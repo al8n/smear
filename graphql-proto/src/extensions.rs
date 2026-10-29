@@ -1,5 +1,17 @@
-//! Draft §7.1.7's `extensions` map, as a type that cannot be anything else and cannot grow without
-//! being charged for it.
+//! Draft §7.1.7's `extensions` map, and §7.1.6's per-error one, as a type that cannot be anything
+//! else and cannot grow without being charged for it.
+//!
+//! # One container for two clauses, because the clauses are one shape
+//!
+//! §7.1.6's *Error Result Format* gives an error the same entry §7.1.7 gives a result, in the same
+//! words: "GraphQL services may provide an additional entry to errors with key `extensions`. This
+//! entry, if set, must have a map as its value. This entry is reserved for implementers to add
+//! additional information to errors however they see fit, and there are no additional restrictions
+//! on its contents." One structural demand at the top level and none below it, which is the seam
+//! the section below draws for §7.1.7 — so the argument there is this one's too, and so is the
+//! budget. [`Executor::handle_field_error_with`](crate::Executor::handle_field_error_with) is the
+//! per-error map's retainer, and it re-checks and re-derives exactly as
+//! [`set_extensions`](crate::Executor::set_extensions) does.
 //!
 //! # Why this is a container and not an opaque `V::Value`
 //!
@@ -167,13 +179,14 @@ impl<V> fmt::Display for Full<V> {
 #[cfg(feature = "std")]
 impl<V: fmt::Debug> std::error::Error for Full<V> {}
 
-/// Draft §7.1.7's `extensions` map.
+/// Draft §7.1.7's `extensions` map, and draft §7.1.6's per-error one.
 ///
 /// A map by construction, which is half the point of the type: §7.1.7 requires the entry's value to
-/// be a map "if set", and there is no way to build one of these that is not. Absence is
-/// [`Option::None`] around it — see
+/// be a map "if set", §7.1.6 requires the same of an error's, and there is no way to build one of
+/// these that is not. Absence is [`Option::None`] around it — see
 /// [`Executor::set_extensions`](crate::Executor::set_extensions) for the three states and which of
-/// them §7 allows.
+/// them §7 allows, and [`Error::extensions`](crate::Error::extensions) for the same three on an
+/// error.
 ///
 /// The other half is the budget. A map is created against a [`Limits`] and carries the two ceilings
 /// it was created under, so [`insert`](Extensions::insert) can refuse before it allocates; the
@@ -277,7 +290,8 @@ impl<V> Extensions<V> {
   /// everything it grew to. That is only a footprint the driver chose while the map is the
   /// driver's; the moment it crosses into an executor it is a footprint that executor never
   /// authorised, which is why `Extensions::shrink_to_ceiling` exists and why it is called by
-  /// [`Executor::set_extensions`](crate::Executor::set_extensions) on the way in.
+  /// [`Executor::set_extensions`](crate::Executor::set_extensions) and
+  /// [`Executor::handle_field_error_with`](crate::Executor::handle_field_error_with) on the way in.
   pub fn remove(&mut self, key: &str) -> Option<V> {
     let index = self.entries.iter().position(|(name, _)| &**name == key)?;
     let (name, value) = self.entries.remove(index);

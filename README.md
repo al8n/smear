@@ -64,7 +64,7 @@ absent, it is absent — not partial.
 | §4 Introspection | The `__`-prefixed meta-schema is injected into every schema, so an introspection *query* is validated like any other document, and a schema can also be *built* from a server's introspection response. There is no introspection **execution** |
 | §5 Validation | All 30 executable-document rules |
 | §6 Execution | **All three operations, behind the non-default `proto` feature.** `smear::proto`'s Sans-I/O executor does collect, coerce arguments, complete, resolve abstract types and propagate nulls. §6.2.2's serial mutation is structural rather than a contract — the top-level fields are withheld from `poll_resolve` rather than queued — and §6.2.3's subscription is a third value of the same at-most-one operation-kind phase, not a second type: `start` runs §6.2.3.1 and hands the driver the one source field to resolve into an event stream, each event it pushes back is one whole execution, and §6.2.3.2's one-result-per-event ordering is owned by the intake. What is still absent is the transport: the crate owns no stream, no clock and no timers, so the connection state machine and backpressure a long-lived operation needs live in a driver |
-| §7 Response | **The tree, not the document.** A finished execution hands back the response as a walkable tree, and its field errors carry §7.1.2's `path` and `locations`; `smear::diagnostic` carries the same response paths for a consumer that has no executor. All three of §7.1's result kinds are modelled — §7.1.1's execution result, §7.1.3's request error result as a distinct type with no `data` accessor at all, and §7.1.2's response stream as the state of a running subscription rather than a container, because a crate that owns no stream cannot hold one. The response map's third entry is there too — the driver attaches a §7.1.7 *Extensions* map, a container that cannot hold a non-map, cannot grow past `max_extension_entries` or `max_extension_key_bytes`, and cannot be attached outside the one phase a response could carry it in; the executor hands the values back unread, at both of §7.1.7's sites. One `extensions` site is deliberately absent: the per-*error* one of §7.1.6's error result format, because it would decide part of the diagnostic contract. Nothing writes `data`, `errors` and `extensions` out, because serialising a driver's leaf is the driver's |
+| §7 Response | **The tree, and the document written from it.** A finished execution hands back the response as a walkable tree, and its field errors carry §7.1.2's `path` and `locations`; `smear::diagnostic` carries the same response paths for a consumer that has no executor. All three of §7.1's result kinds are modelled — §7.1.1's execution result, §7.1.3's request error result as a distinct type with no `data` accessor at all, and §7.1.2's response stream as the state of a running subscription rather than a container, because a crate that owns no stream cannot hold one. The response map's third entry is there too — the driver attaches a §7.1.7 *Extensions* map, a container that cannot hold a non-map, cannot grow past `max_extension_entries` or `max_extension_key_bytes`, and cannot be attached outside the one phase a response could carry it in; the executor hands the values back unread, at both of §7.1.7's sites. The per-*error* `extensions` of §7.1.6's error result format is carried in the same container, on a field error the driver reports through `handle_field_error_with` — which settles that part of [#126]'s reservation — and an error the executor raises, like a request error result's, carries none. `graphql-proto` writes nothing out, because serialising a driver's leaf is the driver's; `smear::json`, above it and behind the same feature, writes both result kinds as §7.2.1 JSON, each error's `extensions` included, with the leaf written by the value's own `WriteJson` or by a closure the driver passes |
 
 Both counts are enumerable rather than asserted. `Rule::ALL` holds 31 entries — the 29 §5 rules that
 need a runtime check, plus two non-specification resource budgets; §5.1.1 needs no entry because the
@@ -407,9 +407,11 @@ between the current front end and a complete implementation.
   That is why the box is unchecked.
 - [ ] **§7 Response** — assembling and serialising the result. Execution hands back a response tree,
   and its field errors carry §7.1.2's `path` and `locations` the same way `smear::diagnostic` does;
-  all three of §7.1's result kinds are modelled, and both of §7.1.7's *Extensions* sites are
-  carried. The per-*error* `extensions` of §7.1.6 is not, and nothing writes `data`, `errors` and
-  `extensions` out as a document.
+  all three of §7.1's result kinds are modelled, both of §7.1.7's *Extensions* sites are carried,
+  and so is §7.1.6's per-*error* `extensions` on a field error the driver reports, which settles
+  that part of [#126]'s reservation. `smear::json` writes the document as §7.2.1 JSON. What has not
+  landed is a driver-supplied entry in a request error result's `errors` — a message this crate did
+  not raise — which is still [#126]'s. That is why the box is unchecked.
 - [ ] **Introspection execution** — a schema can be *built* from an introspection response, and an
   introspection query is *validated* like any other document, because the meta-schema is injected
   into every schema. Nothing here **answers** `__schema` or `__type`.
@@ -454,5 +456,6 @@ shall be dual licensed as above, without any additional terms or conditions.
 [#103]: https://github.com/al8n/smear/issues/103
 [#121]: https://github.com/al8n/smear/issues/121
 [#124]: https://github.com/al8n/smear/issues/124
+[#126]: https://github.com/al8n/smear/issues/126
 [#136]: https://github.com/al8n/smear/issues/136
 [#139]: https://github.com/al8n/smear/issues/139

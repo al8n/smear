@@ -214,6 +214,66 @@ fn render(
   })
 }
 
+/// Runs `query` over [`SDL`] and [`root`], reporting the field named `failing` as a draft §6.4.2
+/// field error with the draft §7.1.6 map `entries` spells, and hands the response to `take`.
+///
+/// Every other field is resolved from the root value as [`execute`] resolves it, so an
+/// executor-raised error can stand beside the driver's in the same response.
+fn execute_failing<T>(
+  query: &'static str,
+  failing: &str,
+  entries: &[(&str, &'static str)],
+  take: impl FnOnce(&Response<'_, ConstInputValue<&'static str>>) -> T,
+) -> T {
+  let schema_document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    TypeSystemDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str(SDL)
+  .expect("the SDL parses");
+  let schema = Schema::build(&schema_document).expect("the SDL is a schema");
+  let document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(query)
+  .expect("the query parses");
+
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, root())
+    .expect("the operation resolves");
+
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    if request.name() == failing {
+      let mut map = Extensions::new(executor.limits());
+      for (key, literal) in entries {
+        map.insert(key, value(literal)).expect("under the ceilings");
+      }
+      executor
+        .handle_field_error_with(id, "the note service is down", map)
+        .expect("a live id, and a map built under this executor's own ceilings");
+    } else {
+      let answer = field(request.parent_value(), request.name())
+        .cloned()
+        .unwrap_or_else(value_null);
+      executor.handle_resolved(&mut space, id, answer);
+    }
+    while executor.poll_abandoned().is_some() {}
+  }
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  take(&response)
+}
+
 // ------------------------------------------------------------------------------------------
 // the fixture
 // ------------------------------------------------------------------------------------------
@@ -606,6 +666,104 @@ fn a_rootless_error_carries_no_path_entry() {
     "an error with no position must carry no `path` entry: {written}"
   );
   assert!(errors[0].get("locations").is_some(), "{written}");
+}
+
+/// A driver-reported error's draft §7.1.6 `extensions`, pinned to its bytes beside an
+/// executor-raised error that has none.
+///
+/// The order inside the entry is what a value comparison cannot see: `message`, `locations`,
+/// `path`, then `extensions`, which is the member order of §7.1.6's own examples. `retry` is a map
+/// holding a list, so the leaf writer has containers to walk inside the entry. And `friends`'
+/// null-in-non-null error is the executor's own, so the same response pins an entry with
+/// `extensions` and one without.
+#[test]
+fn an_error_entrys_extensions_are_pinned_to_their_bytes() {
+  const NOTE: &str = "{ hero { note friends { name } } }";
+  let written = execute_failing(
+    NOTE,
+    "note",
+    &[
+      ("code", r#""UNAVAILABLE""#),
+      ("retry", "{ after: 5, tries: [1, 2] }"),
+    ],
+    |response| {
+      let mut out = String::new();
+      json::write_response(&mut out, response, NOTE).expect("the response is writable");
+      out
+    },
+  );
+
+  assert_eq!(
+    written,
+    concat!(
+      r#"{"errors":[{"message":"the note service is down","#,
+      r#""locations":[{"line":1,"column":10}],"path":["hero","note"],"#,
+      r#""extensions":{"code":"UNAVAILABLE","retry":{"after":5,"tries":[1,2]}}},"#,
+      r#"{"message":"Cannot return null for non-nullable field Friend.name.","#,
+      r#""locations":[{"line":1,"column":25}],"path":["hero","friends",1,"name"]}],"#,
+      r#""data":{"hero":{"note":null,"friends":null}}}"#,
+    )
+  );
+}
+
+/// A present but empty per-error map is written as `{}`, and is not dropped.
+///
+/// `proto::Error::extensions` answers `Some` holding an empty map here and `None` for an error
+/// reported without one — two different responses, and the bytes keep them apart.
+#[test]
+fn an_empty_error_map_is_written_as_an_empty_object() {
+  const NOTE: &str = "{ hero { note } }";
+  let written = execute_failing(NOTE, "note", &[], |response| {
+    let mut out = String::new();
+    json::write_response(&mut out, response, NOTE).expect("the response is writable");
+    out
+  });
+
+  assert_eq!(
+    written,
+    concat!(
+      r#"{"errors":[{"message":"the note service is down","#,
+      r#""locations":[{"line":1,"column":10}],"path":["hero","note"],"extensions":{}}],"#,
+      r#""data":{"hero":{"note":null}}}"#,
+    )
+  );
+}
+
+/// An error map's values reach the caller's own leaf writer, the nested one included.
+///
+/// The closure stands in for a driver whose values are handles into a table it owns: it writes a
+/// marker instead of the value, so the bytes say which door each value went through. `data` holds
+/// no leaf here — the failed `note` is a `null` the writer spells itself — so every marker in the
+/// output is an `extensions` value.
+#[test]
+fn an_error_maps_values_go_through_the_callers_leaf_writer() {
+  const NOTE: &str = "{ hero { note } }";
+  let written = execute_failing(
+    NOTE,
+    "note",
+    &[
+      ("code", r#""UNAVAILABLE""#),
+      ("retry", "{ after: 5, tries: [1, 2] }"),
+    ],
+    |response| {
+      let mut out = String::new();
+      json::write_response_with(&mut out, response, NOTE, |_, json| {
+        json.string("by the caller")
+      })
+      .expect("the response is writable");
+      out
+    },
+  );
+
+  assert_eq!(
+    written,
+    concat!(
+      r#"{"errors":[{"message":"the note service is down","#,
+      r#""locations":[{"line":1,"column":10}],"path":["hero","note"],"#,
+      r#""extensions":{"code":"by the caller","retry":"by the caller"}}],"#,
+      r#""data":{"hero":{"note":null}}}"#,
+    )
+  );
 }
 
 // ------------------------------------------------------------------------------------------

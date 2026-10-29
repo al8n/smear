@@ -15,6 +15,10 @@
 //! not semantic in JSON, so the round-trip gate compares parsed *values*; the byte gate below it
 //! is what pins this choice.
 //!
+//! Inside one `errors` entry the order is `message`, `locations`, `path`, `extensions` — the order
+//! today's §7.1.6 writes its own examples in, with the per-error map last. `write_field_error` has
+//! which of them are written when, and its own byte gate pins the order.
+//!
 //! # `locations` needs the document, so every door asks for it
 //!
 //! `graphql-proto` records a field error's position as a byte span, deliberately: "turning one
@@ -191,7 +195,13 @@ where
     let mut segments = Vec::new();
     let mut list = root.key("errors")?.array()?;
     for error in response.errors() {
-      write_field_error(list.element()?, &error, &mut locations, &mut segments)?;
+      write_field_error(
+        list.element()?,
+        &error,
+        &mut locations,
+        &mut segments,
+        &mut write_leaf,
+      )?;
     }
     list.end()?;
   }
@@ -266,25 +276,32 @@ where
 
 /// Writes one entry of `errors` (draft §7.1.2).
 ///
-/// `message` always, `locations` when the error has any, `path` when it is non-empty. The last is
-/// not a tidying: a `@skip`/`@include` condition read over the *root* selection set is raised at
-/// the root, where §7.1.2 says the entry is absent because the error "cannot be associated to a
-/// particular field" — so an empty array would assert a position the specification says there is
-/// none of.
+/// `message` always, `locations` when the error has any, `path` when it is non-empty, and
+/// `extensions` when the driver attached a map. The third is not a tidying: a `@skip`/`@include`
+/// condition read over the *root* selection set is raised at the root, where §7.1.2 says the entry
+/// is absent because the error "cannot be associated to a particular field" — so an empty array
+/// would assert a position the specification says there is none of.
 ///
-/// No `extensions` on an error entry. §7.1.2 permits one and `graphql-proto` carries none, so
-/// there is nothing to write; writing an empty map would be this writer inventing an entry.
+/// `extensions` is today's §7.1.6 *may*, and it comes last, after `path`, which is the member order
+/// of §7.1.6's own examples. The keys are the driver's and are escaped like any string, and the
+/// values go through `write_leaf`, the same leaf writer `data` and the response's §7.1.7 map use —
+/// they are the driver's `V`, exactly as a leaf is. An empty map writes `{}` and no map writes no
+/// entry, because [`Error::extensions`](graphql_proto::Error::extensions) keeps those two apart and
+/// writing one for the other would be this writer inventing or deleting an entry. An error the
+/// executor raised has no map to write.
 ///
 /// `segments` is the caller's scratch, cleared and refilled per error — see the call site for why
 /// it is the caller's.
-fn write_field_error<'r, W, V>(
+fn write_field_error<'r, W, V, F>(
   json: &mut Json<W>,
   error: &FieldError<'r, V>,
   locations: &mut Locations<'_>,
   segments: &mut Vec<Segment<'r>>,
+  write_leaf: &mut F,
 ) -> Result<(), Error>
 where
   W: fmt::Write,
+  F: FnMut(&V, &mut Json<W>) -> Result<(), Error>,
 {
   let mut entry = json.object()?;
 
@@ -326,6 +343,10 @@ where
       }
     }
     list.end()?;
+  }
+
+  if let Some(extensions) = error.extensions() {
+    write_extensions(entry.key("extensions")?, extensions, write_leaf)?;
   }
 
   entry.end()
@@ -521,7 +542,8 @@ where
   })
 }
 
-/// Writes a draft §7.1.7 `extensions` map.
+/// Writes a draft §7.1.7 `extensions` map, or one error's §7.1.6 map — the same container, so the
+/// same writer.
 ///
 /// The keys are the driver's, under no lexical restriction at all, so they are escaped like any
 /// other string; the values are the driver's and are written by the same leaf writer `data` uses.

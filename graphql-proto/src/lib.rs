@@ -26,6 +26,7 @@
 //!            │                                              │
 //!            │◀── handle_resolved(id, value)                 │
 //!            │◀── handle_field_error(id, message)            │
+//!            │◀── handle_field_error_with(id, message, map)  │
 //!            └──────────────────────────────────────────────┘
 //! ```
 //!
@@ -62,7 +63,9 @@
 //!
 //! - **`data`** (§7.1.5 *Data*) — [`Response::data`], the tree the executor built.
 //! - **`errors`** (§7.1.6 *Errors*) — [`Response::errors`], present when it is non-empty, which
-//!   [`Response::is_ok`] answers.
+//!   [`Response::is_ok`] answers. Each entry's own `extensions` — §7.1.6's *may* — is
+//!   [`Error::extensions`], present when the driver reported that error with a map through
+//!   [`Executor::handle_field_error_with`]; an error the executor raises itself carries none.
 //! - **`extensions`** (§7.1.7 *Extensions*) — [`Response::extensions`], present when the driver
 //!   attached an [`Extensions`] map with [`Executor::set_extensions`].
 //!
@@ -459,7 +462,9 @@ mod values;
 
 pub use collect::variable_key;
 pub use error::{Error, Kind, Resource};
-pub use execute::{Executor, Limits, Response, SetExtensionsError, StartError};
+pub use execute::{
+  Executor, Limits, Response, SetExtensionsError, StartError, UnattachedExtensions,
+};
 pub use extensions::{Ceiling, Extensions, Full};
 pub use request::{Argument, ArgumentSource, FieldRequest, ReqId, SourceField};
 pub use request_error::{RequestErrorResult, TooLarge};
