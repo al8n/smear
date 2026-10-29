@@ -128,38 +128,12 @@ jobs:
       run: rustup update stable --no-self-update && rustup default stable
     - name: Install cargo-hack
       run: cargo install cargo-hack
-    - name: Apply clippy lints
-      run: |
-        # `--tests` makes every row check the member's test code too, built with that row's
-        # features and nothing else; without it a test that names `std` under a `no_std` row is
-        # checked in no row but the full-feature ones. al8n/smear#140. This copy and `ci/hack.sh`
-        # (which `ci.yml` runs) are the same two passes and change together.
-        # `--keep-going` so one run reports every failing row rather than the first (cargo-hack
-        # stops at the first failure, which hides the rest behind a CI round trip each); it still
-        # exits non-zero when any row fails.
-        cargo hack clippy --each-feature --tests --keep-going
-        # Pass 2 — the pairwise isolation cells the crate split used to provide by accident.
-        # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its
-        # build always contained the parser; a single-crate `--each-feature` never builds `parser`
-        # together with exactly one other feature. This restores those pairs deliberately, and the
-        # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
-        #
-        # `rowan`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
-        # because they already imply `parser`, so their pass-1 cells ARE pairs; `default`,
-        # `--no-default-features` and `--all-features` are excluded because those three runs would
-        # duplicate pass-1 exactly.
-        #
-        # `parser` itself is NOT in the exclude list: cargo-hack rejects a feature named by both
-        # `--features` and `--exclude-features` (verified against 0.6.43, "specified by both"),
-        # and it does not need to be there — it already skips the `parser,parser` cell on its own.
-        # Nine cells, one per remaining feature, and a feature added to the manifest later joins
-        # them without anyone editing this file.
-        #
-        # `--tests` here for the reason pass 1 gives: these are the cells whose test targets no
-        # other row builds.
-        cargo hack clippy -p smear --each-feature --features parser --tests --keep-going \
-          --exclude-features rowan,lossless-coverage,validator,introspection,proto,default \
-          --exclude-no-default-features --exclude-all-features
+    # ONE STRING, SHARED WITH `ci.yml` AND WITH A LOCAL RUN. This job used to carry its own copy of
+    # the two passes, and a fix landing in one copy only is a mistake this project has made three
+    # times. `ci/hack.sh` carries the flags, both passes and the reasoning, and its status is what
+    # fails the step, so a failing pass 1 no longer stops the step before pass 2.
+    - name: ci/hack.sh
+      run: bash ci/hack.sh
 
   build:
     name: build
