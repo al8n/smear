@@ -636,6 +636,14 @@ fn a_source_longer_than_a_green_tree_can_address_is_classified_as_refused() {
 /// their own, and `as_ref()` alone is `E0283: cannot infer type of the type parameter Src`.
 #[cfg(feature = "graphql")]
 #[test]
+// On the function, not the statement: an attribute on a macro invocation such as `assert!` is
+// ignored, so the lint is still raised and the `allow` is reported unused. The case is
+// `&&*owned`, a `&&str` the `&str` signature coerces, which is exactly what both lints rewrite away.
+#[allow(
+  clippy::needless_borrow,
+  clippy::explicit_auto_deref,
+  reason = "the `&&*owned` case is the `&&str` coercion under test"
+)]
 fn the_concrete_doors_take_what_they_always_took() {
   use smear::parser::graphql::lossless as door;
 
@@ -653,11 +661,6 @@ fn the_concrete_doors_take_what_they_always_took() {
 
   // The deref coercions. Each is one the `&str` signature performs and a generic `&Src` does not.
   assert!(!door::parse_document(&owned).has_errors());
-  #[allow(
-    clippy::needless_borrow,
-    clippy::explicit_auto_deref,
-    reason = "the `&&str` is the case: the signature takes `&str` and coerces it, which is exactly what the lint rewrites away"
-  )]
   assert!(!door::parse_document(&&*owned).has_errors());
   assert!(!door::parse_document(&owned.clone().into_boxed_str()).has_errors());
   assert!(!door::parse_document(&std::borrow::Cow::<str>::Borrowed(DOC)).has_errors());
