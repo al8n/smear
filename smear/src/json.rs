@@ -66,7 +66,7 @@
 //! **Read this before adding anything to the enumeration below, because the enumeration is the
 //! part that keeps failing.** Four rounds of review found four costs here, and every one of them
 //! got past an instrument that had been written, carefully, for the round before: an allocation pin
-//! could not see a byte walk, a traversal counter could not see reallocation, a native-stack probe
+//! could not see a byte walk, a traversal counter could not see reallocation, a native-stack gate
 //! stayed green on a heap buffer doubling to 64 MiB, and an enumeration of every allocation could
 //! not see a recursion. Each instrument was right about its own axis. What was wrong each time was
 //! the belief that the axis was the only one.
@@ -128,11 +128,13 @@
 //! value stack. Then an allocator that says no — again one fixture per buffer, so that the refusal
 //! is attributable — against which the write **returns** [`Error::Allocation`] rather than
 //! aborting. The
-//! native-stack row is measured for the two walks that could plausibly grow, `write_node` and the
-//! value walk, as a difference of two addresses at two depths each; for the rest of that row it is
-//! read off the code, which is sound because "this function does not call itself" is a syntactic
-//! property and not a quantity. Time is measured as document bytes per location. Output
-//! amplification is not measured at all; it is a constant factor over the two escape maps.
+//! native-stack row is witnessed rather than measured, for the two walks that could plausibly grow,
+//! `write_node` and the value walk: each is run at a depth that a recursion could not survive, on a
+//! stack too small for one, so a walk that recursed would abort the test binary instead of reading
+//! as a small number. For the rest of that row it is read off the code, which is sound because
+//! "this function does not call itself" is a syntactic property and not a quantity. Time is
+//! measured as document bytes per location. Output amplification is not measured at all; it is a
+//! constant factor over the two escape maps.
 //!
 //! The last row is the boundary and not an omission. `write_leaf` is a closure, a driver's
 //! [`WriteJson`] is a driver's, and [`Json::display`] renders whatever `Display` it was handed; a

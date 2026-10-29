@@ -12,6 +12,18 @@
 //! back with a parser that shares no code with this module. What is here is the other half — the
 //! properties a round trip cannot see, because a round trip through *any* correct reader agrees
 //! about `"\u0041"` and `"A"`.
+//!
+//! **The native stack is witnessed by surviving, and nothing in this module reads it.** A gate
+//! that subtracted two stack addresses was here, and an address is a fact about where the compiler
+//! put a local and not about depth: it read zero after an edit that touched neither walk, and
+//! `saturating_sub` wrote an impossible ordering of the two addresses as the same zero, so the
+//! failure came out looking exactly like a pass (`al8n/smear#191`). What replaced it has no reading
+//! to get wrong. Each walk is run at a depth, and on a stack, where a recursion could not survive,
+//! so a walk that recurses aborts the whole test binary, and no build profile, inlining decision
+//! or frame layout can render an abort as a pass. Surviving `N` levels on `S` bytes proves the walk
+//! spends fewer than `S / N` bytes per level, and each gate states that bound for its own `S` and
+//! `N`: `on_a_small_stack` has the argument, `value_depth` the value walk's numbers and
+//! `the_response_depth_does_not_reach_the_native_stack` the response walk's.
 
 use super::{Error, Json, response::Locations};
 
@@ -462,8 +474,9 @@ fn the_index_agrees_with_the_prefix_walk_it_replaced() {
 // them allocates the thing it spends. Deriving a line and column by walking the prefix allocates
 // nothing at all — it spends CPU over the document — and recursing over the response spends the
 // NATIVE STACK, which no allocator sees and which does not fail: it aborts the process. So the
-// instruments are the quantities the properties are stated in, one each: document bytes looked
-// at, and native stack bytes consumed.
+// instruments are the quantities the properties are stated in, where there is one to read — the
+// document bytes looked at — and, for the native stack, the one thing that cannot be misread:
+// whether the walk survives a depth no recursion could, on a stack too small for one.
 //
 // The byte counter is `smear-schema`'s introspection reader's, reached for rather than reinvented
 // — that module carries the argument at length and learned it by writing an allocation gate first
@@ -473,9 +486,9 @@ fn the_index_agrees_with_the_prefix_walk_it_replaced() {
 //
 // ── AND THEN THE THIRD, WHICH IS THE ONE THE SECOND CREATED ───────────────────────────────────
 //
-// Taking the depth off the native stack put it on the heap, and the native-stack probe cannot see
-// what happens to it there: that gate passes, unchanged and at the same numbers, on a frame stack
-// that doubles its way to 64 MiB and calls the allocation-error handler on refusal. A repair is
+// Taking the depth off the native stack put it on the heap, and the native-stack gate cannot see
+// what happens to it there: that gate passes, unchanged, on a frame stack that doubles its way to
+// 64 MiB and calls the allocation-error handler on refusal. A repair is
 // where a cost MOVED to, so an instrument written for the old resource is by construction the one
 // that cannot price the new one. That is why the allocation counter is here, why it is beside the
 // other two rather than instead of either, and why `json::response`'s header answers "which is the
@@ -773,13 +786,79 @@ fn chain(depth: usize) -> (String, String) {
   (sdl, query)
 }
 
-/// Writes a response `depth` objects deep and returns the native stack bytes the writer used.
+/// Runs `f` on a thread with room for the PARSER's own recursion.
 ///
-/// The probe is a local in the leaf callback, which is the deepest point of the walk, measured
-/// against a local in this frame. A walk that recurses puts one frame per level between them; a
-/// walk on an explicit stack puts the same constant there whatever the depth is, which is the
-/// property and is why the gate compares two depths rather than checking one against a threshold.
-fn stack_used(depth: usize) -> usize {
+/// Not part of the property. Reading a document 2048 selection sets deep is itself a recursive
+/// descent — that is the parser's bound, enforced by the very limiter this gate configures — and a
+/// gate about the writer must not be a gate about whichever stack the harness happened to give the
+/// parse. What the writer itself spends is witnessed on [`on_a_small_stack`], which does not borrow
+/// this thread's room.
+fn with_room<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+  std::thread::Builder::new()
+    .stack_size(256 * 1024 * 1024)
+    .spawn(f)
+    .expect("a thread")
+    .join()
+    .expect("the deep fixture did not abort")
+}
+
+/// Runs `f` on a thread whose stack is `stack` bytes, so that spending more than that is fatal.
+///
+/// The opposite of [`with_room`], and deliberately: that helper gives the parser the room its own
+/// recursion needs, so that a gate about the writer is not a gate about the harness's stack, and
+/// this one takes room away so that the writer cannot hide in a generous one.
+///
+/// # What surviving proves, and why it is the instrument for the native stack
+///
+/// A walk that recurses spends some `c` bytes of native stack per level, so `N` levels need `N × c`
+/// bytes and overflow a stack of `S` bytes whenever `c` exceeds `S / N`. Read the other way round:
+/// **a walk that is written through `N` levels on `S` bytes spent fewer than `S / N` bytes per
+/// level, whatever its frame layout, its inlining or the build profile.** An overflow does not
+/// unwind — it aborts the whole test binary with `SIGABRT` — so there is no assertion to write,
+/// nothing to read off, and no way for the failure to come out looking like a pass.
+///
+/// That is the whole argument for it over the gate it replaced, which subtracted two stack
+/// addresses (`al8n/smear#191`). An address is a fact about where the compiler put a local, so the
+/// difference moved to zero under an edit that touched neither walk, and `saturating_sub` wrote an
+/// impossible ordering of the two addresses as the same zero. A survival has no reading to get
+/// wrong, in either direction.
+///
+/// What it gives up is tightness, and the caller states how much: a gate here is exactly as strong
+/// as the bytes per level, `S / N`, that it leaves, which has to be less than any recursion could
+/// spend. Each gate gives its own `S` and `N`, and checks the inequality where it declares them.
+fn on_a_small_stack<T: Send>(stack: usize, f: impl FnOnce() -> T + Send) -> T {
+  std::thread::scope(|scope| {
+    std::thread::Builder::new()
+      .stack_size(stack)
+      .spawn_scoped(scope, f)
+      .expect("a thread")
+      .join()
+      .expect("the walk panicked on the small stack")
+  })
+}
+
+/// The stack the response walk is written on: 64 KiB.
+///
+/// What it is sized from is on [`the_response_depth_does_not_reach_the_native_stack`].
+const RESPONSE_STACK: usize = 64 * 1024;
+
+// A recursion cannot resume a level without that level's cursor, which is 56 bytes on a 64-bit
+// target, so a recursion over the deepest response holds at least `DEEPEST + 1` of them at once,
+// before it counts a single return address. The stack has to be smaller than that for surviving it
+// to rule a recursion out.
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(
+  RESPONSE_STACK < (DEEPEST + 1) * core::mem::size_of::<graphql_proto::Children<'static, Cell>>(),
+  "the response stack is no longer smaller than one cursor per level of the deepest response, so \
+   surviving it does not rule a recursion out"
+);
+
+/// Builds a response `depth` objects deep on the calling thread, which has to be [`with_room`]'s so
+/// that the parser has room, writes it on [`RESPONSE_STACK`], and returns what was written.
+///
+/// A [`Response`] borrows the executor that built it, so it is lent to the small thread rather than
+/// moved there, which is why the write is inside the callback `run` takes.
+fn response_on_a_small_stack(depth: usize) -> String {
   let (sdl, query) = chain(depth);
   run(
     &sdl,
@@ -793,82 +872,54 @@ fn stack_used(depth: usize) -> usize {
       })
     },
     |response| {
-      let anchor = 0u8;
-      let base = core::ptr::addr_of!(anchor) as usize;
-      let mut deepest = base;
-      let mut out = String::new();
-
-      write_response_with(&mut out, response, &query, |value, json| {
-        let probe = 0u8;
-        deepest = deepest.min(core::ptr::addr_of!(probe) as usize);
-        match value {
+      assert_eq!(response.error_count(), 0, "the fixture failed a resolver");
+      on_a_small_stack(RESPONSE_STACK, || {
+        let mut out = String::new();
+        write_response_with(&mut out, response, &query, |value, json| match value {
           Cell::Int(number) => json.number(*number),
           Cell::Object => json.null(),
-        }
+        })
+        .expect("a response the limits admit is writable");
+        out
       })
-      .expect("a response the limits admit is writable");
-
-      // The response really is as deep as the fixture claims: the envelope, the root of `data`,
-      // and one object per level. Without this the measurement could be of a walk that never
-      // descended.
-      assert_eq!(
-        out.matches('{').count(),
-        depth + 2,
-        "the response is not {depth} objects deep, so the stack measurement is of something else"
-      );
-      assert_eq!(response.error_count(), 0, "{out}");
-
-      base.saturating_sub(deepest)
     },
   )
 }
 
-/// Runs `f` on a thread with room for the PARSER's own recursion.
-///
-/// Not part of the property. Reading a document 2048 selection sets deep is itself a recursive
-/// descent — that is the parser's bound, enforced by the very limiter this gate configures — and a
-/// gate about the writer must not be a gate about whichever stack the harness happened to give the
-/// parse. The writer's own use is measured inside, and is a difference of two addresses, so the
-/// size of this stack cannot flatter it.
-fn with_room<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
-  std::thread::Builder::new()
-    .stack_size(256 * 1024 * 1024)
-    .spawn(f)
-    .expect("a thread")
-    .join()
-    .expect("the deep fixture did not abort")
-}
-
-/// A response as deep as the configured limits admit serialises, and the native stack it costs
-/// does not grow with the depth.
+/// A response as deep as the configured limits admit serialises on a stack too small for a
+/// recursion, and one level beyond that depth is refused.
 ///
 /// **The depth is the ceiling, not a number that works.** One level beyond it is refused before
 /// execution, which is asserted here so that "as deep as the limits admit" is a fact about the
 /// fixture rather than a claim about it.
+///
+/// # The witness is that the process lives
+///
+/// The response is built where the parser has room and written on [`RESPONSE_STACK`], 65 536
+/// bytes. [`DEEPEST`] levels open `DEEPEST + 1` = 2 048 containers, so a walk that survives spent
+/// fewer than 65 536 / 2 048 = 32 bytes of native stack per level, whatever its frame layout.
+///
+/// **A recursion cannot spend that little, and the floor is derived rather than assumed.** The
+/// only way `graphql-proto` offers to resume a level once its child is written is that level's
+/// `Children` cursor, which is 56 bytes on a 64-bit target: 2 048 of them are 114 688 bytes with no
+/// return address among them, and the assertion beside [`RESPONSE_STACK`] stops compiling if that
+/// stops being more than the stack. Measured, the recursion this was checked against —
+/// `write_node` planted as a recursive function over the same tree — spends 784 bytes per level in
+/// debug and 304 in release, which is 24.5 and 9.5 times the bound, and aborts here in both with
+/// `SIGABRT`.
+///
+/// The stack is not smaller because the walk itself has to fit in every configuration the suite
+/// runs in: measured, it survives 16 KiB in debug, a quarter of this.
 #[test]
 fn the_response_depth_does_not_reach_the_native_stack() {
-  // The measurement is a difference, so what is left in it is the constant part of the writer's
-  // own frame — which cancels — plus whatever the platform adds between two calls at the same
-  // depth. A walk that recursed would put thousands of times this in it.
-  const SLACK: usize = 1024;
+  let written = with_room(|| response_on_a_small_stack(DEEPEST));
 
-  let (shallow, deep) = with_room(|| (stack_used(DEEPEST / 2), stack_used(DEEPEST)));
-
-  // The probe measured something, which is what stops the comparison below from being two zeroes
-  // agreeing. Measured on the tree that introduced this gate: 3 152 bytes in debug and 1 848 in
-  // release, the same at both depths; with the recursion restored, 1 559 120 and 3 115 600.
-  assert!(
-    shallow > 0,
-    "the writer used no measurable native stack at all, so the growth below is not a measurement"
-  );
-
-  let growth = deep.saturating_sub(shallow);
-  let levels = DEEPEST - DEEPEST / 2;
-  assert!(
-    growth <= SLACK,
-    "{levels} more levels of response cost {growth} more bytes of native stack ({} per level); \
-     the walk is on the native stack again",
-    growth / levels.max(1)
+  // The response really is as deep as the fixture claims: the envelope, the root of `data`, and
+  // one object per level. Without this the survival could be of a walk that never descended.
+  assert_eq!(
+    written.matches('{').count(),
+    DEEPEST + 2,
+    "the response is not {DEEPEST} objects deep, so surviving it says nothing about that depth"
   );
 
   // And the fixture is at the ceiling: one level further is not a deeper response, it is a
@@ -975,9 +1026,9 @@ const DEEP: usize = 1024;
 /// curve is a gate the defect passes.
 ///
 /// Measured on this tree: **1** at 65 frames and **1** at 1 025. Measured with the reservation
-/// removed and the `push` left exactly as it was: **6** and **10**, while the native-stack reading
-/// stayed at its constant and the document-byte readings did not move at all — three axes, and only
-/// this one can see it.
+/// removed and the `push` left exactly as it was: **6** and **10**, while the document-byte
+/// readings did not move at all and nothing on the native stack changed — three axes, and only this
+/// one can see it.
 ///
 /// `<=` rather than `==` for the reason the layout assertions in `graphql-proto` use it: a future
 /// `Vec` that satisfied the request without going to the allocator would be an improvement, and a
@@ -990,7 +1041,7 @@ const ALLOCATIONS_PER_WRITE: u64 = 1;
 /// # The axis the other two gates in this file are blind to
 ///
 /// `the_response_depth_does_not_reach_the_native_stack` was written for this exact walk and passes,
-/// at the same numbers, on a frame stack that reallocates and copies its way to 64 MiB with two
+/// unchanged, on a frame stack that reallocates and copies its way to 64 MiB with two
 /// buffers live at the peak — because taking a cost off the native stack is what makes an allocator
 /// the only instrument that can still see it. The byte gates never look at the frames at all. So
 /// the reading below is the third axis, and the plant for it was checked against both of the
@@ -1196,21 +1247,20 @@ fn into_a_string(depth: usize) -> u64 {
 // {heap} × {json::response} while the defect was at {native stack} × {json::materialized}.
 //
 // So the enumeration this file's gates now stand for is the product, and it is in `super`'s header
-// where both modules can be named. What is added here is the pair of readings the product's fourth
-// cell needs: a value's depth on the native stack, and a value's depth on the heap.
+// where both modules can be named. What is added here is the pair of gates the product's fourth
+// cell needs: a value's depth on the native stack, which is survived, and a value's depth on the
+// heap, which is counted.
 //
 // ── AND WHY THE ALLOCATION READING IS NOT THE ONE THAT SEES THE DEFECT ────────────────────────
 //
 // Said plainly so that nobody reads it as the gate for the recursion: the recursion allocated
 // NOTHING. Its whole cost was native frames. The allocation reading below is a gate on the
 // structure that REPLACED it — the frames must grow geometrically and not once per level — which is
-// the same relationship the third axis has to the second, one subject over. The reading that fails
-// on the recursion is the stack probe; the gate that fails LOUDLY is the small-stack one below,
-// which does not assert anything at all — it aborts, the way the defect did.
+// the same relationship the third axis has to the second, one subject over. The gate that fails on
+// the recursion is the small-stack one below, and it fails LOUDLY: it does not assert anything at
+// all — it aborts, the way the defect did.
 #[cfg(feature = "materialized-numbers")]
 mod value_depth {
-  use core::fmt;
-
   use smear_lexer::tokora::{Parse as _, Parser, span::AsSpan};
   use smear_parser::graphql::{
     GraphQL,
@@ -1224,7 +1274,7 @@ mod value_depth {
       Error, Json, WriteJson,
       response::{allocations, allow_allocations, refuse_allocations_of_at_least},
     },
-    Void,
+    Void, on_a_small_stack,
   };
 
   /// The value tree these fixtures are built at.
@@ -1281,95 +1331,18 @@ mod value_depth {
   /// native stack at any depth — which is what these fixtures are. (A value nested through a
   /// caller-instantiated source type is a different shape and still aborts; `al8n/smear#176`, and
   /// nothing here builds one.) **This function dropping its argument on the floor is the gate**,
-  /// and it is kept rather than inlined at the four call sites because a `dismantle` that went back
-  /// to being needed is the thing to notice.
+  /// and it is kept rather than inlined at the three call sites because a `dismantle` that went
+  /// back to being needed is the thing to notice.
   pub(super) fn dismantle(value: ConstInputValue<&'static str>) {
     drop(value);
   }
 
-  /// A sink that records how far down the native stack the writer was when it wrote.
-  ///
-  /// The probe is a local in the sink, which is reached at every level of the walk, measured
-  /// against a local in the caller's frame — the same difference-of-two-addresses shape as the
-  /// response walk's probe, with the leaf callback replaced by the one thing a value walk always
-  /// calls.
-  #[derive(Default)]
-  struct Deepest {
-    /// The lowest address a `write_str` has seen, or `None` before the first one.
-    deepest: Option<usize>,
-    bytes: usize,
-  }
-
-  impl fmt::Write for Deepest {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
-      let probe = 0u8;
-      let here = core::ptr::addr_of!(probe) as usize;
-      self.deepest = Some(self.deepest.map_or(here, |lowest| lowest.min(here)));
-      self.bytes += text.len();
-      Ok(())
-    }
-  }
-
-  /// Writes a value `depth` lists deep and returns the native stack bytes the writer used.
-  fn stack_used(depth: usize) -> usize {
-    let value = deep(depth);
-    let anchor = 0u8;
-    let base = core::ptr::addr_of!(anchor) as usize;
-    let mut sink = Deepest::default();
-
-    value
-      .write_json(&mut Json::new(&mut sink))
-      .expect("a value the allocator has room for is writable");
-
-    // The fixture really is as deep as it claims: one bracket pair per level and a `null`.
-    assert_eq!(
-      sink.bytes,
-      2 * depth + 4,
-      "a {depth}-deep value wrote {} bytes, so the measurement is of a different value",
-      sink.bytes
-    );
-
-    dismantle(value);
-    base.saturating_sub(sink.deepest.expect("the walk wrote something"))
-  }
-
-  /// The shallower of the two depths the readings are taken at.
+  /// The shallower of the two depths the allocation counts are taken at.
   const SHALLOW: usize = 64;
 
   /// The deeper one, sixteen times further down — `super`'s pair, kept the same so the two
   /// subjects' numbers can be read side by side.
   const DEEP: usize = 1024;
-
-  /// What a difference of two depths may still contain: the constant part of the writer's own
-  /// frame, which cancels, plus whatever the platform puts between two calls at the same depth. A
-  /// walk that recursed would put five hundred times this in it per level.
-  const SLACK: usize = 1024;
-
-  /// A value's nesting does not reach the native stack, however deep it is.
-  ///
-  /// **The reading that sees the recursion**, and the only one of the four axes that can: the
-  /// recursive walk allocated nothing, looked at no document byte, and traversed no extra response
-  /// slot. Measured on this tree in debug: **1 384** bytes at both depths. Measured with the
-  /// recursion restored: **35 704** and **557 944**, which is 544 bytes per level.
-  #[test]
-  fn a_values_depth_does_not_reach_the_native_stack() {
-    let shallow = stack_used(SHALLOW);
-    let deep = stack_used(DEEP);
-
-    assert!(
-      shallow > 0,
-      "the writer used no measurable native stack at all, so the growth below is not a measurement"
-    );
-
-    let growth = deep.saturating_sub(shallow);
-    let levels = DEEP - SHALLOW;
-    assert!(
-      growth <= SLACK,
-      "{levels} more levels of value cost {growth} more bytes of native stack ({} per level); the \
-       value walk is on the native stack",
-      growth / levels.max(1)
-    );
-  }
 
   /// Allocating events one write of a `depth`-deep value costs.
   fn allocated(depth: usize) -> u64 {
@@ -1431,37 +1404,50 @@ mod value_depth {
     }
   }
 
-  /// Runs `f` on a thread with a *small* stack, so that using the native one is fatal.
+  /// The stack the value walk is written on: 512 KiB.
   ///
-  /// The opposite of `super::with_room`, and deliberately: that helper exists so a gate about the
-  /// writer is not a gate about the harness's stack, and this one exists so the writer cannot hide
-  /// in a generous one. At the 544 bytes per level the recursion was measured at, the depth below
-  /// wants about ten megabytes and this thread has half of one.
-  fn on_a_small_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
-    std::thread::Builder::new()
-      .stack_size(512 * 1024)
-      .spawn(f)
-      .expect("a thread")
-      .join()
-      .expect("the deep fixture did not abort")
-  }
+  /// What it is sized from is on [`a_value_deeper_than_the_old_abort_writes_on_a_small_stack`].
+  const SMALL_STACK: usize = 512 * 1024;
 
-  /// How deep the loud gate's fixture is.
+  /// How deep the survival gate's fixture is.
   ///
-  /// Five times the depth the recursive walk died at on the harness's own eight-megabyte stack, on
-  /// a thread with a sixteenth of it.
-  const PAST_THE_OLD_ABORT: usize = 20_000;
+  /// Deep enough that [`SMALL_STACK`] leaves less than a return address per level — more than
+  /// 131 072 levels for a four-byte pointer, 65 536 for an eight-byte one — and no deeper than the
+  /// fixture stays cheap to build, write and release on every run: measured, 200 000 levels take
+  /// about 70 ms in debug.
+  const PAST_THE_OLD_ABORT: usize = 200_000;
 
-  /// A value far past the depth the recursion died at writes, on a stack far smaller than the one
-  /// it died on.
+  // A call saves its return address, which is a pointer wide, so no recursion spends less than
+  // that per level. The stack has to leave less than that per level of the fixture for surviving
+  // it to rule a recursion out, whatever the pointer width.
+  const _: () = assert!(
+    SMALL_STACK < PAST_THE_OLD_ABORT * core::mem::size_of::<usize>(),
+    "the fixture is no longer deep enough for its stack to rule a recursion out: the stack leaves \
+     at least a return address per level"
+  );
+
+  /// A value far past the depth the recursion died at is built, written and released on a stack too
+  /// small for any recursion.
   ///
-  /// **The gate that fails the way the defect did.** The two readings above are assertions about
-  /// numbers; this one is the process surviving, and a walk that recursed does not fail it — it
-  /// aborts the whole test binary with `SIGABRT`, which is the same signal the finding is about and
-  /// is not a failure any assertion can be written to be kinder about.
+  /// **The gate that fails the way the defect did**, and the only one this module has for the
+  /// native stack. A walk that recursed does not fail it — it aborts the whole test binary with
+  /// `SIGABRT`, which is the same signal the finding is about and is not a failure any assertion
+  /// can be written to be kinder about.
+  ///
+  /// # What surviving proves
+  ///
+  /// The fixture is [`PAST_THE_OLD_ABORT`] = 200 000 levels, built, written and released on
+  /// [`SMALL_STACK`] = 524 288 bytes, so a walk that survives spent fewer than 524 288 / 200 000 =
+  /// 2.62 bytes of native stack per level, whatever its frame layout. **No recursion spends that
+  /// little**: a call saves its return address, which is a pointer wide, and the assertion above
+  /// holds this arithmetic to that. Measured, the recursion this was checked against — `write_json`
+  /// planted as a recursive function over the same tree — spends 288 bytes per level in debug and
+  /// 128 in release, which is 110 and 49 times the bound, and aborts here in both. Building and
+  /// releasing the fixture are inside the same window, so a release that recursed fails it the
+  /// same way.
   #[test]
   fn a_value_deeper_than_the_old_abort_writes_on_a_small_stack() {
-    let written = on_a_small_stack(|| {
+    let written = on_a_small_stack(SMALL_STACK, || {
       let value = deep(PAST_THE_OLD_ABORT);
       let mut out = String::new();
       value
