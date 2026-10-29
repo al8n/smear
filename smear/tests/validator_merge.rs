@@ -8,8 +8,22 @@
 //! The **bound**: hostile documents under the **default** [`Budget`] — not a lowered one. A
 //! lowered knob shows the mechanism fires and is what `validator_rules.rs`'s liveness fixtures
 //! use; it says nothing about whether the shipped defaults are the right size. These tests say
-//! that, and record the wall clock at the refusal so a regression in the engine's cost shows up as
-//! a number rather than as a hang.
+//! that, and record what the refusal cost — in the engine's own units, and in the rows of working
+//! set it left behind — so a regression in the engine's cost shows up as a moved number rather
+//! than as a hang.
+//!
+//! # Counted, not timed
+//!
+//! Every cost here is a count, and a count answers the same on a loaded runner as on a quiet one
+//! and the same in a debug build as in a release one: the smallest [`Budget::merge_work`] a
+//! document clears ([`least_work`], by bisection), the count a refusal itself reports
+//! ([`Settled::reported`]), or the working set a call leaves behind ([`Scratch::capacity`]).
+//! A wall-clock bound stood in ten of these places, and a gate that decides on the machine rather
+//! than on the walk reddens a loaded or instrumented runner with no change under `smear/`:
+//! al8n/smear#210, whose first half is `validator_work.rs`. What a count cannot see is work the
+//! ledger does not charge and that allocates nothing: a loop nobody priced moves no unit and no
+//! row, so a regression that added one would not move any reading here. The readings recorded
+//! below were taken in a debug build and in a release one, and are the same in both.
 
 // Every fixture and assertion below calls into `smear::validator`, which does not exist in the
 // crate's API surface with the feature off. This file did not gate itself to that dependency —
@@ -19,7 +33,7 @@
 #![cfg(feature = "validator")]
 #![allow(missing_docs)]
 
-use std::{string::String, thread, time::Instant, vec::Vec};
+use std::{string::String, thread, vec::Vec};
 
 use smear::{
   lexer::{
@@ -211,20 +225,40 @@ fn least_work_that_clears(
     validate_executable_with(schema, &subject, &mut scratch, &budget, rules, &mut Ignore).is_ok()
   };
 
-  let (mut lo, mut hi) = (0u32, Budget::default().merge_work());
-  assert!(clears(hi), "the subject does not clear the default budget");
+  let ceiling = Budget::default().merge_work();
+  assert!(
+    clears(ceiling),
+    "the subject does not clear the default budget"
+  );
+  boundary(ceiling, clears)
+}
+
+/// The smallest limit at or below `ceiling` at which `admits` holds, found by bisection.
+///
+/// The two assertions at the end pin the boundary the search landed on, so a non-monotone engine
+/// cannot hide behind a bisection that happened to agree. Every search in this file ends here:
+/// what differs between them is the question `admits` asks, never how the answer is found.
+fn boundary(ceiling: u32, admits: impl Fn(u32) -> bool) -> u32 {
+  let (mut lo, mut hi) = (0u32, ceiling);
+  assert!(admits(hi), "nothing up to {hi} units admits the subject");
   while lo < hi {
     let mid = lo + (hi - lo) / 2;
-    if clears(mid) {
+    if admits(mid) {
       hi = mid;
     } else {
       lo = mid + 1;
     }
   }
-  assert!(clears(lo));
-  assert!(lo > 0 && !clears(lo - 1), "{lo} is not a boundary");
+  assert!(admits(lo));
+  assert!(lo > 0 && !admits(lo - 1), "{lo} is not a boundary");
   lo
 }
+
+/// The most units [`least_work`] and the searches beside it look for a boundary under.
+///
+/// Past the shipped default on purpose: what is under test is often a document the default
+/// refuses, and the question of how much it asks for has an answer above it.
+const SEARCH_CEILING: u32 = 1 << 24;
 
 /// Which of draft 5.3.2's three requirements a document breaks, in report order.
 fn conflicts(schema: &Schema, source: &str) -> Vec<MergeConflict> {
@@ -471,23 +505,150 @@ fn wide_query(breadth: usize) -> String {
   source
 }
 
-/// Runs `source` under `budget` and returns the verdict, the rules, and the wall clock.
-fn timed(schema: &Schema, source: &str, budget: &Budget) -> (bool, Vec<Rule>, f64) {
-  let document = parse(source);
+/// Everything one validation produced: whether a bound refused, what was emitted, which rules
+/// fired, the count a refusal reports, and the working set the call left behind.
+struct Settled {
+  /// Whether the verdict says a bound refused the document.
+  tripped: bool,
+  /// How many diagnostics the run emitted.
+  emitted: u32,
+  /// The rules that fired, sorted and deduplicated.
+  rules: Vec<Rule>,
+  /// The count a [`Rule::MergeWorkBudget`] or [`Rule::MergeDepthBudget`] diagnostic carries — the
+  /// bound the refusal reached — when one was emitted.
+  reported: Option<u32>,
+  /// [`Scratch::capacity`] after the call: the rows of working set it left behind.
+  rows: usize,
+}
+
+impl Settled {
+  /// Whether the verdict was `Ok`.
+  fn clean(&self) -> bool {
+    self.emitted == 0 && !self.tripped
+  }
+}
+
+/// Validates `document` under `budget` and `rules` with a collecting sink and a fresh working set.
+fn settle(
+  schema: &Schema,
+  document: &ExecutableDocument<&str>,
+  budget: &Budget,
+  rules: RuleSet,
+) -> Settled {
   let mut scratch = Scratch::new();
   let mut collected = Vec::new();
   let mut sink = Collect::new(&mut collected);
-  let start = Instant::now();
-  let verdict = validate_executable(schema, &document, &mut scratch, budget, &mut sink);
-  let elapsed = start.elapsed().as_secs_f64() * 1e3;
-  let budget_tripped = verdict.as_ref().err().is_some_and(|i| i.budget_tripped());
-  let mut rules: Vec<_> = collected.iter().map(Diagnostic::rule).collect();
-  rules.sort_unstable();
-  rules.dedup();
-  (budget_tripped, rules, elapsed)
+  let verdict = validate_executable_with(schema, document, &mut scratch, budget, rules, &mut sink);
+  let tripped = verdict
+    .as_ref()
+    .err()
+    .is_some_and(|invalid| invalid.budget_tripped());
+  let emitted = verdict
+    .as_ref()
+    .err()
+    .map_or(0, |invalid| invalid.emitted());
+  let mut fired: Vec<_> = collected.iter().map(Diagnostic::rule).collect();
+  fired.sort_unstable();
+  fired.dedup();
+  Settled {
+    tripped,
+    emitted,
+    rules: fired,
+    reported: collected.iter().find_map(|diagnostic| {
+      match (diagnostic.rule(), diagnostic.context_of()) {
+        (Rule::MergeWorkBudget | Rule::MergeDepthBudget, Context::Count(bound)) => Some(bound),
+        _ => None,
+      }
+    }),
+    rows: scratch.capacity(),
+  }
 }
 
-/// A response shape nested past the default depth is refused, in bounded time, by name.
+/// The smallest `merge_work` at which `admits` holds of `document` under `budget` and `rules`.
+///
+/// [`least_work_that_clears`]'s general form. That one asks whether the document is clean, which
+/// is not the question for a document with a real finding in it, nor for one the default refuses,
+/// nor for the boundary between two refusals; this takes the question as `admits` and answers it
+/// the same way, by bisecting a ledger that is the same number on every machine.
+fn least_work(
+  schema: &Schema,
+  document: &ExecutableDocument<&str>,
+  budget: Budget,
+  rules: RuleSet,
+  admits: impl Fn(&Settled) -> bool,
+) -> u32 {
+  boundary(SEARCH_CEILING, |limit| {
+    admits(&settle(
+      schema,
+      document,
+      &budget.with_merge_work(limit),
+      rules,
+    ))
+  })
+}
+
+/// Settles `document` under the default merge ceiling, and again with the ceiling lifted, and
+/// checks what holds of any document the ceiling refuses rather than serves.
+///
+/// The refusal reports the ceiling as its own count. Finishing is possible, which is the premise of
+/// the comparison. And the refusal leaves a smaller working set than finishing does, which an
+/// engine that ignored its refusal and finished would not. Returns `(refused, finished)` for what
+/// the caller reads beyond that.
+fn refused_at_the_ceiling(
+  schema: &Schema,
+  document: &ExecutableDocument<&str>,
+  rules: RuleSet,
+) -> (Settled, Settled) {
+  let budget = Budget::default();
+  let refused = settle(schema, document, &budget, rules);
+  let finished = settle(schema, document, &budget.with_merge_work(u32::MAX), rules);
+  assert!(
+    refused.tripped,
+    "the verdict does not report the budget: {:?}",
+    refused.rules
+  );
+  assert_eq!(
+    refused.reported,
+    Some(budget.merge_work()),
+    "the refusal reported {:?} units rather than the ceiling",
+    refused.reported
+  );
+  assert!(
+    finished.clean(),
+    "the document is valid with the ceiling out of the way: {:?}",
+    finished.rules
+  );
+  assert!(
+    refused.rows < finished.rows,
+    "refusing left {} rows against the {} finishing leaves, so the engine went on after the \
+     refusal",
+    refused.rows,
+    finished.rows
+  );
+  (refused, finished)
+}
+
+/// A response shape nested past the default depth is refused by name, at the bound and not past it.
+///
+/// # The instrument
+///
+/// The bound is read three ways, and none of them is a clock. **Its own count**: a refusal carries
+/// the depth it reached, which is [`Budget::DEFAULT_MERGE_DEPTH`]. **Its boundary**: the document
+/// one level below the bound is served and the one at it is refused, so a check that fires late
+/// moves a document from one side to the other. **What it spared**: the smallest `merge_work` at
+/// which the *depth* bound, rather than the work bound, is what refuses this document, against the
+/// smallest that lets it finish with the depth bound lifted — and the same pair as the rows of
+/// working set each leaves behind. A refusal that cost as much as finishing would not be a bound
+/// on anything.
+///
+/// Measured on this tree, at 200 levels: refused for depth at 21,758 units against 23,312 to
+/// finish, leaving 2,148 rows against 3,172. Of the 21,758, 21,311 is the index over the whole
+/// document — what the same refusal costs with the bound at zero — and that is quadratic in the
+/// nesting, because locating a selection set walks its ancestry. So the check's own share is
+/// small, and the boundary pair above is the sharper reading of *where* it fires.
+///
+/// **The plant.** Let `descend` fire sixty-four levels late and the document at the bound is
+/// served, which the boundary pair refuses to accept.
 #[test]
 fn the_default_depth_budget_refuses_a_deep_document() {
   on_a_deep_stack(|| {
@@ -497,38 +658,144 @@ fn the_default_depth_budget_refuses_a_deep_document() {
 
     // apollo-compiler's own measured behaviour at this shape: 140 levels fails closed.
     let source = deep_query(200);
-    let (tripped, rules, ms) = timed(&schema, &source, &budget);
-    println!(
-      "merge_depth trip: {} bytes, 200 levels, {ms:.3} ms",
-      source.len()
+    let document = parse(&source);
+    let refused = settle(&schema, &document, &budget, RuleSet::ALL);
+    assert!(refused.tripped, "the verdict does not report the budget");
+    assert_eq!(
+      refused.rules,
+      [Rule::MergeDepthBudget],
+      "{:?}",
+      refused.rules
     );
-    assert!(tripped, "the verdict does not report the budget");
-    assert_eq!(rules, [Rule::MergeDepthBudget], "{rules:?}");
-    assert!(ms < 500.0, "refusing took {ms} ms");
+    assert_eq!(
+      refused.reported,
+      Some(Budget::DEFAULT_MERGE_DEPTH),
+      "the refusal reported {:?} rather than the depth it reached",
+      refused.reported
+    );
 
-    // And the level below the bound is validated rather than refused.
-    let (tripped, rules, _) = timed(&schema, &deep_query(120), &budget);
-    assert!(!tripped);
-    assert_eq!(rules, []);
+    // What it spared. With the depth bound lifted the same document is valid and finishes, which
+    // is the premise: the comparison below is between a refusal and a run that was possible.
+    let lifted = budget.with_merge_depth(u32::MAX);
+    let finished = settle(&schema, &document, &lifted, RuleSet::ALL);
+    assert!(
+      finished.clean(),
+      "the document is valid with the bound out of the way: {:?}",
+      finished.rules
+    );
+    let for_depth = least_work(&schema, &document, budget, RuleSet::ALL, |run| {
+      run.rules.contains(&Rule::MergeDepthBudget)
+    });
+    let to_finish = least_work(&schema, &document, lifted, RuleSet::ALL, Settled::clean);
+    // The same refusal with the bound at zero comes at the first level, so what it costs is the
+    // index over the whole document and nothing the bound admits.
+    let index = least_work(
+      &schema,
+      &document,
+      budget.with_merge_depth(0),
+      RuleSet::ALL,
+      |run| run.rules.contains(&Rule::MergeDepthBudget),
+    );
+    println!(
+      "merge_depth trip: {} bytes, 200 levels, refused for depth at {for_depth} units, {index} of \
+       them the index, against {to_finish} to finish, leaving {} rows against {}",
+      source.len(),
+      refused.rows,
+      finished.rows
+    );
+    assert!(
+      for_depth < to_finish,
+      "refusing for depth cost {for_depth} units and finishing {to_finish}, so the bound stopped \
+       nothing"
+    );
+    assert!(
+      refused.rows < finished.rows,
+      "refusing left {} rows against the {} finishing needs, so the engine went on after the \
+       refusal",
+      refused.rows,
+      finished.rows
+    );
+
+    // The boundary. The level below the bound is validated rather than refused, and the level at
+    // it is refused: the bound is the number it names, not one the document happens to reach.
+    let bound = Budget::DEFAULT_MERGE_DEPTH as usize;
+    let below = settle(
+      &schema,
+      &parse(&deep_query(bound - 1)),
+      &budget,
+      RuleSet::ALL,
+    );
+    assert!(!below.tripped, "{} levels were refused", bound - 1);
+    assert_eq!(below.rules, []);
+    let at = settle(&schema, &parse(&deep_query(bound)), &budget, RuleSet::ALL);
+    assert!(
+      at.tripped,
+      "{bound} levels were served under a bound of {bound}"
+    );
+    assert_eq!(at.rules, [Rule::MergeDepthBudget], "{:?}", at.rules);
   });
 }
 
-/// A hostile breadth grid is refused by the default work budget, in bounded time, by name.
+/// A hostile breadth grid is refused by the default work budget, at the ceiling and not at the
+/// document, by name.
+///
+/// # The instrument
+///
+/// A refusal costs the ceiling by construction: the ledger refuses the first charge that does not
+/// fit, and every charge stands in front of the work it prices. So what is read here is what
+/// construction does not give. The count the refusal reports is the ceiling itself; and the
+/// working set it leaves is smaller than finishing would leave — the same document with the
+/// ceiling lifted, which is the premise — because an engine that ignored its refusal and finished
+/// would leave the same rows either way.
+///
+/// The index of this document is at least three rows a selection: its field, its set, and its
+/// place in the queue. So a working set under `3 × 20,000` rows is an index that was not finished,
+/// which is the sharper form of the same reading, and finishing clears that floor.
+///
+/// Measured on this tree: 20,000 same-name selections are refused at 65,536 units and leave 24,672
+/// rows; with the ceiling lifted the same document leaves 393,400.
+///
+/// **The plant.** Let the interner's refusal in `fill_merge_set` fall through instead of
+/// returning, so the engine goes on filling the root set past the ceiling: the refusal then leaves
+/// 98,400 rows, which is still fewer than finishing does and is over the floor.
 #[test]
 fn the_default_work_budget_refuses_a_wide_document() {
+  /// Selections in the wide document, each with a selection set of its own.
+  const SELECTIONS: usize = 20_000;
+
   let schema = build();
   let budget = Budget::default();
   assert_eq!(budget.merge_work(), 65_536);
 
-  let source = wide_query(20_000);
-  let (tripped, rules, ms) = timed(&schema, &source, &budget);
+  let source = wide_query(SELECTIONS);
+  let (refused, finished) = refused_at_the_ceiling(&schema, &parse(&source), RuleSet::ALL);
   println!(
-    "merge_work trip: {} bytes, 20000 same-name selections, {ms:.3} ms",
-    source.len()
+    "merge_work trip: {} bytes, {SELECTIONS} same-name selections, refused at {:?} units leaving \
+     {} rows against the {} finishing leaves",
+    source.len(),
+    refused.reported,
+    refused.rows,
+    finished.rows
   );
-  assert!(tripped, "the verdict does not report the budget");
-  assert_eq!(rules, [Rule::MergeWorkBudget], "{rules:?}");
-  assert!(ms < 500.0, "refusing took {ms} ms");
+  assert_eq!(
+    refused.rules,
+    [Rule::MergeWorkBudget],
+    "{:?}",
+    refused.rules
+  );
+  assert!(
+    finished.rows >= 3 * SELECTIONS,
+    "finishing left {} rows, under the {} an index of the document comes to, so the reading below \
+     discriminates nothing",
+    finished.rows,
+    3 * SELECTIONS
+  );
+  assert!(
+    refused.rows < 3 * SELECTIONS,
+    "refusing left {} rows, which is an index of all {SELECTIONS} selections: the refusal came \
+     after the document was walked",
+    refused.rows
+  );
 
   // Exactly one. A collecting sink does not stop the unwinding, so a bound that reported itself
   // once per remaining unit of work would bury the document's real problems under thousands of
@@ -546,28 +813,105 @@ fn the_default_work_budget_refuses_a_wide_document() {
 /// Each level spreads the same fragment from two different fields, so a merge that re-derived
 /// every branch would do `2^depth` of them. The memo recognises that both branches merge the same
 /// field occurrences and checks it once, which is why thirty levels finish at all.
+///
+/// # The instrument
+///
+/// The memo is keyed on field-occurrence identity, so the only way to give it nothing to
+/// recognise is to write *distinct occurrences* of the same structure: the same response, written
+/// out in full. That is the control, the diamond's unfolded twin, and two counts read the
+/// difference. The diamond's price grows with its levels — doubling them roughly doubles it, where
+/// an unmemoised merge would multiply it by `2^15` — and at eight levels its twin costs a multiple
+/// of it that is the memo's whole saving. A memo that recognised nothing would price the diamond
+/// as its twin, and thirty levels of that is refused.
+///
+/// Measured on this tree: 15 levels cost 977 units and 30 cost 1,904 (x1.95); at eight levels the
+/// diamond costs 528 and its twin 17,252 (x32.7).
+///
+/// **The plants.** Make `claim` forget its memo once it holds thirty sets and the diamond still
+/// finishes, in 3,423 units rather than 1,904, so only the doubling reads it (x3.50); never match
+/// a memo entry and thirty levels are refused outright.
 #[test]
 fn shared_subtrees_are_merged_once() {
   let schema = build();
   const LEVELS: usize = 30;
+  /// Levels at which the unfolded twin still clears the default budget, so bisection can price it.
+  const WRITTEN_OUT: usize = 8;
 
-  let mut source = String::from("{ nest { ...l0 } }");
-  for level in 0..LEVELS {
-    source.push_str(&std::format!(
-      " fragment l{level} on Nest {{ a: nest {{ ...l{next} }} b: nest {{ ...l{next} }} }}",
-      next = level + 1
-    ));
+  /// `levels` levels of two branches each, every branch spreading the one fragment of the next.
+  fn diamond(levels: usize) -> String {
+    let mut source = String::from("{ nest { ...l0 } }");
+    for level in 0..levels {
+      source.push_str(&std::format!(
+        " fragment l{level} on Nest {{ a: nest {{ ...l{next} }} b: nest {{ ...l{next} }} }}",
+        next = level + 1
+      ));
+    }
+    source.push_str(&std::format!(" fragment l{levels} on Nest {{ leaf }}"));
+    source
   }
-  source.push_str(&std::format!(" fragment l{LEVELS} on Nest {{ leaf }}"));
 
-  let (tripped, rules, ms) = timed(&schema, &source, &Budget::default());
+  /// The response shape of [`diamond`], written out: every branch is an occurrence of its own, so
+  /// there is nothing for the memo to recognise.
+  fn unfolded(levels: usize) -> String {
+    fn branches(level: usize, levels: usize, into: &mut String) {
+      if level == levels {
+        into.push_str(" leaf ");
+        return;
+      }
+      for alias in ["a", "b"] {
+        into.push_str(&std::format!(" {alias}: nest {{"));
+        branches(level + 1, levels, into);
+        into.push_str("} ");
+      }
+    }
+    let mut source = String::from("{ nest {");
+    branches(0, levels, &mut source);
+    source.push_str("} }");
+    source
+  }
+
+  let source = diamond(LEVELS);
+  let outcome = settle(&schema, &parse(&source), &Budget::default(), RuleSet::ALL);
   println!(
-    "memoised diamond: {} bytes, {LEVELS} levels, {ms:.3} ms",
-    source.len()
+    "memoised diamond: {} bytes, {LEVELS} levels, tripped = {}",
+    source.len(),
+    outcome.tripped
   );
-  assert!(!tripped, "a memoised merge should not need the budget");
-  assert_eq!(rules, [], "{rules:?}");
-  assert!(ms < 500.0, "the memo is not working: {ms} ms");
+  assert!(
+    !outcome.tripped,
+    "a memoised merge should not need the budget"
+  );
+  assert_eq!(outcome.rules, [], "{:?}", outcome.rules);
+
+  // Linear in the levels. Doubling them doubles a sum; a merge that re-derived every branch
+  // multiplies the work by two for each level, so by `2^15` here. Three is between them.
+  let half = least_work_that_clears(&schema, &diamond(LEVELS / 2), None, RuleSet::ALL);
+  let full = least_work_that_clears(&schema, &source, None, RuleSet::ALL);
+  let growth = f64::from(full) / f64::from(half);
+  println!(
+    "diamond: {half} units at {} levels, {full} at {LEVELS} (x{growth:.2})",
+    LEVELS / 2
+  );
+  assert!(
+    growth < 3.0,
+    "doubling the levels multiplied the price by {growth:.2}, so the memo is not working"
+  );
+
+  // The control. The same response shape with nothing shared is what an unmemoised merge pays,
+  // and the premise is that it is the expensive one. What sharing saves is about `2^levels` over
+  // `levels` — thirty-two at eight — so an order of magnitude is the least that is the memo and
+  // not a constant factor.
+  let shared = least_work_that_clears(&schema, &diamond(WRITTEN_OUT), None, RuleSet::ALL);
+  let written = least_work_that_clears(&schema, &unfolded(WRITTEN_OUT), None, RuleSet::ALL);
+  println!(
+    "{WRITTEN_OUT} levels: {shared} units shared, {written} written out (x{:.1})",
+    f64::from(written) / f64::from(shared)
+  );
+  assert!(
+    written >= shared * 10,
+    "the diamond costs {shared} units and its unfolded twin {written}, so sharing a subtree saves \
+     less than a factor of ten and the memo is not what keeps the diamond cheap"
+  );
 }
 
 /// The bound is a refusal, not a truncation: the verdict says so, and an ordinary document does
@@ -621,6 +965,17 @@ fn the_budget_flag_pins_both_states() {
 /// subtree past the trip is unexamined. `Invalid::budget_tripped` carries the refusal with no
 /// diagnostic attached, and `Invalid::emitted` is zero.
 ///
+/// # And it stops where the refusal stops
+///
+/// The depth half is read in units. Which bound refused is no longer in the diagnostics, but it is
+/// in the budget: below the depth refusal's own cost the *work* bound refuses first and says so,
+/// its rule being on, and from that cost upward the depth bound refuses and says nothing. So the
+/// smallest `merge_work` at which the refusal is silent is the same number as the smallest at
+/// which it names the depth bound exactly when filtering the rule out left the stopping where it
+/// was. Measured on this tree: 21,758 units either way, at 200 levels. Let the depth bound fire
+/// eight levels late only when its rule is filtered out, and the two numbers part: 21,912 against
+/// 21,758.
+///
 /// # The plant
 ///
 /// Make `validate_executable_with` return `Ok` whenever nothing was emitted — which is what it did
@@ -639,7 +994,6 @@ fn a_refusal_with_its_rule_filtered_out_is_still_a_refusal() {
     let rules = RuleSet::ALL.without(Rule::MergeDepthBudget);
     assert!(rules.contains(Rule::FieldSelectionMerging));
 
-    let start = Instant::now();
     let invalid = validate_executable_with(
       &schema,
       &document,
@@ -649,8 +1003,6 @@ fn a_refusal_with_its_rule_filtered_out_is_still_a_refusal() {
       &mut Ignore,
     )
     .expect_err("the engine abandoned 5.3.2, so the document cannot be reported clean");
-    let ms = start.elapsed().as_secs_f64() * 1e3;
-    println!("depth bound with the rule disabled: {ms:.3} ms");
     assert!(invalid.budget_tripped(), "{invalid}");
     assert_eq!(
       invalid.emitted(),
@@ -668,7 +1020,23 @@ fn a_refusal_with_its_rule_filtered_out_is_still_a_refusal() {
        whether the whole document was looked at would be right by accident on this verdict and \
        wrong on every other refusal. al8n/smear#196"
     );
-    assert!(ms < 500.0, "the bound stopped holding: {ms} ms");
+
+    // And it stopped where the refusal with the rule on stops.
+    let named = least_work(&schema, &document, budget, RuleSet::ALL, |run| {
+      run.rules.contains(&Rule::MergeDepthBudget)
+    });
+    let silent = least_work(&schema, &document, budget, rules, |run| {
+      run.tripped && run.emitted == 0
+    });
+    println!(
+      "depth bound with the rule disabled: refused silently from {silent} units, and by name from \
+       {named} with the rule on"
+    );
+    assert_eq!(
+      silent, named,
+      "the depth bound refuses from {named} units with its rule on and from {silent} with it \
+       filtered out, so filtering the rule out moved the stopping"
+    );
 
     // The work bound, the same way, with a collecting sink so the empty sink is observed rather
     // than assumed.
@@ -799,26 +1167,53 @@ fn the_verdict_does_not_depend_on_history() {
 ///
 /// Draft 5.5.2.2 refuses it first, exactly as apollo-compiler does — which is why the engine runs
 /// last in this validator rather than wherever 5.3.2 falls in the specification's numbering.
+///
+/// # The instrument
+///
+/// Whether the engine was reached is read through its own ledger. Draft 5.3.2's first act is a
+/// charge, so a `merge_work` of zero refuses it the moment it starts and nothing else can: the
+/// same document under the same `First` sink must come back with the cycle rule's refusal and no
+/// budget refusal, and under a sink that does not stop the same zero is what the engine reads when
+/// it *is* reached, which is the premise. Nothing else on this path can tell the two orders apart —
+/// the default budget admits the engine's whole walk of this graph, so a validator that ran it
+/// first would still answer with the cycle rule.
+///
+/// The collecting half is read in units: the smallest `merge_work` at which the engine terminates
+/// over the graph, and how it grows with the graph. An expansion enters each named fragment once,
+/// so the price is quadratic in the fragments — twice as many is four times the spreads — where
+/// a walk that followed the cycles would not stop at any multiple.
+///
+/// Measured on this tree: sixty fragments spreading each other need 15,504 units and thirty need
+/// 4,164 (x3.72), against the default of 65,536.
+///
+/// **The plant.** Run `check_field_merging` before `check_fragment_cycles`. Every assertion above
+/// the zero-budget one still passes, because the default budget admits the engine's whole walk,
+/// and that one finds `MergeWorkBudget` where the cycle rule should be.
 #[test]
 fn the_all_pairs_fragment_bomb_dies_at_5_5_2_2() {
   let schema = build();
   const FRAGMENTS: usize = 60;
 
-  let mut source = String::from("{ dog { ...f0 } }");
-  for index in 0..FRAGMENTS {
-    source.push_str(&std::format!(" fragment f{index} on Dog {{ name"));
-    for other in 0..FRAGMENTS {
-      source.push_str(&std::format!(" ...f{other}"));
+  /// `{ dog { ...f0 } }`, and `fragments` fragments each spreading all of them, itself included.
+  fn all_pairs(fragments: usize) -> String {
+    let mut source = String::from("{ dog { ...f0 } }");
+    for index in 0..fragments {
+      source.push_str(&std::format!(" fragment f{index} on Dog {{ name"));
+      for other in 0..fragments {
+        source.push_str(&std::format!(" ...f{other}"));
+      }
+      source.push_str(" }");
     }
-    source.push_str(" }");
+    source
   }
+
+  let source = all_pairs(FRAGMENTS);
 
   // A `First` sink is the server default, and it is what makes the ordering observable: the
   // document is refused before anything expands a fragment.
   let document = parse(&source);
   let mut scratch = Scratch::new();
   let mut sink = First::new();
-  let start = Instant::now();
   let invalid = validate_executable(
     &schema,
     &document,
@@ -827,9 +1222,8 @@ fn the_all_pairs_fragment_bomb_dies_at_5_5_2_2() {
     &mut sink,
   )
   .expect_err("the spreads are cyclic");
-  let ms = start.elapsed().as_secs_f64() * 1e3;
   println!(
-    "all-pairs bomb: {} bytes, {FRAGMENTS} fragments, {ms:.3} ms",
+    "all-pairs bomb: {} bytes, {FRAGMENTS} fragments",
     source.len()
   );
   assert_eq!(
@@ -838,15 +1232,71 @@ fn the_all_pairs_fragment_bomb_dies_at_5_5_2_2() {
     "the merge engine was reached before the cycle rule refused the document"
   );
   assert!(!invalid.budget_tripped());
-  assert!(ms < 500.0, "{ms} ms");
+
+  // Not reached, read through the engine's own ledger: with nothing to spend it refuses at its
+  // first charge, so a refusal here would mean it started.
+  let starved = Budget::default().with_merge_work(0);
+  let mut scratch = Scratch::new();
+  let mut sink = First::new();
+  let invalid = validate_executable(&schema, &document, &mut scratch, &starved, &mut sink)
+    .expect_err("the spreads are cyclic");
+  assert_eq!(
+    sink.get().expect("a diagnostic").rule(),
+    Rule::FragmentSpreadsMustNotFormCycles,
+    "with a merge budget of zero the first refusal was not the cycle rule's, so draft 5.3.2 \
+     started before 5.5.2.2 stopped the document"
+  );
+  assert!(
+    !invalid.budget_tripped(),
+    "a merge budget of zero refused the document, so draft 5.3.2 started before 5.5.2.2 stopped it"
+  );
+  // The premise: where nothing stops the validator, the same zero is what the engine reads.
+  let reached = settle(&schema, &document, &starved, RuleSet::ALL);
+  assert!(
+    reached.tripped && reached.rules.contains(&Rule::MergeWorkBudget),
+    "a merge budget of zero did not refuse the engine, so a refusal that never comes proves \
+     nothing: {:?}",
+    reached.rules
+  );
 
   // And with a collecting sink, which does not stop, the engine does run over the cyclic graph —
   // and terminates, under budget.
-  let (tripped, rules, ms) = timed(&schema, &source, &Budget::default());
-  println!("all-pairs bomb, collecting sink: {ms:.3} ms, {rules:?}");
-  assert!(rules.contains(&Rule::FragmentSpreadsMustNotFormCycles));
-  assert!(!tripped, "the engine needed the budget on a cyclic graph");
-  assert!(ms < 2_000.0, "{ms} ms");
+  let outcome = settle(&schema, &document, &Budget::default(), RuleSet::ALL);
+  let terminates = |run: &Settled| !run.tripped;
+  let needed = least_work(
+    &schema,
+    &document,
+    Budget::default(),
+    RuleSet::ALL,
+    terminates,
+  );
+  let half_source = all_pairs(FRAGMENTS / 2);
+  let half = parse(&half_source);
+  let half_needed = least_work(&schema, &half, Budget::default(), RuleSet::ALL, terminates);
+  let growth = f64::from(needed) / f64::from(half_needed);
+  println!(
+    "all-pairs bomb, collecting sink: {needed} units to terminate against {}, {half_needed} at {} \
+     fragments (x{growth:.2}), {:?}",
+    Budget::default().merge_work(),
+    FRAGMENTS / 2,
+    outcome.rules
+  );
+  assert!(
+    outcome
+      .rules
+      .contains(&Rule::FragmentSpreadsMustNotFormCycles)
+  );
+  assert!(
+    !outcome.tripped,
+    "the engine needed the budget on a cyclic graph"
+  );
+  // Twice the fragments is four times the spreads. A cost that grew like the cube would multiply
+  // by eight, and one that followed the cycles has no multiple to stop at; eight is between them.
+  assert!(
+    growth < 8.0,
+    "doubling the fragments multiplied the units by {growth:.2}, which is more than the spreads \
+     they add"
+  );
 }
 
 /// Pairing two wide object literals by field name is linear in their width, and the width is still
@@ -867,6 +1317,17 @@ fn the_all_pairs_fragment_bomb_dies_at_5_5_2_2() {
 /// still refused — the bound did not go away, it stopped being quadratic. A gate whose subject a
 /// repair dissolves has to say so out loud; leaving the old assertion to be deleted quietly is how
 /// a suite ends up green over a property nobody is testing any more.
+///
+/// # The instrument
+///
+/// Units throughout, under the three rules that run this comparison and nothing else. The class is
+/// the ratio of two widths; the old fixture's subject is read as the units it now costs; and the
+/// refusal at the end reports the ceiling and leaves less behind than finishing would — the same
+/// literal with the ceiling lifted, which is the premise.
+///
+/// Measured on this tree: 64 fields a side cost 915 units and 128 cost 1,774 (x1.94); 400 cost
+/// 5,509, where the old pairing's `400 · 401 / 2` scan steps alone were over the 65,536 default;
+/// and 20,000 are refused at 65,536 units, leaving 49,358 rows against the 65,742 finishing leaves.
 #[test]
 fn a_wide_literal_comparison_is_linear_in_its_width() {
   /// Two identical object literals of `width` distinct fields behind one response name, so the two
@@ -888,17 +1349,19 @@ fn a_wide_literal_comparison_is_linear_in_its_width() {
 
   // The old fixture's own subject, which now merges.
   let source = document(400);
-  let (tripped, fired, ms) = timed(&schema, &source, &Budget::default());
+  let outcome = settle(&schema, &parse(&source), &Budget::default(), RuleSet::ALL);
+  let charged = least_work_that_clears(&schema, &source, None, rules);
   println!(
-    "wide literal: {} bytes, 400 fields each side, {ms:.3} ms, tripped = {tripped}",
-    source.len()
+    "wide literal: {} bytes, 400 fields each side, {charged} units, tripped = {}",
+    source.len(),
+    outcome.tripped
   );
   assert!(
-    !tripped,
-    "a seven-kilobyte literal of four hundred distinct fields is refused: {fired:?}"
+    !outcome.tripped,
+    "a seven-kilobyte literal of four hundred distinct fields is refused: {:?}",
+    outcome.rules
   );
-  assert_eq!(fired, [], "{fired:?}");
-  assert!(ms < 500.0, "{ms} ms");
+  assert_eq!(outcome.rules, [], "{:?}", outcome.rules);
 
   // Doubling the width. A quadratic pairing would take about four times the units; an indexed one
   // takes about two, and the separator is three because the fixture also carries a fixed cost that
@@ -918,14 +1381,21 @@ fn a_wide_literal_comparison_is_linear_in_its_width() {
 
   // And the bound is still a bound: linear in the width is not free in it.
   let source = document(20_000);
-  let (tripped, fired, ms) = timed(&schema, &source, &Budget::default());
+  let (refused, finished) = refused_at_the_ceiling(&schema, &parse(&source), rules);
   println!(
-    "very wide literal: {} bytes, 20000 fields each side, {ms:.3} ms",
-    source.len()
+    "very wide literal: {} bytes, 20000 fields each side, refused at {:?} units leaving {} rows \
+     against the {} finishing leaves",
+    source.len(),
+    refused.reported,
+    refused.rows,
+    finished.rows
   );
-  assert!(tripped, "{fired:?}");
-  assert_eq!(fired, [Rule::MergeWorkBudget], "{fired:?}");
-  assert!(ms < 500.0, "{ms} ms");
+  assert_eq!(
+    refused.rules,
+    [Rule::MergeWorkBudget],
+    "{:?}",
+    refused.rules
+  );
 }
 
 /// A part of identical selections is linear in how many arguments they carry, not quadratic.
@@ -1179,6 +1649,17 @@ fn a_comparison_over_a_spelling_is_charged_for_its_length() {
 /// `byte_units` charges a looked-up name passes through, the one `Validator::index` takes in front
 /// of hashing it and the one `Validator::find` takes in front of a matching probe's `memcmp`, and
 /// the hostile half is served.
+///
+/// # The instrument
+///
+/// Both halves are read in units. Every hostile name is hashed once and compared once on each
+/// side, and a byte costs an eighth of a unit, so the ledger owes `4 · 200 · 513 = 410,400` units
+/// for the bytes alone before it charges anything else — which is what separates a ledger that
+/// sees the bytes from one that merely refused. The refusal reports the ceiling.
+///
+/// Measured on this tree: the honest document costs 8,689 units, and the hostile one asks for
+/// 412,493 and is refused at 65,536. Charge the hashing of a name one unit instead of its bytes and
+/// the hostile document is still refused, but asks for 207,293, which is under the 410,400.
 #[test]
 fn a_scan_is_not_charged_for_bytes_no_candidate_reads() {
   /// Arguments a side in the honest half.
@@ -1239,19 +1720,11 @@ fn a_scan_is_not_charged_for_bytes_no_candidate_reads() {
       let budget = Budget::default().with_merge_work(limit);
       validate_executable_with(schema, &document, &mut scratch, &budget, rules, &mut Ignore).is_ok()
     };
-    let (mut lo, mut hi) = (0u32, 1u32 << 24);
-    assert!(clears(hi), "the subject does not clear {hi} units");
-    while lo < hi {
-      let mid = lo + (hi - lo) / 2;
-      if clears(mid) {
-        hi = mid;
-      } else {
-        lo = mid + 1;
-      }
-    }
-    assert!(clears(lo));
-    assert!(lo > 0 && !clears(lo - 1), "{lo} is not a boundary");
-    lo
+    assert!(
+      clears(SEARCH_CEILING),
+      "the subject does not clear {SEARCH_CEILING} units"
+    );
+    boundary(SEARCH_CEILING, clears)
   }
 
   on_a_deep_stack(|| {
@@ -1298,33 +1771,38 @@ fn a_scan_is_not_charged_for_bytes_no_candidate_reads() {
     // sharing every byte but the last four, so no lookup settles early and the comparison the
     // ledger has to see is the whole of `Θ(n² · L)`.
     let hostile = document(&prefixed(HOSTILE_WIDTH, HOSTILE_LEN), true);
-    let mut scratch = Scratch::new();
-    let mut collected = Vec::new();
-    let mut sink = Collect::new(&mut collected);
-    let start = Instant::now();
-    let verdict = validate_executable_with(
-      &schema,
-      &parse(&hostile),
-      &mut scratch,
-      &Budget::default(),
-      rules,
-      &mut sink,
-    );
-    let ms = start.elapsed().as_secs_f64() * 1e3;
-    let mut fired: Vec<_> = collected.iter().map(Diagnostic::rule).collect();
-    fired.sort_unstable();
-    fired.dedup();
+    let refused = settle(&schema, &parse(&hostile), &Budget::default(), rules);
+    let asked = least(&schema, &hostile, rules);
+    // Each name is hashed once and compared once on each side, and a pass over `L` bytes is
+    // `L / 8 + 1` units.
+    let owed = u32::try_from(4 * HOSTILE_WIDTH * (HOSTILE_LEN / 8 + 1)).expect("a ledger's range");
     println!(
       "hostile: {} bytes, {HOSTILE_WIDTH} arguments of {HOSTILE_LEN} bytes in reverse order, \
-       {ms:.3} ms",
-      hostile.len()
+       refused at {:?} units for the {asked} it asks",
+      hostile.len(),
+      refused.reported
     );
     assert!(
-      verdict.as_ref().err().is_some_and(|i| i.budget_tripped()),
+      refused.tripped,
       "the reverse-order long-prefix comparison served under the default budget"
     );
-    assert_eq!(fired, [Rule::MergeWorkBudget], "{fired:?}");
-    assert!(ms < 500.0, "{ms} ms");
+    assert_eq!(
+      refused.rules,
+      [Rule::MergeWorkBudget],
+      "{:?}",
+      refused.rules
+    );
+    assert_eq!(
+      refused.reported,
+      Some(default),
+      "the refusal reported {:?} units rather than the ceiling",
+      refused.reported
+    );
+    assert!(
+      asked >= owed,
+      "the ledger prices the hostile document at {asked} units, under the {owed} that the bytes of \
+       its names alone come to, so the bytes are not all in the total"
+    );
   });
 }
 
@@ -1347,6 +1825,20 @@ fn a_scan_is_not_charged_for_bytes_no_candidate_reads() {
 ///
 /// **The plant.** Charge `byte_units(min(left, right))` again and this reads `[MergeWorkBudget]`
 /// where the conflict should be.
+///
+/// # The instrument
+///
+/// What the decision costs is read in units, against two documents that are the same but for one
+/// thing. The **control** is the same shape with a one-byte literal against a two-byte one: no
+/// spelling long enough for a charge to find, so what it costs is what the decision costs, and the
+/// long pair must cost exactly that. The **premise** is a pair of equal length that differs only
+/// at its last byte, which is a comparison that does read the spelling and must be charged for it
+/// at an eighth of a unit a byte: without it, a price that is flat in the length would be no
+/// reading of anything.
+///
+/// Measured on this tree: 48 units for the long pair and 48 for the control; the premise costs
+/// 65,584, which is 65,536 more. Charge one unit per kilobyte of the shorter spelling and the
+/// document is still served, at 176 units against 48.
 #[test]
 fn a_comparison_two_lengths_settle_is_not_charged_for_either_spelling() {
   /// Long enough that one `byte_units` of it exceeds the shipped `merge_work` on its own.
@@ -1354,32 +1846,65 @@ fn a_comparison_two_lengths_settle_is_not_charged_for_either_spelling() {
 
   on_a_deep_stack(|| {
     let schema = build();
-    let left = "a".repeat(LEN);
-    let right = "a".repeat(LEN + 1);
-    let source = std::format!("{{ x: note(payload: \"{left}\") x: note(payload: \"{right}\") }}");
+    // Two string literals behind one response name, so the two have to be compared.
+    let pair = |left: &str, right: &str| {
+      std::format!("{{ x: note(payload: \"{left}\") x: note(payload: \"{right}\") }}")
+    };
+    let source = pair(&"a".repeat(LEN), &"a".repeat(LEN + 1));
 
-    let (tripped, fired, ms) = timed(&schema, &source, &Budget::default());
-    println!(
-      "length-decided comparison: {} bytes, spellings of {LEN} and {}, {ms:.3} ms",
-      source.len(),
-      LEN + 1
-    );
+    let outcome = settle(&schema, &parse(&source), &Budget::default(), RuleSet::ALL);
     assert!(
-      !tripped,
-      "an `O(1)` decision exhausted the merge budget: {fired:?}"
+      !outcome.tripped,
+      "an `O(1)` decision exhausted the merge budget: {:?}",
+      outcome.rules
     );
     assert_eq!(
-      fired,
+      outcome.rules,
       [Rule::FieldSelectionMerging],
       "the document's finding is that the two literals differ, and that is what the caller must be \
-       told: {fired:?}"
+       told: {:?}",
+      outcome.rules
     );
     assert_eq!(
       conflicts(&schema, &source),
       [MergeConflict::Arguments],
       "and it is the arguments that conflict, not the shapes"
     );
-    assert!(ms < 500.0, "{ms} ms");
+
+    // Not refused is a verdict; what the decision cost is the reading.
+    let price = |source: &str| {
+      least_work(
+        &schema,
+        &parse(source),
+        Budget::default(),
+        RuleSet::ALL,
+        |run| !run.tripped,
+      )
+    };
+    let settled = price(&source);
+    let control = price(&pair("a", "aa"));
+    let read = price(&pair(
+      &std::format!("{}b", "a".repeat(LEN - 1)),
+      &"a".repeat(LEN),
+    ));
+    println!(
+      "length-decided comparison: {} bytes, spellings of {LEN} and {}, {settled} units against \
+       {control} for one byte and two, and {read} when the two lengths are equal",
+      source.len(),
+      LEN + 1
+    );
+    assert_eq!(
+      settled, control,
+      "two spellings the lengths tell apart cost {settled} units at {LEN} bytes and {control} at \
+       one, so something in the price reads the spelling"
+    );
+    let bytes = u32::try_from(LEN / 8).expect("a ledger's range");
+    assert!(
+      read >= settled + bytes,
+      "two spellings of {LEN} bytes that differ only at the last cost {read} units against the \
+       {settled} the length-decided pair costs, which is less than the {bytes} more that reading \
+       them comes to, so a price that ignored the bytes would have passed the equality above"
+    );
   });
 }
 
@@ -1472,6 +1997,9 @@ fn a_merge_bound_governs_the_engine_and_is_vacuous_without_it() {
 /// This crate's work unit is not apollo's — it also charges comparisons, the rows a common-parent
 /// partition duplicates, and tree-resolution steps — so the number is measured here rather than
 /// inherited, and it is printed so that a change to the accounting shows up as a moved number.
+///
+/// Measured on this tree: 22,901 bytes of 2,000 distinct selections cost 32,038 units, about half
+/// the shipped 65,536.
 #[test]
 fn the_default_work_budget_clears_a_large_ordinary_document() {
   let schema = build();
@@ -1484,15 +2012,18 @@ fn the_default_work_budget_clears_a_large_ordinary_document() {
   }
   source.push_str(" } }");
 
-  let (tripped, rules, ms) = timed(&schema, &source, &Budget::default());
+  let outcome = settle(&schema, &parse(&source), &Budget::default(), RuleSet::ALL);
+  let charged = least_work_that_clears(&schema, &source, None, RuleSet::ALL);
   println!(
-    "ordinary document: {} bytes, 2000 distinct selections, {ms:.3} ms, tripped = {tripped}",
-    source.len()
+    "ordinary document: {} bytes, 2000 distinct selections, {charged} units of {}, tripped = {}",
+    source.len(),
+    Budget::default().merge_work(),
+    outcome.tripped
   );
   assert!(
-    !tripped,
+    !outcome.tripped,
     "the default work budget refused an ordinary {}-byte document",
     source.len()
   );
-  assert_eq!(rules, []);
+  assert_eq!(outcome.rules, []);
 }

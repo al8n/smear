@@ -177,7 +177,7 @@ pub struct Fixture {
   ///
   /// Lowering the bound is how a bound is exercised without a hundred-kilobyte fixture; that the
   /// **default** bound holds against a genuinely hostile document is `validator_merge.rs`'s job,
-  /// and it measures the wall clock while it is there.
+  /// and it reads the units and the working set the refusal costs while it is there.
   pub budget: Option<Budget>,
   /// A document that makes [`Fixture::rule`] fire.
   pub invalid: &'static str,
