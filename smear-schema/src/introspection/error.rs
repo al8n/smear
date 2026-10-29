@@ -87,7 +87,8 @@ pub enum ResponseErrorKind {
   /// **Unreachable by construction, and an error rather than a panic because "unreachable" is a
   /// claim.** Every free-form byte the door emits is checked before it is written — names against
   /// the grammar, kinds and locations against closed sets, default values against the const-value
-  /// parser — so nothing a response can carry reaches the parser unexamined. If this fires, the
+  /// parser — or is prose, written as a quoted string with every quote, backslash and control
+  /// escaped, so nothing a response can carry reaches the parser unexamined. If this fires, the
   /// renderer has a bug and the response is innocent.
   UnparsableSdl,
 }

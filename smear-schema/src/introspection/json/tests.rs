@@ -113,8 +113,8 @@ fn every_escape_the_grammar_defines_is_expanded() {
 ///
 /// A name never calls the expander — it borrows the literal's own bytes — and neither does the
 /// walk over a member the door ignores. So an escape that only the *expander* refuses would be an
-/// escape a `description` could carry unchallenged, and "the whole document is proved to be JSON"
-/// would be a promise about the members that happen to be read.
+/// escape an `extensions` member could carry unchallenged, and "the whole document is proved to be
+/// JSON" would be a promise about the members that happen to be read.
 #[test]
 fn the_raw_path_validates_every_escape_the_expanding_one_does() {
   for literal in [

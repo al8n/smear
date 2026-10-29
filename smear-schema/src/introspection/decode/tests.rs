@@ -8,7 +8,9 @@ use super::read;
 use crate::introspection::{
   ResponseErrorKind,
   json::Text,
-  model::{IntrospectedSchema, IntrospectedType, Name, TypeRef},
+  model::{
+    Deprecated, IntrospectedInputValue, IntrospectedSchema, IntrospectedType, Name, TypeRef,
+  },
 };
 // The byte gates at the foot of this file read `json::visited`, a thread-local counter, and
 // `thread_local!` is `std`'s. Under a `no_std` row they are absent rather than vacuous.
@@ -91,15 +93,15 @@ impl<'a> Census<'a> {
     census.name(schema.query_type.name);
     census.name(schema.mutation_type.as_ref().and_then(|root| root.name));
     census.name(schema.subscription_type.as_ref().and_then(|root| root.name));
+    census.text(schema.description.as_ref());
     for ty in &schema.types {
       census.ty(ty);
     }
     for directive in &schema.directives {
       census.name(Some(directive.name));
+      census.text(directive.description.as_ref());
       for arg in &directive.args {
-        census.name(Some(arg.name));
-        census.type_ref(&arg.ty);
-        census.text(arg.default_value.as_ref());
+        census.input(arg);
       }
     }
     census
@@ -107,19 +109,19 @@ impl<'a> Census<'a> {
 
   fn ty(&mut self, ty: &IntrospectedType<'a>) {
     self.name(ty.name);
+    self.text(ty.description.as_ref());
+    self.text(ty.specified_by_url.as_ref());
     for field in ty.fields.iter().flatten() {
       self.name(Some(field.name));
+      self.text(field.description.as_ref());
+      self.deprecated(&field.deprecated);
       self.type_ref(&field.ty);
       for arg in &field.args {
-        self.name(Some(arg.name));
-        self.type_ref(&arg.ty);
-        self.text(arg.default_value.as_ref());
+        self.input(arg);
       }
     }
     for input in ty.input_fields.iter().flatten() {
-      self.name(Some(input.name));
-      self.type_ref(&input.ty);
-      self.text(input.default_value.as_ref());
+      self.input(input);
     }
     for reference in ty.interfaces.iter().flatten() {
       self.type_ref(reference);
@@ -129,6 +131,22 @@ impl<'a> Census<'a> {
     }
     for value in ty.enum_values.iter().flatten() {
       self.name(Some(value.name));
+      self.text(value.description.as_ref());
+      self.deprecated(&value.deprecated);
+    }
+  }
+
+  fn input(&mut self, input: &IntrospectedInputValue<'a>) {
+    self.name(Some(input.name));
+    self.text(input.description.as_ref());
+    self.type_ref(&input.ty);
+    self.text(input.default_value.as_ref());
+    self.deprecated(&input.deprecated);
+  }
+
+  fn deprecated(&mut self, deprecated: &Deprecated<'a>) {
+    if let Some(reason) = deprecated {
+      self.text(reason.as_ref());
     }
   }
 
@@ -167,26 +185,31 @@ impl<'a> Census<'a> {
 /// A response exercising every slot the model has, so a census over it is not thin.
 ///
 /// `pad` lengthens every name, which is what a copying reader would pay for and a borrowing one
-/// does not. `default` is the one prose member.
+/// does not. `default` is one prose member and the rest — a description at every level that takes
+/// one, a deprecation reason at each of the three, a `specifiedByURL` — hold no escape.
 fn corpus(pad: usize, default: &str) -> String {
   let p = "z".repeat(pad);
   format!(
     r#"{{"data":{{"__schema":{{
+      "description":"The schema.",
       "queryType":{{"name":"Query{p}"}},
       "mutationType":{{"name":"Mut{p}"}},
       "subscriptionType":null,
       "directives":[
-        {{"name":"tag{p}","locations":["FIELD_DEFINITION","OBJECT"],"args":[
-          {{"name":"note{p}","type":{{"kind":"SCALAR","name":"String{p}"}},"defaultValue":null}}
+        {{"name":"tag{p}","description":"Tags.","locations":["FIELD_DEFINITION","OBJECT"],"args":[
+          {{"name":"note{p}","description":"A note.","type":{{"kind":"SCALAR","name":"String{p}"}},
+            "defaultValue":null,"isDeprecated":true,"deprecationReason":"Unused."}}
         ],"isRepeatable":true}}
       ],
       "types":[
-        {{"kind":"OBJECT","name":"Query{p}","interfaces":[{{"kind":"INTERFACE","name":"Node{p}"}}],
+        {{"kind":"OBJECT","name":"Query{p}","description":"The root.",
+         "interfaces":[{{"kind":"INTERFACE","name":"Node{p}"}}],
          "fields":[
-          {{"name":"ok{p}","args":[
+          {{"name":"ok{p}","description":"Fine.","args":[
             {{"name":"arg{p}","type":{{"kind":"SCALAR","name":"String{p}"}},"defaultValue":{default}}}
           ],"type":{{"kind":"NON_NULL","name":null,"ofType":
-            {{"kind":"LIST","name":null,"ofType":{{"kind":"SCALAR","name":"Int{p}"}}}}}}}}
+            {{"kind":"LIST","name":null,"ofType":{{"kind":"SCALAR","name":"Int{p}"}}}}}},
+           "isDeprecated":true,"deprecationReason":"Gone."}}
         ]}},
         {{"kind":"OBJECT","name":"Mut{p}","fields":[
           {{"name":"go{p}","args":[],"type":{{"kind":"SCALAR","name":"Int{p}"}}}}
@@ -194,17 +217,23 @@ fn corpus(pad: usize, default: &str) -> String {
         {{"kind":"INTERFACE","name":"Node{p}","interfaces":[],"fields":[
           {{"name":"id{p}","args":[],"type":{{"kind":"SCALAR","name":"ID{p}"}}}}
         ]}},
-        {{"kind":"ENUM","name":"Verdict{p}","enumValues":[{{"name":"YES{p}"}},{{"name":"NO{p}"}}]}},
+        {{"kind":"ENUM","name":"Verdict{p}","enumValues":[
+          {{"name":"YES{p}","description":"Yes."}},
+          {{"name":"NO{p}","isDeprecated":true,"deprecationReason":"Say yes."}}
+        ]}},
         {{"kind":"UNION","name":"U{p}","possibleTypes":[{{"kind":"OBJECT","name":"Query{p}"}}]}},
         {{"kind":"INPUT_OBJECT","name":"In{p}","isOneOf":true,"inputFields":[
           {{"name":"f{p}","type":{{"kind":"SCALAR","name":"String{p}"}},"defaultValue":"1"}}
-        ]}}
+        ]}},
+        {{"kind":"SCALAR","name":"Url{p}","description":"A URL.",
+         "specifiedByURL":"https://url.spec.whatwg.org/"}}
       ]
     }}}}}}"#
   )
 }
 
-/// Every name a response of names alone carries comes back as a slice of the response.
+/// Every name a response carries comes back as a slice of the response, and so does every piece of
+/// prose that holds no escape.
 ///
 /// This is the allocation property said the strongest way it can be said: not "the counter did not
 /// move" but "these bytes are the response's own bytes". A reader that copied a name would hand
@@ -224,6 +253,11 @@ fn a_document_of_only_names_copies_nothing() {
     census.names >= 25,
     "the census reached only {} names; the corpus shrank",
     census.names
+  );
+  assert!(
+    census.borrowed_texts >= 12,
+    "the census reached only {} pieces of prose; the corpus shrank",
+    census.borrowed_texts
   );
 }
 
@@ -704,9 +738,20 @@ fn an_escape_is_decoded_everywhere_but_a_name() {
   // nothing about the response it sits in.
   let escaped_unread = response(&format!(
     r#"{{"kind":"OBJECT","name":"Query","{}":"prose","fields":[]}}"#,
-    escaped("0064", "escription")
+    escaped("0065", "xtensions")
   ));
   assert!(read(&escaped_unread).is_ok());
+
+  // And a description is prose now, so an escaped `description` key selects it like any other key.
+  let escaped_description = response(&format!(
+    r#"{{"kind":"OBJECT","name":"Query","{}":"prose","fields":[]}}"#,
+    escaped("0064", "escription")
+  ));
+  let schema = read(&escaped_description).expect("a schema");
+  assert_eq!(
+    schema.types[0].description.as_ref().map(Text::as_str),
+    Some("prose")
+  );
 }
 
 /// An escaped `data` still shadows every other reading, malformed or not.
@@ -1017,15 +1062,90 @@ fn stepping_over_a_refused_member_gives_back_its_containers() {
 #[test]
 fn an_unknown_member_is_ignored() {
   let json = response(
-    r#"{"kind":"OBJECT","name":"Query","description":"prose with \"escapes\" in it",
+    r#"{"kind":"OBJECT","name":"Query","note":"prose with \"escapes\" in it",
        "specifiedByURL":null,"unheardOf":{"deeply":[1,2,{"nested":true}]},
        "fields":[{"name":"ok","args":[],"type":{"kind":"SCALAR","name":"Int"},
-                  "isDeprecated":false,"deprecationReason":null}]}"#,
+                  "isDeprecated":false,"deprecationReason":null,"extensions":{"cost":3}}]}"#,
   );
   let schema = read(&json).expect("a schema");
   assert_eq!(schema.types.len(), 1);
   // Nothing was copied on the way past them.
   assert_eq!(Census::over(&json, &schema).copied_texts, 0);
+}
+
+/// Prose is read at every level draft §4 has it, decoded where an escape forces it and borrowed
+/// everywhere else.
+#[test]
+fn prose_is_read_wherever_draft_4_has_it() {
+  let json = response(
+    r#"{"kind":"OBJECT","name":"Query","description":"A \"quoted\" root.","fields":[
+         {"name":"ok","description":"Fine.","args":[
+           {"name":"a","description":"An argument.","type":{"kind":"SCALAR","name":"Int"},
+            "defaultValue":null,"isDeprecated":true,"deprecationReason":null}
+         ],"type":{"kind":"SCALAR","name":"Int"},"isDeprecated":true,"deprecationReason":"Gone."},
+         {"name":"kept","args":[],"type":{"kind":"SCALAR","name":"Int"},
+          "isDeprecated":false,"deprecationReason":"ignored beside false"},
+         {"name":"old","args":[],"type":{"kind":"SCALAR","name":"Int"},
+          "deprecationReason":"a reason and no flag"}
+       ]},
+       {"kind":"SCALAR","name":"Url","specifiedByURL":"https://url.spec.whatwg.org/"},
+       {"kind":"ENUM","name":"E","enumValues":[
+         {"name":"A","description":null,"isDeprecated":null},
+         {"name":"B","isDeprecated":true}
+       ]}"#,
+  );
+  let schema = read(&json).expect("a schema");
+  let census = Census::over(&json, &schema);
+  assert_eq!(
+    census.copied_texts, 1,
+    "only the escaped description is a copy"
+  );
+
+  let query = &schema.types[0];
+  assert_eq!(
+    query.description.as_ref().map(Text::as_str),
+    Some("A \"quoted\" root.")
+  );
+  let fields = query.fields.as_ref().expect("fields");
+  assert_eq!(
+    fields[0].description.as_ref().map(Text::as_str),
+    Some("Fine.")
+  );
+  assert_eq!(
+    fields[0]
+      .deprecated
+      .as_ref()
+      .map(|reason| reason.as_ref().map(Text::as_str)),
+    Some(Some("Gone."))
+  );
+  assert_eq!(
+    fields[0].args[0].description.as_ref().map(Text::as_str),
+    Some("An argument.")
+  );
+  assert!(
+    matches!(fields[0].args[0].deprecated, Some(None)),
+    "`isDeprecated: true` beside a `null` reason is deprecated with no reason"
+  );
+  assert!(
+    fields[1].deprecated.is_none(),
+    "the flag decides, and a reason beside `false` is dropped"
+  );
+  assert_eq!(
+    fields[2]
+      .deprecated
+      .as_ref()
+      .map(|reason| reason.as_ref().map(Text::as_str)),
+    Some(Some("a reason and no flag")),
+    "a reason and no flag is read as graphql-js reads it"
+  );
+
+  assert_eq!(
+    schema.types[1].specified_by_url.as_ref().map(Text::as_str),
+    Some("https://url.spec.whatwg.org/")
+  );
+  let values = schema.types[2].enum_values.as_ref().expect("values");
+  assert!(values[0].description.is_none() && values[0].deprecated.is_none());
+  assert!(matches!(values[1].deprecated, Some(None)));
 }
 
 /// The wrapper chain a hostile response can build is bounded before the renderer walks it.
