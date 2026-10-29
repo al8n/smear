@@ -24,13 +24,14 @@
 //! writes. The import below has the argument for why an unnameable bound is the point.
 //!
 //! Exactly the productions whose *output type* mentions the payload take the parameter:
-//! [`int_value`](crate::graphql::syntactic::value::materialized::int_value), [`try_int_value`](crate::graphql::syntactic::value::materialized::try_int_value) and the ten composites.
-//! [`float_value`](crate::graphql::syntactic::value::materialized::float_value) and the ten delegating
-//! leaves do not, because nothing in what they return depends on a width — asking a caller of
-//! [`string_value`](crate::graphql::syntactic::value::materialized::string_value) to name one would be asking them to choose between two
-//! answers to a question
-//! it does not ask. Where the parameter stops is therefore where the width stops, visibly, in the
-//! signatures.
+//! [`int_value`](crate::graphql::syntactic::value::materialized::int_value()),
+//! [`try_int_value`](crate::graphql::syntactic::value::materialized::try_int_value()) and the ten
+//! composites. [`float_value`](crate::graphql::syntactic::value::materialized::float_value()) and
+//! the ten delegating leaves do not, because nothing in what they return depends on a width —
+//! asking a caller of
+//! [`string_value`](crate::graphql::syntactic::value::materialized::string_value()) to name one
+//! would be asking them to choose between two answers to a question it does not ask. Where the
+//! parameter stops is therefore where the width stops, visibly, in the signatures.
 //!
 //! # What is converted
 //!
@@ -94,6 +95,13 @@
 //! spelling for "a slice whose text can be read", satisfied by every source backing it ships. It
 //! is one bound set for the whole module rather than the narrowest per production, so the
 //! module's contract is one sentence; the slice parser is unchanged and unbounded by it.
+
+// The header's four function links give their full path and end in `()` on purpose. This
+// module's declaration in `value` carries outer docs, so rustdoc 1.99 resolves the merged docs
+// from `value`, where the slice parser's private `int_value` and its siblings own the bare
+// names. The 1.101 nightly resolves them from here, and flags a plain `[..](path)` to the same
+// function under `redundant_explicit_links`. The `()` spelling passes on both. Once stable
+// resolves them from here too, the bare labels are enough and the paths can go.
 
 use tokora::{
   Lexer, SimpleSpan, Slice, Source,
