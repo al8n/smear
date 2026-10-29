@@ -30,7 +30,9 @@
 //! it. What is checkable here is the pre-guard diagnostic count and the lossless text, and that is
 //! what is checked.
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 use smear::parser::lossless::recover::scan_allowance;
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 use std::time::Instant;
 
 /// One dialect's row in `every_refusal_commits_at_least_one_item`: a label, its document root, and
@@ -53,6 +55,7 @@ use std::time::Instant;
 /// atoms still live: running the ones that *used* to burn is what proves they no longer do. The
 /// burn that remains is exception 1, re-lexing, which belongs to `sync_balanced` rather than to a
 /// token grammar and is therefore the same in both dialects.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 type Cell = (
   &'static str,
   fn(&str) -> (usize, usize),
@@ -67,6 +70,7 @@ type Cell = (
 /// former burn and measures its absence. GraphQL's is `-`; GraphQLx's is `-.5`, whose
 /// missing-integer-part rule routed through `tt_hook_and_then_into_errors` and returned `Err` even
 /// when its suffix check passed.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 type DensityCell = (
   &'static str,
   fn(&str) -> (usize, usize),
@@ -75,6 +79,7 @@ type DensityCell = (
 );
 
 /// A parse reduced to the three facts every test here reads.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 struct Run {
   diagnostics: usize,
   covered: usize,
@@ -84,6 +89,7 @@ struct Run {
   seconds: f64,
 }
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn run(root: fn(&str) -> (usize, usize), src: &str) -> Run {
   scan_allowance::reset();
   let started = Instant::now();
@@ -99,6 +105,7 @@ fn run(root: fn(&str) -> (usize, usize), src: &str) -> Run {
   }
 }
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 macro_rules! roots {
   ($($name:ident => $path:path),+ $(,)?) => {
     $(
@@ -129,6 +136,7 @@ roots! {
 
 /// The `*_with_limits` twin of a root, taking the ceiling `the_with_limits_doors_reach_the_same_guard`
 /// varies.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 macro_rules! limited_roots {
   ($($name:ident => $path:path),+ $(,)?) => {
     $(
@@ -163,6 +171,7 @@ limited_roots! {
 /// nothing is missing from the tree — and under a ceiling it is where the lex stopped. The test
 /// needs both readings of the same document, which is why the door below takes an `Option` rather
 /// than a number.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 struct Budgeted {
   spent: usize,
   committed: usize,
@@ -176,6 +185,7 @@ struct Budgeted {
 /// It reports `Budgeted` rather than `Run` because the quantity under test is the tree's lexeme
 /// count, which no other cell in this file reads, and because the ceiling has to be absent for one
 /// of the two parses it drives.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 macro_rules! budgeted_roots {
   ($($name:ident => $path:path),+ $(,)?) => {
     $(
@@ -218,6 +228,7 @@ budgeted_roots! {
 /// only "run this on whatever dialects are compiled". Empty is impossible in practice and asserted
 /// against by each caller, because a row with no dialect would pass every test below vacuously.
 #[allow(clippy::vec_init_then_push)]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn document_roots() -> Vec<Root> {
   let mut roots: Vec<Root> = Vec::new();
   #[cfg(feature = "graphql")]
@@ -228,6 +239,7 @@ fn document_roots() -> Vec<Root> {
 }
 
 /// A labelled document root: what [`document_roots`] yields.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 type Root = (&'static str, fn(&str) -> (usize, usize));
 
 /// One census shape at one root, doubled twice.
@@ -236,6 +248,7 @@ type Root = (&'static str, fn(&str) -> (usize, usize));
 /// one of these. The gate sits at 2.6, which is where #168's report put it: far enough above 2 to
 /// absorb the constant terms a small document carries, far enough below 4 that a reintroduced
 /// rescan cannot hide under it.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn assert_linear(root_name: &str, root: fn(&str) -> (usize, usize), unit: &str) {
   const N: usize = 2_000;
   let small = run(root, &unit.repeat(N));

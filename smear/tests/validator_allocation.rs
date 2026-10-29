@@ -34,7 +34,10 @@ mod counting;
 
 use std::vec::Vec;
 
-use counting::{allocations, peak_bytes};
+use counting::allocations;
+// `peak_bytes` is read only by the `std`-gated tests below, so a row without `std` has no use for it.
+#[cfg(feature = "std")]
+use counting::peak_bytes;
 
 use smear::{
   diagnostic::{Diagnose, DiagnoseExt},

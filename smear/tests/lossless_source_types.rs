@@ -653,6 +653,11 @@ fn the_concrete_doors_take_what_they_always_took() {
 
   // The deref coercions. Each is one the `&str` signature performs and a generic `&Src` does not.
   assert!(!door::parse_document(&owned).has_errors());
+  #[allow(
+    clippy::needless_borrow,
+    clippy::explicit_auto_deref,
+    reason = "the `&&str` is the case: the signature takes `&str` and coerces it, which is exactly what the lint rewrites away"
+  )]
   assert!(!door::parse_document(&&*owned).has_errors());
   assert!(!door::parse_document(&owned.clone().into_boxed_str()).has_errors());
   assert!(!door::parse_document(&std::borrow::Cow::<str>::Borrowed(DOC)).has_errors());
