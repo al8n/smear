@@ -52,8 +52,9 @@ extern crate alloc as std;
 pub mod repr;
 
 use repr::{
-  DirectiveDef, DirectiveLocations, FieldDef, InputValueDef, NameIndex, PackedType, Range32,
-  Schema, Sym, TypeDef, TypeId,
+  Deprecation, DirectiveDef, DirectiveLocations, DirectiveMeta, EnumValueMeta, FieldDef, FieldMeta,
+  InputValueDef, InputValueMeta, NameIndex, PackedType, Range32, Schema, Sym, Text, TypeDef,
+  TypeId, TypeMeta,
 };
 
 /// The claims, as compile-time assertions.
@@ -69,6 +70,14 @@ const _: () = {
   let _ = send_sync::<FieldDef>;
   let _ = send_sync::<InputValueDef>;
   let _ = send_sync::<DirectiveDef>;
+  // The side tables draft §4's metadata lives in, and the handle into their text arena.
+  let _ = send_sync::<Text>;
+  let _ = send_sync::<Deprecation>;
+  let _ = send_sync::<TypeMeta>;
+  let _ = send_sync::<FieldMeta>;
+  let _ = send_sync::<InputValueMeta>;
+  let _ = send_sync::<EnumValueMeta>;
+  let _ = send_sync::<DirectiveMeta>;
 
   // Every row is a plain integer record, so the tables are `Box<[T]>` of `Copy` values with no
   // interior pointers. `Copy` is the property that says so.
@@ -82,6 +91,30 @@ const _: () = {
   let _ = plain::<InputValueDef>;
   let _ = plain::<DirectiveDef>;
   let _ = plain::<DirectiveLocations>;
+  let _ = plain::<Text>;
+  let _ = plain::<Deprecation>;
+  let _ = plain::<TypeMeta>;
+  let _ = plain::<FieldMeta>;
+  let _ = plain::<InputValueMeta>;
+  let _ = plain::<EnumValueMeta>;
+  let _ = plain::<DirectiveMeta>;
+};
+
+/// The text handle's two states, exercised without an arena to issue one.
+///
+/// Absent is not empty: [`Text::NONE`] is the one handle no arena issues, and the empty string at
+/// offset zero is a string. A `const` evaluation says it on the target, for the reason the wrapper
+/// word's block below gives.
+const _: () = {
+  assert!(Text::NONE.is_none());
+  assert!(Text::new(0, 0).is_some());
+  assert!(Text::new(7, 3).is_some());
+  assert!(!Deprecation::NotDeprecated.is_deprecated());
+  assert!(Deprecation::Deprecated(Text::NONE).is_deprecated());
+  assert!(Deprecation::Deprecated(Text::NONE).reason().is_none());
+  assert!(Deprecation::NotDeprecated.reason().is_none());
+  assert!(FieldMeta::EMPTY.description().is_none());
+  assert!(InputValueMeta::EMPTY.default_value().is_none());
 };
 
 /// The wrapper word, exercised without a schema to build it from.
