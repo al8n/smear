@@ -15,6 +15,7 @@ pub use block::{LitBlockStr, LitComplexBlockStr};
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) use inline::skip_inline_str_simd;
 pub use inline::{LitComplexInlineStr, LitInlineStr};
+pub use value::{decode_string_value, string_value_len, string_value_pieces};
 
 /// Generates one literal carrier: a private `source`, the line facts the lexer measured on *that*
 /// source, a `pub(crate)` constructor, and read-only doors over the rest.
@@ -274,6 +275,7 @@ macro_rules! impl_source_ordering {
 
 mod block;
 mod inline;
+mod value;
 
 #[cfg(test)]
 mod tests;
