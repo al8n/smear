@@ -178,7 +178,10 @@ mod response;
 #[cfg_attr(docsrs, doc(cfg(feature = "materialized-numbers")))]
 pub mod materialized;
 
-#[cfg(test)]
+// `std` as well as `test`: the module drives threads, a counting `System` allocator and
+// `thread_local!` counters, all of which are `std`'s, and `format!`/`String` unqualified besides, so
+// it does not compile as the `no_std` row `--no-default-features --features proto` builds it.
+#[cfg(all(test, feature = "std"))]
 mod tests;
 
 /// What stopped a value from being written.

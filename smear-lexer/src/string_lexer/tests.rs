@@ -16,7 +16,7 @@
 //! and its `src/json/tests.rs` holds these conversions to that writer over a corpus that overlaps
 //! this one — so a drift here has two gates to get past, and neither of them is this file.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, vec::Vec};
 
 use super::{LitBlockStr, LitComplexInlineStr, LitInlineStr, LitStr};
 

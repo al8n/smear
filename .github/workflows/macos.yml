@@ -130,7 +130,11 @@ jobs:
       run: cargo install cargo-hack
     - name: Apply clippy lints
       run: |
-        cargo hack clippy --each-feature
+        # `--tests` makes every row check the member's test code too, built with that row's
+        # features and nothing else; without it a test that names `std` under a `no_std` row is
+        # checked in no row but the full-feature ones. al8n/smear#140. This copy and `ci/hack.sh`
+        # (which `ci.yml` runs) are the same two passes and change together.
+        cargo hack clippy --each-feature --tests
         # Pass 2 — the pairwise isolation cells the crate split used to provide by accident.
         # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its
         # build always contained the parser; a single-crate `--each-feature` never builds `parser`
@@ -147,7 +151,10 @@ jobs:
         # and it does not need to be there — it already skips the `parser,parser` cell on its own.
         # Nine cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
-        cargo hack clippy -p smear --each-feature --features parser \
+        #
+        # `--tests` here for the reason pass 1 gives: these are the cells whose test targets no
+        # other row builds.
+        cargo hack clippy -p smear --each-feature --features parser --tests \
           --exclude-features rowan,lossless-coverage,validator,introspection,proto,default \
           --exclude-no-default-features --exclude-all-features
 

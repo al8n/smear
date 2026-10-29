@@ -580,7 +580,10 @@ where
 //
 // `realloc` counts, and counts as one event. Geometric growth is mostly `realloc`, so an allocator
 // that forwarded it silently would report the defect this instrument exists for as one allocation.
-#[cfg(test)]
+// Every test-only instrument below is `std`-gated as well as `test`-gated: `thread_local!` and
+// `std::alloc::System` are `std`'s, so a `no_std` row (`--no-default-features --features proto`) has
+// no counters, and `json/tests.rs`, which reads all of them, is `std`-gated to match.
+#[cfg(all(test, feature = "std"))]
 thread_local! {
   /// Document bytes the writer has looked at on this thread.
   static VISITED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
@@ -595,14 +598,14 @@ thread_local! {
 /// Compiles to nothing outside this crate's own tests.
 #[inline]
 fn visit(count: usize) {
-  #[cfg(test)]
+  #[cfg(all(test, feature = "std"))]
   VISITED.with(|visited| visited.set(visited.get() + count as u64));
-  #[cfg(not(test))]
+  #[cfg(not(all(test, feature = "std")))]
   let _ = count;
 }
 
 /// Returns how many document bytes the writer has looked at on this thread.
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(super) fn visited() -> u64 {
   VISITED.with(core::cell::Cell::get)
 }
@@ -618,10 +621,10 @@ pub(super) fn visited() -> u64 {
 /// how many times *writing a response* goes to the allocator, and a buffer some other layer grows
 /// on the writer's behalf would be exactly the kind of thing a module-scoped counter would miss.
 /// The gate's fixture writes into a sink that allocates nothing, so what it reads is the writer's.
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 struct Counting;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 // SAFETY: every method forwards to `System` with the layout it was given, unchanged, and returns
 // exactly what `System` returned — or a null pointer, which is the spelling of "the allocator said
 // no" and is what every caller of this trait already has to handle. The tally is a `Cell<u64>` in
@@ -683,13 +686,13 @@ unsafe impl core::alloc::GlobalAlloc for Counting {
 /// inside the window printed `memory allocation of 6144 bytes failed`, could not print its
 /// backtrace, and then hung instead of aborting. So every fixture arms the allocator immediately
 /// before the call under test, disarms immediately after, and asserts afterwards.
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(super) fn refuse_allocations_of_at_least(bytes: usize) {
   REFUSE_AT.with(|refuse| refuse.set(bytes));
 }
 
 /// Puts this thread's allocator back to answering every request.
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(super) fn allow_allocations() {
   REFUSE_AT.with(|refuse| refuse.set(usize::MAX));
 }
@@ -699,25 +702,25 @@ pub(super) fn allow_allocations() {
 /// `try_with` and a default of "allowed" for the reason the tally uses it: this runs inside the
 /// global allocator, so a thread whose local storage is being set up or torn down must get an
 /// answer rather than a recursive initialisation.
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 fn refused(size: usize) -> bool {
   REFUSE_AT
     .try_with(|refuse| size >= refuse.get())
     .unwrap_or(false)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
 
 /// Records one allocating event.
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 fn allocate() {
   let _ = ALLOCATED.try_with(|allocated| allocated.set(allocated.get() + 1));
 }
 
 /// Returns how many allocating events this thread has caused.
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub(super) fn allocations() -> u64 {
   ALLOCATED.with(core::cell::Cell::get)
 }

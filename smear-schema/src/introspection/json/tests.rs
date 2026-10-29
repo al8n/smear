@@ -1,4 +1,7 @@
-use std::{string::String, vec::Vec};
+use std::{
+  string::{String, ToString},
+  vec::Vec,
+};
 
 use super::{MAX_DEPTH, Scanner, Text};
 use crate::introspection::ResponseErrorKind;
@@ -229,9 +232,9 @@ fn a_container_the_grammar_refuses_is_not_json() {
 fn nesting_is_bounded() {
   fn nested(depth: usize) -> String {
     let mut document = String::with_capacity(depth * 2 + 1);
-    document.extend(std::iter::repeat_n('[', depth));
+    document.extend(core::iter::repeat_n('[', depth));
     document.push('1');
-    document.extend(std::iter::repeat_n(']', depth));
+    document.extend(core::iter::repeat_n(']', depth));
     document
   }
 
