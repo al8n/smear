@@ -687,7 +687,7 @@ fn the_i32_width_cannot_produce_an_out_of_range_int() {
 // the value walk: what it writes, and the three doors it is reached through
 // ------------------------------------------------------------------------------------------
 //
-// The unit gates in `smear::json::tests` measure what the value walk COSTS — its native stack, its
+// The unit gates in `smear::json::tests` pin what the value walk COSTS — its native stack, its
 // frames, and what it does when the allocator says no. Two things they cannot check are here
 // instead: that the walk still writes the right bytes, container by container, and that each of
 // this crate's three public doors reaches it. A response leaf, a §7.1.7 `extensions` entry on an

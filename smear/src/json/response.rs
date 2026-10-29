@@ -546,8 +546,9 @@ where
 // ---------------------------------------------------------------------------------------------
 
 // How many document bytes the writer has looked at, and how many times it went to the allocator.
-// Both counted only when this crate's own tests are built. The third axis — native stack bytes —
-// needs no counter here: `super::tests` reads it as a difference of two addresses.
+// Both counted only when this crate's own tests are built. The third axis — the native stack —
+// needs no counter here: `super::tests` runs the walk on a stack too small for a recursion, and the
+// process either survives it or aborts.
 //
 // ── WHY BYTES ─────────────────────────────────────────────────────────────────────────────────
 //
@@ -571,7 +572,7 @@ where
 //   | #162 R3 | slot traversals    | reallocation and copying (`graphql-proto`)        |
 //   | #162 R4 | those two, jointly | a THIRD buffer, one structure over                |
 //
-// The native-stack probe is the sharpest case. It was written for this very walk, it passes on a
+// The native-stack gate is the sharpest case. It was written for this very walk, it passes on a
 // stack that reallocates its way to 64 MiB, and it would go on passing: moving a cost off the
 // native stack is exactly what makes an allocation counter the instrument that can see what
 // happened to it. A gate needs every axis its subject can grow along, and the answer to "is two
