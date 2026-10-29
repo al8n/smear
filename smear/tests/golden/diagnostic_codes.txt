@@ -120,4 +120,5 @@ SchemaErrorKind::UndefinedType = smear::schema::undefined-type
 SchemaErrorKind::UndefinedUnionMember = smear::schema::undefined-union-member
 SchemaErrorKind::UnexpectedRequiredArgument = smear::schema::unexpected-required-argument
 SchemaErrorKind::UnionMemberNotObject = smear::schema::union-member-not-object
+SchemaErrorKind::UnreadableText = smear::schema::unreadable-text
 SchemaErrorKind::UnsupportedDirectiveLocation = smear::schema::unsupported-directive-location

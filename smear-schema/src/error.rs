@@ -88,6 +88,20 @@ pub enum SchemaErrorKind {
   /// Unreachable from parsed input — the lexer's identifier rule is the same grammar — and
   /// checked anyway, because the AST types are public and a caller may assemble one by hand.
   InvalidName,
+  /// A string the schema keeps — a description, a deprecation reason, a `specifiedByURL`, or a
+  /// string inside a default value — is not UTF-8.
+  ///
+  /// Draft §4 returns all four as `String`, and the schema keeps them in a text arena that is a
+  /// `str` so that every reader of it is infallible. The byte lexer passes a literal's content
+  /// through unread, so a document parsed from a `[u8]` source is the one that can carry such a
+  /// string; one parsed from a `&str` cannot. Refused at admission rather than stored lossily, as
+  /// [`InvalidName`](Self::InvalidName) refuses a name: a replacement character is a different
+  /// string, not a degraded reading of this one.
+  ///
+  /// The subject is the element the string belongs to — `schema` for the schema's own
+  /// description — and the span is the string literal's. A string the schema does not keep, such
+  /// as any other directive argument, is never decoded and never reported.
+  UnreadableText,
   /// The document interns more distinct names than the index can address.
   ///
   /// A capacity limit of this implementation ([`MAX_SYMBOLS`](super::MAX_SYMBOLS)), not a
@@ -104,7 +118,10 @@ pub enum SchemaErrorKind {
   /// wide margin.
   ///
   /// Raised for the literal arena as well as the name arena, which is why the kind is not spelled
-  /// in terms of names: one interner type holds both, and a literal's spelling is not a name.
+  /// in terms of names: one interner type holds both, and a literal's spelling is not a name. And
+  /// for the text arena — descriptions, deprecation reasons, `specifiedByURL`s and printed defaults
+  /// — which is addressed by the same width of offset and refused at the same bar for the same
+  /// reason, though it interns nothing.
   ///
   /// **No document this workspace parses reaches it.** A parsed document's leaves hold disjoint
   /// token spans, so the arena it fills is at most its own source. What reaches it is a tree a
@@ -378,6 +395,7 @@ impl SchemaErrorKind {
     Self::TypeReferenceTooDeep,
     Self::ConstantValueTooDeep,
     Self::InvalidName,
+    Self::UnreadableText,
     Self::TooManyNames,
     Self::TooManyInternedBytes,
     Self::PossibleTypeTableTooLarge,
@@ -455,6 +473,7 @@ impl SchemaErrorKind {
       Self::TypeReferenceTooDeep => "type reference nests too deeply",
       Self::ConstantValueTooDeep => "constant value nests too deeply",
       Self::InvalidName => "not a GraphQL name",
+      Self::UnreadableText => "text is not UTF-8",
       Self::TooManyNames => "too many distinct names",
       Self::TooManyInternedBytes => "too many interned bytes",
       Self::PossibleTypeTableTooLarge => "possible-object table too large",
@@ -560,6 +579,7 @@ impl SchemaErrorKind {
       Self::TypeReferenceTooDeep => Code::new("smear::schema::type-reference-too-deep"),
       Self::ConstantValueTooDeep => Code::new("smear::schema::constant-value-too-deep"),
       Self::InvalidName => Code::new("smear::schema::invalid-name"),
+      Self::UnreadableText => Code::new("smear::schema::unreadable-text"),
       Self::TooManyNames => Code::new("smear::schema::too-many-names"),
       Self::TooManyInternedBytes => Code::new("smear::schema::too-many-interned-bytes"),
       Self::PossibleTypeTableTooLarge => Code::new("smear::schema::possible-type-table-too-large"),
@@ -677,6 +697,7 @@ impl SchemaErrorKind {
       | Self::TypeReferenceTooDeep
       | Self::ConstantValueTooDeep
       | Self::InvalidName
+      | Self::UnreadableText
       | Self::TooManyNames
       | Self::TooManyInternedBytes
       | Self::PossibleTypeTableTooLarge
@@ -781,6 +802,9 @@ impl SchemaErrorKind {
         "reducing a literal costs storage per level of nesting, so this implementation bounds it; no document any smear parser produces comes near the ceiling.",
       ),
       Self::InvalidName => Some("a GraphQL name is spelled `/[_A-Za-z][_0-9A-Za-z]*/`."),
+      Self::UnreadableText => Some(
+        "introspection returns this text as a `String`, which is UTF-8; re-encode the document, or the literal, as UTF-8.",
+      ),
       Self::TooManyInternedBytes => Some(
         "a spelling is addressed by 32-bit byte offsets into one arena, so the arena is bounded; no document reaches the bound, and an assembled AST that does is refused rather than truncated.",
       ),
@@ -949,6 +973,7 @@ impl SchemaErrorKind {
       | Self::TypeReferenceTooDeep
       | Self::ConstantValueTooDeep
       | Self::InvalidName
+      | Self::UnreadableText
       | Self::TooManyNames
       | Self::TooManyInternedBytes
       | Self::PossibleTypeTableTooLarge

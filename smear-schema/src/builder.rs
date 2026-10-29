@@ -27,32 +27,44 @@ use std::{
 
 use tokora::{Parse as _, Parser, SimpleSpan, span::AsSpan};
 
-use smear_parser::graphql::{
-  GraphQL,
-  ast::{
-    ConstDirectives, ConstInputValue, ConstObjectField, DirectiveDefinition, EnumTypeDefinition,
-    EnumValuesDefinition, FieldsDefinition, ImplementInterfaces, InputFieldsDefinition,
-    InputObjectTypeDefinition, InputValueDefinition, InterfaceTypeDefinition, Location, Name,
-    ObjectTypeDefinition, OperationType, ScalarTypeDefinition, SchemaDefinition, Type,
-    TypeDefinition, TypeExtension, TypeSystemDefinition, TypeSystemDefinitionOrExtension,
-    TypeSystemDocument, TypeSystemExtension, UnionMemberTypes, UnionTypeDefinition,
+use smear_parser::{
+  graphql::{
+    GraphQL,
+    ast::{
+      ConstDirective, ConstDirectives, ConstInputValue, ConstObjectField, DirectiveDefinition,
+      EnumTypeDefinition, EnumValuesDefinition, FieldsDefinition, ImplementInterfaces,
+      InputFieldsDefinition, InputObjectTypeDefinition, InputValueDefinition,
+      InterfaceTypeDefinition, Location, Name, ObjectTypeDefinition, OperationType,
+      ScalarTypeDefinition, SchemaDefinition, StringValue, Type, TypeDefinition, TypeExtension,
+      TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
+      TypeSystemExtension, UnionMemberTypes, UnionTypeDefinition,
+    },
+    error::GraphqlErrors,
+    syntactic::{GraphqlLexer, type_system_document},
   },
-  error::GraphqlErrors,
-  syntactic::{GraphqlLexer, type_system_document},
+  lexer::{error::StringValueError, string_value_len, string_value_pieces},
 };
 
-use self::declared::{Args, ArgsMut, Declared};
+use self::{
+  declared::{Args, ArgsMut, Declared},
+  print::{Measure, Unprinted},
+};
 use super::{
   builtin,
   error::{SchemaError, SchemaErrorKind, SchemaErrors, directive_coordinate, owner_path},
   literal::{BuiltInScalar, LiteralShape, fits_i32, is_finite},
   repr::{
-    DefaultKind, DirectiveDef, DirectiveLocation, DirectiveLocations, FieldDef, InputValueDef,
-    MAX_DIRECTIVE_ARGUMENTS, MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, MAX_WRAPPERS, NameIndex, PackedType,
-    Range32, RootOperation, Schema, Sym, TypeDef, TypeFlags, TypeId, TypeKind, is_name,
-    is_reserved,
+    DefaultKind, Deprecation, DirectiveDef, DirectiveLocation, DirectiveLocations, DirectiveMeta,
+    EnumValueMeta, FieldDef, FieldMeta, InputValueDef, InputValueMeta, MAX_DIRECTIVE_ARGUMENTS,
+    MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, MAX_WRAPPERS, NameIndex, PackedType, Range32, RootOperation,
+    Schema, Sym, Text, TypeDef, TypeFlags, TypeId, TypeKind, TypeMeta, is_name, is_reserved,
   },
 };
+
+// The canonical text of a default value, and the string escaping the introspection door shares.
+// No outer doc comment, for the reason `lib.rs` records on `diagnostic`: the file's own header is
+// the one fragment, so its links resolve where it is written.
+pub(crate) mod print;
 
 /// The placeholder a type reference carries until its base name is resolved.
 const UNRESOLVED: TypeId = TypeId::new(u32::MAX);
@@ -66,6 +78,16 @@ const DEPRECATED: &str = "deprecated";
 
 /// The specified `@oneOf` directive. Matched by name, for the reason [`DEPRECATED`] is.
 const ONE_OF: &str = "oneOf";
+
+/// The specified `@specifiedBy` directive. Matched by name, for the reason [`DEPRECATED`] is.
+const SPECIFIED_BY: &str = "specifiedBy";
+
+/// The reason a bare `@deprecated` carries: the default of the specified definition's `reason`.
+///
+/// Read from the specification's definition whatever the document redefined, as graphql-js reads
+/// its own constant of the same text — a document that spells `@deprecated` out with another
+/// default still means the specification's directive, for the reason [`DEPRECATED`] gives.
+const DEFAULT_DEPRECATION_REASON: &str = "No longer supported";
 
 // ---------------------------------------------------------------------------------------------
 // interning
@@ -284,6 +306,156 @@ impl Interner {
     // instead of returning a schema addressed by the low bits of it.
     u32::try_from(self.spans.len()).unwrap_or(u32::MAX)
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// the text arena
+// ---------------------------------------------------------------------------------------------
+
+/// The largest text arena a build fills, in bytes.
+///
+/// A [`Text`] addresses its string by a `u32` offset and length, and [`Text::NONE`] is the offset
+/// `u32::MAX`, so the arena stops one byte short of it and no string it issues can start at the
+/// sentinel. The interval is [`MAX_ARENA_BYTES`]'s — a parsed document's strings are disjoint tokens
+/// of a source this workspace addresses with `u32` spans, so only an assembled tree comes near it —
+/// and so is the refusal, [`SchemaErrorKind::TooManyInternedBytes`].
+const MAX_TEXT_BYTES: u32 = u32::MAX - 1;
+
+/// The growable half of the schema's text arena: every string the finished [`Schema`] keeps.
+///
+/// Descriptions, deprecation reasons, `specifiedByURL`s and the canonical text of each default, in
+/// the order the documents and then the built-ins are read. The finished schema takes the whole
+/// `String` as its arena, so every byte here is a byte draft §4 returns; nothing else is written,
+/// except for a definition that is then dropped as a duplicate, which refuses the build anyway.
+///
+/// # What bounds it
+///
+/// A parsed document's strings are disjoint tokens and none decodes to more than it spells; a
+/// printed default adds a space per separator and an escape per control character, so a parsed
+/// document's arena is a small multiple of its source at worst. An assembled tree has no such
+/// bound — a cloned leaf costs its bytes again in every default it sits in, the shape [`RawShape`]
+/// measures for the literal arena — and [`MAX_TEXT_BYTES`] is what bounds that, refusing rather
+/// than wrapping, as [`Interner`] does.
+#[derive(Default)]
+struct TextArena {
+  text: String,
+  /// Set when a string would have carried the arena past [`MAX_TEXT_BYTES`], and read by
+  /// [`SchemaBuilder::finish`] as the build's refusal.
+  refused: bool,
+  /// [`DEFAULT_DEPRECATION_REASON`], written the first time a bare `@deprecated` asks for it and
+  /// shared by every one after.
+  default_reason: Text,
+}
+
+impl core::fmt::Debug for TextArena {
+  /// The arena's shape, never its contents, for the reason [`Interner`]'s `Debug` gives.
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("TextArena")
+      .field("bytes", &self.text.len())
+      .field("refused", &self.refused)
+      .finish()
+  }
+}
+
+impl TextArena {
+  /// Makes room for `len` more bytes and answers where they start and how long they are, or
+  /// refuses at [`MAX_TEXT_BYTES`].
+  ///
+  /// Asked before anything is written, so a refusal leaves the arena as it was, and the room is
+  /// reserved from the length about to be written — one growth at most per string, and none when
+  /// [`SchemaBuilder::inject`] has already reserved the built-ins' share.
+  fn admit(&mut self, len: usize) -> Option<(u32, u32)> {
+    self.admit_within(len, MAX_TEXT_BYTES)
+  }
+
+  /// [`TextArena::admit`] with the ceiling supplied, for the reason [`Interner::intern_within`]
+  /// takes its two: a test can stand at a ceiling it can afford, and this is the whole mechanism.
+  fn admit_within(&mut self, len: usize, max_bytes: u32) -> Option<(u32, u32)> {
+    let start = self.text.len();
+    let bounds = match (
+      u32::try_from(start),
+      start.checked_add(len).map(u32::try_from),
+    ) {
+      (Ok(start), Some(Ok(end))) if !self.refused && end <= max_bytes => Some((start, end - start)),
+      _ => None,
+    };
+    match bounds {
+      Some(_) => self.text.reserve(len),
+      None => self.refused = true,
+    }
+    bounds
+  }
+
+  /// Appends the value a `StringValue` spelling denotes.
+  ///
+  /// [`Text::NONE`] when the arena is full, which [`SchemaBuilder::finish`] reports for the build.
+  fn string(&mut self, spelling: &[u8]) -> Result<Text, StringValueError> {
+    let len = string_value_len(spelling)?;
+    let Some((start, len)) = self.admit(len) else {
+      return Ok(Text::NONE);
+    };
+    // Cannot refuse: the sizing walk above read the same spelling and accepted it.
+    string_value_pieces(spelling, |piece| self.text.push_str(piece))?;
+    Ok(Text::new(start, len))
+  }
+
+  /// Appends a constant value's canonical text, measured before it is written.
+  ///
+  /// [`Text::NONE`] when the arena is full, as [`TextArena::string`].
+  fn print<S>(&mut self, value: &ConstInputValue<S>) -> Result<Text, Unprinted>
+  where
+    S: AsRef<[u8]>,
+  {
+    let mut measure = Measure::default();
+    print::canonical(value, &mut measure)?;
+    let Some((start, len)) = self.admit(measure.0) else {
+      return Ok(Text::NONE);
+    };
+    // Cannot refuse: the measure above printed the same literal.
+    print::canonical(value, &mut self.text)?;
+    Ok(Text::new(start, len))
+  }
+
+  /// [`DEFAULT_DEPRECATION_REASON`], written once per build.
+  fn default_reason(&mut self) -> Text {
+    if self.default_reason.is_none()
+      && let Some((start, len)) = self.admit(DEFAULT_DEPRECATION_REASON.len())
+    {
+      self.text.push_str(DEFAULT_DEPRECATION_REASON);
+      self.default_reason = Text::new(start, len);
+    }
+    self.default_reason
+  }
+}
+
+/// The first directive a written list applies under `name`.
+///
+/// By name, for the reason [`DEPRECATED`] is: the specified directives keep their meaning when a
+/// document spells their definitions out.
+fn applied<'a, S>(
+  directives: Option<&'a ConstDirectives<S>>,
+  name: &str,
+) -> Option<&'a ConstDirective<S>>
+where
+  S: AsRef<[u8]>,
+{
+  directives?
+    .directives()
+    .iter()
+    .find(|directive| directive.name().source().as_ref() == name.as_bytes())
+}
+
+/// The value one usage writes for the argument `name`.
+fn argument<'a, S>(directive: &'a ConstDirective<S>, name: &[u8]) -> Option<&'a ConstInputValue<S>>
+where
+  S: AsRef<[u8]>,
+{
+  directive
+    .arguments()?
+    .arguments()
+    .iter()
+    .find(|argument| argument.name().source().as_ref() == name)
+    .map(|argument| argument.value())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1481,8 +1653,17 @@ struct RawInput {
   /// 5.8.5 never read a default's *value* — but two §3 rules do: 3.6.1(2.4.5) type-checks it, and
   /// 3.10.1(4) walks the graph these literals induce. Both run inside the build, so the literal is
   /// retained here and dropped by [`SchemaBuilder::flatten`] rather than reaching the schema.
+  ///
+  /// What does reach it is [`RawInput::default_text`], the literal printed — draft §4's
+  /// `defaultValue`, which no validation rule reads either.
   default_value: Option<RawValue>,
   directives: Vec<RawDirectiveUse>,
+  /// The description, decoded into the text arena.
+  description: Text,
+  /// The `@deprecated` written on the input value, its reason decoded into the text arena.
+  deprecation: Deprecation,
+  /// The default's canonical text, printed into the text arena where the literal was read.
+  default_text: Text,
 }
 
 impl RawInput {
@@ -1668,12 +1849,21 @@ struct RawField {
   /// the declaration and not of the pair: an extension appends new fields and never edits one that
   /// is already here, so what is decided at ingest is still true at conformance. al8n/smear#198.
   deprecated: bool,
+  /// The description, decoded into the text arena.
+  description: Text,
+  /// The `@deprecated` written on the field, its reason decoded into the text arena — what draft
+  /// §4 returns, where [`RawField::deprecated`] is what `IsValidImplementation` asks.
+  deprecation: Deprecation,
 }
 
 #[derive(Debug)]
 struct RawEnumValue {
   name: Located,
   directives: Vec<RawDirectiveUse>,
+  /// The description, decoded into the text arena.
+  description: Text,
+  /// The `@deprecated` written on the value, its reason decoded into the text arena.
+  deprecation: Deprecation,
 }
 
 #[derive(Debug)]
@@ -1718,6 +1908,11 @@ struct RawType {
   /// exponent over the top step of 1 k–16 k and **1.470 s** at 16 k, on a schema `Schema::build`
   /// **accepts**. al8n/smear#198.
   required_input_fields: Vec<u32>,
+  /// The description, decoded into the text arena.
+  description: Text,
+  /// A scalar's `@specifiedBy(url:)`, decoded into the text arena — from the definition or from an
+  /// `extend scalar`, which is the one place a type's own text can be added after the definition.
+  specified_by: Text,
 }
 
 impl RawType {
@@ -1736,6 +1931,8 @@ impl RawType {
       closure: Vec::new(),
       sorted_members: Vec::new(),
       required_input_fields: Vec::new(),
+      description: Text::NONE,
+      specified_by: Text::NONE,
     }
   }
 }
@@ -1747,6 +1944,8 @@ struct RawDirectiveDef {
   locations: DirectiveLocations,
   repeatable: bool,
   built_in: bool,
+  /// The description, decoded into the text arena.
+  description: Text,
 }
 
 /// A type extension, converted to owned form and applied once every document has been read.
@@ -1762,6 +1961,8 @@ struct RawExtension {
   directives: Vec<RawDirectiveUse>,
   /// Root operations, for a `extend schema` rather than a type extension.
   roots: Vec<(RootOperation, Located)>,
+  /// An `extend scalar`'s `@specifiedBy(url:)`, decoded into the text arena.
+  specified_by: Text,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1779,16 +1980,106 @@ struct BuiltIns {
   introspection: TypeSystemDocument<&'static str>,
   scalars: TypeSystemDocument<&'static str>,
   directives: TypeSystemDocument<&'static str>,
+  /// The bytes the three add to the text arena when every one of their definitions is injected.
+  ///
+  /// [`SchemaBuilder::inject`] reserves this before it injects anything, so the built-ins'
+  /// descriptions and defaults — a constant few kilobytes every build decodes again into a schema
+  /// of its own — cost the arena one growth rather than one per doubling. Derived from the
+  /// documents where they are parsed, so it is computed once per process wherever the parse is
+  /// cached and cannot drift from what injection writes.
+  text_bytes: usize,
 }
 
 impl BuiltIns {
   fn parse() -> Self {
+    let introspection = SchemaBuilder::parse_builtin(builtin::INTROSPECTION_SDL);
+    let scalars = SchemaBuilder::parse_builtin(builtin::BUILT_IN_SCALARS_SDL);
+    let directives = SchemaBuilder::parse_builtin(builtin::BUILT_IN_DIRECTIVES_SDL);
+    let text_bytes = [&introspection, &scalars, &directives]
+      .into_iter()
+      .map(built_in_text_bytes)
+      .sum();
     Self {
-      introspection: SchemaBuilder::parse_builtin(builtin::INTROSPECTION_SDL),
-      scalars: SchemaBuilder::parse_builtin(builtin::BUILT_IN_SCALARS_SDL),
-      directives: SchemaBuilder::parse_builtin(builtin::BUILT_IN_DIRECTIVES_SDL),
+      introspection,
+      scalars,
+      directives,
+      text_bytes,
     }
   }
+}
+
+/// The bytes one built-in document adds to the text arena: every description it carries and every
+/// default it prints, each as ingest writes it.
+///
+/// The built-in SDL applies no directive, so it writes no deprecation reason and no
+/// `specifiedByURL`; `the_built_in_text_reservation_is_exact` is what notices if that stops being
+/// true.
+fn built_in_text_bytes(document: &TypeSystemDocument<&'static str>) -> usize {
+  fn described(description: Option<&StringValue<&'static str>>) -> usize {
+    description.map_or(0, |description| {
+      string_value_len(description.source().as_bytes()).unwrap_or(0)
+    })
+  }
+  fn inputs(values: &[InputValueDefinition<&'static str>]) -> usize {
+    values
+      .iter()
+      .map(|value| {
+        let printed = value.default_value().map_or(0, |default| {
+          let mut measure = Measure::default();
+          print::canonical(default.value(), &mut measure).map_or(0, |()| measure.0)
+        });
+        described(value.description()) + printed
+      })
+      .sum::<usize>()
+  }
+  fn fields(fields: Option<&FieldsDefinition<&'static str>>) -> usize {
+    fields.map_or(0, |fields| {
+      fields
+        .field_definitions()
+        .iter()
+        .map(|field| {
+          let args = field
+            .arguments_definition()
+            .map_or(0, |arguments| inputs(arguments.input_value_definitions()));
+          described(field.description()) + args
+        })
+        .sum::<usize>()
+    })
+  }
+
+  document
+    .definitions()
+    .iter()
+    .map(|entry| {
+      let TypeSystemDefinitionOrExtension::Definition(definition) = entry else {
+        return 0;
+      };
+      let members = match definition.node() {
+        TypeSystemDefinition::Type(TypeDefinition::Object(def)) => fields(def.fields_definition()),
+        TypeSystemDefinition::Type(TypeDefinition::Interface(def)) => {
+          fields(def.fields_definition())
+        }
+        TypeSystemDefinition::Type(TypeDefinition::Enum(def)) => {
+          def.enum_values_definition().map_or(0, |values| {
+            values
+              .enum_value_definitions()
+              .iter()
+              .map(|value| described(value.description()))
+              .sum::<usize>()
+          })
+        }
+        TypeSystemDefinition::Type(TypeDefinition::InputObject(def)) => def
+          .fields_definition()
+          .map_or(0, |fields| inputs(fields.input_value_definitions())),
+        TypeSystemDefinition::Directive(def) => def
+          .arguments_definition()
+          .map_or(0, |arguments| inputs(arguments.input_value_definitions())),
+        TypeSystemDefinition::Type(TypeDefinition::Scalar(_) | TypeDefinition::Union(_))
+        | TypeSystemDefinition::Schema(_) => 0,
+      };
+      described(definition.description()) + members
+    })
+    .sum()
 }
 
 /// What lets the parsed documents live in a `static`: a shared reference to one crosses threads.
@@ -2126,6 +2417,10 @@ pub struct SchemaBuilder {
   /// reads off the result is the same sentence either way: something the builder had to say is
   /// not here.
   truncated: bool,
+  /// The strings the finished schema keeps. See [`TextArena`].
+  texts: TextArena,
+  /// The `schema` definition's description, decoded into [`SchemaBuilder::texts`].
+  schema_description: Text,
 }
 
 impl SchemaBuilder {
@@ -2147,7 +2442,7 @@ impl SchemaBuilder {
     for entry in doc.definitions() {
       match entry {
         TypeSystemDefinitionOrExtension::Definition(described) => {
-          self.definition(described.node(), false);
+          self.definition(described.node(), described.description(), false);
         }
         TypeSystemDefinitionOrExtension::Extension(extension) => {
           self.extension(extension);
@@ -2210,13 +2505,15 @@ impl SchemaBuilder {
   /// arena is full, not the spelling that found it full, and the next spelling of any length would
   /// have been refused just the same.
   fn arena_refusal(&self) -> Option<SchemaErrors> {
-    (self.interner.refused.is_some() || self.literals.refused.is_some()).then(|| {
-      SchemaErrors::new(vec![SchemaError::new(
-        SchemaErrorKind::TooManyInternedBytes,
-        "schema",
-        SimpleSpan::default(),
-      )])
-    })
+    (self.interner.refused.is_some() || self.literals.refused.is_some() || self.texts.refused).then(
+      || {
+        SchemaErrors::new(vec![SchemaError::new(
+          SchemaErrorKind::TooManyInternedBytes,
+          "schema",
+          SimpleSpan::default(),
+        )])
+      },
+    )
   }
 
   // -- error helpers --------------------------------------------------------------------------
@@ -2309,24 +2606,130 @@ impl SchemaBuilder {
     render_owner(&self.interner, at)
   }
 
-  // -- ingest ---------------------------------------------------------------------------------
+  // -- the text arena -------------------------------------------------------------------------
 
-  fn definition<S>(&mut self, definition: &TypeSystemDefinition<S>, built_in: bool)
+  /// Decodes a description into the text arena, or answers [`Text::NONE`] for none.
+  fn describe<S>(&mut self, description: Option<&StringValue<S>>, subject: Head) -> Text
   where
     S: AsRef<[u8]>,
   {
-    match definition {
-      TypeSystemDefinition::Type(ty) => self.type_definition(ty, built_in),
-      TypeSystemDefinition::Directive(directive) => self.directive_definition(directive, built_in),
-      TypeSystemDefinition::Schema(schema) => self.schema_definition(schema),
+    match description {
+      Some(description) => self.keep(description, subject),
+      None => Text::NONE,
     }
   }
 
-  fn type_definition<S>(&mut self, definition: &TypeDefinition<S>, built_in: bool)
+  /// Decodes one string the schema keeps into the text arena, refusing one it cannot read.
+  ///
+  /// A string the schema does not keep — any other directive argument — is never decoded at all:
+  /// [`RawShape::String`] is a shape, and its bytes are dropped where the literal is read.
+  fn keep<S>(&mut self, value: &StringValue<S>, subject: Head) -> Text
   where
     S: AsRef<[u8]>,
   {
-    let raw = match definition {
+    match self.texts.string(value.source().as_ref()) {
+      Ok(text) => text,
+      Err(_) => {
+        self.unreadable(subject, *value.span());
+        Text::NONE
+      }
+    }
+  }
+
+  /// Prints a default's canonical text into the text arena, refusing one with a string it cannot
+  /// read.
+  fn default_text<S>(&mut self, value: &ConstInputValue<S>, subject: Sym) -> Text
+  where
+    S: AsRef<[u8]>,
+  {
+    match self.texts.print(value) {
+      Ok(text) => text,
+      // `const_value` refused this literal for its depth a moment ago, and one defect reports once.
+      Err(Unprinted::TooDeep) => Text::NONE,
+      Err(Unprinted::Unreadable(span)) => {
+        self.unreadable(Head::Named(subject), span);
+        Text::NONE
+      }
+    }
+  }
+
+  /// Reports text the schema would keep and cannot, as [`SchemaErrorKind::UnreadableText`].
+  ///
+  /// Refused rather than stored lossily, as [`SchemaErrorKind::InvalidName`] refuses a name: a
+  /// replacement character in a description is a different description, and the arena is a `str`
+  /// so that every reader of it can be infallible.
+  fn unreadable(&mut self, subject: Head, span: SimpleSpan) {
+    let subject = match subject {
+      Head::Schema => String::from("schema"),
+      Head::Named(sym) => self.text(sym).to_owned(),
+    };
+    self.errors.push(
+      SchemaError::new(SchemaErrorKind::UnreadableText, &subject, span).in_document(self.document),
+    );
+  }
+
+  /// Reads the `@deprecated` applied in a written list, its reason decoded into the text arena.
+  ///
+  /// Draft §4 has three answers and so does this: no `@deprecated`; a reason, which is
+  /// [`DEFAULT_DEPRECATION_REASON`] for a bare one; and `reason: null`, which `isDeprecated: true`
+  /// reports beside a `null` reason — where graphql-js reads a `null` reason as not deprecated at
+  /// all. A reason of any other shape is `InvalidDirectiveArgumentValue`'s to report.
+  fn deprecation<S>(&mut self, directives: Option<&ConstDirectives<S>>, subject: Sym) -> Deprecation
+  where
+    S: AsRef<[u8]>,
+  {
+    let Some(directive) = applied(directives, DEPRECATED) else {
+      return Deprecation::NotDeprecated;
+    };
+    Deprecation::Deprecated(match argument(directive, b"reason") {
+      None => self.texts.default_reason(),
+      Some(ConstInputValue::String(reason)) => self.keep(reason, Head::Named(subject)),
+      Some(_) => Text::NONE,
+    })
+  }
+
+  /// Reads the `url` of the `@specifiedBy` applied in a written list, decoded into the text arena.
+  ///
+  /// [`Text::NONE`] when there is none, or when its `url` is not a string, which
+  /// `MissingRequiredDirectiveArgument` and `InvalidDirectiveArgumentValue` report.
+  fn specified_by<S>(&mut self, directives: Option<&ConstDirectives<S>>, subject: Sym) -> Text
+  where
+    S: AsRef<[u8]>,
+  {
+    match applied(directives, SPECIFIED_BY).and_then(|directive| argument(directive, b"url")) {
+      Some(ConstInputValue::String(url)) => self.keep(url, Head::Named(subject)),
+      _ => Text::NONE,
+    }
+  }
+
+  // -- ingest ---------------------------------------------------------------------------------
+
+  fn definition<S>(
+    &mut self,
+    definition: &TypeSystemDefinition<S>,
+    description: Option<&StringValue<S>>,
+    built_in: bool,
+  ) where
+    S: AsRef<[u8]>,
+  {
+    match definition {
+      TypeSystemDefinition::Type(ty) => self.type_definition(ty, description, built_in),
+      TypeSystemDefinition::Directive(directive) => {
+        self.directive_definition(directive, description, built_in)
+      }
+      TypeSystemDefinition::Schema(schema) => self.schema_definition(schema, description),
+    }
+  }
+
+  fn type_definition<S>(
+    &mut self,
+    definition: &TypeDefinition<S>,
+    description: Option<&StringValue<S>>,
+    built_in: bool,
+  ) where
+    S: AsRef<[u8]>,
+  {
+    let mut raw = match definition {
       TypeDefinition::Scalar(def) => self.scalar(def, built_in),
       TypeDefinition::Object(def) => self.object(def, built_in),
       TypeDefinition::Interface(def) => self.interface(def, built_in),
@@ -2334,6 +2737,7 @@ impl SchemaBuilder {
       TypeDefinition::Enum(def) => self.enumeration(def, built_in),
       TypeDefinition::InputObject(def) => self.input_object(def, built_in),
     };
+    raw.description = self.describe(description, Head::Named(raw.name.sym));
     self.record_type(raw);
   }
 
@@ -2387,6 +2791,7 @@ impl SchemaBuilder {
     let name = self.located(def.name());
     let mut raw = RawType::new(name, TypeKind::Scalar, built_in);
     raw.directives = self.directive_uses(def.directives(), DirectiveLocation::Scalar);
+    raw.specified_by = self.specified_by(def.directives(), name.sym);
     raw
   }
 
@@ -2447,11 +2852,16 @@ impl SchemaBuilder {
     raw
   }
 
-  fn directive_definition<S>(&mut self, def: &DirectiveDefinition<S>, built_in: bool)
-  where
+  fn directive_definition<S>(
+    &mut self,
+    def: &DirectiveDefinition<S>,
+    description: Option<&StringValue<S>>,
+    built_in: bool,
+  ) where
     S: AsRef<[u8]>,
   {
     let name = self.located(def.name());
+    let description = self.describe(description, Head::Named(name.sym));
     let args = match def.arguments_definition() {
       Some(arguments) => self.input_values(
         arguments.input_value_definitions(),
@@ -2487,11 +2897,15 @@ impl SchemaBuilder {
       locations,
       repeatable,
       built_in,
+      description,
     });
   }
 
-  fn schema_definition<S>(&mut self, def: &SchemaDefinition<S>)
-  where
+  fn schema_definition<S>(
+    &mut self,
+    def: &SchemaDefinition<S>,
+    description: Option<&StringValue<S>>,
+  ) where
     S: AsRef<[u8]>,
   {
     let span = *def.span();
@@ -2504,6 +2918,7 @@ impl SchemaBuilder {
       return;
     }
     self.schema_definition = Some(span);
+    self.schema_description = self.describe(description, Head::Schema);
     let directives = self.directive_uses(def.directives(), DirectiveLocation::Schema);
     self.schema_directives.extend(directives);
     for root in def
@@ -2907,6 +3322,7 @@ impl SchemaBuilder {
       .iter()
       .map(|field| {
         let name = self.located(field.name());
+        let description = self.describe(field.description(), Head::Named(name.sym));
         let ty = self.type_ref(field.ty());
         let args = match field.arguments_definition() {
           Some(arguments) => self.input_values(
@@ -2918,12 +3334,15 @@ impl SchemaBuilder {
         let directives =
           self.directive_uses(field.directives(), DirectiveLocation::FieldDefinition);
         let deprecated = is_deprecated(&self.interner, &directives);
+        let deprecation = self.deprecation(field.directives(), name.sym);
         RawField {
           name,
           ty,
           args: args.into(),
           directives,
           deprecated,
+          description,
+          deprecation,
         }
       })
       .collect()
@@ -2959,22 +3378,31 @@ impl SchemaBuilder {
       .iter()
       .map(|value| {
         let name = self.located(value.name());
+        let description = self.describe(value.description(), Head::Named(name.sym));
         let ty = self.type_ref(value.ty());
         let default_value = value
           .default_value()
           .map(|default| self.const_value(value.name(), default.value()));
+        let default_text = match value.default_value() {
+          Some(default) => self.default_text(default.value(), name.sym),
+          None => Text::NONE,
+        };
         let default = match &default_value {
           None => DefaultKind::Absent,
           Some(value) if matches!(value.shape, RawShape::Null) => DefaultKind::Null,
           Some(_) => DefaultKind::NonNull,
         };
         let directives = self.directive_uses(value.directives(), location);
+        let deprecation = self.deprecation(value.directives(), name.sym);
         RawInput {
           name,
           ty,
           default,
           default_value,
           directives,
+          description,
+          deprecation,
+          default_text,
         }
       })
       .collect()
@@ -2992,8 +3420,15 @@ impl SchemaBuilder {
       .iter()
       .map(|value| {
         let name = self.located(value.value());
+        let description = self.describe(value.description(), Head::Named(name.sym));
         let directives = self.directive_uses(value.directives(), DirectiveLocation::EnumValue);
-        RawEnumValue { name, directives }
+        let deprecation = self.deprecation(value.directives(), name.sym);
+        RawEnumValue {
+          name,
+          directives,
+          description,
+          deprecation,
+        }
       })
       .collect()
   }
@@ -3090,9 +3525,11 @@ impl SchemaBuilder {
       }
       TypeSystemExtension::Type(ty) => match ty {
         TypeExtension::Scalar(def) => {
-          raw.target = Some(self.located(def.name()));
+          let target = self.located(def.name());
+          raw.target = Some(target);
           raw.kind = Some(TypeKind::Scalar);
           raw.directives = self.directive_uses(Some(def.directives()), DirectiveLocation::Scalar);
+          raw.specified_by = self.specified_by(Some(def.directives()), target.sym);
         }
         TypeExtension::Object(def) => {
           raw.target = Some(self.located(def.name()));
@@ -3193,6 +3630,11 @@ impl SchemaBuilder {
       raw.members.extend(extension.members);
       raw.enum_values.extend(extension.enum_values);
       raw.directives.extend(extension.directives);
+      // A second `@specifiedBy` is `DuplicateDirectiveUse`, so at most one of the two is written on
+      // any schema that builds.
+      if raw.specified_by.is_none() {
+        raw.specified_by = extension.specified_by;
+      }
     }
   }
 
@@ -3249,6 +3691,13 @@ impl SchemaBuilder {
     // Anything injected here belongs to no document the caller supplied; `self.document` is
     // already one past the last real index, which is what an injected definition reports under.
 
+    // The built-ins' descriptions and defaults, reserved as one growth before any is decoded. Exact
+    // when every built-in is injected; a document that spells one out leaves the difference unused,
+    // and `flatten`'s `into_boxed_str` gives it back.
+    if !self.texts.refused {
+      self.texts.text.reserve_exact(built_ins.text_bytes);
+    }
+
     // The introspection meta-schema is unconditional: an introspection query must validate
     // against every schema. A user definition of one of its types collides.
     for entry in built_ins.introspection.definitions() {
@@ -3271,7 +3720,7 @@ impl SchemaBuilder {
             self.types[index].collides_with_built_in = true;
           }
         }
-        None => self.type_definition(ty, true),
+        None => self.type_definition(ty, described.description(), true),
       }
     }
 
@@ -3290,7 +3739,7 @@ impl SchemaBuilder {
         .lookup(name.as_bytes())
         .is_some_and(|sym| self.type_index(sym).is_some());
       if !taken {
-        self.type_definition(ty, true);
+        self.type_definition(ty, described.description(), true);
       }
     }
 
@@ -3306,7 +3755,7 @@ impl SchemaBuilder {
         .lookup(def.name().source().as_bytes())
         .is_some_and(|sym| self.directive_index(sym).is_some());
       if !taken {
-        self.directive_definition(def, true);
+        self.directive_definition(def, described.description(), true);
       }
     }
 
@@ -6300,6 +6749,8 @@ impl SchemaBuilder {
       type_of_sym: raw_type_of_sym,
       directives: raw_directives,
       roots: raw_roots,
+      texts,
+      schema_description,
       ..
     } = self;
 
@@ -6458,6 +6909,7 @@ impl SchemaBuilder {
       .unwrap_or(UNRESOLVED);
 
     let mut types: Vec<TypeDef> = Vec::with_capacity(raw_types.len());
+    let mut type_meta: Vec<TypeMeta> = Vec::with_capacity(raw_types.len());
     let mut fields: Vec<FieldDef> = Vec::new();
     let mut inputs: Vec<InputValueDef> = Vec::new();
     let mut interfaces: Vec<TypeId> = Vec::new();
@@ -6632,6 +7084,7 @@ impl SchemaBuilder {
         possible_start,
         ordinal_of[index],
       ));
+      type_meta.push(TypeMeta::new(raw.description, raw.specified_by));
     }
 
     let mut directives: Vec<DirectiveDef> = Vec::with_capacity(raw_directives.len());
@@ -6665,6 +7118,126 @@ impl SchemaBuilder {
       ));
     }
     directives.sort_unstable_by_key(|directive| directive.name().get());
+
+    // What draft §4 returns beyond the shape: one metadata row per table row, and each group's
+    // declaration order beside it.
+    //
+    // # A second pass, over the finished tables
+    //
+    // The tables above are sorted group by group as they are built, and every row is placed here by
+    // a binary search for its name in its group — which is unique on every document the build
+    // accepts, since draft §3 refuses a duplicate in each of these groups. Doing it after rather
+    // than during is what sizes each table from a length that is already final: one allocation of
+    // exactly its length apiece, nothing to grow and nothing to shrink, and none at all for a table
+    // that is empty — `interface_order`, until anything implements anything. No group allocates a
+    // scratch buffer of its own.
+    let mut field_meta = vec![FieldMeta::EMPTY; fields.len()];
+    let mut field_order = vec![0u32; fields.len()];
+    let mut input_meta = vec![InputValueMeta::EMPTY; inputs.len()];
+    let mut input_order = vec![0u32; inputs.len()];
+    let mut enum_value_meta = vec![EnumValueMeta::EMPTY; enum_values.len()];
+    let mut enum_value_order = vec![0u32; enum_values.len()];
+    let mut interface_order = vec![0u32; interfaces.len()];
+    let mut directive_meta = vec![DirectiveMeta::EMPTY; directives.len()];
+    let mut directive_order = vec![0u32; directives.len()];
+
+    // The meta-fields come after a group's declared fields, in the order the loop above appended
+    // them, which is also the order their names were interned in.
+    let meta_fields = [typename_sym, schema_field_sym, type_field_sym];
+    for (raw, def) in raw_types.iter().zip(&types) {
+      match raw.kind {
+        TypeKind::Object | TypeKind::Interface | TypeKind::Union => {
+          let group = def.fields();
+          let rows = group.slice(&fields);
+          for field in &raw.fields {
+            let Some(at) = position_of_field(rows, field.name.sym) else {
+              continue;
+            };
+            field_meta[group.start() as usize + at] =
+              FieldMeta::new(field.description, field.deprecation);
+            if let Args::Bounded(declared) = field.args.read() {
+              place_inputs(
+                &mut input_meta,
+                &mut input_order,
+                &inputs,
+                rows[at].args(),
+                declared,
+              );
+            }
+          }
+          let declared = raw.fields.iter().map(|field| field.name.sym).chain(
+            meta_fields
+              .into_iter()
+              .flatten()
+              .filter(|name| position_of_field(rows, *name).is_some()),
+          );
+          write_order(
+            group_mut(&mut field_order, group),
+            declared.map(|name| position_of_field(rows, name)),
+          );
+        }
+        TypeKind::InputObject => place_inputs(
+          &mut input_meta,
+          &mut input_order,
+          &inputs,
+          def.fields(),
+          &raw.input_fields,
+        ),
+        TypeKind::Enum => {
+          let group = def.enum_values();
+          let values = group.slice(&enum_values);
+          for value in &raw.enum_values {
+            if let Ok(at) = values.binary_search(&value.name.sym) {
+              enum_value_meta[group.start() as usize + at] =
+                EnumValueMeta::new(value.description, value.deprecation);
+            }
+          }
+          write_order(
+            group_mut(&mut enum_value_order, group),
+            raw
+              .enum_values
+              .iter()
+              .map(|value| values.binary_search(&value.name.sym).ok()),
+          );
+        }
+        TypeKind::Scalar => {}
+      }
+
+      // The closure is the declared list sorted by type id on every document the build accepts —
+      // `compute_closures` carries that argument — so the order is the `implements` list mapped
+      // into it.
+      let group = def.interfaces();
+      let implemented = group.slice(&interfaces);
+      write_order(
+        group_mut(&mut interface_order, group),
+        raw
+          .implements
+          .iter()
+          .map(|declared| id_of(declared.sym).and_then(|id| implemented.binary_search(&id).ok())),
+      );
+    }
+
+    for raw in &raw_directives {
+      let Some(at) = position_of_directive(&directives, raw.name.sym) else {
+        continue;
+      };
+      directive_meta[at] = DirectiveMeta::new(raw.description);
+      if let Args::Bounded(declared) = raw.args.read() {
+        place_inputs(
+          &mut input_meta,
+          &mut input_order,
+          &inputs,
+          directives[at].args(),
+          declared,
+        );
+      }
+    }
+    write_order(
+      &mut directive_order,
+      raw_directives
+        .iter()
+        .map(|raw| position_of_directive(&directives, raw.name.sym)),
+    );
 
     let mut type_of_sym = vec![u32::MAX; symbol_count as usize];
     for (index, raw) in raw_types.iter().enumerate() {
@@ -6717,7 +7290,103 @@ impl SchemaBuilder {
       objects: objects.into_boxed_slice(),
       directives: directives.into_boxed_slice(),
       roots,
+      // The arena as ingest left it. `inject` reserved the built-ins' share exactly, so on a build
+      // that injected every built-in this is a hand-over rather than a shrink.
+      text: texts.text.into_boxed_str(),
+      description: schema_description,
+      type_meta: type_meta.into_boxed_slice(),
+      field_meta: field_meta.into_boxed_slice(),
+      input_meta: input_meta.into_boxed_slice(),
+      enum_value_meta: enum_value_meta.into_boxed_slice(),
+      directive_meta: directive_meta.into_boxed_slice(),
+      field_order: field_order.into_boxed_slice(),
+      input_order: input_order.into_boxed_slice(),
+      enum_value_order: enum_value_order.into_boxed_slice(),
+      interface_order: interface_order.into_boxed_slice(),
+      directive_order: directive_order.into_boxed_slice(),
     })
+  }
+}
+
+/// The position of a name in a field group — a binary search, the group being sorted by symbol.
+fn position_of_field(rows: &[FieldDef], name: Sym) -> Option<usize> {
+  rows
+    .binary_search_by_key(&name.get(), |row| row.name().get())
+    .ok()
+}
+
+/// The position of a name in an argument or input-field group.
+fn position_of_input(rows: &[InputValueDef], name: Sym) -> Option<usize> {
+  rows
+    .binary_search_by_key(&name.get(), |row| row.name().get())
+    .ok()
+}
+
+/// The position of a name in the directive table.
+fn position_of_directive(rows: &[DirectiveDef], name: Sym) -> Option<usize> {
+  rows
+    .binary_search_by_key(&name.get(), |row| row.name().get())
+    .ok()
+}
+
+/// The rows of a table a group covers, to be written — [`Range32::slice`] for a table being filled.
+fn group_mut<T>(table: &mut [T], group: Range32) -> &mut [T] {
+  let start = (group.start() as usize).min(table.len());
+  let end = (group.end() as usize).clamp(start, table.len());
+  &mut table[start..end]
+}
+
+/// One argument or input-field group's metadata and declaration order, from the list the document
+/// wrote.
+fn place_inputs(
+  meta: &mut [InputValueMeta],
+  order: &mut [u32],
+  inputs: &[InputValueDef],
+  group: Range32,
+  declared: &[RawInput],
+) {
+  let rows = group.slice(inputs);
+  for value in declared {
+    if let Some(at) = position_of_input(rows, value.name.sym) {
+      meta[group.start() as usize + at] =
+        InputValueMeta::new(value.description, value.deprecation, value.default_text);
+    }
+  }
+  write_order(
+    group_mut(order, group),
+    declared
+      .iter()
+      .map(|value| position_of_input(rows, value.name.sym)),
+  );
+}
+
+/// Writes one group's declaration order over its slice of an order table: slot `k` holds the
+/// position, in the sorted group, of the `k`-th entry the document wrote.
+///
+/// On a document the build accepts, `declared` is a permutation of the group, because each group's
+/// names are unique there. Anything else — a name that resolves nowhere, more or fewer entries than
+/// the group has rows — is written as the sorted order instead, so every order table is a
+/// permutation of its groups whatever reached it, and no accessor reading one can be sent off the
+/// end of a group.
+fn write_order(order: &mut [u32], declared: impl Iterator<Item = Option<usize>>) {
+  let mut written = 0;
+  let mut placed = true;
+  for position in declared {
+    match (position, order.get_mut(written)) {
+      (Some(position), Some(slot)) => {
+        *slot = position as u32;
+        written += 1;
+      }
+      _ => {
+        placed = false;
+        break;
+      }
+    }
+  }
+  if !placed || written != order.len() {
+    for (position, slot) in order.iter_mut().enumerate() {
+      *slot = position as u32;
+    }
   }
 }
 
