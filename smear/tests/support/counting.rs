@@ -3,21 +3,22 @@
 //! # Why this is a file and not an inline module
 //!
 //! It was `tests/validator_allocation.rs`'s, written inline, and it moved here unchanged when
-//! `benches/solo/peak_alloc.rs` needed the same instrument. A second copy is the failure the move
+//! `benches/solo/peak_alloc.rs` needed the same instrument; `tests/validator_work.rs` reads it too,
+//! for the two claims there a unit count cannot answer. A second copy is the failure the move
 //! exists to prevent: the test pins a claim about *events* (`Schema::build` allocates at most `N`
 //! times) and the gate pins one about *bytes*, and two copies would let the two answer from
 //! different definitions of what an allocation is. One `realloc` accounted two ways is two
 //! instruments that disagree about a repair while both report green.
 //!
 //! What the move costs, stated because it is not free: a reader of `validator_allocation.rs` now
-//! opens one more file to see what its numbers mean, and an edit here changes a `cargo test` gate
-//! and a `cargo bench` gate at once. That second half is the point rather than the price — the
-//! instrument is shared *so that* it cannot be changed for one reader only — but it does mean this
-//! file is load-bearing for two targets and its own header is the only place that says so.
+//! opens one more file to see what its numbers mean, and an edit here changes two `cargo test`
+//! gates and a `cargo bench` gate at once. That second half is the point rather than the price —
+//! the instrument is shared *so that* it cannot be changed for one reader only — but it does mean
+//! this file is load-bearing for three targets and its own header is the only place that says so.
 //!
-//! Reached by `#[path]` from both, because cargo compiles neither `tests/support/` nor
-//! `benches/solo/perf/` into a library: this is source included into two binaries, so each gets
-//! its own `#[global_allocator]` and neither can perturb the other.
+//! Reached by `#[path]` from all three, because cargo compiles neither `tests/support/` nor
+//! `benches/solo/perf/` into a library: this is source included into three binaries, so each gets
+//! its own `#[global_allocator]` and none can perturb another.
 //!
 //! # What it measures, and the one thing it does not
 //!
@@ -128,7 +129,7 @@ pub fn peak_bytes(body: impl FnOnce()) -> usize {
 /// Installed by every target that includes this file, so no caller has to remember to.
 ///
 /// A `#[global_allocator]` is per-BINARY, and this file is compiled separately into each one that
-/// `#[path]`s it in — so the test binary and the bench binary each install their own and neither
-/// is visible to the other.
+/// `#[path]`s it in — so the two test binaries and the bench binary each install their own and
+/// none is visible to another.
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
