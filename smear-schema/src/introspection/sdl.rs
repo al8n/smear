@@ -26,6 +26,12 @@
 //! one fragment no vocabulary covers and which goes through the parser itself. The only bytes that
 //! reach the SDL parser unexamined are the renderer's own punctuation.
 //!
+//! **Prose is the one fragment it writes rather than checks.** A description, a deprecation reason
+//! and a `specifiedByURL` are text the response chose, so each is written as the string literal
+//! graphql-js's `printString` would write for it — quoted, with every quote, backslash and control
+//! character escaped — and comes back out of the build's decoder as the same text. Nothing in it
+//! can close the literal it sits in, so nothing in it can reach the parser as syntax.
+//!
 //! [`RedefinedBuiltInType`]: super::super::SchemaErrorKind::RedefinedBuiltInType
 //! [`TypeDef::is_built_in`]: super::super::TypeDef::is_built_in
 
@@ -44,6 +50,8 @@ use smear_parser::graphql::{
 
 use super::{
   super::{
+    // The builder's own escaping, so a description renders as the literal the build decodes back.
+    builder::print::escape,
     builtin,
     // The SDL door's own owner-path helper, so `Query.hero.first` reads the same whichever door
     // refused it.
@@ -52,9 +60,10 @@ use super::{
   },
   decode,
   error::{ResponseError, ResponseErrorKind},
+  json::Text,
   model::{
-    IntrospectedDirective, IntrospectedEnumValue, IntrospectedField, IntrospectedInputValue,
-    IntrospectedKind, IntrospectedSchema, IntrospectedType, Name, TypeRef,
+    Deprecated, IntrospectedDirective, IntrospectedEnumValue, IntrospectedField,
+    IntrospectedInputValue, IntrospectedKind, IntrospectedSchema, IntrospectedType, Name, TypeRef,
   },
 };
 
@@ -94,6 +103,7 @@ impl Renderer {
   /// schema whose query root is called something else round-trips, which the convention would
   /// quietly break.
   fn roots(&mut self, schema: &IntrospectedSchema<'_>) -> Rendered {
+    self.description(schema.description.as_ref(), "");
     self.out.push_str("schema {\n");
     let query = named_root(schema.query_type.name, "query")?;
     self.out.push_str("  query: ");
@@ -145,10 +155,16 @@ impl Renderer {
       return Ok(());
     }
 
+    self.description(ty.description.as_ref(), "");
     match kind {
       TypeKind::Scalar => {
         self.out.push_str("scalar ");
         self.out.push_str(name);
+        if let Some(url) = ty.specified_by_url.as_ref() {
+          self.out.push_str(" @specifiedBy(url: ");
+          quote(url.as_str(), &mut self.out);
+          self.out.push(')');
+        }
         self.out.push_str("\n\n");
       }
       TypeKind::Object | TypeKind::Interface => {
@@ -220,12 +236,14 @@ impl Renderer {
     self.out.push_str(" {\n");
     for field in fields {
       let name = field.name.as_str();
+      self.description(field.description.as_ref(), "  ");
       self.out.push_str("  ");
       self.out.push_str(name);
       self.arguments(&field.args, &path(&[owner, name]))?;
       self.out.push_str(": ");
       let rendered = type_reference(&field.ty, owner, name)?;
       self.out.push_str(&rendered);
+      self.deprecated(&field.deprecated);
       self.out.push('\n');
     }
     self.out.push_str("}\n\n");
@@ -267,9 +285,14 @@ impl Renderer {
     Ok(())
   }
 
-  /// `name: Type` with an optional `= default`, shared by arguments and input-object fields.
+  /// `name: Type` with an optional `= default`, shared by arguments and input-object fields, its
+  /// description written in front of it on the same line.
   fn input_value(&mut self, value: &IntrospectedInputValue<'_>, owner: &str) -> Rendered {
     let name = value.name.as_str();
+    if let Some(description) = value.description.as_ref() {
+      quote(description.as_str(), &mut self.out);
+      self.out.push(' ');
+    }
     self.out.push_str(name);
     self.out.push_str(": ");
     let rendered = type_reference(&value.ty, owner, name)?;
@@ -280,6 +303,7 @@ impl Renderer {
       self.out.push_str(" = ");
       self.out.push_str(default);
     }
+    self.deprecated(&value.deprecated);
     Ok(())
   }
 
@@ -318,12 +342,38 @@ impl Renderer {
       if matches!(name, "true" | "false" | "null") {
         return Err(ResponseError::new(ResponseErrorKind::InvalidEnumValue, name).owned_by(owner));
       }
+      self.description(value.description.as_ref(), "  ");
       self.out.push_str("  ");
       self.out.push_str(name);
+      self.deprecated(&value.deprecated);
       self.out.push('\n');
     }
     self.out.push_str("}\n\n");
     Ok(())
+  }
+
+  /// A description on a line of its own, in front of the element it describes.
+  fn description(&mut self, description: Option<&Text<'_>>, indent: &str) {
+    if let Some(description) = description {
+      self.out.push_str(indent);
+      quote(description.as_str(), &mut self.out);
+      self.out.push('\n');
+    }
+  }
+
+  /// ` @deprecated(reason: …)` behind a member the response reports deprecated, its reason quoted
+  /// or `null` as the response wrote it — the one applied directive besides `@oneOf` and
+  /// `@specifiedBy` that introspection carries.
+  fn deprecated(&mut self, deprecated: &Deprecated<'_>) {
+    let Some(reason) = deprecated else {
+      return;
+    };
+    self.out.push_str(" @deprecated(reason: ");
+    match reason {
+      Some(reason) => quote(reason.as_str(), &mut self.out),
+      None => self.out.push_str("null"),
+    }
+    self.out.push(')');
   }
 
   fn directive(&mut self, directive: &IntrospectedDirective<'_>) -> Rendered {
@@ -346,6 +396,7 @@ impl Renderer {
       );
     }
 
+    self.description(directive.description.as_ref(), "");
     self.out.push_str("directive @");
     self.out.push_str(name);
     self.arguments(&directive.args, name)?;
@@ -367,6 +418,14 @@ impl Renderer {
 // ---------------------------------------------------------------------------------------------
 // checked fragments
 // ---------------------------------------------------------------------------------------------
+
+/// Writes prose as the string literal graphql-js's `printString` writes for it: in quotes, every
+/// quote, backslash and control inside escaped. See the module header for why that is the check.
+fn quote(text: &str, out: &mut String) {
+  out.push('"');
+  escape(text, out);
+  out.push('"');
+}
 
 /// Reads a `__TypeKind` that must name a type.
 ///

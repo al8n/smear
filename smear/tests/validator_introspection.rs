@@ -15,9 +15,11 @@
 //! [`Schema::from_introspection`], and compares the two schemas on every observation a rule can
 //! make: type lookup, kind, flags, field lookup, argument lists, packed type spellings,
 //! [`DefaultKind`], enum values, interface closures, union members, possible-object bitsets,
-//! directive locations and repeatability, and the three root operations. Any divergence is a bug
-//! in one door or the other, and **no self-consistent test on either side would find it** — the
-//! SDL door has no reason to disagree with itself and neither has the introspection door.
+//! directive locations and repeatability, and the three root operations — and on everything else
+//! draft §4 returns: descriptions, deprecation, `specifiedByURL`, each default's canonical text,
+//! and the order every list was declared in. Any divergence is a bug in one door or the other, and
+//! **no self-consistent test on either side would find it** — the SDL door has no reason to
+//! disagree with itself and neither has the introspection door.
 //!
 //! # Why the response is generated rather than written by hand
 //!
@@ -36,22 +38,26 @@
 //!
 //! - **Symbol values, type ids and object ordinals.** They are indices into tables built in
 //!   document order, and the two doors read definitions in different orders. Every fact below is
-//!   therefore keyed by *name*: [`Facts`] stores `BTreeMap`s and sorted `Vec`s, never a raw
+//!   therefore keyed by *name*: [`Facts`] stores `BTreeMap`s and `Vec`s of names — sorted, or in
+//!   declaration order where the order is the fact — never a raw
 //!   [`Sym`](smear::validator::schema::Sym) or [`TypeId`](smear::validator::schema::TypeId).
-//! - **Descriptions, deprecation and `specifiedByURL`.** A `Schema` retains none of them, from
-//!   either door. There is nothing to compare.
-//! - **Applied directives other than `@oneOf`.** Introspection has no field for them, so the
-//!   response cannot carry them; `@oneOf` is the only one a `Schema` observes, as
-//!   `TypeFlags::ONE_OF`, and `isOneOf` carries it. [`one_of_survives_the_round_trip`] pins that
-//!   one rather than leaving it to the aggregate.
-//! - **A default value's content.** `Schema` keeps [`DefaultKind`] and nothing else, so the
-//!   generated response cannot restate the original spelling — it synthesises a literal of the
-//!   right shape. Presence and null-ness are what survive and what the comparison covers.
+//! - **Applied directives other than `@oneOf`, `@deprecated` and `@specifiedBy`.** Introspection
+//!   has no field for them, so the response cannot carry them. Those three are the ones a `Schema`
+//!   observes — `TypeFlags::ONE_OF`, a [`Deprecation`], a scalar's `specifiedByURL` — and
+//!   `isOneOf`, `isDeprecated` / `deprecationReason` and `specifiedByURL` carry them.
+//!   [`one_of_survives_the_round_trip`] pins the first rather than leaving it to the aggregate.
+//! - **A default value as a real server reports it.** The generated response reports the
+//!   schema's canonical text for each default, which is the literal the document wrote, printed;
+//!   graphql-js reports its printing of the *coerced* value, which differs for a list default
+//!   written as one item and for a float written `1.0`. Printing is a fixed point, so the round
+//!   trip compares the text exactly, and [`the_door_reads_a_real_response`] reads a server's own
+//!   spellings.
 //! - **A redefined built-in scalar or specified directive.** `scalar String` in a document makes
-//!   `TypeDef::is_built_in` false; an introspection result reports `String` identically either
-//!   way, so the flag is unrecoverable. The fixture does not redefine one, and
-//!   [`redefining_a_built_in_is_the_one_flag_introspection_loses`] pins the loss instead of hiding
-//!   it.
+//!   `TypeDef::is_built_in` false and gives `String` the document's description; an introspection
+//!   result reports `String` the same way whichever it was, and the door leaves it to the build to
+//!   inject, so the flag is unrecoverable and the description is the built-in's. The fixture does
+//!   not redefine one, and [`redefining_a_built_in_is_the_one_flag_introspection_loses`] pins the
+//!   loss instead of hiding it.
 
 // `Schema::from_introspection`, `IntrospectionError` and `ResponseErrorKind` below all live behind
 // `#[cfg(feature = "introspection")]` in `smear-schema/src/introspection/`, not merely
@@ -73,8 +79,9 @@ use smear::{
     syntactic::{GraphqlLexer, type_system_document},
   },
   validator::schema::{
-    DefaultKind, DirectiveDef, FieldDef, InputValueDef, IntrospectionError, PackedType,
-    RootOperation, Schema, SchemaErrorKind, TypeDef, TypeId, TypeKind,
+    DefaultKind, Deprecation, DirectiveDef, DirectiveMeta, FieldDef, FieldMeta, InputValueDef,
+    InputValueMeta, IntrospectionError, PackedType, Range32, RootOperation, Schema,
+    SchemaErrorKind, Sym, Text, TypeDef, TypeId, TypeKind,
     introspection::{self, ResponseErrorKind},
   },
 };
@@ -123,8 +130,15 @@ fn refused(json: &str) -> IntrospectionError {
 /// non-conventional root names (so the `schema` block has to round-trip rather than the
 /// `Query`/`Mutation` convention covering for it), an interface implementing an interface, a
 /// five-wrapper type reference, all three [`DefaultKind`]s, a `@oneOf` input object, a repeatable
-/// directive, applied directives that introspection cannot carry, and a custom scalar.
+/// directive, applied directives that introspection cannot carry, and a custom scalar. And what
+/// draft §4 returns beyond the shape: a description everywhere one may stand — block strings,
+/// escapes, an empty one — each of the three deprecations, a `@specifiedBy`, defaults whose
+/// canonical text is not their spelling, and lists declared out of the order they are stored in.
 const FIXTURE: &str = r#"
+"""
+Every construct a schema can hold, described, so the agreement covers what draft §4 returns
+beyond the shape as well as the shape.
+"""
 schema {
   query: RootQuery
   mutation: RootMutation
@@ -134,15 +148,22 @@ schema {
 "An instant on a timeline."
 scalar DateTime @specifiedBy(url: "https://example.com/spec/datetime")
 
+"Who may see a field, an object or an operation."
 directive @auth(
+  "The least role that may see it."
   role: Role! = ADMIN
   scopes: [String!] = null
-  note: String
+  """
+  A note for whoever reads the schema.
+  """
+  note: String @deprecated(reason: "say it in the description")
 ) repeatable on FIELD_DEFINITION | OBJECT | QUERY
 
 directive @tag(name: String!) on FIELD_DEFINITION | ENUM_VALUE
 
+"Anything with an id."
 interface Node {
+  "Unique across every type that implements `Node`."
   id: ID!
 }
 
@@ -151,31 +172,54 @@ interface Timestamped implements Node {
   createdAt: DateTime
 }
 
-type User implements Node & Timestamped @auth(role: MEMBER) {
+"""
+A person with an account.
+
+  Indented past the common indentation, which a block string keeps.
+"""
+type User implements Timestamped & Node @auth(role: MEMBER) {
   id: ID!
   createdAt: DateTime
+  "What they are called — in any script."
   name: String!
   nicknames: [[String!]!]!
   role: Role! @deprecated(reason: "use roles")
-  posts(first: Int = 10, after: String, filter: PostFilter, tags: [String!] = null): [Post!]!
+  """
+  Their posts, newest first.
+  A \""" inside a block string, and a "quote".
+  """
+  posts(
+    first: Int = 10
+    "Where the previous page ended."
+    after: String @deprecated(reason: "use first")
+    filter: PostFilter = {published:false,ranked:[[1,null],[]]}
+    tags: [String!] = null
+  ): [Post!]!
 }
 
+""
 type Post implements Node {
   id: ID!
   title: String
   author: User!
 }
 
+"Whatever a search can find."
 union SearchResult = User | Post
 
+"The roles a user can hold."
 enum Role {
+  "May do anything."
   ADMIN
   MEMBER
-  GUEST @tag(name: "legacy")
+  GUEST @tag(name: "legacy") @deprecated
+  OWNER @deprecated(reason: null)
 }
 
+"How to narrow a list of posts."
 input PostFilter {
-  titleContains: String
+  "Matched as a substring.\tA tab, a \"quote\" and a \\ are escapes in the source."
+  titleContains: String @deprecated(reason: "use search")
   published: Boolean = true
   authored: AuthorFilter
   ranked: [[Int]!]
@@ -187,8 +231,8 @@ input AuthorFilter @oneOf {
 }
 
 type RootQuery {
-  node(id: ID!): Node
-  search(term: String!, limit: Int = 25): [SearchResult!]!
+  node("The id to look up." id: ID!): Node
+  search(term: String!, limit: Int = 25, order: String = """the "newest" first"""): [SearchResult!]!
   me: User @auth(role: ADMIN)
   when: DateTime
 }
@@ -217,6 +261,9 @@ type RootSubscription {
 /// and `__type` are in `Schema`'s field tables — every build injects them — and in no server's
 /// `__Type.fields`, because draft §4.4 defines them outside the type system.
 ///
+/// Every list is in the order the document declared it, which is the order a server reports, and
+/// every description, deprecation, `specifiedByURL` and default is the schema's own text for it.
+///
 /// The JSON is assembled with `format!` rather than a serializer on purpose. The door is the code
 /// under test and it uses `serde_json`; a test that shared that library would be unable to
 /// distinguish "the door reads JSON correctly" from "both sides agree on a mistake". Everything
@@ -232,13 +279,13 @@ mod server {
       .map(|(index, def)| ty(schema, TypeId::new(index as u32), def))
       .collect();
     let directives: Vec<String> = schema
-      .directives()
-      .iter()
-      .map(|d| directive(schema, d))
+      .directives_in_order()
+      .map(|(def, meta)| directive(schema, def, meta))
       .collect();
 
     std::format!(
-      r#"{{"data":{{"__schema":{{"queryType":{},"mutationType":{},"subscriptionType":{},"types":[{}],"directives":[{}]}}}}}}"#,
+      r#"{{"data":{{"__schema":{{"description":{},"queryType":{},"mutationType":{},"subscriptionType":{},"types":[{}],"directives":[{}]}}}}}}"#,
+      json_text(schema.description()),
       root(schema, RootOperation::Query),
       root(schema, RootOperation::Mutation),
       root(schema, RootOperation::Subscription),
@@ -260,12 +307,11 @@ mod server {
     let fields = match kind {
       TypeKind::Object | TypeKind::Interface => {
         let rows: Vec<String> = schema
-          .fields_of(id)
-          .iter()
+          .fields_in_order(id)
           // The meta-fields. `Schema` holds them, no server reports them, and the build puts them
           // back — so omitting them here is what makes the round-trip realistic AND correct.
-          .filter(|field| !schema.name(field.name()).starts_with("__"))
-          .map(|field| self::field(schema, field))
+          .filter(|(field, _)| !schema.name(field.name()).starts_with("__"))
+          .map(|(field, meta)| self::field(schema, field, meta))
           .collect();
         std::format!("[{}]", rows.join(","))
       }
@@ -275,9 +321,8 @@ mod server {
     let input_fields = match kind {
       TypeKind::InputObject => {
         let rows: Vec<String> = schema
-          .input_fields_of(id)
-          .iter()
-          .map(|value| input_value(schema, value))
+          .input_fields_in_order(id)
+          .map(|(value, meta)| input_value(schema, value, meta))
           .collect();
         std::format!("[{}]", rows.join(","))
       }
@@ -285,16 +330,25 @@ mod server {
     };
 
     let interfaces = match kind {
-      TypeKind::Object | TypeKind::Interface => named_list(schema, schema.interfaces_of(id)),
+      TypeKind::Object | TypeKind::Interface => {
+        let ids: Vec<TypeId> = schema.interfaces_in_order(id).collect();
+        named_list(schema, &ids)
+      }
       _ => "null".into(),
     };
 
     let enum_values = match kind {
       TypeKind::Enum => {
         let rows: Vec<String> = schema
-          .enum_values_of(id)
-          .iter()
-          .map(|value| std::format!(r#"{{"name":{}}}"#, json_string(schema.name(*value))))
+          .enum_values_in_order(id)
+          .map(|(value, meta)| {
+            std::format!(
+              r#"{{"name":{},"description":{},{}}}"#,
+              json_string(schema.name(value)),
+              json_text(schema.text(meta.description())),
+              deprecation(schema, meta.deprecation()),
+            )
+          })
           .collect();
         std::format!("[{}]", rows.join(","))
       }
@@ -325,9 +379,11 @@ mod server {
     };
 
     std::format!(
-      r#"{{"kind":"{}","name":{},"description":null,"specifiedByURL":null,"fields":{},"inputFields":{},"interfaces":{},"enumValues":{},"possibleTypes":{},"isOneOf":{}}}"#,
+      r#"{{"kind":"{}","name":{},"description":{},"specifiedByURL":{},"fields":{},"inputFields":{},"interfaces":{},"enumValues":{},"possibleTypes":{},"isOneOf":{}}}"#,
       kind.as_str(),
       json_string(schema.name(def.name())),
+      json_text(schema.text(schema.type_meta(id).description())),
+      json_text(schema.specified_by_url(id)),
       fields,
       input_fields,
       interfaces,
@@ -337,73 +393,56 @@ mod server {
     )
   }
 
-  fn field(schema: &Schema, field: &FieldDef) -> String {
+  fn field(schema: &Schema, field: &FieldDef, meta: &FieldMeta) -> String {
     let args: Vec<String> = schema
-      .inputs(field.args())
-      .iter()
-      .map(|arg| input_value(schema, arg))
+      .inputs_in_order(field.args())
+      .map(|(arg, meta)| input_value(schema, arg, meta))
       .collect();
     std::format!(
-      r#"{{"name":{},"description":null,"args":[{}],"type":{},"isDeprecated":false,"deprecationReason":null}}"#,
+      r#"{{"name":{},"description":{},"args":[{}],"type":{},{}}}"#,
       json_string(schema.name(field.name())),
+      json_text(schema.text(meta.description())),
       args.join(","),
       type_ref(schema, field.ty()),
+      deprecation(schema, meta.deprecation()),
     )
   }
 
-  fn input_value(schema: &Schema, value: &InputValueDef) -> String {
+  fn input_value(schema: &Schema, value: &InputValueDef, meta: &InputValueMeta) -> String {
     std::format!(
-      r#"{{"name":{},"description":null,"type":{},"defaultValue":{}}}"#,
+      r#"{{"name":{},"description":{},"type":{},"defaultValue":{},{}}}"#,
       json_string(schema.name(value.name())),
+      json_text(schema.text(meta.description())),
       type_ref(schema, value.ty()),
-      default_value(schema, value),
+      json_text(schema.text(meta.default_value())),
+      deprecation(schema, meta.deprecation()),
     )
   }
 
-  /// A default value of the right *kind*, which is all a `Schema` retains.
-  ///
-  /// The original spelling is gone — the build reduced it to [`DefaultKind`] — so the response
-  /// carries a literal that the base type would plausibly accept rather than the one the document
-  /// wrote. Presence and null-ness are what round-trip, and what the comparison checks.
-  fn default_value(schema: &Schema, value: &InputValueDef) -> String {
-    match value.default_kind() {
-      DefaultKind::Absent => "null".into(),
-      DefaultKind::Null => json_string("null"),
-      DefaultKind::NonNull => {
-        let base = schema.type_def(value.ty().base_id());
-        let literal: String = match base.kind() {
-          TypeKind::Enum => schema
-            .enum_values_of(value.ty().base_id())
-            .first()
-            .map(|first| schema.name(*first).into())
-            .unwrap_or_else(|| "null".into()),
-          TypeKind::InputObject => "{}".into(),
-          TypeKind::Scalar => match schema.name(base.name()) {
-            "String" | "ID" => "\"x\"".into(),
-            "Boolean" => "true".into(),
-            _ => "42".into(),
-          },
-          _ => "42".into(),
-        };
-        json_string(&literal)
-      }
-    }
+  /// `isDeprecated` and `deprecationReason`, the two members a server writes for one
+  /// [`Deprecation`].
+  fn deprecation(schema: &Schema, deprecation: Deprecation) -> String {
+    std::format!(
+      r#""isDeprecated":{},"deprecationReason":{}"#,
+      deprecation.is_deprecated(),
+      json_text(schema.text(deprecation.reason())),
+    )
   }
 
-  fn directive(schema: &Schema, directive: &DirectiveDef) -> String {
+  fn directive(schema: &Schema, directive: &DirectiveDef, meta: &DirectiveMeta) -> String {
     let locations: Vec<String> = directive
       .locations()
       .iter()
       .map(|location| json_string(location.as_str()))
       .collect();
     let args: Vec<String> = schema
-      .inputs(directive.args())
-      .iter()
-      .map(|arg| input_value(schema, arg))
+      .inputs_in_order(directive.args())
+      .map(|(arg, meta)| input_value(schema, arg, meta))
       .collect();
     std::format!(
-      r#"{{"name":{},"description":null,"locations":[{}],"args":[{}],"isRepeatable":{}}}"#,
+      r#"{{"name":{},"description":{},"locations":[{}],"args":[{}],"isRepeatable":{}}}"#,
       json_string(schema.name(directive.name())),
+      json_text(schema.text(meta.description())),
       locations.join(","),
       args.join(","),
       directive.is_repeatable(),
@@ -450,14 +489,31 @@ mod server {
     schema.name(schema.type_def(id).name())
   }
 
-  /// A JSON string literal. Only `"` and `\` can occur in anything this test emits — GraphQL names
-  /// are ASCII identifiers and the synthesised default literals are ASCII — and both are escaped.
+  /// A nullable JSON string: `null` for no text, and the literal otherwise.
+  fn json_text(text: Option<&str>) -> String {
+    text.map_or_else(|| "null".into(), json_string)
+  }
+
+  /// A JSON string literal, escaped as a serializer escapes one: `"` and `\`, the short forms for
+  /// a line feed, a carriage return and a tab, and a `\u` escape for every other C0 control.
+  ///
+  /// Names and the fixed literals are ASCII with neither a quote nor a backslash in them;
+  /// descriptions and defaults are text, and carry all of these.
   fn json_string(value: &str) -> String {
     let mut out = String::from("\"");
     for ch in value.chars() {
       match ch {
         '"' => out.push_str("\\\""),
         '\\' => out.push_str("\\\\"),
+        '\n' => out.push_str("\\n"),
+        '\r' => out.push_str("\\r"),
+        '\t' => out.push_str("\\t"),
+        // The backslash is pushed on its own so the `u` and its digits are assembled, never
+        // written as one escape.
+        control if u32::from(control) < 0x20 => {
+          out.push('\\');
+          out.push_str(&std::format!("u{:04X}", u32::from(control)));
+        }
         other => out.push(other),
       }
     }
@@ -476,8 +532,11 @@ struct Facts {
   /// bitset's meaning, so it is compared before the bitsets are.
   possible_words: u32,
   roots: [Option<String>; 3],
+  description: Option<String>,
   types: BTreeMap<String, TypeFacts>,
   directives: BTreeMap<String, DirectiveFacts>,
+  /// The directive definitions in the order they were defined.
+  directive_order: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -487,19 +546,29 @@ struct TypeFacts {
   built_in: bool,
   /// Whether the type occupies a bit in the possible-object bitsets.
   has_object_ordinal: bool,
+  description: Option<String>,
+  specified_by: Option<String>,
   fields: BTreeMap<String, FieldFacts>,
   input_fields: BTreeMap<String, InputFacts>,
-  enum_values: Vec<String>,
+  enum_values: BTreeMap<String, MemberFacts>,
   interfaces: Vec<String>,
   members: Vec<String>,
   /// The possible-object bitset, read back as the set of object type *names* it selects.
   possible: Option<Vec<String>>,
+  /// The four lists draft §4 returns in the order the document declared them, as that order.
+  field_order: Vec<String>,
+  input_field_order: Vec<String>,
+  enum_value_order: Vec<String>,
+  interface_order: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 struct FieldFacts {
   ty: String,
   args: BTreeMap<String, InputFacts>,
+  arg_order: Vec<String>,
+  description: Option<String>,
+  deprecated: Option<Option<String>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -507,6 +576,17 @@ struct InputFacts {
   ty: String,
   default: &'static str,
   required: bool,
+  /// The default's canonical text: draft §4's `defaultValue`.
+  default_text: Option<String>,
+  description: Option<String>,
+  deprecated: Option<Option<String>>,
+}
+
+/// What draft §4 returns about an enum value beyond its name.
+#[derive(Debug, PartialEq, Eq)]
+struct MemberFacts {
+  description: Option<String>,
+  deprecated: Option<Option<String>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -514,16 +594,21 @@ struct DirectiveFacts {
   locations: u32,
   repeatable: bool,
   built_in: bool,
+  description: Option<String>,
   args: BTreeMap<String, InputFacts>,
+  arg_order: Vec<String>,
 }
 
-/// Reads every observation a validation rule can make out of a schema, keyed by name.
+/// Reads every observation a validation rule can make out of a schema, and everything else draft
+/// §4 returns, keyed by name.
 ///
-/// Two things happen here beyond collecting. Every field, input field, argument and directive is
+/// Three things happen here beyond collecting. Every field, input field, argument and directive is
 /// *looked up* as well as iterated, so the sym-sorted binary-search invariant is exercised on both
-/// schemas rather than assumed; and every type reference is spelled out through
-/// [`PackedType`]'s wrappers, so a mis-packed reference shows up as a different string rather than
-/// as a different integer nobody compares.
+/// schemas rather than assumed; every type reference is spelled out through [`PackedType`]'s
+/// wrappers, so a mis-packed reference shows up as a different string rather than as a different
+/// integer nobody compares; and every declaration order is checked to be a permutation of the group
+/// it orders, so an order table that dropped a member cannot pass by dropping it from both schemas'
+/// facts alike.
 fn facts(schema: &Schema) -> Facts {
   let mut types = BTreeMap::new();
   for (index, def) in schema.types().iter().enumerate() {
@@ -537,45 +622,102 @@ fn facts(schema: &Schema) -> Facts {
     assert_eq!(found_def.kind(), def.kind());
 
     let mut fields = BTreeMap::new();
-    for field in schema.fields_of(id) {
+    assert_eq!(
+      schema.field_meta_of(id).len(),
+      schema.fields_of(id).len(),
+      "`{name}`'s field metadata is not row for row with its fields"
+    );
+    for (field, meta) in schema.fields_of(id).iter().zip(schema.field_meta_of(id)) {
       let field_name = schema.name(field.name()).to_owned();
       let looked_up = schema
         .field(id, field.name())
         .unwrap_or_else(|| panic!("`{name}.{field_name}` is in the group but lookup misses it"));
       assert_eq!(looked_up.ty(), field.ty());
+      let args = inputs(schema, field.args());
+      let arg_order = declared_inputs(schema, field.args());
+      permutation(
+        &arg_order,
+        args.keys(),
+        &std::format!("{name}.{field_name}"),
+      );
       fields.insert(
         field_name,
         FieldFacts {
           ty: spell(schema, field.ty()),
-          args: inputs(schema, field.args()),
+          args,
+          arg_order,
+          description: text(schema, meta.description()),
+          deprecated: deprecated(schema, meta.deprecation()),
         },
       );
     }
+    let field_order = names(
+      schema,
+      schema.fields_in_order(id).map(|(field, _)| field.name()),
+    );
+    permutation(&field_order, fields.keys(), &name);
 
     let mut input_fields = BTreeMap::new();
-    for value in schema.input_fields_of(id) {
+    assert_eq!(
+      schema.input_field_meta_of(id).len(),
+      schema.input_fields_of(id).len(),
+      "`{name}`'s input field metadata is not row for row with its input fields"
+    );
+    for (value, meta) in schema
+      .input_fields_of(id)
+      .iter()
+      .zip(schema.input_field_meta_of(id))
+    {
       let value_name = schema.name(value.name()).to_owned();
       let looked_up = schema
         .input_field(id, value.name())
         .unwrap_or_else(|| panic!("`{name}.{value_name}` is in the group but lookup misses it"));
       assert_eq!(looked_up.ty(), value.ty());
-      input_fields.insert(value_name, input_facts(schema, value));
+      input_fields.insert(value_name, input_facts(schema, value, meta));
     }
+    let input_field_order = names(
+      schema,
+      schema
+        .input_fields_in_order(id)
+        .map(|(value, _)| value.name()),
+    );
+    permutation(&input_field_order, input_fields.keys(), &name);
 
-    let mut enum_values: Vec<String> = schema
+    let mut enum_values = BTreeMap::new();
+    assert_eq!(
+      schema.enum_value_meta_of(id).len(),
+      schema.enum_values_of(id).len(),
+      "`{name}`'s enum value metadata is not row for row with its values"
+    );
+    for (value, meta) in schema
       .enum_values_of(id)
       .iter()
-      .map(|value| {
-        assert!(
-          schema.has_enum_value(id, *value),
-          "`{name}` lists a value `has_enum_value` cannot find"
-        );
-        schema.name(*value).to_owned()
-      })
-      .collect();
-    enum_values.sort();
+      .zip(schema.enum_value_meta_of(id))
+    {
+      assert!(
+        schema.has_enum_value(id, *value),
+        "`{name}` lists a value `has_enum_value` cannot find"
+      );
+      enum_values.insert(
+        schema.name(*value).to_owned(),
+        MemberFacts {
+          description: text(schema, meta.description()),
+          deprecated: deprecated(schema, meta.deprecation()),
+        },
+      );
+    }
+    let enum_value_order = names(
+      schema,
+      schema.enum_values_in_order(id).map(|(value, _)| value),
+    );
+    permutation(&enum_value_order, enum_values.keys(), &name);
 
     let mut interfaces = sorted_names(schema, schema.interfaces_of(id));
+    let interface_order: Vec<String> = schema
+      .interfaces_in_order(id)
+      .map(|interface| schema.name(schema.type_def(interface).name()).to_owned())
+      .collect();
+    permutation(&interface_order, &interfaces, &name);
     interfaces.dedup();
     let members = sorted_names(schema, schema.members_of(id));
 
@@ -601,33 +743,54 @@ fn facts(schema: &Schema) -> Facts {
         one_of: def.is_one_of(),
         built_in: def.is_built_in(),
         has_object_ordinal: def.object_ordinal() != TypeDef::NONE,
+        description: text(schema, schema.type_meta(id).description()),
+        specified_by: schema.specified_by_url(id).map(str::to_owned),
         fields,
         input_fields,
         enum_values,
         interfaces,
         members,
         possible,
+        field_order,
+        input_field_order,
+        enum_value_order,
+        interface_order,
       },
     );
   }
 
   let mut directives = BTreeMap::new();
-  for def in schema.directives() {
+  assert_eq!(
+    schema.directive_meta().len(),
+    schema.directives().len(),
+    "the directive metadata is not row for row with the directives"
+  );
+  for (def, meta) in schema.directives().iter().zip(schema.directive_meta()) {
     let name = schema.name(def.name()).to_owned();
     let looked_up = schema
       .directive_by_name(name.as_bytes())
       .unwrap_or_else(|| panic!("`@{name}` is in the table but lookup misses it"));
     assert_eq!(looked_up.locations().bits(), def.locations().bits());
+    let args = inputs(schema, def.args());
+    let arg_order = declared_inputs(schema, def.args());
+    permutation(&arg_order, args.keys(), &std::format!("@{name}"));
     directives.insert(
       name,
       DirectiveFacts {
         locations: def.locations().bits(),
         repeatable: def.is_repeatable(),
         built_in: def.is_built_in(),
-        args: inputs(schema, def.args()),
+        description: text(schema, meta.description()),
+        args,
+        arg_order,
       },
     );
   }
+  let directive_order = names(
+    schema,
+    schema.directives_in_order().map(|(def, _)| def.name()),
+  );
+  permutation(&directive_order, directives.keys(), "the directive table");
 
   let roots = [
     RootOperation::Query,
@@ -643,33 +806,76 @@ fn facts(schema: &Schema) -> Facts {
   Facts {
     possible_words: schema.possible_words(),
     roots,
+    description: schema.description().map(str::to_owned),
     types,
     directives,
+    directive_order,
   }
 }
 
-fn inputs(
-  schema: &Schema,
-  args: smear::validator::schema::Range32,
-) -> BTreeMap<String, InputFacts> {
+fn inputs(schema: &Schema, args: Range32) -> BTreeMap<String, InputFacts> {
+  assert_eq!(
+    schema.input_meta(args).len(),
+    schema.inputs(args).len(),
+    "an argument group's metadata is not row for row with the group"
+  );
   let mut out = BTreeMap::new();
-  for value in schema.inputs(args) {
+  for (value, meta) in schema.inputs(args).iter().zip(schema.input_meta(args)) {
     let name = schema.name(value.name()).to_owned();
     let looked_up = schema
       .input(args, value.name())
       .unwrap_or_else(|| panic!("`{name}` is in the group but lookup misses it"));
     assert_eq!(looked_up.ty(), value.ty());
-    out.insert(name, input_facts(schema, value));
+    out.insert(name, input_facts(schema, value, meta));
   }
   out
 }
 
-fn input_facts(schema: &Schema, value: &InputValueDef) -> InputFacts {
+fn input_facts(schema: &Schema, value: &InputValueDef, meta: &InputValueMeta) -> InputFacts {
   InputFacts {
     ty: spell(schema, value.ty()),
     default: value.default_kind().as_str(),
     required: value.is_required(),
+    default_text: text(schema, meta.default_value()),
+    description: text(schema, meta.description()),
+    deprecated: deprecated(schema, meta.deprecation()),
   }
+}
+
+/// An argument group's names, in the order the document declared them.
+fn declared_inputs(schema: &Schema, args: Range32) -> Vec<String> {
+  names(
+    schema,
+    schema.inputs_in_order(args).map(|(value, _)| value.name()),
+  )
+}
+
+fn names(schema: &Schema, syms: impl Iterator<Item = Sym>) -> Vec<String> {
+  syms.map(|sym| schema.name(sym).to_owned()).collect()
+}
+
+/// Checks that a declaration order lists every member of the group it orders, once each.
+fn permutation<'a>(order: &[String], members: impl IntoIterator<Item = &'a String>, owner: &str) {
+  let mut sorted: Vec<&String> = order.iter().collect();
+  sorted.sort();
+  let members: Vec<&String> = members.into_iter().collect();
+  assert_eq!(
+    sorted, members,
+    "`{owner}`'s declaration order is not a permutation of its members"
+  );
+}
+
+/// A string out of the schema's text arena, owned so two schemas' facts compare.
+fn text(schema: &Schema, text: Text) -> Option<String> {
+  schema.text(text).map(str::to_owned)
+}
+
+/// `isDeprecated` and `deprecationReason` as one value: `None` when the member is not deprecated,
+/// and its reason — itself `None` for a `null` one — when it is.
+fn deprecated(schema: &Schema, deprecation: Deprecation) -> Option<Option<String>> {
+  deprecation
+    .is_deprecated()
+    .then(|| text(schema, deprecation.reason()))
 }
 
 fn sorted_names(schema: &Schema, ids: &[TypeId]) -> Vec<String> {
@@ -715,8 +921,8 @@ fn two_doors_agree() {
 ///
 /// A census over a thin fixture is the failure mode this file exists to avoid, so the fixture's
 /// reach is asserted rather than reviewed: every type kind present, both abstract kinds carrying
-/// possible-object sets, all three [`DefaultKind`]s, a wrapper chain deeper than two, and all
-/// three roots.
+/// possible-object sets, all three [`DefaultKind`]s, a wrapper chain deeper than two, all three
+/// roots, and each kind of thing draft §4 returns beyond the shape.
 #[test]
 fn the_agreement_is_not_vacuous() {
   let schema = built(FIXTURE);
@@ -811,10 +1017,98 @@ fn the_agreement_is_not_vacuous() {
       .collect::<std::collections::BTreeSet<_>>(),
     "the fixture no longer reaches all three DefaultKinds"
   );
+
+  // What draft §4 returns beyond the shape.
+  assert!(
+    observed.description.is_some(),
+    "the schema description is not reached"
+  );
+  assert_eq!(
+    observed.types["DateTime"].specified_by.as_deref(),
+    Some("https://example.com/spec/datetime"),
+    "`@specifiedBy` is not reached"
+  );
+  assert_eq!(
+    observed.types["Post"].description.as_deref(),
+    Some(""),
+    "an empty description is not reached, so absent and empty are not told apart"
+  );
+  assert_eq!(
+    observed.types["User"].fields["posts"]
+      .description
+      .as_deref(),
+    Some("Their posts, newest first.\nA \"\"\" inside a block string, and a \"quote\"."),
+    "a block string with an escaped triple quote is not reached"
+  );
+  assert_eq!(
+    observed.types["PostFilter"].input_fields["titleContains"]
+      .description
+      .as_deref(),
+    Some("Matched as a substring.\tA tab, a \"quote\" and a \\ are escapes in the source."),
+    "a description with escapes is not reached"
+  );
+  assert_eq!(
+    observed.types["User"].fields["role"].deprecated,
+    Some(Some("use roles".to_owned())),
+    "a deprecation with a reason is not reached"
+  );
+  assert_eq!(
+    observed.types["Role"].enum_values["GUEST"].deprecated,
+    Some(Some("No longer supported".to_owned())),
+    "a bare `@deprecated` is not reached"
+  );
+  assert_eq!(
+    observed.types["Role"].enum_values["OWNER"].deprecated,
+    Some(None),
+    "`@deprecated(reason: null)` is not reached"
+  );
+  assert!(
+    observed.types["User"].fields["posts"].args["after"]
+      .deprecated
+      .is_some(),
+    "a deprecated argument is not reached"
+  );
+  assert!(
+    observed.directives["auth"].args["note"]
+      .deprecated
+      .is_some(),
+    "a deprecated directive argument is not reached"
+  );
+  assert_eq!(
+    observed.types["User"].fields["posts"].args["filter"]
+      .default_text
+      .as_deref(),
+    Some("{published: false, ranked: [[1, null], []]}"),
+    "a default whose canonical text is not its spelling is not reached"
+  );
+  assert_eq!(
+    observed.types["RootQuery"].fields["search"].args["order"]
+      .default_text
+      .as_deref(),
+    Some("\"the \\\"newest\\\" first\""),
+    "a block-string default is not reached"
+  );
+
+  // And the declaration orders compare something: in each of these the document's order is not
+  // the order the group is stored in, so two schemas that kept only the stored order would differ.
+  assert_eq!(
+    observed.types["User"].interface_order,
+    ["Timestamped", "Node"],
+    "`User` no longer declares its interfaces out of type-id order"
+  );
+  let (user, _) = schema.type_by_name(b"User").expect("User");
+  assert!(
+    schema
+      .field_order_of(user)
+      .iter()
+      .enumerate()
+      .any(|(at, &position)| at as u32 != position),
+    "`User` declares its fields in the order they are stored, so the field order compares nothing"
+  );
 }
 
-/// `@oneOf` is the only applied directive a `Schema` retains, so it is pinned on its own rather
-/// than trusted to the aggregate.
+/// `@oneOf` is the one applied directive a `Schema` keeps as a flag validation reads, so it is
+/// pinned on its own rather than trusted to the aggregate.
 #[test]
 fn one_of_survives_the_round_trip() {
   let from_sdl = built(FIXTURE);
@@ -832,9 +1126,12 @@ fn one_of_survives_the_round_trip() {
 /// The one flag introspection cannot carry, pinned as a loss rather than left to be discovered.
 ///
 /// A document that spells out `scalar String` gets a `String` whose `is_built_in` is false. The
-/// introspection result for that schema is byte-identical to the result for one that did not, so
-/// the door cannot reproduce the flag and the round-trip diverges on it. This test is the record:
-/// if a future change makes the flag recoverable, it fails and the module header's table is wrong.
+/// introspection result for that schema reports `String` as it would a built-in, and the door
+/// leaves every built-in scalar to the build, so the door cannot reproduce the flag and the
+/// round-trip diverges on it — and on the description, which is the same loss seen from the other
+/// side: the re-injected `String` describes itself, where the document's said nothing. This test
+/// is the record: if a future change makes the flag recoverable, it fails and the module header's
+/// table is wrong.
 #[test]
 fn redefining_a_built_in_is_the_one_flag_introspection_loses() {
   let sdl = "type Query { ok: String } scalar String";
@@ -852,11 +1149,23 @@ fn redefining_a_built_in_is_the_one_flag_introspection_loses() {
     "the door recovered the flag; the loss recorded in the module header is stale"
   );
 
-  // And it is the *only* divergence: everything else about the two schemas still agrees.
   let mut sdl_facts = facts(&from_sdl);
   let mut json_facts = facts(&from_json);
-  sdl_facts.types.get_mut("String").expect("String").built_in = true;
-  json_facts.types.get_mut("String").expect("String").built_in = true;
+  assert_eq!(sdl_facts.types["String"].description, None);
+  assert!(
+    json_facts.types["String"]
+      .description
+      .as_deref()
+      .is_some_and(|text| text.starts_with("The `String` scalar type")),
+    "the re-injected `String` does not carry the built-in's description"
+  );
+
+  // And that is the *only* divergence: everything else about the two schemas still agrees.
+  for facts in [&mut sdl_facts, &mut json_facts] {
+    let string = facts.types.get_mut("String").expect("String");
+    string.built_in = true;
+    string.description = None;
+  }
   assert_eq!(sdl_facts, json_facts);
 }
 
@@ -867,8 +1176,8 @@ fn redefining_a_built_in_is_the_one_flag_introspection_loses() {
 /// A response written by hand, in the shape a server returns.
 ///
 /// The generated response above is exhaustive but shares an author with the door. This one shares
-/// nothing: it carries real default-value spellings, a `data` envelope, deprecation fields the
-/// door ignores, and `isRepeatable` where the door reads it.
+/// nothing: it carries real default-value spellings, a `data` envelope, descriptions and
+/// deprecation where servers write them, and `isRepeatable` where the door reads it.
 const HAND_WRITTEN: &str = r#"
 {"data":{"__schema":{
   "queryType": {"name": "Query"},
@@ -956,6 +1265,50 @@ fn the_door_reads_a_real_response() {
     7,
     "six fields plus `__typename`"
   );
+
+  // What a server writes beyond the shape is kept: descriptions, deprecation, and each default
+  // as the build printed what the server printed.
+  assert_eq!(
+    schema.text(schema.type_meta(query).description()),
+    Some("The root.")
+  );
+  let field_meta = |name: &str| {
+    schema
+      .fields_in_order(query)
+      .find(|(field, _)| schema.name(field.name()) == name)
+      .map(|(_, meta)| *meta)
+      .expect("a field of `Query`")
+  };
+  assert_eq!(
+    schema.text(field_meta("greeting").description()),
+    Some("Says hello.")
+  );
+  assert!(!field_meta("greeting").deprecation().is_deprecated());
+  assert!(field_meta("scope").deprecation().is_deprecated());
+  assert_eq!(
+    schema.text(field_meta("scope").deprecation().reason()),
+    Some("unused")
+  );
+
+  let declared: Vec<(&str, Option<&str>)> = schema
+    .inputs_in_order(args)
+    .map(|(value, meta)| (schema.name(value.name()), schema.text(meta.default_value())))
+    .collect();
+  assert_eq!(
+    declared,
+    [
+      ("to", Some("\"world\"")),
+      ("loudly", Some("null")),
+      ("repeats", None)
+    ],
+    "the arguments in the order the server listed them, each with its default's text"
+  );
+
+  let (_, cache_meta) = schema
+    .directives_in_order()
+    .find(|(directive, _)| schema.name(directive.name()) == "cacheControl")
+    .expect("@cacheControl");
+  assert_eq!(schema.text(cache_meta.description()), Some("Cache hints."));
 }
 
 /// All three envelopes name the same schema.
@@ -1021,7 +1374,8 @@ fn the_sdl_omits_what_every_build_injects() {
   // nothing observable depends on it — `two_doors_agree` compares the mask.
   assert!(sdl.contains(" repeatable on QUERY | OBJECT | FIELD_DEFINITION"));
   assert!(sdl.contains("interface Timestamped implements Node"));
-  assert!(sdl.contains("type User implements Node & Timestamped"));
+  // Declaration order, not the closure's type-id order.
+  assert!(sdl.contains("type User implements Timestamped & Node"));
   assert!(sdl.contains("nicknames: [[String!]!]!"));
   assert!(sdl.contains(
     "schema {\n  query: RootQuery\n  mutation: RootMutation\n  subscription: RootSubscription\n}"
@@ -1061,9 +1415,10 @@ const UNFIREABLE: &[(ResponseErrorKind, &str)] = &[(
   ResponseErrorKind::UnparsableSdl,
   "every byte the renderer emits is either its own punctuation or a fragment it checked first — \
    names against the grammar, kinds and locations against closed sets, default values against the \
-   parser itself — so no response can reach the SDL parser with anything unexamined in it. The \
-   variant exists because \"unreachable\" is a claim, and a claim that costs a `Result` arm is \
-   cheaper than one that costs a panic in a server.",
+   parser itself — or prose it wrote as a quoted string with every quote, backslash and control \
+   escaped, so no response can reach the SDL parser with anything unexamined in it. The variant \
+   exists because \"unreachable\" is a claim, and a claim that costs a `Result` arm is cheaper \
+   than one that costs a panic in a server.",
 )];
 
 /// Every response-shape kind, with a response that makes it fire and the owner it names.

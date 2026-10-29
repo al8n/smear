@@ -70,14 +70,16 @@
 //!
 //! | Lost | Visible in a `Schema`? |
 //! |---|---|
-//! | **Applied directives**, other than `@oneOf`, `@deprecated` and `@specifiedBy` — introspection has no field for them, so `type User @key(fields: "id")` simply is not in the response | Not today: the only applied directive `Schema` retains is `@oneOf`, as [`TypeFlags::ONE_OF`](super::TypeFlags::ONE_OF), and `isOneOf` carries it. It becomes visible the moment a rule reads directive *usages* |
-//! | **`@deprecated` and `@specifiedBy`** — present in the response as `isDeprecated` / `deprecationReason` / `specifiedByURL`, dropped by the door | No. `Schema` retains neither, from either door |
-//! | **Descriptions** | No. `Schema` retains none, from either door |
+//! | **Applied directives**, other than `@oneOf`, `@deprecated` and `@specifiedBy` — introspection has no field for them, so `type User @key(fields: "id")` simply is not in the response | Not today: the applied directives `Schema` retains are those three — `@oneOf` as [`TypeFlags::ONE_OF`](super::TypeFlags::ONE_OF), carried by `isOneOf`; `@deprecated` as a [`Deprecation`](super::Deprecation), carried by `isDeprecated` and `deprecationReason`; `@specifiedBy` as a scalar's `specifiedByURL` — and the door renders each back as the directive. It becomes visible the moment a rule reads directive *usages* |
 //! | **Deprecated fields, arguments and enum values**, when the introspection query omitted `includeDeprecated: true` | **Yes, and silently.** They are simply absent from the response, and nothing in it says so. This is the one loss the door cannot detect, and the reason an introspection query feeding this door must ask for them |
 //! | **`extend` structure** — a response reports the merged schema | No: a `Schema` holds the merge, so there is nothing to lose |
-//! | **A default value's exact spelling** — the server prints its own coerced form | No: `Schema` keeps [`DefaultKind`](super::DefaultKind), and presence and null-ness both survive printing |
+//! | **A default value's exact spelling** — the server prints its own coerced form | **Yes**, in [`InputValueMeta::default_value`](super::InputValueMeta::default_value): the build keeps the canonical text of the literal it read, which from this door is the server's printing of its *coerced* value — `[1]` for an SDL that wrote `= 1` on a list, `1` for a float written `1.0`. Presence and null-ness, which [`DefaultKind`](super::DefaultKind) keeps, survive either way |
 //! | **Interfaces implemented by interfaces**, from a server predating the 2021 specification | Under-constrains rather than misreports: nothing is claimed that is not in the response |
-//! | **That a document spelled out a built-in** — `scalar String` and `directive @skip(…)` are reported by every server whether the document wrote them or not | **Yes.** [`TypeDef::is_built_in`](super::TypeDef::is_built_in) is false for a spelled-out built-in from the SDL door and true from this one, because the door drops the five scalars and the five specified directives and the build re-injects them. Nothing else diverges, and no draft §5 rule reads the flag |
+//! | **That a document spelled out a built-in** — `scalar String` and `directive @skip(…)` are reported by every server whether the document wrote them or not | **Yes.** [`TypeDef::is_built_in`](super::TypeDef::is_built_in) is false for a spelled-out built-in from the SDL door and true from this one, because the door drops the five scalars and the five specified directives and the build re-injects them — and a re-injected built-in carries its own descriptions, not the ones the response reported. Nothing else diverges, and no draft §5 rule reads either |
+//!
+//! Descriptions, `@deprecated` and `@specifiedBy` were rows here and are not any more: the door
+//! reads `description`, `isDeprecated` / `deprecationReason` and `specifiedByURL` wherever draft §4
+//! has them, renders them back into the SDL, and the build keeps what it keeps from the SDL door.
 //!
 //! Everything else round-trips, and [the two-door agreement test] is what says so rather than this
 //! table: it builds the same schema through both doors and compares every observation a rule can
@@ -134,10 +136,12 @@ impl Schema {
 /// independently of validating anything, and a door whose intermediate form can be printed is one
 /// whose behaviour can be argued about.
 ///
-/// The SDL describes the same schema, not the same document. Descriptions, deprecation and every
-/// applied directive but `@oneOf` are absent — [the module header](self) says which of those a
-/// [`Schema`] could have observed — and so are the definitions every build injects for itself: the
-/// introspection meta-schema, the five built-in scalars and the five specified directives.
+/// The SDL describes the same schema, not the same document. Descriptions are written back, and so
+/// are the three applied directives introspection carries: `@oneOf`, `@deprecated` and
+/// `@specifiedBy`. Every other applied directive is absent — [the module header](self) says what a
+/// [`Schema`] could have observed of one — and so are the definitions every build injects for
+/// itself: the introspection meta-schema, the five built-in scalars and the five specified
+/// directives.
 ///
 /// ```
 /// use smear_schema::introspection;
@@ -165,7 +169,8 @@ pub fn to_sdl(response: &str) -> Result<String, IntrospectionError> {
 /// Parses the renderer's own output.
 ///
 /// The failure arm is a backstop for a bug in this crate, not for anything a response can do:
-/// every byte the renderer emits is either its own punctuation or a fragment it checked first.
+/// every byte the renderer emits is its own punctuation, a fragment it checked first, or prose it
+/// wrote as a quoted string nothing in it can close.
 /// It is an error rather than an `unwrap` because "unreachable" is a claim, and a claim that costs
 /// a `Result` arm is cheaper than a claim that costs a panic in a server.
 fn parse(sdl: &str) -> Result<TypeSystemDocument<&'_ str>, IntrospectionError> {
