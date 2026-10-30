@@ -3,7 +3,7 @@
 </div>
 <div align="center">
 
-A zero-copy lexer, parser and validator for standard GraphQL, built out of reusable combinators so the same machinery serves GraphQL-like DSLs.
+A zero-copy lexer, parser, validator, and Sans-I/O execution core for standard GraphQL, built out of reusable combinators so the same machinery serves GraphQL-like DSLs.
 
 [<img alt="github" src="https://img.shields.io/badge/github-al8n/smear-8da0cb?style=for-the-badge&logo=Github" height="22">][Github-url]
 <img alt="LoC" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fal8n%2F327b2a8aef9003246e45c6e47fe63937%2Fraw%2Fsmear" height="22">
@@ -22,10 +22,12 @@ A zero-copy lexer, parser and validator for standard GraphQL, built out of reusa
 
 **Smear** is a next-generation GraphQL implementation for Rust, built I/O-free from the bottom up.
 Today that means a zero-copy **lexer**, a **parser** that produces either a plain AST or a lossless
-CST, and a **validator** for the draft specification's type-system and executable-document rules.
-Everything above the lexer is built from reusable combinators, so the same machinery serves standard
-GraphQL and GraphQL-like DSLs — GraphQLx, the extended dialect that ships alongside, is one of those
-DSLs rather than a special case.
+CST, a **validator** for the draft specification's type-system and executable-document rules, and a
+Sans-I/O **executor**, behind the non-default `proto` feature, for queries, serial mutations and
+subscriptions. It returns a response tree that `smear::json` writes as §7.2.1 JSON. Everything above
+the lexer is built from reusable combinators, so the same machinery serves standard GraphQL and
+GraphQL-like DSLs — GraphQLx, the extended dialect that ships alongside, is one of those DSLs rather
+than a special case.
 
 *Next generation* is a claim about what smear does **not** decide for you. Today's Rust GraphQL
 libraries each settle three things on their users' behalf: the **string type**, because the parser's
@@ -40,17 +42,19 @@ calls you. That constraint is why the parser is generic over the source represen
 taking `&str`, why the validator's steady state allocates nothing and keeps its scratch in a buffer
 you own, and why `no_std` is reachable at all.
 
-The same constraint shapes what comes next. Execution — draft §6 and §7 — is being built as a
-Sans-I/O state machine: `poll_*` and `handle_*` pairs, time passed in rather than read, and the
+The same constraint shapes execution — draft §6 and §7. It is a Sans-I/O state machine: `poll_*`
+and `handle_*` pairs, time passed in rather than read, and the
 resolved values owned by the caller behind a trait rather than copied into a `Value` enum of ours, so
 a handle from FFI or wasm is a first-class value and not a conversion step. A core shaped that way can
 be driven by a `tokio` server, a `compio` one, a wasm module or an editor without any of them being
 privileged — which is what lets the runtime adapters and the ergonomic macro layer be thin crates
 *above* the core instead of assumptions baked *into* it.
 
-The first phase of that is here, behind the non-default `proto` feature: query execution, and
-nothing above it. The table below is the specification coverage as it stands, and the
-[roadmap](#roadmap) is the list of what is still missing, unchecked.
+The executor is here, behind the non-default `proto` feature: it covers query, serial mutation and
+subscription execution, returns the response tree, and ships with the `smear::json` writer. Smear
+still owns no transport, connection lifecycle or runtime adapter; those belong to the drivers above
+the core. The table below is the specification coverage as it stands, and the [roadmap](#roadmap) is
+the list of what is still missing, unchecked.
 
 ### What is implemented, and what is not
 
@@ -174,7 +178,7 @@ validate against, so checking them would be language design rather than conforma
 
 ```toml
 [dependencies]
-smear = "0.0.0"
+smear = "0.0.1"
 ```
 
 The validator is not a default feature yet — it flips into `default` alongside a minor bump, once its
@@ -182,7 +186,7 @@ API has settled. Until then:
 
 ```toml
 [dependencies]
-smear = { version = "0.0.0", features = ["validator"] }
+smear = { version = "0.0.1", features = ["validator"] }
 ```
 
 ### Parsing
@@ -279,7 +283,7 @@ are generic over the source type and the dialect; the upper three are standard G
 | Parser | `smear-parser` | `smear::parser` | Combinators that build an AST from the syntactic stream, and the rowan CST tower from the lossless one, plus the generic node definitions a new dialect reuses |
 | Schema | `smear-schema` | `smear::validator::schema` | The built-once `Schema` and, behind its `build` feature, draft §3 inside the builder. A consumer that only *reads* a schema takes it with `default-features = false` and gets no front end |
 | Validator | `smear-compiler` | `smear::validator` | The draft §5 rules over a parsed request, the rule vocabulary and the diagnostic rendering |
-| Execution | `graphql-proto` | `smear::proto` | Draft §6 as a Sans-I/O state machine: it says which field it needs next and waits to be told the answer, so the driver keeps the values, the resolvers and the runtime. Queries today, behind the non-default `proto` feature |
+| Execution | `graphql-proto` | `smear::proto` | Draft §6 as a Sans-I/O state machine: it says which field it needs next and waits to be told the answer, so the driver keeps the values, the resolvers and the runtime. Query, serial mutation and subscription execution are behind the non-default `proto` feature; it returns a response tree that `smear::json` writes as §7.2.1 JSON |
 | Diagnostic | (in `smear-schema`) | `smear::diagnostic` | The contract every error family above answers, so rendering is the consumer's choice. It ships with the schema because that is the lowest crate whose errors implement it |
 
 **Depend on `smear` and enable features, or depend on a member directly** — the two are the same
@@ -292,7 +296,7 @@ the members rather than by reading the umbrella's own table.
 
 ## Feature Flags
 
-Fifteen features. The lexer is not one of them: it is the irreducible base, the parser cannot exist
+Sixteen features. The lexer is not one of them: it is the irreducible base, the parser cannot exist
 without it, and a gate that can only ever be on is not a gate.
 
 | Feature | Description | Default |
@@ -303,7 +307,7 @@ without it, and a gate that can only ever be on is not a gate.
 | `parser` | `smear::parser` — the combinators and the ASTs. Off, `smear-parser` is not in the graph at all and the umbrella is the lexer alone | ✓ |
 | `smallvec` | Use `smallvec` for small collections | ✓ |
 | `validator` | `smear::validator` — the draft §5 rules, plus `smear-schema`'s `build` feature for the §3 pass. Implies `parser` and `graphql`. Adds no third-party dependency | |
-| `proto` | `smear::proto` — draft §6 query execution as a Sans-I/O state machine. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds no third-party dependency and defines no value type: the driver's own representation reaches it through a trait | |
+| `proto` | `smear::proto` — draft §6 query, serial mutation and subscription execution as a Sans-I/O state machine. It returns a response tree that `smear::json` writes as §7.2.1 JSON. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds no third-party dependency and defines no value type: the driver's own representation reaches it through a trait | |
 | `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator` and `std`. Adds no third-party dependency | |
 | `materialized-numbers` | A second set of GraphQL value productions whose `Int` and `Float` leaves carry a number instead of a source slice. One tree, generic over the integer: `Int` is `i32` — the width draft §3.5.1 specifies — or `i64`, the reading that takes §2.9.1's unbounded grammar at its word and accepts literals the specification does not; a refusal names which. `Float` is `f64` at both, because draft §3.5.2 says `Float` **is** IEEE 754 double precision. **Numbers only** — strings keep their slice, because materialisation is required to allocate nothing the slice parser did not already allocate. Implies `parser` and `graphql`; adds no dependency, leaves the slice AST and the slice parser untouched, and keeps the slice parser available for the literals neither width can hold | |
 | `rowan` | The lossless CST tower, and with `validator` the lossless validation doors. Implies `parser` and `std` | |
@@ -319,9 +323,9 @@ parser off, or names the member and skips the umbrella entirely. The two resolve
 
 ```toml
 [dependencies]
-smear = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec"] }
+smear = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec"] }
 # or
-smear-lexer = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec"] }
 ```
 
 ### `no_std`
@@ -383,8 +387,9 @@ load average is not a usable signal for that — it reads around 3.3 at 80% idle
 - Anyone building a GraphQL-like DSL, who wants the combinators and the CST substrate rather than a
   fixed grammar
 
-Smear is **not** a GraphQL server *yet*: there is no execution engine and no response serialisation.
-Today it is the front end one would be built on; the [roadmap](#roadmap) is the rest.
+Smear is **not** a GraphQL server *yet*: it has a Sans-I/O execution core and JSON response writer,
+but no transport, connection lifecycle or runtime adapter. A driver supplies those layers; the
+[roadmap](#roadmap) is the rest.
 
 Migration note: `smear-lexer` and `smear-parser` were merged into this crate in [#83] and are
 separate crates again, joined by `smear-schema`, `smear-compiler` and `graphql-proto`. **Nothing a

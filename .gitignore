@@ -5,11 +5,13 @@
 
 **target/
 **Cargo.lock
-# ...except the downstream fixture's, and the exception is load-bearing. `ci/downstream.sh` passes
-# `--locked` to every leg so the gate is hermetic: it answers "does smear's feature gate what it
-# advertises", which has nothing to do with which patch of a dependency is current, and an unpinned
-# resolve would make a red read "upstream released something". `--locked` with no committed lock is
-# a hard cargo error, so ignoring this file would leave the gate unable to run at all.
+# ...except the downstream fixture's, and the exception is load-bearing. It is a historical fixture
+# input, not a release-version mirror: `ci/downstream.sh` snapshots tracked files, refreshes only the
+# snapshot's six local path-package versions once, then passes `--locked` to every cargo leg there.
+# The checkout remains unchanged while third-party pins keep the gate hermetic: it answers
+# "does smear's feature gate what it advertises", not "which upstream patch is current". `--locked`
+# with no committed lock is a hard cargo error, so ignoring this file would leave the gate unable to
+# run at all.
 !ci/downstream/Cargo.lock
 
 **wip

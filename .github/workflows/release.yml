@@ -1,0 +1,296 @@
+name: Release
+run-name: Release ${{ inputs.version }} from ${{ inputs.commit }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact MAJOR.MINOR.PATCH workspace version
+        required: true
+        type: string
+      commit:
+        description: Exact 40-character main-branch commit SHA
+        required: true
+        type: string
+
+# Every job declares the authority it needs. In particular, no job combines the
+# crates.io OIDC token with GitHub contents-write permission.
+permissions: {}
+
+concurrency:
+  group: smear-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_TOOLCHAIN: 1.99.1
+
+jobs:
+  verify:
+    name: Verify exact release inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      lock_b64: ${{ steps.evidence.outputs.lock_b64 }}
+      lock_sha256: ${{ steps.evidence.outputs.lock_sha256 }}
+      preflight_manifest_b64: ${{ steps.evidence.outputs.preflight_manifest_b64 }}
+      preflight_manifest_sha256: ${{ steps.evidence.outputs.preflight_manifest_sha256 }}
+    steps:
+      - name: Check out the requested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      # This is intentionally inline, before any code from the checkout runs.
+      # workflow_dispatch fixes GITHUB_SHA to main's tip at dispatch time; the
+      # full-SHA input makes that immutable event identity explicit.
+      - name: Refuse anything except the exact dispatched main commit
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$REPOSITORY_DEFAULT_BRANCH" = "main"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$RELEASE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+
+      - name: Install the pinned release toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RELEASE_TOOLCHAIN" --profile minimal --no-self-update
+          rustc "+$RELEASE_TOOLCHAIN" -Vv
+
+      - name: Exercise the offline release state machine
+        run: python3 ci/release.py selftest
+
+      - name: Require exact-SHA CI, macOS, and Miri success
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python3 ci/release.py verify \
+            --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" \
+            --target-dir "$RUNNER_TEMP/smear-release/verify-metadata" \
+            --github-gates \
+            --no-workspace
+
+      # The root lock is deliberately ignored. Cargo 1.99.1 cannot verify this
+      # unpublished DAG in a dry run: its temporary registry has no checksum for
+      # the local dependency it just packaged. Exact-SHA CI is the source/build
+      # verdict; this step creates the six byte-evidence archives with locked,
+      # no-verify packaging. Real locked publishes verify after each dependency
+      # becomes publicly indexed.
+      - name: Generate lock and package pre-approval archives
+        id: evidence
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python3 ci/release.py prepare \
+            --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" \
+            --target-dir "$RUNNER_TEMP/smear-release/verify-target"
+
+  publish:
+    name: Publish exact crates through OIDC
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment:
+      name: crates-io
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    outputs:
+      registry_manifest_b64: ${{ steps.publish.outputs.registry_manifest_b64 }}
+      registry_manifest_sha256: ${{ steps.publish.outputs.registry_manifest_sha256 }}
+    steps:
+      - name: Check out the approved commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      # Environment approval happens before this job starts. Repeat the inline
+      # event/checkout equality before running repository code or Cargo.
+      - name: Recheck the exact approved main commit
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$REPOSITORY_DEFAULT_BRANCH" = "main"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$RELEASE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+
+      - name: Install the pinned release toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RELEASE_TOOLCHAIN" --profile minimal --no-self-update
+          rustc "+$RELEASE_TOOLCHAIN" -Vv
+
+      # This must precede every Cargo invocation in the protected job.
+      - name: Reconstruct and authenticate the approved root lock
+        env:
+          RELEASE_LOCK_B64: ${{ needs.verify.outputs.lock_b64 }}
+          RELEASE_PREFLIGHT_MANIFEST_B64: ${{ needs.verify.outputs.preflight_manifest_b64 }}
+        run: |
+          python3 ci/release.py restore \
+            --lock-sha256 "${{ needs.verify.outputs.lock_sha256 }}" \
+            --manifest-sha256 "${{ needs.verify.outputs.preflight_manifest_sha256 }}" \
+            --manifest-output "$RUNNER_TEMP/smear-release/publish/preflight.json"
+
+      - name: Repeat exact-SHA CI, macOS, and Miri gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          cargo "+$RELEASE_TOOLCHAIN" -Vv
+          python3 ci/release.py verify \
+            --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" \
+            --target-dir "$RUNNER_TEMP/smear-release/publish-metadata" \
+            --github-gates
+
+      - name: Repackage and match every pre-approval archive byte
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python3 ci/release.py package \
+            --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" \
+            --lock-sha256 "${{ needs.verify.outputs.lock_sha256 }}" \
+            --target-dir "$RUNNER_TEMP/smear-release/publish-target" \
+            --expected-manifest "$RUNNER_TEMP/smear-release/publish/preflight.json" \
+            --output "$RUNNER_TEMP/smear-release/publish/local.json"
+
+      # One exchange covers all six crates only when all six crates.io configs
+      # match al8n/smear + release.yml + the crates-io environment.
+      - name: Exchange the approved workflow identity for one temporary token
+        id: auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
+      - name: Publish or prove each immutable version in DAG order
+        id: publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python3 ci/release.py publish \
+            --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" \
+            --lock-sha256 "${{ needs.verify.outputs.lock_sha256 }}" \
+            --target-dir "$RUNNER_TEMP/smear-release/publish-target" \
+            --package-manifest "$RUNNER_TEMP/smear-release/publish/local.json" \
+            --poll-timeout 180 \
+            --output "$RUNNER_TEMP/smear-release/publish/registry.json"
+
+  release:
+    name: Create immutable tag and GitHub Release
+    needs: [verify, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the released commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      # Do not compare with the moving live tip here. The two prior jobs already
+      # proved this immutable workflow event was main; allowing main to advance
+      # after registry publication is necessary for safe tag/release recovery.
+      - name: Recheck the immutable workflow event and checkout
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$RELEASE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+
+      - name: Install the pinned release toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RELEASE_TOOLCHAIN" --profile minimal --no-self-update
+          rustc "+$RELEASE_TOOLCHAIN" -Vv
+
+      - name: Reconstruct the approved root lock and preflight manifest
+        env:
+          RELEASE_LOCK_B64: ${{ needs.verify.outputs.lock_b64 }}
+          RELEASE_PREFLIGHT_MANIFEST_B64: ${{ needs.verify.outputs.preflight_manifest_b64 }}
+        run: |
+          python3 ci/release.py restore \
+            --lock-sha256 "${{ needs.verify.outputs.lock_sha256 }}" \
+            --manifest-sha256 "${{ needs.verify.outputs.preflight_manifest_sha256 }}" \
+            --manifest-output "$RUNNER_TEMP/smear-release/github/preflight.json"
+
+      - name: Restore protected registry evidence
+        env:
+          RELEASE_REGISTRY_MANIFEST_B64: ${{ needs.publish.outputs.registry_manifest_b64 }}
+        run: |
+          python3 ci/release.py restore-json \
+            --encoded-env RELEASE_REGISTRY_MANIFEST_B64 \
+            --sha256 "${{ needs.publish.outputs.registry_manifest_sha256 }}" \
+            --label "protected registry manifest" \
+            --output "$RUNNER_TEMP/smear-release/github/registry.json"
+
+      - name: Package the release assets a third time
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          cargo "+$RELEASE_TOOLCHAIN" -Vv
+          python3 ci/release.py package \
+            --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" \
+            --lock-sha256 "${{ needs.verify.outputs.lock_sha256 }}" \
+            --target-dir "$RUNNER_TEMP/smear-release/github-target" \
+            --expected-manifest "$RUNNER_TEMP/smear-release/github/preflight.json" \
+            --output "$RUNNER_TEMP/smear-release/github/local.json"
+
+      - name: Verify public registry, then create tag, release, and exact assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python3 ci/release.py release \
+            --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" \
+            --lock-sha256 "${{ needs.verify.outputs.lock_sha256 }}" \
+            --target-dir "$RUNNER_TEMP/smear-release/github-target" \
+            --package-manifest "$RUNNER_TEMP/smear-release/github/local.json" \
+            --registry-manifest "$RUNNER_TEMP/smear-release/github/registry.json" \
+            --poll-timeout 180 \
+            --evidence-dir "$RUNNER_TEMP/smear-release/github/evidence"

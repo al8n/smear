@@ -9,7 +9,10 @@
 # sibling of this problem. Six review rounds there converged on one shape and one lesson — *a check
 # that establishes its conclusion relative to a frame it never establishes* — and the shape is what
 # is copied: composed flags, a committed lock read with `--locked`, POS legs that must compile, NEG
-# legs that must fail ON A NAMED REASON, and no dev-dependencies.
+# legs that must fail ON A NAMED REASON, and no dev-dependencies. The committed lock is a historical
+# fixture input, deliberately not release-bumped: `ci/downstream.sh` copies tracked files into a
+# private snapshot, refreshes only that copy's local path-package versions once, then certifies the
+# planner and runs every cargo leg `--locked` against the snapshot.
 #
 # ## Why it is its own workspace root and not a member of smear's
 #
