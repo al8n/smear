@@ -2040,6 +2040,108 @@ fn a_default_value_cannot_rewrite_the_schema() {
   assert!(schema.type_by_name(b"not").is_none());
 }
 
+/// A default value cannot carry a directive into the definition it sits in.
+///
+/// The grammar admits const directives after a default, so `1 @deprecated(reason: "x")` is one
+/// input value with a default, and copied through it would deprecate an input value the response
+/// reports as not deprecated. It is refused wherever a default is read: on a field's argument, on
+/// an input-object field, and on a specified directive's argument — whose default is compared with
+/// the injected one first, and does not pass for it, so the directive is written out and refused
+/// rather than left to the build.
+#[test]
+fn a_default_value_cannot_carry_a_directive() {
+  let cases = [
+    (
+      response(
+        r#"{"kind":"OBJECT","name":"Query","fields":[
+          {"name":"ok","args":[
+            {"name":"arg","type":{"kind":"SCALAR","name":"Int"},
+             "defaultValue":"1 @deprecated(reason: \"x\")","isDeprecated":false}
+          ],"type":{"kind":"SCALAR","name":"Int"}}
+        ]}"#,
+      ),
+      "Query.ok.arg",
+    ),
+    (
+      response(
+        r#"{"kind":"OBJECT","name":"Query","fields":[
+          {"name":"ok","args":[
+            {"name":"by","type":{"kind":"INPUT_OBJECT","name":"By"},"defaultValue":null}
+          ],"type":{"kind":"SCALAR","name":"Int"}}
+        ]},
+        {"kind":"INPUT_OBJECT","name":"By","inputFields":[
+          {"name":"id","type":{"kind":"SCALAR","name":"Int"},
+           "defaultValue":"1 @deprecated(reason: \"x\")","isDeprecated":false}
+        ]}"#,
+      ),
+      "By.id",
+    ),
+    // `@deprecated` as the build injects it but for the suffix on its default.
+    (
+      with_directives(
+        r#"{"name":"deprecated","locations":[
+          "FIELD_DEFINITION","ARGUMENT_DEFINITION","INPUT_FIELD_DEFINITION","ENUM_VALUE"
+        ],"args":[
+          {"name":"reason","type":{"kind":"SCALAR","name":"String"},
+           "defaultValue":"\"No longer supported\" @deprecated"}
+        ]}"#,
+      ),
+      "deprecated.reason",
+    ),
+  ];
+  for (json, owner) in cases {
+    match Schema::from_introspection(&json) {
+      Err(IntrospectionError::Response(error)) => {
+        assert_eq!(
+          error.kind(),
+          ResponseErrorKind::MalformedDefaultValue,
+          "{json}"
+        );
+        assert_eq!(error.owner(), Some(owner), "{json}");
+      }
+      Err(other) => panic!("refused for the wrong reason: {other}\n---\n{json}"),
+      Ok(_) => panic!("a default with a directive after it was accepted\n---\n{json}"),
+    }
+  }
+
+  // Whitespace after the value is still just the value, on an argument and in the comparison.
+  let plain = response(
+    r#"{"kind":"OBJECT","name":"Query","fields":[
+      {"name":"ok","args":[
+        {"name":"a","type":{"kind":"SCALAR","name":"Int"},"defaultValue":"1"},
+        {"name":"b","type":{"kind":"SCALAR","name":"Int"},"defaultValue":"1 \n"}
+      ],"type":{"kind":"SCALAR","name":"Int"}}
+    ]}"#,
+  );
+  let schema = from_response(&plain);
+  let (query, _) = schema.type_by_name(b"Query").expect("Query");
+  let ok = schema
+    .field(query, schema.sym(b"ok").expect("interned"))
+    .expect("Query.ok");
+  for name in [&b"a"[..], b"b"] {
+    let arg = schema
+      .input(ok.args(), schema.sym(name).expect("interned"))
+      .expect("an argument of Query.ok");
+    assert_eq!(arg.default_kind(), DefaultKind::NonNull);
+  }
+
+  let injected = from_response(&with_directives(
+    r#"{"name":"deprecated","locations":[
+      "FIELD_DEFINITION","ARGUMENT_DEFINITION","INPUT_FIELD_DEFINITION","ENUM_VALUE"
+    ],"args":[
+      {"name":"reason","type":{"kind":"SCALAR","name":"String"},
+       "defaultValue":"\"No longer supported\" "}
+    ]}"#,
+  ));
+  assert!(
+    injected
+      .directive_by_name(b"deprecated")
+      .expect("@deprecated")
+      .is_built_in(),
+    "the injected default followed by whitespace was not taken for the injected one"
+  );
+}
+
 // ---------------------------------------------------------------------------------------------
 // draft §3, through the introspection door
 // ---------------------------------------------------------------------------------------------

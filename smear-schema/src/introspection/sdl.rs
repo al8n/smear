@@ -758,9 +758,12 @@ fn attach(error: ResponseError, owner: Option<&str>) -> ResponseError {
 ///
 /// So the value is handed to the parser inside a throwaway document of its own, and the result is
 /// checked structurally rather than merely for success. Success alone is not enough: `1 g: Int`
-/// parses, and would add a field. **One definition, holding one input value, with a default** is
-/// the shape that admits nothing but a complete const value — anything the value did not consume
-/// becomes a second field, a second definition, or a syntax error, and all three fail this.
+/// parses, and would add a field. **One definition, holding one input value, with a default and no
+/// directives** is the shape that admits nothing but a complete const value — anything the value
+/// did not consume becomes a directive, a second field, a second definition, or a syntax error, and
+/// all four fail this. No directives, because the grammar admits const directives after a default:
+/// `1 @deprecated(reason: "x")` is one input value with a default, and copied through it would
+/// smuggle a deprecation into the rendered SDL that contradicts the response's own `isDeprecated`.
 fn check_default_value(default: &str, owner: &str, subject: &str) -> Rendered {
   read_default_value(default, |_| ()).ok_or_else(|| {
     ResponseError::new(ResponseErrorKind::MalformedDefaultValue, default)
@@ -795,7 +798,7 @@ fn read_default_value<R>(
   };
   let values: &[_] = input.fields_definition()?.input_value_definitions();
   match values {
-    [only] => Some(read(only.default_value()?.value())),
+    [only] if only.directives().is_none() => Some(read(only.default_value()?.value())),
     _ => None,
   }
 }

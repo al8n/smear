@@ -94,6 +94,10 @@ fn a_default_compares_by_its_canonical_text() {
     canonical_default("1} type Evil { x: Int } input Z { q: Int "),
     None
   );
+  assert_eq!(
+    canonical_default("\"No longer supported\" @deprecated"),
+    None
+  );
 }
 
 /// The meta-schema the door holds a response's meta types to is the one every build injects: kind,
