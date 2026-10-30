@@ -65,7 +65,7 @@ impl Sink for Measure {
 
 /// Why a constant value has no canonical text.
 #[derive(Debug, Clone, Copy)]
-pub(super) enum Unprinted {
+pub(crate) enum Unprinted {
   /// The value opens more than [`MAX_CONST_VALUE_DEPTH`] containers, which
   /// [`SchemaBuilder::const_value`](super::SchemaBuilder::const_value) has already refused it for.
   TooDeep,
@@ -74,7 +74,10 @@ pub(super) enum Unprinted {
 }
 
 /// Prints a constant value in graphql-js's `print` form. See the module header for the form.
-pub(super) fn canonical<S, K>(value: &ConstInputValue<S>, sink: &mut K) -> Result<(), Unprinted>
+///
+/// The introspection door prints a response's default with this too, where it has to compare a
+/// specified directive's argument with the one the build injects.
+pub(crate) fn canonical<S, K>(value: &ConstInputValue<S>, sink: &mut K) -> Result<(), Unprinted>
 where
   S: AsRef<[u8]>,
   K: Sink,

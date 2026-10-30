@@ -53,14 +53,20 @@
 //!   trip compares the text exactly, and [`the_door_reads_a_real_response`] reads a server's own
 //!   spellings.
 //! - **A spelled-out built-in the response cannot tell from the build's own.** A built-in scalar
-//!   whose response says nothing the injected one would not — no `specifiedByURL`, and the
-//!   built-in's own description or none asked for — is left to the build, so a document that
-//!   spelled it out gets `TypeDef::is_built_in` false from the SDL door and true from this one. One
-//!   the response describes otherwise is written out and agrees on everything
-//!   ([`a_built_in_scalar_the_response_describes_is_written_out`]); the five specified directives
-//!   are always left to the build. The fixture does not redefine one, and
-//!   [`redefining_a_built_in_is_the_one_flag_introspection_loses`] pins the loss instead of hiding
-//!   it.
+//!   or a specified directive whose response entry says nothing the injected one would not — for a
+//!   scalar, no `specifiedByURL` and the built-in's own description or none asked for; for a
+//!   directive, its description (or none asked for), locations, argument and repeatability exactly
+//!   as injected — is left to the build. A document that spelled it out then gets `is_built_in`
+//!   false from the SDL door and true from this one, and the definition sits where the build
+//!   injects it — a scalar after the document's types and the meta-schema, a directive after the
+//!   document's own directives, both in the built-in SDL's order — rather than where the document
+//!   wrote it. [`Facts`] compares the directive order, so that place shows; it keys types by name,
+//!   so a scalar's does not. One the response reports otherwise is written out and agrees on
+//!   everything, place included ([`a_built_in_scalar_the_response_describes_is_written_out`],
+//!   [`a_specified_directive_the_response_reports_otherwise_is_written_out`]). The fixture
+//!   redefines none; [`redefining_a_built_in_is_the_one_flag_introspection_loses`] and
+//!   [`a_specified_directive_spelled_as_the_build_injects_it_loses_its_flag_and_its_place`] pin the
+//!   losses instead of hiding them.
 
 // `Schema::from_introspection`, `IntrospectionError` and `ResponseErrorKind` below all live behind
 // `#[cfg(feature = "introspection")]` in `smear-schema/src/introspection/`, not merely
@@ -1211,6 +1217,122 @@ fn redefining_a_built_in_is_the_one_flag_introspection_loses() {
   }
 }
 
+/// A specified directive the response reports other than as the build injects it is written out
+/// as a definition of its own, so the two doors agree on all of it: the user-spelled flag, the
+/// texts, and its place among the document's directives.
+///
+/// One spelling for each way an entry can differ: its description, a `null` one, its locations,
+/// its argument's type, its argument's default, and its repeatability.
+#[test]
+fn a_specified_directive_the_response_reports_otherwise_is_written_out() {
+  const REASON: &str = "\"Explains why this element was deprecated, usually also including a suggestion for how to access supported similar data. Formatted using the Markdown syntax, as specified by [CommonMark](https://commonmark.org/).\"";
+  const DEPRECATED: &str = "\"Marks an element of a GraphQL schema as no longer supported.\"";
+  let spellings = [
+    (
+      "skip",
+      String::from(
+        "\"Skips, our way.\" directive @skip(\"Skipped when true.\" if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT",
+      ),
+    ),
+    ("oneOf", String::from("directive @oneOf on INPUT_OBJECT")),
+    (
+      "deprecated",
+      std::format!(
+        "{DEPRECATED} directive @deprecated({REASON} reason: String = \"No longer supported\") on FIELD_DEFINITION | ENUM_VALUE"
+      ),
+    ),
+    (
+      "include",
+      String::from(
+        "\"Directs the executor to include this field or fragment only when the `if` argument is true.\" directive @include(\"Included when true.\" if: Boolean) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT",
+      ),
+    ),
+    (
+      "deprecated",
+      std::format!(
+        "{DEPRECATED} directive @deprecated({REASON} reason: String = \"Gone.\") on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE"
+      ),
+    ),
+    (
+      "specifiedBy",
+      String::from(
+        "\"Exposes a URL that specifies the behavior of this scalar.\" directive @specifiedBy(\"The URL that specifies the behavior of this scalar.\" url: String!) repeatable on SCALAR",
+      ),
+    ),
+  ];
+
+  for (name, spelled) in spellings {
+    let sdl = std::format!(
+      "type Query {{ ok: Int }}\ndirective @before on FIELD\n{spelled}\ndirective @after on FIELD"
+    );
+    let from_sdl = built(&sdl);
+    let from_json = from_response(&server::introspect(&from_sdl));
+    let directive = from_json
+      .directive_by_name(name.as_bytes())
+      .unwrap_or_else(|| panic!("@{name}"));
+    assert!(
+      !directive.is_built_in(),
+      "the door left the response's `@{name}` to the build\n---\n{sdl}"
+    );
+    assert_eq!(facts(&from_sdl), facts(&from_json), "{sdl}");
+  }
+}
+
+/// The specified-directive twin of the loss above.
+///
+/// A document that spells out a specified directive exactly as the build injects it gets a
+/// definition of its own from the SDL door, and the door, which cannot tell it from the built-in,
+/// leaves it to the build. The flag diverges, and so does its place: the build appends the
+/// specified directives it injects after the document's own, where the document wrote this one
+/// among them. GitLab's `@specifiedBy` is this case. Nothing else diverges.
+#[test]
+fn a_specified_directive_spelled_as_the_build_injects_it_loses_its_flag_and_its_place() {
+  let sdl = "type Query { ok: Int }\n\
+    \"Exposes a URL that specifies the behavior of this scalar.\"\n\
+    directive @specifiedBy(\"The URL that specifies the behavior of this scalar.\" url: String!) on SCALAR\n\
+    directive @after on FIELD";
+  let from_sdl = built(sdl);
+  let from_json = from_response(&server::introspect(&from_sdl));
+
+  let sdl_facts = facts(&from_sdl);
+  let mut json_facts = facts(&from_json);
+  assert!(!sdl_facts.directives["specifiedBy"].built_in);
+  assert!(
+    json_facts.directives["specifiedBy"].built_in,
+    "the door recovered the flag; the loss recorded in the module header is stale"
+  );
+  assert_eq!(
+    sdl_facts.directive_order,
+    [
+      "specifiedBy",
+      "after",
+      "skip",
+      "include",
+      "deprecated",
+      "oneOf"
+    ]
+  );
+  assert_eq!(
+    json_facts.directive_order,
+    [
+      "after",
+      "skip",
+      "include",
+      "deprecated",
+      "specifiedBy",
+      "oneOf"
+    ]
+  );
+
+  json_facts
+    .directives
+    .get_mut("specifiedBy")
+    .expect("@specifiedBy")
+    .built_in = false;
+  json_facts.directive_order = sdl_facts.directive_order.clone();
+  assert_eq!(sdl_facts, json_facts);
+}
+
 // ---------------------------------------------------------------------------------------------
 // the door against a response nobody generated
 // ---------------------------------------------------------------------------------------------
@@ -1226,7 +1348,7 @@ const HAND_WRITTEN: &str = r#"
   "mutationType": null,
   "subscriptionType": null,
   "directives": [
-    {"name":"skip","locations":["FIELD"],"args":[
+    {"name":"skip","locations":["FIELD","FRAGMENT_SPREAD","INLINE_FRAGMENT"],"args":[
       {"name":"if","type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}},"defaultValue":null}
     ],"isRepeatable":false},
     {"name":"cacheControl","description":"Cache hints.","locations":["FIELD_DEFINITION","OBJECT"],"args":[
@@ -1289,8 +1411,8 @@ fn the_door_reads_a_real_response() {
   let (cache_scope, _) = schema.type_by_name(b"CacheScope").expect("CacheScope");
   assert_eq!(schema.enum_values_of(cache_scope).len(), 2);
 
-  // `@skip` came back injected, not as the response declared it; `@cacheControl` came from the
-  // response and is repeatable.
+  // `@skip`, reported as the build injects it — no description asked for, the specified locations
+  // and argument — came back injected; `@cacheControl` came from the response and is repeatable.
   let skip = schema.directive_by_name(b"skip").expect("@skip");
   assert!(skip.is_built_in());
   let cache = schema

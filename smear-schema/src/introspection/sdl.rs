@@ -18,12 +18,14 @@
 //! leaves it true. Dropping them is what makes the two doors produce the same flags, and it costs
 //! nothing: the build puts back exactly what was dropped.
 //!
-//! A built-in scalar is dropped only while that last clause holds. One whose response carries a
-//! `specifiedByURL`, a `null` description or a description other than the built-in's own says
-//! something the injected one would lose, so it is written out as a definition of its own — which
-//! is how the SDL door reads a document that spelled the scalar out, flag and text both, so the
-//! two doors agree on it. A server whose built-in descriptions are not graphql-js's has its five
-//! scalars written out the same way, keeping its own texts.
+//! A built-in scalar or a specified directive is dropped only while that last clause holds. One
+//! the response reports other than as the build injects it says something the injected one would
+//! lose — for a scalar, a `specifiedByURL`, a `null` description or a description other than the
+//! built-in's own; for a directive, any of its description, locations, arguments (with their
+//! descriptions, types and defaults) or repeatability — so it is written out as a definition of its
+//! own. That is how the SDL door reads a document that spelled the built-in out, flag, text and
+//! place among its siblings all three, so the two doors agree on it. A server whose built-in texts
+//! are not graphql-js's has its built-ins written out the same way, keeping its own.
 //!
 //! It emits **nothing it has not checked**, and most of the checking happened before it ran.
 //! [`decode`](super::decode) admits a name only if it spells one, and resolves type kinds and
@@ -49,7 +51,8 @@ use tokora::{Parse as _, Parser};
 use smear_parser::graphql::{
   GraphQL,
   ast::{
-    TypeDefinition, TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
+    ConstInputValue, TypeDefinition, TypeSystemDefinition, TypeSystemDefinitionOrExtension,
+    TypeSystemDocument,
   },
   error::GraphqlErrors,
   syntactic::{GraphqlLexer, type_system_document},
@@ -57,13 +60,14 @@ use smear_parser::graphql::{
 
 use super::{
   super::{
-    // The builder's own escaping, so a description renders as the literal the build decodes back.
-    builder::print::escape,
+    // The builder's own escaping, so a description renders as the literal the build decodes back,
+    // and its own printing, so a default compares as the build would keep it.
+    builder::print::{canonical, escape},
     builtin,
     // The SDL door's own owner-path helper, so `Query.hero.first` reads the same whichever door
     // refused it.
     error::owner_path as path,
-    repr::TypeKind,
+    repr::{DirectiveLocation, DirectiveLocations, TypeKind},
   },
   decode,
   error::{ResponseError, ResponseErrorKind},
@@ -300,7 +304,7 @@ impl Renderer {
   /// description written in front of it on the same line.
   fn input_value(&mut self, value: &IntrospectedInputValue<'_>, owner: &str) -> Rendered {
     let name = value.name.as_str();
-    if let Some(description) = value.description.as_ref() {
+    if let Some(Some(description)) = &value.description {
       quote(description.as_str(), &mut self.out);
       self.out.push(' ');
     }
@@ -389,9 +393,11 @@ impl Renderer {
 
   fn directive(&mut self, directive: &IntrospectedDirective<'_>) -> Rendered {
     let name = directive.name.as_str();
-    // As with the built-in scalars: injected by the build, so re-emitting one would flip
-    // `DirectiveDef::is_built_in` for a definition the two doors are supposed to agree on.
-    if builtin::BUILT_IN_DIRECTIVES.contains(&name) {
+    // As with the built-in scalars: injected by the build, so re-emitting one the build would
+    // inject anyway would flip `DirectiveDef::is_built_in` for a definition the two doors are
+    // supposed to agree on — and one the response reports otherwise is the document's own, which
+    // the SDL door keeps as such, so it is written out.
+    if is_the_specified_directive(directive) {
       return Ok(());
     }
     if directive.locations.is_empty() {
@@ -407,7 +413,7 @@ impl Renderer {
       );
     }
 
-    self.description(directive.description.as_ref(), "");
+    self.description(directive.description.as_ref().and_then(Option::as_ref), "");
     self.out.push_str("directive @");
     self.out.push_str(name);
     self.arguments(&directive.args, name)?;
@@ -441,10 +447,154 @@ fn is_the_built_in_scalar(ty: &IntrospectedType<'_>, name: &str) -> bool {
     return false;
   };
   ty.specified_by_url.is_none()
-    && match &ty.description {
-      None => true,
-      Some(Some(text)) => text.as_str() == builtin::BUILT_IN_SCALAR_DESCRIPTIONS[at],
-      Some(None) => false,
+    && says_only(
+      ty.description.as_ref(),
+      builtin::BUILT_IN_SCALAR_DESCRIPTIONS[at],
+    )
+}
+
+/// Whether a description a response wrote says nothing the built-in's would not: absent, because
+/// the query did not ask, or the built-in's own text. A `null` one says there is none.
+fn says_only(description: Option<&Option<Text<'_>>>, built_in: &str) -> bool {
+  match description {
+    None => true,
+    Some(Some(text)) => text.as_str() == built_in,
+    Some(None) => false,
+  }
+}
+
+/// One of the five specified directives as every build injects it, in the terms introspection
+/// reports it in.
+struct SpecifiedDirective {
+  name: &'static str,
+  description: &'static str,
+  locations: DirectiveLocations,
+  repeatable: bool,
+  argument: Option<SpecifiedArgument>,
+}
+
+/// The one argument a specified directive declares, if it declares one.
+struct SpecifiedArgument {
+  name: &'static str,
+  description: &'static str,
+  /// The type, spelled as SDL.
+  ty: &'static str,
+  /// The default's canonical text.
+  default: Option<&'static str>,
+}
+
+/// The five specified directives as every build injects them, in
+/// [`builtin::BUILT_IN_DIRECTIVES`]' order: what a response's entry for one has to be, exactly,
+/// for the door to leave it to the build. `the_specified_directives_are_the_injected_ones` holds
+/// this to what the build injects.
+static SPECIFIED_DIRECTIVES: [SpecifiedDirective; 5] = {
+  const EXECUTABLE: DirectiveLocations = DirectiveLocations::from_bits(0)
+    .with(DirectiveLocation::Field)
+    .with(DirectiveLocation::FragmentSpread)
+    .with(DirectiveLocation::InlineFragment);
+  [
+    SpecifiedDirective {
+      name: "skip",
+      description: "Directs the executor to skip this field or fragment when the `if` argument is true.",
+      locations: EXECUTABLE,
+      repeatable: false,
+      argument: Some(SpecifiedArgument {
+        name: "if",
+        description: "Skipped when true.",
+        ty: "Boolean!",
+        default: None,
+      }),
+    },
+    SpecifiedDirective {
+      name: "include",
+      description: "Directs the executor to include this field or fragment only when the `if` argument is true.",
+      locations: EXECUTABLE,
+      repeatable: false,
+      argument: Some(SpecifiedArgument {
+        name: "if",
+        description: "Included when true.",
+        ty: "Boolean!",
+        default: None,
+      }),
+    },
+    SpecifiedDirective {
+      name: "deprecated",
+      description: "Marks an element of a GraphQL schema as no longer supported.",
+      locations: DirectiveLocations::from_bits(0)
+        .with(DirectiveLocation::FieldDefinition)
+        .with(DirectiveLocation::ArgumentDefinition)
+        .with(DirectiveLocation::InputFieldDefinition)
+        .with(DirectiveLocation::EnumValue),
+      repeatable: false,
+      argument: Some(SpecifiedArgument {
+        name: "reason",
+        description: "Explains why this element was deprecated, usually also including a suggestion for how to access supported similar data. Formatted using the Markdown syntax, as specified by [CommonMark](https://commonmark.org/).",
+        ty: "String",
+        default: Some("\"No longer supported\""),
+      }),
+    },
+    SpecifiedDirective {
+      name: "specifiedBy",
+      description: "Exposes a URL that specifies the behavior of this scalar.",
+      locations: DirectiveLocations::from_bits(0).with(DirectiveLocation::Scalar),
+      repeatable: false,
+      argument: Some(SpecifiedArgument {
+        name: "url",
+        description: "The URL that specifies the behavior of this scalar.",
+        ty: "String!",
+        default: None,
+      }),
+    },
+    SpecifiedDirective {
+      name: "oneOf",
+      description: "Indicates exactly one field must be supplied and this field must not be `null`.",
+      locations: DirectiveLocations::from_bits(0).with(DirectiveLocation::InputObject),
+      repeatable: false,
+      argument: None,
+    },
+  ]
+};
+
+/// Whether a response's directive is one of the five specified directives exactly as the build
+/// injects it — the same description or none asked for, the same locations, the same argument with
+/// the same description, type and default, and the same repeatability — so leaving it to the
+/// build loses nothing.
+fn is_the_specified_directive(directive: &IntrospectedDirective<'_>) -> bool {
+  let name = directive.name.as_str();
+  let Some(specified) = SPECIFIED_DIRECTIVES
+    .iter()
+    .find(|specified| specified.name == name)
+  else {
+    return false;
+  };
+  let locations: DirectiveLocations = directive.locations.iter().copied().collect();
+  says_only(directive.description.as_ref(), specified.description)
+    && locations == specified.locations
+    && directive.is_repeatable == specified.repeatable
+    && match (directive.args.as_slice(), &specified.argument) {
+      ([], None) => true,
+      ([argument], Some(expected)) => is_the_specified_argument(argument, expected, name),
+      _ => false,
+    }
+}
+
+/// Whether a response's argument is a specified directive's own, exactly: name, description,
+/// type, default and no deprecation.
+fn is_the_specified_argument(
+  argument: &IntrospectedInputValue<'_>,
+  expected: &SpecifiedArgument,
+  owner: &str,
+) -> bool {
+  argument.name.as_str() == expected.name
+    && says_only(argument.description.as_ref(), expected.description)
+    && argument.deprecated.is_none()
+    && type_reference(&argument.ty, owner, expected.name).is_ok_and(|ty| ty == expected.ty)
+    && match (&argument.default_value, expected.default) {
+      (None, None) => true,
+      (Some(default), Some(expected)) => {
+        canonical_default(default.as_str()).is_some_and(|default| default == expected)
+      }
+      _ => false,
     }
 }
 
@@ -578,12 +728,20 @@ fn attach(error: ResponseError, owner: Option<&str>) -> ResponseError {
 /// the shape that admits nothing but a complete const value — anything the value did not consume
 /// becomes a second field, a second definition, or a syntax error, and all three fail this.
 fn check_default_value(default: &str, owner: &str, subject: &str) -> Rendered {
-  let probe = std::format!("input P{{f:T={default}}}");
-  let refuse = || {
+  read_default_value(default, |_| ()).ok_or_else(|| {
     ResponseError::new(ResponseErrorKind::MalformedDefaultValue, default)
       .owned_by(path(&[owner, subject]))
-  };
+  })
+}
 
+/// Parses a server-printed default inside a throwaway document of its own and hands `read` the
+/// one const value in it, or answers `None` for text that is anything else. See
+/// [`check_default_value`] for why the shape is what admits nothing but a complete value.
+fn read_default_value<R>(
+  default: &str,
+  read: impl FnOnce(&ConstInputValue<&str>) -> R,
+) -> Option<R> {
+  let probe = std::format!("input P{{f:T={default}}}");
   let document = Parser::with_parser::<
     GraphqlLexer<'_, str>,
     TypeSystemDocument<&str>,
@@ -592,21 +750,31 @@ fn check_default_value(default: &str, owner: &str, subject: &str) -> Rendered {
     GraphQL,
   >(type_system_document)
   .parse_str(&probe)
-  .map_err(|_| refuse())?;
+  .ok()?;
 
   let definitions: &[_] = document.definitions();
   let [TypeSystemDefinitionOrExtension::Definition(described)] = definitions else {
-    return Err(refuse());
+    return None;
   };
   let TypeSystemDefinition::Type(TypeDefinition::InputObject(input)) = described.node() else {
-    return Err(refuse());
+    return None;
   };
-  let values: &[_] = match input.fields_definition() {
-    Some(fields) => fields.input_value_definitions(),
-    None => return Err(refuse()),
-  };
+  let values: &[_] = input.fields_definition()?.input_value_definitions();
   match values {
-    [only] if only.default_value().is_some() => Ok(()),
-    _ => Err(refuse()),
+    [only] => Some(read(only.default_value()?.value())),
+    _ => None,
   }
 }
+
+/// A server-printed default printed again the way the build prints every default, so two spellings
+/// of one value compare equal — or `None` when it is not one const value.
+fn canonical_default(default: &str) -> Option<String> {
+  read_default_value(default, |value| {
+    let mut out = String::new();
+    canonical(value, &mut out).ok().map(|()| out)
+  })
+  .flatten()
+}
+
+#[cfg(test)]
+mod tests;

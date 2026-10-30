@@ -99,7 +99,7 @@ impl<'a> Census<'a> {
     }
     for directive in &schema.directives {
       census.name(Some(directive.name));
-      census.text(directive.description.as_ref());
+      census.text(directive.description.as_ref().and_then(Option::as_ref));
       for arg in &directive.args {
         census.input(arg);
       }
@@ -138,7 +138,7 @@ impl<'a> Census<'a> {
 
   fn input(&mut self, input: &IntrospectedInputValue<'a>) {
     self.name(Some(input.name));
-    self.text(input.description.as_ref());
+    self.text(input.description.as_ref().and_then(Option::as_ref));
     self.type_ref(&input.ty);
     self.text(input.default_value.as_ref());
     self.deprecated(&input.deprecated);
@@ -1154,8 +1154,11 @@ fn prose_is_read_wherever_draft_4_has_it() {
     Some(Some("Gone."))
   );
   assert_eq!(
-    fields[0].args[0].description.as_ref().map(Text::as_str),
-    Some("An argument.")
+    fields[0].args[0]
+      .description
+      .as_ref()
+      .map(|description| description.as_ref().map(Text::as_str)),
+    Some(Some("An argument."))
   );
   assert!(
     matches!(fields[0].args[0].deprecated, Some(None)),
