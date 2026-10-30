@@ -389,7 +389,30 @@ impl TextArena {
   /// Appends the value a `StringValue` spelling denotes.
   ///
   /// [`Text::NONE`] when the arena is full, which [`SchemaBuilder::finish`] reports for the build.
+  ///
+  /// # One walk, nearly always
+  ///
+  /// A value is never longer than its spelling: every escape is longer than the character it stands
+  /// for, and a block string's dedent and joined terminators only remove bytes. So when the arena
+  /// already has room for the whole spelling, the value is written straight into it, with no sizing
+  /// walk and nothing to reserve — every string the built-ins inject until the last few of their
+  /// exact reservation, and every string a document carries between two of the arena's doublings.
+  /// Only a string that may not fit is sized first, so that the one growth it costs, and the
+  /// ceiling it is held to, are its exact length's.
   fn string(&mut self, spelling: &[u8]) -> Result<Text, StringValueError> {
+    let start = self.text.len();
+    // The capacity test first: it bounds the sum below, so neither side can overflow.
+    if !self.refused
+      && self.text.capacity() - start >= spelling.len()
+      && start + spelling.len() <= MAX_TEXT_BYTES as usize
+    {
+      if let Err(error) = string_value_pieces(spelling, |piece| self.text.push_str(piece)) {
+        self.text.truncate(start);
+        return Err(error);
+      }
+      // Both fit a `u32`: the value ends at or before `MAX_TEXT_BYTES`.
+      return Ok(Text::new(start as u32, (self.text.len() - start) as u32));
+    }
     let len = string_value_len(spelling)?;
     let Some((start, len)) = self.admit(len) else {
       return Ok(Text::NONE);
@@ -7149,10 +7172,12 @@ impl SchemaBuilder {
         TypeKind::Object | TypeKind::Interface | TypeKind::Union => {
           let group = def.fields();
           let rows = group.slice(&fields);
+          let mut positions = DeclaredOrder::new(group_mut(&mut field_order, group));
           for field in &raw.fields {
             let Some(at) = position_of_field(rows, field.name.sym) else {
               continue;
             };
+            positions.push(at);
             field_meta[group.start() as usize + at] =
               FieldMeta::new(field.description, field.deprecation);
             if let Args::Bounded(declared) = field.args.read() {
@@ -7165,16 +7190,12 @@ impl SchemaBuilder {
               );
             }
           }
-          let declared = raw.fields.iter().map(|field| field.name.sym).chain(
-            meta_fields
-              .into_iter()
-              .flatten()
-              .filter(|name| position_of_field(rows, *name).is_some()),
-          );
-          write_order(
-            group_mut(&mut field_order, group),
-            declared.map(|name| position_of_field(rows, name)),
-          );
+          for name in meta_fields.into_iter().flatten() {
+            if let Some(at) = position_of_field(rows, name) {
+              positions.push(at);
+            }
+          }
+          positions.finish();
         }
         TypeKind::InputObject => place_inputs(
           &mut input_meta,
@@ -7186,19 +7207,16 @@ impl SchemaBuilder {
         TypeKind::Enum => {
           let group = def.enum_values();
           let values = group.slice(&enum_values);
+          let mut positions = DeclaredOrder::new(group_mut(&mut enum_value_order, group));
           for value in &raw.enum_values {
-            if let Ok(at) = values.binary_search(&value.name.sym) {
-              enum_value_meta[group.start() as usize + at] =
-                EnumValueMeta::new(value.description, value.deprecation);
-            }
+            let Ok(at) = values.binary_search(&value.name.sym) else {
+              continue;
+            };
+            positions.push(at);
+            enum_value_meta[group.start() as usize + at] =
+              EnumValueMeta::new(value.description, value.deprecation);
           }
-          write_order(
-            group_mut(&mut enum_value_order, group),
-            raw
-              .enum_values
-              .iter()
-              .map(|value| values.binary_search(&value.name.sym).ok()),
-          );
+          positions.finish();
         }
         TypeKind::Scalar => {}
       }
@@ -7346,18 +7364,51 @@ fn place_inputs(
   declared: &[RawInput],
 ) {
   let rows = group.slice(inputs);
+  let mut positions = DeclaredOrder::new(group_mut(order, group));
   for value in declared {
-    if let Some(at) = position_of_input(rows, value.name.sym) {
-      meta[group.start() as usize + at] =
-        InputValueMeta::new(value.description, value.deprecation, value.default_text);
+    let Some(at) = position_of_input(rows, value.name.sym) else {
+      continue;
+    };
+    positions.push(at);
+    meta[group.start() as usize + at] =
+      InputValueMeta::new(value.description, value.deprecation, value.default_text);
+  }
+  positions.finish();
+}
+
+/// One group's declaration order, written as its rows are placed: slot `k` of the group's slice of
+/// an order table gets the position, in the sorted group, of the `k`-th row the document wrote.
+///
+/// The same order [`write_order`] writes, from the binary search that placed each row's metadata
+/// rather than a second one — for a field, an argument or an enum value, every row of a schema.
+struct DeclaredOrder<'a> {
+  slots: &'a mut [u32],
+  written: usize,
+}
+
+impl<'a> DeclaredOrder<'a> {
+  fn new(slots: &'a mut [u32]) -> Self {
+    Self { slots, written: 0 }
+  }
+
+  /// Records where the next row the document wrote sits in the sorted group.
+  fn push(&mut self, position: usize) {
+    if let Some(slot) = self.slots.get_mut(self.written) {
+      *slot = position as u32;
+    }
+    self.written += 1;
+  }
+
+  /// Ends the group. A document the build accepts declares each row once, so exactly one entry
+  /// per row was pushed; anything else is written as the sorted order instead, as [`write_order`]
+  /// writes it, so the table stays a permutation of its group whatever reached it.
+  fn finish(self) {
+    if self.written != self.slots.len() {
+      for (position, slot) in self.slots.iter_mut().enumerate() {
+        *slot = position as u32;
+      }
     }
   }
-  write_order(
-    group_mut(order, group),
-    declared
-      .iter()
-      .map(|value| position_of_input(rows, value.name.sym)),
-  );
 }
 
 /// Writes one group's declaration order over its slice of an order table: slot `k` holds the
