@@ -18,7 +18,10 @@
 
 use std::{borrow::Cow, vec::Vec};
 
+use tokora::{SimpleSpan, utils::Lexeme};
+
 use super::{LitBlockStr, LitComplexInlineStr, LitInlineStr, LitStr};
+use crate::error::StringError;
 
 /// Cooks a literal the way a consumer would: lex it, then convert.
 fn cook(literal: &str) -> Cow<'_, str> {
@@ -432,4 +435,55 @@ fn mixed_type_ordering_is_transitive() {
 
   assert_mixed_transitive(&inline_bytes, &byte_probes);
   assert_mixed_transitive(&block_bytes, &byte_probes);
+}
+
+/// The byte door's string literals must be UTF-8 (smear#246), inline and block alike, and each
+/// ill-formed sequence is refused where it is.
+#[test]
+fn a_byte_literal_that_is_not_utf8_is_refused_in_place() {
+  let unsupported = |start: usize, end: usize| {
+    StringError::<u8>::UnsupportedCharacter(Lexeme::Range(SimpleSpan::new(start, end)))
+  };
+  let cases: [(&[u8], [StringError<u8>; 1]); 2] = [
+    (b"\"\xff\"", [unsupported(1, 2)]),
+    (b"\"\"\"a\xffb\"\"\"", [unsupported(4, 5)]),
+  ];
+  for (literal, want) in cases {
+    let errors = LitStr::try_from(literal).expect_err("not UTF-8");
+    assert_eq!(errors.as_slice(), &want, "{}", literal.escape_ascii());
+  }
+}
+
+/// A backslash no escape rule takes is the same error from either door: the byte grammar answers
+/// for it as the text grammar does, with the error's default, and keeps `UnsupportedCharacter` for
+/// the bytes that are not UTF-8.
+#[test]
+fn a_dangling_backslash_reads_alike_from_text_and_bytes() {
+  let text = LitStr::try_from("\"abc\\").expect_err("unterminated");
+  assert_eq!(
+    text.as_slice(),
+    &[
+      StringError::<char>::default(),
+      StringError::unterminated_inline_string()
+    ]
+  );
+  let bytes = LitStr::try_from(&b"\"abc\\"[..]).expect_err("unterminated");
+  assert_eq!(
+    bytes.as_slice(),
+    &[
+      StringError::<u8>::default(),
+      StringError::unterminated_inline_string()
+    ]
+  );
+
+  // The backslash's error ends where the byte after it stops being a prefix of any sequence, so
+  // that byte is an error of its own.
+  let bytes = LitStr::try_from(&b"\"\\\xff\""[..]).expect_err("not UTF-8");
+  assert_eq!(
+    bytes.as_slice(),
+    &[
+      StringError::default(),
+      StringError::UnsupportedCharacter(Lexeme::Range(SimpleSpan::new(2, 3)))
+    ]
+  );
 }

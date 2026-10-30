@@ -280,6 +280,9 @@ mod value;
 #[cfg(test)]
 mod tests;
 
+#[cfg(all(test, any(feature = "graphql", feature = "graphqlx")))]
+pub(crate) mod utf8_cases;
+
 /// The kind marker of a plain carrier the lexer read as an **inline** `"…"` literal.
 ///
 /// A type-level tag and nothing else: see [`LitPlainStr`] for what it is tagging and why.

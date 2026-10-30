@@ -1165,3 +1165,6 @@ mod bump_parity_tests;
 
 #[cfg(test)]
 mod trait_parity_tests;
+
+#[cfg(test)]
+mod utf8_tests;
