@@ -615,7 +615,12 @@ impl<Char> EscapedCharacter<Char> {
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum StringError<Char = char> {
-  /// An unsupported character in a string literal.
+  /// A byte sequence in a string literal that is not well-formed UTF-8.
+  ///
+  /// Only a byte source (`[u8]`, `Bytes`, `BStr`, `HipByt`) can hold one, and its lexer reports
+  /// each ill-formed sequence in an inline or block literal as one of these. The span is the
+  /// sequence's maximal subpart: the bytes up to where they stop being a prefix of any valid
+  /// sequence, at least one.
   #[from(skip)]
   UnsupportedCharacter(Lexeme<Char>),
   /// An unexpected line terminator in a string literal.
@@ -785,9 +790,9 @@ impl<Char> TryFrom<StringErrors<Char>> for StringError<Char> {
 /// [`string_value_len`](crate::string_value_len) and
 /// [`string_value_pieces`](crate::string_value_pieces) refuse.
 ///
-/// Only [`NotUtf8`](Self::NotUtf8) is reachable from a spelling the parsers lexed. Their byte
-/// lexer passes a literal's content through unread, so a `[u8]` source can hand a decoder bytes
-/// that are no text at all; the other two are what the lexer itself refuses, and a decoder that
+/// None of the three is reachable from a spelling the parsers lexed. A missing delimiter and a bad
+/// escape are what the lexer itself refuses, and so is content that is not UTF-8: a text source
+/// cannot hold it, and the byte lexer refuses such a string literal (smear#246). A decoder that
 /// reads a spelling rather than trusting where it came from answers them instead of guessing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum StringValueError {

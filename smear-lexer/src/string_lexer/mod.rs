@@ -563,8 +563,27 @@ const VALID_STRING_UNREACHABLE: &str =
 /// Only ever invoked on the error path: the SIMD fast path emits every *valid*
 /// string itself, so the delegated `lex_*` here always returns `Err` (hence the
 /// [`VALID_STRING_UNREACHABLE`] `expect_err`).
+///
+/// It is also the one per-source fact the fast path reads before it scans a
+/// string literal: [`UTF8`](Self::UTF8) picks the scanner, so a text source
+/// pays nothing for the UTF-8 rule a byte source's string literals are held to.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) trait DelegateStringError {
+  /// The source's slices are already well-formed UTF-8, so string literals need
+  /// no validation.
+  ///
+  /// `true` for `str` and `HipStr`, whose types guarantee it. `false` for `[u8]`,
+  /// `Bytes`, `BStr` and `HipByt`, whose string literals the fast path checks
+  /// for UTF-8 on the way past (smear#246). Both dialects' SIMD lexers read it to
+  /// pick `CHECK_UTF8` for `skip_inline_str_simd` and `skip_block_str_from_bytes`,
+  /// always as a literal `true` or `false` in one of two `if` arms, so each
+  /// monomorphization keeps one scanner and drops the other.
+  /// (`skip_inline_str_simd::<{ !S::UTF8 }>` would need `generic_const_exprs`.)
+  ///
+  /// A wrong `true` is the dangerous direction: that source's string literals
+  /// would be accepted unchecked again.
+  const UTF8: bool;
+
   /// The `StringErrors` character type this primitive lexes into: `char` for
   /// `str`, `u8` for `[u8]` — matching the SIMD lexer's own `Slice::Char`.
   type Char;
@@ -583,6 +602,8 @@ pub(crate) trait DelegateStringError {
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 impl DelegateStringError for str {
+  const UTF8: bool = true;
+
   type Char = char;
 
   #[inline]
@@ -605,6 +626,8 @@ impl DelegateStringError for str {
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 impl DelegateStringError for [u8] {
+  const UTF8: bool = false;
+
   type Char = u8;
 
   #[inline]
@@ -630,6 +653,8 @@ const _: () = {
   use bytes::Bytes;
 
   impl DelegateStringError for Bytes {
+    const UTF8: bool = false;
+
     type Char = u8;
 
     #[inline]
@@ -644,6 +669,8 @@ const _: () = {
   use hipstr::{HipByt, HipStr};
 
   impl DelegateStringError for HipByt<'_> {
+    const UTF8: bool = false;
+
     type Char = u8;
 
     #[inline]
@@ -653,6 +680,8 @@ const _: () = {
   }
 
   impl DelegateStringError for HipStr<'_> {
+    const UTF8: bool = true;
+
     type Char = char;
 
     #[inline]
@@ -672,6 +701,8 @@ const _: () = {
   use bstr::BStr;
 
   impl DelegateStringError for BStr {
+    const UTF8: bool = false;
+
     type Char = u8;
 
     #[inline]

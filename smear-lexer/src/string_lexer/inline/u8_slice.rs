@@ -15,7 +15,12 @@ use crate::{
 use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInlineStr};
 
 #[derive(Logos, Debug)]
-#[logos(crate = tokora::logos, utf8 = false, extras = usize, error(StringError<u8>))]
+#[logos(
+  crate = tokora::logos,
+  utf8 = false,
+  extras = usize,
+  error(StringError<u8>, unmatched)
+)]
 pub(crate) enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
   #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
@@ -47,10 +52,64 @@ pub(crate) enum StringToken {
   })]
   LineTerminator(LineTerminatorHint),
 
-  /// Any run of allowed string characters:
-  /// all Unicode scalars except: quote, backslash, and line terminators.
+  /// Any run of allowed string characters: all Unicode scalars except quote,
+  /// backslash and the line terminators, each spelled as well-formed UTF-8.
+  ///
+  /// The class is Unicode despite `utf8 = false`, so a byte that is not part of
+  /// a well-formed sequence matches nothing here; see [`unmatched`].
   #[regex(r#"[^"\\\r\n]+"#)]
   StringCharacters,
+}
+
+/// The error for input no rule of [`StringToken`] matches.
+///
+/// # What reaches it
+///
+/// Exactly three shapes, read off the rules above:
+///
+/// - **Ill-formed UTF-8.** Every well-formed scalar other than `"`, `\`, CR and
+///   LF is [`StringCharacters`](StringToken::StringCharacters), and those four
+///   have rules of their own, so an unmatched token that starts with a byte
+///   `>= 0x80` is a sequence that is not UTF-8. It is reported as
+///   [`StringError::UnsupportedCharacter`] over the error token, which logos
+///   ends where the bytes stop being a prefix of any valid sequence: the
+///   maximal subpart [`core::str::Utf8Error::error_len`] measures, or the rest
+///   of the input when it ends inside one — at least one byte either way.
+/// - **A lone `\` at the end of input.** Every escape rule needs a second byte.
+/// - **A `\` before bytes that are not a scalar.** `\\[^"\\/bfnrtu]` takes any
+///   scalar after the backslash, so only ill-formed bytes are left over, and
+///   the error token runs from the backslash to where they stop being a prefix
+///   of a valid sequence.
+///
+/// The two backslash shapes answer `StringError::default()`, which is what the
+/// `str` twin of this grammar answers for the same input — it has no callback —
+/// so the two sources still report a dangling backslash alike.
+///
+/// Like the escape callbacks, this answers in the sub-lexer's own offsets, and
+/// [`lex_inline_str_from_bytes`] bumps every error by the literal's base.
+///
+/// # Why the class is Unicode, and the edit that would break the fast path
+///
+/// `utf8 = false` lets the lexer run over bytes, but it does not make a class
+/// byte-wise: logos-codegen 0.16.1 compiles a `#[regex]` written as a string
+/// literal with `unicode = true` (`lib.rs:226`), and a negated Unicode class
+/// matches only well-formed UTF-8. Rewritten as a byte-string literal (`b"…"`)
+/// the class would match any byte, this callback would stop seeing ill-formed
+/// input, and nothing would fail to compile.
+///
+/// The SIMD fast path depends on that. `skip_inline_str_simd::<true>` refuses a
+/// byte source's literal at the first non-ASCII run `core::str::from_utf8`
+/// refuses, then hands the whole literal to this grammar and `expect_err`s it,
+/// which holds only because the two accept the same sequences. A byte-wise class
+/// here would turn that refusal into a panic.
+#[inline]
+fn unmatched(lexer: &mut Lexer<'_, StringToken>) -> StringError<u8> {
+  match lexer.slice().first() {
+    Some(&lead) if lead >= 0x80 => {
+      StringError::UnsupportedCharacter(Lexeme::Range(lexer.span().into()))
+    }
+    _ => StringError::default(),
+  }
 }
 
 #[inline(always)]
@@ -383,7 +442,8 @@ where
         errs.push(err);
       }
       Ok(StringToken::StringCharacters) => {
-        // Plain content normalizes byte-for-byte
+        // Plain content normalizes byte-for-byte: the class matched well-formed UTF-8 only, so
+        // these bytes are already the value's.
         string_lexer.extras += string_lexer.slice().len();
       }
       Ok(StringToken::EscapedUnicode) => {
