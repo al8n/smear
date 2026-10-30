@@ -67,6 +67,16 @@
 //!   redefines none; [`redefining_a_built_in_is_the_one_flag_introspection_loses`] and
 //!   [`a_specified_directive_spelled_as_the_build_injects_it_loses_its_flag_and_its_place`] pin the
 //!   losses instead of hiding them.
+//! - **The meta types' descriptions, the order of their members, and members the specification's
+//!   meta-schema lacks.** A document cannot define a `__` type, so both doors carry smear's
+//!   meta-schema, and what a response says about the specification's own types beyond their shape
+//!   — graphql-js 15's `__Type.specifiedByUrl`, the legacy `__Directive.onField`, a
+//!   `__DirectiveLocation` value from a later specification — is that server's rendering, not the
+//!   schema's content: it is ignored, and so are an introspection extension's own `__` types along
+//!   with its fields. The generated response is smear's own, so the comparison cannot see any of
+//!   it either way. A contradiction of the shape, or anything listed twice, is refused;
+//!   [`a_meta_type_is_held_to_its_shape_and_not_to_its_rendering`] and
+//!   [`a_meta_type_that_contradicts_its_shape_is_refused`] pin the two halves.
 
 // `Schema::from_introspection`, `IntrospectionError` and `ResponseErrorKind` below all live behind
 // `#[cfg(feature = "introspection")]` in `smear-schema/src/introspection/`, not merely
@@ -1135,23 +1145,70 @@ fn one_of_survives_the_round_trip() {
 /// A built-in scalar the response describes as the build's own would not is written out as a
 /// definition of its own, so the two doors agree on all of it, the user-spelled flag included.
 ///
-/// Both ways a response can say so: a description and a `specifiedByURL` of the document's own, and
-/// a `null` description — a document that spelled `String` out and gave it none.
+/// Each way a response can say so: a description and a `specifiedByURL` of the document's own, a
+/// description alone, and a `null` description — a document that spelled `String` out and gave it
+/// none. The URL rides on `Int`, the type of no specified directive's argument: on `String` it is
+/// refused, by both doors alike, as [`a_string_specified_by_a_url_is_refused_by_both_doors`] pins.
 #[test]
 fn a_built_in_scalar_the_response_describes_is_written_out() {
-  for sdl in [
-    "type Query { ok: String }\n\"Text, the way we use it.\"\nscalar String @specifiedBy(url: \"https://example.com/string\")",
-    "type Query { ok: String }\nscalar String",
+  for (scalar, sdl) in [
+    (
+      "Int",
+      "type Query { ok: Int }\n\"Whole numbers, the way we count them.\"\nscalar Int @specifiedBy(url: \"https://example.com/int\")",
+    ),
+    (
+      "String",
+      "type Query { ok: String }\n\"Text, the way we use it.\"\nscalar String",
+    ),
+    ("String", "type Query { ok: String }\nscalar String"),
   ] {
     let from_sdl = built(sdl);
     let from_json = from_response(&server::introspect(&from_sdl));
-    let (_, string) = from_json.type_by_name(b"String").expect("String");
+    let (_, def) = from_json
+      .type_by_name(scalar.as_bytes())
+      .unwrap_or_else(|| panic!("`{scalar}` is defined\n---\n{sdl}"));
     assert!(
-      !string.is_built_in(),
-      "the door left the response's `String` to the build\n---\n{sdl}"
+      !def.is_built_in(),
+      "the door left the response's `{scalar}` to the build\n---\n{sdl}"
     );
     assert_eq!(facts(&from_sdl), facts(&from_json), "{sdl}");
   }
+}
+
+/// A `String` specified by a URL is refused by both doors, and for the same reason.
+///
+/// `@specifiedBy` takes its `url` as a `String!`, so applying it to `String` makes the directive
+/// refer to itself through the type its own argument names, which draft §3.13.1 forbids. The SDL
+/// door refuses a document that writes it as [`SchemaErrorKind::SelfReferentialDirective`]; the
+/// introspection door writes a response's `String` with a `specifiedByURL` out with `@specifiedBy`
+/// applied, and the build refuses it with the same kind.
+#[test]
+fn a_string_specified_by_a_url_is_refused_by_both_doors() {
+  let sdl = "type Query { ok: String }\n\"Text, the way we use it.\"\nscalar String @specifiedBy(url: \"https://example.com/string\")";
+  let from_sdl = match Schema::build(&parse(sdl)) {
+    Err(errors) => errors.kinds(),
+    Ok(_) => panic!(
+      "the SDL door accepted a `String` that `@specifiedBy` refers to itself through\n---\n{sdl}"
+    ),
+  };
+  assert_eq!(
+    from_sdl,
+    vec![SchemaErrorKind::SelfReferentialDirective],
+    "{sdl}"
+  );
+
+  let json = response(
+    r#"{"kind":"OBJECT","name":"Query","fields":[
+      {"name":"ok","args":[],"type":{"kind":"SCALAR","name":"String"}}
+    ]},
+    {"kind":"SCALAR","name":"String","description":"Text, the way we use it.",
+     "specifiedByURL":"https://example.com/string"}"#,
+  );
+  let error = refused(&json);
+  let Some(errors) = error.schema_errors() else {
+    panic!("refused by the shape, not by draft §3: {error}\n---\n{json}");
+  };
+  assert_eq!(errors.kinds(), from_sdl, "{json}");
 }
 
 /// The one flag introspection cannot carry, pinned as a loss rather than left to be discovered.
@@ -1577,7 +1634,8 @@ const HAND_WRITTEN: &str = r#"
     {"kind":"SCALAR","name":"Boolean"},
     {"kind":"SCALAR","name":"Int"},
     {"kind":"OBJECT","name":"__Schema","fields":[
-      {"name":"types","args":[],"type":{"kind":"SCALAR","name":"String"}}
+      {"name":"types","args":[],"type":{"kind":"NON_NULL","ofType":
+        {"kind":"LIST","ofType":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Type"}}}}}
     ]}
   ]
 }}}
@@ -1624,7 +1682,7 @@ fn the_door_reads_a_real_response() {
   assert!(!cache.is_built_in());
   assert!(cache.is_repeatable());
 
-  // `__Schema` came back injected too — with its real six fields, not the response's one.
+  // `__Schema` came back injected too — with its six fields, not the one the response listed.
   let (meta, def) = schema.type_by_name(b"__Schema").expect("__Schema");
   assert!(def.is_built_in());
   assert_eq!(
@@ -1692,6 +1750,260 @@ fn every_envelope_is_read() {
   let facts_of = |json: &str| facts(&from_response(json));
   assert_eq!(facts_of(BARE), facts_of(&unwrapped));
   assert_eq!(facts_of(BARE), facts_of(&full));
+}
+
+// ---------------------------------------------------------------------------------------------
+// the meta-schema: held to its shape, not to a server's rendering of it
+// ---------------------------------------------------------------------------------------------
+
+/// A response whose types are the query root and the meta types given.
+fn with_meta_types(meta_types: &str) -> String {
+  response(&std::format!("{OK_QUERY},{meta_types}"))
+}
+
+/// graphql-js's `__Directive`, in graphql-js's order: `isRepeatable` third, where smear's is last.
+const GRAPHQL_JS_DIRECTIVE: &str = r#"{"kind":"OBJECT","name":"__Directive","interfaces":[],"fields":[
+  {"name":"name","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}},
+  {"name":"description","args":[],"type":{"kind":"SCALAR","name":"String"}},
+  {"name":"isRepeatable","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}},
+  {"name":"locations","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+    {"kind":"NON_NULL","ofType":{"kind":"ENUM","name":"__DirectiveLocation"}}}}},
+  {"name":"args","args":[
+    {"name":"includeDeprecated","type":{"kind":"SCALAR","name":"Boolean"},"defaultValue":"false"}
+  ],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+    {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__InputValue"}}}}}
+]}"#;
+
+/// The meta types are held to draft §4's shape and nothing more: what a server says about them
+/// beyond it — the order graphql-js lists `__Directive`'s fields in, a description of its own or a
+/// `null` one, members the specification's meta-schema lacks — is not kept, and what an older
+/// server leaves out is not missed.
+#[test]
+fn a_meta_type_is_held_to_its_shape_and_not_to_its_rendering() {
+  let own = built("type Query { ok: Int }");
+  let field_names = |schema: &Schema, name: &[u8]| -> Vec<String> {
+    let (id, _) = schema.type_by_name(name).expect("a meta type");
+    schema
+      .fields_in_order(id)
+      .map(|(field, _)| schema.name(field.name()).to_owned())
+      .collect()
+  };
+  let description = |schema: &Schema, name: &[u8]| -> Option<String> {
+    let (id, _) = schema.type_by_name(name).expect("a meta type");
+    schema
+      .text(schema.type_meta(id).description())
+      .map(str::to_owned)
+  };
+
+  // graphql-js lists `isRepeatable` third, and the schema keeps smear's order, `isRepeatable` last.
+  let graphql_js = from_response(&with_meta_types(GRAPHQL_JS_DIRECTIVE));
+  assert_eq!(
+    field_names(&graphql_js, b"__Directive"),
+    [
+      "name",
+      "description",
+      "locations",
+      "args",
+      "isRepeatable",
+      "__typename"
+    ],
+    "the order a server lists a meta type's fields in is its rendering, not the schema's"
+  );
+
+  // A `null` description and one of the server's own: both accepted, and neither kept.
+  for described in [
+    r#""description":null"#,
+    r#""description":"The server's own words for __Type.""#,
+  ] {
+    let json = with_meta_types(&std::format!(
+      r#"{{"kind":"OBJECT","name":"__Type",{described},"interfaces":[],"fields":[
+        {{"name":"kind","args":[],"type":{{"kind":"NON_NULL","ofType":{{"kind":"ENUM","name":"__TypeKind"}}}}}}
+      ]}}"#
+    ));
+    let schema = from_response(&json);
+    assert_eq!(
+      description(&schema, b"__Type"),
+      description(&own, b"__Type"),
+      "{described}"
+    );
+  }
+
+  // An older server: no `specifiedByURL` or `isOneOf` on `__Type`, no `isRepeatable` on
+  // `__Directive`, and `__Directive.args` taking no `includeDeprecated`.
+  let older = from_response(&with_meta_types(
+    r#"{"kind":"OBJECT","name":"__Type","fields":[
+      {"name":"kind","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"ENUM","name":"__TypeKind"}}},
+      {"name":"name","args":[],"type":{"kind":"SCALAR","name":"String"}},
+      {"name":"fields","args":[
+        {"name":"includeDeprecated","type":{"kind":"SCALAR","name":"Boolean"},"defaultValue":"false"}
+      ],"type":{"kind":"LIST","ofType":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Field"}}}}
+    ]},
+    {"kind":"OBJECT","name":"__Directive","fields":[
+      {"name":"name","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}},
+      {"name":"locations","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+        {"kind":"NON_NULL","ofType":{"kind":"ENUM","name":"__DirectiveLocation"}}}}},
+      {"name":"args","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+        {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__InputValue"}}}}}
+    ]}"#,
+  ));
+  assert_eq!(
+    field_names(&older, b"__Directive"),
+    field_names(&own, b"__Directive")
+  );
+  assert_eq!(field_names(&older, b"__Type"), field_names(&own, b"__Type"));
+
+  // What a server adds ahead of the specification, or keeps from behind it, is ignored: graphql-js
+  // 15's `specifiedByUrl`, an applied-directives extension's field and its two `__` types, the
+  // legacy `onOperation`, `onFragment` and `onField`, and a kind and a location from a later
+  // specification in the enums' listings.
+  let additions = from_response(&with_meta_types(
+    r#"{"kind":"OBJECT","name":"__Type","fields":[
+      {"name":"kind","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"ENUM","name":"__TypeKind"}}},
+      {"name":"specifiedByUrl","args":[],"type":{"kind":"SCALAR","name":"String"}},
+      {"name":"appliedDirectives","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+        {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__AppliedDirective"}}}}}
+    ]},
+    {"kind":"OBJECT","name":"__Directive","fields":[
+      {"name":"name","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}},
+      {"name":"onOperation","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}},
+      {"name":"onFragment","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}},
+      {"name":"onField","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}}
+    ]},
+    {"kind":"ENUM","name":"__TypeKind","enumValues":[{"name":"SCALAR"},{"name":"A_LATER_KIND"}]},
+    {"kind":"ENUM","name":"__DirectiveLocation","enumValues":[
+      {"name":"QUERY"},{"name":"FIELD"},{"name":"A_LATER_LOCATION"}
+    ]},
+    {"kind":"OBJECT","name":"__AppliedDirective","fields":[
+      {"name":"name","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}},
+      {"name":"args","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+        {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__DirectiveArgument"}}}}}
+    ]},
+    {"kind":"OBJECT","name":"__DirectiveArgument","fields":[
+      {"name":"name","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}},
+      {"name":"value","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}}
+    ]}"#,
+  ));
+  for extension in [&b"__AppliedDirective"[..], b"__DirectiveArgument"] {
+    assert!(
+      additions.type_by_name(extension).is_none(),
+      "an introspection extension's own type was kept"
+    );
+  }
+  assert_eq!(
+    field_names(&additions, b"__Type"),
+    field_names(&own, b"__Type")
+  );
+  assert_eq!(
+    field_names(&additions, b"__Directive"),
+    field_names(&own, b"__Directive")
+  );
+  for name in [&b"__TypeKind"[..], b"__DirectiveLocation"] {
+    let (kept, _) = additions.type_by_name(name).expect("a meta enum");
+    let (injected, _) = own.type_by_name(name).expect("a meta enum");
+    assert_eq!(
+      additions.enum_values_of(kept).len(),
+      own.enum_values_of(injected).len(),
+      "a value from a later specification became one of the schema's"
+    );
+  }
+}
+
+/// A meta type that contradicts draft §4's shape, or lists anything twice, is refused, never
+/// quietly given smear's — each way, with the owner and the subject that say where and what.
+#[test]
+fn a_meta_type_that_contradicts_its_shape_is_refused() {
+  let cases = [
+    // Another kind.
+    (
+      r#"{"kind":"SCALAR","name":"__Type"}"#,
+      None,
+      "__Type: SCALAR rather than OBJECT",
+    ),
+    // A field of another type: `__Field.type` is `__Type!`.
+    (
+      r#"{"kind":"OBJECT","name":"__Field","fields":[
+        {"name":"type","args":[],"type":{"kind":"OBJECT","name":"__Type"}}
+      ]}"#,
+      Some("__Field"),
+      "type: __Type rather than __Type!",
+    ),
+    // An argument of another type.
+    (
+      r#"{"kind":"OBJECT","name":"__Type","fields":[
+        {"name":"fields","args":[
+          {"name":"includeDeprecated","type":{"kind":"SCALAR","name":"String"},"defaultValue":null}
+        ],"type":{"kind":"LIST","ofType":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Field"}}}}
+      ]}"#,
+      Some("__Type.fields"),
+      "includeDeprecated: String rather than Boolean",
+    ),
+    // An interface, where the meta types implement nothing.
+    (
+      r#"{"kind":"OBJECT","name":"__Schema","interfaces":[{"kind":"INTERFACE","name":"Node"}],"fields":[]}"#,
+      Some("__Schema"),
+      "implements Node",
+    ),
+    // The meta type listed twice.
+    (
+      r#"{"kind":"OBJECT","name":"__Schema","fields":[]},{"kind":"OBJECT","name":"__Schema","fields":[]}"#,
+      None,
+      "__Schema listed twice",
+    ),
+    // One of the eight listed again, as an introspection extension's own `__` type would be: the
+    // name is still one of the eight's, so it is refused as listed twice rather than dropped.
+    (
+      r#"{"kind":"OBJECT","name":"__Directive","fields":[]},
+      {"kind":"OBJECT","name":"__Directive","fields":[
+        {"name":"appliedDirectives","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+          {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__AppliedDirective"}}}}}
+      ]}"#,
+      None,
+      "__Directive listed twice",
+    ),
+    // A field listed twice — one smear's meta-schema has, and one it would otherwise ignore.
+    (
+      r#"{"kind":"OBJECT","name":"__Type","fields":[
+        {"name":"name","args":[],"type":{"kind":"SCALAR","name":"String"}},
+        {"name":"name","args":[],"type":{"kind":"SCALAR","name":"String"}}
+      ]}"#,
+      Some("__Type"),
+      "name listed twice",
+    ),
+    (
+      r#"{"kind":"OBJECT","name":"__Directive","fields":[
+        {"name":"onField","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}},
+        {"name":"onField","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}}
+      ]}"#,
+      Some("__Directive"),
+      "onField listed twice",
+    ),
+    // An argument listed twice.
+    (
+      r#"{"kind":"OBJECT","name":"__Type","fields":[
+        {"name":"fields","args":[
+          {"name":"includeDeprecated","type":{"kind":"SCALAR","name":"Boolean"},"defaultValue":null},
+          {"name":"includeDeprecated","type":{"kind":"SCALAR","name":"Boolean"},"defaultValue":null}
+        ],"type":{"kind":"LIST","ofType":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Field"}}}}
+      ]}"#,
+      Some("__Type.fields"),
+      "includeDeprecated listed twice",
+    ),
+    // An enum value listed twice.
+    (
+      r#"{"kind":"ENUM","name":"__TypeKind","enumValues":[{"name":"SCALAR"},{"name":"SCALAR"}]}"#,
+      Some("__TypeKind"),
+      "SCALAR listed twice",
+    ),
+  ];
+  for (meta_type, owner, subject) in cases {
+    let json = with_meta_types(meta_type);
+    let IntrospectionError::Response(error) = refused(&json) else {
+      panic!("refused by draft §3, not by the shape\n---\n{json}");
+    };
+    assert_eq!(error.kind(), ResponseErrorKind::InvalidMetaType, "{json}");
+    assert_eq!(error.owner(), owner, "{json}");
+    assert_eq!(error.subject(), subject, "{json}");
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1838,6 +2150,7 @@ const FIXTURES: &[(ResponseErrorKind, &str, Option<&str>)] = &[
     r#"__bad_location__"#,
     Some("weird"),
   ),
+  (ResponseErrorKind::InvalidMetaType, r#"__meta_kind__"#, None),
   (
     ResponseErrorKind::MalformedDefaultValue,
     r#"__default_breakout__"#,
@@ -1870,6 +2183,9 @@ fn fixture_response(marker: &str) -> String {
       r#"{OK_QUERY},{{"kind":"ENUM","name":"Verdict","enumValues":[{{"name":"true"}}]}}"#
     )),
     "__bad_location__" => with_directives(r#"{"name":"weird","locations":["NOWHERE"],"args":[]}"#),
+    "__meta_kind__" => response(&std::format!(
+      r#"{OK_QUERY},{{"kind":"SCALAR","name":"__Type"}}"#
+    )),
     "__default_breakout__" => response(
       r#"{"kind":"OBJECT","name":"Query","fields":[
         {"name":"ok","args":[
@@ -1974,6 +2290,108 @@ fn a_default_value_cannot_rewrite_the_schema() {
   assert!(schema.type_by_name(b"not").is_none());
 }
 
+/// A default value cannot carry a directive into the definition it sits in.
+///
+/// The grammar admits const directives after a default, so `1 @deprecated(reason: "x")` is one
+/// input value with a default, and copied through it would deprecate an input value the response
+/// reports as not deprecated. It is refused wherever a default is read: on a field's argument, on
+/// an input-object field, and on a specified directive's argument — whose default is compared with
+/// the injected one first, and does not pass for it, so the directive is written out and refused
+/// rather than left to the build.
+#[test]
+fn a_default_value_cannot_carry_a_directive() {
+  let cases = [
+    (
+      response(
+        r#"{"kind":"OBJECT","name":"Query","fields":[
+          {"name":"ok","args":[
+            {"name":"arg","type":{"kind":"SCALAR","name":"Int"},
+             "defaultValue":"1 @deprecated(reason: \"x\")","isDeprecated":false}
+          ],"type":{"kind":"SCALAR","name":"Int"}}
+        ]}"#,
+      ),
+      "Query.ok.arg",
+    ),
+    (
+      response(
+        r#"{"kind":"OBJECT","name":"Query","fields":[
+          {"name":"ok","args":[
+            {"name":"by","type":{"kind":"INPUT_OBJECT","name":"By"},"defaultValue":null}
+          ],"type":{"kind":"SCALAR","name":"Int"}}
+        ]},
+        {"kind":"INPUT_OBJECT","name":"By","inputFields":[
+          {"name":"id","type":{"kind":"SCALAR","name":"Int"},
+           "defaultValue":"1 @deprecated(reason: \"x\")","isDeprecated":false}
+        ]}"#,
+      ),
+      "By.id",
+    ),
+    // `@deprecated` as the build injects it but for the suffix on its default.
+    (
+      with_directives(
+        r#"{"name":"deprecated","locations":[
+          "FIELD_DEFINITION","ARGUMENT_DEFINITION","INPUT_FIELD_DEFINITION","ENUM_VALUE"
+        ],"args":[
+          {"name":"reason","type":{"kind":"SCALAR","name":"String"},
+           "defaultValue":"\"No longer supported\" @deprecated"}
+        ]}"#,
+      ),
+      "deprecated.reason",
+    ),
+  ];
+  for (json, owner) in cases {
+    match Schema::from_introspection(&json) {
+      Err(IntrospectionError::Response(error)) => {
+        assert_eq!(
+          error.kind(),
+          ResponseErrorKind::MalformedDefaultValue,
+          "{json}"
+        );
+        assert_eq!(error.owner(), Some(owner), "{json}");
+      }
+      Err(other) => panic!("refused for the wrong reason: {other}\n---\n{json}"),
+      Ok(_) => panic!("a default with a directive after it was accepted\n---\n{json}"),
+    }
+  }
+
+  // Whitespace after the value is still just the value, on an argument and in the comparison.
+  let plain = response(
+    r#"{"kind":"OBJECT","name":"Query","fields":[
+      {"name":"ok","args":[
+        {"name":"a","type":{"kind":"SCALAR","name":"Int"},"defaultValue":"1"},
+        {"name":"b","type":{"kind":"SCALAR","name":"Int"},"defaultValue":"1 \n"}
+      ],"type":{"kind":"SCALAR","name":"Int"}}
+    ]}"#,
+  );
+  let schema = from_response(&plain);
+  let (query, _) = schema.type_by_name(b"Query").expect("Query");
+  let ok = schema
+    .field(query, schema.sym(b"ok").expect("interned"))
+    .expect("Query.ok");
+  for name in [&b"a"[..], b"b"] {
+    let arg = schema
+      .input(ok.args(), schema.sym(name).expect("interned"))
+      .expect("an argument of Query.ok");
+    assert_eq!(arg.default_kind(), DefaultKind::NonNull);
+  }
+
+  let injected = from_response(&with_directives(
+    r#"{"name":"deprecated","locations":[
+      "FIELD_DEFINITION","ARGUMENT_DEFINITION","INPUT_FIELD_DEFINITION","ENUM_VALUE"
+    ],"args":[
+      {"name":"reason","type":{"kind":"SCALAR","name":"String"},
+       "defaultValue":"\"No longer supported\" "}
+    ]}"#,
+  ));
+  assert!(
+    injected
+      .directive_by_name(b"deprecated")
+      .expect("@deprecated")
+      .is_built_in(),
+    "the injected default followed by whitespace was not taken for the injected one"
+  );
+}
+
 // ---------------------------------------------------------------------------------------------
 // draft §3, through the introspection door
 // ---------------------------------------------------------------------------------------------
@@ -2047,14 +2465,14 @@ const SCHEMA_REFUSALS: &[(&str, &str, &[SchemaErrorKind])] = &[
     &[SchemaErrorKind::ReservedFieldName],
   ),
   (
-    "a type name reserved for introspection",
+    "a field typed by a `__` type, which the door drops as an introspection extension's own",
     r#"{"kind":"OBJECT","name":"Query","fields":[
       {"name":"ok","args":[],"type":{"kind":"OBJECT","name":"__Secret"}}
     ]},
     {"kind":"OBJECT","name":"__Secret","fields":[
       {"name":"ok","args":[],"type":{"kind":"SCALAR","name":"Int"}}
     ]}"#,
-    &[SchemaErrorKind::ReservedTypeName],
+    &[SchemaErrorKind::UndefinedType],
   ),
 ];
 

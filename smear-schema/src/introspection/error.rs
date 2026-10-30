@@ -77,6 +77,19 @@ pub enum ResponseErrorKind {
   InvalidEnumValue,
   /// A `__Directive.locations` entry is not one of the 19 `__DirectiveLocation` values.
   UnknownDirectiveLocation,
+  /// One of draft §4's eight meta types — `__Schema`, `__Type`, `__Field`, `__InputValue`,
+  /// `__EnumValue`, `__TypeKind`, `__Directive`, `__DirectiveLocation` — is reported in a shape
+  /// that contradicts the specification's: another kind, an interface, a field or an argument the
+  /// meta-schema has given another type, or the type, or one of its fields, arguments or enum
+  /// values, listed twice.
+  ///
+  /// What a response adds to one is not this: a member the specification's meta-schema lacks — one
+  /// a server adds ahead of it, like an applied-directives extension's fields, or keeps from behind
+  /// it, like graphql-js 15's `__Type.specifiedByUrl` — is ignored. Nor is what it leaves out, as
+  /// a server older than `isRepeatable`, `isOneOf`, `specifiedByURL` or input-value deprecation
+  /// does, nor the descriptions and the order the members are listed in: all of that is the
+  /// server's rendering of the specification's own types, and none of it is kept.
+  InvalidMetaType,
   /// An `__InputValue.defaultValue` is not one complete GraphQL const value.
   ///
   /// Refusing here rather than at the SDL parse is what makes the field safe to embed: a value
@@ -110,6 +123,7 @@ impl ResponseErrorKind {
     Self::InvalidName,
     Self::InvalidEnumValue,
     Self::UnknownDirectiveLocation,
+    Self::InvalidMetaType,
     Self::MalformedDefaultValue,
     Self::UnparsableSdl,
   ];
@@ -128,6 +142,7 @@ impl ResponseErrorKind {
       Self::InvalidName => "not a GraphQL name",
       Self::InvalidEnumValue => "not a GraphQL enum value",
       Self::UnknownDirectiveLocation => "unknown `__DirectiveLocation`",
+      Self::InvalidMetaType => "a meta type in a shape draft §4 does not give it",
       Self::MalformedDefaultValue => "default value is not a GraphQL const value",
       Self::UnparsableSdl => "the rendered SDL does not parse",
     }
@@ -154,6 +169,7 @@ impl ResponseErrorKind {
       Self::UnknownDirectiveLocation => {
         Code::new("smear::introspection::unknown-directive-location")
       }
+      Self::InvalidMetaType => Code::new("smear::introspection::invalid-meta-type"),
       Self::MalformedDefaultValue => Code::new("smear::introspection::malformed-default-value"),
       Self::UnparsableSdl => Code::new("smear::introspection::unparsable-sdl"),
     }
@@ -358,9 +374,9 @@ impl ResponseError {
 ///
 /// # Severity and help are answered here rather than per kind
 ///
-/// All thirteen kinds are refusals, and all thirteen have the same instruction for the same
+/// All fourteen kinds are refusals, and all fourteen have the same instruction for the same
 /// audience: whoever wired up the transport, whose server did not return a draft §4 result. A
-/// per-kind table would be thirteen ways of writing that sentence.
+/// per-kind table would be fourteen ways of writing that sentence.
 impl Diagnose for ResponseError {
   #[inline]
   fn code(&self) -> Code {

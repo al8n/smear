@@ -76,6 +76,7 @@
 //! | **A default value's exact spelling** — the server prints its own coerced form | **Yes**, in [`InputValueMeta::default_value`](super::InputValueMeta::default_value): the build keeps the canonical text of the literal it read, which from this door is the server's printing of its *coerced* value — `[1]` for an SDL that wrote `= 1` on a list, `1` for a float written `1.0`. Presence and null-ness, which [`DefaultKind`](super::DefaultKind) keeps, survive either way |
 //! | **Interfaces implemented by interfaces**, from a server predating the 2021 specification | Under-constrains rather than misreports: nothing is claimed that is not in the response |
 //! | **That a document spelled out a built-in** — `scalar String` and `directive @skip(…)` are reported by every server whether the document wrote them or not | **Yes, when the response cannot tell.** The door leaves a built-in scalar or a specified directive to the build only when the response says nothing the injected one would not: for a scalar, no `specifiedByURL` and a `description` that is the built-in's own text or absent because the query did not ask; for a directive, the built-in's description or none asked for, and its locations, its argument — name, description, type and default — and its repeatability exactly. Such a definition is then the build's in two ways a document that spelled it out is not: [`TypeDef::is_built_in`](super::TypeDef::is_built_in) or [`DirectiveDef::is_built_in`](super::DirectiveDef::is_built_in) is true where the SDL door says false, and it sits where the build injects it — a scalar after the document's types and the meta-schema in the type table, a directive after the document's own directives in definition order, both in the built-in SDL's order — rather than where the document wrote it. Where descriptions were not asked for, the injected texts stand in for the document's too. Anything the response reports otherwise, `null` descriptions included, is written out as a definition of its own and agrees with the SDL door on flag, text and place. No draft §5 rule reads any of it |
+//! | **The meta types' descriptions, the order of their members, and members and types the specification's meta-schema lacks** — what a response's `__Schema.types` says about `__Schema`, `__Type`, `__Field` and the other five beyond their shape, and any other `__` type it lists | **No, by design.** No document can define a `__`-prefixed type ([`RedefinedBuiltInType`](super::SchemaErrorKind::RedefinedBuiltInType)), so the SDL door always carries smear's meta-schema and this door carries the same one: what a server says about the specification's own types beyond their shape is its rendering of the specification, not content of the schema it describes. So graphql-js listing `__Directive.isRepeatable` third, where smear lists it last, changes nothing, and neither does a member or a type the specification's meta-schema lacks — graphql-js 15's `__Type.specifiedByUrl`, an introspection extension's fields and its own `__` types (an applied-directives extension's `__AppliedDirective` and `__DirectiveArgument`), the legacy `__Directive.onOperation`, `onFragment` and `onField`, a `__TypeKind` or `__DirectiveLocation` value from a later specification in the enum's listing: all ignored, though a location a directive actually *uses* is still refused where it is read, and a type the door keeps that names one of the ignored `__` types is refused by the build, which finds it undefined. What is refused, as [`InvalidMetaType`](ResponseErrorKind::InvalidMetaType), is a contradiction: a meta type of another kind, one implementing anything, a field or an argument smear's meta-schema has with another type, or the type or one of its members listed twice. A meta type that leaves members out, as a server older than `isRepeatable` or `specifiedByURL` does, is not refused either |
 //!
 //! Descriptions, `@deprecated` and `@specifiedBy` were rows here and are not any more: the door
 //! reads `description`, `isDeprecated` / `deprecationReason` and `specifiedByURL` wherever draft §4
@@ -83,9 +84,11 @@
 //!
 //! Everything else round-trips, and [the two-door agreement test] is what says so rather than this
 //! table: it builds the same schema through both doors and compares every observation a rule can
-//! make. Each row above is a row *because* it would otherwise make that test fail. The built-in
-//! flag has a test of its own, so the loss is pinned rather than described. The
-//! `includeDeprecated` row cannot have one, and that is the point of it: a response with the
+//! make. Each row above but the last is a row *because* it would otherwise make that test fail;
+//! the last records what both doors carry instead of the response's, which a server other than the
+//! test's own renders differently. The built-in flag and the meta types each have a test of their
+//! own, so those losses are pinned rather than described. The `includeDeprecated` row cannot have
+//! one, and that is the point of it: a response with the
 //! deprecated members omitted is indistinguishable from a response for a schema that never had
 //! them, so no test on this side of the wire can tell — only the query that produced the response
 //! can.
@@ -142,7 +145,12 @@ impl Schema {
 /// [`Schema`] could have observed of one — and so are the definitions every build injects for
 /// itself: the introspection meta-schema, the five built-in scalars and the five specified
 /// directives. A built-in scalar or a specified directive the response reports other than as the
-/// build injects it is the exception, and is written out.
+/// build injects it is the exception, and is written out. The meta-schema is checked before it is
+/// dropped — a meta type that contradicts draft §4's shape, or lists anything twice, is refused as
+/// [`InvalidMetaType`](ResponseErrorKind::InvalidMetaType) — while its descriptions, the order of
+/// its members and any member the specification's meta-schema lacks are ignored: no document can
+/// define those types, so both doors carry smear's. Any other `__` type in a response is an
+/// introspection extension's own, and is ignored with the extension's fields.
 ///
 /// ```
 /// use smear_schema::introspection;

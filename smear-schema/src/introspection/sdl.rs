@@ -18,6 +18,16 @@
 //! leaves it true. Dropping them is what makes the two doors produce the same flags, and it costs
 //! nothing: the build puts back exactly what was dropped.
 //!
+//! The meta types are checked before they are dropped, and the check is for contradictions of the
+//! specification's shape and nothing more: each one's kind, that it implements nothing, the type of
+//! every field and argument it reports that smear's meta-schema has, and that nothing is listed
+//! twice. A document cannot define a `__` type at all, so the SDL door always carries smear's
+//! meta-schema, and what a response says about those types beyond their shape — descriptions, the
+//! order the members are listed in, members a server adds ahead of the specification or keeps
+//! from behind it — is that server's rendering, not the schema it describes. So that is not kept,
+//! while a meta type the response contradicts is refused rather than quietly replaced. Any other
+//! `__` type is an introspection extension's own, and is dropped along with the extension's fields.
+//!
 //! A built-in scalar or a specified directive is dropped only while that last clause holds. One
 //! the response reports other than as the build injects it says something the injected one would
 //! lose — for a scalar, a `specifiedByURL`, a `null` description or a description other than the
@@ -44,7 +54,7 @@
 //! [`RedefinedBuiltInType`]: super::super::SchemaErrorKind::RedefinedBuiltInType
 //! [`TypeDef::is_built_in`]: super::super::TypeDef::is_built_in
 
-use std::string::String;
+use std::{string::String, vec::Vec};
 
 use tokora::{Parse as _, Parser};
 
@@ -67,7 +77,7 @@ use super::{
     // The SDL door's own owner-path helper, so `Query.hero.first` reads the same whichever door
     // refused it.
     error::owner_path as path,
-    repr::{DirectiveLocation, DirectiveLocations, TypeKind},
+    repr::{DirectiveLocation, DirectiveLocations, TypeKind, is_reserved},
   },
   decode,
   error::{ResponseError, ResponseErrorKind},
@@ -93,6 +103,9 @@ pub(super) fn render(response: &str) -> Rendered<String> {
 #[derive(Debug, Default)]
 struct Renderer {
   out: String,
+  /// Which of the eight meta types the response has listed so far, one bit each in
+  /// [`META_TYPES`]' order, so one listed twice is refused rather than read twice and dropped.
+  meta_types: u8,
 }
 
 impl Renderer {
@@ -153,10 +166,16 @@ impl Renderer {
     let kind = named_kind(ty.kind, name, None)?;
 
     // The meta-schema is injected by the build, unconditionally, so re-emitting it is a
-    // redefinition. Only the eight names the specification defines are dropped: a server exposing
-    // some other `__`-prefixed type is exposing something this schema does not know about, and
-    // `ReservedTypeName` says so rather than the door swallowing it.
+    // redefinition. Each of the eight the specification defines is held to its shape before it is
+    // dropped, so a response that contradicts it is refused rather than quietly given smear's.
     if builtin::INTROSPECTION_TYPES.contains(&name) {
+      return self.meta_type(ty, name, kind);
+    }
+    // Any other `__` type is an introspection extension's own — `__AppliedDirective`,
+    // `__DirectiveArgument` — and is dropped with the extension fields that refer to it. Nothing
+    // the door keeps should refer to one: a type that did would be refused by the build for naming
+    // an undefined type, which is the right failure.
+    if is_reserved(name.as_bytes()) {
       return Ok(());
     }
     // Likewise the five built-in scalars — but only when the response agrees they are scalars, and
@@ -389,6 +408,21 @@ impl Renderer {
       None => self.out.push_str("null"),
     }
     self.out.push(')');
+  }
+
+  /// One of the eight meta types: refused when the response has listed it already, and otherwise
+  /// held to its shape and dropped.
+  fn meta_type(&mut self, ty: &IntrospectedType<'_>, name: &str, kind: TypeKind) -> Rendered {
+    let Some(at) = META_TYPES.iter().position(|meta| meta.name == name) else {
+      // The caller asked `INTROSPECTION_TYPES`, which names the same eight.
+      return Ok(());
+    };
+    let listed = 1u8 << at;
+    if self.meta_types & listed != 0 {
+      return Err(not_the_meta_type(None, std::format!("{name} listed twice")));
+    }
+    self.meta_types |= listed;
+    check_meta_type(ty, &META_TYPES[at], kind)
   }
 
   fn directive(&mut self, directive: &IntrospectedDirective<'_>) -> Rendered {
@@ -724,9 +758,12 @@ fn attach(error: ResponseError, owner: Option<&str>) -> ResponseError {
 ///
 /// So the value is handed to the parser inside a throwaway document of its own, and the result is
 /// checked structurally rather than merely for success. Success alone is not enough: `1 g: Int`
-/// parses, and would add a field. **One definition, holding one input value, with a default** is
-/// the shape that admits nothing but a complete const value — anything the value did not consume
-/// becomes a second field, a second definition, or a syntax error, and all three fail this.
+/// parses, and would add a field. **One definition, holding one input value, with a default and no
+/// directives** is the shape that admits nothing but a complete const value — anything the value
+/// did not consume becomes a directive, a second field, a second definition, or a syntax error, and
+/// all four fail this. No directives, because the grammar admits const directives after a default:
+/// `1 @deprecated(reason: "x")` is one input value with a default, and copied through it would
+/// smuggle a deprecation into the rendered SDL that contradicts the response's own `isDeprecated`.
 fn check_default_value(default: &str, owner: &str, subject: &str) -> Rendered {
   read_default_value(default, |_| ()).ok_or_else(|| {
     ResponseError::new(ResponseErrorKind::MalformedDefaultValue, default)
@@ -761,7 +798,7 @@ fn read_default_value<R>(
   };
   let values: &[_] = input.fields_definition()?.input_value_definitions();
   match values {
-    [only] => Some(read(only.default_value()?.value())),
+    [only] if only.directives().is_none() => Some(read(only.default_value()?.value())),
     _ => None,
   }
 }
@@ -774,6 +811,257 @@ fn canonical_default(default: &str) -> Option<String> {
     canonical(value, &mut out).ok().map(|()| out)
   })
   .flatten()
+}
+
+// ---------------------------------------------------------------------------------------------
+// the meta-schema, held to its shape
+// ---------------------------------------------------------------------------------------------
+
+/// One of draft §4's eight meta types as smear's meta-schema declares it: the shape a response's
+/// entry for it must not contradict.
+struct MetaType {
+  name: &'static str,
+  kind: TypeKind,
+  /// The object's fields, in the order smear declares them; empty for the two enums, whose values
+  /// carry no type to contradict.
+  fields: &'static [MetaField],
+}
+
+/// A meta type's field: its name, its type spelled as SDL, and its arguments.
+struct MetaField {
+  name: &'static str,
+  ty: &'static str,
+  args: &'static [MetaArgument],
+}
+
+/// A meta field's argument: its name and its type spelled as SDL.
+struct MetaArgument {
+  name: &'static str,
+  ty: &'static str,
+}
+
+/// The `includeDeprecated` argument five meta fields declare.
+const INCLUDE_DEPRECATED: &[MetaArgument] = &[MetaArgument {
+  name: "includeDeprecated",
+  ty: "Boolean",
+}];
+
+/// Shorthand for a meta field without arguments.
+const fn meta_field(name: &'static str, ty: &'static str) -> MetaField {
+  MetaField {
+    name,
+    ty,
+    args: &[],
+  }
+}
+
+/// Shorthand for a meta field taking `includeDeprecated`.
+const fn filtered_field(name: &'static str, ty: &'static str) -> MetaField {
+  MetaField {
+    name,
+    ty,
+    args: INCLUDE_DEPRECATED,
+  }
+}
+
+/// smear's meta-schema, in [`builtin::INTROSPECTION_TYPES`]' order: the kinds, and the field and
+/// argument types, a response's entry for each of the eight must not contradict.
+/// `the_meta_types_are_the_injected_ones` holds this to what the build injects.
+static META_TYPES: [MetaType; 8] = [
+  MetaType {
+    name: "__Schema",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("description", "String"),
+      meta_field("types", "[__Type!]!"),
+      meta_field("queryType", "__Type!"),
+      meta_field("mutationType", "__Type"),
+      meta_field("subscriptionType", "__Type"),
+      meta_field("directives", "[__Directive!]!"),
+    ],
+  },
+  MetaType {
+    name: "__Type",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("kind", "__TypeKind!"),
+      meta_field("name", "String"),
+      meta_field("description", "String"),
+      meta_field("specifiedByURL", "String"),
+      filtered_field("fields", "[__Field!]"),
+      meta_field("interfaces", "[__Type!]"),
+      meta_field("possibleTypes", "[__Type!]"),
+      filtered_field("enumValues", "[__EnumValue!]"),
+      filtered_field("inputFields", "[__InputValue!]"),
+      meta_field("ofType", "__Type"),
+      meta_field("isOneOf", "Boolean"),
+    ],
+  },
+  MetaType {
+    name: "__Field",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("name", "String!"),
+      meta_field("description", "String"),
+      filtered_field("args", "[__InputValue!]!"),
+      meta_field("type", "__Type!"),
+      meta_field("isDeprecated", "Boolean!"),
+      meta_field("deprecationReason", "String"),
+    ],
+  },
+  MetaType {
+    name: "__InputValue",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("name", "String!"),
+      meta_field("description", "String"),
+      meta_field("type", "__Type!"),
+      meta_field("defaultValue", "String"),
+      meta_field("isDeprecated", "Boolean!"),
+      meta_field("deprecationReason", "String"),
+    ],
+  },
+  MetaType {
+    name: "__EnumValue",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("name", "String!"),
+      meta_field("description", "String"),
+      meta_field("isDeprecated", "Boolean!"),
+      meta_field("deprecationReason", "String"),
+    ],
+  },
+  MetaType {
+    name: "__TypeKind",
+    kind: TypeKind::Enum,
+    fields: &[],
+  },
+  MetaType {
+    name: "__Directive",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("name", "String!"),
+      meta_field("description", "String"),
+      meta_field("locations", "[__DirectiveLocation!]!"),
+      filtered_field("args", "[__InputValue!]!"),
+      meta_field("isRepeatable", "Boolean!"),
+    ],
+  },
+  MetaType {
+    name: "__DirectiveLocation",
+    kind: TypeKind::Enum,
+    fields: &[],
+  },
+];
+
+/// Holds a response's entry for one of the eight meta types to smear's meta-schema.
+///
+/// What is refused is a contradiction: another kind, an interface, a field or an argument smear's
+/// meta-schema has given another type, or a member listed twice. What is ignored is everything
+/// else the entry says — members the specification's meta-schema lacks, which a server adds ahead
+/// of it or keeps from behind it (graphql-js 15's `__Type.specifiedByUrl`, an applied-directives
+/// extension's fields, the legacy `__Directive.onOperation`, `onFragment` and `onField`, a
+/// `__TypeKind` or `__DirectiveLocation` value from a later specification), its descriptions and
+/// its order — and what it leaves out is not missed, as a server older than `isRepeatable`,
+/// `isOneOf`, `specifiedByURL` or input-value deprecation leaves them out. No document can define
+/// these types, so both doors carry smear's.
+fn check_meta_type(ty: &IntrospectedType<'_>, meta: &MetaType, kind: TypeKind) -> Rendered {
+  let name = meta.name;
+  if kind != meta.kind {
+    return Err(not_the_meta_type(
+      None,
+      std::format!(
+        "{name}: {} rather than {}",
+        kind.as_str(),
+        meta.kind.as_str()
+      ),
+    ));
+  }
+  if let Some(interface) = ty.interfaces.iter().flatten().next() {
+    let interface = base_name(interface, name, "implements")?;
+    return Err(not_the_meta_type(
+      Some(name),
+      std::format!("implements {interface}"),
+    ));
+  }
+
+  let fields = ty.fields.as_deref().unwrap_or(&[]);
+  if let Some(twice) = listed_twice(fields.iter().map(|field| field.name.as_str())) {
+    return Err(not_the_meta_type(
+      Some(name),
+      std::format!("{twice} listed twice"),
+    ));
+  }
+  for reported in fields {
+    let field_name = reported.name.as_str();
+    // A field the specification's meta-schema lacks is ignored, arguments and all.
+    let Some(expected) = meta.fields.iter().find(|field| field.name == field_name) else {
+      continue;
+    };
+    let spelled = type_reference(&reported.ty, name, field_name)?;
+    if spelled != expected.ty {
+      return Err(not_the_meta_type(
+        Some(name),
+        std::format!("{field_name}: {spelled} rather than {}", expected.ty),
+      ));
+    }
+    let owner = path(&[name, field_name]);
+    if let Some(twice) = listed_twice(reported.args.iter().map(|argument| argument.name.as_str())) {
+      return Err(not_the_meta_type(
+        Some(owner.as_str()),
+        std::format!("{twice} listed twice"),
+      ));
+    }
+    for argument in &reported.args {
+      let argument_name = argument.name.as_str();
+      let Some(declared) = expected
+        .args
+        .iter()
+        .find(|candidate| candidate.name == argument_name)
+      else {
+        continue;
+      };
+      let spelled = type_reference(&argument.ty, &owner, argument_name)?;
+      if spelled != declared.ty {
+        return Err(not_the_meta_type(
+          Some(owner.as_str()),
+          std::format!("{argument_name}: {spelled} rather than {}", declared.ty),
+        ));
+      }
+    }
+  }
+
+  // An enum value carries no type to contradict, so the listing is held only to naming each value
+  // once. A value the meta-schema lacks is ignored here; a location a directive actually uses is
+  // refused where it is read, as `UnknownDirectiveLocation`.
+  let values = ty.enum_values.as_deref().unwrap_or(&[]);
+  if let Some(twice) = listed_twice(values.iter().map(|value| value.name.as_str())) {
+    return Err(not_the_meta_type(
+      Some(name),
+      std::format!("{twice} listed twice"),
+    ));
+  }
+  Ok(())
+}
+
+/// The first name, in sorted order, that a list gives more than once, or `None` when each is given
+/// once. Sorted rather than compared pair by pair, so a hostile list costs `n log n` and not `n²`.
+fn listed_twice<'a>(names: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+  let mut names: Vec<&'a str> = names.collect();
+  names.sort_unstable();
+  names
+    .windows(2)
+    .find(|pair| pair[0] == pair[1])
+    .map(|pair| pair[0])
+}
+
+/// The refusal for a meta type the response gets wrong: the subject names what it wrote, and the
+/// owner, when there is one, the meta type or meta field it wrote it on.
+fn not_the_meta_type(owner: Option<&str>, subject: String) -> ResponseError {
+  attach(
+    ResponseError::new(ResponseErrorKind::InvalidMetaType, subject),
+    owner,
+  )
 }
 
 #[cfg(test)]
