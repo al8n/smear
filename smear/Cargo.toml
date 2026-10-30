@@ -138,7 +138,7 @@ smallvec = ["smear-lexer/smallvec", "smear-parser?/smallvec"]
 bytes = ["dep:bytes", "smear-lexer/bytes", "smear-parser?/bytes", "tokora/bytes_1"]
 bstr = ["dep:bstr", "smear-lexer/bstr", "smear-parser?/bstr", "tokora/bstr_1"]
 hipstr = ["dep:hipstr", "smear-lexer/hipstr", "smear-parser?/hipstr", "tokora/hipstr_0_8"]
-smol-bytes = ["smear-lexer/smol-bytes", "smear-parser?/smol-bytes", "tokora/smol_bytes_0_1"]
+smol-bytes = ["smear-lexer/smol-bytes", "smear-parser?/smol-bytes", "tokora/smol-bytes_0_2"]
 
 # The umbrella twin of `smear-parser/materialized-numbers` — a second set of GraphQL value
 # productions carrying `i64` and `f64` where the slice parser carries a source slice.

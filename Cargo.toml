@@ -79,7 +79,7 @@ rust-version = "1.95"
 [workspace.dependencies]
 bstr = { version = "1", default-features = false }
 bytes = { version = "1", default-features = false }
-smol-bytes = { version = "0.1", default-features = false }
+smol-bytes = { version = "0.2", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
 # `rowan` is in tokora's PUBLIC API: `Cst::checkpoint` returns `rowan::Checkpoint`, `Cst::finish`
 # returns `rowan::GreenNode`, `cst::cast::token` returns `rowan::SyntaxToken`. So smear's `rowan`
@@ -106,7 +106,16 @@ derive_more = { version = "2", default-features = false, features = ["unwrap", "
 # ArrayDequeN`. What smear actually reaches — `tokora::utils::typenum::U1`, `DowncastRef`,
 # `IntoComponents`, `IntoEquivalent`, the display traits — is unchanged. The rest of 0.10.0 ->
 # 0.11.0 is tokora's own changelog, not a smear concern.
-tokora = { version = "0.11", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
+#
+# WHAT MOVED, 0.11.0 -> 0.12.0 — every public item now has one canonical path, and smear spells
+# the 0.12 ones, so `0.12` is the floor: `tokora::parser` is `tokora::combinator`, the parsing
+# traits and drivers live in `tokora::parse` with the ones a production needs also at the root
+# (`tokora::ParseAttempt`, not `tokora::try_parse_input::ParseAttempt`), the three-level families
+# such as `error::token`, `state::tracker` and `utils::sdl_display` are flattened into their
+# parents, and there is no prelude. Every feature this line names kept its name. The one rename
+# that reaches a manifest is the smol-bytes backing, `smol_bytes_0_1` -> `smol-bytes_0_2`, which
+# each member's `smol-bytes` feature names.
+tokora = { version = "0.12", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }
