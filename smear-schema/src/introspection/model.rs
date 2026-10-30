@@ -163,7 +163,13 @@ pub(super) struct NamedTypeRef<'a> {
 pub(super) struct IntrospectedType<'a> {
   pub(super) kind: IntrospectedKind,
   pub(super) name: Option<Name<'a>>,
-  pub(super) description: Option<Text<'a>>,
+  /// The description in the three states a response can write it: `None` when the member is
+  /// absent because the query did not ask, `Some(None)` for `null`, and a string.
+  ///
+  /// Three where every other description here has two, for one reader: a built-in scalar is left to
+  /// the build only when the response says nothing the build's own would not, and an absent
+  /// description says nothing where a `null` one says there is none.
+  pub(super) description: Option<Option<Text<'a>>>,
   /// A scalar's `@specifiedBy(url:)`. Read for every kind and rendered for a scalar alone, the one
   /// kind the directive may be applied to.
   pub(super) specified_by_url: Option<Text<'a>>,

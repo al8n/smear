@@ -109,7 +109,7 @@ impl<'a> Census<'a> {
 
   fn ty(&mut self, ty: &IntrospectedType<'a>) {
     self.name(ty.name);
-    self.text(ty.description.as_ref());
+    self.text(ty.description.as_ref().and_then(Option::as_ref));
     self.text(ty.specified_by_url.as_ref());
     for field in ty.fields.iter().flatten() {
       self.name(Some(field.name));
@@ -749,8 +749,11 @@ fn an_escape_is_decoded_everywhere_but_a_name() {
   ));
   let schema = read(&escaped_description).expect("a schema");
   assert_eq!(
-    schema.types[0].description.as_ref().map(Text::as_str),
-    Some("prose")
+    schema.types[0]
+      .description
+      .as_ref()
+      .map(|description| description.as_ref().map(Text::as_str)),
+    Some(Some("prose"))
   );
 }
 
@@ -1073,6 +1076,35 @@ fn an_unknown_member_is_ignored() {
   assert_eq!(Census::over(&json, &schema).copied_texts, 0);
 }
 
+/// A type's description keeps all three states a response can write — no member, `null`, and a
+/// string — because the built-in scalar rule reads all three.
+#[test]
+fn a_type_description_keeps_absent_apart_from_null() {
+  let json = response(
+    r#"{"kind":"OBJECT","name":"Query","fields":[
+         {"name":"ok","args":[],"type":{"kind":"SCALAR","name":"Int"}}
+       ]},
+       {"kind":"SCALAR","name":"Int","description":null},
+       {"kind":"SCALAR","name":"Url","description":"A URL."}"#,
+  );
+  let schema = read(&json).expect("a schema");
+  assert!(
+    schema.types[0].description.is_none(),
+    "no member is no answer"
+  );
+  assert!(
+    matches!(schema.types[1].description, Some(None)),
+    "`null` is an answer: there is none"
+  );
+  assert_eq!(
+    schema.types[2]
+      .description
+      .as_ref()
+      .map(|description| description.as_ref().map(Text::as_str)),
+    Some(Some("A URL."))
+  );
+}
+
 /// Prose is read at every level draft §4 has it, decoded where an escape forces it and borrowed
 /// everywhere else.
 #[test]
@@ -1103,8 +1135,11 @@ fn prose_is_read_wherever_draft_4_has_it() {
 
   let query = &schema.types[0];
   assert_eq!(
-    query.description.as_ref().map(Text::as_str),
-    Some("A \"quoted\" root.")
+    query
+      .description
+      .as_ref()
+      .map(|description| description.as_ref().map(Text::as_str)),
+    Some(Some("A \"quoted\" root."))
   );
   let fields = query.fields.as_ref().expect("fields");
   assert_eq!(
