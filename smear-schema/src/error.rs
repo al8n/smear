@@ -92,11 +92,11 @@ pub enum SchemaErrorKind {
   /// string inside a default value — is not UTF-8.
   ///
   /// Draft §4 returns all four as `String`, and the schema keeps them in a text arena that is a
-  /// `str` so that every reader of it is infallible. The parsers' byte lexer passes a literal's
-  /// content through unread, so a document parsed from a `[u8]` source is the one that can carry
-  /// such a string; one parsed from a `&str` cannot. Refused at admission rather than stored
-  /// lossily, as [`InvalidName`](Self::InvalidName) refuses a name: a replacement character is a
-  /// different string, not a degraded reading of this one.
+  /// `str` so that every reader of it is infallible. Unreachable from parsed input — a `&str`
+  /// source is UTF-8 throughout, and the parsers' byte lexer refuses a string literal that is not
+  /// (smear#246) — and checked anyway, as the arena's admission rule. Refused at admission rather
+  /// than stored lossily, as [`InvalidName`](Self::InvalidName) refuses a name: a replacement
+  /// character is a different string, not a degraded reading of this one.
   ///
   /// The subject is the element the string belongs to — `schema` for the schema's own
   /// description — and the span is the string literal's. A string the schema does not keep, such

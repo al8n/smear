@@ -28,7 +28,7 @@ use smear::{
       Described, Name, Nested, ScalarTypeDefinition, TypeDefinition, TypeSystemDefinition,
       TypeSystemDefinitionOrExtension, TypeSystemDocument,
     },
-    error::GraphqlErrors,
+    error::{ErrorData, GraphqlErrors},
     syntactic::{GraphqlLexer, type_system_document},
   },
   validator::schema::{
@@ -89,11 +89,14 @@ const UNFIREABLE: &[(SchemaErrorKind, &str)] = &[
   ),
   (
     SchemaErrorKind::UnreadableText,
-    "a `&str` source is UTF-8 throughout, so no document parsed from one can carry a string that \
-     is not, and every fixture here is a `&str`. `unreadable_text_from_a_byte_source` fires it \
-     through the door that can — a document parsed from `[u8]`, whose string content the byte \
-     lexer passes through unread — and `readable_text_from_a_byte_source_is_kept` is its valid \
-     twin.",
+    "no document, parsed or assembled, can carry a string that is not UTF-8. A `&str` source is \
+     UTF-8 throughout, the byte lexer refuses a string literal that is not (smear#246) — \
+     `ill_formed_text_is_refused_by_the_byte_lexer` pins that at the parse, and \
+     `readable_text_from_a_byte_source_is_kept` is its valid twin — and `StringValue` has no \
+     public constructor. The kind stays as the text arena's admission rule. What an assembled AST \
+     can still carry is a default naming an object field with bytes that are not UTF-8, since \
+     `Name::new` is public: the build refuses that name as `InvalidName`, and printing the \
+     default trips this kind beside it.",
   ),
   (
     SchemaErrorKind::TooManyNames,
@@ -1384,7 +1387,10 @@ fn invalid_name_from_a_hand_built_ast() {
   assert_eq!(error.subject(), "not a name");
 }
 
-/// A document parsed from bytes, which is the one source whose strings may not be text.
+/// A document parsed from bytes, for SDL that parses: it panics on a refusal.
+///
+/// The byte lexer refuses a string literal that is not UTF-8 (smear#246), so a document this
+/// returns holds text in every string, as one parsed from a `&str` does.
 fn parse_bytes(sdl: &[u8]) -> TypeSystemDocument<&[u8]> {
   Parser::with_parser::<
     GraphqlLexer<'_, [u8]>,
@@ -1398,7 +1404,8 @@ fn parse_bytes(sdl: &[u8]) -> TypeSystemDocument<&[u8]> {
 }
 
 /// One string that is not UTF-8 at each kind of string a schema keeps: a type's description, an
-/// argument's default, a field's deprecation reason and a scalar's `specifiedByURL`.
+/// argument's default, a field's deprecation reason and a scalar's `specifiedByURL`. The byte
+/// lexer refuses all four, so this does not parse.
 const UNREADABLE: &[u8] =
   b"\"\xff\" type Query { ok(a: String = \"\xfe\"): Int @deprecated(reason: \"\xfd\") }\n\
   scalar Url @specifiedBy(url: \"\xfc\")\n";
@@ -1409,28 +1416,46 @@ const READABLE: &[u8] =
   scalar Url @specifiedBy(url: \"https://example.com\")\n"
     .as_bytes();
 
-/// [`SchemaErrorKind::UnreadableText`], through the one door that reaches it.
+/// Text that is not UTF-8 never reaches the builder from a parse.
 ///
-/// The parser's byte lexer passes a string's content through unread, so a `[u8]` source can hand
-/// the builder bytes that are no text at all, and the builder refuses each where it would have kept
-/// it — once per string, naming the element the string belongs to — rather than storing a
-/// replacement.
+/// The byte lexer refuses a string literal that is not well-formed UTF-8 (smear#246), so
+/// [`UNREADABLE`] fails to parse, and the refusals are the lexer's, at the string literals. This is
+/// the door that used to reach [`SchemaErrorKind::UnreadableText`]: the byte lexer passed a string's
+/// content through unread, and the builder refused it once per string it would have kept.
 #[test]
-fn unreadable_text_from_a_byte_source() {
-  let errors =
-    Schema::build(&parse_bytes(UNREADABLE)).expect_err("text that is not UTF-8 is not a schema");
-  assert_eq!(
-    errors.kinds(),
-    vec![SchemaErrorKind::UnreadableText],
-    "{errors}"
-  );
-  let mut subjects: Vec<&str> = errors
-    .errors()
+fn ill_formed_text_is_refused_by_the_byte_lexer() {
+  let Err(errors) = Parser::with_parser::<
+    GraphqlLexer<'_, [u8]>,
+    TypeSystemDocument<&[u8]>,
+    GraphqlErrors<&[u8]>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse(UNREADABLE) else {
+    panic!("a string literal that is not UTF-8 does not parse");
+  };
+
+  // The parser keeps a lexer error's span and flattens its data to this note.
+  let literals = [
+    SimpleSpan::new(0, 3),
+    SimpleSpan::new(32, 35),
+    SimpleSpan::new(62, 65),
+    SimpleSpan::new(98, 101),
+  ];
+  for literal in &literals {
+    assert_eq!(UNREADABLE[literal.start()], b'"');
+    assert_eq!(UNREADABLE[literal.end() - 1], b'"');
+  }
+  let lexer_errors: Vec<SimpleSpan> = errors
     .iter()
-    .map(|error| error.subject())
+    .filter(|error| matches!(error.data(), ErrorData::Other(note) if note == "lexer error"))
+    .map(|error| error.span())
     .collect();
-  subjects.sort_unstable();
-  assert_eq!(subjects, ["Query", "Url", "a", "ok"], "{errors}");
+  assert!(!lexer_errors.is_empty(), "{errors:?}");
+  assert!(
+    lexer_errors.iter().all(|span| literals.contains(span)),
+    "every lexer refusal is at one of the four literals: {errors:?}"
+  );
 }
 
 /// The valid twin: the same four places holding text, kept.
