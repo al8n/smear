@@ -776,7 +776,7 @@ pub struct Limits {
   /// driver's own `V` — the same way a `String` leaf of any length reaches the response without a
   /// byte ceiling looking at it, and the same way `start`'s `root` and every
   /// [`handle_resolved`](Executor::handle_resolved) answer do. There is no ceiling that could
-  /// apply: [`Values`](crate::Values) asks seven questions, each discharging a numbered draft §6
+  /// apply: [`Values`](crate::Values) asks eight questions, each discharging a numbered draft §6
   /// step, and none of them is "how big is this" — measuring one would mean a `V` the executor is
   /// allowed to interpret, which is the boundary this crate is built not to cross. `max_in_flight`
   /// and [`max_response_slots`](Limits::max_response_slots) bound how *many* driver values are

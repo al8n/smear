@@ -183,7 +183,7 @@
 //! purpose, so the accessor would return exactly what the caller moved in.
 //!
 //! It would also return it *less* usefully than a field on the driver's own type. [`Values`] is the
-//! surface a driver's value logic runs on, and its seven methods see the driver's type and never
+//! surface a driver's value logic runs on, and its eight methods see the driver's type and never
 //! the executor — so a map parked on an [`Executor`] is unreadable at the two steps an
 //! implementation-specific request hint exists for, [`Values::variable`] (§6.4.1 steps 5.c–5.f and
 //! §6.3's directive conditions) and [`Values::coerce_leaf`] (§6.4.3 step 4). Between
@@ -253,6 +253,7 @@
 //!   }
 //! #   fn is_null(&self, _: &String) -> bool { false }
 //! #   fn as_bool(&self, _: &String) -> Option<bool> { None }
+//! #   fn as_str<'a>(&'a self, value: &'a String) -> Option<&'a str> { Some(value) }
 //! #   fn list_len(&self, _: &String) -> Option<usize> { None }
 //! #   fn list_item(&mut self, _: &String, _: usize) -> String { String::new() }
 //! #   fn type_name<'a>(&'a self, _: &'a String) -> Option<&'a str> { None }
@@ -349,6 +350,12 @@
 //!   }
 //!   fn as_bool(&self, _: &Json) -> Option<bool> {
 //!     None
+//!   }
+//!   fn as_str<'a>(&'a self, value: &'a Json) -> Option<&'a str> {
+//!     match value {
+//!       Json::Str(text) => Some(text),
+//!       _ => None,
+//!     }
 //!   }
 //!   fn list_len(&self, _: &Json) -> Option<usize> {
 //!     None

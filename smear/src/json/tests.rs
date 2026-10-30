@@ -539,6 +539,10 @@ impl Values for Space {
     None
   }
 
+  fn as_str<'a>(&'a self, _: &'a Cell) -> Option<&'a str> {
+    None
+  }
+
   fn list_len(&self, _: &Cell) -> Option<usize> {
     None
   }

@@ -265,6 +265,7 @@ impl<V> std::error::Error for TooLarge<V> {}
 /// #   type Value = String;
 /// #   fn is_null(&self, _: &String) -> bool { false }
 /// #   fn as_bool(&self, _: &String) -> Option<bool> { None }
+/// #   fn as_str<'a>(&'a self, value: &'a String) -> Option<&'a str> { Some(value) }
 /// #   fn list_len(&self, _: &String) -> Option<usize> { None }
 /// #   fn list_item(&mut self, _: &String, _: usize) -> String { String::new() }
 /// #   fn type_name<'a>(&'a self, _: &'a String) -> Option<&'a str> { None }

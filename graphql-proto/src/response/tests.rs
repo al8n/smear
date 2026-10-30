@@ -76,6 +76,10 @@ impl Values for Space {
     None
   }
 
+  fn as_str<'a>(&'a self, _: &'a Value) -> Option<&'a str> {
+    None
+  }
+
   fn list_len(&self, _: &Value) -> Option<usize> {
     None
   }

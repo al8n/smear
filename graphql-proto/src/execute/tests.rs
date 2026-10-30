@@ -122,6 +122,10 @@ impl Values for Space {
     None
   }
 
+  fn as_str<'a>(&'a self, _: &'a Value) -> Option<&'a str> {
+    None
+  }
+
   fn list_len(&self, value: &Value) -> Option<usize> {
     match value {
       Value::List(len) => Some(*len),
@@ -3154,6 +3158,9 @@ impl Values for Counting {
     false
   }
   fn as_bool(&self, _: &Tracked) -> Option<bool> {
+    None
+  }
+  fn as_str<'a>(&'a self, _: &'a Tracked) -> Option<&'a str> {
     None
   }
   fn list_len(&self, value: &Tracked) -> Option<usize> {

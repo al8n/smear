@@ -110,6 +110,13 @@ impl Values for Space {
     }
   }
 
+  fn as_str<'a>(&'a self, value: &'a J) -> Option<&'a str> {
+    match value {
+      J::Str(text) => Some(text),
+      _ => None,
+    }
+  }
+
   fn list_len(&self, value: &J) -> Option<usize> {
     match value {
       J::List(items) => Some(items.len()),
@@ -1924,6 +1931,10 @@ impl Values for Handles {
   }
 
   fn as_bool(&self, _: &Counted) -> Option<bool> {
+    None
+  }
+
+  fn as_str<'a>(&'a self, _: &'a Counted) -> Option<&'a str> {
     None
   }
 

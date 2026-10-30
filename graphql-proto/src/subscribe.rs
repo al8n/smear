@@ -225,6 +225,9 @@ use core::fmt;
 /// #   type Value = Json;
 /// #   fn is_null(&self, value: &Json) -> bool { matches!(value, Json::Null) }
 /// #   fn as_bool(&self, _: &Json) -> Option<bool> { None }
+/// #   fn as_str<'a>(&'a self, value: &'a Json) -> Option<&'a str> {
+/// #     match value { Json::Str(text) => Some(text), _ => None }
+/// #   }
 /// #   fn list_len(&self, _: &Json) -> Option<usize> { None }
 /// #   fn list_item(&mut self, _: &Json, _: usize) -> Json { Json::Null }
 /// #   fn type_name<'a>(&'a self, _: &'a Json) -> Option<&'a str> { None }

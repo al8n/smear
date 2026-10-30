@@ -1,4 +1,4 @@
-//! The driver's value representation, and the seven questions execution asks about it.
+//! The driver's value representation, and the eight questions execution asks about it.
 //!
 //! # Why there is no `smear::proto::Value`
 //!
@@ -105,6 +105,7 @@ impl core::fmt::Display for Leaf<'_> {
 /// |---|---|
 /// | [`is_null`](Values::is_null) | §6.4.3 `CompleteValue` 1–2: the non-null check, and the whole of null propagation — step 4, on what [`coerce_leaf`](Values::coerce_leaf) returned — and the null half of §6.4.1 step 5.i.i and of §6.3's directive conditions |
 /// | [`as_bool`](Values::as_bool) | §6.3 `CollectFields` 3.a–3.b: `@skip(if:)` and `@include(if:)` when the condition is a variable |
+/// | [`as_str`](Values::as_str) | §6.4.1 `CoerceArgumentValues` 5.j, for the one `String!` argument the executor resolves itself: draft §4.4's `__type(name:)` when the name is a variable |
 /// | [`list_len`](Values::list_len) | §6.4.3 `CompleteValue` 3: "if result is not a collection of values, raise a field error" |
 /// | [`list_item`](Values::list_item) | §6.4.3 `CompleteValue` 3: completing each element |
 /// | [`type_name`](Values::type_name) | §6.4.3 `CompleteValue` 5 / `ResolveAbstractType` |
@@ -188,6 +189,30 @@ pub trait Values {
   /// explicitly supplied `null` for it to `null` — and that one is settled by
   /// [`is_null`](Values::is_null) before this method is asked.
   fn as_bool(&self, value: &Self::Value) -> Option<bool>;
+
+  /// Returns the value as a string, or `None` when it is not one.
+  ///
+  /// Only reached for draft §4.4's `__type(name:)` when `name` is a variable, and only for a value
+  /// [`is_null`](Values::is_null) already reported as non-null. The executor answers `__type` from
+  /// the schema rather than offering it to the driver, so this is its own read of the one `String!`
+  /// argument it resolves itself — the counterpart of [`as_bool`](Values::as_bool) for `@skip(if:)`
+  /// and `@include(if:)`. It says what the value *is*; which type the string names is the schema's.
+  ///
+  /// # `None` is a failure, not a name that matches nothing
+  ///
+  /// `name` is declared `String!`, so a value that is not a string does not satisfy the position,
+  /// and the executor raises a field error at `__type` rather than choosing a name for it — an
+  /// unknown *name* answers `null`, and a value that is not a name at all is not an unknown one.
+  /// Draft §6.1's `CoerceVariableValues`, which is the driver's, rejects such a value before
+  /// execution begins, so a conforming driver never reaches that branch.
+  ///
+  /// # Required, and the reason is the answer a default would give
+  ///
+  /// A provided method answering `None` would keep every existing implementation compiling and turn
+  /// every `__type(name: $name)` it serves into that field error — a valid request refused, with
+  /// nothing at build time to say so. A string is a representation question with one right answer
+  /// per representation, and only the driver knows it.
+  fn as_str<'a>(&'a self, value: &'a Self::Value) -> Option<&'a str>;
 
   /// Returns the number of elements when the value is a list, and `None` when it is not.
   ///

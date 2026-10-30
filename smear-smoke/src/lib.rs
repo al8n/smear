@@ -566,6 +566,9 @@ pub fn graphql_execute(sdl: &str, query: &str, value: Option<&str>) -> (Option<S
     fn as_bool(&self, value: &Text) -> Option<bool> {
       value.0.as_deref().map(|text| text == "true")
     }
+    fn as_str<'a>(&'a self, value: &'a Text) -> Option<&'a str> {
+      value.0.as_deref()
+    }
     fn list_len(&self, _: &Text) -> Option<usize> {
       None
     }

@@ -126,6 +126,13 @@ impl Values for Space {
     None
   }
 
+  fn as_str<'a>(&'a self, value: &'a Val) -> Option<&'a str> {
+    match value {
+      Val::Str(text) => Some(text),
+      _ => None,
+    }
+  }
+
   fn list_len(&self, _: &Val) -> Option<usize> {
     None
   }
