@@ -884,6 +884,10 @@ fn render(node: &Node<'_, Val>) -> String {
     Node::Leaf(Val::Data) => "\"<object>\"".to_owned(),
     // `nonnull-test.ts` selects no meta-field, so the executor answers no `__typename` here.
     Node::TypeName(name) => panic!("the ported corpus selects no `__typename`, and got {name:?}"),
+    // Nor any field under `__schema` or `__type`, which are the only positions these come from.
+    Node::Str(_) | Node::Bool(_) | Node::Enum(_) => {
+      panic!("the ported corpus selects no introspection field, and got {node:?}")
+    }
     Node::List(children) => {
       let mut out = String::from("[");
       for (index, (_, child)) in children.clone().enumerate() {

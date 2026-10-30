@@ -5301,7 +5301,7 @@ impl<'r, V> Response<'r, V> {
   /// never ran.
   #[inline]
   pub fn data(&self) -> Node<'r, V> {
-    node(self.slots, self.names, self.name_spans, 0)
+    node(self.schema, self.slots, self.names, self.name_spans, 0)
   }
 
   /// Returns an upper bound on how deep this response is, in draft §7.1.2 path segments.

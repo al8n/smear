@@ -2502,6 +2502,7 @@ fn a_withheld_top_level_field_is_in_the_tree_and_reads_as_null() {
 
   const ROOT: u32 = 0;
   let Node::Object(mut fields) = node(
+    executor.schema,
     &executor.slots,
     executor.interner.names(),
     executor.interner.spans(),

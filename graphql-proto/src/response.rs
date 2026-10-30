@@ -60,7 +60,7 @@ use core::fmt;
 
 use std::collections::TryReserveError;
 
-use smear_schema::{PackedType, TypeId};
+use smear_schema::{PackedType, Schema, TypeId};
 
 #[cfg(all(test, feature = "std"))]
 mod tests;
@@ -887,10 +887,18 @@ fn allow_allocations() {
 /// `String!` position is a value, so a serialiser need not re-check the schema to know its output
 /// will satisfy it.
 ///
-/// [`Node::TypeName`] is the one value that does not arrive as a `&V`, because the driver did not
-/// produce it: draft §4.4's `__typename` is answered by the executor from the object type it
-/// resolved. A serialiser writes it as a GraphQL `String`, the same way it writes a
-/// [`Segment::Field`] key.
+/// [`Node::TypeName`], [`Node::Str`], [`Node::Bool`] and [`Node::Enum`] are the values that do not
+/// arrive as a `&V`, because the driver did not produce them. Draft §4.4's `__typename` is answered
+/// by the executor from the object type it resolved, and everything under draft §4's `__schema`
+/// and `__type` is answered from the [`Schema`] the executor runs against. A serialiser writes a
+/// `TypeName`, a `Str` and an `Enum` as a JSON string, the same way it writes a [`Segment::Field`]
+/// key, and a `Bool` as a JSON boolean.
+///
+/// **Not `#[non_exhaustive]`**, for the rule [`ResponseStream`](crate::ResponseStream) records: a
+/// serialiser has to write something for every kind of value, so a new kind must break its `match`
+/// rather than fall into a catch-all that writes a response the executor did not produce. The three
+/// introspection variants were added that way, and every exhaustive matcher in this repository was
+/// made to name them.
 pub enum Node<'r, V> {
   /// The `null` literal.
   Null,
@@ -898,6 +906,13 @@ pub enum Node<'r, V> {
   Leaf(&'r V),
   /// Draft §4.4's `__typename`: the concrete object type's name, as the schema spells it.
   TypeName(&'r str),
+  /// A `String` draft §4 introspection answers: a name, a description, a deprecation reason, a
+  /// `specifiedByURL` or a default value's text.
+  Str(&'r str),
+  /// A `Boolean` draft §4 introspection answers: `isDeprecated`, `isRepeatable` or `isOneOf`.
+  Bool(bool),
+  /// An enum value draft §4 introspection answers: a `__TypeKind` or a `__DirectiveLocation`.
+  Enum(&'r str),
   /// A list, in order.
   List(Children<'r, V>),
   /// An object, in the order draft §6.3 collected its fields.
@@ -930,7 +945,10 @@ impl<V> fmt::Debug for Node<'_, V> {
     match self {
       Self::Null => f.write_str("null"),
       Self::Leaf(_) => f.write_str("<leaf>"),
-      Self::TypeName(name) => write!(f, "{name:?}"),
+      Self::TypeName(name) | Self::Str(name) => write!(f, "{name:?}"),
+      Self::Bool(flag) => write!(f, "{flag}"),
+      // An enum value is a name, and a name needs no quotes to be read as one.
+      Self::Enum(value) => f.write_str(value),
       // `Children`'s own `Debug` is the keys, so the two arms differ by the name in front of them —
       // which is the one thing the keys alone do not say.
       Self::List(children) => f.debug_tuple("List").field(children).finish(),
@@ -941,6 +959,8 @@ impl<V> fmt::Debug for Node<'_, V> {
 
 /// The children of a list or an object, in response order.
 pub struct Children<'r, V> {
+  /// What an introspection leaf is read out of — see [`node`].
+  schema: &'r Schema,
   slots: &'r [Slot<V>],
   names: &'r str,
   name_spans: &'r [(u32, u32)],
@@ -951,6 +971,7 @@ impl<V> Clone for Children<'_, V> {
   #[inline]
   fn clone(&self) -> Self {
     Self {
+      schema: self.schema,
       slots: self.slots,
       names: self.names,
       name_spans: self.name_spans,
@@ -975,7 +996,10 @@ impl<'r, V> Iterator for Children<'r, V> {
       Key::Index(i) => Segment::Index(i),
       Key::Field(name) => Segment::Field(interned(self.names, self.name_spans, name)),
     };
-    Some((key, node(self.slots, self.names, self.name_spans, index)))
+    Some((
+      key,
+      node(self.schema, self.slots, self.names, self.name_spans, index),
+    ))
   }
 }
 
@@ -1003,7 +1027,12 @@ fn interned<'r>(names: &'r str, name_spans: &[(u32, u32)], id: u32) -> &'r str {
 }
 
 /// Renders the slot at `index` as a [`Node`].
+///
+/// The schema is here for the leaves draft §4 introspection answers, which a slot holds as the
+/// schema handle they are read through rather than as text — so a slot stays the size its
+/// assertions above pin, and the text is borrowed from the schema at the moment it is read.
 pub(super) fn node<'r, V>(
+  schema: &'r Schema,
   slots: &'r [Slot<V>],
   names: &'r str,
   name_spans: &'r [(u32, u32)],
@@ -1026,6 +1055,7 @@ pub(super) fn node<'r, V>(
     State::Leaf(value) => Node::Leaf(value),
     State::TypeName(name) => Node::TypeName(interned(names, name_spans, *name)),
     State::List => Node::List(Children {
+      schema,
       slots,
       names,
       name_spans,
@@ -1034,6 +1064,7 @@ pub(super) fn node<'r, V>(
     // Both object states render the same way, because rendering never read the value or the
     // resolved type — only `first_child`. `Expanded` is that fact made into a state.
     State::Object { .. } | State::Expanded => Node::Object(Children {
+      schema,
       slots,
       names,
       name_spans,

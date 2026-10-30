@@ -403,7 +403,8 @@ fn render(node: &Node<'_, Val>) -> String {
     // an object position — so a marker rather than a panic, which keeps a divergence readable as a
     // diff instead of a backtrace.
     Node::Leaf(_) => "<not-a-number>".to_owned(),
-    Node::TypeName(name) => format!("\"{name}\""),
+    Node::TypeName(name) | Node::Str(name) | Node::Enum(name) => format!("\"{name}\""),
+    Node::Bool(flag) => flag.to_string(),
     Node::List(children) => {
       let mut out = String::from("[");
       for (index, (_, child)) in children.clone().enumerate() {

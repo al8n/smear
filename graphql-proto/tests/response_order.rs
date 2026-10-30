@@ -1233,7 +1233,12 @@ fn borrowed_paths(paths: &[String]) -> Vec<&str> {
 fn collect_keys(node: &Node<'_, Value>, prefix: &str, out: &mut Vec<String>) {
   let children = match node {
     Node::List(children) | Node::Object(children) => children.clone(),
-    Node::Null | Node::Leaf(_) | Node::TypeName(_) => return,
+    Node::Null
+    | Node::Leaf(_)
+    | Node::TypeName(_)
+    | Node::Str(_)
+    | Node::Bool(_)
+    | Node::Enum(_) => return,
   };
   for (key, child) in children {
     let path = join(prefix, &key.to_string());
@@ -1249,7 +1254,8 @@ fn render(node: &Node<'_, Value>) -> String {
     // Unreachable for these fixtures, and rendered distinctly rather than as `null` so that a run
     // that reached it says so instead of looking like a nulled position.
     Node::Leaf(Value::Object) => "<object in a leaf position>".to_owned(),
-    Node::TypeName(name) => format!("\"{name}\""),
+    Node::TypeName(name) | Node::Str(name) | Node::Enum(name) => format!("\"{name}\""),
+    Node::Bool(flag) => flag.to_string(),
     Node::List(children) => {
       let mut out = String::from("[");
       for (index, (_, child)) in children.clone().enumerate() {
