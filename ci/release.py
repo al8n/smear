@@ -28,11 +28,11 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
 import time
-import tomllib
 import unittest
 import urllib.error
 import urllib.parse
@@ -354,6 +354,90 @@ def verify_workspace(metadata: dict[str, object], version: str) -> dict[str, dic
     return by_name
 
 
+def extract_package_for_manifest(
+    bundle: tarfile.TarFile, target_dir: Path, root: str
+) -> Path:
+    extraction_root = target_dir / "package-manifests"
+    package_root = extraction_root / root
+    if package_root.exists():
+        shutil.rmtree(package_root)
+    for member in bundle.getmembers():
+        relative = Path(member.name)
+        if relative.is_absolute() or not relative.parts or relative.parts[0] != root:
+            fail(f"package archive contains an out-of-root path: {member.name!r}")
+        if any(part in ("", ".", "..") for part in relative.parts):
+            fail(f"package archive contains an unsafe path: {member.name!r}")
+        destination = extraction_root.joinpath(*relative.parts)
+        if member.isdir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        if not member.isfile():
+            fail(f"package archive contains a non-file entry: {member.name!r}")
+        source = bundle.extractfile(member)
+        if source is None:
+            fail(f"failed to read package archive entry {member.name!r}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open("wb") as output:
+            shutil.copyfileobj(source, output)
+    manifest_path = package_root / "Cargo.toml"
+    if not manifest_path.is_file():
+        fail(f"extracted package has no normalized manifest: {manifest_path}")
+    return manifest_path
+
+
+def read_packaged_manifest(manifest_path: Path, target_dir: Path) -> dict[str, object]:
+    result = run(
+        cargo_args("read-manifest", "--manifest-path", str(manifest_path)),
+        capture=True,
+        env=cargo_env(target_dir),
+    )
+    try:
+        manifest = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        fail(f"cargo read-manifest returned invalid JSON for {manifest_path}: {error}")
+    if not isinstance(manifest, dict):
+        fail(f"cargo read-manifest returned a non-object for {manifest_path}")
+    return manifest
+
+
+def validate_packaged_manifest(
+    manifest: dict[str, object], name: str, version: str
+) -> None:
+    if manifest.get("name") != name:
+        fail(f"packaged manifest names {manifest.get('name')!r}, expected {name!r}")
+    if manifest.get("version") != version:
+        fail(f"{name}'s packaged manifest has version {manifest.get('version')!r}, expected {version}")
+    dependencies = manifest.get("dependencies")
+    if not isinstance(dependencies, list):
+        fail(f"{name}'s packaged manifest has no dependency list")
+    normal_internal: dict[str, dict[str, object]] = {}
+    for dependency in dependencies:
+        if not isinstance(dependency, dict) or not isinstance(dependency.get("name"), str):
+            fail(f"{name}'s packaged manifest contains invalid dependency metadata")
+        dependency_name = dependency["name"]
+        if dependency_name in PUBLISH_ORDER and dependency.get("kind") is None:
+            if dependency_name in normal_internal:
+                fail(f"{name}'s packaged manifest repeats dependency {dependency_name}")
+            normal_internal[dependency_name] = dependency
+        if name == "smear" and dependency_name == "smear" and dependency.get("kind") == "dev":
+            fail(f"{name}'s packaged manifest retained its path-only self dev-dependency")
+    if set(normal_internal) != set(INTERNAL_EDGES[name]):
+        fail(
+            f"{name}'s packaged manifest has internal edges {sorted(normal_internal)}, "
+            f"expected {sorted(INTERNAL_EDGES[name])}"
+        )
+    for dependency_name, dependency in normal_internal.items():
+        if dependency.get("req") != f"^{version}":
+            fail(
+                f"{name}'s packaged manifest requires {dependency_name} {dependency.get('req')!r}, "
+                f"expected ^{version}"
+            )
+        if dependency.get("source") != "registry+https://github.com/rust-lang/crates.io-index":
+            fail(
+                f"{name}'s packaged manifest does not source {dependency_name} from crates.io"
+            )
+
+
 def package_archive(
     package: dict[str, object], version: str, commit: str, target_dir: Path
 ) -> dict[str, object]:
@@ -380,21 +464,6 @@ def package_archive(
         if vcs_sha != commit:
             fail(f"{filename} records VCS SHA {vcs_sha!r}, expected {commit}")
         manifest_bytes = manifest_file.read()
-        normalized_manifest = tomllib.loads(manifest_bytes.decode())
-        if normalized_manifest.get("package", {}).get("version") != version:
-            fail(f"{filename}'s normalized manifest has the wrong version")
-        normalized_dependencies = normalized_manifest.get("dependencies", {})
-        for dependency_name in INTERNAL_EDGES[name]:
-            dependency = normalized_dependencies.get(dependency_name)
-            if not isinstance(dependency, dict):
-                fail(f"{filename} lost published dependency {dependency_name}")
-            if dependency.get("version") != version or "path" in dependency:
-                fail(
-                    f"{filename} publishes {dependency_name} as {dependency!r}; expected the "
-                    f"registry-only {version} requirement"
-                )
-        if name == "smear" and "smear" in normalized_manifest.get("dev-dependencies", {}):
-            fail(f"{filename} retained its path-only self dev-dependency")
 
         readme_sha = None
         readme = package.get("readme")
@@ -415,6 +484,14 @@ def package_archive(
             if packaged_readme != source_readme:
                 fail(f"{filename}'s README is not byte-identical to {readme_path}")
             readme_sha = sha256_bytes(packaged_readme)
+
+        extracted_manifest = extract_package_for_manifest(bundle, target_dir, root)
+
+    if extracted_manifest.read_bytes() != manifest_bytes:
+        fail(f"{filename}'s extracted Cargo.toml differs from the archived manifest bytes")
+    validate_packaged_manifest(
+        read_packaged_manifest(extracted_manifest, target_dir), name, version
+    )
 
     return {
         "name": name,
@@ -1437,6 +1514,18 @@ class ReleaseSelfTests(unittest.TestCase):
             "sha256": self.checksum,
         }
 
+    def cargo_manifest(self, name: str) -> dict[str, object]:
+        dependencies = [
+            {
+                "name": dependency,
+                "source": "registry+https://github.com/rust-lang/crates.io-index",
+                "req": "^0.0.1",
+                "kind": None,
+            }
+            for dependency in sorted(INTERNAL_EDGES[name])
+        ]
+        return {"name": name, "version": "0.0.1", "dependencies": dependencies}
+
     def test_oidc_exact_is_accepted(self) -> None:
         self.assertEqual(
             classify_version(
@@ -1544,6 +1633,42 @@ class ReleaseSelfTests(unittest.TestCase):
             ),
             "skip",
         )
+
+    def test_cargo_manifest_reader_contract_is_exact(self) -> None:
+        validate_packaged_manifest(self.cargo_manifest("smear-parser"), "smear-parser", "0.0.1")
+        validate_packaged_manifest(self.cargo_manifest("smear"), "smear", "0.0.1")
+
+        wrong_name = self.cargo_manifest("smear-parser")
+        wrong_name["name"] = "other"
+        with self.assertRaisesRegex(ReleaseError, "names"):
+            validate_packaged_manifest(wrong_name, "smear-parser", "0.0.1")
+
+        wrong_version = self.cargo_manifest("smear-parser")
+        wrong_version["version"] = "0.0.2"
+        with self.assertRaisesRegex(ReleaseError, "version"):
+            validate_packaged_manifest(wrong_version, "smear-parser", "0.0.1")
+
+        wrong_requirement = self.cargo_manifest("smear-parser")
+        wrong_requirement["dependencies"][0]["req"] = "^0.0.2"
+        with self.assertRaisesRegex(ReleaseError, r"expected \^0\.0\.1"):
+            validate_packaged_manifest(wrong_requirement, "smear-parser", "0.0.1")
+
+        wrong_source = self.cargo_manifest("smear-parser")
+        wrong_source["dependencies"][0]["source"] = None
+        with self.assertRaisesRegex(ReleaseError, "crates.io"):
+            validate_packaged_manifest(wrong_source, "smear-parser", "0.0.1")
+
+        missing_edge = self.cargo_manifest("smear-parser")
+        missing_edge["dependencies"] = []
+        with self.assertRaisesRegex(ReleaseError, "internal edges"):
+            validate_packaged_manifest(missing_edge, "smear-parser", "0.0.1")
+
+        self_dependency = self.cargo_manifest("smear")
+        self_dependency["dependencies"].append(
+            {"name": "smear", "source": None, "req": "*", "kind": "dev"}
+        )
+        with self.assertRaisesRegex(ReleaseError, "self dev-dependency"):
+            validate_packaged_manifest(self_dependency, "smear", "0.0.1")
 
     def test_cargo_failure_is_overruled_only_by_exact_registry_evidence(self) -> None:
         evidence = {"name": "smear"}
