@@ -1062,16 +1062,34 @@ jobs:
         echo "ok: smear/README.md is mode 120000 -> ../README.md"
     - name: Install Rust
       run: rustup update stable --no-self-update && rustup default stable
-    - name: Cache cargo build and registry
+    # Downloads only — never extracted sources, never `target` — and the reason is that every
+    # workspace crate is version `0.0.0`.
+    #
+    # `cargo publish --dry-run --workspace` verifies each member against its already-packaged
+    # siblings through a temporary local registry at `target/package/tmp-registry`, a path that
+    # is identical on every runner. Cargo treats a registry crate as immutable: when
+    # `~/.cargo/registry/src/<registry-dir>/<name>-0.0.0` is already extracted and carries its
+    # `.cargo-ok` marker, it reuses that directory instead of extracting again, and its build
+    # fingerprint for a registry crate does not look at the source files at all. So a restored
+    # cache hands a later run the sibling sources that `main` had when the cache was saved, and a
+    # member is verified against stale siblings while the freshly packaged tarballs sit unread.
+    #
+    # Observed: a PR whose `graphql-proto` used a newer `smear-schema` item failed verification
+    # with `unresolved import smear_schema::Text` / "no `Text` in the root", although the
+    # packaged `smear-schema` tarball contained `Text` and the tree was sound.
+    #
+    # The index and the downloaded archives of real dependencies are immutable, so they are what
+    # is worth keeping.
+    - name: Cache cargo registry downloads
       uses: actions/cache@v6
       with:
         path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-publish-dry-run-${{ hashFiles('**/Cargo.lock') }}
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ runner.os }}-publish-dry-run-downloads-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-publish-dry-run-
+          ${{ runner.os }}-publish-dry-run-downloads-
     # `--workspace`, NOT `-p smear`, and the difference is a hard failure rather than a
     # preference. `smear` depends on `smear-lexer` by path plus version, and nothing named
     # `smear-lexer` is on the registry yet, so `cargo publish --dry-run -p smear` exits 1 with
