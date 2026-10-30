@@ -756,7 +756,7 @@ fn input_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspec
 
   Ok(IntrospectedInputValue {
     name: name.ok_or_else(|| scanner.missing("name"))?,
-    description: description.flatten(),
+    description,
     ty: ty.ok_or_else(|| scanner.missing("type"))?,
     default_value: default_value.flatten(),
     deprecated: deprecated(is_deprecated_slot.flatten(), deprecation_reason.flatten()),
@@ -847,7 +847,7 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
 
   Ok(IntrospectedDirective {
     name: name.ok_or_else(|| scanner.missing("name"))?,
-    description: description.flatten(),
+    description,
     locations: locations.ok_or_else(|| scanner.missing("locations"))?,
     args: args.unwrap_or_default(),
     is_repeatable: is_repeatable.unwrap_or(false),

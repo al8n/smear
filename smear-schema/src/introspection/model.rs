@@ -166,9 +166,10 @@ pub(super) struct IntrospectedType<'a> {
   /// The description in the three states a response can write it: `None` when the member is
   /// absent because the query did not ask, `Some(None)` for `null`, and a string.
   ///
-  /// Three where every other description here has two, for one reader: a built-in scalar is left to
-  /// the build only when the response says nothing the build's own would not, and an absent
-  /// description says nothing where a `null` one says there is none.
+  /// Three here, on a directive and on an input value, where the others have two, for one reader:
+  /// a built-in scalar or a specified directive is left to the build only when the response says
+  /// nothing the build's own would not, and an absent description says nothing where a `null` one
+  /// says there is none.
   pub(super) description: Option<Option<Text<'a>>>,
   /// A scalar's `@specifiedBy(url:)`. Read for every kind and rendered for a scalar alone, the one
   /// kind the directive may be applied to.
@@ -204,7 +205,9 @@ pub(super) struct IntrospectedField<'a> {
 #[derive(Debug)]
 pub(super) struct IntrospectedInputValue<'a> {
   pub(super) name: Name<'a>,
-  pub(super) description: Option<Text<'a>>,
+  /// Three states, as [`IntrospectedType::description`]: a specified directive's argument is
+  /// compared with the built-in's.
+  pub(super) description: Option<Option<Text<'a>>>,
   pub(super) ty: TypeRef<'a>,
   /// The server's printed spelling of the default, or null for no default.
   ///
@@ -232,7 +235,8 @@ pub(super) struct IntrospectedEnumValue<'a> {
 #[derive(Debug)]
 pub(super) struct IntrospectedDirective<'a> {
   pub(super) name: Name<'a>,
-  pub(super) description: Option<Text<'a>>,
+  /// Three states, as [`IntrospectedType::description`].
+  pub(super) description: Option<Option<Text<'a>>>,
   /// Resolved to the enum while the bytes are in hand, so an unknown location is refused at the
   /// literal that spells it and the renderer has nothing left to compare.
   pub(super) locations: Vec<DirectiveLocation>,
