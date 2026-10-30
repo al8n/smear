@@ -27,7 +27,9 @@ find "${CARGO_TARGET_DIR:-target}/package" -name "*.crate" -type f -exec shasum 
 
 The root `Cargo.lock` is deliberately ignored. Record its SHA-256 with the
 release evidence and remove it afterward; do not add it to Git. The committed
-`ci/downstream/Cargo.lock` remains the consumer fixture's lock.
+`ci/downstream/Cargo.lock` is a historical consumer-fixture input and is not
+release-bumped: `ci/downstream.sh` refreshes only a private snapshot's six
+local path-package versions before running the fixture's locked legs.
 
 The workspace dry run is deliberately unlocked. During first publication,
 Cargo's temporary registry cannot verify a root lock containing unpublished
