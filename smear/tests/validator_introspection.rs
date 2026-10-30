@@ -67,6 +67,13 @@
 //!   redefines none; [`redefining_a_built_in_is_the_one_flag_introspection_loses`] and
 //!   [`a_specified_directive_spelled_as_the_build_injects_it_loses_its_flag_and_its_place`] pin the
 //!   losses instead of hiding them.
+//! - **The meta types' descriptions and the order of their members.** A document cannot define a
+//!   `__` type, so both doors carry smear's meta-schema, and what a response says about the
+//!   specification's own types beyond their shape is that server's rendering, not the schema's
+//!   content: it is not kept. The generated response is smear's own, so the comparison cannot see
+//!   it either way. The shape is held, and a meta type in a shape draft §4 does not give it is
+//!   refused; [`a_meta_type_is_held_to_its_shape_and_not_to_its_rendering`] and
+//!   [`a_meta_type_in_another_shape_is_refused`] pin the two halves.
 
 // `Schema::from_introspection`, `IntrospectionError` and `ResponseErrorKind` below all live behind
 // `#[cfg(feature = "introspection")]` in `smear-schema/src/introspection/`, not merely
@@ -1374,7 +1381,8 @@ const HAND_WRITTEN: &str = r#"
     {"kind":"SCALAR","name":"Boolean"},
     {"kind":"SCALAR","name":"Int"},
     {"kind":"OBJECT","name":"__Schema","fields":[
-      {"name":"types","args":[],"type":{"kind":"SCALAR","name":"String"}}
+      {"name":"types","args":[],"type":{"kind":"NON_NULL","ofType":
+        {"kind":"LIST","ofType":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Type"}}}}}
     ]}
   ]
 }}}
@@ -1421,7 +1429,7 @@ fn the_door_reads_a_real_response() {
   assert!(!cache.is_built_in());
   assert!(cache.is_repeatable());
 
-  // `__Schema` came back injected too — with its real six fields, not the response's one.
+  // `__Schema` came back injected too — with its six fields, not the one the response listed.
   let (meta, def) = schema.type_by_name(b"__Schema").expect("__Schema");
   assert!(def.is_built_in());
   assert_eq!(
@@ -1489,6 +1497,167 @@ fn every_envelope_is_read() {
   let facts_of = |json: &str| facts(&from_response(json));
   assert_eq!(facts_of(BARE), facts_of(&unwrapped));
   assert_eq!(facts_of(BARE), facts_of(&full));
+}
+
+// ---------------------------------------------------------------------------------------------
+// the meta-schema: held to its shape, not to a server's rendering of it
+// ---------------------------------------------------------------------------------------------
+
+/// A response whose types are the query root and the meta types given.
+fn with_meta_types(meta_types: &str) -> String {
+  response(&std::format!("{OK_QUERY},{meta_types}"))
+}
+
+/// graphql-js's `__Directive`, in graphql-js's order: `isRepeatable` third, where smear's is last.
+const GRAPHQL_JS_DIRECTIVE: &str = r#"{"kind":"OBJECT","name":"__Directive","interfaces":[],"fields":[
+  {"name":"name","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}},
+  {"name":"description","args":[],"type":{"kind":"SCALAR","name":"String"}},
+  {"name":"isRepeatable","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}},
+  {"name":"locations","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+    {"kind":"NON_NULL","ofType":{"kind":"ENUM","name":"__DirectiveLocation"}}}}},
+  {"name":"args","args":[
+    {"name":"includeDeprecated","type":{"kind":"SCALAR","name":"Boolean"},"defaultValue":"false"}
+  ],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+    {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__InputValue"}}}}}
+]}"#;
+
+/// The meta types are held to draft §4's shape and nothing more: what a server says about them
+/// beyond it — the order graphql-js lists `__Directive`'s fields in, a description of its own or a
+/// `null` one — is not kept, and what an older server leaves out is not missed.
+#[test]
+fn a_meta_type_is_held_to_its_shape_and_not_to_its_rendering() {
+  let own = built("type Query { ok: Int }");
+  let field_names = |schema: &Schema, name: &[u8]| -> Vec<String> {
+    let (id, _) = schema.type_by_name(name).expect("a meta type");
+    schema
+      .fields_in_order(id)
+      .map(|(field, _)| schema.name(field.name()).to_owned())
+      .collect()
+  };
+  let description = |schema: &Schema, name: &[u8]| -> Option<String> {
+    let (id, _) = schema.type_by_name(name).expect("a meta type");
+    schema
+      .text(schema.type_meta(id).description())
+      .map(str::to_owned)
+  };
+
+  // graphql-js lists `isRepeatable` third, and the schema keeps smear's order, `isRepeatable` last.
+  let graphql_js = from_response(&with_meta_types(GRAPHQL_JS_DIRECTIVE));
+  assert_eq!(
+    field_names(&graphql_js, b"__Directive"),
+    [
+      "name",
+      "description",
+      "locations",
+      "args",
+      "isRepeatable",
+      "__typename"
+    ],
+    "the order a server lists a meta type's fields in is its rendering, not the schema's"
+  );
+
+  // A `null` description and one of the server's own: both accepted, and neither kept.
+  for described in [
+    r#""description":null"#,
+    r#""description":"The server's own words for __Type.""#,
+  ] {
+    let json = with_meta_types(&std::format!(
+      r#"{{"kind":"OBJECT","name":"__Type",{described},"interfaces":[],"fields":[
+        {{"name":"kind","args":[],"type":{{"kind":"NON_NULL","ofType":{{"kind":"ENUM","name":"__TypeKind"}}}}}}
+      ]}}"#
+    ));
+    let schema = from_response(&json);
+    assert_eq!(
+      description(&schema, b"__Type"),
+      description(&own, b"__Type"),
+      "{described}"
+    );
+  }
+
+  // An older server: no `specifiedByURL` or `isOneOf` on `__Type`, no `isRepeatable` on
+  // `__Directive`, and `__Directive.args` taking no `includeDeprecated`.
+  let older = from_response(&with_meta_types(
+    r#"{"kind":"OBJECT","name":"__Type","fields":[
+      {"name":"kind","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"ENUM","name":"__TypeKind"}}},
+      {"name":"name","args":[],"type":{"kind":"SCALAR","name":"String"}},
+      {"name":"fields","args":[
+        {"name":"includeDeprecated","type":{"kind":"SCALAR","name":"Boolean"},"defaultValue":"false"}
+      ],"type":{"kind":"LIST","ofType":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Field"}}}}
+    ]},
+    {"kind":"OBJECT","name":"__Directive","fields":[
+      {"name":"name","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}},
+      {"name":"locations","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+        {"kind":"NON_NULL","ofType":{"kind":"ENUM","name":"__DirectiveLocation"}}}}},
+      {"name":"args","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+        {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__InputValue"}}}}}
+    ]}"#,
+  ));
+  assert_eq!(
+    field_names(&older, b"__Directive"),
+    field_names(&own, b"__Directive")
+  );
+  assert_eq!(field_names(&older, b"__Type"), field_names(&own, b"__Type"));
+}
+
+/// A meta type in a shape draft §4 does not give it is refused, never quietly given smear's — each
+/// way it can be wrong, with the owner and the subject that say where and what.
+#[test]
+fn a_meta_type_in_another_shape_is_refused() {
+  let cases = [
+    // Another kind.
+    (
+      r#"{"kind":"SCALAR","name":"__Type"}"#,
+      None,
+      "__Type: SCALAR rather than OBJECT",
+    ),
+    // A field of another type: `__Field.type` is `__Type!`.
+    (
+      r#"{"kind":"OBJECT","name":"__Field","fields":[
+        {"name":"type","args":[],"type":{"kind":"OBJECT","name":"__Type"}}
+      ]}"#,
+      Some("__Field"),
+      "type: __Type rather than __Type!",
+    ),
+    // A field draft §4 does not give it.
+    (
+      r#"{"kind":"OBJECT","name":"__Type","fields":[
+        {"name":"bogus","args":[],"type":{"kind":"SCALAR","name":"String"}}
+      ]}"#,
+      Some("__Type"),
+      "bogus",
+    ),
+    // An argument of another type.
+    (
+      r#"{"kind":"OBJECT","name":"__Type","fields":[
+        {"name":"fields","args":[
+          {"name":"includeDeprecated","type":{"kind":"SCALAR","name":"String"},"defaultValue":null}
+        ],"type":{"kind":"LIST","ofType":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Field"}}}}
+      ]}"#,
+      Some("__Type.fields"),
+      "includeDeprecated: String rather than Boolean",
+    ),
+    // An enum value draft §4 does not give it.
+    (
+      r#"{"kind":"ENUM","name":"__TypeKind","enumValues":[{"name":"SCALAR"},{"name":"WIDGET"}]}"#,
+      Some("__TypeKind"),
+      "WIDGET",
+    ),
+    // An interface, where the meta types implement nothing.
+    (
+      r#"{"kind":"OBJECT","name":"__Schema","interfaces":[{"kind":"INTERFACE","name":"Node"}],"fields":[]}"#,
+      Some("__Schema"),
+      "implements Node",
+    ),
+  ];
+  for (meta_type, owner, subject) in cases {
+    let json = with_meta_types(meta_type);
+    let IntrospectionError::Response(error) = refused(&json) else {
+      panic!("refused by draft §3, not by the shape\n---\n{json}");
+    };
+    assert_eq!(error.kind(), ResponseErrorKind::InvalidMetaType, "{json}");
+    assert_eq!(error.owner(), owner, "{json}");
+    assert_eq!(error.subject(), subject, "{json}");
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1635,6 +1804,7 @@ const FIXTURES: &[(ResponseErrorKind, &str, Option<&str>)] = &[
     r#"__bad_location__"#,
     Some("weird"),
   ),
+  (ResponseErrorKind::InvalidMetaType, r#"__meta_kind__"#, None),
   (
     ResponseErrorKind::MalformedDefaultValue,
     r#"__default_breakout__"#,
@@ -1667,6 +1837,9 @@ fn fixture_response(marker: &str) -> String {
       r#"{OK_QUERY},{{"kind":"ENUM","name":"Verdict","enumValues":[{{"name":"true"}}]}}"#
     )),
     "__bad_location__" => with_directives(r#"{"name":"weird","locations":["NOWHERE"],"args":[]}"#),
+    "__meta_kind__" => response(&std::format!(
+      r#"{OK_QUERY},{{"kind":"SCALAR","name":"__Type"}}"#
+    )),
     "__default_breakout__" => response(
       r#"{"kind":"OBJECT","name":"Query","fields":[
         {"name":"ok","args":[

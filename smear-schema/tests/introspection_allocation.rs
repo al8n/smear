@@ -11,12 +11,17 @@
 //! # How a public door can measure a private property
 //!
 //! [`to_sdl`] renders what it reads, so lengthening a name that reaches the SDL lengthens the
-//! output and the reading with it. The measurement needs a name the reader **reads and the
-//! renderer drops**, and every real response has one: the introspection meta-schema is in every
-//! server's `__Schema.types` and the door drops all eight of its types, because every build
-//! injects them. So `__Schema`'s own fields are decoded in full and rendered not at all —
-//! lengthening them, or the descriptions they carry, changes what the reader handles and cannot
-//! change what it emits.
+//! output and the reading with it. The measurement needs text the reader **reads and the renderer
+//! drops**, and a real response has two kinds of it:
+//!
+//! - **An interface's `possibleTypes`.** The door reads every name in them and renders none: an
+//!   interface's implementors are derived from the objects' own `interfaces`, the path the SDL door
+//!   takes too. Lengthening those names changes what the reader handles and cannot change what it
+//!   emits.
+//! - **The meta types' descriptions.** The introspection meta-schema is in every server's
+//!   `__Schema.types`, and the door holds each of its types to draft §4's shape and then drops it,
+//!   because every build injects smear's. Its *names* cannot be lengthened, since a field the
+//!   meta-schema does not have is refused, but its descriptions are read in full and kept nowhere.
 //!
 //! Two corpora that differ only in those names, or only in those descriptions, must therefore
 //! produce **the same SDL** and **the same allocation**. [`the_gate_counts`] is the discrimination
@@ -92,32 +97,51 @@ fn allocated(body: impl FnOnce()) -> u64 {
 // the corpus
 // ---------------------------------------------------------------------------------------------
 
-/// How many fields the corpus gives `__Schema`.
-const META_FIELDS: usize = 24;
+/// How many implementors the corpus's interface reports in `possibleTypes`.
+const IMPLEMENTORS: usize = 48;
+
+/// `__Schema`'s six fields, with their types as a response spells them.
+const SCHEMA_FIELDS: [(&str, &str); 6] = [
+  ("description", r#"{"kind":"SCALAR","name":"String"}"#),
+  (
+    "types",
+    r#"{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+      {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Type"}}}}"#,
+  ),
+  (
+    "queryType",
+    r#"{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Type"}}"#,
+  ),
+  ("mutationType", r#"{"kind":"OBJECT","name":"__Type"}"#),
+  ("subscriptionType", r#"{"kind":"OBJECT","name":"__Type"}"#),
+  (
+    "directives",
+    r#"{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+      {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Directive"}}}}"#,
+  ),
+];
 
 /// The descriptions the door reads and drops: `__Schema`'s own and one on each of its fields.
-const DROPPED_DESCRIPTIONS: usize = META_FIELDS + 1;
+const DROPPED_DESCRIPTIONS: usize = SCHEMA_FIELDS.len() + 1;
 
 /// How long a dropped description is in a corpus that lengthens them.
-const PROSE: usize = 8192;
+const PROSE: usize = 16 * 1024;
 
 /// A response a server would return, with two knobs the door is supposed to be indifferent to.
 ///
-/// `pad` lengthens every field name of `__Schema` — read in full, rendered never. `prose` is the
-/// description of `__Schema` and of each of its fields — read too, and dropped with the type.
+/// `pad` lengthens every name in `Node.possibleTypes` — read in full, rendered never. `prose` is
+/// the description of `__Schema` and of each of its fields — read too, and dropped with the type.
 /// Neither reaches the SDL, so neither may reach the allocator unless `prose` holds an escape. The
 /// descriptions that do reach the SDL, on `Query` and on `@tag`, are the same in every corpus.
 fn response(pad: usize, prose: &str) -> String {
   let p = "z".repeat(pad);
-  let meta_fields: Vec<String> = (0..META_FIELDS)
-    .map(|index| {
-      format!(
-        r#"{{"name":"meta{index}{p}","description":"{prose}","args":[
-             {{"name":"arg{index}{p}","type":{{"kind":"SCALAR","name":"String"}},
-               "defaultValue":null}}
-           ],"type":{{"kind":"NON_NULL","name":null,"ofType":
-             {{"kind":"LIST","name":null,"ofType":{{"kind":"SCALAR","name":"String"}}}}}}}}"#
-      )
+  let implementors: Vec<String> = (0..IMPLEMENTORS)
+    .map(|index| format!(r#"{{"kind":"OBJECT","name":"Impl{index}{p}"}}"#))
+    .collect();
+  let schema_fields: Vec<String> = SCHEMA_FIELDS
+    .iter()
+    .map(|(name, ty)| {
+      format!(r#"{{"name":"{name}","description":"{prose}","args":[],"type":{ty}}}"#)
     })
     .collect();
 
@@ -137,12 +161,16 @@ fn response(pad: usize, prose: &str) -> String {
             {{"name":"first","type":{{"kind":"SCALAR","name":"Int"}},"defaultValue":"10"}}
           ],"type":{{"kind":"NON_NULL","name":null,"ofType":{{"kind":"SCALAR","name":"String"}}}}}}
         ]}},
+        {{"kind":"INTERFACE","name":"Node","interfaces":[],"fields":[
+          {{"name":"id","args":[],"type":{{"kind":"SCALAR","name":"ID"}}}}
+        ],"possibleTypes":[{}]}},
         {{"kind":"SCALAR","name":"String"}},
         {{"kind":"SCALAR","name":"Int"}},
-        {{"kind":"OBJECT","name":"__Schema","description":"{prose}","fields":[{}]}}
+        {{"kind":"OBJECT","name":"__Schema","description":"{prose}","interfaces":[],"fields":[{}]}}
       ]
     }}}}}}"#,
-    meta_fields.join(",")
+    implementors.join(","),
+    schema_fields.join(",")
   )
 }
 

@@ -18,6 +18,14 @@
 //! leaves it true. Dropping them is what makes the two doors produce the same flags, and it costs
 //! nothing: the build puts back exactly what was dropped.
 //!
+//! The meta types are checked before they are dropped, and the check is the specification's shape
+//! and nothing more: each one's kind, that it implements nothing, and every field, argument and
+//! enum value it reports, with its type. A document cannot define a `__` type at all, so the SDL
+//! door always carries smear's meta-schema, and what a response says about those types beyond
+//! their shape — descriptions, the order the members are listed in — is the server's rendering of
+//! the specification, not the schema it describes. So that is not kept, while a meta type in a
+//! shape draft §4 does not give it is refused rather than quietly replaced.
+//!
 //! A built-in scalar or a specified directive is dropped only while that last clause holds. One
 //! the response reports other than as the build injects it says something the injected one would
 //! lose — for a scalar, a `specifiedByURL`, a `null` description or a description other than the
@@ -155,9 +163,11 @@ impl Renderer {
     // The meta-schema is injected by the build, unconditionally, so re-emitting it is a
     // redefinition. Only the eight names the specification defines are dropped: a server exposing
     // some other `__`-prefixed type is exposing something this schema does not know about, and
-    // `ReservedTypeName` says so rather than the door swallowing it.
+    // `ReservedTypeName` says so rather than the door swallowing it. And each of the eight is held
+    // to the specification's shape before it is dropped, so a response that gets one wrong is
+    // refused rather than quietly given smear's.
     if builtin::INTROSPECTION_TYPES.contains(&name) {
-      return Ok(());
+      return check_meta_type(ty, name, kind);
     }
     // Likewise the five built-in scalars — but only when the response agrees they are scalars, and
     // only when it says nothing about one that the build's own would not. A response that calls
@@ -774,6 +784,268 @@ fn canonical_default(default: &str) -> Option<String> {
     canonical(value, &mut out).ok().map(|()| out)
   })
   .flatten()
+}
+
+// ---------------------------------------------------------------------------------------------
+// the meta-schema, held to its shape
+// ---------------------------------------------------------------------------------------------
+
+/// One of draft §4's eight meta types as smear's meta-schema declares it: the shape a response's
+/// entry for it is held to.
+struct MetaType {
+  name: &'static str,
+  kind: TypeKind,
+  /// The object's fields, in the order smear declares them; empty for the two enums.
+  fields: &'static [MetaField],
+  /// The enum's values, in the order smear declares them; empty for the six objects.
+  values: &'static [&'static str],
+}
+
+/// A meta type's field: its name, its type spelled as SDL, and its arguments.
+struct MetaField {
+  name: &'static str,
+  ty: &'static str,
+  args: &'static [MetaArgument],
+}
+
+/// A meta field's argument: its name and its type spelled as SDL.
+struct MetaArgument {
+  name: &'static str,
+  ty: &'static str,
+}
+
+/// The `includeDeprecated` argument five meta fields declare.
+const INCLUDE_DEPRECATED: &[MetaArgument] = &[MetaArgument {
+  name: "includeDeprecated",
+  ty: "Boolean",
+}];
+
+/// Shorthand for a meta field without arguments.
+const fn meta_field(name: &'static str, ty: &'static str) -> MetaField {
+  MetaField {
+    name,
+    ty,
+    args: &[],
+  }
+}
+
+/// Shorthand for a meta field taking `includeDeprecated`.
+const fn filtered_field(name: &'static str, ty: &'static str) -> MetaField {
+  MetaField {
+    name,
+    ty,
+    args: INCLUDE_DEPRECATED,
+  }
+}
+
+/// smear's meta-schema, in [`builtin::INTROSPECTION_TYPES`]' order: what a response's entry for
+/// each of the eight is held to. `the_meta_types_are_the_injected_ones` holds this to what the
+/// build injects.
+static META_TYPES: [MetaType; 8] = [
+  MetaType {
+    name: "__Schema",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("description", "String"),
+      meta_field("types", "[__Type!]!"),
+      meta_field("queryType", "__Type!"),
+      meta_field("mutationType", "__Type"),
+      meta_field("subscriptionType", "__Type"),
+      meta_field("directives", "[__Directive!]!"),
+    ],
+    values: &[],
+  },
+  MetaType {
+    name: "__Type",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("kind", "__TypeKind!"),
+      meta_field("name", "String"),
+      meta_field("description", "String"),
+      meta_field("specifiedByURL", "String"),
+      filtered_field("fields", "[__Field!]"),
+      meta_field("interfaces", "[__Type!]"),
+      meta_field("possibleTypes", "[__Type!]"),
+      filtered_field("enumValues", "[__EnumValue!]"),
+      filtered_field("inputFields", "[__InputValue!]"),
+      meta_field("ofType", "__Type"),
+      meta_field("isOneOf", "Boolean"),
+    ],
+    values: &[],
+  },
+  MetaType {
+    name: "__Field",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("name", "String!"),
+      meta_field("description", "String"),
+      filtered_field("args", "[__InputValue!]!"),
+      meta_field("type", "__Type!"),
+      meta_field("isDeprecated", "Boolean!"),
+      meta_field("deprecationReason", "String"),
+    ],
+    values: &[],
+  },
+  MetaType {
+    name: "__InputValue",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("name", "String!"),
+      meta_field("description", "String"),
+      meta_field("type", "__Type!"),
+      meta_field("defaultValue", "String"),
+      meta_field("isDeprecated", "Boolean!"),
+      meta_field("deprecationReason", "String"),
+    ],
+    values: &[],
+  },
+  MetaType {
+    name: "__EnumValue",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("name", "String!"),
+      meta_field("description", "String"),
+      meta_field("isDeprecated", "Boolean!"),
+      meta_field("deprecationReason", "String"),
+    ],
+    values: &[],
+  },
+  MetaType {
+    name: "__TypeKind",
+    kind: TypeKind::Enum,
+    fields: &[],
+    values: &[
+      "SCALAR",
+      "OBJECT",
+      "INTERFACE",
+      "UNION",
+      "ENUM",
+      "INPUT_OBJECT",
+      "LIST",
+      "NON_NULL",
+    ],
+  },
+  MetaType {
+    name: "__Directive",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("name", "String!"),
+      meta_field("description", "String"),
+      meta_field("locations", "[__DirectiveLocation!]!"),
+      filtered_field("args", "[__InputValue!]!"),
+      meta_field("isRepeatable", "Boolean!"),
+    ],
+    values: &[],
+  },
+  MetaType {
+    name: "__DirectiveLocation",
+    kind: TypeKind::Enum,
+    fields: &[],
+    values: &[
+      "QUERY",
+      "MUTATION",
+      "SUBSCRIPTION",
+      "FIELD",
+      "FRAGMENT_DEFINITION",
+      "FRAGMENT_SPREAD",
+      "INLINE_FRAGMENT",
+      "VARIABLE_DEFINITION",
+      "SCHEMA",
+      "SCALAR",
+      "OBJECT",
+      "FIELD_DEFINITION",
+      "ARGUMENT_DEFINITION",
+      "INTERFACE",
+      "UNION",
+      "ENUM",
+      "ENUM_VALUE",
+      "INPUT_OBJECT",
+      "INPUT_FIELD_DEFINITION",
+    ],
+  },
+];
+
+/// Holds a response's entry for one of the eight meta types to smear's meta-schema, and drops it.
+///
+/// The entry must be the specification's kind, implement nothing, and report only fields,
+/// arguments and enum values smear's meta-schema has, each with smear's type. What it leaves out
+/// is fine — a server older than `isRepeatable`, `isOneOf`, `specifiedByURL` or input-value
+/// deprecation reports less — and what it says beyond the shape, its descriptions and its order,
+/// is not kept: no document can define these types, so both doors carry smear's.
+fn check_meta_type(ty: &IntrospectedType<'_>, name: &str, kind: TypeKind) -> Rendered {
+  let Some(meta) = META_TYPES.iter().find(|meta| meta.name == name) else {
+    // The caller asked `INTROSPECTION_TYPES`, which names the same eight.
+    return Ok(());
+  };
+  if kind != meta.kind {
+    return Err(not_the_meta_type(
+      None,
+      std::format!(
+        "{name}: {} rather than {}",
+        kind.as_str(),
+        meta.kind.as_str()
+      ),
+    ));
+  }
+  if let Some(interface) = ty.interfaces.iter().flatten().next() {
+    let interface = base_name(interface, name, "implements")?;
+    return Err(not_the_meta_type(
+      Some(name),
+      std::format!("implements {interface}"),
+    ));
+  }
+
+  for reported in ty.fields.iter().flatten() {
+    let field_name = reported.name.as_str();
+    let Some(expected) = meta.fields.iter().find(|field| field.name == field_name) else {
+      return Err(not_the_meta_type(Some(name), String::from(field_name)));
+    };
+    let spelled = type_reference(&reported.ty, name, field_name)?;
+    if spelled != expected.ty {
+      return Err(not_the_meta_type(
+        Some(name),
+        std::format!("{field_name}: {spelled} rather than {}", expected.ty),
+      ));
+    }
+    let owner = path(&[name, field_name]);
+    for argument in &reported.args {
+      let argument_name = argument.name.as_str();
+      let Some(declared) = expected
+        .args
+        .iter()
+        .find(|candidate| candidate.name == argument_name)
+      else {
+        return Err(not_the_meta_type(
+          Some(owner.as_str()),
+          String::from(argument_name),
+        ));
+      };
+      let spelled = type_reference(&argument.ty, &owner, argument_name)?;
+      if spelled != declared.ty {
+        return Err(not_the_meta_type(
+          Some(owner.as_str()),
+          std::format!("{argument_name}: {spelled} rather than {}", declared.ty),
+        ));
+      }
+    }
+  }
+
+  for value in ty.enum_values.iter().flatten() {
+    let value_name = value.name.as_str();
+    if !meta.values.contains(&value_name) {
+      return Err(not_the_meta_type(Some(name), String::from(value_name)));
+    }
+  }
+  Ok(())
+}
+
+/// The refusal for a meta type the response gets wrong: the subject names what it wrote, and the
+/// owner, when there is one, the meta type or meta field it wrote it on.
+fn not_the_meta_type(owner: Option<&str>, subject: String) -> ResponseError {
+  attach(
+    ResponseError::new(ResponseErrorKind::InvalidMetaType, subject),
+    owner,
+  )
 }
 
 #[cfg(test)]

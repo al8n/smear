@@ -2,7 +2,7 @@
 
 use std::{format, string::String, vec::Vec};
 
-use super::{super::parse, SPECIFIED_DIRECTIVES, canonical_default};
+use super::{super::parse, META_TYPES, SPECIFIED_DIRECTIVES, canonical_default};
 use crate::{PackedType, Schema, builtin};
 
 /// The SDL spelling of a packed type reference.
@@ -94,4 +94,58 @@ fn a_default_compares_by_its_canonical_text() {
     canonical_default("1} type Evil { x: Int } input Z { q: Int "),
     None
   );
+}
+
+/// The meta-schema the door holds a response's meta types to is the one every build injects: kind,
+/// fields in smear's order with their types and arguments, and enum values.
+#[test]
+fn the_meta_types_are_the_injected_ones() {
+  let document = parse("type Query { ok: Int }").expect("the SDL parses");
+  let schema = Schema::build(&document).expect("a schema");
+
+  let names: Vec<&str> = META_TYPES.iter().map(|meta| meta.name).collect();
+  assert_eq!(names, builtin::INTROSPECTION_TYPES);
+
+  for meta in &META_TYPES {
+    let name = meta.name;
+    let (id, def) = schema
+      .type_by_name(name.as_bytes())
+      .unwrap_or_else(|| panic!("{name} is injected"));
+    assert_eq!(def.kind(), meta.kind, "{name}");
+
+    let fields: Vec<_> = schema
+      .fields_in_order(id)
+      .filter(|(field, _)| !schema.name(field.name()).starts_with("__"))
+      .map(|(field, _)| {
+        let arguments: Vec<_> = schema
+          .inputs_in_order(field.args())
+          .map(|(argument, _)| (schema.name(argument.name()), spell(&schema, argument.ty())))
+          .collect();
+        (
+          schema.name(field.name()),
+          spell(&schema, field.ty()),
+          arguments,
+        )
+      })
+      .collect();
+    let expected: Vec<_> = meta
+      .fields
+      .iter()
+      .map(|field| {
+        let arguments: Vec<_> = field
+          .args
+          .iter()
+          .map(|argument| (argument.name, String::from(argument.ty)))
+          .collect();
+        (field.name, String::from(field.ty), arguments)
+      })
+      .collect();
+    assert_eq!(fields, expected, "{name}");
+
+    let values: Vec<&str> = schema
+      .enum_values_in_order(id)
+      .map(|(value, _)| schema.name(value))
+      .collect();
+    assert_eq!(values, meta.values, "{name}");
+  }
 }
