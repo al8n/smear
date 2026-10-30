@@ -55,11 +55,12 @@ where
 /// The lossless `Comment` callback over a byte source, whose comments must be well-formed UTF-8
 /// (smear#251).
 ///
-/// The rule matched the `#` alone. The bump always takes the token through the body, which ends
-/// before the first `\n` or `\r` or at the end of input, so an ill-formed comment is one error token
-/// covering all of it and the rest of its line is not lexed as GraphQL. The errors are one
-/// `UnknownLexeme` per sequence [`IllFormedUtf8`] yields: the syntactic lexer's errors, at the same
-/// spans.
+/// The rule's pattern matches the whole comment, `#` through the end of its body, before the first
+/// `\n` or `\r` or at the end of input, and this callback only validates the matched body: it never
+/// moves the token's end. So the token is the whole comment whether the callback runs or the token
+/// ceiling refuses the comment first, and an ill-formed comment is one error token that keeps the
+/// rest of its line from being lexed as GraphQL. The errors are one `UnknownLexeme` per sequence
+/// [`IllFormedUtf8`] yields: the syntactic lexer's errors, at the same spans.
 #[allow(clippy::result_large_err)]
 #[inline]
 pub(crate) fn comment<'a, S, T, Extras>(
@@ -70,20 +71,18 @@ where
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
-  // The span is the `#`, so the body starts where it ends.
-  let base = lexer.span().end;
-  let remainder = lexer.remainder();
-  let body = remainder.as_ref();
-  let mut walk = IllFormedUtf8::comment(body);
+  // The body starts after the `#`.
+  let base = lexer.span().start + 1;
+  let slice = lexer.slice();
+  let body = &slice.as_ref()[1..];
   let mut errs = LexerErrors::default();
-  for bad in walk.by_ref() {
+  for bad in IllFormedUtf8::new(body) {
     errs.push(LexerError::unknown_char(
-      Span::new(base + bad.start, base + bad.end),
+      SimpleSpan::new(base + bad.start, base + bad.end),
       body[bad.start],
       base + bad.start,
     ));
   }
-  lexer.bump(walk.body_len());
   if errs.is_empty() {
     Ok(lexer.slice())
   } else {
