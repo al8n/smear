@@ -10,6 +10,7 @@ use crate::{
   handlers::{self, is_ignored_char},
   hints::{BinaryHint, ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint},
   limits::LosslessLimits,
+  simd::memchr_newline,
 };
 
 type LexerError<Extras> = error::LexerError<char, Extras>;
@@ -47,6 +48,28 @@ where
     LexerError::unexpected_eoi,
   )
   .into()
+}
+
+/// The lossless `Comment` callback over a text source.
+///
+/// The rule matched the `#` alone, and the bump takes the token through the body, which ends
+/// before the first `\n` or `\r` or at the end of input. A text source is UTF-8 by its type, so
+/// nothing is checked and the answer is always `Ok`; the `Result` is the shape the rule's hook
+/// shares with the byte source's callback. Mirrors the GraphQL callback of the same name.
+#[allow(clippy::result_large_err)]
+#[inline]
+pub(crate) fn comment<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerErrors<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  let remainder = lexer.remainder();
+  let rest = remainder.as_ref().as_bytes();
+  lexer.bump(memchr_newline(rest).unwrap_or(rest.len()));
+  Ok(lexer.slice())
 }
 
 #[inline(always)]

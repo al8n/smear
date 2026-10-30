@@ -220,7 +220,7 @@ macro_rules! token_impl {
         #[token("\u{FEFF}", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
         Bom($logos_slice),
 
-        #[regex("#[^\n\r]*?", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
+        #[token("#", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::comment))]
         Comment($logos_slice),
 
         #[regex("(?&ident)", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
@@ -519,7 +519,7 @@ macro_rules! token_impl {
         #[token("\u{FEFF}", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
         Bom($logos_slice),
 
-        #[regex("#[^\n\r]*?", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
+        #[token("#", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::comment))]
         Comment($logos_slice),
 
         #[regex("(?&ident)", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]

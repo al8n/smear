@@ -127,7 +127,11 @@ memspan::skip_class! {
 }
 
 /// Find the position of the next `\n` or `\r` in `input`, used for terminating
-/// `#`-style comments.
+/// `#`-style comments in a text source: the syntactic lexers' `str` and `HipStr`
+/// paths and the lossless `str` callbacks. A byte source's comment must be
+/// well-formed UTF-8 (smear#251), so the walk that checks its body,
+/// [`IllFormedUtf8::comment`](crate::utf8::IllFormedUtf8::comment), finds its
+/// line end instead.
 #[inline(always)]
 pub(crate) fn memchr_newline(input: &[u8]) -> Option<usize> {
   // Trivial scalar fallback first (most comments are short and contain no
