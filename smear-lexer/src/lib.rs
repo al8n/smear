@@ -188,6 +188,10 @@ mod keyword_prefix;
 
 mod string_lexer;
 
+// Ungated: a byte source's block string literals are walked in every feature set, through
+// `LitStr::try_from(&[u8])` as well as through the dialects.
+pub(crate) mod utf8;
+
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod handlers;
 
