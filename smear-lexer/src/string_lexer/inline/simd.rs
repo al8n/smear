@@ -9,11 +9,13 @@
 //! ```text
 //! loop:
 //!   skip_until(src[pos..], ['"', '\\', '\r', '\n'])   ← SIMD / memchr2-4
+//!     (byte source: skip_until_or_non_ascii, which also stops at 0x80..=0xFF)
 //!   capacity += plain bytes skipped
 //!   match stopped-at byte:
 //!     '"'  → done (plain or complex)
 //!     '\\' → handle escape inline
 //!     '\r' | '\n' → push error, continue
+//!     0x80..=0xFF (byte source only) → validate the non-ASCII run, continue
 //! ```
 //!
 //! # API
@@ -240,8 +242,33 @@ fn handle_braced_unicode(
 /// - `Ok(LitInlineStr<usize>)` — success. The inner `usize` is the number of
 ///   bytes consumed from `src` **including** the closing `"`.
 /// - `Err((consumed, errors))` — unterminated string or validation errors.
+///   Both callers discard the payload and delegate the whole literal to the
+///   Logos sub-lexer, which builds the errors they report.
+///
+/// # `CHECK_UTF8`
+///
+/// `false` for a text source (`str`, `HipStr`), whose slices are UTF-8 by type:
+/// the loop is the plain four-needle scan and pays nothing for the rule below.
+///
+/// `true` for a byte source (`[u8]`, `Bytes`, `BStr`, `HipByt`), whose string
+/// literals must be well-formed UTF-8 (smear#246). The scan also stops at every
+/// non-ASCII byte, measures the maximal non-ASCII run there and checks it with
+/// [`core::str::from_utf8`]. A run is checked whole and alone: no UTF-8 sequence
+/// contains an ASCII byte and every needle is ASCII, so a valid run holds whole
+/// sequences and an ASCII-only stretch needs no check at all.
+///
+/// The first ill-formed run returns `Err` at once, with no error built for it.
+/// Delegation then re-lexes the literal through `lex_inline_str_from_bytes`,
+/// and that must refuse too, because its `expect_err` panics otherwise. It
+/// does. If the scan had already pushed an error, the sub-lexer refuses for
+/// that one. If not, every byte before the run was ASCII, a valid escape or a
+/// valid run, so the sub-lexer reaches the run in step with the scan, and the
+/// byte grammar's `StringCharacters` class matches well-formed UTF-8 and nothing
+/// else: logos and `from_utf8` refuse exactly the same sequences. See that
+/// grammar's error callback for why the class is Unicode, and for the one edit
+/// that would quietly break this.
 #[inline]
-pub(crate) fn skip_inline_str_simd(
+pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
   offset: usize,
   src: &[u8],
 ) -> Result<LitInlineStr<usize>, (usize, StringErrors<u8>)> {
@@ -261,8 +288,14 @@ pub(crate) fn skip_inline_str_simd(
 
   loop {
     // 4 needles → NEON on aarch64 (≥16 bytes); scalar memchr4 otherwise.
-    // Stops at the first `"`, `\`, `\r`, or `\n`.
-    let next = match memspan::skip::skip_until(&src[pos..], *b"\"\\\r\n") {
+    // Stops at the first `"`, `\`, `\r`, or `\n` — and, for a byte source, at the
+    // first non-ASCII byte as well.
+    let stop = if CHECK_UTF8 {
+      memspan::skip::skip_until_or_non_ascii(&src[pos..], *b"\"\\\r\n")
+    } else {
+      memspan::skip::skip_until(&src[pos..], *b"\"\\\r\n")
+    };
+    let next = match stop {
       Some(n) => pos + n,
       None => {
         // No special byte found — string runs off end of input.
@@ -341,7 +374,20 @@ pub(crate) fn skip_inline_str_simd(
         errs_mut!().push(StringError::unexpected_new_line(b'\n', offset + pos));
         pos += 1;
       }
-      _ => unreachable!("skip_until stops only at one of the four needles"),
+      // Guarded by the const, so a text source's scan keeps the arm below as its
+      // only fallback: there `skip_until` stops at the four needles and nowhere
+      // else.
+      0x80..=0xFF if CHECK_UTF8 => {
+        let run = memspan::skip::skip_non_ascii(&src[pos..]);
+        if core::str::from_utf8(&src[pos..pos + run]).is_err() {
+          // The payload is dead (see the doc above), so nothing is built here.
+          return Err((pos, errs.unwrap_or_default()));
+        }
+        // Plain content normalizes byte-for-byte, as the ASCII run before it did.
+        capacity += run;
+        pos += run;
+      }
+      _ => unreachable!("the scan stops only at a needle or, checking UTF-8, a non-ASCII byte"),
     }
   }
 }

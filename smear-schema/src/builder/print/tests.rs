@@ -9,9 +9,12 @@
 
 use std::{format, string::String, vec};
 
-use smear_parser::graphql::ast::{
-  ConstInputValue, ConstList, InputObjectTypeDefinition, Nested, TypeDefinition,
-  TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
+use smear_parser::graphql::{
+  ast::{
+    ConstInputValue, ConstList, InputObjectTypeDefinition, Nested, TypeDefinition,
+    TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
+  },
+  error::ErrorData,
 };
 use tokora::{Parse as _, Parser, SimpleSpan};
 
@@ -200,28 +203,30 @@ fn a_literal_past_the_ceiling_has_no_canonical_text() {
   ));
 }
 
-/// A string that is no text has no canonical text either, and says which literal it was.
+/// A string that is no text never reaches the printer from a parse: the byte lexer refuses the
+/// literal (smear#246), so the document does not parse and there is no default to print.
+///
+/// `Unprinted::Unreadable` stays, as the text arena's admission rule rather than a reading the
+/// parse leaves open.
 #[test]
-fn a_string_that_is_not_utf8_is_unreadable() {
+fn a_string_that_is_not_utf8_does_not_parse() {
   let sdl: &[u8] = b"input I { f: T = [\"ok\", \"\xff\"] }";
-  let document = Parser::with_parser::<
+  let Err(errors) = Parser::with_parser::<
     GraphqlLexer<'_, [u8]>,
     TypeSystemDocument<&[u8]>,
     GraphqlErrors<&[u8]>,
     _,
     GraphQL,
   >(type_system_document)
-  .parse(sdl)
-  .expect("the byte lexer passes the content through unread");
-  let default = default_of(document.definitions()).expect("the document declares a default");
+  .parse(sdl) else {
+    panic!("the byte lexer refuses a string literal that is not UTF-8");
+  };
 
-  let mut measure = Measure::default();
-  match canonical(default, &mut measure) {
-    Err(Unprinted::Unreadable(span)) => assert_eq!(
-      &sdl[span.start()..span.end()],
-      b"\"\xff\"",
-      "the refusal points at the literal that is not text"
-    ),
-    other => panic!("expected an unreadable string, got {other:?}"),
-  }
+  let literal = SimpleSpan::new(24, 27);
+  assert_eq!(&sdl[literal.start()..literal.end()], b"\"\xff\"");
+  assert!(
+    errors.iter().any(|error| error.span() == literal
+      && matches!(error.data(), ErrorData::Other(note) if note == "lexer error")),
+    "the refusal is the lexer's, at the literal that is not text: {errors:?}"
+  );
 }

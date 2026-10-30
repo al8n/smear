@@ -70,6 +70,10 @@ pub(crate) enum Unprinted {
   /// [`SchemaBuilder::const_value`](super::SchemaBuilder::const_value) has already refused it for.
   TooDeep,
   /// A string in it is not text, or a spelling in it is not UTF-8; the span is that literal's.
+  ///
+  /// No parse produces such a value: a `&str` source is UTF-8 throughout, the byte lexer refuses a
+  /// string literal that is not (smear#246), and every other lexeme it prints is ASCII by grammar.
+  /// It is the text arena's admission rule.
   Unreadable(SimpleSpan),
 }
 

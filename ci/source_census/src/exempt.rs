@@ -712,12 +712,13 @@ pub const EXEMPTIONS: &[Exemption] = &[
              costs today is exact and small: the two `WriteJson` implementations require \
              `S: AsRef<str>`, so a materialised value tree parsed over a `[u8]` backing — which \
              `smear-parser`'s own suite drives — has no writer. Widening is not a signature change \
-             alone, which is why it is recorded rather than done: the byte lexer does not validate \
-             UTF-8 INSIDE a string literal — `LitInlineStr<&[u8]>` reaches `LitInlineStr<&str>` \
-             through a `TryFrom` whose error is `Utf8Error` — so an `AsRef<[u8]>` door needs a \
-             fifth `Error` variant for a literal that is not UTF-8, and that variant is a public \
-             API decision about a case draft §2.1 says a conforming document cannot contain. #122 \
-             owns the widening, and this parameter is the whole of what it has to widen here.",
+             alone, which is why it is recorded rather than done: the byte lexer refuses a string \
+             literal that is not UTF-8 (#246), but no type carries that fact — \
+             `LitInlineStr<&[u8]>` reaches `LitInlineStr<&str>` through a `TryFrom` whose error is \
+             `Utf8Error` — so an `AsRef<[u8]>` door needs a fifth `Error` variant for a literal \
+             that is not UTF-8, and that variant is a public API decision about a case draft §2.1 \
+             says a conforming document cannot contain. #122 owns the widening, and this parameter \
+             is the whole of what it has to widen here.",
   },
   Exemption {
     module: "smear::json::response",

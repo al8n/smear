@@ -54,6 +54,9 @@ mod bump_parity_tests;
 #[cfg(test)]
 mod trait_parity_tests;
 
+#[cfg(test)]
+mod utf8_tests;
+
 /// The error data type for lexing based on syntactic token with `char` source.
 pub type SyntacticLexerErrorData = error::LexerErrorData<char, RecursionLimitExceeded>;
 /// The error type for lexing based on syntactic token with `char` source.
@@ -906,11 +909,18 @@ where
         }
         // Block strings (`"""…"""`): valid literals emit via the SIMD
         // scanner (structural twin of the inline-string arm below, with `3`
-        // for the opening `"""` where inline uses `1`); an unterminated body
-        // delegates the whole token to Logos so the error is built for
-        // whatever `Char` this source uses.
+        // for the opening `"""` where inline uses `1`); an unterminated or
+        // ill-formed body delegates the whole token to Logos so the error is
+        // built for whatever `Char` this source uses.
         b'"' if bytes.starts_with(b"\"\"\"") => {
-          match skip_block_str_from_bytes(&bytes[3..]) {
+          // A byte source's string literal must be UTF-8 and a text source's already is: the
+          // const picks the scanner, so each monomorphization keeps one of the two.
+          let scanned = if <S as DelegateStringError>::UTF8 {
+            skip_block_str_from_bytes::<false>(&bytes[3..])
+          } else {
+            skip_block_str_from_bytes::<true>(&bytes[3..])
+          };
+          match scanned {
             Ok(lit) => {
               let consumed = *lit.source_ref(); // content + closing `"""`
               self.cursor += 3 + consumed; // 3 = opening `"""`
@@ -953,25 +963,33 @@ where
               // this source uses.
               return self.delegate_string_error(token_start, false);
             }
-            Some(_) => match skip_inline_str_simd(token_start + 1, &bytes[1..]) {
-              Ok(lit) => {
-                let consumed = *lit.source_ref();
-                self.cursor += 1 + consumed;
-                self.last_span = SimpleSpan::new(token_start, self.cursor);
-                let slice = self.src.slice(&token_start..&self.cursor).unwrap();
-                let inline = match lit {
-                  LitInlineStr::Plain(_) => LitInlineStr::Plain(LitPlainInlineStr::new(slice)),
-                  LitInlineStr::Complex(c) => {
-                    LitInlineStr::Complex(LitComplexInlineStr::new(slice, c.required_capacity()))
-                  }
-                };
-                return Some(finish!(self, SyntacticToken::LitInlineStr(inline)));
+            Some(_) => {
+              // As for block strings: the const picks the scanner.
+              let scanned = if <S as DelegateStringError>::UTF8 {
+                skip_inline_str_simd::<false>(token_start + 1, &bytes[1..])
+              } else {
+                skip_inline_str_simd::<true>(token_start + 1, &bytes[1..])
+              };
+              match scanned {
+                Ok(lit) => {
+                  let consumed = *lit.source_ref();
+                  self.cursor += 1 + consumed;
+                  self.last_span = SimpleSpan::new(token_start, self.cursor);
+                  let slice = self.src.slice(&token_start..&self.cursor).unwrap();
+                  let inline = match lit {
+                    LitInlineStr::Plain(_) => LitInlineStr::Plain(LitPlainInlineStr::new(slice)),
+                    LitInlineStr::Complex(c) => {
+                      LitInlineStr::Complex(LitComplexInlineStr::new(slice, c.required_capacity()))
+                    }
+                  };
+                  return Some(finish!(self, SyntacticToken::LitInlineStr(inline)));
+                }
+                // Any anomaly delegates the whole token to the inline string
+                // sub-lexer (`string_lexer::inline`) rather than re-deriving the
+                // error here.
+                Err(_) => return self.delegate_string_error(token_start, false),
               }
-              // Any anomaly delegates the whole token to the inline string
-              // sub-lexer (`string_lexer::inline`) rather than re-deriving the
-              // error here.
-              Err(_) => return self.delegate_string_error(token_start, false),
-            },
+            }
           }
         }
         0xEF if bytes.starts_with(b"\xEF\xBB\xBF") => {

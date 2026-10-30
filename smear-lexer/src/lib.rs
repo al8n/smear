@@ -99,9 +99,11 @@ pub mod punctuator;
 /// # Source Types
 ///
 /// The lexer is generic over source type `S`:
-/// - `&str`: Most common, UTF-8 validated
-/// - `&[u8]`: For binary sources, can be converted to `&str` when needed
-/// - `bytes::Bytes`: For shared ownership (requires `bytes` feature)
+/// - `&str`: Most common; UTF-8 by its type, so nothing is checked again
+/// - `&[u8]`: For binary sources. Not validated as UTF-8 wholesale, but its string literals must be
+///   well-formed UTF-8: one that is not is refused with
+///   [`StringError::UnsupportedCharacter`](crate::error::StringError::UnsupportedCharacter)
+/// - `bytes::Bytes`: For shared ownership (requires `bytes` feature); a byte source like `&[u8]`
 ///
 /// # Modules
 ///
@@ -153,9 +155,10 @@ pub mod graphql;
 /// # Source Types
 ///
 /// Like the GraphQL lexer, GraphQLx is generic over source type `S`:
-/// - `&str`: UTF-8 validated strings
-/// - `&[u8]`: Byte slices
-/// - `bytes::Bytes`: Shared ownership (requires `bytes` feature)
+/// - `&str`: UTF-8 by its type
+/// - `&[u8]`: Byte slices, not validated as UTF-8 wholesale; their string literals must be
+///   well-formed UTF-8, exactly as in the GraphQL lexer
+/// - `bytes::Bytes`: Shared ownership (requires `bytes` feature); a byte source like `&[u8]`
 ///
 /// # Modules
 ///

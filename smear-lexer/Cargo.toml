@@ -61,7 +61,11 @@ tokora.workspace = true
 # `std` is carried by this crate's own `std` feature, not enabled here. Pinning it on the dependency
 # line put `memspan/std` in the graph of a `--no-default-features` build, so the member advertised
 # `#![no_std]` while its dependency was always compiled against std.
-memspan = { version = "0.1", default-features = false }
+#
+# `0.1.3` is the floor, not a preference: it is the first release with `skip_until_or_non_ascii`,
+# which is how a byte source's string literals are held to UTF-8 without slowing the ASCII scan
+# (#246).
+memspan = { version = "0.1.3", default-features = false }
 
 hipstr = { version = "0.8", default-features = false, optional = true }
 bytes = { workspace = true, optional = true }

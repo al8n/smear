@@ -1,6 +1,10 @@
+use core::ops::Range;
+
 use tokora::{
+  SimpleSpan,
   lexer::Lexable,
   logos::{Lexer, Logos, Source},
+  utils::Lexeme,
 };
 
 use crate::error::{StringError, StringErrors};
@@ -10,10 +14,11 @@ use super::{
 };
 
 /// `&[u8]`-source variant of [`super::str::find_block_close_simd`]. The
-/// algorithm is byte-for-byte identical (block-string scanning works on
-/// raw bytes; UTF-8 status is irrelevant because both `"` (0x22) and
-/// `\` (0x5C) are below 0x80 and so can never appear inside a UTF-8
-/// continuation byte). See the str-side function for the full spec
+/// algorithm is byte-for-byte identical: finding the close works on raw bytes,
+/// and UTF-8 status is irrelevant to it because both `"` (0x22) and `\` (0x5C)
+/// are below 0x80 and so can never appear inside a UTF-8 sequence. Whether the
+/// content it delimits is UTF-8 is a separate question, answered afterwards by
+/// [`IllFormedUtf8`] on both paths. See the str-side function for the full spec
 /// citation and edge-case discussion.
 #[inline]
 fn find_block_close_simd(body: &[u8]) -> (usize, Option<usize>, usize) {
@@ -84,6 +89,18 @@ where
   }
 }
 
+/// The Logos-path block-string lexer over a byte source.
+///
+/// Three callers reach it, all with a byte source: `LitStr::try_from(&[u8])`,
+/// the lossless byte lexers through [`Lexable`], and a byte source's delegation,
+/// which re-lexes a block literal the fast path refused. A text source reaches
+/// the `str` twin instead.
+///
+/// A terminated literal whose content is not well-formed UTF-8 is refused with
+/// one [`StringError::UnsupportedCharacter`] per ill-formed sequence, each at
+/// its absolute span. The sequences are [`IllFormedUtf8`]'s, the same walk
+/// `skip_block_str_from_bytes::<true>` refuses on, which is what keeps
+/// delegation's `expect_err` true for a block literal.
 #[inline]
 pub(crate) fn lex_block_str_from_bytes<'a, S, T>(
   lexer: &mut SealedWrapper<Lexer<'a, T>>,
@@ -101,17 +118,26 @@ where
 
   match close_off {
     Some(start) => {
+      // Where the content starts, read before the bump moves the span's end: every caller has
+      // consumed exactly the opening `"""` by now.
+      let base = lexer.span().end;
       lexer.bump(start + 3);
 
       let content = &remainder_bytes[..start];
 
-      let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
-      while lines.next().is_some() {
-        // callbacks already updated `lines.extras`
+      let mut errs = StringErrors::default();
+      for bad in IllFormedUtf8::new(content) {
+        errs.push(StringError::UnsupportedCharacter(Lexeme::Range(
+          SimpleSpan::new(base + bad.start, base + bad.end),
+        )));
+      }
+      if !errs.is_empty() {
+        return Err(errs);
       }
 
+      let extras = line_facts(content);
       let plan = super::compute_block_normalization_plan(
-        &lines.extras,
+        &extras,
         !content.is_empty(),
         num_escaped_triple_quotes,
       );
@@ -124,7 +150,7 @@ where
         LitComplexBlockStr::new(
           lexer.slice(),
           num_escaped_triple_quotes,
-          lines.extras.has_cr_terminators,
+          extras.has_cr_terminators,
           plan.leading_blank_lines,
           plan.effective_trailing,
           plan.common_indent,
@@ -143,7 +169,8 @@ where
   }
 }
 
-/// `&[u8]` block-string scanner for the SIMD syntactic fast path.
+/// `&[u8]` block-string scanner for the SIMD syntactic fast path, which uses it
+/// for every source type, text sources included.
 ///
 /// `src` is the block-string body **after** the opening `"""`. Mirrors
 /// [`skip_inline_str_simd`](crate::skip_inline_str_simd)'s convention: on a
@@ -156,12 +183,21 @@ where
 /// pipeline that [`lex_block_str_from_bytes`] uses, so the emitted token is
 /// byte-identical to the Logos-delegated one.
 ///
-/// An unterminated body returns the bytes scanned plus the error; the SIMD
-/// lexer discards both and delegates the whole token to Logos rather than
-/// constructing a source-typed error on the fast path.
+/// `CHECK_UTF8` is `true` for a byte source, whose string literals must be
+/// well-formed UTF-8 (smear#246), and `false` for a text source, which pays
+/// nothing for it. When it is `true`, a terminated body with any ill-formed
+/// sequence is refused at the first one [`IllFormedUtf8`] yields; that is the
+/// same walk [`lex_block_str_from_bytes`] reports every sequence from, so the
+/// delegation that follows refuses too.
+///
+/// An unterminated or ill-formed body returns `Err`, and the SIMD lexer
+/// discards the payload and delegates the whole token to Logos rather than
+/// constructing a source-typed error on the fast path. An unterminated body is
+/// never checked for UTF-8 here, and the delegated lexer does not check it
+/// either: its answer is the unterminated error alone.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 #[inline]
-pub(crate) fn skip_block_str_from_bytes(
+pub(crate) fn skip_block_str_from_bytes<const CHECK_UTF8: bool>(
   src: &[u8],
 ) -> Result<LitBlockStr<usize>, (usize, StringErrors<u8>)> {
   // SIMD scan, identical shape to the str-side variant.
@@ -171,13 +207,14 @@ pub(crate) fn skip_block_str_from_bytes(
     Some(start) => {
       let content = &src[..start];
 
-      let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
-      while lines.next().is_some() {
-        // callbacks already updated `lines.extras`
+      // The payload is dead, so nothing is built for the refusal.
+      if CHECK_UTF8 && IllFormedUtf8::new(content).next().is_some() {
+        return Err((start + 3, StringErrors::default()));
       }
 
+      let extras = line_facts(content);
       let plan = super::compute_block_normalization_plan(
-        &lines.extras,
+        &extras,
         !content.is_empty(),
         num_escaped_triple_quotes,
       );
@@ -196,7 +233,7 @@ pub(crate) fn skip_block_str_from_bytes(
         LitComplexBlockStr::new(
           consumed,
           num_escaped_triple_quotes,
-          lines.extras.has_cr_terminators,
+          extras.has_cr_terminators,
           plan.leading_blank_lines,
           plan.effective_trailing,
           plan.common_indent,
@@ -212,6 +249,88 @@ pub(crate) fn skip_block_str_from_bytes(
       Err((read, errs))
     }
   }
+}
+
+/// The ill-formed UTF-8 sequences in a block string's content, in order, as
+/// content-relative byte ranges.
+///
+/// The one decision both block paths make on UTF-8:
+/// `skip_block_str_from_bytes::<true>` refuses when this yields anything, and
+/// [`lex_block_str_from_bytes`] reports everything it yields. They walk the same
+/// content, because both find the close with the same `find_block_close_simd`
+/// over the same bytes, so the fast path can refuse no block literal that the
+/// Logos path then accepts.
+///
+/// The walk hops ASCII with `skip_until_or_non_ascii` given no needles, then
+/// checks each maximal non-ASCII run with [`core::str::from_utf8`]. ASCII bytes
+/// are scalars on their own and no UTF-8 sequence contains one, so only a
+/// non-ASCII run can be ill-formed, and a valid run ends on a sequence boundary.
+/// Inside a run, [`Utf8Error::valid_up_to`](core::str::Utf8Error::valid_up_to)
+/// and [`error_len`](core::str::Utf8Error::error_len) give each ill-formed
+/// sequence's maximal subpart — the rest of the run when it ends inside one —
+/// and the walk resumes after it, so one run can report several. These are the
+/// extents the inline grammar's error tokens have for the same bytes.
+struct IllFormedUtf8<'a> {
+  content: &'a [u8],
+  /// Where the walk resumes.
+  pos: usize,
+  /// The end of the non-ASCII run being checked; equal to `pos` between runs.
+  run_end: usize,
+}
+
+impl<'a> IllFormedUtf8<'a> {
+  #[inline]
+  const fn new(content: &'a [u8]) -> Self {
+    Self {
+      content,
+      pos: 0,
+      run_end: 0,
+    }
+  }
+}
+
+impl Iterator for IllFormedUtf8<'_> {
+  type Item = Range<usize>;
+
+  #[inline]
+  fn next(&mut self) -> Option<Range<usize>> {
+    loop {
+      if self.pos == self.run_end {
+        let start =
+          self.pos + memspan::skip::skip_until_or_non_ascii(&self.content[self.pos..], [])?;
+        self.pos = start;
+        self.run_end = start + memspan::skip::skip_non_ascii(&self.content[start..]);
+      }
+      match core::str::from_utf8(&self.content[self.pos..self.run_end]) {
+        Ok(_) => self.pos = self.run_end,
+        Err(e) => {
+          let start = self.pos + e.valid_up_to();
+          let end = e.error_len().map_or(self.run_end, |len| start + len);
+          self.pos = end;
+          return Some(start..end);
+        }
+      }
+    }
+  }
+}
+
+/// The line facts `BlockLineTok`'s callbacks record over a block string's
+/// content, which the caller has already found to be UTF-8.
+#[inline]
+fn line_facts(content: &[u8]) -> BlockLineExtras {
+  let mut lines = BlockLineTok::lexer_with_extras(content, BlockLineExtras::default());
+  for line in lines.by_ref() {
+    // `BlockLineTok`'s classes are Unicode, so content that is not UTF-8 used to produce error
+    // tokens here, which this loop swallowed; their bytes never reached `on_line_body`, so
+    // `nonblank_body_bytes` undercounted the line they sat in. Every caller now refuses such
+    // content first or holds a text source, and in well-formed UTF-8 every byte belongs to a
+    // scalar that `LineBody` or `Terminator` matches, so no byte is left for an error token.
+    debug_assert!(
+      line.is_ok(),
+      "a block string's content reached the line scan without being UTF-8"
+    );
+  }
+  lines.extras
 }
 
 // sub-lexer over inner block-string content

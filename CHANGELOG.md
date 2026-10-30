@@ -4,7 +4,13 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
-No unreleased changes.
+- `smear-lexer`: string literals in byte sources (`[u8]`, `Bytes`, `BStr`,
+  `HipByt`) must be well-formed UTF-8. Ill-formed content is refused with
+  `StringError::UnsupportedCharacter`, carrying each sequence's span.
+  `LitStr::try_from(&[u8])` refuses likewise. `str` and `HipStr` sources are
+  unchanged (#246).
+- `smear-schema`: `SchemaErrorKind::UnreadableText` is no longer reachable from
+  a parsed document. The kind is kept.
 
 ## [0.0.1] - 2026-10-30
 
