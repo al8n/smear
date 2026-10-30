@@ -917,10 +917,11 @@ fn a_path_past_the_window_is_truncated_rather_than_answering_fmt_error() {
   );
 
   // The two nested renderings carry the truncated path, and carry it where their own field says.
+  // `extensions` is `None` because `handle_field_error` attaches no draft §7.1.6 map.
   assert_eq!(
     format!("{error:?}"),
     format!(
-      "Error {{ kind: {:?}, path: {expected_debug}, locations: {:?} }}",
+      "Error {{ kind: {:?}, path: {expected_debug}, locations: {:?}, extensions: None }}",
       error.kind(),
       error.locations()
     ),

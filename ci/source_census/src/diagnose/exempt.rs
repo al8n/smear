@@ -194,6 +194,22 @@ pub const EXEMPTIONS: &[Exemption] = &[
              part a code would otherwise have carried.",
   },
   Exemption {
+    path: "smear::proto::UnattachedExtensions",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Why `Executor::handle_field_error_with` did not attach a draft §7.1.6 per-error \
+             `extensions` map, and the map itself, returned through `into_extensions` so the \
+             outcome cannot close a handle the driver still owns. The same argument as \
+             `SetExtensionsError`, whose budget variant this one's `TooLarge` repeats: both \
+             variants are properties of the call — the map is over this executor's ceilings, or \
+             the request id is stale or names a position draft §6.4.4 already discarded — so there \
+             is no source position to point at and no response path to carry. The diagnostic in \
+             that call is the field error itself, which a `TooLarge` outcome still records and \
+             which reaches the response as an ordinary `proto::Error`; this value is only what \
+             became of the map, which by construction does not.",
+  },
+  Exemption {
     path: "smear::validator::LosslessInvalid",
     kind: Kind::Verdict,
     element: None,
