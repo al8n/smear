@@ -1,11 +1,12 @@
-//! The string-literal contents both dialects' UTF-8 tests drive (smear#246: a string literal in a
-//! byte source must be well-formed UTF-8).
+//! The string-literal contents and comment bodies both dialects' UTF-8 tests drive (smear#246: a
+//! string literal in a byte source must be well-formed UTF-8; smear#251: so must a comment).
 //!
-//! Each [`Case`] is the content of one literal, and every test holds the lexer's answer for it to
-//! what [`core::str::from_utf8`] says about the same bytes. The table is exhaustive where that is
-//! cheap — every lone byte from `0x80`, every two-byte sequence — and pointed where it is not: the
-//! three- and four-byte boundary classes, truncations, several ill-formed runs in one literal, and
-//! stops and runs that land on a 16-, 32- or 64-byte vector seam.
+//! Each [`Case`] is the content of one literal or the body of one comment, and every test holds the
+//! lexer's answer for it to what [`core::str::from_utf8`] says about the same bytes. The table is
+//! exhaustive where that is cheap — every lone byte from `0x80`, every two-byte sequence — and
+//! pointed where it is not: the three- and four-byte boundary classes, truncations, several
+//! ill-formed runs in one literal, and stops and runs that land on a 16-, 32- or 64-byte vector
+//! seam.
 //!
 //! Under Miri the exhaustive parts shrink to a fixed sample. The interpreter answers whether a path
 //! has undefined behaviour, and the sample still takes every path.
@@ -55,12 +56,12 @@ const MIRI_SECOND: [u8; 11] = [
 /// Truncated sequences, each a valid prefix that stops short.
 pub(crate) const TRUNCATIONS: [&[u8]; 4] = [b"\xc3", b"\xe4\xb8", b"\xf0\x9f", b"\xf0\x9f\x98"];
 
-/// One string literal's content, and the room after the literal.
+/// One string literal's content or comment's body, and the room after it.
 pub(crate) struct Case {
   kind: &'static str,
-  /// The bytes between the delimiters.
+  /// The bytes between the delimiters, or after the `#`.
   pub(crate) body: Vec<u8>,
-  /// Spaces after the closing delimiter.
+  /// Spaces after the closing delimiter, or after the line feed that ends a comment.
   tail: usize,
 }
 
@@ -89,6 +90,27 @@ impl Case {
       .body
       .iter()
       .any(|&byte| matches!(byte, b'"' | b'\\' | b'\r' | b'\n'))
+  }
+
+  /// The case spelled as a comment, `#…`, that a line feed ends, with its tail after the line feed.
+  pub(crate) fn comment(&self) -> Vec<u8> {
+    let mut doc = self.comment_at_eof();
+    doc.push(b'\n');
+    doc.resize(doc.len() + self.tail, b' ');
+    doc
+  }
+
+  /// The case spelled as a comment that the end of the input ends, so with no tail.
+  pub(crate) fn comment_at_eof(&self) -> Vec<u8> {
+    let mut doc = Vec::with_capacity(2 + self.body.len() + self.tail);
+    doc.push(b'#');
+    doc.extend_from_slice(&self.body);
+    doc
+  }
+
+  /// Whether the body holds no CR or LF, so that all of it is one comment's body.
+  pub(crate) fn is_comment_text(&self) -> bool {
+    !self.body.iter().any(|&byte| matches!(byte, b'\r' | b'\n'))
   }
 
   fn spelled(&self, delimiter: &[u8]) -> Vec<u8> {
@@ -126,6 +148,25 @@ pub(crate) fn ill_formed(bytes: &[u8]) -> Vec<Range<usize>> {
     at = end;
   }
   spans
+}
+
+/// One `UnknownLexeme` error, projected to what both lexers must agree on for a comment: its span,
+/// the byte it carries, and the position it names.
+pub(crate) type Unknown = (Range<usize>, u8, usize);
+
+/// What a comment that opens a document must be refused with: one [`Unknown`] per sequence
+/// [`ill_formed`] finds in its `body`, each moved past the `#`. Empty when the body is UTF-8.
+pub(crate) fn comment_refusals(body: &[u8]) -> Vec<Unknown> {
+  ill_formed(body)
+    .into_iter()
+    .map(|span| {
+      (
+        1 + span.start..1 + span.end,
+        body[span.start],
+        1 + span.start,
+      )
+    })
+    .collect()
 }
 
 /// The three- and four-byte boundary classes, each beside the valid sequence at its edge.
