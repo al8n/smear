@@ -111,7 +111,7 @@ mod tests;
 /// | collection work | selections **examined**, name-table entries **compared**, the fragment index's pass, the directives and arguments a request **writes** at a selection, and the bytes of every name it writes there, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment; `included` per directive on a selection it **examines** and `condition_is_true` per argument at a `@skip`/`@include` usage it **compares**, each in front of that one comparison rather than over the list, since both scans short-circuit; **`coerce_arguments`** per written argument the scan **examines**, once however many of §6.4.1's `declared` scans reach it, and both readers of a variable **spelling** — `coerce_arguments` and `condition_is_true` — through `metered_variable_key`, a unit at a time as draft §2.1.9's pass examines the bytes | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can; **charging one name where the position reads two**, which is what the argument key's charge did while the variable written for it went to the driver unmeasured; **charging a whole list in front of a scan that short-circuits**, which refuses a valid operation for work the taken branch never performs — a *list* is not the only such scan, and the variable spelling's own admission pass is one, so a charge over its whole length turned an unreadable name into a resource refusal; and §6.4.1's scan, whose *other* factor is the schema's and is bounded at build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) rather than here |
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
-/// | draft §7.1.7 `extensions` | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed; and **each of the two retainers** — [`set_extensions`](Executor::set_extensions) and [`RequestErrorResult::set_extensions`](super::RequestErrorResult::set_extensions), both of which re-derive an accepted map's spine from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no slot, so an emptied map reports nothing and holds everything it grew to. And a **second** retainer of the same container that re-checks only the two reported quantities, since §7.1.7 admits the entry in a §7.1.3 result too |
+/// | draft §7.1.7 `extensions`, and §7.1.6's per-error map | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed; and **each of the three retainers** — [`set_extensions`](Executor::set_extensions), [`RequestErrorResult::set_extensions`](super::RequestErrorResult::set_extensions) and [`handle_field_error_with`](Executor::handle_field_error_with), all of which re-derive an accepted map's spine from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no slot, so an emptied map reports nothing and holds everything it grew to. And a **second** retainer of the same container that re-checks only the two reported quantities, since §7.1.7 admits the entry in a §7.1.3 result too — and a third, since §7.1.6 admits one on every error |
 /// | error rows | rows | derived: at most one per position | — | a position able to fail twice, or an argument coercion raising more than once |
 /// | list nesting | — | [`MAX_WRAPPERS`](smear_schema::MAX_WRAPPERS) = 15, by the schema | `complete`'s list arm strips one wrapper per level | — |
 ///
@@ -157,6 +157,7 @@ mod tests;
 /// | `TypeName` ids | interner ceiling | `Response` readers | next `start`/drop | `reset` | nothing: no `V`, no handle |
 /// | slots, metadata, interned text | their ceilings | tree walks, `Response` | next `start`/drop | `reset`; suffix-`restore` only | a creator that bypasses the sole creator |
 /// | error rows | one per position | `Response::errors` | next `start`/drop | `reset` | a position able to fail twice |
+/// | **draft §7.1.6 per-error `extensions`** | at most one map per error row, each within the two extension ceilings and re-derived on acceptance as §7.1.7's is — so `max_response_slots × (max_extension_entries + max_extension_key_bytes)`, every factor a ceiling | `Error::extensions` | next `start`/drop | `reset`, which drops them by name; suffix-`restore` with the rows that index them | a `reset` that empties the rows and forgets the maps they index, which hold `V`s no row reaches any more; a `restore` that truncates the rows over maps it leaves behind; and a map retained with the capacity a *different* `Limits` let it grow to |
 /// | draft §7.1.7 `extensions` | its two ceilings, per the row above — **not** the `Option`, which bounds the number of maps and not a map's size, and **not** the entries alone, which bound what the map reports and not the spine it holds | `Response::extensions` | next `start`/drop | `reset`; `take_extensions` | a `reset` that empties the tables and forgets the held `V`s that are in none of them; and a map retained with the capacity a *different* `Limits` let it grow to |
 /// | in-flight entries | `max_in_flight` | `release` by id | answered, retired, or reset | slab free chain; epoch voids stale ids | an id honoured across epochs |
 /// | visit budget | `max_selection_visits` | `walk` | end of operation | **never** — work done is spent | a refund |
@@ -204,6 +205,7 @@ mod tests;
 /// | `merged`, `locations` | `expand`'s commit, and `fail_at` for a lone span | [`max_response_metadata`](Limits::max_response_metadata) |
 /// | `interner` — arena, spans, chain, buckets | `Interner::insert` | [`max_interned_bytes`](Limits::max_interned_bytes): a GraphQL name is at least one byte, so entries cannot outrun the arena, and the bucket table is a power of two at a load factor of a half |
 /// | `errors` | `fail`, `fail_at` | derived: at most one row per position, so `max_response_slots` |
+/// | `error_extensions` | [`handle_field_error_with`](Executor::handle_field_error_with), one map per error it records with one | derived: at most one map per error row, so `max_response_slots`; each map's own spine is re-derived to [`max_extension_entries`](Limits::max_extension_entries) on the way in, and dropped by the `reset` that clears this |
 /// | `inflight` | `poll_resolve`, which withholds at the ceiling and reuses freed entries | [`max_in_flight`](Limits::max_in_flight) |
 /// | `scratch.fields`, `scratch.groups` | `walk`, charged **before** each push against the ceiling the staging is *for* — rule 3 | `max_response_metadata` |
 /// | `scratch.keys` | `walk`, grown one entry at a time to reach an interner id | `max_interned_bytes`, since only an admitted insertion mints an id |
@@ -310,7 +312,7 @@ mod tests;
 ///    ceiling makes the buffer unbounded, ran cleanly over the members that existed, and gave the
 ///    wrong verdict on the very next one: `scratch_args` is grown by `coerce_arguments`, which
 ///    charges no ceiling for the *length* of the group it pushes, and is bounded all the same —
-///    by the schema, which no request can move. Three of the twelve rows in the census above are
+///    by the schema, which no request can move. Three of the fourteen rows in the census above are
 ///    like that. The question the rule is *for* is whether an adversary can make the buffer grow,
 ///    and "which ceiling charges it" is only a proxy for that — a good proxy, which is why it
 ///    stands first, and a proxy that has to name its other answer or it starts rejecting sound
@@ -514,10 +516,11 @@ pub struct Limits {
   /// nobody wants. **It cannot close it.** A discard promotes to abandoned only the requests that
   /// were live *besides* the one that caused it, and that one has always been released by the time
   /// it can fail — through [`handle_resolved`](Executor::handle_resolved), through
-  /// [`handle_field_error`](Executor::handle_field_error), or, for a draft §6.4.1 argument error,
-  /// through the gate in [`poll_resolve`](Executor::poll_resolve) that had already refused to hand
-  /// it out at the ceiling. So undrained entries are bounded by this value *minus one*, and a slot
-  /// is free again as soon as the live work drains.
+  /// [`handle_field_error`](Executor::handle_field_error) or
+  /// [`handle_field_error_with`](Executor::handle_field_error_with), or, for a draft §6.4.1
+  /// argument error, through the gate in [`poll_resolve`](Executor::poll_resolve) that had already
+  /// refused to hand it out at the ceiling. So undrained entries are bounded by this value *minus
+  /// one*, and a slot is free again as soon as the live work drains.
   ///
   /// Three paths hold that bound for three different reasons, and the last of them is an ordering
   /// rather than a release — so the bound is checked where the count is raised and not only argued
@@ -562,6 +565,7 @@ pub struct Limits {
   /// | the in-flight slab index | [`max_in_flight`](Limits::max_in_flight) |
   /// | `fail_at`'s location index | [`max_response_metadata`](Limits::max_response_metadata), which `fail_at` now charges, plus at most one for the root's fallback — and `try_from`-checked besides |
   /// | the interner's arena offset, entry length and id | [`max_interned_bytes`](Limits::max_interned_bytes), and each `try_from`-checked independently of it |
+  /// | the per-error map index in `handle_field_error_with` | this ceiling, derived: at most one map per error row and one row per position, so the index is below the slot count and never the `u32::MAX` that means "no map" |
   ///
   /// The row this table used to end on is gone rather than answered: draft §6.1's lookup produced
   /// an operation *index* whose only bound was the document's own length, and
@@ -736,12 +740,24 @@ pub struct Limits {
   /// One of a **pair**, and neither half bounds anything alone: see
   /// [`max_extension_key_bytes`](Limits::max_extension_key_bytes).
   ///
-  /// **Two retainers read it, because §7.1.7 has two sites.**
+  /// **Three retainers read it, because the container has three sites.**
   /// [`RequestErrorResult`](super::RequestErrorResult) carries the entry for a draft §7.1.3
   /// *request error result* and performs the identical re-check and re-derivation against the
   /// ceilings it was created with. Passing [`limits`](Executor::limits) is what makes those this
   /// executor's; the type's header says why nothing forces it and what that does and does not
   /// bound.
+  ///
+  /// The third is draft §7.1.6's per-error entry:
+  /// [`handle_field_error_with`](Executor::handle_field_error_with) re-checks a map against this
+  /// executor's two ceilings and re-derives its spine exactly as `set_extensions` does. It retains
+  /// one map per driver-reported error rather than one per response, so what the pair bounds there
+  /// is a **product** — at most one map per error row and one row per position, so
+  /// `max_response_slots × (max_extension_entries + max_extension_key_bytes)` at the very worst.
+  /// Every factor is one of this executor's ceilings, which is what makes the product a bound
+  /// rather than the shape the [`Limits`] section *A budget on one factor of a product bounds
+  /// nothing* warns about; a deployment whose driver attaches a map to many errors sizes it by
+  /// lowering any of the three. The values in those maps are the driver's and are not bounded here,
+  /// as below.
   pub max_extension_entries: NonZeroU32,
 
   /// How many bytes of *key* a draft §7.1.7 [`Extensions`] map may hold, summed over its entries.
@@ -926,6 +942,16 @@ struct Mark {
   /// to preserve the row is the leak; keeping the row is a lie. Both go, together: a refused branch
   /// is one that did not happen, errors included.
   errors: usize,
+  /// Draft §7.1.6's per-error maps, because a row names the map it carries — the same reason
+  /// `errors` is here, one index over.
+  ///
+  /// A no-op at every restore site today: a map is pushed only by
+  /// [`handle_field_error_with`](Executor::handle_field_error_with), which is an entry point of its
+  /// own and so never runs between an `expand`'s mark and its restore. It is here anyway because
+  /// truncating the rows while keeping the maps they index would leave driver values no row
+  /// reaches, and the argument that none exist is about which call pushes them while a restore is
+  /// about lengths.
+  error_extensions: usize,
   first_child: u32,
   last_child: u32,
   ready_head: u32,
@@ -979,7 +1005,7 @@ struct Charges {
 ///
 /// The gate this exists for is therefore two assertions rather than one: every field is bounded by
 /// the ceiling — or the fixed input — its row in [`Limits`]'s census names, and no field moves
-/// between one event and the next. One struct rather than eleven accessors, for the reason
+/// between one event and the next. One struct rather than thirteen accessors, for the reason
 /// [`Charges`] is one value: a gate comparing a subset would pass while the buffer it omitted grew.
 ///
 /// **A buffer added to [`Executor`] and not to this is invisible here**, which is the residual and
@@ -1002,6 +1028,9 @@ struct Retained {
   interner: (usize, usize),
   /// Error rows. Derived: at most one per position.
   errors: usize,
+  /// Draft §7.1.6's per-error maps. Derived: at most one per error row, so at most one per
+  /// position.
+  error_extensions: usize,
   /// In-flight slab entries. Bounded by [`Limits::max_in_flight`].
   inflight: usize,
   /// Draft §6.3's five staging buffers, each with its own bound. See `collect::ScratchCapacity`.
@@ -1100,11 +1129,14 @@ enum Coercion {
 /// **This header used to say the shape was gated on al8n/smear#126, and the gate was drawn one
 /// step too wide.** §7.1.6's error result format has exactly one `must` — `message` — and this
 /// type's `Display` is it, rendered rather than stored the way `error.rs`'s are; per-error
-/// `extensions` is a `may`, which the execution result's own [`Error`](super::Error) does not
-/// carry either. What #126 does gate is a *driver-supplied* entry in that list — a message this
-/// crate did not raise, with a diagnostic code beside it — which is why the list here holds
-/// exactly the one error `start` raised. [`RequestErrorResult`](super::RequestErrorResult)'s
-/// header has the boundary and the three request-error sources that fall outside it.
+/// `extensions` is a `may`, which the execution result's [`Error`](super::Error) carries only for
+/// an error the driver reported, through
+/// [`handle_field_error_with`](Executor::handle_field_error_with). A refusal raised here has no
+/// driver input to carry one: §6.1 runs before the driver has answered anything. What #126 does
+/// gate is a *driver-supplied* entry in that list — a message this crate did not raise, with a
+/// diagnostic code beside it — which is why the list here holds exactly the one error `start`
+/// raised. [`RequestErrorResult`](super::RequestErrorResult)'s header has the boundary and the
+/// three request-error sources that fall outside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StartError {
@@ -1335,6 +1367,79 @@ impl<V> fmt::Display for SetExtensionsError<V> {
 
 #[cfg(feature = "std")]
 impl<V: fmt::Debug> std::error::Error for SetExtensionsError<V> {}
+
+/// A draft §7.1.6 `extensions` map [`Executor::handle_field_error_with`] did not attach, carried
+/// back.
+///
+/// The map is returned in every variant rather than dropped, for the reason a refused
+/// [`Extensions::insert`] returns its value: an entry may be a wasm or FFI handle, and a refusal
+/// that closes one has done more than refuse.
+///
+/// # The two variants disagree about the error, and that is the point of having two
+///
+/// The *field error* and the *map* are not one thing. A field error is draft §6.4.2's fact about
+/// the field, and §6.4.4's null depends on it being recorded; an `extensions` entry is §7.1.6's
+/// *may*. So a map this executor will not keep does not stop the error it came with —
+/// [`TooLarge`](Self::TooLarge) is an error recorded *without* its map — while an id this executor
+/// cannot honour records nothing at all, which is [`Stale`](Self::Stale), exactly as it would
+/// without a map. A driver that ignores the `Err` therefore loses nothing the response was owed:
+/// an error there was a field for is recorded either way, and the map's values are back in its
+/// hands.
+#[non_exhaustive]
+pub enum UnattachedExtensions<V> {
+  /// The map is larger than this executor's
+  /// [`max_extension_entries`](Limits::max_extension_entries) or
+  /// [`max_extension_key_bytes`](Limits::max_extension_key_bytes). The field error **was**
+  /// recorded, without a map.
+  TooLarge(Extensions<V>),
+  /// The [`ReqId`] was stale — already answered, retired by
+  /// [`poll_abandoned`](Executor::poll_abandoned), or from an earlier operation — or the position
+  /// it named had already been discarded by draft §6.4.4. **Nothing** was recorded, exactly as
+  /// [`handle_field_error`](Executor::handle_field_error) records nothing for such an id.
+  Stale(Extensions<V>),
+}
+
+impl<V> UnattachedExtensions<V> {
+  /// Returns the map that was not attached, giving up ownership.
+  #[inline]
+  pub fn into_extensions(self) -> Extensions<V> {
+    match self {
+      Self::TooLarge(extensions) | Self::Stale(extensions) => extensions,
+    }
+  }
+}
+
+impl<V> fmt::Debug for UnattachedExtensions<V> {
+  /// Written out rather than derived, because a derive would bound `V: Debug`.
+  ///
+  /// [`Extensions`]'s own `Debug` requires nothing of `V`, so the derive's bound would be strictly
+  /// larger than the field needs — the over-bound [`TooLarge`](super::TooLarge) avoids for the
+  /// same reason.
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      Self::TooLarge(extensions) => f.debug_tuple("TooLarge").field(extensions).finish(),
+      Self::Stale(extensions) => f.debug_tuple("Stale").field(extensions).finish(),
+    }
+  }
+}
+
+impl<V> fmt::Display for UnattachedExtensions<V> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str(match self {
+      Self::TooLarge(_) => {
+        "the `extensions` map exceeds this executor's `max_extension_entries` or \
+         `max_extension_key_bytes`, so the field error was recorded without it"
+      }
+      Self::Stale(_) => {
+        "the request id is stale or its position was already discarded, so no field error was \
+         recorded and the `extensions` map was not attached"
+      }
+    })
+  }
+}
+
+#[cfg(feature = "std")]
+impl<V> std::error::Error for UnattachedExtensions<V> {}
 
 /// What a slot needs from the document, kept out of [`Slot`] so the response types stay free of
 /// the source type `S`.
@@ -1579,7 +1684,7 @@ struct Entry {
 /// rather than linked, being private, the way `request_error.rs` names its own module header —
 /// says whether the executor
 /// is running a query, a mutation or a subscription, and for a subscription which
-/// [`ResponseStream`] state it is in. Draft §6.2.3's five entry points read it and the other eight
+/// [`ResponseStream`] state it is in. Draft §6.2.3's five entry points read it and the other nine
 /// do not, which is the column the last two rows of the table below add. The two axes are not the
 /// same question — a subscription's `Idle` is "between events", where a query's is "before the
 /// operation" — and collapsing them is how a machine ends up delivering an event's response into a
@@ -1591,6 +1696,7 @@ struct Entry {
 /// | [`poll_resolve`](Executor::poll_resolve) | `on_entry` | Running | — | tests `started`; Delivered needs none, since delivery implies an empty ready chain and no live requests |
 /// | [`handle_resolved`](Executor::handle_resolved) | `on_entry` | Running | — | the [`ReqId`]'s epoch and generation — an id from another phase is stale and ignored |
 /// | [`handle_field_error`](Executor::handle_field_error) | `on_entry` | Running | — | the same id validation |
+/// | [`handle_field_error_with`](Executor::handle_field_error_with) | `on_entry` | Running | — | the same id validation, and a stale id hands the map back as `Stale` rather than recording anything |
 /// | [`poll_abandoned`](Executor::poll_abandoned) | `on_entry` | Running **and Delivered** | — | the abandoned count, which `reset` zeroes. Delivered is deliberate: `poll_response` does not withhold on abandoned entries, so this is how they are retired afterwards |
 /// | [`set_extensions`](Executor::set_extensions) | `on_entry` | Running | — | tests both flags and **refuses**, because a map accepted outside Running is one no response will ever carry |
 /// | [`take_extensions`](Executor::take_extensions) | `on_entry` | all three | — | — outside Running there is no map, and `None` is the truthful answer |
@@ -1700,6 +1806,28 @@ where
   #[cfg(test)]
   operation_definitions_walked: u64,
   errors: std::vec::Vec<Row>,
+  /// Draft §7.1.6's per-error `extensions` maps, which a [`Row`] indexes by position.
+  ///
+  /// # A side table, so the error that carries no map pays for none
+  ///
+  /// [`Row`] holds a `u32` index here rather than a map, with `NONE` for none. Every error the
+  /// executor raises, and every driver error reported without a map, is therefore four bytes and no
+  /// allocation, which is the property `error.rs`'s header keeps for messages; only
+  /// [`handle_field_error_with`](Self::handle_field_error_with) pushes, and only for the error it
+  /// records.
+  ///
+  /// # It lives and dies with the rows
+  ///
+  /// A map is the response's — [`Error::extensions`] reads it — and not the tree's, so it is
+  /// released the way `extensions` is: by name, in `reset`, at the next `start` or source event, or
+  /// with the executor. A row whose position draft §6.4.4 later discards is still a row, so its map
+  /// is still read and is kept with it. `restore` truncates this with the rows, which a refused
+  /// expansion cannot in fact reach, for the reason [`Mark`] gives.
+  ///
+  /// Each map arrived re-checked against this executor's two extension ceilings and with its spine
+  /// re-derived, so what this holds is bounded by `max_response_slots` maps of bounded size —
+  /// [`Limits::max_extension_entries`] states the product.
+  error_extensions: std::vec::Vec<Extensions<V::Value>>,
   /// The draft §7.1.7 *Extensions* entry for this operation, or `None` when the response has none.
   ///
   /// # `proto` owns the top level, the driver owns every value under it
@@ -1807,8 +1935,9 @@ where
   /// Draft §6.4.1's surviving arguments, for the one request `poll_resolve` is offering.
   ///
   /// The only driver values the executor owns that are not part of the response at all, and so not
-  /// released by the response tree — nor is `extensions`, which *is* part of the response and still
-  /// outside the tree. Those two are the executor's only values that have to be dropped by name.
+  /// released by the response tree — nor are `extensions` and `error_extensions`, which *are* part
+  /// of the response and still outside the tree. Those three are the executor's only values that
+  /// have to be dropped by name.
   ///
   /// An [`ArgumentSource::Variable`] carries the very value §6.4.1 checked rather than the name to
   /// look it up by — see that variant for why it must — which makes this vector the owner of a
@@ -1876,6 +2005,7 @@ where
       #[cfg(test)]
       operation_definitions_walked: 0,
       errors: std::vec::Vec::new(),
+      error_extensions: std::vec::Vec::new(),
       extensions: None,
       inflight: std::vec::Vec::new(),
       epoch: 0,
@@ -2338,6 +2468,10 @@ where
   ///
   /// The message is the driver's; the response path and the location are the executor's, so a
   /// driver never has to track where it was.
+  ///
+  /// The error carries no draft §7.1.6 `extensions` entry, so [`Error::extensions`] answers `None`
+  /// for it. [`handle_field_error_with`](Executor::handle_field_error_with) is the same report with
+  /// a map.
   pub fn handle_field_error(&mut self, id: ReqId, message: &str) {
     self.on_entry();
     let Some(slot) = self.release(id) else {
@@ -2346,19 +2480,113 @@ where
     if self.discarded(slot) {
       return;
     }
-    // The driver's failure is reported whether or not its text can be kept. Dropping the text is
-    // a loss; letting it push the arena past what a `u32` offset can address would corrupt every
-    // name interned after it, which is not — and the same is true of a lookup nobody paid for, so
-    // the budget refuses through the same door the arena does.
-    //
-    // Through the same door, but not with the same message. The refusal is carried rather than
-    // discarded, because the two doors are two different knobs and an operator told the wrong one
-    // resizes an arena that was never the constraint.
-    let raw = match self.interner.intern(message, &mut self.visits) {
-      Ok(message) => Raw::Resolver { message },
-      Err(unstored) => Raw::ResolverUnstorable { unstored },
-    };
+    let raw = self.resolver_error(message);
     self.fail(slot, raw);
+  }
+
+  /// Reports that resolving a field raised a field error (draft §6.4.2), with a draft §7.1.6
+  /// `extensions` map for its entry in the response's `errors`.
+  ///
+  /// §7.1.6's *Error Result Format*: "GraphQL services may provide an additional entry to errors
+  /// with key `extensions`. This entry, if set, must have a map as its value. This entry is
+  /// reserved for implementers to add additional information to errors however they see fit, and
+  /// there are no additional restrictions on its contents." The map is the same [`Extensions`]
+  /// container §7.1.7's entry is, because the clause has the same shape: one structural demand at
+  /// the top level and nothing below it. Its values are the driver's and nothing here reads one.
+  ///
+  /// Everything else is [`handle_field_error`](Executor::handle_field_error): the message is the
+  /// driver's, the path and the locations are the executor's, and draft §6.4.4 runs from the
+  /// field. [`Error::extensions`] reads the map back, and an empty map is a present
+  /// `"extensions": {}` rather than an absent entry.
+  ///
+  /// # The error is recorded whenever there is a field to fail, map or no map
+  ///
+  /// Three outcomes, and the map comes back in both of the ones that do not keep it — see
+  /// [`UnattachedExtensions`]:
+  ///
+  /// | outcome | the field error | the map |
+  /// |---|---|---|
+  /// | `Ok(())` | recorded | attached to it |
+  /// | [`TooLarge`](UnattachedExtensions::TooLarge) | **recorded**, without a map | handed back |
+  /// | [`Stale`](UnattachedExtensions::Stale) | not recorded, exactly as `handle_field_error` records nothing for that id | handed back |
+  ///
+  /// `TooLarge` records the error because the two are not one fact. The field failed, and §6.4.4's
+  /// null and the response's `errors` entry are owed whatever happens to the map; the map is a
+  /// *may*. Refusing the whole call instead would leave the field in flight for as long as a driver
+  /// that ignored the `Err` went on ignoring it, which is a stalled operation in exchange for an
+  /// optional entry. It is the trade [`Extensions::insert`] makes one level down, carrying the
+  /// value back rather than dropping a handle on a refusal.
+  ///
+  /// The check is against *this* executor's
+  /// [`max_extension_entries`](Limits::max_extension_entries) and
+  /// [`max_extension_key_bytes`](Limits::max_extension_key_bytes), for the reason
+  /// [`set_extensions`](Executor::set_extensions) gives: `Extensions` carries the ceilings it was
+  /// created under, and a ceiling a caller can pick is advice. Build the map with
+  /// `Extensions::new(executor.limits())` and this outcome cannot happen.
+  ///
+  /// `Stale` covers the ids `handle_field_error` ignores — one already answered, one
+  /// [`poll_abandoned`](Executor::poll_abandoned) has retired, one from before the last
+  /// [`start`](Executor::start) — and an id whose position §6.4.4 has already discarded. There is
+  /// no field left to fail, so there is nothing to attach the map to.
+  ///
+  /// # On acceptance the allocation is re-derived
+  ///
+  /// As [`set_extensions`](Executor::set_extensions) does, and for its reason: the two ceilings
+  /// bound what a map *reports*, and its spine is a high-water mark of every entry it ever held —
+  /// [`Extensions::remove`] refunds the budget and returns no slot. So an accepted map's spine is
+  /// re-derived from the entries it carries whenever it is over `max_extension_entries`, which
+  /// leaves every observable of the map alone and bounds what this executor retains. A map built
+  /// under this executor's own ceilings can need it too, because a `Vec` grows by doubling past a
+  /// ceiling that is not a power of two.
+  ///
+  /// # Which errors can carry one, and for how long
+  ///
+  /// Only an error the driver reports, so only a [`Kind::Resolver`](super::Kind::Resolver) error —
+  /// and that includes one whose *message* could not be recorded: the text is refused by the arena
+  /// or the visit budget, the map by neither, and losing the first is no reason to lose the second.
+  /// Every error the executor raises itself carries none, and so does every
+  /// [`StartError`], which is raised before the driver has answered anything.
+  ///
+  /// The map is the response's, so it is held until the next `start`, the next source event, or
+  /// the executor is dropped, as the error row that names it is. A position draft §6.4.4 discards
+  /// *afterwards* does not take the row with it, and so does not take the map either.
+  ///
+  /// # It is an entry point
+  ///
+  /// It settles the lends the driver's previous call left open before anything else, the stale
+  /// path included. See [`Executor`]'s header for the obligation and the table.
+  pub fn handle_field_error_with(
+    &mut self,
+    id: ReqId,
+    message: &str,
+    mut extensions: Extensions<V::Value>,
+  ) -> Result<(), UnattachedExtensions<V::Value>> {
+    self.on_entry();
+    let Some(slot) = self.release(id) else {
+      return Err(UnattachedExtensions::Stale(extensions));
+    };
+    if self.discarded(slot) {
+      return Err(UnattachedExtensions::Stale(extensions));
+    }
+    let raw = self.resolver_error(message);
+    // The re-check `set_extensions` performs, against this executor's ceilings rather than the
+    // ones the map was built under. A refusal still records the error; only the map goes back.
+    if extensions.len() as u64 > u64::from(self.limits.max_extension_entries.get())
+      || u64::from(extensions.key_bytes()) > u64::from(self.limits.max_extension_key_bytes.get())
+    {
+      self.fail(slot, raw);
+      return Err(UnattachedExtensions::TooLarge(extensions));
+    }
+    // After the refusal, so a map this call is not going to keep is not reallocated on its way
+    // back out to the driver.
+    extensions.shrink_to_ceiling(self.limits.max_extension_entries.get());
+    // Exact: a map is pushed only here and only for the row recorded below, a row's position is
+    // failed at most once, and positions are bounded by `max_response_slots` — so the index is
+    // below the slot count and never `NONE`.
+    let index = self.error_extensions.len() as u32;
+    self.error_extensions.push(extensions);
+    self.fail_with(slot, raw, index);
+    Ok(())
   }
 
   /// Returns a request whose value can no longer affect the response.
@@ -2635,6 +2863,7 @@ where
       name_spans: self.interner.spans(),
       locations: &self.locations,
       errors: &self.errors,
+      error_extensions: &self.error_extensions,
       extensions: self.extensions.as_ref(),
     })
   }
@@ -3962,8 +4191,38 @@ where
   /// wrote. The reference implementation passes the whole `fieldNodes` array to `locatedError` and
   /// maps one entry per node, which is what this range reproduces, in collection order.
   fn fail(&mut self, slot: u32, raw: Raw) {
+    self.fail_with(slot, raw, NONE);
+  }
+
+  /// [`fail`](Self::fail), with the row naming `extensions` — an index into `error_extensions`, or
+  /// [`NONE`] for none.
+  ///
+  /// Only [`handle_field_error_with`](Self::handle_field_error_with) passes anything else, and it
+  /// pushes the map in the same breath, so the index always names the map this row was reported
+  /// with.
+  fn fail_with(&mut self, slot: u32, raw: Raw, extensions: u32) {
     let locations = self.meta[slot as usize].locations;
-    self.record(slot, raw, locations);
+    self.record(slot, raw, locations, extensions);
+  }
+
+  /// The [`Raw`] for a field error the driver reported, with `message` interned when it can be.
+  ///
+  /// Shared by [`handle_field_error`](Self::handle_field_error) and
+  /// [`handle_field_error_with`](Self::handle_field_error_with), which differ in the map and in
+  /// nothing about the message.
+  fn resolver_error(&mut self, message: &str) -> Raw {
+    // The driver's failure is reported whether or not its text can be kept. Dropping the text is
+    // a loss; letting it push the arena past what a `u32` offset can address would corrupt every
+    // name interned after it, which is not — and the same is true of a lookup nobody paid for, so
+    // the budget refuses through the same door the arena does.
+    //
+    // Through the same door, but not with the same message. The refusal is carried rather than
+    // discarded, because the two doors are two different knobs and an operator told the wrong one
+    // resizes an arena that was never the constraint.
+    match self.interner.intern(message, &mut self.visits) {
+      Ok(message) => Raw::Resolver { message },
+      Err(unstored) => Raw::ResolverUnstorable { unstored },
+    }
   }
 
   /// [`fail`](Self::fail) with a single location the caller chose.
@@ -3985,15 +4244,15 @@ where
     // operation, so the fallback below overshoots the ceiling by at most a single entry.
     let stored = self.meta[slot as usize].locations;
     if !self.metadata_room(1) && stored.1 > 0 {
-      self.record(slot, raw, stored);
+      self.record(slot, raw, stored, NONE);
       return;
     }
     let Ok(start) = u32::try_from(self.locations.len()) else {
-      self.record(slot, raw, stored);
+      self.record(slot, raw, stored, NONE);
       return;
     };
     self.locations.push(location);
-    self.record(slot, raw, (start, 1));
+    self.record(slot, raw, (start, 1), NONE);
   }
 
   /// Whether `more` metadata entries fit under [`Limits::max_response_metadata`].
@@ -4007,11 +4266,12 @@ where
     used + more <= u64::from(self.limits.max_response_metadata.get())
   }
 
-  fn record(&mut self, slot: u32, raw: Raw, locations: (u32, u32)) {
+  fn record(&mut self, slot: u32, raw: Raw, locations: (u32, u32), extensions: u32) {
     self.errors.push(Row {
       raw,
       slot,
       locations,
+      extensions,
     });
     self.propagate(slot);
   }
@@ -4044,9 +4304,9 @@ where
     // It is a property of *where* a field error may be raised rather than of anything here:
     // `abandon_under` moves entries from `live` to `abandoned` and leaves the sum alone, so what
     // the bound needs is that every path into `record` already holds a free slot.
-    // [`handle_resolved`](Self::handle_resolved) and
-    // [`handle_field_error`](Self::handle_field_error) release their own request before they can
-    // fail; a draft §6.4.1 argument error is raised past
+    // [`handle_resolved`](Self::handle_resolved), [`handle_field_error`](Self::handle_field_error)
+    // and [`handle_field_error_with`](Self::handle_field_error_with) release their own request
+    // before they can fail; a draft §6.4.1 argument error is raised past
     // [`poll_resolve`](Self::poll_resolve)'s gate, which has already refused to pop at the ceiling;
     // and [`expand`](Self::expand)'s budget refusals run from the root with nothing outstanding at
     // all. Move the gate behind `coerce_arguments` and the third of those stops holding: an
@@ -4308,6 +4568,7 @@ where
       locations: self.locations.capacity(),
       interner: self.interner.capacity(),
       errors: self.errors.capacity(),
+      error_extensions: self.error_extensions.capacity(),
       inflight: self.inflight.capacity(),
       scratch: self.scratch.capacities(),
       scratch_sets: self.scratch_sets.capacity(),
@@ -4357,6 +4618,9 @@ where
     self.interner.clear();
     self.interner.set_cap(self.limits.max_interned_bytes.get());
     self.errors.clear();
+    // Draft §7.1.6's per-error maps go with the rows that index them, and clearing is the release:
+    // they are driver values the response tree does not hold, so nothing else would drop them.
+    self.error_extensions.clear();
     // Draft §7.1.7's entry belongs to the response one operation produced, so it is per-operation
     // by this function's own rule: a function of neither the document nor the schema. Dropping it
     // here is also the release — it is a driver value the response tree does not hold, so nothing
@@ -4556,6 +4820,7 @@ where
       locations: self.locations.len(),
       interner: self.interner.mark(),
       errors: self.errors.len(),
+      error_extensions: self.error_extensions.len(),
       first_child: self.slots[slot as usize].first_child,
       last_child: self.slots[slot as usize].last_child,
       ready_head: self.ready_head,
@@ -4594,6 +4859,7 @@ where
       self.serial_next
     );
     self.errors.truncate(mark.errors);
+    self.error_extensions.truncate(mark.error_extensions);
     self.slots.truncate(mark.slots);
     self.meta.truncate(mark.meta);
     self.merged.truncate(mark.merged);
@@ -4651,11 +4917,11 @@ where
   /// Without the test this is a **silent wrong answer** rather than a leak, which is why it is a
   /// condition here and not a note somewhere. Six entry points are no-ops while the stream is being
   /// created — `poll_resolve`, `poll_response`, `poll_abandoned`, `set_extensions`,
-  /// `take_extensions`, and either `handle_*` with a stale id — and every one of them would empty
-  /// `scratch_args` on its way through. `source_field` would then hand the driver a source field
-  /// with **no arguments** and no way to tell that from a field that has none, and the driver would
-  /// resolve the wrong event stream. `a_call_in_while_creating_keeps_the_source_field_arguments`
-  /// is the gate.
+  /// `take_extensions`, and any of the three field answers with a stale id — and every one of them
+  /// would empty `scratch_args` on its way through. `source_field` would then hand the driver a
+  /// source field with **no arguments** and no way to tell that from a field that has none, and the
+  /// driver would resolve the wrong event stream.
+  /// `a_call_in_while_creating_keeps_the_source_field_arguments` is the gate.
   fn on_entry(&mut self) {
     self.settle_deferred();
     if !matches!(
@@ -5006,6 +5272,8 @@ pub struct Response<'r, V> {
   name_spans: &'r [(u32, u32)],
   locations: &'r [SimpleSpan],
   errors: &'r [Row],
+  /// Draft §7.1.6's per-error maps, which the rows in `errors` index.
+  error_extensions: &'r [Extensions<V>],
   extensions: Option<&'r Extensions<V>>,
 }
 
@@ -5082,6 +5350,9 @@ impl<'r, V> Response<'r, V> {
   }
 
   /// Returns the response's `errors`, in the order they were raised.
+  ///
+  /// Each carries its own draft §7.1.6 `extensions` entry when the driver reported it with one —
+  /// see [`Error::extensions`].
   #[inline]
   pub fn errors(&self) -> impl ExactSizeIterator<Item = Error<'r, V>> + '_ {
     self.errors.iter().map(move |row| Error {
@@ -5090,6 +5361,7 @@ impl<'r, V> Response<'r, V> {
       names: self.names,
       name_spans: self.name_spans,
       locations: self.locations,
+      error_extensions: self.error_extensions,
       row,
     })
   }

@@ -54,6 +54,17 @@
 //! a *driver-supplied entry*, not §7.1.3's result shape. The shape needs no error type this crate
 //! does not already have.
 //!
+//! **Part of that reservation is settled now, on the execution-result side.** A field error the
+//! driver reports can carry §7.1.6's per-error `extensions` —
+//! [`Executor::handle_field_error_with`](crate::Executor::handle_field_error_with) attaches it, as
+//! the same budgeted [`Extensions`] container §7.1.7's entry is, and
+//! [`Error::extensions`](crate::Error::extensions) reads it back. That reaches no further than an
+//! error the executor already records: the row and its message are what `handle_field_error`
+//! records, and only the map beside them is new. What stays #126's is the *entry* itself — a
+//! driver-supplied message in this result's `errors` list — and a request error result carries no
+//! per-error map at all, because `start` refuses at draft §6.1, before the driver has answered
+//! anything there could be a map about.
+//!
 //! # The one entry needs nothing #126 has not already been asked for
 //!
 //! §7.1.6's *Error Result Format* has exactly one `must`: "Every error must contain an entry with
@@ -66,7 +77,7 @@
 //! | `message` | must | [`StartError`]'s `Display` |
 //! | `path` | must, **if** the error "can be associated to a particular field in the GraphQL result" | never: a request error result has no result to hold a field |
 //! | `locations` | should, **if** associable to "a particular point in the requested GraphQL document" | not carried — see below |
-//! | `extensions` | may | not carried; this is #126's, and the execution result's [`Error`](crate::Error) does not carry one either |
+//! | `extensions` | may | not carried: a §6.1 refusal is raised before the driver has answered anything, so there is no driver input to attach. The execution result's [`Error`](crate::Error) carries one for a driver-reported field error — the part of al8n/smear#126's reservation settled above — and a driver-supplied entry here is still #126's |
 //!
 //! `locations` is the only judgement call, and the honest answer is "for all but one of them, and
 //! not for that one". §7.1.6 conditions it on the error being associable to "a particular point in

@@ -70,7 +70,8 @@ use smear_parser::{
 use smear_schema::{MAX_FIELD_ARGUMENTS, Schema};
 
 use crate::{
-  Extensions, Kind, Leaf, Node, ReqId, ResponseStream, SourceEventError, StartError, Values,
+  Extensions, Kind, Leaf, Node, ReqId, ResponseStream, SourceEventError, StartError,
+  UnattachedExtensions, Values,
 };
 
 // Neither this crate's `std` nor `smear-schema`'s is implied by anything, so this module also
@@ -2731,6 +2732,17 @@ const ENTRY_PROTOCOL: &[EntryPoint] = &[
                  phase flag being read.",
   },
   EntryPoint {
+    name: "handle_field_error_with",
+    discharge: Discharge::OnEntry,
+    meaningful: &[Phase::Running],
+    stream: &[],
+    guards: &[],
+    structural: "The same `ReqId` validation as `handle_field_error`: epoch and generation make an \
+                 id from before a `reset`, or from after delivery, stale — and a stale id records \
+                 nothing and hands the map back as `UnattachedExtensions::Stale`, without any \
+                 phase flag being read.",
+  },
+  EntryPoint {
     name: "poll_abandoned",
     discharge: Discharge::OnEntry,
     // Delivered on purpose: `poll_response` deliberately does not withhold on abandoned entries,
@@ -3243,6 +3255,7 @@ fn every_public_entry_point_settles_the_previous_call() {
     "poll_resolve",
     "handle_resolved",
     "handle_field_error",
+    "handle_field_error_with",
     "poll_abandoned",
     "set_extensions",
     "take_extensions",
@@ -3309,6 +3322,12 @@ fn every_public_entry_point_settles_the_previous_call() {
     }),
   );
   after(
+    "handle_field_error_with",
+    with_both_lends_open(|executor, echo, _| {
+      let _ = executor.handle_field_error_with(echo, "no", Extensions::new(executor.limits()));
+    }),
+  );
+  after(
     "poll_abandoned",
     with_both_lends_open(|executor, _, _| {
       let _ = executor.poll_abandoned();
@@ -3333,7 +3352,7 @@ fn every_public_entry_point_settles_the_previous_call() {
     }),
   );
 
-  // Draft §6.2.3's five, driven on the same *query* fixture as the other eight and on purpose. Each
+  // Draft §6.2.3's five, driven on the same *query* fixture as the other nine and on purpose. Each
   // of them refuses here — the phase is `Query`, so there is no response stream — and the release
   // has to happen anyway, because `on_entry` runs before the refusal for the reason
   // `set_extensions` does. A method that tested its phase first and released afterwards would pass
@@ -3407,6 +3426,12 @@ fn the_extensions_entry_points_settle_the_deferred_object_too() {
       "take_extensions",
       with_both_lends_open(|executor, _, _| {
         let _ = executor.take_extensions();
+      }),
+    ),
+    (
+      "handle_field_error_with",
+      with_both_lends_open(|executor, echo, _| {
+        let _ = executor.handle_field_error_with(echo, "no", Extensions::new(executor.limits()));
       }),
     ),
   ] {
@@ -3581,6 +3606,456 @@ fn a_map_taken_back_and_regrown_re_enters_through_the_same_gate() {
     retained as u64 <= u64::from(strict.max_extension_entries.get()),
     "a second pass through the gate retained {retained} slots under a ceiling of {}",
     strict.max_extension_entries.get()
+  );
+}
+
+// ---------------------------------------------------------------------------------------
+// draft §7.1.6 per-error `extensions`
+// ---------------------------------------------------------------------------------------
+
+/// A nullable leaf to fail at the root, a non-null leaf under a nullable object to propagate from,
+/// and a list a driver can answer with something that is not one.
+const ERROR_MAP_SDL: &str = r#"
+type Query {
+  plain: String
+  nest: Wrap
+  bulk: [String]
+}
+type Wrap {
+  text: String
+  must: String!
+}
+"#;
+
+/// A message the 16-byte arena in `a_map_reported_with_an_unstorable_message_is_kept` cannot hold
+/// beside the five bytes of `plain`.
+const UNSTORABLE: &str = "a message far longer than the sixteen bytes of arena this executor has";
+
+/// A map holding one entry under `key`, built under `limits`.
+fn one_entry(limits: &Limits, key: &str) -> Extensions<Value> {
+  let mut map = Extensions::new(limits);
+  map
+    .insert(key, Value::Text)
+    .expect("one short key is under every ceiling a case here builds a map with");
+  map
+}
+
+/// Answers `id` with a one-entry map under `key`, and requires the stale outcome with the map in
+/// it.
+fn refused_as_stale(executor: &mut Executor<'_, &str, Space>, id: ReqId, key: &str) {
+  let map = one_entry(executor.limits(), key);
+  let Err(UnattachedExtensions::Stale(back)) = executor.handle_field_error_with(id, "late", map)
+  else {
+    panic!("the `{key}` answer named a stale id and was not refused as one");
+  };
+  assert!(
+    back.get(key).is_some(),
+    "the `{key}` map came back without its entry"
+  );
+}
+
+/// A driver-reported error carries the map it was reported with, entry for entry and in the order
+/// the driver inserted them.
+#[test]
+fn a_driver_error_carries_its_map_in_insertion_order() {
+  let (schema, document) = compile_against(ERROR_MAP_SDL, "{ plain }");
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+
+  let plain = executor.poll_resolve(&mut space).expect("`plain`").id();
+  // Not alphabetical, so a read-back that sorted would be caught.
+  let mut map = Extensions::new(executor.limits());
+  for key in ["zeta", "alpha", "mid"] {
+    map.insert(key, Value::Text).expect("under the ceilings");
+  }
+  executor
+    .handle_field_error_with(plain, "the resolver said no", map)
+    .expect("a live id, and a map built under this executor's own ceilings");
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  let error = response.errors().next().expect("the one error");
+  assert_eq!(error.kind(), Kind::Resolver);
+  assert_eq!(error.to_string(), "the resolver said no");
+  let carried = error.extensions().expect("the driver attached a map");
+  let keys: std::vec::Vec<&str> = carried.iter().map(|(key, _)| key).collect();
+  assert_eq!(keys, ["zeta", "alpha", "mid"]);
+}
+
+/// An empty map is a present entry and a report without one is an absent entry, on one response —
+/// the two answers draft §7.1.6 tells apart, side by side.
+#[test]
+fn an_empty_map_is_present_and_a_plain_report_carries_none() {
+  let (schema, document) = compile_against(ERROR_MAP_SDL, "{ plain nest { text } }");
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+
+  while let Some(request) = executor.poll_resolve(&mut space) {
+    let id = request.id();
+    if request.name() == "plain" {
+      executor
+        .handle_field_error_with(id, "with an empty map", Extensions::new(executor.limits()))
+        .expect("an empty map is under every ceiling");
+    } else if request.name() == "text" {
+      executor.handle_field_error(id, "with no map");
+    } else {
+      executor.handle_resolved(&mut space, id, Value::Obj);
+    }
+  }
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  let errors: std::vec::Vec<_> = response.errors().collect();
+  assert_eq!(errors.len(), 2, "both fields failed");
+  assert!(
+    errors[0].extensions().is_some_and(Extensions::is_empty),
+    "an empty map is `Some` holding nothing, which a serialiser writes as `{{}}`"
+  );
+  assert!(
+    errors[1].extensions().is_none(),
+    "`handle_field_error` attaches nothing, which is an absent entry and not an empty one"
+  );
+}
+
+/// A map over *this* executor's ceilings comes back whole, and the error it came with is recorded
+/// without it.
+///
+/// One operation per ceiling, and each map is built under the defaults — which is what "built under
+/// other `Limits`" means: the map's own ceilings admitted every entry this executor refuses.
+#[test]
+fn a_map_over_this_executors_ceilings_comes_back_and_the_error_is_still_recorded() {
+  let strict = Limits {
+    max_extension_entries: NonZeroU32::new(2).expect("not zero"),
+    max_extension_key_bytes: NonZeroU32::new(8).expect("not zero"),
+    ..Limits::default()
+  };
+  let mut entries = Extensions::new(&Limits::default());
+  for key in ["a", "b", "c"] {
+    entries
+      .insert(key, Value::Text)
+      .expect("under the defaults");
+  }
+  let bytes = one_entry(&Limits::default(), "thirteen-byte");
+
+  let (schema, document) = compile_against(ERROR_MAP_SDL, "{ plain }");
+  let mut space = Space;
+  let mut executor = Executor::with_limits(&schema, &document, strict);
+  for (ceiling, map, len) in [("entries", entries, 3), ("key bytes", bytes, 1)] {
+    executor
+      .start(&mut space, None, Value::Obj)
+      .expect("the operation resolves");
+    let plain = executor.poll_resolve(&mut space).expect("`plain`").id();
+    let Err(UnattachedExtensions::TooLarge(back)) =
+      executor.handle_field_error_with(plain, "no", map)
+    else {
+      panic!("a map over this executor's {ceiling} ceiling was not refused as `TooLarge`");
+    };
+    assert_eq!(
+      back.len(),
+      len,
+      "the map over the {ceiling} ceiling came back whole"
+    );
+    assert!(
+      executor.error_extensions.is_empty(),
+      "a map refused over the {ceiling} ceiling was retained anyway"
+    );
+
+    let response = executor
+      .poll_response()
+      .expect("the error ended the field, so nothing is outstanding");
+    let error = response
+      .errors()
+      .next()
+      .expect("the error is recorded although its map was not");
+    assert_eq!(error.kind(), Kind::Resolver);
+    assert_eq!(error.to_string(), "no");
+    assert!(
+      error.extensions().is_none(),
+      "the error over the {ceiling} ceiling carries no map"
+    );
+  }
+}
+
+/// A stale id records nothing and hands the map back, for each of the three ways an id goes stale.
+#[test]
+fn a_stale_id_records_nothing_and_hands_the_map_back() {
+  let (schema, document) = compile_against(ERROR_MAP_SDL, "{ nest { must text } }");
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  let nest = executor.poll_resolve(&mut space).expect("`nest`").id();
+  executor.handle_resolved(&mut space, nest, Value::Obj);
+  let must = executor.poll_resolve(&mut space).expect("`must`").id();
+  let text = executor.poll_resolve(&mut space).expect("`text`").id();
+
+  // `must` is `String!`, so its error nulls `nest` and abandons `text`.
+  executor
+    .handle_field_error_with(must, "no", one_entry(executor.limits(), "first"))
+    .expect("a live id");
+
+  // A position draft §6.4.4 has discarded, whose request was abandoned.
+  refused_as_stale(&mut executor, text, "abandoned");
+  // An id already answered.
+  refused_as_stale(&mut executor, must, "answered");
+  assert_eq!(executor.errors.len(), 1, "a stale answer recorded an error");
+  assert_eq!(
+    executor.error_extensions.len(),
+    1,
+    "a stale answer attached a map"
+  );
+
+  // An id from the operation before.
+  let _ = executor.poll_response().expect("nothing is outstanding");
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("a second operation resolves");
+  refused_as_stale(&mut executor, nest, "earlier");
+  assert!(
+    executor.errors.is_empty(),
+    "an earlier operation's id recorded an error"
+  );
+  assert!(
+    executor.error_extensions.is_empty(),
+    "an earlier operation's id attached a map"
+  );
+}
+
+/// Draft §6.4.4 nulls past the failed field, and the error and its map both survive it: the map
+/// rides with the error, not with the position.
+#[test]
+fn a_propagated_null_keeps_the_error_and_its_map() {
+  let (schema, document) = compile_against(ERROR_MAP_SDL, "{ nest { must } }");
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  let nest = executor.poll_resolve(&mut space).expect("`nest`").id();
+  executor.handle_resolved(&mut space, nest, Value::Obj);
+  let must = executor.poll_resolve(&mut space).expect("`must`").id();
+  executor
+    .handle_field_error_with(must, "no", one_entry(executor.limits(), "code"))
+    .expect("a live id");
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  let Node::Object(mut fields) = response.data() else {
+    panic!("the root is an object")
+  };
+  let (key, value) = fields.next().expect("`nest`");
+  assert_eq!(key.to_string(), "nest");
+  assert!(
+    matches!(value, Node::Null),
+    "`must` is `String!`, so its error nulls `nest`"
+  );
+  let error = response.errors().next().expect("the one error");
+  assert_eq!(
+    error.path().to_string(),
+    "nest.must",
+    "the path is the field that raised the error, not the position it nulled"
+  );
+  assert!(
+    error.extensions().and_then(|map| map.get("code")).is_some(),
+    "the map is the error's, so the null above it does not take it"
+  );
+}
+
+/// A map whose error's position is discarded *afterwards* is kept with its row, and holds no driver
+/// value once the next `start` has run.
+///
+/// `text` fails first and is nullable, so its map attaches to a row whose position is still in the
+/// tree; `must` fails second and is `String!`, so draft §6.4.4 then discards `nest` and `text`'s
+/// position with it. The row survives that, which is what keeps the map readable — and what makes
+/// the next `start` the only thing left that can release it.
+#[test]
+fn a_map_on_a_discarded_positions_error_holds_nothing_after_the_next_start() {
+  let (schema, document) = compile_against(ERROR_MAP_SDL, "{ nest { text must } }");
+  let tree = std::rc::Rc::new(core::cell::Cell::new(0usize));
+  let maps = std::rc::Rc::new(core::cell::Cell::new(0usize));
+  let mut space = Counting {
+    mint: std::rc::Rc::clone(&tree),
+    variables: std::vec::Vec::new(),
+  };
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Tracked::new(&tree, Value::Obj))
+    .expect("the operation resolves");
+  let nest = executor.poll_resolve(&mut space).expect("`nest`").id();
+  executor.handle_resolved(&mut space, nest, Tracked::new(&tree, Value::Obj));
+  let text = executor.poll_resolve(&mut space).expect("`text`").id();
+  let must = executor.poll_resolve(&mut space).expect("`must`").id();
+
+  let mut map = Extensions::new(executor.limits());
+  map
+    .insert("trace", Tracked::new(&maps, Value::Text))
+    .expect("under the ceilings");
+  executor
+    .handle_field_error_with(text, "no text", map)
+    .expect("a live id");
+  executor.handle_field_error(must, "no must");
+  assert_eq!(
+    maps.get(),
+    1,
+    "the map outlived its position, because the row that names it did"
+  );
+
+  {
+    let response = executor.poll_response().expect("nothing is outstanding");
+    let errors: std::vec::Vec<_> = response.errors().collect();
+    assert_eq!(errors.len(), 2, "both fields failed");
+    assert!(
+      errors[0]
+        .extensions()
+        .and_then(|carried| carried.get("trace"))
+        .is_some(),
+      "`text`'s error still reads its map after `nest` was discarded over it"
+    );
+    assert!(
+      errors[1].extensions().is_none(),
+      "`must` was reported without one"
+    );
+  }
+
+  let mut space = Counting {
+    mint: std::rc::Rc::clone(&tree),
+    variables: std::vec::Vec::new(),
+  };
+  executor
+    .start(&mut space, None, Tracked::new(&tree, Value::Obj))
+    .expect("a second operation resolves");
+  assert_eq!(
+    maps.get(),
+    0,
+    "the next `start` released the map along with the row that named it"
+  );
+}
+
+/// A map built under this executor's *own* ceilings and emptied with `remove` is accepted, with its
+/// spine re-derived.
+///
+/// Its own ceilings are not enough to bound what it holds, and this is the case that shows it: a
+/// `Vec` grows by doubling, so five entries leave eight slots under a ceiling of five, and `remove`
+/// gives back no slot at all. Nothing here is over a ceiling the map reports against, so the call
+/// accepts; what it must not do is keep the eight.
+#[test]
+fn a_map_emptied_under_this_executors_own_ceilings_is_re_derived_on_acceptance() {
+  /// Not a power of two, which is what puts a doubled spine past it.
+  const CEILING: u32 = 5;
+
+  let own = Limits {
+    max_extension_entries: NonZeroU32::new(CEILING).expect("not zero"),
+    ..Limits::default()
+  };
+  let (schema, document) = compile_against(ERROR_MAP_SDL, "{ plain }");
+  let mut space = Space;
+  let mut executor = Executor::with_limits(&schema, &document, own);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  let plain = executor.poll_resolve(&mut space).expect("`plain`").id();
+
+  let mut map = Extensions::new(executor.limits());
+  for index in 0..CEILING {
+    map
+      .insert(&std::format!("k{index}"), Value::Text)
+      .expect("up to this executor's own ceiling");
+  }
+  for index in 0..CEILING {
+    map
+      .remove(&std::format!("k{index}"))
+      .expect("every key was inserted");
+  }
+  assert!(map.is_empty(), "emptied by every count the ceilings read");
+  assert!(
+    map.capacity() > CEILING as usize,
+    "the spine has to be past the ceiling or this case proves nothing: it holds {} slots",
+    map.capacity()
+  );
+  executor
+    .handle_field_error_with(plain, "no", map)
+    .expect("nothing the map reports is over a ceiling");
+
+  let retained = executor.error_extensions[0].capacity();
+  assert!(
+    retained as u64 <= u64::from(CEILING),
+    "the executor is holding {retained} entry slots for one empty map under a ceiling of \
+     {CEILING}"
+  );
+  let response = executor.poll_response().expect("nothing is outstanding");
+  let error = response.errors().next().expect("the one error");
+  assert!(
+    error.extensions().is_some_and(Extensions::is_empty),
+    "accepted, as the present empty map it is"
+  );
+}
+
+/// A map reported with a message the arena refuses is kept: the text and the map answer to
+/// different ceilings, and only the text's refused.
+#[test]
+fn a_map_reported_with_an_unstorable_message_is_kept() {
+  let tight = Limits {
+    max_interned_bytes: NonZeroU32::new(16).expect("not zero"),
+    ..Limits::default()
+  };
+  let (schema, document) = compile_against(ERROR_MAP_SDL, "{ plain }");
+  let mut space = Space;
+  let mut executor = Executor::with_limits(&schema, &document, tight);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  let plain = executor.poll_resolve(&mut space).expect("`plain`").id();
+  executor
+    .handle_field_error_with(plain, UNSTORABLE, one_entry(executor.limits(), "code"))
+    .expect("the map is under its ceilings, whatever became of the text");
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  let error = response.errors().next().expect("the one error");
+  assert_eq!(error.kind(), Kind::Resolver, "still the driver's error");
+  assert!(
+    error.to_string().contains("was not recorded"),
+    "the message was refused, which is the case under test: {error}"
+  );
+  assert!(
+    error.extensions().and_then(|map| map.get("code")).is_some(),
+    "the map was kept although the message was not"
+  );
+}
+
+/// An error the executor raises carries no map, even recorded after one that does.
+///
+/// The order is the point: a row that took "the latest map" instead of its own index would read
+/// `plain`'s map back from `bulk`'s error.
+#[test]
+fn an_error_the_executor_raises_carries_no_map() {
+  let (schema, document) = compile_against(ERROR_MAP_SDL, "{ plain bulk }");
+  let mut space = Space;
+  let mut executor = Executor::new(&schema, &document);
+  executor
+    .start(&mut space, None, Value::Obj)
+    .expect("the operation resolves");
+  let plain = executor.poll_resolve(&mut space).expect("`plain`").id();
+  executor
+    .handle_field_error_with(plain, "no", one_entry(executor.limits(), "code"))
+    .expect("a live id");
+  let bulk = executor.poll_resolve(&mut space).expect("`bulk`").id();
+  // A list position answered with a value that is not a collection: draft §6.4.3 step 3, raised by
+  // the executor.
+  executor.handle_resolved(&mut space, bulk, Value::Text);
+
+  let response = executor.poll_response().expect("nothing is outstanding");
+  let errors: std::vec::Vec<_> = response.errors().collect();
+  assert_eq!(errors.len(), 2, "both fields failed");
+  assert_eq!(errors[0].kind(), Kind::Resolver);
+  assert!(errors[0].extensions().is_some(), "`plain` carries its map");
+  assert_eq!(errors[1].kind(), Kind::NotAList);
+  assert!(
+    errors[1].extensions().is_none(),
+    "an executor-raised error carries no map, whatever was attached before it"
   );
 }
 
@@ -4338,6 +4813,19 @@ fn no_buffer_a_subscription_retains_grows_with_the_stream() {
       .expect("the stream is open and the last result was taken");
     while let Some(request) = executor.poll_resolve(&mut space) {
       let id = request.id();
+      // Every event that reaches a row fails its `other` with a draft §7.1.6 map, so the side
+      // table those maps live in has a growth site for its row below to bound — a census row that
+      // is always empty checks nothing.
+      if request.name() == "other" {
+        let mut map = Extensions::new(executor.limits());
+        map
+          .insert("code", Value::Text)
+          .expect("one entry is under the ceiling");
+        executor
+          .handle_field_error_with(id, "e", map)
+          .expect("a live id, and a map built under this executor's own ceilings");
+        continue;
+      }
       let value = match request.name() {
         "rows" => Value::List(rows),
         "feed" => Value::Obj,
@@ -4377,6 +4865,8 @@ fn no_buffer_a_subscription_retains_grows_with_the_stream() {
     ("interner bytes", held.interner.1, u64::from(INTERNED)),
     // `fail`/`fail_at`, derived: at most one row per position.
     ("errors", held.errors, u64::from(SLOTS)),
+    // `handle_field_error_with`, derived: at most one map per error row, so one per position.
+    ("error_extensions", held.error_extensions, u64::from(SLOTS)),
     // `poll_resolve`, which withholds at the in-flight ceiling.
     ("inflight", held.inflight, u64::from(IN_FLIGHT)),
     // The walk's staging buffer, charged against the metadata ceiling before each push.

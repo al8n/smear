@@ -76,15 +76,15 @@
 //! A subscription is unbounded in time, so "what is held between events" is the question that
 //! decides whether this is safe, and the answer is *the phase and two borrows of the document*.
 //! Every source event begins with the same `reset` a second
-//! [`start`](crate::Executor::start) performs: the response tree, the interner, the error rows, the
-//! draft §7.1.7 map, the in-flight slab and the whole visit budget go back to where they were, and
-//! every driver value the previous event held is dropped. So no *entry* survives an event, and no
-//! ceiling accumulates across a stream.
+//! [`start`](crate::Executor::start) performs: the response tree, the interner, the error rows and
+//! the draft §7.1.6 maps they index, the draft §7.1.7 map, the in-flight slab and the whole visit
+//! budget go back to where they were, and every driver value the previous event held is dropped.
+//! So no *entry* survives an event, and no ceiling accumulates across a stream.
 //!
 //! **The containers keep their capacity, and this used to say the ceilings bound it. They bound
 //! most of it.** `reset` clears and deliberately never shrinks — that is what makes a steady-state
-//! event allocate nothing — so the honest statement is about twelve buffers rather than one
-//! sentence, and one of the twelve is grown by a site no ceiling charges at all: draft §6.4.1's
+//! event allocate nothing — so the honest statement is about thirteen buffers rather than one
+//! sentence, and one of the thirteen is grown by a site no ceiling charges at all: draft §6.4.1's
 //! coerced arguments, which are bounded by the schema's widest declared argument list instead.
 //! [`Limits`](crate::Limits) carries the census, row by row, with each buffer's growth site and
 //! what bounds it; `no_buffer_a_subscription_retains_grows_with_the_stream` is the gate.

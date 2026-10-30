@@ -32,6 +32,19 @@
 //! specification does not prescribe message text — but because the oracle in
 //! `tests/proto_nonnull_oracle.rs` compares against it, and a differential that ignored the
 //! message would agree about strictly less.
+//!
+//! # Only the driver's errors can carry a map
+//!
+//! Draft §7.1.6's *Error Result Format* admits one entry beyond `message`, `locations` and `path`:
+//! "GraphQL services may provide an additional entry to errors with key `extensions`. This entry,
+//! if set, must have a map as its value." It is a *may*, and it is the service's, so an error the
+//! driver reports through
+//! [`handle_field_error_with`](super::Executor::handle_field_error_with) can carry one and an error
+//! the executor raises itself never does. [`Error::extensions`] reads it back.
+//!
+//! The map is not on the row, for the reason the section above keeps messages off it. [`Row`]
+//! holds a `u32` index into a side table the executor keeps beside its error rows, so a plain error
+//! still costs four bytes and no allocation, and only the error that carries a map pays for one.
 
 use core::fmt;
 
@@ -40,15 +53,18 @@ use tokora::SimpleSpan;
 use smear_schema::{PackedType, Schema, Sym, TypeId};
 
 use super::{
+  Extensions,
   collect::Unstored,
-  response::{Path, Slot},
+  response::{NONE, Path, Slot},
 };
 
 /// What went wrong, with everything the message needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Raw {
   /// The driver reported a field error through
-  /// [`handle_field_error`](super::Executor::handle_field_error). The message is held out of line.
+  /// [`handle_field_error`](super::Executor::handle_field_error) or
+  /// [`handle_field_error_with`](super::Executor::handle_field_error_with). The message is held
+  /// out of line.
   Resolver { message: u32 },
   /// Draft §6.4.3 step 1: a non-null position completed to null.
   NullInNonNull { parent: TypeId, field: Sym },
@@ -224,6 +240,10 @@ pub(super) enum Raw {
   /// [`Unstored`] is carried so the message names the ceiling that actually refused. Both are
   /// reachable here: the message is the driver's text, so its length is the arena's problem, and
   /// finding it in the table is the visit budget's.
+  ///
+  /// A draft §7.1.6 map reported with it is kept. The map is checked against the two extension
+  /// ceilings and neither of the two that refused the text, so losing the message is no reason to
+  /// lose the entries beside it.
   ResolverUnstorable { unstored: Unstored },
 }
 
@@ -263,6 +283,13 @@ pub(super) struct Row {
   /// at were collected once per response key whatever happens afterwards. It is also what lets a
   /// list of a thousand elements share one entry per merged field rather than one per element.
   pub(super) locations: (u32, u32),
+  /// Draft §7.1.6's `extensions`, as an index into the executor's side table of per-error maps, or
+  /// [`NONE`] when the error carries none.
+  ///
+  /// An index and not the map, for the reason `locations` is a range: a map is the rare case and an
+  /// executor-raised error never has one, so the row pays four bytes for the possibility and a
+  /// plain error allocates nothing.
+  pub(super) extensions: u32,
 }
 
 /// The classification of a field error, for a driver that wants to branch on it.
@@ -273,6 +300,9 @@ pub(super) struct Row {
 #[non_exhaustive]
 pub enum Kind {
   /// The driver reported it.
+  ///
+  /// The only kind that can carry draft §7.1.6's `extensions` — see
+  /// [`Error::extensions`](super::Error::extensions).
   Resolver,
   /// A non-null position completed to null (draft §6.4.3 step 1).
   NullInNonNull,
@@ -478,6 +508,8 @@ pub struct Error<'r, V> {
   pub(super) names: &'r str,
   pub(super) name_spans: &'r [(u32, u32)],
   pub(super) locations: &'r [SimpleSpan],
+  /// The executor's side table of draft §7.1.6 maps, which `row.extensions` indexes.
+  pub(super) error_extensions: &'r [Extensions<V>],
   pub(super) row: &'r Row,
 }
 
@@ -530,6 +562,30 @@ impl<'r, V> Error<'r, V> {
     &self.locations[start as usize..(start + len) as usize]
   }
 
+  /// Returns the draft §7.1.6 `extensions` entry the driver attached to this error, or `None` when
+  /// it has none.
+  ///
+  /// `None` is an absent key and never an empty map, exactly as it is on
+  /// [`Response::extensions`](super::Response::extensions): `Some` holding an empty
+  /// [`Extensions`] is a *present* empty map, and a serialiser writes it as `{}`. A `Some` is the
+  /// map [`handle_field_error_with`](super::Executor::handle_field_error_with) accepted, entry for
+  /// entry and in the same order, and nothing in this crate has read a value in it.
+  ///
+  /// Only a [`Kind::Resolver`] error can answer `Some` — an error the executor raises has no
+  /// driver input to carry — and that includes one whose message could not be recorded: the map
+  /// was kept even where the text was not.
+  ///
+  /// It survives draft §6.4.4. A null that propagates past this error's position, or a position
+  /// discarded after the error was recorded, keeps the error row and so keeps its map, until the
+  /// next [`start`](super::Executor::start) or the executor is dropped.
+  #[inline]
+  pub fn extensions(&self) -> Option<&'r Extensions<V>> {
+    match self.row.extensions {
+      NONE => None,
+      index => self.error_extensions.get(index as usize),
+    }
+  }
+
   /// Returns one entry of the executor's name table.
   ///
   /// No conversion and no fallback. The arena is a `str` because a fallback here is not a degraded
@@ -549,6 +605,9 @@ impl<V> fmt::Debug for Error<'_, V> {
       .field("kind", &self.kind())
       .field("path", &self.path())
       .field("locations", &self.locations())
+      // `Extensions`'s own `Debug` renders the keys without requiring `V: Debug`, for the reason
+      // `Response`'s does.
+      .field("extensions", &self.extensions())
       .finish()
   }
 }
