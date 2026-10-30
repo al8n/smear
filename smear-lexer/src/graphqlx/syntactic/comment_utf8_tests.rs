@@ -10,7 +10,7 @@ use core::ops::Range;
 
 use std::{vec, vec::Vec};
 
-use tokora::{Lexer as _, SimpleSpan, utils::Lexeme};
+use tokora::{Lexer as _, SimpleSpan, state::tracker::LimitExceeded, utils::Lexeme};
 
 use crate::{
   graphqlx::{
@@ -18,6 +18,7 @@ use crate::{
     lossless::{LosslessLexer, LosslessToken},
     syntactic::{SyntacticLexer, SyntacticToken},
   },
+  limits::LosslessLimits,
   string_lexer::utf8_cases::{self, Case, Unknown},
 };
 
@@ -463,4 +464,145 @@ fn a_hipbyt_source_refuses_an_ill_formed_comment() {
     LosslessLexer::<hipstr::HipByt<'_>>::new(ILL_FORMED).lex(),
     "lossless HipByt",
   );
+}
+
+/// A comment of more than 40 bytes, all ASCII, then the next line.
+const LONG_COMMENT: &[u8] = b"# a comment body of well over forty bytes, all of it ASCII\nnext";
+
+/// [`LONG_COMMENT`]'s shape, with a byte in the body that is not UTF-8.
+const LONG_ILL_FORMED_COMMENT: &[u8] =
+  b"# a comment body of well over forty bytes, then \xff in it\nnext";
+
+/// Where the comment that opens `doc` ends: at its line feed.
+fn line_end(doc: &[u8]) -> usize {
+  doc
+    .iter()
+    .position(|&byte| byte == b'\n')
+    .expect("the comment ends at a line feed")
+}
+
+/// Whether an error item is the token ceiling's refusal and nothing else, compared by variant: a
+/// tripped state outranks any lexer error it arrives with.
+fn is_token_refusal<Char>(errors: &LexerErrors<Char, LimitExceeded>) -> bool {
+  errors.len() == 1
+    && errors
+      .iter()
+      .all(|error| matches!(error.data(), LexerErrorData::State(LimitExceeded::Token(_))))
+}
+
+/// Drives a lossless lexer whose token ceiling is spent when it reaches a comment: `before` tokens,
+/// then the ceiling's refusal, whose token must be all of `comment`, then nothing, twice.
+///
+/// The span is read from the lexer rather than from the error, whose own span is `0..0`.
+fn assert_ceiling_refusal<'a, L, T, Char>(
+  mut lexer: L,
+  before: usize,
+  comment: Range<usize>,
+  label: &str,
+) where
+  L: tokora::Lexer<'a, Token = T, Span = SimpleSpan>,
+  T: tokora::Token<'a, Error = LexerErrors<Char, LimitExceeded>>,
+  Char: core::fmt::Debug,
+{
+  for item in 0..before {
+    assert!(
+      matches!(lexer.lex(), Some(Ok(_))),
+      "{label}: item {item} is not a token"
+    );
+  }
+  match lexer.lex() {
+    Some(Err(errors)) => assert!(is_token_refusal(&errors), "{label}: {errors:?}"),
+    other => panic!("{label}: expected the ceiling's refusal, got {other:?}"),
+  }
+  assert_eq!(
+    lexer.span(),
+    SimpleSpan::new(comment.start, comment.end),
+    "{label}: the refusal is not the whole comment"
+  );
+  assert!(lexer.lex().is_none(), "{label}: the lexer did not latch");
+  assert!(lexer.lex().is_none(), "{label}: the lexer did not latch");
+}
+
+/// A spent token ceiling refuses a whole comment as one item, then latches, so nothing in the
+/// comment's body is ever lexed as source.
+///
+/// Spent by the third item, after two the ceiling allowed, the comment passes its rule's hook and
+/// the logos adapter's post-scan check refuses it. Spent before the first item, the rule's own hook
+/// refuses it before the callback runs. The token is the whole comment either way, because the
+/// rule's pattern matches it before the hook, and the refusal outranks an ill-formed body's UTF-8
+/// errors.
+#[test]
+fn a_spent_token_ceiling_refuses_a_whole_comment() {
+  // `x` and a space are two items, so a ceiling of two refuses the comment after them.
+  let after_two = LosslessLimits::default().with_max_tokens(2);
+  let mut spent = LosslessLimits::default().with_max_tokens(0);
+  spent.increase_token();
+
+  let end = line_end(LONG_COMMENT);
+  let text = core::str::from_utf8(LONG_COMMENT).expect("ASCII");
+  let prefixed = [&b"x "[..], LONG_COMMENT].concat();
+  let prefixed_text = core::str::from_utf8(&prefixed).expect("ASCII");
+  assert_ceiling_refusal(
+    LosslessLexer::<&str>::with_state(prefixed_text, after_two),
+    2,
+    2..2 + end,
+    "&str after two items",
+  );
+  assert_ceiling_refusal(
+    LosslessLexer::<&str>::with_state(text, spent),
+    0,
+    0..end,
+    "&str spent",
+  );
+
+  let byte_cases: [(&[u8], &str, &str); 2] = [
+    (LONG_COMMENT, "&[u8] after two items", "&[u8] spent"),
+    (
+      LONG_ILL_FORMED_COMMENT,
+      "&[u8] ill-formed after two items",
+      "&[u8] ill-formed spent",
+    ),
+  ];
+  for (comment, after_label, spent_label) in byte_cases {
+    let end = line_end(comment);
+    let prefixed = [&b"x "[..], comment].concat();
+    assert_ceiling_refusal(
+      LosslessLexer::<&[u8]>::with_state(prefixed.as_slice(), after_two),
+      2,
+      2..2 + end,
+      after_label,
+    );
+    assert_ceiling_refusal(
+      LosslessLexer::<&[u8]>::with_state(comment, spent),
+      0,
+      0..end,
+      spent_label,
+    );
+  }
+
+  #[cfg(feature = "bytes")]
+  {
+    assert_ceiling_refusal(
+      LosslessLexer::<bytes::Bytes>::with_state(LONG_ILL_FORMED_COMMENT, spent),
+      0,
+      0..line_end(LONG_ILL_FORMED_COMMENT),
+      "Bytes ill-formed spent",
+    );
+  }
+
+  #[cfg(feature = "hipstr")]
+  {
+    assert_ceiling_refusal(
+      LosslessLexer::<hipstr::HipByt<'_>>::with_state(LONG_ILL_FORMED_COMMENT, spent),
+      0,
+      0..line_end(LONG_ILL_FORMED_COMMENT),
+      "HipByt ill-formed spent",
+    );
+    assert_ceiling_refusal(
+      LosslessLexer::<hipstr::HipStr<'_>>::with_state(text, spent),
+      0,
+      0..end,
+      "HipStr spent",
+    );
+  }
 }
