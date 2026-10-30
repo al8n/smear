@@ -1,4 +1,4 @@
-//! The driver's value representation, and the seven questions execution asks about it.
+//! The driver's value representation, and the eight questions execution asks about it.
 //!
 //! # Why there is no `smear::proto::Value`
 //!
@@ -105,6 +105,7 @@ impl core::fmt::Display for Leaf<'_> {
 /// |---|---|
 /// | [`is_null`](Values::is_null) | §6.4.3 `CompleteValue` 1–2: the non-null check, and the whole of null propagation — step 4, on what [`coerce_leaf`](Values::coerce_leaf) returned — and the null half of §6.4.1 step 5.i.i and of §6.3's directive conditions |
 /// | [`as_bool`](Values::as_bool) | §6.3 `CollectFields` 3.a–3.b: `@skip(if:)` and `@include(if:)` when the condition is a variable |
+/// | [`as_str`](Values::as_str) | §6.4.1 `CoerceArgumentValues` 5.j, for the one `String!` argument the executor resolves itself: draft §4.4's `__type(name:)` when the name is a variable |
 /// | [`list_len`](Values::list_len) | §6.4.3 `CompleteValue` 3: "if result is not a collection of values, raise a field error" |
 /// | [`list_item`](Values::list_item) | §6.4.3 `CompleteValue` 3: completing each element |
 /// | [`type_name`](Values::type_name) | §6.4.3 `CompleteValue` 5 / `ResolveAbstractType` |
@@ -122,12 +123,15 @@ impl core::fmt::Display for Leaf<'_> {
 /// conditions apply, so a driver free to name that type could return one the surrounding selections
 /// contradict — `... on Cat` fields sitting under a `"Dog"` — and nothing downstream could tell.
 ///
-/// `__schema` and `__type` are **not** answered by the executor. Draft §4.5 introspection is
-/// outside this phase, so they arrive as ordinary fields of the query root and a driver may resolve
-/// them or not: `__type` is nullable and answering `null` is a complete response, while `__schema`
-/// is `__Schema!` and a null there is draft §6.4.3 step 1's field error. When introspection does
-/// land, both move to the executor's side of the line and out of the driver's reach, the way
-/// `__typename` already is.
+/// **Nor for `__schema` or `__type`, or anything beneath them.** Every value draft §4 introspection
+/// returns is a fact about the schema the executor already holds, so the executor answers both
+/// from it — every field under them, to any depth, before the call that collected them returns —
+/// and they reach the response as [`Node::Str`](crate::Node::Str),
+/// [`Node::Bool`](crate::Node::Bool) and [`Node::Enum`](crate::Node::Enum) inside ordinary lists
+/// and objects. Asking a driver would ask it to restate the executor's own input, and leave it free
+/// to restate it wrongly. What the driver still answers is the one thing about them that is a
+/// representation question: the value of a variable passed as `__type(name:)` or as
+/// `includeDeprecated`, through [`as_str`](Values::as_str) and [`as_bool`](Values::as_bool).
 ///
 /// # What is deliberately absent
 ///
@@ -136,7 +140,9 @@ impl core::fmt::Display for Leaf<'_> {
 /// wearing a different hat. The obvious place for the first one would have been `__typename`: a
 /// hook handing the driver a `&str` to wrap. It is answered as
 /// [`Node::TypeName`](crate::Node::TypeName) instead, so a driver has no way to answer it
-/// wrongly rather than merely no reason to. Argument values reach the driver as
+/// wrongly rather than merely no reason to — and every introspection leaf is answered the same
+/// way, which is why draft §4's strings, booleans and enum values needed three variants of
+/// [`Node`](crate::Node) and not one constructor here. Argument values reach the driver as
 /// [`ArgumentSource`](crate::ArgumentSource), which is a decision and not a value `proto`
 /// built: it resolves draft §6.4.1's control flow, says *which* of the sources supplies each
 /// argument, and hands back either the literal the document already holds or the driver's own
@@ -165,9 +171,14 @@ pub trait Values {
 
   /// Returns the value as a boolean, or `None` when it is not one.
   ///
-  /// Only reached for `@skip(if:)` and `@include(if:)` with a variable condition (draft §6.3), and
-  /// only for a value [`is_null`](Values::is_null) already reported as non-null. This says what
-  /// the value *is*; what it means is §6.3's.
+  /// Reached for `@skip(if:)` and `@include(if:)` with a variable condition (draft §6.3), and for
+  /// draft §4's `includeDeprecated` when a variable supplies it — the two places the executor reads
+  /// a boolean argument itself — and only for a value [`is_null`](Values::is_null) already reported
+  /// as non-null. This says what the value *is*; what it means is §6.3's, or §4's.
+  ///
+  /// At `includeDeprecated` a value that is not a boolean raises
+  /// [`Kind::ArgumentCoercion`](crate::Kind::ArgumentCoercion) at the field it was passed to, for
+  /// the reason the section below gives for `if`: the executor does not choose a boolean for it.
   ///
   /// # `None` is a failure, not a `false`
   ///
@@ -188,6 +199,31 @@ pub trait Values {
   /// explicitly supplied `null` for it to `null` — and that one is settled by
   /// [`is_null`](Values::is_null) before this method is asked.
   fn as_bool(&self, value: &Self::Value) -> Option<bool>;
+
+  /// Returns the value as a string, or `None` when it is not one.
+  ///
+  /// Only reached for draft §4.4's `__type(name:)` when `name` is a variable, and only for a value
+  /// [`is_null`](Values::is_null) already reported as non-null. The executor answers `__type` from
+  /// the schema rather than offering it to the driver, so this is its own read of the one `String!`
+  /// argument it resolves itself — the counterpart of [`as_bool`](Values::as_bool) for `@skip(if:)`
+  /// and `@include(if:)`. It says what the value *is*; which type the string names is the schema's.
+  ///
+  /// # `None` is a failure, not a name that matches nothing
+  ///
+  /// `name` is declared `String!`, so a value that is not a string does not satisfy the position,
+  /// and the executor raises [`Kind::ArgumentCoercion`](crate::Kind::ArgumentCoercion) at `__type`
+  /// rather than choosing a name for it — an unknown *name* answers `null`, and a value that is not
+  /// a name at all is not an unknown one.
+  /// Draft §6.1's `CoerceVariableValues`, which is the driver's, rejects such a value before
+  /// execution begins, so a conforming driver never reaches that branch.
+  ///
+  /// # Required, and the reason is the answer a default would give
+  ///
+  /// A provided method answering `None` would keep every existing implementation compiling and turn
+  /// every `__type(name: $name)` it serves into that field error — a valid request refused, with
+  /// nothing at build time to say so. A string is a representation question with one right answer
+  /// per representation, and only the driver knows it.
+  fn as_str<'a>(&'a self, value: &'a Self::Value) -> Option<&'a str>;
 
   /// Returns the number of elements when the value is a list, and `None` when it is not.
   ///

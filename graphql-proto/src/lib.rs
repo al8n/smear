@@ -137,13 +137,16 @@
 //! already coerced against their declared types. It is one of the §6 preamble's six *request*
 //! members, and the section below has why two of them are the driver's rather than one.
 //!
-//! Of draft §4.4's three meta-fields, one is executed and two are not. `__typename` is answered by
-//! the executor from the object type it resolved and arrives as [`Node::TypeName`];
-//! the driver is never asked, because the executor has already spent that object type deciding
+//! All three of draft §4.4's meta-fields are answered by the executor, and the driver is asked
+//! about none of them. `__typename` is answered from the object type the executor resolved and
+//! arrives as [`Node::TypeName`], because the executor has already spent that object type deciding
 //! which fragments applied and must not let the answer disagree with them. `__schema` and `__type`
-//! are left to the driver as ordinary fields of the query root — draft §4.5 introspection is a
-//! later phase, and until it lands this executor has nothing better to say about them than the
-//! service does.
+//! are answered from the [`Schema`](smear_schema::Schema) itself — every field beneath them, to any
+//! depth, before the call that collected them returns — and arrive as [`Node::Str`],
+//! [`Node::Bool`] and [`Node::Enum`] inside ordinary lists and objects. Only the query root type
+//! has them, which is draft §4.4's placement, and the one thing about them a driver still answers
+//! is the value of a variable passed as an argument: [`Values::as_str`] for `__type(name:)`, and
+//! [`Values::as_bool`] for `includeDeprecated`.
 //!
 //! ## Draft §6's request has six members, and this crate carries the five `ExecuteRequest` takes
 //!
@@ -183,7 +186,7 @@
 //! purpose, so the accessor would return exactly what the caller moved in.
 //!
 //! It would also return it *less* usefully than a field on the driver's own type. [`Values`] is the
-//! surface a driver's value logic runs on, and its seven methods see the driver's type and never
+//! surface a driver's value logic runs on, and its eight methods see the driver's type and never
 //! the executor — so a map parked on an [`Executor`] is unreadable at the two steps an
 //! implementation-specific request hint exists for, [`Values::variable`] (§6.4.1 steps 5.c–5.f and
 //! §6.3's directive conditions) and [`Values::coerce_leaf`] (§6.4.3 step 4). Between
@@ -253,6 +256,7 @@
 //!   }
 //! #   fn is_null(&self, _: &String) -> bool { false }
 //! #   fn as_bool(&self, _: &String) -> Option<bool> { None }
+//! #   fn as_str<'a>(&'a self, value: &'a String) -> Option<&'a str> { Some(value) }
 //! #   fn list_len(&self, _: &String) -> Option<usize> { None }
 //! #   fn list_item(&mut self, _: &String, _: usize) -> String { String::new() }
 //! #   fn type_name<'a>(&'a self, _: &'a String) -> Option<&'a str> { None }
@@ -349,6 +353,12 @@
 //!   }
 //!   fn as_bool(&self, _: &Json) -> Option<bool> {
 //!     None
+//!   }
+//!   fn as_str<'a>(&'a self, value: &'a Json) -> Option<&'a str> {
+//!     match value {
+//!       Json::Str(text) => Some(text),
+//!       _ => None,
+//!     }
 //!   }
 //!   fn list_len(&self, _: &Json) -> Option<usize> {
 //!     None

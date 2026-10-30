@@ -122,6 +122,10 @@ impl Values for Space {
     None
   }
 
+  fn as_str<'a>(&'a self, _: &'a Value) -> Option<&'a str> {
+    None
+  }
+
   fn list_len(&self, value: &Value) -> Option<usize> {
     match value {
       Value::List(len) => Some(*len),
@@ -2502,6 +2506,7 @@ fn a_withheld_top_level_field_is_in_the_tree_and_reads_as_null() {
 
   const ROOT: u32 = 0;
   let Node::Object(mut fields) = node(
+    executor.schema,
     &executor.slots,
     executor.interner.names(),
     executor.interner.spans(),
@@ -3153,6 +3158,9 @@ impl Values for Counting {
     false
   }
   fn as_bool(&self, _: &Tracked) -> Option<bool> {
+    None
+  }
+  fn as_str<'a>(&'a self, _: &'a Tracked) -> Option<&'a str> {
     None
   }
   fn list_len(&self, value: &Tracked) -> Option<usize> {

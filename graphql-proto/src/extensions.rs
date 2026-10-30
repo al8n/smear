@@ -32,7 +32,7 @@
 //! What that buys is the difference between a documented obligation and an unrepresentable state.
 //! With an opaque value, safe driver code could hand over a null, a string or a list and reach a
 //! [`Response`](crate::Response) that is not a conforming §7.1 response, with nothing anywhere
-//! returning an error. `proto` could not even detect it: [`Values`](crate::Values) asks seven
+//! returning an error. `proto` could not even detect it: [`Values`](crate::Values) asks eight
 //! questions and none is "is this a map", and by that trait's own admission rule each method
 //! discharges a numbered draft §6 step, so it must not grow one that discharges none. A partial
 //! check was considered and rejected for being worse than either alternative —

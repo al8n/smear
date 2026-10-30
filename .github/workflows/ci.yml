@@ -1312,6 +1312,7 @@ jobs:
         # unset-variable branch would swallow.
         test -f "$RUNNER_TEMP/graphql-js/src/execution/__tests__/nonnull-test.ts"
         test -f "$RUNNER_TEMP/graphql-js/src/execution/__tests__/mutations-test.ts"
+        test -f "$RUNNER_TEMP/graphql-js/src/utilities/getIntrospectionQuery.ts"
     - name: Install Rust
       run: rustup update stable --no-self-update && rustup default stable
     - name: Cache cargo build and registry
@@ -1324,13 +1325,14 @@ jobs:
         key: ${{ runner.os }}-proto-oracle-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-proto-oracle-
-    - name: cargo test --test proto_nonnull_oracle --test proto_mutation_oracle --test proto_execute
+    - name: cargo test --test proto_nonnull_oracle --test proto_mutation_oracle --test proto_execute --test proto_introspection
       env:
         SMEAR_GRAPHQL_JS: ${{ runner.temp }}/graphql-js
       # `--nocapture` because the counts are the artifact: how many cases reached a comparison, how
       # many error entries, paths and locations were compared, and how many anchors were verified
       # against upstream. A green tick alone would not say whether the oracle compared 29 entries
-      # or none.
+      # or none. `proto_introspection`'s budget record is the same kind of artifact: what graphql-js's
+      # full introspection query costs over GitHub's and GitLab's schemas, against the defaults.
       #
       # Every target by name, not `-p smear --tests`: a cargo target *filter* warns and exits 0
       # when it matches nothing, so a renamed file would silently empty this job. Which is also why
@@ -1338,7 +1340,7 @@ jobs:
       # never runs with `SMEAR_GRAPHQL_JS` set is a gate that cannot fire.
       run: |
         cargo test -p smear --features proto --test proto_nonnull_oracle \
-          --test proto_mutation_oracle --test proto_execute -- --nocapture
+          --test proto_mutation_oracle --test proto_execute --test proto_introspection -- --nocapture
 
   # `needs:` is unchanged, but its effect is not. Every matrix named below used to contain a
   # `macos-latest` cell, so on a run where those cells never got a runner this job was never

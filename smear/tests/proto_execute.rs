@@ -110,6 +110,13 @@ impl Values for Space {
     }
   }
 
+  fn as_str<'a>(&'a self, value: &'a J) -> Option<&'a str> {
+    match value {
+      J::Str(text) => Some(text),
+      _ => None,
+    }
+  }
+
   fn list_len(&self, value: &J) -> Option<usize> {
     match value {
       J::List(items) => Some(items.len()),
@@ -396,7 +403,8 @@ fn render(node: &Node<'_, J>) -> String {
     // would make a response that carries one indistinguishable — in every `data` assertion in this
     // file — from a response that nulled the position and reported the field error.
     Node::Leaf(_) => "<unserialised>".to_owned(),
-    Node::TypeName(name) => format!("\"{name}\""),
+    Node::TypeName(name) | Node::Str(name) | Node::Enum(name) => format!("\"{name}\""),
+    Node::Bool(flag) => flag.to_string(),
     Node::List(children) => {
       let mut out = String::from("[");
       for (index, (_, child)) in children.clone().enumerate() {
@@ -1923,6 +1931,10 @@ impl Values for Handles {
   }
 
   fn as_bool(&self, _: &Counted) -> Option<bool> {
+    None
+  }
+
+  fn as_str<'a>(&'a self, _: &'a Counted) -> Option<&'a str> {
     None
   }
 

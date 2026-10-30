@@ -87,8 +87,9 @@
 //! And the rows that are *not* allocations, listed because "there is nothing else" is the claim and
 //! an absence has to be enumerated to be checked: the sink is the caller's `fmt::Write` and this
 //! writer never buffers into one of its own; [`Json::number`], `int_leaf` and `double` render into
-//! stack buffers; a leaf, a `__typename`, an error message, an `extensions` key and a path segment
-//! are all written straight through, escaped as they stream; and every iterator this file drives —
+//! stack buffers; a leaf, a `__typename`, an introspection string or enum value, an error message,
+//! an `extensions` key and a path segment are all written straight through, escaped as they
+//! stream; and every iterator this file drives —
 //! [`Response::errors`](graphql_proto::Response::errors), [`Children`],
 //! [`Extensions`]'s — is a cursor over a slice the executor already owns.
 //! What this file writes an error *message* with is [`Json::display`](super::Json::display) over
@@ -518,9 +519,15 @@ where
       None
     }
     // Draft §4.4's `__typename` is the executor's own answer and is a `String` in the response,
-    // written the same way a response key is.
-    Node::TypeName(name) => {
-      json.string(name)?;
+    // written the same way a response key is. So is everything draft §4's `__schema` and `__type`
+    // answer from the schema: a `String` or an enum value is a JSON string, escaped as it streams
+    // like any other, and a `Boolean` is a JSON literal.
+    Node::TypeName(text) | Node::Str(text) | Node::Enum(text) => {
+      json.string(text)?;
+      None
+    }
+    Node::Bool(flag) => {
+      json.bool(flag)?;
       None
     }
     Node::List(children) => {

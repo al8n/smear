@@ -87,9 +87,10 @@ use super::{
   },
   error::{ConditionFault, Raw, Row},
   request::name_bytes,
-  response::{Key, NONE, Slot, State, node},
+  response::{Entity, Key, NONE, Slot, State, node},
 };
 
+mod introspect;
 #[cfg(test)]
 mod tests;
 
@@ -108,7 +109,7 @@ mod tests;
 /// | outstanding work | requests | [`max_in_flight`](Limits::max_in_flight) | `poll_resolve` withholds, and the slab reuses freed entries | — |
 /// | response positions | positions | [`max_response_slots`](Limits::max_response_slots) | `push_child`, the only creator | — |
 /// | response metadata | merged selections **and** location spans, counted as one | [`max_response_metadata`](Limits::max_response_metadata) | `expand` before appending, and `fail_at` | a writer appending spans without charging — which `fail_at` did, making the ceiling neither bound it claimed |
-/// | collection work | selections **examined**, name-table entries **compared**, the fragment index's pass, the directives and arguments a request **writes** at a selection, and the bytes of every name it writes there, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment; `included` per directive on a selection it **examines** and `condition_is_true` per argument at a `@skip`/`@include` usage it **compares**, each in front of that one comparison rather than over the list, since both scans short-circuit; **`coerce_arguments`** per written argument the scan **examines**, once however many of §6.4.1's `declared` scans reach it, and both readers of a variable **spelling** — `coerce_arguments` and `condition_is_true` — through `metered_variable_key`, a unit at a time as draft §2.1.9's pass examines the bytes | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can; **charging one name where the position reads two**, which is what the argument key's charge did while the variable written for it went to the driver unmeasured; **charging a whole list in front of a scan that short-circuits**, which refuses a valid operation for work the taken branch never performs — a *list* is not the only such scan, and the variable spelling's own admission pass is one, so a charge over its whole length turned an unreadable name into a resource refusal; and §6.4.1's scan, whose *other* factor is the schema's and is bounded at build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) rather than here |
+/// | collection work | selections **examined**, name-table entries **compared**, the fragment index's pass, the directives and arguments a request **writes** at a selection, and the bytes of every name it writes there, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment; `included` per directive on a selection it **examines** and `condition_is_true` per argument at a `@skip`/`@include` usage it **compares**, each in front of that one comparison rather than over the list, since both scans short-circuit; **`coerce_arguments`** per written argument the scan **examines**, once however many of §6.4.1's `declared` scans reach it, and both readers of a variable **spelling** — `coerce_arguments` and `condition_is_true` — through `metered_variable_key`, a unit at a time as draft §2.1.9's pass examines the bytes; and draft §4's meta walk per schema member a meta list reads and per possible-object word an interface's `possibleTypes` scans, and per pass over the bytes of a `__type` name it decodes and looks up | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can; **charging one name where the position reads two**, which is what the argument key's charge did while the variable written for it went to the driver unmeasured; **charging a whole list in front of a scan that short-circuits**, which refuses a valid operation for work the taken branch never performs — a *list* is not the only such scan, and the variable spelling's own admission pass is one, so a charge over its whole length turned an unreadable name into a resource refusal; and §6.4.1's scan, whose *other* factor is the schema's and is bounded at build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) rather than here; and a meta list that `includeDeprecated` empties, which creates no position for a ceiling to count while reading the schema's whole width — once per alias the client writes |
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
 /// | draft §7.1.7 `extensions`, and §7.1.6's per-error map | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed; and **each of the three retainers** — [`set_extensions`](Executor::set_extensions), [`RequestErrorResult::set_extensions`](super::RequestErrorResult::set_extensions) and [`handle_field_error_with`](Executor::handle_field_error_with), all of which re-derive an accepted map's spine from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no slot, so an emptied map reports nothing and holds everything it grew to. And a **second** retainer of the same container that re-checks only the two reported quantities, since §7.1.7 admits the entry in a §7.1.3 result too — and a third, since §7.1.6 admits one on every error |
@@ -151,7 +152,7 @@ mod tests;
 ///
 /// | member | bound | readers | dead at | released by | what would strand it |
 /// |---|---|---|---|---|---|
-/// | argument values | one field's arguments | the one offered `FieldRequest` | next entry point | `on_entry`, incl. the withhold exit | an entry point that skips retirement |
+/// | argument values | one field's arguments | the one offered `FieldRequest`; for a draft §4 meta field, the meta walk's own read | next entry point; the read | `on_entry`, incl. the withhold exit; `retire_arguments` straight after the read | an entry point that skips retirement |
 /// | **object values** (root included) | object positions | `poll_resolve`'s `parent_value`, once per enqueued child | last enqueued child leaves Ready | the `Object` → `Expanded` transition; `discard`; `reset` | an enqueue or departure path that skips the count |
 /// | leaf values | positions | `Response` readers, repeatedly | next `start`/drop | `reset`/drop; `discard` | nothing — they *are* the response |
 /// | `TypeName` ids | interner ceiling | `Response` readers | next `start`/drop | `reset` | nothing: no `V`, no handle |
@@ -211,7 +212,7 @@ mod tests;
 /// | `scratch.keys` | `walk`, grown one entry at a time to reach an interner id | `max_interned_bytes`, since only an admitted insertion mints an id |
 /// | `scratch.visited` | `walk`, one bit per fragment ordinal | **the document's** fragment count; every spread that reaches it is charged a visit |
 /// | `scratch.stack` | `walk`, one frame per spread or inline fragment | `max_selection_visits`, charged before the frame is taken |
-/// | `scratch_sets` | `complete`'s object arm, one entry per merged selection carrying a sub-selection | `max_response_metadata`, being a slice of `merged` |
+/// | `scratch_sets` | `complete`'s object arm and draft §4's meta walk, one entry per merged selection carrying a sub-selection | `max_response_metadata`, being a slice of `merged` |
 /// | `fragments` — the index | `Fragments::build`, once, kept across resets on purpose | **the document's** definition count, and the pass is charged against `max_selection_visits` before the storage exists |
 /// | `arg_prefix` | `coerce_arguments`, one `u32` per written entry the scan admits, pushed **behind** that entry's own charged opening unit | [`max_selection_visits`](Limits::max_selection_visits), and cleared at every coercion with `scratch_args` |
 /// | **`scratch_args`** | `coerce_arguments`, which charges the request's **written** argument bytes against `max_selection_visits` and does not charge the *length* of what it pushes | **the schema's** declared argument list for the *one* field being coerced — the function clears and then pushes at most one entry per declared argument — which [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) refuses past sixty-four at schema build |
@@ -597,15 +598,15 @@ pub struct Limits {
   pub max_response_metadata: NonZeroU32,
 
   /// How much work draft §6.3's collection **and** draft §6.4.1's argument scan may do, across the
-  /// whole operation.
+  /// whole operation — and draft §4's introspection reads.
   ///
   /// Charged per selection *looked at*, surviving or not; per entry a name lookup compares, before
   /// it compares it; per definition and fragment the fragment index's one pass handles; per
-  /// definition draft §6.1's operation lookup reads; and per **byte of every argument the request
-  /// writes**, at every position the field is coerced at. The first is the difference between this
-  /// and every other ceiling here, and it is deliberate: the others count what was produced, and a
-  /// document built out of fragments that collect nothing produces nothing while walking as far as
-  /// it likes.
+  /// definition draft §6.1's operation lookup reads; per **byte of every argument the request
+  /// writes**, at every position the field is coerced at; and per schema member an introspection
+  /// list reads. The first is the difference between this and every other ceiling here, and it is
+  /// deliberate: the others count what was produced, and a document built out of fragments that
+  /// collect nothing produces nothing while walking as far as it likes.
   ///
   /// **Two of those are taken outside collection, and the first is why this ceiling can refuse a
   /// `start` before a response exists.** Draft §6.1 walks the definitions to find the operation,
@@ -634,6 +635,16 @@ pub struct Limits {
   /// §6.2.3.1 coerces before any response exists, so it becomes
   /// [`StartError::SourceFieldArgumentBudget`](StartError::SourceFieldArgumentBudget) — its own
   /// variant, carrying this number, rather than the specification failure beside it.
+  ///
+  /// **A third is draft §4 introspection, and its refusal is a field error too.** The executor
+  /// answers `__schema` and `__type` from the schema, and two of the reads that takes are its own
+  /// rather than a collection's: one unit per schema member a meta list reads, whether or not
+  /// `includeDeprecated` lets the member through, plus one per possible-object word an interface's
+  /// `possibleTypes` scans; and one pass per walk over the bytes of `__type`'s name. The first is
+  /// §6.4.1's product again — a schema's width per position, with positions the client's to
+  /// multiply by aliasing — and here the width has no build-time ceiling, so it is metered rather
+  /// than bounded at build. A refusal nulls the list or the `__type` it was raised at, and draft
+  /// §6.4.4 takes it from there.
   ///
   /// The rest is what makes the first a bound rather than a bound on one factor. Both tables hash
   /// text the *document* chose, and the shared hash is unkeyed with every round invertible in the
@@ -776,7 +787,7 @@ pub struct Limits {
   /// driver's own `V` — the same way a `String` leaf of any length reaches the response without a
   /// byte ceiling looking at it, and the same way `start`'s `root` and every
   /// [`handle_resolved`](Executor::handle_resolved) answer do. There is no ceiling that could
-  /// apply: [`Values`](crate::Values) asks seven questions, each discharging a numbered draft §6
+  /// apply: [`Values`](crate::Values) asks eight questions, each discharging a numbered draft §6
   /// step, and none of them is "how big is this" — measuring one would mean a `V` the executor is
   /// allowed to interpret, which is the boundary this crate is built not to cross. `max_in_flight`
   /// and [`max_response_slots`](Limits::max_response_slots) bound how *many* driver values are
@@ -1774,6 +1785,13 @@ where
   /// interns all three meta-field names unconditionally. Treating it as "no meta-field here" keeps
   /// the branch total instead of resting on that.
   typename: Option<Sym>,
+  /// `__schema`'s and `__type`'s symbols, resolved once for the reason `typename` is, and `None`
+  /// under the same terms.
+  ///
+  /// `expand` compares a group against these before it asks whether the object is the query root
+  /// type, so two integer comparisons are all an ordinary field pays for them.
+  schema_field: Option<Sym>,
+  type_field: Option<Sym>,
 
   slots: std::vec::Vec<Slot<V::Value>>,
   /// The greatest [`Slot::depth`] any position in `slots` carries.
@@ -1996,6 +2014,8 @@ where
       fragments: Fragments::new(document),
       limits,
       typename: schema.sym(builtin::TYPENAME_FIELD.as_bytes()),
+      schema_field: schema.sym(builtin::SCHEMA_FIELD.as_bytes()),
+      type_field: schema.sym(builtin::TYPE_FIELD.as_bytes()),
       slots: std::vec::Vec::new(),
       max_depth: 0,
       meta: std::vec::Vec::new(),
@@ -2306,7 +2326,12 @@ where
 
     self.scratch_sets.clear();
     self.scratch_sets.push(set);
-    self.expand(ctx, 0)
+    let entries = self.expand(ctx, 0);
+    // Draft §4's `__schema` and `__type` are answered here, whole, when the root is the query root
+    // type — so a root selection that is nothing else is complete before `start` returns, with
+    // nothing on the ready chain, exactly as a `__typename`-only one is.
+    self.introspect(ctx, 0, root_type);
+    entries
   }
 
   /// Returns the next field the driver must resolve, or `None`.
@@ -2395,13 +2420,19 @@ where
       // resolver's parent — a response that is silently, plausibly incorrect. A library panicking
       // on its own accounting bug is defensible; a library corrupting a response is not, and this
       // is the one place where the two are the choice.
+      //
+      // The three draft §4 states are unreachable the same way and one step further: no meta
+      // position is ever enqueued, so none is the parent of a slot that was Ready.
       State::Expanded
       | State::Ready
       | State::InFlight
       | State::Null
       | State::Leaf(_)
       | State::TypeName(_)
-      | State::List => unreachable!("a field slot's parent is an object"),
+      | State::List
+      | State::MetaField(_)
+      | State::MetaObject(_)
+      | State::MetaLeaf(_) => unreachable!("a field slot's parent is an object"),
     };
     Some(FieldRequest {
       id,
@@ -2832,6 +2863,17 @@ where
         .any(|slot| matches!(slot.state, State::Object { .. })),
       "a response was delivered with an object value still held: some enqueue or departure path \
        is not accounted"
+    );
+    // And no draft §4 position is still waiting for the walk: every call that collects one answers
+    // it before returning, so a placeholder here is a meta field the walk never reached — which
+    // `node` would render as a `null` nothing in `errors` accounts for. Debug-only, for the reason
+    // the assertion above is.
+    debug_assert!(
+      !self
+        .slots
+        .iter()
+        .any(|slot| matches!(slot.state, State::MetaField(_) | State::MetaObject(_))),
+      "a response was delivered with a draft §4 meta position unanswered"
     );
     // Draft §6.2.3.2's source stream may have ended while this event was running, in which case the
     // ending is recorded on the phase and this result is the one it was queued behind. Taking the
@@ -3503,6 +3545,9 @@ where
     // Draft §6.2.3.1 step 5's entry count is the only reader of this, and only for the *root*
     // expansion of a subscription. Below the root nothing counts entries.
     let _ = self.expand(ctx, slot);
+    // An object of the query root type answers draft §4's `__schema` and `__type` wherever it
+    // stands, which is draft §4.4's placement of them — and before this answer returns.
+    self.introspect(ctx, slot, object);
   }
 
   /// Draft §6.3 over `self.scratch_sets`, creating one ready slot per response key, and returning
@@ -3518,7 +3563,8 @@ where
   ///
   /// Draft §6.2.3.1 step 5 counts *entries*, and entries and positions are different numbers: a
   /// group whose field the schema does not define is skipped without a position being created, and
-  /// draft §4.4's `__typename` becomes a position that is never enqueued. Every other caller
+  /// draft §4.4's `__typename` becomes a position that is never enqueued — as does every draft §4
+  /// meta field, which the caller's `introspect` answers instead. Every other caller
   /// discards this, which is deliberate — a `#[must_use]` here would be asserting that the count
   /// matters to §6.4.3's completion path, and it does not.
   ///
@@ -3527,8 +3573,12 @@ where
   /// expansion is answered by the root's discard flag instead, which is a different question with
   /// a different remedy.
   fn expand(&mut self, ctx: &mut V, slot: u32) -> usize {
-    let object_type = match &self.slots[slot as usize].state {
-      State::Object { ty, .. } => *ty,
+    // A draft §4 meta object's type is its position's own — every meta type is an object, so there
+    // is no abstract type to resolve — and the entity it stands for is what its fields are answered
+    // from.
+    let (object_type, meta_object) = match &self.slots[slot as usize].state {
+      State::Object { ty, .. } => (*ty, None),
+      State::MetaObject(entity) => (self.slots[slot as usize].ty.base_id(), Some(*entity)),
       // Enumerated for the reason the offer path is. `Expanded` cannot appear because a slot
       // expands once; the rest are the not-an-object cases this always returned on.
       State::Expanded
@@ -3537,7 +3587,9 @@ where
       | State::Null
       | State::Leaf(_)
       | State::TypeName(_)
-      | State::List => return 0,
+      | State::List
+      | State::MetaField(_)
+      | State::MetaLeaf(_) => return 0,
     };
     if self.scratch_sets.is_empty() {
       // An exit that leaves the slot live, so it settles the count like every other. Nothing was
@@ -3702,10 +3754,10 @@ where
       // answer contradict the selections that answer produced: `... on Cat` fields under a
       // `"Dog"`, with nothing in the machine able to notice.
       //
-      // The other two meta-fields are *not* intercepted. `__schema` and `__type` are ordinary
-      // fields of the query root as far as this phase is concerned, offered to the driver like any
-      // other; executing draft §4.5 introspection is not in scope here, and a driver that resolves
-      // them itself is producing the answer from the same schema the executor would have.
+      // The other two meta-fields are never offered either, and neither is anything beneath them.
+      // `__schema` and `__type` on the query root type, and every field of a draft §4 meta object,
+      // are committed below as placeholders that `introspect` answers from the schema before the
+      // call that collected them returns — see `execute::introspect`.
       let typename = match self.typename {
         Some(meta) if meta == sym => {
           let name = self.schema.type_def(object_type).name();
@@ -3725,9 +3777,17 @@ where
         }
         _ => None,
       };
-      let state = match typename {
-        Some(name) => State::TypeName(name),
-        None => State::Ready,
+      let answered = match (typename, meta_object) {
+        (Some(_), _) => None,
+        (None, Some(entity)) => Some(entity),
+        (None, None) => self
+          .answers_at_root(object_type, sym)
+          .then_some(Entity::Schema),
+      };
+      let state = match (typename, answered) {
+        (Some(name), _) => State::TypeName(name),
+        (None, Some(entity)) => State::MetaField(entity),
+        (None, None) => State::Ready,
       };
       let Some(child) = self.push_child(slot, Key::Field(group.key), definition.ty(), state) else {
         // The scratch vectors have to go home before the failure is recorded, because recording it
@@ -3742,7 +3802,7 @@ where
         parent_type: object_type,
         field_sym: sym,
       };
-      if typename.is_none() {
+      if typename.is_none() && answered.is_none() {
         self.enqueue(child);
         enqueued += 1;
       }
@@ -4345,9 +4405,11 @@ where
   /// - Every slot this reaches ends `discarded` and holding no value, so *emptying* a slot happens
   ///   at most once in an operation.
   /// - Nothing is ever added under a discarded slot afterwards. [`push_child`](Self::push_child)
-  ///   has two callers, and both are past a `discarded` check — `expand` runs only on a slot
-  ///   `handle_resolved` admitted, and `complete`'s list arm stops the moment the list is
-  ///   discarded — so a drained subtree stays drained.
+  ///   has three callers, and all are past a `discarded` check — `expand` runs only on a slot
+  ///   `handle_resolved` admitted or a meta object the walk found undiscarded, `complete`'s list
+  ///   arm stops the moment the list is discarded, and draft §4's meta walk fills a list only under
+  ///   an object it has just found undiscarded and stops at its first refusal — so a drained
+  ///   subtree stays drained.
   /// - The descent therefore stops at any child that already carries the flag instead of walking
   ///   into it, and a child it stops at is a maximal discarded root that this call absorbs into a
   ///   larger one. Each call creates exactly one such root, so the stops across the whole operation
@@ -4749,6 +4811,12 @@ where
   /// `root_selection_set` — so an event is bounded because it *is* an execution, not because a
   /// second site remembered the ceiling. That is the property this design was for, and it is worth
   /// recording that it held twice rather than leaving the prediction standing.
+  ///
+  /// **Draft §4's introspection did add one, and it is the case the design was for.** The meta
+  /// walk builds `types`, `fields` and every other meta list one element at a time, a loop whose
+  /// trip count is the schema's rather than the driver's, and it calls this for each element — so
+  /// a full introspection of a large schema is refused at the same ceiling, in the same place and
+  /// with the same error as a long list a resolver returned, with nothing remembered at the site.
   ///
   /// The `as u32` below is exact for the same reason. `self.slots.len()` is strictly less than the
   /// ceiling whenever this returns `Some`, and the ceiling is a `u32`, so the new index is at most
@@ -5301,7 +5369,7 @@ impl<'r, V> Response<'r, V> {
   /// never ran.
   #[inline]
   pub fn data(&self) -> Node<'r, V> {
-    node(self.slots, self.names, self.name_spans, 0)
+    node(self.schema, self.slots, self.names, self.name_spans, 0)
   }
 
   /// Returns an upper bound on how deep this response is, in draft §7.1.2 path segments.

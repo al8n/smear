@@ -4,13 +4,13 @@
 //!
 //! `graphql-proto`'s header says it does not write a response out, and that refusal was never
 //! arbitrary: writing one means writing the driver's `V`, and
-//! [`Values`](crate::proto::Values) asks seven structural questions of which none is
+//! [`Values`](crate::proto::Values) asks eight structural questions of which none is
 //! *write this*. A crate that cannot render a leaf cannot render the tree the leaves are in.
 //!
 //! What unblocked it is the materialised value layer — with
 //! [`parser::graphql::ast::materialized`](crate::parser::graphql::ast::materialized) there is a
-//! concrete tree to write, so the writer lives *above* both and neither layer has to grow an
-//! eighth question. [`materialized`] holds the implementation, one for every width.
+//! concrete tree to write, so the writer lives *above* both and neither layer has to grow a
+//! *write this* question. [`materialized`] holds the implementation, one for every width.
 //!
 //! # What the writer refuses to guess
 //!

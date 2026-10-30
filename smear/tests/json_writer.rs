@@ -93,6 +93,11 @@ impl Values for Space {
     }
   }
 
+  /// Never asked: no fixture below selects `__type` with a variable name.
+  fn as_str<'a>(&'a self, _value: &'a Self::Value) -> Option<&'a str> {
+    None
+  }
+
   fn list_len(&self, value: &Self::Value) -> Option<usize> {
     match value {
       ConstInputValue::List(list) => Some(list.values().len()),

@@ -131,6 +131,18 @@ pub(super) enum Raw {
     /// the two sites whose message names a ceiling.
     variable: Option<u32>,
   },
+  /// Draft §6.4.1 step 5.j: an argument the executor reads itself holds a value that is not of its
+  /// type — `__type`'s `name` that is not a string, or an `includeDeprecated` that is not a
+  /// boolean.
+  ///
+  /// The executor performs step 5.j only for the arguments of draft §4's meta-fields, which it
+  /// answers from the schema; every other argument's contents reach the driver unread, as an
+  /// [`ArgumentSource`](super::ArgumentSource) whose coercion is the driver's.
+  ArgumentCoercion {
+    field: Sym,
+    argument: Sym,
+    ty: PackedType,
+  },
   /// Draft §6.3 steps 3.a and 3.b: a `@skip`/`@include` condition that is not a readable boolean.
   DirectiveCondition { fault: ConditionFault },
   /// Not a specification failure: completing this position would have taken the response past
@@ -152,6 +164,19 @@ pub(super) enum Raw {
   /// that did not choose it. Charging `written` alone was published as bounding the product, and
   /// it does not — the product is zero at zero written and the scan is not. al8n/smear#198.
   ArgumentBudget {
+    parent: TypeId,
+    field: Sym,
+    limit: u32,
+  },
+  /// Not a specification failure: answering this draft §4 meta field from the schema would have
+  /// taken the operation past
+  /// [`Limits::max_selection_visits`](super::Limits::max_selection_visits).
+  ///
+  /// Raised at a meta list whose members the walk could not read — one unit each, filtered out or
+  /// not — or at `__type`, whose name the walk could not afford to look up. Its own variant,
+  /// because the work it names is neither a collection nor an argument the request wrote: it is
+  /// the schema being read, once per position the request asked for it at.
+  IntrospectionBudget {
     parent: TypeId,
     field: Sym,
     limit: u32,
@@ -320,6 +345,15 @@ pub enum Kind {
   ArgumentNull,
   /// A required argument names a variable the request did not supply (draft §6.4.1 step 5.d).
   ArgumentVariableMissing,
+  /// An argument's value is not of the argument's type (draft §6.4.1 step 5.j).
+  ///
+  /// Raised only for the arguments the executor reads itself — draft §4.4's `__type(name:)` and
+  /// draft §4's `includeDeprecated` — because §6.4.1's coercion of every other argument's contents
+  /// is the driver's. A validated document cannot reach it with a literal, and a conforming driver
+  /// cannot with a variable: draft §6.1's `CoerceVariableValues` refuses such a value before
+  /// execution begins. A `__type` name that is a string and names no type is not this error — it
+  /// answers `null`.
+  ArgumentCoercion,
   /// A `@skip`/`@include` condition was not a readable boolean (draft §6.3 steps 3.a and 3.b).
   ///
   /// Separate from [`ArgumentNull`](Kind::ArgumentNull) and its two siblings even though it
@@ -405,8 +439,9 @@ pub enum Resource {
   /// another merged selection or location span.
   ResponseMetadata,
   /// [`Limits::max_selection_visits`](super::Limits::max_selection_visits) is spent: the
-  /// collection walk, the name-table comparisons, the runtime-type lookups and draft §6.4.1's
-  /// argument scan are charged against it, and work already done is never refunded.
+  /// collection walk, the name-table comparisons, the runtime-type lookups, draft §6.4.1's
+  /// argument scan and draft §4's introspection reads are charged against it, and work already
+  /// done is never refunded.
   SelectionVisits,
   /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes) has no room for a name.
   InternedBytes,
@@ -455,7 +490,8 @@ impl Raw {
       }
       Self::ArgumentBudget { .. }
       | Self::CollectionBudget { .. }
-      | Self::RuntimeTypeBudget { .. } => Some(Resource::SelectionVisits),
+      | Self::RuntimeTypeBudget { .. }
+      | Self::IntrospectionBudget { .. } => Some(Resource::SelectionVisits),
       Self::NameStorage { .. } => Some(Resource::InternedBytes),
       Self::Resolver { .. }
       | Self::ResolverUnstorable { .. }
@@ -468,6 +504,7 @@ impl Raw {
       | Self::ArgumentMissing { .. }
       | Self::ArgumentNull { .. }
       | Self::ArgumentVariableMissing { .. }
+      | Self::ArgumentCoercion { .. }
       | Self::DirectiveCondition { .. }
       | Self::ResponseKeyUnreadable => None,
     }
@@ -487,6 +524,7 @@ impl Raw {
       Self::ArgumentMissing { .. } => Kind::ArgumentMissing,
       Self::ArgumentNull { .. } => Kind::ArgumentNull,
       Self::ArgumentVariableMissing { .. } => Kind::ArgumentVariableMissing,
+      Self::ArgumentCoercion { .. } => Kind::ArgumentCoercion,
       Self::DirectiveCondition { .. } => Kind::DirectiveCondition,
       Self::ResponseBudget { .. }
       | Self::ArgumentBudget { .. }
@@ -494,7 +532,8 @@ impl Raw {
       | Self::CollectionBudget { .. }
       | Self::MetadataBudget { .. }
       | Self::NameStorage { .. }
-      | Self::RuntimeTypeBudget { .. } => Kind::ExecutorBudget,
+      | Self::RuntimeTypeBudget { .. }
+      | Self::IntrospectionBudget { .. } => Kind::ExecutorBudget,
       Self::ResponseKeyUnreadable => Kind::ResponseKeyUnreadable,
       Self::ResolverUnstorable { .. } => Kind::Resolver,
     }
@@ -758,6 +797,18 @@ impl<V> fmt::Display for Error<'_, V> {
           None => f.write_str("\" was provided a variable which was not provided a runtime value."),
         }
       }
+      // The wording `ConditionFault::NotABoolean` already uses for the same failure at a directive
+      // argument, so one finding reads one way wherever it is raised. The type it must be is the
+      // argument type's base, which for both arguments this is raised for is a built-in scalar.
+      Raw::ArgumentCoercion {
+        field: _,
+        argument,
+        ty: packed,
+      } => {
+        write!(f, "Argument \"{}\" of type \"", schema.name(argument))?;
+        ty(f, packed)?;
+        write!(f, "\" must be a {}.", schema.name(packed.base()))
+      }
       // Draft §6.3 reads the condition from an argument it names `if`, and draft §3.13 declares
       // both directives with that one argument at type `Boolean!`. Both names are therefore the
       // specification's rather than the schema's, and are written out rather than looked up: a
@@ -811,6 +862,18 @@ impl<V> fmt::Display for Error<'_, V> {
           f,
           ": reading the arguments written here would exceed the executor's limit of {limit} \
            selection visits."
+        )
+      }
+      Raw::IntrospectionBudget {
+        parent,
+        field,
+        limit,
+      } => {
+        position(f, parent, field)?;
+        write!(
+          f,
+          ": answering it from the schema would exceed the executor's limit of {limit} selection \
+           visits."
         )
       }
       Raw::SelectionBudget {

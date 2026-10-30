@@ -188,7 +188,7 @@ pub use graphql_proto as proto;
 // THE ONE MODULE THIS CRATE OWNS, and it is here rather than one layer down for a stated reason.
 //
 // `graphql-proto` refuses to write a response out because writing one means writing the driver's
-// `V`, and `Values` asks seven structural questions of which none is "write this". The
+// `V`, and `Values` asks eight structural questions of which none is "write this". The
 // materialised value layer is what closed that: with a concrete value tree there is something to
 // write, and the writer belongs ABOVE both — over `proto` for the response and over `parser` for
 // the values — which is this crate and no other. Neither layer grows a question it should not
