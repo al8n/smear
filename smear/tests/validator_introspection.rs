@@ -67,13 +67,15 @@
 //!   redefines none; [`redefining_a_built_in_is_the_one_flag_introspection_loses`] and
 //!   [`a_specified_directive_spelled_as_the_build_injects_it_loses_its_flag_and_its_place`] pin the
 //!   losses instead of hiding them.
-//! - **The meta types' descriptions and the order of their members.** A document cannot define a
-//!   `__` type, so both doors carry smear's meta-schema, and what a response says about the
-//!   specification's own types beyond their shape is that server's rendering, not the schema's
-//!   content: it is not kept. The generated response is smear's own, so the comparison cannot see
-//!   it either way. The shape is held, and a meta type in a shape draft §4 does not give it is
-//!   refused; [`a_meta_type_is_held_to_its_shape_and_not_to_its_rendering`] and
-//!   [`a_meta_type_in_another_shape_is_refused`] pin the two halves.
+//! - **The meta types' descriptions, the order of their members, and members the specification's
+//!   meta-schema lacks.** A document cannot define a `__` type, so both doors carry smear's
+//!   meta-schema, and what a response says about the specification's own types beyond their shape
+//!   — graphql-js 15's `__Type.specifiedByUrl`, the legacy `__Directive.onField`, a
+//!   `__DirectiveLocation` value from a later specification — is that server's rendering, not the
+//!   schema's content: it is ignored. The generated response is smear's own, so the comparison
+//!   cannot see it either way. A contradiction of the shape, or anything listed twice, is refused;
+//!   [`a_meta_type_is_held_to_its_shape_and_not_to_its_rendering`] and
+//!   [`a_meta_type_that_contradicts_its_shape_is_refused`] pin the two halves.
 
 // `Schema::from_introspection`, `IntrospectionError` and `ResponseErrorKind` below all live behind
 // `#[cfg(feature = "introspection")]` in `smear-schema/src/introspection/`, not merely
@@ -1523,7 +1525,8 @@ const GRAPHQL_JS_DIRECTIVE: &str = r#"{"kind":"OBJECT","name":"__Directive","int
 
 /// The meta types are held to draft §4's shape and nothing more: what a server says about them
 /// beyond it — the order graphql-js lists `__Directive`'s fields in, a description of its own or a
-/// `null` one — is not kept, and what an older server leaves out is not missed.
+/// `null` one, members the specification's meta-schema lacks — is not kept, and what an older
+/// server leaves out is not missed.
 #[test]
 fn a_meta_type_is_held_to_its_shape_and_not_to_its_rendering() {
   let own = built("type Query { ok: Int }");
@@ -1597,12 +1600,51 @@ fn a_meta_type_is_held_to_its_shape_and_not_to_its_rendering() {
     field_names(&own, b"__Directive")
   );
   assert_eq!(field_names(&older, b"__Type"), field_names(&own, b"__Type"));
+
+  // What a server adds ahead of the specification, or keeps from behind it, is ignored: graphql-js
+  // 15's `specifiedByUrl`, an applied-directives field, the legacy `onOperation`, `onFragment` and
+  // `onField`, and a kind and a location from a later specification in the enums' listings.
+  let additions = from_response(&with_meta_types(
+    r#"{"kind":"OBJECT","name":"__Type","fields":[
+      {"name":"kind","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"ENUM","name":"__TypeKind"}}},
+      {"name":"specifiedByUrl","args":[],"type":{"kind":"SCALAR","name":"String"}},
+      {"name":"appliedDirectives","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+        {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__AppliedDirective"}}}}}
+    ]},
+    {"kind":"OBJECT","name":"__Directive","fields":[
+      {"name":"name","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}},
+      {"name":"onOperation","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}},
+      {"name":"onFragment","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}},
+      {"name":"onField","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}}
+    ]},
+    {"kind":"ENUM","name":"__TypeKind","enumValues":[{"name":"SCALAR"},{"name":"A_LATER_KIND"}]},
+    {"kind":"ENUM","name":"__DirectiveLocation","enumValues":[
+      {"name":"QUERY"},{"name":"FIELD"},{"name":"A_LATER_LOCATION"}
+    ]}"#,
+  ));
+  assert_eq!(
+    field_names(&additions, b"__Type"),
+    field_names(&own, b"__Type")
+  );
+  assert_eq!(
+    field_names(&additions, b"__Directive"),
+    field_names(&own, b"__Directive")
+  );
+  for name in [&b"__TypeKind"[..], b"__DirectiveLocation"] {
+    let (kept, _) = additions.type_by_name(name).expect("a meta enum");
+    let (injected, _) = own.type_by_name(name).expect("a meta enum");
+    assert_eq!(
+      additions.enum_values_of(kept).len(),
+      own.enum_values_of(injected).len(),
+      "a value from a later specification became one of the schema's"
+    );
+  }
 }
 
-/// A meta type in a shape draft §4 does not give it is refused, never quietly given smear's — each
-/// way it can be wrong, with the owner and the subject that say where and what.
+/// A meta type that contradicts draft §4's shape, or lists anything twice, is refused, never
+/// quietly given smear's — each way, with the owner and the subject that say where and what.
 #[test]
-fn a_meta_type_in_another_shape_is_refused() {
+fn a_meta_type_that_contradicts_its_shape_is_refused() {
   let cases = [
     // Another kind.
     (
@@ -1618,14 +1660,6 @@ fn a_meta_type_in_another_shape_is_refused() {
       Some("__Field"),
       "type: __Type rather than __Type!",
     ),
-    // A field draft §4 does not give it.
-    (
-      r#"{"kind":"OBJECT","name":"__Type","fields":[
-        {"name":"bogus","args":[],"type":{"kind":"SCALAR","name":"String"}}
-      ]}"#,
-      Some("__Type"),
-      "bogus",
-    ),
     // An argument of another type.
     (
       r#"{"kind":"OBJECT","name":"__Type","fields":[
@@ -1636,17 +1670,51 @@ fn a_meta_type_in_another_shape_is_refused() {
       Some("__Type.fields"),
       "includeDeprecated: String rather than Boolean",
     ),
-    // An enum value draft §4 does not give it.
-    (
-      r#"{"kind":"ENUM","name":"__TypeKind","enumValues":[{"name":"SCALAR"},{"name":"WIDGET"}]}"#,
-      Some("__TypeKind"),
-      "WIDGET",
-    ),
     // An interface, where the meta types implement nothing.
     (
       r#"{"kind":"OBJECT","name":"__Schema","interfaces":[{"kind":"INTERFACE","name":"Node"}],"fields":[]}"#,
       Some("__Schema"),
       "implements Node",
+    ),
+    // The meta type listed twice.
+    (
+      r#"{"kind":"OBJECT","name":"__Schema","fields":[]},{"kind":"OBJECT","name":"__Schema","fields":[]}"#,
+      None,
+      "__Schema listed twice",
+    ),
+    // A field listed twice — one smear's meta-schema has, and one it would otherwise ignore.
+    (
+      r#"{"kind":"OBJECT","name":"__Type","fields":[
+        {"name":"name","args":[],"type":{"kind":"SCALAR","name":"String"}},
+        {"name":"name","args":[],"type":{"kind":"SCALAR","name":"String"}}
+      ]}"#,
+      Some("__Type"),
+      "name listed twice",
+    ),
+    (
+      r#"{"kind":"OBJECT","name":"__Directive","fields":[
+        {"name":"onField","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}},
+        {"name":"onField","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}}
+      ]}"#,
+      Some("__Directive"),
+      "onField listed twice",
+    ),
+    // An argument listed twice.
+    (
+      r#"{"kind":"OBJECT","name":"__Type","fields":[
+        {"name":"fields","args":[
+          {"name":"includeDeprecated","type":{"kind":"SCALAR","name":"Boolean"},"defaultValue":null},
+          {"name":"includeDeprecated","type":{"kind":"SCALAR","name":"Boolean"},"defaultValue":null}
+        ],"type":{"kind":"LIST","ofType":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Field"}}}}
+      ]}"#,
+      Some("__Type.fields"),
+      "includeDeprecated listed twice",
+    ),
+    // An enum value listed twice.
+    (
+      r#"{"kind":"ENUM","name":"__TypeKind","enumValues":[{"name":"SCALAR"},{"name":"SCALAR"}]}"#,
+      Some("__TypeKind"),
+      "SCALAR listed twice",
     ),
   ];
   for (meta_type, owner, subject) in cases {

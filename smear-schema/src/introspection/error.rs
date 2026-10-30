@@ -78,14 +78,17 @@ pub enum ResponseErrorKind {
   /// A `__Directive.locations` entry is not one of the 19 `__DirectiveLocation` values.
   UnknownDirectiveLocation,
   /// One of draft §4's eight meta types — `__Schema`, `__Type`, `__Field`, `__InputValue`,
-  /// `__EnumValue`, `__TypeKind`, `__Directive`, `__DirectiveLocation` — is reported in a shape the
-  /// specification does not give it: another kind, an interface, or a field, an argument or an
-  /// enum value the meta-schema does not have, or has with another type.
+  /// `__EnumValue`, `__TypeKind`, `__Directive`, `__DirectiveLocation` — is reported in a shape
+  /// that contradicts the specification's: another kind, an interface, a field or an argument the
+  /// meta-schema has given another type, or the type, or one of its fields, arguments or enum
+  /// values, listed twice.
   ///
-  /// What a response leaves out of one is not this: a server older than `isRepeatable`, `isOneOf`,
-  /// `specifiedByURL` or input-value deprecation reports less, and the build's meta-schema has the
-  /// rest. Nor is anything beyond the shape, the descriptions and the order the members are listed
-  /// in, which is that server's rendering of the specification's own types and is not kept.
+  /// What a response adds to one is not this: a member the specification's meta-schema lacks — one
+  /// a server adds ahead of it, like an applied-directives extension's fields, or keeps from behind
+  /// it, like graphql-js 15's `__Type.specifiedByUrl` — is ignored. Nor is what it leaves out, as
+  /// a server older than `isRepeatable`, `isOneOf`, `specifiedByURL` or input-value deprecation
+  /// does, nor the descriptions and the order the members are listed in: all of that is the
+  /// server's rendering of the specification's own types, and none of it is kept.
   InvalidMetaType,
   /// An `__InputValue.defaultValue` is not one complete GraphQL const value.
   ///

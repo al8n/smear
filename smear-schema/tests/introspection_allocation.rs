@@ -19,9 +19,9 @@
 //!   takes too. Lengthening those names changes what the reader handles and cannot change what it
 //!   emits.
 //! - **The meta types' descriptions.** The introspection meta-schema is in every server's
-//!   `__Schema.types`, and the door holds each of its types to draft §4's shape and then drops it,
-//!   because every build injects smear's. Its *names* cannot be lengthened, since a field the
-//!   meta-schema does not have is refused, but its descriptions are read in full and kept nowhere.
+//!   `__Schema.types`, and the door checks each of its types against draft §4's shape and then
+//!   drops it, because every build injects smear's. The fields it does check keep the names smear
+//!   gives them, but their descriptions are read in full and kept nowhere.
 //!
 //! Two corpora that differ only in those names, or only in those descriptions, must therefore
 //! produce **the same SDL** and **the same allocation**. [`the_gate_counts`] is the discrimination

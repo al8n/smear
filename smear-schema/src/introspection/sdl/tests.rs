@@ -2,7 +2,7 @@
 
 use std::{format, string::String, vec::Vec};
 
-use super::{super::parse, META_TYPES, SPECIFIED_DIRECTIVES, canonical_default};
+use super::{super::parse, META_TYPES, SPECIFIED_DIRECTIVES, canonical_default, listed_twice};
 use crate::{PackedType, Schema, builtin};
 
 /// The SDL spelling of a packed type reference.
@@ -97,7 +97,7 @@ fn a_default_compares_by_its_canonical_text() {
 }
 
 /// The meta-schema the door holds a response's meta types to is the one every build injects: kind,
-/// fields in smear's order with their types and arguments, and enum values.
+/// and fields in smear's order with their types and arguments.
 #[test]
 fn the_meta_types_are_the_injected_ones() {
   let document = parse("type Query { ok: Int }").expect("the SDL parses");
@@ -141,11 +141,13 @@ fn the_meta_types_are_the_injected_ones() {
       })
       .collect();
     assert_eq!(fields, expected, "{name}");
-
-    let values: Vec<&str> = schema
-      .enum_values_in_order(id)
-      .map(|(value, _)| schema.name(value))
-      .collect();
-    assert_eq!(values, meta.values, "{name}");
   }
+}
+
+/// A name a list gives twice is found, whatever the order, and a list without one finds nothing.
+#[test]
+fn a_name_listed_twice_is_found() {
+  assert_eq!(listed_twice(["b", "a", "c"].into_iter()), None);
+  assert_eq!(listed_twice(["b", "a", "b", "a"].into_iter()), Some("a"));
+  assert_eq!(listed_twice(core::iter::empty()), None);
 }
