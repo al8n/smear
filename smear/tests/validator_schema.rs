@@ -1411,9 +1411,10 @@ const READABLE: &[u8] =
 
 /// [`SchemaErrorKind::UnreadableText`], through the one door that reaches it.
 ///
-/// The byte lexer passes a string's content through unread, so a `[u8]` source can hand the builder
-/// bytes that are no text at all, and the builder refuses each where it would have kept it — once
-/// per string, naming the element the string belongs to — rather than storing a replacement.
+/// The parser's byte lexer passes a string's content through unread, so a `[u8]` source can hand
+/// the builder bytes that are no text at all, and the builder refuses each where it would have kept
+/// it — once per string, naming the element the string belongs to — rather than storing a
+/// replacement.
 #[test]
 fn unreadable_text_from_a_byte_source() {
   let errors =

@@ -16,8 +16,8 @@
 //! a sequence of Unicode scalar values. The two meet once, where the delimiters come off: the
 //! content is checked for UTF-8 there, and every escape produces a scalar value, so every piece
 //! handed out afterwards is a `&str` and an out-buffer is a `String` with no check left to make.
-//! The byte lexer passes a literal's content through unread, so [`StringValueError::NotUtf8`] is
-//! the one refusal a lexed spelling can reach.
+//! The parsers' byte lexer passes a literal's content through unread, so
+//! [`StringValueError::NotUtf8`] is the one refusal a spelling they lexed can reach.
 //!
 //! # Pieces, and the two callers that want them
 //!

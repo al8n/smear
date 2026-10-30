@@ -13,8 +13,7 @@
 use std::{borrow::Cow, string::String, vec::Vec};
 
 use super::{
-  super::{LitBlockStr, LitInlineStr, LitStr},
-  StringValueError, decode_string_value, string_value_len, string_value_pieces,
+  super::LitStr, StringValueError, decode_string_value, string_value_len, string_value_pieces,
 };
 
 /// Decodes a spelling, or panics with the refusal.
@@ -225,21 +224,15 @@ fn a_spelling_with_no_value_is_refused_and_appends_nothing() {
   }
 }
 
-/// Bytes that are no text are refused, which is the one refusal a lexed spelling can reach.
+/// Bytes that are no text are refused, whatever lexed them.
 ///
-/// The byte lexer passes a literal's content through unread — `LitStr::try_from(&[u8])` accepts
-/// both spellings below — so the decoder is where a non-UTF-8 value is first noticed.
+/// The spellings go to the decoder as bytes, with no lexer in front: the parsers' byte lexer
+/// checks a string's escapes and finds its end without reading the rest as text, so a `[u8]` source
+/// can hand the decoder content that is not UTF-8, and the decoder checks for itself rather than
+/// relying on any lexer to have.
 #[test]
 fn a_value_that_is_not_utf8_is_refused() {
   for spelling in [&b"\"\xff\""[..], b"\"\"\"\n  \xc3\x28\n\"\"\""] {
-    assert!(
-      matches!(
-        LitStr::try_from(spelling),
-        Ok(LitStr::Inline(LitInlineStr::Plain(_)) | LitStr::Block(LitBlockStr::Plain(_)))
-          | Ok(LitStr::Block(LitBlockStr::Complex(_)))
-      ),
-      "the byte lexer is expected to accept {spelling:?}"
-    );
     assert_eq!(refused(spelling), StringValueError::NotUtf8, "{spelling:?}");
   }
 }
