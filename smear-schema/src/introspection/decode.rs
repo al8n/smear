@@ -643,7 +643,7 @@ fn ty<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedType<'a>> {
   Ok(IntrospectedType {
     kind: kind.ok_or_else(|| scanner.missing("kind"))?,
     name: name.flatten(),
-    description: description.flatten(),
+    description,
     specified_by_url: specified_by_url.flatten(),
     fields: fields.flatten(),
     input_fields: input_fields.flatten(),

@@ -2770,6 +2770,24 @@ fn declaration_order_is_kept_beside_the_sorted_tables() {
   }
 }
 
+/// [`builtin::BUILT_IN_SCALAR_DESCRIPTIONS`] is what the build injects, scalar by scalar: the text
+/// the introspection door compares a response's built-in scalar with before leaving it to the
+/// build.
+#[test]
+fn the_built_in_scalar_descriptions_are_the_injected_ones() {
+  let schema = built(ROOT);
+  for (name, text) in builtin::BUILT_IN_SCALARS
+    .iter()
+    .zip(builtin::BUILT_IN_SCALAR_DESCRIPTIONS)
+  {
+    assert_eq!(
+      schema.text(schema.type_meta(ty(&schema, name)).description()),
+      Some(text),
+      "{name}"
+    );
+  }
+}
+
 /// The built-ins carry graphql-js's descriptions, so introspecting them answers what the reference
 /// implementation answers — and their defaults print in the same canonical form.
 #[test]

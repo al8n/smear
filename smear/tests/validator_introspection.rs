@@ -52,12 +52,15 @@
 //!   written as one item and for a float written `1.0`. Printing is a fixed point, so the round
 //!   trip compares the text exactly, and [`the_door_reads_a_real_response`] reads a server's own
 //!   spellings.
-//! - **A redefined built-in scalar or specified directive.** `scalar String` in a document makes
-//!   `TypeDef::is_built_in` false and gives `String` the document's description; an introspection
-//!   result reports `String` the same way whichever it was, and the door leaves it to the build to
-//!   inject, so the flag is unrecoverable and the description is the built-in's. The fixture does
-//!   not redefine one, and [`redefining_a_built_in_is_the_one_flag_introspection_loses`] pins the
-//!   loss instead of hiding it.
+//! - **A spelled-out built-in the response cannot tell from the build's own.** A built-in scalar
+//!   whose response says nothing the injected one would not — no `specifiedByURL`, and the
+//!   built-in's own description or none asked for — is left to the build, so a document that
+//!   spelled it out gets `TypeDef::is_built_in` false from the SDL door and true from this one. One
+//!   the response describes otherwise is written out and agrees on everything
+//!   ([`a_built_in_scalar_the_response_describes_is_written_out`]); the five specified directives
+//!   are always left to the build. The fixture does not redefine one, and
+//!   [`redefining_a_built_in_is_the_one_flag_introspection_loses`] pins the loss instead of hiding
+//!   it.
 
 // `Schema::from_introspection`, `IntrospectionError` and `ResponseErrorKind` below all live behind
 // `#[cfg(feature = "introspection")]` in `smear-schema/src/introspection/`, not merely
@@ -81,7 +84,7 @@ use smear::{
   validator::schema::{
     DefaultKind, Deprecation, DirectiveDef, DirectiveMeta, FieldDef, FieldMeta, InputValueDef,
     InputValueMeta, IntrospectionError, PackedType, Range32, RootOperation, Schema,
-    SchemaErrorKind, Sym, Text, TypeDef, TypeId, TypeKind,
+    SchemaErrorKind, Sym, Text, TypeDef, TypeId, TypeKind, builtin,
     introspection::{self, ResponseErrorKind},
   },
 };
@@ -1123,50 +1126,89 @@ fn one_of_survives_the_round_trip() {
   }
 }
 
+/// A built-in scalar the response describes as the build's own would not is written out as a
+/// definition of its own, so the two doors agree on all of it, the user-spelled flag included.
+///
+/// Both ways a response can say so: a description and a `specifiedByURL` of the document's own, and
+/// a `null` description — a document that spelled `String` out and gave it none.
+#[test]
+fn a_built_in_scalar_the_response_describes_is_written_out() {
+  for sdl in [
+    "type Query { ok: String }\n\"Text, the way we use it.\"\nscalar String @specifiedBy(url: \"https://example.com/string\")",
+    "type Query { ok: String }\nscalar String",
+  ] {
+    let from_sdl = built(sdl);
+    let from_json = from_response(&server::introspect(&from_sdl));
+    let (_, string) = from_json.type_by_name(b"String").expect("String");
+    assert!(
+      !string.is_built_in(),
+      "the door left the response's `String` to the build\n---\n{sdl}"
+    );
+    assert_eq!(facts(&from_sdl), facts(&from_json), "{sdl}");
+  }
+}
+
 /// The one flag introspection cannot carry, pinned as a loss rather than left to be discovered.
 ///
-/// A document that spells out `scalar String` gets a `String` whose `is_built_in` is false. The
-/// introspection result for that schema reports `String` as it would a built-in, and the door
-/// leaves every built-in scalar to the build, so the door cannot reproduce the flag and the
-/// round-trip diverges on it — and on the description, which is the same loss seen from the other
-/// side: the re-injected `String` describes itself, where the document's said nothing. This test
-/// is the record: if a future change makes the flag recoverable, it fails and the module header's
-/// table is wrong.
+/// A document that spells out `scalar String` gets a `String` whose `is_built_in` is false. When
+/// the response describes that `String` as the build's own — the built-in's description and no
+/// `specifiedByURL`, or no description at all because the query did not ask — the door cannot tell
+/// it from the built-in, leaves it to the build, and the round-trip diverges on the flag. Where the
+/// description was not asked for it diverges on that too: the re-injected `String` describes
+/// itself. This test is the record: if a future change makes the flag recoverable here, it fails
+/// and the module header's table is wrong.
 #[test]
 fn redefining_a_built_in_is_the_one_flag_introspection_loses() {
-  let sdl = "type Query { ok: String } scalar String";
-  let from_sdl = built(sdl);
-  let from_json = from_response(&server::introspect(&from_sdl));
+  let at = builtin::BUILT_IN_SCALARS
+    .iter()
+    .position(|name| *name == "String")
+    .expect("String is built in");
+  let injected = builtin::BUILT_IN_SCALAR_DESCRIPTIONS[at];
 
-  let (_, sdl_string) = from_sdl.type_by_name(b"String").expect("String");
-  let (_, json_string) = from_json.type_by_name(b"String").expect("String");
-  assert!(
-    !sdl_string.is_built_in(),
-    "a spelled-out scalar is not built-in"
+  // The built-in's own text, spelled out by the document.
+  let spelled = built(&std::format!(
+    "type Query {{ ok: String }}\n\"\"\"{injected}\"\"\"\nscalar String"
+  ));
+  // No text at all, answered by a query that did not ask for descriptions.
+  let unasked = built("type Query { ok: String }\nscalar String");
+  let asked = server::introspect(&unasked);
+  let not_asked = asked.replace(
+    r#""name":"String","description":null,"#,
+    r#""name":"String","#,
   );
-  assert!(
-    json_string.is_built_in(),
-    "the door recovered the flag; the loss recorded in the module header is stale"
-  );
+  assert_ne!(not_asked, asked, "the fixture lost its edit");
 
-  let mut sdl_facts = facts(&from_sdl);
-  let mut json_facts = facts(&from_json);
-  assert_eq!(sdl_facts.types["String"].description, None);
-  assert!(
-    json_facts.types["String"]
-      .description
-      .as_deref()
-      .is_some_and(|text| text.starts_with("The `String` scalar type")),
-    "the re-injected `String` does not carry the built-in's description"
-  );
+  for (from_sdl, response) in [
+    (&spelled, server::introspect(&spelled)),
+    (&unasked, not_asked),
+  ] {
+    let from_json = from_response(&response);
+    let (_, sdl_string) = from_sdl.type_by_name(b"String").expect("String");
+    let (_, json_string) = from_json.type_by_name(b"String").expect("String");
+    assert!(
+      !sdl_string.is_built_in(),
+      "a spelled-out scalar is not built-in"
+    );
+    assert!(
+      json_string.is_built_in(),
+      "the door recovered the flag; the loss recorded in the module header is stale"
+    );
 
-  // And that is the *only* divergence: everything else about the two schemas still agrees.
-  for facts in [&mut sdl_facts, &mut json_facts] {
-    let string = facts.types.get_mut("String").expect("String");
-    string.built_in = true;
-    string.description = None;
+    // The flag is the divergence, and the description the build injects where none was asked
+    // for. Everything else about the two schemas still agrees.
+    let mut sdl_facts = facts(from_sdl);
+    let mut json_facts = facts(&from_json);
+    assert_eq!(
+      json_facts.types["String"].description.as_deref(),
+      Some(injected)
+    );
+    for facts in [&mut sdl_facts, &mut json_facts] {
+      let string = facts.types.get_mut("String").expect("String");
+      string.built_in = true;
+      string.description = Some(injected.to_owned());
+    }
+    assert_eq!(sdl_facts, json_facts);
   }
-  assert_eq!(sdl_facts, json_facts);
 }
 
 // ---------------------------------------------------------------------------------------------

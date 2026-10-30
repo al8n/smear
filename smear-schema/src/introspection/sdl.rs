@@ -18,6 +18,13 @@
 //! leaves it true. Dropping them is what makes the two doors produce the same flags, and it costs
 //! nothing: the build puts back exactly what was dropped.
 //!
+//! A built-in scalar is dropped only while that last clause holds. One whose response carries a
+//! `specifiedByURL`, a `null` description or a description other than the built-in's own says
+//! something the injected one would lose, so it is written out as a definition of its own — which
+//! is how the SDL door reads a document that spelled the scalar out, flag and text both, so the
+//! two doors agree on it. A server whose built-in descriptions are not graphql-js's has its five
+//! scalars written out the same way, keeping its own texts.
+//!
 //! It emits **nothing it has not checked**, and most of the checking happened before it ran.
 //! [`decode`](super::decode) admits a name only if it spells one, and resolves type kinds and
 //! directive locations to their enums, so what reaches this file is already drawn from the closed
@@ -148,14 +155,18 @@ impl Renderer {
     if builtin::INTROSPECTION_TYPES.contains(&name) {
       return Ok(());
     }
-    // Likewise the five built-in scalars — but only when the response agrees they are scalars. A
-    // response that calls `Int` an enum is describing a schema in which `Int` is an enum, and
-    // dropping it would build a different schema than the one described.
-    if matches!(kind, TypeKind::Scalar) && builtin::BUILT_IN_SCALARS.contains(&name) {
+    // Likewise the five built-in scalars — but only when the response agrees they are scalars, and
+    // only when it says nothing about one that the build's own would not. A response that calls
+    // `Int` an enum is describing a schema in which `Int` is an enum, and dropping it would build a
+    // different schema than the one described. A response that gives `String` a description of its
+    // own, a `null` one or a `specifiedByURL` says what a document that spelled `String` out says,
+    // and the SDL door keeps that spelling as the document's own definition, so this door writes it
+    // out too.
+    if matches!(kind, TypeKind::Scalar) && is_the_built_in_scalar(ty, name) {
       return Ok(());
     }
 
-    self.description(ty.description.as_ref(), "");
+    self.description(ty.description.as_ref().and_then(Option::as_ref), "");
     match kind {
       TypeKind::Scalar => {
         self.out.push_str("scalar ");
@@ -418,6 +429,24 @@ impl Renderer {
 // ---------------------------------------------------------------------------------------------
 // checked fragments
 // ---------------------------------------------------------------------------------------------
+
+/// Whether a member of `__Schema.types` is one of the five built-in scalars as the build injects
+/// it, so leaving it to the build loses nothing: no `specifiedByURL`, and a `description` that is
+/// either not in the response at all — the query did not ask — or the built-in's own text.
+fn is_the_built_in_scalar(ty: &IntrospectedType<'_>, name: &str) -> bool {
+  let Some(at) = builtin::BUILT_IN_SCALARS
+    .iter()
+    .position(|scalar| *scalar == name)
+  else {
+    return false;
+  };
+  ty.specified_by_url.is_none()
+    && match &ty.description {
+      None => true,
+      Some(Some(text)) => text.as_str() == builtin::BUILT_IN_SCALAR_DESCRIPTIONS[at],
+      Some(None) => false,
+    }
+}
 
 /// Writes prose as the string literal graphql-js's `printString` writes for it: in quotes, every
 /// quote, backslash and control inside escaped. See the module header for why that is the check.

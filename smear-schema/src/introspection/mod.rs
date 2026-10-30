@@ -75,7 +75,7 @@
 //! | **`extend` structure** — a response reports the merged schema | No: a `Schema` holds the merge, so there is nothing to lose |
 //! | **A default value's exact spelling** — the server prints its own coerced form | **Yes**, in [`InputValueMeta::default_value`](super::InputValueMeta::default_value): the build keeps the canonical text of the literal it read, which from this door is the server's printing of its *coerced* value — `[1]` for an SDL that wrote `= 1` on a list, `1` for a float written `1.0`. Presence and null-ness, which [`DefaultKind`](super::DefaultKind) keeps, survive either way |
 //! | **Interfaces implemented by interfaces**, from a server predating the 2021 specification | Under-constrains rather than misreports: nothing is claimed that is not in the response |
-//! | **That a document spelled out a built-in** — `scalar String` and `directive @skip(…)` are reported by every server whether the document wrote them or not | **Yes.** [`TypeDef::is_built_in`](super::TypeDef::is_built_in) is false for a spelled-out built-in from the SDL door and true from this one, because the door drops the five scalars and the five specified directives and the build re-injects them — and a re-injected built-in carries its own descriptions, not the ones the response reported. Nothing else diverges, and no draft §5 rule reads either |
+//! | **That a document spelled out a built-in** — `scalar String` and `directive @skip(…)` are reported by every server whether the document wrote them or not | **Yes, when the response cannot tell.** The door leaves a built-in scalar to the build only when the response says nothing the injected one would not — no `specifiedByURL`, and a `description` that is the built-in's own text or absent because the query did not ask — and then [`TypeDef::is_built_in`](super::TypeDef::is_built_in) is true from this door where a document that spelled the scalar out gets false from the SDL door. A scalar the response describes otherwise, `null` description included, is written out as a definition of its own and agrees with the SDL door on flag and text. The five specified directives are always left to the build, so theirs are the build's. No draft §5 rule reads either |
 //!
 //! Descriptions, `@deprecated` and `@specifiedBy` were rows here and are not any more: the door
 //! reads `description`, `isDeprecated` / `deprecationReason` and `specifiedByURL` wherever draft §4
@@ -141,7 +141,8 @@ impl Schema {
 /// `@specifiedBy`. Every other applied directive is absent — [the module header](self) says what a
 /// [`Schema`] could have observed of one — and so are the definitions every build injects for
 /// itself: the introspection meta-schema, the five built-in scalars and the five specified
-/// directives.
+/// directives. A built-in scalar the response describes differently from the build's own is the
+/// exception, and is written out.
 ///
 /// ```
 /// use smear_schema::introspection;
