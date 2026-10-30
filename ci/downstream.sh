@@ -1,5 +1,5 @@
 #!/bin/bash
-set -u
+set -uo pipefail
 
 # Can a SECOND DEPENDENCY reach a `smear::…` capability the consumer never enabled?
 #
@@ -36,32 +36,144 @@ set -u
 #
 # Usage: ci/downstream.sh
 #   CARGO and CARGO_TARGET_DIR are honoured and passed to every leg, so all legs share one target
-#   directory. `--locked` is used throughout, so the fixture's committed lock is what resolves.
+#   directory. `--locked` is used throughout, but against a private snapshot: the committed fixture
+#   lock is the historical input, and one audited metadata refresh updates only the snapshot's local
+#   path-package versions before the planner or any leg runs.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FIXTURE="$REPO_ROOT/ci/downstream"
-MANIFEST="$FIXTURE/Cargo.toml"
-WORKSPACE_MANIFEST="$REPO_ROOT/Cargo.toml"
-PLANNER="$REPO_ROOT/ci/downstream_pairs.py"
+SOURCE_FIXTURE="$REPO_ROOT/ci/downstream"
+SOURCE_MANIFEST="$SOURCE_FIXTURE/Cargo.toml"
 CARGO="${CARGO:-cargo}"
 
 started="$SECONDS"
 
-if [ ! -f "$MANIFEST" ]; then
-  echo "FAIL: no consumer fixture at $MANIFEST" >&2
+if [ ! -f "$SOURCE_MANIFEST" ]; then
+  echo "FAIL: no consumer fixture at $SOURCE_MANIFEST" >&2
   exit 1
 fi
 # Any `python3` will do, and that is checked rather than hoped: `ci/downstream_pairs.py` is stdlib
 # only and 3.9-safe, verified on `/usr/bin/python3` 3.9.6. The one gate in `ci/` with an interpreter
 # floor is `miri_scope.py`, which needs 3.11 for `tomllib` and says so itself.
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "FAIL: python3 is required to read cargo's JSON." >&2
+for program in git tar python3; do
+  if ! command -v "$program" >/dev/null 2>&1; then
+    echo "FAIL: $program is required to build the private downstream snapshot." >&2
+    exit 1
+  fi
+done
+
+status=0
+tmp=""
+cleanup() {
+  case "${tmp:-}" in
+    */smear-downstream.*)
+      if [ -d "$tmp" ]; then
+        rm -rf -- "$tmp" || true
+      fi
+      ;;
+  esac
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if ! tmp="$(mktemp -d "${TMPDIR:-/tmp}/smear-downstream.XXXXXXXX")"; then
+  echo "FAIL: could not create a private downstream snapshot directory." >&2
+  exit 1
+fi
+if ! chmod 700 "$tmp"; then
+  echo "FAIL: could not restrict the private downstream snapshot directory." >&2
   exit 1
 fi
 
-status=0
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+SNAPSHOT="$tmp/repo"
+if ! mkdir "$SNAPSHOT"; then
+  echo "FAIL: could not create the private downstream snapshot." >&2
+  exit 1
+fi
+if ! (
+  cd "$REPO_ROOT"
+  git ls-files -z | tar --null --files-from=- -cf - | tar -C "$SNAPSHOT" -xf -
+); then
+  echo "FAIL: could not copy the tracked checkout into the private downstream snapshot." >&2
+  exit 1
+fi
+
+FIXTURE="$SNAPSHOT/ci/downstream"
+MANIFEST="$FIXTURE/Cargo.toml"
+WORKSPACE_MANIFEST="$SNAPSHOT/Cargo.toml"
+PLANNER="$SNAPSHOT/ci/downstream_pairs.py"
+if [ ! -f "$MANIFEST" ] || [ ! -f "$FIXTURE/Cargo.lock" ]; then
+  echo "FAIL: the private downstream snapshot is missing its fixture manifest or lock." >&2
+  exit 1
+fi
+
+assert_seed_delta() {
+  python3 - "$1" "$2" <<'PY'
+import pathlib
+import re
+import sys
+
+before = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines(keepends=True)
+after = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8").splitlines(keepends=True)
+expected = {
+  "graphql-proto",
+  "smear",
+  "smear-compiler",
+  "smear-lexer",
+  "smear-parser",
+  "smear-schema",
+}
+
+if len(before) != len(after):
+  raise SystemExit("snapshot lock changed its line count")
+
+name_pattern = re.compile(r'name = "([^"]+)"\n?')
+version_pattern = re.compile(r'version = "([^"]+)"\n?')
+current = None
+changes = {}
+for line, (old, new) in enumerate(zip(before, after), start=1):
+  match = name_pattern.fullmatch(old)
+  if match:
+    if old != new:
+      raise SystemExit(f"snapshot lock changed package name at line {line}")
+    current = match.group(1)
+  if old == new:
+    continue
+  old_version = version_pattern.fullmatch(old)
+  new_version = version_pattern.fullmatch(new)
+  if current not in expected or old_version is None or new_version is None:
+    raise SystemExit(f"unexpected snapshot lock delta at line {line}: {old!r} -> {new!r}")
+  if current in changes:
+    raise SystemExit(f"snapshot lock changed `{current}` more than once")
+  changes[current] = (old_version.group(1), new_version.group(1))
+
+if set(changes) != expected:
+  raise SystemExit(f"snapshot lock changed {sorted(changes)}, expected {sorted(expected)}")
+
+print("ok: private lock refreshed only " + ", ".join(
+  f"{name} {old}->{new}" for name, (old, new) in sorted(changes.items())
+))
+PY
+}
+
+LOCK_BEFORE="$tmp/Cargo.lock.before"
+if ! cp "$FIXTURE/Cargo.lock" "$LOCK_BEFORE"; then
+  echo "FAIL: could not preserve the private fixture lock before metadata." >&2
+  exit 1
+fi
+echo "== snapshotting tracked files and refreshing the private fixture lock =="
+if ! $CARGO metadata --manifest-path "$MANIFEST" --format-version 1 \
+     > "$tmp/metadata.json" 2> "$tmp/metadata.err"; then
+  cat "$tmp/metadata.err" >&2
+  echo "FAIL: could not seed the private fixture lock from cargo metadata." >&2
+  exit 1
+fi
+if ! assert_seed_delta "$LOCK_BEFORE" "$FIXTURE/Cargo.lock"; then
+  echo "FAIL: metadata changed more than the six local path-package versions in the private lock." >&2
+  exit 1
+fi
+LOCK_SEEDED="$tmp/Cargo.lock.seeded"
+cp "$FIXTURE/Cargo.lock" "$LOCK_SEEDED"
 
 # ── Certify the frame, and receive the legs ──────────────────────────────────────────────────
 #
@@ -77,6 +189,10 @@ fi
 cat "$tmp/certify.err" >&2
 if [ ! -s "$tmp/plan" ]; then
   echo "FAIL: the planner printed no legs." >&2
+  exit 1
+fi
+if ! cmp -s "$LOCK_SEEDED" "$FIXTURE/Cargo.lock"; then
+  echo "FAIL: the planner changed the private fixture lock after the audited metadata seed." >&2
   exit 1
 fi
 echo

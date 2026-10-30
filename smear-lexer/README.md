@@ -26,7 +26,7 @@ Add to your `Cargo.toml`:
 [dependencies]
 # The lexer alone. For the parser tower, the validator or the protocol machine on top of it,
 # depend on `smear` and enable the matching feature there.
-smear-lexer = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec"] }
 ```
 
 ### Basic Usage
@@ -116,7 +116,7 @@ Enable the `bytes` feature for cheap cloning with Arc-backed storage:
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec", "bytes"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec", "bytes"] }
 ```
 
 ```rust,ignore
@@ -134,7 +134,7 @@ Enable the `hipstr` feature for inline-optimized strings:
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.0", default-features = false, features = ["std", "graphql", "smallvec", "hipstr"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec", "hipstr"] }
 ```
 
 ```rust,ignore
@@ -166,7 +166,7 @@ Enable the `graphqlx` feature for extended tokens:
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.0", default-features = false, features = ["std", "graphqlx", "smallvec"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphqlx", "smallvec"] }
 ```
 
 GraphQLx is a **superset of GraphQL**, meaning it includes all standard GraphQL tokens plus additional extensions:

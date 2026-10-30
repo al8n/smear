@@ -69,7 +69,7 @@ exclude = ["ci/downstream"]
 resolver = "3"
 
 [workspace.package]
-version = "0.0.0"
+version = "0.0.1"
 edition = "2024"
 repository = "https://github.com/al8n/smear"
 homepage = "https://github.com/al8n/smear"
@@ -111,12 +111,12 @@ tokora = { version = "0.11", default-features = false, features = ["logos", "all
 paste = "1"
 thiserror = { version = "2", default-features = false }
 
-graphql-proto = { path = "graphql-proto", version = "0.0.0", default-features = false }
-smear = { path = "smear", version = "0.0.0", default-features = false }
-smear-lexer = { path = "smear-lexer", version = "0.0.0", default-features = false }
-smear-parser = { path = "smear-parser", version = "0.0.0", default-features = false }
-smear-compiler = { path = "smear-compiler", version = "0.0.0", default-features = false }
-smear-schema = { path = "smear-schema", version = "0.0.0", default-features = false }
+graphql-proto = { path = "graphql-proto", version = "0.0.1", default-features = false }
+smear = { path = "smear", version = "0.0.1", default-features = false }
+smear-lexer = { path = "smear-lexer", version = "0.0.1", default-features = false }
+smear-parser = { path = "smear-parser", version = "0.0.1", default-features = false }
+smear-compiler = { path = "smear-compiler", version = "0.0.1", default-features = false }
+smear-schema = { path = "smear-schema", version = "0.0.1", default-features = false }
 
 [workspace.lints.rust]
 # `priority = -1` because `unused_extern_crates` below is a MEMBER of this group, and cargo

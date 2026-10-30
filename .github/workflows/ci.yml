@@ -321,8 +321,11 @@ jobs:
   # a LEAK leg that compiles is the defect, and a CTL leg that compiles means the probe stopped
   # naming the path and the positive beside it proves nothing.
   #
-  # `--locked` against the fixture's committed lock, so the job is hermetic and a red reads "your
-  # feature is broken" rather than "upstream released something".
+  # `ci/downstream.sh` copies tracked files into a private snapshot, uses one audited unlocked
+  # metadata pass to refresh only its six local path-package versions, then certifies the planner
+  # and runs every cargo leg `--locked` there. The committed lock and checkout stay unchanged,
+  # while third-party pins remain hermetic and a red reads "your feature is broken" rather than "upstream released
+  # something".
   #
   # In no `needs:` chain, so it blocks nothing.
   downstream:
