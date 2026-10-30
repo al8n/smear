@@ -1,33 +1,33 @@
 macro_rules! token {
   // Borrowed slice: $slice uses lifetime $lt and IS the logos slice type (no conversion)
-  ($mod:ident <$lt:lifetime>($slice: ty, $char: ty, $handlers:ident, $utf8:tt $(,)?)) => {
+  ($mod:ident <$lt:lifetime>($slice: ty, $char: ty, $handlers:ident, $utf8:tt, $comment:tt $(,)?)) => {
     $crate::graphql::lossless::token_impl!(
       $mod [$lt] [$lt]
-      ($slice, $char, $handlers, $utf8, $slice)
+      ($slice, $char, $handlers, $utf8, $comment, $slice)
       {s => s}
     );
   };
   // Borrowed-with-conversion: $slice uses lifetime $lt but differs from logos slice
-  ($mod:ident <$lt:lifetime>($slice: ty, $char: ty, $handlers:ident, $utf8:tt, $logos_slice:ty $(,)?)) => {
+  ($mod:ident <$lt:lifetime>($slice: ty, $char: ty, $handlers:ident, $utf8:tt, $comment:tt, $logos_slice:ty $(,)?)) => {
     $crate::graphql::lossless::token_impl!(
       $mod [$lt] [$lt]
-      ($slice, $char, $handlers, $utf8, $logos_slice)
+      ($slice, $char, $handlers, $utf8, $comment, $logos_slice)
       {s => s.into_equivalent()}
     );
   };
   // Owned byte-slice
-  ($mod:ident ($slice: ty, $char: ty, $handlers:ident, false $(,)?)) => {
+  ($mod:ident ($slice: ty, $char: ty, $handlers:ident, false, $comment:tt $(,)?)) => {
     $crate::graphql::lossless::token_impl!(
       $mod ['s] []
-      ($slice, $char, $handlers, false, &'s [u8])
+      ($slice, $char, $handlers, false, $comment, &'s [u8])
       {s => s.into_equivalent()}
     );
   };
   // Owned str
-  ($mod:ident ($slice: ty, $char: ty, $handlers:ident, true $(,)?)) => {
+  ($mod:ident ($slice: ty, $char: ty, $handlers:ident, true, $comment:tt $(,)?)) => {
     $crate::graphql::lossless::token_impl!(
       $mod ['s] []
-      ($slice, $char, $handlers, true, &'s str)
+      ($slice, $char, $handlers, true, $comment, &'s str)
       {s => s.into_equivalent()}
     );
   };
@@ -37,7 +37,7 @@ macro_rules! token_impl {
   // With slice lifetime
   (
     $mod:ident [$logos_lt:lifetime] [$slice_lt:lifetime]
-    ($slice:ty, $char:ty, $handlers:ident, $utf8:tt, $logos_slice:ty)
+    ($slice:ty, $char:ty, $handlers:ident, $utf8:tt, $comment:tt, $logos_slice:ty)
     {$val:ident => $convert:expr}
   ) => {
     mod $mod {
@@ -192,7 +192,7 @@ macro_rules! token_impl {
         #[token(".", |lexer| tt_hook_and_then(lexer, |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer))))]
         Spread,
 
-        #[regex("#[^\n\r]*?", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
+        #[regex($comment, |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::comment))]
         Comment($logos_slice),
 
         #[regex("-?0(?&digit)+((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then_into_errors(lexer, |lexer| handlers::$handlers::handle_leading_zero_and_number_suffix_error(lexer, FloatError::LeadingZeros, FloatError::UnexpectedSuffix)))]
@@ -283,7 +283,7 @@ macro_rules! token_impl {
   // Without slice lifetime (owned types)
   (
     $mod:ident [$logos_lt:lifetime] []
-    ($slice:ty, $char:ty, $handlers:ident, $utf8:tt, $logos_slice:ty)
+    ($slice:ty, $char:ty, $handlers:ident, $utf8:tt, $comment:tt, $logos_slice:ty)
     {$val:ident => $convert:expr}
   ) => {
     mod $mod {
@@ -438,7 +438,7 @@ macro_rules! token_impl {
         #[token(".", |lexer| tt_hook_and_then(lexer, |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer))))]
         Spread,
 
-        #[regex("#[^\n\r]*?", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
+        #[regex($comment, |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::comment))]
         Comment($logos_slice),
 
         #[regex("-?0(?&digit)+((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then_into_errors(lexer, |lexer| handlers::$handlers::handle_leading_zero_and_number_suffix_error(lexer, FloatError::LeadingZeros, FloatError::UnexpectedSuffix)))]

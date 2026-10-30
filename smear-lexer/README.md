@@ -101,7 +101,7 @@ let tokens = Lexer::<&str>::new(source);
 
 ### Byte Slices (`&[u8]`)
 
-For binary protocols, or input not yet known to be UTF-8. A byte source is not validated as UTF-8 wholesale, but its string literals must be well-formed UTF-8: an inline or block string literal that is not is refused with `StringError::UnsupportedCharacter`, one error per ill-formed sequence, at that sequence's span. `bytes::Bytes`, `bstr::BStr` and `hipstr::HipByt` are byte sources too and follow the same rule.
+For binary protocols, or input not yet known to be UTF-8. A byte source is not validated as UTF-8 wholesale, but its string literals and comments must be well-formed UTF-8: an inline or block string literal that is not is refused with `StringError::UnsupportedCharacter`, a comment with `LexerErrorData::UnknownLexeme`, one error per ill-formed sequence, at that sequence's span. `bytes::Bytes`, `bstr::BStr` and `hipstr::HipByt` are byte sources too and follow the same rule.
 
 ```rust,ignore
 use smear_lexer::graphql::syntactic::Lexer;

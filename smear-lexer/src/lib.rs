@@ -100,9 +100,12 @@ pub mod punctuator;
 ///
 /// The lexer is generic over source type `S`:
 /// - `&str`: Most common; UTF-8 by its type, so nothing is checked again
-/// - `&[u8]`: For binary sources. Not validated as UTF-8 wholesale, but its string literals must be
-///   well-formed UTF-8: one that is not is refused with
-///   [`StringError::UnsupportedCharacter`](crate::error::StringError::UnsupportedCharacter)
+/// - `&[u8]`: For binary sources. Not validated as UTF-8 wholesale, but its string literals and
+///   comments must be well-formed UTF-8: a string literal that is not is refused with
+///   [`StringError::UnsupportedCharacter`](crate::error::StringError::UnsupportedCharacter), a
+///   comment with
+///   [`LexerErrorData::UnknownLexeme`](graphql::error::LexerErrorData::UnknownLexeme), one per
+///   ill-formed sequence
 /// - `bytes::Bytes`: For shared ownership (requires `bytes` feature); a byte source like `&[u8]`
 ///
 /// # Modules
@@ -156,8 +159,8 @@ pub mod graphql;
 ///
 /// Like the GraphQL lexer, GraphQLx is generic over source type `S`:
 /// - `&str`: UTF-8 by its type
-/// - `&[u8]`: Byte slices, not validated as UTF-8 wholesale; their string literals must be
-///   well-formed UTF-8, exactly as in the GraphQL lexer
+/// - `&[u8]`: Byte slices, not validated as UTF-8 wholesale; their string literals and comments
+///   must be well-formed UTF-8, exactly as in the GraphQL lexer
 /// - `bytes::Bytes`: Shared ownership (requires `bytes` feature); a byte source like `&[u8]`
 ///
 /// # Modules
@@ -187,6 +190,10 @@ pub mod graphqlx;
 mod keyword_prefix;
 
 mod string_lexer;
+
+// Ungated: a byte source's block string literals are walked in every feature set, through
+// `LitStr::try_from(&[u8])` as well as through the dialects.
+pub(crate) mod utf8;
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 mod handlers;

@@ -568,23 +568,25 @@ const VALID_STRING_UNREACHABLE: &str =
 /// [`VALID_STRING_UNREACHABLE`] `expect_err`).
 ///
 /// It is also the one per-source fact the fast path reads before it scans a
-/// string literal: [`UTF8`](Self::UTF8) picks the scanner, so a text source
-/// pays nothing for the UTF-8 rule a byte source's string literals are held to.
+/// string literal or a comment: [`UTF8`](Self::UTF8) picks the scanner, so a
+/// text source pays nothing for the UTF-8 rule a byte source's string literals
+/// and comments are held to.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) trait DelegateStringError {
-  /// The source's slices are already well-formed UTF-8, so string literals need
-  /// no validation.
+  /// The source's slices are already well-formed UTF-8, so string literals and
+  /// comments need no validation.
   ///
   /// `true` for `str` and `HipStr`, whose types guarantee it. `false` for `[u8]`,
-  /// `Bytes`, `BStr` and `HipByt`, whose string literals the fast path checks
-  /// for UTF-8 on the way past (smear#246). Both dialects' SIMD lexers read it to
-  /// pick `CHECK_UTF8` for `skip_inline_str_simd` and `skip_block_str_from_bytes`,
-  /// always as a literal `true` or `false` in one of two `if` arms, so each
-  /// monomorphization keeps one scanner and drops the other.
+  /// `Bytes`, `BStr` and `HipByt`, whose string literals (smear#246) and comments
+  /// (smear#251) the fast path checks for UTF-8 on the way past. Both dialects'
+  /// SIMD lexers read it to pick `CHECK_UTF8` for `skip_inline_str_simd`,
+  /// `skip_block_str_from_bytes` and their own `skip_comment`, always as a
+  /// literal `true` or `false` in one of two `if` arms, so each monomorphization
+  /// keeps one scanner and drops the other.
   /// (`skip_inline_str_simd::<{ !S::UTF8 }>` would need `generic_const_exprs`.)
   ///
   /// A wrong `true` is the dangerous direction: that source's string literals
-  /// would be accepted unchecked again.
+  /// and comments would be accepted unchecked again.
   const UTF8: bool;
 
   /// The `StringErrors` character type this primitive lexes into: `char` for

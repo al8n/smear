@@ -49,6 +49,26 @@ where
   .into()
 }
 
+/// The lossless `Comment` callback over a text source.
+///
+/// The rule's pattern matches the whole comment, `#` through the end of its body, before the first
+/// `\n` or `\r` or at the end of input, and this callback only returns the slice. A text source is
+/// UTF-8 by its type, so there is nothing to check and the answer is always `Ok`; the `Result` is
+/// the shape the rule's hook shares with the byte source's callback. Mirrors the GraphQL callback
+/// of the same name.
+#[allow(clippy::result_large_err)]
+#[inline]
+pub(crate) fn comment<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerErrors<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  Ok(lexer.slice())
+}
+
 #[inline(always)]
 pub(crate) fn handle_fractional_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,

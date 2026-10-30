@@ -2,6 +2,7 @@ use crate::{
   handlers::{self, is_ignored_byte},
   hints::{ExponentHint, FloatHint},
   limits::LosslessLimits,
+  utf8::IllFormedUtf8,
 };
 use tokora::{
   SimpleSpan,
@@ -49,6 +50,44 @@ where
     LexerError::unexpected_eoi,
   )
   .into()
+}
+
+/// The lossless `Comment` callback over a byte source, whose comments must be well-formed UTF-8
+/// (smear#251).
+///
+/// The rule's pattern matches the whole comment, `#` through the end of its body, before the first
+/// `\n` or `\r` or at the end of input, and this callback only validates the matched body: it never
+/// moves the token's end. So the token is the whole comment whether the callback runs or the token
+/// ceiling refuses the comment first, and an ill-formed comment is one error token that keeps the
+/// rest of its line from being lexed as GraphQL. The errors are one `UnknownLexeme` per sequence
+/// [`IllFormedUtf8`] yields: the syntactic lexer's errors, at the same spans.
+#[allow(clippy::result_large_err)]
+#[inline]
+pub(crate) fn comment<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<S::Slice<'a>, LexerErrors<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<[u8]>,
+{
+  // The body starts after the `#`.
+  let base = lexer.span().start + 1;
+  let slice = lexer.slice();
+  let body = &slice.as_ref()[1..];
+  let mut errs = LexerErrors::default();
+  for bad in IllFormedUtf8::new(body) {
+    errs.push(LexerError::unknown_char(
+      SimpleSpan::new(base + bad.start, base + bad.end),
+      body[bad.start],
+      base + bad.start,
+    ));
+  }
+  if errs.is_empty() {
+    Ok(lexer.slice())
+  } else {
+    Err(errs)
+  }
 }
 
 #[inline(always)]

@@ -1,3 +1,5 @@
+use core::ops::Range;
+
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 
 use tokora::{
@@ -18,6 +20,7 @@ use crate::{
   graphqlx::error::{LexerError, LexerErrorData, LexerErrors},
   skip_block_str_from_bytes, skip_inline_str_simd,
   string_lexer::DelegateStringError,
+  utf8::IllFormedUtf8,
 };
 
 use self::number::NumberLexerToken;
@@ -56,6 +59,9 @@ mod trait_parity_tests;
 
 #[cfg(test)]
 mod utf8_tests;
+
+#[cfg(test)]
+mod comment_utf8_tests;
 
 /// The error data type for lexing based on syntactic token with `char` source.
 pub type SyntacticLexerErrorData = error::LexerErrorData<char, RecursionLimitExceeded>;
@@ -904,7 +910,20 @@ where
           return Some(Err(err));
         }
         b'#' => {
-          self.skip_comment();
+          // As for string literals: a byte source's comment must be UTF-8 and a text source's
+          // already is, so the const picks the scanner.
+          let refused = if <S as DelegateStringError>::UTF8 {
+            self.skip_comment::<false>()
+          } else {
+            self.skip_comment::<true>()
+          };
+          if let Some(errs) = refused {
+            // `skip_comment` consumed the whole comment, and the error token is all of it; each
+            // error carries its own sequence's span.
+            self.last_span = SimpleSpan::new(token_start, self.cursor);
+            self.last_error_span = Some(self.last_span);
+            return Some(Err(errs));
+          }
           continue;
         }
         // Block strings (`"""…"""`): valid literals emit via the SIMD
@@ -1231,16 +1250,70 @@ where
     self.cursor += n;
   }
 
-  /// Skip a `#…\n|\r` comment body. Cursor is positioned at the `#`.
+  /// Skip a `#…\n|\r` comment body. Cursor is positioned at the `#`, and moves to the line
+  /// terminator, or to the end of input.
+  ///
+  /// `CHECK_UTF8` is `true` for a byte source, whose comments must be well-formed UTF-8
+  /// (smear#251), and `false` for a text source, which pays nothing for it. With `true` the one
+  /// scan that finds the terminator also checks the body, and an ill-formed body is still skipped
+  /// whole: the answer is one `UnknownLexeme` per sequence [`IllFormedUtf8`] yields, built by
+  /// [`refuse_comment`](Self::refuse_comment). Mirrors the GraphQL lexer's of the same name.
   #[inline(always)]
-  fn skip_comment(&mut self) {
-    let Some(rest) = self.src.slice(&self.cursor..) else {
-      return;
-    };
-    let len = match memchr_newline(rest.as_ref()) {
-      Some(n) => n,       // stop AT the newline; loop eats it next
-      None => rest.len(), // unterminated -> EOF
-    };
-    self.cursor += len;
+  fn skip_comment<const CHECK_UTF8: bool>(
+    &mut self,
+  ) -> Option<LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>> {
+    let rest = self.src.slice(&self.cursor..)?;
+    if !CHECK_UTF8 {
+      let len = match memchr_newline(rest.as_ref()) {
+        Some(n) => n,       // stop AT the newline; loop eats it next
+        None => rest.len(), // unterminated -> EOF
+      };
+      self.cursor += len;
+      return None;
+    }
+
+    // The body starts after the `#`.
+    let mut walk = IllFormedUtf8::comment(&rest.as_ref()[1..]);
+    match walk.next() {
+      None => {
+        self.cursor += 1 + walk.body_len();
+        None
+      }
+      Some(first) => Some(self.refuse_comment(first, walk)),
+    }
+  }
+
+  /// Refuse a comment whose body is not well-formed UTF-8, and move the cursor to the comment's
+  /// end: its line terminator, or the end of input.
+  ///
+  /// `first` is the first ill-formed sequence `walk` yielded, and the rest of `walk` yields the
+  /// others, all relative to the body, which starts one byte past the `#` at the cursor. Each
+  /// becomes an `UnknownLexeme` at its sequence's span, carrying the source's own unit at the
+  /// sequence's first byte, read as the unknown-byte arm reads one. Out of line and cold, so the
+  /// `#` arm's hot path stays the scan and one branch.
+  #[cold]
+  #[inline(never)]
+  fn refuse_comment(
+    &mut self,
+    first: Range<usize>,
+    mut walk: IllFormedUtf8<'_, true>,
+  ) -> LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded> {
+    let body = self.cursor + 1;
+    let mut errs = LexerErrors::default();
+    for bad in core::iter::once(first).chain(walk.by_ref()) {
+      let start = body + bad.start;
+      let ch = self
+        .src
+        .slice(&start..)
+        .and_then(|tail| tail.iter().next())
+        .expect("an ill-formed sequence starts at a byte of the source");
+      errs.push(LexerError::unknown_char(
+        SimpleSpan::new(start, body + bad.end),
+        ch,
+        start,
+      ));
+    }
+    self.cursor = body + walk.body_len();
+    errs
   }
 }
