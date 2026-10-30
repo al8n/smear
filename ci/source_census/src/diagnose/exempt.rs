@@ -363,6 +363,13 @@ pub const EXEMPTIONS: &[Exemption] = &[
     reason: LEXER_FAMILY,
   },
   Exemption {
+    path: "smear::lexer::error::StringValueError",
+    kind: Kind::Tracked,
+    element: None,
+    issue: Some(126),
+    reason: LEXER_FAMILY,
+  },
+  Exemption {
     path: "smear::lexer::error::UnicodeError",
     kind: Kind::Tracked,
     element: None,

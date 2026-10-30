@@ -3,22 +3,31 @@
 //! # What is being claimed
 //!
 //! A draft §4 response is read **shape-first**, straight out of the caller's buffer: names, type
-//! kinds and directive locations are matched against the response's own bytes and never copied,
-//! and the only member that can allocate is `__InputValue.defaultValue`, which allocates only when
-//! the literal it was written as actually contains a backslash.
+//! kinds and directive locations are matched against the response's own bytes and never copied.
+//! Prose — every description, deprecation reason and `specifiedByURL`, and
+//! `__InputValue.defaultValue` — is read and kept, and it borrows too: it allocates only when the
+//! literal it was written as actually contains a backslash.
 //!
 //! # How a public door can measure a private property
 //!
 //! [`to_sdl`] renders what it reads, so lengthening a name that reaches the SDL lengthens the
-//! output and the reading with it. The measurement needs a name the reader **reads and the
-//! renderer drops**, and every real response has one: the introspection meta-schema is in every
-//! server's `__Schema.types` and the door drops all eight of its types, because every build
-//! injects them. So `__Schema`'s own fields are decoded in full and rendered not at all —
-//! lengthening them changes what the reader handles and cannot change what it emits.
+//! output and the reading with it. The measurement needs text the reader **reads and the renderer
+//! drops**, and a real response has two kinds of it:
 //!
-//! Two corpora that differ only in those names must therefore produce **the same SDL** and **the
-//! same allocation**, and [`the_gate_counts`] is the discrimination check that says a matching
-//! reading means "nothing was copied" rather than "nothing was looking".
+//! - **An interface's `possibleTypes`.** The door reads every name in them and renders none: an
+//!   interface's implementors are derived from the objects' own `interfaces`, the path the SDL door
+//!   takes too. Lengthening those names changes what the reader handles and cannot change what it
+//!   emits.
+//! - **The meta types' descriptions.** The introspection meta-schema is in every server's
+//!   `__Schema.types`, and the door checks each of its types against draft §4's shape and then
+//!   drops it, because every build injects smear's. The fields it does check keep the names smear
+//!   gives them, but their descriptions are read in full and kept nowhere.
+//!
+//! Two corpora that differ only in those names, or only in those descriptions, must therefore
+//! produce **the same SDL** and **the same allocation**. [`the_gate_counts`] is the discrimination
+//! check that says a matching reading means "nothing was copied" rather than "nothing was looking",
+//! and [`an_escape_is_what_makes_prose_cost`] is the one that says the descriptions were read rather
+//! than skipped.
 
 // The door itself is behind `introspection`, so with the feature off this file is an empty crate
 // rather than a hard `E0432` — the gate `smear/tests/validator_introspection.rs` carried until it
@@ -88,23 +97,51 @@ fn allocated(body: impl FnOnce()) -> u64 {
 // the corpus
 // ---------------------------------------------------------------------------------------------
 
+/// How many implementors the corpus's interface reports in `possibleTypes`.
+const IMPLEMENTORS: usize = 48;
+
+/// `__Schema`'s six fields, with their types as a response spells them.
+const SCHEMA_FIELDS: [(&str, &str); 6] = [
+  ("description", r#"{"kind":"SCALAR","name":"String"}"#),
+  (
+    "types",
+    r#"{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+      {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Type"}}}}"#,
+  ),
+  (
+    "queryType",
+    r#"{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Type"}}"#,
+  ),
+  ("mutationType", r#"{"kind":"OBJECT","name":"__Type"}"#),
+  ("subscriptionType", r#"{"kind":"OBJECT","name":"__Type"}"#),
+  (
+    "directives",
+    r#"{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+      {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Directive"}}}}"#,
+  ),
+];
+
+/// The descriptions the door reads and drops: `__Schema`'s own and one on each of its fields.
+const DROPPED_DESCRIPTIONS: usize = SCHEMA_FIELDS.len() + 1;
+
+/// How long a dropped description is in a corpus that lengthens them.
+const PROSE: usize = 16 * 1024;
+
 /// A response a server would return, with two knobs the door is supposed to be indifferent to.
 ///
-/// `pad` lengthens every field name of `__Schema` — read in full, rendered never. `prose`
-/// lengthens a `description`, which is a member the door does not read at all. Neither reaches the
-/// SDL, so neither may reach the allocator.
-fn response(pad: usize, prose: usize) -> String {
+/// `pad` lengthens every name in `Node.possibleTypes` — read in full, rendered never. `prose` is
+/// the description of `__Schema` and of each of its fields — read too, and dropped with the type.
+/// Neither reaches the SDL, so neither may reach the allocator unless `prose` holds an escape. The
+/// descriptions that do reach the SDL, on `Query` and on `@tag`, are the same in every corpus.
+fn response(pad: usize, prose: &str) -> String {
   let p = "z".repeat(pad);
-  let description = "d".repeat(prose);
-  let meta_fields: Vec<String> = (0..24)
-    .map(|index| {
-      format!(
-        r#"{{"name":"meta{index}{p}","description":"{description}","args":[
-             {{"name":"arg{index}{p}","type":{{"kind":"SCALAR","name":"String"}},
-               "defaultValue":null}}
-           ],"type":{{"kind":"NON_NULL","name":null,"ofType":
-             {{"kind":"LIST","name":null,"ofType":{{"kind":"SCALAR","name":"String"}}}}}}}}"#
-      )
+  let implementors: Vec<String> = (0..IMPLEMENTORS)
+    .map(|index| format!(r#"{{"kind":"OBJECT","name":"Impl{index}{p}"}}"#))
+    .collect();
+  let schema_fields: Vec<String> = SCHEMA_FIELDS
+    .iter()
+    .map(|(name, ty)| {
+      format!(r#"{{"name":"{name}","description":"{prose}","args":[],"type":{ty}}}"#)
     })
     .collect();
 
@@ -114,22 +151,26 @@ fn response(pad: usize, prose: usize) -> String {
       "mutationType":null,
       "subscriptionType":null,
       "directives":[
-        {{"name":"tag","description":"{description}","locations":["FIELD_DEFINITION"],"args":[
+        {{"name":"tag","description":"Tags a field.","locations":["FIELD_DEFINITION"],"args":[
           {{"name":"note","type":{{"kind":"SCALAR","name":"String"}},"defaultValue":"\"x\""}}
         ],"isRepeatable":false}}
       ],
       "types":[
-        {{"kind":"OBJECT","name":"Query","description":"{description}","interfaces":[],"fields":[
+        {{"kind":"OBJECT","name":"Query","description":"The query root.","interfaces":[],"fields":[
           {{"name":"ok","args":[
             {{"name":"first","type":{{"kind":"SCALAR","name":"Int"}},"defaultValue":"10"}}
           ],"type":{{"kind":"NON_NULL","name":null,"ofType":{{"kind":"SCALAR","name":"String"}}}}}}
         ]}},
+        {{"kind":"INTERFACE","name":"Node","interfaces":[],"fields":[
+          {{"name":"id","args":[],"type":{{"kind":"SCALAR","name":"ID"}}}}
+        ],"possibleTypes":[{}]}},
         {{"kind":"SCALAR","name":"String"}},
         {{"kind":"SCALAR","name":"Int"}},
-        {{"kind":"OBJECT","name":"__Schema","description":"{description}","fields":[{}]}}
+        {{"kind":"OBJECT","name":"__Schema","description":"{prose}","interfaces":[],"fields":[{}]}}
       ]
     }}}}}}"#,
-    meta_fields.join(",")
+    implementors.join(","),
+    schema_fields.join(",")
   )
 }
 
@@ -144,8 +185,8 @@ fn sdl(response: &str) -> String {
 /// A document of only names allocates nothing for them.
 #[test]
 fn lengthening_a_name_the_door_reads_and_drops_costs_nothing() {
-  let short = response(0, 0);
-  let long = response(4096, 0);
+  let short = response(0, "");
+  let long = response(4096, "");
   assert!(
     long.len() > short.len() + 100_000,
     "the corpora do not differ enough for the reading to mean anything"
@@ -174,15 +215,15 @@ fn lengthening_a_name_the_door_reads_and_drops_costs_nothing() {
   );
 }
 
-/// A member the door does not read costs nothing either.
+/// Prose the door reads and drops costs nothing either, while it holds no escape.
 ///
 /// This is the half a value tree could never have: a reader that materialises the document before
 /// consulting the shape pays for every `description` in it, and the descriptions here are the bulk
-/// of the response.
+/// of the response. This one decodes every one of them and keeps each as a slice of the response.
 #[test]
-fn a_member_the_door_never_reads_costs_nothing() {
-  let plain = response(0, 0);
-  let verbose = response(0, 8192);
+fn prose_the_door_reads_and_drops_costs_nothing() {
+  let plain = response(0, "");
+  let verbose = response(0, &"d".repeat(PROSE));
   assert!(verbose.len() > plain.len() + 100_000);
   assert_eq!(sdl(&plain), sdl(&verbose));
 
@@ -192,7 +233,38 @@ fn a_member_the_door_never_reads_costs_nothing() {
   assert_eq!(
     allocated(|| drop(sdl(&plain))),
     allocated(|| drop(sdl(&verbose))),
-    "the door paid for prose it does not read"
+    "the door copied prose that holds no escape"
+  );
+}
+
+/// An escape is what makes prose cost: the same descriptions, each ending in a `\n`, are expanded
+/// into a copy apiece and then dropped with the type they describe.
+///
+/// The discrimination check for the gate above, which a reader that skipped the descriptions would
+/// pass too. This one it fails.
+#[test]
+fn an_escape_is_what_makes_prose_cost() {
+  let plain = response(0, &"d".repeat(PROSE));
+  let escaped = response(0, &format!("{}\\n", "d".repeat(PROSE - 2)));
+  assert_eq!(
+    plain.len(),
+    escaped.len(),
+    "the corpora are not the same size"
+  );
+  assert_eq!(sdl(&plain), sdl(&escaped));
+
+  let _ = sdl(&plain);
+  let _ = sdl(&escaped);
+
+  let plain_bytes = allocated(|| drop(sdl(&plain)));
+  let escaped_bytes = allocated(|| drop(sdl(&escaped)));
+  // Each expansion is one buffer the length of the literal it expands.
+  let expanded = (DROPPED_DESCRIPTIONS * PROSE) as u64;
+  assert!(
+    escaped_bytes >= plain_bytes + expanded,
+    "{DROPPED_DESCRIPTIONS} escaped descriptions of {PROSE} bytes cost {} more bytes, not at \
+     least {expanded}; they were not read",
+    escaped_bytes.saturating_sub(plain_bytes)
   );
 }
 
@@ -213,9 +285,9 @@ fn an_escaped_key_in_an_unread_member_costs_nothing() {
     let members: Vec<String> = (0..200)
       .map(|index| format!(r#""{key}{index}":{index}"#))
       .collect();
-    response(0, 0).replace(
+    response(0, "").replace(
       r#""description":"""#,
-      &format!(r#""description":{{{}}}"#, members.join(",")),
+      &format!(r#""description":"","extensions":{{{}}}"#, members.join(",")),
     )
   };
   let plain = buried("a");
@@ -289,7 +361,7 @@ fn a_refusal_a_duplicate_takes_away_costs_no_owner() {
 /// Reading a response costs a fraction of the response, not a multiple of it.
 #[test]
 fn the_whole_door_allocates_less_than_the_response_it_read() {
-  let response = response(4096, 8192);
+  let response = response(4096, &"d".repeat(PROSE));
   let rendered = sdl(&response);
   let _ = sdl(&response);
   let bytes = allocated(|| drop(sdl(&response)));
@@ -318,7 +390,7 @@ fn the_gate_counts() {
   // And it moves for the door too, when the door has more to emit: the same corpus with a name
   // that does reach the SDL is strictly more expensive, so a matching reading above is a fact
   // about copying rather than about the measurement.
-  let small = response(0, 0);
+  let small = response(0, "");
   let big = small.replace(
     r#""name":"ok""#,
     &format!(r#""name":"ok{}""#, "w".repeat(4096)),

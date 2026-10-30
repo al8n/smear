@@ -226,13 +226,34 @@ const MINIMAL: &str = "type Query { ok: Int }";
 /// built-in items into that one user type, so a single `to_owned()` or `owner_path(…)` put back on
 /// a success path in `resolve_type_refs` or `validate_directive_usages` — the pattern this number
 /// exists to keep out — costs about that many and crosses this line at once.
+///
+/// # Ten more, for what draft §4 returns beyond the shape
+///
+/// Moved from 240 by exactly ten, one per boxed slice the schema gained that is non-empty here,
+/// each allocated once at its final length so none grows or shrinks:
+///
+/// - the text arena — one, because `SchemaBuilder::inject` reserves the built-ins' share of it
+///   (5 103 bytes of graphql-js's descriptions and their printed defaults, computed once where the
+///   built-in SDL is parsed) before decoding a byte, and [`MINIMAL`] adds no text of its own;
+/// - `type_meta`, `field_meta`, `input_meta`, `enum_value_meta` and `directive_meta`, one row per
+///   row of the table each sits beside;
+/// - `field_order`, `input_order`, `enum_value_order` and `directive_order`, the declaration-order
+///   permutations of the same tables.
+///
+/// `interface_order` is the eleventh and costs nothing here: nothing in [`MINIMAL`] or the
+/// built-ins implements an interface, so it is empty and an empty boxed slice allocates nothing.
+/// Decoding the built-in descriptions and printing their defaults allocates nothing either — both
+/// walk the spelling or the literal and write into the reserved arena.
 #[cfg(feature = "std")]
-const BUILD_CEILING: u64 = 240;
+const BUILD_CEILING: u64 = 250;
 
 /// The same reading where there is no `OnceLock` to cache the built-in parse in.
 ///
 /// `SchemaBuilder::built_ins` documents the split: without `std` every build re-parses the three
 /// constant SDL documents, which is 48 allocations the cached path does not pay. Measured at 263.
+///
+/// Moved from 288 by the same ten, for the same ten tables: sizing the built-ins' text share runs
+/// with the parse on this arm, every build, and allocates nothing.
 ///
 /// Pinned rather than skipped, because a gate that disappears under a feature selection is a gate
 /// that stops noticing — and because this is the arm no `cargo test` currently reaches: `smear`'s
@@ -240,7 +261,7 @@ const BUILD_CEILING: u64 = 240;
 /// `std` on whatever the command line asks for. Reading this number needs the `cfg` inverted by
 /// hand, or that manifest edge narrowed.
 #[cfg(not(feature = "std"))]
-const BUILD_CEILING: u64 = 288;
+const BUILD_CEILING: u64 = 298;
 
 /// A warm `Schema::build` allocates for the schema it returns, not for diagnostics it does not
 /// emit.

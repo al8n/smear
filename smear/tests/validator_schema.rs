@@ -32,8 +32,9 @@ use smear::{
     syntactic::{GraphqlLexer, type_system_document},
   },
   validator::schema::{
-    DefaultKind, MAX_CONST_VALUE_DEPTH, RootOperation, Schema, SchemaBuilder, SchemaErrorKind,
-    SchemaErrors, TypeKind, builtin,
+    DefaultKind, Deprecation, FieldDef, FieldMeta, InputValueDef, InputValueMeta,
+    MAX_CONST_VALUE_DEPTH, Range32, RootOperation, Schema, SchemaBuilder, SchemaErrorKind,
+    SchemaErrors, Sym, TypeId, TypeKind, builtin,
   },
 };
 
@@ -85,6 +86,14 @@ const UNFIREABLE: &[(SchemaErrorKind, &str)] = &[
     "the lexer's identifier rule is the same grammar the arena admits, so no parsed document can \
      carry a name that fails it. `invalid_name_from_a_hand_built_ast` fires it through the other \
      door — a hand-assembled AST — because the AST types are public.",
+  ),
+  (
+    SchemaErrorKind::UnreadableText,
+    "a `&str` source is UTF-8 throughout, so no document parsed from one can carry a string that \
+     is not, and every fixture here is a `&str`. `unreadable_text_from_a_byte_source` fires it \
+     through the door that can — a document parsed from `[u8]`, whose string content the byte \
+     lexer passes through unread — and `readable_text_from_a_byte_source_is_kept` is its valid \
+     twin.",
   ),
   (
     SchemaErrorKind::TooManyNames,
@@ -1375,6 +1384,74 @@ fn invalid_name_from_a_hand_built_ast() {
   assert_eq!(error.subject(), "not a name");
 }
 
+/// A document parsed from bytes, which is the one source whose strings may not be text.
+fn parse_bytes(sdl: &[u8]) -> TypeSystemDocument<&[u8]> {
+  Parser::with_parser::<
+    GraphqlLexer<'_, [u8]>,
+    TypeSystemDocument<&[u8]>,
+    GraphqlErrors<&[u8]>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse(sdl)
+  .unwrap_or_else(|errors| panic!("the byte SDL parses: {errors:?}"))
+}
+
+/// One string that is not UTF-8 at each kind of string a schema keeps: a type's description, an
+/// argument's default, a field's deprecation reason and a scalar's `specifiedByURL`.
+const UNREADABLE: &[u8] =
+  b"\"\xff\" type Query { ok(a: String = \"\xfe\"): Int @deprecated(reason: \"\xfd\") }\n\
+  scalar Url @specifiedBy(url: \"\xfc\")\n";
+
+/// [`UNREADABLE`] with readable text in the same four places.
+const READABLE: &[u8] =
+  "\"Root.\" type Query { ok(a: String = \"\u{e9}\"): Int @deprecated(reason: \"gone\") }\n\
+  scalar Url @specifiedBy(url: \"https://example.com\")\n"
+    .as_bytes();
+
+/// [`SchemaErrorKind::UnreadableText`], through the one door that reaches it.
+///
+/// The parser's byte lexer passes a string's content through unread, so a `[u8]` source can hand
+/// the builder bytes that are no text at all, and the builder refuses each where it would have kept
+/// it — once per string, naming the element the string belongs to — rather than storing a
+/// replacement.
+#[test]
+fn unreadable_text_from_a_byte_source() {
+  let errors =
+    Schema::build(&parse_bytes(UNREADABLE)).expect_err("text that is not UTF-8 is not a schema");
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::UnreadableText],
+    "{errors}"
+  );
+  let mut subjects: Vec<&str> = errors
+    .errors()
+    .iter()
+    .map(|error| error.subject())
+    .collect();
+  subjects.sort_unstable();
+  assert_eq!(subjects, ["Query", "Url", "a", "ok"], "{errors}");
+}
+
+/// The valid twin: the same four places holding text, kept.
+#[test]
+fn readable_text_from_a_byte_source_is_kept() {
+  let schema = Schema::build(&parse_bytes(READABLE)).expect("readable text builds");
+  let (query, _) = schema.type_by_name(b"Query").expect("Query");
+  assert_eq!(
+    schema.text(schema.type_meta(query).description()),
+    Some("Root.")
+  );
+
+  let (ok, meta) = member(&schema, "Query", "ok");
+  assert_eq!(deprecated(&schema, meta.deprecation()), Some(Some("gone")));
+  let (_, a) = argument(&schema, ok.args(), "a");
+  assert_eq!(schema.text(a.default_value()), Some("\"\u{e9}\""));
+
+  let (url, _) = schema.type_by_name(b"Url").expect("Url");
+  assert_eq!(schema.specified_by_url(url), Some("https://example.com"));
+}
+
 // ---------------------------------------------------------------------------------------------
 // acceptance
 // ---------------------------------------------------------------------------------------------
@@ -2303,6 +2380,540 @@ fn input_object_default_cycle_verdict_is_declaration_order_independent() {
       errors.kinds(),
       vec![SchemaErrorKind::InputObjectDefaultValueCycle],
       "{errors}"
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// what draft §4 returns beyond the shape
+// ---------------------------------------------------------------------------------------------
+
+/// A schema carrying every datum draft §4 returns that a `Schema` keeps: the schema's own
+/// description, descriptions at every element that takes one — inline, block, and empty — each of
+/// the three deprecation answers on a field, an argument, an input field and an enum value, a
+/// `@specifiedBy` on a definition and another arriving by `extend scalar`, and defaults of every
+/// shape the canonical printer writes.
+const METADATA: &str = r#"
+"""
+The schema of a small library.
+"""
+schema { query: Query mutation: Mutation }
+
+"A book's identifier, as printed on its spine."
+scalar ISBN @specifiedBy(url: "https://example.com/isbn")
+
+scalar Url
+extend scalar Url @specifiedBy(url: "https://url.spec.whatwg.org/")
+
+"Something with an id."
+interface Node {
+  "The id."
+  id: ID!
+}
+
+interface Titled { title: String }
+
+"""
+A book.
+
+  Indented continuation.
+"""
+type Book implements Titled & Node {
+  "The book's id."
+  id: ID!
+  title: String
+  "Who wrote it."
+  author(
+    "Return the pen name instead."
+    penName: Boolean = false @deprecated(reason: "Always the pen name now.")
+    "Which format."
+    format: Format = HARDCOVER
+  ): String @deprecated
+  isbn: ISBN @deprecated(reason: null)
+  shelf: [Int] @deprecated(reason: "Use `location`.\nIt moved.")
+}
+
+enum Format {
+  "Paper covers."
+  PAPERBACK
+  HARDCOVER @deprecated(reason: "Out of print")
+  EBOOK @deprecated
+  AUDIO @deprecated(reason: null)
+}
+
+input BookFilter {
+  "Exact title."
+  title: String = "The \"Great\" Gatsby"
+  formats: [Format!] = [PAPERBACK,EBOOK]
+  near: GeoPoint = {lat: 1.5 lng: -0.25}
+  note: String = """
+    multi
+      line
+  """
+  legacy: Int @deprecated(reason: "unused")
+}
+
+input GeoPoint { lat: Float lng: Float }
+
+type Query {
+  books(filter: BookFilter = {}, first: Int = 10, after: String): [Book!]!
+  node(id: ID!): Node
+}
+
+type Mutation {
+  ""
+  addBook(title: String!): Book
+}
+
+"Marks a field as cached."
+directive @cached(
+  "Seconds."
+  ttl: Int = 60
+  scope: String
+) repeatable on FIELD_DEFINITION
+
+directive @audit on OBJECT
+"#;
+
+fn ty(schema: &Schema, name: &str) -> TypeId {
+  schema
+    .type_by_name(name.as_bytes())
+    .unwrap_or_else(|| panic!("`{name}` is defined"))
+    .0
+}
+
+/// A field of a named type, found in declaration order, with its metadata.
+fn member<'s>(schema: &'s Schema, owner: &str, name: &str) -> (&'s FieldDef, &'s FieldMeta) {
+  schema
+    .fields_in_order(ty(schema, owner))
+    .find(|(field, _)| schema.name(field.name()) == name)
+    .unwrap_or_else(|| panic!("`{owner}.{name}` is a field"))
+}
+
+/// An argument of a group, found in declaration order, with its metadata.
+fn argument<'s>(
+  schema: &'s Schema,
+  args: Range32,
+  name: &str,
+) -> (&'s InputValueDef, &'s InputValueMeta) {
+  schema
+    .inputs_in_order(args)
+    .find(|(arg, _)| schema.name(arg.name()) == name)
+    .unwrap_or_else(|| panic!("`{name}` is an argument"))
+}
+
+/// Draft §4's `isDeprecated` and `deprecationReason`, as one value: `None` when not deprecated.
+fn deprecated(schema: &Schema, deprecation: Deprecation) -> Option<Option<&str>> {
+  deprecation
+    .is_deprecated()
+    .then(|| schema.text(deprecation.reason()))
+}
+
+/// The names of a group, in the order an iterator over it yields them.
+fn names<T>(schema: &Schema, rows: impl Iterator<Item = T>, name: impl Fn(T) -> Sym) -> Vec<&str> {
+  rows.map(|row| schema.name(name(row))).collect()
+}
+
+#[test]
+fn every_datum_section_4_returns_is_kept() {
+  let schema = built(METADATA);
+
+  assert_eq!(schema.description(), Some("The schema of a small library."));
+
+  // Types: an inline description, a block one whose dedent keeps a deeper line's indent, and none.
+  let isbn = ty(&schema, "ISBN");
+  assert_eq!(
+    schema.text(schema.type_meta(isbn).description()),
+    Some("A book's identifier, as printed on its spine.")
+  );
+  assert_eq!(
+    schema.text(schema.type_meta(ty(&schema, "Book")).description()),
+    Some("A book.\n\n  Indented continuation.")
+  );
+  assert_eq!(
+    schema.text(schema.type_meta(ty(&schema, "Titled")).description()),
+    None
+  );
+
+  // `specifiedByURL`: from the definition, from an `extend scalar`, and nothing for another kind.
+  assert_eq!(
+    schema.specified_by_url(isbn),
+    Some("https://example.com/isbn")
+  );
+  assert_eq!(
+    schema.specified_by_url(ty(&schema, "Url")),
+    Some("https://url.spec.whatwg.org/")
+  );
+  assert_eq!(schema.specified_by_url(ty(&schema, "Book")), None);
+
+  // Fields: a description, and each of the three deprecation answers.
+  let (_, id) = member(&schema, "Node", "id");
+  assert_eq!(schema.text(id.description()), Some("The id."));
+  let (author, meta) = member(&schema, "Book", "author");
+  assert_eq!(schema.text(meta.description()), Some("Who wrote it."));
+  assert_eq!(
+    deprecated(&schema, meta.deprecation()),
+    Some(Some("No longer supported")),
+    "a bare `@deprecated` carries the specified default"
+  );
+  let (_, isbn_field) = member(&schema, "Book", "isbn");
+  assert_eq!(
+    deprecated(&schema, isbn_field.deprecation()),
+    Some(None),
+    "`reason: null` is deprecated with a null reason, not undeprecated"
+  );
+  let (_, shelf) = member(&schema, "Book", "shelf");
+  assert_eq!(
+    deprecated(&schema, shelf.deprecation()),
+    Some(Some("Use `location`.\nIt moved."))
+  );
+  let (_, title) = member(&schema, "Book", "title");
+  assert_eq!(deprecated(&schema, title.deprecation()), None);
+  assert_eq!(schema.text(title.description()), None);
+
+  // Arguments: descriptions, canonical defaults, and deprecation.
+  let (_, pen_name) = argument(&schema, author.args(), "penName");
+  assert_eq!(
+    schema.text(pen_name.description()),
+    Some("Return the pen name instead.")
+  );
+  assert_eq!(schema.text(pen_name.default_value()), Some("false"));
+  assert_eq!(
+    deprecated(&schema, pen_name.deprecation()),
+    Some(Some("Always the pen name now."))
+  );
+  let (_, format) = argument(&schema, author.args(), "format");
+  assert_eq!(schema.text(format.default_value()), Some("HARDCOVER"));
+  assert_eq!(deprecated(&schema, format.deprecation()), None);
+
+  // Input fields: every default shape, printed canonically, and a deprecated field with none.
+  let filter = ty(&schema, "BookFilter");
+  let defaults: Vec<(&str, Option<&str>)> = schema
+    .input_fields_in_order(filter)
+    .map(|(field, meta)| (schema.name(field.name()), schema.text(meta.default_value())))
+    .collect();
+  assert_eq!(
+    defaults,
+    [
+      ("title", Some("\"The \\\"Great\\\" Gatsby\"")),
+      ("formats", Some("[PAPERBACK, EBOOK]")),
+      ("near", Some("{lat: 1.5, lng: -0.25}")),
+      ("note", Some("\"multi\\n  line\"")),
+      ("legacy", None),
+    ]
+  );
+  let (_, legacy) = schema
+    .input_fields_in_order(filter)
+    .find(|(field, _)| schema.name(field.name()) == "legacy")
+    .expect("legacy");
+  assert_eq!(
+    deprecated(&schema, legacy.deprecation()),
+    Some(Some("unused"))
+  );
+
+  // Enum values: a description, and the three deprecation answers.
+  let values: Vec<_> = schema
+    .enum_values_in_order(ty(&schema, "Format"))
+    .map(|(value, meta)| {
+      (
+        schema.name(value),
+        schema.text(meta.description()),
+        deprecated(&schema, meta.deprecation()),
+      )
+    })
+    .collect();
+  assert_eq!(
+    values,
+    [
+      ("PAPERBACK", Some("Paper covers."), None),
+      ("HARDCOVER", None, Some(Some("Out of print"))),
+      ("EBOOK", None, Some(Some("No longer supported"))),
+      ("AUDIO", None, Some(None)),
+    ]
+  );
+
+  // Directives: a description on the definition and on an argument, and a default.
+  let (cached, cached_meta) = schema
+    .directives_in_order()
+    .find(|(directive, _)| schema.name(directive.name()) == "cached")
+    .expect("@cached");
+  assert_eq!(
+    schema.text(cached_meta.description()),
+    Some("Marks a field as cached.")
+  );
+  let (_, ttl) = argument(&schema, cached.args(), "ttl");
+  assert_eq!(schema.text(ttl.description()), Some("Seconds."));
+  assert_eq!(schema.text(ttl.default_value()), Some("60"));
+  let (_, scope) = argument(&schema, cached.args(), "scope");
+  assert_eq!(schema.text(scope.description()), None);
+  assert_eq!(schema.text(scope.default_value()), None);
+}
+
+/// Absent is not empty: `""` is a description of no bytes, and returned as one.
+#[test]
+fn an_empty_description_is_not_an_absent_one() {
+  let schema = built(METADATA);
+  let (_, add_book) = member(&schema, "Mutation", "addBook");
+  assert_eq!(schema.text(add_book.description()), Some(""));
+  assert!(add_book.description().is_some());
+  let (_, node) = member(&schema, "Query", "node");
+  assert_eq!(schema.text(node.description()), None);
+  assert!(node.description().is_none());
+}
+
+/// Every group comes back in the order the document declared it, while lookups still binary
+/// search the symbol-sorted tables.
+#[test]
+fn declaration_order_is_kept_beside_the_sorted_tables() {
+  let schema = built(METADATA);
+
+  let book = ty(&schema, "Book");
+  assert_eq!(
+    names(&schema, schema.fields_in_order(book), |(field, _)| field
+      .name()),
+    ["id", "title", "author", "isbn", "shelf", "__typename"],
+    "declared fields first, the meta-field after them"
+  );
+  let query = ty(&schema, "Query");
+  assert_eq!(
+    names(&schema, schema.fields_in_order(query), |(field, _)| field
+      .name()),
+    ["books", "node", "__typename", "__schema", "__type"]
+  );
+
+  let (author, _) = member(&schema, "Book", "author");
+  assert_eq!(
+    names(
+      &schema,
+      schema.inputs_in_order(author.args()),
+      |(arg, _)| arg.name()
+    ),
+    ["penName", "format"]
+  );
+  let (books, _) = member(&schema, "Query", "books");
+  assert_eq!(
+    names(&schema, schema.inputs_in_order(books.args()), |(arg, _)| {
+      arg.name()
+    }),
+    ["filter", "first", "after"]
+  );
+
+  assert_eq!(
+    names(
+      &schema,
+      schema.input_fields_in_order(ty(&schema, "BookFilter")),
+      |(field, _)| field.name()
+    ),
+    ["title", "formats", "near", "note", "legacy"]
+  );
+  assert_eq!(
+    names(
+      &schema,
+      schema.enum_values_in_order(ty(&schema, "Format")),
+      |(value, _)| value
+    ),
+    ["PAPERBACK", "HARDCOVER", "EBOOK", "AUDIO"]
+  );
+
+  // `Node` is defined before `Titled`, so the closure — sorted by type id — lists it first, and the
+  // declaration order is the other way round.
+  let interface = |id: TypeId| schema.type_def(id).name();
+  assert_eq!(
+    names(
+      &schema,
+      schema.interfaces_of(book).iter().copied(),
+      interface
+    ),
+    ["Node", "Titled"]
+  );
+  assert_eq!(
+    names(&schema, schema.interfaces_in_order(book), interface),
+    ["Titled", "Node"]
+  );
+
+  // The document's own directives in definition order, then each specified one it did not spell
+  // out, in the order the built-in SDL declares them.
+  assert_eq!(
+    names(&schema, schema.directives_in_order(), |(directive, _)| {
+      directive.name()
+    }),
+    [
+      "cached",
+      "audit",
+      "skip",
+      "include",
+      "deprecated",
+      "specifiedBy",
+      "oneOf"
+    ]
+  );
+
+  // The tables the lookups read are still sorted, so the orders above are permutations beside them
+  // rather than the order they are stored in.
+  for (index, _) in schema.types().iter().enumerate() {
+    let id = TypeId::new(index as u32);
+    for order in [
+      schema.field_order_of(id),
+      schema.input_field_order_of(id),
+      schema.enum_value_order_of(id),
+      schema.interface_order_of(id),
+    ] {
+      let mut sorted = order.to_vec();
+      sorted.sort_unstable();
+      assert!(
+        sorted
+          .iter()
+          .enumerate()
+          .all(|(at, &position)| position as usize == at),
+        "an order table is not a permutation of its group: {order:?}"
+      );
+    }
+  }
+}
+
+/// [`builtin::BUILT_IN_SCALAR_DESCRIPTIONS`] is what the build injects, scalar by scalar: the text
+/// the introspection door compares a response's built-in scalar with before leaving it to the
+/// build.
+#[test]
+fn the_built_in_scalar_descriptions_are_the_injected_ones() {
+  let schema = built(ROOT);
+  for (name, text) in builtin::BUILT_IN_SCALARS
+    .iter()
+    .zip(builtin::BUILT_IN_SCALAR_DESCRIPTIONS)
+  {
+    assert_eq!(
+      schema.text(schema.type_meta(ty(&schema, name)).description()),
+      Some(text),
+      "{name}"
+    );
+  }
+}
+
+/// The built-ins carry graphql-js's descriptions, so introspecting them answers what the reference
+/// implementation answers — and their defaults print in the same canonical form.
+#[test]
+fn the_built_ins_carry_graphql_js_descriptions() {
+  let schema = built(ROOT);
+
+  assert_eq!(
+    schema.text(schema.type_meta(ty(&schema, "Int")).description()),
+    Some(
+      "The `Int` scalar type represents non-fractional signed whole numeric values. Int can \
+       represent values between -(2^31) and 2^31 - 1."
+    )
+  );
+  let id = schema
+    .text(schema.type_meta(ty(&schema, "ID")).description())
+    .expect("ID is described");
+  assert!(
+    id.contains("(such as `\"4\"`)"),
+    "a quote inside a block string is content: {id}"
+  );
+  let type_ = schema
+    .text(schema.type_meta(ty(&schema, "__Type")).description())
+    .expect("__Type is described");
+  assert!(
+    type_.contains("`__TypeKind` enum.\n\nDepending on the kind"),
+    "{type_}"
+  );
+  let (_, default_value) = member(&schema, "__InputValue", "defaultValue");
+  assert_eq!(
+    schema.text(default_value.description()),
+    Some("A GraphQL-formatted string representing the default value for this input value.")
+  );
+
+  let (deprecated_directive, meta) = schema
+    .directives_in_order()
+    .find(|(directive, _)| schema.name(directive.name()) == "deprecated")
+    .expect("@deprecated");
+  assert_eq!(
+    schema.text(meta.description()),
+    Some("Marks an element of a GraphQL schema as no longer supported.")
+  );
+  let (_, reason) = argument(&schema, deprecated_directive.args(), "reason");
+  assert_eq!(
+    schema.text(reason.default_value()),
+    Some("\"No longer supported\"")
+  );
+  assert!(
+    schema
+      .text(reason.description())
+      .is_some_and(|text| text.starts_with("Explains why this element was deprecated")),
+    "the block string's indentation came off"
+  );
+
+  let (fields, _) = member(&schema, "__Type", "fields");
+  let (_, include_deprecated) = argument(&schema, fields.args(), "includeDeprecated");
+  assert_eq!(
+    schema.text(include_deprecated.default_value()),
+    Some("false")
+  );
+
+  // The three meta-fields have no SDL of their own, and describe nothing.
+  let (_, typename) = member(&schema, "Query", "__typename");
+  assert_eq!(*typename, FieldMeta::EMPTY);
+}
+
+/// The two largest public schemas in the fixture tree build, and keep every description they
+/// write.
+///
+/// Both were printed by GraphQL servers, so every description in them is a block string and no
+/// block string in them is anything else: the `"""` delimiters, halved, count the described
+/// elements. The build adds the built-ins' descriptions on top, so only what the document defined
+/// is counted on the schema's side.
+#[test]
+fn the_large_public_schemas_keep_every_description() {
+  const GITHUB: &str = include_str!("fixtures/schemas/github_schema.graphql");
+  const GITLAB: &str = include_str!("fixtures/schemas/gitlab_schema.graphql");
+
+  fn described(schema: &Schema) -> usize {
+    let mut count = usize::from(schema.description().is_some());
+    for (index, def) in schema.types().iter().enumerate() {
+      if def.is_built_in() {
+        continue;
+      }
+      let id = TypeId::new(index as u32);
+      count += usize::from(schema.type_meta(id).description().is_some());
+      for (field, meta) in schema.fields_in_order(id) {
+        if schema.name(field.name()).starts_with("__") {
+          continue;
+        }
+        count += usize::from(meta.description().is_some());
+        count += schema
+          .inputs_in_order(field.args())
+          .filter(|(_, meta)| meta.description().is_some())
+          .count();
+      }
+      count += schema
+        .input_fields_in_order(id)
+        .filter(|(_, meta)| meta.description().is_some())
+        .count();
+      count += schema
+        .enum_values_in_order(id)
+        .filter(|(_, meta)| meta.description().is_some())
+        .count();
+    }
+    for (directive, meta) in schema.directives_in_order() {
+      if directive.is_built_in() {
+        continue;
+      }
+      count += usize::from(meta.description().is_some());
+      count += schema
+        .inputs_in_order(directive.args())
+        .filter(|(_, meta)| meta.description().is_some())
+        .count();
+    }
+    count
+  }
+
+  for (name, sdl) in [("github", GITHUB), ("gitlab", GITLAB)] {
+    let delimiters = sdl.matches("\"\"\"").count();
+    assert_eq!(delimiters % 2, 0, "{name}: the block delimiters pair up");
+    let schema = built(sdl);
+    assert_eq!(
+      described(&schema),
+      delimiters / 2,
+      "{name}: a description the document wrote is not one the schema keeps"
     );
   }
 }

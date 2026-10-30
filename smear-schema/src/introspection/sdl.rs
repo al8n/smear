@@ -18,6 +18,25 @@
 //! leaves it true. Dropping them is what makes the two doors produce the same flags, and it costs
 //! nothing: the build puts back exactly what was dropped.
 //!
+//! The meta types are checked before they are dropped, and the check is for contradictions of the
+//! specification's shape and nothing more: each one's kind, that it implements nothing, the type of
+//! every field and argument it reports that smear's meta-schema has, and that nothing is listed
+//! twice. A document cannot define a `__` type at all, so the SDL door always carries smear's
+//! meta-schema, and what a response says about those types beyond their shape — descriptions, the
+//! order the members are listed in, members a server adds ahead of the specification or keeps
+//! from behind it — is that server's rendering, not the schema it describes. So that is not kept,
+//! while a meta type the response contradicts is refused rather than quietly replaced. Any other
+//! `__` type is an introspection extension's own, and is dropped along with the extension's fields.
+//!
+//! A built-in scalar or a specified directive is dropped only while that last clause holds. One
+//! the response reports other than as the build injects it says something the injected one would
+//! lose — for a scalar, a `specifiedByURL`, a `null` description or a description other than the
+//! built-in's own; for a directive, any of its description, locations, arguments (with their
+//! descriptions, types and defaults) or repeatability — so it is written out as a definition of its
+//! own. That is how the SDL door reads a document that spelled the built-in out, flag, text and
+//! place among its siblings all three, so the two doors agree on it. A server whose built-in texts
+//! are not graphql-js's has its built-ins written out the same way, keeping its own.
+//!
 //! It emits **nothing it has not checked**, and most of the checking happened before it ran.
 //! [`decode`](super::decode) admits a name only if it spells one, and resolves type kinds and
 //! directive locations to their enums, so what reaches this file is already drawn from the closed
@@ -26,17 +45,24 @@
 //! one fragment no vocabulary covers and which goes through the parser itself. The only bytes that
 //! reach the SDL parser unexamined are the renderer's own punctuation.
 //!
+//! **Prose is the one fragment it writes rather than checks.** A description, a deprecation reason
+//! and a `specifiedByURL` are text the response chose, so each is written as the string literal
+//! graphql-js's `printString` would write for it — quoted, with every quote, backslash and control
+//! character escaped — and comes back out of the build's decoder as the same text. Nothing in it
+//! can close the literal it sits in, so nothing in it can reach the parser as syntax.
+//!
 //! [`RedefinedBuiltInType`]: super::super::SchemaErrorKind::RedefinedBuiltInType
 //! [`TypeDef::is_built_in`]: super::super::TypeDef::is_built_in
 
-use std::string::String;
+use std::{string::String, vec::Vec};
 
 use tokora::{Parse as _, Parser};
 
 use smear_parser::graphql::{
   GraphQL,
   ast::{
-    TypeDefinition, TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
+    ConstInputValue, TypeDefinition, TypeSystemDefinition, TypeSystemDefinitionOrExtension,
+    TypeSystemDocument,
   },
   error::GraphqlErrors,
   syntactic::{GraphqlLexer, type_system_document},
@@ -44,17 +70,21 @@ use smear_parser::graphql::{
 
 use super::{
   super::{
+    // The builder's own escaping, so a description renders as the literal the build decodes back,
+    // and its own printing, so a default compares as the build would keep it.
+    builder::print::{canonical, escape},
     builtin,
     // The SDL door's own owner-path helper, so `Query.hero.first` reads the same whichever door
     // refused it.
     error::owner_path as path,
-    repr::TypeKind,
+    repr::{DirectiveLocation, DirectiveLocations, TypeKind, is_reserved},
   },
   decode,
   error::{ResponseError, ResponseErrorKind},
+  json::Text,
   model::{
-    IntrospectedDirective, IntrospectedEnumValue, IntrospectedField, IntrospectedInputValue,
-    IntrospectedKind, IntrospectedSchema, IntrospectedType, Name, TypeRef,
+    Deprecated, IntrospectedDirective, IntrospectedEnumValue, IntrospectedField,
+    IntrospectedInputValue, IntrospectedKind, IntrospectedSchema, IntrospectedType, Name, TypeRef,
   },
 };
 
@@ -73,6 +103,9 @@ pub(super) fn render(response: &str) -> Rendered<String> {
 #[derive(Debug, Default)]
 struct Renderer {
   out: String,
+  /// Which of the eight meta types the response has listed so far, one bit each in
+  /// [`META_TYPES`]' order, so one listed twice is refused rather than read twice and dropped.
+  meta_types: u8,
 }
 
 impl Renderer {
@@ -94,6 +127,7 @@ impl Renderer {
   /// schema whose query root is called something else round-trips, which the convention would
   /// quietly break.
   fn roots(&mut self, schema: &IntrospectedSchema<'_>) -> Rendered {
+    self.description(schema.description.as_ref(), "");
     self.out.push_str("schema {\n");
     let query = named_root(schema.query_type.name, "query")?;
     self.out.push_str("  query: ");
@@ -132,23 +166,39 @@ impl Renderer {
     let kind = named_kind(ty.kind, name, None)?;
 
     // The meta-schema is injected by the build, unconditionally, so re-emitting it is a
-    // redefinition. Only the eight names the specification defines are dropped: a server exposing
-    // some other `__`-prefixed type is exposing something this schema does not know about, and
-    // `ReservedTypeName` says so rather than the door swallowing it.
+    // redefinition. Each of the eight the specification defines is held to its shape before it is
+    // dropped, so a response that contradicts it is refused rather than quietly given smear's.
     if builtin::INTROSPECTION_TYPES.contains(&name) {
+      return self.meta_type(ty, name, kind);
+    }
+    // Any other `__` type is an introspection extension's own — `__AppliedDirective`,
+    // `__DirectiveArgument` — and is dropped with the extension fields that refer to it. Nothing
+    // the door keeps should refer to one: a type that did would be refused by the build for naming
+    // an undefined type, which is the right failure.
+    if is_reserved(name.as_bytes()) {
       return Ok(());
     }
-    // Likewise the five built-in scalars — but only when the response agrees they are scalars. A
-    // response that calls `Int` an enum is describing a schema in which `Int` is an enum, and
-    // dropping it would build a different schema than the one described.
-    if matches!(kind, TypeKind::Scalar) && builtin::BUILT_IN_SCALARS.contains(&name) {
+    // Likewise the five built-in scalars — but only when the response agrees they are scalars, and
+    // only when it says nothing about one that the build's own would not. A response that calls
+    // `Int` an enum is describing a schema in which `Int` is an enum, and dropping it would build a
+    // different schema than the one described. A response that gives `String` a description of its
+    // own, a `null` one or a `specifiedByURL` says what a document that spelled `String` out says,
+    // and the SDL door keeps that spelling as the document's own definition, so this door writes it
+    // out too.
+    if matches!(kind, TypeKind::Scalar) && is_the_built_in_scalar(ty, name) {
       return Ok(());
     }
 
+    self.description(ty.description.as_ref().and_then(Option::as_ref), "");
     match kind {
       TypeKind::Scalar => {
         self.out.push_str("scalar ");
         self.out.push_str(name);
+        if let Some(url) = ty.specified_by_url.as_ref() {
+          self.out.push_str(" @specifiedBy(url: ");
+          quote(url.as_str(), &mut self.out);
+          self.out.push(')');
+        }
         self.out.push_str("\n\n");
       }
       TypeKind::Object | TypeKind::Interface => {
@@ -220,12 +270,14 @@ impl Renderer {
     self.out.push_str(" {\n");
     for field in fields {
       let name = field.name.as_str();
+      self.description(field.description.as_ref(), "  ");
       self.out.push_str("  ");
       self.out.push_str(name);
       self.arguments(&field.args, &path(&[owner, name]))?;
       self.out.push_str(": ");
       let rendered = type_reference(&field.ty, owner, name)?;
       self.out.push_str(&rendered);
+      self.deprecated(&field.deprecated);
       self.out.push('\n');
     }
     self.out.push_str("}\n\n");
@@ -267,9 +319,14 @@ impl Renderer {
     Ok(())
   }
 
-  /// `name: Type` with an optional `= default`, shared by arguments and input-object fields.
+  /// `name: Type` with an optional `= default`, shared by arguments and input-object fields, its
+  /// description written in front of it on the same line.
   fn input_value(&mut self, value: &IntrospectedInputValue<'_>, owner: &str) -> Rendered {
     let name = value.name.as_str();
+    if let Some(Some(description)) = &value.description {
+      quote(description.as_str(), &mut self.out);
+      self.out.push(' ');
+    }
     self.out.push_str(name);
     self.out.push_str(": ");
     let rendered = type_reference(&value.ty, owner, name)?;
@@ -280,6 +337,7 @@ impl Renderer {
       self.out.push_str(" = ");
       self.out.push_str(default);
     }
+    self.deprecated(&value.deprecated);
     Ok(())
   }
 
@@ -318,19 +376,62 @@ impl Renderer {
       if matches!(name, "true" | "false" | "null") {
         return Err(ResponseError::new(ResponseErrorKind::InvalidEnumValue, name).owned_by(owner));
       }
+      self.description(value.description.as_ref(), "  ");
       self.out.push_str("  ");
       self.out.push_str(name);
+      self.deprecated(&value.deprecated);
       self.out.push('\n');
     }
     self.out.push_str("}\n\n");
     Ok(())
   }
 
+  /// A description on a line of its own, in front of the element it describes.
+  fn description(&mut self, description: Option<&Text<'_>>, indent: &str) {
+    if let Some(description) = description {
+      self.out.push_str(indent);
+      quote(description.as_str(), &mut self.out);
+      self.out.push('\n');
+    }
+  }
+
+  /// ` @deprecated(reason: …)` behind a member the response reports deprecated, its reason quoted
+  /// or `null` as the response wrote it — the one applied directive besides `@oneOf` and
+  /// `@specifiedBy` that introspection carries.
+  fn deprecated(&mut self, deprecated: &Deprecated<'_>) {
+    let Some(reason) = deprecated else {
+      return;
+    };
+    self.out.push_str(" @deprecated(reason: ");
+    match reason {
+      Some(reason) => quote(reason.as_str(), &mut self.out),
+      None => self.out.push_str("null"),
+    }
+    self.out.push(')');
+  }
+
+  /// One of the eight meta types: refused when the response has listed it already, and otherwise
+  /// held to its shape and dropped.
+  fn meta_type(&mut self, ty: &IntrospectedType<'_>, name: &str, kind: TypeKind) -> Rendered {
+    let Some(at) = META_TYPES.iter().position(|meta| meta.name == name) else {
+      // The caller asked `INTROSPECTION_TYPES`, which names the same eight.
+      return Ok(());
+    };
+    let listed = 1u8 << at;
+    if self.meta_types & listed != 0 {
+      return Err(not_the_meta_type(None, std::format!("{name} listed twice")));
+    }
+    self.meta_types |= listed;
+    check_meta_type(ty, &META_TYPES[at], kind)
+  }
+
   fn directive(&mut self, directive: &IntrospectedDirective<'_>) -> Rendered {
     let name = directive.name.as_str();
-    // As with the built-in scalars: injected by the build, so re-emitting one would flip
-    // `DirectiveDef::is_built_in` for a definition the two doors are supposed to agree on.
-    if builtin::BUILT_IN_DIRECTIVES.contains(&name) {
+    // As with the built-in scalars: injected by the build, so re-emitting one the build would
+    // inject anyway would flip `DirectiveDef::is_built_in` for a definition the two doors are
+    // supposed to agree on — and one the response reports otherwise is the document's own, which
+    // the SDL door keeps as such, so it is written out.
+    if is_the_specified_directive(directive) {
       return Ok(());
     }
     if directive.locations.is_empty() {
@@ -346,6 +447,7 @@ impl Renderer {
       );
     }
 
+    self.description(directive.description.as_ref().and_then(Option::as_ref), "");
     self.out.push_str("directive @");
     self.out.push_str(name);
     self.arguments(&directive.args, name)?;
@@ -367,6 +469,176 @@ impl Renderer {
 // ---------------------------------------------------------------------------------------------
 // checked fragments
 // ---------------------------------------------------------------------------------------------
+
+/// Whether a member of `__Schema.types` is one of the five built-in scalars as the build injects
+/// it, so leaving it to the build loses nothing: no `specifiedByURL`, and a `description` that is
+/// either not in the response at all — the query did not ask — or the built-in's own text.
+fn is_the_built_in_scalar(ty: &IntrospectedType<'_>, name: &str) -> bool {
+  let Some(at) = builtin::BUILT_IN_SCALARS
+    .iter()
+    .position(|scalar| *scalar == name)
+  else {
+    return false;
+  };
+  ty.specified_by_url.is_none()
+    && says_only(
+      ty.description.as_ref(),
+      builtin::BUILT_IN_SCALAR_DESCRIPTIONS[at],
+    )
+}
+
+/// Whether a description a response wrote says nothing the built-in's would not: absent, because
+/// the query did not ask, or the built-in's own text. A `null` one says there is none.
+fn says_only(description: Option<&Option<Text<'_>>>, built_in: &str) -> bool {
+  match description {
+    None => true,
+    Some(Some(text)) => text.as_str() == built_in,
+    Some(None) => false,
+  }
+}
+
+/// One of the five specified directives as every build injects it, in the terms introspection
+/// reports it in.
+struct SpecifiedDirective {
+  name: &'static str,
+  description: &'static str,
+  locations: DirectiveLocations,
+  repeatable: bool,
+  argument: Option<SpecifiedArgument>,
+}
+
+/// The one argument a specified directive declares, if it declares one.
+struct SpecifiedArgument {
+  name: &'static str,
+  description: &'static str,
+  /// The type, spelled as SDL.
+  ty: &'static str,
+  /// The default's canonical text.
+  default: Option<&'static str>,
+}
+
+/// The five specified directives as every build injects them, in
+/// [`builtin::BUILT_IN_DIRECTIVES`]' order: what a response's entry for one has to be, exactly,
+/// for the door to leave it to the build. `the_specified_directives_are_the_injected_ones` holds
+/// this to what the build injects.
+static SPECIFIED_DIRECTIVES: [SpecifiedDirective; 5] = {
+  const EXECUTABLE: DirectiveLocations = DirectiveLocations::from_bits(0)
+    .with(DirectiveLocation::Field)
+    .with(DirectiveLocation::FragmentSpread)
+    .with(DirectiveLocation::InlineFragment);
+  [
+    SpecifiedDirective {
+      name: "skip",
+      description: "Directs the executor to skip this field or fragment when the `if` argument is true.",
+      locations: EXECUTABLE,
+      repeatable: false,
+      argument: Some(SpecifiedArgument {
+        name: "if",
+        description: "Skipped when true.",
+        ty: "Boolean!",
+        default: None,
+      }),
+    },
+    SpecifiedDirective {
+      name: "include",
+      description: "Directs the executor to include this field or fragment only when the `if` argument is true.",
+      locations: EXECUTABLE,
+      repeatable: false,
+      argument: Some(SpecifiedArgument {
+        name: "if",
+        description: "Included when true.",
+        ty: "Boolean!",
+        default: None,
+      }),
+    },
+    SpecifiedDirective {
+      name: "deprecated",
+      description: "Marks an element of a GraphQL schema as no longer supported.",
+      locations: DirectiveLocations::from_bits(0)
+        .with(DirectiveLocation::FieldDefinition)
+        .with(DirectiveLocation::ArgumentDefinition)
+        .with(DirectiveLocation::InputFieldDefinition)
+        .with(DirectiveLocation::EnumValue),
+      repeatable: false,
+      argument: Some(SpecifiedArgument {
+        name: "reason",
+        description: "Explains why this element was deprecated, usually also including a suggestion for how to access supported similar data. Formatted using the Markdown syntax, as specified by [CommonMark](https://commonmark.org/).",
+        ty: "String",
+        default: Some("\"No longer supported\""),
+      }),
+    },
+    SpecifiedDirective {
+      name: "specifiedBy",
+      description: "Exposes a URL that specifies the behavior of this scalar.",
+      locations: DirectiveLocations::from_bits(0).with(DirectiveLocation::Scalar),
+      repeatable: false,
+      argument: Some(SpecifiedArgument {
+        name: "url",
+        description: "The URL that specifies the behavior of this scalar.",
+        ty: "String!",
+        default: None,
+      }),
+    },
+    SpecifiedDirective {
+      name: "oneOf",
+      description: "Indicates exactly one field must be supplied and this field must not be `null`.",
+      locations: DirectiveLocations::from_bits(0).with(DirectiveLocation::InputObject),
+      repeatable: false,
+      argument: None,
+    },
+  ]
+};
+
+/// Whether a response's directive is one of the five specified directives exactly as the build
+/// injects it — the same description or none asked for, the same locations, the same argument with
+/// the same description, type and default, and the same repeatability — so leaving it to the
+/// build loses nothing.
+fn is_the_specified_directive(directive: &IntrospectedDirective<'_>) -> bool {
+  let name = directive.name.as_str();
+  let Some(specified) = SPECIFIED_DIRECTIVES
+    .iter()
+    .find(|specified| specified.name == name)
+  else {
+    return false;
+  };
+  let locations: DirectiveLocations = directive.locations.iter().copied().collect();
+  says_only(directive.description.as_ref(), specified.description)
+    && locations == specified.locations
+    && directive.is_repeatable == specified.repeatable
+    && match (directive.args.as_slice(), &specified.argument) {
+      ([], None) => true,
+      ([argument], Some(expected)) => is_the_specified_argument(argument, expected, name),
+      _ => false,
+    }
+}
+
+/// Whether a response's argument is a specified directive's own, exactly: name, description,
+/// type, default and no deprecation.
+fn is_the_specified_argument(
+  argument: &IntrospectedInputValue<'_>,
+  expected: &SpecifiedArgument,
+  owner: &str,
+) -> bool {
+  argument.name.as_str() == expected.name
+    && says_only(argument.description.as_ref(), expected.description)
+    && argument.deprecated.is_none()
+    && type_reference(&argument.ty, owner, expected.name).is_ok_and(|ty| ty == expected.ty)
+    && match (&argument.default_value, expected.default) {
+      (None, None) => true,
+      (Some(default), Some(expected)) => {
+        canonical_default(default.as_str()).is_some_and(|default| default == expected)
+      }
+      _ => false,
+    }
+}
+
+/// Writes prose as the string literal graphql-js's `printString` writes for it: in quotes, every
+/// quote, backslash and control inside escaped. See the module header for why that is the check.
+fn quote(text: &str, out: &mut String) {
+  out.push('"');
+  escape(text, out);
+  out.push('"');
+}
 
 /// Reads a `__TypeKind` that must name a type.
 ///
@@ -486,16 +758,27 @@ fn attach(error: ResponseError, owner: Option<&str>) -> ResponseError {
 ///
 /// So the value is handed to the parser inside a throwaway document of its own, and the result is
 /// checked structurally rather than merely for success. Success alone is not enough: `1 g: Int`
-/// parses, and would add a field. **One definition, holding one input value, with a default** is
-/// the shape that admits nothing but a complete const value — anything the value did not consume
-/// becomes a second field, a second definition, or a syntax error, and all three fail this.
+/// parses, and would add a field. **One definition, holding one input value, with a default and no
+/// directives** is the shape that admits nothing but a complete const value — anything the value
+/// did not consume becomes a directive, a second field, a second definition, or a syntax error, and
+/// all four fail this. No directives, because the grammar admits const directives after a default:
+/// `1 @deprecated(reason: "x")` is one input value with a default, and copied through it would
+/// smuggle a deprecation into the rendered SDL that contradicts the response's own `isDeprecated`.
 fn check_default_value(default: &str, owner: &str, subject: &str) -> Rendered {
-  let probe = std::format!("input P{{f:T={default}}}");
-  let refuse = || {
+  read_default_value(default, |_| ()).ok_or_else(|| {
     ResponseError::new(ResponseErrorKind::MalformedDefaultValue, default)
       .owned_by(path(&[owner, subject]))
-  };
+  })
+}
 
+/// Parses a server-printed default inside a throwaway document of its own and hands `read` the
+/// one const value in it, or answers `None` for text that is anything else. See
+/// [`check_default_value`] for why the shape is what admits nothing but a complete value.
+fn read_default_value<R>(
+  default: &str,
+  read: impl FnOnce(&ConstInputValue<&str>) -> R,
+) -> Option<R> {
+  let probe = std::format!("input P{{f:T={default}}}");
   let document = Parser::with_parser::<
     GraphqlLexer<'_, str>,
     TypeSystemDocument<&str>,
@@ -504,21 +787,282 @@ fn check_default_value(default: &str, owner: &str, subject: &str) -> Rendered {
     GraphQL,
   >(type_system_document)
   .parse_str(&probe)
-  .map_err(|_| refuse())?;
+  .ok()?;
 
   let definitions: &[_] = document.definitions();
   let [TypeSystemDefinitionOrExtension::Definition(described)] = definitions else {
-    return Err(refuse());
+    return None;
   };
   let TypeSystemDefinition::Type(TypeDefinition::InputObject(input)) = described.node() else {
-    return Err(refuse());
+    return None;
   };
-  let values: &[_] = match input.fields_definition() {
-    Some(fields) => fields.input_value_definitions(),
-    None => return Err(refuse()),
-  };
+  let values: &[_] = input.fields_definition()?.input_value_definitions();
   match values {
-    [only] if only.default_value().is_some() => Ok(()),
-    _ => Err(refuse()),
+    [only] if only.directives().is_none() => Some(read(only.default_value()?.value())),
+    _ => None,
   }
 }
+
+/// A server-printed default printed again the way the build prints every default, so two spellings
+/// of one value compare equal — or `None` when it is not one const value.
+fn canonical_default(default: &str) -> Option<String> {
+  read_default_value(default, |value| {
+    let mut out = String::new();
+    canonical(value, &mut out).ok().map(|()| out)
+  })
+  .flatten()
+}
+
+// ---------------------------------------------------------------------------------------------
+// the meta-schema, held to its shape
+// ---------------------------------------------------------------------------------------------
+
+/// One of draft §4's eight meta types as smear's meta-schema declares it: the shape a response's
+/// entry for it must not contradict.
+struct MetaType {
+  name: &'static str,
+  kind: TypeKind,
+  /// The object's fields, in the order smear declares them; empty for the two enums, whose values
+  /// carry no type to contradict.
+  fields: &'static [MetaField],
+}
+
+/// A meta type's field: its name, its type spelled as SDL, and its arguments.
+struct MetaField {
+  name: &'static str,
+  ty: &'static str,
+  args: &'static [MetaArgument],
+}
+
+/// A meta field's argument: its name and its type spelled as SDL.
+struct MetaArgument {
+  name: &'static str,
+  ty: &'static str,
+}
+
+/// The `includeDeprecated` argument five meta fields declare.
+const INCLUDE_DEPRECATED: &[MetaArgument] = &[MetaArgument {
+  name: "includeDeprecated",
+  ty: "Boolean",
+}];
+
+/// Shorthand for a meta field without arguments.
+const fn meta_field(name: &'static str, ty: &'static str) -> MetaField {
+  MetaField {
+    name,
+    ty,
+    args: &[],
+  }
+}
+
+/// Shorthand for a meta field taking `includeDeprecated`.
+const fn filtered_field(name: &'static str, ty: &'static str) -> MetaField {
+  MetaField {
+    name,
+    ty,
+    args: INCLUDE_DEPRECATED,
+  }
+}
+
+/// smear's meta-schema, in [`builtin::INTROSPECTION_TYPES`]' order: the kinds, and the field and
+/// argument types, a response's entry for each of the eight must not contradict.
+/// `the_meta_types_are_the_injected_ones` holds this to what the build injects.
+static META_TYPES: [MetaType; 8] = [
+  MetaType {
+    name: "__Schema",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("description", "String"),
+      meta_field("types", "[__Type!]!"),
+      meta_field("queryType", "__Type!"),
+      meta_field("mutationType", "__Type"),
+      meta_field("subscriptionType", "__Type"),
+      meta_field("directives", "[__Directive!]!"),
+    ],
+  },
+  MetaType {
+    name: "__Type",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("kind", "__TypeKind!"),
+      meta_field("name", "String"),
+      meta_field("description", "String"),
+      meta_field("specifiedByURL", "String"),
+      filtered_field("fields", "[__Field!]"),
+      meta_field("interfaces", "[__Type!]"),
+      meta_field("possibleTypes", "[__Type!]"),
+      filtered_field("enumValues", "[__EnumValue!]"),
+      filtered_field("inputFields", "[__InputValue!]"),
+      meta_field("ofType", "__Type"),
+      meta_field("isOneOf", "Boolean"),
+    ],
+  },
+  MetaType {
+    name: "__Field",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("name", "String!"),
+      meta_field("description", "String"),
+      filtered_field("args", "[__InputValue!]!"),
+      meta_field("type", "__Type!"),
+      meta_field("isDeprecated", "Boolean!"),
+      meta_field("deprecationReason", "String"),
+    ],
+  },
+  MetaType {
+    name: "__InputValue",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("name", "String!"),
+      meta_field("description", "String"),
+      meta_field("type", "__Type!"),
+      meta_field("defaultValue", "String"),
+      meta_field("isDeprecated", "Boolean!"),
+      meta_field("deprecationReason", "String"),
+    ],
+  },
+  MetaType {
+    name: "__EnumValue",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("name", "String!"),
+      meta_field("description", "String"),
+      meta_field("isDeprecated", "Boolean!"),
+      meta_field("deprecationReason", "String"),
+    ],
+  },
+  MetaType {
+    name: "__TypeKind",
+    kind: TypeKind::Enum,
+    fields: &[],
+  },
+  MetaType {
+    name: "__Directive",
+    kind: TypeKind::Object,
+    fields: &[
+      meta_field("name", "String!"),
+      meta_field("description", "String"),
+      meta_field("locations", "[__DirectiveLocation!]!"),
+      filtered_field("args", "[__InputValue!]!"),
+      meta_field("isRepeatable", "Boolean!"),
+    ],
+  },
+  MetaType {
+    name: "__DirectiveLocation",
+    kind: TypeKind::Enum,
+    fields: &[],
+  },
+];
+
+/// Holds a response's entry for one of the eight meta types to smear's meta-schema.
+///
+/// What is refused is a contradiction: another kind, an interface, a field or an argument smear's
+/// meta-schema has given another type, or a member listed twice. What is ignored is everything
+/// else the entry says — members the specification's meta-schema lacks, which a server adds ahead
+/// of it or keeps from behind it (graphql-js 15's `__Type.specifiedByUrl`, an applied-directives
+/// extension's fields, the legacy `__Directive.onOperation`, `onFragment` and `onField`, a
+/// `__TypeKind` or `__DirectiveLocation` value from a later specification), its descriptions and
+/// its order — and what it leaves out is not missed, as a server older than `isRepeatable`,
+/// `isOneOf`, `specifiedByURL` or input-value deprecation leaves them out. No document can define
+/// these types, so both doors carry smear's.
+fn check_meta_type(ty: &IntrospectedType<'_>, meta: &MetaType, kind: TypeKind) -> Rendered {
+  let name = meta.name;
+  if kind != meta.kind {
+    return Err(not_the_meta_type(
+      None,
+      std::format!(
+        "{name}: {} rather than {}",
+        kind.as_str(),
+        meta.kind.as_str()
+      ),
+    ));
+  }
+  if let Some(interface) = ty.interfaces.iter().flatten().next() {
+    let interface = base_name(interface, name, "implements")?;
+    return Err(not_the_meta_type(
+      Some(name),
+      std::format!("implements {interface}"),
+    ));
+  }
+
+  let fields = ty.fields.as_deref().unwrap_or(&[]);
+  if let Some(twice) = listed_twice(fields.iter().map(|field| field.name.as_str())) {
+    return Err(not_the_meta_type(
+      Some(name),
+      std::format!("{twice} listed twice"),
+    ));
+  }
+  for reported in fields {
+    let field_name = reported.name.as_str();
+    // A field the specification's meta-schema lacks is ignored, arguments and all.
+    let Some(expected) = meta.fields.iter().find(|field| field.name == field_name) else {
+      continue;
+    };
+    let spelled = type_reference(&reported.ty, name, field_name)?;
+    if spelled != expected.ty {
+      return Err(not_the_meta_type(
+        Some(name),
+        std::format!("{field_name}: {spelled} rather than {}", expected.ty),
+      ));
+    }
+    let owner = path(&[name, field_name]);
+    if let Some(twice) = listed_twice(reported.args.iter().map(|argument| argument.name.as_str())) {
+      return Err(not_the_meta_type(
+        Some(owner.as_str()),
+        std::format!("{twice} listed twice"),
+      ));
+    }
+    for argument in &reported.args {
+      let argument_name = argument.name.as_str();
+      let Some(declared) = expected
+        .args
+        .iter()
+        .find(|candidate| candidate.name == argument_name)
+      else {
+        continue;
+      };
+      let spelled = type_reference(&argument.ty, &owner, argument_name)?;
+      if spelled != declared.ty {
+        return Err(not_the_meta_type(
+          Some(owner.as_str()),
+          std::format!("{argument_name}: {spelled} rather than {}", declared.ty),
+        ));
+      }
+    }
+  }
+
+  // An enum value carries no type to contradict, so the listing is held only to naming each value
+  // once. A value the meta-schema lacks is ignored here; a location a directive actually uses is
+  // refused where it is read, as `UnknownDirectiveLocation`.
+  let values = ty.enum_values.as_deref().unwrap_or(&[]);
+  if let Some(twice) = listed_twice(values.iter().map(|value| value.name.as_str())) {
+    return Err(not_the_meta_type(
+      Some(name),
+      std::format!("{twice} listed twice"),
+    ));
+  }
+  Ok(())
+}
+
+/// The first name, in sorted order, that a list gives more than once, or `None` when each is given
+/// once. Sorted rather than compared pair by pair, so a hostile list costs `n log n` and not `n²`.
+fn listed_twice<'a>(names: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+  let mut names: Vec<&'a str> = names.collect();
+  names.sort_unstable();
+  names
+    .windows(2)
+    .find(|pair| pair[0] == pair[1])
+    .map(|pair| pair[0])
+}
+
+/// The refusal for a meta type the response gets wrong: the subject names what it wrote, and the
+/// owner, when there is one, the meta type or meta field it wrote it on.
+fn not_the_meta_type(owner: Option<&str>, subject: String) -> ResponseError {
+  attach(
+    ResponseError::new(ResponseErrorKind::InvalidMetaType, subject),
+    owner,
+  )
+}
+
+#[cfg(test)]
+mod tests;

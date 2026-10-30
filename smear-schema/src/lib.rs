@@ -148,9 +148,10 @@ pub use builder::{
 #[cfg_attr(docsrs, doc(cfg(feature = "build")))]
 pub use error::{SchemaError, SchemaErrorKind, SchemaErrors};
 pub use repr::{
-  DefaultKind, DirectiveDef, DirectiveLocation, DirectiveLocations, FieldDef, InputValueDef,
-  MAX_DIRECTIVE_ARGUMENTS, MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, MAX_WRAPPERS, NameIndex, PackedType,
-  Range32, RootOperation, Schema, Sym, TypeDef, TypeFlags, TypeId, TypeKind, is_name, is_name_tail,
+  DefaultKind, Deprecation, DirectiveDef, DirectiveLocation, DirectiveLocations, DirectiveMeta,
+  EnumValueMeta, FieldDef, FieldMeta, InputValueDef, InputValueMeta, MAX_DIRECTIVE_ARGUMENTS,
+  MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, MAX_WRAPPERS, NameIndex, PackedType, Range32, RootOperation,
+  Schema, Sym, Text, TypeDef, TypeFlags, TypeId, TypeKind, TypeMeta, is_name, is_name_tail,
   is_reserved,
 };
 

@@ -649,3 +649,189 @@ fn a_refused_possible_table_is_a_typed_refusal() {
     crate::diagnostic::Severity::Error
   );
 }
+
+// ---------------------------------------------------------------------------------------------
+// the text arena
+// ---------------------------------------------------------------------------------------------
+
+/// The built-ins' share of the text arena is reserved exactly, which is what makes it one
+/// allocation on every build — and the share itself is a constant, recorded here.
+///
+/// 5 103 bytes: graphql-js's descriptions of the eight introspection types, the five scalars and
+/// the five specified directives, at every element that has one, plus the six defaults they print
+/// — `false` five times and `"No longer supported"` once. A walk over the parsed built-ins derives
+/// it; injecting them writes it; the two have to be the same number, and the reservation has to be
+/// that number and no more, or a warm build pays a growth or a shrink it does not need.
+#[test]
+fn the_built_in_text_reservation_is_exact() {
+  let reserved = BuiltIns::parse().text_bytes;
+  assert_eq!(
+    reserved, 5_103,
+    "the built-in SDL's text changed size; if that is intended, record the new number here and in \
+     the allocation gate's ceiling note"
+  );
+
+  let mut builder = SchemaBuilder::new();
+  builder.document(&parse("type Query { ok: Int }"));
+  assert_eq!(builder.texts.text.len(), 0, "the document carries no text");
+  builder.inject_built_ins();
+  assert_eq!(
+    builder.texts.text.len(),
+    reserved,
+    "injection wrote what the walk counted"
+  );
+  assert_eq!(
+    builder.texts.text.capacity(),
+    reserved,
+    "and the arena was reserved for exactly that"
+  );
+}
+
+/// Exactly at the text ceiling a string is admitted; one byte past it the arena refuses, and goes
+/// on refusing.
+#[test]
+fn the_text_ceiling_is_a_price_at_it_and_a_refusal_one_past_it() {
+  let mut arena = TextArena::default();
+  assert_eq!(arena.admit_within(5, 8), Some((0, 5)));
+  arena.text.push_str("alpha");
+  assert_eq!(
+    arena.admit_within(3, 8),
+    Some((5, 3)),
+    "a string ending exactly at the ceiling is admitted"
+  );
+  arena.text.push_str("bet");
+  assert!(!arena.refused);
+
+  assert_eq!(arena.admit_within(1, 8), None);
+  assert!(
+    arena.refused,
+    "one byte past the ceiling is a refusal, and the arena says so"
+  );
+  assert_eq!(
+    arena.admit_within(0, 8),
+    None,
+    "a refused arena admits nothing after"
+  );
+  assert_eq!(arena.text, "alphabet", "a refusal writes nothing");
+}
+
+/// A string written in one walk, because the arena already has room for its spelling, is the
+/// string the sized path writes — and a refusal part-way through leaves the arena as it was.
+#[test]
+fn one_walk_writes_what_two_walks_write() {
+  for spelling in [
+    "\"plain\"",
+    "\"a \u{5c}\"quoted\u{5c}\" word, a tab \u{5c}t and \u{5c}u{e9}\"",
+    "\"\"\"\n    block\n      indented\n    \u{5c}\"\"\" kept\n  \"\"\"",
+    "\"\"",
+  ] {
+    let mut sized = TextArena::default();
+    let mut roomy = TextArena::default();
+    roomy.text.reserve(spelling.len());
+    let from_sized = sized.string(spelling.as_bytes()).expect("a value");
+    let from_roomy = roomy.string(spelling.as_bytes()).expect("a value");
+    assert_eq!(sized.text, roomy.text, "{spelling}");
+    assert_eq!(from_sized, from_roomy, "{spelling}");
+  }
+
+  let mut roomy = TextArena::default();
+  roomy.text.push_str("kept");
+  roomy.text.reserve(64);
+  assert!(roomy.string(b"\"ok \x5cq\"").is_err());
+  assert_eq!(
+    roomy.text, "kept",
+    "a refusal part-way through writes nothing"
+  );
+}
+
+/// The shipped ceiling stops one byte short of what an offset names, so the sentinel is never a
+/// handle the arena issues.
+#[test]
+fn the_text_ceiling_keeps_the_sentinel_unissued() {
+  assert_eq!(MAX_TEXT_BYTES, u32::MAX - 1);
+  assert!(Text::new(MAX_TEXT_BYTES, 0).is_some());
+  assert!(Text::NONE.is_none());
+}
+
+/// A build whose text arena refused answers the arena's typed refusal and nothing else, as the
+/// other two arenas do.
+#[test]
+fn a_refused_text_arena_is_a_typed_refusal() {
+  let mut builder = SchemaBuilder::new();
+  builder.document(&parse("\"described\" type Query { ok: Int }"));
+  assert_eq!(
+    builder.texts.admit_within(1, 0),
+    None,
+    "no room at all, which is the arena four gigabytes in"
+  );
+  let errors = builder
+    .finish()
+    .expect_err("an arena that refused a string is not a schema");
+  assert_eq!(
+    errors.kinds(),
+    std::vec![SchemaErrorKind::TooManyInternedBytes],
+    "{errors}"
+  );
+}
+
+/// Every declaration-order table is a permutation of each group it covers, over a schema with
+/// every kind of group in it — the meta-fields, an argument-less directive and an interface closure
+/// wider than one included.
+#[test]
+fn every_order_table_is_a_permutation_of_its_groups() {
+  const SDL: &str = "type Query { node(id: ID!, depth: Int = 1): Node, b: Int, a: Int }
+     interface Node { id: ID! }
+     interface Named { name: String }
+     type Thing implements Named & Node { name: String id: ID! }
+     enum Size { S M L }
+     input Filter { z: Int y: Size = M x: [Int] = [1, 2] }
+     directive @z(b: Int, a: Int) on FIELD
+     directive @y on FIELD";
+
+  fn permutation(order: &[u32]) -> bool {
+    let mut sorted: Vec<u32> = order.to_vec();
+    sorted.sort_unstable();
+    sorted
+      .iter()
+      .enumerate()
+      .all(|(at, &position)| position as usize == at)
+  }
+
+  let schema = Schema::build(&parse(SDL)).expect("an ordinary schema");
+  assert_eq!(
+    schema.text.len(),
+    BuiltIns::parse().text_bytes + "1".len() + "M".len() + "[1, 2]".len(),
+    "the arena holds the built-ins' text and this document's three defaults, and nothing else"
+  );
+
+  for index in 0..schema.types().len() {
+    let id = TypeId::new(index as u32);
+    for order in [
+      schema.field_order_of(id),
+      schema.input_field_order_of(id),
+      schema.enum_value_order_of(id),
+      schema.interface_order_of(id),
+    ] {
+      assert!(permutation(order), "{order:?}");
+    }
+    for field in schema.fields_of(id) {
+      assert!(permutation(schema.input_order(field.args())));
+    }
+  }
+  assert!(permutation(schema.directive_order()));
+  for directive in schema.directives() {
+    assert!(permutation(schema.input_order(directive.args())));
+  }
+
+  // And the tables are as long as the tables they sit beside.
+  assert_eq!(schema.type_meta.len(), schema.types.len());
+  assert_eq!(schema.field_meta.len(), schema.fields.len());
+  assert_eq!(schema.field_order.len(), schema.fields.len());
+  assert_eq!(schema.input_meta.len(), schema.inputs.len());
+  assert_eq!(schema.input_order.len(), schema.inputs.len());
+  assert_eq!(schema.enum_value_meta.len(), schema.enum_values.len());
+  assert_eq!(schema.enum_value_order.len(), schema.enum_values.len());
+  assert_eq!(schema.interface_order.len(), schema.interfaces.len());
+  assert_eq!(schema.directive_meta.len(), schema.directives.len());
+  assert_eq!(schema.directive_order.len(), schema.directives.len());
+}

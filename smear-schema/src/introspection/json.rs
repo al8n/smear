@@ -19,7 +19,7 @@
 //! | **Dispatch keys** — every object member key | decoded | selects the member it spells | no |
 //! | **Closed vocabularies** — `__Type.kind`, `__Directive.locations` | decoded | resolves to the enum it spells | no, the enum does |
 //! | **`Name`s** — every `name` member | **raw** | refused as [`InvalidName`] | yes, borrowed |
-//! | **Prose** — `__InputValue.defaultValue` | decoded | expanded | yes, [`Text`] |
+//! | **Prose** — every `description`, `deprecationReason` and `specifiedByURL`, and `__InputValue.defaultValue` | decoded | expanded | yes, [`Text`] |
 //! | **Everything skipped** — a member the door does not read | neither | validated only | no |
 //!
 //! The first two are decoded because a *dispatch* is a question about which member or which enum
@@ -35,9 +35,10 @@
 //! an escaped spelling is refused instead of accommodated. Nothing needs one — a `Name` is
 //! `/[_A-Za-z][_0-9A-Za-z]*/`, all ASCII.
 //!
-//! Prose is the one kind that both decodes and survives: `__InputValue.defaultValue` is a value a
-//! server *printed*, so `"\"world\""` is an ordinary thing for it to contain. [`Text`] carries it,
-//! and it allocates **only when a backslash is actually present**.
+//! Prose is the one kind that both decodes and survives: a description is free text and
+//! `__InputValue.defaultValue` is a value a server *printed*, so `"\"world\""` is an ordinary thing
+//! for either to contain. [`Text`] carries it, and it allocates **only when a backslash is actually
+//! present**.
 //!
 //! [`InvalidName`]: ResponseErrorKind::InvalidName
 //! [`Name`]: super::model::Name
@@ -141,8 +142,9 @@ const MAX_DEPTH: u32 = 128;
 /// - A **closed vocabulary** — `__Type.kind`, `__Directive.locations` — is a `Text` only until
 ///   [`IntrospectedKind`](super::model::IntrospectedKind) or
 ///   [`DirectiveLocation`](crate::DirectiveLocation) is resolved out of it.
-/// - **Prose** — `__InputValue.defaultValue` — is the one that is *kept*, and so the one place an
-///   `Unescaped` can appear in the model.
+/// - **Prose** — descriptions, deprecation reasons, `specifiedByURL`s and
+///   `__InputValue.defaultValue` — is the one that is *kept*, and so the one place an `Unescaped`
+///   can appear in the model.
 ///
 /// The two kinds that never reach it are a [`Name`](super::model::Name), which is matched against
 /// the literal's raw bytes and refuses an escape outright, and a string inside a member the door

@@ -15,22 +15,23 @@
 //! rather than compared to a string one layer down — and, being enums, they carry nothing away
 //! from the response at all.
 //!
-//! The exception is [`IntrospectedInputValue::default_value`], which is a literal a *server
-//! printed* and may perfectly well contain a `"` or a `\`. It is a [`Text`], and a [`Text`]
-//! allocates only when the literal actually holds a backslash.
+//! The exception is **prose**: [`IntrospectedInputValue::default_value`], which is a literal a
+//! *server printed*, and every description, deprecation reason and `specifiedByURL`. Any of them
+//! may perfectly well contain a `"` or a `\`, so each is a [`Text`], and a [`Text`] allocates only
+//! when the literal actually holds a backslash.
 //!
-//! **Two paths at this type — names borrow, printed values may not — and that is a statement
-//! about the model, not about the reader.** The reader meets [five kinds of string](super::json)
-//! and decodes four of them; three of the four leave nothing behind, because a dispatch key and a
-//! closed vocabulary are read in order to be *matched* and neither is a field of anything here.
-//! `Name` is the one kind read raw, and the reason is exactly the sentence above it: the borrow is
+//! **Two paths at this type — names borrow, prose may not — and that is a statement about the
+//! model, not about the reader.** The reader meets [five kinds of string](super::json) and decodes
+//! four of them; two of the four leave nothing behind, because a dispatch key and a closed
+//! vocabulary are read in order to be *matched* and neither is a field of anything here. `Name` is
+//! the one kind read raw, and the reason is exactly the sentence above it: the borrow is
 //! unconditional because the type admits no alternative.
 //!
 //! # Required means non-null in the meta-schema
 //!
 //! A field that is not an `Option` here, and carries no note below, is one draft §4 declares
 //! non-null: its absence is a malformed response and the reader says so before the renderer runs
-//! at all. The four exceptions each name a server that omits the field:
+//! at all. The exceptions each name a server, or a query, that omits the field:
 //!
 //! - `__Field.args` and `__Directive.args` — non-null in the meta-schema, universally emitted, and
 //!   defaulted anyway so a hand-written fixture can leave out the empty list.
@@ -38,15 +39,17 @@
 //!   emits no such field and no such directive.
 //! - `__Type.isOneOf` — nullable in the meta-schema and absent from every server predating
 //!   OneOf Input Objects.
+//! - `isDeprecated`, on a field, an input value and an enum value — non-null in the meta-schema,
+//!   and absent whenever the introspection query did not ask for it; input-value deprecation is
+//!   younger still. Absent reads as not deprecated, unless a `deprecationReason` was written.
 //!
-//! # What is deliberately not here
+//! # Prose is kept, because the schema keeps it
 //!
-//! `description`, `isDeprecated`, `deprecationReason` and `specifiedByURL` are read by nothing,
-//! because [`Schema`](crate::Schema) retains none of them — it is the substrate
-//! validation rules stand on, and no draft §5 rule asks whether a field is deprecated. Declaring
-//! them would be declaring that the door drops them, which is
-//! [the module header's](super) job, not the model's. It is also why prose has exactly one slot in
-//! this file: the only text a response carries that the door keeps is a default value.
+//! `description`, `isDeprecated` / `deprecationReason` and `specifiedByURL` are read at every level
+//! draft §4 has them, because [`Schema`](crate::Schema) retains all of them and the two doors have
+//! to agree on what it retains. The `description` on a type in *reference* position — an `ofType`,
+//! a field's type — is not read: draft §4 describes a named type once, where `__Schema.types`
+//! lists it.
 
 use std::{boxed::Box, vec::Vec};
 
@@ -132,6 +135,8 @@ impl IntrospectedKind {
 /// `__Schema` — the root of an introspection result.
 #[derive(Debug)]
 pub(super) struct IntrospectedSchema<'a> {
+  /// The schema's own description: draft §4's `__Schema.description`.
+  pub(super) description: Option<Text<'a>>,
   /// Every type the schema defines, the meta-schema and the built-in scalars included.
   pub(super) types: Vec<IntrospectedType<'a>>,
   /// The query root. Non-null in the meta-schema, and draft §3.3 requires one regardless.
@@ -158,6 +163,17 @@ pub(super) struct NamedTypeRef<'a> {
 pub(super) struct IntrospectedType<'a> {
   pub(super) kind: IntrospectedKind,
   pub(super) name: Option<Name<'a>>,
+  /// The description in the three states a response can write it: `None` when the member is
+  /// absent because the query did not ask, `Some(None)` for `null`, and a string.
+  ///
+  /// Three here, on a directive and on an input value, where the others have two, for one reader:
+  /// a built-in scalar or a specified directive is left to the build only when the response says
+  /// nothing the build's own would not, and an absent description says nothing where a `null` one
+  /// says there is none.
+  pub(super) description: Option<Option<Text<'a>>>,
+  /// A scalar's `@specifiedBy(url:)`. Read for every kind and rendered for a scalar alone, the one
+  /// kind the directive may be applied to.
+  pub(super) specified_by_url: Option<Text<'a>>,
   pub(super) fields: Option<Vec<IntrospectedField<'a>>>,
   pub(super) input_fields: Option<Vec<IntrospectedInputValue<'a>>>,
   pub(super) interfaces: Option<Vec<TypeRef<'a>>>,
@@ -179,43 +195,70 @@ pub(super) struct IntrospectedType<'a> {
 #[derive(Debug)]
 pub(super) struct IntrospectedField<'a> {
   pub(super) name: Name<'a>,
+  pub(super) description: Option<Text<'a>>,
   pub(super) args: Vec<IntrospectedInputValue<'a>>,
   pub(super) ty: TypeRef<'a>,
+  pub(super) deprecated: Deprecated<'a>,
 }
 
 /// `__InputValue` — a field argument, a directive argument, or an input-object field.
 #[derive(Debug)]
 pub(super) struct IntrospectedInputValue<'a> {
   pub(super) name: Name<'a>,
+  /// Three states, as [`IntrospectedType::description`]: a specified directive's argument is
+  /// compared with the built-in's.
+  pub(super) description: Option<Option<Text<'a>>>,
   pub(super) ty: TypeRef<'a>,
   /// The server's printed spelling of the default, or null for no default.
   ///
-  /// **The one prose slot in the model**, and therefore the one place a [`Text`] can be
-  /// `Unescaped` *here*: a printed value may contain a `"` or a `\` and is kept. A dispatch key
-  /// and a closed vocabulary may hold an escape too and are decoded for it, but neither is a field
-  /// of anything in this file, so neither can leave an allocation behind.
+  /// Prose like a description, and so a place a [`Text`] can be `Unescaped` *here*: a printed
+  /// value may contain a `"` or a `\` and is kept. A dispatch key and a closed vocabulary may hold
+  /// an escape too and are decoded for it, but neither is a field of anything in this file, so
+  /// neither can leave an allocation behind.
   ///
-  /// `Schema` keeps only [`DefaultKind`](crate::DefaultKind) — presence and
-  /// null-ness — so the spelling matters exactly twice: it must parse, and it must be
-  /// distinguishable from `null`. Both fall out of handing it back to the const-value parser.
+  /// It must parse — the renderer hands it to the const-value parser before embedding it — and the
+  /// build then prints it again, so `Schema` keeps the canonical text of what the server printed
+  /// beside the [`DefaultKind`](crate::DefaultKind) it reduces it to.
   pub(super) default_value: Option<Text<'a>>,
+  pub(super) deprecated: Deprecated<'a>,
 }
 
 /// `__EnumValue`.
 #[derive(Debug)]
 pub(super) struct IntrospectedEnumValue<'a> {
   pub(super) name: Name<'a>,
+  pub(super) description: Option<Text<'a>>,
+  pub(super) deprecated: Deprecated<'a>,
 }
 
 /// `__Directive`.
 #[derive(Debug)]
 pub(super) struct IntrospectedDirective<'a> {
   pub(super) name: Name<'a>,
+  /// Three states, as [`IntrospectedType::description`].
+  pub(super) description: Option<Option<Text<'a>>>,
   /// Resolved to the enum while the bytes are in hand, so an unknown location is refused at the
   /// literal that spells it and the renderer has nothing left to compare.
   pub(super) locations: Vec<DirectiveLocation>,
   pub(super) args: Vec<IntrospectedInputValue<'a>>,
   pub(super) is_repeatable: bool,
+}
+
+/// `isDeprecated` and `deprecationReason`, read together: `None` when the member is not
+/// deprecated, and `Some` of its reason — itself `None` for a `null` reason — when it is.
+///
+/// The flag decides, as draft §4 says it does: a reason written beside `isDeprecated: false` is
+/// read and dropped. A response that wrote a reason and no flag at all — the query did not ask for
+/// one — is read as graphql-js reads every response, which keys deprecation off the reason alone.
+pub(super) type Deprecated<'a> = Option<Option<Text<'a>>>;
+
+/// Reads the pair a member's two deprecation slots were read into. See [`Deprecated`].
+pub(super) fn deprecated(is_deprecated: Option<bool>, reason: Option<Text<'_>>) -> Deprecated<'_> {
+  match is_deprecated {
+    Some(true) => Some(reason),
+    Some(false) => None,
+    None => reason.map(Some),
+  }
 }
 
 /// `__Type` in its reference position: a wrapper chain bottoming out at a named type.

@@ -6,7 +6,7 @@
 //! The previous reader allocated the same bytes three times — into a JSON value tree, into records
 //! whose every field was owned, and finally into the schema's interner. The first two exist only
 //! because a general reader has to answer "what is this?" for every node before anything can ask
-//! it a question. **The shape is closed**: 8 types and 28 members, none of them open, so at every
+//! it a question. **The shape is closed**: 8 types and 41 members, none of them open, so at every
 //! point this file already knows which member of which type it expects and dispatches on that.
 //! Nothing is built in order to be inspected, and the model borrows the response outright.
 //!
@@ -75,10 +75,11 @@ use std::{boxed::Box, string::String, vec::Vec};
 use super::{
   super::{error::owner_path, repr::DirectiveLocation},
   error::{ResponseError, ResponseErrorKind},
-  json::{Scanned, Scanner},
+  json::{Scanned, Scanner, Text},
   model::{
     IntrospectedDirective, IntrospectedEnumValue, IntrospectedField, IntrospectedInputValue,
     IntrospectedKind, IntrospectedSchema, IntrospectedType, Name, NamedTypeRef, TypeRef,
+    deprecated,
   },
 };
 
@@ -432,6 +433,18 @@ fn nullable_list<'a, T>(
   nullable(scanner, |scanner| list(scanner, what, element))
 }
 
+/// A nullable prose member — a description, a deprecation reason, a `specifiedByURL` — read as
+/// [prose](super::json): decoded, and borrowed unless an escape forces a copy.
+fn prose<'a>(scanner: &mut Scanner<'a>, what: &str) -> Scanned<Option<Text<'a>>> {
+  nullable(scanner, |scanner| scanner.text(what))
+}
+
+/// `isDeprecated`, which a response may write as `null` or leave out when its query did not ask;
+/// both read as unwritten.
+fn is_deprecated(scanner: &mut Scanner<'_>, what: &str) -> Scanned<Option<bool>> {
+  nullable(scanner, |scanner| scanner.boolean(what))
+}
+
 // ---------------------------------------------------------------------------------------------
 // the closed vocabularies
 // ---------------------------------------------------------------------------------------------
@@ -476,6 +489,7 @@ fn location(scanner: &mut Scanner<'_>, owner: Owner) -> Scanned<DirectiveLocatio
 // ---------------------------------------------------------------------------------------------
 
 fn schema<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedSchema<'a>> {
+  let mut description = None;
   let mut types = None;
   let mut query_type = None;
   let mut mutation_type = None;
@@ -485,6 +499,9 @@ fn schema<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedSchema<'a>> {
   let mut members = scanner.enter_object("__Schema")?;
   while let Some(key) = scanner.next_key(&mut members)? {
     match key.as_str() {
+      "description" => member(scanner, &mut description, |scanner| {
+        prose(scanner, "__Schema.description")
+      })?,
       "types" => member(scanner, &mut types, |scanner| {
         list(scanner, "__Schema.types", ty)
       })?,
@@ -503,6 +520,7 @@ fn schema<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedSchema<'a>> {
   }
 
   let mut refusals = Refusals::default();
+  let description = refusals.take(description);
   let types = refusals.take(types);
   let query_type = refusals.take(query_type);
   let mutation_type = refusals.take(mutation_type);
@@ -511,6 +529,7 @@ fn schema<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedSchema<'a>> {
   refusals.check(scanner)?;
 
   Ok(IntrospectedSchema {
+    description: description.flatten(),
     types: types.ok_or_else(|| scanner.missing("types"))?,
     query_type: query_type.ok_or_else(|| scanner.missing("queryType"))?,
     mutation_type: mutation_type.flatten(),
@@ -550,6 +569,8 @@ fn ty<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedType<'a>> {
 
   let mut kind = None;
   let mut name = None;
+  let mut description = None;
+  let mut specified_by_url = None;
   let mut fields = None;
   let mut input_fields = None;
   let mut interfaces = None;
@@ -569,6 +590,12 @@ fn ty<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedType<'a>> {
         nullable(scanner, |scanner| {
           graphql_name(scanner, "__Type.name", Owner::Unowned)
         })
+      })?,
+      "description" => member(scanner, &mut description, |scanner| {
+        prose(scanner, "__Type.description")
+      })?,
+      "specifiedByURL" => member(scanner, &mut specified_by_url, |scanner| {
+        prose(scanner, "__Type.specifiedByURL")
       })?,
       "fields" => member(scanner, &mut fields, |scanner| {
         nullable_list(scanner, "__Type.fields", |scanner| field(scanner, at))
@@ -603,6 +630,8 @@ fn ty<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedType<'a>> {
   let mut refusals = Refusals::default();
   let kind = refusals.take(kind);
   let name = refusals.take(name);
+  let description = refusals.take(description);
+  let specified_by_url = refusals.take(specified_by_url);
   let fields = refusals.take(fields);
   let input_fields = refusals.take(input_fields);
   let interfaces = refusals.take(interfaces);
@@ -614,6 +643,8 @@ fn ty<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedType<'a>> {
   Ok(IntrospectedType {
     kind: kind.ok_or_else(|| scanner.missing("kind"))?,
     name: name.flatten(),
+    description,
+    specified_by_url: specified_by_url.flatten(),
     fields: fields.flatten(),
     input_fields: input_fields.flatten(),
     interfaces: interfaces.flatten(),
@@ -634,8 +665,11 @@ fn field<'a>(scanner: &mut Scanner<'a>, owner_at: usize) -> Scanned<Introspected
   let owner = Owner::Object(owner_at);
 
   let mut name = None;
+  let mut description = None;
   let mut args = None;
   let mut ty = None;
+  let mut is_deprecated_slot = None;
+  let mut deprecation_reason = None;
 
   let mut members = scanner.enter_object("__Field")?;
   while let Some(key) = scanner.next_key(&mut members)? {
@@ -643,33 +677,50 @@ fn field<'a>(scanner: &mut Scanner<'a>, owner_at: usize) -> Scanned<Introspected
       "name" => member(scanner, &mut name, |scanner| {
         graphql_name(scanner, "__Field.name", owner)
       })?,
+      "description" => member(scanner, &mut description, |scanner| {
+        prose(scanner, "__Field.description")
+      })?,
       "args" => member(scanner, &mut args, |scanner| {
         list(scanner, "__Field.args", |scanner| {
           input_value(scanner, Owner::Member(owner_at, at))
         })
       })?,
       "type" => member(scanner, &mut ty, |scanner| type_ref(scanner, owner))?,
+      "isDeprecated" => member(scanner, &mut is_deprecated_slot, |scanner| {
+        is_deprecated(scanner, "__Field.isDeprecated")
+      })?,
+      "deprecationReason" => member(scanner, &mut deprecation_reason, |scanner| {
+        prose(scanner, "__Field.deprecationReason")
+      })?,
       _ => scanner.skip_value()?,
     }
   }
 
   let mut refusals = Refusals::default();
   let name = refusals.take(name);
+  let description = refusals.take(description);
   let args = refusals.take(args);
   let ty = refusals.take(ty);
+  let is_deprecated_slot = refusals.take(is_deprecated_slot);
+  let deprecation_reason = refusals.take(deprecation_reason);
   refusals.check(scanner)?;
 
   Ok(IntrospectedField {
     name: name.ok_or_else(|| scanner.missing("name"))?,
+    description: description.flatten(),
     args: args.unwrap_or_default(),
     ty: ty.ok_or_else(|| scanner.missing("type"))?,
+    deprecated: deprecated(is_deprecated_slot.flatten(), deprecation_reason.flatten()),
   })
 }
 
 fn input_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<IntrospectedInputValue<'a>> {
   let mut name = None;
+  let mut description = None;
   let mut ty = None;
   let mut default_value = None;
+  let mut is_deprecated_slot = None;
+  let mut deprecation_reason = None;
 
   let mut members = scanner.enter_object("__InputValue")?;
   while let Some(key) = scanner.next_key(&mut members)? {
@@ -677,10 +728,18 @@ fn input_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspec
       "name" => member(scanner, &mut name, |scanner| {
         graphql_name(scanner, "__InputValue.name", owner)
       })?,
+      "description" => member(scanner, &mut description, |scanner| {
+        prose(scanner, "__InputValue.description")
+      })?,
       "type" => member(scanner, &mut ty, |scanner| type_ref(scanner, owner))?,
-      // The one prose member in a draft §4 response, and so the one whose text is kept.
       "defaultValue" => member(scanner, &mut default_value, |scanner| {
-        nullable(scanner, |scanner| scanner.text("__InputValue.defaultValue"))
+        prose(scanner, "__InputValue.defaultValue")
+      })?,
+      "isDeprecated" => member(scanner, &mut is_deprecated_slot, |scanner| {
+        is_deprecated(scanner, "__InputValue.isDeprecated")
+      })?,
+      "deprecationReason" => member(scanner, &mut deprecation_reason, |scanner| {
+        prose(scanner, "__InputValue.deprecationReason")
       })?,
       _ => scanner.skip_value()?,
     }
@@ -688,35 +747,57 @@ fn input_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspec
 
   let mut refusals = Refusals::default();
   let name = refusals.take(name);
+  let description = refusals.take(description);
   let ty = refusals.take(ty);
   let default_value = refusals.take(default_value);
+  let is_deprecated_slot = refusals.take(is_deprecated_slot);
+  let deprecation_reason = refusals.take(deprecation_reason);
   refusals.check(scanner)?;
 
   Ok(IntrospectedInputValue {
     name: name.ok_or_else(|| scanner.missing("name"))?,
+    description,
     ty: ty.ok_or_else(|| scanner.missing("type"))?,
     default_value: default_value.flatten(),
+    deprecated: deprecated(is_deprecated_slot.flatten(), deprecation_reason.flatten()),
   })
 }
 
 fn enum_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<IntrospectedEnumValue<'a>> {
   let mut name = None;
+  let mut description = None;
+  let mut is_deprecated_slot = None;
+  let mut deprecation_reason = None;
   let mut members = scanner.enter_object("__EnumValue")?;
   while let Some(key) = scanner.next_key(&mut members)? {
     match key.as_str() {
       "name" => member(scanner, &mut name, |scanner| {
         graphql_name(scanner, "__EnumValue.name", owner)
       })?,
+      "description" => member(scanner, &mut description, |scanner| {
+        prose(scanner, "__EnumValue.description")
+      })?,
+      "isDeprecated" => member(scanner, &mut is_deprecated_slot, |scanner| {
+        is_deprecated(scanner, "__EnumValue.isDeprecated")
+      })?,
+      "deprecationReason" => member(scanner, &mut deprecation_reason, |scanner| {
+        prose(scanner, "__EnumValue.deprecationReason")
+      })?,
       _ => scanner.skip_value()?,
     }
   }
 
   let mut refusals = Refusals::default();
   let name = refusals.take(name);
+  let description = refusals.take(description);
+  let is_deprecated_slot = refusals.take(is_deprecated_slot);
+  let deprecation_reason = refusals.take(deprecation_reason);
   refusals.check(scanner)?;
 
   Ok(IntrospectedEnumValue {
     name: name.ok_or_else(|| scanner.missing("name"))?,
+    description: description.flatten(),
+    deprecated: deprecated(is_deprecated_slot.flatten(), deprecation_reason.flatten()),
   })
 }
 
@@ -725,6 +806,7 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
   let owner = Owner::Object(scanner.position());
 
   let mut name = None;
+  let mut description = None;
   let mut locations = None;
   let mut args = None;
   let mut is_repeatable = None;
@@ -734,6 +816,9 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
     match key.as_str() {
       "name" => member(scanner, &mut name, |scanner| {
         graphql_name(scanner, "__Directive.name", Owner::Unowned)
+      })?,
+      "description" => member(scanner, &mut description, |scanner| {
+        prose(scanner, "__Directive.description")
       })?,
       "locations" => member(scanner, &mut locations, |scanner| {
         list(scanner, "__Directive.locations", |scanner| {
@@ -754,6 +839,7 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
 
   let mut refusals = Refusals::default();
   let name = refusals.take(name);
+  let description = refusals.take(description);
   let locations = refusals.take(locations);
   let args = refusals.take(args);
   let is_repeatable = refusals.take(is_repeatable);
@@ -761,6 +847,7 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
 
   Ok(IntrospectedDirective {
     name: name.ok_or_else(|| scanner.missing("name"))?,
+    description,
     locations: locations.ok_or_else(|| scanner.missing("locations"))?,
     args: args.unwrap_or_default(),
     is_repeatable: is_repeatable.unwrap_or(false),
