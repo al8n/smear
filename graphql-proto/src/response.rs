@@ -31,13 +31,16 @@
 //! driver's own value, moved in and never inspected except through
 //! [`Values`](super::Values). Nothing in this module knows what an `Int` is.
 //!
-//! [`State::TypeName`] is the one position whose *value* is `proto`'s, and it is the exception that
-//! states the rule. Draft §4.4's `__typename` answers with the name of the object type §6.4.3
-//! resolved — a fact about the shape of the response, discovered by the executor and already used
-//! by it to decide which fragments applied. It is held here the same way a response key is, as an
-//! id into the executor's name table, and it reaches a reader as [`Node::TypeName`] rather than
-//! [`Node::Leaf`] so that "this came from the driver" stays a property a serialiser can read off
-//! the type.
+//! [`State::TypeName`] and [`State::MetaLeaf`] are the positions whose *value* is `proto`'s, and
+//! they are the exceptions that state the rule. Draft §4.4's `__typename` answers with the name of
+//! the object type §6.4.3 resolved — a fact about the shape of the response, discovered by the
+//! executor and already used by it to decide which fragments applied. It is held here the same way
+//! a response key is, as an id into the executor's name table, and it reaches a reader as
+//! [`Node::TypeName`] rather than [`Node::Leaf`] so that "this came from the driver" stays a
+//! property a serialiser can read off the type. Everything under draft §4's `__schema` and
+//! `__type` is a fact about the [`Schema`], held as the schema handle it is read through — a
+//! symbol, a text handle, a kind — and it reaches a reader as [`Node::Str`], [`Node::Bool`] or
+//! [`Node::Enum`] for the same reason.
 //!
 //! # Why the type is on the slot
 //!
@@ -60,7 +63,7 @@ use core::fmt;
 
 use std::collections::TryReserveError;
 
-use smear_schema::{PackedType, Schema, TypeId};
+use smear_schema::{DirectiveLocation, PackedType, Schema, Sym, Text, TypeId, TypeKind};
 
 #[cfg(all(test, feature = "std"))]
 mod tests;
@@ -99,6 +102,10 @@ pub(super) struct Slot<V> {
   /// higher up stop at this slot instead of walking into a subtree that is already empty.
   pub(super) discarded: bool,
   /// The next slot on the ready chain, or [`NONE`].
+  ///
+  /// A draft §4 meta object is never on the ready chain, so for one the link is the meta walk's
+  /// instead: the next meta object still to be collected. Two lists through one field, and no slot
+  /// is ever on both.
   pub(super) next_ready: u32,
 }
 
@@ -180,6 +187,128 @@ pub(super) enum State<V> {
     /// The concrete object type, after `ResolveAbstractType` where the position was abstract.
     ty: TypeId,
   },
+  /// A field under one of draft §4's meta-fields, collected and not yet answered: the field of
+  /// `entity` the slot's metadata names — or, for `__schema` and `__type` on the query root type,
+  /// the field of the schema itself.
+  ///
+  /// Never on the ready chain, and never seen by `poll_resolve` or `poll_response`: the walk
+  /// `expand`'s caller runs answers every one before the call that collected it returns. See
+  /// `execute::introspect`.
+  MetaField(Entity),
+  /// A draft §4 meta object — `__Schema`, `__Type`, `__Field`, `__InputValue`, `__EnumValue` or
+  /// `__Directive` — whose selection set has not been collected yet.
+  ///
+  /// [`Expanded`](State::Expanded) once it has been. It holds no `V` in either state, so the
+  /// transition releases nothing; it is there so that what a slot says is what has happened to it.
+  MetaObject(Entity),
+  /// A draft §4 leaf, answered from the schema and rendered when it is read.
+  MetaLeaf(MetaLeaf),
+}
+
+/// The entity of the schema a draft §4 meta object stands for.
+///
+/// Indices rather than borrows, for the reason [`Slot`] holds no lifetime: a field is its owner and
+/// its position in that owner's group, an input value and a directive are rows of the schema's own
+/// tables, and an enum value is its owner and its position. Twelve bytes with the discriminant,
+/// which is the [`Object`](State::Object) variant's own payload — see the size assertions below.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Entity {
+  /// `__Schema`.
+  Schema,
+  /// `__Type`, wrappers and all.
+  Type(TypeRef),
+  /// `__Field`: a position in `owner`'s field group, which [`Schema::fields_of`] returns.
+  Field {
+    /// The object or interface type.
+    owner: TypeId,
+    /// The field's position in the group.
+    at: u32,
+  },
+  /// `__InputValue`: a row of the schema's input-value table — an argument of a field or a
+  /// directive, or a field of an input object.
+  InputValue(u32),
+  /// `__EnumValue`: a position in `owner`'s value group, which [`Schema::enum_values_of`] returns.
+  EnumValue {
+    /// The enum type.
+    owner: TypeId,
+    /// The value's position in the group.
+    at: u32,
+  },
+  /// `__Directive`: a row of the schema's directive table.
+  Directive(u32),
+}
+
+/// A type reference as `__Type` walks it: the named type, and the [`PackedType`] wrapper word
+/// around it.
+///
+/// Eight bytes where a [`PackedType`] is twelve, because the base's name is the type's own and is
+/// read from the type table when it is wanted rather than carried. `ofType` peels one wrapper.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct TypeRef {
+  pub(super) id: TypeId,
+  pub(super) wrappers: u32,
+}
+
+impl TypeRef {
+  /// The named type itself, with no wrapper.
+  #[inline]
+  pub(super) const fn named(id: TypeId) -> Self {
+    Self { id, wrappers: 0 }
+  }
+
+  /// A reference the schema wrote — a field's or an input value's type.
+  #[inline]
+  pub(super) const fn of(ty: PackedType) -> Self {
+    Self {
+      id: ty.base_id(),
+      wrappers: ty.wrappers(),
+    }
+  }
+}
+
+/// `__TypeKind`, in one byte: the six named kinds, and the two wrappers only a reference has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MetaKind {
+  /// A named type's own kind.
+  Named(TypeKind),
+  /// `LIST`.
+  List,
+  /// `NON_NULL`.
+  NonNull,
+}
+
+impl MetaKind {
+  /// The `__TypeKind` value's spelling.
+  #[inline]
+  pub(super) const fn as_str(self) -> &'static str {
+    match self {
+      Self::Named(kind) => kind.as_str(),
+      Self::List => "LIST",
+      Self::NonNull => "NON_NULL",
+    }
+  }
+}
+
+/// A draft §4 leaf, held as the schema handle it is read through.
+///
+/// No `&'static str` and no text is stored: [`node`] is handed the schema and produces the spelling
+/// when the slot is read, which is what keeps [`State`] inside its size assertions below.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MetaLeaf {
+  /// A name the schema interned.
+  Name(Sym),
+  /// A string in the schema's text arena: a description, a deprecation reason, a `specifiedByURL`
+  /// or a default value's text. Never [`Text::NONE`] — an absent string is a [`State::Null`].
+  Text(Text),
+  /// The `schema` definition's own description, which the schema lends as a `&str` and keeps behind
+  /// no handle of its own.
+  SchemaDescription,
+  /// `isDeprecated`, `isRepeatable` or `isOneOf`.
+  Bool(bool),
+  /// A `__TypeKind`.
+  Kind(MetaKind),
+  /// A `__DirectiveLocation`.
+  Location(DirectiveLocation),
 }
 
 /// What the read counter costs, measured rather than derived.
@@ -219,6 +348,16 @@ pub(super) enum State<V> {
 /// costs between nothing and 4 MiB, depending on the driver's value — against a scratch buffer
 /// that reached 16 MiB and briefly held two of them, which is what the field is here to make
 /// unnecessary. Neither number was predicted; both were read off the compiler.
+///
+/// # And what draft §4's three variants cost, which is designed to be nothing
+///
+/// [`State::MetaField`] and [`State::MetaObject`] carry an [`Entity`] and [`State::MetaLeaf`] a
+/// [`MetaLeaf`], twelve four-aligned bytes each — the [`Object`](State::Object) variant's payload
+/// for a four-aligned `V`, and less than it for an eight-aligned one. That is why a type reference
+/// is a [`TypeRef`] rather than a [`PackedType`], and why a `__TypeKind` or a `__DirectiveLocation`
+/// is held as its one-byte discriminant and spelled at [`node`] time rather than stored as a
+/// `&'static str`: either would have grown every slot of every response, introspection or not. The
+/// four bounds below are unchanged, and they are the gate on it.
 const _: () = {
   assert!(core::mem::size_of::<State<u64>>() <= 24);
   assert!(core::mem::size_of::<Slot<u64>>() <= 72);
@@ -1050,10 +1189,19 @@ pub(super) fn node<'r, V>(
   match &slot.state {
     // `Ready` and `InFlight` are unreachable in a finished response: `poll_response` only yields
     // once nothing is outstanding. Rendering them as null keeps the function total for the
-    // `Debug` impls, which may run mid-flight.
-    State::Ready | State::InFlight | State::Null => Node::Null,
+    // `Debug` impls, which may run mid-flight. `MetaField` is unreachable more strongly still — no
+    // call returns with one in the tree — and it renders the same way for the same reason.
+    State::Ready | State::InFlight | State::Null | State::MetaField(_) => Node::Null,
     State::Leaf(value) => Node::Leaf(value),
     State::TypeName(name) => Node::TypeName(interned(names, name_spans, *name)),
+    State::MetaLeaf(leaf) => match *leaf {
+      MetaLeaf::Name(sym) => Node::Str(schema.name(sym)),
+      MetaLeaf::Text(text) => schema.text(text).map_or(Node::Null, Node::Str),
+      MetaLeaf::SchemaDescription => schema.description().map_or(Node::Null, Node::Str),
+      MetaLeaf::Bool(flag) => Node::Bool(flag),
+      MetaLeaf::Kind(kind) => Node::Enum(kind.as_str()),
+      MetaLeaf::Location(location) => Node::Enum(location.as_str()),
+    },
     State::List => Node::List(Children {
       schema,
       slots,
@@ -1061,9 +1209,10 @@ pub(super) fn node<'r, V>(
       name_spans,
       next: slot.first_child,
     }),
-    // Both object states render the same way, because rendering never read the value or the
-    // resolved type — only `first_child`. `Expanded` is that fact made into a state.
-    State::Object { .. } | State::Expanded => Node::Object(Children {
+    // Every object state renders the same way, because rendering never read the value or the
+    // resolved type — only `first_child`. `Expanded` is that fact made into a state, and a meta
+    // object is in it by the time any call returns.
+    State::Object { .. } | State::Expanded | State::MetaObject(_) => Node::Object(Children {
       schema,
       slots,
       names,
