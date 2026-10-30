@@ -226,10 +226,10 @@ fn a_spelling_with_no_value_is_refused_and_appends_nothing() {
 
 /// Bytes that are no text are refused, whatever lexed them.
 ///
-/// The spellings go to the decoder as bytes, with no lexer in front: the parsers' byte lexer
-/// checks a string's escapes and finds its end without reading the rest as text, so a `[u8]` source
-/// can hand the decoder content that is not UTF-8, and the decoder checks for itself rather than
-/// relying on any lexer to have.
+/// The spellings go to the decoder as bytes, with no lexer in front. The parsers' byte lexer refuses
+/// a string literal that is not UTF-8 (smear#246), so no spelling it lexed reaches this refusal; the
+/// decoder checks for itself anyway, because it reads bytes rather than relying on any lexer to
+/// have.
 #[test]
 fn a_value_that_is_not_utf8_is_refused() {
   for spelling in [&b"\"\xff\""[..], b"\"\"\"\n  \xc3\x28\n\"\"\""] {

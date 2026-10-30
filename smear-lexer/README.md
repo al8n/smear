@@ -89,7 +89,7 @@ The lexer is generic over source type `S`, enabling flexibility:
 
 ### String Slices (`&str`)
 
-Most common for UTF-8 validated text:
+Most common, for text that is already UTF-8. The type guarantees it, so the lexer checks nothing again:
 
 ```rust,ignore
 use smear_lexer::graphql::syntactic::Lexer;
@@ -101,7 +101,7 @@ let tokens = Lexer::<&str>::new(source);
 
 ### Byte Slices (`&[u8]`)
 
-For binary protocols or pre-validation:
+For binary protocols, or input not yet known to be UTF-8. A byte source is not validated as UTF-8 wholesale, but its string literals must be well-formed UTF-8: an inline or block string literal that is not is refused with `StringError::UnsupportedCharacter`, one error per ill-formed sequence, at that sequence's span. `bytes::Bytes`, `bstr::BStr` and `hipstr::HipByt` are byte sources too and follow the same rule.
 
 ```rust,ignore
 use smear_lexer::graphql::syntactic::Lexer;
