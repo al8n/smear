@@ -72,8 +72,9 @@
 //!   meta-schema, and what a response says about the specification's own types beyond their shape
 //!   — graphql-js 15's `__Type.specifiedByUrl`, the legacy `__Directive.onField`, a
 //!   `__DirectiveLocation` value from a later specification — is that server's rendering, not the
-//!   schema's content: it is ignored. The generated response is smear's own, so the comparison
-//!   cannot see it either way. A contradiction of the shape, or anything listed twice, is refused;
+//!   schema's content: it is ignored, and so are an introspection extension's own `__` types along
+//!   with its fields. The generated response is smear's own, so the comparison cannot see any of
+//!   it either way. A contradiction of the shape, or anything listed twice, is refused;
 //!   [`a_meta_type_is_held_to_its_shape_and_not_to_its_rendering`] and
 //!   [`a_meta_type_that_contradicts_its_shape_is_refused`] pin the two halves.
 
@@ -1602,8 +1603,9 @@ fn a_meta_type_is_held_to_its_shape_and_not_to_its_rendering() {
   assert_eq!(field_names(&older, b"__Type"), field_names(&own, b"__Type"));
 
   // What a server adds ahead of the specification, or keeps from behind it, is ignored: graphql-js
-  // 15's `specifiedByUrl`, an applied-directives field, the legacy `onOperation`, `onFragment` and
-  // `onField`, and a kind and a location from a later specification in the enums' listings.
+  // 15's `specifiedByUrl`, an applied-directives extension's field and its two `__` types, the
+  // legacy `onOperation`, `onFragment` and `onField`, and a kind and a location from a later
+  // specification in the enums' listings.
   let additions = from_response(&with_meta_types(
     r#"{"kind":"OBJECT","name":"__Type","fields":[
       {"name":"kind","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"ENUM","name":"__TypeKind"}}},
@@ -1620,8 +1622,23 @@ fn a_meta_type_is_held_to_its_shape_and_not_to_its_rendering() {
     {"kind":"ENUM","name":"__TypeKind","enumValues":[{"name":"SCALAR"},{"name":"A_LATER_KIND"}]},
     {"kind":"ENUM","name":"__DirectiveLocation","enumValues":[
       {"name":"QUERY"},{"name":"FIELD"},{"name":"A_LATER_LOCATION"}
+    ]},
+    {"kind":"OBJECT","name":"__AppliedDirective","fields":[
+      {"name":"name","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}},
+      {"name":"args","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+        {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__DirectiveArgument"}}}}}
+    ]},
+    {"kind":"OBJECT","name":"__DirectiveArgument","fields":[
+      {"name":"name","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}},
+      {"name":"value","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}}
     ]}"#,
   ));
+  for extension in [&b"__AppliedDirective"[..], b"__DirectiveArgument"] {
+    assert!(
+      additions.type_by_name(extension).is_none(),
+      "an introspection extension's own type was kept"
+    );
+  }
   assert_eq!(
     field_names(&additions, b"__Type"),
     field_names(&own, b"__Type")
@@ -1681,6 +1698,17 @@ fn a_meta_type_that_contradicts_its_shape_is_refused() {
       r#"{"kind":"OBJECT","name":"__Schema","fields":[]},{"kind":"OBJECT","name":"__Schema","fields":[]}"#,
       None,
       "__Schema listed twice",
+    ),
+    // One of the eight listed again, as an introspection extension's own `__` type would be: the
+    // name is still one of the eight's, so it is refused as listed twice rather than dropped.
+    (
+      r#"{"kind":"OBJECT","name":"__Directive","fields":[]},
+      {"kind":"OBJECT","name":"__Directive","fields":[
+        {"name":"appliedDirectives","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
+          {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__AppliedDirective"}}}}}
+      ]}"#,
+      None,
+      "__Directive listed twice",
     ),
     // A field listed twice — one smear's meta-schema has, and one it would otherwise ignore.
     (
@@ -2085,14 +2113,14 @@ const SCHEMA_REFUSALS: &[(&str, &str, &[SchemaErrorKind])] = &[
     &[SchemaErrorKind::ReservedFieldName],
   ),
   (
-    "a type name reserved for introspection",
+    "a field typed by a `__` type, which the door drops as an introspection extension's own",
     r#"{"kind":"OBJECT","name":"Query","fields":[
       {"name":"ok","args":[],"type":{"kind":"OBJECT","name":"__Secret"}}
     ]},
     {"kind":"OBJECT","name":"__Secret","fields":[
       {"name":"ok","args":[],"type":{"kind":"SCALAR","name":"Int"}}
     ]}"#,
-    &[SchemaErrorKind::ReservedTypeName],
+    &[SchemaErrorKind::UndefinedType],
   ),
 ];
 

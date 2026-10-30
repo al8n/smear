@@ -25,7 +25,8 @@
 //! meta-schema, and what a response says about those types beyond their shape — descriptions, the
 //! order the members are listed in, members a server adds ahead of the specification or keeps
 //! from behind it — is that server's rendering, not the schema it describes. So that is not kept,
-//! while a meta type the response contradicts is refused rather than quietly replaced.
+//! while a meta type the response contradicts is refused rather than quietly replaced. Any other
+//! `__` type is an introspection extension's own, and is dropped along with the extension's fields.
 //!
 //! A built-in scalar or a specified directive is dropped only while that last clause holds. One
 //! the response reports other than as the build injects it says something the injected one would
@@ -76,7 +77,7 @@ use super::{
     // The SDL door's own owner-path helper, so `Query.hero.first` reads the same whichever door
     // refused it.
     error::owner_path as path,
-    repr::{DirectiveLocation, DirectiveLocations, TypeKind},
+    repr::{DirectiveLocation, DirectiveLocations, TypeKind, is_reserved},
   },
   decode,
   error::{ResponseError, ResponseErrorKind},
@@ -165,13 +166,17 @@ impl Renderer {
     let kind = named_kind(ty.kind, name, None)?;
 
     // The meta-schema is injected by the build, unconditionally, so re-emitting it is a
-    // redefinition. Only the eight names the specification defines are dropped: a server exposing
-    // some other `__`-prefixed type is exposing something this schema does not know about, and
-    // `ReservedTypeName` says so rather than the door swallowing it. And each of the eight is held
-    // to the specification's shape before it is dropped, so a response that contradicts it is
-    // refused rather than quietly given smear's.
+    // redefinition. Each of the eight the specification defines is held to its shape before it is
+    // dropped, so a response that contradicts it is refused rather than quietly given smear's.
     if builtin::INTROSPECTION_TYPES.contains(&name) {
       return self.meta_type(ty, name, kind);
+    }
+    // Any other `__` type is an introspection extension's own — `__AppliedDirective`,
+    // `__DirectiveArgument` — and is dropped with the extension fields that refer to it. Nothing
+    // the door keeps should refer to one: a type that did would be refused by the build for naming
+    // an undefined type, which is the right failure.
+    if is_reserved(name.as_bytes()) {
+      return Ok(());
     }
     // Likewise the five built-in scalars — but only when the response agrees they are scalars, and
     // only when it says nothing about one that the build's own would not. A response that calls
