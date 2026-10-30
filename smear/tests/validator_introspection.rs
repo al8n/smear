@@ -1334,6 +1334,209 @@ fn a_specified_directive_spelled_as_the_build_injects_it_loses_its_flag_and_its_
 }
 
 // ---------------------------------------------------------------------------------------------
+// the executor's own answer, read back through the door
+// ---------------------------------------------------------------------------------------------
+
+/// What the executor answers for graphql-js's full introspection query, written by `smear::json`.
+///
+/// [`server`] is this file's own reading of what a server returns, and it shares an author with
+/// the door; the executor shares neither — it answers a real query, through draft §6.3's
+/// collection, and its response is written by the writer a service would use. The query is
+/// graphql-js 16.11.0's `getIntrospectionQuery` with every option on, committed byte for byte as
+/// `fixtures/executables/introspection_query.graphql` and re-checked against upstream by
+/// `proto_introspection.rs` whenever the `proto-oracle` job has upstream to hand.
+///
+/// Needs `proto` as well as this file's `introspection`, and the two imply neither each other.
+#[cfg(feature = "proto")]
+mod executed {
+  // Each name by itself rather than through `use super::*`, which would put `Parse` in scope a
+  // second time, through the parent's own `as _` import.
+  use smear::{
+    json::write_response_with,
+    lexer::tokora::{Parse as _, Parser},
+    parser::graphql::{
+      GraphQL,
+      ast::ExecutableDocument,
+      error::GraphqlErrors,
+      syntactic::{GraphqlLexer, executable_document},
+    },
+    proto::{Executor, Leaf, Values},
+    validator::schema::Schema,
+  };
+
+  use super::Facts;
+
+  /// graphql-js 16.11.0's `getIntrospectionQuery({ descriptions, specifiedByUrl,
+  /// directiveIsRepeatable, schemaDescription, inputValueDeprecation, oneOf })`, all `true`.
+  pub(super) const QUERY: &str = include_str!("fixtures/executables/introspection_query.graphql");
+
+  /// A driver with nothing to say: no field of the query reaches one.
+  struct Nothing;
+
+  impl Values for Nothing {
+    type Value = ();
+
+    fn is_null(&self, _: &()) -> bool {
+      false
+    }
+
+    fn as_bool(&self, _: &()) -> Option<bool> {
+      None
+    }
+
+    fn as_str<'a>(&'a self, _: &'a ()) -> Option<&'a str> {
+      None
+    }
+
+    fn list_len(&self, _: &()) -> Option<usize> {
+      None
+    }
+
+    fn list_item(&mut self, _: &(), _: usize) {}
+
+    fn type_name<'a>(&'a self, _: &'a ()) -> Option<&'a str> {
+      None
+    }
+
+    fn coerce_leaf(&mut self, value: (), _: Leaf<'_>) -> Option<()> {
+      Some(value)
+    }
+
+    fn variable(&mut self, _: &str) -> Option<()> {
+      None
+    }
+  }
+
+  /// Executes [`QUERY`] against `schema` and writes the response.
+  pub(super) fn answer(schema: &Schema) -> String {
+    let document = Parser::with_parser::<
+      GraphqlLexer<'_, str>,
+      ExecutableDocument<&str>,
+      GraphqlErrors<&str>,
+      _,
+      GraphQL,
+    >(executable_document)
+    .parse_str(QUERY)
+    .expect("graphql-js's introspection query parses");
+    let mut nothing = Nothing;
+    let mut executor = Executor::new(schema, &document);
+    executor
+      .start(&mut nothing, None, ())
+      .expect("the operation resolves");
+    assert!(
+      executor.poll_resolve(&mut nothing).is_none(),
+      "an introspection query offered the driver a field"
+    );
+    let response = executor.poll_response().expect("nothing is outstanding");
+    let errors: Vec<String> = response.errors().map(|error| error.to_string()).collect();
+    assert!(errors.is_empty(), "the introspection raised {errors:?}");
+    let mut json = String::new();
+    write_response_with(&mut json, &response, QUERY, |_, _| {
+      unreachable!("an introspection response holds no driver value")
+    })
+    .expect("a String takes everything");
+    json
+  }
+
+  /// Sets aside, on both sides, the two things the door cannot carry about a specified directive
+  /// the document spelled out exactly as the build injects it, and nothing else: the user-spelled
+  /// flag, and its place in definition order — the build appends it after the document's own
+  /// directives, where the document wrote it among them.
+  /// `a_specified_directive_spelled_as_the_build_injects_it_loses_its_flag_and_its_place` pins the
+  /// same loss for the door alone.
+  ///
+  /// The place is set aside by taking `name` out of both orders, so every other directive's place
+  /// is still compared.
+  pub(super) fn forget_a_directive_spelled_as_injected(
+    from_sdl: &mut Facts,
+    from_answer: &mut Facts,
+    name: &str,
+  ) {
+    assert!(
+      !from_sdl.directives[name].built_in,
+      "the document no longer spells out `@{name}`"
+    );
+    let left_to_the_build = from_answer
+      .directives
+      .get_mut(name)
+      .unwrap_or_else(|| panic!("`@{name}` is in the schema the answer built"));
+    assert!(
+      left_to_the_build.built_in,
+      "the door wrote `@{name}` out, so the loss this sets aside is gone"
+    );
+    left_to_the_build.built_in = false;
+    for facts in [from_sdl, from_answer] {
+      facts
+        .directive_order
+        .retain(|ordered| ordered.as_str() != name);
+    }
+  }
+}
+
+/// The schema the executor's answer describes is the schema it answered for.
+///
+/// Built from SDL, answered by the executor, written as JSON, read back through
+/// [`Schema::from_introspection`] — and then every fact [`facts`] reads must agree, which is the
+/// same comparison [`two_doors_agree`] makes against [`server`]'s response. [`FIXTURE`] holds
+/// every construct a schema can; the two public schemas below hold the volume.
+///
+/// [`Facts`] is name-sorted wherever an order is not itself the fact, so key order in the answer is
+/// not what this gates. `proto_introspection.rs`'s golden answer is the gate on order.
+#[cfg(feature = "proto")]
+#[test]
+fn the_executors_answer_reads_back_as_the_schema_it_answered_for() {
+  let from_sdl = built(FIXTURE);
+  let from_answer = from_response(&executed::answer(&from_sdl));
+  assert_eq!(
+    facts(&from_sdl),
+    facts(&from_answer),
+    "the executor's introspection of the fixture built a different schema"
+  );
+}
+
+/// [`the_executors_answer_reads_back_as_the_schema_it_answered_for`], at the size of a public
+/// schema: GitHub's, which spells out no built-in.
+#[cfg(feature = "proto")]
+#[test]
+fn githubs_schema_survives_the_executors_answer() {
+  let from_sdl = built(include_str!("fixtures/schemas/github_schema.graphql"));
+  let from_answer = from_response(&executed::answer(&from_sdl));
+  assert_eq!(
+    facts(&from_sdl),
+    facts(&from_answer),
+    "the executor's introspection of GitHub's schema built a different schema"
+  );
+}
+
+/// The same at GitLab's size, which spells out two specified directives, one each way the door
+/// reads such a definition.
+///
+/// `@oneOf` is spelled unlike the build's own — its description is GitLab's — so the door writes
+/// it out, and the two doors agree on all of it, flag and place included. `@specifiedBy` is
+/// spelled exactly as the build injects it, so the door leaves it to the build, and the round trip
+/// diverges on its flag and its place in definition order and on nothing else.
+#[cfg(feature = "proto")]
+#[test]
+fn gitlabs_schema_survives_the_executors_answer() {
+  let from_sdl = built(include_str!("fixtures/schemas/gitlab_schema.graphql"));
+  let from_answer = from_response(&executed::answer(&from_sdl));
+  let (mut sdl_facts, mut answer_facts) = (facts(&from_sdl), facts(&from_answer));
+  assert!(
+    !sdl_facts.directives["oneOf"].built_in && !answer_facts.directives["oneOf"].built_in,
+    "GitLab's `@oneOf` is the document's from both doors"
+  );
+  executed::forget_a_directive_spelled_as_injected(
+    &mut sdl_facts,
+    &mut answer_facts,
+    "specifiedBy",
+  );
+  assert_eq!(
+    sdl_facts, answer_facts,
+    "the executor's introspection of GitLab's schema built a different schema"
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
 // the door against a response nobody generated
 // ---------------------------------------------------------------------------------------------
 
