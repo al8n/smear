@@ -13,10 +13,9 @@
 //! type at the invocation site.
 
 use tokora::{
-  InputRef, Lexer, ParseInput, TryParseInput,
-  error::{UnexpectedEot, token::UnexpectedToken},
+  InputRef, Lexer, ParseAttempt, ParseInput, TryParseInput,
+  error::{UnexpectedEot, UnexpectedToken},
   token::{IdentifierToken, KeywordToken, PunctuatorToken},
-  try_parse_input::ParseAttempt,
 };
 
 use super::{Equivalent, ErrorOf, ParseCtx, SliceOf};
@@ -273,7 +272,7 @@ macro_rules! typed_keyword_atom {
         $crate::combinator::ErrorOf<'inp, L, Ctx, Lang>:
           ::core::convert::From<::tokora::error::UnexpectedEot<L::Offset, Lang>>
             + ::core::convert::From<
-              ::tokora::error::token::UnexpectedToken<
+              ::tokora::error::UnexpectedToken<
                 'inp,
                 L::Token,
                 <L::Token as ::tokora::Token<'inp>>::Kind,
@@ -293,7 +292,7 @@ macro_rules! typed_keyword_atom {
       pub fn $try_fn_name<'inp, L, Ctx, Lang>(
         inp: &mut ::tokora::InputRef<'inp, '_, L, Ctx, Lang>,
       ) -> ::core::result::Result<
-        ::tokora::try_parse_input::ParseAttempt<$Ty>,
+        ::tokora::ParseAttempt<$Ty>,
         $crate::combinator::ErrorOf<'inp, L, Ctx, Lang>,
       >
       where

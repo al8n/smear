@@ -3,7 +3,7 @@
 use std::{format, string::String};
 
 use smear_lexer::{graphqlx::syntactic::SyntacticTokenKind, limits::SyntacticLimits};
-use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
+use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::Equivalent};
 
 use super::super::{GraphqlxInput, GraphqlxLexer};
 use crate::graphqlx::{

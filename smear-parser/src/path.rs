@@ -5,7 +5,7 @@ use std::vec::Vec;
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},
-  utils::{IntoComponents, human_display::DisplayHuman},
+  utils::{DisplayHuman, IntoComponents},
 };
 
 /// A `::`-separated path of dialect-branded names.

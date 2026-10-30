@@ -12,8 +12,8 @@
 //! crossed trivia without committing it would hand the tree's ordering to a second buffering
 //! layer beside the sink's own mark/rollback discipline.
 //!
-//! So the dispatcher does what [`tokora::parser::node_at`] exists for: it mints a mark, commits the
-//! description, reads the keyword, and hands the mark to the production it chose, which spends
+//! So the dispatcher does what [`tokora::combinator::node_at`] exists for: it mints a mark, commits
+//! the description, reads the keyword, and hands the mark to the production it chose, which spends
 //! it on its own node. The `Description` lands **inside** the definition it describes rather
 //! than beside it, and each production takes exactly one extra argument to say so. Pinned by
 //! `a_description_lives_inside_the_definition_it_describes`, which asserts the definition
@@ -55,11 +55,11 @@
 //!   list value, for the same reasons.
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
-use tokora::{ParseInput as _, cst::event::EventMark};
+use tokora::{ParseInput as _, cst::EventMark};
 
 use crate::graphql::kinds::SyntaxKind as K;
 
-// `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
+// `node`/`node_at` come from `coverage`, not from `tokora::combinator`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
 // counter gate 2 measures its reach with, so a production cannot open a node without being
 // counted; without the feature they are tokora's own, re-exported unchanged.

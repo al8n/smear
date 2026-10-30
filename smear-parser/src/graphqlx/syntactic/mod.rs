@@ -6,9 +6,7 @@
 //! lexer-supported owned source wrappers.
 
 use std::vec::Vec;
-use tokora::{
-  ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source, try_parse_input::ParseAttempt,
-};
+use tokora::{ErrorOf, InputRef, Lexer, ParseAttempt, ParseContext, SimpleSpan, Slice, Source};
 
 use smear_lexer::graphqlx::{
   ContextualKeyword,

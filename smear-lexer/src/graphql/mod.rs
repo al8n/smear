@@ -41,7 +41,7 @@ pub use keyword::ContextualKeyword;
 
 pub(crate) mod handlers;
 
-use tokora::{SimpleSpan, state::recursion_tracker::RecursionLimitExceeded, utils::Lexeme};
+use tokora::{SimpleSpan, state::RecursionLimitExceeded, utils::Lexeme};
 
 #[cfg(test)]
 mod tests;

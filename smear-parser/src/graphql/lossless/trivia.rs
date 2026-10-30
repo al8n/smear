@@ -61,10 +61,9 @@
 //! discipline, for a placement this suite does not want.
 
 use tokora::{
-  Lexer, SimpleSpan, Source, Token,
-  error::{UnexpectedEot, token::UnexpectedToken},
+  Lexer, ParseAttempt, SimpleSpan, Source, Token,
+  error::{UnexpectedEot, UnexpectedToken},
   lexer::FromLogos,
-  try_parse_input::ParseAttempt,
   utils::DowncastRef,
 };
 

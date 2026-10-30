@@ -42,7 +42,8 @@ mod token;
 pub use extent::*;
 pub use token::*;
 pub use tokora::{
-  ComposableEmitter, ComposableParseContext as ParseCtx, ErrorOf, SliceOf, utils::cmp::Equivalent,
+  ComposableParseContext as ParseCtx, ErrorOf, emitter::ComposableEmitter, lexer::SliceOf,
+  utils::Equivalent,
 };
 
 #[cfg(test)]

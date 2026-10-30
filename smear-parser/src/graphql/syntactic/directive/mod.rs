@@ -8,7 +8,7 @@
 
 use std::vec::Vec;
 
-use tokora::{Lexer, SimpleSpan, Slice, Source, try_parse_input::ParseAttempt, utils::DowncastRef};
+use tokora::{Lexer, ParseAttempt, SimpleSpan, Slice, Source, utils::DowncastRef};
 
 use smear_lexer::graphql::ContextualKeyword;
 

@@ -64,11 +64,11 @@
 //!   nesting-aware region and reports it once.
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
-use tokora::{ParseInput as _, cst::event::EventMark};
+use tokora::{ParseInput as _, cst::EventMark};
 
 use crate::graphql::kinds::SyntaxKind as K;
 
-// `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
+// `node`/`node_at` come from `coverage`, not from `tokora::combinator`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
 // counter gate 2 measures its reach with, so a production cannot open a node without being
 // counted; without the feature they are tokora's own, re-exported unchanged.
@@ -422,7 +422,7 @@ lossless_production! {
   /// refusal. It used to re-derive "did this root stop" from tokora's session counter, which
   /// answers for the whole root and therefore mistakes a *caught* early trip for a live one. The
   /// slot carries [`depth::root_turn`](crate::lossless::depth::root_turn)'s own per-entry verdict
-  /// across the [`node`](tokora::parser::node) bracket instead; nothing here writes it.
+  /// across the [`node`](tokora::combinator::node) bracket instead; nothing here writes it.
   fn document<'inp, Src, Ctx>(inp, stop: &mut depth::RootStop) {
     node(
       K::Document.raw(),

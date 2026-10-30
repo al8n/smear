@@ -14,7 +14,7 @@
 //! # The two ambiguities this file exists to resolve, and the two extra arms GraphQLx adds
 //!
 //! - **`Alias` versus a bare field name.** Both start with an `Identifier` and only the following
-//!   `:` tells them apart, which is what [`tokora::parser::node_at`] exists for: mint a mark,
+//!   `:` tells them apart, which is what [`tokora::combinator::node_at`] exists for: mint a mark,
 //!   commit the name, and hand the mark to a *declining* probe that spends it only if the `:` is
 //!   there. An `eat_if` plus an unconditional wrap cannot express this — the `:` would be
 //!   committed outside the wrap's parser.
@@ -37,11 +37,11 @@
 //! `SelectionSet` is immune, its `}` ending the node before anything after it is read.
 
 use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
-use tokora::{ParseInput as _, TryParseInput as _, try_parse_input::ParseAttempt};
+use tokora::{ParseAttempt, ParseInput as _, TryParseInput as _};
 
 use crate::graphqlx::kinds::SyntaxKind as K;
 
-// `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
+// `node`/`node_at` come from `coverage`, not from `tokora::combinator`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
 // counter gate 2 measures its reach with, so a production cannot open a node without being
 // counted; without the feature they are tokora's own, re-exported unchanged.
@@ -208,7 +208,7 @@ lossless_production! {
   /// Two of [`spread_selection`]'s four arms reach it, which is the whole reason it is a
   /// production and not two copies: an `Identifier` head and a `PathSeparator` head differ only in
   /// where the path starts, and `type_path` already handles both.
-  fn fragment_spread_tail<'inp, Src, Ctx>(inp, mark: tokora::cst::event::EventMark) {
+  fn fragment_spread_tail<'inp, Src, Ctx>(inp, mark: tokora::cst::EventMark) {
     node_at(
       mark,
       K::FragmentSpread.raw(),

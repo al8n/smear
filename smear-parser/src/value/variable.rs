@@ -3,11 +3,7 @@ use core::fmt::Display;
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},
-  utils::{
-    IntoComponents,
-    human_display::DisplayHuman,
-    sdl_display::{DisplayCompact, DisplayPretty},
-  },
+  utils::{DisplayCompact, DisplayHuman, DisplayPretty, IntoComponents},
 };
 
 /// A variable value.

@@ -1,8 +1,8 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan,
-  state::recursion_tracker::RecursionLimitExceeded,
-  utils::{Lexeme, human_display::DisplayHuman},
+  state::RecursionLimitExceeded,
+  utils::{DisplayHuman, Lexeme},
 };
 
 /// Errors for GraphQLx lexers

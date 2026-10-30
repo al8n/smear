@@ -44,7 +44,7 @@ macro_rules! token_impl {
       #[allow(unused_imports)]
       use tokora::utils::IntoEquivalent;
       use tokora::{
-        logos::Logos, lexer::Lexable, state::tracker::LimitExceeded,
+        logos::Logos, lexer::Lexable, state::LimitExceeded,
       };
       use crate::{
         error::StringErrors,
@@ -343,7 +343,7 @@ macro_rules! token_impl {
       #[allow(unused_imports)]
       use tokora::utils::IntoEquivalent;
       use tokora::{
-        logos::Logos, lexer::Lexable, state::tracker::LimitExceeded,
+        logos::Logos, lexer::Lexable, state::LimitExceeded,
       };
       use crate::{
         error::StringErrors,

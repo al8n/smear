@@ -21,10 +21,10 @@
 //!
 //! `< T >` is a set and `< K => V >` is a map, and the two are told apart only *after* the first
 //! inner type has been parsed and a `=>` has been probed for (`ty.rs:182-192`). The kind is
-//! therefore unknown when the `<` is committed, which is what [`tokora::parser::node_at`] is for:
-//! mint an inert mark before the `<`, parse until the answer is known, then retro-wrap at the mark
-//! with the kind that won. GraphQL uses the same mechanism for the opposite reason — its unknown is
-//! a *suffix*, this one's is a *separator* — and it is the same three events either way.
+//! therefore unknown when the `<` is committed, which is what [`tokora::combinator::node_at`] is
+//! for: mint an inert mark before the `<`, parse until the answer is known, then retro-wrap at the
+//! mark with the kind that won. GraphQL uses the same mechanism for the opposite reason — its
+//! unknown is a *suffix*, this one's is a *separator* — and it is the same three events either way.
 //!
 //! # A path commits its leading trivia before its node opens
 //!

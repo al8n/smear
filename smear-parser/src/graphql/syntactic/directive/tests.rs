@@ -7,7 +7,7 @@
 //! `parse_directive`/`parse_directives` verdicts for the same inputs.
 
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
-use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
+use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::Equivalent};
 
 use crate::graphql::{
   GraphQL,

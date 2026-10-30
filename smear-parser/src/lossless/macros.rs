@@ -192,7 +192,7 @@ macro_rules! lossless_production {
             ::tokora::error::UnexpectedEot<usize, $crate::$dm::$dl::Brand>,
           >
           + ::core::convert::From<
-            ::tokora::error::token::UnexpectedToken<
+            ::tokora::error::UnexpectedToken<
               $lt,
               $crate::$dm::$dl::Token<$lt, $src>,
               $crate::$dm::$dl::TokenKind,
@@ -252,12 +252,12 @@ macro_rules! lossless_production {
 ///
 /// A production whose node is discovered *after* its first child — every definition that may carry
 /// a leading description, and every type-system extension, whose shape keyword follows the
-/// `extend` its node must contain — takes an [`EventMark`](tokora::cst::event::EventMark) and
-/// opens with [`node_at`](tokora::parser::node_at) rather than [`node`](tokora::parser::node). The
+/// `extend` its node must contain — takes an [`EventMark`](tokora::cst::EventMark) and opens with
+/// [`node_at`](tokora::combinator::node_at) rather than [`node`](tokora::combinator::node). The
 /// `(mark)` suffix on a driver declares that second argument.
 ///
 /// **The two are equivalent at position zero**, which is what makes such a driver honest:
-/// [`node`](tokora::parser::node) mints its own mark at entry and wraps on success, so a mark
+/// [`node`](tokora::combinator::node) mints its own mark at entry and wraps on success, so a mark
 /// minted immediately before the call and spent by `node_at` covers exactly the same region. The
 /// difference only appears when the *caller* commits something between the two, which is the whole
 /// reason the parameter exists.
@@ -480,11 +480,11 @@ macro_rules! lossless_error_impls {
     /// `lossless::source`'s header carries why the byte scanner is not an alternative: its lexeme
     /// boundaries are not the `str` scanner's, and its diagnostics cannot be materialised at all.
     impl<S>
-      ::core::convert::From<$lexer_errors<char, ::tokora::state::tracker::LimitExceeded>>
+      ::core::convert::From<$lexer_errors<char, ::tokora::state::LimitExceeded>>
       for $errors<S>
     {
       #[inline]
-      fn from(err: $lexer_errors<char, ::tokora::state::tracker::LimitExceeded>) -> Self {
+      fn from(err: $lexer_errors<char, ::tokora::state::LimitExceeded>) -> Self {
         $value::new(
           ::tokora::SimpleSpan::new(0, 0),
           $error_data::Lexer(err),
@@ -537,12 +537,12 @@ macro_rules! lossless_error_impls {
     /// collapsing them costs the reader the distinction.
     impl<'a, S, Lang: ?Sized>
       ::core::convert::From<
-        ::tokora::error::token::UnexpectedToken<'a, $token<S>, $kind, ::tokora::SimpleSpan, Lang>,
+        ::tokora::error::UnexpectedToken<'a, $token<S>, $kind, ::tokora::SimpleSpan, Lang>,
       > for $errors<S>
     {
       #[inline]
       fn from(
-        err: ::tokora::error::token::UnexpectedToken<
+        err: ::tokora::error::UnexpectedToken<
           'a,
           $token<S>,
           $kind,
@@ -1044,11 +1044,9 @@ macro_rules! lossless_door {
         <LosslessEmitter<'inp> as ::core::default::Default>::default(),
         ::tokora::cache::DefaultCache::<$crate::$dm::$dl::Lexer<'inp, str>>::default(),
       )
-      .with_recursion_limiter(
-        ::tokora::state::recursion_tracker::RecursionLimiter::with_limitation(
-          limits.parse_ceiling(),
-        ),
-      )
+      .with_recursion_limiter(::tokora::state::RecursionLimiter::with_limitation(
+        limits.parse_ceiling(),
+      ))
       .with_token_budget(::tokora::input::TokenBudget::with_limitation(
         limits.max_produce_events(),
       ));

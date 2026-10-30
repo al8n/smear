@@ -104,8 +104,7 @@
 // resolves them from here too, the bare labels are enough and the paths can go.
 
 use tokora::{
-  Lexer, SimpleSpan, Slice, Source,
-  try_parse_input::ParseAttempt,
+  Lexer, ParseAttempt, SimpleSpan, Slice, Source,
   utils::{DowncastRef, IntoComponents},
 };
 

@@ -556,8 +556,8 @@ fn the_marks_smear_has_to_make_itself_reach_the_caller() {
 #[test]
 fn every_attempt_and_optional_read_raises_the_stop_instead_of_declining() {
   use tokora::{
-    Parse as _, Parser, ParserContext, cache::DefaultCache, emitter::Verbose, input::TokenBudget,
-    try_parse_input::ParseAttempt,
+    Parse as _, ParseAttempt, Parser, ParserContext, cache::DefaultCache, emitter::Verbose,
+    input::TokenBudget,
   };
 
   use crate::graphql::{

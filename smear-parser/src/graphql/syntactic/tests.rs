@@ -1,4 +1,4 @@
-use tokora::{FatalContext, Parse, Parser, try_parse_input::ParseAttempt};
+use tokora::{FatalContext, Parse, ParseAttempt, Parser};
 
 use super::*;
 use crate::graphql::{GraphQL, ast, error::GraphqlErrors};

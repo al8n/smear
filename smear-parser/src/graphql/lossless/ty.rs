@@ -11,7 +11,7 @@
 //!
 //! `Type := (NamedType | ListType) "!"?` — the `!` is a **suffix**, so the inner type is
 //! already committed to the tree before anyone knows whether a wrapper exists. That is what
-//! [`tokora::parser::node_at`] is for: mint an inert mark, parse the inner type, and
+//! [`tokora::combinator::node_at`] is for: mint an inert mark, parse the inner type, and
 //! hand the mark to a *declining* parser that spends it only if the `!` is there. The mark and
 //! the token that justifies spending it are then read by the same call, so no `?` can come
 //! between them and strand a half-decided wrap. An unspent mark materializes into nothing.
@@ -42,7 +42,7 @@ use tokora::{ParseInput as _, TryParseInput as _};
 
 use crate::graphql::kinds::SyntaxKind as K;
 
-// `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
+// `node`/`node_at` come from `coverage`, not from `tokora::combinator`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
 // counter gate 2 measures its reach with, so a production cannot open a node without being
 // counted; without the feature they are tokora's own, re-exported unchanged.

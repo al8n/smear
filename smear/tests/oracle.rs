@@ -1052,7 +1052,7 @@ use smear::lexer::graphqlx::{
   syntactic::SyntacticToken as GxToken,
 };
 #[cfg(feature = "graphqlx")]
-use tokora::state::recursion_tracker::RecursionLimitExceeded;
+use tokora::state::RecursionLimitExceeded;
 
 // Each number-error enum reuses the shared `same_lexeme` for its `Char`-bearing
 // suffix leaf; its `UnexpectedEnd`/span-only leaves carry no `Char`, so both

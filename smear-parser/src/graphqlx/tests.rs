@@ -7,8 +7,7 @@
 
 use smear_lexer::graphqlx::{LitFloat, LitInt, syntactic::SyntacticTokenKind};
 use tokora::{
-  FatalContext, Parse, Parser, SimpleSpan, span::AsSpan, try_parse_input::ParseAttempt,
-  utils::cmp::Equivalent,
+  FatalContext, Parse, ParseAttempt, Parser, SimpleSpan, span::AsSpan, utils::Equivalent,
 };
 
 use super::{

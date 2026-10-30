@@ -72,10 +72,7 @@
 //!   document roots stop on it.
 
 use tokora::state::{
-  State,
-  recursion_tracker::{RecursionLimitExceeded, RecursionLimiter},
-  token_tracker::TokenLimiter,
-  tracker::{LimitExceeded, Limiter},
+  LimitExceeded, Limiter, RecursionLimitExceeded, RecursionLimiter, State, TokenLimiter,
 };
 
 /// The greatest number of **simultaneously open** brackets a smear parse accepts by default. The
@@ -921,7 +918,7 @@ impl LosslessLimits {
 /// `.into()`.
 ///
 /// ```
-/// use smear_lexer::{limits::LosslessLimits, tokora::state::tracker::Limiter};
+/// use smear_lexer::{limits::LosslessLimits, tokora::state::Limiter};
 ///
 /// // The widening compiles, and it seeds the documented default.
 /// let widened = LosslessLimits::from(Limiter::default());
@@ -929,7 +926,7 @@ impl LosslessLimits {
 /// ```
 ///
 /// ```compile_fail
-/// use smear_lexer::{limits::LosslessLimits, tokora::state::tracker::Limiter};
+/// use smear_lexer::{limits::LosslessLimits, tokora::state::Limiter};
 ///
 /// // The round trip does not compile: there is no `From<LosslessLimits> for Limiter` to erase
 /// // the ceiling with. THE CONTROL FOR THIS FENCE IS THE DOCTEST ABOVE — it uses the same two

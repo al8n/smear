@@ -1032,7 +1032,7 @@ fn tokoras_own_descent_trip_lands_terminal_in_both_dialects() {
   };
   use tokora::{
     error::{MaybeTerminal, RecursionLimitReached},
-    state::recursion_tracker::RecursionLimiter,
+    state::RecursionLimiter,
   };
 
   /// tokora's own payload, built the way tokora builds it: a limiter driven past its own

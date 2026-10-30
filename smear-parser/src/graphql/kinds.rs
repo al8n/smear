@@ -2,7 +2,7 @@
 //!
 //! One `#[repr(u16)]` enum holds every kind the lossless CST can carry: the token
 //! *images* committed tokens enter the tree as, the node kinds the assemblies open
-//! with [`node`](tokora::parser::node), and the `Root`/`Error`/`Gap` bookkeeping
+//! with [`node`](tokora::combinator::node), and the `Root`/`Error`/`Gap` bookkeeping
 //! kinds the sink needs. One enum, one space — a token kind and a node kind can
 //! never collide (tokora guide `ch16_lossless_cst.md`).
 //!

@@ -37,7 +37,7 @@ use crate::graphql::{
   error::{ErrorData, GraphqlErrors, IntOverflow, IntWidth},
   syntactic::{GraphqlInput, GraphqlLexer},
 };
-use tokora::try_parse_input::ParseAttempt;
+use tokora::ParseAttempt;
 
 type StrCtx<'inp> = FatalContext<'inp, GraphqlLexer<'inp, str>, GraphqlErrors<&'inp str>, GraphQL>;
 type SliceCtx<'inp> =

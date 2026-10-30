@@ -9,9 +9,7 @@ use core::ops::Range;
 
 use std::vec::Vec;
 
-use tokora::{
-  Lexer as _, SimpleSpan, state::recursion_tracker::RecursionLimitExceeded, utils::Lexeme,
-};
+use tokora::{Lexer as _, SimpleSpan, state::RecursionLimitExceeded, utils::Lexeme};
 
 use crate::{
   LitBlockStr, LitInlineStr, LitStr,

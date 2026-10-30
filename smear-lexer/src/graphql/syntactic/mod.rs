@@ -6,7 +6,7 @@ use tokora::{
   Lexer, SimpleSpan, Slice, Source, Token,
   lexer::{FromLogos, LogosLexer},
   punct::*,
-  state::recursion_tracker::RecursionLimitExceeded,
+  state::RecursionLimitExceeded,
   token::*,
   utils::{CharLen, DowncastRef},
 };

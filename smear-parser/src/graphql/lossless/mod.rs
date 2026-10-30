@@ -14,7 +14,7 @@ use tokora::{
   Source,
   error::RecursionLimitReached,
   input::Descent,
-  state::tracker::LimitExceeded,
+  state::LimitExceeded,
   utils::Expected,
 };
 
@@ -128,7 +128,7 @@ pub type Error<'inp, Src: Source<usize> + ?Sized, Ctx> = GraphqlLosslessError<'i
 /// it is deliberately still a per-dialect function after losing its body. It used to read
 /// `inp.state().max_nesting_depth()` and hand the number down, because the substrate may not name
 /// `smear-lexer`; the ceiling now arrives as the parse's own
-/// [`RecursionLimiter`](tokora::state::recursion_tracker::RecursionLimiter), installed once at the
+/// [`RecursionLimiter`](tokora::state::RecursionLimiter), installed once at the
 /// door, so there is no number left to read on this side of the line. What the wrapper still buys
 /// is that every production writes one call against this dialect's concrete input, error and
 /// brand, so a bound that stops holding is reported here rather than at twenty-eight call sites.

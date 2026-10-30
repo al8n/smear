@@ -50,8 +50,9 @@
 use core::marker::PhantomData;
 
 use tokora::{
-  Complete, Completeness, InputRef, Lexer, ParseContext, ParseInput,
+  InputRef, Lexer, ParseContext, ParseInput,
   cache::PeekedTokenExt,
+  input::{Complete, Completeness},
   span::{Span, Spanned},
   utils::typenum::U1,
 };

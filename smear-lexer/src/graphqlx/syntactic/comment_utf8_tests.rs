@@ -10,7 +10,7 @@ use core::ops::Range;
 
 use std::{vec, vec::Vec};
 
-use tokora::{Lexer as _, SimpleSpan, state::tracker::LimitExceeded, utils::Lexeme};
+use tokora::{Lexer as _, SimpleSpan, state::LimitExceeded, utils::Lexeme};
 
 use crate::{
   graphqlx::{

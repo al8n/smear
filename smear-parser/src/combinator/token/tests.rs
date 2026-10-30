@@ -8,9 +8,8 @@ use smear_lexer::tokora::{
   Emitter, InputRef, Lexer, Parse, Parser, ParserContext, SimpleSpan,
   emitter::{Fatal, FromUnclosed, Verbose},
   error::{
-    Unclosed, UnexpectedEot,
-    syntax::{FullContainer, MissingSyntax, TooFew},
-    token::{MissingToken, SeparatedError, UnexpectedToken},
+    FullContainer, MissingSyntax, MissingToken, SeparatedError, TooFew, Unclosed, UnexpectedEot,
+    UnexpectedToken,
   },
 };
 

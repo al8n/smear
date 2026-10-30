@@ -41,7 +41,7 @@
 //! the document — which is what reports the tail instead.
 
 use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
-use tokora::{ParseInput as _, cst::event::EventMark};
+use tokora::{ParseInput as _, cst::EventMark};
 
 use crate::graphqlx::kinds::SyntaxKind as K;
 

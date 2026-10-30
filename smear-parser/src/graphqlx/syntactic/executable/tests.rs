@@ -1,7 +1,7 @@
 //! Focused GraphQLx executable-production tests.
 
 use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
-use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
+use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::Equivalent};
 
 use super::{
   executable_document, fragment_definition, operation_definition, operation_type,

@@ -1,5 +1,5 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use tokora::state::tracker::LimitExceeded;
+use tokora::state::LimitExceeded;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},

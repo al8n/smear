@@ -1885,7 +1885,7 @@ impl<T: Nestable + core::hash::Hash> core::hash::Hash for Nested<T> {
 }
 
 /// A `Vec`'s own behaviour: a delimiter is the *combinator's* business, not the container's.
-impl<'inp, L, T: Nestable> tokora::parser::DelimiterHandler<'inp, L> for Nested<T> {
+impl<'inp, L, T: Nestable> tokora::parse::DelimiterHandler<'inp, L> for Nested<T> {
   #[inline(always)]
   fn on_open_delimiter(&mut self, _open: tokora::span::Spanned<L::Token, L::Span>)
   where

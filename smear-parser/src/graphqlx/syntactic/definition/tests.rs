@@ -1,7 +1,7 @@
 //! Focused GraphQLx SDL and import-document tests.
 
 use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
-use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::cmp::Equivalent};
+use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::Equivalent};
 
 use super::*;
 use crate::graphqlx::{

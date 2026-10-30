@@ -126,14 +126,14 @@ macro_rules! keyword {
           }
         }
 
-        impl $crate::__private::tokora::utils::human_display::DisplayHuman for $name {
+        impl $crate::__private::tokora::utils::DisplayHuman for $name {
           #[inline]
           fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             ::core::fmt::Display::fmt(self, f)
           }
         }
 
-        impl $crate::__private::tokora::utils::sdl_display::DisplayCompact for $name {
+        impl $crate::__private::tokora::utils::DisplayCompact for $name {
           type Options = ();
 
           #[inline]
@@ -142,7 +142,7 @@ macro_rules! keyword {
           }
         }
 
-        impl $crate::__private::tokora::utils::sdl_display::DisplayPretty for $name {
+        impl $crate::__private::tokora::utils::DisplayPretty for $name {
           type Options = ();
 
           #[inline]
@@ -151,7 +151,7 @@ macro_rules! keyword {
           }
         }
 
-        impl $crate::__private::tokora::utils::syntax_tree_display::DisplaySyntaxTree for $name {
+        impl $crate::__private::tokora::utils::DisplaySyntaxTree for $name {
           #[inline]
           fn fmt(
             &self,

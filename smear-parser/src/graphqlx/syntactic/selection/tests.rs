@@ -1,9 +1,7 @@
 //! Focused GraphQLx selection-production tests.
 
 use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
-use tokora::{
-  FatalContext, Parse, Parser, SimpleSpan, try_parse_input::ParseAttempt, utils::cmp::Equivalent,
-};
+use tokora::{FatalContext, Parse, ParseAttempt, Parser, SimpleSpan, utils::Equivalent};
 
 use super::{field, fragment_spread, inline_fragment, selection, selection_set, type_condition};
 use crate::graphqlx::{

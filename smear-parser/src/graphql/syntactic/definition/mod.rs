@@ -9,13 +9,11 @@ use std::vec::Vec;
 
 use smear_lexer::graphql::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
-  Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source,
-  TryParseInput,
+  Accumulator, Action, EmitterView, Lexer, ParseAttempt, ParseInput, ParseTokenChoice, SimpleSpan,
+  Slice, Source, TryParseInput,
   cache::{Peeked, PeekedTokenExt},
-  parser::Action,
   punct::Pipe,
   span::{AsSpan, Spanned},
-  try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
 };
 

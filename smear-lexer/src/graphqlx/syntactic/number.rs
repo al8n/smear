@@ -113,7 +113,7 @@ macro_rules! number_token_impl {
     mod $mod {
       use tokora::{
         logos::Logos,
-        state::recursion_tracker::RecursionLimitExceeded,
+        state::RecursionLimitExceeded,
       };
       use crate::graphqlx::{
         error::{

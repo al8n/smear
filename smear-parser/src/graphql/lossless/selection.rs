@@ -10,7 +10,7 @@
 //!
 //! - **`Alias` versus a bare field name.** Both start with an `Identifier` and only the
 //!   following `:` tells them apart. That is exactly the shape
-//!   [`tokora::parser::node_at`] exists for: mint a mark, commit the name, and hand the mark to
+//!   [`tokora::combinator::node_at`] exists for: mint a mark, commit the name, and hand the mark to
 //!   a *declining* probe that spends it only if the
 //!   `:` is there. On a decline the mark is left unspent and no `Alias` node exists. An
 //!   `eat_if` plus an unconditional wrap cannot express this — the `:` would be committed
@@ -59,11 +59,11 @@
 //!   list value, for the same reasons.
 
 use smear_lexer::graphql::{ContextualKeyword, lossless::LosslessTokenKind as Kind};
-use tokora::{ParseInput as _, TryParseInput as _, try_parse_input::ParseAttempt};
+use tokora::{ParseAttempt, ParseInput as _, TryParseInput as _};
 
 use crate::graphql::kinds::SyntaxKind as K;
 
-// `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
+// `node`/`node_at` come from `coverage`, not from `tokora::combinator`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
 // counter gate 2 measures its reach with, so a production cannot open a node without being
 // counted; without the feature they are tokora's own, re-exported unchanged.
