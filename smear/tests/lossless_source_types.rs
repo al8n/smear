@@ -295,7 +295,7 @@ macro_rules! dialect {
 
         // NO smol-bytes ROW, and the reason is the manifest rather than the door.
         // `smear/Cargo.toml` forwards that feature (`smear-lexer/smol-bytes`,
-        // `smear-parser/smol-bytes`, `tokora/smol_bytes_0_1`) and takes no `dep:` on the crate, so
+        // `smear-parser/smol-bytes`, `tokora/smol-bytes_0_2`) and takes no `dep:` on the crate, so
         // this test — which is compiled against `smear` — cannot name the four types. Their
         // `LosslessSource` implementations live beside the others in
         // `smear-parser/src/lossless/source.rs` and are compiled by that crate's own

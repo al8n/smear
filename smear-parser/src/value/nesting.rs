@@ -1117,11 +1117,11 @@ impl<T: Leaf> Leaf for core::ops::Range<T> {}
 //     (bytes-1.12.1 `src/bytes.rs:254`) moves an arbitrary caller value into the `Bytes` and drops
 //     it through a vtable slot — `drop: owned_drop::<T>` at `src/bytes.rs:1110` — and `slice`,
 //     `split_off`, `split_to` and `clone` all inherit that vtable.
-//   * `smol_bytes::shared::Bytes::from_owner` forwards straight to it (smol-bytes-0.1.4
+//   * `smol_bytes::shared::Bytes::from_owner` forwards straight to it (smol-bytes-0.2.1
 //     `src/bytes/strategy/shared.rs:270`), and every other smol-bytes form can adopt an existing
 //     `bytes::Bytes` whole — `From<bytes::Bytes>` at `strategy/compact.rs:303` and
-//     `strategy/shared.rs:280`, and `TryFrom<RawBytes<S>>` at `utf8_bytes/from.rs:27` for the two
-//     UTF-8 forms.
+//     `strategy/shared.rs:280`, and, for the two UTF-8 forms, `TryFrom<bytes::Bytes>` at
+//     `utf8_bytes/from.rs:116` or `TryFrom<RawBytes<S>>` at `utf8_bytes/from.rs:76`.
 //
 // A caller who puts a value tree inside such an owner and then seats the result has broken the
 // obligation with their own hands, and the type system cannot tell that value from a fresh one.
