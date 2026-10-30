@@ -62,8 +62,11 @@ impl Text {
 
   /// Borrows the string out of an arena: `None` for [`Text::NONE`], and for a handle that does not
   /// name a whole string in it — which only a handle from another arena can fail to.
+  ///
+  /// Crate-visible only: the arena is the schema's own, and [`Schema::text`](super::Schema::text)
+  /// is the public reader of it.
   #[inline]
-  pub fn slice<'a>(&self, arena: &'a str) -> Option<&'a str> {
+  pub(crate) fn slice<'a>(&self, arena: &'a str) -> Option<&'a str> {
     if self.is_none() {
       return None;
     }
