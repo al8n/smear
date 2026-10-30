@@ -1145,23 +1145,70 @@ fn one_of_survives_the_round_trip() {
 /// A built-in scalar the response describes as the build's own would not is written out as a
 /// definition of its own, so the two doors agree on all of it, the user-spelled flag included.
 ///
-/// Both ways a response can say so: a description and a `specifiedByURL` of the document's own, and
-/// a `null` description — a document that spelled `String` out and gave it none.
+/// Each way a response can say so: a description and a `specifiedByURL` of the document's own, a
+/// description alone, and a `null` description — a document that spelled `String` out and gave it
+/// none. The URL rides on `Int`, the type of no specified directive's argument: on `String` it is
+/// refused, by both doors alike, as [`a_string_specified_by_a_url_is_refused_by_both_doors`] pins.
 #[test]
 fn a_built_in_scalar_the_response_describes_is_written_out() {
-  for sdl in [
-    "type Query { ok: String }\n\"Text, the way we use it.\"\nscalar String @specifiedBy(url: \"https://example.com/string\")",
-    "type Query { ok: String }\nscalar String",
+  for (scalar, sdl) in [
+    (
+      "Int",
+      "type Query { ok: Int }\n\"Whole numbers, the way we count them.\"\nscalar Int @specifiedBy(url: \"https://example.com/int\")",
+    ),
+    (
+      "String",
+      "type Query { ok: String }\n\"Text, the way we use it.\"\nscalar String",
+    ),
+    ("String", "type Query { ok: String }\nscalar String"),
   ] {
     let from_sdl = built(sdl);
     let from_json = from_response(&server::introspect(&from_sdl));
-    let (_, string) = from_json.type_by_name(b"String").expect("String");
+    let (_, def) = from_json
+      .type_by_name(scalar.as_bytes())
+      .unwrap_or_else(|| panic!("`{scalar}` is defined\n---\n{sdl}"));
     assert!(
-      !string.is_built_in(),
-      "the door left the response's `String` to the build\n---\n{sdl}"
+      !def.is_built_in(),
+      "the door left the response's `{scalar}` to the build\n---\n{sdl}"
     );
     assert_eq!(facts(&from_sdl), facts(&from_json), "{sdl}");
   }
+}
+
+/// A `String` specified by a URL is refused by both doors, and for the same reason.
+///
+/// `@specifiedBy` takes its `url` as a `String!`, so applying it to `String` makes the directive
+/// refer to itself through the type its own argument names, which draft §3.13.1 forbids. The SDL
+/// door refuses a document that writes it as [`SchemaErrorKind::SelfReferentialDirective`]; the
+/// introspection door writes a response's `String` with a `specifiedByURL` out with `@specifiedBy`
+/// applied, and the build refuses it with the same kind.
+#[test]
+fn a_string_specified_by_a_url_is_refused_by_both_doors() {
+  let sdl = "type Query { ok: String }\n\"Text, the way we use it.\"\nscalar String @specifiedBy(url: \"https://example.com/string\")";
+  let from_sdl = match Schema::build(&parse(sdl)) {
+    Err(errors) => errors.kinds(),
+    Ok(_) => panic!(
+      "the SDL door accepted a `String` that `@specifiedBy` refers to itself through\n---\n{sdl}"
+    ),
+  };
+  assert_eq!(
+    from_sdl,
+    vec![SchemaErrorKind::SelfReferentialDirective],
+    "{sdl}"
+  );
+
+  let json = response(
+    r#"{"kind":"OBJECT","name":"Query","fields":[
+      {"name":"ok","args":[],"type":{"kind":"SCALAR","name":"String"}}
+    ]},
+    {"kind":"SCALAR","name":"String","description":"Text, the way we use it.",
+     "specifiedByURL":"https://example.com/string"}"#,
+  );
+  let error = refused(&json);
+  let Some(errors) = error.schema_errors() else {
+    panic!("refused by the shape, not by draft §3: {error}\n---\n{json}");
+  };
+  assert_eq!(errors.kinds(), from_sdl, "{json}");
 }
 
 /// The one flag introspection cannot carry, pinned as a loss rather than left to be discovered.
