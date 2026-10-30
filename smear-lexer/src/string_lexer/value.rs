@@ -111,7 +111,9 @@ pub fn decode_string_value(spelling: &[u8], out: &mut String) -> Result<(), Stri
 fn inline_value<F: FnMut(&str)>(content: &str, piece: &mut F) -> Result<(), StringValueError> {
   let bytes = content.as_bytes();
   let mut copied = 0;
-  while let Some(offset) = bytes[copied..].iter().position(|&byte| byte == b'\\') {
+  // `str::find` with a `char` takes the memchr route; `copied` is always a character boundary, at
+  // the start or just past an escape, which is ASCII to its last byte.
+  while let Some(offset) = content[copied..].find('\\') {
     let slash = copied + offset;
     if slash > copied {
       piece(&content[copied..slash]);
@@ -120,7 +122,6 @@ fn inline_value<F: FnMut(&str)>(content: &str, piece: &mut F) -> Result<(), Stri
     let (ch, consumed) =
       escape(&bytes[slash + 1..]).ok_or(StringValueError::InvalidEscape(slash + 1))?;
     piece(ch.encode_utf8(&mut [0u8; 4]));
-    // Every escape is ASCII from the backslash to its last byte, so this is a character boundary.
     copied = slash + 1 + consumed;
   }
   if copied < content.len() {

@@ -715,6 +715,35 @@ fn the_text_ceiling_is_a_price_at_it_and_a_refusal_one_past_it() {
   assert_eq!(arena.text, "alphabet", "a refusal writes nothing");
 }
 
+/// A string written in one walk, because the arena already has room for its spelling, is the
+/// string the sized path writes — and a refusal part-way through leaves the arena as it was.
+#[test]
+fn one_walk_writes_what_two_walks_write() {
+  for spelling in [
+    "\"plain\"",
+    "\"a \u{5c}\"quoted\u{5c}\" word, a tab \u{5c}t and \u{5c}u{e9}\"",
+    "\"\"\"\n    block\n      indented\n    \u{5c}\"\"\" kept\n  \"\"\"",
+    "\"\"",
+  ] {
+    let mut sized = TextArena::default();
+    let mut roomy = TextArena::default();
+    roomy.text.reserve(spelling.len());
+    let from_sized = sized.string(spelling.as_bytes()).expect("a value");
+    let from_roomy = roomy.string(spelling.as_bytes()).expect("a value");
+    assert_eq!(sized.text, roomy.text, "{spelling}");
+    assert_eq!(from_sized, from_roomy, "{spelling}");
+  }
+
+  let mut roomy = TextArena::default();
+  roomy.text.push_str("kept");
+  roomy.text.reserve(64);
+  assert!(roomy.string(b"\"ok \x5cq\"").is_err());
+  assert_eq!(
+    roomy.text, "kept",
+    "a refusal part-way through writes nothing"
+  );
+}
+
 /// The shipped ceiling stops one byte short of what an offset names, so the sentinel is never a
 /// handle the arena issues.
 #[test]
