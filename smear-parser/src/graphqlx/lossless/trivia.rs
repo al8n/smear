@@ -28,10 +28,9 @@
 //! that difference**, because every atom skips trivia before it answers.
 
 use tokora::{
-  Lexer, SimpleSpan, Source, Token,
-  error::{UnexpectedEot, token::UnexpectedToken},
+  Lexer, ParseAttempt, SimpleSpan, Source, Token,
+  error::{UnexpectedEot, UnexpectedToken},
   lexer::FromLogos,
-  try_parse_input::ParseAttempt,
   utils::DowncastRef,
 };
 
@@ -401,7 +400,7 @@ pub mod test_support {
     drive!('inp, src, false, |inp| matches!(
       super::try_eat::<str, _>(inp, Kind::Bang)
         .expect("try_eat must not error over these fixtures"),
-      ::tokora::try_parse_input::ParseAttempt::Accept(())
+      ::tokora::ParseAttempt::Accept(())
     ))
   }
 }

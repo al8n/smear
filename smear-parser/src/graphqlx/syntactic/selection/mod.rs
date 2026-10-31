@@ -8,12 +8,10 @@
 
 use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
-  Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, Token,
-  TryParseInput,
+  Accumulator, Action, EmitterView, Lexer, ParseAttempt, ParseInput, ParseTokenChoice, SimpleSpan,
+  Slice, Source, Token, TryParseInput,
   cache::Peeked,
-  parser::Action,
   span::Spanned,
-  try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
 };
 

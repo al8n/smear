@@ -307,7 +307,7 @@
 use tokora::{
   InputRef, Lexer, ParseContext, SimpleSpan, Token,
   emitter::{CstEmitter, FromUnclosed},
-  error::{Unclosed, UnexpectedEot, token::UnexpectedToken},
+  error::{Unclosed, UnexpectedEot, UnexpectedToken},
   input::Balance,
   lexer::FromLogos,
   span::Spanned,

@@ -118,10 +118,9 @@ fn a_refusal_is_the_error_returned_even_under_a_rejecting_emitter() {
   use tokora::{
     Emitter, Lexer, ParserContext, SimpleSpan, Token,
     cache::DefaultCache,
-    error::{MaybeTerminal, RecursionLimitReached},
-    prelude::UnexpectedTokenOf,
+    error::{MaybeTerminal, RecursionLimitReached, UnexpectedTokenOf},
     span::Spanned,
-    state::recursion_tracker::RecursionLimiter,
+    state::RecursionLimiter,
   };
 
   type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
@@ -365,10 +364,9 @@ fn each_term_of_a_roots_stop_is_alone_on_a_population() {
   use tokora::{
     Emitter, Lexer, ParserContext, SimpleSpan, Token,
     cache::DefaultCache,
-    error::{MaybeTerminal, RecursionLimitReached},
-    prelude::UnexpectedTokenOf,
+    error::{MaybeTerminal, RecursionLimitReached, UnexpectedTokenOf},
     span::Spanned,
-    state::recursion_tracker::RecursionLimiter,
+    state::RecursionLimiter,
   };
 
   type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
@@ -597,10 +595,9 @@ fn a_caught_trip_does_not_silence_a_later_failures_drain() {
   use tokora::{
     Emitter, InputRef, Lexer, ParserContext, SimpleSpan, Token,
     cache::DefaultCache,
-    error::{MaybeTerminal, RecursionLimitReached},
-    prelude::UnexpectedTokenOf,
+    error::{MaybeTerminal, RecursionLimitReached, UnexpectedTokenOf},
     span::Spanned,
-    state::recursion_tracker::RecursionLimiter,
+    state::RecursionLimiter,
   };
 
   type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
@@ -858,10 +855,9 @@ fn a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it() {
   use tokora::{
     Emitter, InputRef, Lexer, ParserContext, SimpleSpan, Token,
     cache::DefaultCache,
-    error::{MaybeTerminal, RecursionLimitReached},
-    prelude::UnexpectedTokenOf,
+    error::{MaybeTerminal, RecursionLimitReached, UnexpectedTokenOf},
     span::Spanned,
-    state::recursion_tracker::RecursionLimiter,
+    state::RecursionLimiter,
   };
 
   type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
@@ -1063,8 +1059,10 @@ fn a_terminal_failure_no_turn_classified_stops_the_drain_on_the_trait_alone() {
     lossless::depth::{FromTokenBudget, RootStop, drain_unless_stopped, drain_unless_terminal},
   };
   use tokora::{
-    Emitter, InputRef, Lexer, ParserContext, SimpleSpan, Token, cache::DefaultCache,
-    error::MaybeTerminal, prelude::UnexpectedTokenOf, span::Spanned,
+    Emitter, InputRef, Lexer, ParserContext, SimpleSpan, Token,
+    cache::DefaultCache,
+    error::{MaybeTerminal, UnexpectedTokenOf},
+    span::Spanned,
   };
 
   type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
@@ -1649,9 +1647,8 @@ fn the_value_a_frame_hands_up_after_a_drain_refusal_is_terminal() {
   use tokora::{
     Emitter, InputRef, Lexer, ParserContext, SimpleSpan, Token,
     cache::DefaultCache,
-    error::{MaybeTerminal, RecursionLimitReached},
+    error::{MaybeTerminal, RecursionLimitReached, UnexpectedTokenOf},
     input::TokenBudget,
-    prelude::UnexpectedTokenOf,
     span::Spanned,
   };
 

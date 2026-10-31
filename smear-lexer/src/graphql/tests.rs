@@ -1,6 +1,6 @@
 use core::marker::PhantomData;
 
-use tokora::{Lexer, SimpleSpan, state::recursion_tracker::RecursionLimitExceeded};
+use tokora::{Lexer, SimpleSpan, state::RecursionLimitExceeded};
 
 use crate::{
   LitComplexInlineStr, LitInlineStr, LitPlainInlineStr,

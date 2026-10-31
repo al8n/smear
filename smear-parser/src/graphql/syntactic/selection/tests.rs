@@ -8,9 +8,7 @@
 //! `parse_selection_set` verdicts — excluding the empty-`{}` row, which parser-next
 //! rejects per the spec-cardinality rule (plan Amendment 2).
 
-use tokora::{
-  FatalContext, Parse, Parser, SimpleSpan, try_parse_input::ParseAttempt, utils::cmp::Equivalent,
-};
+use tokora::{FatalContext, Parse, ParseAttempt, Parser, SimpleSpan, utils::Equivalent};
 
 use super::{
   field, fragment_spread, inline_fragment, selection, selection_set, try_type_condition,

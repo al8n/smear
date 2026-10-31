@@ -9,8 +9,8 @@
 
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{
-  Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, TryParseInput, span::Spanned,
-  try_parse_input::ParseAttempt,
+  Lexer, ParseAttempt, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source, TryParseInput,
+  span::Spanned,
 };
 
 use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken};

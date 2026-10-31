@@ -50,7 +50,7 @@ smallvec = ["dep:smallvec"]
 bytes = ["dep:bytes", "tokora/bytes_1"]
 bstr = ["dep:bstr", "tokora/bstr_1"]
 hipstr = ["dep:hipstr", "tokora/hipstr_0_8"]
-smol-bytes = ["dep:smol-bytes", "tokora/smol_bytes_0_1"]
+smol-bytes = ["dep:smol-bytes", "tokora/smol-bytes_0_2"]
 
 [dependencies]
 derive_more.workspace = true

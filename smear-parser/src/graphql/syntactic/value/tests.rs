@@ -11,7 +11,7 @@
 //! marker, so the drivers use `Parser::with_parser` with that marker explicitly.
 
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
-use tokora::{FatalContext, Lexer, Parse, Parser, SimpleSpan, Source, utils::cmp::Equivalent};
+use tokora::{FatalContext, Lexer, Parse, Parser, SimpleSpan, Source, utils::Equivalent};
 
 use super::{const_object_field, default_value, object_field, try_default_value};
 use crate::graphql::{
@@ -26,7 +26,7 @@ use crate::graphql::{
   error::{ErrorData, Expectation, GraphqlErrors, ObjectFieldValueHint, Unclosed},
   syntactic::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlToken},
 };
-use tokora::try_parse_input::ParseAttempt;
+use tokora::ParseAttempt;
 
 /// The fatal context a `str`-sourced parse runs under.
 type StrCtx<'inp> = FatalContext<'inp, GraphqlLexer<'inp, str>, GraphqlErrors<&'inp str>, GraphQL>;

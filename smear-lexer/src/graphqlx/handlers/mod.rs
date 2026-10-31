@@ -1,7 +1,7 @@
 use tokora::{
   error::{UnexpectedEnd, UnexpectedLexeme},
   logos::{Lexer, Logos, Source},
-  state::tracker::LimitExceeded,
+  state::LimitExceeded,
   utils::Lexeme,
 };
 

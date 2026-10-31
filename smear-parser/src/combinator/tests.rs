@@ -4,9 +4,8 @@ use smear_lexer::tokora::{
   FatalContext, InputRef, Lexer, Parse, Parser,
   emitter::{FromUnclosed, FullContainerEmitter, SeparatedEmitter, TooFewEmitter},
   error::{
-    Unclosed, UnexpectedEot,
-    syntax::{FullContainer, MissingSyntax, TooFew},
-    token::{MissingToken, SeparatedError, UnexpectedToken},
+    FullContainer, MissingSyntax, MissingToken, SeparatedError, TooFew, Unclosed, UnexpectedEot,
+    UnexpectedToken,
   },
 };
 

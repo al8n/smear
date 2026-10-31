@@ -10,7 +10,7 @@
 //! moved, so the whole of this lift is invisible to `value.rs` and its six siblings.
 
 #[cfg(not(feature = "lossless-coverage"))]
-pub(crate) use tokora::parser::{node, node_at};
+pub(crate) use tokora::combinator::{node, node_at};
 
 #[cfg(feature = "lossless-coverage")]
 pub use bound::{hits, hits_of, reset};
@@ -20,23 +20,23 @@ pub(crate) use bound::{node, node_at};
 
 #[cfg(feature = "lossless-coverage")]
 mod bound {
-  use tokora::cst::event::EventMark;
+  use tokora::cst::EventMark;
 
   use crate::{graphql::kinds::SyntaxKind as K, lossless::coverage};
 
-  /// [`tokora::parser::node`], counting the wrap in this dialect's lane.
+  /// [`tokora::combinator::node`], counting the wrap in this dialect's lane.
   #[inline]
-  pub(crate) fn node<P>(kind: u16, parser: P) -> tokora::parser::Node<coverage::Counted<K, P>> {
+  pub(crate) fn node<P>(kind: u16, parser: P) -> tokora::combinator::Node<coverage::Counted<K, P>> {
     coverage::node::<K, P>(kind, parser)
   }
 
-  /// [`tokora::parser::node_at`], counting the wrap in this dialect's lane.
+  /// [`tokora::combinator::node_at`], counting the wrap in this dialect's lane.
   #[inline]
   pub(crate) fn node_at<P>(
     mark: EventMark,
     kind: u16,
     parser: P,
-  ) -> tokora::parser::NodeAt<coverage::Counted<K, P>> {
+  ) -> tokora::combinator::NodeAt<coverage::Counted<K, P>> {
     coverage::node_at::<K, P>(mark, kind, parser)
   }
 

@@ -16,8 +16,8 @@
 //! `hit(K::X)` at each of them is exactly the kind of bookkeeping that a *new* production forgets
 //! — after which the gate reports full coverage of the kinds it knows about and stays silent
 //! about the one that was added. So this module's `node` and `node_at` — which exist only under
-//! the feature, hence no link — shadow [`tokora::parser::node`] and [`tokora::parser::node_at`],
-//! and the production modules import
+//! the feature, hence no link — shadow [`tokora::combinator::node`] and
+//! [`tokora::combinator::node_at`], and the production modules import
 //! them through their dialect's binding. A production cannot open a node without being counted,
 //! because opening a node *is* calling one of these.
 //!
@@ -139,31 +139,31 @@ mod counter {
   }
 }
 
-/// The counting shims: [`tokora::parser::node`] and [`tokora::parser::node_at`] with the inner
-/// parser wrapped so a successful sub-parse — the exact condition tokora wraps on — is recorded.
+/// The counting shims: [`tokora::combinator::node`] and [`tokora::combinator::node_at`] with the
+/// inner parser wrapped so a successful sub-parse — the exact condition tokora wraps on — is
+/// recorded.
 #[cfg(feature = "lossless-coverage")]
 mod instrumented {
   use core::marker::PhantomData;
 
   use tokora::{
-    Emitter, InputRef, Lexer, ParseContext, ParseInput, TryParseInput,
-    cst::event::EventMark,
-    parser::{Node, NodeAt},
-    try_parse_input::ParseAttempt,
+    Emitter, InputRef, Lexer, ParseAttempt, ParseContext, ParseInput, TryParseInput,
+    combinator::{Node, NodeAt},
+    cst::EventMark,
   };
 
   use crate::lossless::KindSpace;
 
-  /// [`tokora::parser::node`], counting the wrap in `K`'s lane.
+  /// [`tokora::combinator::node`], counting the wrap in `K`'s lane.
   #[inline]
   pub fn node<K: KindSpace, P>(kind: u16, parser: P) -> Node<Counted<K, P>> {
-    tokora::parser::node(kind, Counted::new(kind, parser))
+    tokora::combinator::node(kind, Counted::new(kind, parser))
   }
 
-  /// [`tokora::parser::node_at`], counting the wrap in `K`'s lane.
+  /// [`tokora::combinator::node_at`], counting the wrap in `K`'s lane.
   #[inline]
   pub fn node_at<K: KindSpace, P>(mark: EventMark, kind: u16, parser: P) -> NodeAt<Counted<K, P>> {
-    tokora::parser::node_at(mark, kind, Counted::new(kind, parser))
+    tokora::combinator::node_at(mark, kind, Counted::new(kind, parser))
   }
 
   /// A node's inner parser, plus the kind the wrap around it will carry and the lane it belongs

@@ -1,8 +1,5 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use tokora::utils::{
-  human_display::DisplayHuman,
-  sdl_display::{DisplayCompact, DisplayPretty},
-};
+use tokora::utils::{DisplayCompact, DisplayHuman, DisplayPretty};
 
 use super::LitPlainInlineStr;
 use std::{borrow::Cow, string::String};

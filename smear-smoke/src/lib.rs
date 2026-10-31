@@ -801,7 +801,7 @@ macro_rules! smoke_int {
         literal: &str,
       ) -> Result<bool, Option<smear::parser::graphql::error::IntWidth>> {
         use smear::{
-          lexer::tokora::try_parse_input::ParseAttempt,
+          lexer::tokora::ParseAttempt,
           parser::graphql::{
             GraphQL,
             ast::IntValue,

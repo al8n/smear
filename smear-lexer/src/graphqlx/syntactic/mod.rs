@@ -10,7 +10,7 @@ use tokora::{
     DoubleColon, Equal, Exclamation, FatArrow, Hyphen, OpenAngle, OpenBrace, OpenBracket,
     OpenParen, Pipe, Plus, Spread,
   },
-  state::recursion_tracker::RecursionLimitExceeded,
+  state::RecursionLimitExceeded,
   utils::{CharLen, DowncastRef},
 };
 

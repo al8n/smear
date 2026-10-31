@@ -3,12 +3,7 @@ use core::{fmt::Display, marker::PhantomData};
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan, Span as SpanTrait},
-  utils::{
-    IntoComponents,
-    human_display::DisplayHuman,
-    sdl_display::{DisplayCompact, DisplayPretty},
-    syntax_tree_display::DisplaySyntaxTree,
-  },
+  utils::{DisplayCompact, DisplayHuman, DisplayPretty, DisplaySyntaxTree, IntoComponents},
 };
 
 /// A floating-point value literal.

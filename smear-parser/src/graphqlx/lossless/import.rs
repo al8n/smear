@@ -31,10 +31,10 @@ use tokora::ParseInput as _;
 
 use crate::graphqlx::kinds::SyntaxKind as K;
 
-// `node` comes from `coverage`, not from `tokora::parser`. Behind `feature = "lossless-coverage"`
-// it is that same combinator plus the per-node-kind hit counter gate 2 measures its reach with, so
-// a production cannot open a node without being counted; without the feature it is tokora's own,
-// re-exported unchanged.
+// `node` comes from `coverage`, not from `tokora::combinator`. Behind
+// `feature = "lossless-coverage"` it is that same combinator plus the per-node-kind hit counter
+// gate 2 measures its reach with, so a production cannot open a node without being counted;
+// without the feature it is tokora's own, re-exported unchanged.
 use super::coverage::node;
 
 use super::{

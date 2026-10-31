@@ -53,11 +53,10 @@
 //! a real doc-writing obligation rather than a note.
 
 use tokora::{
-  ErrorOf, InputRef, Lexer, SimpleSpan, Token,
-  error::{UnexpectedEot, token::UnexpectedToken},
+  ErrorOf, InputRef, Lexer, ParseAttempt, SimpleSpan, Token,
+  error::{UnexpectedEot, UnexpectedToken},
   lexer::FromLogos,
   span::Spanned,
-  try_parse_input::ParseAttempt,
   utils::DowncastRef,
 };
 
@@ -185,7 +184,7 @@ where
 /// On a mismatch the offending token is **left unconsumed**, at the cache front where
 /// `try_expect` put it. That is the contract a lossless recovery needs: the caller's
 /// `sync_to`/`sync_balanced` still gets to commit that token inside an `Error` node, so it
-/// reaches the tree. Consuming it here — which is what `tokora::parser::expect` does, since it
+/// reaches the tree. Consuming it here — which is what `tokora::combinator::expect` does, since it
 /// reads through `next_or_stop` — would commit it to whatever node happens to be open, and the
 /// recovery could only wrap the tokens after it.
 ///
@@ -270,7 +269,7 @@ where
 ///
 /// # Why a second spelling of the same conditional consume
 ///
-/// A [`ParseAttempt`] is what [`node_at`](tokora::parser::node_at) requires of its inner
+/// A [`ParseAttempt`] is what [`node_at`](tokora::combinator::node_at) requires of its inner
 /// parser: `NodeAt` implements [`TryParseInput`](tokora::TryParseInput) over a declining
 /// parser, and spends the caller's mark **only** on `Accept`. That is the whole retro-wrap
 /// mechanism — the mark is spent by the same call that finds the token justifying it, so no

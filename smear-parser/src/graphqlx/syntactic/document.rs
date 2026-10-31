@@ -9,10 +9,10 @@ use std::vec::Vec;
 
 use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use tokora::{
-  Accumulator, Branch, EmitterView, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source,
+  Accumulator, Action, EmitterView, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source,
   Token,
   cache::Peeked,
-  parser::Action,
+  parse::Branch,
   span::Spanned,
   utils::{DowncastRef, typenum::U1},
 };

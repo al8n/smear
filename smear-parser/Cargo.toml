@@ -97,7 +97,7 @@ smallvec = ["smear-lexer/smallvec"]
 bytes = ["dep:bytes", "smear-lexer/bytes", "tokora/bytes_1"]
 bstr = ["dep:bstr", "smear-lexer/bstr"]
 hipstr = ["dep:hipstr", "smear-lexer/hipstr", "tokora/hipstr_0_8"]
-smol-bytes = ["dep:smol-bytes", "smear-lexer/smol-bytes", "tokora/smol_bytes_0_1"]
+smol-bytes = ["dep:smol-bytes", "smear-lexer/smol-bytes", "tokora/smol-bytes_0_2"]
 
 # The lossless CST tower. `std` because the runner needs it.
 #

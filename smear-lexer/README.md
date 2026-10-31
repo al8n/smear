@@ -232,7 +232,7 @@ belong to the layers above (`parser`, `validator`, `proto`, `rowan`, …).
 | `bytes` | Support `bytes::Bytes` source type | |
 | `bstr` | Support `bstr::BStr` source type | |
 | `hipstr` | Support `hipstr::{HipStr, HipByt}` source type | |
-| `smol-bytes` | Support `smol_bytes::SmolBytes` source type | |
+| `smol-bytes` | Support smol-bytes 0.2 `smol_bytes::{Bytes, Utf8Bytes}` and `smol_bytes::compact::{Bytes, Utf8Bytes}` source types | |
 
 ## Performance Characteristics
 

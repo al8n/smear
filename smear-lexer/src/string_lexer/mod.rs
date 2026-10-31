@@ -1,10 +1,7 @@
 use derive_more::{Deref, DerefMut, From, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   logos::Lexer,
-  utils::{
-    human_display::DisplayHuman,
-    sdl_display::{DisplayCompact, DisplayPretty},
-  },
+  utils::{DisplayCompact, DisplayHuman, DisplayPretty},
 };
 
 use crate::error::{StringError, StringErrors};
@@ -136,12 +133,12 @@ macro_rules! variant_type {
       }
     }
 
-    impl<S: tokora::utils::human_display::DisplayHuman $(, $kind)?> core::fmt::Display
+    impl<S: tokora::utils::DisplayHuman $(, $kind)?> core::fmt::Display
       for $name<S $(, $kind)?>
     {
       #[inline]
       fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        tokora::utils::human_display::DisplayHuman::fmt(&self.source, f)
+        tokora::utils::DisplayHuman::fmt(&self.source, f)
       }
     }
 

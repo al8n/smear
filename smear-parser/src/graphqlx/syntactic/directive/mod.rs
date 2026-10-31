@@ -12,8 +12,8 @@
 use std::vec::Vec;
 
 use tokora::{
-  Lexer, ParseInput, SimpleSpan, Slice, Source, Token, punct::At, span::Spanned,
-  try_parse_input::ParseAttempt, utils::DowncastRef,
+  Lexer, ParseAttempt, ParseInput, SimpleSpan, Slice, Source, Token, punct::At, span::Spanned,
+  utils::DowncastRef,
 };
 
 use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};

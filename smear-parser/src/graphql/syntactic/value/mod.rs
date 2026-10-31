@@ -17,13 +17,11 @@
 //! tail without consuming a wrong token.
 
 use tokora::{
-  Accumulator, EmitterView, Lexer, ParseInput, ParseTokenChoice, SimpleSpan, Slice, Source,
-  TryParseInput,
+  Accumulator, Action, EmitterView, Lexer, ParseAttempt, ParseInput, ParseTokenChoice, SimpleSpan,
+  Slice, Source, TryParseInput,
   cache::{Peeked, PeekedTokenExt},
-  error::{UnexpectedEot, token::UnexpectedToken},
-  parser::Action,
+  error::{UnexpectedEot, UnexpectedToken},
   span::Spanned,
-  try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
 };
 

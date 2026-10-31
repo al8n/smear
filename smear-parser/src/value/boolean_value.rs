@@ -2,10 +2,7 @@ use core::{fmt::Display, marker::PhantomData};
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},
-  utils::{
-    IntoComponents,
-    sdl_display::{DisplayCompact, DisplayPretty},
-  },
+  utils::{DisplayCompact, DisplayPretty, IntoComponents},
 };
 
 /// A boolean value literal.

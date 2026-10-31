@@ -243,7 +243,7 @@ fn the_two_layers_agree_on_what_end_of_input_reports() {
 #[test]
 fn a_declined_expect_reports_the_graphqlx_expectation_for_its_kind() {
   use smear::parser::lexer::graphqlx::lossless::{LosslessToken, LosslessTokenKind as LK};
-  use tokora::error::token::UnexpectedToken as TokUnexpectedToken;
+  use tokora::error::UnexpectedToken as TokUnexpectedToken;
 
   /// The expectation the lossless conversion produces when `expected` was demanded and `found`
   /// turned up.
@@ -294,7 +294,7 @@ fn a_declined_expect_reports_the_graphqlx_expectation_for_its_kind() {
 #[test]
 fn a_lexer_error_lands_as_error_data_lexer_not_as_a_note() {
   use smear::parser::lexer::graphqlx::error::LexerErrors;
-  use tokora::state::tracker::LimitExceeded;
+  use tokora::state::LimitExceeded;
 
   let errs: Errs = LexerErrors::<char, LimitExceeded>::default().into();
   let first = errs.into_iter().next().expect("no error was produced");

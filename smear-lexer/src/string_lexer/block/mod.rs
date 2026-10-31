@@ -1,7 +1,7 @@
 use std::{borrow::Cow, string::String};
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
-use tokora::utils::human_display::DisplayHuman;
+use tokora::utils::DisplayHuman;
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) use self::u8_slice::skip_block_str_from_bytes;

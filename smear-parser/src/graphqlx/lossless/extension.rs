@@ -30,11 +30,11 @@
 //! carry, reached through the same two helpers, so a rule fixed at one site is fixed at both.
 
 use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
-use tokora::{ParseInput as _, cst::event::EventMark};
+use tokora::{ParseInput as _, cst::EventMark};
 
 use crate::graphqlx::kinds::SyntaxKind as K;
 
-// `node_at` comes from `coverage`, not from `tokora::parser`; see any sibling production file.
+// `node_at` comes from `coverage`, not from `tokora::combinator`; see any sibling production file.
 use super::coverage::node_at;
 
 use super::{

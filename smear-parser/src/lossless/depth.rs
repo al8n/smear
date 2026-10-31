@@ -583,7 +583,7 @@ pub(crate) enum RootTurn<T, E> {
 /// # Why a slot rather than a return value
 ///
 /// [`root_turn`] already returns its verdict, and for the loop's own arm that is all a root needs.
-/// The drain sits one frame further out, on the other side of a [`node`](tokora::parser::node)
+/// The drain sits one frame further out, on the other side of a [`node`](tokora::combinator::node)
 /// bracket the root's loop runs *inside*: the loop signals a stop by returning `Err` from that
 /// closure, because `Err` is what demotes the node, and an `Err` is exactly what cannot say which
 /// of the two failures it is. The verdict has to cross that boundary out of band or be
@@ -725,7 +725,7 @@ impl RootStop {
 ///
 /// The verdict this returns is what the loop needs; [`RootStop`] is what the **drain above the
 /// root** needs, and the two are the same value written twice because the loop's `Err` cannot
-/// carry it across the [`node`](tokora::parser::node) bracket the loop runs inside. Writing it
+/// carry it across the [`node`](tokora::combinator::node) bracket the loop runs inside. Writing it
 /// here rather than at the arm is what makes it unforgettable: a root that reaches the arm has
 /// already been recorded, whatever it then does with the verdict. See [`RootStop`] for why the
 /// write is an assignment rather than a latch.

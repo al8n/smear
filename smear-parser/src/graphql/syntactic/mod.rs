@@ -16,7 +16,7 @@ use smear_lexer::graphql::{
   syntactic::{SyntacticLexer, SyntacticToken},
 };
 use tokora::{
-  ErrorOf, InputRef, Lexer, ParseContext, SimpleSpan, Slice, Source, try_parse_input::ParseAttempt,
+  ErrorOf, InputRef, Lexer, ParseAttempt, ParseContext, SimpleSpan, Slice, Source,
   utils::DowncastRef,
 };
 

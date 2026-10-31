@@ -122,9 +122,10 @@ than "nothing was looking".
 ### A source type you choose — on both halves of the parser
 
 The syntactic doors are generic over the source type: `&str`, `&[u8]`, `bytes::Bytes`,
-`bstr::BStr`, `hipstr::{HipStr, HipByt}`, `smol_bytes::SmolBytes`, or your own. Pick a
-`Send + Sync + 'static` one and the AST becomes `Send + Sync + 'static` with it, which is what makes
-parallel schema compilation and batched query processing straightforward.
+`bstr::BStr`, `hipstr::{HipStr, HipByt}`, smol-bytes 0.2's shared and compact `Bytes` and
+`Utf8Bytes`, or your own. Pick a `Send + Sync + 'static` one and the AST becomes
+`Send + Sync + 'static` with it, which is what makes parallel schema compilation and batched query
+processing straightforward.
 
 **The lossless parse doors reach the same set, through a sibling each** ([#121]). Every
 `parse_*` door keeps its `&str` signature and its `-> Parse`, and beside it is a
@@ -314,7 +315,7 @@ without it, and a gate that can only ever be on is not a gate.
 | `bytes` | Support the `bytes::Bytes` source type | |
 | `bstr` | Support the `bstr::BStr` source type | |
 | `hipstr` | Support the `hipstr::{HipStr, HipByt}` source types | |
-| `smol-bytes` | Support the `smol_bytes::SmolBytes` source type | |
+| `smol-bytes` | Support the smol-bytes 0.2 `smol_bytes::{Bytes, Utf8Bytes}` and `smol_bytes::compact::{Bytes, Utf8Bytes}` source types | |
 | `lossless-coverage` | Per-node-kind hit counters for the lossless gates. Implies `rowan` | |
 | `test-support` | The lossless suites' `test_support` scaffolding | |
 

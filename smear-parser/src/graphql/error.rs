@@ -29,9 +29,8 @@ use tokora::{
   Lexer, SimpleSpan as Span,
   emitter::FromUnclosed,
   error::{
-    MaybeTerminal, Unclosed as TokoraUnclosed, UnexpectedEot,
-    syntax::{FullContainer, MissingSyntax, TooFew},
-    token::{MissingToken, SeparatedError, UnexpectedToken as TokUnexpectedToken},
+    FullContainer, MaybeTerminal, MissingSyntax, MissingToken, SeparatedError, TooFew,
+    Unclosed as TokoraUnclosed, UnexpectedEot, UnexpectedToken as TokUnexpectedToken,
   },
   utils::{CowStr, Expected},
 };

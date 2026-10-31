@@ -42,7 +42,7 @@ use tokora::ParseInput as _;
 
 use crate::graphqlx::kinds::SyntaxKind as K;
 
-// `node`/`node_at` come from `coverage`, not from `tokora::parser`. Behind
+// `node`/`node_at` come from `coverage`, not from `tokora::combinator`. Behind
 // `feature = "lossless-coverage"` they are those same combinators plus the per-node-kind hit
 // counter gate 2 measures its reach with, so a production cannot open a node without being counted;
 // without the feature they are tokora's own, re-exported unchanged.
@@ -323,7 +323,7 @@ lossless_production! {
   /// that began at the `{` would lose the only token that says which collection it is.
   fn collection_body<'inp, Src, Ctx>(
     inp,
-    mark: tokora::cst::event::EventMark,
+    mark: tokora::cst::EventMark,
     konst: Constness,
     collection: Collection,
   ) {

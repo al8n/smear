@@ -9,7 +9,7 @@
 
 use smear_lexer::graphql::syntactic::SyntacticTokenKind;
 use tokora::{
-  FatalContext, Lexer, Parse, Parser, SimpleSpan, Source, punct::Bracket, utils::cmp::Equivalent,
+  FatalContext, Lexer, Parse, Parser, SimpleSpan, Source, punct::Bracket, utils::Equivalent,
 };
 
 use crate::graphql::{

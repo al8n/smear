@@ -15,12 +15,13 @@ use smear_lexer::{
   keywords::{Fragment, Mutation, Query, Subscription},
 };
 use tokora::{
-  Accumulator, Branch, EmitterView, Lexer, ParseChoice, ParseInput, SimpleSpan, Slice, Source,
+  Accumulator, Action, EmitterView, Lexer, ParseAttempt, ParseChoice, ParseInput, SimpleSpan,
+  Slice, Source,
   cache::{Peeked, PeekedTokenExt},
-  error::{UnexpectedEot, token::UnexpectedToken},
-  parser::{Action, parens},
+  combinator::parens,
+  error::{UnexpectedEot, UnexpectedToken},
+  parse::Branch,
   span::Spanned,
-  try_parse_input::ParseAttempt,
   utils::{DowncastRef, typenum::U1},
 };
 
