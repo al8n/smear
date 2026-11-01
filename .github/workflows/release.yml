@@ -104,7 +104,42 @@ jobs:
           python3 ci/release.py prepare \
             --version "$RELEASE_VERSION" \
             --commit "$RELEASE_COMMIT" \
-            --target-dir "$RUNNER_TEMP/smear-release/verify-target"
+            --target-dir "$RUNNER_TEMP/smear-release/verify-target" \
+            --evidence-dir "$RUNNER_TEMP/smear-release/preflight"
+
+      # Bootstrap the five missing names from this exact evidence while the
+      # protected publish job waits. Approve THIS run afterward; never resolve
+      # another lock or rerun verify after a sibling has been published.
+      - name: Retain the exact manual-bootstrap evidence
+        id: artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smear-preflight-${{ inputs.version }}-${{ inputs.commit }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/smear-release/preflight/
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 90
+          compression-level: 0
+
+      - name: Record the evidence to review before bootstrap and approval
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          LOCK_SHA256: ${{ steps.evidence.outputs.lock_sha256 }}
+          MANIFEST_SHA256: ${{ steps.evidence.outputs.preflight_manifest_sha256 }}
+          ARTIFACT_ID: ${{ steps.artifact.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.artifact.outputs.artifact-digest }}
+          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
+        run: |
+          {
+            printf 'Release %s from %s, Cargo %s\n\n' "$RELEASE_VERSION" "$RELEASE_COMMIT" "$RELEASE_TOOLCHAIN"
+            printf 'Run %s, producing attempt %s\n\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            printf 'Artifact [%s](%s), SHA-256 %s\n\n' "$ARTIFACT_ID" "$ARTIFACT_URL" "$ARTIFACT_DIGEST"
+            printf 'Lock SHA-256: %s\n\nManifest SHA-256: %s\n\n' "$LOCK_SHA256" "$MANIFEST_SHA256"
+            printf '```text\n'
+            cat "$RUNNER_TEMP/smear-release/preflight/SHA256SUMS"
+            printf '```\n\nKeep publish waiting during bootstrap, then approve this same run.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     name: Publish exact crates through OIDC
