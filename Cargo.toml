@@ -4,11 +4,11 @@ members = [
   "graphql-proto",
   "smear",
   "smear-lexer",
-  "smear-noatomic",
+  "tests/smear-noatomic",
   "smear-parser",
   "smear-compiler",
   "smear-schema",
-  "smear-smoke",
+  "tests/smear-smoke",
 ]
 
 # ── ONE MEMBER PULLS `smear` PAST ITS DEFAULT FEATURE SET ────────────────────────────────────

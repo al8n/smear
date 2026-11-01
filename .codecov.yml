@@ -8,8 +8,8 @@ ignore:
   - "**tests/*"
   - "**ci/*"
   - "**/*test*.rs"
-  - "smear-smoke/"
-  - "smear-noatomic/"
+  - "tests/smear-smoke/"
+  - "tests/smear-noatomic/"
   - "smear-benches/"
 
 coverage:

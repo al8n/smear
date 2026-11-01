@@ -48,7 +48,7 @@
 extern crate alloc as std;
 
 /// The schema representation, compiled from `smear`'s own files.
-#[path = "../../smear-schema/src/repr/mod.rs"]
+#[path = "../../../smear-schema/src/repr/mod.rs"]
 pub mod repr;
 
 use repr::{
