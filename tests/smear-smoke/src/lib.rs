@@ -1842,7 +1842,7 @@ mod tests {
   /// turns on. `ci/source_census` reads this workspace's sources the same way and for the same
   /// reason.
   const MATERIALIZED_SOURCE: &str =
-    include_str!("../../smear-parser/src/graphql/syntactic/value/materialized.rs");
+    include_str!("../../../smear-parser/src/graphql/syntactic/value/materialized.rs");
 
   /// Every public production that module declares, paired with the macro that generated it.
   ///
@@ -2132,7 +2132,7 @@ mod tests {
   /// manifest rather than restated here — one source of truth, not two that agree today.
   #[test]
   fn the_smoke_consumes_every_feature() {
-    let smear: toml::Value = toml::from_str(include_str!("../../smear/Cargo.toml"))
+    let smear: toml::Value = toml::from_str(include_str!("../../../smear/Cargo.toml"))
       .expect("smear/Cargo.toml is not valid TOML");
     let smoke: toml::Value =
       toml::from_str(include_str!("../Cargo.toml")).expect("this crate's Cargo.toml is invalid");

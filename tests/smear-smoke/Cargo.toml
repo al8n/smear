@@ -28,7 +28,7 @@ publish = false
 # #81 was about, and naming every feature is what makes `tests::the_smoke_consumes_every_feature`
 # able to compare the list against `smear`'s manifest. The list is parsed back out of THIS file at
 # compile time, so it is one source of truth rather than two that agree today.
-smear = { path = "../smear", default-features = false, features = [
+smear = { path = "../../smear", default-features = false, features = [
   "std",
   "graphql",
   "graphqlx",
