@@ -29,11 +29,14 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -54,7 +57,10 @@ PUBLISH_ORDER = (
     "graphql-proto",
     "smear",
 )
-BOOTSTRAP_0_0_1 = frozenset(PUBLISH_ORDER[:-1])
+BOOTSTRAP_0_0_1 = frozenset((
+    "smear-lexer", "smear-parser", "smear-schema", "smear-compiler", "graphql-proto",
+))
+BOOTSTRAP_LOGIN = "al8n"
 UNPUBLISHED_MEMBERS = frozenset(("smear-noatomic", "smear-smoke", "source-census"))
 INTERNAL_EDGES = {
     "smear-lexer": frozenset(),
@@ -586,6 +592,108 @@ def emit_github_outputs(values: dict[str, str]) -> None:
     print(f"ok: emitted {len(values)} outputs using {utf16_size} UTF-16 bytes")
 
 
+def preflight_sums(manifest: dict[str, object], manifest_bytes: bytes) -> bytes:
+    lines = [
+        f"{manifest['lock_sha256']}  Cargo.lock",
+        f"{sha256_bytes(manifest_bytes)}  preflight.json",
+    ]
+    packages = package_by_name(manifest)
+    lines.extend(
+        f"{packages[name]['sha256']}  crates/{packages[name]['archive']}"
+        for name in PUBLISH_ORDER
+    )
+    return ("\n".join(lines) + "\n").encode()
+
+
+def export_preflight(
+    directory: Path, lock: bytes, manifest: dict[str, object], target_dir: Path
+) -> None:
+    """Export only the already-approved bytes, never a second resolution."""
+    if sha256_bytes(lock) != manifest.get("lock_sha256"):
+        fail("export lock does not match the preflight manifest")
+    packages = package_by_name(manifest)
+    for package in packages.values():
+        verify_local_archive(target_dir, package)
+    directory.mkdir(parents=True, exist_ok=False)
+    (directory / "crates").mkdir()
+    manifest_bytes = canonical_json_bytes(manifest)
+    (directory / "Cargo.lock").write_bytes(lock)
+    (directory / "preflight.json").write_bytes(manifest_bytes)
+    (directory / "SHA256SUMS").write_bytes(preflight_sums(manifest, manifest_bytes))
+    for name in PUBLISH_ORDER:
+        package = packages[name]
+        shutil.copyfile(local_archive_path(target_dir, package), directory / "crates" / package["archive"])
+    # Check the copied bytes too, before an artifact can be uploaded.
+    read_preflight(directory, manifest["version"], manifest["commit"],
+                   manifest["lock_sha256"], sha256_bytes(manifest_bytes))
+
+
+def read_preflight(
+    directory: Path, version: str, commit: str, lock_sha256: str, manifest_sha256: str
+) -> tuple[bytes, dict[str, object]]:
+    """Authenticate a downloaded bundle against hashes from the trusted run summary."""
+    for digest in (lock_sha256, manifest_sha256):
+        if not SHA256_RE.fullmatch(digest):
+            fail("preflight checksum must be a lowercase SHA-256")
+    if directory.is_symlink() or not directory.is_dir():
+        fail("preflight bundle must be a real directory")
+    expected = {"Cargo.lock", "preflight.json", "SHA256SUMS"} | {
+        f"crates/{name}-{version}.crate" for name in PUBLISH_ORDER
+    }
+    found = set()
+    for root, directories, files in os.walk(directory, followlinks=False):
+        for name in directories + files:
+            path = Path(root) / name
+            relative = path.relative_to(directory).as_posix()
+            mode = path.lstat().st_mode
+            if stat.S_ISLNK(mode):
+                fail(f"preflight bundle contains a symlink: {relative}")
+            if stat.S_ISDIR(mode):
+                if relative != "crates":
+                    fail(f"preflight bundle contains an unexpected directory: {relative}")
+            elif not stat.S_ISREG(mode) or relative not in expected:
+                fail(f"preflight bundle contains an unexpected file: {relative}")
+            else:
+                found.add(relative)
+    if found != expected:
+        fail(f"preflight bundle files differ: missing={sorted(expected - found)}")
+    lock = (directory / "Cargo.lock").read_bytes()
+    manifest_bytes = (directory / "preflight.json").read_bytes()
+    if sha256_bytes(lock) != lock_sha256 or sha256_bytes(manifest_bytes) != manifest_sha256:
+        fail("preflight lock or manifest checksum differs from the trusted run summary")
+    try:
+        manifest = json.loads(manifest_bytes)
+    except (ValueError, UnicodeDecodeError) as error:
+        raise ReleaseError("preflight manifest is not JSON") from error
+    if not isinstance(manifest, dict):
+        fail("preflight manifest is not an object")
+    verify_manifest_header(manifest, version, commit, lock_sha256)
+    for name, package in package_by_name(manifest).items():
+        if package.get("version") != version or package.get("vcs_sha") != commit:
+            fail(f"{name} preflight version or VCS identity differs")
+        if package.get("archive") != f"{name}-{version}.crate":
+            fail(f"{name} preflight archive has a noncanonical path")
+        if not isinstance(package.get("sha256"), str) or not SHA256_RE.fullmatch(package["sha256"]):
+            fail(f"{name} preflight archive checksum is invalid")
+        archive = directory / "crates" / package["archive"]
+        if (type(package.get("size")) is not int or archive.stat().st_size != package["size"]
+                or sha256_file(archive) != package["sha256"]):
+            fail(f"{name} preflight archive bytes differ")
+    if (directory / "SHA256SUMS").read_bytes() != preflight_sums(manifest, manifest_bytes):
+        fail("preflight SHA256SUMS differs from the authenticated manifest")
+    return lock, manifest
+
+
+def bootstrap_prepare_guard(version: str, registry: RegistryClient) -> None:
+    if version != "0.0.1":
+        return
+    if os.environ.get("GITHUB_RUN_ATTEMPT", "1") != "1":
+        fail("do not rerun bootstrap prepare; rerun only publish/release with the original evidence")
+    for name in PUBLISH_ORDER[:-1]:
+        if registry.version(name, version) is not None:
+            fail(f"{name}@{version} exists; retain the original run and lock, never prepare again")
+
+
 def sparse_index_path(name: str) -> str:
     lowered = name.lower()
     length = len(lowered)
@@ -713,6 +821,25 @@ class RegistryClient:
                 return None
             raise
 
+    def bootstrap_identity(self, token: str) -> None:
+        # /me is cookie-only. This scoped, read-only endpoint checks that the
+        # authenticated user ID equals the requested public user's ID.
+        profile = self.http.request_json("GET", f"https://crates.io/api/v1/users/{BOOTSTRAP_LOGIN}")
+        user = profile.get("user") if isinstance(profile, dict) else None
+        if (not isinstance(user, dict) or user.get("login") != BOOTSTRAP_LOGIN
+                or type(user.get("id")) is not int or user["id"] <= 0):
+            fail("could not establish the public al8n registry identity")
+        query = urllib.parse.urlencode({"user_id": user["id"]})
+        try:
+            payload = HttpClient(token).request_json(
+                "GET", f"https://crates.io/api/v1/trusted_publishing/github_configs?{query}"
+            )
+        except ReleaseError as error:
+            raise ReleaseError("could not prove the bootstrap credential belongs to al8n") from error
+        if (not isinstance(payload, dict) or not isinstance(payload.get("github_configs"), list)
+                or not isinstance(payload.get("meta"), dict)):
+            fail("could not prove the bootstrap credential belongs to al8n")
+
 
 def verify_registry_once(
     registry: RegistryClient,
@@ -808,6 +935,8 @@ def package_by_name(manifest: dict[str, object]) -> dict[str, dict[str, object]]
     for package in packages:
         if not isinstance(package, dict) or not isinstance(package.get("name"), str):
             fail("package manifest contains an invalid package")
+        if package["name"] in result:
+            fail(f"package manifest repeats {package['name']}")
         result[package["name"]] = package
     if set(result) != set(PUBLISH_ORDER):
         fail(f"package manifest names are {sorted(result)}, expected {list(PUBLISH_ORDER)}")
@@ -1009,6 +1138,92 @@ def verify_all_registry(
         "lock_sha256": manifest["lock_sha256"],
         "packages": evidence,
     }
+
+
+def verify_bootstrap_lock(expected: str) -> None:
+    path = Path("Cargo.lock")
+    if path.is_symlink() or not path.is_file() or sha256_file(path) != expected:
+        fail("bootstrap root Cargo.lock differs from the frozen preflight lock")
+
+
+def bootstrap_packages(
+    manifest: dict[str, object], target_dir: Path, commit: str,
+    poll_timeout: float, output: Path,
+) -> dict[str, object]:
+    if manifest.get("version") != "0.0.1" or set(PUBLISH_ORDER[:-1]) != BOOTSTRAP_0_0_1:
+        fail("manual bootstrap is restricted to the five 0.0.1 siblings; never smear")
+    if os.environ.get("GITHUB_ACTIONS"):
+        fail("bootstrap is local-only; never put a manual publishing credential in Actions")
+    token = os.environ.get("CARGO_REGISTRY_TOKEN")
+    if not token:
+        fail("bootstrap requires an environment-only CARGO_REGISTRY_TOKEN")
+    packages = package_by_name(manifest)
+    for package in packages.values():
+        verify_local_archive(target_dir, package)
+    verify_bootstrap_lock(manifest["lock_sha256"])
+    registry = RegistryClient()
+    registry.bootstrap_identity(token)
+    # Prove every existing sibling before uploading anything, including one
+    # later in the DAG. A conflicting partial bootstrap must not gain uploads.
+    existing = {}
+    for name in PUBLISH_ORDER[:-1]:
+        if registry.version(name, "0.0.1") is not None:
+            existing[name] = poll_registry(
+                registry, packages[name], commit, allow_bootstrap=True, timeout=poll_timeout
+            )
+    evidence = []
+    result = {
+        "schema": 1, "repository": REPOSITORY, "version": "0.0.1", "commit": commit,
+        "toolchain": TOOLCHAIN, "lock_sha256": manifest["lock_sha256"], "packages": evidence,
+    }
+    for name in PUBLISH_ORDER[:-1]:
+        verify_bootstrap_lock(manifest["lock_sha256"])
+        verify_local_archive(target_dir, packages[name])
+        if name in existing:
+            item = existing[name]
+        else:
+            env = cargo_env(target_dir)
+            # --registry names crates-io explicitly. Bind both Cargo token
+            # spellings to the credential whose identity was just proven.
+            env["CARGO_REGISTRY_TOKEN"] = token
+            env["CARGO_REGISTRIES_CRATES_IO_TOKEN"] = token
+            published = run(
+                cargo_args("publish", "--locked", "--registry", "crates-io", "-p", name),
+                check=False, env=env,
+            )
+            try:
+                item = poll_registry(
+                    registry, packages[name], commit, allow_bootstrap=True, timeout=poll_timeout
+                )
+            except ReleaseError as error:
+                raise ReleaseError(
+                    f"bootstrap {name} exited {published.returncode}; inspect the registry "
+                    "before retrying with this same bundle"
+                ) from error
+            if item.get("provenance") != "bootstrap":
+                fail(f"{name} manual upload did not have exact al8n bootstrap provenance")
+        verify_bootstrap_lock(manifest["lock_sha256"])
+        verify_local_archive(target_dir, packages[name])
+        evidence.append(item)
+        write_json(output, result)
+        print(f"ok: exact bootstrap {name}@0.0.1 verified")
+    return result
+
+
+class GitHubCliReadClient:
+    """Use the operator's existing gh session without extracting its credential."""
+
+    def request_json(self, method: str, url: str) -> object:
+        if method != "GET" or not url.startswith("https://api.github.com/"):
+            fail("local bootstrap GitHub checks only support read-only api.github.com requests")
+        env = dict(os.environ)
+        env.pop("CARGO_REGISTRY_TOKEN", None)
+        env.pop("CARGO_REGISTRIES_CRATES_IO_TOKEN", None)
+        response = run(["gh", "api", url], capture=True, env=env)
+        try:
+            return json.loads(response.stdout)
+        except ValueError as error:
+            raise ReleaseError("gh returned invalid JSON during bootstrap gate checks") from error
 
 
 class GitHubReleaseClient:
@@ -1330,8 +1545,9 @@ def cmd_verify(args: argparse.Namespace) -> None:
 def cmd_prepare(args: argparse.Namespace) -> None:
     verify_event_context(args.version, args.commit)
     verify_git_commit(args.commit)
-    if Path("Cargo.lock").exists():
+    if Path("Cargo.lock").exists() or Path("Cargo.lock").is_symlink():
         fail("root Cargo.lock already exists; preflight must generate the ignored lock itself")
+    bootstrap_prepare_guard(args.version, RegistryClient())
     target_dir = Path(args.target_dir).resolve()
     run(cargo_args("generate-lockfile"), env=cargo_env(target_dir))
     verify_workspace(cargo_metadata(target_dir), args.version)
@@ -1346,6 +1562,7 @@ def cmd_prepare(args: argparse.Namespace) -> None:
         args.version, args.commit, lock_sha, target_dir
     )
     manifest_bytes = canonical_json_bytes(package_manifest)
+    export_preflight(Path(args.evidence_dir), lock_bytes, package_manifest, target_dir)
     emit_github_outputs(
         {
             "lock_b64": encode_evidence(lock_bytes),
@@ -1354,6 +1571,37 @@ def cmd_prepare(args: argparse.Namespace) -> None:
             "preflight_manifest_sha256": sha256_bytes(manifest_bytes),
         }
     )
+
+
+def cmd_bootstrap(args: argparse.Namespace) -> None:
+    verify_event_context(args.version, args.commit)
+    if args.version != "0.0.1" or os.environ.get("GITHUB_ACTIONS"):
+        fail("manual bootstrap is local-only and restricted to the five 0.0.1 siblings")
+    verify_git_commit(args.commit)
+    tracked = run(["git", "ls-files", "--error-unmatch", "Cargo.lock"], capture=True, check=False)
+    if tracked.returncode == 0:
+        fail("the bootstrap root Cargo.lock must remain untracked")
+    directory = Path(args.bundle_dir)
+    lock, manifest = read_preflight(
+        directory, args.version, args.commit, args.lock_sha256, args.manifest_sha256
+    )
+    target_dir, output = Path(args.target_dir).resolve(), Path(args.output).resolve()
+    for path in (target_dir, output):
+        if path.is_relative_to(Path.cwd().resolve()) or path.is_relative_to(directory.resolve()):
+            fail("bootstrap target and output must be outside the checkout and downloaded bundle")
+    verify_github_gates(GitHubCliReadClient(), args.commit)  # type: ignore[arg-type]
+    root_lock = Path("Cargo.lock")
+    if root_lock.exists() or root_lock.is_symlink():
+        verify_bootstrap_lock(args.lock_sha256)
+        if root_lock.read_bytes() != lock:
+            fail("existing root Cargo.lock does not equal the downloaded lock")
+    else:
+        root_lock.write_bytes(lock)
+    create_package_manifest(
+        args.version, args.commit, args.lock_sha256, target_dir, expected=manifest
+    )
+    verify_git_commit(args.commit)
+    bootstrap_packages(manifest, target_dir, args.commit, args.poll_timeout, output)
 
 
 def cmd_restore(args: argparse.Namespace) -> None:
@@ -1525,6 +1773,311 @@ class ReleaseSelfTests(unittest.TestCase):
             for dependency in sorted(INTERNAL_EDGES[name])
         ]
         return {"name": name, "version": "0.0.1", "dependencies": dependencies}
+
+    def preflight_fixture(self, root: Path) -> tuple[bytes, dict[str, object], Path]:
+        lock = b"the frozen root lock\n"
+        target = root / "target"
+        (target / "package").mkdir(parents=True)
+        rows = []
+        for name in PUBLISH_ORDER:
+            data = f"fixture archive for {name}\n".encode()
+            filename = f"{name}-0.0.1.crate"
+            (target / "package" / filename).write_bytes(data)
+            rows.append({
+                "name": name, "version": "0.0.1", "archive": filename,
+                "sha256": sha256_bytes(data), "size": len(data), "vcs_sha": self.commit,
+                "manifest_sha256": self.checksum, "readme_sha256": self.checksum,
+            })
+        manifest = {
+            "schema": 1, "repository": REPOSITORY, "version": "0.0.1",
+            "commit": self.commit, "toolchain": TOOLCHAIN,
+            "lock_sha256": sha256_bytes(lock), "packages": rows,
+        }
+        return lock, manifest, target
+
+    def read_fixture(self, directory: Path, manifest: dict[str, object]) -> tuple[bytes, dict[str, object]]:
+        return read_preflight(directory, "0.0.1", self.commit, manifest["lock_sha256"],
+                              sha256_file(directory / "preflight.json"))
+
+    def rewrite_fixture(self, directory: Path, manifest: dict[str, object]) -> None:
+        data = canonical_json_bytes(manifest)
+        (directory / "preflight.json").write_bytes(data)
+        (directory / "SHA256SUMS").write_bytes(preflight_sums(manifest, data))
+
+    def test_preflight_export_round_trip_and_exact_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock, manifest, target = self.preflight_fixture(root)
+            bundle = root / "bundle"
+            export_preflight(bundle, lock, manifest, target)
+            self.assertEqual(self.read_fixture(bundle, manifest), (lock, manifest))
+            self.assertEqual(len(list(bundle.rglob("*"))), 10)  # nine files and crates/
+            with self.assertRaises(FileExistsError):
+                export_preflight(bundle, lock, manifest, target)
+
+    def test_preflight_external_hashes_and_bytes_are_required(self) -> None:
+        for filename in ("Cargo.lock", "preflight.json", "SHA256SUMS", "crates/smear-lexer-0.0.1.crate"):
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                lock, manifest, target = self.preflight_fixture(root)
+                bundle = root / "bundle"
+                export_preflight(bundle, lock, manifest, target)
+                digest = sha256_file(bundle / "preflight.json")
+                (bundle / filename).write_bytes(b"tampered")
+                with self.assertRaises(ReleaseError):
+                    read_preflight(bundle, "0.0.1", self.commit, sha256_bytes(lock), digest)
+
+    def test_preflight_rejects_wrong_identity_and_toolchain(self) -> None:
+        for key, value in (("repository", "other/repo"), ("version", "0.0.2"),
+                           ("commit", "b" * 40), ("toolchain", "nightly"),
+                           ("lock_sha256", "0" * 64)):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                lock, manifest, target = self.preflight_fixture(root)
+                bundle = root / "bundle"
+                export_preflight(bundle, lock, manifest, target)
+                manifest[key] = value
+                self.rewrite_fixture(bundle, manifest)
+                with self.assertRaises(ReleaseError):
+                    read_preflight(bundle, "0.0.1", self.commit, sha256_bytes(lock),
+                                   sha256_file(bundle / "preflight.json"))
+
+    def test_preflight_rejects_missing_duplicate_and_noncanonical_packages(self) -> None:
+        for defect in ("missing", "duplicate", "parent", "absolute", "version", "vcs", "size", "checksum"):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                lock, manifest, target = self.preflight_fixture(root)
+                bundle = root / "bundle"
+                export_preflight(bundle, lock, manifest, target)
+                rows = manifest["packages"]
+                if defect == "missing":
+                    rows.pop()
+                elif defect == "duplicate":
+                    rows.append(dict(rows[0]))
+                else:
+                    key, value = {
+                        "parent": ("archive", "../outside.crate"),
+                        "absolute": ("archive", "/outside.crate"),
+                        "version": ("version", "0.0.2"), "vcs": ("vcs_sha", "b" * 40),
+                        "size": ("size", True), "checksum": ("sha256", "not-a-hash"),
+                    }[defect]
+                    rows[0][key] = value
+                # Missing/duplicate rows must fail even when an attacker can
+                # supply a matching outer digest; sums cannot repair the census.
+                (bundle / "preflight.json").write_bytes(canonical_json_bytes(manifest))
+                with self.assertRaises(ReleaseError):
+                    self.read_fixture(bundle, manifest)
+
+    def test_preflight_rejects_symlinks_missing_and_unexpected_entries(self) -> None:
+        for defect in ("root-link", "file-link", "directory-link", "missing", "extra", "extra-dir"):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                lock, manifest, target = self.preflight_fixture(root)
+                bundle = root / "bundle"
+                export_preflight(bundle, lock, manifest, target)
+                if defect == "root-link":
+                    link = root / "link"
+                    link.symlink_to(bundle, target_is_directory=True)
+                    bundle = link
+                elif defect == "file-link":
+                    (bundle / "Cargo.lock").unlink()
+                    (root / "lock").write_bytes(lock)
+                    (bundle / "Cargo.lock").symlink_to(root / "lock")
+                elif defect == "directory-link":
+                    (bundle / "crates").rename(root / "archives")
+                    (bundle / "crates").symlink_to(root / "archives", target_is_directory=True)
+                elif defect == "missing":
+                    (bundle / "crates" / "smear-lexer-0.0.1.crate").unlink()
+                elif defect == "extra":
+                    (bundle / "credential").write_text("unexpected fixture")
+                else:
+                    (bundle / "extra").mkdir()
+                with self.assertRaises(ReleaseError):
+                    self.read_fixture(bundle, manifest)
+
+    def test_bootstrap_prepare_refuses_reresolution(self) -> None:
+        registry = mock.Mock()
+        registry.version.return_value = None
+        with mock.patch.dict(os.environ, {"GITHUB_RUN_ATTEMPT": "2"}):
+            with self.assertRaisesRegex(ReleaseError, "do not rerun"):
+                bootstrap_prepare_guard("0.0.1", registry)
+        registry.version.assert_not_called()
+        with mock.patch.dict(os.environ, {"GITHUB_RUN_ATTEMPT": "1"}):
+            bootstrap_prepare_guard("0.0.1", registry)
+            self.assertEqual(registry.version.call_count, 5)
+            registry.version.return_value = {"checksum": self.checksum}
+            with self.assertRaisesRegex(ReleaseError, "never prepare again"):
+                bootstrap_prepare_guard("0.0.1", registry)
+
+    def test_bootstrap_identity_is_only_an_authenticated_get(self) -> None:
+        public = mock.Mock()
+        public.request_json.return_value = {"user": {"id": 119762, "login": "al8n"}}
+        registry = RegistryClient(public)
+        auth = mock.Mock()
+        auth.request_json.return_value = {"github_configs": [], "meta": {"total": 0}}
+        with mock.patch.dict(globals(), {"HttpClient": mock.Mock(return_value=auth)}):
+            registry.bootstrap_identity("fixture-credential")
+            auth.request_json.assert_called_once_with(
+                "GET", "https://crates.io/api/v1/trusted_publishing/github_configs?user_id=119762"
+            )
+            auth.request_json.side_effect = ReleaseError("wrong authenticated principal")
+            with self.assertRaisesRegex(ReleaseError, "belongs to al8n"):
+                registry.bootstrap_identity("fixture-credential")
+        public.request_json.return_value = {"user": {"id": 1, "login": "someone-else"}}
+        with self.assertRaisesRegex(ReleaseError, "public al8n"):
+            registry.bootstrap_identity("fixture-credential")
+
+    def fake_bootstrap_registry(self, manifest: dict[str, object], target: Path, present: set[str]) -> mock.Mock:
+        registry = mock.Mock()
+        packages = package_by_name(manifest)
+        registry.version.side_effect = lambda name, _version: ({
+            "checksum": packages[name]["sha256"], "published_by": {"login": "al8n"},
+            "trustpub_data": None,
+        } if name in present else None)
+        registry.sparse_checksum.side_effect = lambda name, _version: packages[name]["sha256"]
+        registry.archive.side_effect = lambda name, _version: local_archive_path(target, packages[name]).read_bytes()
+        return registry
+
+    def test_bootstrap_partial_resume_never_selects_facade(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _, manifest, target = self.preflight_fixture(root)
+            present = {"smear-lexer", "smear-parser"}
+            registry = self.fake_bootstrap_registry(manifest, target, present)
+            selected = []
+
+            def upload(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+                name = argv[-1]
+                self.assertIn(name, BOOTSTRAP_0_0_1)
+                self.assertIn("--locked", argv)
+                self.assertEqual(kwargs["env"]["CARGO_REGISTRY_TOKEN"], "fixture-credential")
+                self.assertEqual(kwargs["env"]["CARGO_REGISTRIES_CRATES_IO_TOKEN"], "fixture-credential")
+                selected.append(name)
+                present.add(name)
+                return subprocess.CompletedProcess(argv, 101)  # successful upload, ambiguous Cargo result
+
+            with mock.patch.dict(os.environ, {"CARGO_REGISTRY_TOKEN": "fixture-credential"}, clear=True), \
+                    mock.patch.dict(globals(), {"RegistryClient": lambda: registry, "run": upload,
+                                              "verify_bootstrap_lock": mock.Mock()}):
+                output = root / "bootstrap.json"
+                result = bootstrap_packages(manifest, target, self.commit, 0, output)
+                self.assertEqual(selected, ["smear-schema", "smear-compiler", "graphql-proto"])
+                self.assertEqual([p["name"] for p in result["packages"]], list(PUBLISH_ORDER[:-1]))
+                self.assertEqual(load_json(output), result)
+                selected.clear()
+                bootstrap_packages(manifest, target, self.commit, 0, output)
+                self.assertEqual(selected, [])
+
+    def test_bootstrap_wrong_principal_conflict_and_archive_fail_before_upload(self) -> None:
+        for defect in ("principal", "conflict", "archive", "version", "actions", "credential"):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                _, manifest, target = self.preflight_fixture(root)
+                present = {"graphql-proto"} if defect == "conflict" else set()
+                registry = self.fake_bootstrap_registry(manifest, target, present)
+                if defect == "principal":
+                    registry.bootstrap_identity.side_effect = ReleaseError("wrong principal")
+                elif defect == "conflict":
+                    registry.sparse_checksum.side_effect = lambda *_: "0" * 64
+                elif defect == "archive":
+                    local_archive_path(target, manifest["packages"][-1]).write_bytes(b"changed facade")
+                elif defect == "version":
+                    manifest["version"] = "0.0.2"
+                env = {"CARGO_REGISTRY_TOKEN": "fixture-credential"}
+                if defect == "actions":
+                    env["GITHUB_ACTIONS"] = "true"
+                if defect == "credential":
+                    env.clear()
+                upload = mock.Mock()
+                with mock.patch.dict(os.environ, env, clear=True), \
+                        mock.patch.dict(globals(), {"RegistryClient": lambda: registry, "run": upload,
+                                                  "verify_bootstrap_lock": mock.Mock()}):
+                    with self.assertRaises(ReleaseError):
+                        bootstrap_packages(manifest, target, self.commit, 0, root / "evidence.json")
+                upload.assert_not_called()
+
+    def test_bootstrap_cli_has_no_package_override(self) -> None:
+        args = parser().parse_args([
+            "bootstrap", "--version", "0.0.1", "--commit", self.commit,
+            "--target-dir", "/fixture-target", "--bundle-dir", "/fixture-bundle",
+            "--lock-sha256", self.checksum, "--manifest-sha256", self.checksum,
+            "--output", "/fixture-output",
+        ])
+        self.assertFalse(hasattr(args, "package"))
+        self.assertEqual(BOOTSTRAP_0_0_1, set(PUBLISH_ORDER) - {"smear"})
+
+    def test_bootstrap_lock_rejects_mutation_and_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "Cargo.lock"
+            path.write_bytes(b"frozen")
+            # Supply the isolated path without changing the test process cwd.
+            with mock.patch.dict(globals(), {"Path": lambda _name: path}):
+                verify_bootstrap_lock(sha256_bytes(b"frozen"))
+                with self.assertRaises(ReleaseError):
+                    verify_bootstrap_lock(sha256_bytes(b"other"))
+                path.unlink()
+                path.symlink_to(path.parent / "missing")
+                with self.assertRaises(ReleaseError):
+                    verify_bootstrap_lock(sha256_bytes(b"frozen"))
+
+    def test_offline_prepare_export_bootstrap_command_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock, manifest, target = self.preflight_fixture(root)
+            source, bundle = root / "source", root / "bundle"
+            source.mkdir()
+            present: set[str] = set()
+            registry = self.fake_bootstrap_registry(manifest, target, present)
+            commands = []
+
+            def execute(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+                commands.append(argv)
+                if "generate-lockfile" in argv:
+                    Path("Cargo.lock").write_bytes(lock)
+                elif "publish" in argv:
+                    self.assertIn(argv[-1], BOOTSTRAP_0_0_1)
+                    present.add(argv[-1])
+                return subprocess.CompletedProcess(argv, 1 if argv[0] == "git" else 0, "", "")
+
+            def package(_version: str, _commit: str, digest: str, _target: Path,
+                        *, expected: dict[str, object] | None = None) -> dict[str, object]:
+                verify_bootstrap_lock(digest)
+                if expected is not None:
+                    self.assertEqual(expected, manifest)
+                return manifest
+
+            gates = mock.Mock()
+            env = {"GITHUB_OUTPUT": str(root / "outputs"),
+                   "CARGO_REGISTRY_TOKEN": "fixture-credential"}
+            previous = Path.cwd()
+            try:
+                os.chdir(source)
+                with mock.patch.dict(os.environ, env, clear=True), mock.patch.dict(globals(), {
+                    "run": execute, "RegistryClient": lambda: registry,
+                    "verify_git_commit": mock.Mock(), "cargo_metadata": mock.Mock(return_value={}),
+                    "verify_workspace": mock.Mock(), "create_package_manifest": package,
+                    "verify_github_gates": gates,
+                }):
+                    cmd_prepare(argparse.Namespace(
+                        version="0.0.1", commit=self.commit, target_dir=str(target),
+                        evidence_dir=str(bundle),
+                    ))
+                    outputs = dict(line.split("=", 1) for line in (root / "outputs").read_text().splitlines())
+                    self.assertEqual(base64.b64decode(outputs["lock_b64"]), lock)
+                    self.assertEqual(base64.b64decode(outputs["preflight_manifest_b64"]),
+                                     (bundle / "preflight.json").read_bytes())
+                    cmd_bootstrap(argparse.Namespace(
+                        version="0.0.1", commit=self.commit, target_dir=str(target),
+                        bundle_dir=str(bundle), lock_sha256=outputs["lock_sha256"],
+                        manifest_sha256=outputs["preflight_manifest_sha256"],
+                        poll_timeout=0, output=str(root / "bootstrap.json"),
+                    ))
+                    self.assertEqual(Path("Cargo.lock").read_bytes(), lock)
+            finally:
+                os.chdir(previous)
+            self.assertEqual(sum("generate-lockfile" in argv for argv in commands), 1)
+            self.assertEqual([argv[-1] for argv in commands if "publish" in argv], list(PUBLISH_ORDER[:-1]))
+            gates.assert_called_once()
 
     def test_oidc_exact_is_accepted(self) -> None:
         self.assertEqual(
@@ -1881,7 +2434,17 @@ def parser() -> argparse.ArgumentParser:
 
     prepare = subparsers.add_parser("prepare")
     context_arguments(prepare)
+    prepare.add_argument("--evidence-dir", required=True)
     prepare.set_defaults(func=cmd_prepare)
+
+    bootstrap = subparsers.add_parser("bootstrap")
+    context_arguments(bootstrap)
+    bootstrap.add_argument("--bundle-dir", required=True)
+    bootstrap.add_argument("--lock-sha256", required=True)
+    bootstrap.add_argument("--manifest-sha256", required=True)
+    bootstrap.add_argument("--poll-timeout", type=float, default=180)
+    bootstrap.add_argument("--output", required=True)
+    bootstrap.set_defaults(func=cmd_bootstrap)
 
     restore = subparsers.add_parser("restore")
     restore.add_argument("--lock-env", default="RELEASE_LOCK_B64")

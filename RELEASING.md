@@ -76,19 +76,77 @@ the dependent package.
 
 ## Bootstrap and trusted publishing
 
-`0.0.1` is the one-time bootstrap exception. A crate must exist before its
-crates.io trusted publisher can be configured, so bootstrap each first version
-manually with a short-lived, least-privilege publish token. Pass that token only
-through the process environment, never commit it, save it with `cargo login`,
-or place it in GitHub secrets. Revoke it immediately after all six packages are
-verified.
+`0.0.1` has one manual bootstrap exception: the five sibling crates, published
+by `al8n`. The existing `smear` name needs no bootstrap. **Never manually publish
+`smear 0.0.1`: the controller requires GitHub OIDC provenance for the facade.**
+A missing crate name cannot be created through trusted publishing.
 
-After bootstrap, configure a crates.io trusted publisher for every publishable
-crate, bound to this repository, the reviewed release workflow, and its
-protected release environment. Future releases use GitHub Actions OIDC with
-`id-token: write`; the workflow exchanges that identity for a short-lived
-crates.io publishing credential and holds no long-lived registry token. Keep
-the workflow's package order equal to the DAG above.
+Use one release run for both the manual bootstrap and OIDC publication:
+
+1. Merge the reviewed release changes and wait for CI, macOS, and Miri push runs
+   to succeed on that exact main SHA. Dispatch `release.yml` from main with that
+   full SHA and version `0.0.1`.
+2. Let `verify` finish, then leave the `crates-io` publish job waiting for
+   approval. `verify` generates the ignored root lock exactly once and exports
+   its existing bytes, preflight manifest, and six archives as an immutable
+   `smear-preflight-VERSION-COMMIT-RUN-ATTEMPT` artifact. Its summary records the
+   artifact ID/digest and the lock, manifest, and archive SHA-256 values.
+3. Download that exact artifact ID. Verify its repository, workflow, event
+   (`workflow_dispatch`), main-branch SHA, producing attempt, and successful
+   `verify` job. The whole run is still waiting, not completed. Compare the
+   downloaded artifact ZIP's SHA-256 with the upload step's digest before
+   extracting it. Take the lock and manifest hashes from the trusted run
+   summary, not merely from the downloaded `SHA256SUMS`.
+4. Check out that same SHA in a clean, private checkout. Keep the downloaded
+   bundle, Cargo target directory, and bootstrap evidence outside the checkout.
+   Use Cargo `1.99.1` and the existing authenticated `gh` session for gate reads.
+   Run the restricted command below. It restores the downloaded lock before
+   Cargo, reproduces all six archives, and refuses any byte difference before
+   uploading the five siblings. It never generates another lock or selects the
+   facade.
+5. After all five siblings are verified, immediately revoke and unset the
+   bootstrap credential. Configure all six crates' trusted publishers through
+   the crates.io website: owner `al8n`, repository `smear`, workflow `release.yml`,
+   environment `crates-io`. Enable Trusted-Publishing-only mode for all six.
+6. Approve the **same waiting run**. Its protected job restores the original
+   lock from `needs.verify.outputs`, matches the original archives, proves and
+   skips the five manual bootstrap versions, and publishes `smear` via OIDC.
+   Only afterward does the separate GitHub job create the tag and release.
+
+For the manual step, create the shortest-lived scoped credential under `al8n`,
+restricted to these five exact crate scopes: `smear-lexer`, `smear-parser`,
+`smear-schema`, `smear-compiler`, `graphql-proto`. Grant only `publish-new` and
+`trusted_publishing` endpoint permissions. The latter is needed solely for an
+authenticated identity read: crates.io's `/me` route is cookie-only, while
+`GET /api/v1/trusted_publishing/github_configs?user_id=...` verifies that the
+credential belongs to the public `al8n` identity. The command only reads that
+endpoint; it never creates, changes, or deletes a publisher configuration.
+If that identity cannot be proven, it stops before uploads. Do not include
+`smear` in the credential's crate scopes.
+
+Pass the credential only as the local process environment variable
+`CARGO_REGISTRY_TOKEN`. Never put it in chat, arguments, a temporary file,
+`cargo login`, Git, or GitHub secrets. Do not enable shell tracing. All values
+in the following commands are nonsecret evidence from the reviewed run; use a
+private scratch directory and an external Cargo target directory:
+
+```sh
+gh api "repos/al8n/smear/actions/artifacts/$ARTIFACT_ID" > "$SCRATCH/artifact.json"
+gh api "repos/al8n/smear/actions/artifacts/$ARTIFACT_ID/zip" > "$SCRATCH/preflight.zip"
+shasum -a 256 "$SCRATCH/preflight.zip"
+# Compare against the trusted run's artifact digest, then extract:
+unzip -q "$SCRATCH/preflight.zip" -d "$SCRATCH/preflight"
+
+python3 ci/release.py bootstrap \
+  --version 0.0.1 --commit "$RELEASE_COMMIT" \
+  --bundle-dir "$SCRATCH/preflight" \
+  --lock-sha256 "$LOCK_SHA256" --manifest-sha256 "$MANIFEST_SHA256" \
+  --target-dir "$CARGO_TARGET_DIR" --output "$SCRATCH/bootstrap-registry.json"
+```
+
+The root `Cargo.lock` remains ignored and untracked. Keep this exact lock and
+the downloaded bundle with the release evidence; never commit it. An existing
+local lock is accepted only if it is byte-identical to the frozen bundle.
 
 ## Recovery and provenance
 
@@ -98,6 +156,21 @@ download the published archive if present, and compare its checksum, package
 contents, and `.cargo_vcs_info.json` with the preflight record. Only then
 continue the DAG. Published versions are immutable; a bad release requires a
 new version (and, where appropriate, a yank), never an overwrite.
+
+Resume a partial manual bootstrap with the same bundle, hashes, checkout SHA,
+and restricted command. It proves all existing sibling versions before adding
+any uploads, skips exact matches, and saves evidence after every verified
+package. A mismatch is fatal. Retain the original run, producing attempt,
+artifact ID/digest, lock, manifest, and partial registry evidence.
+
+Rerun only failed `publish` or `release` jobs in that original workflow run.
+Never rerun `verify` or start a fresh `0.0.1` preflight after any sibling has
+been published: preparation refuses both reruns and existing sibling versions
+rather than silently resolving another lock. Before bootstrap begins, a failed
+preflight may be replaced by a new run, discarding the unused evidence.
+GitHub permits job reruns for 30 days; artifact retention is 90 days. Outside
+the rerun window, stop for a separately reviewed recovery procedure using the
+retained frozen evidence. There is no automatic fresh-resolution fallback.
 
 For an OIDC release, retain the tag, commit SHA, workflow run URL and identity,
 generated-lock checksum, local and registry archive checksums, package README
