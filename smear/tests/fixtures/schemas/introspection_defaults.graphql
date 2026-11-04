@@ -1,0 +1,39 @@
+"""
+Defaults whose printed literal is not their coerced value.
+
+graphql-js reports a default as `print(astFromValue(valueFromAST(literal, type), type))`, and
+smear as the literal the document wrote, printed. Every default below is one of the cases that
+makes the two differ, and the introspection parity differential reads them both ways.
+"""
+schema {
+  query: Query
+}
+
+type Query {
+  "A single item where a list is expected, which coercion wraps — at every depth."
+  list(item: [Int] = 7, deep: [[String!]] = "x", colour: [Colour!] = RED): Int
+  "A float with a fraction part of zero or an exponent, which coercion reads as a number."
+  float(whole: Float = 1.0, scaled: Float = 1.5e3, small: Float = -0.25E-2, plain: Float = 2.5): Int
+  "An ID spelled as a string of digits, which an integer-valued ID prints as."
+  id(digits: ID = "4", word: ID = "x4", number: ID = 4): Int
+  "An input object written out of field order and missing a defaulted field."
+  range(range: Range = {max: 9, min: 1}): Int
+  "A custom scalar, whose literal coercion is untyped: an enum value reads as its name."
+  raw(value: Raw = AS_WRITTEN): Int
+}
+
+"A colour."
+enum Colour {
+  RED
+  GREEN
+}
+
+"A range of integers."
+input Range {
+  min: Int = 0
+  max: Int
+  step: Int = 1
+}
+
+"Whatever the service makes of it."
+scalar Raw
