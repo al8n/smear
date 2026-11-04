@@ -25,7 +25,9 @@ use smear::{
     GraphQL,
     ast::{
       ConstArgument, ConstArguments, ConstDirective, ConstDirectives, ConstInputValue, ConstList,
-      Described, Name, Nested, ScalarTypeDefinition, TypeDefinition, TypeSystemDefinition,
+      ConstObject, ConstObjectField, DefaultInputValue, Described, InputFieldsDefinition,
+      InputObjectTypeDefinition, InputValueDefinition, Name, NamedType, Nested,
+      ScalarTypeDefinition, Type, TypeDefinition, TypeSystemDefinition,
       TypeSystemDefinitionOrExtension, TypeSystemDocument,
     },
     error::{ErrorData, GraphqlErrors},
@@ -96,7 +98,9 @@ const UNFIREABLE: &[(SchemaErrorKind, &str)] = &[
      public constructor. The kind stays as the text arena's admission rule. What an assembled AST \
      can still carry is a default naming an object field with bytes that are not UTF-8, since \
      `Name::new` is public: the build refuses that name as `InvalidName`, and printing the \
-     default trips this kind beside it.",
+     default trips this kind beside it. `unreadable_text_from_a_hand_built_ast` fires it that \
+     way, and it stays excused here because this census is over a table of `&str` documents, \
+     which a hand-built AST cannot be a row of.",
   ),
   (
     SchemaErrorKind::TooManyNames,
@@ -1385,6 +1389,106 @@ fn invalid_name_from_a_hand_built_ast() {
     .find(|error| error.kind() == SchemaErrorKind::InvalidName)
     .expect("the kind is present");
   assert_eq!(error.subject(), "not a name");
+}
+
+/// The node a [`Described`] holds.
+///
+/// `graphql::ast` spells an input value definition only with its description around it, so this
+/// is how a test names the bare carrier it builds one from.
+trait Wraps {
+  type Node;
+}
+
+impl<T, S> Wraps for Described<T, S> {
+  type Node = T;
+}
+
+/// The bare input value definition, over bytes.
+type InputValueNode = <InputValueDefinition<&'static [u8]> as Wraps>::Node;
+
+/// [`SchemaErrorKind::UnreadableText`], reached the one way a document still can.
+///
+/// No document carries a string that is not UTF-8, but `Name::new` is public, so an assembled AST
+/// can carry a default naming an object field with bytes that are not UTF-8. Reducing the default
+/// refuses that name as [`SchemaErrorKind::InvalidName`], and printing the default's canonical
+/// text — the text a schema keeps for it — trips `UnreadableText` beside it, for the input field
+/// the default belongs to. Both point at the name.
+///
+/// The query root and the scalar are parsed, and only the input object is assembled, through one
+/// [`SchemaBuilder`]: the default is the one thing here no parse can produce.
+#[test]
+fn unreadable_text_from_a_hand_built_ast() {
+  const DECLARATIONS: &str = "type Query { ok: Int }\nscalar Custom\n";
+
+  // `input In { f: Custom = { <FF>: [] } }`, with the name at the byte it would sit at there.
+  let span = SimpleSpan::const_new(0, 0);
+  let at = SimpleSpan::const_new(25, 26);
+  let literal = ConstInputValue::Object(ConstObject::new(
+    span,
+    Nested::new(vec![ConstObjectField::new(
+      span,
+      Name::new(at, b"\xff".as_slice()),
+      ConstInputValue::List(ConstList::new(span, Nested::empty())),
+    )]),
+  ));
+  let field: InputValueDefinition<&'static [u8]> = Described::new(
+    span,
+    None,
+    InputValueNode::new(
+      span,
+      Name::new(span, b"f".as_slice()),
+      Type::Name(NamedType::new(
+        span,
+        Name::new(span, b"Custom".as_slice()),
+        false,
+      )),
+      Some(DefaultInputValue::new(span, literal)),
+      None,
+    ),
+  );
+  let assembled = TypeSystemDocument::<&'static [u8]>::new(
+    span,
+    vec![TypeSystemDefinitionOrExtension::Definition(Described::new(
+      span,
+      None,
+      TypeSystemDefinition::Type(TypeDefinition::InputObject(InputObjectTypeDefinition::new(
+        span,
+        Name::new(span, b"In".as_slice()),
+        None,
+        Some(InputFieldsDefinition::new(span, vec![field])),
+      ))),
+    ))],
+  );
+
+  let declarations = parse(DECLARATIONS);
+  let mut builder = SchemaBuilder::new();
+  builder.document(&declarations);
+  builder.document(&assembled);
+  let errors = builder
+    .finish()
+    .expect_err("a default that cannot be printed is not a schema");
+
+  // A custom scalar accepts every literal, so nothing but the name is in question here.
+  assert_eq!(
+    errors.kinds(),
+    std::vec![
+      SchemaErrorKind::InvalidName,
+      SchemaErrorKind::UnreadableText
+    ],
+    "{errors}"
+  );
+  let reported = |kind: SchemaErrorKind| {
+    let error = errors
+      .errors()
+      .iter()
+      .find(|error| error.kind() == kind)
+      .expect("the kind is present");
+    (error.subject(), error.span())
+  };
+  // The name itself, rendered lossily, because it is not text.
+  assert_eq!(reported(SchemaErrorKind::InvalidName), ("\u{fffd}", at));
+  // The input field whose default could not be kept.
+  assert_eq!(reported(SchemaErrorKind::UnreadableText), ("f", at));
 }
 
 /// A document parsed from bytes, for SDL that parses: it panics on a refusal.
