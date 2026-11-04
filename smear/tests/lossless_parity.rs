@@ -741,9 +741,9 @@ fn both_suites_agree_across_the_lexer_grammar_error_boundary() {
 /// directions, and its marker is checked to be the one the crate actually produces.
 #[test]
 fn the_error_channel_classifier_separates_a_lexer_error_from_a_grammar_one() {
-  // The marker is a live conversion, not a literal: exactly one error, carrying an `Other`
-  // payload. If `error.rs` ever routes lexer failures to a typed variant instead, this reds here
-  // rather than silently reclassifying the whole corpus as grammar rejections.
+  // The marker is a live conversion, not a literal: exactly one error, landed on `Lexical`. If
+  // `error.rs` ever routes lexer failures to another variant instead, this reds here rather than
+  // silently reclassifying the whole corpus as grammar rejections.
   let marker = lexer_error_marker();
   assert_eq!(
     marker.len(),
@@ -751,9 +751,9 @@ fn the_error_channel_classifier_separates_a_lexer_error_from_a_grammar_one() {
     "the lexer-error conversion should collapse to a single error"
   );
   assert!(
-    other_text(marker[0].data()).is_some(),
-    "the lexer-error conversion no longer produces an `Other` payload, so the classifier cannot \
-     key on it: {:?}",
+    is_lexical(marker[0].data()),
+    "the lexer-error conversion no longer lands on `Lexical`, so the classifier cannot key on it: \
+     {:?}",
     marker[0].data()
   );
 
