@@ -1325,7 +1325,7 @@ jobs:
         key: ${{ runner.os }}-proto-oracle-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-proto-oracle-
-    - name: cargo test --test proto_nonnull_oracle --test proto_mutation_oracle --test proto_execute --test proto_introspection
+    - name: cargo test --test proto_nonnull_oracle --test proto_mutation_oracle --test proto_execute --test proto_introspection --test introspection_parity
       env:
         SMEAR_GRAPHQL_JS: ${{ runner.temp }}/graphql-js
       # `--nocapture` because the counts are the artifact: how many cases reached a comparison, how
@@ -1333,6 +1333,10 @@ jobs:
       # against upstream. A green tick alone would not say whether the oracle compared 29 entries
       # or none. `proto_introspection`'s budget record is the same kind of artifact: what graphql-js's
       # full introspection query costs over GitHub's and GitLab's schemas, against the defaults.
+      # `introspection_parity` compares the executor's answer with graphql-js 16.11.0's
+      # `introspectionFromSchema` for the same SDL, read from the goldens committed under
+      # `smear/tests/oracle/graphql-js-introspection/` (so it needs neither node nor
+      # `SMEAR_GRAPHQL_JS`), and prints which of its eight recorded differences fired per schema.
       #
       # Every target by name, not `-p smear --tests`: a cargo target *filter* warns and exits 0
       # when it matches nothing, so a renamed file would silently empty this job. Which is also why
@@ -1340,7 +1344,8 @@ jobs:
       # never runs with `SMEAR_GRAPHQL_JS` set is a gate that cannot fire.
       run: |
         cargo test -p smear --features proto --test proto_nonnull_oracle \
-          --test proto_mutation_oracle --test proto_execute --test proto_introspection -- --nocapture
+          --test proto_mutation_oracle --test proto_execute --test proto_introspection \
+          --test introspection_parity -- --nocapture
 
   # `needs:` is unchanged, but its effect is not. Every matrix named below used to contain a
   # `macos-latest` cell, so on a run where those cells never got a runner this job was never

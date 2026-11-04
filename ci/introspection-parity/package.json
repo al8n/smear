@@ -1,0 +1,13 @@
+{
+  "name": "smear-introspection-parity",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Generates the graphql-js introspection goldens smear's parity differential compares against. Run by hand; CI does not run node.",
+  "type": "module",
+  "scripts": {
+    "generate": "node generate.mjs"
+  },
+  "dependencies": {
+    "graphql": "16.11.0"
+  }
+}

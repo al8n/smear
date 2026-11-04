@@ -1,0 +1,503 @@
+{
+ "provenance": {
+  "graphql": "16.11.0",
+  "generator": "graphqlSync({ schema: buildSchema(GOLDEN_SDL), source: GOLDEN_QUERY })",
+  "sdl": "smear/tests/proto_introspection.rs: GOLDEN_SDL",
+  "sdlSha256": "f541c7547f83a285b62cde2b3ed117500cd567314c85441e520fea2620199f17",
+  "query": "smear/tests/proto_introspection.rs: GOLDEN_QUERY",
+  "querySha256": "ae96b99f2e7c7a9f0ac2a59a33cf8b47288d7904ace3bc3822aa44a4d0a65648",
+  "smear": "smear/tests/golden/introspection_every_datum.json"
+ },
+ "data": {
+  "__schema": {
+   "description": "Every datum introspection returns.\n  Indented past the rest.",
+   "queryType": {
+    "name": "Root"
+   },
+   "mutationType": null,
+   "types": [
+    {
+     "name": "Instant"
+    },
+    {
+     "name": "Node"
+    },
+    {
+     "name": "ID"
+    },
+    {
+     "name": "Named"
+    },
+    {
+     "name": "String"
+    },
+    {
+     "name": "Person"
+    },
+    {
+     "name": "Int"
+    },
+    {
+     "name": "Boolean"
+    },
+    {
+     "name": "Robot"
+    },
+    {
+     "name": "Thing"
+    },
+    {
+     "name": "Unit"
+    },
+    {
+     "name": "Filter"
+    },
+    {
+     "name": "Shape"
+    },
+    {
+     "name": "Root"
+    },
+    {
+     "name": "__Schema"
+    },
+    {
+     "name": "__Type"
+    },
+    {
+     "name": "__TypeKind"
+    },
+    {
+     "name": "__Field"
+    },
+    {
+     "name": "__InputValue"
+    },
+    {
+     "name": "__EnumValue"
+    },
+    {
+     "name": "__Directive"
+    },
+    {
+     "name": "__DirectiveLocation"
+    }
+   ],
+   "directives": [
+    {
+     "name": "tag",
+     "isRepeatable": true,
+     "locations": [
+      "OBJECT",
+      "FIELD_DEFINITION",
+      "QUERY"
+     ],
+     "args": [
+      {
+       "name": "name",
+       "defaultValue": "\"none\""
+      },
+      {
+       "name": "old",
+       "defaultValue": null
+      }
+     ]
+    },
+    {
+     "name": "include",
+     "isRepeatable": false,
+     "locations": [
+      "FIELD",
+      "FRAGMENT_SPREAD",
+      "INLINE_FRAGMENT"
+     ],
+     "args": [
+      {
+       "name": "if",
+       "defaultValue": null
+      }
+     ]
+    },
+    {
+     "name": "skip",
+     "isRepeatable": false,
+     "locations": [
+      "FIELD",
+      "FRAGMENT_SPREAD",
+      "INLINE_FRAGMENT"
+     ],
+     "args": [
+      {
+       "name": "if",
+       "defaultValue": null
+      }
+     ]
+    },
+    {
+     "name": "deprecated",
+     "isRepeatable": false,
+     "locations": [
+      "FIELD_DEFINITION",
+      "ARGUMENT_DEFINITION",
+      "INPUT_FIELD_DEFINITION",
+      "ENUM_VALUE"
+     ],
+     "args": [
+      {
+       "name": "reason",
+       "defaultValue": "\"No longer supported\""
+      }
+     ]
+    },
+    {
+     "name": "specifiedBy",
+     "isRepeatable": false,
+     "locations": [
+      "SCALAR"
+     ],
+     "args": [
+      {
+       "name": "url",
+       "defaultValue": null
+      }
+     ]
+    },
+    {
+     "name": "oneOf",
+     "isRepeatable": false,
+     "locations": [
+      "INPUT_OBJECT"
+     ],
+     "args": []
+    }
+   ]
+  },
+  "person": {
+   "kind": "OBJECT",
+   "name": "Person",
+   "description": "A person, \"quoted\".",
+   "interfaces": [
+    {
+     "name": "Named"
+    },
+    {
+     "name": "Node"
+    }
+   ],
+   "fields": [
+    {
+     "name": "friends"
+    },
+    {
+     "name": "born"
+    },
+    {
+     "name": "name"
+    },
+    {
+     "name": "id"
+    },
+    {
+     "name": "legacy"
+    }
+   ],
+   "all": [
+    {
+     "name": "friends",
+     "description": null,
+     "isDeprecated": false,
+     "deprecationReason": null,
+     "args": [
+      {
+       "name": "first"
+      },
+      {
+       "name": "after"
+      }
+     ],
+     "every": [
+      {
+       "name": "first",
+       "description": null,
+       "defaultValue": "10",
+       "isDeprecated": false,
+       "deprecationReason": null,
+       "type": {
+        "kind": "SCALAR",
+        "name": "Int",
+        "ofType": null
+       }
+      },
+      {
+       "name": "after",
+       "description": null,
+       "defaultValue": "[1, 2]",
+       "isDeprecated": false,
+       "deprecationReason": null,
+       "type": {
+        "kind": "LIST",
+        "name": null,
+        "ofType": {
+         "kind": "NON_NULL",
+         "name": null,
+         "ofType": {
+          "kind": "SCALAR",
+          "name": "Int",
+          "ofType": null
+         }
+        }
+       }
+      }
+     ],
+     "type": {
+      "kind": "NON_NULL",
+      "name": null,
+      "ofType": {
+       "kind": "LIST",
+       "name": null,
+       "ofType": {
+        "kind": "LIST",
+        "name": null,
+        "ofType": {
+         "kind": "NON_NULL",
+         "name": null,
+         "ofType": {
+          "kind": "OBJECT",
+          "name": "Person"
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "born",
+     "description": "Seconds since the epoch.",
+     "isDeprecated": false,
+     "deprecationReason": null,
+     "args": [],
+     "every": [],
+     "type": {
+      "kind": "SCALAR",
+      "name": "Instant",
+      "ofType": null
+     }
+    },
+    {
+     "name": "age",
+     "description": null,
+     "isDeprecated": true,
+     "deprecationReason": "use born",
+     "args": [
+      {
+       "name": "unit"
+      }
+     ],
+     "every": [
+      {
+       "name": "unit",
+       "description": null,
+       "defaultValue": "YEARS",
+       "isDeprecated": false,
+       "deprecationReason": null,
+       "type": {
+        "kind": "ENUM",
+        "name": "Unit",
+        "ofType": null
+       }
+      },
+      {
+       "name": "floor",
+       "description": "Round down.",
+       "defaultValue": "true",
+       "isDeprecated": true,
+       "deprecationReason": "No longer supported",
+       "type": {
+        "kind": "SCALAR",
+        "name": "Boolean",
+        "ofType": null
+       }
+      }
+     ],
+     "type": {
+      "kind": "SCALAR",
+      "name": "Int",
+      "ofType": null
+     }
+    },
+    {
+     "name": "name",
+     "description": null,
+     "isDeprecated": false,
+     "deprecationReason": null,
+     "args": [],
+     "every": [],
+     "type": {
+      "kind": "SCALAR",
+      "name": "String",
+      "ofType": null
+     }
+    },
+    {
+     "name": "id",
+     "description": null,
+     "isDeprecated": false,
+     "deprecationReason": null,
+     "args": [],
+     "every": [],
+     "type": {
+      "kind": "NON_NULL",
+      "name": null,
+      "ofType": {
+       "kind": "SCALAR",
+       "name": "ID",
+       "ofType": null
+      }
+     }
+    },
+    {
+     "name": "legacy",
+     "description": null,
+     "isDeprecated": false,
+     "deprecationReason": null,
+     "args": [],
+     "every": [],
+     "type": {
+      "kind": "SCALAR",
+      "name": "String",
+      "ofType": null
+     }
+    }
+   ],
+   "specifiedByURL": null,
+   "enumValues": null,
+   "inputFields": null,
+   "possibleTypes": null,
+   "isOneOf": null,
+   "ofType": null
+  },
+  "node": {
+   "kind": "INTERFACE",
+   "possibleTypes": [
+    {
+     "name": "Person"
+    },
+    {
+     "name": "Robot"
+    }
+   ],
+   "interfaces": []
+  },
+  "named": {
+   "kind": "INTERFACE",
+   "interfaces": [
+    {
+     "name": "Node"
+    }
+   ],
+   "possibleTypes": [
+    {
+     "name": "Person"
+    }
+   ]
+  },
+  "thing": {
+   "kind": "UNION",
+   "possibleTypes": [
+    {
+     "name": "Robot"
+    },
+    {
+     "name": "Person"
+    }
+   ],
+   "fields": null,
+   "interfaces": null
+  },
+  "unit": {
+   "kind": "ENUM",
+   "enumValues": [
+    {
+     "name": "YEARS"
+    }
+   ],
+   "all": [
+    {
+     "name": "YEARS",
+     "description": "Twelve months.",
+     "isDeprecated": false,
+     "deprecationReason": null
+    },
+    {
+     "name": "DAYS",
+     "description": null,
+     "isDeprecated": true,
+     "deprecationReason": "No longer supported"
+    },
+    {
+     "name": "HOURS",
+     "description": null,
+     "isDeprecated": true,
+     "deprecationReason": "too fine"
+    }
+   ],
+   "fields": null
+  },
+  "filter": {
+   "kind": "INPUT_OBJECT",
+   "isOneOf": true,
+   "inputFields": [
+    {
+     "name": "id"
+    },
+    {
+     "name": "label"
+    }
+   ],
+   "all": [
+    {
+     "name": "id",
+     "description": "By id.",
+     "defaultValue": null,
+     "isDeprecated": false,
+     "deprecationReason": null
+    },
+    {
+     "name": "name",
+     "description": null,
+     "defaultValue": null,
+     "isDeprecated": true,
+     "deprecationReason": "use id"
+    },
+    {
+     "name": "label",
+     "description": null,
+     "defaultValue": null,
+     "isDeprecated": false,
+     "deprecationReason": null
+    }
+   ]
+  },
+  "shape": {
+   "isOneOf": false,
+   "inputFields": [
+    {
+     "name": "sides",
+     "defaultValue": "3"
+    },
+    {
+     "name": "label",
+     "defaultValue": "\"tri\\tangle\""
+    }
+   ]
+  },
+  "instant": {
+   "kind": "SCALAR",
+   "description": "An instant.",
+   "specifiedByURL": "https://example.com/instant",
+   "fields": null,
+   "isOneOf": null
+  },
+  "missing": null
+ }
+}

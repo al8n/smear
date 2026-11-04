@@ -30,3 +30,8 @@
 # pattern when it has a leading or middle slash — a trailing slash alone
 # does not anchor it), so neither achieves "root tree only". `/docs/` does.
 /docs/
+
+# The introspection-parity generator's npm install (graphql-js, pinned by the committed
+# package-lock.json). The goldens it writes are committed and CI never runs node, so the
+# installed tree is a local by-product. Root-anchored for the same reason as /docs/ above.
+/ci/introspection-parity/node_modules/
