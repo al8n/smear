@@ -33,6 +33,18 @@ categories = ["parsing", "parser-implementations", "web-programming", "no-std"]
 # that produced the stub fails there rather than shipping twelve bytes to docs.rs.
 readme = "README.md"
 
+# The graphql-js introspection differential stays out of the published package. Its goldens are
+# about 10.8 MB of JSON — GitLab's schema as graphql-js answers it is 9.2 MB of that — and only
+# `tests/introspection_parity.rs` reads them, with `introspection_defaults.graphql` as its own
+# fixture. The differential runs in this repository's CI, in the `proto-oracle` job, and never
+# from a downloaded crate, so the three leave together: excluding the goldens alone would ship a
+# test target that cannot find what it compares against.
+exclude = [
+  "tests/oracle/graphql-js-introspection/",
+  "tests/introspection_parity.rs",
+  "tests/fixtures/schemas/introspection_defaults.graphql",
+]
+
 # One crate, two layers. `smear-lexer` and `smear-parser` were merged in here (#83): the facade
 # they sat behind had to re-declare each of their features to forward it, and it silently did not
 # forward `rowan` — the gate on the entire lossless CST tower — so the crate named `smear` could
