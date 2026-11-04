@@ -16,11 +16,11 @@
 //!
 //! # Both spellings of the trait
 //!
-//! al8n/tokora#240 moves `Diagnose` into `tokora` and leaves `smear` re-exporting it. The probe
+//! al8n/tokora#240 moved `Diagnose` into `tokora` and left `smear` re-exporting it. The probe
 //! therefore asserts through *every* public spelling the crate offers, derived rather than
-//! written down: the declaration's own path while the trait lives here, and the `pub use`'s path
-//! once it does not. Both resolve to the same trait today because there is one; the day there are
-//! two paths, each is asserted separately and a row that answers only one of them reds.
+//! written down: the declaration's own path while the trait lived here, and the `pub use`'s path
+//! now that it does not. Both resolve to the same trait today because there is one; the day there
+//! are two paths, each is asserted separately and a row that answers only one of them reds.
 
 use std::{
   path::{Path, PathBuf},

@@ -57,20 +57,35 @@ use crate::{
 
 /// The trait the contract is spelled as, by its own name.
 ///
-/// Not by its path: al8n/tokora#240 moves the declaration into `tokora` and leaves `smear`
-/// re-exporting it, so the path is precisely the part that is about to change. Every public
-/// spelling the crate offers is derived and the probe asserts through all of them.
+/// Not by its path: al8n/tokora#240 moved the declaration into `tokora` and left `smear`
+/// re-exporting it, so the path is precisely the part that changed. Every public spelling the
+/// crate offers is derived and the probe asserts through all of them.
 pub const TRAIT: &str = "Diagnose";
 
 /// The accessors D3 governs, from al8n/smear#126 §5.
 ///
 /// Extended at run time by every method the [`TRAIT`] declaration carries, when that declaration
-/// is in this crate to be read — so a method added to the contract brings its own per-variant
-/// matches under the check without this list being touched. The four are named anyway because
-/// `related_label` is not a trait method (it is the per-kind half of the `related()` implication
-/// `tests/diagnostic_codes.rs` pins), and because the trait moving out of the crate must not
-/// silently empty the registry.
-pub const REGISTERED: &[&str] = &["code", "severity", "help", "related_label"];
+/// is in this crate to be read — so a method added to a contract declared here brings its own
+/// per-variant matches under the check without this list being touched.
+///
+/// It is not in this crate any more: the declaration is `tokora::diagnostic::Diagnose`, which
+/// `smear-schema` re-exports, so nothing here extends the list and it names every method that
+/// declaration carries itself — the nine `Diagnose` requires, as of tokora 0.12. A method tokora
+/// adds is therefore a line here. `related_label` is named beside them because it is not a trait
+/// method at all: it is the per-kind half of the `related()` implication
+/// `tests/diagnostic_codes.rs` pins.
+pub const REGISTERED: &[&str] = &[
+  "code",
+  "severity",
+  "primary",
+  "primary_label",
+  "labels",
+  "label",
+  "path_segments",
+  "path_segment",
+  "help",
+  "related_label",
+];
 
 /// One type the contract has something to say about.
 pub struct Row {

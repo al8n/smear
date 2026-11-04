@@ -162,7 +162,10 @@ doors above, recorded as narrow because they are, beside the `_from` siblings th
 `Severity`, a primary source `Location` and any number of secondary `Label`s, plus `PathSegment` for
 a §7.1.2 response path. So a consumer can render into `miette`, `ariadne`, `codespan-reporting`, an
 LSP diagnostic or a GraphQL error response without re-deriving structure from a formatted sentence.
-It is `core` plus a span type — no allocation, no dependency, and not behind a feature.
+The contract is tokora's own `tokora::diagnostic::Diagnose`, re-exported unchanged, so a renderer
+built for tokora's contract takes smear's errors as they are: [painty]'s `tokora` adapter draws
+them as rustc-style snippets with no glue on either side. It is `core` plus a span type — no
+allocation, no dependency smear does not already have, and not behind a feature.
 
 ### A kit for building GraphQL-like languages
 
@@ -286,7 +289,7 @@ are generic over the source type and the dialect; the upper three are standard G
 | Schema | `smear-schema` | `smear::validator::schema` | The built-once `Schema` and, behind its `build` feature, draft §3 inside the builder. A consumer that only *reads* a schema takes it with `default-features = false` and gets no front end |
 | Validator | `smear-compiler` | `smear::validator` | The draft §5 rules over a parsed request, the rule vocabulary and the diagnostic rendering |
 | Execution | `graphql-proto` | `smear::proto` | Draft §6 as a Sans-I/O state machine: it says which field it needs next and waits to be told the answer, so the driver keeps the values, the resolvers and the runtime. Query, serial mutation and subscription execution are behind the non-default `proto` feature; it returns a response tree that `smear::json` writes as §7.2.1 JSON |
-| Diagnostic | (in `smear-schema`) | `smear::diagnostic` | The contract every error family above answers, so rendering is the consumer's choice. It ships with the schema because that is the lowest crate whose errors implement it |
+| Diagnostic | `tokora`, re-exported by `smear-schema` | `smear::diagnostic` | The contract every error family above answers, so rendering is the consumer's choice. The trait is `tokora::diagnostic::Diagnose`, and `smear-schema` re-exports it because that is the lowest crate whose errors implement it |
 
 **Depend on `smear` and enable features, or depend on a member directly** — the two are the same
 code and the same paths. `smear::lexer::X` and `smear_lexer::X` are one item. A member is worth
@@ -435,8 +438,10 @@ between the current front end and a complete implementation.
   §7.1.2 describes, one execution result per source event, so what is left is the wire protocol and
   the connection lifecycle around it.
 - [ ] **Diagnostic rendering** — smear ships the contract and deliberately no renderer, so nothing
-  here turns an error into a rendered snippet. A companion crate for that is being built
-  separately.
+  here turns an error into a rendered snippet. The companion crate for that is [painty]: its
+  `tokora` feature adapts `tokora::diagnostic::Diagnose`, the trait smear's schema, introspection
+  and validation diagnostics answer, so it renders them as rustc-style snippets without either
+  crate depending on the other.
 
 No dates. The order above is roughly the order in which each item unblocks the next.
 
@@ -471,3 +476,4 @@ shall be dual licensed as above, without any additional terms or conditions.
 [#126]: https://github.com/al8n/smear/issues/126
 [#136]: https://github.com/al8n/smear/issues/136
 [#139]: https://github.com/al8n/smear/issues/139
+[painty]: https://github.com/al8n/painty

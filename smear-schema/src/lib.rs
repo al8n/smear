@@ -84,19 +84,20 @@ extern crate alloc as std;
 #[allow(unused_extern_crates)]
 extern crate std;
 
-// The diagnostic vocabulary, and the one place in the layout the design's §2 did not settle.
+// The diagnostic vocabulary: tokora's `diagnostic` module, re-exported item by item under the
+// path smear has always published it at.
 //
-// `error.rs` and `introspection/error.rs` implement `Diagnose`, so `diagnostic` has to sit at or
-// BELOW this crate — and §2 puts it in `smear-compiler`, which is above. It ships here because
-// this is the lowest crate that needs it, and it is ungated because `smear::diagnostic` is ungated
-// today and moving it behind a feature would be an API change. Two consequences, both recorded:
-// this crate's `[dependencies]` table is no longer empty (`tokora`, for `SimpleSpan`), and
-// `smear` depends on it unconditionally rather than behind `validator`.
+// `error.rs` and `introspection/error.rs` implement `Diagnose`, so the re-export has to sit at or
+// BELOW this crate — and the design's §2 puts the vocabulary in `smear-compiler`, which is above.
+// It ships here because this is the lowest crate that needs it, and it is ungated because
+// `smear::diagnostic` is ungated and moving it behind a feature would be an API change. That is
+// also why `smear` depends on this crate unconditionally rather than behind `validator`.
 //
-// It is written to be lifted into `tokora` unchanged, which is why no link in it is `crate::`
-// rooted and why this declaration carries no outer doc comment: rustdoc resolves the MERGED
-// fragments of a module's documentation in the scope of whichever attribute came from outside, so
-// an outer comment here would reinterpret every link inside it as one rooted in this crate.
+// The contract used to be declared here, written to be lifted into `tokora` unchanged; it has
+// been, and this crate now carries only the re-export. The declaration still carries no outer doc
+// comment: rustdoc resolves the MERGED fragments of a module's documentation in the scope of
+// whichever attribute came from outside, so an outer comment here would reinterpret every link in
+// the module's own header as one rooted in this crate, where the re-exported names are not.
 pub mod diagnostic;
 
 pub mod builtin;

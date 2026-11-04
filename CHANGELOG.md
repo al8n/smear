@@ -36,6 +36,19 @@ All notable changes to Smear are documented in this file.
   ends right after it, or, in a byte source, the bytes after it are not
   well-formed UTF-8. `StringError` is not `#[non_exhaustive]`, so the new
   variant breaks an exhaustive `match` on it.
+- `smear-schema`!: the diagnostic contract is tokora's. `smear_schema::diagnostic`,
+  and through it `smear::diagnostic`, re-exports `tokora::diagnostic`'s `Diagnose`,
+  `DiagnoseExt`, `Code`, `Severity`, `Location`, `Label`, `PathSegment`, `Labels`
+  and `PathSegments` instead of declaring copies of them, so `SchemaError`, the
+  introspection door's `ResponseError` and `DiagnosticDisplay` implement
+  `tokora::diagnostic::Diagnose` and painty's `tokora` adapter renders them.
+  Paths, names and method signatures are unchanged. What changed for a caller:
+  each item is now tokora's own rather than a structurally identical twin, so a
+  type that implemented both `Diagnose` traits now implements one trait twice;
+  `Labels` and `PathSegments` no longer implement `ExactSizeIterator` (count them
+  with `count()`, not `len()`), report a `size_hint` lower bound of `0`, and stop
+  for good at the first index whose accessor answers `None` before the count is
+  reached; and `Severity` implements `From<tokora::emitter::Severity>`.
 
 ## [0.0.1] - 2026-10-30
 

@@ -343,8 +343,9 @@ fn every_current_variant_is_an_error() {
 
 /// `labels()` and `label(i)` agree, for every diagnostic either corpus produces.
 ///
-/// A renderer sizes its storage from the count and then walks the indices, so a count that
-/// over-reports panics an LSP server and one that under-reports drops a span.
+/// The contract's adapters walk the indices the count promises and stop for good at the first
+/// hole, so a count that under-reports drops a span and one that over-reports claims labels no
+/// render will show — silently, either way.
 fn labels_are_consistent(diagnostic: &dyn Diagnose, what: &str) {
   let count = diagnostic.labels();
   for index in 0..count {
@@ -517,7 +518,7 @@ fn the_contract_survives_erasure() {
     assert_eq!(subject.severity(), Severity::Error);
     assert!(subject.primary_label().is_some());
     assert_eq!(subject.labels(), 1, "both fixtures are duplicates");
-    assert_eq!(subject.labels_iter().len(), 1);
+    assert_eq!(subject.labels_iter().count(), 1);
     assert_eq!(subject.path_segments_iter().count(), 0);
     assert!(!std::string::ToString::to_string(subject).is_empty());
   }

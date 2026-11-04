@@ -70,11 +70,11 @@ build = ["dep:smear-parser", "smear-parser/graphql"]
 introspection = ["build"]
 
 [dependencies]
-# NOT an empty table, and the design's §2 says it should be. `diagnostic/` moved down with this
-# crate — `error.rs` and `introspection/error.rs` implement `Diagnose`, so the vocabulary has to
-# sit at or below here — and it needs `tokora::SimpleSpan`. The claim `smear-noatomic` actually
-# holds is about `repr/`, which it `#[path]`-includes and builds for `thumbv6m-none-eabi` with an
-# empty table of its own; that claim is untouched.
+# NOT an empty table, and the design's §2 says it should be. `error.rs` and
+# `introspection/error.rs` implement `Diagnose`, which is tokora's: `diagnostic.rs` re-exports
+# `tokora::diagnostic` as this crate's `diagnostic`, ungated, so the reader tier names tokora too.
+# The claim `smear-noatomic` actually holds is about `repr/`, which it `#[path]`-includes and
+# builds for `thumbv6m-none-eabi` with an empty table of its own; that claim is untouched.
 tokora.workspace = true
 
 smear-parser = { workspace = true, optional = true }
