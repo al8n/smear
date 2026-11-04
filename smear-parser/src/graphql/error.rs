@@ -1501,12 +1501,12 @@ where
 // arm is unconditionally `false`, therefore made a rejecting host's `Errors::is_terminal()` answer
 // `false` on a tripped `smear_lexer::limits` budget.
 //
-// `LexerErrorData::State` is the scanner's own stop kind and the only one of the ten that is: the
-// other nine are built from a lexeme the **grammar** rejected — a malformed literal, an unknown
-// character, an unterminated `...`, invalid UTF-8 — and each is recoverable. `State` is the
-// tracker refusing, which no further input clears. It is the same variant the
-// [`Lexer`](ErrorData::Lexer) arm keys on one layer up, so the two readings of a state refusal
-// cannot drift apart.
+// `LexerErrorData::State` is the scanner's own stop kind and the only variant that is: every other
+// one is built from a lexeme the **grammar** rejected — a malformed literal, an unknown character,
+// an unterminated `...`, invalid UTF-8 — or from a slice a whole-slice door refused, and each is
+// recoverable. `State` is the tracker refusing, which no further input clears. It is the same
+// variant the [`Lexer`](ErrorData::Lexer) arm keys on one layer up, so the two readings of a state
+// refusal cannot drift apart.
 //
 // # Why `TerminalEndOfInput` and not a payload-carrying variant of its own
 //
@@ -1527,8 +1527,8 @@ where
 // The payload cannot ride, and its kind can: `LexerErrorData::kind` is bound-free, so the first
 // error's `SyntaxErrorKind` survives the erasure and an unterminated string, a bad escape or a
 // leading zero reaches the caller under its own `smear::syntax` code. It used to be one
-// `Other("lexer error")` for all nine. An **empty** batch has no first error and keeps that note,
-// at `0..0` — the one case where there is no kind to keep and no position to point at.
+// `Other("lexer error")` for every one of them. An **empty** batch has no first error and keeps
+// that note, at `0..0` — the one case where there is no kind to keep and no position to point at.
 //
 // The span is the batch's first, on **both** arms. `Span::new(0, 0)` pointed every lexer error at
 // byte zero, which is a position the error is not at; a `State` error minted through

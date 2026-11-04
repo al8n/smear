@@ -275,9 +275,25 @@ pub enum LexerErrorData<Char = char, StateError = ()> {
   Binary(BinaryError<Char>),
   /// An error encountered during lexing for string literals.
   String(StringErrors<Char>),
-  /// Unexpected token character.
+  /// A character that can begin a token, where it begins none.
+  ///
+  /// This dialect's scanner lexes `+` and `-` as operators and raises none today. The variant
+  /// mirrors GraphQL's, where only the scanner raises it and always over the one character it
+  /// refused, which is what [`UnexpectedCharacter`](SyntaxErrorKind::UnexpectedCharacter) reports.
+  /// A slice a whole-slice door refuses is [`NotOneToken`](Self::NotOneToken) instead.
   #[from(skip)]
   UnexpectedLexeme(Lexeme<Char>),
+  /// The slice handed to a whole-slice door — [`identifier`](super::identifier), or the
+  /// `TryFrom<&str>` of [`LitInt`](super::LitInt) or [`LitFloat`](super::LitFloat) — is not
+  /// exactly one token of the kind the door asked for: a token of another kind, trivia around it,
+  /// or a second token.
+  ///
+  /// The payload names that kind as a noun, `"name"`, `"integer"` or `"float"`, and the error
+  /// renders "not exactly one" followed by it. The scanner never raises it. It reports
+  /// [`UnexpectedToken`](SyntaxErrorKind::UnexpectedToken), and no character in the slice was
+  /// refused.
+  #[from(skip)]
+  NotOneToken(&'static str),
   /// Unknown token character.
   #[from(skip)]
   UnknownLexeme(Lexeme<Char>),
@@ -322,6 +338,7 @@ impl<Char, StateError> LexerErrorData<Char, StateError> {
         .next()
         .map_or(SyntaxErrorKind::InvalidSyntax, StringError::kind),
       Self::UnexpectedLexeme(_) => SyntaxErrorKind::UnexpectedCharacter,
+      Self::NotOneToken(_) => SyntaxErrorKind::UnexpectedToken,
       Self::UnknownLexeme(_) => SyntaxErrorKind::UnknownCharacter,
       Self::UnexpectedEndOfInput => SyntaxErrorKind::UnexpectedEndOfInput,
       Self::UnterminatedSpreadOperator => SyntaxErrorKind::UnterminatedSpread,
@@ -347,6 +364,10 @@ impl<Char, StateError> LexerErrorData<Char, StateError> {
       },
       Self::UnterminatedSpreadOperator => {
         f.write_str("unterminated spread operator, expected `...`")
+      }
+      Self::NotOneToken(what) => {
+        f.write_str("not exactly one ")?;
+        f.write_str(what)
       }
       Self::Other(message) => f.write_str(message),
       Self::UnexpectedLexeme(_)

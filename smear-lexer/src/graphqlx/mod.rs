@@ -1,9 +1,5 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use tokora::{
-  SimpleSpan,
-  state::RecursionLimitExceeded,
-  utils::{DisplayHuman, Lexeme},
-};
+use tokora::{SimpleSpan, state::RecursionLimitExceeded, utils::DisplayHuman};
 
 /// Errors for GraphQLx lexers
 pub mod error;
@@ -228,8 +224,9 @@ impl<S> LitFloat<S> {
 /// must be the whole slice. Leading or trailing trivia fails it, a second token fails it, and a
 /// token of any other kind fails it — a caller asking for a literal is asking about the bytes it
 /// handed over, not about a prefix of them. The lexer's own error passes through unchanged; the
-/// failures the lexer has no opinion about are one [`UnexpectedLexeme`](error::LexerErrorData) over
-/// the slice.
+/// failures the lexer has no opinion about are one
+/// [`NotOneToken`](error::LexerErrorData::NotOneToken) over the slice, naming `what` — the kind
+/// the calling door asked for.
 ///
 /// # `&str` only
 ///
@@ -239,17 +236,9 @@ impl<S> LitFloat<S> {
 /// always text. A byte door here would be surface with no caller.
 fn scan_one_token<'de: 'a, 'a>(
   value: &'de str,
+  what: &'static str,
 ) -> Result<syntactic::SyntacticToken<&'a str>, error::LexerErrors<char, RecursionLimitExceeded>> {
   use tokora::Lexer as _;
-
-  /// The slice is not one numeric literal, and the scanner had no complaint of its own to make.
-  fn not_one_literal(len: usize) -> error::LexerErrors<char, RecursionLimitExceeded> {
-    error::LexerError::const_new(
-      SimpleSpan::new(0, len),
-      error::LexerErrorData::UnexpectedLexeme(Lexeme::from_range_const(SimpleSpan::new(0, len))),
-    )
-    .into()
-  }
 
   let mut lexer = syntactic::SyntacticLexer::<'de, str>::new(value);
   let Some(first) = lexer.lex() else {
@@ -264,9 +253,25 @@ fn scan_one_token<'de: 'a, 'a>(
   let token = first?;
   let span = lexer.span();
   if span.start() != 0 || span.end() != value.len() || lexer.lex().is_some() {
-    return Err(not_one_literal(value.len()));
+    return Err(not_one_token(value.len(), what));
   }
   Ok(token)
+}
+
+/// The slice is not exactly one `what` — the token kind the calling door asked for — and the
+/// scanner had no complaint of its own to make.
+///
+/// [`NotOneToken`](error::LexerErrorData::NotOneToken), not the scanner's `UnexpectedLexeme`: no
+/// character was refused, the slice as a whole was.
+fn not_one_token(
+  len: usize,
+  what: &'static str,
+) -> error::LexerErrors<char, RecursionLimitExceeded> {
+  error::LexerError::const_new(
+    SimpleSpan::new(0, len),
+    error::LexerErrorData::NotOneToken(what),
+  )
+  .into()
 }
 
 /// The scanner's own reading of `value` as one whole identifier.
@@ -288,21 +293,13 @@ fn scan_one_token<'de: 'a, 'a>(
 /// to the scanner and it is [`ContextualKeyword`] that tells them apart afterwards.
 ///
 /// The lexer's own error passes through unchanged; the failures the lexer has no opinion about are
-/// one `UnexpectedLexeme` over the slice.
+/// one [`NotOneToken`](error::LexerErrorData::NotOneToken) over the slice.
 #[inline]
 pub fn identifier(value: &str) -> Result<&str, error::LexerErrors<char, RecursionLimitExceeded>> {
-  match scan_one_token(value)? {
+  const WHAT: &str = "name";
+  match scan_one_token(value, WHAT)? {
     syntactic::SyntacticToken::Identifier(name) => Ok(name),
-    _ => Err(
-      error::LexerError::const_new(
-        SimpleSpan::new(0, value.len()),
-        error::LexerErrorData::UnexpectedLexeme(Lexeme::from_range_const(SimpleSpan::new(
-          0,
-          value.len(),
-        ))),
-      )
-      .into(),
-    ),
+    _ => Err(not_one_token(value.len(), WHAT)),
   }
 }
 
@@ -331,21 +328,13 @@ impl<'de: 'a, 'a> TryFrom<&'de str> for LitInt<&'a str> {
   /// stop inventing.
   ///
   /// The lexer's own error passes through unchanged; the failures the lexer has no opinion about
-  /// are one `UnexpectedLexeme` over the slice.
+  /// are one [`NotOneToken`](error::LexerErrorData::NotOneToken) over the slice.
   #[inline]
   fn try_from(value: &'de str) -> Result<Self, Self::Error> {
-    match scan_one_token(value)? {
+    const WHAT: &str = "integer";
+    match scan_one_token(value, WHAT)? {
       syntactic::SyntacticToken::LitInt(lit) => Ok(lit),
-      _ => Err(
-        error::LexerError::const_new(
-          SimpleSpan::new(0, value.len()),
-          error::LexerErrorData::UnexpectedLexeme(Lexeme::from_range_const(SimpleSpan::new(
-            0,
-            value.len(),
-          ))),
-        )
-        .into(),
-      ),
+      _ => Err(not_one_token(value.len(), WHAT)),
     }
   }
 }
@@ -359,18 +348,10 @@ impl<'de: 'a, 'a> TryFrom<&'de str> for LitFloat<&'a str> {
   /// and for why an integer slice fails here rather than being widened.
   #[inline]
   fn try_from(value: &'de str) -> Result<Self, Self::Error> {
-    match scan_one_token(value)? {
+    const WHAT: &str = "float";
+    match scan_one_token(value, WHAT)? {
       syntactic::SyntacticToken::LitFloat(lit) => Ok(lit),
-      _ => Err(
-        error::LexerError::const_new(
-          SimpleSpan::new(0, value.len()),
-          error::LexerErrorData::UnexpectedLexeme(Lexeme::from_range_const(SimpleSpan::new(
-            0,
-            value.len(),
-          ))),
-        )
-        .into(),
-      ),
+      _ => Err(not_one_token(value.len(), WHAT)),
     }
   }
 }

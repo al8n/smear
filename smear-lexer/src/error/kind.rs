@@ -19,6 +19,11 @@ pub enum SyntaxErrorKind {
   // -- the lexer: a character no token begins with ------------------------------------------
   /// A character that can begin a token, in a place where it begins none: a `+`, or a `-` that no
   /// digit follows (GraphQL only — GraphQLx lexes both as operators).
+  ///
+  /// It is a lexer error's `UnexpectedLexeme`, which only the scanner raises and always over the
+  /// one character it refused, so the kind and its help hold by construction. A slice a whole-slice
+  /// door refuses for not being exactly one token of the kind it asked for is
+  /// [`UnexpectedToken`](Self::UnexpectedToken) instead.
   UnexpectedCharacter,
   /// A character that begins no token at all.
   ///
@@ -66,6 +71,10 @@ pub enum SyntaxErrorKind {
 
   // -- the parser -----------------------------------------------------------------------------
   /// A token the grammar does not allow where it stands.
+  ///
+  /// The lexer's whole-slice doors — `identifier`, `int_literal`, `float_literal`, and GraphQLx's
+  /// `LitInt` and `LitFloat` `TryFrom<&str>` — report it too, as a lexer error's `NotOneToken`,
+  /// when the slice is not exactly one token of the kind the door asked for.
   UnexpectedToken,
   /// A document that ends where the grammar needs more.
   UnexpectedEndOfInput,
