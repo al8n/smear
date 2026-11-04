@@ -938,9 +938,9 @@ fn the_budget_flag_pins_both_states() {
       .expect("a diagnostic")
       .display(&schema)
       .to_string();
-    assert!(
-      rendered.starts_with("5.3.2/depth Merge Depth Budget Exceeded: <here>, found 128 ("),
-      "{rendered}"
+    assert_eq!(
+      rendered,
+      "5.3.2/depth Merge Depth Budget Exceeded: <here>, found 128"
     );
     assert!(
       invalid.to_string().contains("resource budget exceeded"),

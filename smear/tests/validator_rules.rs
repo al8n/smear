@@ -36,6 +36,7 @@
 use std::vec::Vec;
 
 use smear::{
+  diagnostic::{Diagnose, Location},
   lexer::tokora::{Parse as _, Parser, SimpleSpan},
   parser::graphql::{
     GraphQL,
@@ -418,10 +419,13 @@ fn a_diagnostic_points_at_what_it_refused() {
   let span = diagnostic.span();
   assert_eq!(&source[span.start()..span.end()], "meowVolume");
   assert!(matches!(diagnostic.context_of(), Context::Type(_)));
+  let view = diagnostic.display(&schema);
   assert_eq!(
-    diagnostic.display(&schema).to_string(),
-    "5.3.1 Field Selections: `meowVolume` on type `Dog` (8..18)"
+    view.to_string(),
+    "5.3.1 Field Selections: `meowVolume` on type `Dog`"
   );
+  // The message is the sentence alone; the position it used to end in is the contract's.
+  assert_eq!(view.primary(), Location::new(0, SimpleSpan::new(8, 18)));
 }
 
 /// A duplicate points at both occurrences.

@@ -776,10 +776,13 @@ impl core::error::Error for Invalid {}
 /// let invalid = validate_executable(&schema, &bad, &mut scratch, &budget, &mut sink)
 ///   .expect_err("`nickname` is not on `Character`");
 /// assert_eq!(invalid.emitted(), 1);
+/// let diagnostic = sink.get().expect("a diagnostic");
 /// assert_eq!(
-///   sink.get().expect("a diagnostic").display(&schema).to_string(),
-///   "5.3.1 Field Selections: `nickname` on type `Character` (9..17)"
+///   diagnostic.display(&schema).to_string(),
+///   "5.3.1 Field Selections: `nickname` on type `Character`"
 /// );
+/// // The message is the sentence alone; the position is the diagnostic's span.
+/// assert_eq!((diagnostic.span().start(), diagnostic.span().end()), (9, 17));
 /// ```
 pub fn validate_executable<S, K>(
   schema: &Schema,
