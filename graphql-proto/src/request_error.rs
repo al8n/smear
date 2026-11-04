@@ -64,7 +64,7 @@
 //! The two kinds are not exclusive after the first entry. [`push`](RequestErrorResult::push)
 //! appends a driver's entry to either kind of result, because §7.1.3's list is "request errors
 //! raised during the request", whoever raised them — and refusing one there would have needed a
-//! refusal that no [`Limits`] field names, which is a wall rather than an error.
+//! refusal that no [`Limits`] ceiling names, which is a wall rather than an error.
 //!
 //! # What each kind carries of §7.1.6
 //!
@@ -268,9 +268,9 @@ impl<V> std::error::Error for TooLarge<V> {}
 
 /// Which of the ceilings a request error entry meets refused it.
 ///
-/// Every variant is one [`Limits`] field, and [`field`](RequestErrorCeiling::field) spells it, so a
-/// driver reports the knob it wants raised without parsing a message — the accessor
-/// [`Ceiling::field`] is, for the same reason.
+/// Every variant is one [`Limits`] ceiling, and [`field`](RequestErrorCeiling::field) spells its
+/// getter's name, so a driver reports the knob it wants raised without parsing a message — the
+/// accessor [`Ceiling::field`] is, for the same reason.
 ///
 /// # Which door answers which
 ///
