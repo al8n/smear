@@ -1673,10 +1673,7 @@ fn the_in_flight_ceiling_withholds() {
   let mut executor = Executor::with_limits(
     &schema,
     &document,
-    Limits {
-      max_in_flight: NonZeroU32::MIN,
-      ..Limits::default()
-    },
+    Limits::default().with_max_in_flight(NonZeroU32::MIN),
   );
   executor
     .start(&mut space, None, obj(vec![]))
@@ -1807,10 +1804,8 @@ fn every_admissible_ceiling_finishes_a_valid_query() {
   ]);
 
   for ceiling in [1u32, 2, 3, 256] {
-    let limits = Limits {
-      max_in_flight: NonZeroU32::new(ceiling).expect("the ceilings under test are not zero"),
-      ..Limits::default()
-    };
+    let limits = Limits::default()
+      .with_max_in_flight(NonZeroU32::new(ceiling).expect("the ceilings under test are not zero"));
     let mut space = Space::default();
     let mut executor = Executor::with_limits(&schema, &document, limits);
     executor
@@ -2594,10 +2589,8 @@ fn get_operation_refuses_what_it_cannot_run() {
 
 /// A budget low enough that the assertions read as arithmetic rather than as guesswork.
 fn budget(slots: u32) -> Limits {
-  Limits {
-    max_response_slots: NonZeroU32::new(slots).expect("the budgets under test are not zero"),
-    ..Limits::default()
-  }
+  Limits::default()
+    .with_max_response_slots(NonZeroU32::new(slots).expect("the budgets under test are not zero"))
 }
 
 fn run_bounded(
@@ -2783,11 +2776,9 @@ const MERGED_SDL: &str = "type Query { rows: [Row] } type Row { x: String }";
 fn merged_selections_are_charged_against_their_own_ceiling() {
   // Twenty positions is ample for four rows; sixteen merged selections is not ample for
   // four rows x eight duplicate selections.
-  let limits = Limits {
-    max_response_slots: NonZeroU32::new(64).expect("not zero"),
-    max_response_metadata: NonZeroU32::new(16).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default()
+    .with_max_response_slots(NonZeroU32::new(64).expect("not zero"))
+    .with_max_response_metadata(NonZeroU32::new(16).expect("not zero"));
   let rows = J::Phantom(4);
   let (_, errors) = run_bounded(
     MERGED_SDL,
@@ -2817,11 +2808,9 @@ fn merged_selections_are_charged_against_their_own_ceiling() {
 /// ceiling this passes silently while the two metadata vectors grow as rows x selections.
 #[test]
 fn the_position_ceiling_alone_does_not_bound_the_metadata() {
-  let generous_positions = Limits {
-    max_response_slots: NonZeroU32::new(1024).expect("not zero"),
-    max_response_metadata: NonZeroU32::new(24).expect("not zero"),
-    ..Limits::default()
-  };
+  let generous_positions = Limits::default()
+    .with_max_response_slots(NonZeroU32::new(1024).expect("not zero"))
+    .with_max_response_metadata(NonZeroU32::new(24).expect("not zero"));
   let (_, errors) = run_bounded(
     MERGED_SDL,
     &merged_query(16),
@@ -2858,10 +2847,7 @@ fn a_refused_expansion_leaves_the_room_a_later_sibling_is_owed() {
   let sdl = "type Query { a: A b: B c: C } type A { x: String } type B { y: String } \
              type C { z: String }";
   let query = "{ a { x x x x x x x x } b { y y y y y } c { z z } }";
-  let limits = Limits {
-    max_response_metadata: NonZeroU32::new(28).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_response_metadata(NonZeroU32::new(28).expect("not zero"));
   let root = J::Obj(
     "Query",
     vec![
@@ -2888,10 +2874,7 @@ fn a_refused_expansion_leaves_the_room_a_later_sibling_is_owed() {
 /// A document that merges within the ceiling is untouched, so this is a bound and not a rewrite.
 #[test]
 fn merging_inside_the_ceiling_is_unchanged() {
-  let limits = Limits {
-    max_response_metadata: NonZeroU32::new(64).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_response_metadata(NonZeroU32::new(64).expect("not zero"));
   let bounded = run_bounded(
     MERGED_SDL,
     &merged_query(3),
@@ -2988,10 +2971,8 @@ fn collection_that_appends_nothing_is_still_charged() {
   const WALK: u32 = 64;
   const BUDGET: u32 = LOOKUP + WALK;
 
-  let limits = Limits {
-    max_selection_visits: NonZeroU32::new(BUDGET).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits =
+    Limits::default().with_max_selection_visits(NonZeroU32::new(BUDGET).expect("not zero"));
   let (_, errors) = run_bounded(
     "type Query { a: String }",
     &fragment_chain(LINKS),
@@ -3027,10 +3008,7 @@ fn collection_that_appends_on_every_step_is_charged_by_the_same_budget() {
   }
   query.push_str(" }");
 
-  let limits = Limits {
-    max_selection_visits: NonZeroU32::new(32).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_selection_visits(NonZeroU32::new(32).expect("not zero"));
   let (_, errors) = run_bounded(
     "type Query { a: String }",
     &query,
@@ -3053,10 +3031,7 @@ fn collection_inside_the_visit_budget_is_unchanged() {
     "type Query { a: String }",
     &fragment_chain(8),
     obj(vec![("a", J::Str("A".to_owned()))]),
-    Limits {
-      max_selection_visits: NonZeroU32::new(1024).expect("not zero"),
-      ..Limits::default()
-    },
+    Limits::default().with_max_selection_visits(NonZeroU32::new(1024).expect("not zero")),
   );
   let default = run_bounded(
     "type Query { a: String }",
@@ -3118,10 +3093,8 @@ fn a_refused_request_is_refused_again_on_the_same_executor() {
 
   let query = fragment_chain(LINKS);
   let (schema, document) = compile("type Query { a: String }", &query);
-  let limits = Limits {
-    max_selection_visits: NonZeroU32::new(LOOKUP + INDEX + LINKS as u32).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default()
+    .with_max_selection_visits(NonZeroU32::new(LOOKUP + INDEX + LINKS as u32).expect("not zero"));
   let mut space = Space::default();
   let mut executor = Executor::with_limits(&schema, &document, limits);
 
@@ -3162,10 +3135,7 @@ fn a_refused_request_is_refused_again_on_the_same_executor() {
 /// missing, and — the part that matters — the response key beside it is still its own.
 #[test]
 fn a_driver_message_too_large_to_store_still_reports_its_error() {
-  let limits = Limits {
-    max_interned_bytes: NonZeroU32::new(16).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_interned_bytes(NonZeroU32::new(16).expect("not zero"));
   let long = "x".repeat(4096);
   let (data, errors) = run_bounded(
     "type Query { a: String b: String }",
@@ -3253,10 +3223,7 @@ const LONG_TYPE: &str = "AbsurdlyLongConcreteTypeNameForTheArena";
 /// thirty-nine the type name would need.
 #[test]
 fn a_resolvable_abstract_type_does_not_need_the_interner() {
-  let limits = Limits {
-    max_interned_bytes: NonZeroU32::new(8).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_interned_bytes(NonZeroU32::new(8).expect("not zero"));
   let (data, errors) = run_bounded(
     ARENA_SDL,
     "{ pet { n } }",
@@ -3282,10 +3249,7 @@ fn a_resolvable_abstract_type_does_not_need_the_interner() {
 /// keys — `pet` and `__typename` — and still refuses the thirty-nine-byte value.
 #[test]
 fn a_typename_on_an_abstract_type_does_need_the_interner() {
-  let limits = Limits {
-    max_interned_bytes: NonZeroU32::new(20).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_interned_bytes(NonZeroU32::new(20).expect("not zero"));
   let (_, errors) = run_bounded(
     ARENA_SDL,
     "{ pet { __typename } }",
@@ -3309,10 +3273,7 @@ fn a_typename_on_an_abstract_type_does_need_the_interner() {
 /// instead says exactly what happened.
 #[test]
 fn an_impossible_type_that_cannot_be_quoted_still_says_what_went_wrong() {
-  let limits = Limits {
-    max_interned_bytes: NonZeroU32::new(20).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_interned_bytes(NonZeroU32::new(20).expect("not zero"));
   let (_, errors) = run_bounded(
     ARENA_SDL,
     "{ pet { n } }",
@@ -3427,11 +3388,9 @@ fn an_executor_refusal_names_the_same_ceiling_as_its_message() {
       MERGED_SDL,
       &merged_query(8),
       obj(vec![("rows", J::Phantom(4))]),
-      Limits {
-        max_response_slots: NonZeroU32::new(64).expect("not zero"),
-        max_response_metadata: NonZeroU32::new(16).expect("not zero"),
-        ..Limits::default()
-      },
+      Limits::default()
+        .with_max_response_slots(NonZeroU32::new(64).expect("not zero"))
+        .with_max_response_metadata(NonZeroU32::new(16).expect("not zero")),
     ),
   );
   check(
@@ -3440,10 +3399,7 @@ fn an_executor_refusal_names_the_same_ceiling_as_its_message() {
       "type Query { rows: [Row] } type Row { averylongfieldname: String }",
       "{ rows { averylongfieldname } }",
       obj(vec![("rows", J::Phantom(4))]),
-      Limits {
-        max_interned_bytes: NonZeroU32::new(8).expect("not zero"),
-        ..Limits::default()
-      },
+      Limits::default().with_max_interned_bytes(NonZeroU32::new(8).expect("not zero")),
     ),
   );
 
@@ -3459,10 +3415,7 @@ fn an_executor_refusal_names_the_same_ceiling_as_its_message() {
         argument_sdl,
         argument_query,
         obj(vec![("f", J::Str("ok".to_owned()))]),
-        Limits {
-          max_selection_visits: NonZeroU32::new(limit).expect("not zero"),
-          ..Limits::default()
-        },
+        Limits::default().with_max_selection_visits(NonZeroU32::new(limit).expect("not zero")),
       );
       found
         .iter()
@@ -3504,10 +3457,7 @@ fn a_driver_message_refused_for_work_names_the_work_ceiling() {
   // copying it into an empty table, comparing nothing — and one more over the same spelling when
   // `expand` resolves the field against the schema. So the budget is spent to the unit when the
   // driver's failure arrives.
-  let limits = Limits {
-    max_selection_visits: NonZeroU32::new(5).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_selection_visits(NonZeroU32::new(5).expect("not zero"));
   let (_, errors) = run_bounded(
     "type Query { a: String }",
     "{ a }",
@@ -3545,10 +3495,7 @@ fn an_impossible_type_refused_for_work_names_the_work_ceiling() {
   // The driver then names `pet` as the runtime type: the schema knows the spelling — it is a
   // field — so `sym` answers and `type_of_sym` does not, which is the "not a possible type"
   // branch, and the name it wants to quote is the response key already sitting in that bucket.
-  let limits = Limits {
-    max_selection_visits: NonZeroU32::new(6).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_selection_visits(NonZeroU32::new(6).expect("not zero"));
   let (_, errors) = run_bounded(
     ARENA_SDL,
     "{ pet { n } }",
@@ -3601,10 +3548,7 @@ fn an_impossible_type_refused_for_work_names_the_work_ceiling() {
 fn a_runtime_type_lookup_the_budget_refuses_is_not_an_impossible_type() {
   // One unit short of the fixture above, so the ledger is empty at exactly the moment the runtime
   // spelling would be hashed.
-  let limits = Limits {
-    max_selection_visits: NonZeroU32::new(5).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_selection_visits(NonZeroU32::new(5).expect("not zero"));
   let (_, errors) = run_bounded(
     ARENA_SDL,
     "{ pet { n } }",
@@ -3667,10 +3611,8 @@ fn a_drivers_runtime_type_name_is_charged_once_a_position() {
       .map(|_| J::Obj(concrete, vec![("n", J::Null)]))
       .collect();
     let clears = |limit: u32| {
-      let limits = Limits {
-        max_selection_visits: NonZeroU32::new(limit).expect("not zero"),
-        ..Limits::default()
-      };
+      let limits =
+        Limits::default().with_max_selection_visits(NonZeroU32::new(limit).expect("not zero"));
       let (_, errors) = run_bounded(
         &schema,
         "{ pets { n } }",
@@ -3716,10 +3658,7 @@ fn a_drivers_runtime_type_name_is_charged_once_a_position() {
 /// leaves the diagnosis, rather than swapping it for one about the interner.
 #[test]
 fn an_unsupplied_variable_keeps_its_diagnosis_when_its_name_cannot_be_stored() {
-  let limits = Limits {
-    max_interned_bytes: NonZeroU32::new(8).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_interned_bytes(NonZeroU32::new(8).expect("not zero"));
   let (_, errors) = run_bounded(
     "type Query { needs(flag: Boolean!): String }",
     "query ($absent: Boolean!) { needs(flag: $absent) }",
@@ -3800,10 +3739,7 @@ fn txn_root() -> J {
 /// both would pass whether or not the charges came back.
 #[test]
 fn a_refused_expansion_costs_its_siblings_nothing() {
-  let limits = Limits {
-    max_response_metadata: NonZeroU32::new(7).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_response_metadata(NonZeroU32::new(7).expect("not zero"));
   let (data, errors) = run_bounded(TXN_SDL, "{ bad { a b } other { ok } }", txn_root(), limits);
 
   assert_eq!(
@@ -3847,10 +3783,7 @@ type Other {
 /// the case would pass against the very defect it is for.
 #[test]
 fn a_failed_collection_gives_its_interned_keys_back() {
-  let limits = Limits {
-    max_interned_bytes: NonZeroU32::new(19).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_interned_bytes(NonZeroU32::new(19).expect("not zero"));
   let (data, errors) = run_bounded(
     TXN_ARENA_SDL,
     "query ($missing: Boolean!) { bad { zzzzzzzzzz: a boom @include(if: $missing) } other { ok } }",
@@ -4072,10 +4005,7 @@ fn the_last_offered_child_still_reads_its_parents_value() {
 /// message named `Query.Query` — a field no schema has.
 #[test]
 fn a_root_budget_error_has_a_location_and_names_no_impossible_field() {
-  let limits = Limits {
-    max_response_metadata: NonZeroU32::new(2).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_response_metadata(NonZeroU32::new(2).expect("not zero"));
   let located = execute_bounded(
     BUDGET_SDL,
     "{ a b c }",
@@ -4119,10 +4049,7 @@ fn a_root_budget_error_has_a_location_and_names_no_impossible_field() {
 #[test]
 fn a_budget_refusal_points_at_the_selection_it_refused() {
   let query = "{ bad { a b } other { ok } }";
-  let limits = Limits {
-    max_response_metadata: NonZeroU32::new(7).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_response_metadata(NonZeroU32::new(7).expect("not zero"));
   let located = execute_bounded(TXN_SDL, query, txn_root(), Vec::new(), limits, |response| {
     response
       .errors()
@@ -4167,10 +4094,7 @@ fn a_budget_refusal_points_at_the_selection_it_refused() {
 #[test]
 fn a_position_refusal_mid_expansion_costs_its_siblings_nothing() {
   let query = "{ bad { a b } other { ok } }";
-  let limits = Limits {
-    max_response_slots: NonZeroU32::new(4).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_response_slots(NonZeroU32::new(4).expect("not zero"));
   let located = execute_bounded(TXN_SDL, query, txn_root(), Vec::new(), limits, |response| {
     (
       render(&response.data()),
@@ -4234,10 +4158,7 @@ fn a_position_refusal_mid_expansion_costs_its_siblings_nothing() {
 #[test]
 fn a_metadata_refusal_on_an_alias_points_at_the_alias() {
   let query = "{ p: a q: b }";
-  let limits = Limits {
-    max_response_metadata: NonZeroU32::new(2).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_response_metadata(NonZeroU32::new(2).expect("not zero"));
   let located = execute_bounded(
     BUDGET_SDL,
     query,
@@ -4279,10 +4200,7 @@ fn a_metadata_refusal_on_an_alias_points_at_the_alias() {
 #[test]
 fn a_name_storage_refusal_on_an_alias_points_at_the_alias() {
   let query = "{ zz: a }";
-  let limits = Limits {
-    max_interned_bytes: NonZeroU32::new(1).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_interned_bytes(NonZeroU32::new(1).expect("not zero"));
   let located = execute_bounded(
     BUDGET_SDL,
     query,
@@ -4357,10 +4275,7 @@ fn list_txn_root(bad: J) -> J {
 /// reached and `other.ok` would need five. Any other ceiling admits both or refuses both.
 #[test]
 fn a_refused_list_costs_its_siblings_nothing() {
-  let limits = Limits {
-    max_response_slots: NonZeroU32::new(4).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_response_slots(NonZeroU32::new(4).expect("not zero"));
   let (data, errors) = run_bounded(
     LIST_TXN_SDL,
     "{ bad other { ok } }",
@@ -4396,10 +4311,7 @@ fn a_refused_list_costs_its_siblings_nothing() {
 /// sees, and the mark covers the error rows for exactly this reason.
 #[test]
 fn a_refused_list_takes_its_elements_errors_with_it() {
-  let limits = Limits {
-    max_response_slots: NonZeroU32::new(4).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_response_slots(NonZeroU32::new(4).expect("not zero"));
   // The first element serialises to null, which draft §6.4.3 step 4 makes a field error at
   // `bad.0`; `[String]` is nullable per element, so the list survives it and reaches the refusal.
   let (data, errors) = run_bounded(
@@ -4444,10 +4356,7 @@ fn a_refused_list_takes_its_elements_errors_with_it() {
 fn answering_an_abandoned_request_frees_its_in_flight_entry() {
   let query = r#"{ nest { deep { boom echo(text: "e") } bulk { text } } }"#;
   let (schema, document) = compile(HOLD_SDL, query);
-  let limits = Limits {
-    max_in_flight: NonZeroU32::new(2).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_in_flight(NonZeroU32::new(2).expect("not zero"));
   let mut space = Space::default();
   let mut executor = Executor::with_limits(&schema, &document, limits);
   executor
@@ -4509,10 +4418,7 @@ fn answering_an_abandoned_request_frees_its_in_flight_entry() {
 #[test]
 fn a_merged_key_refused_during_collection_points_at_the_first_selection() {
   let query = "{ nullable nullable }";
-  let limits = Limits {
-    max_response_metadata: NonZeroU32::new(2).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_response_metadata(NonZeroU32::new(2).expect("not zero"));
   let located = execute_bounded(
     BUDGET_SDL,
     query,
@@ -4847,10 +4753,7 @@ fn an_undrained_abandonment_narrows_the_ceiling_without_stopping_the_mutation() 
   let query = "mutation { one { text required } two { a: text b: text } }";
   assert_valid(MUTATION_SDL, query);
   let (schema, document) = mutation(query);
-  let limits = Limits {
-    max_in_flight: NonZeroU32::new(2).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_in_flight(NonZeroU32::new(2).expect("not zero"));
   let mut space = Space::default();
   let mut executor = Executor::with_limits(&schema, &document, limits);
   executor
@@ -4947,10 +4850,7 @@ fn an_abandonment_can_never_take_the_last_in_flight_slot() {
   let query = "mutation { one { a: text b: text required } two { a: text b: text } }";
   assert_valid(MUTATION_SDL, query);
   let (schema, document) = mutation(query);
-  let limits = Limits {
-    max_in_flight: NonZeroU32::new(3).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_in_flight(NonZeroU32::new(3).expect("not zero"));
   let mut space = Space::default();
   let mut executor = Executor::with_limits(&schema, &document, limits);
   executor
@@ -5077,10 +4977,7 @@ fn an_argument_error_at_the_ceiling_leaves_a_slot_for_the_next_mutation_field() 
   // `$m` is declared and never supplied, which is draft §6.4.1 step 5.d's field error — raised
   // inside `poll_resolve`, on a slot that never became a request.
   let mut space = Space::default();
-  let limits = Limits {
-    max_in_flight: NonZeroU32::new(3).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_in_flight(NonZeroU32::new(3).expect("not zero"));
   let mut executor = Executor::with_limits(&schema, &document, limits);
   executor
     .start(&mut space, None, obj(vec![]))
@@ -5192,10 +5089,7 @@ fn a_ceiling_of_one_abandons_nothing() {
   let query = "mutation { one { text required } two { text } }";
   assert_valid(MUTATION_SDL, query);
   let (schema, document) = mutation(query);
-  let limits = Limits {
-    max_in_flight: NonZeroU32::MIN,
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_in_flight(NonZeroU32::MIN);
   let mut space = Space::default();
   let mut executor = Executor::with_limits(&schema, &document, limits);
   executor
@@ -5514,10 +5408,7 @@ fn every_top_level_mutation_field_reads_the_root_value() {
 /// operation kind, so the message has to be one that is true of both.
 #[test]
 fn a_root_budget_error_on_a_mutation_names_no_operation_kind() {
-  let limits = Limits {
-    max_response_metadata: NonZeroU32::new(2).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_response_metadata(NonZeroU32::new(2).expect("not zero"));
   let messages = execute_bounded(
     MUTATION_SDL,
     "mutation { one { text } two { text } }",
@@ -5808,10 +5699,7 @@ fn a_repeated_key_replaces_and_charges_nothing() {
 /// The entry ceiling refuses, and hands the value back rather than dropping it.
 #[test]
 fn the_entry_ceiling_refuses_and_returns_the_value() {
-  let limits = Limits {
-    max_extension_entries: NonZeroU32::new(3).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_extension_entries(NonZeroU32::new(3).expect("not zero"));
   let mut map: Extensions<J> = Extensions::new(&limits);
   for index in 0..3 {
     map
@@ -5837,11 +5725,9 @@ fn the_entry_ceiling_refuses_and_returns_the_value() {
 /// argument from the other side.
 #[test]
 fn the_key_byte_ceiling_refuses_independently_of_the_entry_count() {
-  let limits = Limits {
-    max_extension_entries: NonZeroU32::new(64).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(16).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(64).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(16).expect("not zero"));
   let mut map: Extensions<J> = Extensions::new(&limits);
   map.insert("0123456789", J::Int(1)).expect("ten bytes");
   assert_eq!(map.key_bytes(), 10);
@@ -5865,11 +5751,9 @@ fn the_key_byte_ceiling_refuses_independently_of_the_entry_count() {
 /// A zero-length key is a legal key, which is why bounding bytes alone would bound nothing.
 #[test]
 fn an_empty_key_still_costs_an_entry() {
-  let limits = Limits {
-    max_extension_entries: NonZeroU32::new(2).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(1024).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(2).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(1024).expect("not zero"));
   let mut map: Extensions<J> = Extensions::new(&limits);
   map.insert("", J::Int(0)).expect("an empty key is a key");
   map.insert("a", J::Int(1)).expect("room");
@@ -5890,14 +5774,8 @@ fn an_empty_key_still_costs_an_entry() {
 /// is what turns them into a bound, and it hands the map back.
 #[test]
 fn a_map_built_under_laxer_limits_is_refused() {
-  let lax = Limits {
-    max_extension_entries: NonZeroU32::new(64).expect("not zero"),
-    ..Limits::default()
-  };
-  let strict = Limits {
-    max_extension_entries: NonZeroU32::new(2).expect("not zero"),
-    ..Limits::default()
-  };
+  let lax = Limits::default().with_max_extension_entries(NonZeroU32::new(64).expect("not zero"));
+  let strict = Limits::default().with_max_extension_entries(NonZeroU32::new(2).expect("not zero"));
 
   let (schema, document) = compile(EXT_SDL, "{ greeting }");
   let mut space = Space::default();
@@ -5942,11 +5820,9 @@ fn a_map_grown_and_emptied_is_accepted_and_reaches_the_response_unchanged() {
   /// no `Limits` the executor was built with would have authorised.
   const GROWN: usize = 512;
 
-  let lax = Limits {
-    max_extension_entries: NonZeroU32::new(GROWN as u32).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(1 << 20).expect("not zero"),
-    ..Limits::default()
-  };
+  let lax = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(GROWN as u32).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(1 << 20).expect("not zero"));
 
   let seen = ext_run(
     |executor| {
@@ -6331,10 +6207,8 @@ fn the_errors_entry_is_the_one_refusal_start_raised() {
   let chat = "type Query { a: String } type Subscription { newMessage(roomId: ID!): String }";
   // One position is the root's, so the source field has nowhere to go: a ceiling refusing the
   // §6.2.3.1 collection rather than a document naming the wrong fields.
-  let cramped = Limits {
-    max_response_slots: NonZeroU32::new(1).expect("one is not zero"),
-    ..Limits::default()
-  };
+  let cramped =
+    Limits::default().with_max_response_slots(NonZeroU32::new(1).expect("one is not zero"));
   for (sdl, query, operation, limits, expected) in [
     (
       both,
@@ -6400,10 +6274,7 @@ fn the_errors_entry_is_the_one_refusal_start_raised() {
       // distinction — a resource refusal that used to arrive as a specification failure.
       "subscription { newMessage(roomId: \"1\") }",
       None,
-      Limits {
-        max_selection_visits: NonZeroU32::new(8).expect("eight is not zero"),
-        ..Limits::default()
-      },
+      Limits::default().with_max_selection_visits(NonZeroU32::new(8).expect("eight is not zero")),
       StartError::SourceFieldArgumentBudget { limit: 8 },
     ),
     (
@@ -6411,10 +6282,7 @@ fn the_errors_entry_is_the_one_refusal_start_raised() {
       // Three definitions and room to read two, so draft §6.1's walk stops inside the document.
       "query one { a } query two { a } fragment F on Query { a }",
       Some("two"),
-      Limits {
-        max_selection_visits: NonZeroU32::new(1).expect("one is not zero"),
-        ..Limits::default()
-      },
+      Limits::default().with_max_selection_visits(NonZeroU32::new(1).expect("one is not zero")),
       StartError::OperationLookupRefused,
     ),
   ] {
@@ -6540,23 +6408,17 @@ fn a_map_built_under_laxer_limits_is_refused_and_names_the_ceiling() {
   let sdl = "type Query { greeting: String }";
   let query = "query A { greeting } query B { greeting }";
 
-  let lax = Limits {
-    max_extension_entries: NonZeroU32::new(64).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(1024).expect("not zero"),
-    ..Limits::default()
-  };
+  let lax = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(64).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(1024).expect("not zero"));
   // One strict `Limits` per ceiling, each leaving the other wide, so the case that trips one cannot
   // have tripped the other on the way past.
-  let strict_entries = Limits {
-    max_extension_entries: NonZeroU32::new(2).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(1024).expect("not zero"),
-    ..Limits::default()
-  };
-  let strict_bytes = Limits {
-    max_extension_entries: NonZeroU32::new(64).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(4).expect("not zero"),
-    ..Limits::default()
-  };
+  let strict_entries = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(2).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(1024).expect("not zero"));
+  let strict_bytes = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(64).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(4).expect("not zero"));
 
   for (label, limits, entries, expected) in [
     (
@@ -6618,10 +6480,7 @@ fn a_refused_or_taken_map_releases_nothing_of_the_drivers() {
   let mut executor = Executor::with_limits(
     &held.schema,
     &held.document,
-    Limits {
-      max_extension_entries: NonZeroU32::new(1).expect("not zero"),
-      ..Limits::default()
-    },
+    Limits::default().with_max_extension_entries(NonZeroU32::new(1).expect("not zero")),
   );
   // A refusal `start` raises on this executor, so the result's ceilings are the ones above.
   let error = executor
@@ -6630,10 +6489,7 @@ fn a_refused_or_taken_map_releases_nothing_of_the_drivers() {
   let mut result: RequestErrorResult<Counted> = RequestErrorResult::new(executor.limits(), error);
   let before = held.tree.get();
 
-  let lax = Limits {
-    max_extension_entries: NonZeroU32::new(8).expect("not zero"),
-    ..Limits::default()
-  };
+  let lax = Limits::default().with_max_extension_entries(NonZeroU32::new(8).expect("not zero"));
   let mut over = Extensions::new(&lax);
   over.insert("a", Counted::obj(&held.tree)).expect("room");
   over.insert("b", Counted::obj(&held.tree)).expect("room");
@@ -6788,12 +6644,10 @@ fn every_validation_diagnostic_becomes_one_entry_in_order() {
 /// laxer `Limits` is exactly what it must not take on trust.
 #[test]
 fn each_request_error_ceiling_refuses_at_its_boundary() {
-  let tight = Limits {
-    max_request_errors: NonZeroU32::new(2).expect("not zero"),
-    max_request_error_message_bytes: NonZeroU32::new(8).expect("not zero"),
-    max_request_error_locations: NonZeroU32::new(2).expect("not zero"),
-    ..Limits::default()
-  };
+  let tight = Limits::default()
+    .with_max_request_errors(NonZeroU32::new(2).expect("not zero"))
+    .with_max_request_error_message_bytes(NonZeroU32::new(8).expect("not zero"))
+    .with_max_request_error_locations(NonZeroU32::new(2).expect("not zero"));
   let lax = Limits::default();
   let span = SimpleSpan::new(0, 1);
 
@@ -6895,14 +6749,10 @@ fn each_request_error_ceiling_refuses_at_its_boundary() {
 fn an_entrys_map_is_rechecked_and_a_refusal_releases_nothing() {
   let live = Rc::new(Cell::new(0usize));
   let lax = Limits::default();
-  let strict_entries = Limits {
-    max_extension_entries: NonZeroU32::new(1).expect("not zero"),
-    ..Limits::default()
-  };
-  let strict_bytes = Limits {
-    max_extension_key_bytes: NonZeroU32::new(2).expect("not zero"),
-    ..Limits::default()
-  };
+  let strict_entries =
+    Limits::default().with_max_extension_entries(NonZeroU32::new(1).expect("not zero"));
+  let strict_bytes =
+    Limits::default().with_max_extension_key_bytes(NonZeroU32::new(2).expect("not zero"));
 
   for (label, limits, expected) in [
     (
@@ -6954,10 +6804,7 @@ fn an_entrys_map_is_rechecked_and_a_refusal_releases_nothing() {
 /// it as it was, and a driver's entry may follow the executor's refusal.
 #[test]
 fn the_errors_list_is_never_empty_and_keeps_its_first_entry() {
-  let one = Limits {
-    max_request_errors: NonZeroU32::new(1).expect("not zero"),
-    ..Limits::default()
-  };
+  let one = Limits::default().with_max_request_errors(NonZeroU32::new(1).expect("not zero"));
 
   // Room for the first entry and no other: every push is refused, and the list is still that one.
   let mut result: RequestErrorResult<J> = RequestErrorResult::from_driver(
@@ -7122,10 +6969,8 @@ fn from_diagnose_keeps_the_rendering_and_reads_every_span() {
 /// and the span count is the primary's with the labels'.
 #[test]
 fn from_diagnose_meets_both_entry_ceilings() {
-  let eight = Limits {
-    max_request_error_message_bytes: NonZeroU32::new(8).expect("not zero"),
-    ..Limits::default()
-  };
+  let eight =
+    Limits::default().with_max_request_error_message_bytes(NonZeroU32::new(8).expect("not zero"));
   let at = Location::new(0, SimpleSpan::new(3, 9));
 
   let fits = Planted {
@@ -7149,10 +6994,8 @@ fn from_diagnose_meets_both_entry_ceilings() {
     Some(RequestErrorCeiling::MessageBytes)
   );
 
-  let one = Limits {
-    max_request_error_locations: NonZeroU32::new(1).expect("not zero"),
-    ..Limits::default()
-  };
+  let one =
+    Limits::default().with_max_request_error_locations(NonZeroU32::new(1).expect("not zero"));
   let two = Planted {
     message: "m",
     primary: at,

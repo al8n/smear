@@ -307,7 +307,7 @@ pub enum RequestErrorCeiling {
 }
 
 impl RequestErrorCeiling {
-  /// Returns the [`Limits`] field that refused.
+  /// Returns the [`Limits`] ceiling that refused, by the name of its getter.
   #[inline]
   pub const fn field(self) -> &'static str {
     match self {
@@ -768,10 +768,8 @@ impl<V> fmt::Display for RequestErrorEntry<'_, V> {
 ///
 /// // `{ hero(id: $id) { nickname } }`, where the operation declares no `$id` and `Character`
 /// // has no `nickname`.
-/// let limits = Limits {
-///   max_request_errors: NonZeroU32::new(2).expect("two is not zero"),
-///   ..Limits::default()
-/// };
+/// let limits = Limits::default()
+///   .with_max_request_errors(NonZeroU32::new(2).expect("two is not zero"));
 /// let nickname = RequestError::<()>::new(
 ///   &limits,
 ///   "Cannot query field \"nickname\" on type \"Character\".",

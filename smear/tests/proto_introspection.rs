@@ -259,10 +259,8 @@ fn census(data: Node<'_, J>) -> (usize, usize) {
 /// succeeds is exactly what a successful run spends.
 fn least_visits(schema: &Schema, document: &ExecutableDocument<&str>) -> u32 {
   let fits = |visits: u32| -> bool {
-    let limits = Limits {
-      max_selection_visits: NonZeroU32::new(visits).expect("not zero"),
-      ..Limits::default()
-    };
+    let limits =
+      Limits::default().with_max_selection_visits(NonZeroU32::new(visits).expect("not zero"));
     let mut space = Space::default();
     let mut executor = Executor::with_limits(schema, document, limits);
     executor.start(&mut space, None, J::Obj).is_ok()
@@ -270,7 +268,7 @@ fn least_visits(schema: &Schema, document: &ExecutableDocument<&str>) -> u32 {
         .poll_response()
         .is_some_and(|response| response.is_ok())
   };
-  let (mut low, mut high) = (1u32, Limits::default().max_selection_visits.get());
+  let (mut low, mut high) = (1u32, Limits::default().max_selection_visits().get());
   assert!(fits(high), "the document does not fit the default ceiling");
   while low < high {
     let middle = low + (high - low) / 2;
@@ -1175,10 +1173,7 @@ fn a_literal_name_is_read_as_its_value() {
 /// `types: [__Type!]!` under `__schema: __Schema!` makes that the operation's whole `data`.
 #[test]
 fn a_position_refusal_under_types_nulls_data() {
-  let limits = Limits {
-    max_response_slots: NonZeroU32::new(8).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_response_slots(NonZeroU32::new(8).expect("not zero"));
   let answer = run_with(SPEC_SDL, "{ __schema { types { name } } }", &[], limits);
   assert_eq!(answer.data, JsonValue::Null, "`data` is null, not absent");
   assert_eq!(
@@ -1217,10 +1212,8 @@ fn the_walks_own_charge_refuses_at_the_list() {
   const QUERY: &str = "{ __schema { directives { locations } } }";
   let (schema, document) = compile(SPEC_SDL, QUERY);
   let least = least_visits(&schema, &document);
-  let short = Limits {
-    max_selection_visits: NonZeroU32::new(least - 1).expect("not zero"),
-    ..Limits::default()
-  };
+  let short =
+    Limits::default().with_max_selection_visits(NonZeroU32::new(least - 1).expect("not zero"));
   let answer = run_with(SPEC_SDL, QUERY, &[], short);
   assert_eq!(answer.data, JsonValue::Null);
   assert_eq!(
@@ -1285,7 +1278,9 @@ fn the_full_introspection_query_fits_the_default_limits() {
     println!(
       "introspection budget, {name}: {slots} response slots of {}, {metadata} metadata entries of \
        {}, {visits} selection visits of {}",
-      defaults.max_response_slots, defaults.max_response_metadata, defaults.max_selection_visits,
+      defaults.max_response_slots(),
+      defaults.max_response_metadata(),
+      defaults.max_selection_visits(),
     );
   }
 }
