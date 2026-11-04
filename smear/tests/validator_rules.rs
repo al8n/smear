@@ -99,7 +99,7 @@ fn parse(source: &str) -> ExecutableDocument<&str> {
   .unwrap_or_else(|errors| panic!("fixture query does not parse: {errors:?}\n---\n{source}"))
 }
 
-/// Validates `source` against `schema` with every rule on, returning the diagnostics.
+/// Validates `source` against `schema` under `RuleSet::ALL`, returning the diagnostics.
 fn diagnose<'a>(schema: &Schema, source: &'a str) -> Vec<Diagnostic<&'a str>> {
   diagnose_with(schema, source, RuleSet::ALL)
 }
@@ -137,17 +137,21 @@ fn diagnose_full<'a>(
 
 /// The set of rules a document fires, sorted and deduplicated.
 fn fired(schema: &Schema, source: &str) -> Vec<Rule> {
-  fired_under(schema, source, &Budget::default())
+  fired_with(schema, source, RuleSet::ALL)
 }
 
-fn fired_under(schema: &Schema, source: &str, budget: &Budget) -> Vec<Rule> {
-  let mut rules: Vec<_> = diagnose_full(schema, source, RuleSet::ALL, budget)
+fn fired_with(schema: &Schema, source: &str, rules: RuleSet) -> Vec<Rule> {
+  fired_under(schema, source, rules, &Budget::default())
+}
+
+fn fired_under(schema: &Schema, source: &str, rules: RuleSet, budget: &Budget) -> Vec<Rule> {
+  let mut observed: Vec<_> = diagnose_full(schema, source, rules, budget)
     .iter()
     .map(Diagnostic::rule)
     .collect();
-  rules.sort_unstable();
-  rules.dedup();
-  rules
+  observed.sort_unstable();
+  observed.dedup();
+  observed
 }
 
 fn sorted(rules: &[Rule]) -> Vec<Rule> {
@@ -216,7 +220,8 @@ fn liveness_floor() {
     let _ = &schema;
 
     let budget = fixture.budget.unwrap_or_default();
-    let actual = fired_under(&schema, fixture.invalid, &budget);
+    let rules = fixture.rules.unwrap_or(RuleSet::ALL);
+    let actual = fired_under(&schema, fixture.invalid, rules, &budget);
     assert_eq!(
       actual,
       sorted(fixture.fires),
@@ -231,7 +236,7 @@ fn liveness_floor() {
       fixture.invalid
     );
 
-    let twin = fired_under(&schema, fixture.valid, &budget);
+    let twin = fired_under(&schema, fixture.valid, rules, &budget);
     assert!(
       twin.is_empty(),
       "the valid twin for {:?} fired {twin:?}\n---\n{}",
@@ -440,7 +445,8 @@ fn every_diagnostic_renders() {
       None => build(SCHEMA),
     };
     let budget = fixture.budget.unwrap_or_default();
-    for diagnostic in diagnose_full(&schema, fixture.invalid, RuleSet::ALL, &budget) {
+    let rules = fixture.rules.unwrap_or(RuleSet::ALL);
+    for diagnostic in diagnose_full(&schema, fixture.invalid, rules, &budget) {
       let rendered = diagnostic.display(&schema).to_string();
       assert!(
         rendered.starts_with(diagnostic.rule().section()),
@@ -811,6 +817,212 @@ fn subscription_roots_are_collected_without_runtime_values() {
   let aliased = diagnose(&schema, "subscription aliased { alias: __typename }");
   assert_eq!(aliased.len(), 1);
   assert_eq!(aliased[0].subject_source(), Some(&"__typename"));
+}
+
+// ---------------------------------------------------------------------------------------------
+// the introspection policy: opt-in, and outside `RuleSet::ALL`
+// ---------------------------------------------------------------------------------------------
+
+/// What a server that does not publish its schema runs: the default set plus the policy.
+const INTROSPECTION_OFF: RuleSet = RuleSet::ALL.with(Rule::NoSchemaIntrospection);
+
+/// The default set leaves the policy out, so the default door keeps accepting introspection.
+#[test]
+fn the_introspection_policy_is_opt_in() {
+  assert!(!RuleSet::ALL.contains(Rule::NoSchemaIntrospection));
+
+  let schema = build(SCHEMA);
+  for source in [
+    "{ __schema { queryType { name } } }",
+    "{ __type(name: \"Dog\") { name } }",
+  ] {
+    assert_eq!(fired(&schema, source), [], "---\n{source}");
+    // `validate_executable` takes no rule set, so it is the door whose answer must not move.
+    let document = parse(source);
+    let mut scratch = Scratch::new();
+    assert!(
+      validate_executable(
+        &schema,
+        &document,
+        &mut scratch,
+        &Budget::default(),
+        &mut Ignore
+      )
+      .is_ok(),
+      "---\n{source}"
+    );
+    assert_eq!(
+      fired_with(&schema, source, INTROSPECTION_OFF),
+      [Rule::NoSchemaIntrospection],
+      "---\n{source}"
+    );
+  }
+}
+
+/// `__schema` and `__type` at the root are refused, each at its own name.
+#[test]
+fn introspection_is_refused_at_the_root() {
+  let schema = build(SCHEMA);
+  let source = "{ __schema { queryType { name } } __type(name: \"Dog\") { name } }";
+  let refused: Vec<_> = diagnose_with(&schema, source, INTROSPECTION_OFF)
+    .iter()
+    .map(|diagnostic| {
+      let span = diagnostic.span();
+      (
+        diagnostic.rule(),
+        diagnostic.subject_source().copied(),
+        &source[span.start()..span.end()],
+      )
+    })
+    .collect();
+  assert_eq!(
+    refused,
+    [
+      (Rule::NoSchemaIntrospection, Some("__schema"), "__schema"),
+      (Rule::NoSchemaIntrospection, Some("__type"), "__type"),
+    ]
+  );
+}
+
+/// `__typename` reads no schema, so the policy never refuses it.
+#[test]
+fn typename_is_never_refused_as_introspection() {
+  let schema = build(SCHEMA);
+  for source in [
+    "{ __typename }",
+    "{ dog { __typename name } }",
+    "{ catOrDog { __typename ... on Dog { barkVolume } } }",
+    "mutation addCat { addPet(pet: { cat: { name: \"Brontie\" } }) { __typename } }",
+    "subscription sub { newMessage { __typename body } }",
+  ] {
+    assert_eq!(
+      fired_with(&schema, source, INTROSPECTION_OFF),
+      [],
+      "---\n{source}"
+    );
+  }
+  // At a subscription's root it is draft 5.2.4.1's refusal, and still not the policy's.
+  assert_eq!(
+    fired_with(
+      &schema,
+      "subscription sub { __typename }",
+      INTROSPECTION_OFF
+    ),
+    [Rule::SingleRootField]
+  );
+}
+
+/// The policy matches the field's own name, wherever it is written: an alias does not launder it,
+/// and neither does a position where the name does not resolve.
+#[test]
+fn introspection_is_refused_by_name() {
+  let schema = build(SCHEMA);
+
+  // At the field's name and with its spelling, not the alias's.
+  let source = "{ alias: __schema { queryType { name } } }";
+  let diagnostics = diagnose_with(&schema, source, INTROSPECTION_OFF);
+  assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+  assert_eq!(diagnostics[0].rule(), Rule::NoSchemaIntrospection);
+  assert_eq!(diagnostics[0].subject_source(), Some(&"__schema"));
+  let span = diagnostics[0].span();
+  assert_eq!(&source[span.start()..span.end()], "__schema");
+
+  // Below the root the meta-field does not exist. graphql-js's rule, which reads the resolved
+  // type, says nothing here and leaves draft 5.3.1 to report alone; this one reports too.
+  assert_eq!(
+    fired_with(
+      &schema,
+      "{ dog { __schema { queryType { name } } } }",
+      INTROSPECTION_OFF
+    ),
+    sorted(&[Rule::FieldSelections, Rule::NoSchemaIntrospection])
+  );
+}
+
+/// The selection is found however it is reached: through inline fragments and through fragment
+/// spreads, each nested two levels deep.
+#[test]
+fn introspection_is_found_through_fragments_at_depth() {
+  let schema = build(SCHEMA);
+  for (source, name) in [
+    (
+      "{ ... on Query { ... on Query { __schema { queryType { name } } } } }",
+      "__schema",
+    ),
+    (
+      "{ ...outer } fragment outer on Query { ...inner } \
+       fragment inner on Query { __type(name: \"Dog\") { name } }",
+      "__type",
+    ),
+  ] {
+    let diagnostics = diagnose_with(&schema, source, INTROSPECTION_OFF);
+    assert_eq!(diagnostics.len(), 1, "---\n{source}\n{diagnostics:#?}");
+    assert_eq!(diagnostics[0].rule(), Rule::NoSchemaIntrospection);
+    assert_eq!(diagnostics[0].subject_source(), Some(&name));
+    let span = diagnostics[0].span();
+    assert_eq!(&source[span.start()..span.end()], name, "---\n{source}");
+  }
+}
+
+/// A fragment is reported once, at its definition, however many spreads reach it; a fragment no
+/// operation reaches is not reported at all, because an unused fragment is draft 5.5.1.4's concern.
+#[test]
+fn introspection_in_a_fragment_is_reported_once_and_only_when_reached() {
+  let schema = build(SCHEMA);
+
+  let source = "query one { ...meta } query two { ...meta ...meta } \
+                fragment meta on Query { __schema { queryType { name } } }";
+  let diagnostics = diagnose_with(&schema, source, INTROSPECTION_OFF);
+  assert_eq!(
+    diagnostics.len(),
+    1,
+    "a fragment spread three times reported more than once: {diagnostics:#?}"
+  );
+  assert_eq!(diagnostics[0].rule(), Rule::NoSchemaIntrospection);
+  assert_eq!(
+    Some(diagnostics[0].span().start()),
+    source.find("__schema"),
+    "not at the definition site"
+  );
+
+  assert_eq!(
+    fired_with(
+      &schema,
+      "{ __typename } fragment unused on Query { __schema { queryType { name } } }",
+      INTROSPECTION_OFF
+    ),
+    [Rule::FragmentsMustBeUsed]
+  );
+}
+
+/// Every operation kind is walked alike. `__schema` exists only on the query root, so on a mutation
+/// and a subscription draft 5.3.1 refuses it too, and a subscription's own draft 5.2.4.1 report —
+/// an introspection field at its root — still appears beside the policy's.
+#[test]
+fn introspection_is_refused_in_every_operation_kind() {
+  let schema = build(SCHEMA);
+  let mutation = "mutation m { __schema { queryType { name } } }";
+  let subscription = "subscription s { __schema { queryType { name } } }";
+
+  assert_eq!(
+    fired_with(&schema, mutation, INTROSPECTION_OFF),
+    sorted(&[Rule::FieldSelections, Rule::NoSchemaIntrospection])
+  );
+  assert_eq!(
+    fired_with(&schema, subscription, INTROSPECTION_OFF),
+    sorted(&[
+      Rule::FieldSelections,
+      Rule::SingleRootField,
+      Rule::NoSchemaIntrospection
+    ])
+  );
+
+  // And without the policy, the draft rules alone.
+  assert_eq!(fired(&schema, mutation), [Rule::FieldSelections]);
+  assert_eq!(
+    fired(&schema, subscription),
+    sorted(&[Rule::FieldSelections, Rule::SingleRootField])
+  );
 }
 
 /// Draft 5.5.2.2 runs over the whole fragment graph, including fragments no operation reaches —

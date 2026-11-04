@@ -42,6 +42,7 @@ Rule::LeafFieldSelections = smear::validation::leaf-field-selections
 Rule::LoneAnonymousOperation = smear::validation::lone-anonymous-operation
 Rule::MergeDepthBudget = smear::validation::merge-depth-budget
 Rule::MergeWorkBudget = smear::validation::merge-work-budget
+Rule::NoSchemaIntrospection = smear::validation::no-schema-introspection
 Rule::OperationNameUniqueness = smear::validation::operation-name-uniqueness
 Rule::OperationTypeExistence = smear::validation::operation-type-existence
 Rule::RequiredArguments = smear::validation::required-arguments

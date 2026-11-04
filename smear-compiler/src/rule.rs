@@ -1,22 +1,24 @@
-//! The rule vocabulary: one identity per draft §5 rule, and a set over them.
+//! The rule vocabulary: one identity per draft §5 rule, per resource bound and per opt-in policy,
+//! and a set over them.
 //!
 //! [`Rule`] is a fieldless enum, so a diagnostic names the rule that produced it with one byte and
 //! a consumer matches on it exhaustively. [`Rule::ALL`] enumerates the space, which is what lets
 //! the liveness gate iterate the rules rather than a hand-kept list: a rule added without a
 //! fixture that makes it fire is a failing test, not a silently unexercised branch.
 //!
-//! [`RuleSet`] is the selection door. Validation runs every rule by default; a consumer that wants
-//! a subset — a linter checking only the fragment rules, say — hands one to
-//! [`validate_executable_with`](super::validate_executable_with).
+//! [`RuleSet`] is the selection door. Validation runs [`RuleSet::ALL`] by default: every rule
+//! except the opt-in policy rules, which the specification does not ask for. A consumer that wants
+//! a policy rule, or a subset — a linter checking only the fragment rules, say — hands its own set
+//! to [`validate_executable_with`](super::validate_executable_with).
 
 use smear_schema::diagnostic::{Code, Severity};
 
-/// One draft §5 validation rule.
+/// One validation rule: a draft §5 rule, a resource bound, or an opt-in policy rule.
 ///
-/// Every variant carries its specification section in its documentation, and the section numbers
-/// are the **draft**'s (<https://spec.graphql.org/draft/>), which renumbered §5 after the October
-/// 2021 edition: *Required Arguments* is 5.4.3 rather than 5.4.2.1, and *Operation Type Existence*
-/// (5.2.1.1) did not exist in the 2021 text at all.
+/// Every draft §5 variant carries its specification section in its documentation, and the section
+/// numbers are the **draft**'s (<https://spec.graphql.org/draft/>), which renumbered §5 after the
+/// October 2021 edition: *Required Arguments* is 5.4.3 rather than 5.4.2.1, and *Operation Type
+/// Existence* (5.2.1.1) did not exist in the 2021 text at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Rule {
@@ -184,6 +186,32 @@ pub enum Rule {
   /// it. A validator that abandoned a pass and then answered `Ok` would be spelling giving up the
   /// same way it spells finishing.
   ValidationWorkBudget,
+
+  // -- policy -----------------------------------------------------------------------------------
+  /// A `__schema` or `__type` field selection, refused as policy: not a draft rule.
+  ///
+  /// The rule graphql-js ships as `NoSchemaIntrospectionCustomRule`, and the one Apollo Server
+  /// applies when `introspection` is `false`: a server that does not publish its schema refuses the
+  /// two meta-fields that read it. Draft §5 asks for nothing of the kind, so this rule is **outside
+  /// [`RuleSet::ALL`]** and [`validate_executable`](super::validate_executable) still accepts
+  /// introspection. A consumer opts in with `RuleSet::ALL.with(Rule::NoSchemaIntrospection)`.
+  ///
+  /// `__typename` reads no schema and is never refused.
+  ///
+  /// # By name, wherever the name is written
+  ///
+  /// A selection is refused for its field's **name**, and reported at that name: `alias: __schema`
+  /// is refused at `__schema`, so an alias does not launder it. The name is matched at any depth,
+  /// through inline fragments and fragment spreads alike. graphql-js's rule instead reports every
+  /// field whose resolved type is an introspection type — `queryType` beneath `__schema` too — and
+  /// so says nothing where the name does not resolve: `__schema` selected on a mutation root, say,
+  /// which draft 5.3.1 then reports alone. Matching by name is a deliberate, schema-free
+  /// difference.
+  ///
+  /// Each selection is reported once, at its definition, and only when an operation reaches it: a
+  /// fragment spread twice is reported once, and a fragment no operation spreads is
+  /// [`Rule::FragmentsMustBeUsed`]'s business rather than this rule's.
+  NoSchemaIntrospection,
 }
 
 impl Rule {
@@ -224,6 +252,7 @@ impl Rule {
     Self::MergeDepthBudget,
     Self::MergeWorkBudget,
     Self::ValidationWorkBudget,
+    Self::NoSchemaIntrospection,
   ];
 
   /// Returns the rule's bit position in a [`RuleSet`].
@@ -267,6 +296,7 @@ impl Rule {
       Self::MergeDepthBudget => 29,
       Self::MergeWorkBudget => 30,
       Self::ValidationWorkBudget => 31,
+      Self::NoSchemaIntrospection => 32,
     }
   }
 
@@ -311,6 +341,9 @@ impl Rule {
       // Not a section either, and deliberately not spelled against one: this bound is over every
       // §5 pass that is NOT draft 5.3.2, so naming any single section would misstate its scope.
       Self::ValidationWorkBudget => "§5/work",
+      // Not a section either: an opt-in policy outside `RuleSet::ALL`, which no draft section
+      // asks for. Terse like the budgets', because `Display` renders it in front of the title.
+      Self::NoSchemaIntrospection => "policy/introspection",
     }
   }
 
@@ -350,6 +383,7 @@ impl Rule {
       Self::MergeDepthBudget => "Merge Depth Budget Exceeded",
       Self::MergeWorkBudget => "Merge Work Budget Exceeded",
       Self::ValidationWorkBudget => "Validation Work Ceiling Exceeded",
+      Self::NoSchemaIntrospection => "No Schema Introspection",
     }
   }
 
@@ -412,6 +446,7 @@ impl Rule {
       Self::MergeDepthBudget => Code::new("smear::validation::merge-depth-budget"),
       Self::MergeWorkBudget => Code::new("smear::validation::merge-work-budget"),
       Self::ValidationWorkBudget => Code::new("smear::validation::validation-work-budget"),
+      Self::NoSchemaIntrospection => Code::new("smear::validation::no-schema-introspection"),
     }
   }
 
@@ -455,7 +490,8 @@ impl Rule {
       | Self::AllVariableUsagesAreAllowed
       | Self::MergeDepthBudget
       | Self::MergeWorkBudget
-      | Self::ValidationWorkBudget => Severity::Error,
+      | Self::ValidationWorkBudget
+      | Self::NoSchemaIntrospection => Severity::Error,
     }
   }
 
@@ -524,6 +560,9 @@ impl Rule {
       Self::ValidationWorkBudget => Some(
         "raise `Budget::validation_work`, or send a smaller document: what this bounds is every pass except draft 5.3.2, and draft 5.3.2 runs last.",
       ),
+      Self::NoSchemaIntrospection => Some(
+        "this server does not publish its schema, so `__schema` and `__type` cannot be selected; remove the selection. `__typename` is not introspection and is still allowed.",
+      ),
       Self::OperationNameUniqueness
       | Self::ArgumentNames
       | Self::ArgumentUniqueness
@@ -577,7 +616,8 @@ impl Rule {
       | Self::AllVariableUsagesAreAllowed
       | Self::MergeDepthBudget
       | Self::MergeWorkBudget
-      | Self::ValidationWorkBudget => None,
+      | Self::ValidationWorkBudget
+      | Self::NoSchemaIntrospection => None,
     }
   }
 }
@@ -591,9 +631,11 @@ impl core::fmt::Display for Rule {
 
 /// A set of [`Rule`]s, as a bitmask.
 ///
-/// The default is [`RuleSet::ALL`] — validation checks everything unless a caller narrows it.
-/// Narrowing does not merely filter diagnostics: a draft §5 rule that is off is not evaluated, so
-/// a consumer that only wants, say, the fragment rules does not pay for value coercion.
+/// The default is [`RuleSet::ALL`] — validation checks every draft §5 rule and every resource bound
+/// unless a caller narrows it, and an opt-in policy rule such as [`Rule::NoSchemaIntrospection`]
+/// only when a caller adds it. Narrowing does not merely filter diagnostics: a draft §5 rule that
+/// is off is not evaluated, so a consumer that only wants, say, the fragment rules does not pay for
+/// value coercion.
 ///
 /// **The resource bounds are not rules in that sense**, and reading the sentence above as though
 /// they were is the one way to be wrong about this type. [`Rule::MergeDepthBudget`],
@@ -654,15 +696,23 @@ impl RuleSet {
   /// spends a bounded handful of units.
   pub const EMPTY: Self = Self(0);
 
-  /// Every rule.
+  /// Every rule except the policy rules: every draft §5 rule and every resource bound.
+  ///
+  /// A policy rule is one a server opts into and the specification does not ask for, and
+  /// [`Rule::NoSchemaIntrospection`] is the one there is. Leaving it out is what keeps
+  /// [`validate_executable`](super::validate_executable), which runs this set, accepting every
+  /// document the specification accepts. A consumer opts in with
+  /// `RuleSet::ALL.with(Rule::NoSchemaIntrospection)`.
   pub const ALL: Self = {
-    // `Rule::ALL.len()` low bits set. Written as a shift so adding a rule cannot leave it stale.
+    // `Rule::ALL.len()` low bits set, less the policy rules. Written as a shift so adding a rule
+    // cannot leave it stale; a policy rule is excluded here by name, so adding one means naming it.
     let count = Rule::ALL.len() as u32;
     Self(if count >= 64 {
       u64::MAX
     } else {
       (1u64 << count) - 1
     })
+    .without(Rule::NoSchemaIntrospection)
   };
 
   /// Returns the set containing exactly `rule`.
@@ -742,6 +792,9 @@ impl FromIterator<Rule> for RuleSet {
 mod tests {
   use super::{Rule, RuleSet};
 
+  /// The opt-in policy rules: in [`Rule::ALL`], and deliberately outside [`RuleSet::ALL`].
+  const POLICY: &[Rule] = &[Rule::NoSchemaIntrospection];
+
   /// [`Rule::bit`] is spelled out because a `const fn` cannot search [`Rule::ALL`]. This is what
   /// keeps the two from drifting: a rule inserted in the middle of `ALL` without renumbering
   /// `bit` fails here rather than silently aliasing another rule's bit.
@@ -757,9 +810,28 @@ mod tests {
     }
     assert_eq!(
       RuleSet::ALL.len() as usize,
-      Rule::ALL.len(),
-      "RuleSet::ALL does not cover every rule"
+      Rule::ALL.len() - POLICY.len(),
+      "RuleSet::ALL does not cover every rule but the policy rules"
     );
+    for rule in Rule::ALL {
+      assert_eq!(
+        RuleSet::ALL.contains(*rule),
+        !POLICY.contains(rule),
+        "{rule:?}: RuleSet::ALL holds every rule except the policy rules"
+      );
+    }
+  }
+
+  /// The introspection policy is opt-in: the default set leaves it out, so the default validator
+  /// keeps accepting introspection, and adding it is the whole of opting in.
+  #[test]
+  fn the_policy_rule_is_outside_the_default_set() {
+    assert!(!RuleSet::ALL.contains(Rule::NoSchemaIntrospection));
+    assert!(!RuleSet::default().contains(Rule::NoSchemaIntrospection));
+    assert_eq!(Rule::NoSchemaIntrospection.bit(), 32);
+    let opted = RuleSet::ALL.with(Rule::NoSchemaIntrospection);
+    assert!(opted.contains(Rule::NoSchemaIntrospection));
+    assert_eq!(opted.len(), RuleSet::ALL.len() + 1);
   }
 
   #[test]
@@ -769,7 +841,8 @@ mod tests {
       assert_eq!(set.len(), 1);
       assert!(set.contains(*rule));
       assert_eq!(set.iter().collect::<std::vec::Vec<_>>(), [*rule]);
-      assert!(RuleSet::ALL.without(*rule).len() as usize == Rule::ALL.len() - 1);
+      let with = RuleSet::ALL.with(*rule);
+      assert!(with.without(*rule).len() == with.len() - 1);
     }
   }
 

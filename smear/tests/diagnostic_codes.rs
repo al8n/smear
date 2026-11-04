@@ -44,8 +44,8 @@ use smear::{
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
   validator::{
-    Budget, Collect, Diagnostic, Rule, Schema, SchemaError, SchemaErrorKind, Scratch,
-    validate_executable,
+    Budget, Collect, Diagnostic, Rule, RuleSet, Schema, SchemaError, SchemaErrorKind, Scratch,
+    validate_executable_with,
   },
 };
 
@@ -99,12 +99,17 @@ fn built(sdl: &str) -> Schema {
     .unwrap_or_else(|errors| panic!("fixture SDL is not a schema:\n{errors}\n---\n{sdl}"))
 }
 
-fn diagnose<'a>(schema: &Schema, source: &'a str, budget: &Budget) -> Vec<Diagnostic<&'a str>> {
+fn diagnose<'a>(
+  schema: &Schema,
+  source: &'a str,
+  budget: &Budget,
+  rules: RuleSet,
+) -> Vec<Diagnostic<&'a str>> {
   let document = parse_query(source);
   let mut scratch = Scratch::new();
   let mut collected = Vec::new();
   let mut sink = Collect::new(&mut collected);
-  let _ = validate_executable(schema, &document, &mut scratch, budget, &mut sink);
+  let _ = validate_executable_with(schema, &document, &mut scratch, budget, rules, &mut sink);
   collected
 }
 
@@ -403,7 +408,8 @@ fn a_related_span_always_has_a_phrase() {
   for fixture in FIXTURES {
     let schema = built(fixture.schema.unwrap_or(SCHEMA));
     let budget = fixture.budget.unwrap_or_default();
-    for diagnostic in diagnose(&schema, fixture.invalid, &budget) {
+    let rules = fixture.rules.unwrap_or(RuleSet::ALL);
+    for diagnostic in diagnose(&schema, fixture.invalid, &budget, rules) {
       if diagnostic.related_span().is_some() {
         assert!(
           diagnostic.rule().related_label().is_some(),
@@ -450,7 +456,8 @@ fn only_the_introspection_door_answers_entire() {
   for fixture in FIXTURES {
     let schema = built(fixture.schema.unwrap_or(SCHEMA));
     let budget = fixture.budget.unwrap_or_default();
-    for diagnostic in diagnose(&schema, fixture.invalid, &budget) {
+    let rules = fixture.rules.unwrap_or(RuleSet::ALL);
+    for diagnostic in diagnose(&schema, fixture.invalid, &budget, rules) {
       let view = diagnostic.display(&schema);
       assert_eq!(
         view.primary().span(),
@@ -497,6 +504,7 @@ fn the_contract_survives_erasure() {
     &schema,
     "query dup { dog { name } } query dup { dog { nickname } }",
     &Budget::default(),
+    RuleSet::ALL,
   );
   let diagnostic = diagnostics.first().expect("a diagnostic");
   let view = diagnostic.display(&schema);
