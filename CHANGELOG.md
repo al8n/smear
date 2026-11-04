@@ -30,6 +30,12 @@ All notable changes to Smear are documented in this file.
   introspection; opt in with `RuleSet::ALL.with(Rule::NoSchemaIntrospection)`.
   `__typename` is never refused. Code
   `smear::validation::no-schema-introspection`.
+- `smear-lexer`: a backslash that no character follows in an inline string
+  literal is refused as `StringError::IncompleteEscape`, at the backslash's
+  byte, instead of the positionless `StringError::Other("unknown")`: the input
+  ends right after it, or, in a byte source, the bytes after it are not
+  well-formed UTF-8. `StringError` is not `#[non_exhaustive]`, so the new
+  variant breaks an exhaustive `match` on it.
 
 ## [0.0.1] - 2026-10-30
 

@@ -454,16 +454,16 @@ fn a_byte_literal_that_is_not_utf8_is_refused_in_place() {
   }
 }
 
-/// A backslash no escape rule takes is the same error from either door: the byte grammar answers
-/// for it as the text grammar does, with the error's default, and keeps `UnsupportedCharacter` for
-/// the bytes that are not UTF-8.
+/// A backslash no escape rule takes is the same error from either door: an `IncompleteEscape` at
+/// the backslash's own byte. The byte grammar keeps `UnsupportedCharacter` for the bytes after it
+/// that are no prefix of any sequence, and swallows a truncated prefix into the backslash's token.
 #[test]
 fn a_dangling_backslash_reads_alike_from_text_and_bytes() {
   let text = LitStr::try_from("\"abc\\").expect_err("unterminated");
   assert_eq!(
     text.as_slice(),
     &[
-      StringError::<char>::default(),
+      StringError::<char>::IncompleteEscape(SimpleSpan::new(4, 5)),
       StringError::unterminated_inline_string()
     ]
   );
@@ -471,19 +471,27 @@ fn a_dangling_backslash_reads_alike_from_text_and_bytes() {
   assert_eq!(
     bytes.as_slice(),
     &[
-      StringError::<u8>::default(),
+      StringError::<u8>::IncompleteEscape(SimpleSpan::new(4, 5)),
       StringError::unterminated_inline_string()
     ]
   );
 
-  // The backslash's error ends where the byte after it stops being a prefix of any sequence, so
+  // The backslash's token ends where the byte after it stops being a prefix of any sequence, so
   // that byte is an error of its own.
   let bytes = LitStr::try_from(&b"\"\\\xff\""[..]).expect_err("not UTF-8");
   assert_eq!(
     bytes.as_slice(),
     &[
-      StringError::default(),
+      StringError::IncompleteEscape(SimpleSpan::new(1, 2)),
       StringError::UnsupportedCharacter(Lexeme::Range(SimpleSpan::new(2, 3)))
     ]
+  );
+
+  // A truncated prefix is still a prefix when the quote arrives, so the backslash's token swallows
+  // it: one error, and still at the backslash alone.
+  let bytes = LitStr::try_from(&b"\"\\\xe4\xb8\""[..]).expect_err("not UTF-8");
+  assert_eq!(
+    bytes.as_slice(),
+    &[StringError::IncompleteEscape(SimpleSpan::new(1, 2))]
   );
 }

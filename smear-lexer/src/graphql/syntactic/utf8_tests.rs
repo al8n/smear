@@ -207,8 +207,9 @@ fn a_truncated_sequence_before_an_escape_is_one_error() {
   assert_eq!(logos_inline(doc).expect_err("not UTF-8").as_slice(), &want);
 }
 
-/// A backslash no escape rule takes is the same error from a text and a byte source, and the
-/// ill-formed byte after it is an error of its own.
+/// A backslash no escape rule takes is the same error from a text and a byte source, an
+/// `IncompleteEscape` at the backslash's own byte; an ill-formed byte after it that is no prefix of
+/// any sequence is an error of its own, and a truncated prefix is swallowed into the backslash's.
 #[test]
 fn a_dangling_backslash_reads_alike_through_delegation() {
   let text = match SyntacticLexer::<str>::new("\"abc\\").lex() {
@@ -221,7 +222,7 @@ fn a_dangling_backslash_reads_alike_through_delegation() {
   assert_eq!(
     text.as_slice(),
     &[
-      StringError::<char>::default(),
+      StringError::<char>::IncompleteEscape(SimpleSpan::new(4, 5)),
       StringError::unterminated_inline_string()
     ]
   );
@@ -230,7 +231,7 @@ fn a_dangling_backslash_reads_alike_through_delegation() {
       .expect_err("unterminated")
       .as_slice(),
     &[
-      StringError::<u8>::default(),
+      StringError::<u8>::IncompleteEscape(SimpleSpan::new(4, 5)),
       StringError::unterminated_inline_string()
     ]
   );
@@ -240,9 +241,16 @@ fn a_dangling_backslash_reads_alike_through_delegation() {
       .expect_err("not UTF-8")
       .as_slice(),
     &[
-      StringError::default(),
+      StringError::IncompleteEscape(SimpleSpan::new(1, 2)),
       StringError::UnsupportedCharacter(Lexeme::Range(SimpleSpan::new(2, 3)))
     ]
+  );
+
+  assert_eq!(
+    syntactic_inline(b"\"\\\xe4\xb8\"")
+      .expect_err("not UTF-8")
+      .as_slice(),
+    &[StringError::IncompleteEscape(SimpleSpan::new(1, 2))]
   );
 }
 
