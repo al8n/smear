@@ -21,7 +21,8 @@ use core::{cell::Cell, num::NonZeroU32};
 use std::rc::Rc;
 
 use smear::{
-  lexer::tokora::{Parse as _, Parser},
+  diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity},
+  lexer::tokora::{Parse as _, Parser, SimpleSpan},
   parser::graphql::{
     GraphQL,
     ast::{ExecutableDocument, TypeSystemDocument},
@@ -29,11 +30,11 @@ use smear::{
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
   proto::{
-    ArgumentSource, Ceiling, Executor, Extensions, Kind, Leaf, Limits, Node, ReqId,
-    RequestErrorResult, Resource, Response, ResponseStream, SetExtensionsError, SourceEventError,
-    StartError, Values,
+    ArgumentSource, Ceiling, Executor, Extensions, Kind, Leaf, Limits, Node, ReqId, RequestError,
+    RequestErrorCeiling, RequestErrorEntry, RequestErrorResult, Resource, Response, ResponseStream,
+    SetExtensionsError, SourceEventError, StartError, Values,
   },
-  validator::{Budget, First, Schema, Scratch, validate_executable},
+  validator::{Budget, Collect, First, Schema, Scratch, validate_executable},
 };
 
 // ------------------------------------------------------------------------------------------
@@ -6263,7 +6264,7 @@ fn a_valid_document_can_still_be_a_request_error_with_no_response_to_carry_it() 
   }
 }
 
-/// Builds §7.1.3's result the way a driver does: from a real refusal, under the refusing
+/// Builds §7.1.3's result the way a driver does from a refusal: from a real one, under the refusing
 /// executor's ceilings.
 ///
 /// Through `start` rather than by naming a [`StartError`] variant, so the fixture cannot drift away
@@ -6284,7 +6285,7 @@ fn request_error_result(
 }
 
 /// Every refusal `start` can raise becomes a result whose `errors` is the non-empty list §7.1.3
-/// requires, carrying that refusal's own §7.1.6 `message`.
+/// requires, holding exactly that refusal, with its own §7.1.6 `message`.
 ///
 /// One case per refusal and not one case, because the list's *content* is the only thing a
 /// serialiser writes and a result that reported the same error for two different refusals would
@@ -6442,20 +6443,27 @@ fn the_errors_entry_is_the_one_refusal_start_raised() {
 
 /// The §7.1.3 shape every refusal has to produce: one entry, this refusal's, and no §7.1.7 map.
 fn one_request_error(result: &RequestErrorResult<J>, expected: StartError) {
-  assert_eq!(result.error(), expected);
+  assert_eq!(result.error(), Some(expected));
 
   let mut errors = result.errors();
   assert_eq!(
     errors.len(),
     1,
-    "§7.1.3 requires a non-empty list, and this crate raises exactly one request error"
+    "§7.1.3 requires a non-empty list, and the executor raises exactly one request error"
   );
   let entry = errors.next().expect("non-empty by construction");
-  assert_eq!(entry, expected);
+  assert!(
+    matches!(entry, RequestErrorEntry::Start(raised) if raised == expected),
+    "the entry is the executor's own refusal, and this one: {entry:?}"
+  );
   assert_eq!(
     entry.to_string(),
     expected.to_string(),
     "§7.1.6's one `must` is `message`, and it has to be this refusal's"
+  );
+  assert!(
+    entry.locations().is_empty() && entry.extensions().is_none(),
+    "a §6.1 refusal is associable to no point in the text, and has no driver input for a map"
   );
   assert!(errors.next().is_none(), "and there is no second entry");
   assert!(
@@ -6672,6 +6680,502 @@ fn a_refused_or_taken_map_releases_nothing_of_the_drivers() {
     held.tree.get(),
     before,
     "released when the driver drops it, rather than held until the result is"
+  );
+}
+
+// ------------------------------------------------------------------------------------------
+// draft §7.1.3's driver-supplied entries: the request errors no executor raises
+// ------------------------------------------------------------------------------------------
+//
+// Three of §7.1.3's four request-error sources arise where no executor exists — a syntax error, a
+// validation failure, a variable coercion failure — and the driver lists them as `RequestError`s.
+// What is gated from outside is the shape (non-empty by construction, in order, either kind
+// first), each of the three ceilings at its boundary with the entry handed back, the re-check an
+// entry meets when the result it joins runs under a different budget, and the diagnostic door
+// over the validator's real output. The bytes those entries become are `json_writer.rs`'s.
+
+/// The schema and the document the draft §5 cases below validate.
+///
+/// `validate_executable`'s own worked example pins its diagnostic against this schema and
+/// `{ hero { nickname } }`; one more unknown field gives the list two entries, so that their order
+/// is observable.
+const UNKNOWN_SDL: &str = "type Query { hero: Character } interface Character { name: String! }";
+
+/// Two fields `Character` does not have.
+const UNKNOWN_FIELDS: &str = "{ hero { nickname age } }";
+
+/// Validates `query` against `sdl`, and returns every draft §5 diagnostic as its own rendering
+/// beside the entry [`RequestError::from_diagnose`] builds from it under `limits`.
+fn validation_errors(sdl: &str, query: &str, limits: &Limits) -> Vec<(String, RequestError<J>)> {
+  let (schema, document) = compile(sdl, query);
+  let mut scratch = Scratch::new();
+  let budget = Budget::default();
+  let mut collected = Vec::new();
+  let mut sink = Collect::new(&mut collected);
+  validate_executable(&schema, &document, &mut scratch, &budget, &mut sink)
+    .expect_err("the fixture is invalid");
+  collected
+    .iter()
+    .map(|diagnostic| {
+      let view = diagnostic.display(&schema);
+      let entry = RequestError::from_diagnose(limits, &view)
+        .expect("a validation diagnostic fits the default ceilings");
+      (view.to_string(), entry)
+    })
+    .collect()
+}
+
+/// A draft §5 failure becomes one entry per diagnostic, in the validator's order, each carrying the
+/// diagnostic's own rendering as its message and the position it was raised at as its
+/// `locations` — and no executor's refusal among them.
+#[test]
+fn every_validation_diagnostic_becomes_one_entry_in_order() {
+  let limits = Limits::default();
+  let errors = validation_errors(UNKNOWN_SDL, UNKNOWN_FIELDS, &limits);
+  assert_eq!(
+    errors.len(),
+    2,
+    "one diagnostic per unknown field: {errors:?}"
+  );
+  assert!(
+    errors[0].0.contains("`nickname`") && errors[1].0.contains("`age`"),
+    "in the document's order: {errors:?}"
+  );
+  let expected = [
+    (errors[0].0.clone(), occurrences(UNKNOWN_FIELDS, "nickname")),
+    (errors[1].0.clone(), occurrences(UNKNOWN_FIELDS, "age")),
+  ];
+
+  let mut entries = errors.into_iter().map(|(_, entry)| entry);
+  let first = entries.next().expect("two diagnostics");
+  let mut result =
+    RequestErrorResult::from_driver(&limits, first).expect("built under the same ceilings");
+  for entry in entries {
+    result.push(entry).expect("well under `max_request_errors`");
+  }
+
+  assert_eq!(
+    result.error(),
+    None,
+    "no executor refused anything: the document never reached one"
+  );
+  let listed: Vec<(String, Vec<(usize, usize)>)> = result
+    .errors()
+    .map(|entry| {
+      assert!(matches!(entry, RequestErrorEntry::Driver(_)), "{entry:?}");
+      assert!(entry.extensions().is_none(), "no code is invented");
+      (
+        entry.to_string(),
+        entry
+          .locations()
+          .iter()
+          .map(|span| (span.start(), span.end()))
+          .collect(),
+      )
+    })
+    .collect();
+  assert_eq!(
+    listed, expected,
+    "each message is the diagnostic's rendering, untouched, and each position is its span"
+  );
+}
+
+/// Each of the three ceilings, at its boundary: one more byte, one more span, one more entry, and
+/// the entry comes back whole every time.
+///
+/// Both of an entry's own ceilings are met twice — where it is built, and again where it is listed
+/// under a different budget — because the result is a second retainer and an entry built under a
+/// laxer `Limits` is exactly what it must not take on trust.
+#[test]
+fn each_request_error_ceiling_refuses_at_its_boundary() {
+  let tight = Limits {
+    max_request_errors: NonZeroU32::new(2).expect("not zero"),
+    max_request_error_message_bytes: NonZeroU32::new(8).expect("not zero"),
+    max_request_error_locations: NonZeroU32::new(2).expect("not zero"),
+    ..Limits::default()
+  };
+  let lax = Limits::default();
+  let span = SimpleSpan::new(0, 1);
+
+  // Built: at each ceiling is accepted and one past it is not. Bytes and not characters — `é` is
+  // two of them — and the message is checked before the spans.
+  for (label, message, spans, expected) in [
+    ("eight bytes", "12345678", 2, None),
+    ("four two-byte characters", "éééé", 0, None),
+    (
+      "nine bytes",
+      "123456789",
+      0,
+      Some(RequestErrorCeiling::MessageBytes),
+    ),
+    (
+      "eight bytes and one character",
+      "éééé1",
+      0,
+      Some(RequestErrorCeiling::MessageBytes),
+    ),
+    ("three spans", "", 3, Some(RequestErrorCeiling::Locations)),
+    (
+      "both over",
+      "123456789",
+      3,
+      Some(RequestErrorCeiling::MessageBytes),
+    ),
+  ] {
+    let built = RequestError::<J>::new(&tight, message, &vec![span; spans]);
+    assert_eq!(built.err(), expected, "{label}");
+  }
+
+  // Listed: two entries fit, and the third is refused and handed back with everything it carried.
+  let mut result: RequestErrorResult<J> = RequestErrorResult::from_driver(
+    &tight,
+    RequestError::new(&tight, "first", &[span]).expect("it fits"),
+  )
+  .expect("it fits");
+  result
+    .push(RequestError::new(&tight, "second", &[]).expect("it fits"))
+    .expect("room for two");
+  let refused = result
+    .push(RequestError::new(&tight, "third", &[span, span]).expect("it fits"))
+    .expect_err("two is the ceiling");
+  assert_eq!(refused.ceiling(), RequestErrorCeiling::Errors);
+  assert_eq!(refused.ceiling().field(), "max_request_errors");
+  let back = refused.into_error();
+  assert_eq!(back.message(), "third");
+  assert_eq!(back.locations(), &[span, span]);
+  assert_eq!(result.errors().len(), 2, "and nothing more was listed");
+
+  // Re-checked: built under the defaults and listed under `tight`, at either door.
+  for (label, message, spans, expected) in [
+    (
+      "a nine-byte message",
+      "123456789",
+      0,
+      RequestErrorCeiling::MessageBytes,
+    ),
+    ("three spans", "", 3, RequestErrorCeiling::Locations),
+  ] {
+    let entry =
+      RequestError::<J>::new(&lax, message, &vec![span; spans]).expect("it fits the defaults");
+    let refused = RequestErrorResult::from_driver(&tight, entry).expect_err(label);
+    assert_eq!(refused.ceiling(), expected, "{label}, at `from_driver`");
+    assert_eq!(
+      refused.ceiling().field(),
+      match expected {
+        RequestErrorCeiling::MessageBytes => "max_request_error_message_bytes",
+        _ => "max_request_error_locations",
+      },
+      "{label}: the refusal names the knob the caller can move"
+    );
+    let entry = refused.into_error();
+
+    let mut result: RequestErrorResult<J> = RequestErrorResult::from_driver(
+      &tight,
+      RequestError::new(&tight, "first", &[]).expect("it fits"),
+    )
+    .expect("it fits");
+    let refused = result.push(entry).expect_err(label);
+    assert_eq!(refused.ceiling(), expected, "{label}, at `push`");
+    let back = refused.into_error();
+    assert_eq!(
+      (back.message(), back.locations().len()),
+      (message, spans),
+      "{label}: the entry comes back as it was built"
+    );
+    assert_eq!(result.errors().len(), 1, "{label}: nothing was listed");
+  }
+}
+
+/// An entry's own draft §7.1.6 map is re-checked against the result's two extension ceilings, and a
+/// refusal hands the whole entry back with every one of the driver's values alive.
+///
+/// The `Drop` counter is what tells a handed-back value from one dropped inside the refusal, which
+/// is why this case is here rather than beside the container.
+#[test]
+fn an_entrys_map_is_rechecked_and_a_refusal_releases_nothing() {
+  let live = Rc::new(Cell::new(0usize));
+  let lax = Limits::default();
+  let strict_entries = Limits {
+    max_extension_entries: NonZeroU32::new(1).expect("not zero"),
+    ..Limits::default()
+  };
+  let strict_bytes = Limits {
+    max_extension_key_bytes: NonZeroU32::new(2).expect("not zero"),
+    ..Limits::default()
+  };
+
+  for (label, limits, expected) in [
+    (
+      "two entries under a ceiling of one",
+      strict_entries,
+      Ceiling::Entries,
+    ),
+    (
+      "six key bytes under a ceiling of two",
+      strict_bytes,
+      Ceiling::KeyBytes,
+    ),
+  ] {
+    let mut map = Extensions::new(&lax);
+    map.insert("abc", Counted::obj(&live)).expect("room");
+    map.insert("def", Counted::obj(&live)).expect("room");
+    let mut entry = RequestError::new(&lax, "the entry", &[]).expect("it fits");
+    assert!(entry.set_extensions(map).is_none(), "the entry had no map");
+    assert_eq!(live.get(), 2, "{label}: both values are alive");
+
+    let refused = RequestErrorResult::from_driver(&limits, entry).expect_err(label);
+    assert_eq!(
+      refused.ceiling(),
+      RequestErrorCeiling::Extensions(expected),
+      "{label}"
+    );
+    assert_eq!(refused.ceiling().field(), expected.field(), "{label}");
+    assert_eq!(
+      live.get(),
+      2,
+      "{label}: still alive — the refused entry is the driver's again, map and all"
+    );
+
+    let mut entry = refused.into_error();
+    let map = entry
+      .take_extensions()
+      .expect("the map came back with its entry");
+    assert_eq!(map.len(), 2, "{label}: and whole");
+    drop(map);
+    assert_eq!(
+      live.get(),
+      0,
+      "{label}: released when the driver drops them, rather than held by anything else"
+    );
+  }
+}
+
+/// The list is non-empty by construction whichever kind of entry starts it, every refusal leaves
+/// it as it was, and a driver's entry may follow the executor's refusal.
+#[test]
+fn the_errors_list_is_never_empty_and_keeps_its_first_entry() {
+  let one = Limits {
+    max_request_errors: NonZeroU32::new(1).expect("not zero"),
+    ..Limits::default()
+  };
+
+  // Room for the first entry and no other: every push is refused, and the list is still that one.
+  let mut result: RequestErrorResult<J> = RequestErrorResult::from_driver(
+    &one,
+    RequestError::new(&one, "first", &[]).expect("it fits"),
+  )
+  .expect("one entry under a ceiling of one");
+  for _ in 0..3 {
+    let refused = result
+      .push(RequestError::new(&one, "later", &[]).expect("it fits"))
+      .expect_err("one is the ceiling");
+    assert_eq!(refused.ceiling(), RequestErrorCeiling::Errors);
+  }
+  assert_eq!(
+    result
+      .errors()
+      .map(|entry| entry.to_string())
+      .collect::<Vec<_>>(),
+    ["first"]
+  );
+
+  // The executor's refusal starts the other kind, and counts against the same ceiling.
+  let sdl = "type Query { greeting: String }";
+  let query = "query A { greeting } query B { greeting }";
+  let (_, mut full) = request_error_result(sdl, query, None, one);
+  let refused = full
+    .push(RequestError::new(&one, "no room", &[]).expect("it fits"))
+    .expect_err("the refusal is the one entry a ceiling of one admits");
+  assert_eq!(refused.ceiling(), RequestErrorCeiling::Errors);
+  assert_eq!(full.errors().len(), 1);
+
+  // Under room for two, the driver's entry follows the refusal, which stays first.
+  let (_, mut result) = request_error_result(sdl, query, None, Limits::default());
+  result
+    .push(RequestError::new(&Limits::default(), "and the driver's own", &[]).expect("it fits"))
+    .expect("room after the refusal");
+  assert_eq!(result.error(), Some(StartError::AmbiguousOperation));
+  assert_eq!(
+    result
+      .errors()
+      .map(|entry| match entry {
+        RequestErrorEntry::Start(_) => "start",
+        RequestErrorEntry::Driver(_) => "driver",
+      })
+      .collect::<Vec<_>>(),
+    ["start", "driver"]
+  );
+}
+
+/// A diagnostic built by hand, so the cases below can choose exactly what `from_diagnose` reads.
+struct Planted {
+  message: &'static str,
+  primary: Location,
+  labels: Vec<Label>,
+}
+
+impl core::fmt::Display for Planted {
+  /// In pieces, split after each space, as a real `Display` writes: both renderings
+  /// `from_diagnose` makes then meet a sentence that reaches the sink across more than one call.
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    for piece in self.message.split_inclusive(' ') {
+      f.write_str(piece)?;
+    }
+    Ok(())
+  }
+}
+
+impl Diagnose for Planted {
+  fn code(&self) -> Code {
+    Code::new("smear::test::planted")
+  }
+
+  fn severity(&self) -> Severity {
+    Severity::Error
+  }
+
+  fn primary(&self) -> Location {
+    self.primary
+  }
+
+  fn primary_label(&self) -> Option<&'static str> {
+    None
+  }
+
+  fn labels(&self) -> usize {
+    self.labels.len()
+  }
+
+  fn label(&self, index: usize) -> Option<Label> {
+    self.labels.get(index).copied()
+  }
+
+  fn path_segments(&self) -> usize {
+    0
+  }
+
+  fn path_segment(&self, _: usize) -> Option<PathSegment<'_>> {
+    None
+  }
+
+  fn help(&self) -> Option<&'static str> {
+    None
+  }
+}
+
+/// `from_diagnose` keeps the diagnostic's rendering as it renders, and reads the primary span and
+/// then each label's, skipping a location that is the whole input.
+#[test]
+fn from_diagnose_keeps_the_rendering_and_reads_every_span() {
+  let limits = Limits::default();
+  let at = |start: usize, end: usize| Location::new(0, SimpleSpan::new(start, end));
+
+  for (label, message, primary, labels, spans) in [
+    (
+      "one span, and a sentence written in pieces",
+      "the field is not on the type",
+      at(3, 9),
+      vec![],
+      vec![(3, 9)],
+    ),
+    (
+      "a whole-input primary points nowhere",
+      "the document as a whole",
+      Location::entire(0),
+      vec![],
+      vec![],
+    ),
+    (
+      "the labels follow the primary, and a whole-input one is skipped",
+      "a fault with company",
+      at(3, 9),
+      vec![
+        Label::new(at(12, 14), "declared here"),
+        Label::new(Location::entire(0), "the whole input"),
+        Label::new(at(20, 21), "and here"),
+      ],
+      vec![(3, 9), (12, 14), (20, 21)],
+    ),
+  ] {
+    let planted = Planted {
+      message,
+      primary,
+      labels,
+    };
+    let entry = RequestError::<J>::from_diagnose(&limits, &planted).expect(label);
+    assert_eq!(entry.message(), message, "{label}");
+    assert_eq!(entry.message(), planted.to_string(), "{label}");
+    assert_eq!(
+      entry
+        .locations()
+        .iter()
+        .map(|span| (span.start(), span.end()))
+        .collect::<Vec<_>>(),
+      spans,
+      "{label}"
+    );
+    assert!(entry.extensions().is_none(), "{label}: no code is invented");
+  }
+}
+
+/// Both of an entry's own ceilings hold at the diagnostic door: the message is measured whole,
+/// and the span count is the primary's with the labels'.
+#[test]
+fn from_diagnose_meets_both_entry_ceilings() {
+  let eight = Limits {
+    max_request_error_message_bytes: NonZeroU32::new(8).expect("not zero"),
+    ..Limits::default()
+  };
+  let at = Location::new(0, SimpleSpan::new(3, 9));
+
+  let fits = Planted {
+    message: "1234 678",
+    primary: at,
+    labels: vec![],
+  };
+  assert_eq!(
+    RequestError::<J>::from_diagnose(&eight, &fits)
+      .expect("eight bytes, in two pieces")
+      .message(),
+    "1234 678"
+  );
+  let over = Planted {
+    message: "1234 6789",
+    primary: at,
+    labels: vec![],
+  };
+  assert_eq!(
+    RequestError::<J>::from_diagnose(&eight, &over).err(),
+    Some(RequestErrorCeiling::MessageBytes)
+  );
+
+  let one = Limits {
+    max_request_error_locations: NonZeroU32::new(1).expect("not zero"),
+    ..Limits::default()
+  };
+  let two = Planted {
+    message: "m",
+    primary: at,
+    labels: vec![Label::new(
+      Location::new(0, SimpleSpan::new(1, 2)),
+      "and here",
+    )],
+  };
+  assert_eq!(
+    RequestError::<J>::from_diagnose(&one, &two).err(),
+    Some(RequestErrorCeiling::Locations)
+  );
+  let skipped = Planted {
+    message: "m",
+    primary: at,
+    labels: vec![Label::new(Location::entire(0), "the whole input")],
+  };
+  assert_eq!(
+    RequestError::<J>::from_diagnose(&one, &skipped)
+      .expect("a whole-input label is not a span, so it is not counted")
+      .locations()
+      .len(),
+    1
   );
 }
 

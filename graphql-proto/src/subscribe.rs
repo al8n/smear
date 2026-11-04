@@ -307,9 +307,11 @@ pub enum ResponseStream {
   ///
   /// The driver's obligation here is step 9 — call `ResolveFieldEventStream` and then
   /// [`handle_source_stream`](crate::Executor::handle_source_stream). A driver whose resolver
-  /// *fails* reports nothing and builds a [`RequestErrorResult`](crate::RequestErrorResult) of its
-  /// own instead, which is where that failure belongs: it is the driver's error, and this crate
-  /// carries no driver-supplied error entry (al8n/smear#126).
+  /// *fails* reports nothing to this machine and builds a
+  /// [`RequestErrorResult`](crate::RequestErrorResult) of its own instead, which is where that
+  /// failure belongs: it is the driver's error, so it is listed as the driver's
+  /// [`RequestError`](crate::RequestError), through
+  /// [`RequestErrorResult::from_driver`](crate::RequestErrorResult::from_driver).
   Creating,
   /// Open: each source event the machine accepts produces exactly one draft §7.1.1 execution
   /// result.
@@ -326,12 +328,12 @@ pub enum ResponseStream {
   /// Draft §6.2.3.2: "When {sourceStream} completes with {error}: Complete {responseStream} with
   /// {error}."
   ///
-  /// The error itself is the **driver's** and stays there. This crate did not raise it, has no type
-  /// for a driver-supplied error entry, and inventing one is al8n/smear#126's — the same boundary
-  /// [`RequestErrorResult`](crate::RequestErrorResult) draws around the three request-error sources
-  /// that arise outside this crate. What the state adds is that the ending is *recorded in one
-  /// place*: a serialiser reads how the stream ended off the machine instead of off its own
-  /// bookkeeping, and no further event can be accepted.
+  /// The error itself is the **driver's** and stays there. This crate did not raise it, and the
+  /// driver-supplied entry it does carry, a [`RequestError`](crate::RequestError), is a §7.1.3
+  /// *request* error's, raised before any execution — this one ends a response stream that had
+  /// already begun. What the state adds is that the ending is *recorded in one place*: a serialiser
+  /// reads how the stream ended off the machine instead of off its own bookkeeping, and no further
+  /// event can be accepted.
   Failed,
   /// Draft §6.2.3.3 `Unsubscribe`: the response stream was cancelled, so it "completes" normally
   /// and **the driver owes its source stream a cancellation**.

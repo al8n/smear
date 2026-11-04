@@ -194,6 +194,33 @@ pub const EXEMPTIONS: &[Exemption] = &[
              part a code would otherwise have carried.",
   },
   Exemption {
+    path: "smear::proto::RefusedEntry",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Which ceiling refused a driver's request error entry on its way into a draft §7.1.3 \
+             request error result, and the entry handed back so a refusal cannot close a handle \
+             its `extensions` map still holds. The same argument as `TooLarge`, one level up: \
+             `TooLarge` is a map refused and this is an entry refused, and neither has a document \
+             behind it to have a span in — the refusal is about the result's budget, not about \
+             the request the entry describes, and the entry's own spans are still in it, \
+             untouched. `RequestErrorCeiling::field` names the `Limits` field that refused, which \
+             is the machine-readable part a code would otherwise have carried.",
+  },
+  Exemption {
+    path: "smear::proto::RequestErrorCeiling",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Which of the request-error ceilings refused, standing alone in the `Err` of \
+             `RequestError::new` and `RequestError::from_diagnose` because those two borrowed \
+             everything they were handed and took nothing to give back. The same argument as \
+             `Full`, which names a `Ceiling` beside the value it returns: a ceiling refusing is an \
+             outcome about a budget the service chose, with no document behind it to have a span \
+             in. `field` names the `Limits` field that refused, which is the machine-readable part \
+             a code would otherwise have carried.",
+  },
+  Exemption {
     path: "smear::proto::UnattachedExtensions",
     kind: Kind::Verdict,
     element: None,
@@ -241,6 +268,22 @@ pub const EXEMPTIONS: &[Exemption] = &[
              their own payloads — one a contract row, the other an aggregate of one. A `Diagnose` \
              on the sum would have to invent a primary location for a variant holding a hundred of \
              them.",
+  },
+  // ── §7.1.3's driver-supplied entry: what a diagnostic becomes, not a diagnostic ──────────────
+  Exemption {
+    path: "smear::proto::RequestError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: "Named for draft §7.1.3's own term — a result's `errors` is a list of \"request \
+             errors\" — and not an error any code is handed to explain: it is the WIRE ENTRY a \
+             request error becomes, the carrier of an already-rendered message, the spans it \
+             points at and the driver's `extensions`, which `smear::json` writes and nothing \
+             renders. The contract runs into it rather than out of it: \
+             `RequestError::from_diagnose` reads any `Diagnose` and keeps its `Display`, primary \
+             and label spans. Answering the contract here would mean inventing a `Code` and a \
+             `Severity` for a message the driver may have written itself, which is the one \
+             convention the type deliberately leaves to the driver's `extensions`.",
   },
   // ── The lossless tower's caller-built door ───────────────────────────────────────────────────
   Exemption {
