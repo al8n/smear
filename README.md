@@ -64,7 +64,7 @@ absent, it is absent — not partial.
 | Draft section | State |
 |---|---|
 | §2 Language | Parsed in full, by two token streams and into two tree shapes |
-| §3 Type System | Validated inside `Schema::build`: 67 distinct refusals, each with a schema in the test suite that makes it fire |
+| §3 Type System | Validated inside `Schema::build`: 73 distinct refusals, each with a schema in the test suite that makes it fire |
 | §4 Introspection | The `__`-prefixed meta-schema is injected into every schema, so an introspection *query* is validated like any other document, and a schema can also be *built* from a server's introspection response. Behind `proto` the executor also **answers** `__schema` and `__type`, from the schema itself and without a resolver — graphql-js's full `getIntrospectionQuery` included — and what it answers builds back, through `Schema::from_introspection`, into the schema it describes |
 | §5 Validation | All 30 executable-document rules. Introspection can be switched off too, by an opt-in policy rule that is not a draft rule: `Rule::NoSchemaIntrospection`, which `RuleSet::ALL` leaves out |
 | §6 Execution | **All three operations, behind the non-default `proto` feature.** `smear::proto`'s Sans-I/O executor does collect, coerce arguments, complete, resolve abstract types and propagate nulls. §6.2.2's serial mutation is structural rather than a contract — the top-level fields are withheld from `poll_resolve` rather than queued — and §6.2.3's subscription is a third value of the same at-most-one operation-kind phase, not a second type: `start` runs §6.2.3.1 and hands the driver the one source field to resolve into an event stream, each event it pushes back is one whole execution, and §6.2.3.2's one-result-per-event ordering is owned by the intake. What is still absent is the transport: the crate owns no stream, no clock and no timers, so the connection state machine and backpressure a long-lived operation needs live in a driver |
@@ -74,7 +74,7 @@ Both counts are enumerable rather than asserted. `Rule::ALL` holds 33 entries �
 need a runtime check, three non-specification resource budgets, and the opt-in policy rule that
 `RuleSet::ALL` leaves out; §5.1.1 needs no entry because the grammar gives an executable document no
 type-system branch to begin with. `SchemaErrorKind::ALL`
-holds 67. Three floors in the test suite keep those numbers meaningful instead of decorative:
+holds 73. Three floors in the test suite keep those numbers meaningful instead of decorative:
 `liveness_floor` demands every rule have a document that fires it *and* a valid twin that does not,
 `refusal_floor` demands the same of every schema refusal, and `branch_floor` adds 31 further rows
 pinning sub-clauses that a single fixture per rule would leave unreached.
