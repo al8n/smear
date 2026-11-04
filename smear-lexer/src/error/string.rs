@@ -11,7 +11,7 @@ type Span = SimpleSpan;
 
 use crate::hints::{LineTerminatorHint, LitStrDelimiterHint, UnpairedSurrogateHint};
 
-use super::LengthError;
+use super::{LengthError, SyntaxErrorKind};
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
 enum InvalidUnicodeHexDigitsRepr<Char = char> {
@@ -343,6 +343,20 @@ pub enum BracedUnicodeEscapeError {
 }
 
 impl BracedUnicodeEscapeError {
+  /// Returns the syntax-error kind this refusal reports as: a value no Unicode scalar has is
+  /// [`InvalidUnicodeScalar`](SyntaxErrorKind::InvalidUnicodeScalar), and every malformed spelling
+  /// is [`InvalidUnicodeEscape`](SyntaxErrorKind::InvalidUnicodeEscape).
+  #[inline]
+  pub const fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::Unclosed(_)
+      | Self::Empty(_)
+      | Self::TooManyDigits { .. }
+      | Self::InvalidSequence(_) => SyntaxErrorKind::InvalidUnicodeEscape,
+      Self::InvalidScalar(_) => SyntaxErrorKind::InvalidUnicodeScalar,
+    }
+  }
+
   /// Creates an empty braced unicode escape error.
   #[inline]
   pub const fn empty(span: Span) -> Self {
@@ -420,6 +434,17 @@ pub enum FixedUnicodeEscapeError<Char = char> {
 }
 
 impl<Char> FixedUnicodeEscapeError<Char> {
+  /// Returns the syntax-error kind this refusal reports as: an unpaired surrogate is
+  /// [`InvalidUnicodeScalar`](SyntaxErrorKind::InvalidUnicodeScalar), and a short or non-hex
+  /// spelling is [`InvalidUnicodeEscape`](SyntaxErrorKind::InvalidUnicodeEscape).
+  #[inline]
+  pub const fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::Incomplete(_) | Self::InvalidSequence(_) => SyntaxErrorKind::InvalidUnicodeEscape,
+      Self::UnpairedSurrogate(_) => SyntaxErrorKind::InvalidUnicodeScalar,
+    }
+  }
+
   /// Creates a unpaired high surrogate error.
   #[inline]
   pub const fn unpaired_high_surrogate(lexeme: Lexeme<Char>) -> Self {
@@ -462,6 +487,15 @@ pub enum UnicodeError<Char = char> {
 }
 
 impl<Char> UnicodeError<Char> {
+  /// Returns the syntax-error kind this refusal reports as, which is its escape's.
+  #[inline]
+  pub const fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::Fixed(error) => error.kind(),
+      Self::Braced(error) => error.kind(),
+    }
+  }
+
   /// Creates a unpaired high surrogate error.
   #[inline]
   pub const fn unpaired_high_surrogate(lexeme: Lexeme<Char>) -> Self {
@@ -654,6 +688,24 @@ impl<Char> Default for StringError<Char> {
 }
 
 impl<Char> StringError<Char> {
+  /// Returns the syntax-error kind this refusal reports as.
+  ///
+  /// A string literal is refused by its lexer error, which is the diagnostic: this is how that
+  /// error's kind is read off the string's own refusal.
+  #[inline]
+  pub const fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::UnsupportedCharacter(_) => SyntaxErrorKind::InvalidUtf8,
+      Self::UnexpectedLineTerminator(_) => SyntaxErrorKind::LineTerminatorInString,
+      Self::UnexpectedEscapedCharacter(_) => SyntaxErrorKind::UnknownEscape,
+      Self::IncompleteEscape(_) => SyntaxErrorKind::IncompleteEscape,
+      Self::Unopened(_) => SyntaxErrorKind::UnopenedString,
+      Self::Unterminated(_) => SyntaxErrorKind::UnterminatedString,
+      Self::Unicode(error) => error.kind(),
+      Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
+    }
+  }
+
   /// Creates an unterminated string error.
   #[inline]
   pub const fn unterminated_inline_string() -> Self {

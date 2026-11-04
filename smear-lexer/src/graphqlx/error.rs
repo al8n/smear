@@ -3,13 +3,20 @@ use std::borrow::Cow;
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan,
+  diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity},
   error::{UnexpectedEnd, UnexpectedLexeme},
   utils::{Lexeme, PositionedChar},
 };
 
 type Span = SimpleSpan;
 
-use crate::{error::*, hints::*};
+use crate::{
+  error::{describe, *},
+  hints::*,
+};
+
+/// The one document a lex reads, as a [`Location`] numbers it.
+const SOURCE: u32 = 0;
 
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
@@ -26,6 +33,39 @@ pub enum FloatError<Char = char> {
   /// Float literals must have an integer part, e.g. `.1` is invalid.
   #[from(skip)]
   MissingIntegerPart(Span),
+}
+
+impl<Char> FloatError<Char> {
+  /// Returns the syntax-error kind this refusal reports as.
+  #[inline]
+  pub const fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::UnexpectedSuffix(_) | Self::UnexpectedLexeme(_) | Self::MissingIntegerPart(_) => {
+        SyntaxErrorKind::InvalidNumber
+      }
+      Self::UnexpectedEnd(_) => SyntaxErrorKind::IncompleteNumber,
+    }
+  }
+
+  /// Writes the sentence a float refusal renders as.
+  fn describe(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::UnexpectedSuffix(_) => {
+        f.write_str("invalid number, unexpected character after a float")
+      }
+      Self::UnexpectedLexeme(lexeme) => {
+        f.write_str("invalid number, expected ")?;
+        f.write_str(describe::float_hint(lexeme.hint()))
+      }
+      Self::UnexpectedEnd(end) => {
+        f.write_str("incomplete number, expected ")?;
+        f.write_str(describe::float_hint(end.hint()))
+      }
+      Self::MissingIntegerPart(_) => {
+        f.write_str("invalid number, a float must have an integer part")
+      }
+    }
+  }
 }
 
 /// An error encountered during lexing for float literals.
@@ -48,6 +88,42 @@ pub enum HexFloatError<Char = char> {
   MissingExponent(Span),
 }
 
+impl<Char> HexFloatError<Char> {
+  /// Returns the syntax-error kind this refusal reports as.
+  #[inline]
+  pub const fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::UnexpectedSuffix(_) | Self::UnexpectedLexeme(_) | Self::MissingIntegerPart(_) => {
+        SyntaxErrorKind::InvalidNumber
+      }
+      Self::UnexpectedEnd(_) | Self::MissingExponent(_) => SyntaxErrorKind::IncompleteNumber,
+    }
+  }
+
+  /// Writes the sentence a hexadecimal float refusal renders as.
+  fn describe(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::UnexpectedSuffix(_) => {
+        f.write_str("invalid number, unexpected character after a hexadecimal float")
+      }
+      Self::UnexpectedLexeme(lexeme) => {
+        f.write_str("invalid number, expected ")?;
+        f.write_str(describe::hex_float_hint(lexeme.hint()))
+      }
+      Self::UnexpectedEnd(end) => {
+        f.write_str("incomplete number, expected ")?;
+        f.write_str(describe::hex_float_hint(end.hint()))
+      }
+      Self::MissingIntegerPart(_) => {
+        f.write_str("invalid number, a hexadecimal float must have an integer part")
+      }
+      Self::MissingExponent(_) => {
+        f.write_str("incomplete number, a hexadecimal float must have a `p` exponent")
+      }
+    }
+  }
+}
+
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
@@ -58,6 +134,27 @@ pub enum DecimalError<Char = char> {
   UnexpectedSuffix(Lexeme<Char>),
   /// Unexpected character in decimal literal, e.g. `-A`
   UnexpectedEnd(UnexpectedEnd<DecimalHint>),
+}
+
+impl<Char> DecimalError<Char> {
+  /// Returns the syntax-error kind this refusal reports as.
+  #[inline]
+  pub const fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::UnexpectedSuffix(_) => SyntaxErrorKind::InvalidNumber,
+      Self::UnexpectedEnd(_) => SyntaxErrorKind::IncompleteNumber,
+    }
+  }
+
+  /// Writes the sentence a decimal integer refusal renders as.
+  fn describe(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::UnexpectedSuffix(_) => {
+        f.write_str("invalid number, unexpected character after an integer")
+      }
+      Self::UnexpectedEnd(_) => f.write_str("incomplete number, expected a digit"),
+    }
+  }
 }
 
 /// An error encountered during lexing for hex literals.
@@ -72,6 +169,27 @@ pub enum HexError<Char = char> {
   UnexpectedEnd(UnexpectedEnd<HexHint>),
 }
 
+impl<Char> HexError<Char> {
+  /// Returns the syntax-error kind this refusal reports as.
+  #[inline]
+  pub const fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::UnexpectedSuffix(_) => SyntaxErrorKind::InvalidNumber,
+      Self::UnexpectedEnd(_) => SyntaxErrorKind::IncompleteNumber,
+    }
+  }
+
+  /// Writes the sentence a hexadecimal integer refusal renders as.
+  fn describe(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::UnexpectedSuffix(_) => {
+        f.write_str("invalid number, unexpected character after a hexadecimal integer")
+      }
+      Self::UnexpectedEnd(_) => f.write_str("incomplete number, expected a hex digit"),
+    }
+  }
+}
+
 /// An error encountered during lexing for octal literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
@@ -84,6 +202,27 @@ pub enum OctalError<Char = char> {
   UnexpectedEnd(UnexpectedEnd<OctalHint>),
 }
 
+impl<Char> OctalError<Char> {
+  /// Returns the syntax-error kind this refusal reports as.
+  #[inline]
+  pub const fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::UnexpectedSuffix(_) => SyntaxErrorKind::InvalidNumber,
+      Self::UnexpectedEnd(_) => SyntaxErrorKind::IncompleteNumber,
+    }
+  }
+
+  /// Writes the sentence an octal integer refusal renders as.
+  fn describe(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::UnexpectedSuffix(_) => {
+        f.write_str("invalid number, unexpected character after an octal integer")
+      }
+      Self::UnexpectedEnd(_) => f.write_str("incomplete number, expected an octal digit"),
+    }
+  }
+}
+
 /// An error encountered during lexing for binary literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
@@ -94,6 +233,27 @@ pub enum BinaryError<Char = char> {
   UnexpectedSuffix(Lexeme<Char>),
   /// Unexpected character in binary literal, e.g. `0b-1`
   UnexpectedEnd(UnexpectedEnd<BinaryHint>),
+}
+
+impl<Char> BinaryError<Char> {
+  /// Returns the syntax-error kind this refusal reports as.
+  #[inline]
+  pub const fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::UnexpectedSuffix(_) => SyntaxErrorKind::InvalidNumber,
+      Self::UnexpectedEnd(_) => SyntaxErrorKind::IncompleteNumber,
+    }
+  }
+
+  /// Writes the sentence a binary integer refusal renders as.
+  fn describe(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::UnexpectedSuffix(_) => {
+        f.write_str("invalid number, unexpected character after a binary integer")
+      }
+      Self::UnexpectedEnd(_) => f.write_str("incomplete number, expected a binary digit"),
+    }
+  }
 }
 
 /// The data of the lexer error.
@@ -142,6 +302,61 @@ impl<Char, StateError> Default for LexerErrorData<Char, StateError> {
 }
 
 impl<Char, StateError> LexerErrorData<Char, StateError> {
+  /// Returns the syntax-error kind this refusal reports as.
+  ///
+  /// A `String` batch reports its first string error's kind, and an empty one reports
+  /// [`InvalidSyntax`](SyntaxErrorKind::InvalidSyntax). A `State` refusal is a tripped
+  /// `smear_lexer::limits` ceiling — the nesting depth, or the lossless lexer's token budget —
+  /// and reports [`ResourceLimit`](SyntaxErrorKind::ResourceLimit) whichever one tripped, since
+  /// nothing here bounds `StateError` to say which.
+  pub fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::Float(error) => error.kind(),
+      Self::HexFloat(error) => error.kind(),
+      Self::Decimal(error) => error.kind(),
+      Self::Hex(error) => error.kind(),
+      Self::Octal(error) => error.kind(),
+      Self::Binary(error) => error.kind(),
+      Self::String(errors) => errors
+        .iter()
+        .next()
+        .map_or(SyntaxErrorKind::InvalidSyntax, StringError::kind),
+      Self::UnexpectedLexeme(_) => SyntaxErrorKind::UnexpectedCharacter,
+      Self::UnknownLexeme(_) => SyntaxErrorKind::UnknownCharacter,
+      Self::UnexpectedEndOfInput => SyntaxErrorKind::UnexpectedEndOfInput,
+      Self::UnterminatedSpreadOperator => SyntaxErrorKind::UnterminatedSpread,
+      Self::State(_) => SyntaxErrorKind::ResourceLimit,
+      Self::InvalidUtf8(_) => SyntaxErrorKind::InvalidUtf8,
+      Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
+    }
+  }
+
+  /// Writes the sentence this refusal renders as: the kind's message, with a more specific clause
+  /// where the data has one, and no position.
+  fn describe(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Float(error) => error.describe(f),
+      Self::HexFloat(error) => error.describe(f),
+      Self::Decimal(error) => error.describe(f),
+      Self::Hex(error) => error.describe(f),
+      Self::Octal(error) => error.describe(f),
+      Self::Binary(error) => error.describe(f),
+      Self::String(errors) => match errors.iter().next() {
+        Some(error) => describe::string_error(error, f),
+        None => f.write_str(SyntaxErrorKind::InvalidSyntax.message()),
+      },
+      Self::UnterminatedSpreadOperator => {
+        f.write_str("unterminated spread operator, expected `...`")
+      }
+      Self::Other(message) => f.write_str(message),
+      Self::UnexpectedLexeme(_)
+      | Self::UnknownLexeme(_)
+      | Self::UnexpectedEndOfInput
+      | Self::State(_)
+      | Self::InvalidUtf8(_) => f.write_str(self.kind().message()),
+    }
+  }
+
   /// Create a new error data with the given message.
   #[inline]
   pub fn other(message: impl Into<Cow<'static, str>>) -> Self {
@@ -310,6 +525,80 @@ impl<Char, StateError> LexerError<Char, StateError> {
   #[inline]
   pub fn into_components(self) -> (Span, LexerErrorData<Char, StateError>) {
     (self.span, self.data)
+  }
+
+  /// Returns the syntax-error kind this refusal reports as, which is its data's.
+  #[inline]
+  pub fn kind(&self) -> SyntaxErrorKind {
+    self.data.kind()
+  }
+}
+
+/// A lexical refusal, as a sentence: the kind's message, with a more specific clause where the
+/// data has one — "unknown escape sequence", "incomplete number, expected a hex digit".
+///
+/// **Never a position**, and nothing quoted from the source, for the reasons GraphQL's twin
+/// records — which is also why this needs no bound on `Char`.
+impl<Char, StateError> core::fmt::Display for LexerError<Char, StateError> {
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    self.data.describe(f)
+  }
+}
+
+impl<Char, StateError> core::error::Error for LexerError<Char, StateError>
+where
+  Char: core::fmt::Debug,
+  StateError: core::fmt::Debug,
+{
+}
+
+/// A lexical refusal, read as structure: its [`SyntaxErrorKind`]'s code, severity and help, and
+/// its own span in the one document a lex reads. No labels and no path segments.
+impl<Char, StateError> Diagnose for LexerError<Char, StateError> {
+  #[inline]
+  fn code(&self) -> Code {
+    self.kind().code()
+  }
+
+  #[inline]
+  fn severity(&self) -> Severity {
+    self.kind().severity()
+  }
+
+  #[inline]
+  fn primary(&self) -> Location {
+    Location::new(SOURCE, self.span)
+  }
+
+  #[inline]
+  fn primary_label(&self) -> Option<&'static str> {
+    Some(self.kind().message())
+  }
+
+  #[inline]
+  fn labels(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn label(&self, _: usize) -> Option<Label> {
+    None
+  }
+
+  #[inline]
+  fn path_segments(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn path_segment(&self, _: usize) -> Option<PathSegment<'_>> {
+    None
+  }
+
+  #[inline]
+  fn help(&self) -> Option<&'static str> {
+    self.kind().help()
   }
 }
 
