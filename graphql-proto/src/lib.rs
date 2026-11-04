@@ -80,8 +80,11 @@
 //! refuse a **valid** document — ambiguity between two named operations is a §6.1 `GetOperation`
 //! failure, not a validation one. `start` still returns [`StartError`] and builds no response, so
 //! the result is a value the driver constructs from the refusal it was handed, under the ceilings
-//! of the executor that refused. That type's header has the four things §7.1.3 demands and how
-//! each one is made structural.
+//! of the executor that refused. The other request errors are raised where no executor exists — a
+//! syntax error, a validation failure, a variable coercion failure — and the driver builds the same
+//! result from those, one [`RequestError`] each, under the same [`Limits`]. That type's header has
+//! the four things §7.1.3 demands, how each one is made structural, and what bounds the driver's
+//! entries.
 //!
 //! **The numbers moved, so the titles are given with them.** The draft renumbered §7.1 when it
 //! separated the result kinds and added *Response Position*: `Data` and `Errors` were §7.1.1 and
@@ -477,7 +480,9 @@ pub use execute::{
 };
 pub use extensions::{Ceiling, Extensions, Full};
 pub use request::{Argument, ArgumentSource, FieldRequest, ReqId, SourceField};
-pub use request_error::{RequestErrorResult, TooLarge};
+pub use request_error::{
+  RefusedEntry, RequestError, RequestErrorCeiling, RequestErrorEntry, RequestErrorResult, TooLarge,
+};
 pub use response::{Ancestors, Children, INLINE_SEGMENTS, Node, Path, PathIter, Segment};
 pub use subscribe::{ResponseStream, SourceEventError};
 pub use values::{Leaf, Values};

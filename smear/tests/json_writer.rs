@@ -34,7 +34,7 @@
 
 use smear::{
   json,
-  lexer::tokora::{Parse as _, Parser},
+  lexer::tokora::{Parse as _, Parser, SimpleSpan},
   parser::graphql::{
     GraphQL,
     ast::{ExecutableDocument, TypeSystemDocument, materialized},
@@ -43,8 +43,11 @@ use smear::{
       GraphqlLexer, executable_document, type_system_document, value::materialized::const_value,
     },
   },
-  proto::{Executor, Extensions, Leaf, RequestErrorResult, Response, StartError, Values},
-  validator::Schema,
+  proto::{
+    Executor, Extensions, Leaf, Limits, RequestError, RequestErrorResult, Response, StartError,
+    Values,
+  },
+  validator::{Budget, Collect, Schema, Scratch, validate_executable},
 };
 
 /// The width every fixture in this file is built at.
@@ -489,7 +492,7 @@ fn a_request_error_result_has_no_data_entry() {
   result.set_extensions(map).expect("under the ceilings");
 
   let mut out = String::new();
-  json::write_request_error_result(&mut out, &result).expect("writable");
+  json::write_request_error_result(&mut out, &result, TWO).expect("writable");
 
   let parsed: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
   assert_eq!(
@@ -500,6 +503,125 @@ fn a_request_error_result_has_no_data_entry() {
     })
   );
   assert!(!out.contains("\"data\""), "{out}");
+}
+
+/// A draft §5 failure, written: one entry per diagnostic, each with its own `locations`, and no
+/// `data`.
+///
+/// The messages are the driver's own — the wording a driver porting `graphql-js` writes, from the
+/// field each diagnostic names — and the positions are the validator's spans, resolved against the
+/// document by the writer. Pinned to its bytes, like the envelope above, because the order inside
+/// each entry is what a value comparison cannot see.
+#[test]
+fn a_validation_failure_is_written_one_entry_per_diagnostic() {
+  const CHARACTER: &str = "type Query { hero: Character } interface Character { name: String! }";
+  const UNKNOWN: &str = "{ hero { nickname age } }";
+
+  let schema_document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    TypeSystemDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(type_system_document)
+  .parse_str(CHARACTER)
+  .expect("the SDL parses");
+  let schema = Schema::build(&schema_document).expect("a schema");
+  let document = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(UNKNOWN)
+  .expect("the query parses");
+
+  let mut scratch = Scratch::new();
+  let mut diagnostics = Vec::new();
+  let mut sink = Collect::new(&mut diagnostics);
+  validate_executable(
+    &schema,
+    &document,
+    &mut scratch,
+    &Budget::default(),
+    &mut sink,
+  )
+  .expect_err("`Character` has neither field");
+
+  // The ceilings a deployment's executors run under; no executor exists for this document.
+  let limits = Limits::default();
+  let mut entries = diagnostics.iter().map(|diagnostic| {
+    let field = diagnostic
+      .subject_source()
+      .expect("an unknown field is reported by its name");
+    let message = format!("Cannot query field \"{field}\" on type \"Character\".");
+    RequestError::new(&limits, &message, &[diagnostic.span()]).expect("well under both ceilings")
+  });
+  let mut result: RequestErrorResult<ConstInputValue<&'static str>> =
+    RequestErrorResult::from_driver(&limits, entries.next().expect("two diagnostics"))
+      .expect("built under the same ceilings");
+  for entry in entries {
+    result.push(entry).expect("well under `max_request_errors`");
+  }
+
+  let mut out = String::new();
+  json::write_request_error_result(&mut out, &result, UNKNOWN).expect("the result is writable");
+  assert_eq!(
+    out,
+    concat!(
+      r#"{"errors":[{"message":"Cannot query field \"nickname\" on type \"Character\".","#,
+      r#""locations":[{"line":1,"column":10}]},"#,
+      r#"{"message":"Cannot query field \"age\" on type \"Character\".","#,
+      r#""locations":[{"line":1,"column":19}]}]}"#,
+    )
+  );
+}
+
+/// A driver's entry is written `message`, `locations`, `extensions` — §7.1.6's order without
+/// `path` — with its own map inside it, and the result's §7.1.7 map after the list.
+///
+/// The span is on the document's second line, so the `line` and `column` are the writer's
+/// resolution against the document it was handed rather than a coincidence of offsets.
+#[test]
+fn a_driver_entrys_extensions_are_written_inside_it() {
+  const UNDEFINED: &str = "query {\n  hero(id: $id) { name }\n}";
+
+  let limits = Limits::default();
+  let at = UNDEFINED
+    .find("$id")
+    .expect("the fixture names the variable");
+  let mut entry = RequestError::new(
+    &limits,
+    "Variable \"$id\" is not defined.",
+    &[SimpleSpan::new(at, at + "$id".len())],
+  )
+  .expect("well under both ceilings");
+  let mut map = Extensions::new(&limits);
+  map
+    .insert("code", value(r#""GRAPHQL_VALIDATION_FAILED""#))
+    .expect("under the ceilings");
+  assert!(entry.set_extensions(map).is_none(), "the entry had no map");
+
+  let mut result: RequestErrorResult<ConstInputValue<&'static str>> =
+    RequestErrorResult::from_driver(&limits, entry).expect("built under the same ceilings");
+  let mut top = Extensions::new(&limits);
+  top
+    .insert("traceId", value(r#""9f2c""#))
+    .expect("under the ceilings");
+  result.set_extensions(top).expect("under the ceilings");
+
+  let mut out = String::new();
+  json::write_request_error_result(&mut out, &result, UNDEFINED).expect("the result is writable");
+  assert_eq!(
+    out,
+    concat!(
+      r#"{"errors":[{"message":"Variable \"$id\" is not defined.","#,
+      r#""locations":[{"line":2,"column":12}],"#,
+      r#""extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}],"#,
+      r#""extensions":{"traceId":"9f2c"}}"#,
+    )
+  );
 }
 
 /// Every double the writer can be handed comes back bit-for-bit through an independent reader.
@@ -1146,7 +1268,7 @@ fn a_deeply_nested_extension_on_a_request_error_result_is_written() {
   result.set_extensions(map).expect("under the ceilings");
 
   let mut out = String::new();
-  json::write_request_error_result(&mut out, &result).expect("the result is writable");
+  json::write_request_error_result(&mut out, &result, TWO).expect("the result is writable");
   assert!(
     out.ends_with(&format!(r#","extensions":{{"trace":{}}}}}"#, nested_json())),
     "the deep extension is not the last entry of the result"

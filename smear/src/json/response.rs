@@ -17,16 +17,22 @@
 //!
 //! Inside one `errors` entry the order is `message`, `locations`, `path`, `extensions` — the order
 //! today's §7.1.6 writes its own examples in, with the per-error map last. `write_field_error` has
-//! which of them are written when, and its own byte gate pins the order.
+//! which of them are written when, and its own byte gate pins the order. A request error result's
+//! entry is the same order with `path` left out, since it has no result for a path to point into.
 //!
 //! # `locations` needs the document, so every door asks for it
 //!
 //! `graphql-proto` records a field error's position as a byte span, deliberately: "turning one
-//! into the other needs the source text, which the executor does not hold". Draft §7.1.2 wants a
-//! line and a column, so the source text arrives here instead — as the `document` argument, which
-//! must be the same text the executor's `ExecutableDocument` was parsed from. Handing over a
-//! different one produces positions that point at nothing, which is why the parameter is required
-//! rather than optional: an `Option<&str>` would make silently dropping `locations` the easy path.
+//! into the other needs the source text, which the executor does not hold". A driver's request
+//! error carries its positions the same way. Draft §7.1.2 wants a line and a column, so the source
+//! text arrives here instead — as the `document` argument, which must be the text the positions
+//! point into: the text the executor's `ExecutableDocument` was parsed from, or for a request error
+//! the text the driver parsed, or failed to. Handing over a different one produces positions that
+//! point at nothing, which is why the parameter is required rather than optional: an
+//! `Option<&str>` would make silently dropping `locations` the easy path. The request error result
+//! doors ask for it on the same terms, although a result built from an executor's refusal has no
+//! positions at all — whether an entry has any is the driver's to decide entry by entry, and a door
+//! that could not take the text would decide it for every entry at once.
 //!
 //! # The three walks a remote client shapes, and what each of them runs on
 //!
@@ -120,10 +126,12 @@ use core::fmt;
 use std::vec::Vec;
 
 use graphql_proto::{
-  Children, Error as FieldError, Extensions, Node, RequestErrorResult, Response, Segment,
+  Children, Error as FieldError, Extensions, Node, RequestErrorEntry, RequestErrorResult, Response,
+  Segment,
 };
+use tokora::SimpleSpan;
 
-use super::{Error, Json, WriteJson};
+use super::{Error, Json, Object, WriteJson};
 
 /// Writes a finished draft §7.1 execution result as JSON.
 ///
@@ -228,21 +236,30 @@ where
 /// this takes has no `data` accessor to write. That is the distinction being kept — a present
 /// `"data": null` says execution began and nulled the root.
 ///
+/// `document` is the source text the result's positions point into — the text the driver parsed,
+/// or failed to parse — for the reason the module header gives about every door. It is read only
+/// for an entry that has `locations`: an executor's refusal has none, and nor has a driver's entry
+/// built without spans.
+///
 /// # Errors
 ///
 /// As [`write_response`].
-pub fn write_request_error_result<W, V>(out: W, result: &RequestErrorResult<V>) -> Result<(), Error>
+pub fn write_request_error_result<W, V>(
+  out: W,
+  result: &RequestErrorResult<V>,
+  document: &str,
+) -> Result<(), Error>
 where
   W: fmt::Write,
   V: WriteJson,
 {
-  write_request_error_result_with(out, result, |value, json| value.write_json(json))
+  write_request_error_result_with(out, result, document, |value, json| value.write_json(json))
 }
 
 /// Writes a draft §7.1.3 request error result, with the caller saying how a leaf is written.
 ///
-/// Only `extensions` can hold a driver value here, and it is the same door
-/// [`write_response_with`] opens for the same reason.
+/// Every driver value here is in an `extensions` map — the result's own, or one of the driver's
+/// entries' — and they go through the same door [`write_response_with`] opens for the same reason.
 ///
 /// # Errors
 ///
@@ -250,6 +267,7 @@ where
 pub fn write_request_error_result_with<W, V, F>(
   out: W,
   result: &RequestErrorResult<V>,
+  document: &str,
   mut write_leaf: F,
 ) -> Result<(), Error>
 where
@@ -259,12 +277,16 @@ where
   let mut json = Json::new(out);
   let mut root = json.object()?;
 
-  // §7.1.3 makes `errors` non-empty by definition, and the type makes it exactly one.
+  // §7.1.3 makes `errors` non-empty by definition and the type makes it non-empty by construction,
+  // so there is no branch here for the empty list §7.1.3 forbids.
+  //
+  // ONE index for the whole result, as `write_response_with` builds one for a response and for the
+  // same reason. It reads nothing until the first location, so a result whose entries carry none —
+  // every executor refusal — never builds it.
+  let mut locations = Locations::new(document);
   let mut list = root.key("errors")?.array()?;
   for error in result.errors() {
-    let mut entry = list.element()?.object()?;
-    entry.key("message")?.display(&error)?;
-    entry.end()?;
+    write_request_error(list.element()?, &error, &mut locations, &mut write_leaf)?;
   }
   list.end()?;
 
@@ -273,6 +295,35 @@ where
   }
 
   root.end()
+}
+
+/// Writes one entry of a request error result's `errors` (draft §7.1.3).
+///
+/// `message`, then `locations` when the entry has any, then `extensions` when it carries a map:
+/// [`write_field_error`]'s order and its two presence rules, with `path` left out because a request
+/// error result has no result for a path to point into. `locations` goes through the same
+/// [`write_locations`], so a driver's span is resolved to a line and a column exactly as a field
+/// error's is. An executor's refusal has neither of the optional two, so it is written as a lone
+/// `message`.
+fn write_request_error<W, V, F>(
+  json: &mut Json<W>,
+  error: &RequestErrorEntry<'_, V>,
+  locations: &mut Locations<'_>,
+  write_leaf: &mut F,
+) -> Result<(), Error>
+where
+  W: fmt::Write,
+  F: FnMut(&V, &mut Json<W>) -> Result<(), Error>,
+{
+  let mut entry = json.object()?;
+
+  entry.key("message")?.display(error)?;
+  write_locations(&mut entry, error.locations(), locations)?;
+  if let Some(extensions) = error.extensions() {
+    write_extensions(entry.key("extensions")?, extensions, write_leaf)?;
+  }
+
+  entry.end()
 }
 
 /// Writes one entry of `errors` (draft §7.1.2).
@@ -307,19 +358,7 @@ where
   let mut entry = json.object()?;
 
   entry.key("message")?.display(error)?;
-
-  let spans = error.locations();
-  if !spans.is_empty() {
-    let mut list = entry.key("locations")?.array()?;
-    for span in spans {
-      let (line, column) = locations.resolve(span.start())?;
-      let mut position = list.element()?.object()?;
-      position.key("line")?.number(line)?;
-      position.key("column")?.number(column)?;
-      position.end()?;
-    }
-    list.end()?;
-  }
+  write_locations(&mut entry, error.locations(), locations)?;
 
   // One climb of the response tree per error, into the buffer the caller lends, and the whole
   // path is in hand before the first bracket is written. `graphql-proto` owns the climb because
@@ -351,6 +390,34 @@ where
   }
 
   entry.end()
+}
+
+/// Writes an `errors` entry's draft §7.1.2 `locations`, when there are spans to write.
+///
+/// Absent rather than empty when there are none — an empty array would claim a position the entry
+/// has none of — and every span is resolved through the one [`Locations`] the caller holds for the
+/// whole document. One function for both kinds of entry, so a field error's positions and a
+/// driver's request error's cannot be resolved two different ways.
+fn write_locations<W>(
+  entry: &mut Object<'_, W>,
+  spans: &[SimpleSpan],
+  locations: &mut Locations<'_>,
+) -> Result<(), Error>
+where
+  W: fmt::Write,
+{
+  if spans.is_empty() {
+    return Ok(());
+  }
+  let mut list = entry.key("locations")?.array()?;
+  for span in spans {
+    let (line, column) = locations.resolve(span.start())?;
+    let mut position = list.element()?.object()?;
+    position.key("line")?.number(line)?;
+    position.key("column")?.number(column)?;
+    position.end()?;
+  }
+  list.end()
 }
 
 /// One container `write_node` has opened and not yet closed.

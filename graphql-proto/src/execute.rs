@@ -113,6 +113,7 @@ mod tests;
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
 /// | draft §7.1.7 `extensions`, and §7.1.6's per-error map | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed; and **each of the three retainers** — [`set_extensions`](Executor::set_extensions), [`RequestErrorResult::set_extensions`](super::RequestErrorResult::set_extensions) and [`handle_field_error_with`](Executor::handle_field_error_with), all of which re-derive an accepted map's spine from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no slot, so an emptied map reports nothing and holds everything it grew to. And a **second** retainer of the same container that re-checks only the two reported quantities, since §7.1.7 admits the entry in a §7.1.3 result too — and a third, since §7.1.6 admits one on every error |
+/// | draft §7.1.3's driver-supplied request errors | entries, message bytes **and** spans per entry, as three ceilings | [`max_request_errors`](Limits::max_request_errors), [`max_request_error_message_bytes`](Limits::max_request_error_message_bytes), [`max_request_error_locations`](Limits::max_request_error_locations) | [`RequestError::new`](super::RequestError::new) and [`from_diagnose`](super::RequestError::from_diagnose), before the message is boxed or a span is copied; and **the result that lists the entry** — [`RequestErrorResult::from_driver`](super::RequestErrorResult::from_driver) and [`push`](super::RequestErrorResult::push), which re-check every quantity the entry reports against the result's own ceilings, the extension pair included for the entry's own §7.1.6 map, and re-derive that map's spine | bounding the count alone: one message a gigabyte long, or one entry with a million spans. Bounding the lengths alone: an unbounded list of short entries. Trusting the entry's construction: an entry is built under whatever `Limits` the driver passed, so a result that did not re-check would retain what a laxer budget let it grow to. And letting `Vec` double the list's spine: a ceiling of a hundred would hold a hundred and twenty-eight slots |
 /// | error rows | rows | derived: at most one per position | — | a position able to fail twice, or an argument coercion raising more than once |
 /// | list nesting | — | [`MAX_WRAPPERS`](smear_schema::MAX_WRAPPERS) = 15, by the schema | `complete`'s list arm strips one wrapper per level | — |
 ///
@@ -793,6 +794,61 @@ pub struct Limits {
   /// and [`max_response_slots`](Limits::max_response_slots) bound how *many* driver values are
   /// held; nothing bounds one of them, here or anywhere else.
   pub max_extension_key_bytes: NonZeroU32,
+
+  /// How many entries a draft §7.1.3 [`RequestErrorResult`](super::RequestErrorResult) may list.
+  ///
+  /// The first of **three** ceilings on the one population no executor creates: the request errors
+  /// a driver raises where no executor exists — draft §2's syntax errors, draft §5's validation
+  /// failures, and the variable coercion failures draft §6.1 leaves to the driver — each a
+  /// [`RequestError`](super::RequestError) the driver builds and a result lists. Charged by
+  /// [`RequestErrorResult::push`](super::RequestErrorResult::push), before the entry is read; the
+  /// first entry counts, whichever kind it is.
+  ///
+  /// **Three, and not the two that were reserved for it.** A driver-grown list of driver-supplied
+  /// messages is a count multiplied by a length, and a budget on one factor of a product bounds
+  /// nothing — and an entry's `locations` are a second length beside its message. So the product
+  /// has three factors of its own, and the entry's §7.1.6 `extensions` map brings the pair above
+  /// with it:
+  ///
+  /// `max_request_errors × (max_request_error_message_bytes + max_request_error_locations ·
+  /// size_of::<SimpleSpan>() + max_extension_entries + max_extension_key_bytes)`, plus a list spine
+  /// of at most `max_request_errors`.
+  ///
+  /// Every factor is a ceiling, which is what makes the product a bound rather than the shape the
+  /// [`Limits`] section *A budget on one factor of a product bounds nothing* warns about. At the
+  /// defaults it is 1.125 MiB of message, span and key bytes — on a 64-bit target, where a span is
+  /// sixteen bytes — plus 8,192 extension entry slots, and the values in those maps are the
+  /// driver's, as below.
+  ///
+  /// **No executor charges it, or either of the two after it.** They bound what a result retains,
+  /// and a result is a value the driver builds after `start` has refused, or before any executor
+  /// existed — so an operation spends none of the three, and none of them can refuse one.
+  pub max_request_errors: NonZeroU32,
+
+  /// How many bytes of `message` one driver-supplied [`RequestError`](super::RequestError) may
+  /// carry.
+  ///
+  /// Checked by [`RequestError::new`](super::RequestError::new) **before** the message is boxed —
+  /// the text arrives borrowed, so a refusal allocates nothing, which is the difference
+  /// [`Extensions::insert`] draws between a ceiling and a receipt — and by
+  /// [`RequestError::from_diagnose`](super::RequestError::from_diagnose) after measuring a
+  /// rendering it has not yet kept. The result that lists the entry checks it again, against its
+  /// own value. Bytes and not characters, because what is retained is a `Box<str>` and its length
+  /// is what this bounds.
+  ///
+  /// The length factor of the product [`max_request_errors`](Limits::max_request_errors) states.
+  pub max_request_error_message_bytes: NonZeroU32,
+
+  /// How many draft §7.1.6 `locations` one driver-supplied [`RequestError`](super::RequestError)
+  /// may carry.
+  ///
+  /// The second length factor of the same product. A location is a span, copied as it arrives and
+  /// boxed at its exact count, so the count is the whole of what this bounds — and the count is the
+  /// document's to grow, which is why it has a ceiling of its own rather than riding on the
+  /// message's: `graphql-js` 16.11.0's `UniqueArgumentNamesRule` reports every duplicate of an
+  /// argument as one error's `nodes`, and its `OverlappingFieldsCanBeMergedRule` reports
+  /// `fields1.concat(fields2)`.
+  pub max_request_error_locations: NonZeroU32,
 }
 
 /// Enough concurrency that a driver never has to think about the knob, low enough that a runaway
@@ -895,6 +951,35 @@ const DEFAULT_EXTENSION_ENTRIES: NonZeroU32 = NonZeroU32::new(64).expect("64 is 
 /// Key bytes across one draft §7.1.7 `extensions` map, which with the entry count bounds the scan.
 const DEFAULT_EXTENSION_KEY_BYTES: NonZeroU32 = NonZeroU32::new(4096).expect("4096 is not zero");
 
+/// Entries in one draft §7.1.3 request error result.
+///
+/// Sized from the reference implementation's own stops, so that a driver porting them is never
+/// refused by this one first. `graphql-js` 16.11.0's `validate` stops at `maxErrors`, 100 unless
+/// the caller says otherwise — its documentation: "Attackers can send pathologically invalid
+/// queries to induce a DoS attack, so by default `maxErrors` set to 100 errors" — and then appends
+/// one more error saying so, for 101. `execute` coerces variables under `maxCoercionErrors`, 50,
+/// and its overflow error makes 51. 128 is the next power of two above both.
+const DEFAULT_REQUEST_ERRORS: NonZeroU32 = NonZeroU32::new(128).expect("128 is not zero");
+
+/// Bytes of message in one driver-supplied request error.
+///
+/// A specified message is a sentence over the names it quotes, and the names are the document's:
+/// draft §2.1.9 puts no length on a `Name`. So the length a message reaches is the client's to
+/// choose, and the ceiling says how much of its own document a client can have quoted back at it —
+/// four kibibytes is room for any sentence and the names it needs, and refuses one whose bulk is a
+/// name the client made long on purpose. Matching `max_extension_key_bytes` is not a coincidence:
+/// both are text a service writes about a request rather than text a response is made of.
+const DEFAULT_REQUEST_ERROR_MESSAGE_BYTES: NonZeroU32 =
+  NonZeroU32::new(4096).expect("4096 is not zero");
+
+/// Draft §7.1.6 `locations` on one driver-supplied request error.
+///
+/// One or two is the ordinary count — a node, or a node and the one it conflicts with — and the
+/// count is the document's to grow: `graphql-js` 16.11.0's `UniqueArgumentNamesRule` reports every
+/// duplicate of an argument as one error's `nodes`. Sixty-four spans is a kibibyte on a 64-bit
+/// target, which is the size of the bound and not a guess at a distribution.
+const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("64 is not zero");
+
 impl Default for Limits {
   #[inline]
   fn default() -> Self {
@@ -906,6 +991,9 @@ impl Default for Limits {
       max_interned_bytes: DEFAULT_INTERNED_BYTES,
       max_extension_entries: DEFAULT_EXTENSION_ENTRIES,
       max_extension_key_bytes: DEFAULT_EXTENSION_KEY_BYTES,
+      max_request_errors: DEFAULT_REQUEST_ERRORS,
+      max_request_error_message_bytes: DEFAULT_REQUEST_ERROR_MESSAGE_BYTES,
+      max_request_error_locations: DEFAULT_REQUEST_ERROR_LOCATIONS,
     }
   }
 }
@@ -989,6 +1077,10 @@ struct Mark {
 /// [`Limits::max_in_flight`] is absent and that is not an omission: it bounds requests outstanding
 /// at an instant rather than a population that accumulates, so there is no total for two operations
 /// to disagree about. `collect::Visits` records it, with what else the gate does not reach.
+/// [`Limits::max_request_errors`], [`Limits::max_request_error_message_bytes`] and
+/// [`Limits::max_request_error_locations`] are absent for a plainer reason: no executor charges
+/// them. They bound what a [`RequestErrorResult`](super::RequestErrorResult) retains, a value the
+/// driver builds outside any operation, so there is nothing of theirs for an operation to spend.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Charges {
@@ -1140,14 +1232,15 @@ enum Coercion {
 /// **This header used to say the shape was gated on al8n/smear#126, and the gate was drawn one
 /// step too wide.** §7.1.6's error result format has exactly one `must` — `message` — and this
 /// type's `Display` is it, rendered rather than stored the way `error.rs`'s are; per-error
-/// `extensions` is a `may`, which the execution result's [`Error`](super::Error) carries only for
-/// an error the driver reported, through
-/// [`handle_field_error_with`](Executor::handle_field_error_with). A refusal raised here has no
-/// driver input to carry one: §6.1 runs before the driver has answered anything. What #126 does
-/// gate is a *driver-supplied* entry in that list — a message this crate did not raise, with a
-/// diagnostic code beside it — which is why the list here holds exactly the one error `start`
-/// raised. [`RequestErrorResult`](super::RequestErrorResult)'s header has the boundary and the
-/// three request-error sources that fall outside it.
+/// `extensions` is a `may`, which the execution result's [`Error`] carries only for an error the
+/// driver reported, through [`handle_field_error_with`](Executor::handle_field_error_with). A
+/// refusal raised here has no driver input to carry one: §6.1 runs before the driver has answered
+/// anything. What #126 did gate was a *driver-supplied* entry in that list — a message this crate
+/// did not raise — and that entry is carried now, as a [`RequestError`](super::RequestError),
+/// for the three request-error sources that arise where no executor exists. A result built from
+/// this type still lists exactly the one error `start` raised, because that is all the executor
+/// raises. [`RequestErrorResult`](super::RequestErrorResult)'s header has the two kinds of entry
+/// and who raises each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StartError {
@@ -1204,12 +1297,13 @@ pub enum StartError {
   /// supply the variable, rather than rewrite the document's root selection set.
   ///
   /// The specific fault is **not** carried, and that is a boundary rather than an oversight. It is
-  /// available as a draft §7.1.2 field error inside the executor, and [`StartError`] is a `Copy`,
-  /// data-free enum whose whole `errors` entry in a §7.1.3
-  /// [`RequestErrorResult`](super::RequestErrorResult) is one rendered [`Display`](fmt::Display).
-  /// Carrying more means a driver-supplied error *entry*, which is al8n/smear#126's — the same line
-  /// `request_error.rs` draws around the three request-error sources that arise outside this crate,
-  /// and the same one that leaves [`NoMutationRoot`](Self::NoMutationRoot)'s span uncarried.
+  /// available as a draft §7.1.2 field error inside the executor, and [`StartError`] is a `Copy`
+  /// enum whose whole `errors` entry in a §7.1.3 [`RequestErrorResult`](super::RequestErrorResult)
+  /// is one rendered [`Display`](fmt::Display). Carrying more would mean the executor raising a
+  /// second request error beside its refusal, and it raises one — the population
+  /// `request_error.rs` states. The driver-supplied [`RequestError`](super::RequestError) is for the
+  /// request errors raised where no executor exists, not for detail about this one, and the same
+  /// line leaves [`NoMutationRoot`](Self::NoMutationRoot)'s span uncarried.
   SourceSelectionRefused,
   /// Draft §6.2.3.1 step 8: `CoerceArgumentValues` rejected an argument of the source field.
   ///
@@ -3203,10 +3297,10 @@ where
   /// # The error is not carried, and that is the boundary rather than a gap
   ///
   /// It takes no message. The error is the **driver's**: it belongs to a stream this crate does not
-  /// own, raised by code this crate did not run, and there is no type here for a driver-supplied
-  /// error entry — that is al8n/smear#126's, and it is the same line
-  /// [`RequestErrorResult`](super::RequestErrorResult) draws around the three request-error sources
-  /// that arise outside this crate. A driver reporting one already holds it.
+  /// own, raised by code this crate did not run. The driver-supplied entry this crate does carry, a
+  /// [`RequestError`](super::RequestError), is a §7.1.3 *request* error's — raised before any
+  /// execution — and this one ends a response stream that had already begun, so it is not one of
+  /// those either. A driver reporting it already holds it.
   ///
   /// What the call buys is that the *ending* is recorded in one place. §6.2.3.2 makes completing
   /// with an error a different completion from completing normally, and a serialiser reads which
@@ -5363,10 +5457,10 @@ impl<'r, V> Response<'r, V> {
   /// `StartError` returned to the driver, not a response with no `data`.
   ///
   /// So the §7.1.3 result shape is real, and it is a **different type**:
-  /// [`RequestErrorResult`](super::RequestErrorResult), which has no `data` accessor at all. The
-  /// two result kinds are two maps in §7.1 and they are two types here, which is what stops a
-  /// driver from reaching for this one — whose `data` is infallible — to answer a request that
-  /// never ran.
+  /// [`RequestErrorResult`](super::RequestErrorResult), which has no `data` accessor at all and
+  /// lists the driver's own request errors as well as this executor's refusal. The two result kinds
+  /// are two maps in §7.1 and they are two types here, which is what stops a driver from reaching
+  /// for this one — whose `data` is infallible — to answer a request that never ran.
   #[inline]
   pub fn data(&self) -> Node<'r, V> {
     node(self.schema, self.slots, self.names, self.name_spans, 0)

@@ -679,12 +679,29 @@ pub const EXEMPTIONS: &[Exemption] = &[
     issue: None,
     reason: EXTENSION_KEY,
   },
-  // ── The draft §7.2.1 writer — three of its `&str`s are output, two are genuinely narrow ──────
+  // ── §7.1.3's driver-supplied entry, whose message is the driver's sentence ───────────────────
+  Exemption {
+    module: "smear::proto::request_error",
+    entry: "RequestError::new",
+    param: "message",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: "Draft §7.1.6's `message` for a request error the driver raised: a sentence the \
+             service composes about the request — a parser's refusal reworded, a coercion \
+             failure — and not the request document. It is `Executor::handle_field_error`'s \
+             `message` one door over, and that one is acquitted by test 3 on its receiver; this \
+             one is an associated function of `RequestError<V>`, which is parameterised by the \
+             driver's value type and has no source type to hold, so test 3 has nothing to acquit \
+             it on. The document the entry is about is the writer's `document`, recorded below; \
+             the entry carries only spans into it, which constrain nobody.",
+  },
+  // ── The draft §7.2.1 writer — two of its `&str`s are output, five are genuinely narrow ───────
   //
-  // Worth reading as a group, because the rule gets all five right in the direction this table's
+  // Worth reading as a group, because the rule gets all seven right in the direction this table's
   // header calls evidence FOR it: `smear::json` writes JSON, and JSON is UTF-8 by definition, so
-  // most of its `&str`s are bytes on the way OUT rather than a caller's document on the way in.
-  // The two that really are a document are recorded as debt with an issue.
+  // its output-side `&str`s are bytes on the way OUT rather than a caller's document on the way
+  // in. The five that really are a document — a literal's source spelling, and the request's text
+  // at four doors — are recorded as debt with an issue.
   Exemption {
     module: "smear::json",
     entry: "Json::string",
@@ -736,6 +753,22 @@ pub const EXEMPTIONS: &[Exemption] = &[
     issue: Some(122),
     reason: WRITER_DOCUMENT,
   },
+  Exemption {
+    module: "smear::json::response",
+    entry: "write_request_error_result",
+    param: "document",
+    kind: Kind::Tracked,
+    issue: Some(122),
+    reason: WRITER_DOCUMENT,
+  },
+  Exemption {
+    module: "smear::json::response",
+    entry: "write_request_error_result_with",
+    param: "document",
+    kind: Kind::Tracked,
+    issue: Some(122),
+    reason: WRITER_DOCUMENT,
+  },
 ];
 
 /// The writer's output-side `&str`s: not a caller's document in either direction.
@@ -747,15 +780,16 @@ const JSON_OUTPUT: &str = "Bytes on the way OUT, not a document on the way in. T
    of its own. Test 3 does not acquit it because `Json<W>`'s parameter is the SINK and carries no \
    source type, which is right: there is no document here for it to have carried.";
 
-/// Why the two response doors take the executed document as `&str`.
-const WRITER_DOCUMENT: &str = "The source text the operation was parsed from, read for exactly one thing: turning the byte \
-   span `graphql-proto` records on a field error into draft §7.1.2's `line` and `column`. It is \
-   genuinely a document and the rule is right to convict it. Widening it belongs to #122 and is \
-   not free the way the schema doors are: the column is counted in CHARACTERS, so an \
-   `AsRef<[u8]>` door either decodes UTF-8 as it walks — and must then decide what a malformed \
-   sequence counts as, inside a function whose whole job is to name a position — or silently \
-   changes the unit to bytes and reports a different column for the same token. Recorded rather \
-   than guessed. One parameter on two doors that share a body.";
+/// Why the four writer doors take the request's document as `&str`.
+const WRITER_DOCUMENT: &str = "The source text the request was parsed from, read for exactly one thing: turning the byte \
+   spans `graphql-proto` records on a field error, and a driver carries on a request error, into \
+   draft §7.1.2's `line` and `column`. It is genuinely a document and the rule is right to convict \
+   it. Widening it belongs to #122 and is not free the way the schema doors are: the column is \
+   counted in CHARACTERS, so an `AsRef<[u8]>` door either decodes UTF-8 as it walks — and must \
+   then decide what a malformed sequence counts as, inside a function whose whole job is to name a \
+   position — or silently changes the unit to bytes and reports a different column for the same \
+   token. Recorded rather than guessed. One parameter on four doors, two to a body, and all four \
+   resolve through the same index.";
 
 /// Refuses a table that would let a narrowing through without an argument.
 pub fn validate() -> Vec<String> {

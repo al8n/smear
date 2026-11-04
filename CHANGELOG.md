@@ -55,6 +55,30 @@ All notable changes to Smear are documented in this file.
   position from the contract does not print it twice. The position is where it
   already was: `Diagnose::primary()` and the labels, and `Diagnostic::span()` and
   `related_span()`.
+- `graphql-proto`: a request error result carries the driver's own request
+  errors — the syntax errors, validation failures and variable coercion
+  failures raised where no executor exists. `RequestError` is one entry, with
+  its message, its §7.1.6 `locations` as spans and its own `extensions`, built
+  with `RequestError::new` or from any `Diagnose` with
+  `RequestError::from_diagnose`, which takes the diagnostic's rendering as the
+  message and its primary and label spans as the `locations`.
+  `RequestErrorResult::from_driver` and `RequestErrorResult::push` list them; a
+  refused entry comes back in a `RefusedEntry`, naming its
+  `RequestErrorCeiling`. Three new `Limits` ceilings bound them:
+  `max_request_errors` (128), `max_request_error_message_bytes` (4096) and
+  `max_request_error_locations` (64).
+- `graphql-proto`: `RequestErrorResult::errors` yields a `RequestErrorEntry`,
+  which is the executor's refusal or the driver's entry, rather than a
+  `StartError`, and `RequestErrorResult::error` returns `Option<StartError>`,
+  `None` for a result built from the driver's entries. Both break code that
+  reads them. `Limits` is not `#[non_exhaustive]`, so its three new fields break
+  a struct literal that names every field; one ending in `..Limits::default()`
+  is unaffected.
+- `smear`: `json::write_request_error_result` and
+  `json::write_request_error_result_with` take the request's `document: &str`,
+  as `write_response` does, and write each driver entry's `locations`, resolved
+  against it, and its `extensions`. The new parameter breaks every existing
+  call.
 
 ## [0.0.1] - 2026-10-30
 
