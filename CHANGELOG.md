@@ -82,7 +82,7 @@ All notable changes to Smear are documented in this file.
   as `write_response` does, and write each driver entry's `locations`, resolved
   against it, and its `extensions`. The new parameter breaks every existing
   call.
-- `smear-lexer`: `SyntaxErrorKind`, one fieldless kind for every draft §2
+- `smear-lexer`!: `SyntaxErrorKind`, one fieldless kind for every draft §2
   refusal the lexer or the parser reports, in both dialects, with a code in the
   new `smear::syntax` family (23 of them), a lowercase message, an optional help
   line and `Severity::Error`. It is re-exported at the crate root and through
@@ -91,7 +91,15 @@ All notable changes to Smear are documented in this file.
   primary location is its own span, and the message names no position. A
   `State` refusal — a tripped nesting or token ceiling — reports
   `smear::syntax::resource-limit`. `LexerErrorData`, `LexerError` and every
-  nested string, Unicode-escape and number error gain `kind()`.
+  nested string, Unicode-escape and number error gain `kind()`. Each dialect's
+  `LexerErrorData` gains `NotOneToken(&'static str)`: what a whole-slice door
+  (`identifier`, `int_literal` and `float_literal`, and GraphQLx's `identifier`
+  and its `LitInt` and `LitFloat` `TryFrom<&str>`) answers when the slice is not
+  exactly one token of the kind it asked for, rendered "not exactly one name",
+  "… integer" or "… float" and reported as `smear::syntax::unexpected-token`.
+  Those doors answered `UnexpectedLexeme` over the slice, which is now only the
+  scanner's refused character. `LexerErrorData` is not `#[non_exhaustive]`, so
+  an exhaustive match on it breaks.
 - `smear-lexer`!: token kinds render as a diagnostic names them: punctuation in
   backticks and every class as a bare noun. GraphQL's `SyntacticTokenKind` and
   `LosslessTokenKind` render `name` and `integer` where they rendered
