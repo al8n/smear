@@ -1,6 +1,8 @@
+pub use kind::SyntaxErrorKind;
 pub use string::*;
 pub use traits::*;
 
+mod kind;
 mod string;
 mod traits;
 

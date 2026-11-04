@@ -40,6 +40,8 @@ pub use lossless_lexer::LosslessLexer;
 
 pub use string_lexer::*;
 
+pub use error::SyntaxErrorKind;
+
 pub use tokora;
 
 /// Implementation detail of the macros this crate exports. Not public API.
