@@ -467,11 +467,12 @@ macro_rules! lossless_error_impls {
   ) => {
     /// The lossless lexer's error channel, landed in the dialect container.
     ///
-    /// Unlike the syntactic twin, which flattens a lexer error to a bare `Other("lexer error")`
-    /// note, the payload survives here: the container's `StateError` is the lexer's own
-    /// `LimitExceeded`, so `ErrorData::Lexer` accepts it unchanged. The span is the one thing that
-    /// cannot be recovered — the lexer error type is a *batch* and the container's error carries a
-    /// single span — so it is zeroed exactly as the syntactic impl zeroes it.
+    /// Unlike the syntactic twin, which keeps only the first lexer error's kind as
+    /// `ErrorData::Lexical`, the payload survives here: the container's `StateError` is the
+    /// lexer's own `LimitExceeded`, so `ErrorData::Lexer` accepts it unchanged. The outer span is
+    /// zeroed — the lexer error type is a *batch* and the container's error carries a single span
+    /// — and the batch keeps every span of its own, which is where the error's `Diagnose`
+    /// primary location reads its first error's from.
     ///
     /// # `char`, and only `char`
     ///

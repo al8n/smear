@@ -19,6 +19,7 @@
 use core::marker::PhantomData;
 
 use smear_lexer::{
+  SyntaxErrorKind,
   error::BadStateError,
   graphqlx::{error::LexerErrors, syntactic::SyntacticTokenKind},
 };
@@ -102,8 +103,8 @@ fn the_terminal_arms_answer_for_every_variant() {
         );
         cells += 1;
       })+)+
-      // A census that selected nothing exits `ok`. 9 = 8 variants + `Lexer`'s second sample.
-      assert_eq!(cells, 9, "the cell set collapsed");
+      // A census that selected nothing exits `ok`. 10 = 9 variants + `Lexer`'s second sample.
+      assert_eq!(cells, 10, "the cell set collapsed");
     };
   }
 
@@ -139,6 +140,8 @@ fn the_terminal_arms_answer_for_every_variant() {
       false
     )],
     Other => [(ErrorData::Other(std::borrow::Cow::Borrowed("x")), false)],
+    // A malformed lexeme kept by its kind: a grammar rejection, as the note it replaced was.
+    Lexical => [(ErrorData::Lexical(SyntaxErrorKind::UnknownCharacter), false)],
     // Carries no diagnostic at all — it exists to keep `S` used.
     Source => [(ErrorData::Source(PhantomData), false)],
   }
@@ -449,7 +452,10 @@ fn the_marks_smear_has_to_make_itself_reach_the_caller() {
     cells += 1;
   }
 
-  for (src, end) in [("\u{1}", 1usize), ("\"unterminated", 13)] {
+  for (src, end, kind) in [
+    ("\u{1}", 1usize, SyntaxErrorKind::UnknownCharacter),
+    ("\"unterminated", 13, SyntaxErrorKind::UnterminatedString),
+  ] {
     let errors = fatal(
       |inp| InputValue::<_>::graphqlx(inp).map(|_| ()),
       src,
@@ -461,8 +467,9 @@ fn the_marks_smear_has_to_make_itself_reach_the_caller() {
       .next()
       .expect("the conversion emits exactly one error");
     assert!(
-      matches!(error.data(), ErrorData::Other(note) if note == "lexer error"),
-      "{src:?}: a malformed lexeme is a grammar rejection, not a scanner stop: {:?}",
+      matches!(error.data(), ErrorData::Lexical(found) if *found == kind),
+      "{src:?}: a malformed lexeme is a grammar rejection, not a scanner stop, and it keeps its \
+       kind: {:?}",
       error.data()
     );
     assert!(!errors.is_terminal(), "{src:?}");

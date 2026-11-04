@@ -1,6 +1,7 @@
 //! The `MaybeTerminal` arm census: which errors end the parse.
 
 use smear_lexer::{
+  SyntaxErrorKind,
   error::BadStateError,
   graphql::{error::LexerErrors, syntactic::SyntacticTokenKind},
 };
@@ -130,6 +131,10 @@ fn the_terminal_arms_answer_for_every_variant() {
 
   // ── `false`, and affirmatively so: built from what the grammar rejected ──
   assert!(!Data::Other(std::borrow::Cow::Borrowed("x")).is_terminal());
+  assert!(
+    !Data::Lexical(SyntaxErrorKind::UnknownCharacter).is_terminal(),
+    "a malformed lexeme kept by its kind is a grammar rejection, as the note it replaced was"
+  );
 }
 
 /// The container fold is `any`, so a stop recorded beside an ordinary diagnostic is still a stop.
@@ -497,8 +502,12 @@ fn the_marks_smear_has_to_make_itself_reach_the_caller() {
   }
 
   // THE CONTROL, and it is the half that says this is an inspection rather than a rewrite: an
-  // ordinary lexical error through the same rejecting emitter stays recoverable AND keeps its span.
-  for (src, end) in [("\u{1}", 1usize), ("\"unterminated", 13)] {
+  // ordinary lexical error through the same rejecting emitter stays recoverable, keeps its span,
+  // and keeps its own kind.
+  for (src, end, kind) in [
+    ("\u{1}", 1usize, SyntaxErrorKind::UnknownCharacter),
+    ("\"unterminated", 13, SyntaxErrorKind::UnterminatedString),
+  ] {
     let errors = fatal(
       |inp| InputValue::<_>::graphql(inp).map(|_| ()),
       src,
@@ -510,8 +519,9 @@ fn the_marks_smear_has_to_make_itself_reach_the_caller() {
       .next()
       .expect("the conversion emits exactly one error");
     assert!(
-      matches!(error.data(), ErrorData::Other(note) if note == "lexer error"),
-      "{src:?}: a malformed lexeme is a grammar rejection, not a scanner stop: {:?}",
+      matches!(error.data(), ErrorData::Lexical(found) if *found == kind),
+      "{src:?}: a malformed lexeme is a grammar rejection, not a scanner stop, and it keeps its \
+       kind: {:?}",
       error.data()
     );
     assert!(

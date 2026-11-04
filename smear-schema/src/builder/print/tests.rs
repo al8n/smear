@@ -9,12 +9,15 @@
 
 use std::{format, string::String, vec};
 
-use smear_parser::graphql::{
-  ast::{
-    ConstInputValue, ConstList, InputObjectTypeDefinition, Nested, TypeDefinition,
-    TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
+use smear_parser::{
+  graphql::{
+    ast::{
+      ConstInputValue, ConstList, InputObjectTypeDefinition, Nested, TypeDefinition,
+      TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
+    },
+    error::ErrorData,
   },
-  error::ErrorData,
+  lexer::SyntaxErrorKind,
 };
 use tokora::{Parse as _, Parser, SimpleSpan};
 
@@ -226,7 +229,10 @@ fn a_string_that_is_not_utf8_does_not_parse() {
   assert_eq!(&sdl[literal.start()..literal.end()], b"\"\xff\"");
   assert!(
     errors.iter().any(|error| error.span() == literal
-      && matches!(error.data(), ErrorData::Other(note) if note == "lexer error")),
+      && matches!(
+        error.data(),
+        ErrorData::Lexical(SyntaxErrorKind::InvalidUtf8)
+      )),
     "the refusal is the lexer's, at the literal that is not text: {errors:?}"
   );
 }

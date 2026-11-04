@@ -38,7 +38,7 @@
 //! grammar refuses them. That leaves the other half of the acceptance surface untested — a source
 //! the lexer itself refuses, where the two suites reach their verdict through machinery that has
 //! nothing in common. `syntactic/` fails the whole parse out of the lexer
-//! (`ErrorData::Other("lexer error")`, one error, span `0..0`); the lossless suite has no such
+//! (`ErrorData::Lexical`, one error, at the lexer error's own span); the lossless suite has no such
 //! exit — it records the lexer error as a diagnostic, keeps parsing, and tiles the refused bytes
 //! into the tree as a `Gap`. Whether those two answers *agree* is the claim, and until this class
 //! existed nothing measured it.
@@ -97,7 +97,10 @@
 use std::path::PathBuf;
 
 use smear::{
-  lexer::graphql::{error::LexerErrors, lossless::LosslessLexer},
+  lexer::graphql::{
+    error::{LexerError, LexerErrors},
+    lossless::LosslessLexer,
+  },
   parser::graphql::{
     GraphQL,
     ast::{Document, ExecutableDocument, TypeSystemDocument},
@@ -107,7 +110,7 @@ use smear::{
     syntactic::{GraphqlLexer, document, executable_document, type_system_document},
   },
 };
-use tokora::{Lexer as _, Parse as _, Parser};
+use tokora::{Lexer as _, Parse as _, Parser, SimpleSpan};
 
 /// The lossless verdict: did the parse report a grammar **error**?
 ///
@@ -187,25 +190,24 @@ enum Channel {
   Grammar,
 }
 
-/// The `Other` payload of an error, when it has one.
-fn other_text<S, T, C, E, SE>(data: &ErrorData<S, T, C, E, SE>) -> Option<&str> {
-  match data {
-    ErrorData::Other(text) => Some(text.as_ref()),
-    _ => None,
-  }
+/// Whether an error is the one this crate lands a lexer failure on.
+fn is_lexical<S, T, C, E, SE>(data: &ErrorData<S, T, C, E, SE>) -> bool {
+  matches!(data, ErrorData::Lexical(_))
 }
 
-/// The marker this crate itself stamps on a lexer failure, **derived rather than spelled**.
+/// What this crate itself makes of a lexer failure, **derived rather than assumed**.
 ///
-/// `error.rs`'s `impl From<LexerErrors<…>> for GraphqlErrors<S>` discards the lexer's typed error
-/// and produces one `ErrorData::Other` with a fixed message — the frozen parser's behaviour, kept
-/// deliberately. Reproducing that message as a literal here would give this file a second copy of
-/// a string that lives in production, and a rename would leave the classifier silently answering
-/// [`Channel::Grammar`] for everything. Running the conversion instead means the classifier is
-/// keyed to the impl, so a rename moves both halves together and a *removal* of the impl fails to
+/// `error.rs`'s `impl From<LexerErrors<…>> for GraphqlErrors<S>` keeps a non-empty batch's first
+/// error as one `ErrorData::Lexical`, carrying that error's kind. Running the conversion on a
+/// one-error batch here keys the classifier to the impl: a conversion that moved the refusal to
+/// another variant fails the assertion in [`syntactic_channel`] rather than leaving the classifier
+/// silently answering [`Channel::Grammar`] for everything, and a *removal* of the impl fails to
 /// compile.
 fn lexer_error_marker() -> GraphqlErrors<&'static str> {
-  LexerErrors::<char, ()>::default().into()
+  LexerErrors::<char, ()>::from(LexerError::<char, ()>::unexpected_eoi(SimpleSpan::new(
+    0, 0,
+  )))
+  .into()
 }
 
 /// Which channel the syntactic suite rejected `src` through; `None` when it accepted.
@@ -222,21 +224,21 @@ fn syntactic_channel(src: &str) -> Option<Channel> {
   .err()?;
 
   let marker = lexer_error_marker();
-  let marker = other_text(
-    marker
-      .first()
-      .expect("the lexer-error conversion must produce an error")
-      .data(),
-  )
-  .expect("the lexer-error conversion must produce an `Other` payload");
+  assert!(
+    is_lexical(
+      marker
+        .first()
+        .expect("the lexer-error conversion must produce an error")
+        .data()
+    ),
+    "the lexer-error conversion must land a one-error batch on `Lexical`"
+  );
 
-  Some(
-    if errors.iter().any(|e| other_text(e.data()) == Some(marker)) {
-      Channel::Lexer
-    } else {
-      Channel::Grammar
-    },
-  )
+  Some(if errors.iter().any(|e| is_lexical(e.data())) {
+    Channel::Lexer
+  } else {
+    Channel::Grammar
+  })
 }
 
 /// How many of a lossless tree's tokens the grammar committed, as opposed to the sink tiling them.

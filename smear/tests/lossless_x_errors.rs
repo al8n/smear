@@ -286,11 +286,11 @@ fn a_declined_expect_reports_the_graphqlx_expectation_for_its_kind() {
 
 /// The lexer's error channel lands in the container with its payload intact.
 ///
-/// The fourth generated impl. Unlike the syntactic twin, which flattens a lexer error to a bare
-/// `Other("lexer error")` note, the payload survives here: the container's `StateError` is the
-/// lexer's own `LimitExceeded`, so `ErrorData::Lexer` accepts it unchanged. The span is the one
-/// thing that cannot be recovered — the lexer error type is a *batch* and the container's error
-/// carries a single span — so it is zeroed.
+/// The fourth generated impl. Unlike the syntactic twin, which keeps only the first lexer error's
+/// kind as `ErrorData::Lexical`, the payload survives here: the container's `StateError` is the
+/// lexer's own `LimitExceeded`, so `ErrorData::Lexer` accepts it unchanged. The outer span is
+/// zeroed — the lexer error type is a *batch* and the container's error carries a single span —
+/// and the batch keeps its own.
 #[test]
 fn a_lexer_error_lands_as_error_data_lexer_not_as_a_note() {
   use smear::parser::lexer::graphqlx::error::LexerErrors;

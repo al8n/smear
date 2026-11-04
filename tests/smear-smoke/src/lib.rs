@@ -102,7 +102,7 @@ pub fn graphql_parser(
   .parse_str(src)
 }
 
-/// `ErrorData`'s 11 variants, named from outside the crate, plus the wildcard arm
+/// `ErrorData`'s 12 variants, named from outside the crate, plus the wildcard arm
 /// `#[non_exhaustive]` requires — which fails **closed**.
 ///
 /// # What this replaced, and why it is not the same probe
@@ -122,7 +122,7 @@ pub fn graphql_parser(
 ///
 /// # What is left, and the two halves it is in
 ///
-/// - **Complete.** All 11 of the enum's variants are named below, so a dependent can reach each
+/// - **Complete.** All 12 of the enum's variants are named below, so a dependent can reach each
 ///   of them by name and a path that stops resolving still fails here. The arm the attribute
 ///   forces returns `None` instead of a tag, so a variant nobody listed is a *reported* failure
 ///   rather than a quiet fall-through into some neighbour's answer. `NestingLimitExceeded` and
@@ -160,6 +160,7 @@ pub fn error_data_variant_tag(
 
   Some(match error.data() {
     ErrorData::Lexer(_) => "Lexer",
+    ErrorData::Lexical(_) => "Lexical",
     ErrorData::IntOverflow(_) => "IntOverflow",
     ErrorData::FloatOverflow(_) => "FloatOverflow",
     ErrorData::Unclosed(_) => "Unclosed",
@@ -194,10 +195,13 @@ pub fn error_data_variant_tag(
 pub fn error_data_variant_samples() -> [(
   &'static str,
   smear::parser::graphql::error::GraphqlError<&'static str>,
-); 11] {
+); 12] {
   use smear::{
     lexer::{
-      graphql::{error::LexerErrors, syntactic::SyntacticTokenKind},
+      graphql::{
+        error::{LexerError, LexerErrors},
+        syntactic::SyntacticTokenKind,
+      },
       tokora::SimpleSpan,
     },
     parser::graphql::error::{
@@ -248,8 +252,20 @@ pub fn error_data_variant_samples() -> [(
       "TokenBudgetExhausted",
       GraphqlError::token_budget_exhausted(span),
     ),
+    // Not a constructor: the lexer-batch conversion is `Lexical`'s one producer, and it keeps a
+    // non-empty batch's first kind.
+    (
+      "Lexical",
+      GraphqlErrors::from(LexerErrors::<char, ()>::from(
+        LexerError::<char, ()>::unexpected_eoi(span),
+      ))
+      .into_iter()
+      .next()
+      .expect("the lexer-error conversion emits one error"),
+    ),
     // Not a constructor: `Other`'s only producers are the `From` conversions in `smear-parser`'s
-    // error glue, and this is the cheapest of them to mint from out here.
+    // error glue, and this is the cheapest of them to mint from out here — the lexer-batch
+    // conversion over an empty batch, which has no kind to keep.
     (
       "Other",
       GraphqlErrors::from(LexerErrors::<char, ()>::default())

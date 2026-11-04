@@ -5,12 +5,16 @@
 //! feature-gated GraphQL dialect module.
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use smear_lexer::graphqlx::{
-  error::{LexerErrorData, LexerErrors},
-  syntactic::{SyntacticToken, SyntacticTokenKind},
+use smear_lexer::{
+  SyntaxErrorKind,
+  graphqlx::{
+    error::{LexerErrorData, LexerErrors},
+    syntactic::{SyntacticToken, SyntacticTokenKind},
+  },
 };
 use tokora::{
   Lexer, SimpleSpan as Span,
+  diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity},
   emitter::FromUnclosed,
   error::{
     FullContainer, MaybeTerminal, MissingSyntax, MissingToken, SeparatedError, TooFew,
@@ -190,6 +194,14 @@ pub enum Unclosed {
 pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// One or more lexer errors.
   Lexer(LexerErrors<Char, StateError>),
+  /// A lexer refusal on the syntactic path, by its kind alone.
+  ///
+  /// GraphQL's twin carries the reasoning: the syntactic container cannot hold the generic batch,
+  /// so its `From<LexerErrors>` keeps the first error's span and [`SyntaxErrorKind`] instead of
+  /// one shared "lexer error" note. Never terminal: a `State` refusal routes to
+  /// [`TerminalEndOfInput`](Self::TerminalEndOfInput) instead.
+  #[from(skip)]
+  Lexical(SyntaxErrorKind),
   /// A delimiter was not closed.
   Unclosed(Unclosed),
   /// A token did not satisfy its typed expectation.
@@ -274,7 +286,11 @@ impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, S
       // Neither is a scanner stop, and this arm is what stops the conversion's routing from being
       // discarded one layer later.
       Self::TerminalEndOfInput => true,
-      Self::Unclosed(_) | Self::UnexpectedToken(_) | Self::Other(_) | Self::Source(_) => false,
+      Self::Unclosed(_)
+      | Self::UnexpectedToken(_)
+      | Self::Lexical(_)
+      | Self::Other(_)
+      | Self::Source(_) => false,
     }
   }
 }
@@ -407,6 +423,183 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   #[inline]
   pub fn into_data(self) -> ErrorData<S, T, Char, Exp, StateError> {
     self.data
+  }
+
+  /// Returns the syntax-error kind this error reports as, which is its data's.
+  #[inline]
+  pub fn kind(&self) -> SyntaxErrorKind {
+    self.data.kind()
+  }
+}
+
+impl<S, T, Char, Exp, StateError> ErrorData<S, T, Char, Exp, StateError> {
+  /// Returns the syntax-error kind this error reports as.
+  ///
+  /// The one dispatch every [`Diagnose`] accessor on [`Error`] delegates to. A genuine end of
+  /// input is an [`UnexpectedToken`](Self::UnexpectedToken) with no found token in this dialect,
+  /// and it reports [`UnexpectedEndOfInput`](SyntaxErrorKind::UnexpectedEndOfInput); the end of
+  /// input that stands in for a scanner stop reports
+  /// [`ResourceLimit`](SyntaxErrorKind::ResourceLimit).
+  pub fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::Lexer(errors) => errors
+        .iter()
+        .next()
+        .map_or(SyntaxErrorKind::InvalidSyntax, |error| error.kind()),
+      Self::Lexical(kind) => *kind,
+      Self::Unclosed(_) => SyntaxErrorKind::UnclosedDelimiter,
+      Self::UnexpectedToken(token) => {
+        if token.found().is_some() {
+          SyntaxErrorKind::UnexpectedToken
+        } else {
+          SyntaxErrorKind::UnexpectedEndOfInput
+        }
+      }
+      Self::TerminalEndOfInput => SyntaxErrorKind::ResourceLimit,
+      Self::NestingLimitExceeded => SyntaxErrorKind::NestingLimit,
+      Self::TokenBudgetExhausted => SyntaxErrorKind::TokenBudget,
+      Self::Other(_) | Self::Source(_) => SyntaxErrorKind::InvalidSyntax,
+    }
+  }
+}
+
+/// The one document a parse reads, as a [`Location`] numbers it.
+const SOURCE: u32 = 0;
+
+/// Writes `, expected {expected}` — or nothing, when the expectation renders as nothing.
+///
+/// GraphQL's twin carries the reasoning: an expectation with nothing to name renders empty, and
+/// the clause is dropped with it rather than naming a guess.
+fn expected_clause<Exp>(f: &mut core::fmt::Formatter<'_>, expected: &Exp) -> core::fmt::Result
+where
+  Exp: core::fmt::Display,
+{
+  struct Writes(bool);
+
+  impl core::fmt::Write for Writes {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+      self.0 |= !s.is_empty();
+      Ok(())
+    }
+  }
+
+  let mut probe = Writes(false);
+  let _ = core::fmt::write(&mut probe, format_args!("{expected}"));
+  if probe.0 {
+    write!(f, ", expected {expected}")
+  } else {
+    Ok(())
+  }
+}
+
+/// A syntax error, as a sentence: lowercase, no trailing period, spellings in backticks, and never
+/// a position. GraphQL's twin carries the reasoning, and this one renders the same sentences for
+/// the same events.
+impl<S, T, Char, Exp, StateError> core::fmt::Display for Error<S, T, Char, Exp, StateError>
+where
+  T: core::fmt::Display,
+  Exp: core::fmt::Display,
+{
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match &self.data {
+      ErrorData::Lexer(errors) => match errors.iter().next() {
+        Some(error) => core::fmt::Display::fmt(error, f),
+        None => f.write_str(SyntaxErrorKind::InvalidSyntax.message()),
+      },
+      ErrorData::Lexical(kind) => f.write_str(kind.message()),
+      ErrorData::Unclosed(unclosed) => f.write_str(match unclosed {
+        Unclosed::Parentheses => "unclosed `(`",
+        Unclosed::List => "unclosed `[`",
+        Unclosed::Object => "unclosed `{`",
+        Unclosed::Angle => "unclosed `<`",
+      }),
+      ErrorData::UnexpectedToken(token) => {
+        match token.found() {
+          Some(found) => write!(f, "unexpected {found}")?,
+          None => f.write_str("unexpected end of input")?,
+        }
+        expected_clause(f, token.expected())
+      }
+      ErrorData::TerminalEndOfInput => f.write_str(SyntaxErrorKind::ResourceLimit.message()),
+      ErrorData::NestingLimitExceeded => f.write_str(SyntaxErrorKind::NestingLimit.message()),
+      ErrorData::TokenBudgetExhausted => f.write_str(SyntaxErrorKind::TokenBudget.message()),
+      ErrorData::Other(text) => f.write_str(text),
+      ErrorData::Source(_) => f.write_str(SyntaxErrorKind::InvalidSyntax.message()),
+    }
+  }
+}
+
+impl<S, T, Char, Exp, StateError> core::error::Error for Error<S, T, Char, Exp, StateError>
+where
+  S: core::fmt::Debug,
+  T: core::fmt::Debug + core::fmt::Display,
+  Char: core::fmt::Debug,
+  Exp: core::fmt::Debug + core::fmt::Display,
+  StateError: core::fmt::Debug,
+{
+}
+
+/// A GraphQLx syntax error, read as structure, exactly as GraphQL's twin reads one: its
+/// [`SyntaxErrorKind`]'s code, severity and help, and the position it refused at — a
+/// [`Lexer`](ErrorData::Lexer) batch's first error's, else its own. Never [`Location::entire`],
+/// and no labels or path segments.
+///
+/// The bounds are spelled `core::fmt::Display` for the reason GraphQL's twin records: the census
+/// copies them into a crate that imports nothing, and re-spaces them so that a leading `::` would
+/// not parse.
+impl<S, T, Char, Exp, StateError> Diagnose for Error<S, T, Char, Exp, StateError>
+where
+  T: core::fmt::Display,
+  Exp: core::fmt::Display,
+{
+  #[inline]
+  fn code(&self) -> Code {
+    self.kind().code()
+  }
+
+  #[inline]
+  fn severity(&self) -> Severity {
+    self.kind().severity()
+  }
+
+  #[inline]
+  fn primary(&self) -> Location {
+    let span = if let ErrorData::Lexer(errors) = &self.data {
+      errors.iter().next().map_or(self.span, |error| error.span())
+    } else {
+      self.span
+    };
+    Location::new(SOURCE, span)
+  }
+
+  #[inline]
+  fn primary_label(&self) -> Option<&'static str> {
+    Some(self.kind().message())
+  }
+
+  #[inline]
+  fn labels(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn label(&self, _: usize) -> Option<Label> {
+    None
+  }
+
+  #[inline]
+  fn path_segments(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn path_segment(&self, _: usize) -> Option<PathSegment<'_>> {
+    None
+  }
+
+  #[inline]
+  fn help(&self) -> Option<&'static str> {
+    self.kind().help()
   }
 }
 
@@ -697,13 +890,14 @@ where
 // accepted the diagnostic, or smear here when it rejected — because the fact about the document is
 // the same.
 //
-// A variant carrying the batch is not available at this keying anyway, which is what made this
-// impl erase in the first place: it is generic over the batch's `Char` and `StateError` while the
-// container pins its own (`char`, `()`), so `ErrorData::Lexer` does not typecheck here. The
-// lossless conversion `lossless_error_impls!` generates is pinned to `LexerErrors<char,
-// LimitExceeded>` and therefore keeps the payload; that one already routed correctly and is
-// unchanged. A new variant here would have to erase the payload too — it would be
-// `TerminalEndOfInput` under another name, with a census row and a parity row bought for nothing.
+// A variant carrying the batch is not available at this keying anyway: this impl is generic over
+// the batch's `Char` and `StateError` while the container pins its own (`char`, `()`), so
+// `ErrorData::Lexer` does not typecheck here. The lossless conversion `lossless_error_impls!`
+// generates is pinned to `LexerErrors<char, LimitExceeded>` and therefore keeps the payload.
+//
+// Every other batch becomes `Lexical`, keeping the first error's `SyntaxErrorKind` — GraphQL's
+// twin carries why. An **empty** batch has no first error and keeps the `Other("lexer error")`
+// note at `0..0`.
 //
 // The span is the batch's first, on **both** arms. `Span::new(0, 0)` pointed every lexer error at
 // byte zero, which is a position the error is not at; a `State` error minted through
@@ -712,18 +906,21 @@ where
 impl<S, Char, StateError> From<LexerErrors<Char, StateError>> for GraphqlxErrors<S> {
   #[inline]
   fn from(err: LexerErrors<Char, StateError>) -> Self {
-    let span = err.iter().next().map_or(Span::new(0, 0), |e| e.span());
+    let Some(first) = err.iter().next() else {
+      return GraphqlxError::new(
+        Span::new(0, 0),
+        ErrorData::Other(std::borrow::Cow::Borrowed("lexer error")),
+      )
+      .into();
+    };
+    let span = first.span();
     if err
       .iter()
       .any(|e| matches!(e.data(), LexerErrorData::State(_)))
     {
       return GraphqlxError::terminal_end_of_input(span).into();
     }
-    GraphqlxError::new(
-      span,
-      ErrorData::Other(std::borrow::Cow::Borrowed("lexer error")),
-    )
-    .into()
+    GraphqlxError::new(span, ErrorData::Lexical(first.kind())).into()
   }
 }
 

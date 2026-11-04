@@ -654,6 +654,7 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
     name: "ErrorData",
     expected: &[
       "Lexer(LexerErrors<Char, StateError>)",
+      "Lexical(SyntaxErrorKind)",
       "IntOverflow(IntOverflow<S>)",
       "FloatOverflow(S)",
       "Unclosed(Unclosed)",
@@ -665,7 +666,7 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
       "TokenBudgetExhausted",
       "Other(std::borrow::Cow<'static, str>)",
     ],
-    reason: "FIVE changes, and they were reviewed separately. (1) `IntOverflow(S)` became \
+    reason: "SIX changes, and they were reviewed separately. (1) `IntOverflow(S)` became \
        `IntOverflow(IntOverflow<S>)`. SOURCE-BREAKING, ACCEPTED AND DECLARED — see the section of \
        that name on `ErrorData` for what breaks, what it buys and why the alternatives are worse. \
        The variant predates the merge base, so this reshapes an old name rather than adding a new \
@@ -704,9 +705,14 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
        every crate, bench and example found no producer of any of them outside `error.rs` and its \
        own tests, and each variant left answers a diagnostic code meant to outlive a rewording — \
        a code for an error no parse can raise is a promise about nothing. The seven hint enums \
-       only those variants named went with them, recorded in `RECORDED_REMOVALS`. The other \
-       seven lines above are the merge base's, unedited, and repeating them is the point — this \
-       entry approves five named changes, not the enum.",
+       only those variants named went with them, recorded in `RECORDED_REMOVALS`. (6) \
+       `Lexical(SyntaxErrorKind)` is NEW. Not source-breaking — the enum is `#[non_exhaustive]` — \
+       and its payload is a fieldless `Copy` kind: the syntactic `From<LexerErrors>` keeps a \
+       non-empty batch's first span and first `SyntaxErrorKind` here instead of one shared \
+       `Other(\"lexer error\")` note, so an unterminated string, a bad escape and a leading zero \
+       each reach a caller under their own `smear::syntax` code. The other seven lines above are \
+       the merge base's, unedited, and repeating them is the point — this entry approves six \
+       named changes, not the enum.",
   },
   Recorded {
     file: "src/graphql/error.rs",
@@ -976,8 +982,8 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   // A scan that stops finding enums has nothing left to check; a scan that finds them and reads
   // no variants out of them is accounted for on the attribute axis and silent on the payload one.
   //
-  // 9 enums = 5 in error.rs + 2 in ast/value.rs + 2 in ast/materialized.rs. 89 variants =
-  // 55 + 17 + 17 across the same three files. Update either count only after checking why it
+  // 9 enums = 5 in error.rs + 2 in ast/value.rs + 2 in ast/materialized.rs. 90 variants =
+  // 56 + 17 + 17 across the same three files. Update either count only after checking why it
   // moved.
   //
   // It has moved twice, and these are the readings. `refactor/materialised-generic` deleted
@@ -991,7 +997,8 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   // variant again, and the same recorded row carries it (smear issue #177).
   // `feat/syntax-diagnostics` then removed fourteen `ErrorData` variants no parse produced and the
   // seven hint enums only they named: 16 -> 9 enums, and 142 -> 89 variants is 39 hint variants
-  // and 14 `ErrorData` ones leaving. `RECORDED_REMOVALS` carries the seven.
+  // and 14 `ErrorData` ones leaving. `RECORDED_REMOVALS` carries the seven. It then added
+  // `ErrorData::Lexical`: 89 -> 90, and the recorded row carries it.
   assert_eq!(
     found.len(),
     9,
@@ -1002,8 +1009,8 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   );
   let variants_read: usize = found.iter().map(|enum_| enum_.variants.len()).sum();
   assert_eq!(
-    variants_read, 89,
-    "the scan read {variants_read} variant(s) out of 9 enums, expected 89 — an enum gained or \
+    variants_read, 90,
+    "the scan read {variants_read} variant(s) out of 9 enums, expected 90 — an enum gained or \
      lost one, or `read_variants` stopped seeing them",
   );
 

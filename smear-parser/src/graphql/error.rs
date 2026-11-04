@@ -19,6 +19,7 @@
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::{
+  SyntaxErrorKind,
   graphql::{
     error::{LexerErrorData, LexerErrors},
     syntactic::{SyntacticToken, SyntacticTokenKind},
@@ -27,6 +28,7 @@ use smear_lexer::{
 };
 use tokora::{
   Lexer, SimpleSpan as Span,
+  diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity},
   emitter::FromUnclosed,
   error::{
     FullContainer, MaybeTerminal, MissingSyntax, MissingToken, SeparatedError, TooFew,
@@ -453,7 +455,7 @@ impl<S> IntOverflow<S> {
 ///
 /// No consumer can be told at build time that this vocabulary grew: making a downstream match
 /// untotal is the whole of what `#[non_exhaustive]` does. The notice does not disappear, it moves
-/// in-crate, where the attribute is inert. `error_data_variant_census` matches all 11 variants
+/// in-crate, where the attribute is inert. `error_data_variant_census` matches all 12 variants
 /// wildcard-free in **every** configuration, so a new one is `E0004` there before it can reach
 /// anybody, and it must carry a public producer before that test is green again.
 ///
@@ -488,8 +490,9 @@ impl<S> IntOverflow<S> {
 ///
 /// So the two claims the census makes are different claims, and it makes both:
 /// `error_data_variant_census` matches this enum exhaustively and wildcard-free in **every**
-/// configuration — 11 variants, always — and builds a sample through a public constructor for
-/// each one whose producer that configuration compiled: 11 samples with the feature, 9 without.
+/// configuration — 12 variants, always — and builds a sample through a public constructor or
+/// conversion for each one whose producer that configuration compiled: 12 samples with the
+/// feature, 10 without.
 /// A variant producible in no configuration is caught by the all-features run.
 ///
 /// # Source-breaking change: `IntOverflow`'s payload
@@ -566,6 +569,16 @@ impl<S> IntOverflow<S> {
 pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// One or more errors from the lexer.
   Lexer(LexerErrors<Char, StateError>),
+  /// A lexer refusal on the syntactic path, by its kind alone.
+  ///
+  /// The syntactic container pins `char` and `()` where a lexer batch's are generic, so the batch
+  /// itself cannot ride in [`Lexer`](Self::Lexer) there. What its `From<LexerErrors>` keeps is the
+  /// first error's span, as this error's, and that error's [`SyntaxErrorKind`] — so an
+  /// unterminated string, a bad escape or a leading zero reports its own code rather than one
+  /// shared "lexer error". Never terminal: a `State` refusal routes to
+  /// [`TerminalEndOfInput`](Self::TerminalEndOfInput) instead.
+  #[from(skip)]
+  Lexical(SyntaxErrorKind),
   /// An integer literal is syntactically valid GraphQL but does not fit the width it was read
   /// at.
   ///
@@ -764,6 +777,7 @@ impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, S
       | Self::Unclosed(_)
       | Self::UnexpectedToken(_)
       | Self::EndOfInput
+      | Self::Lexical(_)
       | Self::Other(_) => false,
     }
   }
@@ -961,6 +975,218 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   pub fn into_data(self) -> ErrorData<S, T, Char, Exp, StateError> {
     self.data
   }
+
+  /// Returns the syntax-error kind this error reports as, which is its data's.
+  #[inline]
+  pub fn kind(&self) -> SyntaxErrorKind {
+    self.data.kind()
+  }
+}
+
+impl<S, T, Char, Exp, StateError> ErrorData<S, T, Char, Exp, StateError> {
+  /// Returns the syntax-error kind this error reports as.
+  ///
+  /// The one dispatch every [`Diagnose`] accessor on [`Error`] delegates to. A [`Lexer`](Self::Lexer)
+  /// batch reports its first error's kind; an end of input reports
+  /// [`UnexpectedEndOfInput`](SyntaxErrorKind::UnexpectedEndOfInput) when the document genuinely
+  /// ended and [`ResourceLimit`](SyntaxErrorKind::ResourceLimit) when it stands in for a scanner
+  /// stop, because that end is a limit tripping rather than the document running out.
+  pub fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::Lexer(errors) => errors
+        .iter()
+        .next()
+        .map_or(SyntaxErrorKind::InvalidSyntax, |error| error.kind()),
+      Self::Lexical(kind) => *kind,
+      Self::IntOverflow(_) => SyntaxErrorKind::IntOverflow,
+      Self::FloatOverflow(_) => SyntaxErrorKind::FloatOverflow,
+      Self::Unclosed(_) => SyntaxErrorKind::UnclosedDelimiter,
+      Self::UnexpectedToken(token) => {
+        if token.found().is_some() {
+          SyntaxErrorKind::UnexpectedToken
+        } else {
+          SyntaxErrorKind::UnexpectedEndOfInput
+        }
+      }
+      Self::UnexpectedEndOfObjectFieldValue(end) => {
+        if end.is_terminal() {
+          SyntaxErrorKind::ResourceLimit
+        } else {
+          SyntaxErrorKind::UnexpectedEndOfInput
+        }
+      }
+      Self::EndOfInput => SyntaxErrorKind::UnexpectedEndOfInput,
+      Self::TerminalEndOfInput => SyntaxErrorKind::ResourceLimit,
+      Self::NestingLimitExceeded => SyntaxErrorKind::NestingLimit,
+      Self::TokenBudgetExhausted => SyntaxErrorKind::TokenBudget,
+      Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
+    }
+  }
+}
+
+/// The one document a parse reads, as a [`Location`] numbers it.
+const SOURCE: u32 = 0;
+
+/// Writes `, expected {expected}` — or nothing, when the expectation renders as nothing.
+///
+/// An expectation with nothing to name renders empty rather than as a placeholder, and the clause
+/// is dropped with it: "unexpected `}`" says what is known, where "unexpected `}`, expected a
+/// name" would name a guess. Measured by rendering it once into a sink that only notes whether
+/// anything arrived, so the check allocates nothing and asks nothing of `Exp` beyond `Display`.
+fn expected_clause<Exp>(f: &mut core::fmt::Formatter<'_>, expected: &Exp) -> core::fmt::Result
+where
+  Exp: core::fmt::Display,
+{
+  struct Writes(bool);
+
+  impl core::fmt::Write for Writes {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+      self.0 |= !s.is_empty();
+      Ok(())
+    }
+  }
+
+  let mut probe = Writes(false);
+  let _ = core::fmt::write(&mut probe, format_args!("{expected}"));
+  if probe.0 {
+    write!(f, ", expected {expected}")
+  } else {
+    Ok(())
+  }
+}
+
+/// A syntax error, as a sentence: lowercase, no trailing period, spellings in backticks, and never
+/// a position — the position is the diagnostic's primary location, and a sentence that spelled it
+/// as well would say it twice.
+///
+/// Nothing from the source is quoted, so there is no bound on `S` and no question of whether a
+/// byte source's slice is text: an overflow names the width it was read at, not the literal.
+impl<S, T, Char, Exp, StateError> core::fmt::Display for Error<S, T, Char, Exp, StateError>
+where
+  T: core::fmt::Display,
+  Exp: core::fmt::Display,
+{
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match &self.data {
+      ErrorData::Lexer(errors) => match errors.iter().next() {
+        Some(error) => core::fmt::Display::fmt(error, f),
+        None => f.write_str(SyntaxErrorKind::InvalidSyntax.message()),
+      },
+      ErrorData::Lexical(kind) => f.write_str(kind.message()),
+      ErrorData::IntOverflow(overflow) => write!(
+        f,
+        "integer out of range for a {}-bit integer",
+        overflow.width().bits()
+      ),
+      ErrorData::FloatOverflow(_) => f.write_str("float out of range for a 64-bit float"),
+      ErrorData::Unclosed(unclosed) => f.write_str(match unclosed {
+        Unclosed::Parentheses => "unclosed `(`",
+        Unclosed::List => "unclosed `[`",
+        Unclosed::Object => "unclosed `{`",
+      }),
+      ErrorData::UnexpectedToken(token) => {
+        match token.found() {
+          Some(found) => write!(f, "unexpected {found}")?,
+          None => f.write_str("unexpected end of input")?,
+        }
+        expected_clause(f, token.expected())
+      }
+      ErrorData::UnexpectedEndOfObjectFieldValue(end) => {
+        if end.is_terminal() {
+          f.write_str(SyntaxErrorKind::ResourceLimit.message())
+        } else {
+          write!(f, "unexpected end of input, expected a {}", end.hint())
+        }
+      }
+      ErrorData::EndOfInput => f.write_str(SyntaxErrorKind::UnexpectedEndOfInput.message()),
+      ErrorData::TerminalEndOfInput => f.write_str(SyntaxErrorKind::ResourceLimit.message()),
+      ErrorData::NestingLimitExceeded => f.write_str(SyntaxErrorKind::NestingLimit.message()),
+      ErrorData::TokenBudgetExhausted => f.write_str(SyntaxErrorKind::TokenBudget.message()),
+      ErrorData::Other(text) => f.write_str(text),
+    }
+  }
+}
+
+impl<S, T, Char, Exp, StateError> core::error::Error for Error<S, T, Char, Exp, StateError>
+where
+  S: core::fmt::Debug,
+  T: core::fmt::Debug + core::fmt::Display,
+  Char: core::fmt::Debug,
+  Exp: core::fmt::Debug + core::fmt::Display,
+  StateError: core::fmt::Debug,
+{
+}
+
+/// A draft §2 syntax error, read as structure: the code, severity and help of its
+/// [`SyntaxErrorKind`], and the position it refused at in the one document a parse reads.
+///
+/// The position is the error's own span, with one exception: a [`Lexer`](ErrorData::Lexer) batch
+/// points at its first error, because the lossless conversion that builds one carries the empty
+/// span `0..0` outside it. An empty batch keeps the outer span. Never
+/// [`Location::entire`]: a syntax error always has a place in the text.
+///
+/// No labels and no path segments: a syntax error points at one place, and it is raised before
+/// any request has produced a result.
+///
+/// The bounds are what the message needs and nothing else — a found token and an expectation that
+/// render — and they are spelled `core::fmt::Display` because `ci/source_census` copies them
+/// verbatim into a generated crate that imports nothing. Not `::core::…`: the census re-spaces the
+/// tokens it copies, and a leading `::` fuses with the bound's own `:` into a `:::` that does not
+/// parse.
+impl<S, T, Char, Exp, StateError> Diagnose for Error<S, T, Char, Exp, StateError>
+where
+  T: core::fmt::Display,
+  Exp: core::fmt::Display,
+{
+  #[inline]
+  fn code(&self) -> Code {
+    self.kind().code()
+  }
+
+  #[inline]
+  fn severity(&self) -> Severity {
+    self.kind().severity()
+  }
+
+  #[inline]
+  fn primary(&self) -> Location {
+    let span = if let ErrorData::Lexer(errors) = &self.data {
+      errors.iter().next().map_or(self.span, |error| error.span())
+    } else {
+      self.span
+    };
+    Location::new(SOURCE, span)
+  }
+
+  #[inline]
+  fn primary_label(&self) -> Option<&'static str> {
+    Some(self.kind().message())
+  }
+
+  #[inline]
+  fn labels(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn label(&self, _: usize) -> Option<Label> {
+    None
+  }
+
+  #[inline]
+  fn path_segments(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn path_segment(&self, _: usize) -> Option<PathSegment<'_>> {
+    None
+  }
+
+  #[inline]
+  fn help(&self) -> Option<&'static str> {
+    self.kind().help()
+  }
 }
 
 type DefaultErrorsContainer<S, T, Char = char, Exp = Expectation, StateError = ()> =
@@ -1034,8 +1260,9 @@ pub type GraphqlErrors<S> = Errors<S, SyntacticTokenKind, char, Expectation>;
 // GraphQL expectation, while absent or multi-kind expectations retain the historic
 // `Name` fallback because [`ErrorData::UnexpectedToken`] has one expectation slot.
 // Diagnostics-carrying families (missing separator/element, full container, too
-// few, lexer errors) map to `Other` exactly as the frozen glue did — these are
-// emitter paths a `Vec` container and a fail-fast context rarely reach.
+// few) map to `Other` exactly as the frozen glue did — these are emitter paths a
+// `Vec` container and a fail-fast context rarely reach. A lexer batch keeps its first
+// error's kind, as `Lexical`; see its conversion at the foot of the file.
 
 #[inline]
 fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
@@ -1223,13 +1450,19 @@ where
 // accepted the diagnostic, or smear here when it rejected — because the fact about the document is
 // the same.
 //
-// A variant carrying the batch is not available at this keying anyway, which is what made this
-// impl erase in the first place: it is generic over the batch's `Char` and `StateError` while the
-// container pins its own (`char`, `()`), so `ErrorData::Lexer` does not typecheck here. The
-// lossless conversion `lossless_error_impls!` generates is pinned to `LexerErrors<char,
-// LimitExceeded>` and therefore keeps the payload; that one already routed correctly and is
-// unchanged. A new variant here would have to erase the payload too — it would be
-// `TerminalEndOfInput` under another name, with a census row and a parity row bought for nothing.
+// A variant carrying the batch is not available at this keying anyway: this impl is generic over
+// the batch's `Char` and `StateError` while the container pins its own (`char`, `()`), so
+// `ErrorData::Lexer` does not typecheck here. The lossless conversion `lossless_error_impls!`
+// generates is pinned to `LexerErrors<char, LimitExceeded>` and therefore keeps the payload; that
+// one already routed correctly and is unchanged.
+//
+// # What every other batch becomes: `Lexical`, keeping the first error's kind
+//
+// The payload cannot ride, and its kind can: `LexerErrorData::kind` is bound-free, so the first
+// error's `SyntaxErrorKind` survives the erasure and an unterminated string, a bad escape or a
+// leading zero reaches the caller under its own `smear::syntax` code. It used to be one
+// `Other("lexer error")` for all nine. An **empty** batch has no first error and keeps that note,
+// at `0..0` — the one case where there is no kind to keep and no position to point at.
 //
 // The span is the batch's first, on **both** arms. `Span::new(0, 0)` pointed every lexer error at
 // byte zero, which is a position the error is not at; a `State` error minted through
@@ -1238,18 +1471,21 @@ where
 impl<S, Char, StateError> From<LexerErrors<Char, StateError>> for GraphqlErrors<S> {
   #[inline]
   fn from(err: LexerErrors<Char, StateError>) -> Self {
-    let span = err.iter().next().map_or(Span::new(0, 0), |e| e.span());
+    let Some(first) = err.iter().next() else {
+      return GraphqlError::new(
+        Span::new(0, 0),
+        ErrorData::Other(std::borrow::Cow::Borrowed("lexer error")),
+      )
+      .into();
+    };
+    let span = first.span();
     if err
       .iter()
       .any(|e| matches!(e.data(), LexerErrorData::State(_)))
     {
       return GraphqlError::terminal_end_of_input(span).into();
     }
-    GraphqlError::new(
-      span,
-      ErrorData::Other(std::borrow::Cow::Borrowed("lexer error")),
-    )
-    .into()
+    GraphqlError::new(span, ErrorData::Lexical(first.kind())).into()
   }
 }
 

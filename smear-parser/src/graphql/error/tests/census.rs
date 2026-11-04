@@ -1,6 +1,9 @@
 //! The `ErrorData` producibility census.
 
-use smear_lexer::graphql::{error::LexerErrors, syntactic::SyntacticTokenKind};
+use smear_lexer::graphql::{
+  error::{LexerError, LexerErrors},
+  syntactic::SyntacticTokenKind,
+};
 use tokora::SimpleSpan as Span;
 
 use crate::graphql::error::{
@@ -33,10 +36,10 @@ type Data = ErrorData<&'static str, SyntacticTokenKind>;
 ///   `smear-lexer`'s `LosslessTokenKind::Boolean` (28 declared, 27 producible).
 ///
 /// **The exhaustive match and the sample set are gated differently, and that is the point.**
-/// `ErrorData` declares the same 11 variants in every configuration, so the `match` below is
-/// wildcard-free over all 11 everywhere and a new variant is `E0004` in a default build. What
+/// `ErrorData` declares the same 12 variants in every configuration, so the `match` below is
+/// wildcard-free over all 12 everywhere and a new variant is `E0004` in a default build. What
 /// `materialized-numbers` gates is the two *producers*, so only their two samples carry a
-/// `#[cfg]`: 11 samples with the feature, 9 without.
+/// `#[cfg]`: 12 samples with the feature, 10 without.
 ///
 /// (Nothing asserts those numbers — the count that has teeth is the `match`, which the compiler
 /// derives — so a stale one is prose drift rather than a hole, but it is the kind that reads as a
@@ -46,7 +49,7 @@ type Data = ErrorData<&'static str, SyntacticTokenKind>;
 /// made each build check only the enum it compiled, which sounds stricter and is weaker: it lets
 /// a variant be declared-and-unproducible in *every* configuration as long as no single
 /// configuration sees both halves. The all-features run is what rules that out, and it can only
-/// do so because it samples all 11.
+/// do so because it samples all 12.
 ///
 /// A census over the union of configurations — the shape `ci/source_census`'s D1–D4 necessarily
 /// has, since it reads the source as text with `syn` and strips only `#[cfg(test)]` — cannot tell
@@ -142,8 +145,17 @@ fn error_data_variant_census() {
     // reason: `lossless::depth`'s `FromTokenBudget` impl is pinned to the lossless keying.
     TokenBudgetExhausted => GraphqlError::<&str>::token_budget_exhausted(span).into_data(),
 
+    // Not a constructor: the producer is the lexer-batch conversion, which keeps a non-empty
+    // batch's first kind. It is the only door that reaches this variant.
+    Lexical => GraphqlErrors::<&str>::from(LexerErrors::<char, ()>::from(
+      LexerError::<char, ()>::unexpected_eoi(span),
+    ))[0]
+      .clone()
+      .into_data(),
+
     // Not a constructor: the only producers of `Other` are the six `From` conversions in
-    // `error.rs`, and this is the cheapest of them to mint.
+    // `error.rs`, and this is the cheapest of them to mint — the lexer-batch conversion, over an
+    // empty batch, which has no first error and so no kind to keep.
     Other => GraphqlErrors::<&str>::from(LexerErrors::<char, ()>::default())[0]
       .clone()
       .into_data(),
