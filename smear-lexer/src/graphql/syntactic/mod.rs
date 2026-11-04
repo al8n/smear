@@ -1243,3 +1243,6 @@ mod utf8_tests;
 
 #[cfg(test)]
 mod comment_utf8_tests;
+
+#[cfg(test)]
+mod diagnostic_tests;

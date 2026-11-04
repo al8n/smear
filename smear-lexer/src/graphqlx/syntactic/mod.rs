@@ -63,6 +63,9 @@ mod utf8_tests;
 #[cfg(test)]
 mod comment_utf8_tests;
 
+#[cfg(test)]
+mod diagnostic_tests;
+
 /// The error data type for lexing based on syntactic token with `char` source.
 pub type SyntacticLexerErrorData = error::LexerErrorData<char, RecursionLimitExceeded>;
 /// The error type for lexing based on syntactic token with `char` source.
