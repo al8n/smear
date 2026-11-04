@@ -307,11 +307,11 @@ fn the_two_doors_agree() {
   let mut diagnostics = 0usize;
   let mut rules: BTreeSet<Rule> = BTreeSet::new();
 
-  for (fixture, schema, budget, rules) in documents() {
+  for (fixture, schema, budget, rule_set) in documents() {
     for source in halves(fixture) {
       for (form, padded) in forms(source) {
-        let expected = syntactic(&schema, &padded, &budget, rules);
-        let (actual, recovery) = lossless(&schema, &padded, &budget, rules);
+        let expected = syntactic(&schema, &padded, &budget, rule_set);
+        let (actual, recovery) = lossless(&schema, &padded, &budget, rule_set);
 
         assert!(
           recovery.is_complete(),
