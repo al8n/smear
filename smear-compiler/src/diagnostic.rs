@@ -212,6 +212,12 @@ impl<S> Diagnostic<S> {
 /// needs the schema those symbols index. Pairing the two is what makes a resolved view, so the
 /// door into the contract is the door that was already there —
 /// [`display`](Diagnostic::display).
+///
+/// Its [`Display`](core::fmt::Display) is the sentence alone. Where the diagnostic points is
+/// structure rather than prose —
+/// [`primary`](smear_schema::diagnostic::Diagnose::primary) and the labels, or
+/// [`Diagnostic::span`] and [`Diagnostic::related_span`] — so a renderer that draws the position
+/// from the contract does not print it a second time in the message.
 #[derive(Debug, Clone, Copy)]
 pub struct DiagnosticDisplay<'a, S> {
   diagnostic: &'a Diagnostic<S>,
@@ -311,7 +317,6 @@ where
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let Diagnostic {
       rule,
-      span,
       subject,
       context,
       ..
@@ -351,7 +356,7 @@ where
       Context::Count(count) => write!(f, ", found {count}")?,
       Context::Merge(conflict) => write!(f, ", {conflict}")?,
     }
-    write!(f, " ({}..{})", span.start(), span.end())
+    Ok(())
   }
 }
 

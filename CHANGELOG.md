@@ -49,6 +49,12 @@ All notable changes to Smear are documented in this file.
   with `count()`, not `len()`), report a `size_hint` lower bound of `0`, and stop
   for good at the first index whose accessor answers `None` before the count is
   reached; and `Severity` implements `From<tokora::emitter::Severity>`.
+- `smear-compiler`: a draft §5 diagnostic's message no longer ends in its byte
+  range. `DiagnosticDisplay`'s `Display` wrote the sentence followed by
+  ` (start..end)`; it now writes the sentence alone, so a renderer that draws the
+  position from the contract does not print it twice. The position is where it
+  already was: `Diagnose::primary()` and the labels, and `Diagnostic::span()` and
+  `related_span()`.
 
 ## [0.0.1] - 2026-10-30
 
