@@ -336,6 +336,17 @@ const DECLARED: &[Declared] = &[
     "the_value_a_frame_hands_up_after_a_drain_refusal_is_terminal::frame",
     1,
   ),
+  // al8n/smear#126 phase E: the drain's refusal read as the value it hands up. The door drops
+  // whatever its root returns — a `Parse` keeps a span and a severity, not the payload — so the
+  // cell's root runs a drain of its own over a root that reads everything, and records the
+  // `SyntaxErrorKind` of the `TokenBudgetExhausted` that drain builds. Like `frame` above, it
+  // reaches a frame that stops and never emits: the report stays the door's.
+  (
+    "drain_unless_stopped",
+    "smear-parser/src/graphql/lossless/tests.rs",
+    "the_doors_own_refusals_answer_their_own_codes::budget_root",
+    1,
+  ),
   // Codex round 5's own regression: a door nested inside a door. TWO rows for one cell, and the
   // pair is the point — the outer parse and the composed root each run one, and the cell asserts
   // that their logs are two logs.
