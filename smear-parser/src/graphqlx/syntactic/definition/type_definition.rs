@@ -37,7 +37,7 @@ where
     ContextualKeyword::Input => {
       super::input_object::input_object_after_keyword(inp, start).map(TypeDefinition::InputObject)
     }
-    _ => expected_definition_phase(inp, Expectation::Keyword("type definition")),
+    _ => expected_definition_phase(inp, Expectation::Production("a type definition")),
   }
 }
 
@@ -71,7 +71,7 @@ definition_parser!(
             _ => Err(
               DialectGraphqlxError::unexpected_token(
                 kind,
-                Expectation::Keyword("type definition"),
+                Expectation::Production("a type definition"),
                 span,
               )
               .into(),
@@ -85,7 +85,7 @@ definition_parser!(
       .try_parse_input(inp)?
     {
       ParseAttempt::Accept(definition) => Ok(definition),
-      ParseAttempt::Decline => expected_definition_phase(inp, Expectation::Keyword("type definition")),
+      ParseAttempt::Decline => expected_definition_phase(inp, Expectation::Production("a type definition")),
     }
   }
 );

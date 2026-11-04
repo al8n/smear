@@ -241,12 +241,12 @@ document_parser!(
         match token {
           GraphqlToken::<'inp, Src>::Identifier(_) => match keyword {
             Some(keyword) => {
-              definition_after_keyword(inp, keyword, span, Expectation::Keyword("definition"))
+              definition_after_keyword(inp, keyword, span, Expectation::Production("a definition"))
             }
             None => unexpected_consumed_head::<Src, Ctx, _>(
               span,
               kind,
-              Expectation::Keyword("definition"),
+              Expectation::Production("a definition"),
             ),
           },
           _ => unreachable!("fused full-definition arm received a non-identifier token"),
@@ -257,7 +257,7 @@ document_parser!(
       .try_parse_input(inp)?
     {
       ParseAttempt::Accept(definition) => Ok(definition),
-      ParseAttempt::Decline => expected_document_phase(inp, Expectation::Keyword("definition")),
+      ParseAttempt::Decline => expected_document_phase(inp, Expectation::Production("a definition")),
     }
   }
 );
@@ -281,10 +281,10 @@ document_parser!(
       ParseAttempt::Accept(value) => Some(value),
       ParseAttempt::Decline => None,
     };
-    // `Keyword("definition")` is the expectation the described-`extend` rejection already
+    // `Production("a definition")` is the expectation the described-`extend` rejection already
     // raises from this root: after a description, one of the twelve definition keywords.
     if description.is_some() {
-      refuse_described_shorthand(inp, Expectation::Keyword("definition"))?;
+      refuse_described_shorthand(inp, Expectation::Production("a definition"))?;
     }
     let definition = definition(inp)?;
     Ok(Described::new(
@@ -324,7 +324,7 @@ document_parser!(
        inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
         GraphqlToken::<'inp, Src>::LitInlineStr(value) => {
           let description = StringValue::new(span, value.into());
-          refuse_described_shorthand(inp, Expectation::Keyword("definition or extension"))?;
+          refuse_described_shorthand(inp, Expectation::Production("a definition or an extension"))?;
           let definition = definition(inp)?;
           let span = SimpleSpan::new(span.start(), definition.as_span().end());
           Ok(DefinitionOrExtension::Definition(Described::new(
@@ -340,7 +340,7 @@ document_parser!(
        inp: &mut GraphqlInput<'inp, '_, Src, Ctx>| match token {
         GraphqlToken::<'inp, Src>::LitBlockStr(value) => {
           let description = StringValue::new(span, value.into());
-          refuse_described_shorthand(inp, Expectation::Keyword("definition or extension"))?;
+          refuse_described_shorthand(inp, Expectation::Production("a definition or an extension"))?;
           let definition = definition(inp)?;
           let span = SimpleSpan::new(span.start(), definition.as_span().end());
           Ok(DefinitionOrExtension::Definition(Described::new(
@@ -366,7 +366,7 @@ document_parser!(
               inp,
               keyword,
               span,
-              Expectation::Keyword("definition or extension"),
+              Expectation::Production("a definition or an extension"),
             )
             .map(|definition| {
               let span = *definition.as_span();
@@ -375,7 +375,7 @@ document_parser!(
             None => unexpected_consumed_head::<Src, Ctx, _>(
               span,
               kind,
-              Expectation::Keyword("definition or extension"),
+              Expectation::Production("a definition or an extension"),
             ),
           },
           _ => unreachable!("fused full-document arm received a non-identifier token"),
@@ -392,7 +392,7 @@ document_parser!(
     {
       ParseAttempt::Accept(entry) => Ok(entry),
       ParseAttempt::Decline => {
-        expected_document_phase(inp, Expectation::Keyword("definition or extension"))
+        expected_document_phase(inp, Expectation::Production("a definition or an extension"))
       }
     }
   }

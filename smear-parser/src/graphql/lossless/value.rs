@@ -129,7 +129,7 @@ impl Constness {
   /// **Measured, not assumed: this distinction is currently unobservable.** Collapsing both arms
   /// to `VALUE_HEADS` reds nothing (mutation, in-space silent pass), because the set reaches an
   /// error only as `UnexpectedToken::expected_one_of`, and `lossless/mod.rs`'s `expectation_of`
-  /// folds every multi-kind expectation onto `Expectation::Name` — after which [`Parse`] drops
+  /// folds every multi-kind expectation onto `Expectation::Unspecified` — after which [`Parse`] drops
   /// the payload entirely and exposes span, severity and skipped-token count alone. There is no
   /// door through which a test could read it.
   ///

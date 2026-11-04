@@ -34,7 +34,7 @@ where
       super::type_definition::type_definition_after_keyword(inp, keyword, start)
         .map(TypeSystemDefinition::Type)
     }
-    _ => expected_definition_phase(inp, Expectation::Keyword("type-system definition")),
+    _ => expected_definition_phase(inp, Expectation::Production("a type-system definition")),
   }
 }
 
@@ -54,7 +54,7 @@ where
   Err(
     DialectGraphqlError::unexpected_token(
       kind,
-      Expectation::Keyword("type-system definition"),
+      Expectation::Production("a type-system definition"),
       span,
     )
     .into(),
@@ -102,7 +102,7 @@ definition_parser!(
     {
       ParseAttempt::Accept(definition) => Ok(definition),
       ParseAttempt::Decline => {
-        expected_definition_phase(inp, Expectation::Keyword("type-system definition"))
+        expected_definition_phase(inp, Expectation::Production("a type-system definition"))
       }
     }
   }
@@ -182,7 +182,7 @@ where
   {
     ParseAttempt::Accept(definition) => Ok(definition),
     ParseAttempt::Decline => {
-      expected_definition_phase(inp, Expectation::Keyword("type-system definition"))
+      expected_definition_phase(inp, Expectation::Production("a type-system definition"))
     }
   }
 }
@@ -246,7 +246,7 @@ definition_parser!(
             _ => Err(
               DialectGraphqlError::unexpected_token(
                 kind,
-                Expectation::Keyword("type-system definition or extension"),
+                Expectation::Production("a type-system definition or an extension"),
                 span,
               )
               .into(),
@@ -266,7 +266,7 @@ definition_parser!(
     {
       ParseAttempt::Accept(entry) => Ok(entry),
       ParseAttempt::Decline => {
-        expected_definition_phase(inp, Expectation::Keyword("type-system definition or extension"))
+        expected_definition_phase(inp, Expectation::Production("a type-system definition or an extension"))
       }
     }
   }

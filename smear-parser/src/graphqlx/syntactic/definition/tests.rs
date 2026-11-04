@@ -204,7 +204,7 @@ fn type_system_definitions_commit_where_and_delimiter_diagnostics() {
   assert!(matches!(
     error.into_data(),
     ErrorData::UnexpectedToken(unexpected)
-      if unexpected.expected() == &Expectation::Keyword("directive location")
+      if unexpected.expected() == &Expectation::Production("a directive location")
         && unexpected.found().is_none()
   ));
 }
@@ -230,7 +230,7 @@ fn separator_tails_preserve_leading_spans_and_committed_diagnostics() {
   assert!(matches!(
     error.into_data(),
     ErrorData::UnexpectedToken(unexpected)
-      if unexpected.expected() == &Expectation::Keyword("directive location")
+      if unexpected.expected() == &Expectation::Production("a directive location")
         && unexpected.found().copied() == Some(SyntacticTokenKind::Identifier)
   ));
 
@@ -242,7 +242,7 @@ fn separator_tails_preserve_leading_spans_and_committed_diagnostics() {
   assert!(matches!(
     error.into_data(),
     ErrorData::UnexpectedToken(unexpected)
-      if unexpected.expected() == &Expectation::Keyword("directive location")
+      if unexpected.expected() == &Expectation::Production("a directive location")
         && unexpected.found().is_none()
   ));
 

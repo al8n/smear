@@ -82,8 +82,9 @@ pub(crate) const SPREAD_TAIL_HEADS: &[Kind] = &[Kind::Identifier, Kind::At, Kind
 /// The token kinds a type condition may begin with — one, and it stands for two positions.
 ///
 /// `on` and the name after it are both `Identifier`s, and `expectation_of` collapses every
-/// token-kind expectation onto [`Expectation::Name`](crate::graphql::error::Expectation::Name)
-/// anyway, so a second set naming the keyword would report the same sentence. The precise
+/// token-kind expectation set onto
+/// [`Expectation::Unspecified`](crate::graphql::error::Expectation::Unspecified) anyway, so a
+/// second set naming the keyword would report the same sentence. The precise
 /// "expected the keyword `on`" wording needs the dialect error rather than tokora's
 /// token-kind one, and no production here carries the bound that would reach it.
 pub(crate) const TYPE_CONDITION_HEADS: &[Kind] = &[Kind::Identifier];
@@ -130,8 +131,8 @@ pub(crate) const DESCRIBED_MEMBER_HEADS: &[Kind] =
 /// The last two are *spelling* rules — `DirectiveLocation` admits nineteen names and
 /// `FragmentName` is `Name but not "on"` — which this kind-level set cannot express and does not
 /// try to: `lossless/mod.rs`'s `expectation_of` collapses every token-kind expectation onto
-/// [`Expectation::Name`](crate::graphql::error::Expectation::Name) anyway, so a finer set here
-/// would report the same sentence. The precise wording needs the dialect error rather than
+/// [`Expectation::Unspecified`](crate::graphql::error::Expectation::Unspecified) anyway, so a finer
+/// set here would report the same sentence. The precise wording needs the dialect error rather than
 /// tokora's token-kind one, and no production here carries the bound that would reach it — the
 /// ruling [`TYPE_CONDITION_HEADS`] already records for the keyword `on`.
 pub(crate) const NAME_HEADS: &[Kind] = &[Kind::Identifier];

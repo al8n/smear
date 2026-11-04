@@ -445,7 +445,7 @@ fn executable_productions_commit_required_tails_and_keep_delimiter_diagnostics()
   );
   assert_unexpected(
     drive_str(|inp| operation_type(inp).map(|_| ()), "fragment"),
-    Expectation::Keyword("query, mutation, or subscription"),
+    Expectation::Production("`query`, `mutation` or `subscription`"),
     Some(SyntacticTokenKind::Identifier),
   );
   assert!(

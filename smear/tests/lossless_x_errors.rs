@@ -239,7 +239,7 @@ fn the_two_layers_agree_on_what_end_of_input_reports() {
 /// The third of the four generated impls, and the one that routes through `expectation_of`. The
 /// seven images GraphQL has no counterpart for are the rows a mapper adapted from GraphQL's table
 /// would be missing, so those are the rows asserted here; a missing row falls back to
-/// `Expectation::Name`, which is a plausible-looking wrong answer rather than a crash.
+/// `Expectation::Unspecified`, which drops the expectation from the message rather than crashing.
 #[test]
 fn a_declined_expect_reports_the_graphqlx_expectation_for_its_kind() {
   use smear::parser::lexer::graphqlx::lossless::{LosslessToken, LosslessTokenKind as LK};
@@ -281,7 +281,7 @@ fn a_declined_expect_reports_the_graphqlx_expectation_for_its_kind() {
 
   // A trivia kind is never demanded by any production, so it falls back — which is the arm that
   // makes the fallback provably a fallback rather than the whole table.
-  assert_eq!(expectation_for(LK::Comment), Expectation::Name);
+  assert_eq!(expectation_for(LK::Comment), Expectation::Unspecified);
 }
 
 /// The lexer's error channel lands in the container with its payload intact.

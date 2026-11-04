@@ -716,6 +716,59 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
   },
   Recorded {
     file: "src/graphql/error.rs",
+    name: "Expectation",
+    expected: &[
+      "InlineString",
+      "BlockString",
+      "Dollar",
+      "LParen",
+      "RParen",
+      "Spread",
+      "Colon",
+      "Equal",
+      "At",
+      "LBracket",
+      "RBracket",
+      "LBrace",
+      "RBrace",
+      "Pipe",
+      "Bang",
+      "Ampersand",
+      "ConstInputValue",
+      "InputValue",
+      "Type",
+      "Selection",
+      "VariableDefinition",
+      "OperationType",
+      "ExecutableDefinition",
+      "OperationTypeOrFragment",
+      "FragmentName",
+      "Name",
+      "OperationName",
+      "DirectiveLocation",
+      "FragmentSpreadOrInlineFragment",
+      "IntValue",
+      "BooleanValue",
+      "FloatValue",
+      "NullValue",
+      "EnumValue",
+      "StringValue",
+      "Keyword(&'static str)",
+      "Production(&'static str)",
+      "Unspecified",
+    ],
+    reason: "TWO variants ADDED at the end, and neither is source-breaking: the enum is \
+       `#[non_exhaustive]`, so every downstream exhaustive match already carries a wildcard. \
+       `Production(&'static str)` takes the production descriptions `Keyword` used to carry — \
+       \"a type definition\", \"a definition or an extension\" — so that a diagnostic renders a \
+       real keyword in backticks and a production as a noun phrase; `Keyword` keeps the real \
+       keywords. `Unspecified` replaces the `Name` fallback an absent or multi-kind tokora \
+       expectation used to land on, which named one member of a set as though it were the set; \
+       it renders as nothing, so a message drops its \"expected …\" clause. The other 36 lines \
+       are the merge base's, unedited.",
+  },
+  Recorded {
+    file: "src/graphql/error.rs",
     name: "IntWidth",
     expected: &["I32", "I64"],
     reason: "new enum: the two readings of `Int` the `materialized-numbers` feature ships. No \
@@ -982,8 +1035,8 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   // A scan that stops finding enums has nothing left to check; a scan that finds them and reads
   // no variants out of them is accounted for on the attribute axis and silent on the payload one.
   //
-  // 9 enums = 5 in error.rs + 2 in ast/value.rs + 2 in ast/materialized.rs. 90 variants =
-  // 56 + 17 + 17 across the same three files. Update either count only after checking why it
+  // 9 enums = 5 in error.rs + 2 in ast/value.rs + 2 in ast/materialized.rs. 92 variants =
+  // 58 + 17 + 17 across the same three files. Update either count only after checking why it
   // moved.
   //
   // It has moved twice, and these are the readings. `refactor/materialised-generic` deleted
@@ -998,7 +1051,9 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   // `feat/syntax-diagnostics` then removed fourteen `ErrorData` variants no parse produced and the
   // seven hint enums only they named: 16 -> 9 enums, and 142 -> 89 variants is 39 hint variants
   // and 14 `ErrorData` ones leaving. `RECORDED_REMOVALS` carries the seven. It then added
-  // `ErrorData::Lexical`: 89 -> 90, and the recorded row carries it.
+  // `ErrorData::Lexical`: 89 -> 90, and the recorded row carries it. And it added
+  // `Expectation::Production` and `Expectation::Unspecified`: 90 -> 92, with a recorded row of
+  // their own.
   assert_eq!(
     found.len(),
     9,
@@ -1009,8 +1064,8 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   );
   let variants_read: usize = found.iter().map(|enum_| enum_.variants.len()).sum();
   assert_eq!(
-    variants_read, 90,
-    "the scan read {variants_read} variant(s) out of 9 enums, expected 90 — an enum gained or \
+    variants_read, 92,
+    "the scan read {variants_read} variant(s) out of 9 enums, expected 92 — an enum gained or \
      lost one, or `read_variants` stopped seeing them",
   );
 

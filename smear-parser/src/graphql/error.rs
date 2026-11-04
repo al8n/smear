@@ -133,8 +133,73 @@ pub enum Expectation {
   EnumValue,
   /// A string value was expected.
   StringValue,
-  /// A keyword was expected.
+  /// A keyword was expected: the spelling itself, such as `on` or `fragment`.
   Keyword(&'static str),
+  /// A production was expected, named by a noun phrase that reads after "expected" — "a type
+  /// definition", "a definition or an extension".
+  ///
+  /// [`Keyword`](Self::Keyword) used to carry these too, which made "expected `type definition`"
+  /// read as though `type definition` were something to type.
+  Production(&'static str),
+  /// Nothing more specific is known than that the token found is not one the grammar takes here.
+  ///
+  /// What a conversion lands on when tokora names no expected kind, or several: the one
+  /// expectation slot cannot hold a set, and naming one member of it — `Name` was the old answer —
+  /// would claim a precision the parse does not have. It renders as nothing, so a message drops
+  /// its "expected …" clause rather than naming a guess.
+  Unspecified,
+}
+
+/// What a message says was expected, as the object of "expected …": punctuation and keywords in
+/// backticks, and every other class as a noun phrase — "a name", "a value", "a selection".
+///
+/// [`Unspecified`](Expectation::Unspecified) renders as nothing at all, which is what tells a
+/// message to drop the clause.
+impl core::fmt::Display for Expectation {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::InlineString => f.write_str("a string"),
+      Self::BlockString => f.write_str("a block string"),
+      Self::Dollar => f.write_str("`$`"),
+      Self::LParen => f.write_str("`(`"),
+      Self::RParen => f.write_str("`)`"),
+      Self::Spread => f.write_str("`...`"),
+      Self::Colon => f.write_str("`:`"),
+      Self::Equal => f.write_str("`=`"),
+      Self::At => f.write_str("`@`"),
+      Self::LBracket => f.write_str("`[`"),
+      Self::RBracket => f.write_str("`]`"),
+      Self::LBrace => f.write_str("`{`"),
+      Self::RBrace => f.write_str("`}`"),
+      Self::Pipe => f.write_str("`|`"),
+      Self::Bang => f.write_str("`!`"),
+      Self::Ampersand => f.write_str("`&`"),
+      Self::ConstInputValue => f.write_str("a constant value"),
+      Self::InputValue => f.write_str("a value"),
+      Self::Type => f.write_str("a type"),
+      Self::Selection => f.write_str("a selection"),
+      Self::VariableDefinition => f.write_str("a variable definition"),
+      Self::OperationType => f.write_str("an operation type"),
+      Self::ExecutableDefinition => f.write_str("an executable definition"),
+      Self::OperationTypeOrFragment => f.write_str("an operation type or `fragment`"),
+      Self::FragmentName => f.write_str("a fragment name"),
+      Self::Name => f.write_str("a name"),
+      Self::OperationName => f.write_str("an operation name"),
+      Self::DirectiveLocation => f.write_str("a directive location"),
+      Self::FragmentSpreadOrInlineFragment => {
+        f.write_str("a fragment spread or an inline fragment")
+      }
+      Self::IntValue => f.write_str("an integer"),
+      Self::BooleanValue => f.write_str("a boolean"),
+      Self::FloatValue => f.write_str("a float"),
+      Self::NullValue => f.write_str("`null`"),
+      Self::EnumValue => f.write_str("an enum value"),
+      Self::StringValue => f.write_str("a string"),
+      Self::Keyword(keyword) => write!(f, "`{keyword}`"),
+      Self::Production(production) => f.write_str(production),
+      Self::Unspecified => Ok(()),
+    }
+  }
 }
 
 /// An unexpected token error carrying the found token and the expectation.
@@ -1029,10 +1094,10 @@ const SOURCE: u32 = 0;
 
 /// Writes `, expected {expected}` — or nothing, when the expectation renders as nothing.
 ///
-/// An expectation with nothing to name renders empty rather than as a placeholder, and the clause
-/// is dropped with it: "unexpected `}`" says what is known, where "unexpected `}`, expected a
-/// name" would name a guess. Measured by rendering it once into a sink that only notes whether
-/// anything arrived, so the check allocates nothing and asks nothing of `Exp` beyond `Display`.
+/// [`Expectation::Unspecified`] renders empty rather than as a placeholder, and the clause is
+/// dropped with it: "unexpected `}`" says what is known, where "unexpected `}`, expected a name"
+/// would name a guess. Measured by rendering it once into a sink that only notes whether anything
+/// arrived, so the check allocates nothing and asks nothing of `Exp` beyond `Display`.
 fn expected_clause<Exp>(f: &mut core::fmt::Formatter<'_>, expected: &Exp) -> core::fmt::Result
 where
   Exp: core::fmt::Display,
@@ -1257,8 +1322,9 @@ pub type GraphqlErrors<S> = Errors<S, SyntacticTokenKind, char, Expectation>;
 // pins); Tokora token errors use the concrete `SyntacticTokenKind`, and found
 // tokens are reduced to that dialect token kind.
 // A single concrete Tokora expected kind is mapped into the corresponding
-// GraphQL expectation, while absent or multi-kind expectations retain the historic
-// `Name` fallback because [`ErrorData::UnexpectedToken`] has one expectation slot.
+// GraphQL expectation, while absent or multi-kind expectations fall back to
+// `Unspecified` because [`ErrorData::UnexpectedToken`] has one expectation slot — the
+// fallback used to be `Name`, which named one member of a set as though it were the set.
 // Diagnostics-carrying families (missing separator/element, full container, too
 // few) map to `Other` exactly as the frozen glue did — these are emitter paths a
 // `Vec` container and a fail-fast context rarely reach. A lexer batch keeps its first
@@ -1289,11 +1355,11 @@ fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
     // `#[allow]` and not a deletion. `SyntacticTokenKind` is `#[non_exhaustive]`, which forced this
     // arm while the lexer was a separate crate; with the crates merged (#83) the compiler can see
     // every variant from here and calls it unreachable. The arm stays because deleting it would
-    // turn "a new token kind falls back to `Name`" into "a new token kind fails to compile" — a
-    // real change to this function's contract, and this merge is a relocation. Revisiting that
-    // choice is follow-up work, not part of the move.
+    // turn "a new token kind falls back to `Unspecified`" into "a new token kind fails to
+    // compile" — a real change to this function's contract, and this merge is a relocation.
+    // Revisiting that choice is follow-up work, not part of the move.
     #[allow(unreachable_patterns)]
-    _ => Expectation::Name,
+    _ => Expectation::Unspecified,
   }
 }
 
@@ -1301,7 +1367,7 @@ fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
 fn expectation_from_tokora(expected: Option<Expected<'_, SyntacticTokenKind>>) -> Expectation {
   match expected {
     Some(Expected::One(kind)) => expectation_from_token_kind(kind),
-    _ => Expectation::Name,
+    _ => Expectation::Unspecified,
   }
 }
 
@@ -1577,21 +1643,25 @@ mod tests {
     }
   }
 
+  /// An absent or multi-kind expected set names no expectation, rather than one member of the set.
+  ///
+  /// It fell back to `Name` until the diagnostic contract rendered the expectation into the
+  /// message, where "expected a name" for a `{`-or-`[` set reads as a fact about the grammar.
   #[test]
-  fn tokora_unrepresentable_expected_sets_keep_the_name_fallback() {
+  fn tokora_unrepresentable_expected_sets_name_no_expectation() {
     static ONE_OF: [SyntacticTokenKind; 2] =
       [SyntacticTokenKind::LBrace, SyntacticTokenKind::LBracket];
 
     let without_expected =
       TokoraTokenError::of(SimpleSpan::new(4, 9)).with_found(SyntacticToken::Identifier("found"));
-    assert_expected(without_expected.into(), Expectation::Name);
+    assert_expected(without_expected.into(), Expectation::Unspecified);
 
     let one_of = TokoraTokenError::expected_one_of_with_found(
       SimpleSpan::new(4, 9),
       SyntacticToken::Identifier("found"),
       &ONE_OF,
     );
-    assert_expected(one_of.into(), Expectation::Name);
+    assert_expected(one_of.into(), Expectation::Unspecified);
 
     assert_expected(
       SeparatedError::leading(unexpected_with(SyntacticTokenKind::LBrace)).into(),

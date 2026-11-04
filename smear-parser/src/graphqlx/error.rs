@@ -123,8 +123,74 @@ pub enum Expectation {
   ///
   /// [`Expectation`]: crate::graphql::error::Expectation
   FragmentName,
-  /// A keyword with the given spelling.
+  /// A keyword with the given spelling, such as `extend` or `set`.
   Keyword(&'static str),
+  /// A production, named by a noun phrase that reads after "expected" — "a type definition",
+  /// "a directive location".
+  ///
+  /// GraphQL's twin carries why this is not a [`Keyword`](Self::Keyword).
+  Production(&'static str),
+  /// Nothing more specific is known than that the token found is not one the grammar takes here.
+  ///
+  /// What a conversion lands on when tokora names no expected kind, or several, and what a genuine
+  /// end of input names. It renders as nothing, so a message drops its "expected …" clause rather
+  /// than naming a guess.
+  Unspecified,
+}
+
+/// What a message says was expected, as the object of "expected …": punctuation and keywords in
+/// backticks, and every other class as a noun phrase. GraphQL's twin carries the rule;
+/// [`Unspecified`](Expectation::Unspecified) renders as nothing.
+impl core::fmt::Display for Expectation {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::InlineString => f.write_str("a string"),
+      Self::BlockString => f.write_str("a block string"),
+      Self::Dollar => f.write_str("`$`"),
+      Self::LParen => f.write_str("`(`"),
+      Self::RParen => f.write_str("`)`"),
+      Self::Spread => f.write_str("`...`"),
+      Self::Colon => f.write_str("`:`"),
+      Self::Equal => f.write_str("`=`"),
+      Self::At => f.write_str("`@`"),
+      Self::LAngle => f.write_str("`<`"),
+      Self::RAngle => f.write_str("`>`"),
+      Self::LBracket => f.write_str("`[`"),
+      Self::RBracket => f.write_str("`]`"),
+      Self::LBrace => f.write_str("`{`"),
+      Self::RBrace => f.write_str("`}`"),
+      Self::Asterisk => f.write_str("`*`"),
+      Self::Plus => f.write_str("`+`"),
+      Self::Minus => f.write_str("`-`"),
+      Self::PathSeparator => f.write_str("`::`"),
+      Self::FatArrow => f.write_str("`=>`"),
+      Self::Pipe => f.write_str("`|`"),
+      Self::Bang => f.write_str("`!`"),
+      Self::Ampersand => f.write_str("`&`"),
+      Self::Name => f.write_str("a name"),
+      Self::Path => f.write_str("a path"),
+      Self::IntValue => f.write_str("an integer"),
+      Self::FloatValue => f.write_str("a float"),
+      Self::StringValue => f.write_str("a string"),
+      Self::BooleanValue => f.write_str("a boolean"),
+      Self::NullValue => f.write_str("`null`"),
+      Self::EnumValue => f.write_str("an enum value"),
+      Self::VariableValue => f.write_str("a variable"),
+      Self::Type => f.write_str("a type"),
+      Self::InputValue => f.write_str("a value"),
+      Self::ConstInputValue => f.write_str("a constant value"),
+      Self::ImportClause => f.write_str("an import clause"),
+      Self::ImportMember => f.write_str("an import member"),
+      Self::Import => f.write_str("`import`"),
+      Self::From => f.write_str("`from`"),
+      Self::As => f.write_str("`as`"),
+      Self::OperationTypeOrFragment => f.write_str("an operation type or `fragment`"),
+      Self::FragmentName => f.write_str("a fragment name"),
+      Self::Keyword(keyword) => write!(f, "`{keyword}`"),
+      Self::Production(production) => f.write_str(production),
+      Self::Unspecified => Ok(()),
+    }
+  }
 }
 
 /// An unexpected token with the found token kind and typed expectation.
@@ -468,8 +534,8 @@ const SOURCE: u32 = 0;
 
 /// Writes `, expected {expected}` — or nothing, when the expectation renders as nothing.
 ///
-/// GraphQL's twin carries the reasoning: an expectation with nothing to name renders empty, and
-/// the clause is dropped with it rather than naming a guess.
+/// GraphQL's twin carries the reasoning: [`Expectation::Unspecified`] renders empty, and the
+/// clause is dropped with it rather than naming a guess.
 fn expected_clause<Exp>(f: &mut core::fmt::Formatter<'_>, expected: &Exp) -> core::fmt::Result
 where
   Exp: core::fmt::Display,
@@ -614,7 +680,7 @@ impl<S, T, Char, StateError> Error<S, T, Char, Expectation, StateError> {
   /// And it is spelled as an [`UnexpectedToken`] with no found token, because **that is what this
   /// dialect's own `UnexpectedEot` conversion already produces** — the syntactic layer reports the
   /// identical event as
-  /// `maybe_unexpected_token(None, Expectation::InputValue, …)`, and the lossless layer is
+  /// `maybe_unexpected_token(None, Expectation::Unspecified, …)`, and the lossless layer is
   /// compared against the syntactic one, input by input, by the acceptance-parity gate. Two
   /// spellings of one event across two layers of one dialect is a difference no consumer could
   /// act on and every consumer would have to handle.
@@ -631,7 +697,7 @@ impl<S, T, Char, StateError> Error<S, T, Char, Expectation, StateError> {
   /// `smear/tests/lossless_x_errors.rs` pins the two layers together on both events.
   #[inline]
   pub const fn unexpected_end_of_input(span: Span) -> Self {
-    Self::maybe_unexpected_token(None, Expectation::InputValue, span)
+    Self::maybe_unexpected_token(None, Expectation::Unspecified, span)
   }
 }
 
@@ -726,11 +792,11 @@ fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
     // `#[allow]` and not a deletion. `SyntacticTokenKind` is `#[non_exhaustive]`, which forced this
     // arm while the lexer was a separate crate; with the crates merged (#83) the compiler can see
     // every variant from here and calls it unreachable. The arm stays because deleting it would
-    // turn "a new token kind falls back to `Name`" into "a new token kind fails to compile" — a
-    // real change to this function's contract, and this merge is a relocation. Revisiting that
-    // choice is follow-up work, not part of the move.
+    // turn "a new token kind falls back to `Unspecified`" into "a new token kind fails to
+    // compile" — a real change to this function's contract, and this merge is a relocation.
+    // Revisiting that choice is follow-up work, not part of the move.
     #[allow(unreachable_patterns)]
-    _ => Expectation::Name,
+    _ => Expectation::Unspecified,
   }
 }
 
@@ -738,7 +804,7 @@ fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
 fn expectation_from_tokora(expected: Option<Expected<'_, SyntacticTokenKind>>) -> Expectation {
   match expected {
     Some(Expected::One(kind)) => expectation_from_token_kind(kind),
-    _ => Expectation::Name,
+    _ => Expectation::Unspecified,
   }
 }
 
@@ -836,7 +902,7 @@ impl<S, Lang: ?Sized, Set: Clone + 'static> From<UnexpectedEot<usize, Lang, Set>
     if err.is_terminal() {
       GraphqlxError::terminal_end_of_input(span).into()
     } else {
-      GraphqlxError::maybe_unexpected_token(None, Expectation::InputValue, span).into()
+      GraphqlxError::maybe_unexpected_token(None, Expectation::Unspecified, span).into()
     }
   }
 }

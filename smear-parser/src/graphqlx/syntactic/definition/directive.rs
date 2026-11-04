@@ -70,13 +70,13 @@ definition_parser!(
         None => Err(
           DialectGraphqlxError::unexpected_token(
             token.kind(),
-            Expectation::Keyword("directive location"),
+            Expectation::Production("a directive location"),
             span,
           )
           .into(),
         ),
       },
-      None => expected_definition_phase(inp, Expectation::Keyword("directive location")),
+      None => expected_definition_phase(inp, Expectation::Production("a directive location")),
     }
   }
 );
