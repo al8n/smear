@@ -79,11 +79,15 @@ pub(crate) enum StringToken {
 /// - **A `\` before bytes that are not a scalar.** `\\[^"\\/bfnrtu]` takes any
 ///   scalar after the backslash, so only ill-formed bytes are left over, and
 ///   the error token runs from the backslash to where they stop being a prefix
-///   of a valid sequence.
+///   of a valid sequence. That is the backslash alone when the next byte is no
+///   prefix of any sequence, and that byte then gets an `UnsupportedCharacter`
+///   of its own; a truncated prefix is swallowed into the backslash's token.
 ///
-/// The two backslash shapes answer `StringError::default()`, which is what the
-/// `str` twin of this grammar answers for the same input — it has no callback —
-/// so the two sources still report a dangling backslash alike.
+/// Both backslash shapes answer [`StringError::IncompleteEscape`] at the
+/// backslash's own byte — never at the error token, which a swallowed prefix
+/// lengthens. The `str` twin's callback answers the same for the one shape a
+/// text source can reach, the first, so the two sources still report a
+/// dangling backslash alike.
 ///
 /// Like the escape callbacks, this answers in the sub-lexer's own offsets, and
 /// [`lex_inline_str_from_bytes`] bumps every error by the literal's base.
@@ -107,6 +111,10 @@ fn unmatched(lexer: &mut Lexer<'_, StringToken>) -> StringError<u8> {
   match lexer.slice().first() {
     Some(&lead) if lead >= 0x80 => {
       StringError::UnsupportedCharacter(Lexeme::Range(lexer.span().into()))
+    }
+    Some(&b'\\') => {
+      let start = lexer.span().start;
+      StringError::IncompleteEscape(Span::new(start, start + 1))
     }
     _ => StringError::default(),
   }

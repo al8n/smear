@@ -22,6 +22,20 @@ All notable changes to Smear are documented in this file.
   feature of `smear`, `smear-lexer` and `smear-parser` now enables tokora's
   `smol-bytes_0_2` integration instead of `smol_bytes_0_1`, so the four
   smol-bytes source types are smol-bytes 0.2's. Supersedes #235.
+- `smear-compiler`: `Rule::NoSchemaIntrospection`, an opt-in policy rule that
+  refuses every `__schema` and `__type` field selection an operation reaches,
+  at the field's name. It is the policy graphql-js ships as
+  `NoSchemaIntrospectionCustomRule`, matched by name rather than by resolved
+  type. It is outside `RuleSet::ALL`, so `validate_executable` still accepts
+  introspection; opt in with `RuleSet::ALL.with(Rule::NoSchemaIntrospection)`.
+  `__typename` is never refused. Code
+  `smear::validation::no-schema-introspection`.
+- `smear-lexer`: a backslash that no character follows in an inline string
+  literal is refused as `StringError::IncompleteEscape`, at the backslash's
+  byte, instead of the positionless `StringError::Other("unknown")`: the input
+  ends right after it, or, in a byte source, the bytes after it are not
+  well-formed UTF-8. `StringError` is not `#[non_exhaustive]`, so the new
+  variant breaks an exhaustive `match` on it.
 
 ## [0.0.1] - 2026-10-30
 

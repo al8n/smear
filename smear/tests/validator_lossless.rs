@@ -272,12 +272,12 @@ fn forms(src: &str) -> Vec<(&'static str, String)> {
     .collect()
 }
 
-/// Every document in the corpus: both halves of every fixture, with the schema and budget that
-/// fixture is measured under.
+/// Every document in the corpus: both halves of every fixture, with the schema, budget and rule
+/// set that fixture is measured under.
 ///
 /// The schema is built once per fixture and both halves borrow it, so the sweep pays thirty
 /// builds rather than sixty for a value that is by construction the same on both sides.
-fn documents() -> Vec<(&'static Fixture, Schema, Budget)> {
+fn documents() -> Vec<(&'static Fixture, Schema, Budget, RuleSet)> {
   FIXTURES
     .iter()
     .map(|fixture| {
@@ -285,6 +285,7 @@ fn documents() -> Vec<(&'static Fixture, Schema, Budget)> {
         fixture,
         build(fixture.schema.unwrap_or(SCHEMA)),
         fixture.budget.unwrap_or_default(),
+        fixture.rules.unwrap_or(RuleSet::ALL),
       )
     })
     .collect()
@@ -306,11 +307,11 @@ fn the_two_doors_agree() {
   let mut diagnostics = 0usize;
   let mut rules: BTreeSet<Rule> = BTreeSet::new();
 
-  for (fixture, schema, budget) in documents() {
+  for (fixture, schema, budget, rules) in documents() {
     for source in halves(fixture) {
       for (form, padded) in forms(source) {
-        let expected = syntactic(&schema, &padded, &budget, RuleSet::ALL);
-        let (actual, recovery) = lossless(&schema, &padded, &budget, RuleSet::ALL);
+        let expected = syntactic(&schema, &padded, &budget, rules);
+        let (actual, recovery) = lossless(&schema, &padded, &budget, rules);
 
         assert!(
           recovery.is_complete(),
@@ -370,11 +371,11 @@ fn the_agreement_is_not_vacuous() {
   let mut lossless_rules: BTreeSet<Rule> = BTreeSet::new();
   let mut invalid_documents_with_findings = 0usize;
 
-  for (fixture, schema, budget) in documents() {
+  for (fixture, schema, budget, rules) in documents() {
     for source in halves(fixture) {
       for (_, padded) in forms(source) {
-        let expected = syntactic(&schema, &padded, &budget, RuleSet::ALL);
-        let (actual, _) = lossless(&schema, &padded, &budget, RuleSet::ALL);
+        let expected = syntactic(&schema, &padded, &budget, rules);
+        let (actual, _) = lossless(&schema, &padded, &budget, rules);
         syntactic_total += expected.len();
         lossless_total += actual.len();
         syntactic_rules.extend(expected.iter().map(Diagnostic::rule));
@@ -484,13 +485,14 @@ fn dropping_one_rule_from_one_door_is_caught() {
   for fixture in FIXTURES {
     let schema = build(fixture.schema.unwrap_or(SCHEMA));
     let budget = fixture.budget.unwrap_or_default();
+    let rules = fixture.rules.unwrap_or(RuleSet::ALL);
 
-    let expected = syntactic(&schema, fixture.invalid, &budget, RuleSet::ALL);
+    let expected = syntactic(&schema, fixture.invalid, &budget, rules);
     let (perturbed, _) = lossless(
       &schema,
       fixture.invalid,
       &budget,
-      RuleSet::ALL.without(fixture.rule),
+      rules.without(fixture.rule),
     );
     assert_ne!(
       expected, perturbed,
@@ -518,16 +520,16 @@ fn a_diagnostic_points_at_the_same_bytes_through_both_doors() {
   let mut checked = 0usize;
   let mut moved = 0usize;
 
-  for (fixture, schema, budget) in documents() {
+  for (fixture, schema, budget, rules) in documents() {
     for source in halves(fixture) {
-      let compact = syntactic(&schema, source, &budget, RuleSet::ALL);
+      let compact = syntactic(&schema, source, &budget, rules);
       if compact.is_empty() {
         continue;
       }
 
       for (form, padded) in forms(source) {
-        let expected = syntactic(&schema, &padded, &budget, RuleSet::ALL);
-        let (actual, _) = lossless(&schema, &padded, &budget, RuleSet::ALL);
+        let expected = syntactic(&schema, &padded, &budget, rules);
+        let (actual, _) = lossless(&schema, &padded, &budget, rules);
         assert_eq!(expected.len(), actual.len());
 
         for (index, (left, right)) in expected.iter().zip(actual.iter()).enumerate() {
@@ -580,13 +582,13 @@ fn the_padding_is_load_bearing() {
   let mut discriminating = 0usize;
   let mut total = 0usize;
 
-  for (fixture, schema, budget) in documents() {
+  for (fixture, schema, budget, rules) in documents() {
     for source in halves(fixture) {
       for (form, padded) in forms(source) {
         if form == "compact" {
           continue;
         }
-        for diagnostic in syntactic(&schema, &padded, &budget, RuleSet::ALL) {
+        for diagnostic in syntactic(&schema, &padded, &budget, rules) {
           total += 1;
           let start = diagnostic.span().start();
           let end = diagnostic.span().end();
@@ -628,14 +630,14 @@ fn a_half_typed_document_still_gets_an_answer() {
   let mut answered = 0usize;
   let mut recovered_partially = 0usize;
 
-  for (fixture, schema, budget) in documents() {
+  for (fixture, schema, budget, rules) in documents() {
     for source in halves(fixture) {
       for cut in boundaries(source) {
         if cut == 0 || cut == source.len() {
           continue;
         }
         let half = &source[..cut];
-        let (diagnostics, recovery) = lossless(&schema, half, &budget, RuleSet::ALL);
+        let (diagnostics, recovery) = lossless(&schema, half, &budget, rules);
         truncations += 1;
         if !diagnostics.is_empty() {
           answered += 1;

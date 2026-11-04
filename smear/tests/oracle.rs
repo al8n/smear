@@ -540,6 +540,9 @@ fn same_string_error(byte: &StringError<u8>, str_: &StringError<char>) -> bool {
     (StringError::UnexpectedEscapedCharacter(b), StringError::UnexpectedEscapedCharacter(s)) => {
       same_escaped_character(b, s)
     }
+    // `IncompleteEscape`'s payload is a span, which carries no `Char` -- same
+    // concrete type either side.
+    (StringError::IncompleteEscape(b), StringError::IncompleteEscape(s)) => b == s,
     // `Unterminated`'s payload (`UnexpectedEnd<LitStrDelimiterHint>`) carries
     // no `Char` -- same concrete type either side.
     (StringError::Unterminated(b), StringError::Unterminated(s)) => b == s,

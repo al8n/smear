@@ -23,7 +23,7 @@
 //!
 //! [`liveness_floor`]: ../validator_rules.rs
 
-use smear::validator::{Budget, Rule, SchemaErrorKind};
+use smear::validator::{Budget, Rule, RuleSet, SchemaErrorKind};
 
 /// The schema every fixture without an override validates against.
 ///
@@ -179,6 +179,12 @@ pub struct Fixture {
   /// **default** bound holds against a genuinely hostile document is `validator_merge.rs`'s job,
   /// and it reads the units and the working set the refusal costs while it is there.
   pub budget: Option<Budget>,
+  /// A [`RuleSet`] override; `None` means [`RuleSet::ALL`].
+  ///
+  /// For the opt-in policy rules, which are in `Rule::ALL` — so the liveness floor asks for a
+  /// fixture — and outside `RuleSet::ALL`, so a fixture run under the default set could never make
+  /// one fire. Every reader of this table runs a fixture under this set, both halves alike.
+  pub rules: Option<RuleSet>,
   /// A document that makes [`Fixture::rule`] fire.
   pub invalid: &'static str,
   /// The **complete** set of rules [`Fixture::invalid`] fires.
@@ -196,6 +202,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::OperationTypeExistence,
     schema: Some(QUERY_ONLY),
     budget: None,
+    rules: None,
     invalid: "mutation goodbyeMutation { goodbye }",
     fires: &[Rule::OperationTypeExistence],
     valid: "query helloQuery { ok }",
@@ -204,6 +211,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::OperationNameUniqueness,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "query getName { dog { name } } query getName { dog { nickname } }",
     fires: &[Rule::OperationNameUniqueness],
     valid: "query getName { dog { name } } query getNickname { dog { nickname } }",
@@ -212,6 +220,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::LoneAnonymousOperation,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { name } } query getName { dog { nickname } }",
     fires: &[Rule::LoneAnonymousOperation],
     valid: "{ dog { name } }",
@@ -220,6 +229,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::SingleRootField,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "subscription sub { newMessage { body } disallowedSecondRootField }",
     fires: &[Rule::SingleRootField],
     valid: "subscription sub { newMessage { body } }",
@@ -229,6 +239,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::FieldSelections,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { meowVolume } }",
     fires: &[Rule::FieldSelections],
     valid: "{ dog { barkVolume } }",
@@ -237,6 +248,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::FieldSelectionMerging,
     schema: None,
     budget: None,
+    rules: None,
     // The specification's own `conflictingBecauseAlias`. It fires twice, because the pair breaks
     // two of the three requirements at once: `nickname` is `String` where `name` is `String!`, and
     // the two are not the same field.
@@ -249,6 +261,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::LeafFieldSelections,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { barkVolume { sinceWhen } } }",
     fires: &[Rule::LeafFieldSelections],
     valid: "{ dog { barkVolume } }",
@@ -258,6 +271,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::ArgumentNames,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { isHouseTrained(atOtherHomes: true, unless: false) } }",
     fires: &[Rule::ArgumentNames],
     valid: "{ dog { isHouseTrained(atOtherHomes: true) } }",
@@ -266,6 +280,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::ArgumentUniqueness,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { isHouseTrained(atOtherHomes: true, atOtherHomes: false) } }",
     fires: &[Rule::ArgumentUniqueness],
     valid: "{ dog { isHouseTrained(atOtherHomes: true) } }",
@@ -274,6 +289,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::RequiredArguments,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { doesKnowCommand } }",
     fires: &[Rule::RequiredArguments],
     valid: "{ dog { doesKnowCommand(dogCommand: SIT) } }",
@@ -283,6 +299,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::FragmentNameUniqueness,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { ...part } } fragment part on Dog { name } fragment part on Dog { nickname }",
     fires: &[Rule::FragmentNameUniqueness],
     valid: "{ dog { ...part ...other } } fragment part on Dog { name } \
@@ -292,6 +309,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::FragmentSpreadTypeExistence,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { ...part } } fragment part on NotInSchema { name }",
     fires: &[Rule::FragmentSpreadTypeExistence],
     valid: "{ dog { ...part } } fragment part on Dog { name }",
@@ -300,6 +318,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::FragmentsOnCompositeTypes,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { ...part } } fragment part on Int { something }",
     fires: &[Rule::FragmentsOnCompositeTypes],
     valid: "{ dog { ...part } } fragment part on Dog { name }",
@@ -308,6 +327,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::FragmentsMustBeUsed,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { name } } fragment nameFragment on Dog { name }",
     fires: &[Rule::FragmentsMustBeUsed],
     valid: "{ dog { ...nameFragment } } fragment nameFragment on Dog { name }",
@@ -316,6 +336,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::FragmentSpreadTargetDefined,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { ...undefinedFragment } }",
     fires: &[Rule::FragmentSpreadTargetDefined],
     valid: "{ dog { ...definedFragment } } fragment definedFragment on Dog { name }",
@@ -324,6 +345,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::FragmentSpreadsMustNotFormCycles,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { ...nameFragment } } fragment nameFragment on Dog { name ...barkFragment } \
               fragment barkFragment on Dog { barkVolume ...nameFragment }",
     fires: &[Rule::FragmentSpreadsMustNotFormCycles],
@@ -334,6 +356,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::FragmentSpreadIsPossible,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ catOrDog { ... on Cat { ...dogFragment } } } \
               fragment dogFragment on Dog { barkVolume }",
     fires: &[Rule::FragmentSpreadIsPossible],
@@ -345,6 +368,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::ValuesOfCorrectType,
     schema: None,
     budget: None,
+    rules: None,
     invalid: r#"{ arguments { intArgField(intArg: "123") } }"#,
     fires: &[Rule::ValuesOfCorrectType],
     valid: "{ arguments { intArgField(intArg: 123) } }",
@@ -353,6 +377,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::InputObjectFieldNames,
     schema: None,
     budget: None,
+    rules: None,
     invalid: r#"{ findDog(searchBy: { favoriteCookieFlavor: "Bacon" }) { name } }"#,
     fires: &[Rule::InputObjectFieldNames],
     valid: r#"{ findDog(searchBy: { name: "Fido" }) { name } }"#,
@@ -361,6 +386,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::InputObjectFieldUniqueness,
     schema: None,
     budget: None,
+    rules: None,
     invalid: r#"{ findDog(searchBy: { name: "Fido", name: "Milou" }) { name } }"#,
     fires: &[Rule::InputObjectFieldUniqueness],
     valid: r#"{ findDog(searchBy: { name: "Fido" }) { name } }"#,
@@ -369,6 +395,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::InputObjectRequiredFields,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ requiredInput(input: { opt: 1 }) }",
     fires: &[Rule::InputObjectRequiredFields],
     valid: "{ requiredInput(input: { req: 1 }) }",
@@ -378,6 +405,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::DirectivesAreDefined,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { name @undefinedDirective } }",
     fires: &[Rule::DirectivesAreDefined],
     valid: "{ dog { name @skip(if: true) } }",
@@ -386,6 +414,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::DirectivesAreInValidLocations,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "query getName @skip(if: true) { dog { name } }",
     fires: &[Rule::DirectivesAreInValidLocations],
     valid: "query getName @onQuery { dog { name } }",
@@ -394,6 +423,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::DirectivesAreUniquePerLocation,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "{ dog { name @skip(if: true) @skip(if: false) } }",
     fires: &[Rule::DirectivesAreUniquePerLocation],
     valid: "{ dog { name @repeatableField @repeatableField } }",
@@ -403,6 +433,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::VariableUniqueness,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "query houseTrained($atOtherHomes: Boolean, $atOtherHomes: Boolean) \
               { dog { isHouseTrained(atOtherHomes: $atOtherHomes) } }",
     fires: &[Rule::VariableUniqueness],
@@ -415,6 +446,7 @@ pub const FIXTURES: &[Fixture] = &[
     // The variable is also unused, and cannot be otherwise: no argument anywhere can have an
     // object type, so there is no position a `Cat` variable could legally be used in.
     budget: None,
+    rules: None,
     invalid: "query takesCat($cat: Cat) { dog { name } }",
     fires: &[Rule::VariablesAreInputTypes, Rule::AllVariablesUsed],
     valid: "query takesBoolean($atOtherHomes: Boolean) \
@@ -424,6 +456,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::AllVariableUsesDefined,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "query variableIsNotDefined { dog { isHouseTrained(atOtherHomes: $atOtherHomes) } }",
     fires: &[Rule::AllVariableUsesDefined],
     valid: "query variableIsDefined($atOtherHomes: Boolean) \
@@ -433,6 +466,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::AllVariablesUsed,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "query variableUnused($atOtherHomes: Boolean) { dog { name } }",
     fires: &[Rule::AllVariablesUsed],
     valid: "query variableUsed($atOtherHomes: Boolean) \
@@ -442,6 +476,7 @@ pub const FIXTURES: &[Fixture] = &[
     rule: Rule::AllVariableUsagesAreAllowed,
     schema: None,
     budget: None,
+    rules: None,
     invalid: "query intCannotGoIntoBoolean($intArg: Int) \
               { arguments { booleanArgField(booleanArg: $intArg) } }",
     fires: &[Rule::AllVariableUsagesAreAllowed],
@@ -455,6 +490,7 @@ pub const FIXTURES: &[Fixture] = &[
     // `Nest` is self-referential, so the response shape can be as deep as the fixture likes and
     // nothing else about the document changes between the two halves.
     budget: Some(Budget::new(3, Budget::DEFAULT_MERGE_WORK)),
+    rules: None,
     invalid: "{ nest { nest { nest { leaf } } } }",
     fires: &[Rule::MergeDepthBudget],
     valid: "{ nest { nest { leaf } } }",
@@ -468,9 +504,22 @@ pub const FIXTURES: &[Fixture] = &[
     // the interner and the memo their own charges and left this at 24 — below the cost of the
     // *valid* twin, which made the clean half of the corpus produce a finding.
     budget: Some(Budget::new(Budget::DEFAULT_MERGE_DEPTH, 40)),
+    rules: None,
     invalid: "{ dog { name nickname barkVolume } }",
     fires: &[Rule::MergeWorkBudget],
     valid: "{ dog { name } }",
+  },
+  // -- policy -----------------------------------------------------------------------------------
+  Fixture {
+    rule: Rule::NoSchemaIntrospection,
+    schema: None,
+    budget: None,
+    // Opt-in: under `RuleSet::ALL` this document is valid, which `validator_rules.rs` pins.
+    rules: Some(RuleSet::ALL.with(Rule::NoSchemaIntrospection)),
+    invalid: "{ __schema { queryType { name } } }",
+    fires: &[Rule::NoSchemaIntrospection],
+    // `__typename` reads no schema, so the policy never refuses it.
+    valid: "{ __typename }",
   },
 ];
 

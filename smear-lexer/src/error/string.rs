@@ -627,6 +627,15 @@ pub enum StringError<Char = char> {
   UnexpectedLineTerminator(UnexpectedLexeme<Char, LineTerminatorHint>),
   /// An unexpected escaped character in a string literal.
   UnexpectedEscapedCharacter(EscapedCharacter<Char>),
+  /// A backslash that no character follows: the input ends right after it, or (byte sources only)
+  /// the bytes after it are not well-formed UTF-8.
+  ///
+  /// The span is the backslash's single byte. Ill-formed bytes after it are reported on their own,
+  /// as [`UnsupportedCharacter`](Self::UnsupportedCharacter), when they are no prefix of any
+  /// sequence; a truncated prefix is swallowed into the backslash's token and not reported
+  /// separately.
+  #[from(skip)]
+  IncompleteEscape(Span),
   /// A unopened string literal. e.g. a string literal that starts with a non-quote character.
   Unopened(UnexpectedLexeme<Option<Char>, LitStrDelimiterHint>),
   /// An unterminated string literal.
@@ -725,6 +734,9 @@ impl<Char> StringError<Char> {
       }
       Self::UnsupportedCharacter(ch) => {
         ch.bump(&n);
+      }
+      Self::IncompleteEscape(span) => {
+        span.bump(&n);
       }
       Self::Unicode(unicode) => {
         unicode.bump(n);

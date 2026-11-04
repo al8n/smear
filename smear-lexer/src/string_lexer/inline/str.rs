@@ -15,7 +15,7 @@ use crate::{
 use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInlineStr};
 
 #[derive(Logos, Debug)]
-#[logos(crate = tokora::logos, extras = usize, error(StringError))]
+#[logos(crate = tokora::logos, extras = usize, error(StringError, unmatched))]
 pub(crate) enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
   #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
@@ -51,6 +51,27 @@ pub(crate) enum StringToken {
   /// all Unicode scalars except: quote, backslash, and line terminators.
   #[regex(r#"[^"\\\r\n]+"#)]
   StringCharacters,
+}
+
+/// The error for input no rule of [`StringToken`] matches.
+///
+/// Every scalar other than `"`, `\`, CR and LF is
+/// [`StringCharacters`](StringToken::StringCharacters), those four have rules
+/// of their own, and `\\[^"\\/bfnrtu]` takes a backslash before any scalar. So
+/// the one shape that reaches this is a lone `\` at the end of input, and it is
+/// [`StringError::IncompleteEscape`] at the backslash's byte — what the byte
+/// twin of this grammar answers for the same input.
+///
+/// Anything else reaching here would be a grammar change, and answers the
+/// default rather than a position this has not established.
+#[inline]
+fn unmatched(lexer: &mut Lexer<'_, StringToken>) -> StringError<char> {
+  if lexer.slice().starts_with('\\') {
+    let start = lexer.span().start;
+    StringError::IncompleteEscape(Span::new(start, start + 1))
+  } else {
+    StringError::default()
+  }
 }
 
 #[inline(always)]

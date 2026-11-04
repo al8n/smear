@@ -222,6 +222,23 @@ where
       }
     }
 
+    // The opt-in introspection policy, which is not a draft rule. By the field's own name, so an
+    // alias does not launder it, and independent of `definition`, so a name the schema does not
+    // resolve is refused all the same — which is also why it is not one of
+    // `reads_field_positions`' readers. `check` reports a fragment once however often it is
+    // spread, and `in_operation` keeps a fragment no operation reaches silent: that walk runs with
+    // it false. Asked after `on`, so a set without the rule reads no byte of the name, and
+    // `matches!` on a byte-string pattern compares the length first and then at most eight bytes
+    // however long the spelling is — `O(1)`, inside the iteration `walk_selections` already
+    // charged for.
+    if check
+      && self.in_operation
+      && self.on(Rule::NoSchemaIntrospection)
+      && matches!(name_bytes(name), b"__schema" | b"__type")
+    {
+      self.report_name(Rule::NoSchemaIntrospection, name, Context::None)?;
+    }
+
     let arguments = field
       .arguments()
       .map_or(&[][..], |arguments| arguments.arguments());
