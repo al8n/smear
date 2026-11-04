@@ -128,7 +128,7 @@ pub enum Ceiling {
 }
 
 impl Ceiling {
-  /// Returns the [`Limits`] field that refused.
+  /// Returns the [`Limits`] ceiling that refused, by the name of its getter.
   #[inline]
   pub const fn field(self) -> &'static str {
     match self {

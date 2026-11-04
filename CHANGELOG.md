@@ -71,9 +71,12 @@ All notable changes to Smear are documented in this file.
   which is the executor's refusal or the driver's entry, rather than a
   `StartError`, and `RequestErrorResult::error` returns `Option<StartError>`,
   `None` for a result built from the driver's entries. Both break code that
-  reads them. `Limits` is not `#[non_exhaustive]`, so its three new fields break
-  a struct literal that names every field; one ending in `..Limits::default()`
-  is unaffected.
+  reads them.
+- `graphql-proto`!: `Limits`'s fields are no longer public. Build one with
+  `Limits::new()` or `Limits::default()` and the `with_*` methods, one per
+  ceiling, and read a ceiling with the getter of the same name; a struct
+  literal, `..Limits::default()` included, and a field read no longer compile.
+  Adding a ceiling is therefore no longer a breaking change.
 - `smear`: `json::write_request_error_result` and
   `json::write_request_error_result_with` take the request's `document: &str`,
   as `write_response` does, and write each driver entry's `locations`, resolved

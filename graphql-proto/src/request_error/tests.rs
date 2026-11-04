@@ -95,20 +95,16 @@ fn grown_and_emptied(lax: &Limits) -> RequestError<Value> {
 )]
 #[test]
 fn an_accepted_map_retains_no_capacity_the_result_never_authorised() {
-  let lax = Limits {
-    max_extension_entries: NonZeroU32::new(GROWN_ENTRIES as u32).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(1 << 20).expect("not zero"),
-    ..Limits::default()
-  };
+  let lax = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(GROWN_ENTRIES as u32).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(1 << 20).expect("not zero"));
   // The key-byte ceiling is deliberately *above* the capacity being planted, and not a small
   // number chosen to look strict. There are two ceilings a repair could read here and only one of
   // them bounds entry slots; with the other one set low, a repair reading it would shrink anyway
   // and this case would pass a bound it never checked.
-  let strict = Limits {
-    max_extension_entries: NonZeroU32::new(4).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(GROWN_ENTRIES as u32 * 2).expect("not zero"),
-    ..Limits::default()
-  };
+  let strict = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(4).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(GROWN_ENTRIES as u32 * 2).expect("not zero"));
 
   let mut map: Extensions<Value> = Extensions::new(&lax);
   for index in 0..GROWN_ENTRIES {
@@ -163,16 +159,12 @@ fn an_accepted_map_retains_no_capacity_the_result_never_authorised() {
 /// the way out would have spent the caller's time on a value this result never kept.
 #[test]
 fn a_refused_map_is_handed_back_without_being_reallocated() {
-  let lax = Limits {
-    max_extension_entries: NonZeroU32::new(64).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(1 << 20).expect("not zero"),
-    ..Limits::default()
-  };
-  let strict = Limits {
-    max_extension_entries: NonZeroU32::new(4).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(1 << 20).expect("not zero"),
-    ..Limits::default()
-  };
+  let lax = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(64).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(1 << 20).expect("not zero"));
+  let strict = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(4).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(1 << 20).expect("not zero"));
 
   // Grown to sixteen and emptied back to eight, so the map is refused (eight entries against a
   // ceiling of four) **and** its spine is strictly larger than its entries. Both halves are load
@@ -230,16 +222,11 @@ fn a_refused_map_is_handed_back_without_being_reallocated() {
 /// about what is *retained*.
 #[test]
 fn an_accepted_entrys_map_retains_no_capacity_the_result_never_authorised() {
-  let lax = Limits {
-    max_extension_entries: NonZeroU32::new(ENTRY_GROWN as u32).expect("not zero"),
-    ..Limits::default()
-  };
+  let lax = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(ENTRY_GROWN as u32).expect("not zero"));
   // The key-byte ceiling is left at its default, which is well above anything planted here, for the
   // reason the first case gives: only one of the two ceilings bounds entry slots.
-  let strict = Limits {
-    max_extension_entries: NonZeroU32::new(4).expect("not zero"),
-    ..Limits::default()
-  };
+  let strict = Limits::default().with_max_extension_entries(NonZeroU32::new(4).expect("not zero"));
   let ceiling = u64::from(strict.max_extension_entries.get());
 
   let mut result = RequestErrorResult::from_driver(&strict, grown_and_emptied(&lax))
@@ -277,14 +264,8 @@ fn an_accepted_entrys_map_retains_no_capacity_the_result_never_authorised() {
 /// once every check has passed.
 #[test]
 fn a_refused_entrys_map_is_handed_back_without_being_reallocated() {
-  let lax = Limits {
-    max_extension_entries: NonZeroU32::new(64).expect("not zero"),
-    ..Limits::default()
-  };
-  let strict = Limits {
-    max_extension_entries: NonZeroU32::new(4).expect("not zero"),
-    ..Limits::default()
-  };
+  let lax = Limits::default().with_max_extension_entries(NonZeroU32::new(64).expect("not zero"));
+  let strict = Limits::default().with_max_extension_entries(NonZeroU32::new(4).expect("not zero"));
 
   // Grown to sixteen and emptied back to eight, for the reason the map-side case gives: refused
   // (eight entries against a ceiling of four), and holding strictly more slots than entries.
@@ -352,10 +333,7 @@ fn a_refused_entrys_map_is_handed_back_without_being_reallocated() {
 /// twenty-eight slots for the ninety-nine entries after the head.
 #[test]
 fn the_list_spine_holds_no_slot_the_count_ceiling_refuses() {
-  let limits = Limits {
-    max_request_errors: NonZeroU32::new(100).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default().with_max_request_errors(NonZeroU32::new(100).expect("not zero"));
   let entry = || RequestError::<Value>::new(&limits, "listed", &[]).expect("it fits");
 
   let mut result = RequestErrorResult::from_driver(&limits, entry()).expect("it fits");

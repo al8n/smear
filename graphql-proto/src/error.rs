@@ -410,7 +410,7 @@ pub enum Kind {
 /// Which of the ceilings an [`Executor`](super::Executor) accumulates against refused a position.
 ///
 /// The typed half of [`Kind::ExecutorBudget`], which is the category. Every variant is one
-/// [`Limits`](super::Limits) field and [`Resource::field`] spells that field's name, so a driver
+/// [`Limits`](super::Limits) ceiling and [`Resource::field`] spells its getter's name, so a driver
 /// reports the knob it wants raised without parsing a message.
 ///
 /// Deliberately **not** [`Ceiling`](super::Ceiling), which answers the same question for
@@ -448,7 +448,7 @@ pub enum Resource {
 }
 
 impl Resource {
-  /// Returns the [`Limits`](super::Limits) field that refused.
+  /// Returns the [`Limits`](super::Limits) ceiling that refused, by the name of its getter.
   ///
   /// The same accessor [`Ceiling::field`](super::Ceiling::field) is, for the same reason: the
   /// machine-readable part a code would otherwise have had to carry.

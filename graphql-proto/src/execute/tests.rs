@@ -310,10 +310,8 @@ fn collection_scratch_cannot_outgrow_the_ceiling_that_refuses_it() {
   query.push_str(" }");
 
   let (schema, document) = compile(&query);
-  let limits = Limits {
-    max_response_metadata: NonZeroU32::new(8).expect("eight is not zero"),
-    ..Limits::default()
-  };
+  let limits =
+    Limits::default().with_max_response_metadata(NonZeroU32::new(8).expect("eight is not zero"));
   let mut space = Space;
   let mut executor = Executor::with_limits(&schema, &document, limits);
   executor
@@ -865,10 +863,8 @@ fn a_refused_index_pass_reserves_no_fragment_storage() {
   let mut refused = Executor::with_limits(
     &schema,
     &document,
-    Limits {
-      max_selection_visits: NonZeroU32::new(UP_TO_THE_POPULATION).expect("not zero"),
-      ..Limits::default()
-    },
+    Limits::default()
+      .with_max_selection_visits(NonZeroU32::new(UP_TO_THE_POPULATION).expect("not zero")),
   );
   refused
     .start(&mut space, None, Value::Obj)
@@ -1004,10 +1000,7 @@ fn the_index_pass_reads_each_definition_once() {
   let mut executor = Executor::with_limits(
     &schema,
     &document,
-    Limits {
-      max_selection_visits: NonZeroU32::new(BUDGET).expect("not zero"),
-      ..Limits::default()
-    },
+    Limits::default().with_max_selection_visits(NonZeroU32::new(BUDGET).expect("not zero")),
   );
   executor
     .start(&mut space, Some("Op0"), Value::Obj)
@@ -1411,10 +1404,8 @@ fn a_refused_probe_run_stops_at_the_refusal() {
   let mut space = Space;
   let index = colliding_index_cost(&names);
   let budget = COLLIDING_LOOKUP + index + 1 + SLACK;
-  let limits = Limits {
-    max_selection_visits: NonZeroU32::new(budget).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits =
+    Limits::default().with_max_selection_visits(NonZeroU32::new(budget).expect("not zero"));
   let mut executor = Executor::with_limits(&schema, &document, limits);
   executor
     .start(&mut space, None, Value::Obj)
@@ -1486,10 +1477,8 @@ fn a_skipped_selection_does_not_pay_for_the_directives_after_the_skip() {
 
   let (schema, document) = compile_against(SDL, &long);
   let mut space = Space;
-  let limits = Limits {
-    max_selection_visits: NonZeroU32::new(spent_short).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits =
+    Limits::default().with_max_selection_visits(NonZeroU32::new(spent_short).expect("not zero"));
   let mut executor = Executor::with_limits(&schema, &document, limits);
   executor
     .start(&mut space, None, Value::Obj)
@@ -1662,10 +1651,9 @@ fn drive<S: AsRef<[u8]>>(
 ) -> Assembled {
   let mut space = Space;
   let limits = match limit {
-    Some(limit) => Limits {
-      max_selection_visits: NonZeroU32::new(limit).expect("not zero"),
-      ..Limits::default()
-    },
+    Some(limit) => {
+      Limits::default().with_max_selection_visits(NonZeroU32::new(limit).expect("not zero"))
+    }
     None => Limits::default(),
   };
   let mut executor = Executor::with_limits(schema, document, limits);
@@ -2073,10 +2061,8 @@ fn a_colliding_set_of_document_variables_cannot_outrun_the_budget() {
 
   let (schema, document) = compile_against("type Query { arg(to: String!): String }", &query);
   let mut space = Space;
-  let limits = Limits {
-    max_selection_visits: NonZeroU32::new(BUDGET).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits =
+    Limits::default().with_max_selection_visits(NonZeroU32::new(BUDGET).expect("not zero"));
   let mut executor = Executor::with_limits(&schema, &document, limits);
   executor
     .start(&mut space, None, Value::Obj)
@@ -2265,10 +2251,7 @@ fn a_refused_operation_lookup_reads_nothing_past_the_ceiling() {
   let mut executor = Executor::with_limits(
     &schema,
     &document,
-    Limits {
-      max_selection_visits: NonZeroU32::new(BUDGET).expect("not zero"),
-      ..Limits::default()
-    },
+    Limits::default().with_max_selection_visits(NonZeroU32::new(BUDGET).expect("not zero")),
   );
 
   let refused = executor
@@ -2296,10 +2279,8 @@ fn collected_under(
   visits: u32,
 ) -> Option<std::string::String> {
   let mut space = Space;
-  let limits = Limits {
-    max_selection_visits: NonZeroU32::new(visits).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits =
+    Limits::default().with_max_selection_visits(NonZeroU32::new(visits).expect("not zero"));
   let mut executor = Executor::with_limits(schema, document, limits);
   executor
     .start(&mut space, None, Value::Obj)
@@ -3484,20 +3465,16 @@ const GROWN_ENTRIES: usize = 4096;
 )]
 #[test]
 fn an_accepted_map_retains_no_capacity_the_executor_never_authorised() {
-  let lax = Limits {
-    max_extension_entries: NonZeroU32::new(GROWN_ENTRIES as u32).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(1 << 20).expect("not zero"),
-    ..Limits::default()
-  };
+  let lax = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(GROWN_ENTRIES as u32).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(1 << 20).expect("not zero"));
   // The key-byte ceiling is deliberately *above* the capacity being planted, and not a small
   // number chosen to look strict. There are two ceilings a repair could read here and only one of
   // them bounds entry slots; with the other one set low, a repair reading it would shrink anyway
   // and this case would pass a bound it never checked.
-  let strict = Limits {
-    max_extension_entries: NonZeroU32::new(4).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(GROWN_ENTRIES as u32 * 2).expect("not zero"),
-    ..Limits::default()
-  };
+  let strict = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(4).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(GROWN_ENTRIES as u32 * 2).expect("not zero"));
 
   let mut map: Extensions<Value> = Extensions::new(&lax);
   for index in 0..GROWN_ENTRIES {
@@ -3563,17 +3540,13 @@ fn a_map_taken_back_and_regrown_re_enters_through_the_same_gate() {
   const REGROWN: usize = 256;
 
   // One over, because the map keeps the entry it was first attached with while it regrows.
-  let lax = Limits {
-    max_extension_entries: NonZeroU32::new(REGROWN as u32 + 1).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(1 << 20).expect("not zero"),
-    ..Limits::default()
-  };
+  let lax = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(REGROWN as u32 + 1).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(1 << 20).expect("not zero"));
   // Above the regrown capacity, for the reason the case above states.
-  let strict = Limits {
-    max_extension_entries: NonZeroU32::new(4).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(REGROWN as u32 * 8).expect("not zero"),
-    ..Limits::default()
-  };
+  let strict = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(4).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(REGROWN as u32 * 8).expect("not zero"));
 
   let (schema, document) = compile("{ nest { boom } }");
   let mut space = Space;
@@ -3736,11 +3709,9 @@ fn an_empty_map_is_present_and_a_plain_report_carries_none() {
 /// other `Limits`" means: the map's own ceilings admitted every entry this executor refuses.
 #[test]
 fn a_map_over_this_executors_ceilings_comes_back_and_the_error_is_still_recorded() {
-  let strict = Limits {
-    max_extension_entries: NonZeroU32::new(2).expect("not zero"),
-    max_extension_key_bytes: NonZeroU32::new(8).expect("not zero"),
-    ..Limits::default()
-  };
+  let strict = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(2).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(8).expect("not zero"));
   let mut entries = Extensions::new(&Limits::default());
   for key in ["a", "b", "c"] {
     entries
@@ -3955,10 +3926,8 @@ fn a_map_emptied_under_this_executors_own_ceilings_is_re_derived_on_acceptance()
   /// Not a power of two, which is what puts a doubled spine past it.
   const CEILING: u32 = 5;
 
-  let own = Limits {
-    max_extension_entries: NonZeroU32::new(CEILING).expect("not zero"),
-    ..Limits::default()
-  };
+  let own =
+    Limits::default().with_max_extension_entries(NonZeroU32::new(CEILING).expect("not zero"));
   let (schema, document) = compile_against(ERROR_MAP_SDL, "{ plain }");
   let mut space = Space;
   let mut executor = Executor::with_limits(&schema, &document, own);
@@ -4006,10 +3975,7 @@ fn a_map_emptied_under_this_executors_own_ceilings_is_re_derived_on_acceptance()
 /// different ceilings, and only the text's refused.
 #[test]
 fn a_map_reported_with_an_unstorable_message_is_kept() {
-  let tight = Limits {
-    max_interned_bytes: NonZeroU32::new(16).expect("not zero"),
-    ..Limits::default()
-  };
+  let tight = Limits::default().with_max_interned_bytes(NonZeroU32::new(16).expect("not zero"));
   let (schema, document) = compile_against(ERROR_MAP_SDL, "{ plain }");
   let mut space = Space;
   let mut executor = Executor::with_limits(&schema, &document, tight);
@@ -4412,10 +4378,7 @@ fn a_refused_root_collection_is_its_own_request_error() {
   let mut executor = Executor::with_limits(
     &schema,
     &document,
-    Limits {
-      max_response_slots: one,
-      ..Limits::default()
-    },
+    Limits::default().with_max_response_slots(one),
   );
   assert_eq!(
     executor.start(&mut space, None, Value::Obj),
@@ -4795,14 +4758,12 @@ fn no_buffer_a_subscription_retains_grows_with_the_stream() {
   /// `scratch_args` — no ceiling does.
   const SCHEMA_ARGUMENTS: usize = 2;
 
-  let limits = Limits {
-    max_in_flight: NonZeroU32::new(IN_FLIGHT).expect("not zero"),
-    max_response_slots: NonZeroU32::new(SLOTS).expect("not zero"),
-    max_response_metadata: NonZeroU32::new(METADATA).expect("not zero"),
-    max_interned_bytes: NonZeroU32::new(INTERNED).expect("not zero"),
-    max_selection_visits: NonZeroU32::new(VISITS).expect("not zero"),
-    ..Limits::default()
-  };
+  let limits = Limits::default()
+    .with_max_in_flight(NonZeroU32::new(IN_FLIGHT).expect("not zero"))
+    .with_max_response_slots(NonZeroU32::new(SLOTS).expect("not zero"))
+    .with_max_response_metadata(NonZeroU32::new(METADATA).expect("not zero"))
+    .with_max_interned_bytes(NonZeroU32::new(INTERNED).expect("not zero"))
+    .with_max_selection_visits(NonZeroU32::new(VISITS).expect("not zero"));
   let (schema, document) = compile_against(CENSUS_SDL, CENSUS_QUERY);
   let mut space = Space;
   let mut executor = Executor::with_limits(&schema, &document, limits);
@@ -5130,10 +5091,7 @@ fn a_fragment_names_hashing_pass_is_charged_for_its_bytes() {
     let mut executor = Executor::with_limits(
       &schema,
       &document,
-      Limits {
-        max_selection_visits: NonZeroU32::new(COUNTS).expect("not zero"),
-        ..Limits::default()
-      },
+      Limits::default().with_max_selection_visits(NonZeroU32::new(COUNTS).expect("not zero")),
     );
     let _ = executor.start(&mut space, None, Value::Obj);
     let hashed = executor.fragment_name_bytes_hashed();
@@ -5209,10 +5167,7 @@ fn a_warm_fragment_table_charges_what_a_cold_one_charges() {
     let mut executor = Executor::with_limits(
       &schema,
       &document,
-      Limits {
-        max_selection_visits: NonZeroU32::new(limit).expect("not zero"),
-        ..Limits::default()
-      },
+      Limits::default().with_max_selection_visits(NonZeroU32::new(limit).expect("not zero")),
     );
     let mut served = false;
     for _ in 0..runs {
@@ -5267,10 +5222,7 @@ fn a_warm_fragment_table_charges_what_a_cold_one_charges() {
   let mut executor = Executor::with_limits(
     &schema,
     &document,
-    Limits {
-      max_selection_visits: NonZeroU32::new(cold).expect("not zero"),
-      ..Limits::default()
-    },
+    Limits::default().with_max_selection_visits(NonZeroU32::new(cold).expect("not zero")),
   );
   assert!(executor.start(&mut space, None, Value::Obj).is_ok());
   while let Some(request) = executor.poll_resolve(&mut space) {

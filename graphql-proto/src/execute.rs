@@ -96,6 +96,26 @@ mod tests;
 
 /// What the executor will not do, whatever the document or the driver asks.
 ///
+/// # Building one
+///
+/// Start from [`Limits::new`] or `Limits::default()`, which are the same value, replace the
+/// ceilings that need replacing with the `with_*` methods, and read one back through the getter of
+/// the same name. The fields are not public so that a ceiling added in a later release arrives as
+/// one more getter and one more setter, and no caller breaks. The setters are `const`, so
+/// `const LIMITS: Limits = Limits::new().with_max_in_flight(…)` works.
+///
+/// ```
+/// use core::num::NonZeroU32;
+///
+/// use graphql_proto::Limits;
+///
+/// const FOUR: NonZeroU32 = NonZeroU32::new(4).expect("four is not zero");
+/// const TIGHT: Limits = Limits::new().with_max_request_errors(FOUR);
+///
+/// assert_eq!(TIGHT.max_request_errors(), FOUR);
+/// assert_eq!(TIGHT.max_in_flight(), Limits::default().max_in_flight());
+/// ```
+///
 /// # One knob per resource, derived rather than accumulated
 ///
 /// Three review rounds added one ceiling each, and each was found to be the wrong unit by the
@@ -475,16 +495,9 @@ mod tests;
 /// program runs, costs no branch, and keeps [`Executor::with_limits`] infallible:
 ///
 /// ```compile_fail,E0308
-/// use core::num::NonZeroU32;
-///
 /// use graphql_proto::Limits;
 ///
-/// const EIGHT: NonZeroU32 = NonZeroU32::new(8).expect("eight is not zero");
-///
-/// let stopped = Limits {
-///   max_in_flight: 0,
-///   max_response_slots: EIGHT,
-/// };
+/// let stopped = Limits::new().with_max_in_flight(0);
 /// ```
 ///
 /// ```
@@ -494,361 +507,21 @@ mod tests;
 ///
 /// const EIGHT: NonZeroU32 = NonZeroU32::new(8).expect("eight is not zero");
 ///
-/// let pool_of_eight = Limits {
-///   max_in_flight: EIGHT,
-///   ..Limits::default()
-/// };
-/// assert_eq!(pool_of_eight.max_in_flight.get(), 8);
+/// let pool_of_eight = Limits::default().with_max_in_flight(EIGHT);
+/// assert_eq!(pool_of_eight.max_in_flight().get(), 8);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
-  /// How many field requests may be outstanding at once.
-  ///
-  /// `poll_resolve` returns `None` at the ceiling even when work remains. This is the whole of the
-  /// executor's flow control and it is deliberately the only kind: a driver that resolves fields
-  /// against a connection pool of eight sets this to eight and never has to model the pool twice.
-  ///
-  /// It bounds outstanding *requests* and deliberately not retained *values*: a completed object's
-  /// value is not in this slab, and what bounds its lifetime is the lifetime table's row 2, not this
-  /// knob. Before that row was enforced the two were confused, and a pool of eight could be facing
-  /// a hundred thousand live handles.
-  ///
-  /// Requests [`poll_abandoned`](Executor::poll_abandoned) has not yet retired count against it,
-  /// so a driver that ignores that channel narrows its own ceiling rather than accumulating work
-  /// nobody wants. **It cannot close it.** A discard promotes to abandoned only the requests that
-  /// were live *besides* the one that caused it, and that one has always been released by the time
-  /// it can fail — through [`handle_resolved`](Executor::handle_resolved), through
-  /// [`handle_field_error`](Executor::handle_field_error) or
-  /// [`handle_field_error_with`](Executor::handle_field_error_with), or, for a draft §6.4.1
-  /// argument error, through the gate in [`poll_resolve`](Executor::poll_resolve) that had already
-  /// refused to hand it out at the ceiling. So undrained entries are bounded by this value *minus
-  /// one*, and a slot is free again as soon as the live work drains.
-  ///
-  /// Three paths hold that bound for three different reasons, and the last of them is an ordering
-  /// rather than a release — so the bound is checked where the count is raised and not only argued
-  /// here: `propagate` asserts it, in debug, on every discard.
-  ///
-  /// The worst an ignored channel can therefore do is take the driver down to one request at a
-  /// time; it never takes it to none, and it can be cleared whenever the driver likes, because the
-  /// channel is returning `Some`. A ceiling of zero would admit nothing at all and no call could
-  /// clear it, which is the difference, and why this one cannot be zero.
-  pub max_in_flight: NonZeroU32,
-
-  /// How many positions the response tree may hold, counting the root.
-  ///
-  /// A position is one node of the response: the root, a field of an object, or an element of a
-  /// list. Reaching the ceiling is a draft §7.1.2 **field error** at the position that could not be
-  /// completed ([`Kind::ExecutorBudget`](super::Kind::ExecutorBudget)), so draft §6.4.4 nulls that
-  /// position and propagates from it exactly as it does for any other field error.
-  ///
-  /// A field error is the only shape available, and it is also the right one. The alternative —
-  /// abandoning the whole execution — is a *request* error, and draft §7.1.2 reserves that for a
-  /// failure raised **before** execution begins, which is why [`StartError`] is this module's only
-  /// non-field refusal. Once a resolver has answered, a response with no `data` key would be
-  /// telling the client the request never ran.
-  ///
-  /// What the error honestly says is *where execution could not continue*, not *what made the
-  /// response large*: the position that happens to cross the line is blamed, and a driver reading
-  /// the path should treat it as the point of exhaustion rather than the cause.
-  ///
-  /// It also makes the two *position* narrowings exact: a slot index and a list index are both
-  /// `u32`, and `u32::MAX` is the tree's "no such slot" sentinel, so because a position is only
-  /// created while the count is strictly below this ceiling, the largest index reachable is
-  /// `max_response_slots - 1` — never the sentinel and never truncated.
-  ///
-  /// **Only those two, and the module has more.** A blanket claim about every `as u32` here would
-  /// be false, so the sites are enumerated instead and each is answered by name:
-  ///
-  /// | site | what bounds it |
-  /// |---|---|
-  /// | the slot index in `push_child` | this ceiling |
-  /// | a list element's `Key::Index` | this ceiling, via a `try_from` on the same decision |
-  /// | the two metadata range starts in `expand` | [`max_response_metadata`](Limits::max_response_metadata), via a `try_from` on the same decision |
-  /// | the in-flight slab index | [`max_in_flight`](Limits::max_in_flight) |
-  /// | `fail_at`'s location index | [`max_response_metadata`](Limits::max_response_metadata), which `fail_at` now charges, plus at most one for the root's fallback — and `try_from`-checked besides |
-  /// | the interner's arena offset, entry length and id | [`max_interned_bytes`](Limits::max_interned_bytes), and each `try_from`-checked independently of it |
-  /// | the per-error map index in `handle_field_error_with` | this ceiling, derived: at most one map per error row and one row per position, so the index is below the slot count and never the `u32::MAX` that means "no map" |
-  ///
-  /// The row this table used to end on is gone rather than answered: draft §6.1's lookup produced
-  /// an operation *index* whose only bound was the document's own length, and
-  /// `Executor::operation_definition` now returns the definition itself. There is no narrowing
-  /// left to bound.
-  pub max_response_slots: NonZeroU32,
-
-  /// How many merged field selections the executor will record across the whole response.
-  ///
-  /// Draft §6.3 collects every selection sharing a response key into one field, and the group has
-  /// to survive until that field's value comes back so draft §6.4's `MergeSelectionSets` can read
-  /// it. One position therefore costs one entry *per selection in its group*, not one entry — and
-  /// that count is the document's, while the number of positions is the driver's. This ceiling is
-  /// on their product, for the reason the type's own documentation gives at length.
-  ///
-  /// Reaching it is the same field error as reaching the position ceiling
-  /// ([`Kind::ExecutorBudget`](super::Kind::ExecutorBudget)) and for the same reasons: it is raised
-  /// once execution is under way, so §7.1.2 leaves no other shape, and it names the object whose
-  /// selection set could not be recorded rather than diagnosing what made the response expensive.
-  ///
-  /// The check happens **before** anything is appended, so a refused expansion leaves the metadata
-  /// vectors exactly as it found them. A budget that appended first and refused afterwards would
-  /// leak on every near-miss, which under a client that retries is the same denial of service
-  /// wearing a slower coat.
-  ///
-  /// The default is four times the position ceiling rather than equal to it: a group of one is the
-  /// ordinary case, so this is only reached by a document that merges heavily, and a response of
-  /// legitimately merged selections should not be refused for being tidy.
-  pub max_response_metadata: NonZeroU32,
-
-  /// How much work draft §6.3's collection **and** draft §6.4.1's argument scan may do, across the
-  /// whole operation — and draft §4's introspection reads.
-  ///
-  /// Charged per selection *looked at*, surviving or not; per entry a name lookup compares, before
-  /// it compares it; per definition and fragment the fragment index's one pass handles; per
-  /// definition draft §6.1's operation lookup reads; per **byte of every argument the request
-  /// writes**, at every position the field is coerced at; and per schema member an introspection
-  /// list reads. The first is the difference between this and every other ceiling here, and it is
-  /// deliberate: the others count what was produced, and a document built out of fragments that
-  /// collect nothing produces nothing while walking as far as it likes.
-  ///
-  /// **Two of those are taken outside collection, and the first is why this ceiling can refuse a
-  /// `start` before a response exists.** Draft §6.1 walks the definitions to find the operation,
-  /// once per [`start`](Executor::start), over a count the document chooses; it was the module's
-  /// last uncharged walk over a client quantity (al8n/smear#144) and it now spends this budget like
-  /// the rest. The refusal is
-  /// [`StartError::OperationLookupRefused`](StartError::OperationLookupRefused) rather than a
-  /// field error, because §7.1.2 has no response for a failure raised before execution begins.
-  ///
-  /// **The second is draft §6.4.1 `CoerceArgumentValues`, and its refusal is a field error.**
-  /// Step 5 iterates every argument the *schema* declares and asks, for each, whether the request
-  /// supplied it, so the scan is `declared × written` name comparisons at **every runtime position
-  /// of the field** — and positions are the driver's. `written` is the caller's and is charged
-  /// here, once, in front of the scan; a refusal raises `Raw::ArgumentBudget`, which nulls that
-  /// field under §6.4.4 and leaves the rest of the response alone, exactly as §6.4.1's own
-  /// argument faults do. **`declared` is deliberately not charged against this ceiling**: it is the
-  /// deployment's design-time number, and pricing it here refuses a caller whose document is small
-  /// because the schema is wide — measured, one unit per declared argument per position refuses a
-  /// full-occupancy response at about thirteen declared arguments, which is ordinary input. It is
-  /// bounded at schema build instead, by
-  /// [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS), so the scan is
-  /// `positions × 64` with positions metered by this ceiling and by
-  /// [`max_response_slots`](Limits::max_response_slots). al8n/smear#198.
-  ///
-  /// The one place §6.4.1's refusal is **not** a field error is a subscription's source field:
-  /// §6.2.3.1 coerces before any response exists, so it becomes
-  /// [`StartError::SourceFieldArgumentBudget`](StartError::SourceFieldArgumentBudget) — its own
-  /// variant, carrying this number, rather than the specification failure beside it.
-  ///
-  /// **A third is draft §4 introspection, and its refusal is a field error too.** The executor
-  /// answers `__schema` and `__type` from the schema, and two of the reads that takes are its own
-  /// rather than a collection's: one unit per schema member a meta list reads, whether or not
-  /// `includeDeprecated` lets the member through, plus one per possible-object word an interface's
-  /// `possibleTypes` scans; and one pass per walk over the bytes of `__type`'s name. The first is
-  /// §6.4.1's product again — a schema's width per position, with positions the client's to
-  /// multiply by aliasing — and here the width has no build-time ceiling, so it is metered rather
-  /// than bounded at build. A refusal nulls the list or the `__type` it was raised at, and draft
-  /// §6.4.4 takes it from there.
-  ///
-  /// The rest is what makes the first a bound rather than a bound on one factor. Both tables hash
-  /// text the *document* chose, and the shared hash is unkeyed with every round invertible in the
-  /// word it folds, so a client can put every one of its names in one bucket deliberately. Charging
-  /// each comparison first means it spends this ceiling doing so, and the guarantee does not rest
-  /// on the hash behaving.
-  ///
-  /// **What a lookup costs an honest document is the hash's business, and it was asserted before it
-  /// was measured (al8n/smear#172).** "About one entry, so roughly twice what it used to be" was
-  /// true of `k0…k4095` — 1.89 units per key — and false of every other ordinary spelling: 4,096
-  /// **distinct** keys spelled `user0000Name…` charged 15.83 each, `field0…` charged 41.45 and
-  /// `h00000000…` charged 64.60, growing quadratically, with no collision search anywhere. That was
-  /// [`hash_bytes`](smear_schema::hash_bytes)'s fold leaving a name's late bytes out of the bucket
-  /// index.
-  ///
-  /// **Then the replacement claim was asserted over the same five fixtures (al8n/smear#196).** An
-  /// avalanche step at the end of the fold closed the half of it that short names showed, and left
-  /// open the half that names *longer than eight bytes* have: differences in two consecutive fold
-  /// inputs cancelled, so 4,096 aliases spelled `x` plus an eight-digit base-36 counter charged
-  /// **11,943** units here and base-63 charged **18,401** — again with no collision search, again
-  /// growing with the count. Mixing between the rounds is what closed that. Thirty-three families
-  /// crossing four radices against seven counter widths now measure 7,081 to 7,265 units for 4,096
-  /// keys — 1.73 to 1.77 each, every one within 3% of the others — so the sentence is finally true
-  /// of a population and not of a list.
-  ///
-  /// None of that was ever the *bound* — a constructed pile-up spends this ceiling either way, and
-  /// the hash is still unkeyed. What it decides is whether the default below is a ceiling on abuse
-  /// or a lottery on how a client spells its aliases.
-  ///
-  /// **It is not "collection work" in the narrow sense, and the widening was a defect repair.**
-  /// Every name the executor interns charges this, including the ones only a *diagnostic* wants: a
-  /// driver's error message, an unresolvable runtime type name, the spelling of a variable an
-  /// argument did not get. Two of those are the document's own text, and while they interned
-  /// uncharged a client could name its variables into one bucket and walk it once per failed
-  /// field — after collection had been admitted, so nothing here saw it. A name that cannot be
-  /// charged is now dropped from its message rather than fatal, exactly as one that will not fit
-  /// the arena already was.
-  ///
-  /// It is also what replaced a recursion. `walk` used to descend the native stack once per named
-  /// fragment in a chain, and a chain is flat in the document, so no parser depth limit could see
-  /// it — a few thousand links aborted the process with `SIGABRT`, at a count that moves with the
-  /// platform and the build profile, which `collect::walk` records with both measurements. The walk
-  /// now runs on an explicit stack, which turns depth into heap that this budget already bounds, so
-  /// there is no depth knob to get wrong per deployment.
-  ///
-  /// Per operation rather than per call, because `collect_fields` runs once per object position: a
-  /// per-call budget would leave the total at `positions × budget`, and positions are the driver's.
-  /// Counting down across the operation means no driver answer multiplies collection work.
-  ///
-  /// Per operation also means *every* operation. An executor reused for a second run of the same
-  /// document re-pays the fragment index pass it built the first time, even though the table is
-  /// still there — so the verdict on a request is a function of the request and this number, and
-  /// never of what the executor happened to be asked before it.
-  ///
-  /// **And per draft §6.2.3.2 *event*, which is the same sentence and had to be checked rather
-  /// than assumed.** §6.2.3.2 makes each source event one whole `ExecuteRootSelectionSet`, so an
-  /// event is an operation by this ceiling's own unit — and it must be, because a subscription is
-  /// unbounded in time and a budget spent cumulatively across one would refuse event *N* for work
-  /// event 1 did. [`handle_source_event`](Executor::handle_source_event) re-arms it through the
-  /// same `reset` a second `start` performs, and `each_source_event_charges_what_the_first_did` is
-  /// the gate.
-  pub max_selection_visits: NonZeroU32,
-
-  /// How many bytes of interned text the response may hold.
-  ///
-  /// Response keys, `__typename` answers and the names an error message quotes are stored once
-  /// each in one arena, and so are the messages
-  /// [`handle_field_error`](Executor::handle_field_error) is handed. That last population is the
-  /// reason this is a ceiling and not an invariant: its size is the *driver's*, one message per
-  /// failed position, and neither the length nor the count is anything the query bounds.
-  ///
-  /// **This one is a correctness ceiling before it is a resource ceiling.** Offsets into the arena
-  /// are `u32`. Without a bound, an arena past four gigabytes does not fail to allocate — it
-  /// truncates, and every name interned afterwards reads back the wrong bytes, so a response comes
-  /// out well formed and quietly wrong. The narrowing is checked as well, so the two are
-  /// independent: the check cannot be defeated by choosing a larger ceiling.
-  ///
-  /// A refusal degrades rather than propagates. A driver message that will not fit is reported as
-  /// a field error without its text; a *name* that will not fit cannot be degraded that way — a
-  /// response key is the position — so that one refuses the position.
-  ///
-  /// **It bounds bytes, and the memory is a multiple of them.** Every entry carries bookkeeping the
-  /// arena's length does not count — its span, its stored hash, its hash-chain link, its share of
-  /// the bucket table and its slot in collection's key-to-group scratch — and a GraphQL name is at
-  /// least one byte, so `B` bytes of ceiling can be `B` entries costing about `33 · B`. That is a
-  /// constant multiple and not a second factor, which is the difference between a cost to know
-  /// about and the product shape this module refuses; it is stated because a caller choosing this
-  /// number is choosing thirty-three times it.
-  pub max_interned_bytes: NonZeroU32,
-
-  /// How many entries a draft §7.1.7 [`Extensions`] map may hold.
-  ///
-  /// Charged by `Extensions::insert`, and re-checked by
-  /// [`set_extensions`](Executor::set_extensions) against *this* executor's value — a map built
-  /// under a laxer `Limits` is refused rather than trusted, because a ceiling a caller can pick is
-  /// advice.
-  ///
-  /// It bounds the map's **entry slots** and not only its entries. `Extensions::remove` refunds
-  /// this budget without returning the slot to the allocator, so `set_extensions` re-derives an
-  /// accepted map's spine from its entries whenever it is holding more than this — otherwise a map
-  /// grown under the laxer `Limits` and emptied back down would pass every check here and be
-  /// retained at its high-water mark. The entries themselves are untouched; see that method.
-  ///
-  /// One of a **pair**, and neither half bounds anything alone: see
-  /// [`max_extension_key_bytes`](Limits::max_extension_key_bytes).
-  ///
-  /// **Three retainers read it, because the container has three sites.**
-  /// [`RequestErrorResult`](super::RequestErrorResult) carries the entry for a draft §7.1.3
-  /// *request error result* and performs the identical re-check and re-derivation against the
-  /// ceilings it was created with. Passing [`limits`](Executor::limits) is what makes those this
-  /// executor's; the type's header says why nothing forces it and what that does and does not
-  /// bound.
-  ///
-  /// The third is draft §7.1.6's per-error entry:
-  /// [`handle_field_error_with`](Executor::handle_field_error_with) re-checks a map against this
-  /// executor's two ceilings and re-derives its spine exactly as `set_extensions` does. It retains
-  /// one map per driver-reported error rather than one per response, so what the pair bounds there
-  /// is a **product** — at most one map per error row and one row per position, so
-  /// `max_response_slots × (max_extension_entries + max_extension_key_bytes)` at the very worst.
-  /// Every factor is one of this executor's ceilings, which is what makes the product a bound
-  /// rather than the shape the [`Limits`] section *A budget on one factor of a product bounds
-  /// nothing* warns about; a deployment whose driver attaches a map to many errors sizes it by
-  /// lowering any of the three. The values in those maps are the driver's and are not bounded here,
-  /// as below.
-  pub max_extension_entries: NonZeroU32,
-
-  /// How many bytes of *key* a draft §7.1.7 [`Extensions`] map may hold, summed over its entries.
-  ///
-  /// The other half of the pair. Entries alone would leave one key free to be a gigabyte; key bytes
-  /// alone would leave an unbounded number of entries under empty keys, since a zero-length key is
-  /// a legal key. Together they also bound the map's linear scan, whose whole-life worst case is
-  /// `max_extension_entries × max_extension_key_bytes` byte comparisons.
-  ///
-  /// **Not** [`max_interned_bytes`](Limits::max_interned_bytes), and the separation is deliberate:
-  /// that arena is a response budget shared with field names and driver error messages, so
-  /// spending it on protocol metadata would let an extensions map refuse an error message.
-  ///
-  /// Values are **not** bounded here, by either ceiling, and that is a **non-goal rather than the
-  /// third hole in this pair**. `proto` bounds what `proto` allocates, and an entry's value is the
-  /// driver's own `V` — the same way a `String` leaf of any length reaches the response without a
-  /// byte ceiling looking at it, and the same way `start`'s `root` and every
-  /// [`handle_resolved`](Executor::handle_resolved) answer do. There is no ceiling that could
-  /// apply: [`Values`](crate::Values) asks eight questions, each discharging a numbered draft §6
-  /// step, and none of them is "how big is this" — measuring one would mean a `V` the executor is
-  /// allowed to interpret, which is the boundary this crate is built not to cross. `max_in_flight`
-  /// and [`max_response_slots`](Limits::max_response_slots) bound how *many* driver values are
-  /// held; nothing bounds one of them, here or anywhere else.
-  pub max_extension_key_bytes: NonZeroU32,
-
-  /// How many entries a draft §7.1.3 [`RequestErrorResult`](super::RequestErrorResult) may list.
-  ///
-  /// The first of **three** ceilings on the one population no executor creates: the request errors
-  /// a driver raises where no executor exists — draft §2's syntax errors, draft §5's validation
-  /// failures, and the variable coercion failures draft §6.1 leaves to the driver — each a
-  /// [`RequestError`](super::RequestError) the driver builds and a result lists. Charged by
-  /// [`RequestErrorResult::push`](super::RequestErrorResult::push), before the entry is read; the
-  /// first entry counts, whichever kind it is.
-  ///
-  /// **Three, and not the two that were reserved for it.** A driver-grown list of driver-supplied
-  /// messages is a count multiplied by a length, and a budget on one factor of a product bounds
-  /// nothing — and an entry's `locations` are a second length beside its message. So the product
-  /// has three factors of its own, and the entry's §7.1.6 `extensions` map brings the pair above
-  /// with it:
-  ///
-  /// `max_request_errors × (max_request_error_message_bytes + max_request_error_locations ·
-  /// size_of::<SimpleSpan>() + max_extension_entries + max_extension_key_bytes)`, plus a list spine
-  /// of at most `max_request_errors`.
-  ///
-  /// Every factor is a ceiling, which is what makes the product a bound rather than the shape the
-  /// [`Limits`] section *A budget on one factor of a product bounds nothing* warns about. At the
-  /// defaults it is 1.125 MiB of message, span and key bytes — on a 64-bit target, where a span is
-  /// sixteen bytes — plus 8,192 extension entry slots, and the values in those maps are the
-  /// driver's, as below.
-  ///
-  /// **No executor charges it, or either of the two after it.** They bound what a result retains,
-  /// and a result is a value the driver builds after `start` has refused, or before any executor
-  /// existed — so an operation spends none of the three, and none of them can refuse one.
-  pub max_request_errors: NonZeroU32,
-
-  /// How many bytes of `message` one driver-supplied [`RequestError`](super::RequestError) may
-  /// carry.
-  ///
-  /// Checked by [`RequestError::new`](super::RequestError::new) **before** the message is boxed —
-  /// the text arrives borrowed, so a refusal allocates nothing, which is the difference
-  /// [`Extensions::insert`] draws between a ceiling and a receipt — and by
-  /// [`RequestError::from_diagnose`](super::RequestError::from_diagnose) after measuring a
-  /// rendering it has not yet kept. The result that lists the entry checks it again, against its
-  /// own value. Bytes and not characters, because what is retained is a `Box<str>` and its length
-  /// is what this bounds.
-  ///
-  /// The length factor of the product [`max_request_errors`](Limits::max_request_errors) states.
-  pub max_request_error_message_bytes: NonZeroU32,
-
-  /// How many draft §7.1.6 `locations` one driver-supplied [`RequestError`](super::RequestError)
-  /// may carry.
-  ///
-  /// The second length factor of the same product. A location is a span, copied as it arrives and
-  /// boxed at its exact count, so the count is the whole of what this bounds — and the count is the
-  /// document's to grow, which is why it has a ceiling of its own rather than riding on the
-  /// message's: `graphql-js` 16.11.0's `UniqueArgumentNamesRule` reports every duplicate of an
-  /// argument as one error's `nodes`, and its `OverlappingFieldsCanBeMergedRule` reports
-  /// `fields1.concat(fields2)`.
-  pub max_request_error_locations: NonZeroU32,
+  pub(crate) max_in_flight: NonZeroU32,
+  pub(crate) max_response_slots: NonZeroU32,
+  pub(crate) max_response_metadata: NonZeroU32,
+  pub(crate) max_selection_visits: NonZeroU32,
+  pub(crate) max_interned_bytes: NonZeroU32,
+  pub(crate) max_extension_entries: NonZeroU32,
+  pub(crate) max_extension_key_bytes: NonZeroU32,
+  pub(crate) max_request_errors: NonZeroU32,
+  pub(crate) max_request_error_message_bytes: NonZeroU32,
+  pub(crate) max_request_error_locations: NonZeroU32,
 }
 
 /// Enough concurrency that a driver never has to think about the knob, low enough that a runaway
@@ -983,6 +656,16 @@ const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("
 impl Default for Limits {
   #[inline]
   fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl Limits {
+  /// The default ceilings.
+  ///
+  /// [`Limits::default`] returns the same value; this one can start a `const` item.
+  #[inline]
+  pub const fn new() -> Self {
     Self {
       max_in_flight: DEFAULT_IN_FLIGHT,
       max_response_slots: DEFAULT_RESPONSE_SLOTS,
@@ -995,6 +678,470 @@ impl Default for Limits {
       max_request_error_message_bytes: DEFAULT_REQUEST_ERROR_MESSAGE_BYTES,
       max_request_error_locations: DEFAULT_REQUEST_ERROR_LOCATIONS,
     }
+  }
+
+  /// How many field requests may be outstanding at once.
+  ///
+  /// `poll_resolve` returns `None` at the ceiling even when work remains. This is the whole of the
+  /// executor's flow control and it is deliberately the only kind: a driver that resolves fields
+  /// against a connection pool of eight sets this to eight and never has to model the pool twice.
+  ///
+  /// It bounds outstanding *requests* and deliberately not retained *values*: a completed object's
+  /// value is not in this slab, and what bounds its lifetime is the lifetime table's row 2, not this
+  /// knob. Before that row was enforced the two were confused, and a pool of eight could be facing
+  /// a hundred thousand live handles.
+  ///
+  /// Requests [`poll_abandoned`](Executor::poll_abandoned) has not yet retired count against it,
+  /// so a driver that ignores that channel narrows its own ceiling rather than accumulating work
+  /// nobody wants. **It cannot close it.** A discard promotes to abandoned only the requests that
+  /// were live *besides* the one that caused it, and that one has always been released by the time
+  /// it can fail — through [`handle_resolved`](Executor::handle_resolved), through
+  /// [`handle_field_error`](Executor::handle_field_error) or
+  /// [`handle_field_error_with`](Executor::handle_field_error_with), or, for a draft §6.4.1
+  /// argument error, through the gate in [`poll_resolve`](Executor::poll_resolve) that had already
+  /// refused to hand it out at the ceiling. So undrained entries are bounded by this value *minus
+  /// one*, and a slot is free again as soon as the live work drains.
+  ///
+  /// Three paths hold that bound for three different reasons, and the last of them is an ordering
+  /// rather than a release — so the bound is checked where the count is raised and not only argued
+  /// here: `propagate` asserts it, in debug, on every discard.
+  ///
+  /// The worst an ignored channel can therefore do is take the driver down to one request at a
+  /// time; it never takes it to none, and it can be cleared whenever the driver likes, because the
+  /// channel is returning `Some`. A ceiling of zero would admit nothing at all and no call could
+  /// clear it, which is the difference, and why this one cannot be zero.
+  #[inline]
+  pub const fn max_in_flight(&self) -> NonZeroU32 {
+    self.max_in_flight
+  }
+
+  /// How many positions the response tree may hold, counting the root.
+  ///
+  /// A position is one node of the response: the root, a field of an object, or an element of a
+  /// list. Reaching the ceiling is a draft §7.1.2 **field error** at the position that could not be
+  /// completed ([`Kind::ExecutorBudget`](super::Kind::ExecutorBudget)), so draft §6.4.4 nulls that
+  /// position and propagates from it exactly as it does for any other field error.
+  ///
+  /// A field error is the only shape available, and it is also the right one. The alternative —
+  /// abandoning the whole execution — is a *request* error, and draft §7.1.2 reserves that for a
+  /// failure raised **before** execution begins, which is why [`StartError`] is this module's only
+  /// non-field refusal. Once a resolver has answered, a response with no `data` key would be
+  /// telling the client the request never ran.
+  ///
+  /// What the error honestly says is *where execution could not continue*, not *what made the
+  /// response large*: the position that happens to cross the line is blamed, and a driver reading
+  /// the path should treat it as the point of exhaustion rather than the cause.
+  ///
+  /// It also makes the two *position* narrowings exact: a slot index and a list index are both
+  /// `u32`, and `u32::MAX` is the tree's "no such slot" sentinel, so because a position is only
+  /// created while the count is strictly below this ceiling, the largest index reachable is
+  /// `max_response_slots - 1` — never the sentinel and never truncated.
+  ///
+  /// **Only those two, and the module has more.** A blanket claim about every `as u32` here would
+  /// be false, so the sites are enumerated instead and each is answered by name:
+  ///
+  /// | site | what bounds it |
+  /// |---|---|
+  /// | the slot index in `push_child` | this ceiling |
+  /// | a list element's `Key::Index` | this ceiling, via a `try_from` on the same decision |
+  /// | the two metadata range starts in `expand` | [`max_response_metadata`](Limits::max_response_metadata), via a `try_from` on the same decision |
+  /// | the in-flight slab index | [`max_in_flight`](Limits::max_in_flight) |
+  /// | `fail_at`'s location index | [`max_response_metadata`](Limits::max_response_metadata), which `fail_at` now charges, plus at most one for the root's fallback — and `try_from`-checked besides |
+  /// | the interner's arena offset, entry length and id | [`max_interned_bytes`](Limits::max_interned_bytes), and each `try_from`-checked independently of it |
+  /// | the per-error map index in `handle_field_error_with` | this ceiling, derived: at most one map per error row and one row per position, so the index is below the slot count and never the `u32::MAX` that means "no map" |
+  ///
+  /// The row this table used to end on is gone rather than answered: draft §6.1's lookup produced
+  /// an operation *index* whose only bound was the document's own length, and
+  /// `Executor::operation_definition` now returns the definition itself. There is no narrowing
+  /// left to bound.
+  #[inline]
+  pub const fn max_response_slots(&self) -> NonZeroU32 {
+    self.max_response_slots
+  }
+
+  /// How many merged field selections the executor will record across the whole response.
+  ///
+  /// Draft §6.3 collects every selection sharing a response key into one field, and the group has
+  /// to survive until that field's value comes back so draft §6.4's `MergeSelectionSets` can read
+  /// it. One position therefore costs one entry *per selection in its group*, not one entry — and
+  /// that count is the document's, while the number of positions is the driver's. This ceiling is
+  /// on their product, for the reason the type's own documentation gives at length.
+  ///
+  /// Reaching it is the same field error as reaching the position ceiling
+  /// ([`Kind::ExecutorBudget`](super::Kind::ExecutorBudget)) and for the same reasons: it is raised
+  /// once execution is under way, so §7.1.2 leaves no other shape, and it names the object whose
+  /// selection set could not be recorded rather than diagnosing what made the response expensive.
+  ///
+  /// The check happens **before** anything is appended, so a refused expansion leaves the metadata
+  /// vectors exactly as it found them. A budget that appended first and refused afterwards would
+  /// leak on every near-miss, which under a client that retries is the same denial of service
+  /// wearing a slower coat.
+  ///
+  /// The default is four times the position ceiling rather than equal to it: a group of one is the
+  /// ordinary case, so this is only reached by a document that merges heavily, and a response of
+  /// legitimately merged selections should not be refused for being tidy.
+  #[inline]
+  pub const fn max_response_metadata(&self) -> NonZeroU32 {
+    self.max_response_metadata
+  }
+
+  /// How much work draft §6.3's collection **and** draft §6.4.1's argument scan may do, across the
+  /// whole operation — and draft §4's introspection reads.
+  ///
+  /// Charged per selection *looked at*, surviving or not; per entry a name lookup compares, before
+  /// it compares it; per definition and fragment the fragment index's one pass handles; per
+  /// definition draft §6.1's operation lookup reads; per **byte of every argument the request
+  /// writes**, at every position the field is coerced at; and per schema member an introspection
+  /// list reads. The first is the difference between this and every other ceiling here, and it is
+  /// deliberate: the others count what was produced, and a document built out of fragments that
+  /// collect nothing produces nothing while walking as far as it likes.
+  ///
+  /// **Two of those are taken outside collection, and the first is why this ceiling can refuse a
+  /// `start` before a response exists.** Draft §6.1 walks the definitions to find the operation,
+  /// once per [`start`](Executor::start), over a count the document chooses; it was the module's
+  /// last uncharged walk over a client quantity (al8n/smear#144) and it now spends this budget like
+  /// the rest. The refusal is
+  /// [`StartError::OperationLookupRefused`](StartError::OperationLookupRefused) rather than a
+  /// field error, because §7.1.2 has no response for a failure raised before execution begins.
+  ///
+  /// **The second is draft §6.4.1 `CoerceArgumentValues`, and its refusal is a field error.**
+  /// Step 5 iterates every argument the *schema* declares and asks, for each, whether the request
+  /// supplied it, so the scan is `declared × written` name comparisons at **every runtime position
+  /// of the field** — and positions are the driver's. `written` is the caller's and is charged
+  /// here, once, in front of the scan; a refusal raises `Raw::ArgumentBudget`, which nulls that
+  /// field under §6.4.4 and leaves the rest of the response alone, exactly as §6.4.1's own
+  /// argument faults do. **`declared` is deliberately not charged against this ceiling**: it is the
+  /// deployment's design-time number, and pricing it here refuses a caller whose document is small
+  /// because the schema is wide — measured, one unit per declared argument per position refuses a
+  /// full-occupancy response at about thirteen declared arguments, which is ordinary input. It is
+  /// bounded at schema build instead, by
+  /// [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS), so the scan is
+  /// `positions × 64` with positions metered by this ceiling and by
+  /// [`max_response_slots`](Limits::max_response_slots). al8n/smear#198.
+  ///
+  /// The one place §6.4.1's refusal is **not** a field error is a subscription's source field:
+  /// §6.2.3.1 coerces before any response exists, so it becomes
+  /// [`StartError::SourceFieldArgumentBudget`](StartError::SourceFieldArgumentBudget) — its own
+  /// variant, carrying this number, rather than the specification failure beside it.
+  ///
+  /// **A third is draft §4 introspection, and its refusal is a field error too.** The executor
+  /// answers `__schema` and `__type` from the schema, and two of the reads that takes are its own
+  /// rather than a collection's: one unit per schema member a meta list reads, whether or not
+  /// `includeDeprecated` lets the member through, plus one per possible-object word an interface's
+  /// `possibleTypes` scans; and one pass per walk over the bytes of `__type`'s name. The first is
+  /// §6.4.1's product again — a schema's width per position, with positions the client's to
+  /// multiply by aliasing — and here the width has no build-time ceiling, so it is metered rather
+  /// than bounded at build. A refusal nulls the list or the `__type` it was raised at, and draft
+  /// §6.4.4 takes it from there.
+  ///
+  /// The rest is what makes the first a bound rather than a bound on one factor. Both tables hash
+  /// text the *document* chose, and the shared hash is unkeyed with every round invertible in the
+  /// word it folds, so a client can put every one of its names in one bucket deliberately. Charging
+  /// each comparison first means it spends this ceiling doing so, and the guarantee does not rest
+  /// on the hash behaving.
+  ///
+  /// **What a lookup costs an honest document is the hash's business, and it was asserted before it
+  /// was measured (al8n/smear#172).** "About one entry, so roughly twice what it used to be" was
+  /// true of `k0…k4095` — 1.89 units per key — and false of every other ordinary spelling: 4,096
+  /// **distinct** keys spelled `user0000Name…` charged 15.83 each, `field0…` charged 41.45 and
+  /// `h00000000…` charged 64.60, growing quadratically, with no collision search anywhere. That was
+  /// [`hash_bytes`](smear_schema::hash_bytes)'s fold leaving a name's late bytes out of the bucket
+  /// index.
+  ///
+  /// **Then the replacement claim was asserted over the same five fixtures (al8n/smear#196).** An
+  /// avalanche step at the end of the fold closed the half of it that short names showed, and left
+  /// open the half that names *longer than eight bytes* have: differences in two consecutive fold
+  /// inputs cancelled, so 4,096 aliases spelled `x` plus an eight-digit base-36 counter charged
+  /// **11,943** units here and base-63 charged **18,401** — again with no collision search, again
+  /// growing with the count. Mixing between the rounds is what closed that. Thirty-three families
+  /// crossing four radices against seven counter widths now measure 7,081 to 7,265 units for 4,096
+  /// keys — 1.73 to 1.77 each, every one within 3% of the others — so the sentence is finally true
+  /// of a population and not of a list.
+  ///
+  /// None of that was ever the *bound* — a constructed pile-up spends this ceiling either way, and
+  /// the hash is still unkeyed. What it decides is whether the default below is a ceiling on abuse
+  /// or a lottery on how a client spells its aliases.
+  ///
+  /// **It is not "collection work" in the narrow sense, and the widening was a defect repair.**
+  /// Every name the executor interns charges this, including the ones only a *diagnostic* wants: a
+  /// driver's error message, an unresolvable runtime type name, the spelling of a variable an
+  /// argument did not get. Two of those are the document's own text, and while they interned
+  /// uncharged a client could name its variables into one bucket and walk it once per failed
+  /// field — after collection had been admitted, so nothing here saw it. A name that cannot be
+  /// charged is now dropped from its message rather than fatal, exactly as one that will not fit
+  /// the arena already was.
+  ///
+  /// It is also what replaced a recursion. `walk` used to descend the native stack once per named
+  /// fragment in a chain, and a chain is flat in the document, so no parser depth limit could see
+  /// it — a few thousand links aborted the process with `SIGABRT`, at a count that moves with the
+  /// platform and the build profile, which `collect::walk` records with both measurements. The walk
+  /// now runs on an explicit stack, which turns depth into heap that this budget already bounds, so
+  /// there is no depth knob to get wrong per deployment.
+  ///
+  /// Per operation rather than per call, because `collect_fields` runs once per object position: a
+  /// per-call budget would leave the total at `positions × budget`, and positions are the driver's.
+  /// Counting down across the operation means no driver answer multiplies collection work.
+  ///
+  /// Per operation also means *every* operation. An executor reused for a second run of the same
+  /// document re-pays the fragment index pass it built the first time, even though the table is
+  /// still there — so the verdict on a request is a function of the request and this number, and
+  /// never of what the executor happened to be asked before it.
+  ///
+  /// **And per draft §6.2.3.2 *event*, which is the same sentence and had to be checked rather
+  /// than assumed.** §6.2.3.2 makes each source event one whole `ExecuteRootSelectionSet`, so an
+  /// event is an operation by this ceiling's own unit — and it must be, because a subscription is
+  /// unbounded in time and a budget spent cumulatively across one would refuse event *N* for work
+  /// event 1 did. [`handle_source_event`](Executor::handle_source_event) re-arms it through the
+  /// same `reset` a second `start` performs, and `each_source_event_charges_what_the_first_did` is
+  /// the gate.
+  #[inline]
+  pub const fn max_selection_visits(&self) -> NonZeroU32 {
+    self.max_selection_visits
+  }
+
+  /// How many bytes of interned text the response may hold.
+  ///
+  /// Response keys, `__typename` answers and the names an error message quotes are stored once
+  /// each in one arena, and so are the messages
+  /// [`handle_field_error`](Executor::handle_field_error) is handed. That last population is the
+  /// reason this is a ceiling and not an invariant: its size is the *driver's*, one message per
+  /// failed position, and neither the length nor the count is anything the query bounds.
+  ///
+  /// **This one is a correctness ceiling before it is a resource ceiling.** Offsets into the arena
+  /// are `u32`. Without a bound, an arena past four gigabytes does not fail to allocate — it
+  /// truncates, and every name interned afterwards reads back the wrong bytes, so a response comes
+  /// out well formed and quietly wrong. The narrowing is checked as well, so the two are
+  /// independent: the check cannot be defeated by choosing a larger ceiling.
+  ///
+  /// A refusal degrades rather than propagates. A driver message that will not fit is reported as
+  /// a field error without its text; a *name* that will not fit cannot be degraded that way — a
+  /// response key is the position — so that one refuses the position.
+  ///
+  /// **It bounds bytes, and the memory is a multiple of them.** Every entry carries bookkeeping the
+  /// arena's length does not count — its span, its stored hash, its hash-chain link, its share of
+  /// the bucket table and its slot in collection's key-to-group scratch — and a GraphQL name is at
+  /// least one byte, so `B` bytes of ceiling can be `B` entries costing about `33 · B`. That is a
+  /// constant multiple and not a second factor, which is the difference between a cost to know
+  /// about and the product shape this module refuses; it is stated because a caller choosing this
+  /// number is choosing thirty-three times it.
+  #[inline]
+  pub const fn max_interned_bytes(&self) -> NonZeroU32 {
+    self.max_interned_bytes
+  }
+
+  /// How many entries a draft §7.1.7 [`Extensions`] map may hold.
+  ///
+  /// Charged by `Extensions::insert`, and re-checked by
+  /// [`set_extensions`](Executor::set_extensions) against *this* executor's value — a map built
+  /// under a laxer `Limits` is refused rather than trusted, because a ceiling a caller can pick is
+  /// advice.
+  ///
+  /// It bounds the map's **entry slots** and not only its entries. `Extensions::remove` refunds
+  /// this budget without returning the slot to the allocator, so `set_extensions` re-derives an
+  /// accepted map's spine from its entries whenever it is holding more than this — otherwise a map
+  /// grown under the laxer `Limits` and emptied back down would pass every check here and be
+  /// retained at its high-water mark. The entries themselves are untouched; see that method.
+  ///
+  /// One of a **pair**, and neither half bounds anything alone: see
+  /// [`max_extension_key_bytes`](Limits::max_extension_key_bytes).
+  ///
+  /// **Three retainers read it, because the container has three sites.**
+  /// [`RequestErrorResult`](super::RequestErrorResult) carries the entry for a draft §7.1.3
+  /// *request error result* and performs the identical re-check and re-derivation against the
+  /// ceilings it was created with. Passing [`limits`](Executor::limits) is what makes those this
+  /// executor's; the type's header says why nothing forces it and what that does and does not
+  /// bound.
+  ///
+  /// The third is draft §7.1.6's per-error entry:
+  /// [`handle_field_error_with`](Executor::handle_field_error_with) re-checks a map against this
+  /// executor's two ceilings and re-derives its spine exactly as `set_extensions` does. It retains
+  /// one map per driver-reported error rather than one per response, so what the pair bounds there
+  /// is a **product** — at most one map per error row and one row per position, so
+  /// `max_response_slots × (max_extension_entries + max_extension_key_bytes)` at the very worst.
+  /// Every factor is one of this executor's ceilings, which is what makes the product a bound
+  /// rather than the shape the [`Limits`] section *A budget on one factor of a product bounds
+  /// nothing* warns about; a deployment whose driver attaches a map to many errors sizes it by
+  /// lowering any of the three. The values in those maps are the driver's and are not bounded here,
+  /// as below.
+  #[inline]
+  pub const fn max_extension_entries(&self) -> NonZeroU32 {
+    self.max_extension_entries
+  }
+
+  /// How many bytes of *key* a draft §7.1.7 [`Extensions`] map may hold, summed over its entries.
+  ///
+  /// The other half of the pair. Entries alone would leave one key free to be a gigabyte; key bytes
+  /// alone would leave an unbounded number of entries under empty keys, since a zero-length key is
+  /// a legal key. Together they also bound the map's linear scan, whose whole-life worst case is
+  /// `max_extension_entries × max_extension_key_bytes` byte comparisons.
+  ///
+  /// **Not** [`max_interned_bytes`](Limits::max_interned_bytes), and the separation is deliberate:
+  /// that arena is a response budget shared with field names and driver error messages, so
+  /// spending it on protocol metadata would let an extensions map refuse an error message.
+  ///
+  /// Values are **not** bounded here, by either ceiling, and that is a **non-goal rather than the
+  /// third hole in this pair**. `proto` bounds what `proto` allocates, and an entry's value is the
+  /// driver's own `V` — the same way a `String` leaf of any length reaches the response without a
+  /// byte ceiling looking at it, and the same way `start`'s `root` and every
+  /// [`handle_resolved`](Executor::handle_resolved) answer do. There is no ceiling that could
+  /// apply: [`Values`](crate::Values) asks eight questions, each discharging a numbered draft §6
+  /// step, and none of them is "how big is this" — measuring one would mean a `V` the executor is
+  /// allowed to interpret, which is the boundary this crate is built not to cross. `max_in_flight`
+  /// and [`max_response_slots`](Limits::max_response_slots) bound how *many* driver values are
+  /// held; nothing bounds one of them, here or anywhere else.
+  #[inline]
+  pub const fn max_extension_key_bytes(&self) -> NonZeroU32 {
+    self.max_extension_key_bytes
+  }
+
+  /// How many entries a draft §7.1.3 [`RequestErrorResult`](super::RequestErrorResult) may list.
+  ///
+  /// The first of **three** ceilings on the one population no executor creates: the request errors
+  /// a driver raises where no executor exists — draft §2's syntax errors, draft §5's validation
+  /// failures, and the variable coercion failures draft §6.1 leaves to the driver — each a
+  /// [`RequestError`](super::RequestError) the driver builds and a result lists. Charged by
+  /// [`RequestErrorResult::push`](super::RequestErrorResult::push), before the entry is read; the
+  /// first entry counts, whichever kind it is.
+  ///
+  /// **Three, and not the two that were reserved for it.** A driver-grown list of driver-supplied
+  /// messages is a count multiplied by a length, and a budget on one factor of a product bounds
+  /// nothing — and an entry's `locations` are a second length beside its message. So the product
+  /// has three factors of its own, and the entry's §7.1.6 `extensions` map brings the pair above
+  /// with it:
+  ///
+  /// `max_request_errors × (max_request_error_message_bytes + max_request_error_locations ·
+  /// size_of::<SimpleSpan>() + max_extension_entries + max_extension_key_bytes)`, plus a list spine
+  /// of at most `max_request_errors`.
+  ///
+  /// Every factor is a ceiling, which is what makes the product a bound rather than the shape the
+  /// [`Limits`] section *A budget on one factor of a product bounds nothing* warns about. At the
+  /// defaults it is 1.125 MiB of message, span and key bytes — on a 64-bit target, where a span is
+  /// sixteen bytes — plus 8,192 extension entry slots, and the values in those maps are the
+  /// driver's, as below.
+  ///
+  /// **No executor charges it, or either of the two after it.** They bound what a result retains,
+  /// and a result is a value the driver builds after `start` has refused, or before any executor
+  /// existed — so an operation spends none of the three, and none of them can refuse one.
+  #[inline]
+  pub const fn max_request_errors(&self) -> NonZeroU32 {
+    self.max_request_errors
+  }
+
+  /// How many bytes of `message` one driver-supplied [`RequestError`](super::RequestError) may
+  /// carry.
+  ///
+  /// Checked by [`RequestError::new`](super::RequestError::new) **before** the message is boxed —
+  /// the text arrives borrowed, so a refusal allocates nothing, which is the difference
+  /// [`Extensions::insert`] draws between a ceiling and a receipt — and by
+  /// [`RequestError::from_diagnose`](super::RequestError::from_diagnose) after measuring a
+  /// rendering it has not yet kept. The result that lists the entry checks it again, against its
+  /// own value. Bytes and not characters, because what is retained is a `Box<str>` and its length
+  /// is what this bounds.
+  ///
+  /// The length factor of the product [`max_request_errors`](Limits::max_request_errors) states.
+  #[inline]
+  pub const fn max_request_error_message_bytes(&self) -> NonZeroU32 {
+    self.max_request_error_message_bytes
+  }
+
+  /// How many draft §7.1.6 `locations` one driver-supplied [`RequestError`](super::RequestError)
+  /// may carry.
+  ///
+  /// The second length factor of the same product. A location is a span, copied as it arrives and
+  /// boxed at its exact count, so the count is the whole of what this bounds — and the count is the
+  /// document's to grow, which is why it has a ceiling of its own rather than riding on the
+  /// message's: `graphql-js` 16.11.0's `UniqueArgumentNamesRule` reports every duplicate of an
+  /// argument as one error's `nodes`, and its `OverlappingFieldsCanBeMergedRule` reports
+  /// `fields1.concat(fields2)`.
+  #[inline]
+  pub const fn max_request_error_locations(&self) -> NonZeroU32 {
+    self.max_request_error_locations
+  }
+
+  /// The same limits with `max` as their [`max_in_flight`](Self::max_in_flight) ceiling.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_in_flight(mut self, max: NonZeroU32) -> Self {
+    self.max_in_flight = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_response_slots`](Self::max_response_slots) ceiling.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_response_slots(mut self, max: NonZeroU32) -> Self {
+    self.max_response_slots = max;
+    self
+  }
+
+  /// The same limits with `max` as their
+  /// [`max_response_metadata`](Self::max_response_metadata) ceiling.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_response_metadata(mut self, max: NonZeroU32) -> Self {
+    self.max_response_metadata = max;
+    self
+  }
+
+  /// The same limits with `max` as their
+  /// [`max_selection_visits`](Self::max_selection_visits) ceiling.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_selection_visits(mut self, max: NonZeroU32) -> Self {
+    self.max_selection_visits = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_interned_bytes`](Self::max_interned_bytes) ceiling.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_interned_bytes(mut self, max: NonZeroU32) -> Self {
+    self.max_interned_bytes = max;
+    self
+  }
+
+  /// The same limits with `max` as their
+  /// [`max_extension_entries`](Self::max_extension_entries) ceiling.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_extension_entries(mut self, max: NonZeroU32) -> Self {
+    self.max_extension_entries = max;
+    self
+  }
+
+  /// The same limits with `max` as their
+  /// [`max_extension_key_bytes`](Self::max_extension_key_bytes) ceiling.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_extension_key_bytes(mut self, max: NonZeroU32) -> Self {
+    self.max_extension_key_bytes = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_request_errors`](Self::max_request_errors) ceiling.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_request_errors(mut self, max: NonZeroU32) -> Self {
+    self.max_request_errors = max;
+    self
+  }
+
+  /// The same limits with `max` as their
+  /// [`max_request_error_message_bytes`](Self::max_request_error_message_bytes) ceiling.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_request_error_message_bytes(mut self, max: NonZeroU32) -> Self {
+    self.max_request_error_message_bytes = max;
+    self
+  }
+
+  /// The same limits with `max` as their
+  /// [`max_request_error_locations`](Self::max_request_error_locations) ceiling.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_request_error_locations(mut self, max: NonZeroU32) -> Self {
+    self.max_request_error_locations = max;
+    self
   }
 }
 
