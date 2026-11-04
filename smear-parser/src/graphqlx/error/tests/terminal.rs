@@ -22,9 +22,9 @@ use smear_lexer::{
   error::BadStateError,
   graphqlx::{error::LexerErrors, syntactic::SyntacticTokenKind},
 };
-use tokora::{SimpleSpan as Span, error::MaybeTerminal, utils::CowStr};
+use tokora::{SimpleSpan as Span, error::MaybeTerminal};
 
-use crate::graphqlx::error::{Error, ErrorData, Errors, Expectation, UnexpectedEnd};
+use crate::graphqlx::error::{Error, ErrorData, Errors, Expectation};
 
 /// A stand-in for `smear_lexer::limits`'s `LimitExceeded`. The `Lexer` arm asks whether the
 /// *variant* is `State`, not what the payload is, so any inhabited type exercises it — and using
@@ -51,9 +51,9 @@ type Errs = Errors<&'static str, SyntacticTokenKind, char, Expectation, StateErr
 /// * **Each entry carries its expected answer beside its sample**, so there is no state in which a
 ///   variant is listed and unchecked.
 ///
-/// Some variants appear **twice**, and those are the point: an arm that delegates has to be shown
-/// reading the value rather than the variant, which takes one sample on each side. `Lexer` and
-/// `UnexpectedEnd` are the two.
+/// One variant appears **twice**, and that is the point: an arm that delegates has to be shown
+/// reading the value rather than the variant, which takes one sample on each side. `Lexer` is the
+/// one.
 ///
 /// # Naming a variant directly is allowed here, and is not allowed in the producibility census
 ///
@@ -102,17 +102,12 @@ fn the_terminal_arms_answer_for_every_variant() {
         );
         cells += 1;
       })+)+
-      // A census that selected nothing exits `ok`. 11 = 9 variants + the two second samples.
-      assert_eq!(cells, 11, "the cell set collapsed");
+      // A census that selected nothing exits `ok`. 9 = 8 variants + `Lexer`'s second sample.
+      assert_eq!(cells, 9, "the cell set collapsed");
     };
   }
 
   let span = Span::new(0, 1);
-  let end = UnexpectedEnd::with_name(
-    0usize,
-    CowStr::from_static("GraphQLx production"),
-    Expectation::Name,
-  );
 
   census! {
     // Terminal only when it holds a `State` refusal — a spent `smear_lexer::limits` budget, and
@@ -135,13 +130,6 @@ fn the_terminal_arms_answer_for_every_variant() {
     // tripped limit — smear issue #177. Through the constructor both `From<UnexpectedEot>` impls
     // route to when tokora's mark is set, so the conversion and the arm cannot disagree.
     TerminalEndOfInput => [(Err::terminal_end_of_input(span).into_data(), true)],
-
-    // Delegated: the value decides, not the variant. A production that ran out of input is a
-    // grammar rejection; the same variant is terminal when the scanner raised the flag on it.
-    UnexpectedEnd => [
-      (ErrorData::UnexpectedEnd(end.clone()), false),
-      (ErrorData::UnexpectedEnd(end.into_terminal()), true),
-    ],
 
     // Affirmatively recoverable: built from a construct the grammar rejected, not from a limit the
     // runtime refused.

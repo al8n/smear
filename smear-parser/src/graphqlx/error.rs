@@ -5,12 +5,9 @@
 //! feature-gated GraphQL dialect module.
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
-use smear_lexer::{
-  graphqlx::{
-    error::{LexerErrorData, LexerErrors},
-    syntactic::{SyntacticToken, SyntacticTokenKind},
-  },
-  tokora::error::UnexpectedEnd,
+use smear_lexer::graphqlx::{
+  error::{LexerErrorData, LexerErrors},
+  syntactic::{SyntacticToken, SyntacticTokenKind},
 };
 use tokora::{
   Lexer, SimpleSpan as Span,
@@ -197,8 +194,6 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   Unclosed(Unclosed),
   /// A token did not satisfy its typed expectation.
   UnexpectedToken(UnexpectedToken<T, Exp>),
-  /// A production reached end of input unexpectedly.
-  UnexpectedEnd(UnexpectedEnd<Exp>),
   /// An end of input that stands in for a **terminal scanner stop** — smear issue #177.
   ///
   /// GraphQL's twin carries the reasoning and the shape: a resource-limit trip, or the poison
@@ -248,7 +243,7 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
 /// Which of these errors **end the parse** rather than being something to recover from.
 ///
 /// GraphQL's twin carries the reasoning and the rule each arm came from. This dialect's variant
-/// set is narrower and every arm is the same ruling: [`UnexpectedEnd`] delegates,
+/// set is narrower and every arm is the same ruling:
 /// [`NestingLimitExceeded`](Self::NestingLimitExceeded),
 /// [`TokenBudgetExhausted`](Self::TokenBudgetExhausted) and
 /// [`TerminalEndOfInput`](Self::TerminalEndOfInput) are always terminal, and
@@ -279,7 +274,6 @@ impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, S
       // Neither is a scanner stop, and this arm is what stops the conversion's routing from being
       // discarded one layer later.
       Self::TerminalEndOfInput => true,
-      Self::UnexpectedEnd(e) => e.is_terminal(),
       Self::Unclosed(_) | Self::UnexpectedToken(_) | Self::Other(_) | Self::Source(_) => false,
     }
   }
@@ -326,22 +320,6 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   #[inline]
   pub const fn unexpected_token(found: T, expected: Exp, span: Span) -> Self {
     Self::maybe_unexpected_token(Some(found), expected, span)
-  }
-
-  /// Creates an unexpected-end error with a typed expectation.
-  #[inline]
-  pub fn unexpected_end(expected: Exp, span: Span) -> Self
-  where
-    Exp: core::fmt::Debug,
-  {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEnd(UnexpectedEnd::with_name(
-        0,
-        tokora::utils::CowStr::from_static("GraphQLx production"),
-        expected,
-      )),
-    )
   }
 
   /// Creates a parser-frame nesting refusal.
@@ -436,13 +414,13 @@ impl<S, T, Char, StateError> Error<S, T, Char, Expectation, StateError> {
   /// Creates the end-of-input error a production raises when it has no particular expectation
   /// to name.
   ///
-  /// # Why this is a second impl block, and why it is not `ErrorData::UnexpectedEnd`
+  /// # Why this is a second impl block, and why it is an `UnexpectedToken`
   ///
   /// It names an [`Expectation`] value, so it cannot live in the `Exp`-generic block above.
   ///
-  /// And it is spelled as an [`UnexpectedToken`] with no found token rather than as an
-  /// [`UnexpectedEnd`], because **that is what this dialect's own `UnexpectedEot` conversion
-  /// already produces** — the syntactic layer reports the identical event as
+  /// And it is spelled as an [`UnexpectedToken`] with no found token, because **that is what this
+  /// dialect's own `UnexpectedEot` conversion already produces** — the syntactic layer reports the
+  /// identical event as
   /// `maybe_unexpected_token(None, Expectation::InputValue, …)`, and the lossless layer is
   /// compared against the syntactic one, input by input, by the acceptance-parity gate. Two
   /// spellings of one event across two layers of one dialect is a difference no consumer could

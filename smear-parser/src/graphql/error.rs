@@ -35,18 +35,6 @@ use tokora::{
   utils::{CowStr, Expected},
 };
 
-/// Hints for parsing a variable value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum VariableValueHint {
-  /// A name was expected.
-  #[display("name")]
-  Name,
-  /// A dollar `$` was expected.
-  #[display("dollar")]
-  Dollar,
-}
-
 /// A hint for what was expected in a object field value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
 #[non_exhaustive]
@@ -60,153 +48,6 @@ pub enum ObjectFieldValueHint {
   /// A name was expected.
   #[display("name")]
   Name,
-}
-
-/// Hints for the next component was expected while parsing a schema extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum SchemaExtensionHint {
-  /// Directives.
-  #[display("directives")]
-  Directives,
-  /// Root operation types definition.
-  #[display("root operation types definition")]
-  RootOperationTypesDefinition,
-  /// Extend keyword.
-  #[display("extend keyword")]
-  Extend,
-  /// Schema keyword.
-  #[display("schema keyword")]
-  Schema,
-  /// Directives or root operation types definition.
-  #[display("directives or root operation types definition")]
-  DirectivesOrRootOperationTypesDefinition,
-}
-
-/// Hints for the next component was expected while parsing a union type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum UnionTypeExtensionHint {
-  /// Directives.
-  #[display("directives")]
-  Directives,
-  /// Union member types.
-  #[display("union member types")]
-  UnionMemberTypes,
-  /// Name.
-  #[display("name")]
-  Name,
-  /// Extend keyword.
-  #[display("extend keyword")]
-  Extend,
-  /// Union keyword.
-  #[display("union keyword")]
-  Union,
-  /// Directives or union member types.
-  #[display("directives or union member types")]
-  DirectivesOrUnionMemberTypes,
-}
-
-/// Hints for the next component was expected while parsing an input object type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum InputObjectTypeExtensionHint {
-  /// Directives.
-  #[display("directives")]
-  Directives,
-  /// Input fields definition.
-  #[display("input fields definition")]
-  InputFieldsDefinition,
-  /// Name.
-  #[display("name")]
-  Name,
-  /// Extend keyword.
-  #[display("extend keyword")]
-  Extend,
-  /// Input keyword.
-  #[display("input keyword")]
-  Input,
-  /// Directives or input fields definition.
-  #[display("directives or input fields definition")]
-  DirectivesOrInputFieldsDefinition,
-}
-
-/// Hints for the next component was expected while parsing an object type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum ObjectTypeExtensionHint {
-  /// Implements interfaces.
-  #[display("implements")]
-  Implements,
-  /// Directives.
-  #[display("directives")]
-  Directives,
-  /// Fields definition.
-  #[display("fields definition")]
-  FieldsDefinition,
-  /// Name.
-  #[display("name")]
-  Name,
-  /// Extend keyword.
-  #[display("extend keyword")]
-  Extend,
-  /// Type keyword.
-  #[display("type keyword")]
-  Type,
-  /// Implements, directives, or fields definition.
-  #[display("implements, directives, or fields definition")]
-  ImplementsOrDirectivesOrFieldsDefinition,
-}
-
-/// Hints for the next component was expected while parsing an interface type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum InterfaceTypeExtensionHint {
-  /// Implements interfaces.
-  #[display("implements")]
-  Implements,
-  /// Directives.
-  #[display("directives")]
-  Directives,
-  /// Fields definition.
-  #[display("fields definition")]
-  FieldsDefinition,
-  /// Name.
-  #[display("name")]
-  Name,
-  /// Extend keyword.
-  #[display("extend keyword")]
-  Extend,
-  /// Interface keyword.
-  #[display("interface keyword")]
-  Interface,
-  /// Implements, directives, or fields definition.
-  #[display("implements, directives, or fields definition")]
-  ImplementsOrDirectivesOrFieldsDefinition,
-}
-
-/// Hints for the next component was expected while parsing an enum type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum EnumTypeExtensionHint {
-  /// Directives.
-  #[display("directives")]
-  Directives,
-  /// Enum values definition.
-  #[display("enum values definition")]
-  EnumValuesDefinition,
-  /// Name.
-  #[display("name")]
-  Name,
-  /// Extend keyword.
-  #[display("extend keyword")]
-  Extend,
-  /// Enum keyword.
-  #[display("enum keyword")]
-  Enum,
-  /// Directives or enum values definition.
-  #[display("directives or enum values definition")]
-  DirectivesOrEnumValuesDefinition,
 }
 
 /// Expectations for the GraphQL parser.
@@ -330,36 +171,6 @@ impl<T, TK> UnexpectedToken<T, TK> {
   #[inline]
   pub const fn expected(&self) -> &TK {
     &self.expected
-  }
-}
-
-/// An unexpected keyword error.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UnexpectedKeyword<S> {
-  found: S,
-  expected: &'static str,
-}
-
-impl<S> UnexpectedKeyword<S> {
-  /// Creates a new unexpected keyword error.
-  #[inline]
-  pub const fn new(found: S, expected_kw: &'static str) -> Self {
-    Self {
-      found,
-      expected: expected_kw,
-    }
-  }
-
-  /// Returns the found keyword.
-  #[inline]
-  pub const fn found(&self) -> &S {
-    &self.found
-  }
-
-  /// Returns the name of the expected keyword.
-  #[inline]
-  pub const fn expected(&self) -> &'static str {
-    self.expected
   }
 }
 
@@ -594,7 +405,7 @@ impl<S> IntOverflow<S> {
 /// exhaustive match gets is *information*: the language moved.
 ///
 /// This enum is the other side of that rule, and it transcribes nothing. Its list is what this
-/// parser chose to distinguish about a document it refused, and three parts of the list say so
+/// parser chose to distinguish about a document it refused, and two parts of the list say so
 /// without being asked:
 ///
 /// - [`Other`](Self::Other) exists **because** the list is open. The six `From` conversions at the
@@ -603,11 +414,16 @@ impl<S> IntOverflow<S> {
 /// - [`IntOverflow`](Self::IntOverflow) and [`FloatOverflow`](Self::FloatOverflow) are not grammar
 ///   refusals at all. Draft §2.9.1 bounds an `IntValue`'s digits at nothing, and these two exist
 ///   because this crate ships a *materialising* reading — they arrived with a feature.
-/// - The six `UnexpectedEndOf…Extension` variants are one grammatical situation cut six ways
-///   because this parser carries a per-extension hint. The draft asks for none of the six.
 ///
 /// So the list is ours, it has grown for our reasons, and it is committed to growing further:
 /// `graphqlx` is a second dialect in this crate today and more dialects are the plan.
+///
+/// **It has also shrunk, and for the same reason.** Fourteen variants that no parse produced —
+/// `InvalidEnumValue`, `InvalidBooleanValue`, `InvalidNullValue`, `InvalidFragmentName`,
+/// `UnexpectedKeyword`, `UnexpectedEndOfVariableValue`, `UnknownDirectiveLocation`,
+/// `UnknownOperationType` and six per-extension `UnexpectedEndOf…Extension` variants — were
+/// removed before 0.1. Every variant left answers a diagnostic code meant to outlive a rewording,
+/// and a code for an error that cannot happen is a promise about nothing.
 ///
 /// ## What the attribute costs, measured rather than argued
 ///
@@ -637,9 +453,9 @@ impl<S> IntOverflow<S> {
 ///
 /// No consumer can be told at build time that this vocabulary grew: making a downstream match
 /// untotal is the whole of what `#[non_exhaustive]` does. The notice does not disappear, it moves
-/// in-crate, where the attribute is inert. `error_data_variant_census` matches all 25 variants
-/// wildcard-free in **every** configuration, so a twenty-sixth is `E0004` there before it can
-/// reach anybody, and it must carry a public producer before that test is green again.
+/// in-crate, where the attribute is inert. `error_data_variant_census` matches all 11 variants
+/// wildcard-free in **every** configuration, so a new one is `E0004` there before it can reach
+/// anybody, and it must carry a public producer before that test is green again.
 ///
 /// What survives outside the crate is the half a wildcard cannot swallow, and `smear-smoke`'s
 /// `error_data_variant_tag` holds it: every variant is named there and reachable from a dependent
@@ -672,8 +488,8 @@ impl<S> IntOverflow<S> {
 ///
 /// So the two claims the census makes are different claims, and it makes both:
 /// `error_data_variant_census` matches this enum exhaustively and wildcard-free in **every**
-/// configuration — 22 variants, always — and builds a sample through a public constructor for
-/// each one whose producer that configuration compiled: 22 samples with the feature, 20 without.
+/// configuration — 11 variants, always — and builds a sample through a public constructor for
+/// each one whose producer that configuration compiled: 11 samples with the feature, 9 without.
 /// A variant producible in no configuration is caught by the all-features run.
 ///
 /// # Source-breaking change: `IntOverflow`'s payload
@@ -769,46 +585,12 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// Raised only by the `materialized-numbers` productions; see `Error::float_overflow`.
   #[from(skip)]
   FloatOverflow(S),
-  /// An enum value is invalid.
-  #[from(skip)]
-  InvalidEnumValue(S),
-  /// A boolean value is invalid.
-  #[from(skip)]
-  InvalidBooleanValue(S),
-  /// A null value is invalid.
-  #[from(skip)]
-  InvalidNullValue(S),
-  /// A fragment name is invalid.
-  #[from(skip)]
-  InvalidFragmentName(S),
   /// A delimiter was not closed.
   Unclosed(Unclosed),
   /// An unexpected token was found.
   UnexpectedToken(UnexpectedToken<T, Exp>),
-  /// An unexpected keyword was found.
-  UnexpectedKeyword(UnexpectedKeyword<S>),
-  /// An unexpected end was found in a variable value.
-  UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>),
   /// An unexpected end was found in an object field value.
   UnexpectedEndOfObjectFieldValue(UnexpectedEnd<ObjectFieldValueHint>),
-  /// An unknown directive location was found.
-  #[from(skip)]
-  UnknownDirectiveLocation(S),
-  /// An unknown operation type was found.
-  #[from(skip)]
-  UnknownOperationType(S),
-  /// An unexpected end was found in an object type extension.
-  UnexpectedEndOfObjectExtension(UnexpectedEnd<ObjectTypeExtensionHint>),
-  /// An unexpected end was found in an interface type extension.
-  UnexpectedEndOfInterfaceExtension(UnexpectedEnd<InterfaceTypeExtensionHint>),
-  /// An unexpected end was found in an enum type extension.
-  UnexpectedEndOfEnumExtension(UnexpectedEnd<EnumTypeExtensionHint>),
-  /// An unexpected end was found in an input object type extension.
-  UnexpectedEndOfInputObjectExtension(UnexpectedEnd<InputObjectTypeExtensionHint>),
-  /// An unexpected end was found in a union type extension.
-  UnexpectedEndOfUnionExtension(UnexpectedEnd<UnionTypeExtensionHint>),
-  /// An unexpected end was found in a schema extension.
-  UnexpectedEndOfSchemaExtension(UnexpectedEnd<SchemaExtensionHint>),
   /// A **genuine** end of input was found: the production asked for more and the document had
   /// ended.
   ///
@@ -912,9 +694,10 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
 ///
 /// # The arms, and the rule each one came from
 ///
-/// * **Delegated** — the eight [`UnexpectedEnd`] variants. `UnexpectedEnd` answers for itself: its
-///   flag is raised when a *scanner* stop built it and clear for a genuine end of a production, so
-///   the value decides rather than the variant. That is step 1 of the trait's rule.
+/// * **Delegated** — [`UnexpectedEndOfObjectFieldValue`](Self::UnexpectedEndOfObjectFieldValue),
+///   the one [`UnexpectedEnd`] variant. `UnexpectedEnd` answers for itself: its flag is raised when
+///   a *scanner* stop built it and clear for a genuine end of a production, so the value decides
+///   rather than the variant. That is step 1 of the trait's rule.
 /// * **`true`, always** — [`NestingLimitExceeded`](Self::NestingLimitExceeded). A frame budget is
 ///   never cleared by more input.
 /// * **`true`, always** — [`TokenBudgetExhausted`](Self::TokenBudgetExhausted). Neither is a
@@ -975,25 +758,11 @@ impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, S
       Self::NestingLimitExceeded => true,
       Self::TokenBudgetExhausted => true,
       Self::TerminalEndOfInput => true,
-      Self::UnexpectedEndOfVariableValue(e) => e.is_terminal(),
       Self::UnexpectedEndOfObjectFieldValue(e) => e.is_terminal(),
-      Self::UnexpectedEndOfObjectExtension(e) => e.is_terminal(),
-      Self::UnexpectedEndOfInterfaceExtension(e) => e.is_terminal(),
-      Self::UnexpectedEndOfEnumExtension(e) => e.is_terminal(),
-      Self::UnexpectedEndOfInputObjectExtension(e) => e.is_terminal(),
-      Self::UnexpectedEndOfUnionExtension(e) => e.is_terminal(),
-      Self::UnexpectedEndOfSchemaExtension(e) => e.is_terminal(),
       Self::IntOverflow(_)
       | Self::FloatOverflow(_)
-      | Self::InvalidEnumValue(_)
-      | Self::InvalidBooleanValue(_)
-      | Self::InvalidNullValue(_)
-      | Self::InvalidFragmentName(_)
       | Self::Unclosed(_)
       | Self::UnexpectedToken(_)
-      | Self::UnexpectedKeyword(_)
-      | Self::UnknownDirectiveLocation(_)
-      | Self::UnknownOperationType(_)
       | Self::EndOfInput
       | Self::Other(_) => false,
     }
@@ -1047,28 +816,6 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
     Self::maybe_unexpected_token(Some(found), expected, span)
   }
 
-  /// Creates an unexpected end in variable value error.
-  #[inline]
-  pub const fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfVariableValue(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("variable value"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected keyword error.
-  #[inline]
-  pub const fn unexpected_keyword(found: S, expected_kw: &'static str, span: Span) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedKeyword(UnexpectedKeyword::new(found, expected_kw)),
-    )
-  }
-
   /// Creates an unexpected end in object field value error.
   #[inline]
   pub const fn unexpected_end_of_object_field_value(
@@ -1080,93 +827,6 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
       ErrorData::UnexpectedEndOfObjectFieldValue(UnexpectedEnd::with_name(
         0,
         CowStr::from_static("object field value"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in object type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_object_extension(
-    span: Span,
-    hint: ObjectTypeExtensionHint,
-  ) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfObjectExtension(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("object type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in interface type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_interface_extension(
-    span: Span,
-    hint: InterfaceTypeExtensionHint,
-  ) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfInterfaceExtension(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("interface type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in enum type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_enum_extension(span: Span, hint: EnumTypeExtensionHint) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfEnumExtension(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("enum type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in input object type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_input_object_extension(
-    span: Span,
-    hint: InputObjectTypeExtensionHint,
-  ) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfInputObjectExtension(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("input object type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in union type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_union_extension(span: Span, hint: UnionTypeExtensionHint) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfUnionExtension(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("union type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in schema extension error.
-  #[inline]
-  pub const fn unexpected_end_of_schema_extension(span: Span, hint: SchemaExtensionHint) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfSchemaExtension(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("schema extension"),
         hint,
       )),
     )
@@ -1194,42 +854,6 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   #[inline]
   pub const fn from_lexer_errors(err: LexerErrors<Char, StateError>, span: Span) -> Self {
     Self::new(span, ErrorData::Lexer(err))
-  }
-
-  /// Creates an invalid fragment name error.
-  #[inline]
-  pub const fn invalid_fragment_name(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidFragmentName(value))
-  }
-
-  /// Creates an invalid enum value error.
-  #[inline]
-  pub const fn invalid_enum_value(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidEnumValue(value))
-  }
-
-  /// Creates an invalid boolean value error.
-  #[inline]
-  pub const fn invalid_boolean_value(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidBooleanValue(value))
-  }
-
-  /// Creates an invalid null value error.
-  #[inline]
-  pub const fn invalid_null_value(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidNullValue(value))
-  }
-
-  /// Creates an unknown directive location error.
-  #[inline]
-  pub const fn unknown_directive_location(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::UnknownDirectiveLocation(value))
-  }
-
-  /// Creates an unknown operation type error.
-  #[inline]
-  pub const fn unknown_operation_type(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::UnknownOperationType(value))
   }
 
   /// Creates an unexpected end of input error — the **genuine** kind.

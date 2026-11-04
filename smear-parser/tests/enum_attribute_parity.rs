@@ -579,7 +579,8 @@ const RECORDED_DIFFERENCES: &[Recorded] = &[
        attribute belongs on vocabulary SMEAR OWNS and not on vocabulary the GRAPHQL \
        SPECIFICATION ENUMERATES, and `ErrorData` transcribes no production — its `Other` variant \
        exists because the list is open, its two overflow variants arrived with a feature, and its \
-       six extension-hint variants are one grammatical situation cut six ways. The four enums \
+       six extension-hint variants (since removed, with eight others no parse produced) were one \
+       grammatical situation cut six ways. The four enums \
        `7b9b293` freed are the other side of the same rule and stay exhaustive, as do `Unclosed` \
        and `IntWidth` in this very file. MEASURED COST: `cargo check --workspace --all-features \
        --all-targets --keep-going` with the attribute applied reports exactly one `E0004` in the \
@@ -655,30 +656,16 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
       "Lexer(LexerErrors<Char, StateError>)",
       "IntOverflow(IntOverflow<S>)",
       "FloatOverflow(S)",
-      "InvalidEnumValue(S)",
-      "InvalidBooleanValue(S)",
-      "InvalidNullValue(S)",
-      "InvalidFragmentName(S)",
       "Unclosed(Unclosed)",
       "UnexpectedToken(UnexpectedToken<T, Exp>)",
-      "UnexpectedKeyword(UnexpectedKeyword<S>)",
-      "UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>)",
       "UnexpectedEndOfObjectFieldValue(UnexpectedEnd<ObjectFieldValueHint>)",
-      "UnknownDirectiveLocation(S)",
-      "UnknownOperationType(S)",
-      "UnexpectedEndOfObjectExtension(UnexpectedEnd<ObjectTypeExtensionHint>)",
-      "UnexpectedEndOfInterfaceExtension(UnexpectedEnd<InterfaceTypeExtensionHint>)",
-      "UnexpectedEndOfEnumExtension(UnexpectedEnd<EnumTypeExtensionHint>)",
-      "UnexpectedEndOfInputObjectExtension(UnexpectedEnd<InputObjectTypeExtensionHint>)",
-      "UnexpectedEndOfUnionExtension(UnexpectedEnd<UnionTypeExtensionHint>)",
-      "UnexpectedEndOfSchemaExtension(UnexpectedEnd<SchemaExtensionHint>)",
       "EndOfInput",
       "TerminalEndOfInput",
       "NestingLimitExceeded",
       "TokenBudgetExhausted",
       "Other(std::borrow::Cow<'static, str>)",
     ],
-    reason: "TWO changes, and they were reviewed separately. (1) `IntOverflow(S)` became \
+    reason: "FIVE changes, and they were reviewed separately. (1) `IntOverflow(S)` became \
        `IntOverflow(IntOverflow<S>)`. SOURCE-BREAKING, ACCEPTED AND DECLARED — see the section of \
        that name on `ErrorData` for what breaks, what it buys and why the alternatives are worse. \
        The variant predates the merge base, so this reshapes an old name rather than adding a new \
@@ -709,9 +696,17 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
        read least well: `error_data_variant_census`'s `tag` matches `$variant { .. }`, which fits \
        a tuple variant and cannot see inside it, and the `MaybeTerminal` arm would become \
        `EndOfInput(t) => *t`, which compiles once and forces no decision again — THIS TABLE'S \
-       payload axis would be the only reader that noticed. The other 21 \
-       lines above are the merge base's, unedited, and repeating \
-       them is the point — this entry approves four named changes, not the enum.",
+       payload axis would be the only reader that noticed. (5) FOURTEEN variants are REMOVED — \
+       `InvalidEnumValue`, `InvalidBooleanValue`, `InvalidNullValue`, `InvalidFragmentName`, \
+       `UnexpectedKeyword`, `UnexpectedEndOfVariableValue`, `UnknownDirectiveLocation`, \
+       `UnknownOperationType` and the six `UnexpectedEndOf…Extension` variants. SOURCE-BREAKING \
+       for a match arm or a constructor call naming one, and accepted before 0.1: `git grep` over \
+       every crate, bench and example found no producer of any of them outside `error.rs` and its \
+       own tests, and each variant left answers a diagnostic code meant to outlive a rewording — \
+       a code for an error no parse can raise is a promise about nothing. The seven hint enums \
+       only those variants named went with them, recorded in `RECORDED_REMOVALS`. The other \
+       seven lines above are the merge base's, unedited, and repeating them is the point — this \
+       entry approves five named changes, not the enum.",
   },
   Recorded {
     file: "src/graphql/error.rs",
@@ -757,6 +752,60 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
     ],
     reason: "new enum, same reason as `materialized::InputValue` above, payload parameter included.",
   },
+];
+
+/// Why each enum in [`RECORDED_REMOVALS`] went: they are one removal, so they share one reason.
+const REMOVED_WITH_ITS_VARIANT: &str = "the hint payload of an `ErrorData` variant no parse \
+   produced, removed with that variant before 0.1. `git grep` over every crate, bench and example \
+   found no producer of the variant outside `error.rs` and its own tests, and every variant left \
+   answers a diagnostic code meant to outlive a rewording; a hint for an error that cannot happen \
+   had nothing left to describe.";
+
+/// Every merge-base enum that no longer exists, each with why it went.
+///
+/// **The merge-base tables stay verbatim**, because they are the merge base by definition: a row
+/// edited out of them would be a baseline that no longer says what `c3e35b8` said. So a removal is
+/// recorded here instead, and [`audit`] consults this list before it reports a vanished baseline
+/// row. Both directions of a stale entry fail: a removal whose enum the scan still finds did not
+/// happen, and a removal naming no merge-base row on an axis records nothing on that axis.
+///
+/// `(file, enum name, reason)`.
+const RECORDED_REMOVALS: &[(&str, &str, &str)] = &[
+  (
+    "src/graphql/error.rs",
+    "VariableValueHint",
+    REMOVED_WITH_ITS_VARIANT,
+  ),
+  (
+    "src/graphql/error.rs",
+    "SchemaExtensionHint",
+    REMOVED_WITH_ITS_VARIANT,
+  ),
+  (
+    "src/graphql/error.rs",
+    "UnionTypeExtensionHint",
+    REMOVED_WITH_ITS_VARIANT,
+  ),
+  (
+    "src/graphql/error.rs",
+    "InputObjectTypeExtensionHint",
+    REMOVED_WITH_ITS_VARIANT,
+  ),
+  (
+    "src/graphql/error.rs",
+    "ObjectTypeExtensionHint",
+    REMOVED_WITH_ITS_VARIANT,
+  ),
+  (
+    "src/graphql/error.rs",
+    "InterfaceTypeExtensionHint",
+    REMOVED_WITH_ITS_VARIANT,
+  ),
+  (
+    "src/graphql/error.rs",
+    "EnumTypeExtensionHint",
+    REMOVED_WITH_ITS_VARIANT,
+  ),
 ];
 
 /// One contract axis this census reads off a `pub enum`, with the two tables that account for it.
@@ -859,11 +908,15 @@ fn audit(axis: &Axis, found: &[FoundEnum], failures: &mut Vec<String>) {
     }
   }
 
+  let removed =
+    |file: &str, name: &str| RECORDED_REMOVALS.iter().any(|r| r.0 == file && r.1 == name);
+
   failures.extend(
     axis
       .baseline
       .iter()
       .filter(|entry| !seen_baseline.contains(&(entry.0, entry.1)))
+      .filter(|entry| !removed(entry.0, entry.1))
       .map(|entry| {
         format!(
           "{}::{} — a merge-base {} entry matching no public enum this scan still finds \
@@ -872,6 +925,26 @@ fn audit(axis: &Axis, found: &[FoundEnum], failures: &mut Vec<String>) {
         )
       }),
   );
+
+  for (file, name, reason) in RECORDED_REMOVALS {
+    if seen_baseline.contains(&(*file, *name)) {
+      failures.push(format!(
+        "{file}::{name} — recorded as removed, and the scan still finds it. Delete the entry, \
+         the removal it records did not happen\n    what was recorded: {reason}",
+      ));
+    }
+    if !axis
+      .baseline
+      .iter()
+      .any(|entry| entry.0 == *file && entry.1 == *name)
+    {
+      failures.push(format!(
+        "{file}::{name} — recorded as removed, and no merge-base {} entry names it, so the \
+         record accounts for nothing on that axis",
+        axis.name,
+      ));
+    }
+  }
 
   failures.extend(
     axis
@@ -903,8 +976,8 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   // A scan that stops finding enums has nothing left to check; a scan that finds them and reads
   // no variants out of them is accounted for on the attribute axis and silent on the payload one.
   //
-  // 16 enums = 12 in error.rs + 2 in ast/value.rs + 2 in ast/materialized.rs. 140 variants =
-  // 106 + 17 + 17 across the same three files. Update either count only after checking why it
+  // 9 enums = 5 in error.rs + 2 in ast/value.rs + 2 in ast/materialized.rs. 89 variants =
+  // 55 + 17 + 17 across the same three files. Update either count only after checking why it
   // moved.
   //
   // It has moved twice, and these are the readings. `refactor/materialised-generic` deleted
@@ -916,18 +989,21 @@ fn public_enum_attributes_and_payloads_match_the_merge_base_or_are_named() {
   // shape one resource along, and the same recorded row carries it (smear issue #193).
   // `fix/terminal-end-of-input` then added `ErrorData::TerminalEndOfInput`: 141 -> 142, one unit
   // variant again, and the same recorded row carries it (smear issue #177).
+  // `feat/syntax-diagnostics` then removed fourteen `ErrorData` variants no parse produced and the
+  // seven hint enums only they named: 16 -> 9 enums, and 142 -> 89 variants is 39 hint variants
+  // and 14 `ErrorData` ones leaving. `RECORDED_REMOVALS` carries the seven.
   assert_eq!(
     found.len(),
-    16,
-    "the scan found {} public enum(s) across {} files, expected 16 — a file gained or lost one, \
+    9,
+    "the scan found {} public enum(s) across {} files, expected 9 — a file gained or lost one, \
      or the line-matching in `find_public_enums` stopped seeing the surface",
     found.len(),
     FILES.len(),
   );
   let variants_read: usize = found.iter().map(|enum_| enum_.variants.len()).sum();
   assert_eq!(
-    variants_read, 142,
-    "the scan read {variants_read} variant(s) out of 16 enums, expected 142 — an enum gained or \
+    variants_read, 89,
+    "the scan read {variants_read} variant(s) out of 9 enums, expected 89 — an enum gained or \
      lost one, or `read_variants` stopped seeing them",
   );
 
