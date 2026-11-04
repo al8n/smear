@@ -352,7 +352,7 @@ mod graphql {
       );
       let rendered = error.to_string();
       assert_eq!(rendered, "unexpected name");
-      assert!(!rendered.contains("expected"), "{rendered:?}");
+      assert!(!rendered.contains(", expected"), "{rendered:?}");
       assert_eq!(error.kind(), SyntaxErrorKind::UnexpectedToken);
     }
     assert_eq!(Expectation::Unspecified.to_string(), "");
