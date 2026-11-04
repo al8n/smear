@@ -15,7 +15,7 @@
 //! # The properties beside it
 //!
 //! - Codes are unique across families and spelled `smear::<family>::<kebab-case>`, because a
-//!   renderer sees all three families in one pass and cannot disambiguate by enum.
+//!   renderer sees all four families in one pass and cannot disambiguate by enum.
 //! - Every current variant is [`Severity::Error`]. The severity axis exists for a deprecation-lint
 //!   class that does not exist yet, and saying so here stops anyone inventing a warning to justify
 //!   the field.
@@ -23,7 +23,8 @@
 //!   that fire every variant, because the two halves live in different files and a kind that
 //!   started attaching a related span without one would drop it with nothing to say so.
 //! - [`Location::entire`] has exactly one user. A family that stopped pointing at its spans would
-//!   pass every other gate in this file.
+//!   pass every other gate in this file — and a syntax error, which always has a place in the text,
+//!   is held to that alongside the schema and validation families.
 
 // Everything below names `smear::validator`, which does not exist in the crate's API surface with
 // the feature off; the introspection door needs its own feature on top of that and is gated per
@@ -36,11 +37,14 @@ use std::{path::PathBuf, string::String, vec::Vec};
 
 use smear::{
   diagnostic::{Diagnose, DiagnoseExt, Severity},
-  lexer::tokora::{Parse as _, Parser},
+  lexer::{
+    SyntaxErrorKind,
+    tokora::{Parse as _, Parser},
+  },
   parser::graphql::{
     GraphQL,
     ast::{ExecutableDocument, TypeSystemDocument},
-    error::GraphqlErrors,
+    error::{GraphqlError, GraphqlErrors},
     syntactic::{GraphqlLexer, executable_document, type_system_document},
   },
   validator::{
@@ -94,6 +98,22 @@ fn refused(sdl: &str) -> Vec<SchemaError> {
   }
 }
 
+/// The first error a query that does not parse is refused with.
+fn syntax_error(source: &str) -> GraphqlError<&str> {
+  Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(source)
+  .expect_err("the fixture does not parse")
+  .into_iter()
+  .next()
+  .expect("a refused parse reports an error")
+}
+
 fn built(sdl: &str) -> Schema {
   Schema::build(&parse_sdl(sdl))
     .unwrap_or_else(|errors| panic!("fixture SDL is not a schema:\n{errors}\n---\n{sdl}"))
@@ -122,7 +142,8 @@ fn row(variant: &str, code: &str) -> String {
   std::format!("{variant} = {code}")
 }
 
-/// The two families every `--features validator` build has.
+/// The three families every `--features validator` build has: the schema's and the validator's,
+/// and the syntax family, whose `smear-lexer` is a dependency of every build.
 fn always_present_rows() -> Vec<String> {
   let mut rows: Vec<String> = SchemaErrorKind::ALL
     .iter()
@@ -137,6 +158,12 @@ fn always_present_rows() -> Vec<String> {
         .iter()
         .map(|rule| row(&std::format!("Rule::{rule:?}"), rule.code().as_str())),
     )
+    .chain(SyntaxErrorKind::ALL.iter().map(|kind| {
+      row(
+        &std::format!("SyntaxErrorKind::{kind:?}"),
+        kind.code().as_str(),
+      )
+    }))
     .collect();
   rows.sort();
   rows
@@ -176,7 +203,10 @@ fn derived_rows() -> Vec<String> {
 /// complete build checks the file's length as well, so a row belonging to no family at all is
 /// still caught.
 fn in_this_build(line: &str) -> bool {
-  if line.starts_with("SchemaErrorKind::") || line.starts_with("Rule::") {
+  if line.starts_with("SchemaErrorKind::")
+    || line.starts_with("Rule::")
+    || line.starts_with("SyntaxErrorKind::")
+  {
     return true;
   }
   cfg!(feature = "introspection") && line.starts_with("ResponseErrorKind::")
@@ -267,7 +297,7 @@ fn codes_match_the_golden() {
 /// A code names exactly one rule, and is spelled the way the namespace says.
 ///
 /// Uniqueness is the property that makes one flat namespace usable at all: a renderer holding
-/// diagnostics from three families keys off the code and nothing else, so two families answering
+/// diagnostics from four families keys off the code and nothing else, so two families answering
 /// the same string would silently merge two rules.
 #[test]
 fn codes_are_unique_and_well_formed() {
@@ -290,8 +320,8 @@ fn codes_are_unique_and_well_formed() {
     let rule = parts.next().unwrap_or_else(|| panic!("{code} has no rule"));
     assert_eq!(parts.next(), None, "{code} has more than three segments");
     assert!(
-      matches!(family, "schema" | "validation" | "introspection"),
-      "{code} names the family {family:?}, which is not one of the three"
+      matches!(family, "schema" | "validation" | "introspection" | "syntax"),
+      "{code} names the family {family:?}, which is not one of the four"
     );
     assert!(
       !rule.is_empty()
@@ -329,11 +359,16 @@ fn every_current_variant_is_an_error() {
   for rule in Rule::ALL {
     assert_eq!(rule.severity(), Severity::Error, "{rule:?}");
   }
+  for kind in SyntaxErrorKind::ALL {
+    assert_eq!(kind.severity(), Severity::Error, "{kind:?}");
+  }
   assert!(
-    SchemaErrorKind::ALL.len() >= 66 && Rule::ALL.len() >= 31,
-    "read {} kinds and {} rules; the enumerations are wrong, not the assertion",
+    SchemaErrorKind::ALL.len() >= 66 && Rule::ALL.len() >= 31 && SyntaxErrorKind::ALL.len() >= 23,
+    "read {} schema kinds, {} rules and {} syntax kinds; the enumerations are wrong, not the \
+     assertion",
     SchemaErrorKind::ALL.len(),
-    Rule::ALL.len()
+    Rule::ALL.len(),
+    SyntaxErrorKind::ALL.len()
   );
 }
 
@@ -471,6 +506,27 @@ fn only_the_introspection_door_answers_entire() {
       }
     }
   }
+
+  // A syntax error, lexical or grammatical, points at the text it refused: its own span, or the
+  // first lexer error's where it carries a batch.
+  for source in [
+    "{ dog { name }",
+    "{ dog(",
+    "{ dog(x: \"oops) }",
+    "{ dog(x: 007) }",
+    "{ ? }",
+  ] {
+    let error = syntax_error(source);
+    let primary = error.primary();
+    assert!(
+      !primary.is_entire(),
+      "{source:?} was refused as {:?} with no primary span; a syntax error always has one",
+      error.kind()
+    );
+    assert_eq!(primary.source(), 0, "{source:?}");
+    assert_eq!(primary.span(), Some(error.span()), "{source:?}");
+    labels_are_consistent(&error, source);
+  }
 }
 
 /// The introspection door is the exception, and says so.
@@ -495,8 +551,8 @@ fn the_introspection_door_is_the_exception() {
 
 /// The whole contract is readable through `&dyn Diagnose`, which is the shape it exists for.
 ///
-/// A server renders schema refusals and validation diagnostics in one pass, so the two have to
-/// erase to the same type. This is the compile-time half of what
+/// A server renders syntax errors, schema refusals and validation diagnostics in one pass, so the
+/// three have to erase to the same type. This is the compile-time half of what
 /// `validator_allocation.rs::only_rendering_allocates` then measures.
 #[test]
 fn the_contract_survives_erasure() {
@@ -511,15 +567,26 @@ fn the_contract_survives_erasure() {
   let view = diagnostic.display(&schema);
   let refusal = refused("type Query { ok: Int } type Query { ok: Int }");
   let refusal = refusal.first().expect("a refusal");
+  let syntax = syntax_error("query dup { dog { name }");
 
-  let erased: [&dyn Diagnose; 2] = [refusal, &view];
-  for subject in erased {
+  // The two duplicates point back at what they repeat; a syntax error points at one place.
+  let erased: [(&dyn Diagnose, usize); 3] = [
+    (refusal as &dyn Diagnose, 1),
+    (&view as &dyn Diagnose, 1),
+    (&syntax as &dyn Diagnose, 0),
+  ];
+  for (subject, labels) in erased {
     assert!(subject.code().as_str().starts_with("smear::"));
     assert_eq!(subject.severity(), Severity::Error);
     assert!(subject.primary_label().is_some());
-    assert_eq!(subject.labels(), 1, "both fixtures are duplicates");
-    assert_eq!(subject.labels_iter().count(), 1);
+    assert_eq!(subject.labels(), labels);
+    assert_eq!(subject.labels_iter().count(), labels);
     assert_eq!(subject.path_segments_iter().count(), 0);
     assert!(!std::string::ToString::to_string(subject).is_empty());
   }
+  assert!(
+    syntax.code().as_str().starts_with("smear::syntax::"),
+    "{}",
+    syntax.code()
+  );
 }
