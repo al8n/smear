@@ -134,3 +134,56 @@ fn a_tripped_ceiling_reports_a_resource_limit() {
     "a resource limit stopped the parse"
   );
 }
+
+/// The one error a whole-slice door refuses `src` with.
+macro_rules! door_refusal {
+  ($door:expr, $src:expr) => {{
+    let src = $src;
+    let mut errors = $door(src).expect_err("the slice is not one token of the door's kind");
+    assert_eq!(errors.len(), 1, "{src:?}");
+    errors.remove(0)
+  }};
+}
+
+/// GraphQLx's whole-slice doors — `identifier` and the `TryFrom<&str>` of `LitInt` and `LitFloat` —
+/// refuse a slice that is not exactly one token of the kind they asked for as `NotOneToken`, under
+/// `smear::syntax::unexpected-token` and with no help line, as GraphQL's do.
+#[test]
+fn a_whole_slice_door_refuses_what_is_not_exactly_one_token_of_its_kind() {
+  use tokora::SimpleSpan;
+
+  use crate::graphqlx::{LitFloat, LitInt, error::LexerErrorData, identifier};
+
+  for (src, error, message) in [
+    ("1", door_refusal!(identifier, "1"), "not exactly one name"),
+    (
+      "a b",
+      door_refusal!(identifier, "a b"),
+      "not exactly one name",
+    ),
+    (
+      " a",
+      door_refusal!(identifier, " a"),
+      "not exactly one name",
+    ),
+    (
+      "1.0",
+      door_refusal!(LitInt::try_from, "1.0"),
+      "not exactly one integer",
+    ),
+    (
+      "1",
+      door_refusal!(LitFloat::try_from, "1"),
+      "not exactly one float",
+    ),
+  ] {
+    assert!(
+      matches!(error.data(), LexerErrorData::NotOneToken(_)),
+      "{src:?}: {:?}",
+      error.data()
+    );
+    assert_eq!(error.span(), SimpleSpan::new(0, src.len()), "{src:?}");
+    assert_eq!(error.help(), None, "{src:?}");
+    assert_refusal!(error, src, SyntaxErrorKind::UnexpectedToken, message);
+  }
+}

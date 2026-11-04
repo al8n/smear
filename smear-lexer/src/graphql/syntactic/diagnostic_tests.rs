@@ -197,3 +197,57 @@ fn a_tripped_ceiling_reports_a_resource_limit() {
     "a resource limit stopped the parse"
   );
 }
+
+/// The one error a whole-slice door refuses `src` with.
+macro_rules! door_refusal {
+  ($door:expr, $src:expr) => {{
+    let src = $src;
+    let mut errors = $door(src).expect_err("the slice is not one token of the door's kind");
+    assert_eq!(errors.len(), 1, "{src:?}");
+    errors.remove(0)
+  }};
+}
+
+/// A whole-slice door refuses a slice that is not exactly one token of the kind it asked for — a
+/// token of another kind, a second token, or trivia around it — as `NotOneToken`, under
+/// `smear::syntax::unexpected-token` and with no help line. The scanner's `UnexpectedLexeme`, whose
+/// code and help are about a sign character, is not what a door answers.
+#[test]
+fn a_whole_slice_door_refuses_what_is_not_exactly_one_token_of_its_kind() {
+  use tokora::SimpleSpan;
+
+  use crate::graphql::{error::LexerErrorData, float_literal, identifier, int_literal};
+
+  for (src, error, message) in [
+    ("1", door_refusal!(identifier, "1"), "not exactly one name"),
+    (
+      "a b",
+      door_refusal!(identifier, "a b"),
+      "not exactly one name",
+    ),
+    (
+      " a",
+      door_refusal!(identifier, " a"),
+      "not exactly one name",
+    ),
+    (
+      "1.0",
+      door_refusal!(int_literal, "1.0"),
+      "not exactly one integer",
+    ),
+    (
+      "1",
+      door_refusal!(float_literal, "1"),
+      "not exactly one float",
+    ),
+  ] {
+    assert!(
+      matches!(error.data(), LexerErrorData::NotOneToken(_)),
+      "{src:?}: {:?}",
+      error.data()
+    );
+    assert_eq!(error.span(), SimpleSpan::new(0, src.len()), "{src:?}");
+    assert_eq!(error.help(), None, "{src:?}");
+    assert_refusal!(error, src, SyntaxErrorKind::UnexpectedToken, message);
+  }
+}
