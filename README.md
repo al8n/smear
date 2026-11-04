@@ -63,7 +63,7 @@ absent, it is absent — not partial.
 
 | Draft section | State |
 |---|---|
-| §2 Language | Parsed in full, by two token streams and into two tree shapes |
+| §2 Language | Parsed in full, by two token streams and into two tree shapes. A document that is not GraphQL is refused with a diagnostic, lexer and parser alike and in both dialects: 23 codes in one `smear::syntax` family — `smear::syntax::unterminated-string`, `smear::syntax::unexpected-token`, `smear::syntax::resource-limit` — whichever layer refused, because draft §2 makes both "the document is not GraphQL" and a client cannot act on the difference |
 | §3 Type System | Validated inside `Schema::build`: 73 distinct refusals, each with a schema in the test suite that makes it fire |
 | §4 Introspection | The `__`-prefixed meta-schema is injected into every schema, so an introspection *query* is validated like any other document, and a schema can also be *built* from a server's introspection response. Behind `proto` the executor also **answers** `__schema` and `__type`, from the schema itself and without a resolver — graphql-js's full `getIntrospectionQuery` included — and what it answers builds back, through `Schema::from_introspection`, into the schema it describes. That answer is differential-tested against graphql-js 16.11.0's own `introspectionFromSchema` for the same SDL — the agreement fixture, GitHub's and GitLab's schemas, and a fixture of defaults — and every difference has to be one of eight recorded ones: (1) the order of `__schema.types`; (2) the built-in scalars nothing references, which smear lists and graphql-js leaves out — a subset of `Int`, `Float` and `ID`; (3) `defaultValue`, which smear prints as the literal written and graphql-js as the coerced value, so `[Int] = 7` is `[7]`, `Float = 1.0` is `1`, `ID = "4"` is `4` and an input object's omitted defaults are filled in; (4) `__Directive`'s `isRepeatable`, last in smear and third in graphql-js; (5) `@deprecated(reason: null)`, which smear answers `isDeprecated: true, deprecationReason: null` and graphql-js `isDeprecated: false`; (6) a directive's `locations`, in bit order in smear and in declared order in graphql-js; (7) `__schema.directives`, where smear appends the specified ones as `skip`, `include`, … and graphql-js as `include`, `skip`, …; and (8) an interface's `possibleTypes`, compared as a set although, for a schema built from SDL, both sides answer it in document order. Introspection can also be refused, by §5's opt-in `Rule::NoSchemaIntrospection` |
 | §5 Validation | All 30 executable-document rules. Introspection can be switched off too, by an opt-in policy rule that is not a draft rule: `Rule::NoSchemaIntrospection`, which `RuleSet::ALL` leaves out |
@@ -162,6 +162,9 @@ doors above, recorded as narrow because they are, beside the `_from` siblings th
 `Severity`, a primary source `Location` and any number of secondary `Label`s, plus `PathSegment` for
 a §7.1.2 response path. So a consumer can render into `miette`, `ariadne`, `codespan-reporting`, an
 LSP diagnostic or a GraphQL error response without re-deriving structure from a formatted sentence.
+The families are `smear::syntax` (draft §2: every lexer and parser refusal, in both dialects),
+`smear::schema` (§3), `smear::validation` (§5) and `smear::introspection`, and a code outlives every
+rewording of the message beside it.
 The contract is tokora's own `tokora::diagnostic::Diagnose`, re-exported unchanged, so a renderer
 built for tokora's contract takes smear's errors as they are: [painty]'s `tokora` adapter draws
 them as rustc-style snippets with no glue on either side. It is `core` plus a span type — no
@@ -289,7 +292,7 @@ are generic over the source type and the dialect; the upper three are standard G
 | Schema | `smear-schema` | `smear::validator::schema` | The built-once `Schema` and, behind its `build` feature, draft §3 inside the builder. A consumer that only *reads* a schema takes it with `default-features = false` and gets no front end |
 | Validator | `smear-compiler` | `smear::validator` | The draft §5 rules over a parsed request, the rule vocabulary and the diagnostic rendering |
 | Execution | `graphql-proto` | `smear::proto` | Draft §6 as a Sans-I/O state machine: it says which field it needs next and waits to be told the answer, so the driver keeps the values, the resolvers and the runtime. Query, serial mutation and subscription execution are behind the non-default `proto` feature; it returns a response tree that `smear::json` writes as §7.2.1 JSON |
-| Diagnostic | `tokora`, re-exported by `smear-schema` | `smear::diagnostic` | The contract every error family above answers, so rendering is the consumer's choice. The trait is `tokora::diagnostic::Diagnose`, and `smear-schema` re-exports it because that is the lowest crate whose errors implement it |
+| Diagnostic | `tokora`, re-exported by `smear-schema` | `smear::diagnostic` | The contract every error family above answers, so rendering is the consumer's choice. The trait is `tokora::diagnostic::Diagnose`: the lexer's and the parser's syntax errors implement it straight from `tokora`, and `smear-schema` re-exports it as the ungated `smear::diagnostic` path it has always been |
 
 **Depend on `smear` and enable features, or depend on a member directly** — the two are the same
 code and the same paths. `smear::lexer::X` and `smear_lexer::X` are one item. A member is worth
@@ -424,9 +427,9 @@ between the current front end and a complete implementation.
   the connection lifecycle around it.
 - [ ] **Diagnostic rendering** — smear ships the contract and deliberately no renderer, so nothing
   here turns an error into a rendered snippet. The companion crate for that is [painty]: its
-  `tokora` feature adapts `tokora::diagnostic::Diagnose`, the trait smear's schema, introspection
-  and validation diagnostics answer, so it renders them as rustc-style snippets without either
-  crate depending on the other.
+  `tokora` feature adapts `tokora::diagnostic::Diagnose`, the trait smear's syntax, schema,
+  introspection and validation diagnostics answer, so it renders them as rustc-style snippets
+  without either crate depending on the other.
 
 No dates. The order above is roughly the order in which each item unblocks the next.
 

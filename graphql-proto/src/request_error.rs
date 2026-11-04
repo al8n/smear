@@ -127,10 +127,10 @@
 //! # An entry built from a diagnostic
 //!
 //! [`RequestError::from_diagnose`] turns any [`Diagnose`] into an entry. The seam is the one this
-//! crate already reads through `smear-schema`, and the three families that answer it —
-//! `smear-compiler`'s `DiagnosticDisplay`, `smear-schema`'s `SchemaError` and the introspection
-//! door's `ResponseError` — need nothing new to reach a request error result. Three decisions are
-//! taken there, and recorded here:
+//! crate already reads through `smear-schema`, and the families that answer it —
+//! `smear-parser`'s syntax `Error`, `smear-compiler`'s `DiagnosticDisplay`, `smear-schema`'s
+//! `SchemaError` and the introspection door's `ResponseError` — need nothing new to reach a
+//! request error result. Three decisions are taken there, and recorded here:
 //!
 //! - **The message is the diagnostic's rendering, as it renders.** Nothing is cut out of it or
 //!   added to it. The position travels in `locations`, which is where §7.1.6 puts it and the form a
@@ -144,11 +144,11 @@
 //!   right there for [`set_extensions`](RequestError::set_extensions) — and not one this crate
 //!   imposes on every driver's wire format.
 //!
-//! **There is no twin for a parse error, and that is a boundary rather than an omission.**
-//! `smear-parser`'s graphql `Error` has a `span()` and has neither a `Display` nor a [`Diagnose`]
-//! implementation — giving it a code is phase E of al8n/smear#126 — so there is no message to take
-//! from it. A driver holding one writes its own sentence through [`RequestError::new`], with the
-//! span the error already carries.
+//! **A parse error is a diagnostic too.** `smear-parser`'s `Error`, in both dialects, implements
+//! [`Diagnose`]: its code is one of the `smear::syntax` family, its message names no position, and
+//! its primary location is where the document was refused. So a draft §2 syntax error reaches a
+//! request error result through this same door, and a driver has no sentence of its own to write
+//! for one — though [`RequestError::new`] stays open to a driver that wants to.
 //!
 //! # What it retains, and what bounds it
 //!

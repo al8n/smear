@@ -35,10 +35,11 @@ extern crate std;
 //
 // The contract is tokora's: `smear-schema`'s `diagnostic` module re-exports `tokora::diagnostic`
 // item by item, so `smear::diagnostic::Diagnose` IS `tokora::diagnostic::Diagnose`. It comes
-// through `smear-schema` rather than straight from tokora because that is the LOWEST crate whose
-// errors implement it: `schema::error` and `schema::introspection::error`. The re-export is what
-// keeps `smear::diagnostic` the ungated path it has always been, and it is why `smear-schema` is
-// an unconditional dependency below rather than one behind `validator`.
+// through `smear-schema` rather than straight from tokora because that is where it was first
+// published: `schema::error` and `schema::introspection::error` implement it there, and the
+// lexer's and parser's syntax errors implement the same trait from tokora directly. The re-export
+// is what keeps `smear::diagnostic` the ungated path it has always been, and it is why
+// `smear-schema` is an unconditional dependency below rather than one behind `validator`.
 pub use smear_schema::diagnostic;
 
 /// Lexers for GraphQL and GraphQL-like DSLs.
