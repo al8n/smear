@@ -128,16 +128,17 @@ All notable changes to Smear are documented in this file.
   tokora maps to `Unspecified` where it mapped to `Name`, and so does GraphQLx's
   genuine end of input where it named `InputValue`; a message then has no
   "expected …" clause.
-- `smear-lexer`!: sixteen public error enums are now `#[non_exhaustive]`:
-  `LengthError`, `StringError`, `UnicodeError`, `FixedUnicodeEscapeError`,
+- `smear-lexer`!: fifteen public error enums are now `#[non_exhaustive]`:
+  `StringError`, `UnicodeError`, `FixedUnicodeEscapeError`,
   `BracedUnicodeEscapeError` and `StringValueError`; in `graphql`,
   `LexerErrorData`, `FloatError` and `DecimalError`; in `graphqlx`,
   `LexerErrorData`, `FloatError`, `HexFloatError`, `DecimalError`, `HexError`,
   `OctalError` and `BinaryError`. A `match` on one of them outside `smear-lexer`
   needs a wildcard arm. Adding a refusal variant is no longer a breaking change.
-  `InvalidUnicodeScalarKind` stays exhaustive: a value that is not a Unicode
-  scalar is a surrogate or lies above `0x10_FFFF`, and the Unicode Standard
-  fixes both ranges.
+  Two closed sets stay exhaustive. One is `InvalidUnicodeScalarKind`: a value
+  that is not a Unicode scalar is a surrogate or lies above `0x10_FFFF`, and the
+  Unicode Standard fixes both ranges. The other is `LengthError`: converting a
+  list to one error fails only when the list holds none or more than one.
 - `smear-parser`!: GraphQLx's `Unclosed` is now `#[non_exhaustive]`. A `match`
   on it outside `smear-parser` needs a wildcard arm. Adding a delimiter kind is
   no longer a breaking change. GraphQL's `Unclosed` stays exhaustive: its three
