@@ -257,8 +257,15 @@ impl<Char> InvalidUnicodeSequence<Char> {
 }
 
 /// Why a parsed value is *not* a valid Unicode scalar.
+///
+/// # Exhaustive, deliberately
+///
+/// No `#[non_exhaustive]`, unlike every other public enum in this file. A value that is not a
+/// Unicode scalar value is a surrogate or lies above `0x10_FFFF`, and the Unicode Standard fixes
+/// both ranges, so these two variants are the whole classification rather than smear's vocabulary
+/// to grow. [`InvalidUnicodeScalarValue::kind`] hands it out to branch on, and a wildcard arm
+/// forced onto that branch could never run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub enum InvalidUnicodeScalarKind {
   /// In the UTF-16 surrogate range: 0xD800..=0xDFFF.
   Surrogate,
