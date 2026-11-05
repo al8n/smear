@@ -186,11 +186,11 @@ mod tests;
 
 /// What stopped a value from being written.
 ///
-/// Deliberately **not** `#[non_exhaustive]`. The set is closed by what the writer can produce, and
-/// each variant below is a branch of a total function rather than a placeholder for a case nobody
-/// has met yet; a census over it should be exhaustive and checked, which
-/// `#[non_exhaustive]` would quietly stop being possible outside this crate.
+/// `#[non_exhaustive]`: what the writer can refuse is its own vocabulary and grows with it, so a
+/// 0.1.x release may add a variant without breaking a caller's `match`. An in-crate `match` stays
+/// wildcard-free; one outside the crate carries a wildcard arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Error {
   /// The sink refused the write.
   ///

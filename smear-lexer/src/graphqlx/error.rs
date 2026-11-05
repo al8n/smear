@@ -22,6 +22,7 @@ const SOURCE: u32 = 0;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
+#[non_exhaustive]
 pub enum FloatError<Char = char> {
   /// The float has an unexpected suffix, e.g. `1.0x`, `1.e+1y`
   #[from(skip)]
@@ -72,6 +73,7 @@ impl<Char> FloatError<Char> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
+#[non_exhaustive]
 pub enum HexFloatError<Char = char> {
   /// The float has an unexpected suffix, e.g. `1.0x`, `1.e+1y`
   #[from(skip)]
@@ -128,6 +130,7 @@ impl<Char> HexFloatError<Char> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
+#[non_exhaustive]
 pub enum DecimalError<Char = char> {
   /// Unexpected character in decimal literal suffix, e.g. `123abc`
   #[from(skip)]
@@ -161,6 +164,7 @@ impl<Char> DecimalError<Char> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
+#[non_exhaustive]
 pub enum HexError<Char = char> {
   /// Unexpected character in hex literal suffix, e.g. `0x123abc`
   #[from(skip)]
@@ -194,6 +198,7 @@ impl<Char> HexError<Char> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
+#[non_exhaustive]
 pub enum OctalError<Char = char> {
   /// Unexpected character in octal literal suffix, e.g. `0o123abc`
   #[from(skip)]
@@ -227,6 +232,7 @@ impl<Char> OctalError<Char> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
+#[non_exhaustive]
 pub enum BinaryError<Char = char> {
   /// Unexpected character in binary literal suffix, e.g. `0b10102`
   #[from(skip)]
@@ -260,6 +266,7 @@ impl<Char> BinaryError<Char> {
 #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum LexerErrorData<Char = char, StateError = ()> {
   /// An error encountered during lexing for float literals.
   Float(FloatError<Char>),

@@ -234,6 +234,7 @@ impl<T, TK> UnexpectedToken<T, TK> {
 
 /// The delimiter kind left unclosed by a GraphQLx production.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, IsVariant)]
+#[non_exhaustive]
 pub enum Unclosed {
   /// Parentheses, missing `)`.
   Parentheses,

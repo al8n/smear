@@ -19,6 +19,7 @@ const SOURCE: u32 = 0;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
+#[non_exhaustive]
 pub enum FloatError<Char = char> {
   /// The float has an unexpected suffix, e.g. `1.0x`, `1.e+1y`
   #[from(skip)]
@@ -72,6 +73,7 @@ impl<Char> FloatError<Char> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
 #[try_unwrap(ref)]
+#[non_exhaustive]
 pub enum DecimalError<Char = char> {
   /// Unexpected character in decimal literal suffix, e.g. `123abc`
   #[from(skip)]
@@ -110,6 +112,7 @@ impl<Char> DecimalError<Char> {
 #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum LexerErrorData<Char = char, StateError = ()> {
   /// An error encountered during lexing for float literals.
   Float(FloatError<Char>),
