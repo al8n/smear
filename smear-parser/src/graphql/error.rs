@@ -264,9 +264,9 @@ pub enum Unclosed {
 ///
 /// # Exhaustive, deliberately
 ///
-/// No `#[non_exhaustive]`, unlike the hint enums above it and like [`Unclosed`] beside it. The
-/// whole reason to read this is to branch on the two, and a wildcard arm forced onto every
-/// consumer would be a wildcard over a two-element closed set.
+/// No `#[non_exhaustive]`, like [`Unclosed`] beside it and unlike every other public enum in
+/// this file. The whole reason to read this is to branch on the two, and a wildcard arm forced
+/// onto every consumer would be a wildcard over a two-element closed set.
 ///
 /// A third width is not a variant added here in isolation. It used to mean a third marker and a
 /// third value tree in [`ast`](crate::graphql::ast); it now means a third impl of the **sealed**

@@ -258,6 +258,7 @@ impl<Char> InvalidUnicodeSequence<Char> {
 
 /// Why a parsed value is *not* a valid Unicode scalar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum InvalidUnicodeScalarKind {
   /// In the UTF-16 surrogate range: 0xD800..=0xDFFF.
   Surrogate,
@@ -320,6 +321,7 @@ impl InvalidUnicodeScalarValue {
 
 /// An error encountered during lexing for `\u{...}` (braced) unicode sequences.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum BracedUnicodeEscapeError {
   /// The opening brace was not closed: `\u{1234`.
   Unclosed(Span),
@@ -423,6 +425,7 @@ impl BracedUnicodeEscapeError {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum FixedUnicodeEscapeError<Char = char> {
   /// An incomplete fixed-width unicode escape sequence.
   #[from(skip)]
@@ -479,6 +482,7 @@ impl<Char> FixedUnicodeEscapeError<Char> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum UnicodeError<Char = char> {
   /// An error in a fixed-width unicode escape sequence (`\uXXXX`).
   Fixed(FixedUnicodeEscapeError<Char>),
@@ -648,6 +652,7 @@ impl<Char> EscapedCharacter<Char> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum StringError<Char = char> {
   /// A byte sequence in a string literal that is not well-formed UTF-8.
   ///
@@ -859,6 +864,7 @@ impl<Char> TryFrom<StringErrors<Char>> for StringError<Char> {
 /// cannot hold it, and the byte lexer refuses such a string literal (smear#246). A decoder that
 /// reads a spelling rather than trusting where it came from answers them instead of guessing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[non_exhaustive]
 pub enum StringValueError {
   /// The spelling is not wrapped in `"…"` or `"""…"""`.
   #[error("a string value is not wrapped in `\"` or `\"\"\"`")]

@@ -34,8 +34,7 @@ All notable changes to Smear are documented in this file.
   literal is refused as `StringError::IncompleteEscape`, at the backslash's
   byte, instead of the positionless `StringError::Other("unknown")`: the input
   ends right after it, or, in a byte source, the bytes after it are not
-  well-formed UTF-8. `StringError` is not `#[non_exhaustive]`, so the new
-  variant breaks an exhaustive `match` on it.
+  well-formed UTF-8.
 - `smear-schema`!: the diagnostic contract is tokora's. `smear_schema::diagnostic`,
   and through it `smear::diagnostic`, re-exports `tokora::diagnostic`'s `Diagnose`,
   `DiagnoseExt`, `Code`, `Severity`, `Location`, `Label`, `PathSegment`, `Labels`
@@ -98,8 +97,7 @@ All notable changes to Smear are documented in this file.
   exactly one token of the kind it asked for, rendered "not exactly one name",
   "… integer" or "… float" and reported as `smear::syntax::unexpected-token`.
   Those doors answered `UnexpectedLexeme` over the slice, which is now only the
-  scanner's refused character. `LexerErrorData` is not `#[non_exhaustive]`, so
-  an exhaustive match on it breaks.
+  scanner's refused character.
 - `smear-lexer`!: token kinds render as a diagnostic names them: punctuation in
   backticks and every class as a bare noun. GraphQL's `SyntacticTokenKind` and
   `LosslessTokenKind` render `name` and `integer` where they rendered
@@ -130,6 +128,20 @@ All notable changes to Smear are documented in this file.
   tokora maps to `Unspecified` where it mapped to `Name`, and so does GraphQLx's
   genuine end of input where it named `InputValue`; a message then has no
   "expected …" clause.
+- `smear-lexer`!: seventeen public error enums are now `#[non_exhaustive]`:
+  `LengthError`, `StringError`, `UnicodeError`, `FixedUnicodeEscapeError`,
+  `BracedUnicodeEscapeError`, `InvalidUnicodeScalarKind` and `StringValueError`;
+  in `graphql`, `LexerErrorData`, `FloatError` and `DecimalError`; in `graphqlx`,
+  `LexerErrorData`, `FloatError`, `HexFloatError`, `DecimalError`, `HexError`,
+  `OctalError` and `BinaryError`. A `match` on one of them outside `smear-lexer`
+  needs a wildcard arm. Adding a refusal variant is no longer a breaking change.
+- `smear-parser`!: GraphQLx's `Unclosed` is now `#[non_exhaustive]`. A `match`
+  on it outside `smear-parser` needs a wildcard arm. Adding a delimiter kind is
+  no longer a breaking change. GraphQL's `Unclosed` stays exhaustive: its three
+  delimiter pairs are the specification's.
+- `smear`!: `json::Error` is now `#[non_exhaustive]`. A `match` on it outside
+  `smear` needs a wildcard arm. Adding a refusal variant is no longer a breaking
+  change.
 
 ## [0.0.1] - 2026-10-30
 

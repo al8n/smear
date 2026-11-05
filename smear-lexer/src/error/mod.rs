@@ -10,6 +10,7 @@ mod traits;
 
 /// Length error when converting from a list of errors to a single error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[non_exhaustive]
 pub enum LengthError {
   /// The error list contains more than one error.
   #[error("too many errors")]
