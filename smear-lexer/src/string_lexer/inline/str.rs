@@ -29,9 +29,12 @@ pub(crate) enum StringToken {
     r#"\\u\{[0-9A-Fa-f]{7,}\}"#,
     too_many_hex_digits_in_braced_unicode_escape
   )]
-  #[regex(r#"\\u\{[0-9A-Fa-f]{1,6}"#, unclosed_brace_in_braced_unicode_escape)]
-  #[regex(r#"\\u\{[^0-9A-Fa-f}]"#, unclosed_brace_in_braced_unicode_escape)]
-  #[regex(r#"\\u\{"#, handle_semi_braced_escape_unicode)]
+  // `\u{` without its closing brace, whose end the callback finds. The one-character class leaves
+  // out every delimiter that search stops at, so before one the bare `\u{` rule takes the escape
+  // and the delimiter keeps its own rule.
+  #[regex(r#"\\u\{[0-9A-Fa-f]{1,6}"#, handle_partial_braced_escape_unicode)]
+  #[regex(r#"\\u\{[^0-9A-Fa-f}"\\\r\n]"#, handle_partial_braced_escape_unicode)]
+  #[regex(r#"\\u\{"#, handle_partial_braced_escape_unicode)]
   EscapedUnicode,
 
   #[token("\"")]
@@ -273,19 +276,23 @@ fn handle_braced_escape_unicode(
   }
 }
 
+/// The callback of the three partial-brace rules.
+///
+/// A `}` before any delimiter closes the escape over content that is not one to six hex digits,
+/// so the escape is an invalid sequence through the brace. Otherwise it is unclosed over what the
+/// rule matched, and the sub-lexer goes on at the delimiter, or at the end of the input.
 #[inline(always)]
-fn handle_semi_braced_escape_unicode(
+fn handle_partial_braced_escape_unicode(
   lexer: &mut tokora::logos::Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
-  let remainder = lexer.remainder();
-
-  Err(match remainder.find(['}']) {
-    None => UnicodeError::unclosed_braced_unicode_escape(lexer.span().into()).into(),
-    Some(pos) => {
-      lexer.bump(pos + 1);
-      UnicodeError::invalid_braced_unicode_escape_sequence(lexer.span().into()).into()
+  let close = super::braced_escape_close(lexer.remainder().as_bytes());
+  Err(StringError::Unicode(match close {
+    Some(at) => {
+      lexer.bump(at + 1);
+      UnicodeError::invalid_braced_unicode_escape_sequence(lexer.span().into())
     }
-  })
+    None => UnicodeError::unclosed_braced_unicode_escape(lexer.span().into()),
+  }))
 }
 
 #[inline(always)]
@@ -305,15 +312,6 @@ fn too_many_hex_digits_in_braced_unicode_escape(
   let counts = slice.len() - 4; // subtract \u{}
   Err(StringError::Unicode(
     UnicodeError::too_many_digits_in_braced_unicode_escape(lexer.span().into(), counts),
-  ))
-}
-
-#[inline(always)]
-fn unclosed_brace_in_braced_unicode_escape(
-  lexer: &mut tokora::logos::Lexer<'_, StringToken>,
-) -> Result<(), StringError<char>> {
-  Err(StringError::Unicode(
-    UnicodeError::unclosed_braced_unicode_escape(lexer.span().into()),
   ))
 }
 

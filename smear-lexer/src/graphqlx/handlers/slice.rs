@@ -331,23 +331,27 @@ where
   S::Slice<'a>: AsRef<[u8]>,
 {
   let mut errs = error::LexerErrors::default();
+  let no_digit = error::LexerError::binary(
+    lexer.span().into(),
+    BinaryError::UnexpectedEnd(UnexpectedEnd::with_name(
+      0,
+      "binary".into(),
+      BinaryHint::Digit,
+    )),
+  );
   let remainder = lexer.remainder();
   let remainder_ref = remainder.as_ref();
 
   if remainder_ref.is_empty() {
-    errs.push(error::LexerError::binary(
-      lexer.span().into(),
-      BinaryError::UnexpectedEnd(UnexpectedEnd::with_name(
-        0,
-        "binary".into(),
-        BinaryHint::Digit,
-      )),
-    ));
+    errs.push(no_digit);
     return Err(errs);
   }
 
   match handle_valid_binary_suffix(lexer, BinaryError::UnexpectedSuffix) {
-    Ok(_) => Err(errs),
+    Ok(_) => {
+      errs.push(no_digit);
+      Err(errs)
+    }
     Err(e) => {
       errs.push(error::LexerError::new(lexer.span(), e.into()));
       Err(errs)
@@ -387,23 +391,27 @@ where
   S::Slice<'a>: AsRef<[u8]>,
 {
   let mut errs = error::LexerErrors::default();
+  let no_digit = error::LexerError::octal(
+    lexer.span().into(),
+    OctalError::UnexpectedEnd(UnexpectedEnd::with_name(
+      0,
+      "octal".into(),
+      OctalHint::Digit,
+    )),
+  );
   let remainder = lexer.remainder();
   let remainder_ref = remainder.as_ref();
 
   if remainder_ref.is_empty() {
-    errs.push(error::LexerError::octal(
-      lexer.span().into(),
-      OctalError::UnexpectedEnd(UnexpectedEnd::with_name(
-        0,
-        "octal".into(),
-        OctalHint::Digit,
-      )),
-    ));
+    errs.push(no_digit);
     return Err(errs);
   }
 
   match handle_valid_octal_suffix(lexer, OctalError::UnexpectedSuffix) {
-    Ok(_) => Err(errs),
+    Ok(_) => {
+      errs.push(no_digit);
+      Err(errs)
+    }
     Err(e) => {
       errs.push(error::LexerError::new(lexer.span(), e.into()));
       Err(errs)
@@ -443,19 +451,23 @@ where
   S::Slice<'a>: AsRef<[u8]>,
 {
   let mut errs = error::LexerErrors::default();
+  let no_digit = error::LexerError::hex(
+    lexer.span().into(),
+    HexError::UnexpectedEnd(UnexpectedEnd::with_name(0, "hex".into(), HexHint::Digit)),
+  );
   let remainder = lexer.remainder();
   let remainder_ref = remainder.as_ref();
 
   if remainder_ref.is_empty() {
-    errs.push(error::LexerError::hex(
-      lexer.span().into(),
-      HexError::UnexpectedEnd(UnexpectedEnd::with_name(0, "hex".into(), HexHint::Digit)),
-    ));
+    errs.push(no_digit);
     return Err(errs);
   }
 
   match handle_valid_hex_suffix(lexer, HexError::UnexpectedSuffix) {
-    Ok(_) => Err(errs),
+    Ok(_) => {
+      errs.push(no_digit);
+      Err(errs)
+    }
     Err(e) => {
       errs.push(error::LexerError::new(lexer.span(), e.into()));
       Err(errs)

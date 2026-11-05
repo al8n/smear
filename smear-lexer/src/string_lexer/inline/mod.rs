@@ -446,3 +446,22 @@ const fn utf8_len_for_scalar(cp: u32) -> usize {
     _ => 4,               // 0x10000..=0x10_FFFF
   }
 }
+
+/// Where the `}` closing a braced Unicode escape is, in `rest`, the input after what a
+/// partial-brace rule matched: `\u{` with one to six hex digits, with one other character, or
+/// alone.
+///
+/// The escape ends at the first `}`, `"`, `\`, CR or LF in `rest`. A `}` closes it, and its index
+/// is the answer. Each of the others belongs to a rule of its own, so the escape is unclosed and
+/// the answer is `None`, as it is at the end of the input. The search therefore never runs past the
+/// literal's closing quote, a line break or the next escape to a `}` beyond them.
+///
+/// All five stops are ASCII, so the one byte scan serves a text source and a byte source alike, and
+/// in a text source the byte after the `}` is a character boundary.
+#[inline(always)]
+fn braced_escape_close(rest: &[u8]) -> Option<usize> {
+  rest
+    .iter()
+    .position(|&byte| matches!(byte, b'}' | b'"' | b'\\' | b'\r' | b'\n'))
+    .filter(|&stop| rest[stop] == b'}')
+}

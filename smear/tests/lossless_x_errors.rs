@@ -306,6 +306,31 @@ fn a_lexer_error_lands_as_error_data_lexer_not_as_a_note() {
   );
 }
 
+/// A radix prefix with no digit before a delimiter reaches this layer as one refusal with a kind
+/// and a position.
+///
+/// The fourth conversion keeps the lexer's batch whole, so the batch is all a lossless diagnostic
+/// can say about the prefix. For `0x)` it was empty: no kind, no sentence and no position. It now
+/// holds one error at the prefix's span, the incomplete number the prefix is at the end of input.
+#[test]
+fn a_bare_radix_prefix_reaches_the_lossless_layer_as_an_incomplete_number() {
+  use smear::lexer::SyntaxErrorKind;
+  use tokora::Lexer as _;
+
+  let mut lexer = Lx::new("0x)");
+  let errors = match lexer.lex() {
+    Some(Err(errors)) => errors,
+    other => panic!("a radix prefix with no digit lexed as {other:?}"),
+  };
+  assert_eq!(errors.len(), 1, "{errors:?}");
+  assert_eq!(errors[0].kind(), SyntaxErrorKind::IncompleteNumber);
+  assert_eq!(
+    errors[0].to_string(),
+    "incomplete number, expected a hex digit"
+  );
+  assert_eq!(errors[0].span(), SimpleSpan::new(0, 2));
+}
+
 /// A path the scanner stopped inside is not committed as a complete `Path` node.
 ///
 /// # This is the one shipped-tree change smear issue #177 makes, and it is here so it is a

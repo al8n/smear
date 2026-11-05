@@ -1,10 +1,15 @@
-use std::{vec, vec::Vec};
+use std::{string::ToString, vec, vec::Vec};
 
-use tokora::Lexer as _;
+use tokora::{Lexer as _, SimpleSpan, state::RecursionLimitExceeded, utils::Lexeme};
 
-use crate::graphqlx::{
-  LitFloat, LitInt,
-  syntactic::{SyntacticLexer, SyntacticToken},
+use crate::{
+  SyntaxErrorKind,
+  error::{StringError, StringErrors, UnicodeError},
+  graphqlx::{
+    LitFloat, LitInt,
+    error::{LexerErrorData, LexerErrors},
+    syntactic::{SyntacticLexer, SyntacticToken},
+  },
 };
 
 /// Drive a `<str>`-sourced lexer to completion, unwrapping every result.
@@ -15,6 +20,37 @@ fn lex_all(src: &str) -> Vec<SyntacticToken<&str>> {
     out.push(tok.unwrap());
   }
   out
+}
+
+/// Lexes the refusal a document opens with, and answers its batch, the span of its error token and
+/// the kind of the token after it.
+macro_rules! refusal {
+  ($lexer:expr, $src:expr) => {{
+    let mut lexer = $lexer;
+    let src = $src;
+    let errors = match lexer.lex() {
+      Some(Err(errors)) => errors,
+      other => panic!("{src:?}: expected a refusal, got {other:?}"),
+    };
+    let span = lexer.error_span();
+    let next = lexer
+      .lex()
+      .map(|token| token.expect("the input after the refusal lexes").kind());
+    (errors, span, next)
+  }};
+}
+
+/// The string errors a refused literal's batch holds, which come as its one `String` lexer error.
+fn string_errors<Char: Clone + core::fmt::Debug>(
+  errors: &LexerErrors<Char, RecursionLimitExceeded>,
+) -> StringErrors<Char> {
+  let [error] = errors.as_slice() else {
+    panic!("expected one lexer error, got {errors:?}");
+  };
+  let LexerErrorData::String(errs) = error.data() else {
+    panic!("expected a string error, got {error:?}");
+  };
+  errs.clone()
 }
 
 #[test]
@@ -139,6 +175,53 @@ fn radix_numbers_delegate_to_logos() {
   );
 }
 
+/// A radix prefix with no digit after it refuses as an incomplete number wherever it stands: one
+/// error at the prefix's own span, with the delimiter after it lexed as a token of its own. Before
+/// a delimiter, the prefix used to yield an error token whose batch was empty.
+#[test]
+fn a_bare_radix_prefix_before_a_delimiter_is_an_incomplete_number() {
+  use crate::graphqlx::syntactic::SyntacticTokenKind;
+
+  macro_rules! assert_no_digit {
+    ($lexer:expr, $src:expr, $message:expr, $after:expr) => {{
+      let (errors, span, next) = refusal!($lexer, $src);
+      let src = $src;
+      assert_eq!(errors.len(), 1, "{src:?}: {errors:?}");
+      assert_eq!(
+        errors[0].kind(),
+        SyntaxErrorKind::IncompleteNumber,
+        "{src:?}"
+      );
+      assert_eq!(errors[0].to_string(), $message, "{src:?}");
+      assert_eq!(errors[0].span(), SimpleSpan::new(0, 2), "{src:?}");
+      assert_eq!(span, Some(SimpleSpan::new(0, 2)), "{src:?}");
+      assert_eq!(next, $after, "{src:?}");
+    }};
+  }
+
+  for (src, message, after) in [
+    (
+      "0x)",
+      "incomplete number, expected a hex digit",
+      Some(SyntacticTokenKind::RParen),
+    ),
+    (
+      "0o )",
+      "incomplete number, expected an octal digit",
+      Some(SyntacticTokenKind::RParen),
+    ),
+    ("0b,", "incomplete number, expected a binary digit", None),
+  ] {
+    assert_no_digit!(SyntacticLexer::<str>::new(src), src, message, after);
+    assert_no_digit!(
+      SyntacticLexer::<[u8]>::new(src.as_bytes()),
+      src,
+      message,
+      after
+    );
+  }
+}
+
 #[test]
 fn asterisk_and_spread() {
   assert_eq!(lex_all("*"), vec![SyntacticToken::Asterisk]);
@@ -176,6 +259,86 @@ fn inline_string_fast_path() {
   let toks = lex_all("\"a\\nb\"");
   assert_eq!(toks.len(), 1);
   assert!(matches!(&toks[0], SyntacticToken::LitInlineStr(_)));
+}
+
+/// A braced escape ends at the first `}`, `"`, `\` or line break after `\u{`.
+///
+/// A `}` closes it, so content that is not one to six hex digits is an invalid sequence through the
+/// brace, from a text source as from a byte source. Any other stop leaves the escape unclosed over
+/// what its rule matched, and is lexed by its own rule: the literal still ends at its own quote, a
+/// line break in it is still refused, and a `}` past the quote is a token of its own.
+#[test]
+fn a_braced_escape_ends_at_its_brace_or_at_the_first_delimiter() {
+  use crate::graphqlx::syntactic::SyntacticTokenKind;
+
+  fn unclosed<Char>(start: usize, end: usize) -> StringError<Char> {
+    StringError::Unicode(UnicodeError::unclosed_braced_unicode_escape(
+      SimpleSpan::new(start, end),
+    ))
+  }
+
+  fn invalid<Char>(start: usize, end: usize) -> StringError<Char> {
+    StringError::Unicode(UnicodeError::invalid_braced_unicode_escape_sequence(
+      SimpleSpan::new(start, end),
+    ))
+  }
+
+  // Each text literal is the whole input, so it ends at its own quote where the input does.
+  let text: [(&str, Vec<StringError<char>>); 6] = [
+    (r#""\u{G}""#, vec![invalid(1, 6)]),
+    (r#""\u{12G4}""#, vec![invalid(1, 9)]),
+    (r#""\u{G""#, vec![unclosed(1, 5)]),
+    (
+      "\"\\u{G\n}\"",
+      vec![unclosed(1, 5), StringError::unexpected_new_line('\n', 5)],
+    ),
+    (r#""\u{""#, vec![unclosed(1, 4)]),
+    (
+      "\"\\u{\n}\"",
+      vec![unclosed(1, 4), StringError::unexpected_new_line('\n', 4)],
+    ),
+  ];
+  for (src, want) in text {
+    let (errors, span, next) = refusal!(SyntacticLexer::<str>::new(src), src);
+    assert_eq!(
+      string_errors(&errors).as_slice(),
+      want.as_slice(),
+      "{src:?}"
+    );
+    assert_eq!(span, Some(SimpleSpan::new(0, src.len())), "{src:?}");
+    assert_eq!(next, None, "{src:?}");
+  }
+
+  let bytes: [(&[u8], Vec<StringError<u8>>); 2] = [
+    (b"\"\\u{\"", vec![unclosed(1, 4)]),
+    (b"\"\\u{\xff}\"", vec![invalid(1, 6)]),
+  ];
+  for (doc, want) in bytes {
+    let label = doc.escape_ascii().to_string();
+    let (errors, span, next) = refusal!(SyntacticLexer::<[u8]>::new(doc), &label);
+    assert_eq!(
+      string_errors(&errors).as_slice(),
+      want.as_slice(),
+      "{label}"
+    );
+    assert_eq!(span, Some(SimpleSpan::new(0, doc.len())), "{label}");
+    assert_eq!(next, None, "{label}");
+  }
+
+  // A byte that begins no UTF-8 scalar is refused on its own, after the escape it ends, and the `}`
+  // past the closing quote is a token of its own.
+  let doc: &[u8] = b"\"\\u{\xff\" }";
+  let (errors, span, next) = refusal!(
+    SyntacticLexer::<[u8]>::new(doc),
+    doc.escape_ascii().to_string()
+  );
+  let want: [StringError<u8>; 2] = [
+    unclosed(1, 4),
+    StringError::UnsupportedCharacter(Lexeme::Range(SimpleSpan::new(4, 5))),
+  ];
+  assert_eq!(string_errors(&errors).as_slice(), want.as_slice());
+  assert_eq!(span, Some(SimpleSpan::new(0, 6)));
+  assert_eq!(next, Some(SyntacticTokenKind::RBrace));
 }
 
 #[test]
