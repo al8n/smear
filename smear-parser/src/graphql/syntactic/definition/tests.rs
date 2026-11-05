@@ -1331,3 +1331,55 @@ fn type_system_document_accepts_described_definitions_and_extensions() {
 
   reject_all!(TypeSystemDocument::<_>::graphql, "");
 }
+
+/// A committed definition phase that finds no head it takes names the production it expected,
+/// under `smear::syntax::unexpected-token`: a type-system definition, before a token that opens
+/// none or after a description, and a type extension after an `extend` that no shape follows.
+#[test]
+fn a_rejected_definition_head_names_the_production_it_expected() {
+  use std::string::{String, ToString};
+
+  use smear_lexer::SyntaxErrorKind;
+  use tokora::diagnostic::{Code, Diagnose};
+
+  /// The code and the sentence of the one error a refused fixture reports.
+  fn refusal<O>(result: Result<O, GraphqlErrors<&str>>) -> (Code, String) {
+    let Err(errors) = result else {
+      panic!("the fixture should be refused");
+    };
+    let error = errors
+      .into_iter()
+      .next()
+      .expect("the fatal context reports one error");
+    (error.code(), error.to_string())
+  }
+
+  for (what, (code, rendered), expected) in [
+    (
+      "a type-system definition opened by no keyword",
+      refusal(drive_str(TypeSystemDefinition::<_>::graphql, "1")),
+      "unexpected integer, expected a type-system definition",
+    ),
+    (
+      "a description that no definition follows",
+      refusal(drive_str(
+        TypeSystemDefinitionOrExtension::<_>::graphql,
+        "\"doc\" 1",
+      )),
+      "unexpected integer, expected a type-system definition",
+    ),
+    (
+      "an extension of a shape that is not a type",
+      refusal(drive_str(TypeExtension::<_>::graphql, "extend foo")),
+      "unexpected name, expected a type extension",
+    ),
+    (
+      "an extension that no shape follows",
+      refusal(drive_str(TypeExtension::<_>::graphql, "extend 1")),
+      "unexpected integer, expected a type extension",
+    ),
+  ] {
+    assert_eq!(code, SyntaxErrorKind::UnexpectedToken.code(), "{what}");
+    assert_eq!(rendered, expected, "{what}");
+  }
+}

@@ -63,7 +63,9 @@ fn check(error: &dyn Diagnose, what: &str, kind: SyntaxErrorKind, message: Messa
   assert_eq!(error.primary_label(), Some(kind.message()), "{what}");
   assert_eq!(error.help(), kind.help(), "{what}");
   assert_eq!(error.labels(), 0, "{what}");
+  assert!(error.label(0).is_none(), "{what}");
   assert_eq!(error.path_segments(), 0, "{what}");
+  assert!(error.path_segment(0).is_none(), "{what}");
 }
 
 #[test]
@@ -406,6 +408,150 @@ mod graphql {
     assert!(!names_a_position(&empty[0].to_string()));
   }
 
+  /// The variants the rows above leave out, read at the value through the producers a parse
+  /// reaches them by: the two delimiters besides `{`, both halves of an object field's end of
+  /// input, the genuine end of input tokora hands the conversion, and a kept lexer batch with no
+  /// error in it, which has no kind, sentence or position of its own to lend.
+  #[test]
+  fn the_remaining_variants_render_their_sentences() {
+    use smear::{diagnostic::Location, parser::graphql::error::ObjectFieldValueHint};
+    use tokora::error::{UnexpectedEnd, UnexpectedEot};
+
+    let span = SimpleSpan::new(3, 4);
+    check(
+      &GraphqlError::<&str>::unclosed_parentheses(span),
+      "an unclosed parenthesis",
+      SyntaxErrorKind::UnclosedDelimiter,
+      Message::Exact("unclosed `(`"),
+    );
+    check(
+      &GraphqlError::<&str>::unclosed_list(span),
+      "an unclosed list",
+      SyntaxErrorKind::UnclosedDelimiter,
+      Message::Exact("unclosed `[`"),
+    );
+    check(
+      &GraphqlError::<&str>::unexpected_end_of_object_field_value(
+        ObjectFieldValueHint::Colon,
+        span,
+      ),
+      "an object field the document ends inside",
+      SyntaxErrorKind::UnexpectedEndOfInput,
+      Message::Exact("unexpected end of input, expected a colon"),
+    );
+
+    // The same carrier marked as a scanner stop: the document did not end, a limit did.
+    let stopped = GraphqlError::<&str>::new(
+      span,
+      ErrorData::UnexpectedEndOfObjectFieldValue(
+        UnexpectedEnd::new(0, ObjectFieldValueHint::Value).into_terminal(),
+      ),
+    );
+    check(
+      &stopped,
+      "an object field a scanner stop ends",
+      SyntaxErrorKind::ResourceLimit,
+      Message::Exact("a resource limit stopped the parse"),
+    );
+
+    let ended: GraphqlErrors<&str> = UnexpectedEot::<usize, GraphQL>::eot_of(7).into();
+    assert!(
+      matches!(ended[0].data(), ErrorData::EndOfInput),
+      "{:?}",
+      ended[0].data()
+    );
+    check(
+      &ended[0],
+      "a genuine end of input",
+      SyntaxErrorKind::UnexpectedEndOfInput,
+      Message::Exact("unexpected end of input"),
+    );
+
+    let unfilled = GraphqlError::<&str>::from_lexer_errors(LexerErrors::default(), span);
+    assert_eq!(unfilled.primary(), Location::new(0, span));
+    check(
+      &unfilled,
+      "an empty kept batch",
+      SyntaxErrorKind::InvalidSyntax,
+      Message::Exact("invalid syntax"),
+    );
+  }
+
+  /// The lossless door keeps a lexical refusal's whole batch where the syntactic door keeps only
+  /// its kind. The error itself carries the zeroed span, and reads its kind, its sentence and its
+  /// position off the batch's first error.
+  #[cfg(feature = "rowan")]
+  #[test]
+  fn a_kept_lexer_batch_answers_through_its_first_error() {
+    use smear::{
+      diagnostic::Location, lexer::graphql::lossless::LosslessLexer,
+      parser::graphql::lossless::GraphqlLosslessErrors,
+    };
+    use tokora::Lexer as _;
+
+    let src = "{ a ? b }";
+    let mut lexer = LosslessLexer::<&str>::new(src);
+    let batch = loop {
+      match lexer.lex() {
+        Some(Err(errors)) => break errors,
+        Some(Ok(_)) => {}
+        None => panic!("{src:?} lexed without an error"),
+      }
+    };
+
+    let kept: GraphqlLosslessErrors<&str> = batch.into();
+    assert!(
+      matches!(kept[0].data(), ErrorData::Lexer(_)),
+      "{:?}",
+      kept[0].data()
+    );
+    assert_eq!(kept[0].span(), SimpleSpan::new(0, 0));
+    assert_eq!(kept[0].primary(), Location::new(0, SimpleSpan::new(4, 5)));
+    check(
+      &kept[0],
+      "a kept lexer batch",
+      SyntaxErrorKind::UnknownCharacter,
+      Message::Exact("unknown character"),
+    );
+  }
+
+  /// No production demands a trivia kind, so the lossless door's expectation table sends one to
+  /// `Unspecified`, and the sentence drops its "expected" clause rather than naming it.
+  #[cfg(feature = "rowan")]
+  #[test]
+  fn a_trivia_expectation_names_none() {
+    use smear::{
+      lexer::graphql::lossless::{LosslessToken, LosslessTokenKind},
+      parser::graphql::lossless::GraphqlLosslessErrors,
+    };
+
+    type Declined = TokUnexpectedToken<
+      'static,
+      LosslessToken<&'static str>,
+      LosslessTokenKind,
+      SimpleSpan,
+      GraphQL,
+    >;
+
+    let declined = Declined::expected_one(SimpleSpan::new(4, 5), LosslessTokenKind::Comma)
+      .with_found(LosslessToken::Comma);
+    let errors: GraphqlLosslessErrors<&str> = declined.into();
+    assert!(
+      matches!(
+        errors[0].data(),
+        ErrorData::UnexpectedToken(token) if *token.expected() == Expectation::Unspecified
+      ),
+      "{:?}",
+      errors[0].data()
+    );
+    check(
+      &errors[0],
+      "a declined trivia expectation",
+      SyntaxErrorKind::UnexpectedToken,
+      Message::Exact("unexpected `,`"),
+    );
+  }
+
   #[cfg(feature = "materialized-numbers")]
   #[test]
   fn an_out_of_range_literal_names_its_width_not_its_spelling() {
@@ -614,5 +760,122 @@ mod graphqlx {
       assert_eq!(errors[0].span().start(), 7, "{src:?}");
       assert!(!errors.is_terminal(), "{src:?}");
     }
+  }
+
+  /// The variants no document here reaches, read at the value as GraphQL's twin reads them: the
+  /// lossless door's two budgets, the empty lexer batch's note, the three delimiters besides `{`,
+  /// an empty kept batch, and the variant that exists only to keep `S`.
+  #[test]
+  fn the_kinds_this_door_does_not_reach_render_their_sentences() {
+    use smear::{
+      diagnostic::{Diagnose, Location},
+      lexer::{graphqlx::error::LexerErrors, tokora::SimpleSpan},
+    };
+
+    let span = SimpleSpan::new(3, 3);
+    check(
+      &GraphqlxError::<&str>::nesting_limit_exceeded(span),
+      "a parser-frame refusal",
+      SyntaxErrorKind::NestingLimit,
+      Message::Exact("nesting limit exceeded"),
+    );
+    check(
+      &GraphqlxError::<&str>::token_budget_exhausted(span),
+      "a durable token-budget refusal",
+      SyntaxErrorKind::TokenBudget,
+      Message::Exact("token budget exhausted"),
+    );
+
+    let empty = GraphqlxErrors::<&str>::from(LexerErrors::<char, ()>::default());
+    assert!(
+      matches!(empty[0].data(), ErrorData::Other(_)),
+      "{:?}",
+      empty[0].data()
+    );
+    check(
+      &empty[0],
+      "an empty lexer batch",
+      SyntaxErrorKind::InvalidSyntax,
+      Message::Exact("lexer error"),
+    );
+
+    for (error, what, message) in [
+      (
+        GraphqlxError::<&str>::unclosed_parentheses(span),
+        "an unclosed parenthesis",
+        "unclosed `(`",
+      ),
+      (
+        GraphqlxError::<&str>::unclosed_list(span),
+        "an unclosed list",
+        "unclosed `[`",
+      ),
+      (
+        GraphqlxError::<&str>::unclosed_angle(span),
+        "an unclosed angle bracket",
+        "unclosed `<`",
+      ),
+    ] {
+      check(
+        &error,
+        what,
+        SyntaxErrorKind::UnclosedDelimiter,
+        Message::Exact(message),
+      );
+    }
+
+    let unfilled = GraphqlxError::<&str>::new(span, ErrorData::Lexer(LexerErrors::default()));
+    assert_eq!(unfilled.primary(), Location::new(0, span));
+    check(
+      &unfilled,
+      "an empty kept batch",
+      SyntaxErrorKind::InvalidSyntax,
+      Message::Exact("invalid syntax"),
+    );
+    check(
+      &GraphqlxError::<&str>::new(span, ErrorData::Source(core::marker::PhantomData)),
+      "the variant that keeps the source type",
+      SyntaxErrorKind::InvalidSyntax,
+      Message::Exact("invalid syntax"),
+    );
+  }
+
+  /// GraphQLx's lossless door keeps a lexical refusal's whole batch as GraphQL's does, and the
+  /// error reads its kind, its sentence and its position off the batch's first error rather than
+  /// off the zeroed span it carries itself.
+  #[cfg(feature = "rowan")]
+  #[test]
+  fn a_kept_lexer_batch_answers_through_its_first_error() {
+    use smear::{
+      diagnostic::{Diagnose, Location},
+      lexer::{graphqlx::lossless::LosslessLexer, tokora::SimpleSpan},
+      parser::graphqlx::lossless::GraphqlxLosslessErrors,
+    };
+    use tokora::Lexer as _;
+
+    let src = "type T { f(x: Int = 0xZZ): Int }";
+    let mut lexer = LosslessLexer::<&str>::new(src);
+    let batch = loop {
+      match lexer.lex() {
+        Some(Err(errors)) => break errors,
+        Some(Ok(_)) => {}
+        None => panic!("{src:?} lexed without an error"),
+      }
+    };
+
+    let kept: GraphqlxLosslessErrors<&str> = batch.into();
+    assert!(
+      matches!(kept[0].data(), ErrorData::Lexer(_)),
+      "{:?}",
+      kept[0].data()
+    );
+    assert_eq!(kept[0].span(), SimpleSpan::new(0, 0));
+    assert_eq!(kept[0].primary(), Location::new(0, SimpleSpan::new(20, 24)));
+    check(
+      &kept[0],
+      "a kept lexer batch",
+      SyntaxErrorKind::InvalidNumber,
+      Message::Exact("invalid number, unexpected character after a hexadecimal integer"),
+    );
   }
 }

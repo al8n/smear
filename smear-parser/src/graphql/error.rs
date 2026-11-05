@@ -1670,6 +1670,7 @@ mod tests {
   }
 
   mod census;
+  mod expectation;
   #[cfg(feature = "materialized-numbers")]
   mod int_overflow;
   mod terminal;

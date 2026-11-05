@@ -1,7 +1,8 @@
 //! A lexical refusal answers the diagnostic contract in GraphQLx as it does in GraphQL: its kind's
 //! `smear::syntax` code, a sentence with no position in it, and its own span as the primary
 //! location. GraphQL's twin carries the full table; this one holds the arms GraphQLx lexes on its
-//! own — the radix literals — beside a sample of the shared ones.
+//! own — its number errors, the radix literals and hexadecimal floats among them — beside a sample
+//! of the shared ones.
 
 use std::string::{String, ToString};
 
@@ -60,7 +61,9 @@ macro_rules! assert_refusal {
     assert_eq!(error.primary_label(), Some(kind.message()));
     assert_eq!(error.help(), kind.help());
     assert_eq!(error.labels(), 0);
+    assert!(error.label(0).is_none());
     assert_eq!(error.path_segments(), 0);
+    assert!(error.path_segment(0).is_none());
   }};
 }
 
@@ -82,6 +85,91 @@ fn every_lexical_refusal_renders_its_own_sentence_under_its_own_code() {
       "0xZZ",
       SyntaxErrorKind::InvalidNumber,
       "invalid number, unexpected character after a hexadecimal integer",
+    ),
+    (
+      "0x",
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected a hex digit",
+    ),
+    (
+      "0o8",
+      SyntaxErrorKind::InvalidNumber,
+      "invalid number, unexpected character after an octal integer",
+    ),
+    (
+      "0o",
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected an octal digit",
+    ),
+    (
+      "0b2",
+      SyntaxErrorKind::InvalidNumber,
+      "invalid number, unexpected character after a binary integer",
+    ),
+    (
+      "0b",
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected a binary digit",
+    ),
+    (
+      "123abc",
+      SyntaxErrorKind::InvalidNumber,
+      "invalid number, unexpected character after an integer",
+    ),
+    (
+      "1.5x",
+      SyntaxErrorKind::InvalidNumber,
+      "invalid number, unexpected character after a float",
+    ),
+    (
+      ".5",
+      SyntaxErrorKind::InvalidNumber,
+      "invalid number, a float must have an integer part",
+    ),
+    (
+      "1.)",
+      SyntaxErrorKind::InvalidNumber,
+      "invalid number, expected a fractional digit",
+    ),
+    (
+      "1e+",
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected an exponent digit",
+    ),
+    (
+      "0x1p1z",
+      SyntaxErrorKind::InvalidNumber,
+      "invalid number, unexpected character after a hexadecimal float",
+    ),
+    (
+      "0x1.)",
+      SyntaxErrorKind::InvalidNumber,
+      "invalid number, expected a fractional hex digit",
+    ),
+    (
+      "0x1.",
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected a fractional hex digit",
+    ),
+    (
+      "0x1p",
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected `+`, `-` or an exponent digit",
+    ),
+    (
+      "0x1p+",
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected an exponent digit",
+    ),
+    (
+      ".8p1",
+      SyntaxErrorKind::InvalidNumber,
+      "invalid number, a hexadecimal float must have an integer part",
+    ),
+    (
+      "0x1.8",
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, a hexadecimal float must have a `p` exponent",
     ),
     (
       "\"unterminated",
@@ -185,5 +273,167 @@ fn a_whole_slice_door_refuses_what_is_not_exactly_one_token_of_its_kind() {
     assert_eq!(error.span(), SimpleSpan::new(0, src.len()), "{src:?}");
     assert_eq!(error.help(), None, "{src:?}");
     assert_refusal!(error, src, SyntaxErrorKind::UnexpectedToken, message);
+  }
+}
+
+/// Every token kind renders as a diagnostic names what it found, as GraphQL's twin pins it, over
+/// this dialect's own vocabulary: the angle pair, `=>`, `*`, `+`, `-` and `::` beside GraphQL's
+/// punctuation. Both tables are copied from the impls row for row.
+#[test]
+fn every_token_kind_renders_as_a_diagnostic_names_it() {
+  use crate::graphqlx::{
+    lossless::LosslessTokenKind as Lossless, syntactic::SyntacticTokenKind as Syntactic,
+  };
+
+  for (kind, text) in [
+    (Syntactic::Identifier, "name"),
+    (Syntactic::Int, "integer"),
+    (Syntactic::Float, "float"),
+    (Syntactic::InlineString, "string"),
+    (Syntactic::BlockString, "block string"),
+    (Syntactic::Dollar, "`$`"),
+    (Syntactic::FatArrow, "`=>`"),
+    (Syntactic::LAngle, "`<`"),
+    (Syntactic::RAngle, "`>`"),
+    (Syntactic::LParen, "`(`"),
+    (Syntactic::RParen, "`)`"),
+    (Syntactic::Spread, "`...`"),
+    (Syntactic::Colon, "`:`"),
+    (Syntactic::Equal, "`=`"),
+    (Syntactic::Asterisk, "`*`"),
+    (Syntactic::At, "`@`"),
+    (Syntactic::LBracket, "`[`"),
+    (Syntactic::RBracket, "`]`"),
+    (Syntactic::LBrace, "`{`"),
+    (Syntactic::RBrace, "`}`"),
+    (Syntactic::Pipe, "`|`"),
+    (Syntactic::Bang, "`!`"),
+    (Syntactic::Ampersand, "`&`"),
+    (Syntactic::Plus, "`+`"),
+    (Syntactic::Minus, "`-`"),
+    (Syntactic::PathSeparator, "`::`"),
+  ] {
+    assert_eq!(kind.to_string(), text, "{kind:?}");
+  }
+
+  for (kind, text) in [
+    (Lossless::Asterisk, "`*`"),
+    (Lossless::At, "`@`"),
+    (Lossless::Bom, "BOM"),
+    (Lossless::Dollar, "`$`"),
+    (Lossless::FatArrow, "`=>`"),
+    (Lossless::LAngle, "`<`"),
+    (Lossless::RAngle, "`>`"),
+    (Lossless::LParen, "`(`"),
+    (Lossless::RParen, "`)`"),
+    (Lossless::Spread, "`...`"),
+    (Lossless::Colon, "`:`"),
+    (Lossless::Equal, "`=`"),
+    (Lossless::LBracket, "`[`"),
+    (Lossless::RBracket, "`]`"),
+    (Lossless::LBrace, "`{`"),
+    (Lossless::RBrace, "`}`"),
+    (Lossless::Pipe, "`|`"),
+    (Lossless::Bang, "`!`"),
+    (Lossless::Ampersand, "`&`"),
+    (Lossless::Plus, "`+`"),
+    (Lossless::Minus, "`-`"),
+    (Lossless::PathSeparator, "`::`"),
+    (Lossless::Comma, "`,`"),
+    (Lossless::Space, "space"),
+    (Lossless::Tab, "tab"),
+    (Lossless::Newline, "line feed"),
+    (Lossless::CarriageReturn, "carriage return"),
+    (Lossless::CarriageReturnAndNewline, "line break"),
+    (Lossless::Comment, "comment"),
+    (Lossless::Identifier, "name"),
+    (Lossless::Float, "float"),
+    (Lossless::Int, "integer"),
+    (Lossless::InlineString, "string"),
+    (Lossless::BlockString, "block string"),
+  ] {
+    assert_eq!(kind.to_string(), text, "{kind:?}");
+  }
+}
+
+/// The refusals no lexing door in this dialect reaches, read at the value: the two
+/// hexadecimal-float hints no scanner raises, an integer the input ends inside, the sign character
+/// this scanner lexes as an operator instead, an end of input it never raises, a source that is not
+/// UTF-8, a free-form note and an empty string batch. Each answers the contract under the kind its
+/// data names.
+#[test]
+fn the_refusals_no_lexing_door_reaches_render_their_sentences() {
+  use tokora::{SimpleSpan, error::UnexpectedEnd};
+
+  use crate::{
+    error::StringErrors,
+    graphqlx::error::{DecimalError, HexFloatError, LexerError, LexerErrorData},
+    hints::{DecimalHint, HexExponentHint, HexFloatHint},
+  };
+
+  /// A refusal built from its data, at a span no lexer chose.
+  fn built(data: LexerErrorData<char, ()>) -> LexerError<char, ()> {
+    LexerError::new(SimpleSpan::new(0, 1), data)
+  }
+
+  let not_utf8 = core::str::from_utf8(&[u8::MAX]).expect_err("0xFF begins no UTF-8 sequence");
+
+  for (what, error, kind, message) in [
+    (
+      "an integer the input ends inside",
+      built(LexerErrorData::Decimal(DecimalError::UnexpectedEnd(
+        UnexpectedEnd::new(0, DecimalHint::Digit),
+      ))),
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected a digit",
+    ),
+    (
+      "a hexadecimal float the input ends inside before a digit",
+      built(LexerErrorData::HexFloat(HexFloatError::UnexpectedEnd(
+        UnexpectedEnd::new(0, HexFloatHint::Digit),
+      ))),
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected a hex digit",
+    ),
+    (
+      "a hexadecimal float the input ends inside before its exponent marker",
+      built(LexerErrorData::HexFloat(HexFloatError::UnexpectedEnd(
+        UnexpectedEnd::new(0, HexFloatHint::Exponent(HexExponentHint::Identifier)),
+      ))),
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected `p` or `P`",
+    ),
+    (
+      "a sign that begins no token",
+      built(LexerErrorData::unexpected_char('+', 0)),
+      SyntaxErrorKind::UnexpectedCharacter,
+      "unexpected character",
+    ),
+    (
+      "an end of input the scanner never raises",
+      built(LexerErrorData::UnexpectedEndOfInput),
+      SyntaxErrorKind::UnexpectedEndOfInput,
+      "unexpected end of input",
+    ),
+    (
+      "a source that is not UTF-8",
+      built(LexerErrorData::InvalidUtf8(not_utf8)),
+      SyntaxErrorKind::InvalidUtf8,
+      "invalid UTF-8",
+    ),
+    (
+      "a free-form note",
+      built(LexerErrorData::other("a free-form note")),
+      SyntaxErrorKind::InvalidSyntax,
+      "a free-form note",
+    ),
+    (
+      "an empty string batch",
+      built(LexerErrorData::String(StringErrors::default())),
+      SyntaxErrorKind::InvalidSyntax,
+      "invalid syntax",
+    ),
+  ] {
+    assert_refusal!(error, what, kind, message);
   }
 }
