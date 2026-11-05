@@ -104,6 +104,7 @@ SchemaErrorKind::ReservedFieldName = smear::schema::reserved-field-name
 SchemaErrorKind::ReservedInputFieldName = smear::schema::reserved-input-field-name
 SchemaErrorKind::ReservedTypeName = smear::schema::reserved-type-name
 SchemaErrorKind::RootOperationTypeNotObject = smear::schema::root-operation-type-not-object
+SchemaErrorKind::SchemaExtensionWithoutSchema = smear::schema::schema-extension-without-schema
 SchemaErrorKind::SelfImplementingInterface = smear::schema::self-implementing-interface
 SchemaErrorKind::SelfReferentialDirective = smear::schema::self-referential-directive
 SchemaErrorKind::SharedRootOperationType = smear::schema::shared-root-operation-type

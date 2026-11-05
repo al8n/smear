@@ -1984,6 +1984,10 @@ struct RawExtension {
   directives: Vec<RawDirectiveUse>,
   /// Root operations, for a `extend schema` rather than a type extension.
   roots: Vec<(RootOperation, Located)>,
+  /// Where an `extend schema` was written — its whole span, and the document it was read from —
+  /// for draft §3.3.2's "The Schema must already be defined", which has nothing narrower to point
+  /// at. `None` for a type extension, which [`target`](RawExtension::target) locates.
+  schema: Option<(SimpleSpan, u32)>,
   /// An `extend scalar`'s `@specifiedBy(url:)`, decoded into the text arena.
   specified_by: Text,
 }
@@ -2492,6 +2496,9 @@ impl SchemaBuilder {
     // an undefined target. Whether a built-in is injected at all is decided by the *definitions*,
     // all of which are already in, so the order does not change what gets replaced.
     self.inject_built_ins();
+    // The presumed roots precede extension too: an `extend schema` beside no `schema` definition
+    // extends the schema that omitting one defines, so that schema's roots are in place first.
+    self.presume_default_roots();
     self.apply_extensions();
 
     if let Some(refusal) = self.arena_refusal() {
@@ -3537,6 +3544,7 @@ impl SchemaBuilder {
     let mut raw = RawExtension::default();
     match extension {
       TypeSystemExtension::Schema(schema) => {
+        raw.schema = Some((*schema.span(), self.document));
         raw.directives = self.directive_uses(schema.directives(), DirectiveLocation::Schema);
         if let Some(roots) = schema.root_operation_types_definition() {
           for root in roots.root_operation_type_definitions() {
@@ -3591,10 +3599,56 @@ impl SchemaBuilder {
     self.extensions.push(raw);
   }
 
+  /// Draft §3.3.1's default root operation type names, for a document that omits the `schema`
+  /// definition: "The "Query" type is presumed to be the query root operation type of the schema"
+  /// (Example 41), and `Mutation` and `Subscription` likewise.
+  ///
+  /// Run before [`apply_extensions`](SchemaBuilder::apply_extensions) rather than by
+  /// [`resolve_roots`](SchemaBuilder::resolve_roots), because these are the roots an
+  /// `extend schema` extends. `resolve_roots` records what an extension that provides one of them
+  /// again is told.
+  fn presume_default_roots(&mut self) {
+    // "The type system definition language can omit the schema definition when each root
+    // operation type uses its respective default root type name". So the defaults stand in for an
+    // omitted `schema` definition and for nothing else. A document that writes one names every
+    // root it has, and an object type that is merely called `Mutation` beside
+    // `schema { query: Query }` is not the mutation root: Example 42 is "a valid GraphQL schema
+    // without a mutation root operation type, even though it contains a type named "Mutation"".
+    // An `extend schema` is not a definition, so on its own it keeps the defaults.
+    if self.schema_definition.is_some() {
+      return;
+    }
+    for operation in RootOperation::ALL {
+      let name = operation.default_type_name();
+      if let Some(sym) = self.interner.lookup(name.as_bytes())
+        && let Some(index) = self.type_index(sym)
+        && self.types[index].kind == TypeKind::Object
+      {
+        self.roots[operation.index()] = Some(self.types[index].name);
+      }
+    }
+  }
+
   fn apply_extensions(&mut self) {
+    // Draft §3.3.2: "The Schema must already be defined." A `schema` definition defines it, and so
+    // does omitting one beside an object type named `Query`, which `presume_default_roots` has
+    // just made the query root (§3.3.1, Example 41). Decided once, before any extension adds a
+    // root of its own.
+    let schema_defined =
+      self.schema_definition.is_some() || self.roots[RootOperation::Query.index()].is_some();
     let extensions = core::mem::take(&mut self.extensions);
     for extension in extensions {
       let Some(target) = extension.target else {
+        if !schema_defined && let Some((span, document)) = extension.schema {
+          self.errors.push(
+            SchemaError::new(
+              SchemaErrorKind::SchemaExtensionWithoutSchema,
+              "schema",
+              span,
+            )
+            .in_document(document),
+          );
+        }
         // `extend schema`. Its directives join the schema definition's own list, because the two
         // are one location: `schema @d` plus `extend schema @d` repeats a non-repeatable `@d`.
         self.schema_directives.extend(extension.directives);
@@ -3809,26 +3863,13 @@ impl SchemaBuilder {
   }
 
   fn resolve_roots(&mut self) {
-    // Draft §3.3.1, "Default Root Operation Type Names": "The type system definition language can
-    // omit the schema definition when each root operation type uses its respective default root
-    // type name". So the defaults stand in for an omitted `schema` definition and for nothing else.
-    // A document that writes one names every root it has, and an object type that is merely called
-    // `Mutation` beside `schema { query: Query }` is not the mutation root: Example 42 is "a valid
-    // GraphQL schema without a mutation root operation type, even though it contains a type named
-    // "Mutation"". An `extend schema` is not a definition, so on its own it keeps the defaults.
-    for operation in RootOperation::ALL {
-      if self.schema_definition.is_some() || self.roots[operation.index()].is_some() {
-        continue;
-      }
-      let name = operation.default_type_name();
-      if let Some(sym) = self.interner.lookup(name.as_bytes())
-        && let Some(index) = self.type_index(sym)
-        && self.types[index].kind == TypeKind::Object
-      {
-        self.roots[operation.index()] = Some(self.types[index].name);
-      }
-    }
-
+    // The roots are all in by now: the `schema` definition's, or the defaults
+    // `presume_default_roots` put in for an omitted one, and then each `extend schema`'s. An
+    // extension that provides a root the schema already has was refused as
+    // `DuplicateRootOperationType` by `set_root`, a presumed root included: "A schema defines the
+    // initial root operation type for each kind of operation it supports", and omitting the
+    // definition defines the schema, presumed roots and all, as surely as writing it (Example 41).
+    // graphql-js diverges here, and lets the extension's root replace the presumed one in silence.
     for operation in RootOperation::ALL {
       let Some(root) = self.roots[operation.index()] else {
         if operation == RootOperation::Query {

@@ -52,6 +52,19 @@ pub enum SchemaErrorKind {
   UndefinedExtensionTarget,
   /// `extend` names a type of a different kind than the extension's keyword (draft §3.3).
   ExtensionKindMismatch,
+  /// An `extend schema` has no schema to extend: the document has no `schema` definition and no
+  /// object type named `Query` (draft §3.3.2).
+  ///
+  /// "The Schema must already be defined." Omitting the `schema` definition still defines one
+  /// when there is a `Query` type to be "presumed to be the query root operation type of the
+  /// schema" (§3.3.1, Example 41), so that schema is one an extension may extend. With neither,
+  /// there is nothing for the extension to add to.
+  ///
+  /// The subject is `schema` and the span is the whole extension. The extension is applied all
+  /// the same, so its directives and roots are still checked, and a document that has no query
+  /// root at all is still [`MissingQueryRootOperationType`](Self::MissingQueryRootOperationType)
+  /// beside this.
+  SchemaExtensionWithoutSchema,
   /// A definition redefines an introspection type (draft §3.3).
   ///
   /// The five built-in scalars and the five specified directives are *not* in this class: a
@@ -389,6 +402,7 @@ impl SchemaErrorKind {
     Self::MissingQueryRootOperationType,
     Self::UndefinedExtensionTarget,
     Self::ExtensionKindMismatch,
+    Self::SchemaExtensionWithoutSchema,
     Self::RedefinedBuiltInType,
     Self::ReservedTypeName,
     Self::UndefinedType,
@@ -467,6 +481,7 @@ impl SchemaErrorKind {
       Self::MissingQueryRootOperationType => "no query root operation type",
       Self::UndefinedExtensionTarget => "extension target is not defined",
       Self::ExtensionKindMismatch => "extension does not match the kind of the type it extends",
+      Self::SchemaExtensionWithoutSchema => "schema extension has no schema to extend",
       Self::RedefinedBuiltInType => "redefinition of an introspection type",
       Self::ReservedTypeName => "type name is reserved for introspection",
       Self::UndefinedType => "undefined type",
@@ -573,6 +588,9 @@ impl SchemaErrorKind {
       }
       Self::UndefinedExtensionTarget => Code::new("smear::schema::undefined-extension-target"),
       Self::ExtensionKindMismatch => Code::new("smear::schema::extension-kind-mismatch"),
+      Self::SchemaExtensionWithoutSchema => {
+        Code::new("smear::schema::schema-extension-without-schema")
+      }
       Self::RedefinedBuiltInType => Code::new("smear::schema::redefined-built-in-type"),
       Self::ReservedTypeName => Code::new("smear::schema::reserved-type-name"),
       Self::UndefinedType => Code::new("smear::schema::undefined-type"),
@@ -691,6 +709,7 @@ impl SchemaErrorKind {
       | Self::MissingQueryRootOperationType
       | Self::UndefinedExtensionTarget
       | Self::ExtensionKindMismatch
+      | Self::SchemaExtensionWithoutSchema
       | Self::RedefinedBuiltInType
       | Self::ReservedTypeName
       | Self::UndefinedType
@@ -789,6 +808,9 @@ impl SchemaErrorKind {
       Self::ExtensionKindMismatch => {
         Some("the `extend` keyword has to match the kind of the definition it extends.")
       }
+      Self::SchemaExtensionWithoutSchema => Some(
+        "`extend schema` adds to a schema the document defines: write a `schema` definition, or define the `Query` type that omitting one presumes.",
+      ),
       Self::RedefinedBuiltInType => Some(
         "the `__`-prefixed introspection types are injected by every build and cannot be replaced.",
       ),
@@ -967,6 +989,7 @@ impl SchemaErrorKind {
       | Self::RootOperationTypeNotObject
       | Self::MissingQueryRootOperationType
       | Self::UndefinedExtensionTarget
+      | Self::SchemaExtensionWithoutSchema
       | Self::RedefinedBuiltInType
       | Self::ReservedTypeName
       | Self::UndefinedType

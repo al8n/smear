@@ -167,6 +167,14 @@ All notable changes to Smear are documented in this file.
   beside `type Mutation` has no mutation root, as in the draft's Example 42, where
   `Mutation` used to become one. An `extend schema` is not a definition, so a
   document with one and no `schema` definition still takes the defaults.
+- `smear-schema`: an `extend schema` with no schema to extend is refused as
+  `SchemaErrorKind::SchemaExtensionWithoutSchema`, at the extension (draft
+  §3.3.2: "The Schema must already be defined"). Omitting the `schema`
+  definition still defines a schema when there is an object type named `Query`
+  (Example 41), and an extension may extend that one. The presumed default roots
+  are now in place before any extension is applied, so an `extend schema` that
+  provides one of them again is `DuplicateRootOperationType`, as it is against a
+  written definition's root. Code `smear::schema::schema-extension-without-schema`.
 
 ## [0.0.1] - 2026-10-30
 

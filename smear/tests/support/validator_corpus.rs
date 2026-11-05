@@ -586,6 +586,11 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     &[SchemaErrorKind::ExtensionKindMismatch],
   ),
   (
+    SchemaErrorKind::SchemaExtensionWithoutSchema,
+    "type Q { ok: Int } extend schema { query: Q }",
+    &[SchemaErrorKind::SchemaExtensionWithoutSchema],
+  ),
+  (
     SchemaErrorKind::RedefinedBuiltInType,
     "type Query { ok: Int } type __Type { name: String }",
     &[SchemaErrorKind::RedefinedBuiltInType],

@@ -2467,6 +2467,140 @@ fn an_extend_schema_alone_keeps_the_default_root_names() {
   assert_eq!(schema.root(RootOperation::Subscription), None);
 }
 
+/// Draft §3.3.2: "The Schema must already be defined." With no `schema` definition and no `Query`
+/// type for an omitted one to presume, an `extend schema` has nothing to extend.
+#[test]
+fn an_extend_schema_with_no_schema_to_extend_is_refused() {
+  let sdl = "type Q { ok: Int } extend schema { query: Q }";
+  let errors = refused(sdl);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::SchemaExtensionWithoutSchema]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.subject(), "schema");
+  assert_eq!(error.owner(), None);
+  assert_eq!(
+    &sdl[error.span().start()..error.span().end()],
+    "extend schema { query: Q }"
+  );
+  assert_eq!(
+    error.to_string(),
+    "schema extension has no schema to extend: `schema`"
+  );
+
+  // Each extension is refused, at its own span.
+  let sdl = "directive @d on SCHEMA type Q { ok: Int } extend schema { query: Q } extend schema @d";
+  let errors = refused(sdl);
+  let blamed: Vec<&str> = errors
+    .errors()
+    .iter()
+    .map(|error| &sdl[error.span().start()..error.span().end()])
+    .collect();
+  assert_eq!(blamed, ["extend schema { query: Q }", "extend schema @d"]);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::SchemaExtensionWithoutSchema]
+  );
+
+  // A type called `Query` that is not an object type is never presumed to be the query root, so
+  // it defines no schema either.
+  let errors = refused("interface Query { ok: Int } type Q { ok: Int } extend schema { query: Q }");
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::SchemaExtensionWithoutSchema]
+  );
+
+  // Nothing else moves: a document with no query root anywhere is still told so as well.
+  let errors = refused("directive @d on SCHEMA extend schema @d");
+  assert_eq!(
+    errors.kinds(),
+    vec![
+      SchemaErrorKind::MissingQueryRootOperationType,
+      SchemaErrorKind::SchemaExtensionWithoutSchema,
+    ]
+  );
+}
+
+/// What an `extend schema` may extend: a `schema` definition wherever it is written, or the schema
+/// that omitting one defines around an object type named `Query` (Example 41).
+#[test]
+fn an_extend_schema_with_a_schema_to_extend_is_accepted() {
+  for sdl in [
+    "type Query { ok: Int } type M { go: Int } schema { query: Query } extend schema { mutation: M }",
+    "type Query { ok: Int } type M { go: Int } extend schema { mutation: M } schema { query: Query }",
+    "type Query { ok: Int } type M { go: Int } extend schema { mutation: M }",
+  ] {
+    let schema = built(sdl);
+    assert_eq!(
+      schema.root(RootOperation::Query),
+      Some(ty(&schema, "Query")),
+      "{sdl}"
+    );
+    assert_eq!(
+      schema.root(RootOperation::Mutation),
+      Some(ty(&schema, "M")),
+      "{sdl}"
+    );
+  }
+
+  // The definition may be in a later document than the extension.
+  let extension = parse("extend schema { mutation: M } type M { go: Int }");
+  let definition = parse("schema { query: Query } type Query { ok: Int }");
+  let mut builder = SchemaBuilder::new();
+  builder.document(&extension).document(&definition);
+  let schema = builder
+    .finish()
+    .expect("an extension may precede the definition it extends");
+  assert_eq!(schema.root(RootOperation::Mutation), Some(ty(&schema, "M")));
+}
+
+/// An `extend schema` that provides a root an omitted `schema` definition presumed is the same
+/// duplicate a written definition's root would be.
+///
+/// The presumed roots are in place before any extension is applied: "A schema defines the initial
+/// root operation type for each kind of operation it supports", and Example 41's schema is defined
+/// with its query root presumed. graphql-js lets the extension's root replace the presumed one in
+/// silence; this follows the draft instead.
+#[test]
+fn an_extend_schema_cannot_provide_a_presumed_root_again() {
+  let sdl = "type Query { ok: Int } type Other { ok: Int } extend schema { query: Other }";
+  let errors = refused(sdl);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::DuplicateRootOperationType]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.subject(), "query");
+  assert_eq!(&sdl[error.span().start()..error.span().end()], "Other");
+  assert_eq!(
+    error.span().start(),
+    sdl.rfind("Other").expect("the extension's root")
+  );
+  let related = error.related().expect("the presumed root is pointed at");
+  assert_eq!(&sdl[related.start()..related.end()], "Query");
+  assert_eq!(related.start(), "type ".len());
+
+  // Naming the presumed root itself again is the same duplicate.
+  let errors = refused(
+    "type Query { ok: Int } type Mutation { go: Int } extend schema { mutation: Mutation }",
+  );
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::DuplicateRootOperationType]
+  );
+  assert_eq!(errors.errors()[0].subject(), "mutation");
+
+  // A root nothing presumed is the extension's to provide.
+  let schema = built("type Query { ok: Int } type S { s: Int } extend schema { subscription: S }");
+  assert_eq!(
+    schema.root(RootOperation::Subscription),
+    Some(ty(&schema, "S"))
+  );
+}
+
 /// The name index is a real index: every interned name resolves, nothing else does.
 #[test]
 fn the_name_index_resolves_exactly_what_was_interned() {
