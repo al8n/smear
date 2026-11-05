@@ -146,6 +146,12 @@ All notable changes to Smear are documented in this file.
 - `smear`!: `json::Error` is now `#[non_exhaustive]`. A `match` on it outside
   `smear` needs a wildcard arm. Adding a refusal variant is no longer a breaking
   change.
+- `smear-lexer`: a GraphQLx radix prefix with no digit, `0x`, `0o` or `0b`,
+  refuses as an incomplete number wherever it stands: `HexError::UnexpectedEnd`,
+  `OctalError::UnexpectedEnd` or `BinaryError::UnexpectedEnd` at the prefix's
+  span, as at the end of input. Before a delimiter, as in `0x)`, it produced an
+  empty error batch, which the syntactic parser reported as
+  `Other("lexer error")` at `0..0`.
 
 ## [0.0.1] - 2026-10-30
 

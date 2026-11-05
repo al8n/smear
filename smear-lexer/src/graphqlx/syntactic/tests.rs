@@ -1,10 +1,13 @@
-use std::{vec, vec::Vec};
+use std::{string::ToString, vec, vec::Vec};
 
-use tokora::Lexer as _;
+use tokora::{Lexer as _, SimpleSpan};
 
-use crate::graphqlx::{
-  LitFloat, LitInt,
-  syntactic::{SyntacticLexer, SyntacticToken},
+use crate::{
+  SyntaxErrorKind,
+  graphqlx::{
+    LitFloat, LitInt,
+    syntactic::{SyntacticLexer, SyntacticToken},
+  },
 };
 
 /// Drive a `<str>`-sourced lexer to completion, unwrapping every result.
@@ -15,6 +18,24 @@ fn lex_all(src: &str) -> Vec<SyntacticToken<&str>> {
     out.push(tok.unwrap());
   }
   out
+}
+
+/// Lexes the refusal a document opens with, and answers its batch, the span of its error token and
+/// the kind of the token after it.
+macro_rules! refusal {
+  ($lexer:expr, $src:expr) => {{
+    let mut lexer = $lexer;
+    let src = $src;
+    let errors = match lexer.lex() {
+      Some(Err(errors)) => errors,
+      other => panic!("{src:?}: expected a refusal, got {other:?}"),
+    };
+    let span = lexer.error_span();
+    let next = lexer
+      .lex()
+      .map(|token| token.expect("the input after the refusal lexes").kind());
+    (errors, span, next)
+  }};
 }
 
 #[test]
@@ -137,6 +158,53 @@ fn radix_numbers_delegate_to_logos() {
     lex_all("0x1.8p3"),
     vec![SyntacticToken::LitFloat(LitFloat::Hex("0x1.8p3"))]
   );
+}
+
+/// A radix prefix with no digit after it refuses as an incomplete number wherever it stands: one
+/// error at the prefix's own span, with the delimiter after it lexed as a token of its own. Before
+/// a delimiter, the prefix used to yield an error token whose batch was empty.
+#[test]
+fn a_bare_radix_prefix_before_a_delimiter_is_an_incomplete_number() {
+  use crate::graphqlx::syntactic::SyntacticTokenKind;
+
+  macro_rules! assert_no_digit {
+    ($lexer:expr, $src:expr, $message:expr, $after:expr) => {{
+      let (errors, span, next) = refusal!($lexer, $src);
+      let src = $src;
+      assert_eq!(errors.len(), 1, "{src:?}: {errors:?}");
+      assert_eq!(
+        errors[0].kind(),
+        SyntaxErrorKind::IncompleteNumber,
+        "{src:?}"
+      );
+      assert_eq!(errors[0].to_string(), $message, "{src:?}");
+      assert_eq!(errors[0].span(), SimpleSpan::new(0, 2), "{src:?}");
+      assert_eq!(span, Some(SimpleSpan::new(0, 2)), "{src:?}");
+      assert_eq!(next, $after, "{src:?}");
+    }};
+  }
+
+  for (src, message, after) in [
+    (
+      "0x)",
+      "incomplete number, expected a hex digit",
+      Some(SyntacticTokenKind::RParen),
+    ),
+    (
+      "0o )",
+      "incomplete number, expected an octal digit",
+      Some(SyntacticTokenKind::RParen),
+    ),
+    ("0b,", "incomplete number, expected a binary digit", None),
+  ] {
+    assert_no_digit!(SyntacticLexer::<str>::new(src), src, message, after);
+    assert_no_digit!(
+      SyntacticLexer::<[u8]>::new(src.as_bytes()),
+      src,
+      message,
+      after
+    );
+  }
 }
 
 #[test]

@@ -653,6 +653,35 @@ fn failures_keep_typed_expectations_and_unclosed_kinds() {
   ));
 }
 
+/// A radix prefix with no digit before a delimiter is refused as the lexer refuses it: an
+/// incomplete number, at the prefix's span. The lexer's batch for it used to be empty, which the
+/// conversion can only report as its untyped note at `0..0`.
+#[test]
+fn a_bare_radix_prefix_in_an_argument_is_an_incomplete_number() {
+  use smear_lexer::SyntaxErrorKind;
+  use tokora::diagnostic::Diagnose as _;
+
+  let error = drive_str(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "{ a(x: 0x) }",
+  )
+  .expect_err("a radix prefix with no digit is not a value")
+  .into_iter()
+  .next()
+  .expect("the refused parse reports an error");
+  assert_eq!(error.code().as_str(), "smear::syntax::incomplete-number");
+  assert_eq!(error.kind(), SyntaxErrorKind::IncompleteNumber);
+  assert_eq!(error.span(), SimpleSpan::new(7, 9));
+  assert!(
+    matches!(
+      error.data(),
+      ErrorData::Lexical(SyntaxErrorKind::IncompleteNumber)
+    ),
+    "{:?}",
+    error.data()
+  );
+}
+
 #[test]
 fn complete_document_accepts_every_graphqlx_fixture_over_all_borrowed_sources() {
   const FIXTURES: &[&str] = &[
