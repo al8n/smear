@@ -186,10 +186,9 @@ mod tests;
 
 /// What stopped a value from being written.
 ///
-/// `#[non_exhaustive]`, like the other public error enums in this workspace: what the writer can
-/// refuse is its own vocabulary and grows with it, so a 0.1.x release may add a variant without
-/// breaking a caller's `match`. An in-crate `match` stays wildcard-free; one outside the crate
-/// carries a wildcard arm.
+/// `#[non_exhaustive]`: what the writer can refuse is its own vocabulary and grows with it, so a
+/// 0.1.x release may add a variant without breaking a caller's `match`. An in-crate `match` stays
+/// wildcard-free; one outside the crate carries a wildcard arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Error {
