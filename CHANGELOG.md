@@ -198,6 +198,12 @@ All notable changes to Smear are documented in this file.
   that gives a built-in scalar a `specifiedByURL` the same way, because the door
   writes it out as the directive. Code
   `smear::schema::specified-by-on-built-in-scalar`.
+- `smear-schema`: a related position carries its own document, which
+  `SchemaError::related_document` returns and the related label is rendered in.
+  A duplicate across the builder's documents points at the first definition in
+  the document it was read from, rather than at the same range of the
+  duplicate's document, and `MissingQueryRootOperationType` is reported in the
+  `schema` definition's document rather than in document 0.
 
 ## [0.0.1] - 2026-10-30
 

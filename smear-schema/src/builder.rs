@@ -2376,17 +2376,21 @@ fn push_at(
   );
 }
 
+/// Reports at `at` and points back at `related`, each in the document it was read from.
+///
+/// The two need not share one: a duplicate repeats a definition that may be in another of the
+/// builder's documents, so the related position is a [`Located`] and keeps its own.
 fn push_related(
   errors: &mut Vec<SchemaError>,
   kind: SchemaErrorKind,
   subject: &str,
   owner: Option<String>,
   at: Located,
-  related: SimpleSpan,
+  related: Located,
 ) {
   let mut error = SchemaError::new(kind, subject, at.span)
     .in_document(at.document)
-    .related_to(related);
+    .related_to(related.span, related.document);
   if let Some(owner) = owner {
     error = error.owned_by(owner);
   }
@@ -2426,7 +2430,8 @@ pub struct SchemaBuilder {
   /// `Sym` to an index into `directives`; `u32::MAX` for "not a directive".
   directive_of_sym: Vec<u32>,
   roots: [Option<Located>; 3],
-  schema_definition: Option<SimpleSpan>,
+  /// The `schema` definition's span, and the document it was read from.
+  schema_definition: Option<(SimpleSpan, u32)>,
   /// `SCHEMA`-location directives, from the `schema` definition and every `extend schema`.
   ///
   /// One list rather than one per definition, because apollo and the draft both treat the schema
@@ -2569,7 +2574,7 @@ impl SchemaBuilder {
     subject: &str,
     owner: Option<String>,
     at: Located,
-    related: SimpleSpan,
+    related: Located,
   ) {
     push_related(&mut self.errors, kind, subject, owner, at, related);
   }
@@ -2779,7 +2784,7 @@ impl SchemaBuilder {
   fn record_type(&mut self, raw: RawType) {
     let sym = raw.name.sym;
     if let Some(previous) = self.type_index(sym) {
-      let related = self.types[previous].name.span;
+      let related = self.types[previous].name;
       let subject = self.text(sym).to_owned();
       self.push_related(
         SchemaErrorKind::DuplicateTypeName,
@@ -2913,7 +2918,7 @@ impl SchemaBuilder {
     let repeatable = def.repeatable();
 
     if let Some(previous) = self.directive_index(name.sym) {
-      let related = self.directives[previous].name.span;
+      let related = self.directives[previous].name;
       let subject = self.text(name.sym).to_owned();
       self.push_related(
         SchemaErrorKind::DuplicateDirectiveDefinition,
@@ -2944,15 +2949,15 @@ impl SchemaBuilder {
     S: AsRef<[u8]>,
   {
     let span = *def.span();
-    if let Some(previous) = self.schema_definition {
+    if let Some((previous, document)) = self.schema_definition {
       self.errors.push(
         SchemaError::new(SchemaErrorKind::DuplicateSchemaDefinition, "schema", span)
           .in_document(self.document)
-          .related_to(previous),
+          .related_to(previous, document),
       );
       return;
     }
-    self.schema_definition = Some(span);
+    self.schema_definition = Some((span, self.document));
     self.schema_description = self.describe(description, Head::Schema);
     let directives = self.directive_uses(def.directives(), DirectiveLocation::Schema);
     self.schema_directives.extend(directives);
@@ -2974,7 +2979,7 @@ impl SchemaBuilder {
         subject,
         None,
         target,
-        previous.span,
+        previous,
       );
       return;
     }
@@ -3669,7 +3674,7 @@ impl SchemaBuilder {
       };
       if self.types[index].kind != extension.kind.unwrap_or(self.types[index].kind) {
         let subject = self.text(target.sym).to_owned();
-        let related = self.types[index].name.span;
+        let related = self.types[index].name;
         self.push_related(
           SchemaErrorKind::ExtensionKindMismatch,
           &subject,
@@ -3879,13 +3884,16 @@ impl SchemaBuilder {
     for operation in RootOperation::ALL {
       let Some(root) = self.roots[operation.index()] else {
         if operation == RootOperation::Query {
+          // At the `schema` definition, in the document it was read from; with none, at the
+          // start of the first document, since the refusal is about the document as a whole.
+          let (span, document) = self.schema_definition.unwrap_or_default();
           self.errors.push(
             SchemaError::new(
               SchemaErrorKind::MissingQueryRootOperationType,
               "query",
-              self.schema_definition.unwrap_or_default(),
+              span,
             )
-            .in_document(0),
+            .in_document(document),
           );
         }
         continue;
@@ -3927,7 +3935,7 @@ impl SchemaBuilder {
           &subject,
           None,
           root,
-          first.span,
+          first,
         );
       }
     }
@@ -4310,7 +4318,7 @@ impl SchemaBuilder {
       let path = owner.then(at.sym);
 
       if let Some(earlier) = seen.first(field, at.sym) {
-        let first = self.types[index].fields[earlier].name.span;
+        let first = self.types[index].fields[earlier].name;
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -4424,7 +4432,7 @@ impl SchemaBuilder {
       let required = argument.is_required();
 
       if let Some(earlier) = seen.first(index, at.sym) {
-        let first = declared[earlier].name.span;
+        let first = declared[earlier].name;
         let name = model.text(at.sym).to_owned();
         let owner = model.owner(owner);
         push_related(errors, rules.duplicate, &name, Some(owner), at, first);
@@ -4490,7 +4498,7 @@ impl SchemaBuilder {
     for position in 0..self.types[index].implements.len() {
       let declared = self.types[index].implements[position];
       if let Some(earlier) = seen.first(position, declared.sym) {
-        let first = self.types[index].implements[earlier].span;
+        let first = self.types[index].implements[earlier];
         let name = self.text(declared.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -4531,7 +4539,7 @@ impl SchemaBuilder {
     for position in 0..self.types[index].members.len() {
       let member = self.types[index].members[position];
       if let Some(earlier) = seen.first(position, member.sym) {
-        let first = self.types[index].members[earlier].span;
+        let first = self.types[index].members[earlier];
         let name = self.text(member.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -4573,7 +4581,7 @@ impl SchemaBuilder {
     for position in 0..self.types[index].enum_values.len() {
       let value = self.types[index].enum_values[position].name;
       if let Some(earlier) = seen.first(position, value.sym) {
-        let first = self.types[index].enum_values[earlier].name.span;
+        let first = self.types[index].enum_values[earlier].name;
         let name = self.text(value.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -4611,7 +4619,7 @@ impl SchemaBuilder {
       let has_default = field.default.is_present();
 
       if let Some(earlier) = seen.first(position, at.sym) {
-        let first = self.types[index].input_fields[earlier].name.span;
+        let first = self.types[index].input_fields[earlier].name;
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -4878,7 +4886,7 @@ impl SchemaBuilder {
       if !model.directives[definition].repeatable
         && let Some(earlier) = seen.first(index, used.name.sym)
       {
-        let first = model.directive_uses(at)[earlier].name.span;
+        let first = model.directive_uses(at)[earlier].name;
         let name = model.text(used.name.sym).to_owned();
         push_related(
           errors,
@@ -4934,7 +4942,7 @@ impl SchemaBuilder {
     let mut seen = Duplicates::over(used.args.len(), |at| used.args[at].name.sym);
     for (position, argument) in used.args.iter().enumerate() {
       if let Some(earlier) = seen.first(position, argument.name.sym) {
-        let first = used.args[earlier].name.span;
+        let first = used.args[earlier].name;
         let name = model.text(argument.name.sym).to_owned();
         push_related(
           errors,
@@ -5771,7 +5779,7 @@ impl SchemaBuilder {
                 model.text(interface_field.name.sym),
                 Some(owner.clone()),
                 own.name,
-                interface_field.name.span,
+                interface_field.name,
               );
             }
 

@@ -20,6 +20,7 @@
 #![allow(missing_docs)]
 
 use smear::{
+  diagnostic::{Diagnose as _, Label, Location},
   lexer::{
     SyntaxErrorKind,
     tokora::{Parse as _, Parser, SimpleSpan},
@@ -1938,6 +1939,175 @@ fn one_builder_accepts_documents_of_different_source_types() {
   builder.document(&bytes);
   let schema = builder.finish().expect("both documents build one schema");
   assert!(schema.type_by_name(b"Extra").is_some());
+}
+
+// ---------------------------------------------------------------------------------------------
+// several documents: every position in the document it was read from
+// ---------------------------------------------------------------------------------------------
+
+/// Builds `documents` with one builder, in order, and returns what it refused them with.
+fn refused_documents(documents: &[&str]) -> SchemaErrors {
+  let parsed: Vec<TypeSystemDocument<&str>> = documents.iter().map(|&sdl| parse(sdl)).collect();
+  let mut builder = SchemaBuilder::new();
+  for document in &parsed {
+    builder.document(document);
+  }
+  match builder.finish() {
+    Err(errors) => errors,
+    Ok(_) => panic!("expected a refusal, got a schema\n---\n{documents:#?}"),
+  }
+}
+
+/// The `nth` occurrence of `text` in `documents[document]`, as a diagnostic location.
+fn occurrence(documents: &[&str], document: u32, text: &str, nth: usize) -> Location {
+  let (start, _) = documents[document as usize]
+    .match_indices(text)
+    .nth(nth)
+    .unwrap_or_else(|| {
+      panic!(
+        "{text:?} occurs fewer than {} times in document {document}",
+        nth + 1
+      )
+    });
+  Location::new(document, SimpleSpan::new(start, start + text.len()))
+}
+
+/// Builds `documents` together and requires one refusal, of `kind`: its primary position is the
+/// occurrence `at` names, and its one label says `phrase` at the occurrence `related` names, each
+/// as `(document, text, nth)`.
+fn assert_points_across(
+  documents: &[&str],
+  kind: SchemaErrorKind,
+  at: (u32, &str, usize),
+  related: (u32, &str, usize),
+  phrase: &'static str,
+) {
+  let errors = refused_documents(documents);
+  assert_eq!(errors.kinds(), vec![kind], "{documents:#?}");
+  assert_eq!(errors.len(), 1, "{errors}\n{documents:#?}");
+  let error = &errors.errors()[0];
+  assert_eq!(
+    error.primary(),
+    occurrence(documents, at.0, at.1, at.2),
+    "{documents:#?}"
+  );
+  assert_eq!(error.document(), at.0, "{documents:#?}");
+  let label = occurrence(documents, related.0, related.1, related.2);
+  assert_eq!(error.labels(), 1, "{documents:#?}");
+  assert_eq!(
+    error.label(0),
+    Some(Label::new(label, phrase)),
+    "{documents:#?}"
+  );
+  assert_eq!(error.related(), label.span(), "{documents:#?}");
+  assert_eq!(error.related_document(), Some(related.0), "{documents:#?}");
+}
+
+/// A missing query root is reported at the `schema` definition, in the document that definition
+/// was read from: here the second, while a `Query` type sits in the first, which a `schema`
+/// definition keeps from being presumed the root.
+#[test]
+fn a_missing_query_root_is_reported_in_the_schema_definitions_document() {
+  let documents = [
+    "type Query { ok: Int }",
+    "schema { mutation: Mutation } type Mutation { go: Int }",
+  ];
+  let errors = refused_documents(&documents);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::MissingQueryRootOperationType]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(
+    error.primary(),
+    occurrence(&documents, 1, "schema { mutation: Mutation }", 0)
+  );
+  assert_eq!(error.document(), 1);
+  assert_eq!(error.labels(), 0);
+  assert_eq!(error.related_document(), None);
+}
+
+/// A type defined in the first document and again in the second is refused in the second, and
+/// its label points back into the first, at the definition it repeats.
+#[test]
+fn a_duplicate_type_across_documents_points_back_into_the_first() {
+  assert_points_across(
+    &[
+      "type Query { ok: Int } type Thing { a: Int }",
+      "type Thing { b: Int }",
+    ],
+    SchemaErrorKind::DuplicateTypeName,
+    (1, "Thing", 0),
+    (0, "Thing", 0),
+    "first defined here",
+  );
+}
+
+/// A `schema` definition in each of two documents is refused in the second, and its label points
+/// back into the first.
+#[test]
+fn a_duplicate_schema_definition_across_documents_points_back_into_the_first() {
+  assert_points_across(
+    &[
+      "type Query { ok: Int } schema { query: Query }",
+      "schema { query: Query }",
+    ],
+    SchemaErrorKind::DuplicateSchemaDefinition,
+    (1, "schema { query: Query }", 0),
+    (0, "schema { query: Query }", 0),
+    "first defined here",
+  );
+}
+
+/// A duplicate whose two halves are in one document keeps both there: the related item's own
+/// document is the primary's when it really is in it. Written in the second document, so a
+/// related position pinned to the first would show.
+#[test]
+fn a_duplicate_within_one_document_points_within_it() {
+  assert_points_across(
+    &[
+      "type Query { ok: Int }",
+      "type Thing { a: Int } type Thing { b: Int }",
+    ],
+    SchemaErrorKind::DuplicateTypeName,
+    (1, "Thing", 1),
+    (1, "Thing", 0),
+    "first defined here",
+  );
+}
+
+/// The same across the related rules an extension in another document reaches: a field added
+/// again, a directive applied again, and a root operation provided again.
+#[test]
+fn an_extension_in_another_document_points_back_at_what_it_repeats() {
+  assert_points_across(
+    &["type Query { ok: Int }", "extend type Query { ok: Int }"],
+    SchemaErrorKind::DuplicateFieldName,
+    (1, "ok", 0),
+    (0, "ok", 0),
+    "first defined here",
+  );
+  assert_points_across(
+    &[
+      "directive @tag on OBJECT type Query @tag { ok: Int }",
+      "extend type Query @tag",
+    ],
+    SchemaErrorKind::DuplicateDirectiveUse,
+    (1, "tag", 0),
+    (0, "tag", 1),
+    "first applied here",
+  );
+  assert_points_across(
+    &[
+      "type Query { ok: Int } schema { query: Query }",
+      "type Other { ok: Int } extend schema { query: Other }",
+    ],
+    SchemaErrorKind::DuplicateRootOperationType,
+    (1, "Other", 1),
+    (0, "Query", 1),
+    "first named here",
+  );
 }
 
 /// The whole point of the arena: the schema outlives every byte it was built from.

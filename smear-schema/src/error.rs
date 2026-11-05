@@ -1116,7 +1116,9 @@ pub struct SchemaError {
   subject: Box<str>,
   owner: Option<Box<str>>,
   span: SimpleSpan,
-  related: Option<SimpleSpan>,
+  /// The second position, and the index of the document it is in, which need not be
+  /// [`SchemaError::document`]: the definition a duplicate repeats may be in another document.
+  related: Option<(SimpleSpan, u32)>,
   document: u32,
 }
 
@@ -1139,13 +1141,14 @@ impl SchemaError {
     self
   }
 
-  /// Points at a second, related position — the first of two duplicates, say.
-  pub(crate) fn related_to(mut self, span: SimpleSpan) -> Self {
-    self.related = Some(span);
+  /// Points at a second, related position — the first of two duplicates, say — in the builder's
+  /// document `document`.
+  pub(crate) fn related_to(mut self, span: SimpleSpan, document: u32) -> Self {
+    self.related = Some((span, document));
     self
   }
 
-  /// Records which of the builder's documents the spans belong to.
+  /// Records which of the builder's documents the subject's span belongs to.
   pub(crate) fn in_document(mut self, index: u32) -> Self {
     self.document = index;
     self
@@ -1176,13 +1179,31 @@ impl SchemaError {
   }
 
   /// Returns a second position the error refers to, when there is one.
+  ///
+  /// It is a position in [`related_document`](Self::related_document), which need not be
+  /// [`document`](Self::document): a duplicate repeats a definition that may have been read from
+  /// another of the builder's documents.
   #[inline]
   pub const fn related(&self) -> Option<SimpleSpan> {
-    self.related
+    match self.related {
+      Some((span, _)) => Some(span),
+      None => None,
+    }
   }
 
-  /// Returns the index of the document the spans belong to, in the order the builder was given
-  /// them.
+  /// Returns the index of the document [`related`](Self::related) is a position in, when there is
+  /// a related position, in the order the builder was given its documents.
+  #[inline]
+  pub const fn related_document(&self) -> Option<u32> {
+    match self.related {
+      Some((_, document)) => Some(document),
+      None => None,
+    }
+  }
+
+  /// Returns the index of the document [`span`](Self::span) belongs to, in the order the builder
+  /// was given them. A related position carries its own:
+  /// [`related_document`](Self::related_document).
   #[inline]
   pub const fn document(&self) -> u32 {
     self.document
@@ -1195,7 +1216,7 @@ impl SchemaError {
   #[inline]
   const fn secondary(&self) -> Option<Label> {
     match (self.related, self.kind.related_label()) {
-      (Some(span), Some(text)) => Some(Label::new(Location::new(self.document, span), text)),
+      (Some((span, document)), Some(text)) => Some(Label::new(Location::new(document, span), text)),
       _ => None,
     }
   }
@@ -1208,8 +1229,9 @@ impl SchemaError {
 /// why the location is not a bare span.
 ///
 /// There is at most one secondary label, and it is the kind's own phrase over
-/// [`SchemaError::related`]: a duplicate points back at the definition it repeats, an implementing
-/// field at the interface field it answers to.
+/// [`SchemaError::related`] in [`SchemaError::related_document`]: a duplicate points back at the
+/// definition it repeats, in whichever document that was read from, and an implementing field at
+/// the interface field it answers to.
 ///
 /// **No path segments, ever.** A schema refusal is about SDL, and draft §7.1.2's `path` is a
 /// coordinate in a *response*. The dotted owner path this error renders — `User.pet.first` — is a
