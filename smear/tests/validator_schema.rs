@@ -2338,6 +2338,110 @@ fn one_of_on_the_definition_is_accepted() {
   );
 }
 
+/// Draft §3.10.1's OneOf input coercion, at every SDL constant position and at every depth of the
+/// literal: "the value to be coerced must contain exactly one entry and that entry must not be null
+/// or the null literal".
+#[test]
+fn a_one_of_constant_value_holds_exactly_one_entry() {
+  // (document, the bytes blamed, what it renders as)
+  for (sdl, blamed, rendered) in [
+    (
+      "type Query { ok(f: O = {}): Int } input O @oneOf { a: Int b: Int }",
+      "{}",
+      "default value does not fit its declared type: `Query.ok.f`",
+    ),
+    (
+      "type Query { ok(f: O = {a: 1, b: 2}): Int } input O @oneOf { a: Int b: Int }",
+      "{a: 1, b: 2}",
+      "default value does not fit its declared type: `Query.ok.f`",
+    ),
+    (
+      "type Query { ok(f: O = {a: null}): Int } input O @oneOf { a: Int b: Int }",
+      "null",
+      "default value does not fit its declared type: `Query.ok.f`",
+    ),
+    // Inside a list, after an entry that fits too, and inside an ordinary input object.
+    (
+      "type Query { ok(f: [O] = [{}]): Int } input O @oneOf { a: Int b: Int }",
+      "{}",
+      "default value does not fit its declared type: `Query.ok.f`",
+    ),
+    (
+      "type Query { ok(f: [O] = [{a: 1}, {}]): Int } input O @oneOf { a: Int b: Int }",
+      "{}",
+      "default value does not fit its declared type: `Query.ok.f`",
+    ),
+    (
+      "type Query { ok(f: Outer = {o: {}}): Int } input Outer { o: O } input O @oneOf { a: Int b: Int }",
+      "{}",
+      "default value does not fit its declared type: `Query.ok.f`",
+    ),
+    // An input field's default.
+    (
+      "type Query { ok: Int } input Outer { o: O = {a: 1, b: 2} } input O @oneOf { a: Int b: Int }",
+      "{a: 1, b: 2}",
+      "default value does not fit its declared type: `Outer.o`",
+    ),
+    // A directive argument, bare and inside a list.
+    (
+      "directive @d(f: O) on FIELD_DEFINITION type Query { ok: Int @d(f: {}) } input O @oneOf { a: Int b: Int }",
+      "{}",
+      "directive argument value does not fit its declared type: `Query.ok.@d.f`",
+    ),
+    (
+      "directive @d(f: [O]) on FIELD_DEFINITION type Query { ok: Int @d(f: [{b: null}]) } input O @oneOf { a: Int b: Int }",
+      "null",
+      "directive argument value does not fit its declared type: `Query.ok.@d.f`",
+    ),
+  ] {
+    let errors = refused(sdl);
+    let all: Vec<String> = errors.errors().iter().map(ToString::to_string).collect();
+    assert_eq!(all, [rendered], "---\n{sdl}");
+    let span = errors.errors()[0].span();
+    assert_eq!(&sdl[span.start()..span.end()], blamed, "---\n{sdl}");
+  }
+
+  // The fields are still coerced as any input object's are, so a field that does not fit is a
+  // second diagnostic, at its own value.
+  let sdl = "type Query { ok(f: O = {a: 1, b: \"x\"}): Int } input O @oneOf { a: Int b: Int }";
+  let errors = refused(sdl);
+  let blamed: Vec<&str> = errors
+    .errors()
+    .iter()
+    .map(|error| &sdl[error.span().start()..error.span().end()])
+    .collect();
+  assert_eq!(blamed, ["{a: 1, b: \"x\"}", "\"x\""]);
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::InvalidDefaultValue]);
+
+  // A `null` for a field the type does not declare is the undefined field, once.
+  let errors = refused("type Query { ok(f: O = {z: null}): Int } input O @oneOf { a: Int b: Int }");
+  let all: Vec<String> = errors.errors().iter().map(ToString::to_string).collect();
+  assert_eq!(all, ["undefined input object field: `O.z`"]);
+}
+
+/// The literals the OneOf coercion accepts, at the same positions — and the ones an ordinary input
+/// object accepts that a OneOf does not.
+#[test]
+fn a_one_of_constant_value_with_one_entry_is_accepted() {
+  built(
+    "type Query {
+       ok(
+         a: O = {a: 1}
+         b: O = {b: 2}
+         none: O = null
+         list: [O] = [{a: 1}, {b: 2}]
+         single: [O] = {a: 1}
+         nested: Outer = {o: {b: 2}}
+       ): Int @d(f: {a: 1})
+     }
+     input Outer { o: O = {a: 1} }
+     input O @oneOf { a: Int b: Int }
+     directive @d(f: O) on FIELD_DEFINITION",
+  );
+  // An ordinary input object may be given no field, or every one.
+  built("type Query { ok(f: P = {}, g: P = {a: 1, b: 2}): Int } input P { a: Int b: Int }");
+}
+
 /// Three roots, three distinct types — and the defaults, which cannot collide.
 #[test]
 fn distinct_roots_are_accepted() {

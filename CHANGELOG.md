@@ -184,6 +184,12 @@ All notable changes to Smear are documented in this file.
   `input Filter @oneOf { not: Filter, eq: String }` still builds. A cycle through
   a OneOf input object that has such a field is no longer refused as
   `CircularNonNullInputField`. Code `smear::schema::circular-one-of-input-field`.
+- `smear-schema`: a constant value offered to a `@oneOf` input object must hold
+  exactly one entry, and not a `null` one (draft §3.10.1). A default value or a
+  directive argument whose literal gives a OneOf input object no field, two
+  fields or one `null` field, at any depth of lists and input objects, is refused
+  as `InvalidDefaultValue` or `InvalidDirectiveArgumentValue`, at the literal or
+  at the `null`.
 
 ## [0.0.1] - 2026-10-30
 

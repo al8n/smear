@@ -4222,8 +4222,8 @@ impl SchemaBuilder {
   /// `@oneOf` is read here rather than at ingest so an extension that adds it is seen. Adding it
   /// *is* draft §3.10.3(5)'s refusal, reported by `apply_extensions`; the flag is still set from
   /// the merged list so that §3.10.3(6) — the OneOf constraints over the extension's own fields —
-  /// is checked rather than hidden behind that refusal. The field constraints and the
-  /// unbreakable-cycle rule read this one answer.
+  /// is checked rather than hidden behind that refusal. The field constraints, the
+  /// unbreakable-cycle rule and the coercion of a constant value read this one answer.
   fn mark_one_of_input_objects(&mut self) {
     for index in 0..self.types.len() {
       if self.types[index].kind == TypeKind::InputObject {
@@ -5002,7 +5002,8 @@ impl SchemaBuilder {
   /// The decision procedure is draft 5.6.1's, and the coercion table it consults is the one the
   /// executable rules consult: `null` only where the position is nullable, a non-list value
   /// standing for the one-element list containing it at any depth, an enum literal that must name
-  /// a member, and a scalar that must be spelled the way its built-in says — with a custom scalar
+  /// a member, a OneOf input object's literal that must hold exactly one entry and not a `null`
+  /// one, and a scalar that must be spelled the way its built-in says — with a custom scalar
   /// accepting anything, because only the service knows how to read one.
   ///
   /// What it deliberately does not report is a mistake some *other* rule already owns: an
@@ -5251,6 +5252,28 @@ impl SchemaBuilder {
           // this type — the nested entry the level below is about to offer to a second one
           // included. A value per literal is what this was, and it was live across that recursion
           // and built again for every sibling; [`DeclaredNames`] carries what that cost.
+          //
+          // Draft §3.10.1, a OneOf Input Object's input coercion: "the value to be coerced must
+          // contain exactly one entry and that entry must not be null or the null literal". Asked
+          // before the fields are offered, and the fields are offered all the same — "All Input
+          // Object input coercion rules must also apply to a OneOf Input Object" — so a field that
+          // does not fit is still a diagnostic of its own. A `null` for a field the type does not
+          // declare, or for a required one, is already the undefined-field or required-field
+          // diagnostic the level below reports, and one defect reports once.
+          if model.types[base].one_of {
+            match fields.as_slice() {
+              [entry] => {
+                if matches!(entry.value.shape, RawShape::Null)
+                  && names
+                    .first(model.types, base, entry.name.sym)
+                    .is_some_and(|at| !model.types[base].input_fields[at].is_required())
+                {
+                  reject(errors, entry.value.span);
+                }
+              }
+              _ => reject(errors, value.span),
+            }
+          }
           levels.push(Level::Fields {
             rest: fields.iter(),
             base,
