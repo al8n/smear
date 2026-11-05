@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan,
+  diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity},
   error::{UnexpectedEnd, UnexpectedLexeme},
   utils::{Lexeme, PositionedChar},
 };
@@ -10,6 +11,9 @@ use tokora::{
 type Span = SimpleSpan;
 
 use crate::{error::*, hints::*};
+
+/// The one document a lex reads, as a [`Location`] numbers it.
+const SOURCE: u32 = 0;
 
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
@@ -31,6 +35,39 @@ pub enum FloatError<Char = char> {
   MissingIntegerPart,
 }
 
+impl<Char> FloatError<Char> {
+  /// Returns the syntax-error kind this refusal reports as.
+  #[inline]
+  pub const fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::UnexpectedSuffix(_) | Self::UnexpectedLexeme(_) | Self::MissingIntegerPart => {
+        SyntaxErrorKind::InvalidNumber
+      }
+      Self::UnexpectedEnd(_) => SyntaxErrorKind::IncompleteNumber,
+      Self::LeadingZeros(_) => SyntaxErrorKind::LeadingZero,
+    }
+  }
+
+  /// Writes the sentence a float refusal renders as.
+  fn describe(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::UnexpectedSuffix(_) => {
+        f.write_str("invalid number, unexpected character after a float")
+      }
+      Self::UnexpectedLexeme(lexeme) => {
+        f.write_str("invalid number, expected ")?;
+        f.write_str(crate::error::describe::float_hint(lexeme.hint()))
+      }
+      Self::UnexpectedEnd(end) => {
+        f.write_str("incomplete number, expected ")?;
+        f.write_str(crate::error::describe::float_hint(end.hint()))
+      }
+      Self::LeadingZeros(_) => f.write_str("leading zero in a float"),
+      Self::MissingIntegerPart => f.write_str("invalid number, a float must have an integer part"),
+    }
+  }
+}
+
 /// An error encountered during lexing for decimal literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref)]
@@ -46,6 +83,29 @@ pub enum DecimalError<Char = char> {
   LeadingZeros(Lexeme<Char>),
 }
 
+impl<Char> DecimalError<Char> {
+  /// Returns the syntax-error kind this refusal reports as.
+  #[inline]
+  pub const fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::UnexpectedSuffix(_) => SyntaxErrorKind::InvalidNumber,
+      Self::UnexpectedEnd(_) => SyntaxErrorKind::IncompleteNumber,
+      Self::LeadingZeros(_) => SyntaxErrorKind::LeadingZero,
+    }
+  }
+
+  /// Writes the sentence an integer refusal renders as.
+  fn describe(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::UnexpectedSuffix(_) => {
+        f.write_str("invalid number, unexpected character after an integer")
+      }
+      Self::UnexpectedEnd(_) => f.write_str("incomplete number, expected a digit"),
+      Self::LeadingZeros(_) => f.write_str("leading zero in an integer"),
+    }
+  }
+}
+
 /// The data of the lexer error.
 #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
@@ -57,9 +117,25 @@ pub enum LexerErrorData<Char = char, StateError = ()> {
   Int(DecimalError<Char>),
   /// An error encountered during lexing for string literals.
   String(StringErrors<Char>),
-  /// Unexpected token character.
+  /// A character that can begin a token, where it begins none: a `+`, or a `-` that no digit
+  /// follows.
+  ///
+  /// Only the scanner raises it in this crate, and always over the one character it refused, so it
+  /// reports [`UnexpectedCharacter`](SyntaxErrorKind::UnexpectedCharacter) by construction. A
+  /// slice a whole-slice door refuses is [`NotOneToken`](Self::NotOneToken) instead.
   #[from(skip)]
   UnexpectedLexeme(Lexeme<Char>),
+  /// The slice handed to a whole-slice door — [`identifier`](super::identifier),
+  /// [`int_literal`](super::int_literal) or [`float_literal`](super::float_literal) — is not
+  /// exactly one token of the kind the door asked for: a token of another kind, trivia around it,
+  /// or a second token.
+  ///
+  /// The payload names that kind as a noun, `"name"`, `"integer"` or `"float"`, and the error
+  /// renders "not exactly one" followed by it. The scanner never raises it. It reports
+  /// [`UnexpectedToken`](SyntaxErrorKind::UnexpectedToken), and no character in the slice was
+  /// refused.
+  #[from(skip)]
+  NotOneToken(&'static str),
   /// Unknown token character.
   #[from(skip)]
   UnknownLexeme(Lexeme<Char>),
@@ -84,6 +160,58 @@ impl<Char, StateError> Default for LexerErrorData<Char, StateError> {
 }
 
 impl<Char, StateError> LexerErrorData<Char, StateError> {
+  /// Returns the syntax-error kind this refusal reports as.
+  ///
+  /// A `String` batch reports its first string error's kind, and an empty one reports
+  /// [`InvalidSyntax`](SyntaxErrorKind::InvalidSyntax). A `State` refusal is a tripped
+  /// `smear_lexer::limits` ceiling — the nesting depth, or the lossless lexer's token budget —
+  /// and reports [`ResourceLimit`](SyntaxErrorKind::ResourceLimit) whichever one tripped, since
+  /// nothing here bounds `StateError` to say which.
+  pub fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::Float(error) => error.kind(),
+      Self::Int(error) => error.kind(),
+      Self::String(errors) => errors
+        .iter()
+        .next()
+        .map_or(SyntaxErrorKind::InvalidSyntax, StringError::kind),
+      Self::UnexpectedLexeme(_) => SyntaxErrorKind::UnexpectedCharacter,
+      Self::NotOneToken(_) => SyntaxErrorKind::UnexpectedToken,
+      Self::UnknownLexeme(_) => SyntaxErrorKind::UnknownCharacter,
+      Self::UnexpectedEndOfInput => SyntaxErrorKind::UnexpectedEndOfInput,
+      Self::UnterminatedSpreadOperator => SyntaxErrorKind::UnterminatedSpread,
+      Self::State(_) => SyntaxErrorKind::ResourceLimit,
+      Self::InvalidUtf8(_) => SyntaxErrorKind::InvalidUtf8,
+      Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
+    }
+  }
+
+  /// Writes the sentence this refusal renders as: the kind's message, with a more specific clause
+  /// where the data has one, and no position.
+  fn describe(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::Float(error) => error.describe(f),
+      Self::Int(error) => error.describe(f),
+      Self::String(errors) => match errors.iter().next() {
+        Some(error) => crate::error::describe::string_error(error, f),
+        None => f.write_str(SyntaxErrorKind::InvalidSyntax.message()),
+      },
+      Self::UnterminatedSpreadOperator => {
+        f.write_str("unterminated spread operator, expected `...`")
+      }
+      Self::NotOneToken(what) => {
+        f.write_str("not exactly one ")?;
+        f.write_str(what)
+      }
+      Self::Other(message) => f.write_str(message),
+      Self::UnexpectedLexeme(_)
+      | Self::UnknownLexeme(_)
+      | Self::UnexpectedEndOfInput
+      | Self::State(_)
+      | Self::InvalidUtf8(_) => f.write_str(self.kind().message()),
+    }
+  }
+
   /// Create a new error data with the given message.
   #[inline]
   pub fn other(message: impl Into<Cow<'static, str>>) -> Self {
@@ -228,6 +356,84 @@ impl<Char, StateError> LexerError<Char, StateError> {
   #[inline]
   pub fn into_components(self) -> (Span, LexerErrorData<Char, StateError>) {
     (self.span, self.data)
+  }
+
+  /// Returns the syntax-error kind this refusal reports as, which is its data's.
+  #[inline]
+  pub fn kind(&self) -> SyntaxErrorKind {
+    self.data.kind()
+  }
+}
+
+/// A lexical refusal, as a sentence: the kind's message, with a more specific clause where the
+/// data has one — "unknown escape sequence", "incomplete number, expected a digit".
+///
+/// **Never a position.** tokora's `Lexeme` renders the offset it carries, so it is not used; the
+/// position is the diagnostic's primary location, and a sentence that spelled it too would say it
+/// twice. Nothing from the source is quoted either, which is why this needs no bound on `Char`.
+impl<Char, StateError> core::fmt::Display for LexerError<Char, StateError> {
+  #[inline]
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    self.data.describe(f)
+  }
+}
+
+impl<Char, StateError> core::error::Error for LexerError<Char, StateError>
+where
+  Char: core::fmt::Debug,
+  StateError: core::fmt::Debug,
+{
+}
+
+/// A lexical refusal, read as structure: its [`SyntaxErrorKind`]'s code, severity and help, and
+/// its own span in the one document a lex reads.
+///
+/// No labels and no path segments: a lexical refusal points at one run of the source, and it is
+/// raised before any request has produced a result.
+impl<Char, StateError> Diagnose for LexerError<Char, StateError> {
+  #[inline]
+  fn code(&self) -> Code {
+    self.kind().code()
+  }
+
+  #[inline]
+  fn severity(&self) -> Severity {
+    self.kind().severity()
+  }
+
+  #[inline]
+  fn primary(&self) -> Location {
+    Location::new(SOURCE, self.span)
+  }
+
+  #[inline]
+  fn primary_label(&self) -> Option<&'static str> {
+    Some(self.kind().message())
+  }
+
+  #[inline]
+  fn labels(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn label(&self, _: usize) -> Option<Label> {
+    None
+  }
+
+  #[inline]
+  fn path_segments(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn path_segment(&self, _: usize) -> Option<PathSegment<'_>> {
+    None
+  }
+
+  #[inline]
+  fn help(&self) -> Option<&'static str> {
+    self.kind().help()
   }
 }
 

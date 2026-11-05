@@ -757,13 +757,13 @@ fn complete_document_rejects_descriptions_before_imports_and_extensions() {
   assert_unexpected(
     |inp| ast::ImportOrDefinitionOrExtension::graphqlx(inp).map(|_| ()),
     "\"description\" import { User } from \"types.graphqlx\"",
-    Expectation::Keyword("definition after description"),
+    Expectation::Production("a definition after a description"),
     Some(SyntacticTokenKind::Identifier),
   );
   assert_unexpected(
     |inp| ast::ImportOrDefinitionOrExtension::graphqlx(inp).map(|_| ()),
     "\"description\" extend type User { id: ID }",
-    Expectation::Keyword("definition after description"),
+    Expectation::Production("a definition after a description"),
     Some(SyntacticTokenKind::Identifier),
   );
 }

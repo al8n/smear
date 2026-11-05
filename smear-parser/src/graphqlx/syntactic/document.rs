@@ -220,14 +220,20 @@ where
 {
   let definition = match classify_document_head(inp)? {
     Some(DocumentHead::TypeSystem(keyword)) => {
-      let span = take_classified_identifier(inp, Expectation::Keyword("type-system definition"))?;
+      let span =
+        take_classified_identifier(inp, Expectation::Production("a type-system definition"))?;
       type_system_definition_after_keyword(inp, keyword, span.start())
         .map(Definition::TypeSystem)?
     }
     Some(DocumentHead::Executable(
       head @ (ExecutableDefinitionHead::Operation(_) | ExecutableDefinitionHead::Fragment),
     )) => executable_definition_after_head(head, inp).map(Definition::Executable)?,
-    _ => return unexpected_here(inp, Expectation::Keyword("definition after description")),
+    _ => {
+      return unexpected_here(
+        inp,
+        Expectation::Production("a definition after a description"),
+      );
+    }
   };
   Ok(ImportOrDefinitionOrExtension::Definition(
     described_definition(Some(description), definition),
@@ -262,7 +268,7 @@ document_parser!(
         executable_head = Some(head);
         Branch::B4
       }
-      None => return unexpected_here(inp, Expectation::Keyword("document entry")),
+      None => return unexpected_here(inp, Expectation::Production("an import, a definition or an extension")),
     };
 
     let mut tails = (
@@ -281,7 +287,7 @@ document_parser!(
       |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
         let keyword = type_system_keyword
           .expect("type-system document branch retains its classified keyword");
-        let span = take_classified_identifier(inp, Expectation::Keyword("type-system definition"))?;
+        let span = take_classified_identifier(inp, Expectation::Production("a type-system definition"))?;
         type_system_definition_after_keyword(inp, keyword, span.start()).map(|definition| {
           ImportOrDefinitionOrExtension::Definition(described_definition(
             None,

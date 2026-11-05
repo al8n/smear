@@ -82,6 +82,54 @@ All notable changes to Smear are documented in this file.
   as `write_response` does, and write each driver entry's `locations`, resolved
   against it, and its `extensions`. The new parameter breaks every existing
   call.
+- `smear-lexer`!: `SyntaxErrorKind`, one fieldless kind for every draft §2
+  refusal the lexer or the parser reports, in both dialects, with a code in the
+  new `smear::syntax` family (23 of them), a lowercase message, an optional help
+  line and `Severity::Error`. It is re-exported at the crate root and through
+  `smear::lexer`. Each dialect's `LexerError` implements `Display`,
+  `core::error::Error` and tokora's `Diagnose`: the code is its kind's, the
+  primary location is its own span, and the message names no position. A
+  `State` refusal — a tripped nesting or token ceiling — reports
+  `smear::syntax::resource-limit`. `LexerErrorData`, `LexerError` and every
+  nested string, Unicode-escape and number error gain `kind()`. Each dialect's
+  `LexerErrorData` gains `NotOneToken(&'static str)`: what a whole-slice door
+  (`identifier`, `int_literal` and `float_literal`, and GraphQLx's `identifier`
+  and its `LitInt` and `LitFloat` `TryFrom<&str>`) answers when the slice is not
+  exactly one token of the kind it asked for, rendered "not exactly one name",
+  "… integer" or "… float" and reported as `smear::syntax::unexpected-token`.
+  Those doors answered `UnexpectedLexeme` over the slice, which is now only the
+  scanner's refused character. `LexerErrorData` is not `#[non_exhaustive]`, so
+  an exhaustive match on it breaks.
+- `smear-lexer`!: token kinds render as a diagnostic names them: punctuation in
+  backticks and every class as a bare noun. GraphQL's `SyntacticTokenKind` and
+  `LosslessTokenKind` render `name` and `integer` where they rendered
+  `identifier` and `int`, and `` `{` `` where they rendered `{`; GraphQLx's
+  rendered their `Debug` names. `FloatHint::Exponent` and
+  `HexFloatHint::Exponent` render the exponent hint they carry instead of the
+  literal text `_0`.
+- `smear-parser`!: a syntax error answers the diagnostic contract. Each
+  dialect's `Error` implements `Display`, `core::error::Error` and `Diagnose`,
+  and `Error::kind` and `ErrorData::kind` name its `SyntaxErrorKind`. The
+  syntactic `From<LexerErrors>` keeps the first lexer error's kind as the new
+  `ErrorData::Lexical(SyntaxErrorKind)`, at that error's span, where every
+  lexical refusal used to become `ErrorData::Other("lexer error")`; an empty
+  batch still does, and a `State` refusal is still `TerminalEndOfInput`. A match
+  on `Other("lexer error")` stops matching.
+- `smear-parser`!: the fourteen GraphQL `ErrorData` variants no parse produced
+  are removed — `InvalidEnumValue`, `InvalidBooleanValue`, `InvalidNullValue`,
+  `InvalidFragmentName`, `UnexpectedKeyword`, `UnexpectedEndOfVariableValue`,
+  `UnknownDirectiveLocation`, `UnknownOperationType` and the six
+  `UnexpectedEndOf…Extension` variants — with their constructors and the types
+  only they used: `UnexpectedKeyword`, `VariableValueHint` and the six
+  `…ExtensionHint` enums. GraphQLx's `ErrorData::UnexpectedEnd` and
+  `Error::unexpected_end` are removed for the same reason.
+- `smear-parser`!: `Expectation`, in both dialects, implements `Display` and
+  gains `Production(&'static str)` and `Unspecified`. A production description
+  such as "a type definition" is a `Production` where it was a `Keyword`, which
+  now carries real keywords only. An absent or multi-kind expected set from
+  tokora maps to `Unspecified` where it mapped to `Name`, and so does GraphQLx's
+  genuine end of input where it named `InputValue`; a message then has no
+  "expected …" clause.
 
 ## [0.0.1] - 2026-10-30
 

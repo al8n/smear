@@ -2460,3 +2460,110 @@ fn a_nested_door_reports_into_its_own_parse_and_not_the_enclosing_one() {
      so, in its own result"
   );
 }
+
+/// The two refusals only the lossless door's own machinery raises answer their own codes, over a
+/// real source through the real door.
+///
+/// `drain_unless_stopped` mints the durable token budget's refusal and `descend` the parser-frame
+/// budget's, each under the ceiling `parse_lossless_document` installs from the caller's
+/// `LosslessLimits`. The door then drops whatever its root returns — a `Parse` keeps a span and a
+/// severity, not the payload — so the root below is the one place the value can be read: it runs
+/// the frame and records the kind of what the frame handed up.
+#[test]
+fn the_doors_own_refusals_answer_their_own_codes() {
+  use core::cell::Cell as StdCell;
+
+  use crate::{
+    graphql::{
+      GraphQL,
+      lossless::{GraphqlLosslessErrors, GraphqlLosslessLexer, runner::LosslessEmitter},
+    },
+    lossless::depth::{RootStop, descend, drain_unless_stopped},
+  };
+  use smear_lexer::{SyntaxErrorKind, limits::LosslessLimits};
+  use tokora::{InputRef, cache::DefaultCache, cst::Sink};
+
+  type Lx<'inp> = GraphqlLosslessLexer<'inp, str>;
+  type Ctx<'inp> = (
+    Sink<'inp, Lx<'inp>, LosslessEmitter<'inp>>,
+    DefaultCache<'inp, Lx<'inp>>,
+  );
+  type Errs<'inp> = GraphqlLosslessErrors<&'inp str>;
+
+  thread_local! {
+    /// The kind of the first error the root's frame handed up, when it handed one up.
+    static HANDED_UP: StdCell<Option<SyntaxErrorKind>> = const { StdCell::new(None) };
+  }
+
+  fn record(out: &Result<(), Errs<'_>>) {
+    let kind = out
+      .as_ref()
+      .err()
+      .and_then(|errors| errors.iter().next())
+      .map(|error| error.kind());
+    HANDED_UP.with(|cell| cell.set(kind));
+  }
+
+  /// Reads to the end, so a durable budget refuses inside the frame.
+  fn read_all<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    inp.skip_while(|_| true)?;
+    Ok(())
+  }
+
+  /// The drain the shipped roots end in, over a root that reads everything.
+  fn budget_root<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    let out = drain_unless_stopped(inp, read_all);
+    record(&out);
+    out
+  }
+
+  /// The descent every nesting production opens with, refused at the first frame.
+  fn descent_root<'inp>(
+    inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+    _stop: &mut RootStop,
+  ) -> Result<(), Errs<'inp>> {
+    let out = descend(inp).map(|_| ());
+    record(&out);
+    out
+  }
+
+  let src = "a b c d e f g h i j k l m n o p q r s t ".repeat(2);
+  HANDED_UP.with(|cell| cell.set(None));
+  let _ = crate::graphql::lossless::runner::parse_lossless_document(
+    &src,
+    LosslessLimits::default().with_max_produce_events(4),
+    budget_root,
+  );
+  assert_eq!(
+    HANDED_UP.with(StdCell::get),
+    Some(SyntaxErrorKind::TokenBudget),
+    "a refused durable budget is the `smear::syntax::token-budget` refusal"
+  );
+
+  HANDED_UP.with(|cell| cell.set(None));
+  let _ = crate::graphql::lossless::runner::parse_lossless_document(
+    "{ a { b } }",
+    LosslessLimits::with_max_nesting_depth(0),
+    descent_root,
+  );
+  assert_eq!(
+    HANDED_UP.with(StdCell::get),
+    Some(SyntaxErrorKind::NestingLimit),
+    "a refused parser frame is the `smear::syntax::nesting-limit` refusal"
+  );
+
+  assert_eq!(
+    SyntaxErrorKind::TokenBudget.code().as_str(),
+    "smear::syntax::token-budget"
+  );
+  assert_eq!(
+    SyntaxErrorKind::NestingLimit.code().as_str(),
+    "smear::syntax::nesting-limit"
+  );
+}

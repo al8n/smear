@@ -149,7 +149,7 @@ pub enum FloatHint {
   #[display("fractional digits")]
   Fractional,
   /// Expect the next character to be an exponent part.
-  #[display("_0")]
+  #[display("{_0}")]
   Exponent(ExponentHint),
   /// Expect the next character to be a digit.
   #[display("digit")]
@@ -178,7 +178,7 @@ pub enum HexFloatHint {
   #[display("fractional digits")]
   Fractional,
   /// Expect the next character to be a hex exponent part.
-  #[display("_0")]
+  #[display("{_0}")]
   Exponent(HexExponentHint),
   /// Expect the next character to be a hex digit.
   #[display("digit")]
@@ -239,3 +239,6 @@ pub enum WhiteSpaceHint {
   #[display("'\\t'")]
   Tab,
 }
+
+#[cfg(test)]
+mod tests;

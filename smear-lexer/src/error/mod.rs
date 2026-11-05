@@ -1,6 +1,10 @@
+pub use kind::SyntaxErrorKind;
 pub use string::*;
 pub use traits::*;
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) mod describe;
+mod kind;
 mod string;
 mod traits;
 

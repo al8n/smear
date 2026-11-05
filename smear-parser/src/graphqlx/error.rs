@@ -6,14 +6,15 @@
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::{
+  SyntaxErrorKind,
   graphqlx::{
     error::{LexerErrorData, LexerErrors},
     syntactic::{SyntacticToken, SyntacticTokenKind},
   },
-  tokora::error::UnexpectedEnd,
 };
 use tokora::{
   Lexer, SimpleSpan as Span,
+  diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity},
   emitter::FromUnclosed,
   error::{
     FullContainer, MaybeTerminal, MissingSyntax, MissingToken, SeparatedError, TooFew,
@@ -122,8 +123,74 @@ pub enum Expectation {
   ///
   /// [`Expectation`]: crate::graphql::error::Expectation
   FragmentName,
-  /// A keyword with the given spelling.
+  /// A keyword with the given spelling, such as `extend` or `set`.
   Keyword(&'static str),
+  /// A production, named by a noun phrase that reads after "expected" — "a type definition",
+  /// "a directive location".
+  ///
+  /// GraphQL's twin carries why this is not a [`Keyword`](Self::Keyword).
+  Production(&'static str),
+  /// Nothing more specific is known than that the token found is not one the grammar takes here.
+  ///
+  /// What a conversion lands on when tokora names no expected kind, or several, and what a genuine
+  /// end of input names. It renders as nothing, so a message drops its "expected …" clause rather
+  /// than naming a guess.
+  Unspecified,
+}
+
+/// What a message says was expected, as the object of "expected …": punctuation and keywords in
+/// backticks, and every other class as a noun phrase. GraphQL's twin carries the rule;
+/// [`Unspecified`](Expectation::Unspecified) renders as nothing.
+impl core::fmt::Display for Expectation {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::InlineString => f.write_str("a string"),
+      Self::BlockString => f.write_str("a block string"),
+      Self::Dollar => f.write_str("`$`"),
+      Self::LParen => f.write_str("`(`"),
+      Self::RParen => f.write_str("`)`"),
+      Self::Spread => f.write_str("`...`"),
+      Self::Colon => f.write_str("`:`"),
+      Self::Equal => f.write_str("`=`"),
+      Self::At => f.write_str("`@`"),
+      Self::LAngle => f.write_str("`<`"),
+      Self::RAngle => f.write_str("`>`"),
+      Self::LBracket => f.write_str("`[`"),
+      Self::RBracket => f.write_str("`]`"),
+      Self::LBrace => f.write_str("`{`"),
+      Self::RBrace => f.write_str("`}`"),
+      Self::Asterisk => f.write_str("`*`"),
+      Self::Plus => f.write_str("`+`"),
+      Self::Minus => f.write_str("`-`"),
+      Self::PathSeparator => f.write_str("`::`"),
+      Self::FatArrow => f.write_str("`=>`"),
+      Self::Pipe => f.write_str("`|`"),
+      Self::Bang => f.write_str("`!`"),
+      Self::Ampersand => f.write_str("`&`"),
+      Self::Name => f.write_str("a name"),
+      Self::Path => f.write_str("a path"),
+      Self::IntValue => f.write_str("an integer"),
+      Self::FloatValue => f.write_str("a float"),
+      Self::StringValue => f.write_str("a string"),
+      Self::BooleanValue => f.write_str("a boolean"),
+      Self::NullValue => f.write_str("`null`"),
+      Self::EnumValue => f.write_str("an enum value"),
+      Self::VariableValue => f.write_str("a variable"),
+      Self::Type => f.write_str("a type"),
+      Self::InputValue => f.write_str("a value"),
+      Self::ConstInputValue => f.write_str("a constant value"),
+      Self::ImportClause => f.write_str("an import clause"),
+      Self::ImportMember => f.write_str("an import member"),
+      Self::Import => f.write_str("`import`"),
+      Self::From => f.write_str("`from`"),
+      Self::As => f.write_str("`as`"),
+      Self::OperationTypeOrFragment => f.write_str("an operation type or `fragment`"),
+      Self::FragmentName => f.write_str("a fragment name"),
+      Self::Keyword(keyword) => write!(f, "`{keyword}`"),
+      Self::Production(production) => f.write_str(production),
+      Self::Unspecified => Ok(()),
+    }
+  }
 }
 
 /// An unexpected token with the found token kind and typed expectation.
@@ -193,12 +260,18 @@ pub enum Unclosed {
 pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// One or more lexer errors.
   Lexer(LexerErrors<Char, StateError>),
+  /// A lexer refusal on the syntactic path, by its kind alone.
+  ///
+  /// GraphQL's twin carries the reasoning: the syntactic container cannot hold the generic batch,
+  /// so its `From<LexerErrors>` keeps the first error's span and [`SyntaxErrorKind`] instead of
+  /// one shared "lexer error" note. Never terminal: a `State` refusal routes to
+  /// [`TerminalEndOfInput`](Self::TerminalEndOfInput) instead.
+  #[from(skip)]
+  Lexical(SyntaxErrorKind),
   /// A delimiter was not closed.
   Unclosed(Unclosed),
   /// A token did not satisfy its typed expectation.
   UnexpectedToken(UnexpectedToken<T, Exp>),
-  /// A production reached end of input unexpectedly.
-  UnexpectedEnd(UnexpectedEnd<Exp>),
   /// An end of input that stands in for a **terminal scanner stop** — smear issue #177.
   ///
   /// GraphQL's twin carries the reasoning and the shape: a resource-limit trip, or the poison
@@ -248,7 +321,7 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
 /// Which of these errors **end the parse** rather than being something to recover from.
 ///
 /// GraphQL's twin carries the reasoning and the rule each arm came from. This dialect's variant
-/// set is narrower and every arm is the same ruling: [`UnexpectedEnd`] delegates,
+/// set is narrower and every arm is the same ruling:
 /// [`NestingLimitExceeded`](Self::NestingLimitExceeded),
 /// [`TokenBudgetExhausted`](Self::TokenBudgetExhausted) and
 /// [`TerminalEndOfInput`](Self::TerminalEndOfInput) are always terminal, and
@@ -279,8 +352,11 @@ impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, S
       // Neither is a scanner stop, and this arm is what stops the conversion's routing from being
       // discarded one layer later.
       Self::TerminalEndOfInput => true,
-      Self::UnexpectedEnd(e) => e.is_terminal(),
-      Self::Unclosed(_) | Self::UnexpectedToken(_) | Self::Other(_) | Self::Source(_) => false,
+      Self::Unclosed(_)
+      | Self::UnexpectedToken(_)
+      | Self::Lexical(_)
+      | Self::Other(_)
+      | Self::Source(_) => false,
     }
   }
 }
@@ -326,22 +402,6 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   #[inline]
   pub const fn unexpected_token(found: T, expected: Exp, span: Span) -> Self {
     Self::maybe_unexpected_token(Some(found), expected, span)
-  }
-
-  /// Creates an unexpected-end error with a typed expectation.
-  #[inline]
-  pub fn unexpected_end(expected: Exp, span: Span) -> Self
-  where
-    Exp: core::fmt::Debug,
-  {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEnd(UnexpectedEnd::with_name(
-        0,
-        tokora::utils::CowStr::from_static("GraphQLx production"),
-        expected,
-      )),
-    )
   }
 
   /// Creates a parser-frame nesting refusal.
@@ -430,20 +490,197 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   pub fn into_data(self) -> ErrorData<S, T, Char, Exp, StateError> {
     self.data
   }
+
+  /// Returns the syntax-error kind this error reports as, which is its data's.
+  #[inline]
+  pub fn kind(&self) -> SyntaxErrorKind {
+    self.data.kind()
+  }
+}
+
+impl<S, T, Char, Exp, StateError> ErrorData<S, T, Char, Exp, StateError> {
+  /// Returns the syntax-error kind this error reports as.
+  ///
+  /// The one dispatch every [`Diagnose`] accessor on [`Error`] delegates to. A genuine end of
+  /// input is an [`UnexpectedToken`](Self::UnexpectedToken) with no found token in this dialect,
+  /// and it reports [`UnexpectedEndOfInput`](SyntaxErrorKind::UnexpectedEndOfInput); the end of
+  /// input that stands in for a scanner stop reports
+  /// [`ResourceLimit`](SyntaxErrorKind::ResourceLimit).
+  pub fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::Lexer(errors) => errors
+        .iter()
+        .next()
+        .map_or(SyntaxErrorKind::InvalidSyntax, |error| error.kind()),
+      Self::Lexical(kind) => *kind,
+      Self::Unclosed(_) => SyntaxErrorKind::UnclosedDelimiter,
+      Self::UnexpectedToken(token) => {
+        if token.found().is_some() {
+          SyntaxErrorKind::UnexpectedToken
+        } else {
+          SyntaxErrorKind::UnexpectedEndOfInput
+        }
+      }
+      Self::TerminalEndOfInput => SyntaxErrorKind::ResourceLimit,
+      Self::NestingLimitExceeded => SyntaxErrorKind::NestingLimit,
+      Self::TokenBudgetExhausted => SyntaxErrorKind::TokenBudget,
+      Self::Other(_) | Self::Source(_) => SyntaxErrorKind::InvalidSyntax,
+    }
+  }
+}
+
+/// The one document a parse reads, as a [`Location`] numbers it.
+const SOURCE: u32 = 0;
+
+/// Writes `, expected {expected}` — or nothing, when the expectation renders as nothing.
+///
+/// GraphQL's twin carries the reasoning: [`Expectation::Unspecified`] renders empty, and the
+/// clause is dropped with it rather than naming a guess.
+fn expected_clause<Exp>(f: &mut core::fmt::Formatter<'_>, expected: &Exp) -> core::fmt::Result
+where
+  Exp: core::fmt::Display,
+{
+  struct Writes(bool);
+
+  impl core::fmt::Write for Writes {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+      self.0 |= !s.is_empty();
+      Ok(())
+    }
+  }
+
+  let mut probe = Writes(false);
+  let _ = core::fmt::write(&mut probe, format_args!("{expected}"));
+  if probe.0 {
+    write!(f, ", expected {expected}")
+  } else {
+    Ok(())
+  }
+}
+
+/// A syntax error, as a sentence: lowercase, no trailing period, spellings in backticks, and never
+/// a position. GraphQL's twin carries the reasoning, and this one renders the same sentences for
+/// the same events.
+impl<S, T, Char, Exp, StateError> core::fmt::Display for Error<S, T, Char, Exp, StateError>
+where
+  T: core::fmt::Display,
+  Exp: core::fmt::Display,
+{
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match &self.data {
+      ErrorData::Lexer(errors) => match errors.iter().next() {
+        Some(error) => core::fmt::Display::fmt(error, f),
+        None => f.write_str(SyntaxErrorKind::InvalidSyntax.message()),
+      },
+      ErrorData::Lexical(kind) => f.write_str(kind.message()),
+      ErrorData::Unclosed(unclosed) => f.write_str(match unclosed {
+        Unclosed::Parentheses => "unclosed `(`",
+        Unclosed::List => "unclosed `[`",
+        Unclosed::Object => "unclosed `{`",
+        Unclosed::Angle => "unclosed `<`",
+      }),
+      ErrorData::UnexpectedToken(token) => {
+        match token.found() {
+          Some(found) => write!(f, "unexpected {found}")?,
+          None => f.write_str("unexpected end of input")?,
+        }
+        expected_clause(f, token.expected())
+      }
+      ErrorData::TerminalEndOfInput => f.write_str(SyntaxErrorKind::ResourceLimit.message()),
+      ErrorData::NestingLimitExceeded => f.write_str(SyntaxErrorKind::NestingLimit.message()),
+      ErrorData::TokenBudgetExhausted => f.write_str(SyntaxErrorKind::TokenBudget.message()),
+      ErrorData::Other(text) => f.write_str(text),
+      ErrorData::Source(_) => f.write_str(SyntaxErrorKind::InvalidSyntax.message()),
+    }
+  }
+}
+
+impl<S, T, Char, Exp, StateError> core::error::Error for Error<S, T, Char, Exp, StateError>
+where
+  S: core::fmt::Debug,
+  T: core::fmt::Debug + core::fmt::Display,
+  Char: core::fmt::Debug,
+  Exp: core::fmt::Debug + core::fmt::Display,
+  StateError: core::fmt::Debug,
+{
+}
+
+/// A GraphQLx syntax error, read as structure, exactly as GraphQL's twin reads one: its
+/// [`SyntaxErrorKind`]'s code, severity and help, and the position it refused at — a
+/// [`Lexer`](ErrorData::Lexer) batch's first error's, else its own. Never [`Location::entire`],
+/// and no labels or path segments.
+///
+/// The bounds are spelled `core::fmt::Display` for the reason GraphQL's twin records: the census
+/// copies them into a crate that imports nothing, and re-spaces them so that a leading `::` would
+/// not parse.
+impl<S, T, Char, Exp, StateError> Diagnose for Error<S, T, Char, Exp, StateError>
+where
+  T: core::fmt::Display,
+  Exp: core::fmt::Display,
+{
+  #[inline]
+  fn code(&self) -> Code {
+    self.kind().code()
+  }
+
+  #[inline]
+  fn severity(&self) -> Severity {
+    self.kind().severity()
+  }
+
+  #[inline]
+  fn primary(&self) -> Location {
+    let span = if let ErrorData::Lexer(errors) = &self.data {
+      errors.iter().next().map_or(self.span, |error| error.span())
+    } else {
+      self.span
+    };
+    Location::new(SOURCE, span)
+  }
+
+  #[inline]
+  fn primary_label(&self) -> Option<&'static str> {
+    Some(self.kind().message())
+  }
+
+  #[inline]
+  fn labels(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn label(&self, _: usize) -> Option<Label> {
+    None
+  }
+
+  #[inline]
+  fn path_segments(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn path_segment(&self, _: usize) -> Option<PathSegment<'_>> {
+    None
+  }
+
+  #[inline]
+  fn help(&self) -> Option<&'static str> {
+    self.kind().help()
+  }
 }
 
 impl<S, T, Char, StateError> Error<S, T, Char, Expectation, StateError> {
   /// Creates the end-of-input error a production raises when it has no particular expectation
   /// to name.
   ///
-  /// # Why this is a second impl block, and why it is not `ErrorData::UnexpectedEnd`
+  /// # Why this is a second impl block, and why it is an `UnexpectedToken`
   ///
   /// It names an [`Expectation`] value, so it cannot live in the `Exp`-generic block above.
   ///
-  /// And it is spelled as an [`UnexpectedToken`] with no found token rather than as an
-  /// [`UnexpectedEnd`], because **that is what this dialect's own `UnexpectedEot` conversion
-  /// already produces** — the syntactic layer reports the identical event as
-  /// `maybe_unexpected_token(None, Expectation::InputValue, …)`, and the lossless layer is
+  /// And it is spelled as an [`UnexpectedToken`] with no found token, because **that is what this
+  /// dialect's own `UnexpectedEot` conversion already produces** — the syntactic layer reports the
+  /// identical event as
+  /// `maybe_unexpected_token(None, Expectation::Unspecified, …)`, and the lossless layer is
   /// compared against the syntactic one, input by input, by the acceptance-parity gate. Two
   /// spellings of one event across two layers of one dialect is a difference no consumer could
   /// act on and every consumer would have to handle.
@@ -460,7 +697,7 @@ impl<S, T, Char, StateError> Error<S, T, Char, Expectation, StateError> {
   /// `smear/tests/lossless_x_errors.rs` pins the two layers together on both events.
   #[inline]
   pub const fn unexpected_end_of_input(span: Span) -> Self {
-    Self::maybe_unexpected_token(None, Expectation::InputValue, span)
+    Self::maybe_unexpected_token(None, Expectation::Unspecified, span)
   }
 }
 
@@ -555,11 +792,11 @@ fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
     // `#[allow]` and not a deletion. `SyntacticTokenKind` is `#[non_exhaustive]`, which forced this
     // arm while the lexer was a separate crate; with the crates merged (#83) the compiler can see
     // every variant from here and calls it unreachable. The arm stays because deleting it would
-    // turn "a new token kind falls back to `Name`" into "a new token kind fails to compile" — a
-    // real change to this function's contract, and this merge is a relocation. Revisiting that
-    // choice is follow-up work, not part of the move.
+    // turn "a new token kind falls back to `Unspecified`" into "a new token kind fails to
+    // compile" — a real change to this function's contract, and this merge is a relocation.
+    // Revisiting that choice is follow-up work, not part of the move.
     #[allow(unreachable_patterns)]
-    _ => Expectation::Name,
+    _ => Expectation::Unspecified,
   }
 }
 
@@ -567,7 +804,7 @@ fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
 fn expectation_from_tokora(expected: Option<Expected<'_, SyntacticTokenKind>>) -> Expectation {
   match expected {
     Some(Expected::One(kind)) => expectation_from_token_kind(kind),
-    _ => Expectation::Name,
+    _ => Expectation::Unspecified,
   }
 }
 
@@ -665,7 +902,7 @@ impl<S, Lang: ?Sized, Set: Clone + 'static> From<UnexpectedEot<usize, Lang, Set>
     if err.is_terminal() {
       GraphqlxError::terminal_end_of_input(span).into()
     } else {
-      GraphqlxError::maybe_unexpected_token(None, Expectation::InputValue, span).into()
+      GraphqlxError::maybe_unexpected_token(None, Expectation::Unspecified, span).into()
     }
   }
 }
@@ -704,12 +941,12 @@ where
 // arm is unconditionally `false`, therefore made a rejecting host's `Errors::is_terminal()` answer
 // `false` on a tripped `smear_lexer::limits` budget.
 //
-// `LexerErrorData::State` is the scanner's own stop kind and the only one of the ten that is: the
-// other nine are built from a lexeme the **grammar** rejected — a malformed literal, an unknown
-// character, an unterminated `...`, invalid UTF-8 — and each is recoverable. `State` is the
-// tracker refusing, which no further input clears. It is the same variant the
-// [`Lexer`](ErrorData::Lexer) arm keys on one layer up, so the two readings of a state refusal
-// cannot drift apart.
+// `LexerErrorData::State` is the scanner's own stop kind and the only variant that is: every other
+// one is built from a lexeme the **grammar** rejected — a malformed literal, an unknown character,
+// an unterminated `...`, invalid UTF-8 — or from a slice a whole-slice door refused, and each is
+// recoverable. `State` is the tracker refusing, which no further input clears. It is the same
+// variant the [`Lexer`](ErrorData::Lexer) arm keys on one layer up, so the two readings of a state
+// refusal cannot drift apart.
 //
 // # Why `TerminalEndOfInput` and not a payload-carrying variant of its own
 //
@@ -719,13 +956,14 @@ where
 // accepted the diagnostic, or smear here when it rejected — because the fact about the document is
 // the same.
 //
-// A variant carrying the batch is not available at this keying anyway, which is what made this
-// impl erase in the first place: it is generic over the batch's `Char` and `StateError` while the
-// container pins its own (`char`, `()`), so `ErrorData::Lexer` does not typecheck here. The
-// lossless conversion `lossless_error_impls!` generates is pinned to `LexerErrors<char,
-// LimitExceeded>` and therefore keeps the payload; that one already routed correctly and is
-// unchanged. A new variant here would have to erase the payload too — it would be
-// `TerminalEndOfInput` under another name, with a census row and a parity row bought for nothing.
+// A variant carrying the batch is not available at this keying anyway: this impl is generic over
+// the batch's `Char` and `StateError` while the container pins its own (`char`, `()`), so
+// `ErrorData::Lexer` does not typecheck here. The lossless conversion `lossless_error_impls!`
+// generates is pinned to `LexerErrors<char, LimitExceeded>` and therefore keeps the payload.
+//
+// Every other batch becomes `Lexical`, keeping the first error's `SyntaxErrorKind` — GraphQL's
+// twin carries why. An **empty** batch has no first error and keeps the `Other("lexer error")`
+// note at `0..0`.
 //
 // The span is the batch's first, on **both** arms. `Span::new(0, 0)` pointed every lexer error at
 // byte zero, which is a position the error is not at; a `State` error minted through
@@ -734,18 +972,21 @@ where
 impl<S, Char, StateError> From<LexerErrors<Char, StateError>> for GraphqlxErrors<S> {
   #[inline]
   fn from(err: LexerErrors<Char, StateError>) -> Self {
-    let span = err.iter().next().map_or(Span::new(0, 0), |e| e.span());
+    let Some(first) = err.iter().next() else {
+      return GraphqlxError::new(
+        Span::new(0, 0),
+        ErrorData::Other(std::borrow::Cow::Borrowed("lexer error")),
+      )
+      .into();
+    };
+    let span = first.span();
     if err
       .iter()
       .any(|e| matches!(e.data(), LexerErrorData::State(_)))
     {
       return GraphqlxError::terminal_end_of_input(span).into();
     }
-    GraphqlxError::new(
-      span,
-      ErrorData::Other(std::borrow::Cow::Borrowed("lexer error")),
-    )
-    .into()
+    GraphqlxError::new(span, ErrorData::Lexical(first.kind())).into()
   }
 }
 

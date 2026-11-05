@@ -538,7 +538,7 @@ executable_parser!(
       Some(ExecutableDefinitionHead::Operation(OperationHead::Query)) => Branch::B0,
       Some(ExecutableDefinitionHead::Operation(OperationHead::Mutation)) => Branch::B1,
       Some(ExecutableDefinitionHead::Operation(OperationHead::Subscription)) => Branch::B2,
-      _ => return unexpected_here(inp, Expectation::Keyword("query, mutation, or subscription")),
+      _ => return unexpected_here(inp, Expectation::Production("`query`, `mutation` or `subscription`")),
     };
 
     let mut tails = (
@@ -618,7 +618,8 @@ where
       .map(OperationDefinition::Shorthand)
       .map(ExecutableDefinition::Operation),
     ExecutableDefinitionHead::Operation(head) => {
-      let (span, _) = take_classified_identifier(inp, Expectation::Keyword("operation type"))?;
+      let (span, _) =
+        take_classified_identifier(inp, Expectation::Production("an operation type"))?;
       named_operation_after_head(span.start(), operation_type_from_head(head, span), inp)
         .map(ExecutableDefinition::Operation)
     }
@@ -649,7 +650,7 @@ executable_parser!(
         named_head = Some(head);
         Branch::B1
       }
-      _ => return unexpected_here(inp, Expectation::Keyword("operation definition")),
+      _ => return unexpected_here(inp, Expectation::Production("an operation definition")),
     };
 
     let mut tails = (
@@ -657,7 +658,7 @@ executable_parser!(
         selection_set(inp).map(OperationDefinition::Shorthand)
       },
       |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
-        let (span, _) = take_classified_identifier(inp, Expectation::Keyword("operation type"))?;
+        let (span, _) = take_classified_identifier(inp, Expectation::Production("an operation type"))?;
         let head = named_head.expect("named operation branch retains its classified head");
         named_operation_after_head(span.start(), operation_type_from_head(head, span), inp)
       },
@@ -715,7 +716,7 @@ where
       Branch::B1
     }
     Some(ExecutableDefinitionHead::Fragment) => Branch::B2,
-    None => return unexpected_here(inp, Expectation::Keyword("executable definition")),
+    None => return unexpected_here(inp, Expectation::Production("an executable definition")),
   };
 
   let mut tails = (
@@ -801,7 +802,7 @@ executable_parser!(
             DescribedExecutableDefinition::new(span, None, definition),
           ))
         }
-        None => unexpected_here(inp, Expectation::Keyword("import or executable definition")),
+        None => unexpected_here(inp, Expectation::Production("an import or an executable definition")),
       }
     }
   }

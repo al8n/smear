@@ -52,10 +52,11 @@
 //!
 //! # Divergence 20 has no lossless expression, and that is not a gap
 //!
-//! GraphQLx spells the directive-location expectation `Expectation::Keyword("directive location")`
-//! where GraphQL has an `Expectation::DirectiveLocation` variant. Neither reaches this suite: a
-//! lossless diagnostic's expectation is derived from the *token kinds* a head set names, through
-//! `lossless/mod.rs`'s `expectation_of`, and a multi-kind set falls back to `Expectation::Name`.
+//! GraphQLx spells the directive-location expectation
+//! `Expectation::Production("a directive location")` where GraphQL has an
+//! `Expectation::DirectiveLocation` variant. Neither reaches this suite: a lossless diagnostic's
+//! expectation is derived from the *token kinds* a head set names, through `lossless/mod.rs`'s
+//! `expectation_of`, and a multi-kind set falls back to `Expectation::Unspecified`.
 //! The two dialects' lossless suites therefore agree here where their syntactic suites differ.
 //! Gate 1 compares verdicts and not diagnostic sets, which is the reason that is acceptable and is
 //! recorded rather than assumed.

@@ -1022,7 +1022,7 @@ fn described_type_definition_commits_after_a_description() {
       let reported_query = matches!(
         error.into_iter().next().expect("one error").into_data(),
         ErrorData::UnexpectedToken(unexpected)
-          if unexpected.expected() == &Expectation::Keyword("type definition")
+          if unexpected.expected() == &Expectation::Production("a type definition")
             && unexpected.found() == Some(&SyntacticTokenKind::Identifier)
       );
       let next = inp

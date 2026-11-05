@@ -33,6 +33,7 @@
 //! writer rather than on a mock: every value in these responses came out of the real parser.
 
 use smear::{
+  diagnostic::Diagnose,
   json,
   lexer::tokora::{Parse as _, Parser, SimpleSpan},
   parser::graphql::{
@@ -620,6 +621,45 @@ fn a_driver_entrys_extensions_are_written_inside_it() {
       r#""locations":[{"line":2,"column":12}],"#,
       r#""extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}],"#,
       r#""extensions":{"traceId":"9f2c"}}"#,
+    )
+  );
+}
+
+/// A syntax error goes from the parser to the wire with nothing in between but the contract: the
+/// refusal is a `Diagnose`, `RequestError::from_diagnose` keeps its sentence and its primary span,
+/// and the writer resolves that span against the document into §7.1.6's `line` and `column`.
+///
+/// The string opens on the document's second line and runs to its end, so the one refusal is the
+/// unterminated literal at line 2, column 12 — the writer's resolution rather than a coincidence of
+/// offsets — and its sentence carries no position of its own to repeat.
+#[test]
+fn a_syntax_error_is_written_as_a_request_error() {
+  const BROKEN: &str = "query {\n  hero(id: \"oops) }";
+
+  let errors = Parser::with_parser::<
+    GraphqlLexer<'_, str>,
+    ExecutableDocument<&str>,
+    GraphqlErrors<&str>,
+    _,
+    GraphQL,
+  >(executable_document)
+  .parse_str(BROKEN)
+  .expect_err("an unterminated string does not parse");
+  let error = errors.first().expect("the refusal");
+  assert_eq!(error.code().as_str(), "smear::syntax::unterminated-string");
+
+  let limits = Limits::default();
+  let entry = RequestError::from_diagnose(&limits, error).expect("well under both ceilings");
+  let result: RequestErrorResult<ConstInputValue<&'static str>> =
+    RequestErrorResult::from_driver(&limits, entry).expect("built under the same ceilings");
+
+  let mut out = String::new();
+  json::write_request_error_result(&mut out, &result, BROKEN).expect("the result is writable");
+  assert_eq!(
+    out,
+    concat!(
+      r#"{"errors":[{"message":"unterminated string","#,
+      r#""locations":[{"line":2,"column":12}]}]}"#,
     )
   );
 }

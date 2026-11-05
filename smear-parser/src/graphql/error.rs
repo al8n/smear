@@ -19,6 +19,7 @@
 
 use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into, IsVariant, TryUnwrap, Unwrap};
 use smear_lexer::{
+  SyntaxErrorKind,
   graphql::{
     error::{LexerErrorData, LexerErrors},
     syntactic::{SyntacticToken, SyntacticTokenKind},
@@ -27,6 +28,7 @@ use smear_lexer::{
 };
 use tokora::{
   Lexer, SimpleSpan as Span,
+  diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity},
   emitter::FromUnclosed,
   error::{
     FullContainer, MaybeTerminal, MissingSyntax, MissingToken, SeparatedError, TooFew,
@@ -34,18 +36,6 @@ use tokora::{
   },
   utils::{CowStr, Expected},
 };
-
-/// Hints for parsing a variable value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum VariableValueHint {
-  /// A name was expected.
-  #[display("name")]
-  Name,
-  /// A dollar `$` was expected.
-  #[display("dollar")]
-  Dollar,
-}
 
 /// A hint for what was expected in a object field value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
@@ -60,153 +50,6 @@ pub enum ObjectFieldValueHint {
   /// A name was expected.
   #[display("name")]
   Name,
-}
-
-/// Hints for the next component was expected while parsing a schema extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum SchemaExtensionHint {
-  /// Directives.
-  #[display("directives")]
-  Directives,
-  /// Root operation types definition.
-  #[display("root operation types definition")]
-  RootOperationTypesDefinition,
-  /// Extend keyword.
-  #[display("extend keyword")]
-  Extend,
-  /// Schema keyword.
-  #[display("schema keyword")]
-  Schema,
-  /// Directives or root operation types definition.
-  #[display("directives or root operation types definition")]
-  DirectivesOrRootOperationTypesDefinition,
-}
-
-/// Hints for the next component was expected while parsing a union type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum UnionTypeExtensionHint {
-  /// Directives.
-  #[display("directives")]
-  Directives,
-  /// Union member types.
-  #[display("union member types")]
-  UnionMemberTypes,
-  /// Name.
-  #[display("name")]
-  Name,
-  /// Extend keyword.
-  #[display("extend keyword")]
-  Extend,
-  /// Union keyword.
-  #[display("union keyword")]
-  Union,
-  /// Directives or union member types.
-  #[display("directives or union member types")]
-  DirectivesOrUnionMemberTypes,
-}
-
-/// Hints for the next component was expected while parsing an input object type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum InputObjectTypeExtensionHint {
-  /// Directives.
-  #[display("directives")]
-  Directives,
-  /// Input fields definition.
-  #[display("input fields definition")]
-  InputFieldsDefinition,
-  /// Name.
-  #[display("name")]
-  Name,
-  /// Extend keyword.
-  #[display("extend keyword")]
-  Extend,
-  /// Input keyword.
-  #[display("input keyword")]
-  Input,
-  /// Directives or input fields definition.
-  #[display("directives or input fields definition")]
-  DirectivesOrInputFieldsDefinition,
-}
-
-/// Hints for the next component was expected while parsing an object type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum ObjectTypeExtensionHint {
-  /// Implements interfaces.
-  #[display("implements")]
-  Implements,
-  /// Directives.
-  #[display("directives")]
-  Directives,
-  /// Fields definition.
-  #[display("fields definition")]
-  FieldsDefinition,
-  /// Name.
-  #[display("name")]
-  Name,
-  /// Extend keyword.
-  #[display("extend keyword")]
-  Extend,
-  /// Type keyword.
-  #[display("type keyword")]
-  Type,
-  /// Implements, directives, or fields definition.
-  #[display("implements, directives, or fields definition")]
-  ImplementsOrDirectivesOrFieldsDefinition,
-}
-
-/// Hints for the next component was expected while parsing an interface type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum InterfaceTypeExtensionHint {
-  /// Implements interfaces.
-  #[display("implements")]
-  Implements,
-  /// Directives.
-  #[display("directives")]
-  Directives,
-  /// Fields definition.
-  #[display("fields definition")]
-  FieldsDefinition,
-  /// Name.
-  #[display("name")]
-  Name,
-  /// Extend keyword.
-  #[display("extend keyword")]
-  Extend,
-  /// Interface keyword.
-  #[display("interface keyword")]
-  Interface,
-  /// Implements, directives, or fields definition.
-  #[display("implements, directives, or fields definition")]
-  ImplementsOrDirectivesOrFieldsDefinition,
-}
-
-/// Hints for the next component was expected while parsing an enum type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]
-#[non_exhaustive]
-pub enum EnumTypeExtensionHint {
-  /// Directives.
-  #[display("directives")]
-  Directives,
-  /// Enum values definition.
-  #[display("enum values definition")]
-  EnumValuesDefinition,
-  /// Name.
-  #[display("name")]
-  Name,
-  /// Extend keyword.
-  #[display("extend keyword")]
-  Extend,
-  /// Enum keyword.
-  #[display("enum keyword")]
-  Enum,
-  /// Directives or enum values definition.
-  #[display("directives or enum values definition")]
-  DirectivesOrEnumValuesDefinition,
 }
 
 /// Expectations for the GraphQL parser.
@@ -290,8 +133,73 @@ pub enum Expectation {
   EnumValue,
   /// A string value was expected.
   StringValue,
-  /// A keyword was expected.
+  /// A keyword was expected: the spelling itself, such as `on` or `fragment`.
   Keyword(&'static str),
+  /// A production was expected, named by a noun phrase that reads after "expected" — "a type
+  /// definition", "a definition or an extension".
+  ///
+  /// [`Keyword`](Self::Keyword) used to carry these too, which made "expected `type definition`"
+  /// read as though `type definition` were something to type.
+  Production(&'static str),
+  /// Nothing more specific is known than that the token found is not one the grammar takes here.
+  ///
+  /// What a conversion lands on when tokora names no expected kind, or several: the one
+  /// expectation slot cannot hold a set, and naming one member of it — `Name` was the old answer —
+  /// would claim a precision the parse does not have. It renders as nothing, so a message drops
+  /// its "expected …" clause rather than naming a guess.
+  Unspecified,
+}
+
+/// What a message says was expected, as the object of "expected …": punctuation and keywords in
+/// backticks, and every other class as a noun phrase — "a name", "a value", "a selection".
+///
+/// [`Unspecified`](Expectation::Unspecified) renders as nothing at all, which is what tells a
+/// message to drop the clause.
+impl core::fmt::Display for Expectation {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self {
+      Self::InlineString => f.write_str("a string"),
+      Self::BlockString => f.write_str("a block string"),
+      Self::Dollar => f.write_str("`$`"),
+      Self::LParen => f.write_str("`(`"),
+      Self::RParen => f.write_str("`)`"),
+      Self::Spread => f.write_str("`...`"),
+      Self::Colon => f.write_str("`:`"),
+      Self::Equal => f.write_str("`=`"),
+      Self::At => f.write_str("`@`"),
+      Self::LBracket => f.write_str("`[`"),
+      Self::RBracket => f.write_str("`]`"),
+      Self::LBrace => f.write_str("`{`"),
+      Self::RBrace => f.write_str("`}`"),
+      Self::Pipe => f.write_str("`|`"),
+      Self::Bang => f.write_str("`!`"),
+      Self::Ampersand => f.write_str("`&`"),
+      Self::ConstInputValue => f.write_str("a constant value"),
+      Self::InputValue => f.write_str("a value"),
+      Self::Type => f.write_str("a type"),
+      Self::Selection => f.write_str("a selection"),
+      Self::VariableDefinition => f.write_str("a variable definition"),
+      Self::OperationType => f.write_str("an operation type"),
+      Self::ExecutableDefinition => f.write_str("an executable definition"),
+      Self::OperationTypeOrFragment => f.write_str("an operation type or `fragment`"),
+      Self::FragmentName => f.write_str("a fragment name"),
+      Self::Name => f.write_str("a name"),
+      Self::OperationName => f.write_str("an operation name"),
+      Self::DirectiveLocation => f.write_str("a directive location"),
+      Self::FragmentSpreadOrInlineFragment => {
+        f.write_str("a fragment spread or an inline fragment")
+      }
+      Self::IntValue => f.write_str("an integer"),
+      Self::BooleanValue => f.write_str("a boolean"),
+      Self::FloatValue => f.write_str("a float"),
+      Self::NullValue => f.write_str("`null`"),
+      Self::EnumValue => f.write_str("an enum value"),
+      Self::StringValue => f.write_str("a string"),
+      Self::Keyword(keyword) => write!(f, "`{keyword}`"),
+      Self::Production(production) => f.write_str(production),
+      Self::Unspecified => Ok(()),
+    }
+  }
 }
 
 /// An unexpected token error carrying the found token and the expectation.
@@ -330,36 +238,6 @@ impl<T, TK> UnexpectedToken<T, TK> {
   #[inline]
   pub const fn expected(&self) -> &TK {
     &self.expected
-  }
-}
-
-/// An unexpected keyword error.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UnexpectedKeyword<S> {
-  found: S,
-  expected: &'static str,
-}
-
-impl<S> UnexpectedKeyword<S> {
-  /// Creates a new unexpected keyword error.
-  #[inline]
-  pub const fn new(found: S, expected_kw: &'static str) -> Self {
-    Self {
-      found,
-      expected: expected_kw,
-    }
-  }
-
-  /// Returns the found keyword.
-  #[inline]
-  pub const fn found(&self) -> &S {
-    &self.found
-  }
-
-  /// Returns the name of the expected keyword.
-  #[inline]
-  pub const fn expected(&self) -> &'static str {
-    self.expected
   }
 }
 
@@ -594,7 +472,7 @@ impl<S> IntOverflow<S> {
 /// exhaustive match gets is *information*: the language moved.
 ///
 /// This enum is the other side of that rule, and it transcribes nothing. Its list is what this
-/// parser chose to distinguish about a document it refused, and three parts of the list say so
+/// parser chose to distinguish about a document it refused, and two parts of the list say so
 /// without being asked:
 ///
 /// - [`Other`](Self::Other) exists **because** the list is open. The six `From` conversions at the
@@ -603,11 +481,16 @@ impl<S> IntOverflow<S> {
 /// - [`IntOverflow`](Self::IntOverflow) and [`FloatOverflow`](Self::FloatOverflow) are not grammar
 ///   refusals at all. Draft §2.9.1 bounds an `IntValue`'s digits at nothing, and these two exist
 ///   because this crate ships a *materialising* reading — they arrived with a feature.
-/// - The six `UnexpectedEndOf…Extension` variants are one grammatical situation cut six ways
-///   because this parser carries a per-extension hint. The draft asks for none of the six.
 ///
 /// So the list is ours, it has grown for our reasons, and it is committed to growing further:
 /// `graphqlx` is a second dialect in this crate today and more dialects are the plan.
+///
+/// **It has also shrunk, and for the same reason.** Fourteen variants that no parse produced —
+/// `InvalidEnumValue`, `InvalidBooleanValue`, `InvalidNullValue`, `InvalidFragmentName`,
+/// `UnexpectedKeyword`, `UnexpectedEndOfVariableValue`, `UnknownDirectiveLocation`,
+/// `UnknownOperationType` and six per-extension `UnexpectedEndOf…Extension` variants — were
+/// removed before 0.1. Every variant left answers a diagnostic code meant to outlive a rewording,
+/// and a code for an error that cannot happen is a promise about nothing.
 ///
 /// ## What the attribute costs, measured rather than argued
 ///
@@ -637,9 +520,9 @@ impl<S> IntOverflow<S> {
 ///
 /// No consumer can be told at build time that this vocabulary grew: making a downstream match
 /// untotal is the whole of what `#[non_exhaustive]` does. The notice does not disappear, it moves
-/// in-crate, where the attribute is inert. `error_data_variant_census` matches all 25 variants
-/// wildcard-free in **every** configuration, so a twenty-sixth is `E0004` there before it can
-/// reach anybody, and it must carry a public producer before that test is green again.
+/// in-crate, where the attribute is inert. `error_data_variant_census` matches all 12 variants
+/// wildcard-free in **every** configuration, so a new one is `E0004` there before it can reach
+/// anybody, and it must carry a public producer before that test is green again.
 ///
 /// What survives outside the crate is the half a wildcard cannot swallow, and `smear-smoke`'s
 /// `error_data_variant_tag` holds it: every variant is named there and reachable from a dependent
@@ -672,8 +555,9 @@ impl<S> IntOverflow<S> {
 ///
 /// So the two claims the census makes are different claims, and it makes both:
 /// `error_data_variant_census` matches this enum exhaustively and wildcard-free in **every**
-/// configuration — 22 variants, always — and builds a sample through a public constructor for
-/// each one whose producer that configuration compiled: 22 samples with the feature, 20 without.
+/// configuration — 12 variants, always — and builds a sample through a public constructor or
+/// conversion for each one whose producer that configuration compiled: 12 samples with the
+/// feature, 10 without.
 /// A variant producible in no configuration is caught by the all-features run.
 ///
 /// # Source-breaking change: `IntOverflow`'s payload
@@ -750,6 +634,16 @@ impl<S> IntOverflow<S> {
 pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// One or more errors from the lexer.
   Lexer(LexerErrors<Char, StateError>),
+  /// A lexer refusal on the syntactic path, by its kind alone.
+  ///
+  /// The syntactic container pins `char` and `()` where a lexer batch's are generic, so the batch
+  /// itself cannot ride in [`Lexer`](Self::Lexer) there. What its `From<LexerErrors>` keeps is the
+  /// first error's span, as this error's, and that error's [`SyntaxErrorKind`] — so an
+  /// unterminated string, a bad escape or a leading zero reports its own code rather than one
+  /// shared "lexer error". Never terminal: a `State` refusal routes to
+  /// [`TerminalEndOfInput`](Self::TerminalEndOfInput) instead.
+  #[from(skip)]
+  Lexical(SyntaxErrorKind),
   /// An integer literal is syntactically valid GraphQL but does not fit the width it was read
   /// at.
   ///
@@ -769,46 +663,12 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// Raised only by the `materialized-numbers` productions; see `Error::float_overflow`.
   #[from(skip)]
   FloatOverflow(S),
-  /// An enum value is invalid.
-  #[from(skip)]
-  InvalidEnumValue(S),
-  /// A boolean value is invalid.
-  #[from(skip)]
-  InvalidBooleanValue(S),
-  /// A null value is invalid.
-  #[from(skip)]
-  InvalidNullValue(S),
-  /// A fragment name is invalid.
-  #[from(skip)]
-  InvalidFragmentName(S),
   /// A delimiter was not closed.
   Unclosed(Unclosed),
   /// An unexpected token was found.
   UnexpectedToken(UnexpectedToken<T, Exp>),
-  /// An unexpected keyword was found.
-  UnexpectedKeyword(UnexpectedKeyword<S>),
-  /// An unexpected end was found in a variable value.
-  UnexpectedEndOfVariableValue(UnexpectedEnd<VariableValueHint>),
   /// An unexpected end was found in an object field value.
   UnexpectedEndOfObjectFieldValue(UnexpectedEnd<ObjectFieldValueHint>),
-  /// An unknown directive location was found.
-  #[from(skip)]
-  UnknownDirectiveLocation(S),
-  /// An unknown operation type was found.
-  #[from(skip)]
-  UnknownOperationType(S),
-  /// An unexpected end was found in an object type extension.
-  UnexpectedEndOfObjectExtension(UnexpectedEnd<ObjectTypeExtensionHint>),
-  /// An unexpected end was found in an interface type extension.
-  UnexpectedEndOfInterfaceExtension(UnexpectedEnd<InterfaceTypeExtensionHint>),
-  /// An unexpected end was found in an enum type extension.
-  UnexpectedEndOfEnumExtension(UnexpectedEnd<EnumTypeExtensionHint>),
-  /// An unexpected end was found in an input object type extension.
-  UnexpectedEndOfInputObjectExtension(UnexpectedEnd<InputObjectTypeExtensionHint>),
-  /// An unexpected end was found in a union type extension.
-  UnexpectedEndOfUnionExtension(UnexpectedEnd<UnionTypeExtensionHint>),
-  /// An unexpected end was found in a schema extension.
-  UnexpectedEndOfSchemaExtension(UnexpectedEnd<SchemaExtensionHint>),
   /// A **genuine** end of input was found: the production asked for more and the document had
   /// ended.
   ///
@@ -912,9 +772,10 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
 ///
 /// # The arms, and the rule each one came from
 ///
-/// * **Delegated** — the eight [`UnexpectedEnd`] variants. `UnexpectedEnd` answers for itself: its
-///   flag is raised when a *scanner* stop built it and clear for a genuine end of a production, so
-///   the value decides rather than the variant. That is step 1 of the trait's rule.
+/// * **Delegated** — [`UnexpectedEndOfObjectFieldValue`](Self::UnexpectedEndOfObjectFieldValue),
+///   the one [`UnexpectedEnd`] variant. `UnexpectedEnd` answers for itself: its flag is raised when
+///   a *scanner* stop built it and clear for a genuine end of a production, so the value decides
+///   rather than the variant. That is step 1 of the trait's rule.
 /// * **`true`, always** — [`NestingLimitExceeded`](Self::NestingLimitExceeded). A frame budget is
 ///   never cleared by more input.
 /// * **`true`, always** — [`TokenBudgetExhausted`](Self::TokenBudgetExhausted). Neither is a
@@ -975,26 +836,13 @@ impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, S
       Self::NestingLimitExceeded => true,
       Self::TokenBudgetExhausted => true,
       Self::TerminalEndOfInput => true,
-      Self::UnexpectedEndOfVariableValue(e) => e.is_terminal(),
       Self::UnexpectedEndOfObjectFieldValue(e) => e.is_terminal(),
-      Self::UnexpectedEndOfObjectExtension(e) => e.is_terminal(),
-      Self::UnexpectedEndOfInterfaceExtension(e) => e.is_terminal(),
-      Self::UnexpectedEndOfEnumExtension(e) => e.is_terminal(),
-      Self::UnexpectedEndOfInputObjectExtension(e) => e.is_terminal(),
-      Self::UnexpectedEndOfUnionExtension(e) => e.is_terminal(),
-      Self::UnexpectedEndOfSchemaExtension(e) => e.is_terminal(),
       Self::IntOverflow(_)
       | Self::FloatOverflow(_)
-      | Self::InvalidEnumValue(_)
-      | Self::InvalidBooleanValue(_)
-      | Self::InvalidNullValue(_)
-      | Self::InvalidFragmentName(_)
       | Self::Unclosed(_)
       | Self::UnexpectedToken(_)
-      | Self::UnexpectedKeyword(_)
-      | Self::UnknownDirectiveLocation(_)
-      | Self::UnknownOperationType(_)
       | Self::EndOfInput
+      | Self::Lexical(_)
       | Self::Other(_) => false,
     }
   }
@@ -1047,28 +895,6 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
     Self::maybe_unexpected_token(Some(found), expected, span)
   }
 
-  /// Creates an unexpected end in variable value error.
-  #[inline]
-  pub const fn unexpected_end_of_variable_value(hint: VariableValueHint, span: Span) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfVariableValue(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("variable value"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected keyword error.
-  #[inline]
-  pub const fn unexpected_keyword(found: S, expected_kw: &'static str, span: Span) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedKeyword(UnexpectedKeyword::new(found, expected_kw)),
-    )
-  }
-
   /// Creates an unexpected end in object field value error.
   #[inline]
   pub const fn unexpected_end_of_object_field_value(
@@ -1080,93 +906,6 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
       ErrorData::UnexpectedEndOfObjectFieldValue(UnexpectedEnd::with_name(
         0,
         CowStr::from_static("object field value"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in object type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_object_extension(
-    span: Span,
-    hint: ObjectTypeExtensionHint,
-  ) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfObjectExtension(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("object type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in interface type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_interface_extension(
-    span: Span,
-    hint: InterfaceTypeExtensionHint,
-  ) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfInterfaceExtension(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("interface type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in enum type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_enum_extension(span: Span, hint: EnumTypeExtensionHint) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfEnumExtension(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("enum type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in input object type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_input_object_extension(
-    span: Span,
-    hint: InputObjectTypeExtensionHint,
-  ) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfInputObjectExtension(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("input object type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in union type extension error.
-  #[inline]
-  pub const fn unexpected_end_of_union_extension(span: Span, hint: UnionTypeExtensionHint) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfUnionExtension(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("union type extension"),
-        hint,
-      )),
-    )
-  }
-
-  /// Creates an unexpected end in schema extension error.
-  #[inline]
-  pub const fn unexpected_end_of_schema_extension(span: Span, hint: SchemaExtensionHint) -> Self {
-    Self::new(
-      span,
-      ErrorData::UnexpectedEndOfSchemaExtension(UnexpectedEnd::with_name(
-        0,
-        CowStr::from_static("schema extension"),
         hint,
       )),
     )
@@ -1194,42 +933,6 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   #[inline]
   pub const fn from_lexer_errors(err: LexerErrors<Char, StateError>, span: Span) -> Self {
     Self::new(span, ErrorData::Lexer(err))
-  }
-
-  /// Creates an invalid fragment name error.
-  #[inline]
-  pub const fn invalid_fragment_name(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidFragmentName(value))
-  }
-
-  /// Creates an invalid enum value error.
-  #[inline]
-  pub const fn invalid_enum_value(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidEnumValue(value))
-  }
-
-  /// Creates an invalid boolean value error.
-  #[inline]
-  pub const fn invalid_boolean_value(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidBooleanValue(value))
-  }
-
-  /// Creates an invalid null value error.
-  #[inline]
-  pub const fn invalid_null_value(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::InvalidNullValue(value))
-  }
-
-  /// Creates an unknown directive location error.
-  #[inline]
-  pub const fn unknown_directive_location(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::UnknownDirectiveLocation(value))
-  }
-
-  /// Creates an unknown operation type error.
-  #[inline]
-  pub const fn unknown_operation_type(value: S, span: Span) -> Self {
-    Self::new(span, ErrorData::UnknownOperationType(value))
   }
 
   /// Creates an unexpected end of input error — the **genuine** kind.
@@ -1337,6 +1040,218 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
   pub fn into_data(self) -> ErrorData<S, T, Char, Exp, StateError> {
     self.data
   }
+
+  /// Returns the syntax-error kind this error reports as, which is its data's.
+  #[inline]
+  pub fn kind(&self) -> SyntaxErrorKind {
+    self.data.kind()
+  }
+}
+
+impl<S, T, Char, Exp, StateError> ErrorData<S, T, Char, Exp, StateError> {
+  /// Returns the syntax-error kind this error reports as.
+  ///
+  /// The one dispatch every [`Diagnose`] accessor on [`Error`] delegates to. A [`Lexer`](Self::Lexer)
+  /// batch reports its first error's kind; an end of input reports
+  /// [`UnexpectedEndOfInput`](SyntaxErrorKind::UnexpectedEndOfInput) when the document genuinely
+  /// ended and [`ResourceLimit`](SyntaxErrorKind::ResourceLimit) when it stands in for a scanner
+  /// stop, because that end is a limit tripping rather than the document running out.
+  pub fn kind(&self) -> SyntaxErrorKind {
+    match self {
+      Self::Lexer(errors) => errors
+        .iter()
+        .next()
+        .map_or(SyntaxErrorKind::InvalidSyntax, |error| error.kind()),
+      Self::Lexical(kind) => *kind,
+      Self::IntOverflow(_) => SyntaxErrorKind::IntOverflow,
+      Self::FloatOverflow(_) => SyntaxErrorKind::FloatOverflow,
+      Self::Unclosed(_) => SyntaxErrorKind::UnclosedDelimiter,
+      Self::UnexpectedToken(token) => {
+        if token.found().is_some() {
+          SyntaxErrorKind::UnexpectedToken
+        } else {
+          SyntaxErrorKind::UnexpectedEndOfInput
+        }
+      }
+      Self::UnexpectedEndOfObjectFieldValue(end) => {
+        if end.is_terminal() {
+          SyntaxErrorKind::ResourceLimit
+        } else {
+          SyntaxErrorKind::UnexpectedEndOfInput
+        }
+      }
+      Self::EndOfInput => SyntaxErrorKind::UnexpectedEndOfInput,
+      Self::TerminalEndOfInput => SyntaxErrorKind::ResourceLimit,
+      Self::NestingLimitExceeded => SyntaxErrorKind::NestingLimit,
+      Self::TokenBudgetExhausted => SyntaxErrorKind::TokenBudget,
+      Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
+    }
+  }
+}
+
+/// The one document a parse reads, as a [`Location`] numbers it.
+const SOURCE: u32 = 0;
+
+/// Writes `, expected {expected}` — or nothing, when the expectation renders as nothing.
+///
+/// [`Expectation::Unspecified`] renders empty rather than as a placeholder, and the clause is
+/// dropped with it: "unexpected `}`" says what is known, where "unexpected `}`, expected a name"
+/// would name a guess. Measured by rendering it once into a sink that only notes whether anything
+/// arrived, so the check allocates nothing and asks nothing of `Exp` beyond `Display`.
+fn expected_clause<Exp>(f: &mut core::fmt::Formatter<'_>, expected: &Exp) -> core::fmt::Result
+where
+  Exp: core::fmt::Display,
+{
+  struct Writes(bool);
+
+  impl core::fmt::Write for Writes {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+      self.0 |= !s.is_empty();
+      Ok(())
+    }
+  }
+
+  let mut probe = Writes(false);
+  let _ = core::fmt::write(&mut probe, format_args!("{expected}"));
+  if probe.0 {
+    write!(f, ", expected {expected}")
+  } else {
+    Ok(())
+  }
+}
+
+/// A syntax error, as a sentence: lowercase, no trailing period, spellings in backticks, and never
+/// a position — the position is the diagnostic's primary location, and a sentence that spelled it
+/// as well would say it twice.
+///
+/// Nothing from the source is quoted, so there is no bound on `S` and no question of whether a
+/// byte source's slice is text: an overflow names the width it was read at, not the literal.
+impl<S, T, Char, Exp, StateError> core::fmt::Display for Error<S, T, Char, Exp, StateError>
+where
+  T: core::fmt::Display,
+  Exp: core::fmt::Display,
+{
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match &self.data {
+      ErrorData::Lexer(errors) => match errors.iter().next() {
+        Some(error) => core::fmt::Display::fmt(error, f),
+        None => f.write_str(SyntaxErrorKind::InvalidSyntax.message()),
+      },
+      ErrorData::Lexical(kind) => f.write_str(kind.message()),
+      ErrorData::IntOverflow(overflow) => write!(
+        f,
+        "integer out of range for a {}-bit integer",
+        overflow.width().bits()
+      ),
+      ErrorData::FloatOverflow(_) => f.write_str("float out of range for a 64-bit float"),
+      ErrorData::Unclosed(unclosed) => f.write_str(match unclosed {
+        Unclosed::Parentheses => "unclosed `(`",
+        Unclosed::List => "unclosed `[`",
+        Unclosed::Object => "unclosed `{`",
+      }),
+      ErrorData::UnexpectedToken(token) => {
+        match token.found() {
+          Some(found) => write!(f, "unexpected {found}")?,
+          None => f.write_str("unexpected end of input")?,
+        }
+        expected_clause(f, token.expected())
+      }
+      ErrorData::UnexpectedEndOfObjectFieldValue(end) => {
+        if end.is_terminal() {
+          f.write_str(SyntaxErrorKind::ResourceLimit.message())
+        } else {
+          write!(f, "unexpected end of input, expected a {}", end.hint())
+        }
+      }
+      ErrorData::EndOfInput => f.write_str(SyntaxErrorKind::UnexpectedEndOfInput.message()),
+      ErrorData::TerminalEndOfInput => f.write_str(SyntaxErrorKind::ResourceLimit.message()),
+      ErrorData::NestingLimitExceeded => f.write_str(SyntaxErrorKind::NestingLimit.message()),
+      ErrorData::TokenBudgetExhausted => f.write_str(SyntaxErrorKind::TokenBudget.message()),
+      ErrorData::Other(text) => f.write_str(text),
+    }
+  }
+}
+
+impl<S, T, Char, Exp, StateError> core::error::Error for Error<S, T, Char, Exp, StateError>
+where
+  S: core::fmt::Debug,
+  T: core::fmt::Debug + core::fmt::Display,
+  Char: core::fmt::Debug,
+  Exp: core::fmt::Debug + core::fmt::Display,
+  StateError: core::fmt::Debug,
+{
+}
+
+/// A draft §2 syntax error, read as structure: the code, severity and help of its
+/// [`SyntaxErrorKind`], and the position it refused at in the one document a parse reads.
+///
+/// The position is the error's own span, with one exception: a [`Lexer`](ErrorData::Lexer) batch
+/// points at its first error, because the lossless conversion that builds one carries the empty
+/// span `0..0` outside it. An empty batch keeps the outer span. Never
+/// [`Location::entire`]: a syntax error always has a place in the text.
+///
+/// No labels and no path segments: a syntax error points at one place, and it is raised before
+/// any request has produced a result.
+///
+/// The bounds are what the message needs and nothing else — a found token and an expectation that
+/// render — and they are spelled `core::fmt::Display` because `ci/source_census` copies them
+/// verbatim into a generated crate that imports nothing. Not `::core::…`: the census re-spaces the
+/// tokens it copies, and a leading `::` fuses with the bound's own `:` into a `:::` that does not
+/// parse.
+impl<S, T, Char, Exp, StateError> Diagnose for Error<S, T, Char, Exp, StateError>
+where
+  T: core::fmt::Display,
+  Exp: core::fmt::Display,
+{
+  #[inline]
+  fn code(&self) -> Code {
+    self.kind().code()
+  }
+
+  #[inline]
+  fn severity(&self) -> Severity {
+    self.kind().severity()
+  }
+
+  #[inline]
+  fn primary(&self) -> Location {
+    let span = if let ErrorData::Lexer(errors) = &self.data {
+      errors.iter().next().map_or(self.span, |error| error.span())
+    } else {
+      self.span
+    };
+    Location::new(SOURCE, span)
+  }
+
+  #[inline]
+  fn primary_label(&self) -> Option<&'static str> {
+    Some(self.kind().message())
+  }
+
+  #[inline]
+  fn labels(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn label(&self, _: usize) -> Option<Label> {
+    None
+  }
+
+  #[inline]
+  fn path_segments(&self) -> usize {
+    0
+  }
+
+  #[inline]
+  fn path_segment(&self, _: usize) -> Option<PathSegment<'_>> {
+    None
+  }
+
+  #[inline]
+  fn help(&self) -> Option<&'static str> {
+    self.kind().help()
+  }
 }
 
 type DefaultErrorsContainer<S, T, Char = char, Exp = Expectation, StateError = ()> =
@@ -1407,11 +1322,13 @@ pub type GraphqlErrors<S> = Errors<S, SyntacticTokenKind, char, Expectation>;
 // pins); Tokora token errors use the concrete `SyntacticTokenKind`, and found
 // tokens are reduced to that dialect token kind.
 // A single concrete Tokora expected kind is mapped into the corresponding
-// GraphQL expectation, while absent or multi-kind expectations retain the historic
-// `Name` fallback because [`ErrorData::UnexpectedToken`] has one expectation slot.
+// GraphQL expectation, while absent or multi-kind expectations fall back to
+// `Unspecified` because [`ErrorData::UnexpectedToken`] has one expectation slot — the
+// fallback used to be `Name`, which named one member of a set as though it were the set.
 // Diagnostics-carrying families (missing separator/element, full container, too
-// few, lexer errors) map to `Other` exactly as the frozen glue did — these are
-// emitter paths a `Vec` container and a fail-fast context rarely reach.
+// few) map to `Other` exactly as the frozen glue did — these are emitter paths a
+// `Vec` container and a fail-fast context rarely reach. A lexer batch keeps its first
+// error's kind, as `Lexical`; see its conversion at the foot of the file.
 
 #[inline]
 fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
@@ -1438,11 +1355,11 @@ fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
     // `#[allow]` and not a deletion. `SyntacticTokenKind` is `#[non_exhaustive]`, which forced this
     // arm while the lexer was a separate crate; with the crates merged (#83) the compiler can see
     // every variant from here and calls it unreachable. The arm stays because deleting it would
-    // turn "a new token kind falls back to `Name`" into "a new token kind fails to compile" — a
-    // real change to this function's contract, and this merge is a relocation. Revisiting that
-    // choice is follow-up work, not part of the move.
+    // turn "a new token kind falls back to `Unspecified`" into "a new token kind fails to
+    // compile" — a real change to this function's contract, and this merge is a relocation.
+    // Revisiting that choice is follow-up work, not part of the move.
     #[allow(unreachable_patterns)]
-    _ => Expectation::Name,
+    _ => Expectation::Unspecified,
   }
 }
 
@@ -1450,7 +1367,7 @@ fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
 fn expectation_from_tokora(expected: Option<Expected<'_, SyntacticTokenKind>>) -> Expectation {
   match expected {
     Some(Expected::One(kind)) => expectation_from_token_kind(kind),
-    _ => Expectation::Name,
+    _ => Expectation::Unspecified,
   }
 }
 
@@ -1584,12 +1501,12 @@ where
 // arm is unconditionally `false`, therefore made a rejecting host's `Errors::is_terminal()` answer
 // `false` on a tripped `smear_lexer::limits` budget.
 //
-// `LexerErrorData::State` is the scanner's own stop kind and the only one of the ten that is: the
-// other nine are built from a lexeme the **grammar** rejected — a malformed literal, an unknown
-// character, an unterminated `...`, invalid UTF-8 — and each is recoverable. `State` is the
-// tracker refusing, which no further input clears. It is the same variant the
-// [`Lexer`](ErrorData::Lexer) arm keys on one layer up, so the two readings of a state refusal
-// cannot drift apart.
+// `LexerErrorData::State` is the scanner's own stop kind and the only variant that is: every other
+// one is built from a lexeme the **grammar** rejected — a malformed literal, an unknown character,
+// an unterminated `...`, invalid UTF-8 — or from a slice a whole-slice door refused, and each is
+// recoverable. `State` is the tracker refusing, which no further input clears. It is the same
+// variant the [`Lexer`](ErrorData::Lexer) arm keys on one layer up, so the two readings of a state
+// refusal cannot drift apart.
 //
 // # Why `TerminalEndOfInput` and not a payload-carrying variant of its own
 //
@@ -1599,13 +1516,19 @@ where
 // accepted the diagnostic, or smear here when it rejected — because the fact about the document is
 // the same.
 //
-// A variant carrying the batch is not available at this keying anyway, which is what made this
-// impl erase in the first place: it is generic over the batch's `Char` and `StateError` while the
-// container pins its own (`char`, `()`), so `ErrorData::Lexer` does not typecheck here. The
-// lossless conversion `lossless_error_impls!` generates is pinned to `LexerErrors<char,
-// LimitExceeded>` and therefore keeps the payload; that one already routed correctly and is
-// unchanged. A new variant here would have to erase the payload too — it would be
-// `TerminalEndOfInput` under another name, with a census row and a parity row bought for nothing.
+// A variant carrying the batch is not available at this keying anyway: this impl is generic over
+// the batch's `Char` and `StateError` while the container pins its own (`char`, `()`), so
+// `ErrorData::Lexer` does not typecheck here. The lossless conversion `lossless_error_impls!`
+// generates is pinned to `LexerErrors<char, LimitExceeded>` and therefore keeps the payload; that
+// one already routed correctly and is unchanged.
+//
+// # What every other batch becomes: `Lexical`, keeping the first error's kind
+//
+// The payload cannot ride, and its kind can: `LexerErrorData::kind` is bound-free, so the first
+// error's `SyntaxErrorKind` survives the erasure and an unterminated string, a bad escape or a
+// leading zero reaches the caller under its own `smear::syntax` code. It used to be one
+// `Other("lexer error")` for every one of them. An **empty** batch has no first error and keeps
+// that note, at `0..0` — the one case where there is no kind to keep and no position to point at.
 //
 // The span is the batch's first, on **both** arms. `Span::new(0, 0)` pointed every lexer error at
 // byte zero, which is a position the error is not at; a `State` error minted through
@@ -1614,18 +1537,21 @@ where
 impl<S, Char, StateError> From<LexerErrors<Char, StateError>> for GraphqlErrors<S> {
   #[inline]
   fn from(err: LexerErrors<Char, StateError>) -> Self {
-    let span = err.iter().next().map_or(Span::new(0, 0), |e| e.span());
+    let Some(first) = err.iter().next() else {
+      return GraphqlError::new(
+        Span::new(0, 0),
+        ErrorData::Other(std::borrow::Cow::Borrowed("lexer error")),
+      )
+      .into();
+    };
+    let span = first.span();
     if err
       .iter()
       .any(|e| matches!(e.data(), LexerErrorData::State(_)))
     {
       return GraphqlError::terminal_end_of_input(span).into();
     }
-    GraphqlError::new(
-      span,
-      ErrorData::Other(std::borrow::Cow::Borrowed("lexer error")),
-    )
-    .into()
+    GraphqlError::new(span, ErrorData::Lexical(first.kind())).into()
   }
 }
 
@@ -1717,21 +1643,25 @@ mod tests {
     }
   }
 
+  /// An absent or multi-kind expected set names no expectation, rather than one member of the set.
+  ///
+  /// It fell back to `Name` until the diagnostic contract rendered the expectation into the
+  /// message, where "expected a name" for a `{`-or-`[` set reads as a fact about the grammar.
   #[test]
-  fn tokora_unrepresentable_expected_sets_keep_the_name_fallback() {
+  fn tokora_unrepresentable_expected_sets_name_no_expectation() {
     static ONE_OF: [SyntacticTokenKind; 2] =
       [SyntacticTokenKind::LBrace, SyntacticTokenKind::LBracket];
 
     let without_expected =
       TokoraTokenError::of(SimpleSpan::new(4, 9)).with_found(SyntacticToken::Identifier("found"));
-    assert_expected(without_expected.into(), Expectation::Name);
+    assert_expected(without_expected.into(), Expectation::Unspecified);
 
     let one_of = TokoraTokenError::expected_one_of_with_found(
       SimpleSpan::new(4, 9),
       SyntacticToken::Identifier("found"),
       &ONE_OF,
     );
-    assert_expected(one_of.into(), Expectation::Name);
+    assert_expected(one_of.into(), Expectation::Unspecified);
 
     assert_expected(
       SeparatedError::leading(unexpected_with(SyntacticTokenKind::LBrace)).into(),

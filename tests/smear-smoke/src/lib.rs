@@ -102,7 +102,7 @@ pub fn graphql_parser(
   .parse_str(src)
 }
 
-/// `ErrorData`'s 22 variants, named from outside the crate, plus the wildcard arm
+/// `ErrorData`'s 12 variants, named from outside the crate, plus the wildcard arm
 /// `#[non_exhaustive]` requires — which fails **closed**.
 ///
 /// # What this replaced, and why it is not the same probe
@@ -122,15 +122,15 @@ pub fn graphql_parser(
 ///
 /// # What is left, and the two halves it is in
 ///
-/// - **Complete.** 23 of the enum's 25 variants are named below, so a dependent can reach each of
-///   those by name and a path that stops resolving still fails here. The arm the attribute forces
-///   returns `None` instead of a tag, so a variant nobody listed is a *reported* failure rather
-///   than a quiet fall-through into some neighbour's answer. The two that are not named are
-///   `NestingLimitExceeded` and `TokenBudgetExhausted`: both are minted by machinery inside
-///   `smear-parser` rather than by anything a dependent calls, and this list has never covered
-///   them. **The completeness claim is `smear-parser`'s `error_data_variant_census`**, which is
-///   wildcard-free over all 25; what lives out here is that the ones a dependent names still
-///   resolve and still have a public producer.
+/// - **Complete.** All 12 of the enum's variants are named below, so a dependent can reach each
+///   of them by name and a path that stops resolving still fails here. The arm the attribute
+///   forces returns `None` instead of a tag, so a variant nobody listed is a *reported* failure
+///   rather than a quiet fall-through into some neighbour's answer. `NestingLimitExceeded` and
+///   `TokenBudgetExhausted` are minted by machinery inside `smear-parser`, and they are named here
+///   anyway: each has a public constructor a dependent can call. **The completeness claim is
+///   `smear-parser`'s `error_data_variant_census`**, which is wildcard-free over every variant;
+///   what lives out here is that the ones a dependent names still resolve and still have a public
+///   producer.
 /// - **Reachable.** [`error_data_variant_samples`] builds one value per name below through a
 ///   public constructor, from outside the crate, and the test pairs each against the tag it must
 ///   produce. The old probe never had this half: it proved the names *resolve*, not that a
@@ -148,10 +148,11 @@ pub fn graphql_parser(
 ///
 /// # Planted, because a gate nobody has seen fail is a gate nobody has tested
 ///
-/// Deleting the `UnknownOperationType` arm below — which the attribute makes compile — reddens
-/// that test with *the sample built for `UnknownOperationType` did not tag as
-/// `UnknownOperationType`; a `None` here is the wildcard arm*. That is the decay the fail-closed
-/// arm exists to refuse, and it is the whole of what this probe can still see.
+/// Deleting any arm below — which the attribute makes compile — reddens that test with *the
+/// sample built for `X` did not tag as `X`; a `None` here is the wildcard arm*. It was planted on
+/// the `UnknownOperationType` arm, a variant since removed with thirteen others no parse produced.
+/// That is the decay the fail-closed arm exists to refuse, and it is the whole of what this probe
+/// can still see.
 pub fn error_data_variant_tag(
   error: &smear::parser::graphql::error::GraphqlError<&str>,
 ) -> Option<&'static str> {
@@ -159,27 +160,16 @@ pub fn error_data_variant_tag(
 
   Some(match error.data() {
     ErrorData::Lexer(_) => "Lexer",
+    ErrorData::Lexical(_) => "Lexical",
     ErrorData::IntOverflow(_) => "IntOverflow",
     ErrorData::FloatOverflow(_) => "FloatOverflow",
-    ErrorData::InvalidEnumValue(_) => "InvalidEnumValue",
-    ErrorData::InvalidBooleanValue(_) => "InvalidBooleanValue",
-    ErrorData::InvalidNullValue(_) => "InvalidNullValue",
-    ErrorData::InvalidFragmentName(_) => "InvalidFragmentName",
     ErrorData::Unclosed(_) => "Unclosed",
     ErrorData::UnexpectedToken(_) => "UnexpectedToken",
-    ErrorData::UnexpectedKeyword(_) => "UnexpectedKeyword",
-    ErrorData::UnexpectedEndOfVariableValue(_) => "UnexpectedEndOfVariableValue",
     ErrorData::UnexpectedEndOfObjectFieldValue(_) => "UnexpectedEndOfObjectFieldValue",
-    ErrorData::UnknownDirectiveLocation(_) => "UnknownDirectiveLocation",
-    ErrorData::UnknownOperationType(_) => "UnknownOperationType",
-    ErrorData::UnexpectedEndOfObjectExtension(_) => "UnexpectedEndOfObjectExtension",
-    ErrorData::UnexpectedEndOfInterfaceExtension(_) => "UnexpectedEndOfInterfaceExtension",
-    ErrorData::UnexpectedEndOfEnumExtension(_) => "UnexpectedEndOfEnumExtension",
-    ErrorData::UnexpectedEndOfInputObjectExtension(_) => "UnexpectedEndOfInputObjectExtension",
-    ErrorData::UnexpectedEndOfUnionExtension(_) => "UnexpectedEndOfUnionExtension",
-    ErrorData::UnexpectedEndOfSchemaExtension(_) => "UnexpectedEndOfSchemaExtension",
     ErrorData::EndOfInput => "EndOfInput",
     ErrorData::TerminalEndOfInput => "TerminalEndOfInput",
+    ErrorData::NestingLimitExceeded => "NestingLimitExceeded",
+    ErrorData::TokenBudgetExhausted => "TokenBudgetExhausted",
     ErrorData::Other(_) => "Other",
     // The arm `#[non_exhaustive]` requires, and it must stay a `return None`. A tag here would
     // answer for a variant nobody read, on this arm's authority, and leave the run green while
@@ -205,17 +195,17 @@ pub fn error_data_variant_tag(
 pub fn error_data_variant_samples() -> [(
   &'static str,
   smear::parser::graphql::error::GraphqlError<&'static str>,
-); 23] {
+); 12] {
   use smear::{
     lexer::{
-      graphql::{error::LexerErrors, syntactic::SyntacticTokenKind},
+      graphql::{
+        error::{LexerError, LexerErrors},
+        syntactic::SyntacticTokenKind,
+      },
       tokora::SimpleSpan,
     },
     parser::graphql::error::{
-      EnumTypeExtensionHint, Expectation, GraphqlError, GraphqlErrors,
-      InputObjectTypeExtensionHint, IntOverflow, IntWidth, InterfaceTypeExtensionHint,
-      ObjectFieldValueHint, ObjectTypeExtensionHint, SchemaExtensionHint, UnionTypeExtensionHint,
-      VariableValueHint,
+      Expectation, GraphqlError, GraphqlErrors, IntOverflow, IntWidth, ObjectFieldValueHint,
     },
   };
 
@@ -235,73 +225,14 @@ pub fn error_data_variant_samples() -> [(
       ),
     ),
     ("FloatOverflow", GraphqlError::float_overflow("1e400", span)),
-    (
-      "InvalidEnumValue",
-      GraphqlError::invalid_enum_value("x", span),
-    ),
-    (
-      "InvalidBooleanValue",
-      GraphqlError::invalid_boolean_value("x", span),
-    ),
-    (
-      "InvalidNullValue",
-      GraphqlError::invalid_null_value("x", span),
-    ),
-    (
-      "InvalidFragmentName",
-      GraphqlError::invalid_fragment_name("on", span),
-    ),
     ("Unclosed", GraphqlError::unclosed_list(span)),
     (
       "UnexpectedToken",
       GraphqlError::unexpected_token(SyntacticTokenKind::Colon, Expectation::Name, span),
     ),
     (
-      "UnexpectedKeyword",
-      GraphqlError::unexpected_keyword("quary", "query", span),
-    ),
-    (
-      "UnexpectedEndOfVariableValue",
-      GraphqlError::unexpected_end_of_variable_value(VariableValueHint::Name, span),
-    ),
-    (
       "UnexpectedEndOfObjectFieldValue",
       GraphqlError::unexpected_end_of_object_field_value(ObjectFieldValueHint::Name, span),
-    ),
-    (
-      "UnknownDirectiveLocation",
-      GraphqlError::unknown_directive_location("NOWHERE", span),
-    ),
-    (
-      "UnknownOperationType",
-      GraphqlError::unknown_operation_type("quary", span),
-    ),
-    (
-      "UnexpectedEndOfObjectExtension",
-      GraphqlError::unexpected_end_of_object_extension(span, ObjectTypeExtensionHint::Name),
-    ),
-    (
-      "UnexpectedEndOfInterfaceExtension",
-      GraphqlError::unexpected_end_of_interface_extension(span, InterfaceTypeExtensionHint::Name),
-    ),
-    (
-      "UnexpectedEndOfEnumExtension",
-      GraphqlError::unexpected_end_of_enum_extension(span, EnumTypeExtensionHint::Name),
-    ),
-    (
-      "UnexpectedEndOfInputObjectExtension",
-      GraphqlError::unexpected_end_of_input_object_extension(
-        span,
-        InputObjectTypeExtensionHint::Name,
-      ),
-    ),
-    (
-      "UnexpectedEndOfUnionExtension",
-      GraphqlError::unexpected_end_of_union_extension(span, UnionTypeExtensionHint::Name),
-    ),
-    (
-      "UnexpectedEndOfSchemaExtension",
-      GraphqlError::unexpected_end_of_schema_extension(span, SchemaExtensionHint::Schema),
     ),
     ("EndOfInput", GraphqlError::unexpected_end_of_input(span)),
     // The end of input that stands in for a terminal scanner stop — smear issue #177. A second
@@ -311,8 +242,30 @@ pub fn error_data_variant_samples() -> [(
       "TerminalEndOfInput",
       GraphqlError::terminal_end_of_input(span),
     ),
+    // The two refusals `smear-parser`'s own machinery mints — the parser-frame budget and the
+    // durable token budget — through the public constructors that machinery bottoms out in.
+    (
+      "NestingLimitExceeded",
+      GraphqlError::nesting_limit_exceeded(span),
+    ),
+    (
+      "TokenBudgetExhausted",
+      GraphqlError::token_budget_exhausted(span),
+    ),
+    // Not a constructor: the lexer-batch conversion is `Lexical`'s one producer, and it keeps a
+    // non-empty batch's first kind.
+    (
+      "Lexical",
+      GraphqlErrors::from(LexerErrors::<char, ()>::from(
+        LexerError::<char, ()>::unexpected_eoi(span),
+      ))
+      .into_iter()
+      .next()
+      .expect("the lexer-error conversion emits one error"),
+    ),
     // Not a constructor: `Other`'s only producers are the `From` conversions in `smear-parser`'s
-    // error glue, and this is the cheapest of them to mint from out here.
+    // error glue, and this is the cheapest of them to mint from out here — the lexer-batch
+    // conversion over an empty batch, which has no kind to keep.
     (
       "Other",
       GraphqlErrors::from(LexerErrors::<char, ()>::default())

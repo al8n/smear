@@ -92,7 +92,7 @@ extension_tail!(
       (None, None, None) => {
         return expected_definition_phase(
           inp,
-          Expectation::Keyword("implements, directives, or fields definition"),
+          Expectation::Production("`implements`, directives or a fields definition"),
         );
       }
     };
@@ -147,7 +147,7 @@ extension_tail!(
       (None, None, None) => {
         return expected_definition_phase(
           inp,
-          Expectation::Keyword("implements, directives, or fields definition"),
+          Expectation::Production("`implements`, directives or a fields definition"),
         );
       }
     };
@@ -188,7 +188,7 @@ extension_tail!(
       (None, None) => {
         return expected_definition_phase(
           inp,
-          Expectation::Keyword("directives or union member types"),
+          Expectation::Production("directives or union member types"),
         );
       }
     };
@@ -229,7 +229,7 @@ extension_tail!(
       (None, None) => {
         return expected_definition_phase(
           inp,
-          Expectation::Keyword("directives or enum values definition"),
+          Expectation::Production("directives or an enum values definition"),
         );
       }
     };
@@ -270,7 +270,7 @@ extension_tail!(
       (None, None) => {
         return expected_definition_phase(
           inp,
-          Expectation::Keyword("directives or input fields definition"),
+          Expectation::Production("directives or an input fields definition"),
         );
       }
     };
@@ -313,7 +313,7 @@ extension_tail!(
       (None, None) => {
         return expected_definition_phase(
           inp,
-          Expectation::Keyword("directives or root operation types definition"),
+          Expectation::Production("directives or a root operation types definition"),
         );
       }
     };
@@ -352,7 +352,7 @@ where
     ContextualKeyword::Input => {
       input_object_extension_after_keyword(inp, start).map(TypeExtension::InputObject)
     }
-    _ => expected_definition_phase(inp, Expectation::Keyword("type extension")),
+    _ => expected_definition_phase(inp, Expectation::Production("a type extension")),
   }
 }
 
@@ -388,7 +388,7 @@ where
           _ => Err(
             DialectGraphqlError::unexpected_token(
               kind,
-              Expectation::Keyword("type extension"),
+              Expectation::Production("a type extension"),
               span,
             )
             .into(),
@@ -402,7 +402,9 @@ where
     .try_parse_input(inp)?
   {
     ParseAttempt::Accept(extension) => Ok(extension),
-    ParseAttempt::Decline => expected_definition_phase(inp, Expectation::Keyword("type extension")),
+    ParseAttempt::Decline => {
+      expected_definition_phase(inp, Expectation::Production("a type extension"))
+    }
   }
 }
 
@@ -442,7 +444,7 @@ where
           _ => Err(
             DialectGraphqlError::unexpected_token(
               kind,
-              Expectation::Keyword("type-system extension"),
+              Expectation::Production("a type-system extension"),
               span,
             )
             .into(),
@@ -457,7 +459,7 @@ where
   {
     ParseAttempt::Accept(extension) => Ok(extension),
     ParseAttempt::Decline => {
-      expected_definition_phase(inp, Expectation::Keyword("type-system extension"))
+      expected_definition_phase(inp, Expectation::Production("a type-system extension"))
     }
   }
 }

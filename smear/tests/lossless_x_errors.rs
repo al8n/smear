@@ -239,7 +239,7 @@ fn the_two_layers_agree_on_what_end_of_input_reports() {
 /// The third of the four generated impls, and the one that routes through `expectation_of`. The
 /// seven images GraphQL has no counterpart for are the rows a mapper adapted from GraphQL's table
 /// would be missing, so those are the rows asserted here; a missing row falls back to
-/// `Expectation::Name`, which is a plausible-looking wrong answer rather than a crash.
+/// `Expectation::Unspecified`, which drops the expectation from the message rather than crashing.
 #[test]
 fn a_declined_expect_reports_the_graphqlx_expectation_for_its_kind() {
   use smear::parser::lexer::graphqlx::lossless::{LosslessToken, LosslessTokenKind as LK};
@@ -281,16 +281,16 @@ fn a_declined_expect_reports_the_graphqlx_expectation_for_its_kind() {
 
   // A trivia kind is never demanded by any production, so it falls back — which is the arm that
   // makes the fallback provably a fallback rather than the whole table.
-  assert_eq!(expectation_for(LK::Comment), Expectation::Name);
+  assert_eq!(expectation_for(LK::Comment), Expectation::Unspecified);
 }
 
 /// The lexer's error channel lands in the container with its payload intact.
 ///
-/// The fourth generated impl. Unlike the syntactic twin, which flattens a lexer error to a bare
-/// `Other("lexer error")` note, the payload survives here: the container's `StateError` is the
-/// lexer's own `LimitExceeded`, so `ErrorData::Lexer` accepts it unchanged. The span is the one
-/// thing that cannot be recovered — the lexer error type is a *batch* and the container's error
-/// carries a single span — so it is zeroed.
+/// The fourth generated impl. Unlike the syntactic twin, which keeps only the first lexer error's
+/// kind as `ErrorData::Lexical`, the payload survives here: the container's `StateError` is the
+/// lexer's own `LimitExceeded`, so `ErrorData::Lexer` accepts it unchanged. The outer span is
+/// zeroed — the lexer error type is a *batch* and the container's error carries a single span —
+/// and the batch keeps its own.
 #[test]
 fn a_lexer_error_lands_as_error_data_lexer_not_as_a_note() {
   use smear::parser::lexer::graphqlx::error::LexerErrors;

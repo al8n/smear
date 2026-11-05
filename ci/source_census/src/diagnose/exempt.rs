@@ -20,16 +20,24 @@
 //!
 //! [`Kind::Tracked`] is a family that has not joined the contract and is expected to. Every one of
 //! them today is al8n/smear#126's, and each must name its issue, so it is debt with a home rather
-//! than debt with an excuse. Two of that issue's phases are represented: **phase E**, the parser
-//! and lexer families, sequenced after the validator ones deliberately; and **phase D**, the §7
-//! writer and proto's adoption of the contract, which the issue sequences *strictly after*
-//! `feat/proto-execute-query` merges. Neither ordering is this table's — it records them.
+//! than debt with an excuse. One of that issue's phases is represented: **phase D**, the §7 writer
+//! and proto's adoption of the contract, which the issue sequences *strictly after*
+//! `feat/proto-execute-query` merges. That ordering is not this table's — it records it.
 //!
-//! [`Kind::NotDiagnostic`] is the name pattern misfiring: a type whose name ends in `Error` and
-//! which is not an error a consumer is ever handed. It is counted separately in the run's own
-//! output, because if it stops being a handful the pattern is wrong and recording will not fix
-//! that. There is none today, and the kind exists so that the first one is a record rather than a
-//! change to the pattern.
+//! **Phase E, the parser and lexer families, closed with one decision.** Every draft §2 refusal,
+//! lexical and grammatical, answers under one code family, `smear::syntax`, through one fieldless
+//! `SyntaxErrorKind`: draft §2 defines both layers as "the document is not GraphQL", a client
+//! cannot act differently on which layer refused, and which one did is an implementation detail a
+//! code has to outlive. So each dialect's `LexerError` and parser `Error` are contract rows, and
+//! what this table keeps of the phase is their containers, their components, the projections that
+//! name them, and four refusals that are about a value the caller built rather than a document.
+//!
+//! [`Kind::NotDiagnostic`] is a type named like an error that is not one a consumer is handed to
+//! explain a document: the name pattern misfiring, a wire entry such as `proto::RequestError`, or a
+//! component — a lexer's string or number refusal — that reaches a consumer only inside the
+//! contract row that answers for it. It is counted separately in the run's own output, because a
+//! component recorded here is a part of the surface that answers through something else, and that
+//! is worth a number somebody can read.
 
 use crate::exempt::reason_problems;
 
@@ -66,26 +74,27 @@ pub struct Exemption {
   pub reason: &'static str,
 }
 
-/// The lexer families: draft §2 lexical refusals, one per numeric and string shape.
-const LEXER_FAMILY: &str = "A draft §2 lexical refusal. al8n/smear#126 sequences the parser and \
-   lexer families into phase E, after the validator families and after the draft §3 layering memo \
-   that phase writes: the `Code` namespace has to settle where a lexical refusal sits relative to \
-   a syntactic one and to a validation rule before either family can be given codes meant to \
-   outlive a rewording, and that ordering is the issue's, not this table's. Recorded, not \
-   accepted.";
+/// The lexer's components: a string, Unicode-escape or number refusal inside a lexer error.
+const LEXER_COMPONENT: &str = "A part of a draft §2 lexical refusal rather than a refusal on its \
+   own. It reaches a consumer only inside a dialect's `LexerErrorData`, and that dialect's \
+   `LexerError` is the diagnostic that answers for it: a contract row, carrying the span this value \
+   does not and the `smear::syntax` code this value's own `kind()` maps to. Answering the contract \
+   here as well would give one refusal two primary locations and two diagnostics where a renderer \
+   should draw one.";
 
-/// The parser families: draft §2 syntactic refusals, and the lossless tower's own reports.
-const PARSER_FAMILY: &str = "A draft §2 syntactic refusal. Phase E of al8n/smear#126 owns it \
-   together with the lexer families, and for the same reason: the §3 question of which \
-   obligations a parser discharges and which a validation rule does is the one the contract was \
-   built to make rigorous, so codes assigned before that memo would be the guess the issue exists \
-   to stop making. Recorded, not accepted.";
+/// The projections a production names its error by, which are the caller's context's error.
+const ERROR_OF_PROJECTION: &str = "An `ErrorOf<…>` projection: the error type of whichever parse \
+   context the caller chose, so it names no type of its own and nothing can be asserted of it \
+   generically. Over this dialect's own container it is `Errors`, an aggregate of the dialect's \
+   `Error`, which is a contract row; over a caller's container it is the caller's type, which this \
+   crate cannot make answer. A `Diagnose` claim here would be a claim about every context anyone \
+   could write.";
 
 /// Every type the D1 inventory finds that does not answer the contract, each with its argument.
 ///
-/// It is long, and its length is the finding rather than a defect in the table: almost all of it is
-/// the lexer and parser families phase E owns. The rows it does *not* cover are the ones phase A
-/// implemented, and D2 proves those with the compiler.
+/// It is long, and most of it is the draft §2 surface: the containers, components and projections
+/// around the contract rows each dialect's syntax errors answer through. The rows it does *not*
+/// cover are the contract rows themselves, and D2 proves those with the compiler.
 ///
 /// The counts are deliberately not written out here. The run's own summary line is the first place
 /// in the repository that states how many there are, and it recomputes them; a pair copied into a
@@ -306,9 +315,8 @@ pub const EXEMPTIONS: &[Exemption] = &[
              `proto::SetExtensionsError`, `proto::Full`, `proto::SourceEventError` and \
              `proto::TooLarge` are already recorded as. `parser::graphql::lossless::Unverified` \
              is this door's sibling — the same tower, refusing a `(parse, source)` pair the \
-             caller put together — and its record already reaches the same conclusion about \
-             `primary`, but files it under phase E for that phase to settle rather than as a \
-             standing exemption; the two rows should be read together. \
+             caller put together — and its record reaches the same conclusion about `primary`; \
+             the two rows should be read together. \
              \
              What the argument does NOT reach is a refusal that has an input and merely no span: \
              `proto::StartError` is refused on a property of a whole document, a whole document \
@@ -383,264 +391,261 @@ pub const EXEMPTIONS: &[Exemption] = &[
              softening it: it is the one refusal with no position even in the RESPONSE, since it \
              is raised because the path could not be assembled. Recorded, not accepted.",
   },
-  // ── The lexer families — al8n/smear#126 phase E ──────────────────────────────────────────────
-  Exemption {
-    path: "smear::lexer::error::LengthError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::error::StringError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::error::StringErrors",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::error::StringValueError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::error::UnicodeError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::error::BracedUnicodeEscapeError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::error::FixedUnicodeEscapeError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::graphql::error::LexerError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
+  // ── Draft §2 syntax errors: the containers ──────────────────────────────────────────────────
+  //
+  // Phase E of al8n/smear#126 closed with each dialect's `LexerError` and parser `Error` answering
+  // the contract under `smear::syntax`. What follows is everything around those four rows.
   Exemption {
     path: "smear::lexer::graphql::error::LexerErrors",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::graphql::error::FloatError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::graphql::error::DecimalError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::graphqlx::error::LexerError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
+    kind: Kind::Aggregate,
+    element: Some("smear::lexer::graphql::error::LexerError"),
+    issue: None,
+    reason: "The batch a lexer hands back for one lexeme, with the span of each error in it. A \
+             collection is not a diagnostic — it has no code, primary span or severity of its own \
+             — and its elements are `LexerError`, which is a contract row and which D2 asserts.",
   },
   Exemption {
     path: "smear::lexer::graphqlx::error::LexerErrors",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::graphqlx::error::FloatError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::graphqlx::error::HexFloatError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::graphqlx::error::DecimalError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::graphqlx::error::HexError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::graphqlx::error::OctalError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  Exemption {
-    path: "smear::lexer::graphqlx::error::BinaryError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: LEXER_FAMILY,
-  },
-  // ── The parser families — al8n/smear#126 phase E ─────────────────────────────────────────────
-  Exemption {
-    path: "smear::parser::graphql::error::Error",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: PARSER_FAMILY,
+    kind: Kind::Aggregate,
+    element: Some("smear::lexer::graphqlx::error::LexerError"),
+    issue: None,
+    reason: "GraphQLx's twin of the GraphQL batch above, and the same argument: a collection of \
+             `LexerError`s, each a contract row that D2 asserts, with nothing of its own to answer.",
   },
   Exemption {
     path: "smear::parser::graphql::error::Errors",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: PARSER_FAMILY,
-  },
-  Exemption {
-    path: "smear::parser::graphql::syntactic::GraphqlError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: PARSER_FAMILY,
-  },
-  Exemption {
-    path: "smear::parser::graphql::lossless::GraphqlLosslessError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: PARSER_FAMILY,
-  },
-  Exemption {
-    path: "smear::parser::graphql::lossless::GraphqlLosslessErrors",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: PARSER_FAMILY,
-  },
-  Exemption {
-    path: "smear::parser::graphqlx::error::Error",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: PARSER_FAMILY,
+    kind: Kind::Aggregate,
+    element: Some("smear::parser::graphql::error::Error"),
+    issue: None,
+    reason: "The `Vec` of parser errors a GraphQL parse context collects. A collection is not a \
+             diagnostic, and the design says so: implemented by the resolved views, never by \
+             aggregates. Its elements are `Error`, which is a contract row and which D2 asserts.",
   },
   Exemption {
     path: "smear::parser::graphqlx::error::Errors",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: PARSER_FAMILY,
+    kind: Kind::Aggregate,
+    element: Some("smear::parser::graphqlx::error::Error"),
+    issue: None,
+    reason: "GraphQLx's twin of the GraphQL container above, and the same argument: a collection \
+             of `Error`s, each a contract row that D2 asserts.",
   },
   Exemption {
-    path: "smear::parser::graphqlx::syntactic::GraphqlxError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: PARSER_FAMILY,
-  },
-  Exemption {
-    path: "smear::parser::graphqlx::lossless::GraphqlxLosslessError",
-    kind: Kind::Tracked,
-    element: None,
-    issue: Some(126),
-    reason: PARSER_FAMILY,
+    path: "smear::parser::graphql::lossless::GraphqlLosslessErrors",
+    kind: Kind::Aggregate,
+    element: Some("smear::parser::graphql::error::Error"),
+    issue: None,
+    reason: "The container the lossless driver pins: the dialect's `Errors` re-keyed to the \
+             lossless token kind and state error. It is spelled through the `DialectErrors` \
+             rename, which `resolve_decl` cannot fold into the `Errors` row, so it is a row of its \
+             own; its elements are the dialect's `Error`, a contract row.",
   },
   Exemption {
     path: "smear::parser::graphqlx::lossless::GraphqlxLosslessErrors",
-    kind: Kind::Tracked,
+    kind: Kind::Aggregate,
+    element: Some("smear::parser::graphqlx::error::Error"),
+    issue: None,
+    reason: "GraphQLx's twin of the lossless container above, spelled through the same rename for \
+             the same reason, and with the same element: the dialect's `Error`, a contract row.",
+  },
+  // ── Draft §2 syntax errors: the projections a production names its error by ──────────────────
+  Exemption {
+    path: "smear::parser::graphql::syntactic::GraphqlError",
+    kind: Kind::NotDiagnostic,
     element: None,
-    issue: Some(126),
-    reason: PARSER_FAMILY,
+    issue: None,
+    reason: ERROR_OF_PROJECTION,
   },
   Exemption {
-    path: "smear::parser::lossless::project::ProjectError",
-    kind: Kind::Tracked,
+    path: "smear::parser::graphql::lossless::GraphqlLosslessError",
+    kind: Kind::NotDiagnostic,
     element: None,
-    issue: Some(126),
+    issue: None,
+    reason: ERROR_OF_PROJECTION,
+  },
+  Exemption {
+    path: "smear::parser::graphqlx::syntactic::GraphqlxError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: ERROR_OF_PROJECTION,
+  },
+  Exemption {
+    path: "smear::parser::graphqlx::lossless::GraphqlxLosslessError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: ERROR_OF_PROJECTION,
+  },
+  // ── Draft §2 syntax errors: the lexer's components ───────────────────────────────────────────
+  Exemption {
+    path: "smear::lexer::error::StringError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: LEXER_COMPONENT,
+  },
+  Exemption {
+    path: "smear::lexer::error::StringErrors",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: "The string refusals of one string literal, inside a lexer error's `String` data. It \
+             cannot be recorded as an aggregate of `StringError`, because `StringError` is a \
+             component rather than a contract row; like its element it reaches a consumer only \
+             inside a dialect's `LexerErrorData`, and the dialect's `LexerError` is the diagnostic \
+             that answers for the literal, with the first string refusal's kind as its code.",
+  },
+  Exemption {
+    path: "smear::lexer::error::UnicodeError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: LEXER_COMPONENT,
+  },
+  Exemption {
+    path: "smear::lexer::error::BracedUnicodeEscapeError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: LEXER_COMPONENT,
+  },
+  Exemption {
+    path: "smear::lexer::error::FixedUnicodeEscapeError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: LEXER_COMPONENT,
+  },
+  Exemption {
+    path: "smear::lexer::graphql::error::FloatError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: LEXER_COMPONENT,
+  },
+  Exemption {
+    path: "smear::lexer::graphql::error::DecimalError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: LEXER_COMPONENT,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::FloatError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: LEXER_COMPONENT,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::HexFloatError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: LEXER_COMPONENT,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::DecimalError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: LEXER_COMPONENT,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::HexError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: LEXER_COMPONENT,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::OctalError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: LEXER_COMPONENT,
+  },
+  Exemption {
+    path: "smear::lexer::graphqlx::error::BinaryError",
+    kind: Kind::NotDiagnostic,
+    element: None,
+    issue: None,
+    reason: LEXER_COMPONENT,
+  },
+  // ── The lexer crate's two conversion refusals ───────────────────────────────────────────────
+  Exemption {
+    path: "smear::lexer::error::LengthError",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Why `StringError::try_from(StringErrors)` refused: the container held no error, or \
+             more than one. Its subject is a container the caller handed over, not a span of a \
+             document, which is the class `MintError` records — a refusal about a value the \
+             caller constructed — and the two variants are the whole of what it has to say.",
+  },
+  Exemption {
+    path: "smear::lexer::error::StringValueError",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Why `decode_string_value` and its two siblings refused a `StringValue` spelling a \
+             caller handed them. A decoder outcome rather than a parse position: none of the three \
+             refusals is reachable from a spelling the parsers lexed — the lexer refuses each \
+             first, as a `LexerError` that answers the contract — and the one offset it carries \
+             is into the caller's spelling, not into any document, which is `MintError`'s class.",
+  },
+  // ── Phase E's four refusals about a value the caller built ──────────────────────────────────
+  Exemption {
+    path: "smear::parser::lossless::project::ProjectError",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
     reason: "The projection's refusal: the caller's buffer does not match the green tree the \
-             projection was asked to re-slice it by. Phase E of al8n/smear#126 owns it with the \
-             rest of the parser families. It is also the one refusal in this group that is about \
-             a caller's mistake rather than a document's, which is a distinction the phase's \
-             `Code` namespace has to make and cannot make before it exists.",
+             projection was asked to re-slice it by. Its subject is a pair the caller put together \
+             rather than a span of a document this crate parsed — the class `MintError` records — \
+             and `ProjectErrorKind` names what refused, which is the machine-readable part a code \
+             would otherwise have carried. Phase E of al8n/smear#126 closed on that: \
+             `smear::syntax` is draft §2's family, and a caller's mismatched pair is not a draft \
+             §2 refusal.",
   },
   Exemption {
     path: "smear::parser::graphql::lossless::Unverified",
-    kind: Kind::Tracked,
+    kind: Kind::Verdict,
     element: None,
-    issue: Some(126),
-    reason: "What a whole-root verification answers, and it is `ProjectError` above with the two \
-             outcomes separated — a stale pair from a tree too deep to descend — so it belongs to \
-             the same family and the same phase E. It also carries strictly LESS than the entry \
-             it is built from: `ProjectError` has a byte range, and this deliberately has none, \
-             because 'these are not the same document' is not a fact about a position in either \
-             of them. `Diagnose::primary` returns a `Location`, so answering the contract here \
-             means inventing one, and phase E is where what a caller-mistake refusal points at \
-             gets decided rather than guessed. Recorded, not accepted.",
+    issue: None,
+    reason: "What a whole-root verification answers: `ProjectError` above with its two outcomes \
+             separated — a stale pair, and a tree too deep to descend. Its subject is a `(parse, \
+             source)` pair the caller assembled, and 'these are not the same document' is not a \
+             fact about a position in either of them, so `Diagnose::primary` would have to invent \
+             one. Read with `MintError` and `ProjectError`; phase E of al8n/smear#126 closed with \
+             all three as outcomes about a caller's value rather than draft §2 refusals.",
   },
   Exemption {
     path: "smear::parser::lossless::Refused",
-    kind: Kind::Tracked,
+    kind: Kind::Verdict,
     element: None,
-    issue: Some(126),
+    issue: None,
     reason: "Why a source is not a document at all — the `Err` of the twelve `parse_*_from` \
-             siblings al8n/smear#121 added. Same family and same phase E as the entries around \
-             it, and for the ordinary structural reason first: `Diagnose` is `smear-schema`'s and \
-             `smear-parser` does not depend on it, so this crate could not answer the contract \
-             here even if the code were decided. \
-             What separates it from `MintError` and `Unverified` beside it is worth recording, \
-             because it means this row is waiting on strictly less: those two are exempt partly \
-             because `Diagnose::primary` returns a `Location` and neither has an honest one, and \
-             `NonUtf8Source` DOES — `valid_up_to` is the offset of the sequence that failed, and \
-             `source_len` bounds it. So the only open question here is which `Code` a refusal \
-             that precedes every rule should carry, which is exactly phase E's. Recorded, not \
-             accepted.",
+             siblings al8n/smear#121 added. A verdict about the whole source, recorded rather than \
+             answered because its two variants disagree about position: `NonUtf8Source` has one — \
+             `valid_up_to` is the offset of the sequence that failed — and `SourceTooLong` has \
+             only the whole source, which is `Location::entire`, whose single user \
+             `only_the_introspection_door_answers_entire` in `smear/tests/diagnostic_codes.rs` \
+             pins. A sum answers the contract for both variants or for neither, and answering \
+             for both means changing that gate deliberately; phase E of al8n/smear#126 closed \
+             without doing so.",
   },
   Exemption {
     path: "smear::parser::lossless::runner::Diagnostic",
-    kind: Kind::Tracked,
+    kind: Kind::Verdict,
     element: None,
-    issue: Some(126),
+    issue: None,
     reason: "What a lossless parse recorded: a byte range, a severity, and the token count of a \
              recovery hole. It is deliberately payload-free — carrying the typed error would give \
-             `Parse` the parse's lifetime and stop a consumer caching one per file — so joining \
-             the contract means deciding which `Code` a lifetime-free record can honestly answer \
-             with, and that is phase E's question rather than a line missing here.",
+             `Parse` the parse's lifetime and stop a consumer caching one per file — so it is the \
+             parse's record that a diagnostic happened rather than the diagnostic: the typed \
+             error that answers, a dialect `Error`, is dropped at materialisation by design. \
+             Phase E of al8n/smear#126 closed with that recorded rather than reversed.",
   },
 ];
 

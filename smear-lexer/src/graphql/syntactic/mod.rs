@@ -475,28 +475,30 @@ pub enum SyntacticTokenKind {
   Ampersand,
 }
 
+/// The kind as a diagnostic names what it found: punctuation in backticks, and every class as a
+/// bare noun — "name", "integer", "string" — because it follows "unexpected" in a message.
 impl core::fmt::Display for SyntacticTokenKind {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     match self {
-      Self::Identifier => f.write_str("identifier"),
-      Self::Int => f.write_str("int"),
+      Self::Identifier => f.write_str("name"),
+      Self::Int => f.write_str("integer"),
       Self::Float => f.write_str("float"),
       Self::InlineString => f.write_str("string"),
       Self::BlockString => f.write_str("block string"),
-      Self::Dollar => f.write_str("$"),
-      Self::LParen => f.write_str("("),
-      Self::RParen => f.write_str(")"),
-      Self::Spread => f.write_str("..."),
-      Self::Colon => f.write_str(":"),
-      Self::Equal => f.write_str("="),
-      Self::At => f.write_str("@"),
-      Self::LBracket => f.write_str("["),
-      Self::RBracket => f.write_str("]"),
-      Self::LBrace => f.write_str("{"),
-      Self::RBrace => f.write_str("}"),
-      Self::Pipe => f.write_str("|"),
-      Self::Bang => f.write_str("!"),
-      Self::Ampersand => f.write_str("&"),
+      Self::Dollar => f.write_str("`$`"),
+      Self::LParen => f.write_str("`(`"),
+      Self::RParen => f.write_str("`)`"),
+      Self::Spread => f.write_str("`...`"),
+      Self::Colon => f.write_str("`:`"),
+      Self::Equal => f.write_str("`=`"),
+      Self::At => f.write_str("`@`"),
+      Self::LBracket => f.write_str("`[`"),
+      Self::RBracket => f.write_str("`]`"),
+      Self::LBrace => f.write_str("`{`"),
+      Self::RBrace => f.write_str("`}`"),
+      Self::Pipe => f.write_str("`|`"),
+      Self::Bang => f.write_str("`!`"),
+      Self::Ampersand => f.write_str("`&`"),
     }
   }
 }
@@ -1241,3 +1243,6 @@ mod utf8_tests;
 
 #[cfg(test)]
 mod comment_utf8_tests;
+
+#[cfg(test)]
+mod diagnostic_tests;

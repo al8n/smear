@@ -24,7 +24,7 @@ where
       _ => Err(
         DialectGraphqlxError::unexpected_token(
           token.kind(),
-          Expectation::Keyword("query, mutation, or subscription"),
+          Expectation::Production("`query`, `mutation` or `subscription`"),
           span,
         )
         .into(),
@@ -32,7 +32,7 @@ where
     },
     None => expected_definition_phase(
       inp,
-      Expectation::Keyword("query, mutation, or subscription"),
+      Expectation::Production("`query`, `mutation` or `subscription`"),
     ),
   }
 }

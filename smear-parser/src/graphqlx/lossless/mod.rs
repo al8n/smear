@@ -237,7 +237,8 @@ crate::lossless::lossless_error_impls! {
 /// The lossless twin of `error.rs`'s `expectation_from_token_kind`.
 ///
 /// `ErrorData::UnexpectedToken` has one expectation slot, so a multi-kind or absent expectation
-/// falls back to `Name` exactly as the syntactic mapping does. Every trivia kind falls back too:
+/// falls back to `Unspecified` exactly as the syntactic mapping does. Every trivia kind falls back
+/// too:
 /// no production expects a comment or a newline — trivia is skipped into the tree by the atom
 /// set, never demanded — so those arms are unreachable in practice rather than merely lossy.
 ///
@@ -282,9 +283,9 @@ fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectat
       LosslessTokenKind::Plus => Expectation::Plus,
       LosslessTokenKind::Minus => Expectation::Minus,
       LosslessTokenKind::PathSeparator => Expectation::PathSeparator,
-      _ => Expectation::Name,
+      _ => Expectation::Unspecified,
     },
-    _ => Expectation::Name,
+    _ => Expectation::Unspecified,
   }
 }
 

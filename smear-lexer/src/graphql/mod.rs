@@ -41,7 +41,7 @@ pub use keyword::ContextualKeyword;
 
 pub(crate) mod handlers;
 
-use tokora::{SimpleSpan, state::RecursionLimitExceeded, utils::Lexeme};
+use tokora::{SimpleSpan, state::RecursionLimitExceeded};
 
 #[cfg(test)]
 mod tests;
@@ -52,7 +52,8 @@ mod tests;
 /// contract. The slice must scan to **exactly one** token whose span is the whole slice: leading or
 /// trailing trivia fails it and a second token fails it. The scan is
 /// [`SyntacticLexer`](syntactic::SyntacticLexer) — the shipped one, not a second grammar — so there
-/// is nothing left for the two layers to disagree about.
+/// is nothing left for the two layers to disagree about. `what` is the kind the calling door asked
+/// for, which its [`NotOneToken`](error::LexerErrorData::NotOneToken) names.
 ///
 /// # Why these exist: a payload with no door is a payload with a second custodian
 ///
@@ -70,6 +71,7 @@ mod tests;
 /// always text and the answer is that same slice. A byte door here would be surface with no caller.
 fn scan_one_token<'de: 'a, 'a>(
   value: &'de str,
+  what: &'static str,
 ) -> Result<syntactic::SyntacticToken<&'a str>, error::LexerErrors<char, RecursionLimitExceeded>> {
   use tokora::Lexer as _;
 
@@ -86,17 +88,23 @@ fn scan_one_token<'de: 'a, 'a>(
   let token = first?;
   let span = lexer.span();
   if span.start() != 0 || span.end() != value.len() || lexer.lex().is_some() {
-    return Err(not_one_token(value.len()));
+    return Err(not_one_token(value.len(), what));
   }
   Ok(token)
 }
 
-/// The slice is not the one token the caller asked for, and the scanner had no complaint of its
-/// own to make.
-fn not_one_token(len: usize) -> error::LexerErrors<char, RecursionLimitExceeded> {
+/// The slice is not exactly one `what` — the token kind the calling door asked for — and the
+/// scanner had no complaint of its own to make.
+///
+/// [`NotOneToken`](error::LexerErrorData::NotOneToken), not the scanner's `UnexpectedLexeme`: no
+/// character was refused, the slice as a whole was.
+fn not_one_token(
+  len: usize,
+  what: &'static str,
+) -> error::LexerErrors<char, RecursionLimitExceeded> {
   error::LexerError::const_new(
     SimpleSpan::new(0, len),
-    error::LexerErrorData::UnexpectedLexeme(Lexeme::from_range_const(SimpleSpan::new(0, len))),
+    error::LexerErrorData::NotOneToken(what),
   )
   .into()
 }
@@ -114,12 +122,13 @@ fn not_one_token(len: usize) -> error::LexerErrors<char, RecursionLimitExceeded>
 /// to the scanner and it is [`ContextualKeyword`] that tells them apart afterwards.
 ///
 /// The lexer's own error passes through unchanged; the failures the lexer has no opinion about are
-/// one `UnexpectedLexeme` over the slice.
+/// one [`NotOneToken`](error::LexerErrorData::NotOneToken) over the slice.
 #[inline]
 pub fn identifier(value: &str) -> Result<&str, error::LexerErrors<char, RecursionLimitExceeded>> {
-  match scan_one_token(value)? {
+  const WHAT: &str = "name";
+  match scan_one_token(value, WHAT)? {
     syntactic::SyntacticToken::Identifier(name) => Ok(name),
-    _ => Err(not_one_token(value.len())),
+    _ => Err(not_one_token(value.len(), WHAT)),
   }
 }
 
@@ -131,9 +140,10 @@ pub fn identifier(value: &str) -> Result<&str, error::LexerErrors<char, Recursio
 /// than being accepted, because the two AST carriers are different productions.
 #[inline]
 pub fn int_literal(value: &str) -> Result<&str, error::LexerErrors<char, RecursionLimitExceeded>> {
-  match scan_one_token(value)? {
+  const WHAT: &str = "integer";
+  match scan_one_token(value, WHAT)? {
     syntactic::SyntacticToken::LitInt(text) => Ok(text),
-    _ => Err(not_one_token(value.len())),
+    _ => Err(not_one_token(value.len(), WHAT)),
   }
 }
 
@@ -144,8 +154,9 @@ pub fn int_literal(value: &str) -> Result<&str, error::LexerErrors<char, Recursi
 pub fn float_literal(
   value: &str,
 ) -> Result<&str, error::LexerErrors<char, RecursionLimitExceeded>> {
-  match scan_one_token(value)? {
+  const WHAT: &str = "float";
+  match scan_one_token(value, WHAT)? {
     syntactic::SyntacticToken::LitFloat(text) => Ok(text),
-    _ => Err(not_one_token(value.len())),
+    _ => Err(not_one_token(value.len(), WHAT)),
   }
 }

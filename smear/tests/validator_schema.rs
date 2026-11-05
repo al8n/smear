@@ -20,7 +20,10 @@
 #![allow(missing_docs)]
 
 use smear::{
-  lexer::tokora::{Parse as _, Parser, SimpleSpan},
+  lexer::{
+    SyntaxErrorKind,
+    tokora::{Parse as _, Parser, SimpleSpan},
+  },
   parser::graphql::{
     GraphQL,
     ast::{
@@ -1539,7 +1542,7 @@ fn ill_formed_text_is_refused_by_the_byte_lexer() {
     panic!("a string literal that is not UTF-8 does not parse");
   };
 
-  // The parser keeps a lexer error's span and flattens its data to this note.
+  // The parser keeps a lexer error's span and its kind.
   let literals = [
     SimpleSpan::new(0, 3),
     SimpleSpan::new(32, 35),
@@ -1552,7 +1555,12 @@ fn ill_formed_text_is_refused_by_the_byte_lexer() {
   }
   let lexer_errors: Vec<SimpleSpan> = errors
     .iter()
-    .filter(|error| matches!(error.data(), ErrorData::Other(note) if note == "lexer error"))
+    .filter(|error| {
+      matches!(
+        error.data(),
+        ErrorData::Lexical(SyntaxErrorKind::InvalidUtf8)
+      )
+    })
     .map(|error| error.span())
     .collect();
   assert!(!lexer_errors.is_empty(), "{errors:?}");
