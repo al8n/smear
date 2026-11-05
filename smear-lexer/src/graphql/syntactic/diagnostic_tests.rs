@@ -194,6 +194,11 @@ fn every_lexical_refusal_renders_its_own_sentence_under_its_own_code() {
       "unclosed Unicode escape, expected `}`",
     ),
     (
+      r#""\u{G}""#,
+      SyntaxErrorKind::InvalidUnicodeEscape,
+      "invalid Unicode escape, expected hex digits between `{` and `}`",
+    ),
+    (
       r#""\u{}""#,
       SyntaxErrorKind::InvalidUnicodeEscape,
       "empty Unicode escape, expected a hex digit between `{` and `}`",
@@ -223,10 +228,11 @@ fn a_byte_source_refuses_an_ill_formed_string_as_invalid_utf8() {
   );
 }
 
-/// A braced escape whose digits are not hex is a byte source's refusal alone. A text source never
-/// reaches it: its grammar reads `\u{` followed by anything but a hex digit or `}` as an unclosed
-/// escape, closed braces or not. A byte that begins no UTF-8 scalar matches none of those rules, so
-/// only the bare `\u{` rule takes it and finds the closing brace past it.
+/// A byte source refuses a braced escape whose content is not hex as a text source does, but by a
+/// route of its own, which is what this case pins. A text source's `"\u{G}"`, in the table above,
+/// is taken by the rule for `\u{` and one character. A byte that begins no UTF-8 scalar matches
+/// neither that rule nor the hex one, so the bare `\u{` rule takes the escape, and its search for
+/// the closing brace goes past that byte.
 #[test]
 fn a_byte_source_refuses_a_braced_escape_that_is_not_hex() {
   let src: &[u8] = b"\"\\u{\xff}\"";

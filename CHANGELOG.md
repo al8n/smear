@@ -152,6 +152,14 @@ All notable changes to Smear are documented in this file.
   span, as at the end of input. Before a delimiter, as in `0x)`, it produced an
   empty error batch, which the syntactic parser reported as
   `Other("lexer error")` at `0..0`.
+- `smear-lexer`: a braced Unicode escape whose brace is closed but whose content
+  is not hex, such as `\u{G}` or `\u{12G4}`, refuses as
+  `BracedUnicodeEscapeError::InvalidSequence` over the whole escape in a text
+  source too, where it refused as `Unclosed`. The search for the brace stops at
+  the string's closing quote, at a line break and at the next escape, any of
+  which leaves the escape `Unclosed`, so in a byte source it no longer runs past
+  the string to a `}` later in the document. A `\u{` followed directly by a
+  quote, a backslash or a line break no longer swallows it.
 
 ## [0.0.1] - 2026-10-30
 
