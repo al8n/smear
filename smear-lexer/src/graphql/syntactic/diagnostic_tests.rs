@@ -58,7 +58,9 @@ macro_rules! assert_refusal {
     assert_eq!(error.primary_label(), Some(kind.message()));
     assert_eq!(error.help(), kind.help());
     assert_eq!(error.labels(), 0);
+    assert!(error.label(0).is_none());
     assert_eq!(error.path_segments(), 0);
+    assert!(error.path_segment(0).is_none());
   }};
 }
 
@@ -112,6 +114,16 @@ fn every_lexical_refusal_renders_its_own_sentence_under_its_own_code() {
       "invalid number, unexpected character after a float",
     ),
     (
+      "1.)",
+      SyntaxErrorKind::InvalidNumber,
+      "invalid number, expected a fractional digit",
+    ),
+    (
+      "1e+)",
+      SyntaxErrorKind::InvalidNumber,
+      "invalid number, expected an exponent digit",
+    ),
+    (
       "\"unterminated",
       SyntaxErrorKind::UnterminatedString,
       "unterminated string, expected a closing `\"`",
@@ -125,6 +137,16 @@ fn every_lexical_refusal_renders_its_own_sentence_under_its_own_code() {
       "\"\nhello\n\"",
       SyntaxErrorKind::LineTerminatorInString,
       "line feed in a single-line string",
+    ),
+    (
+      "\"a\rb\"",
+      SyntaxErrorKind::LineTerminatorInString,
+      "carriage return in a single-line string",
+    ),
+    (
+      "\"a\r\nb\"",
+      SyntaxErrorKind::LineTerminatorInString,
+      "line break in a single-line string",
     ),
     (
       r#""a\qb""#,
@@ -152,6 +174,11 @@ fn every_lexical_refusal_renders_its_own_sentence_under_its_own_code() {
       "unpaired high surrogate in a Unicode escape",
     ),
     (
+      r#""\uDE00""#,
+      SyntaxErrorKind::InvalidUnicodeScalar,
+      "unpaired low surrogate in a Unicode escape",
+    ),
+    (
       r#""\u{D800}""#,
       SyntaxErrorKind::InvalidUnicodeScalar,
       "escape names a surrogate, not a Unicode scalar value",
@@ -160,6 +187,21 @@ fn every_lexical_refusal_renders_its_own_sentence_under_its_own_code() {
       r#""\u{110000}""#,
       SyntaxErrorKind::InvalidUnicodeScalar,
       "escape names a value past `10FFFF`, not a Unicode scalar value",
+    ),
+    (
+      r#""\u{12""#,
+      SyntaxErrorKind::InvalidUnicodeEscape,
+      "unclosed Unicode escape, expected `}`",
+    ),
+    (
+      r#""\u{}""#,
+      SyntaxErrorKind::InvalidUnicodeEscape,
+      "empty Unicode escape, expected a hex digit between `{` and `}`",
+    ),
+    (
+      r#""\u{1234567}""#,
+      SyntaxErrorKind::InvalidUnicodeEscape,
+      "invalid Unicode escape, more than 6 hex digits",
     ),
   ];
 
@@ -178,6 +220,22 @@ fn a_byte_source_refuses_an_ill_formed_string_as_invalid_utf8() {
     src,
     SyntaxErrorKind::InvalidUtf8,
     "invalid UTF-8 in a string"
+  );
+}
+
+/// A braced escape whose digits are not hex is a byte source's refusal alone. A text source never
+/// reaches it: its grammar reads `\u{` followed by anything but a hex digit or `}` as an unclosed
+/// escape, closed braces or not. A byte that begins no UTF-8 scalar matches none of those rules, so
+/// only the bare `\u{` rule takes it and finds the closing brace past it.
+#[test]
+fn a_byte_source_refuses_a_braced_escape_that_is_not_hex() {
+  let src: &[u8] = b"\"\\u{\xff}\"";
+  let error = first_error!(SyntacticLexer::<[u8]>::new(src), src);
+  assert_refusal!(
+    error,
+    src,
+    SyntaxErrorKind::InvalidUnicodeEscape,
+    "invalid Unicode escape, expected hex digits between `{` and `}`"
   );
 }
 
@@ -249,5 +307,169 @@ fn a_whole_slice_door_refuses_what_is_not_exactly_one_token_of_its_kind() {
     assert_eq!(error.span(), SimpleSpan::new(0, src.len()), "{src:?}");
     assert_eq!(error.help(), None, "{src:?}");
     assert_refusal!(error, src, SyntaxErrorKind::UnexpectedToken, message);
+  }
+}
+
+/// Every token kind renders as a diagnostic names what it found: punctuation in backticks, and
+/// every class, trivia included, as a bare noun. Both tables are copied from the impls row for row,
+/// so rewording a kind is a change this test has to be shown.
+#[test]
+fn every_token_kind_renders_as_a_diagnostic_names_it() {
+  use crate::graphql::{
+    lossless::LosslessTokenKind as Lossless, syntactic::SyntacticTokenKind as Syntactic,
+  };
+
+  for (kind, text) in [
+    (Syntactic::Identifier, "name"),
+    (Syntactic::Int, "integer"),
+    (Syntactic::Float, "float"),
+    (Syntactic::InlineString, "string"),
+    (Syntactic::BlockString, "block string"),
+    (Syntactic::Dollar, "`$`"),
+    (Syntactic::LParen, "`(`"),
+    (Syntactic::RParen, "`)`"),
+    (Syntactic::Spread, "`...`"),
+    (Syntactic::Colon, "`:`"),
+    (Syntactic::Equal, "`=`"),
+    (Syntactic::At, "`@`"),
+    (Syntactic::LBracket, "`[`"),
+    (Syntactic::RBracket, "`]`"),
+    (Syntactic::LBrace, "`{`"),
+    (Syntactic::RBrace, "`}`"),
+    (Syntactic::Pipe, "`|`"),
+    (Syntactic::Bang, "`!`"),
+    (Syntactic::Ampersand, "`&`"),
+  ] {
+    assert_eq!(kind.to_string(), text, "{kind:?}");
+  }
+
+  for (kind, text) in [
+    (Lossless::Ampersand, "`&`"),
+    (Lossless::At, "`@`"),
+    (Lossless::Bom, "BOM"),
+    (Lossless::RBrace, "`}`"),
+    (Lossless::LBrace, "`{`"),
+    (Lossless::RBracket, "`]`"),
+    (Lossless::LBracket, "`[`"),
+    (Lossless::RParen, "`)`"),
+    (Lossless::LParen, "`(`"),
+    (Lossless::Bang, "`!`"),
+    (Lossless::Colon, "`:`"),
+    (Lossless::Dollar, "`$`"),
+    (Lossless::Equal, "`=`"),
+    (Lossless::Space, "space"),
+    (Lossless::Tab, "tab"),
+    (Lossless::CarriageReturn, "carriage return"),
+    (Lossless::Newline, "line feed"),
+    (Lossless::CarriageReturnAndNewline, "line break"),
+    (Lossless::Comma, "`,`"),
+    (Lossless::Pipe, "`|`"),
+    (Lossless::Spread, "`...`"),
+    (Lossless::Float, "float"),
+    (Lossless::Identifier, "name"),
+    (Lossless::Int, "integer"),
+    (Lossless::InlineString, "string"),
+    (Lossless::BlockString, "block string"),
+    (Lossless::Comment, "comment"),
+  ] {
+    assert_eq!(kind.to_string(), text, "{kind:?}");
+  }
+}
+
+/// The refusals no lexing door reaches, read at the value: the two hints no scanner raises, an
+/// integer the input ends inside (no scanner builds that one either), a source that is not UTF-8,
+/// the free-form notes, an empty string batch, and the unterminated delimiter no lexed string
+/// leaves undecided. The unopened spelling is the one built by a real door, `LitStr::try_from`,
+/// which re-reads a caller's spelling rather than lexing a document. Each answers the contract
+/// under the kind its data names.
+#[test]
+fn the_refusals_no_lexing_door_reaches_render_their_sentences() {
+  use std::borrow::Cow;
+
+  use tokora::{SimpleSpan, error::UnexpectedEnd};
+
+  use crate::{
+    LitStr,
+    error::{StringError, StringErrors},
+    graphql::error::{DecimalError, FloatError, LexerError, LexerErrorData},
+    hints::{DecimalHint, ExponentHint, FloatHint, LitStrDelimiterHint},
+  };
+
+  /// A refusal built from its data, at a span no lexer chose.
+  fn built(data: LexerErrorData<char, ()>) -> LexerError<char, ()> {
+    LexerError::new(SimpleSpan::new(0, 1), data)
+  }
+
+  let not_utf8 = core::str::from_utf8(&[u8::MAX]).expect_err("0xFF begins no UTF-8 sequence");
+  let unopened = LitStr::<&str>::try_from("value").expect_err("the spelling opens with no quote");
+  let note: StringError = StringError::Other(Cow::Borrowed("a free-form string note"));
+  let undecided: StringError = StringError::Unterminated(UnexpectedEnd::new(
+    0,
+    LitStrDelimiterHint::QuoteOrTripleQuote,
+  ));
+
+  for (what, error, kind, message) in [
+    (
+      "an integer the input ends inside",
+      built(LexerErrorData::Int(DecimalError::UnexpectedEnd(
+        UnexpectedEnd::new(0, DecimalHint::Digit),
+      ))),
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected a digit",
+    ),
+    (
+      "a float the input ends inside before a digit",
+      built(LexerErrorData::Float(FloatError::UnexpectedEnd(
+        UnexpectedEnd::new(0, FloatHint::Digit),
+      ))),
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected a digit",
+    ),
+    (
+      "a float the input ends inside before its exponent marker",
+      built(LexerErrorData::Float(FloatError::UnexpectedEnd(
+        UnexpectedEnd::new(0, FloatHint::Exponent(ExponentHint::Identifier)),
+      ))),
+      SyntaxErrorKind::IncompleteNumber,
+      "incomplete number, expected `e` or `E`",
+    ),
+    (
+      "a source that is not UTF-8",
+      built(LexerErrorData::InvalidUtf8(not_utf8)),
+      SyntaxErrorKind::InvalidUtf8,
+      "invalid UTF-8",
+    ),
+    (
+      "a free-form note",
+      built(LexerErrorData::other("a free-form note")),
+      SyntaxErrorKind::InvalidSyntax,
+      "a free-form note",
+    ),
+    (
+      "an empty string batch",
+      built(LexerErrorData::String(StringErrors::default())),
+      SyntaxErrorKind::InvalidSyntax,
+      "invalid syntax",
+    ),
+    (
+      "a free-form string note",
+      built(LexerErrorData::String(note.into())),
+      SyntaxErrorKind::InvalidSyntax,
+      "a free-form string note",
+    ),
+    (
+      "a string the input ends inside, delimiter undecided",
+      built(LexerErrorData::String(undecided.into())),
+      SyntaxErrorKind::UnterminatedString,
+      "unterminated string",
+    ),
+    (
+      "a spelling with no opening quote",
+      built(LexerErrorData::String(unopened)),
+      SyntaxErrorKind::UnopenedString,
+      "a string value must open with `\"` or `\"\"\"`",
+    ),
+  ] {
+    assert_refusal!(error, what, kind, message);
   }
 }

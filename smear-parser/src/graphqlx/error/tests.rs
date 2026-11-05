@@ -23,4 +23,5 @@ fn graphqlx_error_is_parse_ctx_over_str_and_slice() {
   >();
 }
 
+mod expectation;
 mod terminal;

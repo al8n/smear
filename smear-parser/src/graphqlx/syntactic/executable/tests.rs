@@ -494,3 +494,24 @@ fn direct_executable_apis_preserve_owned_bytes_payloads() {
     &::bytes::Bytes::from_static(b"Owned")
   );
 }
+
+/// An operation-definition door refuses a fragment head by naming the production it expected,
+/// under `smear::syntax::unexpected-token`.
+#[test]
+fn an_operation_definition_refuses_a_fragment_head_by_name() {
+  use std::string::ToString;
+
+  use smear_lexer::SyntaxErrorKind;
+  use tokora::diagnostic::Diagnose;
+
+  let error = drive_str(|inp| operation_definition(inp).map(|_| ()), "fragment")
+    .expect_err("a fragment head is not an operation")
+    .into_iter()
+    .next()
+    .expect("the fatal context reports one error");
+  assert_eq!(error.code(), SyntaxErrorKind::UnexpectedToken.code());
+  assert_eq!(
+    error.to_string(),
+    "unexpected name, expected an operation definition"
+  );
+}

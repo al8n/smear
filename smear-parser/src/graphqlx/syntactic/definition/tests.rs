@@ -294,3 +294,125 @@ fn extension_dispatch_selects_all_named_shapes() {
     drive_slice(ast::TypeExtension::graphqlx, source.as_bytes()).expect("slice type extension");
   }
 }
+
+/// A committed definition or extension phase names the production it expected: under
+/// `smear::syntax::unexpected-token` where a token stood in its place, and under
+/// `smear::syntax::unexpected-end-of-input` where the source ended there.
+#[test]
+fn a_rejected_phase_names_the_production_it_expected() {
+  use std::string::{String, ToString};
+
+  use smear_lexer::SyntaxErrorKind;
+  use tokora::diagnostic::{Code, Diagnose};
+
+  /// The code and the sentence of the one error a refused fixture reports.
+  fn refusal<O>(result: Result<O, GraphqlxErrors<&str>>) -> (Code, String) {
+    let Err(errors) = result else {
+      panic!("the fixture should be refused");
+    };
+    let error = errors
+      .into_iter()
+      .next()
+      .expect("the fatal context reports one error");
+    (error.code(), error.to_string())
+  }
+
+  let token = SyntaxErrorKind::UnexpectedToken;
+  let end = SyntaxErrorKind::UnexpectedEndOfInput;
+
+  for (what, (code, rendered), kind, expected) in [
+    (
+      "an entry opened by no keyword",
+      refusal(drive_str(
+        ast::TypeSystemDefinitionOrExtension::graphqlx,
+        "1",
+      )),
+      token,
+      "unexpected integer, expected a type-system definition or an extension",
+    ),
+    (
+      "an entry named by no keyword",
+      refusal(drive_str(
+        ast::TypeSystemDefinitionOrExtension::graphqlx,
+        "foo",
+      )),
+      token,
+      "unexpected name, expected a type-system definition or an extension",
+    ),
+    (
+      "a type definition named by no keyword",
+      refusal(drive_str(ast::TypeDefinition::graphqlx, "foo")),
+      token,
+      "unexpected name, expected a type definition",
+    ),
+    (
+      "a type definition opened by no keyword",
+      refusal(drive_str(ast::TypeDefinition::graphqlx, "1")),
+      token,
+      "unexpected integer, expected a type definition",
+    ),
+    (
+      "an extension of a shape that is not a type",
+      refusal(drive_str(ast::TypeExtension::graphqlx, "extend foo")),
+      token,
+      "unexpected name, expected a type extension",
+    ),
+    (
+      "an extension that no shape follows",
+      refusal(drive_str(ast::TypeExtension::graphqlx, "extend 1")),
+      token,
+      "unexpected integer, expected a type extension",
+    ),
+    (
+      "a type-system extension of no shape",
+      refusal(drive_str(ast::TypeSystemExtension::graphqlx, "extend foo")),
+      token,
+      "unexpected name, expected a type-system extension",
+    ),
+    (
+      "a type-system extension that no shape follows",
+      refusal(drive_str(ast::TypeSystemExtension::graphqlx, "extend 1")),
+      token,
+      "unexpected integer, expected a type-system extension",
+    ),
+    (
+      "a union extension that adds nothing",
+      refusal(drive_str(
+        ast::UnionTypeExtension::graphqlx,
+        "extend union U",
+      )),
+      end,
+      "unexpected end of input, expected directives or union member types",
+    ),
+    (
+      "an enum extension that adds nothing",
+      refusal(drive_str(ast::EnumTypeExtension::graphqlx, "extend enum E")),
+      end,
+      "unexpected end of input, expected directives or an enum values definition",
+    ),
+    (
+      "an input extension that adds nothing",
+      refusal(drive_str(
+        ast::InputObjectTypeExtension::graphqlx,
+        "extend input I",
+      )),
+      end,
+      "unexpected end of input, expected directives or an input fields definition",
+    ),
+    (
+      "a schema extension that adds nothing",
+      refusal(drive_str(ast::SchemaExtension::graphqlx, "extend schema")),
+      end,
+      "unexpected end of input, expected directives or a root operation types definition",
+    ),
+    (
+      "a root operation with no operation type",
+      refusal(drive_str(ast::RootOperationTypeDefinition::graphqlx, "")),
+      end,
+      "unexpected end of input, expected `query`, `mutation` or `subscription`",
+    ),
+  ] {
+    assert_eq!(code, kind.code(), "{what}");
+    assert_eq!(rendered, expected, "{what}");
+  }
+}

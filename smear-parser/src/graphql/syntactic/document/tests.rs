@@ -295,3 +295,38 @@ fn associated_root_apis_infer_str_and_byte_slice_sources() {
   )
   .expect("str document");
 }
+
+/// A document entry refused at a committed head names the production it expected, under
+/// `smear::syntax::unexpected-token`: an `extend` that no type-system extension follows, and a
+/// description that no definition follows.
+#[test]
+fn a_refused_document_entry_names_the_production_it_expected() {
+  use std::string::ToString;
+
+  use smear_lexer::SyntaxErrorKind;
+  use tokora::diagnostic::Diagnose;
+
+  for (source, expected) in [
+    (
+      "extend foo",
+      "unexpected name, expected a type-system extension",
+    ),
+    (
+      "extend 1",
+      "unexpected integer, expected a type-system extension",
+    ),
+    ("\"doc\" foo", "unexpected name, expected a definition"),
+  ] {
+    let error = drive_str(|inp| document(inp).map(|_| ()), source)
+      .expect_err("the fixture should be refused")
+      .into_iter()
+      .next()
+      .expect("the fatal context reports one error");
+    assert_eq!(
+      error.code(),
+      SyntaxErrorKind::UnexpectedToken.code(),
+      "{source:?}"
+    );
+    assert_eq!(error.to_string(), expected, "{source:?}");
+  }
+}
