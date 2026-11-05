@@ -4250,7 +4250,7 @@ impl SchemaBuilder {
       let one_of = self.types[index].one_of;
 
       match kind {
-        TypeKind::Scalar => {}
+        TypeKind::Scalar => self.validate_scalar(index, owner),
         TypeKind::Object | TypeKind::Interface => {
           self.validate_fields(index, owner);
           self.validate_implements(index, owner);
@@ -4259,6 +4259,31 @@ impl SchemaBuilder {
         TypeKind::Enum => self.validate_enum(index, owner),
         TypeKind::InputObject => self.validate_input_object(index, owner, one_of),
       }
+    }
+  }
+
+  /// Draft §3.13.4: `@specifiedBy` "must not appear on built-in scalar types".
+  ///
+  /// Read off the merged list, so a `@specifiedBy` that an `extend scalar` adds is refused where
+  /// it is written, as one on the definition is. Being built in is decided by the name, as
+  /// [`BuiltInScalar::from_name`] decides it everywhere: a document that spells `scalar Int` out
+  /// still defines the specification's `Int`.
+  fn validate_scalar(&mut self, index: usize, owner: Coordinate) {
+    if BuiltInScalar::from_name(self.text(self.types[index].name.sym).as_bytes()).is_none() {
+      return;
+    }
+    for position in 0..self.types[index].directives.len() {
+      let used = self.types[index].directives[position].name;
+      if self.text(used.sym) != SPECIFIED_BY {
+        continue;
+      }
+      let owner = self.owner(owner);
+      self.push_owned(
+        SchemaErrorKind::SpecifiedByOnBuiltInScalar,
+        SPECIFIED_BY,
+        owner,
+        used,
+      );
     }
   }
 

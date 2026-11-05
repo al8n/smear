@@ -69,6 +69,8 @@ pub enum SchemaErrorKind {
   ///
   /// The five built-in scalars and the five specified directives are *not* in this class: a
   /// document that spells one out replaces it, which is what makes a printed schema re-readable.
+  /// A built-in scalar spelled out is still the specification's, though, so it takes no
+  /// `@specifiedBy`: that is [`SpecifiedByOnBuiltInScalar`](Self::SpecifiedByOnBuiltInScalar).
   /// The introspection types are `__`-prefixed and injected unconditionally, so a definition of
   /// one is a genuine collision.
   RedefinedBuiltInType,
@@ -344,6 +346,19 @@ pub enum SchemaErrorKind {
   /// A directive definition refers to itself, directly or through the types it names
   /// (draft §3.13.1).
   SelfReferentialDirective,
+  /// `@specifiedBy` is applied to a built-in scalar, by its definition or by an `extend scalar`
+  /// (draft §3.13.4).
+  ///
+  /// "It must not appear on built-in scalar types", which "must not provide a scalar
+  /// specification URL as they are specified by this document" (§3.5). A document may spell
+  /// `scalar Int` out and replace the injected definition, as
+  /// [`RedefinedBuiltInType`](Self::RedefinedBuiltInType) records, but what it defines is still
+  /// the specification's `Int`, so being built in is a matter of the name.
+  ///
+  /// graphql-js accepts the directive in either position and discards it, with the definition or
+  /// the extension it is written on: a built-in scalar is always its own. The subject is
+  /// `specifiedBy`, qualified by the scalar, and the span is the directive's name.
+  SpecifiedByOnBuiltInScalar,
 
   // -- §3.13 Directives, at a use site --------------------------------------------------------
   //
@@ -474,6 +489,7 @@ impl SchemaErrorKind {
     Self::DirectiveArgumentTypeNotInputType,
     Self::TooManyDirectiveArguments,
     Self::SelfReferentialDirective,
+    Self::SpecifiedByOnBuiltInScalar,
     Self::UndefinedDirective,
     Self::UnsupportedDirectiveLocation,
     Self::DuplicateDirectiveUse,
@@ -570,6 +586,7 @@ impl SchemaErrorKind {
       Self::DirectiveArgumentTypeNotInputType => "directive argument type is not an input type",
       Self::TooManyDirectiveArguments => "directive declares too many arguments",
       Self::SelfReferentialDirective => "directive definition refers to itself",
+      Self::SpecifiedByOnBuiltInScalar => "@specifiedBy is applied to a built-in scalar",
       Self::UndefinedDirective => "undefined directive",
       Self::UnsupportedDirectiveLocation => "directive is not allowed here",
       Self::DuplicateDirectiveUse => "directive is not repeatable",
@@ -690,6 +707,9 @@ impl SchemaErrorKind {
       }
       Self::TooManyDirectiveArguments => Code::new("smear::schema::too-many-directive-arguments"),
       Self::SelfReferentialDirective => Code::new("smear::schema::self-referential-directive"),
+      Self::SpecifiedByOnBuiltInScalar => {
+        Code::new("smear::schema::specified-by-on-built-in-scalar")
+      }
       Self::UndefinedDirective => Code::new("smear::schema::undefined-directive"),
       Self::UnsupportedDirectiveLocation => {
         Code::new("smear::schema::unsupported-directive-location")
@@ -786,6 +806,7 @@ impl SchemaErrorKind {
       | Self::DirectiveArgumentTypeNotInputType
       | Self::TooManyDirectiveArguments
       | Self::SelfReferentialDirective
+      | Self::SpecifiedByOnBuiltInScalar
       | Self::UndefinedDirective
       | Self::UnsupportedDirectiveLocation
       | Self::DuplicateDirectiveUse
@@ -945,6 +966,9 @@ impl SchemaErrorKind {
       Self::SelfReferentialDirective => Some(
         "a directive may not appear on its own definition, nor on any type that definition names.",
       ),
+      Self::SpecifiedByOnBuiltInScalar => Some(
+        "a built-in scalar is specified by the GraphQL specification itself, so it takes no specification URL; drop the `@specifiedBy`.",
+      ),
       Self::UnsupportedDirectiveLocation => {
         Some("add the location to the directive's definition, or move the usage.")
       }
@@ -1062,6 +1086,7 @@ impl SchemaErrorKind {
       | Self::DirectiveArgumentTypeNotInputType
       | Self::TooManyDirectiveArguments
       | Self::SelfReferentialDirective
+      | Self::SpecifiedByOnBuiltInScalar
       | Self::UndefinedDirective
       | Self::UnsupportedDirectiveLocation
       | Self::UndefinedDirectiveArgument

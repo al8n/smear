@@ -190,6 +190,14 @@ All notable changes to Smear are documented in this file.
   fields or one `null` field, at any depth of lists and input objects, is refused
   as `InvalidDefaultValue` or `InvalidDirectiveArgumentValue`, at the literal or
   at the `null`.
+- `smear-schema`: `@specifiedBy` on a built-in scalar is refused as
+  `SchemaErrorKind::SpecifiedByOnBuiltInScalar`, at the directive, whether a
+  definition that spells the scalar out applies it or an `extend scalar` does
+  (draft §3.13.4: it "must not appear on built-in scalar types"). graphql-js
+  accepts it and discards it. `Schema::from_introspection` refuses a response
+  that gives a built-in scalar a `specifiedByURL` the same way, because the door
+  writes it out as the directive. Code
+  `smear::schema::specified-by-on-built-in-scalar`.
 
 ## [0.0.1] - 2026-10-30
 

@@ -877,6 +877,11 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
      input In { x: Int @d }",
     &[SchemaErrorKind::SelfReferentialDirective],
   ),
+  (
+    SchemaErrorKind::SpecifiedByOnBuiltInScalar,
+    "type Query { ok: Int } scalar Int @specifiedBy(url: \"https://example.invalid\")",
+    &[SchemaErrorKind::SpecifiedByOnBuiltInScalar],
+  ),
   // -- §3.13, at a use site -----------------------------------------------------------------
   //
   // Every SDL below is the probe `benchmarks`'s differential oracle used to find the gap these

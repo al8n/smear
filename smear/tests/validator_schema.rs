@@ -1840,6 +1840,83 @@ fn built_ins_can_be_extended() {
   let _ = int;
 }
 
+/// Draft §3.13.4: `@specifiedBy` "must not appear on built-in scalar types". "Built-in scalar types
+/// must not provide a scalar specification URL as they are specified by this document" (§3.5).
+#[test]
+fn specified_by_on_a_built_in_scalar_is_refused() {
+  // On a definition that spells the built-in out, for the four other than `String`, the type of
+  // `@specifiedBy`'s own `url` argument.
+  for scalar in ["Int", "Float", "Boolean", "ID"] {
+    let sdl = format!(
+      "type Query {{ ok: Int }} scalar {scalar} @specifiedBy(url: \"https://example.invalid\")"
+    );
+    let errors = refused(&sdl);
+    let rendered: Vec<String> = errors.errors().iter().map(ToString::to_string).collect();
+    assert_eq!(
+      rendered,
+      [format!(
+        "@specifiedBy is applied to a built-in scalar: `{scalar}.specifiedBy`"
+      )],
+      "---\n{sdl}"
+    );
+    let span = errors.errors()[0].span();
+    assert_eq!(&sdl[span.start()..span.end()], "specifiedBy", "---\n{sdl}");
+  }
+
+  // On an extension, of the injected definition and of one the document spelled out.
+  for sdl in [
+    "type Query { ok: Int } extend scalar Float @specifiedBy(url: \"https://example.invalid\")",
+    "type Query { ok: Int } scalar Float extend scalar Float @specifiedBy(url: \"https://example.invalid\")",
+  ] {
+    let errors = refused(sdl);
+    let rendered: Vec<String> = errors.errors().iter().map(ToString::to_string).collect();
+    assert_eq!(
+      rendered,
+      ["@specifiedBy is applied to a built-in scalar: `Float.specifiedBy`"],
+      "---\n{sdl}"
+    );
+    let span = errors.errors()[0].span();
+    assert_eq!(span.start(), sdl.rfind("specifiedBy").expect("the usage"));
+  }
+
+  // On `String`, whose directive also refers to itself through its own `url: String!`.
+  assert_eq!(
+    refused(
+      "type Query { ok: String } scalar String @specifiedBy(url: \"https://example.invalid\")"
+    )
+    .kinds(),
+    vec![
+      SchemaErrorKind::SelfReferentialDirective,
+      SchemaErrorKind::SpecifiedByOnBuiltInScalar,
+    ]
+  );
+}
+
+/// What stays legal beside that refusal: `@specifiedBy` on a custom scalar, from its definition or
+/// from an extension, and a built-in scalar spelled out or extended without it.
+#[test]
+fn specified_by_on_a_custom_scalar_is_accepted() {
+  let schema = built(
+    "type Query { ok: Int }
+     directive @tag on SCALAR
+     scalar UUID @specifiedBy(url: \"https://example.invalid/uuid\")
+     scalar Url
+     extend scalar Url @specifiedBy(url: \"https://example.invalid/url\")
+     scalar Int
+     extend scalar Float @tag",
+  );
+  assert_eq!(
+    schema.specified_by_url(ty(&schema, "UUID")),
+    Some("https://example.invalid/uuid")
+  );
+  assert_eq!(
+    schema.specified_by_url(ty(&schema, "Url")),
+    Some("https://example.invalid/url")
+  );
+  assert_eq!(schema.specified_by_url(ty(&schema, "Int")), None);
+  assert_eq!(schema.specified_by_url(ty(&schema, "Float")), None);
+}
+
 /// One builder, two documents whose source slice types differ — the property that makes `Schema`
 /// non-generic worth having.
 #[test]
