@@ -2110,6 +2110,38 @@ fn an_extension_in_another_document_points_back_at_what_it_repeats() {
   );
 }
 
+/// A related position inside an injected built-in definition is not reported at all: no source
+/// the caller supplied holds it, so a label there would point past the end of the caller's
+/// documents. The refusal keeps its primary position, in the caller's document, and has no label.
+#[test]
+fn no_related_label_points_into_a_built_in() {
+  // An object extension of the injected `Int` scalar.
+  let sdl = "type Query { ok: Int } extend type Int { f: Int }";
+  let errors = refused(sdl);
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::ExtensionKindMismatch]);
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.subject(), "Int");
+  assert_eq!(error.primary(), occurrence(&[sdl], 0, "Int", 1));
+  assert_eq!(error.labels(), 0);
+  assert_eq!(error.label(0), None);
+  assert_eq!(error.related(), None);
+  assert_eq!(error.related_document(), None);
+
+  // A field that an extension of the injected `__Type` repeats.
+  let sdl = "type Query { ok: Int } extend type __Type { name: String }";
+  let errors = refused(sdl);
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::DuplicateFieldName]);
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.to_string(), "duplicate field: `__Type.name`");
+  assert_eq!(error.primary(), occurrence(&[sdl], 0, "name", 0));
+  assert_eq!(error.labels(), 0);
+  assert_eq!(error.label(0), None);
+  assert_eq!(error.related(), None);
+  assert_eq!(error.related_document(), None);
+}
+
 /// The whole point of the arena: the schema outlives every byte it was built from.
 #[test]
 fn a_schema_outlives_its_document() {

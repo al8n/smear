@@ -203,7 +203,9 @@ All notable changes to Smear are documented in this file.
   A duplicate across the builder's documents points at the first definition in
   the document it was read from, rather than at the same range of the
   duplicate's document, and `MissingQueryRootOperationType` is reported in the
-  `schema` definition's document rather than in document 0.
+  `schema` definition's document rather than in document 0. A related position
+  inside a built-in definition is no longer reported, since no document the
+  caller supplied holds it: `extend type Int { f: Int }` is refused with no label.
 
 ## [0.0.1] - 2026-10-30
 

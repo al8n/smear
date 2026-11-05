@@ -1182,7 +1182,8 @@ impl SchemaError {
   ///
   /// It is a position in [`related_document`](Self::related_document), which need not be
   /// [`document`](Self::document): a duplicate repeats a definition that may have been read from
-  /// another of the builder's documents.
+  /// another of the builder's documents. A related position in an injected built-in definition is
+  /// never recorded, so this is always in a document the caller supplied.
   #[inline]
   pub const fn related(&self) -> Option<SimpleSpan> {
     match self.related {
@@ -1193,6 +1194,9 @@ impl SchemaError {
 
   /// Returns the index of the document [`related`](Self::related) is a position in, when there is
   /// a related position, in the order the builder was given its documents.
+  ///
+  /// Always one of the caller's documents: a related position in an injected built-in definition
+  /// is never recorded, so an error that would point there has none.
   #[inline]
   pub const fn related_document(&self) -> Option<u32> {
     match self.related {
@@ -1204,6 +1208,11 @@ impl SchemaError {
   /// Returns the index of the document [`span`](Self::span) belongs to, in the order the builder
   /// was given them. A related position carries its own:
   /// [`related_document`](Self::related_document).
+  ///
+  /// An index equal to the number of documents the builder was given is not one of them: it
+  /// belongs to the built-in definitions the build injects — the introspection types, and each
+  /// built-in scalar and specified directive the documents did not spell out — which have no
+  /// source the caller supplied. A renderer shows such an error without a snippet.
   #[inline]
   pub const fn document(&self) -> u32 {
     self.document

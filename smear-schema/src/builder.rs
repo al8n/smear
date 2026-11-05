@@ -2153,6 +2153,8 @@ struct Model<'a> {
   interner: &'a Interner,
   /// The literal spellings, deduplicated. See [`SchemaBuilder::literals`].
   literals: &'a Interner,
+  /// See [`SchemaBuilder::built_in_document`].
+  built_in_document: Option<u32>,
 }
 
 impl<'a> Model<'a> {
@@ -2380,17 +2382,23 @@ fn push_at(
 ///
 /// The two need not share one: a duplicate repeats a definition that may be in another of the
 /// builder's documents, so the related position is a [`Located`] and keeps its own.
+///
+/// Except in an injected built-in definition, at or past `built_in_document`, where the related
+/// position is not recorded at all: no source the caller supplied holds those bytes, so a label
+/// there would send a renderer past the end of the caller's sources.
 fn push_related(
   errors: &mut Vec<SchemaError>,
+  built_in_document: Option<u32>,
   kind: SchemaErrorKind,
   subject: &str,
   owner: Option<String>,
   at: Located,
   related: Located,
 ) {
-  let mut error = SchemaError::new(kind, subject, at.span)
-    .in_document(at.document)
-    .related_to(related.span, related.document);
+  let mut error = SchemaError::new(kind, subject, at.span).in_document(at.document);
+  if built_in_document.is_none_or(|built_in| related.document < built_in) {
+    error = error.related_to(related.span, related.document);
+  }
   if let Some(owner) = owner {
     error = error.owned_by(owner);
   }
@@ -2440,6 +2448,12 @@ pub struct SchemaBuilder {
   extensions: Vec<RawExtension>,
   errors: Vec<SchemaError>,
   document: u32,
+  /// The document index the injected built-in definitions report under — one past the last
+  /// document the caller supplied — recorded as they are injected, and `None` until then.
+  ///
+  /// No source the caller holds has that index, so a related position at or past it is not
+  /// recorded: see [`push_related`].
+  built_in_document: Option<u32>,
   /// One lookup index per input object, shared by every literal validation. Empty until a
   /// declaration is asked; see [`DeclaredNames`].
   declared_names: DeclaredNames,
@@ -2576,7 +2590,15 @@ impl SchemaBuilder {
     at: Located,
     related: Located,
   ) {
-    push_related(&mut self.errors, kind, subject, owner, at, related);
+    push_related(
+      &mut self.errors,
+      self.built_in_document,
+      kind,
+      subject,
+      owner,
+      at,
+      related,
+    );
   }
 
   /// The read side and the write side, borrowed apart. See [`Model`].
@@ -2600,6 +2622,7 @@ impl SchemaBuilder {
         schema_directives: &self.schema_directives,
         interner: &self.interner,
         literals: &self.literals,
+        built_in_document: self.built_in_document,
       },
       &mut self.errors,
       &mut self.declared_names,
@@ -3777,6 +3800,7 @@ impl SchemaBuilder {
   fn inject(&mut self, built_ins: &BuiltIns) {
     // Anything injected here belongs to no document the caller supplied; `self.document` is
     // already one past the last real index, which is what an injected definition reports under.
+    self.built_in_document = Some(self.document);
 
     // The built-ins' descriptions and defaults, reserved as one growth before any is decoded. Exact
     // when every built-in is injected; a document that spells one out leaves the difference unused,
@@ -4435,7 +4459,15 @@ impl SchemaBuilder {
         let first = declared[earlier].name;
         let name = model.text(at.sym).to_owned();
         let owner = model.owner(owner);
-        push_related(errors, rules.duplicate, &name, Some(owner), at, first);
+        push_related(
+          errors,
+          model.built_in_document,
+          rules.duplicate,
+          &name,
+          Some(owner),
+          at,
+          first,
+        );
       }
 
       if !built_in && is_reserved(model.text(at.sym).as_bytes()) {
@@ -4890,6 +4922,7 @@ impl SchemaBuilder {
         let name = model.text(used.name.sym).to_owned();
         push_related(
           errors,
+          model.built_in_document,
           SchemaErrorKind::DuplicateDirectiveUse,
           &name,
           Some(model.owner(owner)),
@@ -4946,6 +4979,7 @@ impl SchemaBuilder {
         let name = model.text(argument.name.sym).to_owned();
         push_related(
           errors,
+          model.built_in_document,
           SchemaErrorKind::DuplicateDirectiveArgumentUse,
           &name,
           Some(model.owner(coordinate)),
@@ -5775,6 +5809,7 @@ impl SchemaBuilder {
               }
               push_related(
                 errors,
+                model.built_in_document,
                 SchemaErrorKind::InterfaceFieldNotDeprecated,
                 model.text(interface_field.name.sym),
                 Some(owner.clone()),
