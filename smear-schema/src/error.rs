@@ -284,6 +284,22 @@ pub enum SchemaErrorKind {
   /// Input objects form a cycle in which every link is non-null, so no finite value satisfies it
   /// (draft §3.10.1).
   CircularNonNullInputField,
+  /// Input objects form a cycle that a `@oneOf` input object on it holds closed, so no finite value
+  /// satisfies it (draft §3.10, `InputObjectHasUnbreakableCycle`).
+  ///
+  /// The `@oneOf` half of [`CircularNonNullInputField`](Self::CircularNonNullInputField), and a
+  /// kind of its own because that one's "no nullable or list link" is not true of it. "OneOf Input
+  /// Objects require exactly one field be provided, and that value cannot be null", so a nullable
+  /// field of one is still a link the value has to take when no other field of it can be given a
+  /// finite value. That is Counter Example 86, where "providing a value for First requires a
+  /// non-null Second, and constructing a Second requires a non-null First". One field that can be
+  /// given a finite value — a scalar, an enum, a list, or an input object no such cycle holds — is
+  /// enough to break it: `input Filter @oneOf { not: Filter, eq: String }` is satisfied by
+  /// `{ eq: "x" }`.
+  ///
+  /// The subject is the field that closes the cycle, qualified by its input object, as for the
+  /// non-null kind.
+  CircularOneOfInputField,
   /// An input object's default values refer to one another in a cycle, so coercing the outer
   /// default would never terminate (draft §3.10.1(4), `InputObjectDefaultValueHasCycle`).
   ///
@@ -449,6 +465,7 @@ impl SchemaErrorKind {
     Self::OneOfFieldNotNullable,
     Self::OneOfFieldHasDefault,
     Self::CircularNonNullInputField,
+    Self::CircularOneOfInputField,
     Self::InputObjectDefaultValueCycle,
     Self::OneOfOnInputObjectExtension,
     Self::ReservedDirectiveName,
@@ -540,6 +557,9 @@ impl SchemaErrorKind {
       Self::OneOfFieldNotNullable => "field of a @oneOf input object is non-null",
       Self::OneOfFieldHasDefault => "field of a @oneOf input object has a default value",
       Self::CircularNonNullInputField => "input object cycle has no nullable or list link",
+      Self::CircularOneOfInputField => {
+        "input object cycle through a @oneOf input object has no finite value"
+      }
       Self::InputObjectDefaultValueCycle => "input object default values form a cycle",
       Self::OneOfOnInputObjectExtension => "@oneOf is provided by an input object type extension",
       Self::ReservedDirectiveName => "directive name is reserved for introspection",
@@ -651,6 +671,7 @@ impl SchemaErrorKind {
       Self::OneOfFieldNotNullable => Code::new("smear::schema::one-of-field-not-nullable"),
       Self::OneOfFieldHasDefault => Code::new("smear::schema::one-of-field-has-default"),
       Self::CircularNonNullInputField => Code::new("smear::schema::circular-non-null-input-field"),
+      Self::CircularOneOfInputField => Code::new("smear::schema::circular-one-of-input-field"),
       Self::InputObjectDefaultValueCycle => {
         Code::new("smear::schema::input-object-default-value-cycle")
       }
@@ -756,6 +777,7 @@ impl SchemaErrorKind {
       | Self::OneOfFieldNotNullable
       | Self::OneOfFieldHasDefault
       | Self::CircularNonNullInputField
+      | Self::CircularOneOfInputField
       | Self::InputObjectDefaultValueCycle
       | Self::OneOfOnInputObjectExtension
       | Self::ReservedDirectiveName
@@ -899,6 +921,9 @@ impl SchemaErrorKind {
       Self::CircularNonNullInputField => Some(
         "break the cycle with a nullable link or a list; as written, no finite value satisfies it.",
       ),
+      Self::CircularOneOfInputField => Some(
+        "a `@oneOf` input object is given exactly one field, so it breaks a cycle only through a field that can be given a finite value; give it one, such as a scalar or a list.",
+      ),
       Self::InputObjectDefaultValueCycle => {
         Some("drop one of the defaults, or give it a value that does not refer back.")
       }
@@ -1029,6 +1054,7 @@ impl SchemaErrorKind {
       | Self::OneOfFieldNotNullable
       | Self::OneOfFieldHasDefault
       | Self::CircularNonNullInputField
+      | Self::CircularOneOfInputField
       | Self::InputObjectDefaultValueCycle
       | Self::OneOfOnInputObjectExtension
       | Self::ReservedDirectiveName

@@ -175,6 +175,15 @@ All notable changes to Smear are documented in this file.
   are now in place before any extension is applied, so an `extend schema` that
   provides one of them again is `DuplicateRootOperationType`, as it is against a
   written definition's root. Code `smear::schema::schema-extension-without-schema`.
+- `smear-schema`: the input-object cycle rule is the draft's
+  `InputObjectHasUnbreakableCycle` (§3.10), which a `@oneOf` input object can
+  hold closed: it is given exactly one field, so it breaks a cycle only through
+  a field that can be given a finite value. A cycle a OneOf input object holds
+  closed is refused as `SchemaErrorKind::CircularOneOfInputField`, at the field
+  that closes it, as in the draft's Counter Example 86;
+  `input Filter @oneOf { not: Filter, eq: String }` still builds. A cycle through
+  a OneOf input object that has such a field is no longer refused as
+  `CircularNonNullInputField`. Code `smear::schema::circular-one-of-input-field`.
 
 ## [0.0.1] - 2026-10-30
 

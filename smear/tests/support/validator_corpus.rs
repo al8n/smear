@@ -834,6 +834,12 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     &[SchemaErrorKind::CircularNonNullInputField],
   ),
   (
+    // Draft §3.10's Counter Example 86.
+    SchemaErrorKind::CircularOneOfInputField,
+    "type Query { ok: Int } input First @oneOf { second: Second } input Second { first: First! }",
+    &[SchemaErrorKind::CircularOneOfInputField],
+  ),
+  (
     SchemaErrorKind::InputObjectDefaultValueCycle,
     "type Query { ok: Int } input In { a: In = {} }",
     &[SchemaErrorKind::InputObjectDefaultValueCycle],

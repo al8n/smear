@@ -2382,6 +2382,170 @@ fn breakable_cycles_are_accepted() {
   assert_eq!(errors.errors()[0].subject(), "a");
 }
 
+/// Draft §3.10's Counter Example 86, verbatim, and the other cycles a `@oneOf` input object holds
+/// closed.
+///
+/// "OneOf Input Objects require exactly one field be provided, and that value cannot be null. This
+/// example is invalid because providing a value for First requires a non-null Second, and
+/// constructing a Second requires a non-null First".
+#[test]
+fn a_one_of_input_object_can_hold_a_cycle_closed() {
+  const COUNTER_EXAMPLE_86: &str = "type Query { ok: Int }
+input First @oneOf {
+  second: Second
+}
+input Second {
+  first: First!
+}";
+  let errors = refused(COUNTER_EXAMPLE_86);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::CircularOneOfInputField]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(
+    error.to_string(),
+    "input object cycle through a @oneOf input object has no finite value: `Second.first`"
+  );
+  assert_eq!(
+    error.span().start(),
+    COUNTER_EXAMPLE_86
+      .find("first:")
+      .expect("the closing field")
+  );
+  assert_eq!(error.span().end() - error.span().start(), "first".len());
+
+  for (sdl, expected) in [
+    // Its one field leads straight back.
+    (
+      "type Query { ok: Int } input A @oneOf { a: A }",
+      &["input object cycle through a @oneOf input object has no finite value: `A.a`"][..],
+    ),
+    // Two OneOf input objects, each leading only into the other: one cycle, one diagnostic.
+    (
+      "type Query { ok: Int } input A @oneOf { b: B } input B @oneOf { a: A }",
+      &["input object cycle through a @oneOf input object has no finite value: `B.a`"][..],
+    ),
+    // Every field leads back, by two cycles, and each is reported where it closes.
+    (
+      "type Query { ok: Int } input A @oneOf { a: A b: B } input B { a: A! }",
+      &[
+        "input object cycle through a @oneOf input object has no finite value: `A.a`",
+        "input object cycle through a @oneOf input object has no finite value: `B.a`",
+      ][..],
+    ),
+  ] {
+    let rendered: Vec<String> = refused(sdl)
+      .errors()
+      .iter()
+      .map(ToString::to_string)
+      .collect();
+    assert_eq!(rendered, expected, "---\n{sdl}");
+  }
+}
+
+/// One field that can be given a finite value breaks a OneOf out of any cycle, which is the whole
+/// of the draft's OneOf arm: "If not InputFieldTypeHasUnbreakableCycle(fieldType, nextVisited):
+/// Return false."
+#[test]
+fn a_one_of_input_object_with_a_way_out_breaks_its_cycle() {
+  for sdl in [
+    // The scalar alternative beside a self-reference.
+    "type Query { ok: Int } input Filter @oneOf { not: Filter, eq: String }",
+    // An enum alternative, and a list one, which may be empty.
+    "type Query { ok: Int } input Filter @oneOf { not: Filter, by: Order } enum Order { ASC DESC }",
+    "type Query { ok: Int } input Filter @oneOf { not: Filter, all: [Filter!] }",
+    // Counter Example 86 with a third input object to pick, which is finite.
+    "type Query { ok: Int }
+     input First @oneOf { second: Second, third: Third }
+     input Second { first: First! }
+     input Third { x: Int }",
+    // Counter Example 86 with the ordinary input object's link made nullable.
+    "type Query { ok: Int } input First @oneOf { second: Second } input Second { first: First }",
+  ] {
+    built(sdl);
+  }
+
+  // A way out breaks a non-null cycle through the OneOf too. The non-null field is refused, as a
+  // field of a OneOf; the cycle it is on is not.
+  let errors =
+    refused("type Query { ok: Int } input O @oneOf { a: A!, s: String } input A { o: O! }");
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::OneOfFieldNotNullable]);
+}
+
+/// The ordinary arm is unchanged by the OneOf one: draft §3.10's Examples 82 and 83 are valid and
+/// its Counter Examples 84 and 85 are not, each with one diagnostic at the link that closes it.
+#[test]
+fn the_draft_input_object_cycle_examples_hold() {
+  built("type Query { ok: Int } input Example { self: Example value: String }");
+  built("type Query { ok: Int } input Example { self: [Example!]! value: String }");
+
+  for (sdl, expected) in [
+    (
+      "type Query { ok: Int } input Example { self: Example! value: String }",
+      "input object cycle has no nullable or list link: `Example.self`",
+    ),
+    (
+      "type Query { ok: Int }
+       input First { second: Second! value: String }
+       input Second { first: First! value: String }",
+      "input object cycle has no nullable or list link: `Second.first`",
+    ),
+  ] {
+    let rendered: Vec<String> = refused(sdl)
+      .errors()
+      .iter()
+      .map(ToString::to_string)
+      .collect();
+    assert_eq!(rendered, [expected], "---\n{sdl}");
+  }
+}
+
+/// The OneOf cycle rule is linear and iterative over a chain as long as the document makes it.
+///
+/// The draft states `InputObjectHasUnbreakableCycle` recursively, with the path in `visited`, and
+/// twenty thousand links is a stack overflow for a literal transcription of it.
+#[test]
+fn a_deep_one_of_cycle_does_not_recurse() {
+  const DEPTH: usize = 20_000;
+
+  // A chain of OneOf input objects, each naming the next, that the last one's scalar field lets
+  // out of: every one of them is satisfied.
+  let mut sdl = String::from("type Query { ok(a: In0): Int }\n");
+  for level in 0..DEPTH {
+    sdl.push_str(&format!(
+      "input In{level} @oneOf {{ next: In{} }}\n",
+      level + 1
+    ));
+  }
+  sdl.push_str(&format!("input In{DEPTH} @oneOf {{ end: Int }}\n"));
+  built(&sdl);
+
+  // The same chain closed into a cycle: one diagnostic, at the link that closes it.
+  let mut sdl = String::from("type Query { ok(a: In0): Int }\n");
+  for level in 0..DEPTH {
+    sdl.push_str(&format!(
+      "input In{level} @oneOf {{ next: In{} }}\n",
+      level + 1
+    ));
+  }
+  sdl.push_str(&format!("input In{DEPTH} @oneOf {{ next: In0 }}\n"));
+  let errors = refused(&sdl);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::CircularOneOfInputField]
+  );
+  assert_eq!(
+    errors.len(),
+    1,
+    "a cycle through twenty thousand objects is one diagnostic, not twenty thousand"
+  );
+  let last = format!("In{DEPTH}");
+  assert_eq!(errors.errors()[0].owner(), Some(last.as_str()));
+  assert_eq!(errors.errors()[0].subject(), "next");
+}
+
 /// The default roots are the conventionally named object types, when no `schema` block names any.
 #[test]
 fn default_root_names_are_used_without_a_schema_definition() {

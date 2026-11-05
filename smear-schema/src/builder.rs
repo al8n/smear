@@ -1931,6 +1931,10 @@ struct RawType {
   /// exponent over the top step of 1 k–16 k and **1.470 s** at 16 k, on a schema `Schema::build`
   /// **accepts**. al8n/smear#198.
   required_input_fields: Vec<u32>,
+  /// Whether `@oneOf` is applied to an input object, which makes it draft §3.10.1's OneOf Input
+  /// Object, filled in during validation once every extension is merged. `false` for every other
+  /// kind.
+  one_of: bool,
   /// The description, decoded into the text arena.
   description: Text,
   /// A scalar's `@specifiedBy(url:)`, decoded into the text arena — from the definition or from an
@@ -1954,6 +1958,7 @@ impl RawType {
       closure: Vec::new(),
       sorted_members: Vec::new(),
       required_input_fields: Vec::new(),
+      one_of: false,
       description: Text::NONE,
       specified_by: Text::NONE,
     }
@@ -3853,6 +3858,7 @@ impl SchemaBuilder {
     self.compute_closures();
     self.index_union_members();
     self.collect_required_input_fields();
+    self.mark_one_of_input_objects();
     self.validate_types();
     self.validate_directive_definitions();
     self.validate_directive_usages();
@@ -4211,6 +4217,21 @@ impl SchemaBuilder {
     }
   }
 
+  /// Fills [`RawType::one_of`], one pass over the input objects the whole schema declares.
+  ///
+  /// `@oneOf` is read here rather than at ingest so an extension that adds it is seen. Adding it
+  /// *is* draft §3.10.3(5)'s refusal, reported by `apply_extensions`; the flag is still set from
+  /// the merged list so that §3.10.3(6) — the OneOf constraints over the extension's own fields —
+  /// is checked rather than hidden behind that refusal. The field constraints and the
+  /// unbreakable-cycle rule read this one answer.
+  fn mark_one_of_input_objects(&mut self) {
+    for index in 0..self.types.len() {
+      if self.types[index].kind == TypeKind::InputObject {
+        self.types[index].one_of = self.has_directive(index, ONE_OF);
+      }
+    }
+  }
+
   fn validate_types(&mut self) {
     for index in 0..self.types.len() {
       let kind = self.types[index].kind;
@@ -4226,11 +4247,7 @@ impl SchemaBuilder {
         self.push(SchemaErrorKind::ReservedTypeName, &name, at);
       }
 
-      // `@oneOf` is read here rather than at ingest so an extension that adds it is seen. Adding
-      // it *is* draft §3.10.3(5)'s refusal, reported by `apply_extensions`; the flag is still set
-      // from the merged list so that §3.10.3(6) — the OneOf constraints over the extension's own
-      // fields — is checked rather than hidden behind that refusal.
-      let one_of = self.has_directive(index, ONE_OF);
+      let one_of = self.types[index].one_of;
 
       match kind {
         TypeKind::Scalar => {}
@@ -5808,56 +5825,223 @@ impl SchemaBuilder {
     self.truncated |= truncated | mismatches_truncated;
   }
 
-  /// Draft §3.10.1: an input-object cycle must have at least one nullable or list link.
+  /// Draft §3.10: "InputObjectHasUnbreakableCycle(inputObject) must be false."
+  ///
+  /// # The draft's algorithm, as a least fixed point
+  ///
+  /// `InputObjectHasUnbreakableCycle` walks an input object's fields with the objects on the
+  /// current path in `visited`, answers `true` on reaching one of them again, and has two arms:
+  ///
+  /// - "If inputObject is a OneOf Input Object", it is unbreakable when every one of its fields
+  ///   is. Exactly one field is given, so one field that can be given a finite value breaks it.
+  /// - "Otherwise", it is unbreakable when any of its non-null fields is, because a non-null field
+  ///   cannot be left out.
+  ///
+  /// `InputFieldTypeHasUnbreakableCycle` decides a field: a list never is, since it may be empty;
+  /// a non-null type is decided by the type it wraps; a scalar or an enum never is; an input
+  /// object is the question again.
+  ///
+  /// Transcribed as written, the walk explores what it reaches once per path that reaches it, so
+  /// a chain of `N` input objects, each naming the next in two non-null fields, is `2^N` paths.
+  /// What it answers is the complement of a least fixed point, which is what this computes
+  /// instead. An input object is *finite* — some finite value satisfies it — when it is a OneOf
+  /// with a field that is a list, a scalar, an enum or a finite input object, or when it is an
+  /// ordinary input object whose every non-null singular field names a finite input object; and
+  /// nothing else is. The objects those two rules never reach are exactly the ones the draft's
+  /// walk leads back into `visited` by every way out. [`finite_input_objects`] propagates the
+  /// rules over the links in reverse, so the pass is linear in the fields the document declares
+  /// and holds no frame per level; `a_deep_one_of_cycle_does_not_recurse` is the guard.
+  ///
+  /// # One diagnostic per cycle, and which kind
+  ///
+  /// The draft refuses every input object it answers `true` for, the objects that merely reach an
+  /// unbreakable cycle as well as the ones on it. What is reported is the cycle. The walk below
+  /// follows, among the objects that are not finite, the links that keep each one so, and reports
+  /// the field that closes a cycle, once per owning type, as the walk before it did. A cycle whose
+  /// every link is non-null is [`SchemaErrorKind::CircularNonNullInputField`], the rule this pass
+  /// was before OneOf input objects. A cycle with a nullable link is held closed only by a OneOf
+  /// none of whose fields can be given a finite value, and is
+  /// [`SchemaErrorKind::CircularOneOfInputField`], because the other kind's "no nullable or list
+  /// link" is not true of it.
+  ///
+  /// Every object that is not finite links to another that is not, except a OneOf with no fields
+  /// at all, which the draft's "for each field" answers `true` for and which `EmptyInputFields`
+  /// has already refused. So unless such a OneOf is all that keeps them from being finite, the
+  /// objects that are not finite hold a cycle, and the walk reports one.
+  ///
+  /// [`finite_input_objects`]: SchemaBuilder::finite_input_objects
   fn validate_input_object_cycles(&mut self) {
+    let Some(finite) = self.finite_input_objects() else {
+      return;
+    };
     let count = self.types.len();
+    if (0..count).all(|index| self.types[index].kind != TypeKind::InputObject || finite[index]) {
+      return;
+    }
+
     // 0 = unvisited, 1 = on the current path, 2 = settled.
     let mut colour = vec![0u8; count];
     let mut reported = vec![false; count];
+    // Where on the path an object sits while it is on it.
+    let mut depth = vec![0u32; count];
+    // Explicit stack: (type, next field to examine, nullable links on the path down to it).
+    let mut stack: Vec<(usize, usize, u32)> = Vec::new();
 
     for start in 0..count {
-      if self.types[start].kind != TypeKind::InputObject || colour[start] != 0 {
+      if self.types[start].kind != TypeKind::InputObject || finite[start] || colour[start] != 0 {
         continue;
       }
-      // Explicit stack: (type, next field to examine).
-      let mut stack: Vec<(usize, usize)> = vec![(start, 0)];
       colour[start] = 1;
-      while let Some((current, cursor)) = stack.pop() {
+      depth[start] = 0;
+      stack.push((start, 0, 0));
+      while let Some((current, cursor, nullable)) = stack.pop() {
         if cursor >= self.types[current].input_fields.len() {
           colour[current] = 2;
           continue;
         }
-        stack.push((current, cursor + 1));
+        stack.push((current, cursor + 1, nullable));
         let field = &self.types[current].input_fields[cursor];
-        let packed = field.ty.packed;
-        // The only link that cannot be broken by a `null` or an empty list is a bare `X!`.
-        if packed.depth() != 1 || !packed.is_non_null() {
+        let at = field.name;
+        let Some((target, link_is_nullable)) = self.input_link(current, field.ty.packed) else {
+          continue;
+        };
+        if finite[target] {
           continue;
         }
-        let target = packed.base_id();
-        if target == UNRESOLVED {
-          continue;
-        }
-        let target = target.get() as usize;
-        if self.types[target].kind != TypeKind::InputObject {
-          continue;
-        }
-        if colour[target] == 1 {
-          if !reported[current] {
-            reported[current] = true;
-            let owner = self.text(self.types[current].name.sym).to_owned();
-            let name = self.text(field.name.sym).to_owned();
-            let at = field.name;
-            self.push_owned(SchemaErrorKind::CircularNonNullInputField, &name, owner, at);
+        let through = nullable + u32::from(link_is_nullable);
+        match colour[target] {
+          0 => {
+            colour[target] = 1;
+            depth[target] = stack.len() as u32;
+            stack.push((target, 0, through));
           }
-          continue;
-        }
-        if colour[target] == 0 {
-          colour[target] = 1;
-          stack.push((target, 0));
+          1 if !reported[current] => {
+            reported[current] = true;
+            // The cycle is the path from `target` down to here, then this link back up to it, so
+            // its nullable links are the ones counted since `target`, and this one.
+            let kind = if through == stack[depth[target] as usize].2 {
+              SchemaErrorKind::CircularNonNullInputField
+            } else {
+              SchemaErrorKind::CircularOneOfInputField
+            };
+            let owner = self.text(self.types[current].name.sym).to_owned();
+            let name = self.text(at.sym).to_owned();
+            self.push_owned(kind, &name, owner, at);
+          }
+          _ => {}
         }
       }
     }
+  }
+
+  /// Which input objects some finite value satisfies: the least fixed point
+  /// [`validate_input_object_cycles`](SchemaBuilder::validate_input_object_cycles) describes, so
+  /// an input object is `false` here exactly when the draft's `InputObjectHasUnbreakableCycle` is
+  /// true of it. Every other kind of type is `false` and means nothing.
+  ///
+  /// `None` when the schema has no input object, which is most builds, so that they allocate
+  /// nothing here.
+  fn finite_input_objects(&self) -> Option<Vec<bool>> {
+    let objects = self
+      .types
+      .iter()
+      .filter(|ty| ty.kind == TypeKind::InputObject)
+      .count();
+    if objects == 0 {
+      return None;
+    }
+    let count = self.types.len();
+    let mut finite = vec![false; count];
+    // Per ordinary input object, how many of its links still name an object not known to be
+    // finite. A OneOf needs only one of its links, so its count is never read.
+    let mut waiting = vec![0u32; count];
+    // The links grouped by target: the owners of the links into `t` are
+    // `owners[start[t] as usize..start[t + 1] as usize]`.
+    let mut start = vec![0u32; count + 1];
+    // Each object is pushed once, as it is found finite.
+    let mut ready: Vec<usize> = Vec::with_capacity(objects);
+
+    for owner in 0..count {
+      if self.types[owner].kind != TypeKind::InputObject {
+        continue;
+      }
+      let mut leaves = false;
+      for field in &self.types[owner].input_fields {
+        match self.input_link(owner, field.ty.packed) {
+          Some((target, _)) => {
+            start[target + 1] += 1;
+            waiting[owner] += 1;
+          }
+          None => leaves = true,
+        }
+      }
+      let satisfied = if self.types[owner].one_of {
+        leaves
+      } else {
+        waiting[owner] == 0
+      };
+      if satisfied {
+        finite[owner] = true;
+        ready.push(owner);
+      }
+    }
+    for target in 0..count {
+      start[target + 1] += start[target];
+    }
+    let mut owners = vec![0u32; start[count] as usize];
+    let mut next = start.clone();
+    for owner in 0..count {
+      if self.types[owner].kind != TypeKind::InputObject {
+        continue;
+      }
+      for field in &self.types[owner].input_fields {
+        if let Some((target, _)) = self.input_link(owner, field.ty.packed) {
+          owners[next[target] as usize] = owner as u32;
+          next[target] += 1;
+        }
+      }
+    }
+
+    while let Some(target) = ready.pop() {
+      for &owner in &owners[start[target] as usize..start[target + 1] as usize] {
+        let owner = owner as usize;
+        if finite[owner] {
+          continue;
+        }
+        if !self.types[owner].one_of {
+          waiting[owner] -= 1;
+          if waiting[owner] != 0 {
+            continue;
+          }
+        }
+        finite[owner] = true;
+        ready.push(owner);
+      }
+    }
+    Some(finite)
+  }
+
+  /// The input object one field of `owner` ties it to under `InputObjectHasUnbreakableCycle`, and
+  /// whether the field is nullable.
+  ///
+  /// `None` for a field that never holds a cycle closed: a list, which may be empty; a scalar or an
+  /// enum; a nullable field of an ordinary input object, which may be left out; and a type that
+  /// did not resolve or is not an input type, which another rule has already refused. A nullable
+  /// field of a OneOf is still a link, because the one field a OneOf is given may not be `null`.
+  fn input_link(&self, owner: usize, packed: PackedType) -> Option<(usize, bool)> {
+    let nullable = !packed.is_non_null();
+    if nullable && !self.types[owner].one_of {
+      return None;
+    }
+    if packed.nullable().depth() != 0 {
+      return None;
+    }
+    let base = packed.base_id();
+    if base == UNRESOLVED {
+      return None;
+    }
+    let base = base.get() as usize;
+    (self.types[base].kind == TypeKind::InputObject).then_some((base, nullable))
   }
 
   /// Draft §3.10.1(4): `InputObjectDefaultValueHasCycle(inputObject)` must be false.
