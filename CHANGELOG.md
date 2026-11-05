@@ -160,6 +160,13 @@ All notable changes to Smear are documented in this file.
   which leaves the escape `Unclosed`, so in a byte source it no longer runs past
   the string to a `}` later in the document. A `\u{` followed directly by a
   quote, a backslash or a line break no longer swallows it.
+- `smear-schema`!: the default root operation type names `Query`, `Mutation`
+  and `Subscription` apply only when the document has no `schema` definition
+  (draft §3.3.1). Beside a `schema` definition, an object type of a default name
+  that the definition does not list is an ordinary type: `schema { query: Query }`
+  beside `type Mutation` has no mutation root, as in the draft's Example 42, where
+  `Mutation` used to become one. An `extend schema` is not a definition, so a
+  document with one and no `schema` definition still takes the defaults.
 
 ## [0.0.1] - 2026-10-30
 

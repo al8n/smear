@@ -414,7 +414,8 @@ impl RootOperation {
     }
   }
 
-  /// Returns the type name GraphQL defaults the root to when no `schema` definition names one.
+  /// Returns the type name GraphQL defaults the root to when the document has no `schema`
+  /// definition.
   #[inline]
   pub const fn default_type_name(&self) -> &'static str {
     match self {

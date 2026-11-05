@@ -3809,9 +3809,15 @@ impl SchemaBuilder {
   }
 
   fn resolve_roots(&mut self) {
-    // With no `schema` definition, the roots default to the conventionally named object types.
+    // Draft §3.3.1, "Default Root Operation Type Names": "The type system definition language can
+    // omit the schema definition when each root operation type uses its respective default root
+    // type name". So the defaults stand in for an omitted `schema` definition and for nothing else.
+    // A document that writes one names every root it has, and an object type that is merely called
+    // `Mutation` beside `schema { query: Query }` is not the mutation root: Example 42 is "a valid
+    // GraphQL schema without a mutation root operation type, even though it contains a type named
+    // "Mutation"". An `extend schema` is not a definition, so on its own it keeps the defaults.
     for operation in RootOperation::ALL {
-      if self.roots[operation.index()].is_some() {
+      if self.schema_definition.is_some() || self.roots[operation.index()].is_some() {
         continue;
       }
       let name = operation.default_type_name();

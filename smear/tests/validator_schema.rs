@@ -2399,6 +2399,74 @@ fn default_root_names_are_used_without_a_schema_definition() {
   assert!(errors.contains_kind(SchemaErrorKind::MissingQueryRootOperationType));
 }
 
+/// Draft §3.3.1's Example 42, verbatim: a `schema` definition names every root the schema has.
+///
+/// "This example describes a valid GraphQL schema without a mutation root operation type, even
+/// though it contains a type named "Mutation". The schema definition must be included, otherwise
+/// the "Mutation" type would be incorrectly presumed to be the mutation root operation type of the
+/// schema."
+#[test]
+fn a_schema_definition_turns_the_default_root_names_off() {
+  const EXAMPLE_42: &str = r#"
+schema {
+  query: Query
+}
+
+type Query {
+  latestVirus: Virus
+}
+
+type Virus {
+  name: String
+  mutations: [Mutation]
+}
+
+type Mutation {
+  name: String
+}
+"#;
+  let schema = built(EXAMPLE_42);
+  assert_eq!(
+    schema.root(RootOperation::Query),
+    Some(ty(&schema, "Query"))
+  );
+  assert_eq!(
+    schema.root(RootOperation::Mutation),
+    None,
+    "`Mutation` was presumed to be the mutation root beside a `schema` definition"
+  );
+  assert_eq!(schema.root(RootOperation::Subscription), None);
+
+  // The third default name, the same way.
+  let schema = built("schema { query: Query } type Query { ok: Int } type Subscription { s: Int }");
+  assert_eq!(
+    schema.root(RootOperation::Query),
+    Some(ty(&schema, "Query"))
+  );
+  assert_eq!(schema.root(RootOperation::Subscription), None);
+}
+
+/// An `extend schema` is not a `schema` definition, so the default root names still apply beside
+/// one.
+#[test]
+fn an_extend_schema_alone_keeps_the_default_root_names() {
+  let schema = built(
+    "directive @d on SCHEMA
+     type Query { ok: Int }
+     type Mutation { go: Int }
+     extend schema @d",
+  );
+  assert_eq!(
+    schema.root(RootOperation::Query),
+    Some(ty(&schema, "Query"))
+  );
+  assert_eq!(
+    schema.root(RootOperation::Mutation),
+    Some(ty(&schema, "Mutation"))
+  );
+  assert_eq!(schema.root(RootOperation::Subscription), None);
+}
+
 /// The name index is a real index: every interned name resolves, nothing else does.
 #[test]
 fn the_name_index_resolves_exactly_what_was_interned() {
