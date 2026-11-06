@@ -1302,7 +1302,7 @@ struct SourceGetter {
 
 /// The ten files the 79 `ast_node!` invocations live in.
 ///
-/// Ten and not the GraphQL twin's seven: this dialect puts the seven type-system extensions in
+/// Ten and not the GraphQL twin's seven: this dialect puts the eight type-system extensions in
 /// `extension.rs` and the generic machinery in `generic.rs`, and adds `import.rs` for a production
 /// GraphQL has no counterpart for at all.
 const AST_FILES: &[&str] = &[
@@ -1701,17 +1701,18 @@ fn every_getter_is_named_for_what_it_projects() {
 ///
 /// The positive control for [`no_getter_reaches_a_name_by_counting_keywords`]. "This dialect has no
 /// positional getter" is a claim about an absence, and an absence is satisfied just as well by an
-/// inventory that lost its getters as by a grammar that never needed them — so the fifteen
+/// inventory that lost its getters as by a grammar that never needed them — so the sixteen
 /// positions where the twin *would* have counted are pinned by what they hold instead.
 ///
-/// Fifteen is the twin's fourteen plus one. GraphQL spells `type T` as two `K::Name` tokens under
-/// one parent and reaches the second by index, fourteen times over; here each of those is a
+/// Sixteen is the twin's fifteen plus one. GraphQL spells `type T` as two `K::Name` tokens under
+/// one parent and reaches the second by index, fifteen times over; here each of those is a
 /// [`DefinitionName`] or an [`ExtensionName`] node. The extra one is
 /// [`OperationDefinition`]: GraphQL wraps `query` in an `OperationType` **node**, which leaves the
 /// operation's own name as the first bare `K::Name` and reachable with a plain `tok`, while this
 /// dialect has no such node and puts the name in a [`DefinitionName`] instead.
 const NAME_NODE_CARRIERS: &[(&str, &str, &str)] = &[
   ("DirectiveDefinition", "definition_name", "DefinitionName"),
+  ("DirectiveExtension", "extension_name", "ExtensionName"),
   ("EnumTypeDefinition", "definition_name", "DefinitionName"),
   ("EnumTypeExtension", "extension_name", "ExtensionName"),
   (
@@ -1746,7 +1747,7 @@ const NAME_NODE_CARRIERS: &[(&str, &str, &str)] = &[
 
 #[test]
 fn no_getter_reaches_a_name_by_counting_keywords() {
-  // Task 10's ruling 2 in the GraphQL twin became fourteen `tok_nth 1 K::Name` and
+  // Task 10's ruling 2 in the GraphQL twin became fifteen `tok_nth 1 K::Name` and
   // `tok_nth 2 K::Name` getters, each counting past a definition's or an extension's keywords —
   // and the twin's gate 4 then had to assert that every one of those indices was right, because an
   // index correct for `type T` is wrong for `extend type T`. **This dialect has no such getter**,
@@ -1790,7 +1791,7 @@ fn no_getter_reaches_a_name_by_counting_keywords() {
     carriers, pinned,
     "the set of wrappers that name themselves through a node moved"
   );
-  assert_eq!(carriers.len(), 15);
+  assert_eq!(carriers.len(), 16);
 }
 
 #[test]

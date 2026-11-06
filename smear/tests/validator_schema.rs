@@ -4072,6 +4072,7 @@ fn declaration_order_is_kept_beside_the_sorted_tables() {
     [
       "cached",
       "audit",
+      "memo",
       "skip",
       "include",
       "deprecated",
