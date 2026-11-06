@@ -273,7 +273,8 @@ All notable changes to Smear are documented in this file.
   `deprecationReason`, and `__Schema.directives` leaves a deprecated directive
   out unless `includeDeprecated` is `true`. `includeDeprecated: null`, written or
   as a variable's value, is draft §6.4.1's `Kind::ArgumentNull` field error where
-  it read as `false`.
+  it read as `false`, and the error is raised on every `__Type`, including the
+  kinds that have no such list and the `LIST` and `NON_NULL` wrapper types.
 - The introspection parity oracle compares the executor's answers with graphql-js
   17.1.0's instead of 16.11.0's, directive deprecation included, and its eight
   recorded differences are redrawn for that release.

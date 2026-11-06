@@ -1194,6 +1194,128 @@ fn a_null_include_deprecated_is_a_field_error() {
   );
 }
 
+/// The field error a `null` `includeDeprecated` raises at `path`, as
+/// `a_null_include_deprecated_is_a_field_error` pins it for `fields`.
+fn null_include_deprecated(path: &str) -> (Kind, Option<Resource>, String, String) {
+  (
+    Kind::ArgumentNull,
+    None,
+    path.to_owned(),
+    "Argument \"includeDeprecated\" of non-null type \"Boolean!\" must not be null.".to_owned(),
+  )
+}
+
+/// The three lists of `__Type` that take `includeDeprecated` coerce it on every kind of type, not
+/// only on the kind that answers the list: a `null` is draft §6.4.1's field error on a scalar,
+/// which has none of them, as it is on the kind that has one.
+///
+/// Draft §5.8.5 lets a nullable variable stand where the declared `Boolean! = false` has a
+/// default, so `$d: Boolean` is a valid argument and a `null` value for it reaches the executor.
+/// The kind chooses between the list and `null` only once the argument has coerced, so with the
+/// variable not supplied the default applies, and the kinds without the list answer `null`.
+#[test]
+fn a_null_include_deprecated_is_a_field_error_on_every_kind_of_type() {
+  // Each list, and the types of `SPEC_SDL` it answers for: an object or an interface for `fields`,
+  // an enum for `enumValues` and an input object for `inputFields`.
+  let lists: [(&str, &[&str]); 3] = [
+    ("fields", &["Widget", "Thing"]),
+    ("enumValues", &["Unit"]),
+    ("inputFields", &["Spec"]),
+  ];
+  // One type of each kind: an object, an interface, a union, an enum, an input object, a scalar.
+  let types = ["Widget", "Thing", "Any", "Unit", "Spec", "Instant"];
+
+  for (list, answers_for) in lists {
+    for ty in types {
+      // Written as a variable's value, and as a literal.
+      for (argument, header) in [("$d", "query ($d: Boolean)"), ("null", "query")] {
+        let query = format!(
+          r#"{header} {{ __type(name: "{ty}") {{ name {list}(includeDeprecated: {argument}) {{ name }} }} }}"#
+        );
+        let answer = run_with(SPEC_SDL, &query, &[("d", J::Null)], Limits::default());
+        assert_eq!(
+          answer.errors,
+          vec![null_include_deprecated(&format!("__type.{list}"))],
+          "{list} on {ty}, {argument}"
+        );
+        assert_eq!(
+          answer.data,
+          json!({ "__type": { "name": ty, list: null } }),
+          "{list} on {ty}, {argument}"
+        );
+      }
+
+      // The control: the variable not supplied is the default `false`, which is no error, and the
+      // list is there for the kind that has it and `null` for every other.
+      let query = format!(
+        r#"query ($d: Boolean) {{ __type(name: "{ty}") {{ {list}(includeDeprecated: $d) {{ name }} }} }}"#
+      );
+      let answer = run(SPEC_SDL, &query);
+      assert!(
+        answer.errors.is_empty(),
+        "{list} on {ty}: {:?}",
+        answer.errors
+      );
+      let answered = &answer.data["__type"][list];
+      if answers_for.contains(&ty) {
+        assert!(
+          answered
+            .as_array()
+            .is_some_and(|members| !members.is_empty()),
+          "{list} on {ty} answered {answered}"
+        );
+      } else {
+        assert!(answered.is_null(), "{list} on {ty} answered {answered}");
+      }
+    }
+  }
+}
+
+/// A `null` `includeDeprecated` is a field error on a `LIST` or `NON_NULL` reference too, where
+/// `type` and `ofType` lead to one and every field but `kind` and `ofType` answers `null`.
+#[test]
+fn a_null_include_deprecated_is_a_field_error_on_a_wrapper() {
+  // `[String!]!` is a `NON_NULL` over a `LIST` over a `NON_NULL`: `type`, `type.ofType` and
+  // `type.ofType.ofType` are all wrappers.
+  const SDL: &str = "type Query { tags: [String!]! }";
+
+  for list in ["fields", "enumValues", "inputFields"] {
+    for depth in 0..3 {
+      let mut selection = format!("{list}(includeDeprecated: $d) {{ name }}");
+      let mut path = String::from("__type.fields.0.type");
+      let mut answered = json!({ list: null });
+      for _ in 0..depth {
+        selection = format!("ofType {{ {selection} }}");
+        path.push_str(".ofType");
+        answered = json!({ "ofType": answered });
+      }
+      path.push('.');
+      path.push_str(list);
+      let query = format!(
+        r#"query ($d: Boolean) {{ __type(name: "Query") {{ fields {{ type {{ {selection} }} }} }} }}"#
+      );
+      let data = json!({ "__type": { "fields": [{ "type": answered }] } });
+
+      let null = run_with(SDL, &query, &[("d", J::Null)], Limits::default());
+      assert_eq!(
+        null.errors,
+        vec![null_include_deprecated(&path)],
+        "{list} at depth {depth}"
+      );
+      assert_eq!(null.data, data, "{list} at depth {depth}");
+
+      // The control: with the variable not supplied the same wrapper answers `null`, and no error.
+      let default = run(SDL, &query);
+      assert!(
+        default.errors.is_empty(),
+        "{list} at depth {depth}: {:?}",
+        default.errors
+      );
+      assert_eq!(default.data, data, "{list} at depth {depth}");
+    }
+  }
+}
+
 /// `name` is `String!` with no default, so draft §6.4.1 raises for it like for any other argument:
 /// absent, `null`, or a variable the request did not supply.
 #[test]
