@@ -922,7 +922,7 @@ fn variant_list(expr: &Expr) -> Option<Vec<(String, String)>> {
 /// The enum `head` names from inside `module`, by the same rule [`resolve_decl`] uses.
 ///
 /// `SyntaxKind` is declared once per dialect and each dialect's `ALL` sits beside its own, so an
-/// answer of "the first one" would compare `graphqlx`'s 113 variants against `graphql`'s 87 and
+/// answer of "the first one" would compare `graphqlx`'s 114 variants against `graphql`'s 88 and
 /// report twenty-six omissions that are not there.
 fn resolve_enum<'a>(
   head: &str,

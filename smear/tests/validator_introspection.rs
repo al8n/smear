@@ -56,11 +56,11 @@
 //!   or a specified directive whose response entry says nothing the injected one would not — for a
 //!   scalar, no `specifiedByURL` and the built-in's own description or none asked for; for a
 //!   directive, its description (or none asked for), locations, argument and repeatability exactly
-//!   as injected — is left to the build. A document that spelled it out then gets `is_built_in`
-//!   false from the SDL door and true from this one, and the definition sits where the build
-//!   injects it — a scalar after the document's types and the meta-schema, a directive after the
-//!   document's own directives, both in the built-in SDL's order — rather than where the document
-//!   wrote it. [`Facts`] compares the directive order, so that place shows; it keys types by name,
+//!   as injected, and not deprecated — is left to the build. A document that spelled it out then
+//!   gets `is_built_in` false from the SDL door and true from this one, and the definition sits
+//!   where the build injects it — a scalar after the document's types and the meta-schema, a
+//!   directive after the document's own directives, both in the built-in SDL's order — rather than
+//!   where the document wrote it. [`Facts`] compares the directive order, so that place shows; it keys types by name,
 //!   so a scalar's does not. One the response reports otherwise is written out and agrees on
 //!   everything, place included ([`a_built_in_scalar_the_response_describes_is_written_out`],
 //!   [`a_specified_directive_the_response_reports_otherwise_is_written_out`]). The fixture
@@ -1698,8 +1698,8 @@ fn with_meta_types(meta_types: &str) -> String {
   response(&std::format!("{OK_QUERY},{meta_types}"))
 }
 
-/// A server's `__Directive`, listed in an order of its own: `isRepeatable` last, the place smear's
-/// meta-schema gave it before it followed the draft's.
+/// A server's `__Directive`, listed in an order of its own: `isRepeatable` fifth of seven, after
+/// `args` and last of the five members smear's meta-schema had before it followed the draft's.
 const REORDERED_DIRECTIVE: &str = r#"{"kind":"OBJECT","name":"__Directive","interfaces":[],"fields":[
   {"name":"name","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}},
   {"name":"description","args":[],"type":{"kind":"SCALAR","name":"String"}},
@@ -1736,7 +1736,8 @@ fn a_meta_type_is_held_to_its_shape_and_not_to_its_rendering() {
       .map(str::to_owned)
   };
 
-  // The server lists `isRepeatable` last, and the schema keeps the draft's order, third.
+  // The server lists `isRepeatable` fifth, after `args`, and the schema keeps the draft's order,
+  // third.
   let reordered = from_response(&with_meta_types(REORDERED_DIRECTIVE));
   assert_eq!(
     field_names(&reordered, b"__Directive"),
