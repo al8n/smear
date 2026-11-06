@@ -3576,6 +3576,8 @@ impl SchemaBuilder {
   {
     let mut raw = RawExtension::default();
     match extension {
+      // Directive extensions are not applied yet.
+      TypeSystemExtension::Directive(_) => return,
       TypeSystemExtension::Schema(schema) => {
         raw.schema = Some((*schema.span(), self.document));
         raw.directives = self.directive_uses(schema.directives(), DirectiveLocation::Schema);

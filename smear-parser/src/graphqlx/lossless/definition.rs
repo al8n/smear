@@ -88,7 +88,7 @@ use super::{
   value::{Constness, default_value},
 };
 
-// The nineteen directive-location spellings, from Task 7's frozen macro. Written out per dialect
+// The twenty directive-location spellings, from Task 7's macro. Written out per dialect
 // it is the second place a dialect could forget one; generated, the two suites cannot disagree.
 // This is the invocation that leaves `crate::lossless`'s macro set with no unused member.
 crate::lossless::directive_location_predicate!(smear_lexer::graphqlx::ContextualKeyword);
@@ -634,8 +634,8 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `Description? directive @ DefinitionName ArgumentsDefinition? repeatable? on
-  /// DirectiveLocations WhereClause?`
+  /// `Description? directive @ DefinitionName ArgumentsDefinition? Directives[Const]? repeatable?
+  /// on DirectiveLocations WhereClause?`
   ///
   /// The one definition whose tail is mandatory in two places: the `@` before its name, and the
   /// `on` before its locations.
@@ -656,6 +656,9 @@ lossless_production! {
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
           arguments_definition::<Src, Ctx>(inp)?;
         }
+        // The definition's own directives, after its arguments and before `repeatable` (draft
+        // §3.13). No `@` opens no node.
+        directives::<Src, Ctx>(inp, Constness::Const)?;
         // `repeatable` is a contextual keyword and a flag, not a node: the token is in the tree and
         // the kind space has no image for it.
         if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Repeatable) {

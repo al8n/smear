@@ -46,7 +46,7 @@
 //!   only content is the token the outer node already covers.
 //! - **A location that names no directive location is reported and still consumed.** apollo
 //!   reports and pops it too; the load-bearing reason here is that `syntactic/`'s `location`
-//!   admits only the nineteen spellings, and gate 1 compares verdicts. Consuming it keeps the
+//!   admits only the twenty spellings, and gate 1 compares verdicts. Consuming it keeps the
 //!   token in the `DirectiveLocations` node a diagnostic wants to point at.
 //! - **`true`, `false` and `null` are reported as enum values**, matching `syntactic/`'s
 //!   `take_enum_value`; the `EnumValue` node is still built, for the same reason.
@@ -608,7 +608,8 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `Description? directive @ Name ArgumentsDefinition? repeatable? on DirectiveLocations`
+  /// `Description? directive @ Name ArgumentsDefinition? Directives? repeatable? on
+  /// DirectiveLocations`
   ///
   /// The one definition whose tail is mandatory in two places: the `@` before its name, and the
   /// `on` before its locations. `syntactic/` requires both, so both are reported here.
@@ -623,6 +624,9 @@ lossless_production! {
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
           arguments_definition::<Src, Ctx>(inp)?;
         }
+        // The definition's own directives, after its arguments and before `repeatable` (draft
+        // §3.13). No `@` opens no node.
+        directives::<Src, Ctx>(inp, Constness::Const)?;
         // `repeatable` is a contextual keyword and a flag, not a node: the token is in the tree
         // and the kind space has no image for it.
         if peek_as::<Src, Ctx, ContextualKeyword>(inp)? == Some(ContextualKeyword::Repeatable) {

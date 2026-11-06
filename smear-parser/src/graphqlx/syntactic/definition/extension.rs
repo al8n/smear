@@ -58,6 +58,28 @@ extension_tail!(
   }
 );
 
+extension_tail!(
+  directive_extension_after_keyword,
+  DirectiveExtension<GraphqlxSlice<'inp, Src>>,
+  [contextual],
+  |inp, start| {
+    match try_at(inp)? {
+      ParseAttempt::Accept(_) => {}
+      ParseAttempt::Decline => return expected_definition_phase(inp, Expectation::At),
+    }
+    let name = extension_name(inp)?;
+    let directives = match optional_const_directives(inp)? {
+      Some(directives) => directives,
+      None => return expected_definition_phase(inp, Expectation::At),
+    };
+    Ok(DirectiveExtension::new(
+      SimpleSpan::new(start, directives.span().end()),
+      name,
+      directives,
+    ))
+  }
+);
+
 fn constrained_extension_fields<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<
@@ -534,6 +556,9 @@ where
         Some(ContextualKeyword::Schema) => {
           schema_extension_after_keyword(inp, start).map(TypeSystemExtension::Schema)
         }
+        Some(ContextualKeyword::Directive) => {
+          directive_extension_after_keyword(inp, start).map(TypeSystemExtension::Directive)
+        }
         Some(
           keyword @ (ContextualKeyword::Scalar
           | ContextualKeyword::Type
@@ -674,6 +699,22 @@ definition_parser!(
   }
 );
 definition_parser!(
+  /// Parses a GraphQLx directive extension.
+  ///
+  /// Its directives are mandatory, and its target is a generic-capable extension path.
+  ///
+  /// See the [GraphQL Directive Extension specification](https://spec.graphql.org/draft/#DirectiveExtension).
+  pub directive_extension,
+  inp,
+  DirectiveExtension<GraphqlxSlice<'inp, Src>>,
+  [contextual],
+  {
+    let start = take_contextual_keyword(inp, ContextualKeyword::Extend)?.start();
+    take_contextual_keyword(inp, ContextualKeyword::Directive)?;
+    directive_extension_after_keyword(inp, start)
+  }
+);
+definition_parser!(
   /// Parses a GraphQLx named type extension with fused single-consumption dispatch.
   ///
   /// See the [GraphQL Type System Extension specification](https://spec.graphql.org/draft/#TypeSystemExtension).
@@ -771,6 +812,15 @@ impl_definition_api!(
   S,
   SchemaExtension<S>,
   schema_extension,
+  [contextual]
+);
+impl_definition_api!(
+  /// Parses a GraphQLx directive extension.
+  ///
+  /// See the [GraphQL Directive Extension specification](https://spec.graphql.org/draft/#DirectiveExtension).
+  S,
+  DirectiveExtension<S>,
+  directive_extension,
   [contextual]
 );
 impl_definition_api!(

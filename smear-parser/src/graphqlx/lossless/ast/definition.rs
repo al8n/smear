@@ -341,6 +341,8 @@ ast_node!(
     definition_name: opt DefinitionName,
     /// The directive's argument definitions, if it declares any.
     arguments_definition: opt ArgumentsDefinition,
+    /// The directives applied to the definition itself, if it was given any.
+    directives: opt Directives,
     /// The locations the directive may be applied at.
     directive_locations: opt DirectiveLocations,
     /// The definition's `where` clause, if it has one.

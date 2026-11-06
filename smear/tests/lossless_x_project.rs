@@ -4006,6 +4006,14 @@ const SITES: &[Site] = &[
     Absent::Imaged,
   ),
   (
+    "extension.rs",
+    "report",
+    "extend directive @d",
+    Root::Mixed,
+    "MissingChild DirectiveExtension",
+    Absent::Imaged,
+  ),
+  (
     "value.rs",
     "report",
     "type T { f(a: Int = $v): Int }",
@@ -4255,7 +4263,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (48, 17),
+    (49, 17),
     "the two families' populations"
   );
 
@@ -4808,7 +4816,7 @@ fn every_walk_is_a_transcription() {
     1,
     "the cursor's trivia skip, and nothing else"
   );
-  assert_eq!(count("Cursor::new("), 74, "the walks, one cursor each");
+  assert_eq!(count("Cursor::new("), 75, "the walks, one cursor each");
 }
 
 #[test]

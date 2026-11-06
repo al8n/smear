@@ -310,8 +310,49 @@ fn a_directive_definition_carries_its_arguments_and_locations() {
 }
 
 #[test]
+fn a_directive_definition_carries_its_own_directives_before_repeatable() {
+  // Draft §3.13: `directive @ Name ArgumentsDefinition? Directives[Const]? repeatable? on
+  // DirectiveLocations`. The run sits after the arguments, and `DIRECTIVE_DEFINITION` is a
+  // location like the other nineteen.
+  let parse =
+    parse_document("directive @d(a: Int) @k @j(x: 1) repeatable on FIELD | DIRECTIVE_DEFINITION");
+  assert_eq!(
+    kinds(&parse),
+    vec![
+      K::Root,
+      K::Document,
+      K::DirectiveDefinition,
+      K::ArgumentsDefinition,
+      K::InputValueDefinition,
+      K::NamedType,
+      K::Directives,
+      K::Directive,
+      K::Directive,
+      K::Arguments,
+      K::Argument,
+      K::IntValue,
+      K::DirectiveLocations,
+    ]
+  );
+  assert!(!parse.has_errors());
+  assert_eq!(texts_of(&parse, K::Directives), ["@k @j(x: 1) "]);
+  assert_eq!(
+    texts_of(&parse, K::DirectiveLocations),
+    ["FIELD | DIRECTIVE_DEFINITION"]
+  );
+
+  // `syntactic/` takes the run before `repeatable` and nowhere else.
+  let parse = parse_document("directive @d repeatable @k on FIELD");
+  assert!(
+    parse.has_errors(),
+    "a directive after `repeatable` is refused"
+  );
+  assert_eq!(text(&parse), "directive @d repeatable @k on FIELD");
+}
+
+#[test]
 fn a_location_that_names_no_directive_location_is_reported() {
-  // `syntactic/`'s `location` admits only the nineteen spelled locations and errors otherwise,
+  // `syntactic/`'s `location` admits only the twenty spelled locations and errors otherwise,
   // and gate 1 compares verdicts. The name is still consumed, so the tree keeps its shape.
   let parse = parse_document("directive @d on NOPE");
   assert_eq!(

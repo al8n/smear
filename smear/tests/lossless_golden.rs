@@ -852,7 +852,7 @@ fn the_render_shows_a_lost_definition_node() {
 /// it by being tokenless, and one of the three can only leave it by gaining a token.
 ///
 /// The test is over both golden sets, not over the three entries, because "only these" is a claim
-/// about all 95 of them.
+/// about all 96 of them.
 #[test]
 fn only_a_source_with_no_committed_token_tiles_its_gap_at_the_root() {
   /// Does `src` put a token directly under `Root`? Only the gap can be there — every grammar token

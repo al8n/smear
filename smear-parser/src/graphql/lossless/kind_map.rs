@@ -27,7 +27,7 @@
 //! genuinely a text-level detail.
 //!
 //! **Do not "repair" the fold by adding `CarriageReturn`/`CarriageReturnAndNewline` kinds.**
-//! That breaks [`SyntaxKind::ALL`](crate::graphql::kinds::SyntaxKind::ALL)'s 87-kind pin and
+//! That breaks [`SyntaxKind::ALL`](crate::graphql::kinds::SyntaxKind::ALL)'s 88-kind pin and
 //! buys nothing the text does not already give.
 //!
 //! # No wildcard arm

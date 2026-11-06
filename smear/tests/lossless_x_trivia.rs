@@ -62,7 +62,7 @@
 //! Both exception sets are **derived**, not hand-listed. [`node_kinds`] takes the kind space minus
 //! its image prefix and minus the bookkeeping triple the [`KindSpace`] trait names, so a kind added
 //! anywhere in the node block defaults into the must-be-covered set — the safe direction — and a
-//! seventy-ninth node kind nobody reaches is a failure rather than an omission.
+//! eightieth node kind nobody reaches is a failure rather than an omission.
 //!
 //! And the counter has a blind spot of its own, which the plan does not name and a mutation found:
 //! a **loop that runs exactly once** reports full coverage while its continuation test is dead.
@@ -1158,8 +1158,8 @@ fn the_covered_set_is_every_node_kind() {
   let kinds = node_kinds();
   assert_eq!(
     kinds.len(),
-    78,
-    "GraphQLx declares 78 node kinds; the set this gate covers is {kinds:?}"
+    79,
+    "GraphQLx declares 79 node kinds; the set this gate covers is {kinds:?}"
   );
   assert_eq!(
     kinds.len() + K::IMAGE_BLOCK + 3,

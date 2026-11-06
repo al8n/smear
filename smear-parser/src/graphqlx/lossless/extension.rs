@@ -1,4 +1,4 @@
-//! The seven type-system extensions, and the `extend` dispatcher over them.
+//! The eight type-system extensions, and the `extend` dispatcher over them.
 //!
 //! The conventions are `value.rs`'s and are not repeated here.
 //!
@@ -17,10 +17,10 @@
 //! # Every extension needs at least one component, and each one says so differently
 //!
 //! `syntactic/`'s six tails each end in a `(None, None, …) => Err` arm naming its own expectation,
-//! and a scalar extension goes further: its directives are **mandatory**, not merely one of
-//! several alternatives (`extension.rs:48-51`). A bare `extend type T` re-prints as perfectly
-//! valid text, so the verdict is the only witness — which is why the emptiness check is written
-//! out at every site rather than left to the components' own optionality.
+//! and a scalar or a directive extension goes further: its directives are **mandatory**, not
+//! merely one of several alternatives (`extension.rs:48-51`). A bare `extend type T` re-prints as
+//! perfectly valid text, so the verdict is the only witness — which is why the emptiness check is
+//! written out at every site rather than left to the components' own optionality.
 //!
 //! # Divergences 16 and 17 have their extension twins here
 //!
@@ -69,6 +69,30 @@ lossless_production! {
       K::ScalarTypeExtension.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        extension_name::<Src, Ctx>(inp)?;
+        if peek_kind::<Src, Ctx>(inp)? != Some(Kind::At) {
+          return recover::report_unexpected::<Src, Ctx>(inp, EXTENSION_TAIL_HEADS);
+        }
+        directives::<Src, Ctx>(inp, Constness::Const)
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// `extend directive @ ExtensionName Directives[Const]`
+  ///
+  /// **Precondition: `mark` was minted before the `extend`, which is already committed, and the
+  /// head is an `Identifier` spelled `directive`.** [`type_system_extension`] establishes both.
+  ///
+  /// [`scalar_type_extension`]'s single, **required** tail, behind the `@` a directive's name is
+  /// written after. The `@` is required too, as in a directive definition.
+  fn directive_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
+    node_at(
+      mark,
+      K::DirectiveExtension.raw(),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        expect::<Src, Ctx>(inp, Kind::At)?;
         extension_name::<Src, Ctx>(inp)?;
         if peek_kind::<Src, Ctx>(inp)? != Some(Kind::At) {
           return recover::report_unexpected::<Src, Ctx>(inp, EXTENSION_TAIL_HEADS);
@@ -240,7 +264,8 @@ lossless_production! {
       Some(Keyword::Enum) => enum_type_extension::<Src, Ctx>(inp, mark),
       Some(Keyword::Input) => input_object_type_extension::<Src, Ctx>(inp, mark),
       Some(Keyword::Schema) => schema_extension::<Src, Ctx>(inp, mark),
-      // A name that is none of the seven, or no name at all. Reported and skipped — `unexpected`
+      Some(Keyword::Directive) => directive_extension::<Src, Ctx>(inp, mark),
+      // A name that is none of the eight, or no name at all. Reported and skipped — `unexpected`
       // consumes at least one token whenever input remains, which is the document loops' only
       // termination argument. The mark is left unspent and materializes into nothing.
       _ => recover::unexpected::<Src, Ctx>(inp, TYPE_EXTENSION_HEADS),
@@ -272,7 +297,7 @@ lossless_drivers! {
   mod test_support;
 
   /// `super::extension` over `src` — the entry every extension position uses, and the only door
-  /// to the seven `*_type_extension` productions.
+  /// to the seven `*_type_extension` productions and `directive_extension`.
   fn parse_type_system_extension => extension;
 
   /// `super::extension` over `src` again, under the name divergence 17's test reads.

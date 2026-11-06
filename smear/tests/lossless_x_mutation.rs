@@ -577,7 +577,7 @@ const OPEN: &[(&str, usize)] = &[];
 
 /// The `(entry, door)` pairs the law runs over: every hole-free parse of every corpus entry under
 /// each of the three doors that builds that door's container.
-const PAIRS: usize = 251;
+const PAIRS: usize = 253;
 
 /// Of [`PAIRS`], the ones whose unmutated tree already lacks a lenient token — every mutation of
 /// them is compared against a restored text.
@@ -590,29 +590,29 @@ const TRIED: &[((&str, &str), usize)] = &[
   (("executable", "retext"), 1434),
   (("executable", "swap"), 669),
   (("executable", "transplant"), 13_750),
-  (("mixed", "delete"), 3184),
-  (("mixed", "duplicate"), 3184),
-  (("mixed", "retext"), 4163),
-  (("mixed", "swap"), 1640),
-  (("mixed", "transplant"), 35_899),
-  (("type-system", "delete"), 1881),
-  (("type-system", "duplicate"), 1881),
-  (("type-system", "retext"), 2679),
-  (("type-system", "swap"), 955),
-  (("type-system", "transplant"), 20_767),
+  (("mixed", "delete"), 3197),
+  (("mixed", "duplicate"), 3197),
+  (("mixed", "retext"), 4183),
+  (("mixed", "swap"), 1645),
+  (("mixed", "transplant"), 35_990),
+  (("type-system", "delete"), 1894),
+  (("type-system", "duplicate"), 1894),
+  (("type-system", "retext"), 2699),
+  (("type-system", "swap"), 960),
+  (("type-system", "transplant"), 20_858),
 ];
 
 /// Mutations tried in total.
-const TRIED_TOTAL: usize = 94_632;
+const TRIED_TOTAL: usize = 94_916;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 83_979;
+const UNFAITHFUL: usize = 84_231;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 8036;
+const EQUAL: usize = 8064;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 2302;
+const BOTH_REFUSE: usize = 2306;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
 const LENIENT_EQUAL: usize = 247;

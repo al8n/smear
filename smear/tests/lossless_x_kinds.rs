@@ -96,7 +96,7 @@ const RENAMED_IMAGES: &[(&str, &str, &str)] = &[
     "Identifier",
     "Name",
     "graphqlx::syntactic::name builds graphqlx::ast::Name from it, and so does every one of the \
-     forty-four contextual keywords",
+     forty-five contextual keywords",
   ),
   (
     "CarriageReturn",
@@ -160,7 +160,7 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   ),
   (
     "TypeSystemExtension",
-    "a choice of TypeExtension | SchemaExtension",
+    "a choice of TypeExtension | DirectiveExtension | SchemaExtension",
   ),
   (
     "TypeSystemDefinitionOrExtension",

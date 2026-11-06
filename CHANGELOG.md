@@ -206,6 +206,33 @@ All notable changes to Smear are documented in this file.
   `schema` definition's document rather than in document 0. A related position
   inside a built-in definition is no longer reported, since no document the
   caller supplied holds it: `extend type Int { f: Int }` is refused with no label.
+- `smear-lexer`!: `DIRECTIVE_DEFINITION` is a contextual keyword in both
+  dialects, the twentieth `DirectiveLocation` of draft §3.13. Each dialect's
+  `ContextualKeyword` gains `DirectiveDefinitionLocation`, after
+  `InputFieldDefinitionLocation` (and, in GraphQLx, before `Import`), and
+  `keywords::DirectiveDefinitionLocation` is its keyword token. An exhaustive
+  match on either `ContextualKeyword` needs the new arm.
+- `smear-parser`!: a directive definition takes directives and a directive is
+  extended with `extend directive`, in both dialects (draft §3.13 and §3.13.6).
+  `DirectiveDefinition` gains a `Directives` type parameter after `Arguments`:
+  `DirectiveDefinition::new` takes the definition's directives after its
+  arguments definition, `directives()` returns them, both dialects'
+  `DirectiveDefinition` aliases bind `ConstDirectives`, and both parsers read
+  `Directives[Const]?` after the arguments and before `repeatable`.
+  `DirectiveExtension` is `extend directive @Name Directives[Const]`, whose
+  directives are mandatory; GraphQL's alias names the directive with a `Name`
+  and GraphQLx's with an `ExtensionName`, and each dialect has a
+  `directive_extension` production and `DirectiveExtension::graphql` or
+  `::graphqlx`. `TypeSystemExtension` is now
+  `TypeSystemExtension<TypeExtension, DirectiveExtension, SchemaExtension>`
+  with a `Directive` variant, and both dialects' aliases follow; an exhaustive
+  match needs the new arm. `TypeSystemDirectiveLocation::DirectiveDefinition`
+  is the `DIRECTIVE_DEFINITION` location. In the lossless layer each dialect's
+  `SyntaxKind` gains `DirectiveExtension` (GraphQL's after `SchemaExtension`,
+  GraphQLx's after `InputObjectTypeExtension`), which moves the raw value of
+  every later kind by one; the typed layer adds the `DirectiveExtension`
+  wrapper, `DirectiveDefinition::directives` and `directive_extensions` on both
+  document roots, and both projections build the new AST.
 
 ## [0.0.1] - 2026-10-30
 

@@ -14,15 +14,16 @@ use super::description;
 use crate::graphql::{
   GraphQL,
   ast::{
-    ArgumentsDefinition, Described, DirectiveDefinition, DirectiveLocations, EnumTypeDefinition,
-    EnumTypeExtension, EnumValueDefinition, EnumValuesDefinition, FieldDefinition,
-    FieldsDefinition, ImplementInterfaces, InputFieldsDefinition, InputObjectTypeDefinition,
-    InputObjectTypeExtension, InputValueDefinition, InterfaceTypeDefinition,
-    InterfaceTypeExtension, Location, Name, ObjectTypeDefinition, ObjectTypeExtension,
-    RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
-    ScalarTypeExtension, SchemaDefinition, SchemaExtension, StringValue, TypeDefinition,
-    TypeExtension, TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
-    TypeSystemExtension, UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension,
+    ArgumentsDefinition, Described, DirectiveDefinition, DirectiveExtension, DirectiveLocations,
+    EnumTypeDefinition, EnumTypeExtension, EnumValueDefinition, EnumValuesDefinition,
+    FieldDefinition, FieldsDefinition, ImplementInterfaces, InputFieldsDefinition,
+    InputObjectTypeDefinition, InputObjectTypeExtension, InputValueDefinition,
+    InterfaceTypeDefinition, InterfaceTypeExtension, Location, Name, ObjectTypeDefinition,
+    ObjectTypeExtension, RootOperationTypeDefinition, RootOperationTypesDefinition,
+    ScalarTypeDefinition, ScalarTypeExtension, SchemaDefinition, SchemaExtension, StringValue,
+    TypeDefinition, TypeExtension, TypeSystemDefinition, TypeSystemDefinitionOrExtension,
+    TypeSystemDocument, TypeSystemExtension, UnionMemberTypes, UnionTypeDefinition,
+    UnionTypeExtension,
   },
   error::{ErrorData, Expectation, GraphqlErrors, Unclosed},
   syntactic::{GraphqlInput, GraphqlLexer},
@@ -461,7 +462,7 @@ fn optional_sdl_groups_accept_after_their_opener() {
 
 #[test]
 fn directive_locations_are_exact_and_lossless_at_the_token_level() {
-  const LOCATIONS: [&str; 19] = [
+  const LOCATIONS: [&str; 20] = [
     "QUERY",
     "MUTATION",
     "SUBSCRIPTION",
@@ -481,6 +482,7 @@ fn directive_locations_are_exact_and_lossless_at_the_token_level() {
     "ENUM_VALUE",
     "INPUT_OBJECT",
     "INPUT_FIELD_DEFINITION",
+    "DIRECTIVE_DEFINITION",
   ];
 
   fn assert_location(source: &str) {
@@ -508,7 +510,7 @@ fn directive_locations_are_exact_and_lossless_at_the_token_level() {
   }
 
   fn all(locations: DirectiveLocations<Location>) {
-    assert_eq!(locations.locations().len(), 19);
+    assert_eq!(locations.locations().len(), 20);
     assert_eq!(
       locations
         .locations()
@@ -520,7 +522,7 @@ fn directive_locations_are_exact_and_lossless_at_the_token_level() {
   }
   accept_all!(
     DirectiveLocations::<Location>::graphql,
-    "| QUERY | MUTATION | SUBSCRIPTION | FIELD | FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT | VARIABLE_DEFINITION | SCHEMA | SCALAR | OBJECT | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION",
+    "| QUERY | MUTATION | SUBSCRIPTION | FIELD | FRAGMENT_DEFINITION | FRAGMENT_SPREAD | INLINE_FRAGMENT | VARIABLE_DEFINITION | SCHEMA | SCALAR | OBJECT | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | DIRECTIVE_DEFINITION",
     all
   );
 
@@ -813,6 +815,7 @@ fn directive_schema_and_type_dispatch_share_the_concrete_ast_api() {
   fn directive<S: AsRef<[u8]>>(value: DirectiveDefinition<S>) {
     assert_eq!(value.name().source_ref().as_ref(), b"tag");
     assert!(value.arguments_definition().is_some());
+    assert!(value.directives().is_none());
     assert!(value.repeatable());
     assert_eq!(value.locations().locations().len(), 2);
   }
@@ -821,9 +824,42 @@ fn directive_schema_and_type_dispatch_share_the_concrete_ast_api() {
     "directive @tag(reason: String) repeatable on FIELD | OBJECT",
     directive
   );
+  // Draft §3.13: `Directives[Const]?` sits after the arguments and before `repeatable`.
+  fn directed_directive<S: AsRef<[u8]>>(value: DirectiveDefinition<S>) {
+    assert_eq!(value.span().start(), 0);
+    assert_eq!(value.name().source_ref().as_ref(), b"tag");
+    assert!(value.arguments_definition().is_some());
+    let directives = value.directives().expect("the definition's own directives");
+    assert_eq!(directives.directives().len(), 2);
+    assert_eq!(
+      directives.directives()[0].name().source_ref().as_ref(),
+      b"meta"
+    );
+    assert_eq!(
+      directives.directives()[1].name().source_ref().as_ref(),
+      b"other"
+    );
+    assert_eq!(*directives.span(), SimpleSpan::new(31, 53));
+    assert!(value.repeatable());
+    assert_eq!(
+      value
+        .locations()
+        .locations()
+        .iter()
+        .map(Location::as_str)
+        .collect::<Vec<_>>(),
+      ["FIELD", "DIRECTIVE_DEFINITION"]
+    );
+  }
+  accept_all!(
+    DirectiveDefinition::<_>::graphql,
+    "directive @tag(reason: String) @meta(level: 1) @other repeatable on FIELD | DIRECTIVE_DEFINITION",
+    directed_directive
+  );
   fn simple_directive<S: AsRef<[u8]>>(value: DirectiveDefinition<S>) {
     assert_eq!(value.name().source_ref().as_ref(), b"deprecated");
     assert!(value.arguments_definition().is_none());
+    assert!(value.directives().is_none());
     assert!(!value.repeatable());
     assert_eq!(value.locations().locations().len(), 1);
   }
@@ -967,10 +1003,21 @@ fn type_and_directive_definition_parity_rows_remain_stable() {
     ("directive @tag repeatable on FIELD", true),
     ("directive @tag(reason: String) on FIELD", true),
     ("directive @tag on | FIELD", true),
+    ("directive @tag @meta on FIELD", true),
+    (
+      "directive @tag(reason: String) @meta(level: 1) on FIELD",
+      true,
+    ),
+    ("directive @tag @meta repeatable on FIELD", true),
+    ("directive @tag on DIRECTIVE_DEFINITION", true),
     ("directive tag on FIELD", false),
     ("directive @tag FIELD", false),
     ("directive @tag on", false),
     ("directive @tag on BOGUS", false),
+    // The directives come before `repeatable`, and they are constant.
+    ("directive @tag repeatable @meta on FIELD", false),
+    ("directive @tag @meta(level: $v) on FIELD", false),
+    ("directive @tag @ on FIELD", false),
   ];
   for (source, accepted) in DIRECTIVE_DEFINITION_ROWS {
     assert_eq!(
@@ -1186,7 +1233,37 @@ fn extension_apis_require_a_nonempty_payload_and_preserve_the_extend_span() {
     schema
   );
 
+  // Draft §3.13.6: `extend directive @ Name Directives[Const]`, the directives mandatory.
+  fn directive<S: AsRef<[u8]>>(value: DirectiveExtension<S>) {
+    assert_eq!(value.span().start(), 0);
+    assert_eq!(value.name().source_ref().as_ref(), b"tag");
+    assert_eq!(value.directives().directives().len(), 2);
+    assert_eq!(value.span().end(), value.directives().span().end());
+  }
+  accept_all!(
+    DirectiveExtension::<_>::graphql,
+    "extend directive @tag @meta(level: 1) @other",
+    directive
+  );
+
   reject_all!(ScalarTypeExtension::<_>::graphql, "extend scalar Date");
+  reject_all!(DirectiveExtension::<_>::graphql, "extend directive @tag");
+  reject_all!(
+    DirectiveExtension::<_>::graphql,
+    "extend directive tag @meta"
+  );
+  reject_all!(
+    DirectiveExtension::<_>::graphql,
+    "extend directive @tag @meta(level: $v)"
+  );
+  assert_unexpected(
+    drive_str(
+      |inp| DirectiveExtension::<_>::graphql(inp).map(|_| ()),
+      "extend directive @tag repeatable",
+    ),
+    Expectation::At,
+    Some(SyntacticTokenKind::Identifier),
+  );
   reject_all!(ObjectTypeExtension::<_>::graphql, "extend type User");
   reject_all!(
     InterfaceTypeExtension::<_>::graphql,
@@ -1258,12 +1335,28 @@ fn type_system_dispatches_definitions_extensions_and_descriptions() {
     "extend enum Role { ADMIN }",
     "extend input Filter { limit: Int }",
     "extend schema { query: Query }",
+    "extend directive @tag @dir",
   ] {
     assert!(
       drive_str(TypeSystemExtension::<_>::graphql, source).is_ok(),
       "type-system-extension fused dispatch accepts {source:?}",
     );
   }
+
+  // A directive extension is a type-system extension and not a type extension.
+  fn directive_extension<S: AsRef<[u8]>>(value: TypeSystemExtension<S>) {
+    assert!(value.is_directive());
+    assert_eq!(
+      value.unwrap_directive().name().source_ref().as_ref(),
+      b"tag"
+    );
+  }
+  accept_all!(
+    TypeSystemExtension::<_>::graphql,
+    "extend directive @tag @dir",
+    directive_extension
+  );
+  reject_all!(TypeExtension::<_>::graphql, "extend directive @tag @dir");
 
   fn definition_or_extension<S: AsRef<[u8]>>(value: TypeSystemDefinitionOrExtension<S>) {
     assert!(value.is_definition());

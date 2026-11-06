@@ -49,6 +49,9 @@ pub(crate) fn classify_location(keyword: ContextualKeyword, span: SimpleSpan) ->
     ContextualKeyword::InputFieldDefinitionLocation => {
       TypeSystemDirectiveLocation::input_field_definition(span).into()
     }
+    ContextualKeyword::DirectiveDefinitionLocation => {
+      TypeSystemDirectiveLocation::directive_definition(span).into()
+    }
     _ => return None,
   })
 }
@@ -130,6 +133,7 @@ where
   let name = definition_name(inp)?;
   let arguments_definition: Option<ArgumentsDefinition<GraphqlxSlice<'inp, Src>>> =
     try_arguments_definition(inp)?.into();
+  let directives = optional_const_directives(inp)?;
   let repeatable = matches!(
     try_contextual_keyword(inp, ContextualKeyword::Repeatable)?,
     ParseAttempt::Accept(_)
@@ -156,6 +160,7 @@ where
     SimpleSpan::new(start, end),
     name,
     arguments_definition,
+    directives,
     repeatable,
     locations,
   ))

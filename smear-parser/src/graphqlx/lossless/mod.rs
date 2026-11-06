@@ -123,7 +123,7 @@ pub type TokenKind = LosslessTokenKind;
 /// This dialect's contextual-keyword projection — the door a production reads a keyword's
 /// *spelling* through, since every one of them arrives as an ordinary identifier token.
 ///
-/// GraphQLx has forty-four of them against GraphQL's thirty-two: `import`, `from`, `as`, `where`,
+/// GraphQLx has forty-five of them against GraphQL's thirty-nine: `import`, `from`, `as`, `where`,
 /// `set` and `map` are keywords here and ordinary names there.
 pub type Keyword = smear_lexer::graphqlx::ContextualKeyword;
 

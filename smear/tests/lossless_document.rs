@@ -1,6 +1,6 @@
 #![cfg(all(feature = "rowan", feature = "graphql"))]
 
-//! Task 8's gate, part two: the seven type-system extensions, the two document roots, and the
+//! Task 8's gate, part two: the eight type-system extensions, the two document roots, and the
 //! top-level recovery point — the one place in this suite where a production's `Err` is caught
 //! rather than propagated.
 //!
@@ -35,7 +35,7 @@ fn texts_of(parse: &Parse, kind: K) -> Vec<String> {
     .collect()
 }
 
-// ---- The seven extensions --------------------------------------------------------------------
+// ---- The eight extensions --------------------------------------------------------------------
 
 #[test]
 fn every_extension_kind_is_reachable_and_wraps_its_extend() {
@@ -115,6 +115,16 @@ fn every_extension_kind_is_reachable_and_wraps_its_extend() {
         K::NamedType,
       ],
     ),
+    (
+      "extend directive @d @k",
+      vec![
+        K::Root,
+        K::Document,
+        K::DirectiveExtension,
+        K::Directives,
+        K::Directive,
+      ],
+    ),
   ] {
     let parse = parse_document(src);
     assert_eq!(kinds(&parse), want, "{src:?}");
@@ -139,7 +149,7 @@ fn an_extension_node_starts_at_its_extend_keyword() {
 
 #[test]
 fn an_extension_with_no_body_is_reported() {
-  // All seven extension shapes require at least one trailing component; `syntactic/`'s
+  // All eight extension shapes require at least one trailing component; `syntactic/`'s
   // `extension.rs` errors on each bare form ("directives or …"), and gate 1 compares verdicts.
   for src in [
     "extend scalar S",
@@ -149,11 +159,32 @@ fn an_extension_with_no_body_is_reported() {
     "extend enum E",
     "extend input I",
     "extend schema",
+    "extend directive @d",
   ] {
     let parse = parse_document(src);
     assert!(parse.has_errors(), "{src:?} has no body and must report");
     assert_eq!(text(&parse), src, "{src:?} must still round-trip");
   }
+}
+
+#[test]
+fn a_directive_extension_names_its_directive_after_an_at() {
+  // `extend directive @ Name Directives[Const]` (draft §3.13.6). The `@` before the name is a
+  // token of the extension, and the directives are its only tail.
+  let parse = parse_document("extend directive @d @k(a: 1)");
+  assert!(!parse.has_errors());
+  assert_eq!(
+    texts_of(&parse, K::DirectiveExtension),
+    ["extend directive @d @k(a: 1)"]
+  );
+  assert_eq!(texts_of(&parse, K::Directives), ["@k(a: 1)"]);
+
+  // `syntactic/` commits to the `@`, so an extension without one is not built: the production
+  // unwinds and its tokens stay in the document, reported.
+  let parse = parse_document("extend directive d @k");
+  assert!(parse.has_errors());
+  assert!(!kinds(&parse).contains(&K::DirectiveExtension));
+  assert_eq!(text(&parse), "extend directive d @k");
 }
 
 #[test]

@@ -112,7 +112,7 @@ pub fn token_kind<S>(token: &LosslessToken<S>) -> u16 {
     LosslessToken::Tab => K::Tab,
     // The 3 -> 1 fold, and the only one. `K::CarriageReturn` and `K::CarriageReturnAndNewline` do
     // not exist and must not be added: the three forms stay distinguishable through the token's
-    // text, and adding them would break the space's 113-kind pin.
+    // text, and adding them would break the space's 114-kind pin.
     LosslessToken::Newline => K::Newline,
     LosslessToken::CarriageReturn => K::Newline,
     LosslessToken::CarriageReturnAndNewline => K::Newline,

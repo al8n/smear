@@ -90,6 +90,8 @@ pub enum ContextualKeyword {
   InputObjectLocation,
   /// `INPUT_FIELD_DEFINITION`
   InputFieldDefinitionLocation,
+  /// `DIRECTIVE_DEFINITION`
+  DirectiveDefinitionLocation,
   /// `import`
   Import,
   /// `from`
@@ -147,6 +149,7 @@ impl ContextualKeyword {
       Self::EnumValueLocation => "ENUM_VALUE",
       Self::InputObjectLocation => "INPUT_OBJECT",
       Self::InputFieldDefinitionLocation => "INPUT_FIELD_DEFINITION",
+      Self::DirectiveDefinitionLocation => "DIRECTIVE_DEFINITION",
       Self::Import => "import",
       Self::From => "from",
       Self::As => "as",
@@ -205,6 +208,7 @@ pub fn contextual_keyword(source: &[u8]) -> Option<ContextualKeyword> {
     b"ENUM_VALUE" => Some(ContextualKeyword::EnumValueLocation),
     b"INPUT_OBJECT" => Some(ContextualKeyword::InputObjectLocation),
     b"INPUT_FIELD_DEFINITION" => Some(ContextualKeyword::InputFieldDefinitionLocation),
+    b"DIRECTIVE_DEFINITION" => Some(ContextualKeyword::DirectiveDefinitionLocation),
     b"import" => Some(ContextualKeyword::Import),
     b"from" => Some(ContextualKeyword::From),
     b"as" => Some(ContextualKeyword::As),
@@ -248,7 +252,7 @@ where
 /// now a compile-time check, and `crate::keyword_prefix` compares the two dialects' lists against
 /// a third one written out by hand.
 #[cfg(test)]
-pub(crate) const KEYWORDS: [ContextualKeyword; 44] = [
+pub(crate) const KEYWORDS: [ContextualKeyword; 45] = [
   ContextualKeyword::Type,
   ContextualKeyword::Interface,
   ContextualKeyword::Union,
@@ -287,6 +291,7 @@ pub(crate) const KEYWORDS: [ContextualKeyword; 44] = [
   ContextualKeyword::EnumValueLocation,
   ContextualKeyword::InputObjectLocation,
   ContextualKeyword::InputFieldDefinitionLocation,
+  ContextualKeyword::DirectiveDefinitionLocation,
   ContextualKeyword::Import,
   ContextualKeyword::From,
   ContextualKeyword::As,
@@ -347,6 +352,7 @@ impl ContextualKeyword {
       | Self::EnumValueLocation
       | Self::InputObjectLocation
       | Self::InputFieldDefinitionLocation
+      | Self::DirectiveDefinitionLocation
       | Self::Import
       | Self::From
       | Self::As

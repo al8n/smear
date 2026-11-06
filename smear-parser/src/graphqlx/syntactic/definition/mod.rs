@@ -32,9 +32,9 @@ use crate::{
     GraphQLx,
     ast::{
       ArgumentsDefinition, ConstDirectives, Constrained, Described, DescribedTypeSystemDefinition,
-      DirectiveDefinition, DirectiveLocations, EnumTypeDefinition, EnumTypeExtension,
-      EnumValueDefinition, EnumValuesDefinition, FieldDefinition, FieldsDefinition,
-      ImplementInterfaces, InputFieldsDefinition, InputObjectTypeDefinition,
+      DirectiveDefinition, DirectiveExtension, DirectiveLocations, EnumTypeDefinition,
+      EnumTypeExtension, EnumValueDefinition, EnumValuesDefinition, FieldDefinition,
+      FieldsDefinition, ImplementInterfaces, InputFieldsDefinition, InputObjectTypeDefinition,
       InputObjectTypeExtension, InputValueDefinition, InterfaceTypeDefinition,
       InterfaceTypeExtension, Location, Name, ObjectTypeDefinition, ObjectTypeExtension,
       RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
@@ -186,7 +186,7 @@ pub use type_definition::{described_type_definition, type_definition};
 mod extension;
 pub(crate) use extension::type_system_extension_after_extend;
 pub use extension::{
-  enum_type_extension, input_object_type_extension, interface_type_extension,
+  directive_extension, enum_type_extension, input_object_type_extension, interface_type_extension,
   object_type_extension, scalar_type_extension, schema_extension, type_extension,
   type_system_extension, union_type_extension,
 };
