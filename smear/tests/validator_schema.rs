@@ -407,6 +407,39 @@ const BRANCHES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     "type Query { ok(a: I): Int } interface I { a: Int } type A implements I { a: Int }",
     &[SchemaErrorKind::ArgumentTypeNotInputType],
   ),
+  // -- §3.13 and §3.13.6, where the list is a directive definition's own -----------------------
+  //
+  // The census rows of these four kinds write their directive, or their extension, against a
+  // type. These are the same rules at `DIRECTIVE_DEFINITION`, where the list is the one a
+  // directive definition carries and an `extend directive` adds to.
+  (
+    SchemaErrorKind::UndefinedExtensionTarget,
+    "type Query { ok: Int } directive @k on DIRECTIVE_DEFINITION extend directive @nope @k",
+    &[SchemaErrorKind::UndefinedExtensionTarget],
+  ),
+  (
+    SchemaErrorKind::UnsupportedDirectiveLocation,
+    "type Query { ok: Int } directive @k on FIELD directive @d @k on FIELD",
+    &[SchemaErrorKind::UnsupportedDirectiveLocation],
+  ),
+  (
+    SchemaErrorKind::DuplicateDirectiveUse,
+    "type Query { ok: Int }
+     directive @k on DIRECTIVE_DEFINITION
+     directive @d @k on FIELD
+     extend directive @d @k",
+    &[SchemaErrorKind::DuplicateDirectiveUse],
+  ),
+  (
+    SchemaErrorKind::SelfReferentialDirective,
+    "type Query { ok: Int } directive @d @d on DIRECTIVE_DEFINITION",
+    &[SchemaErrorKind::SelfReferentialDirective],
+  ),
+  (
+    SchemaErrorKind::SelfReferentialDirective,
+    "type Query { ok: Int } directive @d on DIRECTIVE_DEFINITION extend directive @d @d",
+    &[SchemaErrorKind::SelfReferentialDirective],
+  ),
 ];
 
 /// Every branch row fires exactly what it says, and every one names a kind the census already
@@ -695,6 +728,10 @@ const RENDERED: &[(&str, &[&str])] = &[
     &["undefined directive: `d.a.nope`"],
   ),
   (
+    "type Query { ok: Int } directive @d @nope on FIELD",
+    &["undefined directive: `d.nope`"],
+  ),
+  (
     "directive @d on SCALAR\ntype Query { ok: Int @d }",
     &["directive is not allowed here: `Query.ok.d`"],
   ),
@@ -722,6 +759,12 @@ const RENDERED: &[(&str, &[&str])] = &[
   (
     "directive @d(a: Int) on ARGUMENT_DEFINITION\ntype Query { ok(b: Int @d(a: 1, a: 2)): Int }",
     &["directive argument is passed twice: `Query.ok.b.@d.a`"],
+  ),
+  (
+    "directive @k(a: Int) on DIRECTIVE_DEFINITION
+     directive @d @k(a: \"x\") on FIELD
+     type Query { ok: Int }",
+    &["directive argument value does not fit its declared type: `d.@k.a`"],
   ),
 ];
 
@@ -759,6 +802,7 @@ fn legal_directive_usages_are_accepted() {
      directive @onEnumValue on ENUM_VALUE
      directive @onInputObject on INPUT_OBJECT
      directive @onInputField on INPUT_FIELD_DEFINITION
+     directive @onDirectiveDef on DIRECTIVE_DEFINITION
      schema @onSchema { query: Query }
      type Query @onObject { ok(a: Int @onArgDef): Int @onFieldDef }
      scalar Custom @onScalar
@@ -766,20 +810,25 @@ fn legal_directive_usages_are_accepted() {
      type Impl implements I @onObject { ok: Int }
      union U @onUnion = Query | Impl
      enum E @onEnum { A @onEnumValue }
-     input In @onInputObject { a: Int @onInputField }",
+     input In @onInputObject { a: Int @onInputField }
+     directive @annotated @onDirectiveDef on FIELD",
   );
 
-  // The same location reached through an extension, including `extend schema`.
+  // The same location reached through an extension, including `extend schema` and
+  // `extend directive`.
   built(
     "directive @onSchema repeatable on SCHEMA
      directive @onObject on OBJECT
      directive @onEnumValue on ENUM_VALUE
+     directive @onDirectiveDef on DIRECTIVE_DEFINITION
      schema @onSchema { query: Query }
      extend schema @onSchema
      type Query { ok: Int }
      type T @onObject { a: Int }
      enum E { A }
-     extend enum E { B @onEnumValue }",
+     extend enum E { B @onEnumValue }
+     directive @annotated on FIELD
+     extend directive @annotated @onDirectiveDef",
   );
 
   // `repeatable` means what it says.
@@ -851,6 +900,293 @@ fn a_type_and_its_extensions_are_one_directive_location() {
   );
 }
 
+/// Draft §3.13 gives a directive definition `Directives[Const]?`, applied at
+/// `DIRECTIVE_DEFINITION`, and §3.13.6's `extend directive` adds to them: the accepting direction
+/// of every rule the tests after this one refuse with.
+#[test]
+fn directives_on_a_directive_definition_are_accepted() {
+  // On the definition, between its arguments and `repeatable`, at the location the applied
+  // directive's own definition lists.
+  built(
+    "type Query { ok: Int }
+     directive @meta(level: Int) on DIRECTIVE_DEFINITION
+     directive @d(a: Int) @meta(level: 1) repeatable on FIELD",
+  );
+  // Through an extension: of a directive the document defines, written before that definition,
+  // and of one the specification provides.
+  built(
+    "type Query { ok: Int }
+     extend directive @d @meta
+     directive @meta on DIRECTIVE_DEFINITION
+     directive @d on FIELD
+     extend directive @deprecated @meta",
+  );
+  // A `repeatable` directive, by the definition and again by every extension.
+  built(
+    "type Query { ok: Int }
+     directive @tag(name: String!) repeatable on DIRECTIVE_DEFINITION
+     directive @d @tag(name: \"a\") on FIELD
+     extend directive @d @tag(name: \"b\") @tag(name: \"c\")
+     extend directive @d @tag(name: \"d\")",
+  );
+  // A non-repeatable one once on each of two definitions, which are two locations.
+  built(
+    "type Query { ok: Int }
+     directive @k on DIRECTIVE_DEFINITION
+     directive @d @k on FIELD
+     directive @e on FIELD
+     extend directive @e @k",
+  );
+  // A chain that never comes back is not a cycle, whether an extension or a type an argument
+  // accepts is one of its links.
+  built(
+    "type Query { ok: Int }
+     directive @a on DIRECTIVE_DEFINITION
+     directive @b @a on DIRECTIVE_DEFINITION
+     directive @c on DIRECTIVE_DEFINITION
+     extend directive @c @b",
+  );
+  built(
+    "type Query { ok: Int }
+     directive @a(x: In) on DIRECTIVE_DEFINITION
+     directive @b on INPUT_FIELD_DEFINITION
+     input In { f: Int @b }
+     directive @c @a(x: { f: 1 }) on FIELD",
+  );
+}
+
+/// A directive written on a directive definition, or provided by an `extend directive`, is a usage
+/// at `DIRECTIVE_DEFINITION`, held to every rule a usage anywhere else is held to.
+#[test]
+fn a_directive_on_a_directive_definition_is_checked_at_its_location() {
+  // Not listed there: refused at the usage, on the definition and through an extension alike, and
+  // owned by the directive it is written on.
+  for sdl in [
+    "type Query { ok: Int } directive @k on FIELD directive @d @k on FIELD",
+    "type Query { ok: Int } directive @k on FIELD directive @d on FIELD extend directive @d @k",
+  ] {
+    let errors = refused(sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::UnsupportedDirectiveLocation],
+      "{sdl}"
+    );
+    assert_eq!(errors.len(), 1, "{errors}");
+    let error = &errors.errors()[0];
+    assert_eq!(error.to_string(), "directive is not allowed here: `d.k`");
+    assert_eq!(
+      error.span().start(),
+      sdl.rfind("@k").expect("the usage") + 1,
+      "{sdl}"
+    );
+  }
+
+  // No other location stands in for it: a directive listing all nineteen of the others is still
+  // refused there.
+  let errors = refused(
+    "type Query { ok: Int }
+     directive @k on QUERY | MUTATION | SUBSCRIPTION | FIELD | FRAGMENT_DEFINITION
+       | FRAGMENT_SPREAD | INLINE_FRAGMENT | VARIABLE_DEFINITION | SCHEMA | SCALAR | OBJECT
+       | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE
+       | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+     directive @d @k on FIELD",
+  );
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::UnsupportedDirectiveLocation]
+  );
+
+  // Undefined, and missing a required argument, exactly as on any other element.
+  let errors = refused("type Query { ok: Int } directive @d @nope on FIELD");
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::UndefinedDirective]);
+  let errors = refused(
+    "type Query { ok: Int }
+     directive @k(level: Int!) on DIRECTIVE_DEFINITION
+     directive @d on FIELD
+     extend directive @d @k",
+  );
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::MissingRequiredDirectiveArgument]
+  );
+  assert_eq!(errors.errors()[0].owner(), Some("d.@k"));
+}
+
+/// Draft §3.13.6: "Any non-repeatable directives provided must not already apply to the previous
+/// directive." A directive definition and its extensions are one location, as a type and its
+/// extensions are.
+#[test]
+fn a_directive_definition_and_its_extensions_are_one_directive_location() {
+  let sdl = "type Query { ok: Int }
+     directive @k on DIRECTIVE_DEFINITION
+     directive @d @k on FIELD
+     extend directive @d @k";
+  let errors = refused(sdl);
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::DuplicateDirectiveUse]);
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.to_string(), "directive is not repeatable: `d.k`");
+  // At the extension's `@k`, pointing back at the definition's.
+  assert_eq!(
+    error.span().start(),
+    sdl.rfind("@k").expect("the extension's") + 1
+  );
+  let first = sdl.find("@d @k").expect("the definition's") + 4;
+  assert_eq!(error.related(), Some(SimpleSpan::new(first, first + 1)));
+
+  // Two extensions repeat it between them, and one extension within itself.
+  for sdl in [
+    "type Query { ok: Int } directive @k on DIRECTIVE_DEFINITION directive @d on FIELD
+     extend directive @d @k extend directive @d @k",
+    "type Query { ok: Int } directive @k on DIRECTIVE_DEFINITION directive @d on FIELD
+     extend directive @d @k @k",
+  ] {
+    let errors = refused(sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::DuplicateDirectiveUse],
+      "{sdl}"
+    );
+    assert_eq!(errors.len(), 1, "{errors}");
+  }
+
+  // The positive control: declared `repeatable`, the same three shapes build.
+  for sdl in [
+    "type Query { ok: Int } directive @k repeatable on DIRECTIVE_DEFINITION
+     directive @d @k on FIELD extend directive @d @k",
+    "type Query { ok: Int } directive @k repeatable on DIRECTIVE_DEFINITION directive @d on FIELD
+     extend directive @d @k extend directive @d @k",
+    "type Query { ok: Int } directive @k repeatable on DIRECTIVE_DEFINITION directive @d on FIELD
+     extend directive @d @k @k",
+  ] {
+    built(sdl);
+  }
+}
+
+/// Draft §3.13.6: "The previous directive must already be defined."
+#[test]
+fn an_extension_of_an_undefined_directive_is_refused() {
+  let sdl = "type Query { ok: Int } directive @k on DIRECTIVE_DEFINITION extend directive @nope @k";
+  let errors = refused(sdl);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::UndefinedExtensionTarget]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.subject(), "nope");
+  assert_eq!(error.owner(), None);
+  assert_eq!(&sdl[error.span().start()..error.span().end()], "nope");
+  assert_eq!(error.to_string(), "extension target is not defined: `nope`");
+
+  // A type is not a directive, nor a directive a type: the two names live apart.
+  for sdl in [
+    "type Query { ok: Int } directive @k on DIRECTIVE_DEFINITION extend directive @Query @k",
+    "type Query { ok: Int } directive @d on FIELD extend type d { more: Int }",
+  ] {
+    let errors = refused(sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::UndefinedExtensionTarget],
+      "{sdl}"
+    );
+  }
+
+  // The directives of an extension with nothing to extend are not checked against a definition it
+  // does not have: one mistake, one diagnostic, as for a type extension.
+  let errors = refused("type Query { ok: Int } extend directive @nope @alsoNope");
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::UndefinedExtensionTarget]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+
+  // The positive control: defined, the same extension builds.
+  built(
+    "type Query { ok: Int }
+     directive @k on DIRECTIVE_DEFINITION
+     directive @nope on FIELD
+     extend directive @nope @k",
+  );
+}
+
+/// Draft §3.13's "must not contain the use of a Directive which references itself directly" and
+/// "indirectly", through the directives on a definition and on its extensions. §3.13.6's rules 3
+/// and 4 ask the same of an extension's directives, and get the same answer: the extension's
+/// directives are the definition's, so one check is both.
+#[test]
+fn a_directive_reaching_itself_through_its_definitions_directives_is_refused() {
+  let cases: &[(&str, &[&str])] = &[
+    // Directly, on the definition and through an extension.
+    ("directive @d @d on DIRECTIVE_DEFINITION", &["d"]),
+    (
+      "directive @d on DIRECTIVE_DEFINITION extend directive @d @d",
+      &["d"],
+    ),
+    // Indirectly, through another directive's definition, and with an extension closing the loop.
+    (
+      "directive @a @b on DIRECTIVE_DEFINITION directive @b @a on DIRECTIVE_DEFINITION",
+      &["a", "b"],
+    ),
+    (
+      "directive @a on DIRECTIVE_DEFINITION
+       directive @b @a on DIRECTIVE_DEFINITION
+       extend directive @a @b",
+      &["a", "b"],
+    ),
+    // Indirectly, through a type an argument accepts, closed on a definition and by an extension.
+    (
+      "directive @a(x: In) on DIRECTIVE_DEFINITION
+       directive @b @a on INPUT_FIELD_DEFINITION
+       input In { f: Int @b }",
+      &["a", "b"],
+    ),
+    (
+      "directive @a(x: In) on DIRECTIVE_DEFINITION
+       directive @b on INPUT_FIELD_DEFINITION
+       input In { f: Int @b }
+       extend directive @b @a",
+      &["a", "b"],
+    ),
+  ];
+  for (sdl, cyclic) in cases {
+    let sdl = format!("{ROOT}{sdl}");
+    let errors = refused(&sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::SelfReferentialDirective],
+      "{sdl}"
+    );
+    let blamed: Vec<&str> = errors
+      .errors()
+      .iter()
+      .map(|error| error.subject())
+      .collect();
+    assert_eq!(blamed, *cyclic, "{sdl}");
+  }
+
+  // Blamed on the definition, where the cycle is, even when an extension closed it.
+  let sdl = "type Query { ok: Int } directive @d on DIRECTIVE_DEFINITION extend directive @d @d";
+  let errors = refused(sdl);
+  assert_eq!(
+    errors.errors()[0].span().start(),
+    sdl.find("@d").expect("the definition") + 1
+  );
+
+  // A directive that merely uses a self-referential one is not on the cycle, so it is not blamed.
+  let errors = refused(
+    "type Query { ok: Int }
+     directive @a @a on DIRECTIVE_DEFINITION
+     directive @b @a on DIRECTIVE_DEFINITION",
+  );
+  let blamed: Vec<&str> = errors
+    .errors()
+    .iter()
+    .map(|error| error.subject())
+    .collect();
+  assert_eq!(blamed, ["a"]);
+}
+
 /// Use-site refusals name the element the directive sits on, and the `@name` its arguments belong
 /// to.
 #[test]
@@ -897,6 +1233,20 @@ fn directive_usage_errors_name_their_coordinate() {
       SchemaErrorKind::UndefinedDirective,
       "nowhere",
       "schema",
+    ),
+    (
+      "type Query { ok: Int } directive @d on FIELD extend directive @d @nowhere",
+      SchemaErrorKind::UndefinedDirective,
+      "nowhere",
+      "d",
+    ),
+    (
+      "directive @meta(a: Int) on DIRECTIVE_DEFINITION
+       directive @d @meta(b: 1) on FIELD
+       type Query { ok: Int }",
+      SchemaErrorKind::UndefinedDirectiveArgument,
+      "b",
+      "d.@meta",
     ),
     (
       "directive @onObject(a: Int) on OBJECT
@@ -2078,7 +2428,8 @@ fn a_duplicate_within_one_document_points_within_it() {
 }
 
 /// The same across the related rules an extension in another document reaches: a field added
-/// again, a directive applied again, and a root operation provided again.
+/// again, a directive applied again, to a type or to a directive definition, and a root operation
+/// provided again.
 #[test]
 fn an_extension_in_another_document_points_back_at_what_it_repeats() {
   assert_points_across(
@@ -2092,6 +2443,16 @@ fn an_extension_in_another_document_points_back_at_what_it_repeats() {
     &[
       "directive @tag on OBJECT type Query @tag { ok: Int }",
       "extend type Query @tag",
+    ],
+    SchemaErrorKind::DuplicateDirectiveUse,
+    (1, "tag", 0),
+    (0, "tag", 1),
+    "first applied here",
+  );
+  assert_points_across(
+    &[
+      "type Query { ok: Int } directive @tag on DIRECTIVE_DEFINITION directive @d @tag on FIELD",
+      "extend directive @d @tag",
     ],
     SchemaErrorKind::DuplicateDirectiveUse,
     (1, "tag", 0),

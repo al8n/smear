@@ -586,6 +586,7 @@ enum DirectivesOf {
   FieldArgument { ty: usize, field: usize, arg: usize },
   InputField { ty: usize, field: usize },
   EnumValue { ty: usize, value: usize },
+  Directive { index: usize },
   DirectiveArgument { directive: usize, arg: usize },
 }
 
@@ -1969,6 +1970,11 @@ impl RawType {
 struct RawDirectiveDef {
   name: Located,
   args: Declared<MAX_DIRECTIVE_ARGUMENTS>,
+  /// The directives written on the definition, at `DIRECTIVE_DEFINITION` (draft §3.13), followed
+  /// by the ones its `extend directive`s provide (§3.13.6), which
+  /// [`apply_extensions`](SchemaBuilder::apply_extensions) appends: a definition and its
+  /// extensions are one location.
+  directives: Vec<RawDirectiveUse>,
   locations: DirectiveLocations,
   repeatable: bool,
   built_in: bool,
@@ -1976,11 +1982,15 @@ struct RawDirectiveDef {
   description: Text,
 }
 
-/// A type extension, converted to owned form and applied once every document has been read.
+/// A schema, type or directive extension, converted to owned form and applied once every
+/// document has been read.
 #[derive(Debug, Default)]
 struct RawExtension {
   target: Option<Located>,
   kind: Option<TypeKind>,
+  /// The directive an `extend directive` names, for draft §3.13.6's "The previous directive must
+  /// already be defined". `None` for a schema or type extension.
+  directive: Option<Located>,
   implements: Vec<Located>,
   fields: Vec<RawField>,
   input_fields: Vec<RawInput>,
@@ -1991,7 +2001,8 @@ struct RawExtension {
   roots: Vec<(RootOperation, Located)>,
   /// Where an `extend schema` was written — its whole span, and the document it was read from —
   /// for draft §3.3.2's "The Schema must already be defined", which has nothing narrower to point
-  /// at. `None` for a type extension, which [`target`](RawExtension::target) locates.
+  /// at. `None` for a type or directive extension, which [`target`](RawExtension::target) or
+  /// [`directive`](RawExtension::directive) locates.
   schema: Option<(SimpleSpan, u32)>,
   /// An `extend scalar`'s `@specifiedBy(url:)`, decoded into the text arena.
   specified_by: Text,
@@ -2267,6 +2278,7 @@ impl<'a> Model<'a> {
       }
       DirectivesOf::InputField { ty, field } => &self.types[ty].input_fields[field].directives,
       DirectivesOf::EnumValue { ty, value } => &self.types[ty].enum_values[value].directives,
+      DirectivesOf::Directive { index } => &self.directives[index].directives,
       DirectivesOf::DirectiveArgument { directive, arg } => {
         match self.directives[directive].args.read() {
           Args::Bounded(args) => &args[arg].directives,
@@ -2932,6 +2944,7 @@ impl SchemaBuilder {
       ),
       None => Vec::new(),
     };
+    let directives = self.directive_uses(def.directives(), DirectiveLocation::DirectiveDefinition);
     let mut locations = DirectiveLocations::EMPTY;
     for location in def.locations().locations() {
       if let Some(mapped) = map_location(location) {
@@ -2957,6 +2970,7 @@ impl SchemaBuilder {
     self.directives.push(RawDirectiveDef {
       name,
       args: args.into(),
+      directives,
       locations,
       repeatable,
       built_in,
@@ -3576,8 +3590,6 @@ impl SchemaBuilder {
   {
     let mut raw = RawExtension::default();
     match extension {
-      // Directive extensions are not applied yet.
-      TypeSystemExtension::Directive(_) => return,
       TypeSystemExtension::Schema(schema) => {
         raw.schema = Some((*schema.span(), self.document));
         raw.directives = self.directive_uses(schema.directives(), DirectiveLocation::Schema);
@@ -3630,6 +3642,13 @@ impl SchemaBuilder {
           raw.input_fields = self.input_fields(def.fields_definition());
         }
       },
+      TypeSystemExtension::Directive(def) => {
+        raw.directive = Some(self.located(def.name()));
+        raw.directives = self.directive_uses(
+          Some(def.directives()),
+          DirectiveLocation::DirectiveDefinition,
+        );
+      }
     }
     self.extensions.push(raw);
   }
@@ -3673,6 +3692,23 @@ impl SchemaBuilder {
       self.schema_definition.is_some() || self.roots[RootOperation::Query.index()].is_some();
     let extensions = core::mem::take(&mut self.extensions);
     for extension in extensions {
+      // Draft §3.13.6: "The previous directive must already be defined", which a built-in is,
+      // since injection precedes this. The extension's directives join the definition's own list,
+      // because the two are one location: `directive @e @d` plus `extend directive @e @d` repeats
+      // a non-repeatable `@d`, and a directive the extension provides is one the definition
+      // reaches when `validate_directive_cycles` asks whether it reaches itself.
+      if let Some(target) = extension.directive {
+        match self.directive_index(target.sym) {
+          Some(index) => self.directives[index]
+            .directives
+            .extend(extension.directives),
+          None => {
+            let subject = self.text(target.sym).to_owned();
+            self.push(SchemaErrorKind::UndefinedExtensionTarget, &subject, target);
+          }
+        }
+        continue;
+      }
       let Some(target) = extension.target else {
         if !schema_defined && let Some((span, document)) = extension.schema {
           self.errors.push(
@@ -4798,7 +4834,7 @@ impl SchemaBuilder {
   ///
   /// It runs after [`SchemaBuilder::resolve_type_refs`] because an argument's declared type has to
   /// be resolved before a value can be checked against it, and after
-  /// [`SchemaBuilder::apply_extensions`] because a type and its extensions are one location.
+  /// [`SchemaBuilder::apply_extensions`] because a definition and its extensions are one location.
   fn validate_directive_usages(&mut self) {
     let (model, errors, names) = self.split_indexed();
     Self::check_directive_uses(
@@ -4865,6 +4901,13 @@ impl SchemaBuilder {
 
     for directive in 0..model.directives.len() {
       let owner = Coordinate::named(model.directives[directive].name.sym);
+      Self::check_directive_uses(
+        model,
+        errors,
+        names,
+        DirectivesOf::Directive { index: directive },
+        owner,
+      );
       if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive { index: directive })
       {
         for (arg, argument) in declared.iter().enumerate() {
@@ -4885,9 +4928,9 @@ impl SchemaBuilder {
   ///
   /// Over a [`Model`] rather than `&mut self` so that the list can be read where it lies. The
   /// owner arrives as a [`Coordinate`]: this runs once per type, field, argument, input field,
-  /// enum value and directive argument in the merged schema, and most of those carry no directive
-  /// at all — the pass cost 6.4 µs on a document with none, all of it owner paths built before the
-  /// empty list was looked at.
+  /// enum value, directive and directive argument in the merged schema, and most of those carry no
+  /// directive at all — the pass cost 6.4 µs on a document with none, all of it owner paths built
+  /// before the empty list was looked at.
   fn check_directive_uses(
     model: Model<'_>,
     errors: &mut Vec<SchemaError>,
@@ -6871,11 +6914,14 @@ impl SchemaBuilder {
     }
   }
 
-  /// Draft §3.13.1: a directive definition must not refer to itself, directly or indirectly.
+  /// Draft §3.13: a directive definition must not refer to itself, directly or indirectly, and
+  /// §3.13.6's rules 3 and 4 hold the directives an `extend directive` provides to the same.
   ///
   /// The rule is exactly "is this directive reachable from itself", over one graph with two kinds
   /// of node — a directive, and a type an argument accepts — because the path between two
-  /// directives runs through the types their arguments name.
+  /// directives runs through the directives written on their definitions and the types their
+  /// arguments name. An extension's directives are in its definition's list by the time this
+  /// runs, so "references the previous directive" is the same question.
   ///
   /// # What a walk per directive cost, on a document `Schema::build` accepts
   ///
@@ -6934,10 +6980,10 @@ impl SchemaBuilder {
   /// # The graph
   ///
   /// Node `d` below [`SchemaBuilder::directives`]`.len()` is that directive; node
-  /// `directives + t` is type `t`. The edges are the steps the walk this replaces took, and they
-  /// are the same steps: a directive reaches the directives written on its arguments and the base
-  /// types its arguments accept; a type reaches the directives written on it, on its input fields
-  /// and on its enum values, and the base types its input fields accept.
+  /// `directives + t` is type `t`. A directive reaches the directives written on its definition,
+  /// its extensions included, and on its arguments, and the base types its arguments accept; a
+  /// type reaches the directives written on it, on its input fields and on its enum values, and
+  /// the base types its input fields accept.
   ///
   /// A directive whose argument list a ceiling refused reaches **nothing**, exactly as it seeded
   /// nothing before. A cycle through a directive that will not build is a second diagnostic about
@@ -7061,6 +7107,7 @@ impl SchemaBuilder {
       let Args::Bounded(args) = self.directives[node].args.read() else {
         return;
       };
+      self.push_directive_uses(&self.directives[node].directives, reaches);
       for arg in args {
         self.push_directive_uses(&arg.directives, reaches);
         push_type(arg.ty.packed.base_id(), first_type_node, reaches);

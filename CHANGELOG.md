@@ -233,6 +233,19 @@ All notable changes to Smear are documented in this file.
   every later kind by one; the typed layer adds the `DirectiveExtension`
   wrapper, `DirectiveDefinition::directives` and `directive_extensions` on both
   document roots, and both projections build the new AST.
+- `smear-schema`!: `Schema::build` reads the directives on a directive
+  definition and `extend directive` (draft §3.13 and §3.13.6).
+  `DirectiveLocation` gains `DirectiveDefinition`, the `DIRECTIVE_DEFINITION`
+  location, which `DirectiveLocation::from_name` resolves, and
+  `DirectiveLocation::ALL` becomes `[DirectiveLocation; 20]`; an exhaustive
+  match needs the new arm. A directive written on a directive definition, or
+  provided by an `extend directive`, is checked at `DIRECTIVE_DEFINITION` like
+  any other usage, and a definition and its extensions are one location, so a
+  non-repeatable directive applied by both is `DuplicateDirectiveUse`. An
+  `extend directive` of a directive no document defines is
+  `UndefinedExtensionTarget`. A directive that reaches itself through the
+  directives on its definition or its extensions, directly or through other
+  directives and types, is `SelfReferentialDirective`.
 
 ## [0.0.1] - 2026-10-30
 

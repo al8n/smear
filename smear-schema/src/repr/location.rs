@@ -1,6 +1,6 @@
-//! The nineteen draft directive locations, and the bitmask a directive definition carries.
+//! The twenty draft directive locations, and the bitmask a directive definition carries.
 
-/// One of the draft grammar's nineteen `DirectiveLocation`s.
+/// One of the draft grammar's twenty `DirectiveLocation`s.
 ///
 /// The discriminants are the bit positions used by [`DirectiveLocations`], so the whole of draft
 /// 5.7.2 ("Directives Are In Valid Locations") is `locations.contains(loc)` — one shift and one
@@ -46,13 +46,15 @@ pub enum DirectiveLocation {
   InputObject = 17,
   /// `INPUT_FIELD_DEFINITION`
   InputFieldDefinition = 18,
+  /// `DIRECTIVE_DEFINITION`
+  DirectiveDefinition = 19,
 }
 
 impl DirectiveLocation {
   /// Every location, in grammar order.
   ///
   /// Iterating this is how a test enumerates the space rather than restating it.
-  pub const ALL: [Self; 19] = [
+  pub const ALL: [Self; 20] = [
     Self::Query,
     Self::Mutation,
     Self::Subscription,
@@ -72,6 +74,7 @@ impl DirectiveLocation {
     Self::EnumValue,
     Self::InputObject,
     Self::InputFieldDefinition,
+    Self::DirectiveDefinition,
   ];
 
   /// Returns the location's bit position in a [`DirectiveLocations`] mask.
@@ -103,6 +106,7 @@ impl DirectiveLocation {
       Self::EnumValue => "ENUM_VALUE",
       Self::InputObject => "INPUT_OBJECT",
       Self::InputFieldDefinition => "INPUT_FIELD_DEFINITION",
+      Self::DirectiveDefinition => "DIRECTIVE_DEFINITION",
     }
   }
 
@@ -131,6 +135,7 @@ impl DirectiveLocation {
       "ENUM_VALUE" => Self::EnumValue,
       "INPUT_OBJECT" => Self::InputObject,
       "INPUT_FIELD_DEFINITION" => Self::InputFieldDefinition,
+      "DIRECTIVE_DEFINITION" => Self::DirectiveDefinition,
       _ => return None,
     })
   }
