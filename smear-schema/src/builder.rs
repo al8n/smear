@@ -1931,6 +1931,10 @@ struct RawType {
   /// exponent over the top step of 1 k–16 k and **1.470 s** at 16 k, on a schema `Schema::build`
   /// **accepts**. al8n/smear#198.
   required_input_fields: Vec<u32>,
+  /// Whether `@oneOf` is applied to an input object, which makes it draft §3.10.1's OneOf Input
+  /// Object, filled in during validation once every extension is merged. `false` for every other
+  /// kind.
+  one_of: bool,
   /// The description, decoded into the text arena.
   description: Text,
   /// A scalar's `@specifiedBy(url:)`, decoded into the text arena — from the definition or from an
@@ -1954,6 +1958,7 @@ impl RawType {
       closure: Vec::new(),
       sorted_members: Vec::new(),
       required_input_fields: Vec::new(),
+      one_of: false,
       description: Text::NONE,
       specified_by: Text::NONE,
     }
@@ -1984,6 +1989,10 @@ struct RawExtension {
   directives: Vec<RawDirectiveUse>,
   /// Root operations, for a `extend schema` rather than a type extension.
   roots: Vec<(RootOperation, Located)>,
+  /// Where an `extend schema` was written — its whole span, and the document it was read from —
+  /// for draft §3.3.2's "The Schema must already be defined", which has nothing narrower to point
+  /// at. `None` for a type extension, which [`target`](RawExtension::target) locates.
+  schema: Option<(SimpleSpan, u32)>,
   /// An `extend scalar`'s `@specifiedBy(url:)`, decoded into the text arena.
   specified_by: Text,
 }
@@ -2144,6 +2153,8 @@ struct Model<'a> {
   interner: &'a Interner,
   /// The literal spellings, deduplicated. See [`SchemaBuilder::literals`].
   literals: &'a Interner,
+  /// See [`SchemaBuilder::built_in_document`].
+  built_in_document: Option<u32>,
 }
 
 impl<'a> Model<'a> {
@@ -2367,17 +2378,27 @@ fn push_at(
   );
 }
 
+/// Reports at `at` and points back at `related`, each in the document it was read from.
+///
+/// The two need not share one: a duplicate repeats a definition that may be in another of the
+/// builder's documents, so the related position is a [`Located`] and keeps its own.
+///
+/// Except in an injected built-in definition, at or past `built_in_document`, where the related
+/// position is not recorded at all: no source the caller supplied holds those bytes, so a label
+/// there would send a renderer past the end of the caller's sources.
 fn push_related(
   errors: &mut Vec<SchemaError>,
+  built_in_document: Option<u32>,
   kind: SchemaErrorKind,
   subject: &str,
   owner: Option<String>,
   at: Located,
-  related: SimpleSpan,
+  related: Located,
 ) {
-  let mut error = SchemaError::new(kind, subject, at.span)
-    .in_document(at.document)
-    .related_to(related);
+  let mut error = SchemaError::new(kind, subject, at.span).in_document(at.document);
+  if built_in_document.is_none_or(|built_in| related.document < built_in) {
+    error = error.related_to(related.span, related.document);
+  }
   if let Some(owner) = owner {
     error = error.owned_by(owner);
   }
@@ -2417,7 +2438,8 @@ pub struct SchemaBuilder {
   /// `Sym` to an index into `directives`; `u32::MAX` for "not a directive".
   directive_of_sym: Vec<u32>,
   roots: [Option<Located>; 3],
-  schema_definition: Option<SimpleSpan>,
+  /// The `schema` definition's span, and the document it was read from.
+  schema_definition: Option<(SimpleSpan, u32)>,
   /// `SCHEMA`-location directives, from the `schema` definition and every `extend schema`.
   ///
   /// One list rather than one per definition, because apollo and the draft both treat the schema
@@ -2426,6 +2448,12 @@ pub struct SchemaBuilder {
   extensions: Vec<RawExtension>,
   errors: Vec<SchemaError>,
   document: u32,
+  /// The document index the injected built-in definitions report under — one past the last
+  /// document the caller supplied — recorded as they are injected, and `None` until then.
+  ///
+  /// No source the caller holds has that index, so a related position at or past it is not
+  /// recorded: see [`push_related`].
+  built_in_document: Option<u32>,
   /// One lookup index per input object, shared by every literal validation. Empty until a
   /// declaration is asked; see [`DeclaredNames`].
   declared_names: DeclaredNames,
@@ -2492,6 +2520,9 @@ impl SchemaBuilder {
     // an undefined target. Whether a built-in is injected at all is decided by the *definitions*,
     // all of which are already in, so the order does not change what gets replaced.
     self.inject_built_ins();
+    // The presumed roots precede extension too: an `extend schema` beside no `schema` definition
+    // extends the schema that omitting one defines, so that schema's roots are in place first.
+    self.presume_default_roots();
     self.apply_extensions();
 
     if let Some(refusal) = self.arena_refusal() {
@@ -2557,9 +2588,17 @@ impl SchemaBuilder {
     subject: &str,
     owner: Option<String>,
     at: Located,
-    related: SimpleSpan,
+    related: Located,
   ) {
-    push_related(&mut self.errors, kind, subject, owner, at, related);
+    push_related(
+      &mut self.errors,
+      self.built_in_document,
+      kind,
+      subject,
+      owner,
+      at,
+      related,
+    );
   }
 
   /// The read side and the write side, borrowed apart. See [`Model`].
@@ -2583,6 +2622,7 @@ impl SchemaBuilder {
         schema_directives: &self.schema_directives,
         interner: &self.interner,
         literals: &self.literals,
+        built_in_document: self.built_in_document,
       },
       &mut self.errors,
       &mut self.declared_names,
@@ -2767,7 +2807,7 @@ impl SchemaBuilder {
   fn record_type(&mut self, raw: RawType) {
     let sym = raw.name.sym;
     if let Some(previous) = self.type_index(sym) {
-      let related = self.types[previous].name.span;
+      let related = self.types[previous].name;
       let subject = self.text(sym).to_owned();
       self.push_related(
         SchemaErrorKind::DuplicateTypeName,
@@ -2901,7 +2941,7 @@ impl SchemaBuilder {
     let repeatable = def.repeatable();
 
     if let Some(previous) = self.directive_index(name.sym) {
-      let related = self.directives[previous].name.span;
+      let related = self.directives[previous].name;
       let subject = self.text(name.sym).to_owned();
       self.push_related(
         SchemaErrorKind::DuplicateDirectiveDefinition,
@@ -2932,15 +2972,15 @@ impl SchemaBuilder {
     S: AsRef<[u8]>,
   {
     let span = *def.span();
-    if let Some(previous) = self.schema_definition {
+    if let Some((previous, document)) = self.schema_definition {
       self.errors.push(
         SchemaError::new(SchemaErrorKind::DuplicateSchemaDefinition, "schema", span)
           .in_document(self.document)
-          .related_to(previous),
+          .related_to(previous, document),
       );
       return;
     }
-    self.schema_definition = Some(span);
+    self.schema_definition = Some((span, self.document));
     self.schema_description = self.describe(description, Head::Schema);
     let directives = self.directive_uses(def.directives(), DirectiveLocation::Schema);
     self.schema_directives.extend(directives);
@@ -2962,7 +3002,7 @@ impl SchemaBuilder {
         subject,
         None,
         target,
-        previous.span,
+        previous,
       );
       return;
     }
@@ -3537,6 +3577,7 @@ impl SchemaBuilder {
     let mut raw = RawExtension::default();
     match extension {
       TypeSystemExtension::Schema(schema) => {
+        raw.schema = Some((*schema.span(), self.document));
         raw.directives = self.directive_uses(schema.directives(), DirectiveLocation::Schema);
         if let Some(roots) = schema.root_operation_types_definition() {
           for root in roots.root_operation_type_definitions() {
@@ -3591,10 +3632,56 @@ impl SchemaBuilder {
     self.extensions.push(raw);
   }
 
+  /// Draft §3.3.1's default root operation type names, for a document that omits the `schema`
+  /// definition: "The "Query" type is presumed to be the query root operation type of the schema"
+  /// (Example 41), and `Mutation` and `Subscription` likewise.
+  ///
+  /// Run before [`apply_extensions`](SchemaBuilder::apply_extensions) rather than by
+  /// [`resolve_roots`](SchemaBuilder::resolve_roots), because these are the roots an
+  /// `extend schema` extends. `resolve_roots` records what an extension that provides one of them
+  /// again is told.
+  fn presume_default_roots(&mut self) {
+    // "The type system definition language can omit the schema definition when each root
+    // operation type uses its respective default root type name". So the defaults stand in for an
+    // omitted `schema` definition and for nothing else. A document that writes one names every
+    // root it has, and an object type that is merely called `Mutation` beside
+    // `schema { query: Query }` is not the mutation root: Example 42 is "a valid GraphQL schema
+    // without a mutation root operation type, even though it contains a type named "Mutation"".
+    // An `extend schema` is not a definition, so on its own it keeps the defaults.
+    if self.schema_definition.is_some() {
+      return;
+    }
+    for operation in RootOperation::ALL {
+      let name = operation.default_type_name();
+      if let Some(sym) = self.interner.lookup(name.as_bytes())
+        && let Some(index) = self.type_index(sym)
+        && self.types[index].kind == TypeKind::Object
+      {
+        self.roots[operation.index()] = Some(self.types[index].name);
+      }
+    }
+  }
+
   fn apply_extensions(&mut self) {
+    // Draft §3.3.2: "The Schema must already be defined." A `schema` definition defines it, and so
+    // does omitting one beside an object type named `Query`, which `presume_default_roots` has
+    // just made the query root (§3.3.1, Example 41). Decided once, before any extension adds a
+    // root of its own.
+    let schema_defined =
+      self.schema_definition.is_some() || self.roots[RootOperation::Query.index()].is_some();
     let extensions = core::mem::take(&mut self.extensions);
     for extension in extensions {
       let Some(target) = extension.target else {
+        if !schema_defined && let Some((span, document)) = extension.schema {
+          self.errors.push(
+            SchemaError::new(
+              SchemaErrorKind::SchemaExtensionWithoutSchema,
+              "schema",
+              span,
+            )
+            .in_document(document),
+          );
+        }
         // `extend schema`. Its directives join the schema definition's own list, because the two
         // are one location: `schema @d` plus `extend schema @d` repeats a non-repeatable `@d`.
         self.schema_directives.extend(extension.directives);
@@ -3610,7 +3697,7 @@ impl SchemaBuilder {
       };
       if self.types[index].kind != extension.kind.unwrap_or(self.types[index].kind) {
         let subject = self.text(target.sym).to_owned();
-        let related = self.types[index].name.span;
+        let related = self.types[index].name;
         self.push_related(
           SchemaErrorKind::ExtensionKindMismatch,
           &subject,
@@ -3713,6 +3800,7 @@ impl SchemaBuilder {
   fn inject(&mut self, built_ins: &BuiltIns) {
     // Anything injected here belongs to no document the caller supplied; `self.document` is
     // already one past the last real index, which is what an injected definition reports under.
+    self.built_in_document = Some(self.document);
 
     // The built-ins' descriptions and defaults, reserved as one growth before any is decoded. Exact
     // when every built-in is injected; a document that spells one out leaves the difference unused,
@@ -3799,6 +3887,7 @@ impl SchemaBuilder {
     self.compute_closures();
     self.index_union_members();
     self.collect_required_input_fields();
+    self.mark_one_of_input_objects();
     self.validate_types();
     self.validate_directive_definitions();
     self.validate_directive_usages();
@@ -3809,30 +3898,26 @@ impl SchemaBuilder {
   }
 
   fn resolve_roots(&mut self) {
-    // With no `schema` definition, the roots default to the conventionally named object types.
-    for operation in RootOperation::ALL {
-      if self.roots[operation.index()].is_some() {
-        continue;
-      }
-      let name = operation.default_type_name();
-      if let Some(sym) = self.interner.lookup(name.as_bytes())
-        && let Some(index) = self.type_index(sym)
-        && self.types[index].kind == TypeKind::Object
-      {
-        self.roots[operation.index()] = Some(self.types[index].name);
-      }
-    }
-
+    // The roots are all in by now: the `schema` definition's, or the defaults
+    // `presume_default_roots` put in for an omitted one, and then each `extend schema`'s. An
+    // extension that provides a root the schema already has was refused as
+    // `DuplicateRootOperationType` by `set_root`, a presumed root included: "A schema defines the
+    // initial root operation type for each kind of operation it supports", and omitting the
+    // definition defines the schema, presumed roots and all, as surely as writing it (Example 41).
+    // graphql-js diverges here, and lets the extension's root replace the presumed one in silence.
     for operation in RootOperation::ALL {
       let Some(root) = self.roots[operation.index()] else {
         if operation == RootOperation::Query {
+          // At the `schema` definition, in the document it was read from; with none, at the
+          // start of the first document, since the refusal is about the document as a whole.
+          let (span, document) = self.schema_definition.unwrap_or_default();
           self.errors.push(
             SchemaError::new(
               SchemaErrorKind::MissingQueryRootOperationType,
               "query",
-              self.schema_definition.unwrap_or_default(),
+              span,
             )
-            .in_document(0),
+            .in_document(document),
           );
         }
         continue;
@@ -3874,7 +3959,7 @@ impl SchemaBuilder {
           &subject,
           None,
           root,
-          first.span,
+          first,
         );
       }
     }
@@ -4164,6 +4249,21 @@ impl SchemaBuilder {
     }
   }
 
+  /// Fills [`RawType::one_of`], one pass over the input objects the whole schema declares.
+  ///
+  /// `@oneOf` is read here rather than at ingest so an extension that adds it is seen. Adding it
+  /// *is* draft §3.10.3(5)'s refusal, reported by `apply_extensions`; the flag is still set from
+  /// the merged list so that §3.10.3(6) — the OneOf constraints over the extension's own fields —
+  /// is checked rather than hidden behind that refusal. The field constraints, the
+  /// unbreakable-cycle rule and the coercion of a constant value read this one answer.
+  fn mark_one_of_input_objects(&mut self) {
+    for index in 0..self.types.len() {
+      if self.types[index].kind == TypeKind::InputObject {
+        self.types[index].one_of = self.has_directive(index, ONE_OF);
+      }
+    }
+  }
+
   fn validate_types(&mut self) {
     for index in 0..self.types.len() {
       let kind = self.types[index].kind;
@@ -4179,14 +4279,10 @@ impl SchemaBuilder {
         self.push(SchemaErrorKind::ReservedTypeName, &name, at);
       }
 
-      // `@oneOf` is read here rather than at ingest so an extension that adds it is seen. Adding
-      // it *is* draft §3.10.3(5)'s refusal, reported by `apply_extensions`; the flag is still set
-      // from the merged list so that §3.10.3(6) — the OneOf constraints over the extension's own
-      // fields — is checked rather than hidden behind that refusal.
-      let one_of = self.has_directive(index, ONE_OF);
+      let one_of = self.types[index].one_of;
 
       match kind {
-        TypeKind::Scalar => {}
+        TypeKind::Scalar => self.validate_scalar(index, owner),
         TypeKind::Object | TypeKind::Interface => {
           self.validate_fields(index, owner);
           self.validate_implements(index, owner);
@@ -4195,6 +4291,31 @@ impl SchemaBuilder {
         TypeKind::Enum => self.validate_enum(index, owner),
         TypeKind::InputObject => self.validate_input_object(index, owner, one_of),
       }
+    }
+  }
+
+  /// Draft §3.13.4: `@specifiedBy` "must not appear on built-in scalar types".
+  ///
+  /// Read off the merged list, so a `@specifiedBy` that an `extend scalar` adds is refused where
+  /// it is written, as one on the definition is. Being built in is decided by the name, as
+  /// [`BuiltInScalar::from_name`] decides it everywhere: a document that spells `scalar Int` out
+  /// still defines the specification's `Int`.
+  fn validate_scalar(&mut self, index: usize, owner: Coordinate) {
+    if BuiltInScalar::from_name(self.text(self.types[index].name.sym).as_bytes()).is_none() {
+      return;
+    }
+    for position in 0..self.types[index].directives.len() {
+      let used = self.types[index].directives[position].name;
+      if self.text(used.sym) != SPECIFIED_BY {
+        continue;
+      }
+      let owner = self.owner(owner);
+      self.push_owned(
+        SchemaErrorKind::SpecifiedByOnBuiltInScalar,
+        SPECIFIED_BY,
+        owner,
+        used,
+      );
     }
   }
 
@@ -4221,7 +4342,7 @@ impl SchemaBuilder {
       let path = owner.then(at.sym);
 
       if let Some(earlier) = seen.first(field, at.sym) {
-        let first = self.types[index].fields[earlier].name.span;
+        let first = self.types[index].fields[earlier].name;
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -4335,10 +4456,18 @@ impl SchemaBuilder {
       let required = argument.is_required();
 
       if let Some(earlier) = seen.first(index, at.sym) {
-        let first = declared[earlier].name.span;
+        let first = declared[earlier].name;
         let name = model.text(at.sym).to_owned();
         let owner = model.owner(owner);
-        push_related(errors, rules.duplicate, &name, Some(owner), at, first);
+        push_related(
+          errors,
+          model.built_in_document,
+          rules.duplicate,
+          &name,
+          Some(owner),
+          at,
+          first,
+        );
       }
 
       if !built_in && is_reserved(model.text(at.sym).as_bytes()) {
@@ -4401,7 +4530,7 @@ impl SchemaBuilder {
     for position in 0..self.types[index].implements.len() {
       let declared = self.types[index].implements[position];
       if let Some(earlier) = seen.first(position, declared.sym) {
-        let first = self.types[index].implements[earlier].span;
+        let first = self.types[index].implements[earlier];
         let name = self.text(declared.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -4442,7 +4571,7 @@ impl SchemaBuilder {
     for position in 0..self.types[index].members.len() {
       let member = self.types[index].members[position];
       if let Some(earlier) = seen.first(position, member.sym) {
-        let first = self.types[index].members[earlier].span;
+        let first = self.types[index].members[earlier];
         let name = self.text(member.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -4484,7 +4613,7 @@ impl SchemaBuilder {
     for position in 0..self.types[index].enum_values.len() {
       let value = self.types[index].enum_values[position].name;
       if let Some(earlier) = seen.first(position, value.sym) {
-        let first = self.types[index].enum_values[earlier].name.span;
+        let first = self.types[index].enum_values[earlier].name;
         let name = self.text(value.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -4522,7 +4651,7 @@ impl SchemaBuilder {
       let has_default = field.default.is_present();
 
       if let Some(earlier) = seen.first(position, at.sym) {
-        let first = self.types[index].input_fields[earlier].name.span;
+        let first = self.types[index].input_fields[earlier].name;
         let name = self.text(at.sym).to_owned();
         let owner = self.owner(owner);
         self.push_related(
@@ -4789,10 +4918,11 @@ impl SchemaBuilder {
       if !model.directives[definition].repeatable
         && let Some(earlier) = seen.first(index, used.name.sym)
       {
-        let first = model.directive_uses(at)[earlier].name.span;
+        let first = model.directive_uses(at)[earlier].name;
         let name = model.text(used.name.sym).to_owned();
         push_related(
           errors,
+          model.built_in_document,
           SchemaErrorKind::DuplicateDirectiveUse,
           &name,
           Some(model.owner(owner)),
@@ -4845,10 +4975,11 @@ impl SchemaBuilder {
     let mut seen = Duplicates::over(used.args.len(), |at| used.args[at].name.sym);
     for (position, argument) in used.args.iter().enumerate() {
       if let Some(earlier) = seen.first(position, argument.name.sym) {
-        let first = used.args[earlier].name.span;
+        let first = used.args[earlier].name;
         let name = model.text(argument.name.sym).to_owned();
         push_related(
           errors,
+          model.built_in_document,
           SchemaErrorKind::DuplicateDirectiveArgumentUse,
           &name,
           Some(model.owner(coordinate)),
@@ -4938,7 +5069,8 @@ impl SchemaBuilder {
   /// The decision procedure is draft 5.6.1's, and the coercion table it consults is the one the
   /// executable rules consult: `null` only where the position is nullable, a non-list value
   /// standing for the one-element list containing it at any depth, an enum literal that must name
-  /// a member, and a scalar that must be spelled the way its built-in says — with a custom scalar
+  /// a member, a OneOf input object's literal that must hold exactly one entry and not a `null`
+  /// one, and a scalar that must be spelled the way its built-in says — with a custom scalar
   /// accepting anything, because only the service knows how to read one.
   ///
   /// What it deliberately does not report is a mistake some *other* rule already owns: an
@@ -5187,6 +5319,28 @@ impl SchemaBuilder {
           // this type — the nested entry the level below is about to offer to a second one
           // included. A value per literal is what this was, and it was live across that recursion
           // and built again for every sibling; [`DeclaredNames`] carries what that cost.
+          //
+          // Draft §3.10.1, a OneOf Input Object's input coercion: "the value to be coerced must
+          // contain exactly one entry and that entry must not be null or the null literal". Asked
+          // before the fields are offered, and the fields are offered all the same — "All Input
+          // Object input coercion rules must also apply to a OneOf Input Object" — so a field that
+          // does not fit is still a diagnostic of its own. A `null` for a field the type does not
+          // declare, or for a required one, is already the undefined-field or required-field
+          // diagnostic the level below reports, and one defect reports once.
+          if model.types[base].one_of {
+            match fields.as_slice() {
+              [entry] => {
+                if matches!(entry.value.shape, RawShape::Null)
+                  && names
+                    .first(model.types, base, entry.name.sym)
+                    .is_some_and(|at| !model.types[base].input_fields[at].is_required())
+                {
+                  reject(errors, entry.value.span);
+                }
+              }
+              _ => reject(errors, value.span),
+            }
+          }
           levels.push(Level::Fields {
             rest: fields.iter(),
             base,
@@ -5655,11 +5809,12 @@ impl SchemaBuilder {
               }
               push_related(
                 errors,
+                model.built_in_document,
                 SchemaErrorKind::InterfaceFieldNotDeprecated,
                 model.text(interface_field.name.sym),
                 Some(owner.clone()),
                 own.name,
-                interface_field.name.span,
+                interface_field.name,
               );
             }
 
@@ -5761,56 +5916,223 @@ impl SchemaBuilder {
     self.truncated |= truncated | mismatches_truncated;
   }
 
-  /// Draft §3.10.1: an input-object cycle must have at least one nullable or list link.
+  /// Draft §3.10: "InputObjectHasUnbreakableCycle(inputObject) must be false."
+  ///
+  /// # The draft's algorithm, as a least fixed point
+  ///
+  /// `InputObjectHasUnbreakableCycle` walks an input object's fields with the objects on the
+  /// current path in `visited`, answers `true` on reaching one of them again, and has two arms:
+  ///
+  /// - "If inputObject is a OneOf Input Object", it is unbreakable when every one of its fields
+  ///   is. Exactly one field is given, so one field that can be given a finite value breaks it.
+  /// - "Otherwise", it is unbreakable when any of its non-null fields is, because a non-null field
+  ///   cannot be left out.
+  ///
+  /// `InputFieldTypeHasUnbreakableCycle` decides a field: a list never is, since it may be empty;
+  /// a non-null type is decided by the type it wraps; a scalar or an enum never is; an input
+  /// object is the question again.
+  ///
+  /// Transcribed as written, the walk explores what it reaches once per path that reaches it, so
+  /// a chain of `N` input objects, each naming the next in two non-null fields, is `2^N` paths.
+  /// What it answers is the complement of a least fixed point, which is what this computes
+  /// instead. An input object is *finite* — some finite value satisfies it — when it is a OneOf
+  /// with a field that is a list, a scalar, an enum or a finite input object, or when it is an
+  /// ordinary input object whose every non-null singular field names a finite input object; and
+  /// nothing else is. The objects those two rules never reach are exactly the ones the draft's
+  /// walk leads back into `visited` by every way out. [`finite_input_objects`] propagates the
+  /// rules over the links in reverse, so the pass is linear in the fields the document declares
+  /// and holds no frame per level; `a_deep_one_of_cycle_does_not_recurse` is the guard.
+  ///
+  /// # One diagnostic per cycle, and which kind
+  ///
+  /// The draft refuses every input object it answers `true` for, the objects that merely reach an
+  /// unbreakable cycle as well as the ones on it. What is reported is the cycle. The walk below
+  /// follows, among the objects that are not finite, the links that keep each one so, and reports
+  /// the field that closes a cycle, once per owning type, as the walk before it did. A cycle whose
+  /// every link is non-null is [`SchemaErrorKind::CircularNonNullInputField`], the rule this pass
+  /// was before OneOf input objects. A cycle with a nullable link is held closed only by a OneOf
+  /// none of whose fields can be given a finite value, and is
+  /// [`SchemaErrorKind::CircularOneOfInputField`], because the other kind's "no nullable or list
+  /// link" is not true of it.
+  ///
+  /// Every object that is not finite links to another that is not, except a OneOf with no fields
+  /// at all, which the draft's "for each field" answers `true` for and which `EmptyInputFields`
+  /// has already refused. So unless such a OneOf is all that keeps them from being finite, the
+  /// objects that are not finite hold a cycle, and the walk reports one.
+  ///
+  /// [`finite_input_objects`]: SchemaBuilder::finite_input_objects
   fn validate_input_object_cycles(&mut self) {
+    let Some(finite) = self.finite_input_objects() else {
+      return;
+    };
     let count = self.types.len();
+    if (0..count).all(|index| self.types[index].kind != TypeKind::InputObject || finite[index]) {
+      return;
+    }
+
     // 0 = unvisited, 1 = on the current path, 2 = settled.
     let mut colour = vec![0u8; count];
     let mut reported = vec![false; count];
+    // Where on the path an object sits while it is on it.
+    let mut depth = vec![0u32; count];
+    // Explicit stack: (type, next field to examine, nullable links on the path down to it).
+    let mut stack: Vec<(usize, usize, u32)> = Vec::new();
 
     for start in 0..count {
-      if self.types[start].kind != TypeKind::InputObject || colour[start] != 0 {
+      if self.types[start].kind != TypeKind::InputObject || finite[start] || colour[start] != 0 {
         continue;
       }
-      // Explicit stack: (type, next field to examine).
-      let mut stack: Vec<(usize, usize)> = vec![(start, 0)];
       colour[start] = 1;
-      while let Some((current, cursor)) = stack.pop() {
+      depth[start] = 0;
+      stack.push((start, 0, 0));
+      while let Some((current, cursor, nullable)) = stack.pop() {
         if cursor >= self.types[current].input_fields.len() {
           colour[current] = 2;
           continue;
         }
-        stack.push((current, cursor + 1));
+        stack.push((current, cursor + 1, nullable));
         let field = &self.types[current].input_fields[cursor];
-        let packed = field.ty.packed;
-        // The only link that cannot be broken by a `null` or an empty list is a bare `X!`.
-        if packed.depth() != 1 || !packed.is_non_null() {
+        let at = field.name;
+        let Some((target, link_is_nullable)) = self.input_link(current, field.ty.packed) else {
+          continue;
+        };
+        if finite[target] {
           continue;
         }
-        let target = packed.base_id();
-        if target == UNRESOLVED {
-          continue;
-        }
-        let target = target.get() as usize;
-        if self.types[target].kind != TypeKind::InputObject {
-          continue;
-        }
-        if colour[target] == 1 {
-          if !reported[current] {
-            reported[current] = true;
-            let owner = self.text(self.types[current].name.sym).to_owned();
-            let name = self.text(field.name.sym).to_owned();
-            let at = field.name;
-            self.push_owned(SchemaErrorKind::CircularNonNullInputField, &name, owner, at);
+        let through = nullable + u32::from(link_is_nullable);
+        match colour[target] {
+          0 => {
+            colour[target] = 1;
+            depth[target] = stack.len() as u32;
+            stack.push((target, 0, through));
           }
-          continue;
-        }
-        if colour[target] == 0 {
-          colour[target] = 1;
-          stack.push((target, 0));
+          1 if !reported[current] => {
+            reported[current] = true;
+            // The cycle is the path from `target` down to here, then this link back up to it, so
+            // its nullable links are the ones counted since `target`, and this one.
+            let kind = if through == stack[depth[target] as usize].2 {
+              SchemaErrorKind::CircularNonNullInputField
+            } else {
+              SchemaErrorKind::CircularOneOfInputField
+            };
+            let owner = self.text(self.types[current].name.sym).to_owned();
+            let name = self.text(at.sym).to_owned();
+            self.push_owned(kind, &name, owner, at);
+          }
+          _ => {}
         }
       }
     }
+  }
+
+  /// Which input objects some finite value satisfies: the least fixed point
+  /// [`validate_input_object_cycles`](SchemaBuilder::validate_input_object_cycles) describes, so
+  /// an input object is `false` here exactly when the draft's `InputObjectHasUnbreakableCycle` is
+  /// true of it. Every other kind of type is `false` and means nothing.
+  ///
+  /// `None` when the schema has no input object, which is most builds, so that they allocate
+  /// nothing here.
+  fn finite_input_objects(&self) -> Option<Vec<bool>> {
+    let objects = self
+      .types
+      .iter()
+      .filter(|ty| ty.kind == TypeKind::InputObject)
+      .count();
+    if objects == 0 {
+      return None;
+    }
+    let count = self.types.len();
+    let mut finite = vec![false; count];
+    // Per ordinary input object, how many of its links still name an object not known to be
+    // finite. A OneOf needs only one of its links, so its count is never read.
+    let mut waiting = vec![0u32; count];
+    // The links grouped by target: the owners of the links into `t` are
+    // `owners[start[t] as usize..start[t + 1] as usize]`.
+    let mut start = vec![0u32; count + 1];
+    // Each object is pushed once, as it is found finite.
+    let mut ready: Vec<usize> = Vec::with_capacity(objects);
+
+    for owner in 0..count {
+      if self.types[owner].kind != TypeKind::InputObject {
+        continue;
+      }
+      let mut leaves = false;
+      for field in &self.types[owner].input_fields {
+        match self.input_link(owner, field.ty.packed) {
+          Some((target, _)) => {
+            start[target + 1] += 1;
+            waiting[owner] += 1;
+          }
+          None => leaves = true,
+        }
+      }
+      let satisfied = if self.types[owner].one_of {
+        leaves
+      } else {
+        waiting[owner] == 0
+      };
+      if satisfied {
+        finite[owner] = true;
+        ready.push(owner);
+      }
+    }
+    for target in 0..count {
+      start[target + 1] += start[target];
+    }
+    let mut owners = vec![0u32; start[count] as usize];
+    let mut next = start.clone();
+    for owner in 0..count {
+      if self.types[owner].kind != TypeKind::InputObject {
+        continue;
+      }
+      for field in &self.types[owner].input_fields {
+        if let Some((target, _)) = self.input_link(owner, field.ty.packed) {
+          owners[next[target] as usize] = owner as u32;
+          next[target] += 1;
+        }
+      }
+    }
+
+    while let Some(target) = ready.pop() {
+      for &owner in &owners[start[target] as usize..start[target + 1] as usize] {
+        let owner = owner as usize;
+        if finite[owner] {
+          continue;
+        }
+        if !self.types[owner].one_of {
+          waiting[owner] -= 1;
+          if waiting[owner] != 0 {
+            continue;
+          }
+        }
+        finite[owner] = true;
+        ready.push(owner);
+      }
+    }
+    Some(finite)
+  }
+
+  /// The input object one field of `owner` ties it to under `InputObjectHasUnbreakableCycle`, and
+  /// whether the field is nullable.
+  ///
+  /// `None` for a field that never holds a cycle closed: a list, which may be empty; a scalar or an
+  /// enum; a nullable field of an ordinary input object, which may be left out; and a type that
+  /// did not resolve or is not an input type, which another rule has already refused. A nullable
+  /// field of a OneOf is still a link, because the one field a OneOf is given may not be `null`.
+  fn input_link(&self, owner: usize, packed: PackedType) -> Option<(usize, bool)> {
+    let nullable = !packed.is_non_null();
+    if nullable && !self.types[owner].one_of {
+      return None;
+    }
+    if packed.nullable().depth() != 0 {
+      return None;
+    }
+    let base = packed.base_id();
+    if base == UNRESOLVED {
+      return None;
+    }
+    let base = base.get() as usize;
+    (self.types[base].kind == TypeKind::InputObject).then_some((base, nullable))
   }
 
   /// Draft §3.10.1(4): `InputObjectDefaultValueHasCycle(inputObject)` must be false.

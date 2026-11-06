@@ -20,6 +20,7 @@
 #![allow(missing_docs)]
 
 use smear::{
+  diagnostic::{Diagnose as _, Label, Location},
   lexer::{
     SyntaxErrorKind,
     tokora::{Parse as _, Parser, SimpleSpan},
@@ -1840,6 +1841,83 @@ fn built_ins_can_be_extended() {
   let _ = int;
 }
 
+/// Draft §3.13.4: `@specifiedBy` "must not appear on built-in scalar types". "Built-in scalar types
+/// must not provide a scalar specification URL as they are specified by this document" (§3.5).
+#[test]
+fn specified_by_on_a_built_in_scalar_is_refused() {
+  // On a definition that spells the built-in out, for the four other than `String`, the type of
+  // `@specifiedBy`'s own `url` argument.
+  for scalar in ["Int", "Float", "Boolean", "ID"] {
+    let sdl = format!(
+      "type Query {{ ok: Int }} scalar {scalar} @specifiedBy(url: \"https://example.invalid\")"
+    );
+    let errors = refused(&sdl);
+    let rendered: Vec<String> = errors.errors().iter().map(ToString::to_string).collect();
+    assert_eq!(
+      rendered,
+      [format!(
+        "@specifiedBy is applied to a built-in scalar: `{scalar}.specifiedBy`"
+      )],
+      "---\n{sdl}"
+    );
+    let span = errors.errors()[0].span();
+    assert_eq!(&sdl[span.start()..span.end()], "specifiedBy", "---\n{sdl}");
+  }
+
+  // On an extension, of the injected definition and of one the document spelled out.
+  for sdl in [
+    "type Query { ok: Int } extend scalar Float @specifiedBy(url: \"https://example.invalid\")",
+    "type Query { ok: Int } scalar Float extend scalar Float @specifiedBy(url: \"https://example.invalid\")",
+  ] {
+    let errors = refused(sdl);
+    let rendered: Vec<String> = errors.errors().iter().map(ToString::to_string).collect();
+    assert_eq!(
+      rendered,
+      ["@specifiedBy is applied to a built-in scalar: `Float.specifiedBy`"],
+      "---\n{sdl}"
+    );
+    let span = errors.errors()[0].span();
+    assert_eq!(span.start(), sdl.rfind("specifiedBy").expect("the usage"));
+  }
+
+  // On `String`, whose directive also refers to itself through its own `url: String!`.
+  assert_eq!(
+    refused(
+      "type Query { ok: String } scalar String @specifiedBy(url: \"https://example.invalid\")"
+    )
+    .kinds(),
+    vec![
+      SchemaErrorKind::SelfReferentialDirective,
+      SchemaErrorKind::SpecifiedByOnBuiltInScalar,
+    ]
+  );
+}
+
+/// What stays legal beside that refusal: `@specifiedBy` on a custom scalar, from its definition or
+/// from an extension, and a built-in scalar spelled out or extended without it.
+#[test]
+fn specified_by_on_a_custom_scalar_is_accepted() {
+  let schema = built(
+    "type Query { ok: Int }
+     directive @tag on SCALAR
+     scalar UUID @specifiedBy(url: \"https://example.invalid/uuid\")
+     scalar Url
+     extend scalar Url @specifiedBy(url: \"https://example.invalid/url\")
+     scalar Int
+     extend scalar Float @tag",
+  );
+  assert_eq!(
+    schema.specified_by_url(ty(&schema, "UUID")),
+    Some("https://example.invalid/uuid")
+  );
+  assert_eq!(
+    schema.specified_by_url(ty(&schema, "Url")),
+    Some("https://example.invalid/url")
+  );
+  assert_eq!(schema.specified_by_url(ty(&schema, "Int")), None);
+  assert_eq!(schema.specified_by_url(ty(&schema, "Float")), None);
+}
+
 /// One builder, two documents whose source slice types differ — the property that makes `Schema`
 /// non-generic worth having.
 #[test]
@@ -1861,6 +1939,207 @@ fn one_builder_accepts_documents_of_different_source_types() {
   builder.document(&bytes);
   let schema = builder.finish().expect("both documents build one schema");
   assert!(schema.type_by_name(b"Extra").is_some());
+}
+
+// ---------------------------------------------------------------------------------------------
+// several documents: every position in the document it was read from
+// ---------------------------------------------------------------------------------------------
+
+/// Builds `documents` with one builder, in order, and returns what it refused them with.
+fn refused_documents(documents: &[&str]) -> SchemaErrors {
+  let parsed: Vec<TypeSystemDocument<&str>> = documents.iter().map(|&sdl| parse(sdl)).collect();
+  let mut builder = SchemaBuilder::new();
+  for document in &parsed {
+    builder.document(document);
+  }
+  match builder.finish() {
+    Err(errors) => errors,
+    Ok(_) => panic!("expected a refusal, got a schema\n---\n{documents:#?}"),
+  }
+}
+
+/// The `nth` occurrence of `text` in `documents[document]`, as a diagnostic location.
+fn occurrence(documents: &[&str], document: u32, text: &str, nth: usize) -> Location {
+  let (start, _) = documents[document as usize]
+    .match_indices(text)
+    .nth(nth)
+    .unwrap_or_else(|| {
+      panic!(
+        "{text:?} occurs fewer than {} times in document {document}",
+        nth + 1
+      )
+    });
+  Location::new(document, SimpleSpan::new(start, start + text.len()))
+}
+
+/// Builds `documents` together and requires one refusal, of `kind`: its primary position is the
+/// occurrence `at` names, and its one label says `phrase` at the occurrence `related` names, each
+/// as `(document, text, nth)`.
+fn assert_points_across(
+  documents: &[&str],
+  kind: SchemaErrorKind,
+  at: (u32, &str, usize),
+  related: (u32, &str, usize),
+  phrase: &'static str,
+) {
+  let errors = refused_documents(documents);
+  assert_eq!(errors.kinds(), vec![kind], "{documents:#?}");
+  assert_eq!(errors.len(), 1, "{errors}\n{documents:#?}");
+  let error = &errors.errors()[0];
+  assert_eq!(
+    error.primary(),
+    occurrence(documents, at.0, at.1, at.2),
+    "{documents:#?}"
+  );
+  assert_eq!(error.document(), at.0, "{documents:#?}");
+  let label = occurrence(documents, related.0, related.1, related.2);
+  assert_eq!(error.labels(), 1, "{documents:#?}");
+  assert_eq!(
+    error.label(0),
+    Some(Label::new(label, phrase)),
+    "{documents:#?}"
+  );
+  assert_eq!(error.related(), label.span(), "{documents:#?}");
+  assert_eq!(error.related_document(), Some(related.0), "{documents:#?}");
+}
+
+/// A missing query root is reported at the `schema` definition, in the document that definition
+/// was read from: here the second, while a `Query` type sits in the first, which a `schema`
+/// definition keeps from being presumed the root.
+#[test]
+fn a_missing_query_root_is_reported_in_the_schema_definitions_document() {
+  let documents = [
+    "type Query { ok: Int }",
+    "schema { mutation: Mutation } type Mutation { go: Int }",
+  ];
+  let errors = refused_documents(&documents);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::MissingQueryRootOperationType]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(
+    error.primary(),
+    occurrence(&documents, 1, "schema { mutation: Mutation }", 0)
+  );
+  assert_eq!(error.document(), 1);
+  assert_eq!(error.labels(), 0);
+  assert_eq!(error.related_document(), None);
+}
+
+/// A type defined in the first document and again in the second is refused in the second, and
+/// its label points back into the first, at the definition it repeats.
+#[test]
+fn a_duplicate_type_across_documents_points_back_into_the_first() {
+  assert_points_across(
+    &[
+      "type Query { ok: Int } type Thing { a: Int }",
+      "type Thing { b: Int }",
+    ],
+    SchemaErrorKind::DuplicateTypeName,
+    (1, "Thing", 0),
+    (0, "Thing", 0),
+    "first defined here",
+  );
+}
+
+/// A `schema` definition in each of two documents is refused in the second, and its label points
+/// back into the first.
+#[test]
+fn a_duplicate_schema_definition_across_documents_points_back_into_the_first() {
+  assert_points_across(
+    &[
+      "type Query { ok: Int } schema { query: Query }",
+      "schema { query: Query }",
+    ],
+    SchemaErrorKind::DuplicateSchemaDefinition,
+    (1, "schema { query: Query }", 0),
+    (0, "schema { query: Query }", 0),
+    "first defined here",
+  );
+}
+
+/// A duplicate whose two halves are in one document keeps both there: the related item's own
+/// document is the primary's when it really is in it. Written in the second document, so a
+/// related position pinned to the first would show.
+#[test]
+fn a_duplicate_within_one_document_points_within_it() {
+  assert_points_across(
+    &[
+      "type Query { ok: Int }",
+      "type Thing { a: Int } type Thing { b: Int }",
+    ],
+    SchemaErrorKind::DuplicateTypeName,
+    (1, "Thing", 1),
+    (1, "Thing", 0),
+    "first defined here",
+  );
+}
+
+/// The same across the related rules an extension in another document reaches: a field added
+/// again, a directive applied again, and a root operation provided again.
+#[test]
+fn an_extension_in_another_document_points_back_at_what_it_repeats() {
+  assert_points_across(
+    &["type Query { ok: Int }", "extend type Query { ok: Int }"],
+    SchemaErrorKind::DuplicateFieldName,
+    (1, "ok", 0),
+    (0, "ok", 0),
+    "first defined here",
+  );
+  assert_points_across(
+    &[
+      "directive @tag on OBJECT type Query @tag { ok: Int }",
+      "extend type Query @tag",
+    ],
+    SchemaErrorKind::DuplicateDirectiveUse,
+    (1, "tag", 0),
+    (0, "tag", 1),
+    "first applied here",
+  );
+  assert_points_across(
+    &[
+      "type Query { ok: Int } schema { query: Query }",
+      "type Other { ok: Int } extend schema { query: Other }",
+    ],
+    SchemaErrorKind::DuplicateRootOperationType,
+    (1, "Other", 1),
+    (0, "Query", 1),
+    "first named here",
+  );
+}
+
+/// A related position inside an injected built-in definition is not reported at all: no source
+/// the caller supplied holds it, so a label there would point past the end of the caller's
+/// documents. The refusal keeps its primary position, in the caller's document, and has no label.
+#[test]
+fn no_related_label_points_into_a_built_in() {
+  // An object extension of the injected `Int` scalar.
+  let sdl = "type Query { ok: Int } extend type Int { f: Int }";
+  let errors = refused(sdl);
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::ExtensionKindMismatch]);
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.subject(), "Int");
+  assert_eq!(error.primary(), occurrence(&[sdl], 0, "Int", 1));
+  assert_eq!(error.labels(), 0);
+  assert_eq!(error.label(0), None);
+  assert_eq!(error.related(), None);
+  assert_eq!(error.related_document(), None);
+
+  // A field that an extension of the injected `__Type` repeats.
+  let sdl = "type Query { ok: Int } extend type __Type { name: String }";
+  let errors = refused(sdl);
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::DuplicateFieldName]);
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.to_string(), "duplicate field: `__Type.name`");
+  assert_eq!(error.primary(), occurrence(&[sdl], 0, "name", 0));
+  assert_eq!(error.labels(), 0);
+  assert_eq!(error.label(0), None);
+  assert_eq!(error.related(), None);
+  assert_eq!(error.related_document(), None);
 }
 
 /// The whole point of the arena: the schema outlives every byte it was built from.
@@ -2338,6 +2617,110 @@ fn one_of_on_the_definition_is_accepted() {
   );
 }
 
+/// Draft §3.10.1's OneOf input coercion, at every SDL constant position and at every depth of the
+/// literal: "the value to be coerced must contain exactly one entry and that entry must not be null
+/// or the null literal".
+#[test]
+fn a_one_of_constant_value_holds_exactly_one_entry() {
+  // (document, the bytes blamed, what it renders as)
+  for (sdl, blamed, rendered) in [
+    (
+      "type Query { ok(f: O = {}): Int } input O @oneOf { a: Int b: Int }",
+      "{}",
+      "default value does not fit its declared type: `Query.ok.f`",
+    ),
+    (
+      "type Query { ok(f: O = {a: 1, b: 2}): Int } input O @oneOf { a: Int b: Int }",
+      "{a: 1, b: 2}",
+      "default value does not fit its declared type: `Query.ok.f`",
+    ),
+    (
+      "type Query { ok(f: O = {a: null}): Int } input O @oneOf { a: Int b: Int }",
+      "null",
+      "default value does not fit its declared type: `Query.ok.f`",
+    ),
+    // Inside a list, after an entry that fits too, and inside an ordinary input object.
+    (
+      "type Query { ok(f: [O] = [{}]): Int } input O @oneOf { a: Int b: Int }",
+      "{}",
+      "default value does not fit its declared type: `Query.ok.f`",
+    ),
+    (
+      "type Query { ok(f: [O] = [{a: 1}, {}]): Int } input O @oneOf { a: Int b: Int }",
+      "{}",
+      "default value does not fit its declared type: `Query.ok.f`",
+    ),
+    (
+      "type Query { ok(f: Outer = {o: {}}): Int } input Outer { o: O } input O @oneOf { a: Int b: Int }",
+      "{}",
+      "default value does not fit its declared type: `Query.ok.f`",
+    ),
+    // An input field's default.
+    (
+      "type Query { ok: Int } input Outer { o: O = {a: 1, b: 2} } input O @oneOf { a: Int b: Int }",
+      "{a: 1, b: 2}",
+      "default value does not fit its declared type: `Outer.o`",
+    ),
+    // A directive argument, bare and inside a list.
+    (
+      "directive @d(f: O) on FIELD_DEFINITION type Query { ok: Int @d(f: {}) } input O @oneOf { a: Int b: Int }",
+      "{}",
+      "directive argument value does not fit its declared type: `Query.ok.@d.f`",
+    ),
+    (
+      "directive @d(f: [O]) on FIELD_DEFINITION type Query { ok: Int @d(f: [{b: null}]) } input O @oneOf { a: Int b: Int }",
+      "null",
+      "directive argument value does not fit its declared type: `Query.ok.@d.f`",
+    ),
+  ] {
+    let errors = refused(sdl);
+    let all: Vec<String> = errors.errors().iter().map(ToString::to_string).collect();
+    assert_eq!(all, [rendered], "---\n{sdl}");
+    let span = errors.errors()[0].span();
+    assert_eq!(&sdl[span.start()..span.end()], blamed, "---\n{sdl}");
+  }
+
+  // The fields are still coerced as any input object's are, so a field that does not fit is a
+  // second diagnostic, at its own value.
+  let sdl = "type Query { ok(f: O = {a: 1, b: \"x\"}): Int } input O @oneOf { a: Int b: Int }";
+  let errors = refused(sdl);
+  let blamed: Vec<&str> = errors
+    .errors()
+    .iter()
+    .map(|error| &sdl[error.span().start()..error.span().end()])
+    .collect();
+  assert_eq!(blamed, ["{a: 1, b: \"x\"}", "\"x\""]);
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::InvalidDefaultValue]);
+
+  // A `null` for a field the type does not declare is the undefined field, once.
+  let errors = refused("type Query { ok(f: O = {z: null}): Int } input O @oneOf { a: Int b: Int }");
+  let all: Vec<String> = errors.errors().iter().map(ToString::to_string).collect();
+  assert_eq!(all, ["undefined input object field: `O.z`"]);
+}
+
+/// The literals the OneOf coercion accepts, at the same positions — and the ones an ordinary input
+/// object accepts that a OneOf does not.
+#[test]
+fn a_one_of_constant_value_with_one_entry_is_accepted() {
+  built(
+    "type Query {
+       ok(
+         a: O = {a: 1}
+         b: O = {b: 2}
+         none: O = null
+         list: [O] = [{a: 1}, {b: 2}]
+         single: [O] = {a: 1}
+         nested: Outer = {o: {b: 2}}
+       ): Int @d(f: {a: 1})
+     }
+     input Outer { o: O = {a: 1} }
+     input O @oneOf { a: Int b: Int }
+     directive @d(f: O) on FIELD_DEFINITION",
+  );
+  // An ordinary input object may be given no field, or every one.
+  built("type Query { ok(f: P = {}, g: P = {a: 1, b: 2}): Int } input P { a: Int b: Int }");
+}
+
 /// Three roots, three distinct types — and the defaults, which cannot collide.
 #[test]
 fn distinct_roots_are_accepted() {
@@ -2382,6 +2765,170 @@ fn breakable_cycles_are_accepted() {
   assert_eq!(errors.errors()[0].subject(), "a");
 }
 
+/// Draft §3.10's Counter Example 86, verbatim, and the other cycles a `@oneOf` input object holds
+/// closed.
+///
+/// "OneOf Input Objects require exactly one field be provided, and that value cannot be null. This
+/// example is invalid because providing a value for First requires a non-null Second, and
+/// constructing a Second requires a non-null First".
+#[test]
+fn a_one_of_input_object_can_hold_a_cycle_closed() {
+  const COUNTER_EXAMPLE_86: &str = "type Query { ok: Int }
+input First @oneOf {
+  second: Second
+}
+input Second {
+  first: First!
+}";
+  let errors = refused(COUNTER_EXAMPLE_86);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::CircularOneOfInputField]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(
+    error.to_string(),
+    "input object cycle through a @oneOf input object has no finite value: `Second.first`"
+  );
+  assert_eq!(
+    error.span().start(),
+    COUNTER_EXAMPLE_86
+      .find("first:")
+      .expect("the closing field")
+  );
+  assert_eq!(error.span().end() - error.span().start(), "first".len());
+
+  for (sdl, expected) in [
+    // Its one field leads straight back.
+    (
+      "type Query { ok: Int } input A @oneOf { a: A }",
+      &["input object cycle through a @oneOf input object has no finite value: `A.a`"][..],
+    ),
+    // Two OneOf input objects, each leading only into the other: one cycle, one diagnostic.
+    (
+      "type Query { ok: Int } input A @oneOf { b: B } input B @oneOf { a: A }",
+      &["input object cycle through a @oneOf input object has no finite value: `B.a`"][..],
+    ),
+    // Every field leads back, by two cycles, and each is reported where it closes.
+    (
+      "type Query { ok: Int } input A @oneOf { a: A b: B } input B { a: A! }",
+      &[
+        "input object cycle through a @oneOf input object has no finite value: `A.a`",
+        "input object cycle through a @oneOf input object has no finite value: `B.a`",
+      ][..],
+    ),
+  ] {
+    let rendered: Vec<String> = refused(sdl)
+      .errors()
+      .iter()
+      .map(ToString::to_string)
+      .collect();
+    assert_eq!(rendered, expected, "---\n{sdl}");
+  }
+}
+
+/// One field that can be given a finite value breaks a OneOf out of any cycle, which is the whole
+/// of the draft's OneOf arm: "If not InputFieldTypeHasUnbreakableCycle(fieldType, nextVisited):
+/// Return false."
+#[test]
+fn a_one_of_input_object_with_a_way_out_breaks_its_cycle() {
+  for sdl in [
+    // The scalar alternative beside a self-reference.
+    "type Query { ok: Int } input Filter @oneOf { not: Filter, eq: String }",
+    // An enum alternative, and a list one, which may be empty.
+    "type Query { ok: Int } input Filter @oneOf { not: Filter, by: Order } enum Order { ASC DESC }",
+    "type Query { ok: Int } input Filter @oneOf { not: Filter, all: [Filter!] }",
+    // Counter Example 86 with a third input object to pick, which is finite.
+    "type Query { ok: Int }
+     input First @oneOf { second: Second, third: Third }
+     input Second { first: First! }
+     input Third { x: Int }",
+    // Counter Example 86 with the ordinary input object's link made nullable.
+    "type Query { ok: Int } input First @oneOf { second: Second } input Second { first: First }",
+  ] {
+    built(sdl);
+  }
+
+  // A way out breaks a non-null cycle through the OneOf too. The non-null field is refused, as a
+  // field of a OneOf; the cycle it is on is not.
+  let errors =
+    refused("type Query { ok: Int } input O @oneOf { a: A!, s: String } input A { o: O! }");
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::OneOfFieldNotNullable]);
+}
+
+/// The ordinary arm is unchanged by the OneOf one: draft §3.10's Examples 82 and 83 are valid and
+/// its Counter Examples 84 and 85 are not, each with one diagnostic at the link that closes it.
+#[test]
+fn the_draft_input_object_cycle_examples_hold() {
+  built("type Query { ok: Int } input Example { self: Example value: String }");
+  built("type Query { ok: Int } input Example { self: [Example!]! value: String }");
+
+  for (sdl, expected) in [
+    (
+      "type Query { ok: Int } input Example { self: Example! value: String }",
+      "input object cycle has no nullable or list link: `Example.self`",
+    ),
+    (
+      "type Query { ok: Int }
+       input First { second: Second! value: String }
+       input Second { first: First! value: String }",
+      "input object cycle has no nullable or list link: `Second.first`",
+    ),
+  ] {
+    let rendered: Vec<String> = refused(sdl)
+      .errors()
+      .iter()
+      .map(ToString::to_string)
+      .collect();
+    assert_eq!(rendered, [expected], "---\n{sdl}");
+  }
+}
+
+/// The OneOf cycle rule is linear and iterative over a chain as long as the document makes it.
+///
+/// The draft states `InputObjectHasUnbreakableCycle` recursively, with the path in `visited`, and
+/// twenty thousand links is a stack overflow for a literal transcription of it.
+#[test]
+fn a_deep_one_of_cycle_does_not_recurse() {
+  const DEPTH: usize = 20_000;
+
+  // A chain of OneOf input objects, each naming the next, that the last one's scalar field lets
+  // out of: every one of them is satisfied.
+  let mut sdl = String::from("type Query { ok(a: In0): Int }\n");
+  for level in 0..DEPTH {
+    sdl.push_str(&format!(
+      "input In{level} @oneOf {{ next: In{} }}\n",
+      level + 1
+    ));
+  }
+  sdl.push_str(&format!("input In{DEPTH} @oneOf {{ end: Int }}\n"));
+  built(&sdl);
+
+  // The same chain closed into a cycle: one diagnostic, at the link that closes it.
+  let mut sdl = String::from("type Query { ok(a: In0): Int }\n");
+  for level in 0..DEPTH {
+    sdl.push_str(&format!(
+      "input In{level} @oneOf {{ next: In{} }}\n",
+      level + 1
+    ));
+  }
+  sdl.push_str(&format!("input In{DEPTH} @oneOf {{ next: In0 }}\n"));
+  let errors = refused(&sdl);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::CircularOneOfInputField]
+  );
+  assert_eq!(
+    errors.len(),
+    1,
+    "a cycle through twenty thousand objects is one diagnostic, not twenty thousand"
+  );
+  let last = format!("In{DEPTH}");
+  assert_eq!(errors.errors()[0].owner(), Some(last.as_str()));
+  assert_eq!(errors.errors()[0].subject(), "next");
+}
+
 /// The default roots are the conventionally named object types, when no `schema` block names any.
 #[test]
 fn default_root_names_are_used_without_a_schema_definition() {
@@ -2397,6 +2944,208 @@ fn default_root_names_are_used_without_a_schema_definition() {
   // A conventionally named type that is not an object is not silently adopted.
   let errors = refused("interface Query { ok: Int }");
   assert!(errors.contains_kind(SchemaErrorKind::MissingQueryRootOperationType));
+}
+
+/// Draft §3.3.1's Example 42, verbatim: a `schema` definition names every root the schema has.
+///
+/// "This example describes a valid GraphQL schema without a mutation root operation type, even
+/// though it contains a type named "Mutation". The schema definition must be included, otherwise
+/// the "Mutation" type would be incorrectly presumed to be the mutation root operation type of the
+/// schema."
+#[test]
+fn a_schema_definition_turns_the_default_root_names_off() {
+  const EXAMPLE_42: &str = r#"
+schema {
+  query: Query
+}
+
+type Query {
+  latestVirus: Virus
+}
+
+type Virus {
+  name: String
+  mutations: [Mutation]
+}
+
+type Mutation {
+  name: String
+}
+"#;
+  let schema = built(EXAMPLE_42);
+  assert_eq!(
+    schema.root(RootOperation::Query),
+    Some(ty(&schema, "Query"))
+  );
+  assert_eq!(
+    schema.root(RootOperation::Mutation),
+    None,
+    "`Mutation` was presumed to be the mutation root beside a `schema` definition"
+  );
+  assert_eq!(schema.root(RootOperation::Subscription), None);
+
+  // The third default name, the same way.
+  let schema = built("schema { query: Query } type Query { ok: Int } type Subscription { s: Int }");
+  assert_eq!(
+    schema.root(RootOperation::Query),
+    Some(ty(&schema, "Query"))
+  );
+  assert_eq!(schema.root(RootOperation::Subscription), None);
+}
+
+/// An `extend schema` is not a `schema` definition, so the default root names still apply beside
+/// one.
+#[test]
+fn an_extend_schema_alone_keeps_the_default_root_names() {
+  let schema = built(
+    "directive @d on SCHEMA
+     type Query { ok: Int }
+     type Mutation { go: Int }
+     extend schema @d",
+  );
+  assert_eq!(
+    schema.root(RootOperation::Query),
+    Some(ty(&schema, "Query"))
+  );
+  assert_eq!(
+    schema.root(RootOperation::Mutation),
+    Some(ty(&schema, "Mutation"))
+  );
+  assert_eq!(schema.root(RootOperation::Subscription), None);
+}
+
+/// Draft §3.3.2: "The Schema must already be defined." With no `schema` definition and no `Query`
+/// type for an omitted one to presume, an `extend schema` has nothing to extend.
+#[test]
+fn an_extend_schema_with_no_schema_to_extend_is_refused() {
+  let sdl = "type Q { ok: Int } extend schema { query: Q }";
+  let errors = refused(sdl);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::SchemaExtensionWithoutSchema]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.subject(), "schema");
+  assert_eq!(error.owner(), None);
+  assert_eq!(
+    &sdl[error.span().start()..error.span().end()],
+    "extend schema { query: Q }"
+  );
+  assert_eq!(
+    error.to_string(),
+    "schema extension has no schema to extend: `schema`"
+  );
+
+  // Each extension is refused, at its own span.
+  let sdl = "directive @d on SCHEMA type Q { ok: Int } extend schema { query: Q } extend schema @d";
+  let errors = refused(sdl);
+  let blamed: Vec<&str> = errors
+    .errors()
+    .iter()
+    .map(|error| &sdl[error.span().start()..error.span().end()])
+    .collect();
+  assert_eq!(blamed, ["extend schema { query: Q }", "extend schema @d"]);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::SchemaExtensionWithoutSchema]
+  );
+
+  // A type called `Query` that is not an object type is never presumed to be the query root, so
+  // it defines no schema either.
+  let errors = refused("interface Query { ok: Int } type Q { ok: Int } extend schema { query: Q }");
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::SchemaExtensionWithoutSchema]
+  );
+
+  // Nothing else moves: a document with no query root anywhere is still told so as well.
+  let errors = refused("directive @d on SCHEMA extend schema @d");
+  assert_eq!(
+    errors.kinds(),
+    vec![
+      SchemaErrorKind::MissingQueryRootOperationType,
+      SchemaErrorKind::SchemaExtensionWithoutSchema,
+    ]
+  );
+}
+
+/// What an `extend schema` may extend: a `schema` definition wherever it is written, or the schema
+/// that omitting one defines around an object type named `Query` (Example 41).
+#[test]
+fn an_extend_schema_with_a_schema_to_extend_is_accepted() {
+  for sdl in [
+    "type Query { ok: Int } type M { go: Int } schema { query: Query } extend schema { mutation: M }",
+    "type Query { ok: Int } type M { go: Int } extend schema { mutation: M } schema { query: Query }",
+    "type Query { ok: Int } type M { go: Int } extend schema { mutation: M }",
+  ] {
+    let schema = built(sdl);
+    assert_eq!(
+      schema.root(RootOperation::Query),
+      Some(ty(&schema, "Query")),
+      "{sdl}"
+    );
+    assert_eq!(
+      schema.root(RootOperation::Mutation),
+      Some(ty(&schema, "M")),
+      "{sdl}"
+    );
+  }
+
+  // The definition may be in a later document than the extension.
+  let extension = parse("extend schema { mutation: M } type M { go: Int }");
+  let definition = parse("schema { query: Query } type Query { ok: Int }");
+  let mut builder = SchemaBuilder::new();
+  builder.document(&extension).document(&definition);
+  let schema = builder
+    .finish()
+    .expect("an extension may precede the definition it extends");
+  assert_eq!(schema.root(RootOperation::Mutation), Some(ty(&schema, "M")));
+}
+
+/// An `extend schema` that provides a root an omitted `schema` definition presumed is the same
+/// duplicate a written definition's root would be.
+///
+/// The presumed roots are in place before any extension is applied: "A schema defines the initial
+/// root operation type for each kind of operation it supports", and Example 41's schema is defined
+/// with its query root presumed. graphql-js lets the extension's root replace the presumed one in
+/// silence; this follows the draft instead.
+#[test]
+fn an_extend_schema_cannot_provide_a_presumed_root_again() {
+  let sdl = "type Query { ok: Int } type Other { ok: Int } extend schema { query: Other }";
+  let errors = refused(sdl);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::DuplicateRootOperationType]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.subject(), "query");
+  assert_eq!(&sdl[error.span().start()..error.span().end()], "Other");
+  assert_eq!(
+    error.span().start(),
+    sdl.rfind("Other").expect("the extension's root")
+  );
+  let related = error.related().expect("the presumed root is pointed at");
+  assert_eq!(&sdl[related.start()..related.end()], "Query");
+  assert_eq!(related.start(), "type ".len());
+
+  // Naming the presumed root itself again is the same duplicate.
+  let errors = refused(
+    "type Query { ok: Int } type Mutation { go: Int } extend schema { mutation: Mutation }",
+  );
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::DuplicateRootOperationType]
+  );
+  assert_eq!(errors.errors()[0].subject(), "mutation");
+
+  // A root nothing presumed is the extension's to provide.
+  let schema = built("type Query { ok: Int } type S { s: Int } extend schema { subscription: S }");
+  assert_eq!(
+    schema.root(RootOperation::Subscription),
+    Some(ty(&schema, "S"))
+  );
 }
 
 /// The name index is a real index: every interned name resolves, nothing else does.

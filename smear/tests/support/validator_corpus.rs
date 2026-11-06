@@ -586,6 +586,11 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     &[SchemaErrorKind::ExtensionKindMismatch],
   ),
   (
+    SchemaErrorKind::SchemaExtensionWithoutSchema,
+    "type Q { ok: Int } extend schema { query: Q }",
+    &[SchemaErrorKind::SchemaExtensionWithoutSchema],
+  ),
+  (
     SchemaErrorKind::RedefinedBuiltInType,
     "type Query { ok: Int } type __Type { name: String }",
     &[SchemaErrorKind::RedefinedBuiltInType],
@@ -829,6 +834,12 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     &[SchemaErrorKind::CircularNonNullInputField],
   ),
   (
+    // Draft §3.10's Counter Example 86.
+    SchemaErrorKind::CircularOneOfInputField,
+    "type Query { ok: Int } input First @oneOf { second: Second } input Second { first: First! }",
+    &[SchemaErrorKind::CircularOneOfInputField],
+  ),
+  (
     SchemaErrorKind::InputObjectDefaultValueCycle,
     "type Query { ok: Int } input In { a: In = {} }",
     &[SchemaErrorKind::InputObjectDefaultValueCycle],
@@ -865,6 +876,11 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
      directive @d(a: In) on INPUT_FIELD_DEFINITION
      input In { x: Int @d }",
     &[SchemaErrorKind::SelfReferentialDirective],
+  ),
+  (
+    SchemaErrorKind::SpecifiedByOnBuiltInScalar,
+    "type Query { ok: Int } scalar Int @specifiedBy(url: \"https://example.invalid\")",
+    &[SchemaErrorKind::SpecifiedByOnBuiltInScalar],
   ),
   // -- §3.13, at a use site -----------------------------------------------------------------
   //

@@ -184,7 +184,8 @@ impl Renderer {
     // different schema than the one described. A response that gives `String` a description of its
     // own, a `null` one or a `specifiedByURL` says what a document that spelled `String` out says,
     // and the SDL door keeps that spelling as the document's own definition, so this door writes it
-    // out too.
+    // out too. A `specifiedByURL` is then refused by the build, as the SDL door refuses a document
+    // that writes one on a built-in scalar.
     if matches!(kind, TypeKind::Scalar) && is_the_built_in_scalar(ty, name) {
       return Ok(());
     }

@@ -52,10 +52,25 @@ pub enum SchemaErrorKind {
   UndefinedExtensionTarget,
   /// `extend` names a type of a different kind than the extension's keyword (draft §3.3).
   ExtensionKindMismatch,
+  /// An `extend schema` has no schema to extend: the document has no `schema` definition and no
+  /// object type named `Query` (draft §3.3.2).
+  ///
+  /// "The Schema must already be defined." Omitting the `schema` definition still defines one
+  /// when there is a `Query` type to be "presumed to be the query root operation type of the
+  /// schema" (§3.3.1, Example 41), so that schema is one an extension may extend. With neither,
+  /// there is nothing for the extension to add to.
+  ///
+  /// The subject is `schema` and the span is the whole extension. The extension is applied all
+  /// the same, so its directives and roots are still checked, and a document that has no query
+  /// root at all is still [`MissingQueryRootOperationType`](Self::MissingQueryRootOperationType)
+  /// beside this.
+  SchemaExtensionWithoutSchema,
   /// A definition redefines an introspection type (draft §3.3).
   ///
   /// The five built-in scalars and the five specified directives are *not* in this class: a
   /// document that spells one out replaces it, which is what makes a printed schema re-readable.
+  /// A built-in scalar spelled out is still the specification's, though, so it takes no
+  /// `@specifiedBy`: that is [`SpecifiedByOnBuiltInScalar`](Self::SpecifiedByOnBuiltInScalar).
   /// The introspection types are `__`-prefixed and injected unconditionally, so a definition of
   /// one is a genuine collision.
   RedefinedBuiltInType,
@@ -271,6 +286,22 @@ pub enum SchemaErrorKind {
   /// Input objects form a cycle in which every link is non-null, so no finite value satisfies it
   /// (draft §3.10.1).
   CircularNonNullInputField,
+  /// Input objects form a cycle that a `@oneOf` input object on it holds closed, so no finite value
+  /// satisfies it (draft §3.10, `InputObjectHasUnbreakableCycle`).
+  ///
+  /// The `@oneOf` half of [`CircularNonNullInputField`](Self::CircularNonNullInputField), and a
+  /// kind of its own because that one's "no nullable or list link" is not true of it. "OneOf Input
+  /// Objects require exactly one field be provided, and that value cannot be null", so a nullable
+  /// field of one is still a link the value has to take when no other field of it can be given a
+  /// finite value. That is Counter Example 86, where "providing a value for First requires a
+  /// non-null Second, and constructing a Second requires a non-null First". One field that can be
+  /// given a finite value — a scalar, an enum, a list, or an input object no such cycle holds — is
+  /// enough to break it: `input Filter @oneOf { not: Filter, eq: String }` is satisfied by
+  /// `{ eq: "x" }`.
+  ///
+  /// The subject is the field that closes the cycle, qualified by its input object, as for the
+  /// non-null kind.
+  CircularOneOfInputField,
   /// An input object's default values refer to one another in a cycle, so coercing the outer
   /// default would never terminate (draft §3.10.1(4), `InputObjectDefaultValueHasCycle`).
   ///
@@ -315,6 +346,19 @@ pub enum SchemaErrorKind {
   /// A directive definition refers to itself, directly or through the types it names
   /// (draft §3.13.1).
   SelfReferentialDirective,
+  /// `@specifiedBy` is applied to a built-in scalar, by its definition or by an `extend scalar`
+  /// (draft §3.13.4).
+  ///
+  /// "It must not appear on built-in scalar types", which "must not provide a scalar
+  /// specification URL as they are specified by this document" (§3.5). A document may spell
+  /// `scalar Int` out and replace the injected definition, as
+  /// [`RedefinedBuiltInType`](Self::RedefinedBuiltInType) records, but what it defines is still
+  /// the specification's `Int`, so being built in is a matter of the name.
+  ///
+  /// graphql-js accepts the directive in either position and discards it, with the definition or
+  /// the extension it is written on: a built-in scalar is always its own. The subject is
+  /// `specifiedBy`, qualified by the scalar, and the span is the directive's name.
+  SpecifiedByOnBuiltInScalar,
 
   // -- §3.13 Directives, at a use site --------------------------------------------------------
   //
@@ -389,6 +433,7 @@ impl SchemaErrorKind {
     Self::MissingQueryRootOperationType,
     Self::UndefinedExtensionTarget,
     Self::ExtensionKindMismatch,
+    Self::SchemaExtensionWithoutSchema,
     Self::RedefinedBuiltInType,
     Self::ReservedTypeName,
     Self::UndefinedType,
@@ -435,6 +480,7 @@ impl SchemaErrorKind {
     Self::OneOfFieldNotNullable,
     Self::OneOfFieldHasDefault,
     Self::CircularNonNullInputField,
+    Self::CircularOneOfInputField,
     Self::InputObjectDefaultValueCycle,
     Self::OneOfOnInputObjectExtension,
     Self::ReservedDirectiveName,
@@ -443,6 +489,7 @@ impl SchemaErrorKind {
     Self::DirectiveArgumentTypeNotInputType,
     Self::TooManyDirectiveArguments,
     Self::SelfReferentialDirective,
+    Self::SpecifiedByOnBuiltInScalar,
     Self::UndefinedDirective,
     Self::UnsupportedDirectiveLocation,
     Self::DuplicateDirectiveUse,
@@ -467,6 +514,7 @@ impl SchemaErrorKind {
       Self::MissingQueryRootOperationType => "no query root operation type",
       Self::UndefinedExtensionTarget => "extension target is not defined",
       Self::ExtensionKindMismatch => "extension does not match the kind of the type it extends",
+      Self::SchemaExtensionWithoutSchema => "schema extension has no schema to extend",
       Self::RedefinedBuiltInType => "redefinition of an introspection type",
       Self::ReservedTypeName => "type name is reserved for introspection",
       Self::UndefinedType => "undefined type",
@@ -525,6 +573,9 @@ impl SchemaErrorKind {
       Self::OneOfFieldNotNullable => "field of a @oneOf input object is non-null",
       Self::OneOfFieldHasDefault => "field of a @oneOf input object has a default value",
       Self::CircularNonNullInputField => "input object cycle has no nullable or list link",
+      Self::CircularOneOfInputField => {
+        "input object cycle through a @oneOf input object has no finite value"
+      }
       Self::InputObjectDefaultValueCycle => "input object default values form a cycle",
       Self::OneOfOnInputObjectExtension => "@oneOf is provided by an input object type extension",
       Self::ReservedDirectiveName => "directive name is reserved for introspection",
@@ -535,6 +586,7 @@ impl SchemaErrorKind {
       Self::DirectiveArgumentTypeNotInputType => "directive argument type is not an input type",
       Self::TooManyDirectiveArguments => "directive declares too many arguments",
       Self::SelfReferentialDirective => "directive definition refers to itself",
+      Self::SpecifiedByOnBuiltInScalar => "@specifiedBy is applied to a built-in scalar",
       Self::UndefinedDirective => "undefined directive",
       Self::UnsupportedDirectiveLocation => "directive is not allowed here",
       Self::DuplicateDirectiveUse => "directive is not repeatable",
@@ -573,6 +625,9 @@ impl SchemaErrorKind {
       }
       Self::UndefinedExtensionTarget => Code::new("smear::schema::undefined-extension-target"),
       Self::ExtensionKindMismatch => Code::new("smear::schema::extension-kind-mismatch"),
+      Self::SchemaExtensionWithoutSchema => {
+        Code::new("smear::schema::schema-extension-without-schema")
+      }
       Self::RedefinedBuiltInType => Code::new("smear::schema::redefined-built-in-type"),
       Self::ReservedTypeName => Code::new("smear::schema::reserved-type-name"),
       Self::UndefinedType => Code::new("smear::schema::undefined-type"),
@@ -633,6 +688,7 @@ impl SchemaErrorKind {
       Self::OneOfFieldNotNullable => Code::new("smear::schema::one-of-field-not-nullable"),
       Self::OneOfFieldHasDefault => Code::new("smear::schema::one-of-field-has-default"),
       Self::CircularNonNullInputField => Code::new("smear::schema::circular-non-null-input-field"),
+      Self::CircularOneOfInputField => Code::new("smear::schema::circular-one-of-input-field"),
       Self::InputObjectDefaultValueCycle => {
         Code::new("smear::schema::input-object-default-value-cycle")
       }
@@ -651,6 +707,9 @@ impl SchemaErrorKind {
       }
       Self::TooManyDirectiveArguments => Code::new("smear::schema::too-many-directive-arguments"),
       Self::SelfReferentialDirective => Code::new("smear::schema::self-referential-directive"),
+      Self::SpecifiedByOnBuiltInScalar => {
+        Code::new("smear::schema::specified-by-on-built-in-scalar")
+      }
       Self::UndefinedDirective => Code::new("smear::schema::undefined-directive"),
       Self::UnsupportedDirectiveLocation => {
         Code::new("smear::schema::unsupported-directive-location")
@@ -691,6 +750,7 @@ impl SchemaErrorKind {
       | Self::MissingQueryRootOperationType
       | Self::UndefinedExtensionTarget
       | Self::ExtensionKindMismatch
+      | Self::SchemaExtensionWithoutSchema
       | Self::RedefinedBuiltInType
       | Self::ReservedTypeName
       | Self::UndefinedType
@@ -737,6 +797,7 @@ impl SchemaErrorKind {
       | Self::OneOfFieldNotNullable
       | Self::OneOfFieldHasDefault
       | Self::CircularNonNullInputField
+      | Self::CircularOneOfInputField
       | Self::InputObjectDefaultValueCycle
       | Self::OneOfOnInputObjectExtension
       | Self::ReservedDirectiveName
@@ -745,6 +806,7 @@ impl SchemaErrorKind {
       | Self::DirectiveArgumentTypeNotInputType
       | Self::TooManyDirectiveArguments
       | Self::SelfReferentialDirective
+      | Self::SpecifiedByOnBuiltInScalar
       | Self::UndefinedDirective
       | Self::UnsupportedDirectiveLocation
       | Self::DuplicateDirectiveUse
@@ -789,6 +851,9 @@ impl SchemaErrorKind {
       Self::ExtensionKindMismatch => {
         Some("the `extend` keyword has to match the kind of the definition it extends.")
       }
+      Self::SchemaExtensionWithoutSchema => Some(
+        "`extend schema` adds to a schema the document defines: write a `schema` definition, or define the `Query` type that omitting one presumes.",
+      ),
       Self::RedefinedBuiltInType => Some(
         "the `__`-prefixed introspection types are injected by every build and cannot be replaced.",
       ),
@@ -877,6 +942,9 @@ impl SchemaErrorKind {
       Self::CircularNonNullInputField => Some(
         "break the cycle with a nullable link or a list; as written, no finite value satisfies it.",
       ),
+      Self::CircularOneOfInputField => Some(
+        "a `@oneOf` input object is given exactly one field, so it breaks a cycle only through a field that can be given a finite value; give it one, such as a scalar or a list.",
+      ),
       Self::InputObjectDefaultValueCycle => {
         Some("drop one of the defaults, or give it a value that does not refer back.")
       }
@@ -897,6 +965,9 @@ impl SchemaErrorKind {
       ),
       Self::SelfReferentialDirective => Some(
         "a directive may not appear on its own definition, nor on any type that definition names.",
+      ),
+      Self::SpecifiedByOnBuiltInScalar => Some(
+        "a built-in scalar is specified by the GraphQL specification itself, so it takes no specification URL; drop the `@specifiedBy`.",
       ),
       Self::UnsupportedDirectiveLocation => {
         Some("add the location to the directive's definition, or move the usage.")
@@ -967,6 +1038,7 @@ impl SchemaErrorKind {
       | Self::RootOperationTypeNotObject
       | Self::MissingQueryRootOperationType
       | Self::UndefinedExtensionTarget
+      | Self::SchemaExtensionWithoutSchema
       | Self::RedefinedBuiltInType
       | Self::ReservedTypeName
       | Self::UndefinedType
@@ -1006,6 +1078,7 @@ impl SchemaErrorKind {
       | Self::OneOfFieldNotNullable
       | Self::OneOfFieldHasDefault
       | Self::CircularNonNullInputField
+      | Self::CircularOneOfInputField
       | Self::InputObjectDefaultValueCycle
       | Self::OneOfOnInputObjectExtension
       | Self::ReservedDirectiveName
@@ -1013,6 +1086,7 @@ impl SchemaErrorKind {
       | Self::DirectiveArgumentTypeNotInputType
       | Self::TooManyDirectiveArguments
       | Self::SelfReferentialDirective
+      | Self::SpecifiedByOnBuiltInScalar
       | Self::UndefinedDirective
       | Self::UnsupportedDirectiveLocation
       | Self::UndefinedDirectiveArgument
@@ -1042,7 +1116,9 @@ pub struct SchemaError {
   subject: Box<str>,
   owner: Option<Box<str>>,
   span: SimpleSpan,
-  related: Option<SimpleSpan>,
+  /// The second position, and the index of the document it is in, which need not be
+  /// [`SchemaError::document`]: the definition a duplicate repeats may be in another document.
+  related: Option<(SimpleSpan, u32)>,
   document: u32,
 }
 
@@ -1065,13 +1141,14 @@ impl SchemaError {
     self
   }
 
-  /// Points at a second, related position — the first of two duplicates, say.
-  pub(crate) fn related_to(mut self, span: SimpleSpan) -> Self {
-    self.related = Some(span);
+  /// Points at a second, related position — the first of two duplicates, say — in the builder's
+  /// document `document`.
+  pub(crate) fn related_to(mut self, span: SimpleSpan, document: u32) -> Self {
+    self.related = Some((span, document));
     self
   }
 
-  /// Records which of the builder's documents the spans belong to.
+  /// Records which of the builder's documents the subject's span belongs to.
   pub(crate) fn in_document(mut self, index: u32) -> Self {
     self.document = index;
     self
@@ -1102,13 +1179,40 @@ impl SchemaError {
   }
 
   /// Returns a second position the error refers to, when there is one.
+  ///
+  /// It is a position in [`related_document`](Self::related_document), which need not be
+  /// [`document`](Self::document): a duplicate repeats a definition that may have been read from
+  /// another of the builder's documents. A related position in an injected built-in definition is
+  /// never recorded, so this is always in a document the caller supplied.
   #[inline]
   pub const fn related(&self) -> Option<SimpleSpan> {
-    self.related
+    match self.related {
+      Some((span, _)) => Some(span),
+      None => None,
+    }
   }
 
-  /// Returns the index of the document the spans belong to, in the order the builder was given
-  /// them.
+  /// Returns the index of the document [`related`](Self::related) is a position in, when there is
+  /// a related position, in the order the builder was given its documents.
+  ///
+  /// Always one of the caller's documents: a related position in an injected built-in definition
+  /// is never recorded, so an error that would point there has none.
+  #[inline]
+  pub const fn related_document(&self) -> Option<u32> {
+    match self.related {
+      Some((_, document)) => Some(document),
+      None => None,
+    }
+  }
+
+  /// Returns the index of the document [`span`](Self::span) belongs to, in the order the builder
+  /// was given them. A related position carries its own:
+  /// [`related_document`](Self::related_document).
+  ///
+  /// An index equal to the number of documents the builder was given is not one of them: it
+  /// belongs to the built-in definitions the build injects — the introspection types, and each
+  /// built-in scalar and specified directive the documents did not spell out — which have no
+  /// source the caller supplied. A renderer shows such an error without a snippet.
   #[inline]
   pub const fn document(&self) -> u32 {
     self.document
@@ -1121,7 +1225,7 @@ impl SchemaError {
   #[inline]
   const fn secondary(&self) -> Option<Label> {
     match (self.related, self.kind.related_label()) {
-      (Some(span), Some(text)) => Some(Label::new(Location::new(self.document, span), text)),
+      (Some((span, document)), Some(text)) => Some(Label::new(Location::new(document, span), text)),
       _ => None,
     }
   }
@@ -1134,8 +1238,9 @@ impl SchemaError {
 /// why the location is not a bare span.
 ///
 /// There is at most one secondary label, and it is the kind's own phrase over
-/// [`SchemaError::related`]: a duplicate points back at the definition it repeats, an implementing
-/// field at the interface field it answers to.
+/// [`SchemaError::related`] in [`SchemaError::related_document`]: a duplicate points back at the
+/// definition it repeats, in whichever document that was read from, and an implementing field at
+/// the interface field it answers to.
 ///
 /// **No path segments, ever.** A schema refusal is about SDL, and draft §7.1.2's `path` is a
 /// coordinate in a *response*. The dotted owner path this error renders — `User.pet.first` — is a

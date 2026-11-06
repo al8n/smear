@@ -160,6 +160,52 @@ All notable changes to Smear are documented in this file.
   which leaves the escape `Unclosed`, so in a byte source it no longer runs past
   the string to a `}` later in the document. A `\u{` followed directly by a
   quote, a backslash or a line break no longer swallows it.
+- `smear-schema`!: the default root operation type names `Query`, `Mutation`
+  and `Subscription` apply only when the document has no `schema` definition
+  (draft §3.3.1). Beside a `schema` definition, an object type of a default name
+  that the definition does not list is an ordinary type: `schema { query: Query }`
+  beside `type Mutation` has no mutation root, as in the draft's Example 42, where
+  `Mutation` used to become one. An `extend schema` is not a definition, so a
+  document with one and no `schema` definition still takes the defaults.
+- `smear-schema`: an `extend schema` with no schema to extend is refused as
+  `SchemaErrorKind::SchemaExtensionWithoutSchema`, at the extension (draft
+  §3.3.2: "The Schema must already be defined"). Omitting the `schema`
+  definition still defines a schema when there is an object type named `Query`
+  (Example 41), and an extension may extend that one. The presumed default roots
+  are now in place before any extension is applied, so an `extend schema` that
+  provides one of them again is `DuplicateRootOperationType`, as it is against a
+  written definition's root. Code `smear::schema::schema-extension-without-schema`.
+- `smear-schema`: the input-object cycle rule is the draft's
+  `InputObjectHasUnbreakableCycle` (§3.10), which a `@oneOf` input object can
+  hold closed: it is given exactly one field, so it breaks a cycle only through
+  a field that can be given a finite value. A cycle a OneOf input object holds
+  closed is refused as `SchemaErrorKind::CircularOneOfInputField`, at the field
+  that closes it, as in the draft's Counter Example 86;
+  `input Filter @oneOf { not: Filter, eq: String }` still builds. A cycle through
+  a OneOf input object that has such a field is no longer refused as
+  `CircularNonNullInputField`. Code `smear::schema::circular-one-of-input-field`.
+- `smear-schema`: a constant value offered to a `@oneOf` input object must hold
+  exactly one entry, and not a `null` one (draft §3.10.1). A default value or a
+  directive argument whose literal gives a OneOf input object no field, two
+  fields or one `null` field, at any depth of lists and input objects, is refused
+  as `InvalidDefaultValue` or `InvalidDirectiveArgumentValue`, at the literal or
+  at the `null`.
+- `smear-schema`: `@specifiedBy` on a built-in scalar is refused as
+  `SchemaErrorKind::SpecifiedByOnBuiltInScalar`, at the directive, whether a
+  definition that spells the scalar out applies it or an `extend scalar` does
+  (draft §3.13.4: it "must not appear on built-in scalar types"). graphql-js
+  accepts it and discards it. `Schema::from_introspection` refuses a response
+  that gives a built-in scalar a `specifiedByURL` the same way, because the door
+  writes it out as the directive. Code
+  `smear::schema::specified-by-on-built-in-scalar`.
+- `smear-schema`: a related position carries its own document, which
+  `SchemaError::related_document` returns and the related label is rendered in.
+  A duplicate across the builder's documents points at the first definition in
+  the document it was read from, rather than at the same range of the
+  duplicate's document, and `MissingQueryRootOperationType` is reported in the
+  `schema` definition's document rather than in document 0. A related position
+  inside a built-in definition is no longer reported, since no document the
+  caller supplied holds it: `extend type Int { f: Int }` is refused with no label.
 
 ## [0.0.1] - 2026-10-30
 
