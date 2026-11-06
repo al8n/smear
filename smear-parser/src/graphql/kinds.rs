@@ -201,6 +201,8 @@ pub enum SyntaxKind {
   InputObjectTypeExtension,
   /// A `SchemaExtension`.
   SchemaExtension,
+  /// A `DirectiveExtension`.
+  DirectiveExtension,
   /// A `Document` (mixed executable + type-system).
   Document,
   /// A `TypeSystemDocument`.
@@ -319,6 +321,7 @@ impl SyntaxKind {
     Self::EnumTypeExtension,
     Self::InputObjectTypeExtension,
     Self::SchemaExtension,
+    Self::DirectiveExtension,
     Self::Document,
     Self::TypeSystemDocument,
     // Bookkeeping.

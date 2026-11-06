@@ -5,7 +5,7 @@ use super::*;
 /// Maps a location keyword onto its [`Location`], or `None` when the keyword names none.
 ///
 /// `pub(crate)` rather than private since #58: the CST-to-AST projection has to answer the same
-/// question off a tree token, and a second copy of this nineteen-arm table is a place the two
+/// question off a tree token, and a second copy of this twenty-arm table is a place the two
 /// layers could disagree about what `INPUT_FIELD_DEFINITION` means.
 #[inline]
 pub(crate) fn classify_location(keyword: ContextualKeyword, span: SimpleSpan) -> Option<Location> {
@@ -47,6 +47,9 @@ pub(crate) fn classify_location(keyword: ContextualKeyword, span: SimpleSpan) ->
     ContextualKeyword::InputFieldDefinitionLocation => {
       TypeSystemDirectiveLocation::input_field_definition(span).into()
     }
+    ContextualKeyword::DirectiveDefinitionLocation => {
+      TypeSystemDirectiveLocation::directive_definition(span).into()
+    }
     _ => return None,
   })
 }
@@ -74,6 +77,7 @@ fn is_location_keyword(keyword: ContextualKeyword) -> bool {
       | ContextualKeyword::EnumValueLocation
       | ContextualKeyword::InputObjectLocation
       | ContextualKeyword::InputFieldDefinitionLocation
+      | ContextualKeyword::DirectiveDefinitionLocation
   )
 }
 
@@ -182,6 +186,7 @@ where
     ParseAttempt::Accept(arguments) => Some(arguments),
     ParseAttempt::Decline => None,
   };
+  let directives = optional_const_directives(inp)?;
   let repeatable = matches!(try_repeatable_keyword(inp)?, ParseAttempt::Accept(_));
   take_contextual_keyword(inp, ContextualKeyword::On)?;
   let locations = directive_locations(inp)?;
@@ -189,6 +194,7 @@ where
     SimpleSpan::new(start, locations.span().end()),
     name,
     arguments_definition,
+    directives,
     repeatable,
     locations,
   ))

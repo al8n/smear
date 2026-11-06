@@ -75,20 +75,22 @@ pub enum ResponseErrorKind {
   /// The grammar's `EnumValue` excludes all three, so such a value cannot be written in SDL and
   /// the schema the response describes is one no document can express.
   InvalidEnumValue,
-  /// A `__Directive.locations` entry is not one of the 19 `__DirectiveLocation` values.
+  /// A `__Directive.locations` entry is not one of the 20 `__DirectiveLocation` values.
   UnknownDirectiveLocation,
   /// One of draft §4's eight meta types — `__Schema`, `__Type`, `__Field`, `__InputValue`,
   /// `__EnumValue`, `__TypeKind`, `__Directive`, `__DirectiveLocation` — is reported in a shape
   /// that contradicts the specification's: another kind, an interface, a field or an argument the
   /// meta-schema has given another type, or the type, or one of its fields, arguments or enum
-  /// values, listed twice.
+  /// values, listed twice. An `includeDeprecated` typed `Boolean`, as the October 2021
+  /// specification typed it, is not another type: the draft's `Boolean!` and that one are both
+  /// read.
   ///
   /// What a response adds to one is not this: a member the specification's meta-schema lacks — one
   /// a server adds ahead of it, like an applied-directives extension's fields, or keeps from behind
   /// it, like graphql-js 15's `__Type.specifiedByUrl` — is ignored. Nor is what it leaves out, as
-  /// a server older than `isRepeatable`, `isOneOf`, `specifiedByURL` or input-value deprecation
-  /// does, nor the descriptions and the order the members are listed in: all of that is the
-  /// server's rendering of the specification's own types, and none of it is kept.
+  /// a server older than `isRepeatable`, `isOneOf`, `specifiedByURL`, input-value deprecation or
+  /// directive deprecation does, nor the descriptions and the order the members are listed in: all
+  /// of that is the server's rendering of the specification's own types, and none of it is kept.
   InvalidMetaType,
   /// An `__InputValue.defaultValue` is not one complete GraphQL const value.
   ///

@@ -722,12 +722,11 @@ macro_rules! lossless_error_impls {
   };
 }
 
-/// Generates a dialect's `is_directive_location` from the one list of nineteen spellings.
+/// Generates a dialect's `is_directive_location` from the one list of twenty spellings.
 ///
-/// **The nineteen spellings are a frozen, shared vocabulary** — the eight of
-/// `ExecutableDirectiveLocation` and the eleven of `TypeSystemDirectiveLocation`, verified
-/// byte-identical between the two dialects' `classify_location`. Two copies of a frozen list is
-/// two things to get wrong; this is one.
+/// **The twenty spellings are a shared vocabulary** — the eight of `ExecutableDirectiveLocation`
+/// and the twelve of `TypeSystemDirectiveLocation`, verified byte-identical between the two
+/// dialects' `classify_location`. Two copies of one list is two things to get wrong; this is one.
 ///
 /// **The count has been wrong in prose before.** It read "eighteen" for three tasks, from the task
 /// that wrote the predicate until a gate report caught it; the *membership* was right the whole
@@ -740,8 +739,8 @@ macro_rules! lossless_error_impls {
 /// impl, and a conversion is the measured dead end Task 0b recorded.
 macro_rules! directive_location_predicate {
   ($kw:path) => {
-    /// Whether `keyword` is one of the **nineteen** spellings `DirectiveLocation` admits: the
-    /// eight of `ExecutableDirectiveLocation` and the eleven of `TypeSystemDirectiveLocation`.
+    /// Whether `keyword` is one of the **twenty** spellings `DirectiveLocation` admits: the
+    /// eight of `ExecutableDirectiveLocation` and the twelve of `TypeSystemDirectiveLocation`.
     ///
     /// The lexer already tells `QUERY` from `query` — they are different `ContextualKeyword`
     /// variants — so this is a membership test over the projection and never a string comparison.
@@ -769,6 +768,7 @@ macro_rules! directive_location_predicate {
           | DirectiveLocationKeyword::EnumValueLocation
           | DirectiveLocationKeyword::InputObjectLocation
           | DirectiveLocationKeyword::InputFieldDefinitionLocation
+          | DirectiveLocationKeyword::DirectiveDefinitionLocation
       )
     }
   };

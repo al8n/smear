@@ -130,7 +130,7 @@ fn the_mapping_is_many_to_one_only_at_the_line_terminators() {
   //
   // This test exists to stop the mapping from being "repaired" into a bijection by adding
   // `CarriageReturn`/`CarriageReturnAndNewline` kinds, which would break Task 2's
-  // `K::ALL.len() == 87` pin, and equally to catch a *new* fold arriving by accident.
+  // `K::ALL.len() == 88` pin, and equally to catch a *new* fold arriving by accident.
   // `S` is unconstrained here — `token_kind` is generic over it and these three variants carry
   // no payload — so the array's element type has to be spelled.
   let terminators: [T<&str>; 3] = [T::Newline, T::CarriageReturn, T::CarriageReturnAndNewline];
@@ -155,7 +155,7 @@ fn the_mapping_is_many_to_one_only_at_the_line_terminators() {
   // And those 25 are the *token images*, not node kinds: the images are the leading block of
   // the space and `Bom` is the last of them, so a mapper arm pointing at a node kind — or at
   // `Error`/`Gap`/`Root` — lands past it and fails here. `from_raw` alone cannot see this: it
-  // admits all 87 kinds.
+  // admits all 88 kinds.
   for raw in raws {
     assert!(
       raw <= K::Bom.raw(),

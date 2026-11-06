@@ -1,6 +1,6 @@
 //! The cross-dialect keyword-prefix pin.
 //!
-//! `graphqlx::ContextualKeyword` is `graphql::ContextualKeyword`'s 38 variants **verbatim, in
+//! `graphqlx::ContextualKeyword` is `graphql::ContextualKeyword`'s 39 variants **verbatim, in
 //! order**, plus six (`Import`, `From`, `As`, `Where`, `Set`, `Map`). Measured by diffing the two
 //! enum bodies: exactly one hunk, six pure additions at the tail, nothing changed and nothing
 //! reordered.
@@ -22,7 +22,7 @@
 
 use crate::{graphql::ContextualKeyword as G, graphqlx::ContextualKeyword as X};
 
-/// The 38 spellings both dialects share, in graphql's declaration order.
+/// The 39 spellings both dialects share, in graphql's declaration order.
 ///
 /// Written out rather than derived, because deriving it from either enum is what makes the check
 /// vacuous: a list generated from graphqlx cannot notice graphqlx reordering. This array is the
@@ -102,6 +102,11 @@ const SHARED: &[(&str, G, X)] = &[
     G::InputFieldDefinitionLocation,
     X::InputFieldDefinitionLocation,
   ),
+  (
+    "DIRECTIVE_DEFINITION",
+    G::DirectiveDefinitionLocation,
+    X::DirectiveDefinitionLocation,
+  ),
 ];
 
 /// The six GraphQLx adds, and the fact that it adds exactly six.
@@ -117,7 +122,7 @@ const EXTRA: &[(&str, X)] = &[
 /// Every shared spelling exists in both dialects and spells the same word.
 #[test]
 fn the_shared_keyword_spellings_agree() {
-  assert_eq!(SHARED.len(), 38, "the shared list is no longer 38 entries");
+  assert_eq!(SHARED.len(), 39, "the shared list is no longer 39 entries");
   for (word, g, x) in SHARED {
     assert_eq!(
       g.as_str(),
@@ -180,7 +185,7 @@ fn graphqlx_adds_exactly_six_keywords_at_the_tail() {
 ///
 /// **This is the assertion that makes the two above non-vacuous.** Both dialects' `KEYWORDS` are
 /// arrays, so each pins its own length at compile time; what this pins is that the two lengths and
-/// the two hand-written lists still agree. Without it, a 39th graphql keyword or a 45th graphqlx
+/// the two hand-written lists still agree. Without it, a 40th graphql keyword or a 46th graphqlx
 /// one passes every test in this file.
 #[test]
 fn neither_enum_has_grown_behind_the_lists() {

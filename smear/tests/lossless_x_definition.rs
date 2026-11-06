@@ -300,7 +300,7 @@ fn a_directive_location_is_a_token_and_an_unknown_spelling_is_reported() {
   let parse = parse_directive_locations("| FIELD | NOPE");
   assert!(
     parse.has_errors(),
-    "`syntactic/`'s `location` admits only the nineteen spellings"
+    "`syntactic/`'s `location` admits only the twenty spellings"
   );
   assert_eq!(
     text!(parse_directive_locations, "| FIELD | NOPE"),
@@ -312,10 +312,10 @@ fn a_directive_location_is_a_token_and_an_unknown_spelling_is_reported() {
       "QUERY | MUTATION | SUBSCRIPTION | FIELD | FRAGMENT_DEFINITION \
        | FRAGMENT_SPREAD | INLINE_FRAGMENT | VARIABLE_DEFINITION | SCHEMA | SCALAR | OBJECT \
        | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE \
-       | INPUT_OBJECT | INPUT_FIELD_DEFINITION"
+       | INPUT_OBJECT | INPUT_FIELD_DEFINITION | DIRECTIVE_DEFINITION"
     )
     .has_errors(),
-    "all nineteen spellings are admitted — the predicate is Task 7's frozen macro"
+    "all twenty spellings are admitted — the predicate is Task 7's shared macro"
   );
 }
 
@@ -484,7 +484,8 @@ fn each_definition_reaches_its_own_block_and_clause_productions() {
 /// The flavour is invisible to a node-kind pre-order and to the text — a `VariableValue` node is
 /// built either way, the rejection being a diagnostic — so only the verdict moves. Measured:
 /// flipping all nine `Constness::Const` sites in `definition.rs` to `NonConst` red **one** test
-/// before this one existed, which left eight positions with no witness at all.
+/// before this one existed, which left eight positions with no witness at all. The tenth, a
+/// directive definition's own directives, has its row below too.
 #[test]
 fn every_sdl_directive_position_is_const() {
   type Driver = fn(&str) -> smear::parser::graphqlx::lossless::Parse;
@@ -538,6 +539,11 @@ fn every_sdl_directive_position_is_const() {
       parse_type_system_definition as Driver,
       "schema @d(x: $v) { query: Q }",
       "schema @d(x: 1) { query: Q }",
+    ),
+    (
+      parse_directive_definition as Driver,
+      "directive @dd @d(x: $v) on FIELD",
+      "directive @dd @d(x: 1) on FIELD",
     ),
   ] {
     assert!(
@@ -690,6 +696,46 @@ fn a_directive_definition_takes_a_trailing_where_that_forces_nothing() {
   assert!(
     !parse_directive_definition("directive @d on FIELD where T: Node").has_errors(),
     "nothing is forced after the clause"
+  );
+}
+
+/// Draft §3.13: a directive definition's own `Directives[Const]?` sit after its arguments and
+/// before `repeatable`, and `DIRECTIVE_DEFINITION` is a location.
+#[test]
+fn a_directive_definition_carries_its_own_directives_before_repeatable() {
+  assert_eq!(
+    kinds!(
+      parse_directive_definition,
+      "directive @d(a: Int) @k repeatable on DIRECTIVE_DEFINITION where T: Node"
+    ),
+    vec![
+      K::Root,
+      K::DirectiveDefinition,
+      K::DefinitionName,
+      K::ArgumentsDefinition,
+      K::InputValueDefinition,
+      K::DefinitionTypePath,
+      K::Path,
+      K::Directives,
+      K::Directive,
+      K::TypePath,
+      K::Path,
+      K::DirectiveLocations,
+      K::WhereClause,
+      K::WherePredicate,
+      K::TypePath,
+      K::Path,
+      K::TypePath,
+      K::Path
+    ]
+  );
+  assert!(
+    !parse_directive_definition("directive @d @k on DIRECTIVE_DEFINITION").has_errors(),
+    "`DIRECTIVE_DEFINITION` is a location"
+  );
+  assert!(
+    parse_directive_definition("directive @d repeatable @k on FIELD").has_errors(),
+    "the directives come before `repeatable`"
   );
 }
 

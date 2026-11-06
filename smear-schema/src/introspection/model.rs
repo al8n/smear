@@ -39,9 +39,11 @@
 //!   emits no such field and no such directive.
 //! - `__Type.isOneOf` — nullable in the meta-schema and absent from every server predating
 //!   OneOf Input Objects.
-//! - `isDeprecated`, on a field, an input value and an enum value — non-null in the meta-schema,
-//!   and absent whenever the introspection query did not ask for it; input-value deprecation is
-//!   younger still. Absent reads as not deprecated, unless a `deprecationReason` was written.
+//! - `isDeprecated`, on a field, an input value, an enum value and a directive — non-null in the
+//!   meta-schema, and absent whenever the introspection query did not ask for it; input-value
+//!   deprecation is younger still, and directive deprecation youngest, asked for by graphql-js's
+//!   query only under `experimentalDirectiveDeprecation`. Absent reads as not deprecated, unless a
+//!   `deprecationReason` was written as text.
 //!
 //! # Prose is kept, because the schema keeps it
 //!
@@ -242,22 +244,61 @@ pub(super) struct IntrospectedDirective<'a> {
   pub(super) locations: Vec<DirectiveLocation>,
   pub(super) args: Vec<IntrospectedInputValue<'a>>,
   pub(super) is_repeatable: bool,
+  /// Draft §4.2.6's `isDeprecated` and `deprecationReason`, which the renderer writes back as the
+  /// `@deprecated` on the directive's definition.
+  pub(super) deprecated: Deprecated<'a>,
+}
+
+/// A `deprecationReason` in the three states a response can write it.
+///
+/// A `null` reason and a missing one are different statements, and the renderer answers them
+/// differently. A query may ask for `isDeprecated` and leave `deprecationReason` out, so a response
+/// can say a member is deprecated and nothing about why: that is [`Omitted`](Self::Omitted), and it
+/// is written as a bare `@deprecated`, for the definition's own default to answer.
+/// `"deprecationReason": null` is a server answering that it has no reason: [`Null`](Self::Null),
+/// written as `@deprecated(reason: null)`, which the specified `reason: String!` refuses. Read as
+/// one state, a question nobody asked would be refused as an invalid answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Reason<'a> {
+  /// The response wrote a string.
+  Text(Text<'a>),
+  /// The response wrote `null`.
+  Null,
+  /// The response did not write the member.
+  Omitted,
 }
 
 /// `isDeprecated` and `deprecationReason`, read together: `None` when the member is not
-/// deprecated, and `Some` of its reason — itself `None` for a `null` reason — when it is.
+/// deprecated, and `Some` of its [`Reason`] when it is.
 ///
-/// The flag decides, as draft §4 says it does: a reason written beside `isDeprecated: false` is
-/// read and dropped. A response that wrote a reason and no flag at all — the query did not ask for
-/// one — is read as graphql-js reads every response, which keys deprecation off the reason alone.
-pub(super) type Deprecated<'a> = Option<Option<Text<'a>>>;
+/// The flag decides whenever it is written, as draft §4 says it does: `true` is deprecated, with
+/// the reason in whichever state the response wrote it, and `false` is not deprecated, a reason
+/// written beside it being read and dropped. A response that wrote no flag at all — the query did
+/// not ask for one — is read as graphql-js reads every response, which keys deprecation off the
+/// reason alone: a reason that is text deprecates the member, and a `null` or an omitted one does
+/// not.
+pub(super) type Deprecated<'a> = Option<Reason<'a>>;
 
 /// Reads the pair a member's two deprecation slots were read into. See [`Deprecated`].
-pub(super) fn deprecated(is_deprecated: Option<bool>, reason: Option<Text<'_>>) -> Deprecated<'_> {
+///
+/// `reason` is the slot as the reader left it, which keeps the three states apart: `None` for a
+/// member the response did not write, `Some(None)` for `null`, and `Some(Some(_))` for a string.
+pub(super) fn deprecated(
+  is_deprecated: Option<bool>,
+  reason: Option<Option<Text<'_>>>,
+) -> Deprecated<'_> {
+  let reason = match reason {
+    None => Reason::Omitted,
+    Some(None) => Reason::Null,
+    Some(Some(text)) => Reason::Text(text),
+  };
   match is_deprecated {
     Some(true) => Some(reason),
     Some(false) => None,
-    None => reason.map(Some),
+    None => match reason {
+      Reason::Text(_) => Some(reason),
+      Reason::Null | Reason::Omitted => None,
+    },
   }
 }
 

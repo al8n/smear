@@ -206,6 +206,81 @@ All notable changes to Smear are documented in this file.
   `schema` definition's document rather than in document 0. A related position
   inside a built-in definition is no longer reported, since no document the
   caller supplied holds it: `extend type Int { f: Int }` is refused with no label.
+- `smear-lexer`!: `DIRECTIVE_DEFINITION` is a contextual keyword in both
+  dialects, the twentieth `DirectiveLocation` of draft §3.13. Each dialect's
+  `ContextualKeyword` gains `DirectiveDefinitionLocation`, after
+  `InputFieldDefinitionLocation` (and, in GraphQLx, before `Import`), and
+  `keywords::DirectiveDefinitionLocation` is its keyword token. An exhaustive
+  match on either `ContextualKeyword` needs the new arm.
+- `smear-parser`!: a directive definition takes directives and a directive is
+  extended with `extend directive`, in both dialects (draft §3.13 and §3.13.6).
+  `DirectiveDefinition` gains a `Directives` type parameter after `Arguments`:
+  `DirectiveDefinition::new` takes the definition's directives after its
+  arguments definition, `directives()` returns them, both dialects'
+  `DirectiveDefinition` aliases bind `ConstDirectives`, and both parsers read
+  `Directives[Const]?` after the arguments and before `repeatable`.
+  `DirectiveExtension` is `extend directive @Name Directives[Const]`, whose
+  directives are mandatory; GraphQL's alias names the directive with a `Name`
+  and GraphQLx's with an `ExtensionName`, and each dialect has a
+  `directive_extension` production and `DirectiveExtension::graphql` or
+  `::graphqlx`. `TypeSystemExtension` is now
+  `TypeSystemExtension<TypeExtension, DirectiveExtension, SchemaExtension>`
+  with a `Directive` variant, and both dialects' aliases follow; an exhaustive
+  match needs the new arm. `TypeSystemDirectiveLocation::DirectiveDefinition`
+  is the `DIRECTIVE_DEFINITION` location. In the lossless layer each dialect's
+  `SyntaxKind` gains `DirectiveExtension` (GraphQL's after `SchemaExtension`,
+  GraphQLx's after `InputObjectTypeExtension`), which moves the raw value of
+  every later kind by one; the typed layer adds the `DirectiveExtension`
+  wrapper, `DirectiveDefinition::directives` and `directive_extensions` on both
+  document roots, and both projections build the new AST.
+- `smear-schema`!: `Schema::build` reads the directives on a directive
+  definition and `extend directive` (draft §3.13 and §3.13.6).
+  `DirectiveLocation` gains `DirectiveDefinition`, the `DIRECTIVE_DEFINITION`
+  location, which `DirectiveLocation::from_name` resolves, and
+  `DirectiveLocation::ALL` becomes `[DirectiveLocation; 20]`; an exhaustive
+  match needs the new arm. A directive written on a directive definition, or
+  provided by an `extend directive`, is checked at `DIRECTIVE_DEFINITION` like
+  any other usage, and a definition and its extensions are one location, so a
+  non-repeatable directive applied by both is `DuplicateDirectiveUse`. An
+  `extend directive` of a directive no document defines is
+  `UndefinedExtensionTarget`. A directive that reaches itself through the
+  directives on its definition or its extensions, directly or through other
+  directives and types, is `SelfReferentialDirective`.
+- `smear-schema`!: the meta-schema and the specified `@deprecated` follow the
+  draft (§3.13.3 and §4.2). `@deprecated(reason: String! = "No longer supported")`
+  may also stand on a directive definition, and `@deprecated(reason: null)` is
+  refused as `InvalidDirectiveArgumentValue` where it built as deprecated with no
+  reason. `__DirectiveLocation` gains `DIRECTIVE_DEFINITION`. `__Directive` lists
+  its fields in the draft's order — `name`, `description`, `isRepeatable`,
+  `locations`, `args`, then the new `isDeprecated` and `deprecationReason` — and
+  `__Schema.directives` takes `includeDeprecated`. Every `includeDeprecated` is
+  `Boolean! = false`, so `includeDeprecated: null` no longer validates. A
+  directive definition or an `extend directive` carrying `@deprecated` deprecates
+  the directive: `DirectiveMeta::new` takes its `Deprecation` as a second
+  argument, and `DirectiveMeta::deprecation` returns it.
+  `Schema::from_introspection` reads a directive's `isDeprecated` and
+  `deprecationReason` and writes them back as the `@deprecated` on its
+  definition, and accepts an `includeDeprecated` typed `Boolean`, as the October
+  2021 specification and graphql-js 16 type it, beside the draft's `Boolean!`;
+  it refuses an explicit `null` for any `isDeprecated`, on a field, an input
+  value, an enum value or a directive (draft §4 types all four `Boolean!`), as
+  `MalformedResponse` where it read as unwritten, while an omitted
+  `isDeprecated` still falls back to the reason as graphql-js reads it, and a
+  deprecated element whose `deprecationReason` the response omits is written as
+  a bare `@deprecated`, so the definition's default reason applies, where a
+  `null` one is refused. A bare `@deprecated` now takes its reason from the
+  effective definition's default (a replacement's own string or `null`), where
+  it always read "No longer supported", so the door's omitted reasons resolve
+  the same way.
+- `graphql-proto`: introspection answers `__Directive.isDeprecated` and
+  `deprecationReason`, and `__Schema.directives` leaves a deprecated directive
+  out unless `includeDeprecated` is `true`. `includeDeprecated: null`, written or
+  as a variable's value, is draft §6.4.1's `Kind::ArgumentNull` field error where
+  it read as `false`, and the error is raised on every `__Type`, including the
+  kinds that have no such list and the `LIST` and `NON_NULL` wrapper types.
+- The introspection parity oracle compares the executor's answers with graphql-js
+  17.1.0's instead of 16.11.0's, directive deprecation included, and its eight
+  recorded differences are redrawn for that release.
 
 ## [0.0.1] - 2026-10-30
 

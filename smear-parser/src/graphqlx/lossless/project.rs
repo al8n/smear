@@ -23,7 +23,7 @@
 //! The contract, the error vocabulary, the span rule, the `(tree, source)` verification and the
 //! green traversal are [the substrate](crate::lossless::project)'s, and the entry shapes are the
 //! naming symmetry its header states. **Everything below that is this dialect's**: sixteen of
-//! GraphQLx's seventy-eight wrappers are structurally identical to a GraphQL one, thirty-six share
+//! GraphQLx's seventy-nine wrappers are structurally identical to a GraphQL one, thirty-seven share
 //! a name with a different shape, and twenty-six have no GraphQL image at all. Three of those
 //! differences are *mapping* divergences rather than renamings, and each one changes what a walk
 //! has to do rather than what it has to call something:
@@ -117,10 +117,10 @@
 //! GraphQLx's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
 //! Every one of those shapes reaches this projection looking well-formed, and each needs an
-//! answer. The population is every call that reports without building a hole — **48**
+//! answer. The population is every call that reports without building a hole — **49**
 //! `recover::report_unexpected::<…>` sites and **17** `recover::unclosed_{list,object,parens,angle}::<…>`
 //! sites across `graphqlx/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 65 are mapped** in the table below, one probe each: a text that reaches the site with a
+//! **all 66 are mapped** in the table below, one probe each: a text that reaches the site with a
 //! hole-free tree, and what this projection answers for it. The table is executable:
 //! `every_report_and_build_site_has_a_measured_answer` holds the same rows, asserts their count
 //! per file and family against the source's own spelling of each call, and measures every answer.
@@ -133,7 +133,7 @@
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Sixteen project; forty-nine refuse.** The sixteen are the lenient rows a site can leave with a
+//! **Sixteen project; fifty refuse.** The sixteen are the lenient rows a site can leave with a
 //! well-formed value. The others refuse either the shape the site built, or — for the unclosed
 //! sites whose definition the parser cannot finish at end of input — the rubble the document is
 //! left holding.
@@ -197,6 +197,7 @@
 //! | `extension.rs` | report | `extend union U` | a constituent with an image | `MissingChild { UnionTypeExtension }` |
 //! | `extension.rs` | report | `extend enum E` | a constituent with an image | `MissingChild { EnumTypeExtension }` |
 //! | `extension.rs` | report | `extend schema` | a constituent with an image | `MissingChild { SchemaExtension }` |
+//! | `extension.rs` | report | `extend directive @d` | a constituent with an image | `MissingChild { DirectiveExtension }` |
 //! | `value.rs` | report | `type T { f(a: Int = $v): Int }` | nothing — a present token is refused | `UnexpectedChild { DefaultValue, VariableValue }` |
 //! | `value.rs` | unclosed | `{ f(a: [1` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
@@ -595,11 +596,11 @@ use crate::{
       ConstDirective, ConstDirectives, ConstInputValue, ConstList, ConstMap, ConstMapEntry,
       ConstObject, ConstObjectField, ConstSet, DefaultInputValue, DefinitionName,
       DefinitionTypeGenerics, DefinitionTypeParam, DefinitionTypePath, Described,
-      DescribedVariableDefinition, Directive, DirectiveLocations, Directives, Document,
-      EnumTypeDefinition, EnumTypeExtension, EnumValue, EnumValuesDefinition, ExecutableDefinition,
-      ExecutableDefinitionHeader, ExecutableDefinitionName, ExecutableDefinitionTypeGenerics,
-      ExecutableDocument, ExtensionName, ExtensionTypeGenerics, ExtensionTypeParam, Field,
-      FieldsDefinition, FloatValue, FragmentSpread, ImplementInterfaces,
+      DescribedVariableDefinition, Directive, DirectiveExtension, DirectiveLocations, Directives,
+      Document, EnumTypeDefinition, EnumTypeExtension, EnumValue, EnumValuesDefinition,
+      ExecutableDefinition, ExecutableDefinitionHeader, ExecutableDefinitionName,
+      ExecutableDefinitionTypeGenerics, ExecutableDocument, ExtensionName, ExtensionTypeGenerics,
+      ExtensionTypeParam, Field, FieldsDefinition, FloatValue, FragmentSpread, ImplementInterfaces,
       ImportOrDefinitionOrExtension, ImportOrExecutableDefinition,
       ImportOrTypeSystemDefinitionOrExtension, InlineFragment, InlineStringValue,
       InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension, InputValue,
@@ -1574,8 +1575,8 @@ fn float_lit(text: &str, span: SimpleSpan) -> Out<LitFloat<&str>> {
 // documents
 // ---------------------------------------------------------------------------------------------
 
-/// The seven extension kinds, each its own transcription.
-const EXTENSION_KINDS: [SyntaxKind; 7] = [
+/// The eight extension kinds, each its own transcription.
+const EXTENSION_KINDS: [SyntaxKind; 8] = [
   K::ScalarTypeExtension,
   K::ObjectTypeExtension,
   K::InterfaceTypeExtension,
@@ -1583,6 +1584,7 @@ const EXTENSION_KINDS: [SyntaxKind; 7] = [
   K::EnumTypeExtension,
   K::InputObjectTypeExtension,
   K::SchemaExtension,
+  K::DirectiveExtension,
 ];
 
 /// The eight type-system definition kinds.
@@ -1599,10 +1601,10 @@ const TYPE_SYSTEM_DEFINITION_KINDS: [SyntaxKind; 8] = [
 
 /// What the mixed root's entry run holds: an import, either executable definition, a type-system
 /// definition or an extension.
-const MIXED_ENTRY_KINDS: [SyntaxKind; 18] = entry_kinds::<18>(true, true);
+const MIXED_ENTRY_KINDS: [SyntaxKind; 19] = entry_kinds::<19>(true, true);
 
 /// What the SDL root's entry run holds — the mixed run without the two executable kinds.
-const TYPE_SYSTEM_ENTRY_KINDS: [SyntaxKind; 16] = entry_kinds::<16>(false, true);
+const TYPE_SYSTEM_ENTRY_KINDS: [SyntaxKind; 17] = entry_kinds::<17>(false, true);
 
 /// What the executable root's entry run holds — an import or one of the two executable kinds.
 const EXECUTABLE_ENTRY_KINDS: [SyntaxKind; 3] = entry_kinds::<3>(true, false);
@@ -1909,7 +1911,7 @@ fn type_system_definition<'src>(
   })
 }
 
-/// `Some` when `node` is one of the seven extension kinds, `None` when it is anything else.
+/// `Some` when `node` is one of the eight extension kinds, `None` when it is anything else.
 ///
 /// An extension carries no description — a string written in front of an `extend` is reported and
 /// stays outside the extension's node — so this answers before the hoist rather than inside it, and
@@ -1964,6 +1966,10 @@ fn type_system_extension<'src>(
     K::SchemaExtension => {
       let (extension, extent) = schema_extension(node, source)?;
       (TypeSystemExtension::Schema(extension), extent)
+    }
+    K::DirectiveExtension => {
+      let (extension, extent) = directive_extension(node, source)?;
+      (TypeSystemExtension::Directive(extension), extent)
     }
     _ => return Ok(None),
   }))
@@ -4906,9 +4912,9 @@ fn directive_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, crate::graphqlx::ast::DirectiveDefinition<&'src str>>> {
-  // `Description? directive @ DefinitionName ArgumentsDefinition? repeatable? on
-  //  DirectiveLocations WhereClause?` — three keyword positions, each read by its spelling in its
-  // own place, so `directive @d foo FIELD` is refused at `foo` rather than answering what
+  // `Description? directive @ DefinitionName ArgumentsDefinition? Directives[Const]? repeatable?
+  //  on DirectiveLocations WhereClause?` — three keyword positions, each read by its spelling in
+  // its own place, so `directive @d foo FIELD` is refused at `foo` rather than answering what
   // `directive @d on FIELD` answers.
   let mut cursor = Cursor::new(node);
   let description_token = cursor.opt_description();
@@ -4916,6 +4922,7 @@ fn directive_definition<'src>(
   cursor.token(K::At, "the `@` before a directive's name")?;
   let name_node = cursor.node(K::DefinitionName, "a definition name")?;
   let arguments_node = cursor.opt_node(K::ArgumentsDefinition);
+  let directives_node = cursor.opt_node(K::Directives);
   let repeatable = cursor.opt_keyword(ContextualKeyword::Repeatable).is_some();
   // Lenient, as a type condition's `on` is: no AST image, and the production reports a missing
   // one and still builds the definition, hole-free, around the locations. The locations stay
@@ -4929,6 +4936,7 @@ fn directive_definition<'src>(
   let name = cursor.keep(definition_name(name_node, source)?);
   let arguments_definition =
     cursor.keep_opt(optional_arguments_definition(arguments_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
   // The other site this grammar puts the clause after the thing it constrains.
   let locations = cursor.keep(constrained_after(
     directive_locations(locations_node)?,
@@ -4942,6 +4950,7 @@ fn directive_definition<'src>(
       to_span(inner),
       name,
       arguments_definition,
+      directives,
       repeatable,
       locations,
     ),
@@ -5362,4 +5371,31 @@ fn schema_extension<'src>(
   };
   let extent = cursor.finish("a token")?;
   Ok((SchemaExtension::new(to_span(extent), data), extent))
+}
+
+/// `extend directive @ ExtensionName Directives[Const]` — a target, as the type extensions have,
+/// but behind an `@` and with one mandatory tail, so this walks the node itself rather than going
+/// through [`extension_parts`].
+fn directive_extension<'src>(
+  node: Node<'_>,
+  source: &'src str,
+) -> Out<(DirectiveExtension<&'src str>, TextRange)> {
+  let mut cursor = Cursor::new(node);
+  cursor.keyword(ContextualKeyword::Extend, "the `extend` keyword")?;
+  cursor.keyword(ContextualKeyword::Directive, "the `directive` keyword")?;
+  cursor.token(K::At, "the `@` before a directive's name")?;
+  let name_node = cursor.node(K::ExtensionName, "an extended directive's name")?;
+  let directives_node = cursor.opt_node(K::Directives);
+  cursor.end()?;
+
+  let name = cursor.keep(extension_name(name_node, source)?);
+  // The extension's only tail, so the grammar makes it mandatory.
+  let directives = cursor
+    .keep_optional(optional_const_directives(directives_node, source)?)
+    .ok_or_else(|| missing(node, "the directives a directive extension must add"))?;
+  let extent = cursor.range("a token")?;
+  Ok((
+    DirectiveExtension::new(to_span(extent), name, directives),
+    extent,
+  ))
 }

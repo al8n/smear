@@ -446,4 +446,18 @@ keyword! {
   /// directive @constraint(min: Int, max: Int) on INPUT_FIELD_DEFINITION
   /// ```
   (InputFieldDefinitionLocation, "INPUT_FIELD_DEFINITION_KW", "INPUT_FIELD_DEFINITION"),
+
+  /// `DIRECTIVE_DEFINITION` location - directives can be applied to directive definitions.
+  ///
+  /// Directive definition directives provide metadata about a directive itself. They are
+  /// written on the definition, after its arguments, or added by a directive extension.
+  ///
+  /// ## Examples
+  ///
+  /// ```text
+  /// directive @experimental on DIRECTIVE_DEFINITION
+  /// directive @cache(ttl: Int) @experimental on FIELD
+  /// extend directive @cache @experimental
+  /// ```
+  (DirectiveDefinitionLocation, "DIRECTIVE_DEFINITION_KW", "DIRECTIVE_DEFINITION"),
 }

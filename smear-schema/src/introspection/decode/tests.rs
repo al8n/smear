@@ -9,7 +9,7 @@ use crate::introspection::{
   ResponseErrorKind,
   json::Text,
   model::{
-    Deprecated, IntrospectedInputValue, IntrospectedSchema, IntrospectedType, Name, TypeRef,
+    Deprecated, IntrospectedInputValue, IntrospectedSchema, IntrospectedType, Name, Reason, TypeRef,
   },
 };
 // The byte gates at the foot of this file read `json::visited`, a thread-local counter, and
@@ -100,6 +100,7 @@ impl<'a> Census<'a> {
     for directive in &schema.directives {
       census.name(Some(directive.name));
       census.text(directive.description.as_ref().and_then(Option::as_ref));
+      census.deprecated(&directive.deprecated);
       for arg in &directive.args {
         census.input(arg);
       }
@@ -145,8 +146,8 @@ impl<'a> Census<'a> {
   }
 
   fn deprecated(&mut self, deprecated: &Deprecated<'a>) {
-    if let Some(reason) = deprecated {
-      self.text(reason.as_ref());
+    if let Some(Reason::Text(reason)) = deprecated {
+      self.text(Some(reason));
     }
   }
 
@@ -186,7 +187,7 @@ impl<'a> Census<'a> {
 ///
 /// `pad` lengthens every name, which is what a copying reader would pay for and a borrowing one
 /// does not. `default` is one prose member and the rest — a description at every level that takes
-/// one, a deprecation reason at each of the three, a `specifiedByURL` — hold no escape.
+/// one, a deprecation reason at each of the four, a `specifiedByURL` — hold no escape.
 fn corpus(pad: usize, default: &str) -> String {
   let p = "z".repeat(pad);
   format!(
@@ -199,7 +200,7 @@ fn corpus(pad: usize, default: &str) -> String {
         {{"name":"tag{p}","description":"Tags.","locations":["FIELD_DEFINITION","OBJECT"],"args":[
           {{"name":"note{p}","description":"A note.","type":{{"kind":"SCALAR","name":"String{p}"}},
             "defaultValue":null,"isDeprecated":true,"deprecationReason":"Unused."}}
-        ],"isRepeatable":true}}
+        ],"isRepeatable":true,"isDeprecated":true,"deprecationReason":"Retired."}}
       ],
       "types":[
         {{"kind":"OBJECT","name":"Query{p}","description":"The root.",
@@ -1122,7 +1123,7 @@ fn prose_is_read_wherever_draft_4_has_it() {
        ]},
        {"kind":"SCALAR","name":"Url","specifiedByURL":"https://url.spec.whatwg.org/"},
        {"kind":"ENUM","name":"E","enumValues":[
-         {"name":"A","description":null,"isDeprecated":null},
+         {"name":"A","description":null},
          {"name":"B","isDeprecated":true}
        ]}"#,
   );
@@ -1147,11 +1148,8 @@ fn prose_is_read_wherever_draft_4_has_it() {
     Some("Fine.")
   );
   assert_eq!(
-    fields[0]
-      .deprecated
-      .as_ref()
-      .map(|reason| reason.as_ref().map(Text::as_str)),
-    Some(Some("Gone."))
+    fields[0].deprecated,
+    Some(Reason::Text(Text::Borrowed("Gone.")))
   );
   assert_eq!(
     fields[0].args[0]
@@ -1160,20 +1158,18 @@ fn prose_is_read_wherever_draft_4_has_it() {
       .map(|description| description.as_ref().map(Text::as_str)),
     Some(Some("An argument."))
   );
-  assert!(
-    matches!(fields[0].args[0].deprecated, Some(None)),
-    "`isDeprecated: true` beside a `null` reason is deprecated with no reason"
+  assert_eq!(
+    fields[0].args[0].deprecated,
+    Some(Reason::Null),
+    "`isDeprecated: true` beside a `null` reason is deprecated with a `null` one"
   );
   assert!(
     fields[1].deprecated.is_none(),
     "the flag decides, and a reason beside `false` is dropped"
   );
   assert_eq!(
-    fields[2]
-      .deprecated
-      .as_ref()
-      .map(|reason| reason.as_ref().map(Text::as_str)),
-    Some(Some("a reason and no flag")),
+    fields[2].deprecated,
+    Some(Reason::Text(Text::Borrowed("a reason and no flag"))),
     "a reason and no flag is read as graphql-js reads it"
   );
 
@@ -1183,7 +1179,196 @@ fn prose_is_read_wherever_draft_4_has_it() {
   );
   let values = schema.types[2].enum_values.as_ref().expect("values");
   assert!(values[0].description.is_none() && values[0].deprecated.is_none());
-  assert!(matches!(values[1].deprecated, Some(None)));
+  assert_eq!(
+    values[1].deprecated,
+    Some(Reason::Omitted),
+    "`isDeprecated: true` and no reason member says nothing about the reason, which is not `null`"
+  );
+}
+
+/// A directive's `isDeprecated` and `deprecationReason` are read as a field's are: the flag
+/// decides, a reason beside `false` is dropped, and a reason with no flag is read as graphql-js
+/// reads it.
+#[test]
+fn a_directive_deprecation_is_read() {
+  let json = with_directives(
+    r#"{"name":"gone","locations":["FIELD"],"args":[],
+        "isDeprecated":true,"deprecationReason":"Use @kept."},
+       {"name":"nulled","locations":["FIELD"],"args":[],
+        "isDeprecated":true,"deprecationReason":null},
+       {"name":"unexplained","locations":["FIELD"],"args":[],"isDeprecated":true},
+       {"name":"kept","locations":["FIELD"],"args":[],
+        "isDeprecated":false,"deprecationReason":"ignored beside false"},
+       {"name":"old","locations":["FIELD"],"args":[],"deprecationReason":"a reason and no flag"},
+       {"name":"unasked","locations":["FIELD"],"args":[]}"#,
+  );
+  let schema = read(&json).expect("a schema");
+  let deprecations: Vec<Deprecated<'_>> = schema
+    .directives
+    .iter()
+    .map(|directive| directive.deprecated.clone())
+    .collect();
+  assert_eq!(
+    deprecations,
+    [
+      Some(Reason::Text(Text::Borrowed("Use @kept."))),
+      Some(Reason::Null),
+      Some(Reason::Omitted),
+      None,
+      Some(Reason::Text(Text::Borrowed("a reason and no flag"))),
+      None,
+    ]
+  );
+}
+
+/// One `__Field`, one `__InputValue`, one `__EnumValue` and one `__Directive` — the four types
+/// draft §4 gives an `isDeprecated` — each as a response, keyed by the member a refusal of its flag
+/// names.
+///
+/// `members` is the one part that varies: written after the other members of each, leading comma
+/// included, or empty.
+fn deprecation_sites(members: &str) -> [(&'static str, String); 4] {
+  [
+    (
+      "__Field.isDeprecated",
+      response(&format!(
+        r#"{{"kind":"OBJECT","name":"Query","fields":[
+          {{"name":"ok","args":[],"type":{{"kind":"SCALAR","name":"Int"}}{members}}}
+        ]}}"#
+      )),
+    ),
+    (
+      "__InputValue.isDeprecated",
+      response(&format!(
+        r#"{{"kind":"OBJECT","name":"Query","fields":[
+          {{"name":"ok","args":[
+            {{"name":"arg","type":{{"kind":"SCALAR","name":"Int"}}{members}}}
+          ],"type":{{"kind":"SCALAR","name":"Int"}}}}
+        ]}}"#
+      )),
+    ),
+    (
+      "__EnumValue.isDeprecated",
+      response(&format!(
+        r#"{OK_QUERY},{{"kind":"ENUM","name":"Verdict","enumValues":[{{"name":"YES"{members}}}]}}"#
+      )),
+    ),
+    (
+      "__Directive.isDeprecated",
+      with_directives(&format!(
+        r#"{{"name":"weird","locations":["FIELD"],"args":[]{members}}}"#
+      )),
+    ),
+  ]
+}
+
+/// An explicit `null` for `isDeprecated` is a malformed response, on all four types that have one.
+///
+/// Draft §4 types the flag `Boolean!`, and a non-null violation propagates the `null` to the parent
+/// instead of writing it, so no conforming server sends one. Read as an omitted flag it would leave
+/// the decision to `deprecationReason`: a reason beside the `null` would deprecate the member, and
+/// with none the member would silently build as not deprecated. Both are pinned, and in both
+/// orders, because the flag and the reason are separate members and either may be written first.
+#[test]
+fn an_explicit_null_flag_is_refused_on_all_four_types() {
+  for members in [
+    r#","isDeprecated":null"#,
+    r#","isDeprecated":null,"deprecationReason":"Gone.""#,
+    r#","deprecationReason":"Gone.","isDeprecated":null"#,
+  ] {
+    for (flag, json) in deprecation_sites(members) {
+      assert_eq!(
+        refused(&json).0,
+        ResponseErrorKind::MalformedResponse,
+        "{flag} with `{members}`\n---\n{json}"
+      );
+      let subject = subject_of(&json);
+      assert!(
+        subject.starts_with(&format!(
+          "invalid type: null, expected a boolean for `{flag}`"
+        )),
+        "{flag} with `{members}`: {subject}"
+      );
+    }
+  }
+
+  // The control that makes the refusals above evidence rather than a tautology: with the `null`
+  // swapped for anything else the flag can be, or left out, the same four fixtures are read.
+  for members in [
+    "",
+    r#","isDeprecated":false"#,
+    r#","isDeprecated":true"#,
+    r#","deprecationReason":"Gone.""#,
+  ] {
+    for (flag, json) in deprecation_sites(members) {
+      assert!(
+        read(&json).is_ok(),
+        "{flag} with `{members}` was refused\n---\n{json}"
+      );
+    }
+  }
+}
+
+/// A directive's `isDeprecated` decides whenever it is written, and the reason decides only when it
+/// is not.
+///
+/// A flag that is not written is a query that did not ask for it, and the response is read as
+/// graphql-js reads every response: deprecated if and only if the reason is text. A `null` flag is
+/// refused, as the test above pins, so this one pins what the spellings that are read come to: each
+/// of the three flags beside each of the reason's three states. It is where a flag that is `true`
+/// keeps a `null` reason apart from one that was not written.
+#[test]
+fn a_directive_flag_decides_when_written_and_the_reason_when_it_is_not() {
+  let cases: &[(&str, &str, Option<Reason<'_>>)] = &[
+    ("no flag, no reason", "", None),
+    (
+      "no flag, a null reason",
+      r#","deprecationReason":null"#,
+      None,
+    ),
+    (
+      "no flag, a reason",
+      r#","deprecationReason":"Use @kept.""#,
+      Some(Reason::Text(Text::Borrowed("Use @kept."))),
+    ),
+    ("false, no reason", r#","isDeprecated":false"#, None),
+    (
+      "false, a null reason",
+      r#","isDeprecated":false,"deprecationReason":null"#,
+      None,
+    ),
+    (
+      "false, a reason",
+      r#","isDeprecated":false,"deprecationReason":"Use @kept.""#,
+      None,
+    ),
+    (
+      "true, no reason",
+      r#","isDeprecated":true"#,
+      Some(Reason::Omitted),
+    ),
+    (
+      "true, a null reason",
+      r#","isDeprecated":true,"deprecationReason":null"#,
+      Some(Reason::Null),
+    ),
+    (
+      "true, a reason",
+      r#","isDeprecated":true,"deprecationReason":"Use @kept.""#,
+      Some(Reason::Text(Text::Borrowed("Use @kept."))),
+    ),
+  ];
+
+  for (what, members, expected) in cases {
+    let json = with_directives(&format!(
+      r#"{{"name":"gone","locations":["FIELD"],"args":[]{members}}}"#
+    ));
+    let schema = read(&json).expect("a schema");
+    assert_eq!(
+      &schema.directives[0].deprecated, expected,
+      "{what}\n---\n{json}"
+    );
+  }
 }
 
 /// The wrapper chain a hostile response can build is bounded before the renderer walks it.

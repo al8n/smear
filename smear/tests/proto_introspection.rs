@@ -285,9 +285,10 @@ fn least_visits(schema: &Schema, document: &ExecutableDocument<&str>) -> u32 {
 // the fixtures
 // ------------------------------------------------------------------------------------------
 
-/// graphql-js 16.11.0's `getIntrospectionQuery({ descriptions, specifiedByUrl,
-/// directiveIsRepeatable, schemaDescription, inputValueDeprecation, oneOf })`, all `true`, byte for
-/// byte — see `the_introspection_query_is_graphql_jss_own`.
+/// graphql-js 17.1.0's `getIntrospectionQuery({ descriptions, specifiedByUrl,
+/// directiveIsRepeatable, schemaDescription, inputValueDeprecation,
+/// experimentalDirectiveDeprecation, oneOf, typeDepth: 9 })`, the seven flags `true`, byte for byte
+/// — see `the_introspection_query_is_graphql_jss_own`.
 const INTROSPECTION_QUERY: &str = include_str!("fixtures/executables/introspection_query.graphql");
 
 /// The schema the behaviour cases run against: one of every kind, every list a deprecation can
@@ -348,12 +349,14 @@ directive @mark(why: String @deprecated, how: Int) on FIELD_DEFINITION
 
 /// A schema carrying every datum draft §4 returns, declared out of the order it is stored in.
 ///
-/// A block-string schema description that dedents, descriptions with escapes, all three
-/// deprecations — with a reason, bare, and `reason: null` — on fields, arguments, enum values,
-/// input fields and a directive's argument, a `@specifiedBy`, a `@oneOf`, a repeatable directive
-/// declaring its locations out of bit order, defaults whose canonical text is not their spelling,
-/// a four-wrapper type, an interface implementing an interface, an object listing its interfaces
-/// out of type order, and a union listing its members out of object order.
+/// A block-string schema description that dedents, descriptions with escapes, both deprecations —
+/// with a reason, and bare — on fields, arguments, enum values, input fields and a directive's
+/// argument, a directive deprecated by its definition and another by an `extend directive`, a
+/// directive declared at `DIRECTIVE_DEFINITION` and written on a definition, a `@specifiedBy`, a
+/// `@oneOf`, a repeatable directive declaring its locations out of bit order, defaults whose
+/// canonical text is not their spelling, a four-wrapper type, an interface implementing an
+/// interface, an object listing its interfaces out of type order, and a union listing its members
+/// out of object order.
 const GOLDEN_SDL: &str = r#"
 """
   Every datum introspection returns.
@@ -372,6 +375,15 @@ directive @tag(
   name: String! = "none"
   old: Int @deprecated(reason: "gone")
 ) repeatable on OBJECT | FIELD_DEFINITION | QUERY
+
+directive @origin(note: String) on DIRECTIVE_DEFINITION
+
+directive @label(text: String) @origin(note: "v1") @deprecated(reason: "use @tag")
+  on FIELD_DEFINITION
+
+directive @flag on ENUM_VALUE
+
+extend directive @flag @deprecated
 
 interface Node {
   id: ID!
@@ -392,7 +404,6 @@ type Person implements Named & Node @tag {
     @deprecated(reason: "use born")
   name: String
   id: ID!
-  legacy: String @deprecated(reason: null)
 }
 
 type Robot implements Node {
@@ -441,6 +452,7 @@ const GOLDEN_QUERY: &str = r#"
       locations
       args(includeDeprecated: true) { name defaultValue }
     }
+    all: directives(includeDeprecated: true) { name isDeprecated deprecationReason }
   }
   person: __type(name: "Person") {
     kind
@@ -642,8 +654,8 @@ fn only_the_query_root_type_answers() {
 // what each field answers
 // ------------------------------------------------------------------------------------------
 
-/// `includeDeprecated` defaults to `false`, an explicit `null` means the same, and every one of
-/// the four lists it governs is filtered by it.
+/// `includeDeprecated` defaults to `false`, and every list it governs on `__Type`, `__Field` and
+/// `__Directive` is filtered by it; `__Schema.directives`, the fifth, has a test of its own below.
 #[test]
 fn include_deprecated_defaults_to_false_and_filters_every_list() {
   let answer = run(
@@ -652,7 +664,6 @@ fn include_deprecated_defaults_to_false_and_filters_every_list() {
       widget: __type(name: "Widget") {
         fields { name args { name } }
         all: fields(includeDeprecated: true) { name all: args(includeDeprecated: true) { name } }
-        none: fields(includeDeprecated: null) { name }
         no: fields(includeDeprecated: false) { name }
       }
       unit: __type(name: "Unit") {
@@ -685,7 +696,6 @@ fn include_deprecated_defaults_to_false_and_filters_every_list() {
         { "name": "old", "all": [] },
         { "name": "tags", "all": [] }
       ],
-      "none": names(&["id", "size", "tags"]),
       "no": names(&["id", "size", "tags"])
     })
   );
@@ -711,6 +721,96 @@ fn include_deprecated_defaults_to_false_and_filters_every_list() {
       directive("oneOf", &[], &[])
     ])
   );
+}
+
+/// `__Schema.directives` takes `includeDeprecated` too (draft §4.2.1): absent or `false`, a
+/// directive deprecated by its definition or by an `extend directive` is left out, and `true` lists
+/// it, with its `isDeprecated` and `deprecationReason`, in definition order.
+#[test]
+fn directives_are_filtered_by_include_deprecated() {
+  const SDL: &str = r#"
+    type Query { ok: Int }
+    directive @kept on FIELD
+    directive @gone @deprecated(reason: "use @kept") on FIELD
+    directive @faded on FIELD
+    extend directive @faded @deprecated
+  "#;
+  let answer = run(
+    SDL,
+    r#"{
+      __schema {
+        directives { name }
+        no: directives(includeDeprecated: false) { name }
+        all: directives(includeDeprecated: true) { name isDeprecated deprecationReason }
+      }
+    }"#,
+  );
+  assert!(answer.errors.is_empty(), "{:?}", answer.errors);
+  let names =
+    |list: &[&str]| -> JsonValue { list.iter().map(|name| json!({ "name": name })).collect() };
+  let shown = names(&[
+    "kept",
+    "skip",
+    "include",
+    "deprecated",
+    "specifiedBy",
+    "oneOf",
+  ]);
+  let directive = |name: &str, reason: Option<&str>| -> JsonValue {
+    json!({ "name": name, "isDeprecated": reason.is_some(), "deprecationReason": reason })
+  };
+  assert_eq!(
+    answer.data,
+    json!({
+      "__schema": {
+        "directives": shown.clone(),
+        "no": shown,
+        "all": [
+          directive("kept", None),
+          directive("gone", Some("use @kept")),
+          directive("faded", Some("No longer supported")),
+          directive("skip", None),
+          directive("include", None),
+          directive("deprecated", None),
+          directive("specifiedBy", None),
+          directive("oneOf", None)
+        ]
+      }
+    })
+  );
+}
+
+/// A bare `@deprecated` is answered with the reason its definition's default gives it: `null`
+/// against a replacement whose `reason` defaults to `null`, and the replacement's own text against
+/// one whose default is a string — not the specified `No longer supported`, which neither schema
+/// declares.
+#[test]
+fn a_bare_deprecated_is_answered_with_its_definitions_default() {
+  for (default, reason) in [("null", JsonValue::Null), ("\"Custom\"", json!("Custom"))] {
+    let sdl = format!(
+      "directive @deprecated(reason: String = {default}) on FIELD_DEFINITION | \
+       ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE | DIRECTIVE_DEFINITION
+       type Query {{ ok: Int }}
+       type Widget {{ id: ID old: Int @deprecated }}"
+    );
+    let answer = run(
+      &sdl,
+      r#"{
+        __type(name: "Widget") {
+          fields(includeDeprecated: true) { name isDeprecated deprecationReason }
+        }
+      }"#,
+    );
+    assert!(answer.errors.is_empty(), "{:?}", answer.errors);
+    assert_eq!(
+      answer.data["__type"]["fields"],
+      json!([
+        { "name": "id", "isDeprecated": false, "deprecationReason": null },
+        { "name": "old", "isDeprecated": true, "deprecationReason": reason }
+      ]),
+      "{sdl}"
+    );
+  }
 }
 
 /// Draft §4's kind-dependent nulls, for every kind a type can be, a reference's two wrappers
@@ -890,7 +990,15 @@ fn the_meta_schema_introspects_itself() {
         "interfaces": []
       },
       "d": {
-        "fields": names(&["name", "description", "locations", "args", "isRepeatable"])
+        "fields": names(&[
+          "name",
+          "description",
+          "isRepeatable",
+          "locations",
+          "args",
+          "isDeprecated",
+          "deprecationReason"
+        ])
       },
       "k": {
         "kind": "ENUM",
@@ -984,9 +1092,10 @@ fn typename_names_the_meta_type() {
 // the two arguments
 // ------------------------------------------------------------------------------------------
 
-/// Both arguments read through variables: `name` through [`Values::as_str`] and
-/// `includeDeprecated` through [`Values::as_bool`], with draft §6.4.1's default and `null` both
-/// meaning `false`.
+/// Both arguments read through variables: `name` through [`Values::as_str`] and `includeDeprecated`
+/// through [`Values::as_bool`], with draft §6.4.1's default meaning `false` when the request does
+/// not supply the variable. A `null` one is a field error, which
+/// `a_null_include_deprecated_is_a_field_error` holds.
 #[test]
 fn variables_reach_both_arguments() {
   const QUERY: &str = r#"query ($name: String!, $deprecated: Boolean) {
@@ -1006,10 +1115,6 @@ fn variables_reach_both_arguments() {
     ),
     (
       vec![("name", widget.clone())],
-      names(&["id", "size", "tags"]),
-    ),
-    (
-      vec![("name", widget.clone()), ("deprecated", J::Null)],
       names(&["id", "size", "tags"]),
     ),
   ] {
@@ -1048,7 +1153,7 @@ fn a_value_of_the_wrong_type_is_a_field_error() {
     Kind::ArgumentCoercion,
     None,
     "__type.fields".to_owned(),
-    "Argument \"includeDeprecated\" of type \"Boolean\" must be a Boolean.".to_owned(),
+    "Argument \"includeDeprecated\" of type \"Boolean!\" must be a Boolean.".to_owned(),
   );
 
   let not_a_string = run_with(SPEC_SDL, QUERY, &[("name", J::Int(5))], Limits::default());
@@ -1083,6 +1188,165 @@ fn a_value_of_the_wrong_type_is_a_field_error() {
     literal_flag.data,
     json!({ "__type": { "name": "Widget", "fields": null } })
   );
+}
+
+/// `includeDeprecated` is `Boolean! = false` (draft §4.2), so an explicit `null` — written, or a
+/// variable's value — is draft §6.4.1 step 5.i.i's field error at the field it was passed to, where
+/// an absent argument or a variable the request did not supply is the default's `false`.
+#[test]
+fn a_null_include_deprecated_is_a_field_error() {
+  let null_error: (Kind, Option<Resource>, String, String) = (
+    Kind::ArgumentNull,
+    None,
+    "__type.fields".to_owned(),
+    "Argument \"includeDeprecated\" of non-null type \"Boolean!\" must not be null.".to_owned(),
+  );
+
+  let literal = run(
+    SPEC_SDL,
+    r#"{ __type(name: "Widget") { name fields(includeDeprecated: null) { name } } }"#,
+  );
+  assert_eq!(literal.errors, vec![null_error.clone()]);
+  assert_eq!(
+    literal.data,
+    json!({ "__type": { "name": "Widget", "fields": null } })
+  );
+
+  let variable = run_with(
+    SPEC_SDL,
+    r#"query ($deprecated: Boolean) {
+      __type(name: "Widget") { name fields(includeDeprecated: $deprecated) { name } }
+    }"#,
+    &[("deprecated", J::Null)],
+    Limits::default(),
+  );
+  assert_eq!(variable.errors, vec![null_error]);
+  assert_eq!(
+    variable.data,
+    json!({ "__type": { "name": "Widget", "fields": null } })
+  );
+}
+
+/// The field error a `null` `includeDeprecated` raises at `path`, as
+/// `a_null_include_deprecated_is_a_field_error` pins it for `fields`.
+fn null_include_deprecated(path: &str) -> (Kind, Option<Resource>, String, String) {
+  (
+    Kind::ArgumentNull,
+    None,
+    path.to_owned(),
+    "Argument \"includeDeprecated\" of non-null type \"Boolean!\" must not be null.".to_owned(),
+  )
+}
+
+/// The three lists of `__Type` that take `includeDeprecated` coerce it on every kind of type, not
+/// only on the kind that answers the list: a `null` is draft §6.4.1's field error on a scalar,
+/// which has none of them, as it is on the kind that has one.
+///
+/// Draft §5.8.5 lets a nullable variable stand where the declared `Boolean! = false` has a
+/// default, so `$d: Boolean` is a valid argument and a `null` value for it reaches the executor.
+/// The kind chooses between the list and `null` only once the argument has coerced, so with the
+/// variable not supplied the default applies, and the kinds without the list answer `null`.
+#[test]
+fn a_null_include_deprecated_is_a_field_error_on_every_kind_of_type() {
+  // Each list, and the types of `SPEC_SDL` it answers for: an object or an interface for `fields`,
+  // an enum for `enumValues` and an input object for `inputFields`.
+  let lists: [(&str, &[&str]); 3] = [
+    ("fields", &["Widget", "Thing"]),
+    ("enumValues", &["Unit"]),
+    ("inputFields", &["Spec"]),
+  ];
+  // One type of each kind: an object, an interface, a union, an enum, an input object, a scalar.
+  let types = ["Widget", "Thing", "Any", "Unit", "Spec", "Instant"];
+
+  for (list, answers_for) in lists {
+    for ty in types {
+      // Written as a variable's value, and as a literal.
+      for (argument, header) in [("$d", "query ($d: Boolean)"), ("null", "query")] {
+        let query = format!(
+          r#"{header} {{ __type(name: "{ty}") {{ name {list}(includeDeprecated: {argument}) {{ name }} }} }}"#
+        );
+        let answer = run_with(SPEC_SDL, &query, &[("d", J::Null)], Limits::default());
+        assert_eq!(
+          answer.errors,
+          vec![null_include_deprecated(&format!("__type.{list}"))],
+          "{list} on {ty}, {argument}"
+        );
+        assert_eq!(
+          answer.data,
+          json!({ "__type": { "name": ty, list: null } }),
+          "{list} on {ty}, {argument}"
+        );
+      }
+
+      // The control: the variable not supplied is the default `false`, which is no error, and the
+      // list is there for the kind that has it and `null` for every other.
+      let query = format!(
+        r#"query ($d: Boolean) {{ __type(name: "{ty}") {{ {list}(includeDeprecated: $d) {{ name }} }} }}"#
+      );
+      let answer = run(SPEC_SDL, &query);
+      assert!(
+        answer.errors.is_empty(),
+        "{list} on {ty}: {:?}",
+        answer.errors
+      );
+      let answered = &answer.data["__type"][list];
+      if answers_for.contains(&ty) {
+        assert!(
+          answered
+            .as_array()
+            .is_some_and(|members| !members.is_empty()),
+          "{list} on {ty} answered {answered}"
+        );
+      } else {
+        assert!(answered.is_null(), "{list} on {ty} answered {answered}");
+      }
+    }
+  }
+}
+
+/// A `null` `includeDeprecated` is a field error on a `LIST` or `NON_NULL` reference too, where
+/// `type` and `ofType` lead to one and every field but `kind` and `ofType` answers `null`.
+#[test]
+fn a_null_include_deprecated_is_a_field_error_on_a_wrapper() {
+  // `[String!]!` is a `NON_NULL` over a `LIST` over a `NON_NULL`: `type`, `type.ofType` and
+  // `type.ofType.ofType` are all wrappers.
+  const SDL: &str = "type Query { tags: [String!]! }";
+
+  for list in ["fields", "enumValues", "inputFields"] {
+    for depth in 0..3 {
+      let mut selection = format!("{list}(includeDeprecated: $d) {{ name }}");
+      let mut path = String::from("__type.fields.0.type");
+      let mut answered = json!({ list: null });
+      for _ in 0..depth {
+        selection = format!("ofType {{ {selection} }}");
+        path.push_str(".ofType");
+        answered = json!({ "ofType": answered });
+      }
+      path.push('.');
+      path.push_str(list);
+      let query = format!(
+        r#"query ($d: Boolean) {{ __type(name: "Query") {{ fields {{ type {{ {selection} }} }} }} }}"#
+      );
+      let data = json!({ "__type": { "fields": [{ "type": answered }] } });
+
+      let null = run_with(SDL, &query, &[("d", J::Null)], Limits::default());
+      assert_eq!(
+        null.errors,
+        vec![null_include_deprecated(&path)],
+        "{list} at depth {depth}"
+      );
+      assert_eq!(null.data, data, "{list} at depth {depth}");
+
+      // The control: with the variable not supplied the same wrapper answers `null`, and no error.
+      let default = run(SDL, &query);
+      assert!(
+        default.errors.is_empty(),
+        "{list} at depth {depth}: {:?}",
+        default.errors
+      );
+      assert_eq!(default.data, data, "{list} at depth {depth}");
+    }
+  }
 }
 
 /// `name` is `String!` with no default, so draft §6.4.1 raises for it like for any other argument:
@@ -1285,14 +1549,21 @@ fn the_full_introspection_query_fits_the_default_limits() {
   }
 }
 
-/// The committed query is upstream's own: re-derived from graphql-js's `getIntrospectionQuery.ts`
-/// with every option on, whenever `SMEAR_GRAPHQL_JS` points at a checkout — which the
-/// `proto-oracle` job's does.
+/// The committed query is upstream's own: re-derived from graphql-js 17.1.0's
+/// `getIntrospectionQuery.ts` with seven flags on and `typeDepth` at 9, whenever
+/// `SMEAR_GRAPHQL_JS_17` points at a checkout — which the `proto-oracle` job's does.
+///
+/// The source is read the way it evaluates. It holds two template literals: the recursive
+/// `ofType()` helper's, which the type reference's
+/// `${ofType(optionsWithDefault.typeDepth, '      ')}` placeholder expands nine levels deep, and
+/// the query's own, the `return` that opens with `query IntrospectionQuery`. Every other
+/// placeholder is one of the options, a flag that is on and so stands for its field or argument —
+/// `directives`'s spread over three lines as the formatter wrote it.
 #[test]
 fn the_introspection_query_is_graphql_jss_own() {
-  let Some(root) = std::env::var_os("SMEAR_GRAPHQL_JS") else {
+  let Some(root) = std::env::var_os("SMEAR_GRAPHQL_JS_17") else {
     println!(
-      "SMEAR_GRAPHQL_JS is unset, so the committed introspection query was not re-derived from \
+      "SMEAR_GRAPHQL_JS_17 is unset, so the committed introspection query was not re-derived from \
        upstream"
     );
     return;
@@ -1300,19 +1571,64 @@ fn the_introspection_query_is_graphql_jss_own() {
   let path = std::path::Path::new(&root).join("src/utilities/getIntrospectionQuery.ts");
   let source = std::fs::read_to_string(&path)
     .unwrap_or_else(|error| panic!("{} is unreadable: {error}", path.display()));
-  let start = source
-    .find("return `")
-    .expect("`getIntrospectionQuery` returns a template literal")
-    + "return `".len();
-  let end = start
-    + source[start..]
-      .find("`;")
-      .expect("the template literal is closed");
-  let mut query = source[start..end].to_owned();
+
+  /// The text of the template literal the first `return` at or after `from` opens.
+  fn template(source: &str, from: usize) -> &str {
+    let start = from
+      + source[from..]
+        .find("return `")
+        .expect("a template literal is returned")
+      + "return `".len();
+    let end = start
+      + source[start..]
+        .find("`;")
+        .expect("the template literal is closed");
+    &source[start..end]
+  }
+  let helper = template(
+    &source,
+    source
+      .find("function ofType(")
+      .expect("the `ofType()` helper is defined"),
+  );
+  let query_at = source
+    .find("return `\n    query IntrospectionQuery")
+    .expect("`getIntrospectionQuery` returns the query as a template literal");
+  let mut query = template(&source, query_at).to_owned();
+
+  /// `ofType(level, indent)`: nothing at level zero, and otherwise the helper's template with its
+  /// indentation and its own next level filled in.
+  fn of_type(helper: &str, level: u32, indent: &str) -> String {
+    if level == 0 {
+      return String::new();
+    }
+    let deeper = of_type(helper, level - 1, &format!("{indent}  "));
+    helper
+      .replace("${ofType(level - 1, indent + '  ')}", &deeper)
+      .replace("${indent}", indent)
+  }
+  let type_ref = of_type(helper, 9, "      ");
+  assert!(
+    !type_ref.contains("${"),
+    "the `ofType()` helper has a placeholder this derivation does not know:\n{helper}"
+  );
+
   for (placeholder, value) in [
     ("${schemaDescription}", "description"),
     ("${descriptions}", "description"),
     ("${directiveIsRepeatable}", "isRepeatable"),
+    (
+      "${experimentalDirectiveDeprecation(\n          '(includeDeprecated: true)',\n        )}",
+      "(includeDeprecated: true)",
+    ),
+    (
+      "${experimentalDirectiveDeprecation('isDeprecated')}",
+      "isDeprecated",
+    ),
+    (
+      "${experimentalDirectiveDeprecation('deprecationReason')}",
+      "deprecationReason",
+    ),
     (
       "${inputDeprecation('(includeDeprecated: true)')}",
       "(includeDeprecated: true)",
@@ -1324,6 +1640,10 @@ fn the_introspection_query_is_graphql_jss_own() {
     ),
     ("${specifiedByUrl}", "specifiedByURL"),
     ("${oneOf}", "isOneOf"),
+    (
+      "${ofType(optionsWithDefault.typeDepth, '      ')}",
+      type_ref.as_str(),
+    ),
   ] {
     query = query.replace(placeholder, value);
   }

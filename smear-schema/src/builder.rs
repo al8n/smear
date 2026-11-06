@@ -82,12 +82,17 @@ const ONE_OF: &str = "oneOf";
 /// The specified `@specifiedBy` directive. Matched by name, for the reason [`DEPRECATED`] is.
 const SPECIFIED_BY: &str = "specifiedBy";
 
-/// The reason a bare `@deprecated` carries: the default of the specified definition's `reason`.
+/// The placeholder a bare `@deprecated` — one that writes no `reason` — carries until
+/// [`SchemaBuilder::resolve_bare_deprecations`] gives it the reason its definition's default
+/// supplies.
 ///
-/// Read from the specification's definition whatever the document redefined, as graphql-js reads
-/// its own constant of the same text — a document that spells `@deprecated` out with another
-/// default still means the specification's directive, for the reason [`DEPRECATED`] gives.
-const DEFAULT_DEPRECATION_REASON: &str = "No longer supported";
+/// A placeholder because the usage is read before that definition is known: a document may
+/// replace `@deprecated` further down, or in a later document, and the specified one is injected
+/// only once every document has been read. The handle is one no arena issues — [`Text::NONE`]'s
+/// offset, with a length `NONE` does not have — so it is never mistaken for a `null` reason, and
+/// the one question anything asks of it before it is replaced, whether the element is deprecated,
+/// it answers truly.
+const BARE_DEPRECATION: Deprecation = Deprecation::Deprecated(Text::new(u32::MAX, 1));
 
 // ---------------------------------------------------------------------------------------------
 // interning
@@ -324,9 +329,11 @@ const MAX_TEXT_BYTES: u32 = u32::MAX - 1;
 /// The growable half of the schema's text arena: every string the finished [`Schema`] keeps.
 ///
 /// Descriptions, deprecation reasons, `specifiedByURL`s and the canonical text of each default, in
-/// the order the documents and then the built-ins are read. The finished schema takes the whole
-/// `String` as its arena, so every byte here is a byte draft §4 returns; nothing else is written,
-/// except for a definition that is then dropped as a duplicate, which refuses the build anyway.
+/// the order the documents and then the built-ins are read, and last the one reason every bare
+/// `@deprecated` shares. The finished schema takes the whole `String` as its arena, so every byte
+/// here is a byte draft §4 returns; nothing else is written, except for what a definition or an
+/// extension carried when the build then drops it — a duplicate, or an extension it cannot apply
+/// — which refuses the build anyway.
 ///
 /// # What bounds it
 ///
@@ -342,9 +349,6 @@ struct TextArena {
   /// Set when a string would have carried the arena past [`MAX_TEXT_BYTES`], and read by
   /// [`SchemaBuilder::finish`] as the build's refusal.
   refused: bool,
-  /// [`DEFAULT_DEPRECATION_REASON`], written the first time a bare `@deprecated` asks for it and
-  /// shared by every one after.
-  default_reason: Text,
 }
 
 impl core::fmt::Debug for TextArena {
@@ -437,17 +441,6 @@ impl TextArena {
     // Cannot refuse: the measure above printed the same literal.
     print::canonical(value, &mut self.text)?;
     Ok(Text::new(start, len))
-  }
-
-  /// [`DEFAULT_DEPRECATION_REASON`], written once per build.
-  fn default_reason(&mut self) -> Text {
-    if self.default_reason.is_none()
-      && let Some((start, len)) = self.admit(DEFAULT_DEPRECATION_REASON.len())
-    {
-      self.text.push_str(DEFAULT_DEPRECATION_REASON);
-      self.default_reason = Text::new(start, len);
-    }
-    self.default_reason
   }
 }
 
@@ -586,6 +579,7 @@ enum DirectivesOf {
   FieldArgument { ty: usize, field: usize, arg: usize },
   InputField { ty: usize, field: usize },
   EnumValue { ty: usize, value: usize },
+  Directive { index: usize },
   DirectiveArgument { directive: usize, arg: usize },
 }
 
@@ -1683,7 +1677,8 @@ struct RawInput {
   directives: Vec<RawDirectiveUse>,
   /// The description, decoded into the text arena.
   description: Text,
-  /// The `@deprecated` written on the input value, its reason decoded into the text arena.
+  /// The `@deprecated` written on the input value, its reason decoded into the text arena, or
+  /// [`BARE_DEPRECATION`] for a bare one until its definition's default is known.
   deprecation: Deprecation,
   /// The default's canonical text, printed into the text arena where the literal was read.
   default_text: Text,
@@ -1799,7 +1794,9 @@ mod declared {
     Refused,
   }
 
-  /// [`Args`] for the one pass that resolves the arguments in place.
+  /// [`Args`] for the two passes that rewrite the arguments in place:
+  /// [`resolve_type_refs`](super::SchemaBuilder::resolve_type_refs) and
+  /// [`resolve_bare_deprecations`](super::SchemaBuilder::resolve_bare_deprecations).
   pub(super) enum ArgsMut<'a> {
     /// At or below the ceiling.
     Bounded(&'a mut [RawInput]),
@@ -1874,8 +1871,9 @@ struct RawField {
   deprecated: bool,
   /// The description, decoded into the text arena.
   description: Text,
-  /// The `@deprecated` written on the field, its reason decoded into the text arena — what draft
-  /// §4 returns, where [`RawField::deprecated`] is what `IsValidImplementation` asks.
+  /// The `@deprecated` written on the field, its reason decoded into the text arena, or
+  /// [`BARE_DEPRECATION`] for a bare one until its definition's default is known — what draft §4
+  /// returns, where [`RawField::deprecated`] is what `IsValidImplementation` asks.
   deprecation: Deprecation,
 }
 
@@ -1885,7 +1883,8 @@ struct RawEnumValue {
   directives: Vec<RawDirectiveUse>,
   /// The description, decoded into the text arena.
   description: Text,
-  /// The `@deprecated` written on the value, its reason decoded into the text arena.
+  /// The `@deprecated` written on the value, its reason decoded into the text arena, or
+  /// [`BARE_DEPRECATION`] for a bare one until its definition's default is known.
   deprecation: Deprecation,
 }
 
@@ -1969,18 +1968,33 @@ impl RawType {
 struct RawDirectiveDef {
   name: Located,
   args: Declared<MAX_DIRECTIVE_ARGUMENTS>,
+  /// The directives written on the definition, at `DIRECTIVE_DEFINITION` (draft §3.13), followed
+  /// by the ones its `extend directive`s provide (§3.13.6), which
+  /// [`apply_extensions`](SchemaBuilder::apply_extensions) appends: a definition and its
+  /// extensions are one location.
+  directives: Vec<RawDirectiveUse>,
   locations: DirectiveLocations,
   repeatable: bool,
   built_in: bool,
   /// The description, decoded into the text arena.
   description: Text,
+  /// The `@deprecated` written on the definition, its reason decoded into the text arena, or else
+  /// the first one its `extend directive`s provide, which
+  /// [`apply_extensions`](SchemaBuilder::apply_extensions) takes: what draft §4.2.6's
+  /// `isDeprecated` and `deprecationReason` return. A bare one is [`BARE_DEPRECATION`] until its
+  /// definition's default is known.
+  deprecation: Deprecation,
 }
 
-/// A type extension, converted to owned form and applied once every document has been read.
+/// A schema, type or directive extension, converted to owned form and applied once every
+/// document has been read.
 #[derive(Debug, Default)]
 struct RawExtension {
   target: Option<Located>,
   kind: Option<TypeKind>,
+  /// The directive an `extend directive` names, for draft §3.13.6's "The previous directive must
+  /// already be defined". `None` for a schema or type extension.
+  directive: Option<Located>,
   implements: Vec<Located>,
   fields: Vec<RawField>,
   input_fields: Vec<RawInput>,
@@ -1991,10 +2005,14 @@ struct RawExtension {
   roots: Vec<(RootOperation, Located)>,
   /// Where an `extend schema` was written — its whole span, and the document it was read from —
   /// for draft §3.3.2's "The Schema must already be defined", which has nothing narrower to point
-  /// at. `None` for a type extension, which [`target`](RawExtension::target) locates.
+  /// at. `None` for a type or directive extension, which [`target`](RawExtension::target) or
+  /// [`directive`](RawExtension::directive) locates.
   schema: Option<(SimpleSpan, u32)>,
   /// An `extend scalar`'s `@specifiedBy(url:)`, decoded into the text arena.
   specified_by: Text,
+  /// An `extend directive`'s `@deprecated`, its reason decoded into the text arena, or
+  /// [`BARE_DEPRECATION`] for a bare one until its definition's default is known.
+  deprecation: Deprecation,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2267,6 +2285,7 @@ impl<'a> Model<'a> {
       }
       DirectivesOf::InputField { ty, field } => &self.types[ty].input_fields[field].directives,
       DirectivesOf::EnumValue { ty, value } => &self.types[ty].enum_values[value].directives,
+      DirectivesOf::Directive { index } => &self.directives[index].directives,
       DirectivesOf::DirectiveArgument { directive, arg } => {
         match self.directives[directive].args.read() {
           Args::Bounded(args) => &args[arg].directives,
@@ -2470,6 +2489,10 @@ pub struct SchemaBuilder {
   truncated: bool,
   /// The strings the finished schema keeps. See [`TextArena`].
   texts: TextArena,
+  /// Whether ingest read a bare `@deprecated`, so that
+  /// [`SchemaBuilder::resolve_bare_deprecations`] walks the tables, and writes the reason they
+  /// share, for a build that has one to resolve and for no other.
+  bare_deprecations: bool,
   /// The `schema` definition's description, decoded into [`SchemaBuilder::texts`].
   schema_description: Text,
 }
@@ -2506,11 +2529,12 @@ impl SchemaBuilder {
 
   /// Consumes the builder and produces a schema, or every reason it is not one.
   pub fn finish(mut self) -> Result<Schema, SchemaErrors> {
-    // The arenas are asked twice, around the only step after ingest that interns: ingest reads
-    // the document's own names and literals, injection reads the built-ins', and applying an
-    // extension only resolves symbols already in. The first ask is what keeps injection from
-    // running over a refused arena at all — every built-in name would come back as the same
-    // placeholder, and `type_definition` would file each one as a redefinition of the last.
+    // The arenas are asked twice, around the two steps after ingest that write to them: ingest
+    // reads the document's own names and literals, injection reads the built-ins', resolving the
+    // bare `@deprecated`s writes the one reason they share, and applying an extension only
+    // resolves symbols already in. The first ask is what keeps injection from running over a
+    // refused arena at all — every built-in name would come back as the same placeholder, and
+    // `type_definition` would file each one as a redefinition of the last.
     if let Some(refusal) = self.arena_refusal() {
       return Err(refusal);
     }
@@ -2524,6 +2548,9 @@ impl SchemaBuilder {
     // extends the schema that omitting one defines, so that schema's roots are in place first.
     self.presume_default_roots();
     self.apply_extensions();
+    // Last of the steps that complete the definitions, because it reads the effective
+    // `@deprecated`, which injection decides, and patches what the extensions carried in with them.
+    self.resolve_bare_deprecations();
 
     if let Some(refusal) = self.arena_refusal() {
       return Err(refusal);
@@ -2733,10 +2760,15 @@ impl SchemaBuilder {
 
   /// Reads the `@deprecated` applied in a written list, its reason decoded into the text arena.
   ///
-  /// Draft §4 has three answers and so does this: no `@deprecated`; a reason, which is
-  /// [`DEFAULT_DEPRECATION_REASON`] for a bare one; and `reason: null`, which `isDeprecated: true`
-  /// reports beside a `null` reason — where graphql-js reads a `null` reason as not deprecated at
-  /// all. A reason of any other shape is `InvalidDirectiveArgumentValue`'s to report.
+  /// A written `reason` that is a string is decoded. Any other — `null`, or a value of another
+  /// shape — answers `Deprecated(Text::NONE)`, deprecated with `null` for a reason. Against the
+  /// specified `reason: String!` (draft §3.13.3) every such value reaches `check_const_value` and
+  /// is `InvalidDirectiveArgumentValue`, so that answer is for a build that is refused; a document
+  /// that redefines `@deprecated` with a `reason` that accepts the value builds with it.
+  ///
+  /// A bare one answers [`BARE_DEPRECATION`], and the build records that it read one: its reason
+  /// is its definition's default, which is not known yet. See
+  /// [`SchemaBuilder::resolve_bare_deprecations`].
   fn deprecation<S>(&mut self, directives: Option<&ConstDirectives<S>>, subject: Sym) -> Deprecation
   where
     S: AsRef<[u8]>,
@@ -2744,11 +2776,133 @@ impl SchemaBuilder {
     let Some(directive) = applied(directives, DEPRECATED) else {
       return Deprecation::NotDeprecated;
     };
-    Deprecation::Deprecated(match argument(directive, b"reason") {
-      None => self.texts.default_reason(),
-      Some(ConstInputValue::String(reason)) => self.keep(reason, Head::Named(subject)),
-      Some(_) => Text::NONE,
-    })
+    match argument(directive, b"reason") {
+      None => {
+        self.bare_deprecations = true;
+        BARE_DEPRECATION
+      }
+      Some(ConstInputValue::String(reason)) => {
+        Deprecation::Deprecated(self.keep(reason, Head::Named(subject)))
+      }
+      Some(_) => Deprecation::Deprecated(Text::NONE),
+    }
+  }
+
+  /// Gives every bare `@deprecated` the reason its definition's default supplies, in place of the
+  /// [`BARE_DEPRECATION`] ingest recorded.
+  ///
+  /// Draft §6.4.1's `CoerceArgumentValues` gives an argument that is not written its definition's
+  /// default, and a usage's `reason` is read by the same rule. The definition is the effective
+  /// `@deprecated`: a document's own, which replaces the specified one, or else the specified
+  /// one. graphql-js reads every bare `@deprecated` against its own specified definition instead,
+  /// so a document that replaces it with another default reads differently there.
+  ///
+  /// # Why here
+  ///
+  /// The effective definition is known only once [`SchemaBuilder::inject_built_ins`] has run,
+  /// after every document has been read, so a usage cannot be resolved where it is read: the
+  /// replacement may come after it, or in a later document. [`apply_extensions`] has run too, so
+  /// an `extend directive`'s `@deprecated` and the members an extension adds are already in the
+  /// two tables walked here.
+  ///
+  /// And nothing reads a reason before this. Of the steps that run first, only [`apply_extensions`]
+  /// reads a [`Deprecation`] at all, to ask whether a directive is already deprecated, which the
+  /// placeholder answers truly. The draft §3 passes that run after never read one — they ask
+  /// whether `@deprecated` is written, of the directive lists — and [`SchemaBuilder::flatten`],
+  /// which copies every reason into the schema, runs last.
+  ///
+  /// # What it costs
+  ///
+  /// Nothing for a build that read no bare `@deprecated`. For one that did, a walk over the tables,
+  /// a copy of the default's printed text, and one string in the text arena, written once and
+  /// shared by every usage, under the arena's own ceiling: a refusal there is the
+  /// `TooManyInternedBytes` [`SchemaBuilder::finish`] asks for next.
+  ///
+  /// [`apply_extensions`]: SchemaBuilder::apply_extensions
+  fn resolve_bare_deprecations(&mut self) {
+    if !self.bare_deprecations {
+      return;
+    }
+    let resolved = Deprecation::Deprecated(self.bare_deprecation_reason());
+    let resolve = |deprecation: &mut Deprecation| {
+      if *deprecation == BARE_DEPRECATION {
+        *deprecation = resolved;
+      }
+    };
+    for ty in &mut self.types {
+      for field in &mut ty.fields {
+        resolve(&mut field.deprecation);
+        if let ArgsMut::Bounded(args) = field.args.read_mut() {
+          for arg in args {
+            resolve(&mut arg.deprecation);
+          }
+        }
+      }
+      for field in &mut ty.input_fields {
+        resolve(&mut field.deprecation);
+      }
+      for value in &mut ty.enum_values {
+        resolve(&mut value.deprecation);
+      }
+    }
+    for directive in &mut self.directives {
+      resolve(&mut directive.deprecation);
+      if let ArgsMut::Bounded(args) = directive.args.read_mut() {
+        for arg in args {
+          resolve(&mut arg.deprecation);
+        }
+      }
+    }
+  }
+
+  /// The reason a bare `@deprecated` takes: the default of the effective definition's `reason`,
+  /// read as [`SchemaBuilder::deprecation`] reads a written one.
+  ///
+  /// A string is the reason, decoded into the text arena — `No longer supported` for the specified
+  /// definition. Everything else answers [`Text::NONE`], deprecated with `null` for a reason: a
+  /// `null` default; no default, which is `null` for a nullable `reason` and, for a non-null one,
+  /// a usage the build refuses as `MissingRequiredDirectiveArgument`; a definition with no
+  /// `reason` at all; and a default of another shape, as a written reason of that shape answers.
+  ///
+  /// The default's literal is not kept — [`RawShape::String`] is a shape, not a value — so the
+  /// value is decoded from the default's canonical text instead: the string quoted as graphql-js's
+  /// `printString` writes it, every quote, backslash and control character escaped, which is a
+  /// `StringValue` spelling that decodes back to the value it was printed from. The spelling is
+  /// copied out first, because the value is written into the arena it is read from.
+  fn bare_deprecation_reason(&mut self) -> Text {
+    // Injection put the specified definition in unless a document had defined its own, so this is
+    // found on every build that reaches here; `Text::NONE` is the answer that invents nothing.
+    let Some(index) = self
+      .interner
+      .lookup(DEPRECATED.as_bytes())
+      .and_then(|sym| self.directive_index(sym))
+    else {
+      return Text::NONE;
+    };
+    // A list past its ceiling is a refused build, and the arguments are not there to read.
+    let Args::Bounded(args) = self.directives[index].args.read() else {
+      return Text::NONE;
+    };
+    let printed = args
+      .iter()
+      .find(|arg| self.text(arg.name.sym) == "reason")
+      .filter(|reason| {
+        matches!(
+          reason.default_value,
+          Some(RawValue {
+            shape: RawShape::String,
+            ..
+          })
+        )
+      })
+      .and_then(|reason| reason.default_text.slice(&self.texts.text))
+      .map(str::to_owned);
+    match printed {
+      // The `Err` is unreachable: the printer wrote this spelling from a value it decoded. A full
+      // arena is `Ok(Text::NONE)`, and the arena's own refusal.
+      Some(printed) => self.texts.string(printed.as_bytes()).unwrap_or(Text::NONE),
+      None => Text::NONE,
+    }
   }
 
   /// Reads the `url` of the `@specifiedBy` applied in a written list, decoded into the text arena.
@@ -2932,6 +3086,8 @@ impl SchemaBuilder {
       ),
       None => Vec::new(),
     };
+    let directives = self.directive_uses(def.directives(), DirectiveLocation::DirectiveDefinition);
+    let deprecation = self.deprecation(def.directives(), name.sym);
     let mut locations = DirectiveLocations::EMPTY;
     for location in def.locations().locations() {
       if let Some(mapped) = map_location(location) {
@@ -2957,10 +3113,12 @@ impl SchemaBuilder {
     self.directives.push(RawDirectiveDef {
       name,
       args: args.into(),
+      directives,
       locations,
       repeatable,
       built_in,
       description,
+      deprecation,
     });
   }
 
@@ -3628,6 +3786,15 @@ impl SchemaBuilder {
           raw.input_fields = self.input_fields(def.fields_definition());
         }
       },
+      TypeSystemExtension::Directive(def) => {
+        let target = self.located(def.name());
+        raw.directive = Some(target);
+        raw.directives = self.directive_uses(
+          Some(def.directives()),
+          DirectiveLocation::DirectiveDefinition,
+        );
+        raw.deprecation = self.deprecation(Some(def.directives()), target.sym);
+      }
     }
     self.extensions.push(raw);
   }
@@ -3671,6 +3838,32 @@ impl SchemaBuilder {
       self.schema_definition.is_some() || self.roots[RootOperation::Query.index()].is_some();
     let extensions = core::mem::take(&mut self.extensions);
     for extension in extensions {
+      // Draft §3.13.6: "The previous directive must already be defined", which a built-in is,
+      // since injection precedes this. The extension's directives join the definition's own list,
+      // because the two are one location: `directive @e @d` plus `extend directive @e @d` repeats
+      // a non-repeatable `@d`, and a directive the extension provides is one the definition
+      // reaches when `validate_directive_cycles` asks whether it reaches itself.
+      //
+      // A `@deprecated` the extension provides deprecates the directive, unless the definition or
+      // an earlier extension already did: graphql-js reads the definition first and then its
+      // extensions in order. Two of them are `DuplicateDirectiveUse` anyway, so the order decides
+      // nothing about a schema that builds.
+      if let Some(target) = extension.directive {
+        match self.directive_index(target.sym) {
+          Some(index) => {
+            let directive = &mut self.directives[index];
+            directive.directives.extend(extension.directives);
+            if !directive.deprecation.is_deprecated() {
+              directive.deprecation = extension.deprecation;
+            }
+          }
+          None => {
+            let subject = self.text(target.sym).to_owned();
+            self.push(SchemaErrorKind::UndefinedExtensionTarget, &subject, target);
+          }
+        }
+        continue;
+      }
       let Some(target) = extension.target else {
         if !schema_defined && let Some((span, document)) = extension.schema {
           self.errors.push(
@@ -4796,7 +4989,7 @@ impl SchemaBuilder {
   ///
   /// It runs after [`SchemaBuilder::resolve_type_refs`] because an argument's declared type has to
   /// be resolved before a value can be checked against it, and after
-  /// [`SchemaBuilder::apply_extensions`] because a type and its extensions are one location.
+  /// [`SchemaBuilder::apply_extensions`] because a definition and its extensions are one location.
   fn validate_directive_usages(&mut self) {
     let (model, errors, names) = self.split_indexed();
     Self::check_directive_uses(
@@ -4863,6 +5056,13 @@ impl SchemaBuilder {
 
     for directive in 0..model.directives.len() {
       let owner = Coordinate::named(model.directives[directive].name.sym);
+      Self::check_directive_uses(
+        model,
+        errors,
+        names,
+        DirectivesOf::Directive { index: directive },
+        owner,
+      );
       if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive { index: directive })
       {
         for (arg, argument) in declared.iter().enumerate() {
@@ -4883,9 +5083,9 @@ impl SchemaBuilder {
   ///
   /// Over a [`Model`] rather than `&mut self` so that the list can be read where it lies. The
   /// owner arrives as a [`Coordinate`]: this runs once per type, field, argument, input field,
-  /// enum value and directive argument in the merged schema, and most of those carry no directive
-  /// at all — the pass cost 6.4 µs on a document with none, all of it owner paths built before the
-  /// empty list was looked at.
+  /// enum value, directive and directive argument in the merged schema, and most of those carry no
+  /// directive at all — the pass cost 6.4 µs on a document with none, all of it owner paths built
+  /// before the empty list was looked at.
   fn check_directive_uses(
     model: Model<'_>,
     errors: &mut Vec<SchemaError>,
@@ -6869,11 +7069,14 @@ impl SchemaBuilder {
     }
   }
 
-  /// Draft §3.13.1: a directive definition must not refer to itself, directly or indirectly.
+  /// Draft §3.13: a directive definition must not refer to itself, directly or indirectly, and
+  /// §3.13.6's rules 3 and 4 hold the directives an `extend directive` provides to the same.
   ///
   /// The rule is exactly "is this directive reachable from itself", over one graph with two kinds
   /// of node — a directive, and a type an argument accepts — because the path between two
-  /// directives runs through the types their arguments name.
+  /// directives runs through the directives written on their definitions and the types their
+  /// arguments name. An extension's directives are in its definition's list by the time this
+  /// runs, so "references the previous directive" is the same question.
   ///
   /// # What a walk per directive cost, on a document `Schema::build` accepts
   ///
@@ -6932,10 +7135,10 @@ impl SchemaBuilder {
   /// # The graph
   ///
   /// Node `d` below [`SchemaBuilder::directives`]`.len()` is that directive; node
-  /// `directives + t` is type `t`. The edges are the steps the walk this replaces took, and they
-  /// are the same steps: a directive reaches the directives written on its arguments and the base
-  /// types its arguments accept; a type reaches the directives written on it, on its input fields
-  /// and on its enum values, and the base types its input fields accept.
+  /// `directives + t` is type `t`. A directive reaches the directives written on its definition,
+  /// its extensions included, and on its arguments, and the base types its arguments accept; a
+  /// type reaches the directives written on it, on its input fields and on its enum values, and
+  /// the base types its input fields accept.
   ///
   /// A directive whose argument list a ceiling refused reaches **nothing**, exactly as it seeded
   /// nothing before. A cycle through a directive that will not build is a second diagnostic about
@@ -7059,6 +7262,7 @@ impl SchemaBuilder {
       let Args::Bounded(args) = self.directives[node].args.read() else {
         return;
       };
+      self.push_directive_uses(&self.directives[node].directives, reaches);
       for arg in args {
         self.push_directive_uses(&arg.directives, reaches);
         push_type(arg.ty.packed.base_id(), first_type_node, reaches);
@@ -7561,7 +7765,7 @@ impl SchemaBuilder {
       let Some(at) = position_of_directive(&directives, raw.name.sym) else {
         continue;
       };
-      directive_meta[at] = DirectiveMeta::new(raw.description);
+      directive_meta[at] = DirectiveMeta::new(raw.description, raw.deprecation);
       if let Args::Bounded(declared) = raw.args.read() {
         place_inputs(
           &mut input_meta,

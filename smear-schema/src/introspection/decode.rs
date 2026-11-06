@@ -6,7 +6,7 @@
 //! The previous reader allocated the same bytes three times — into a JSON value tree, into records
 //! whose every field was owned, and finally into the schema's interner. The first two exist only
 //! because a general reader has to answer "what is this?" for every node before anything can ask
-//! it a question. **The shape is closed**: 8 types and 41 members, none of them open, so at every
+//! it a question. **The shape is closed**: 8 types and 43 members, none of them open, so at every
 //! point this file already knows which member of which type it expects and dispatches on that.
 //! Nothing is built in order to be inspected, and the model borrows the response outright.
 //!
@@ -439,10 +439,21 @@ fn prose<'a>(scanner: &mut Scanner<'a>, what: &str) -> Scanned<Option<Text<'a>>>
   nullable(scanner, |scanner| scanner.text(what))
 }
 
-/// `isDeprecated`, which a response may write as `null` or leave out when its query did not ask;
-/// both read as unwritten.
-fn is_deprecated(scanner: &mut Scanner<'_>, what: &str) -> Scanned<Option<bool>> {
-  nullable(scanner, |scanner| scanner.boolean(what))
+/// `isDeprecated`, which draft §4 types `Boolean!` on a field, an input value, an enum value and a
+/// directive alike, so `null` is refused like any other non-boolean — as it is for
+/// `__Directive.isRepeatable`.
+///
+/// A conforming response never writes one: a non-null violation propagates the `null` to the parent
+/// instead. A member the response *omits* is a different thing and never reaches this function — a
+/// query that did not ask for the flag leaves it out — so its slot reads as unwritten, and
+/// `deprecated` falls back to the reason as graphql-js does.
+///
+/// The reason's slot reaches `deprecated` as the reader left it, unflattened: a `deprecationReason`
+/// the query did not ask for and one the server wrote as `null` are two states
+/// ([`Reason`](super::model::Reason)), and only the second is a value the specified `@deprecated`
+/// can refuse.
+fn is_deprecated(scanner: &mut Scanner<'_>, what: &str) -> Scanned<bool> {
+  scanner.boolean(what)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -710,7 +721,7 @@ fn field<'a>(scanner: &mut Scanner<'a>, owner_at: usize) -> Scanned<Introspected
     description: description.flatten(),
     args: args.unwrap_or_default(),
     ty: ty.ok_or_else(|| scanner.missing("type"))?,
-    deprecated: deprecated(is_deprecated_slot.flatten(), deprecation_reason.flatten()),
+    deprecated: deprecated(is_deprecated_slot, deprecation_reason),
   })
 }
 
@@ -759,7 +770,7 @@ fn input_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspec
     description,
     ty: ty.ok_or_else(|| scanner.missing("type"))?,
     default_value: default_value.flatten(),
-    deprecated: deprecated(is_deprecated_slot.flatten(), deprecation_reason.flatten()),
+    deprecated: deprecated(is_deprecated_slot, deprecation_reason),
   })
 }
 
@@ -797,7 +808,7 @@ fn enum_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspect
   Ok(IntrospectedEnumValue {
     name: name.ok_or_else(|| scanner.missing("name"))?,
     description: description.flatten(),
-    deprecated: deprecated(is_deprecated_slot.flatten(), deprecation_reason.flatten()),
+    deprecated: deprecated(is_deprecated_slot, deprecation_reason),
   })
 }
 
@@ -810,6 +821,8 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
   let mut locations = None;
   let mut args = None;
   let mut is_repeatable = None;
+  let mut is_deprecated_slot = None;
+  let mut deprecation_reason = None;
 
   let mut members = scanner.enter_object("__Directive")?;
   while let Some(key) = scanner.next_key(&mut members)? {
@@ -833,6 +846,12 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
       "isRepeatable" => member(scanner, &mut is_repeatable, |scanner| {
         scanner.boolean("__Directive.isRepeatable")
       })?,
+      "isDeprecated" => member(scanner, &mut is_deprecated_slot, |scanner| {
+        is_deprecated(scanner, "__Directive.isDeprecated")
+      })?,
+      "deprecationReason" => member(scanner, &mut deprecation_reason, |scanner| {
+        prose(scanner, "__Directive.deprecationReason")
+      })?,
       _ => scanner.skip_value()?,
     }
   }
@@ -843,6 +862,8 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
   let locations = refusals.take(locations);
   let args = refusals.take(args);
   let is_repeatable = refusals.take(is_repeatable);
+  let is_deprecated_slot = refusals.take(is_deprecated_slot);
+  let deprecation_reason = refusals.take(deprecation_reason);
   refusals.check(scanner)?;
 
   Ok(IntrospectedDirective {
@@ -851,6 +872,7 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
     locations: locations.ok_or_else(|| scanner.missing("locations"))?,
     args: args.unwrap_or_default(),
     is_repeatable: is_repeatable.unwrap_or(false),
+    deprecated: deprecated(is_deprecated_slot, deprecation_reason),
   })
 }
 

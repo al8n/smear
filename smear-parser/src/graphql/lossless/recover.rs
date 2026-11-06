@@ -128,7 +128,7 @@ pub(crate) const DESCRIBED_MEMBER_HEADS: &[Kind] =
 /// interface in an `implements` clause, a member of a union, a root operation type's target, a
 /// directive location, and a `FragmentName`.
 ///
-/// The last two are *spelling* rules — `DirectiveLocation` admits nineteen names and
+/// The last two are *spelling* rules — `DirectiveLocation` admits twenty names and
 /// `FragmentName` is `Name but not "on"` — which this kind-level set cannot express and does not
 /// try to: `lossless/mod.rs`'s `expectation_of` collapses every token-kind expectation onto
 /// [`Expectation::Unspecified`](crate::graphql::error::Expectation::Unspecified) anyway, so a finer
@@ -163,6 +163,10 @@ pub(crate) const TYPE_EXTENSION_HEADS: &[Kind] = &[Kind::Identifier];
 /// one shape — `extend scalar Name Directives` — so its directives are mandatory where every
 /// other definition's are optional.
 pub(crate) const SCALAR_EXTENSION_TAIL_HEADS: &[Kind] = &[Kind::At];
+
+/// The token kinds that may open a `DirectiveExtension`'s tail. Like a scalar extension, it has
+/// exactly one shape — `extend directive @ Name Directives` — so its directives are mandatory.
+pub(crate) const DIRECTIVE_EXTENSION_TAIL_HEADS: &[Kind] = &[Kind::At];
 
 /// The token kinds that may open an `ObjectTypeExtension`'s or `InterfaceTypeExtension`'s tail:
 /// `implements` (an `Identifier`), a directive's `@`, or a fields definition's `{`.

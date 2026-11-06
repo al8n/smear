@@ -7,11 +7,11 @@
 //   node generate.mjs
 //
 // CI never runs it. The goldens are committed, and each one carries the provenance this script
-// recorded: the graphql-js release, the six options, and the SHA-256 of the SDL it was answered
+// recorded: the graphql-js release, the options, and the SHA-256 of the SDL it was answered
 // for — which the test checks against the fixture it reads, so an edited fixture with a stale golden
 // fails there rather than comparing against an answer for some other schema.
 //
-// What is generated is `introspectionFromSchema(buildSchema(sdl), OPTIONS)`: graphql-js 16.11.0's
+// What is generated is `introspectionFromSchema(buildSchema(sdl), OPTIONS)`: graphql-js 17.1.0's
 // answer to its own full introspection query, executed against the schema it builds from the same
 // SDL smear builds from. `buildSchema` gets no options — in particular not `assumeValidSDL`, so a
 // fixture graphql-js would refuse is refused here rather than answered.
@@ -32,16 +32,21 @@ import {
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /** The release every golden is graphql-js's answer from. `package-lock.json` pins the same. */
-const RELEASE = '16.11.0';
+const RELEASE = '17.1.0';
 
 /**
- * The six options of graphql-js 16.11.0's `getIntrospectionQuery`, every one on.
+ * The eight options of graphql-js 17.1.0's `getIntrospectionQuery`: seven on, and `typeDepth` at
+ * its default of 9.
  *
- * Passed explicitly, all six, rather than left to `introspectionFromSchema`'s own defaults: that
- * function turns five of them on and leaves `descriptions` to `getIntrospectionQuery`'s default,
- * which is also on, and a golden whose flags depended on two layers of defaults would not say what
- * it was generated with. These are the flags of the query smear executes — asserted below against
- * the committed `introspection_query.graphql`, byte for byte.
+ * Passed explicitly, all eight, rather than left to `introspectionFromSchema`'s own defaults: that
+ * function turns six of them on and leaves `descriptions` and `typeDepth` to
+ * `getIntrospectionQuery`'s defaults, `true` and 9, and a golden whose flags depended on two layers
+ * of defaults would not say what it was generated with. These are the flags of the query smear
+ * executes — asserted below against the committed `introspection_query.graphql`, byte for byte.
+ *
+ * `experimentalDirectiveDeprecation` asks for `__schema.directives(includeDeprecated: true)` and
+ * for `__Directive`'s `isDeprecated` and `deprecationReason`, which draft §4.2 declares and smear
+ * answers, so a deprecated directive is compared like any other.
  */
 const OPTIONS = Object.freeze({
   descriptions: true,
@@ -49,7 +54,9 @@ const OPTIONS = Object.freeze({
   directiveIsRepeatable: true,
   schemaDescription: true,
   inputValueDeprecation: true,
+  experimentalDirectiveDeprecation: true,
   oneOf: true,
+  typeDepth: 9,
 });
 
 /** The query smear executes, committed beside the executor's own tests. */
@@ -59,8 +66,9 @@ const QUERY = 'smear/tests/fixtures/executables/introspection_query.graphql';
  * The schemas the executor's introspection is checked against elsewhere, by name: the agreement
  * fixture `validator_introspection.rs` holds every construct a schema can in, and the two public
  * schemas it and `proto_introspection.rs` take for volume. And one more, `defaults`, which exists
- * for this differential alone: no default in the other three prints differently once coerced, so
- * without it the `defaultValue` normalisation would compare nothing it normalises.
+ * for this differential alone: numbers, enum values and strings spelled where two printers could
+ * part, which the `defaultValue` comparison must find equal by spelling, and an input object the
+ * two print in their own forms.
  */
 const FIXTURES = [
   ['agreement', 'smear/tests/fixtures/schemas/introspection_agreement.graphql'],

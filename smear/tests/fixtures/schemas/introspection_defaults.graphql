@@ -1,24 +1,26 @@
 """
-Defaults whose printed literal is not their coerced value.
+Defaults spelled where two printers could part.
 
-graphql-js reports a default as `print(astFromValue(valueFromAST(literal, type), type))`, and
-smear as the literal the document wrote, printed. Every default below is one of the cases that
-makes the two differ, and the introspection parity differential reads them both ways.
+graphql-js reports a default as its own `print` of the literal the document wrote, and smear as
+the same literal printed in graphql-js 16's form. Both write a number and an enum value as it was
+spelled and an inline string as its value, quoted, so those agree to the byte; an input object is
+the shape here the two forms print apart. The introspection parity differential reads each default
+as the constant value it spells.
 """
 schema {
   query: Query
 }
 
 type Query {
-  "A single item where a list is expected, which coercion wraps — at every depth."
+  "A single item where a list is expected, at every depth, printed as written."
   list(item: [Int] = 7, deep: [[String!]] = "x", colour: [Colour!] = RED): Int
-  "A float with a fraction part of zero or an exponent, which coercion reads as a number."
+  "A float with a fraction part of zero or an exponent, compared by its spelling."
   float(whole: Float = 1.0, scaled: Float = 1.5e3, small: Float = -0.25E-2, plain: Float = 2.5): Int
-  "An ID spelled as a string of digits, which an integer-valued ID prints as."
+  "An ID spelled as a string of digits, as a string, and as an integer."
   id(digits: ID = "4", word: ID = "x4", number: ID = 4): Int
   "An input object written out of field order and missing a defaulted field."
   range(range: Range = {max: 9, min: 1}): Int
-  "A custom scalar, whose literal coercion is untyped: an enum value reads as its name."
+  "A custom scalar given an enum value."
   raw(value: Raw = AS_WRITTEN): Int
 }
 

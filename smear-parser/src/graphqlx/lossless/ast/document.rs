@@ -6,8 +6,8 @@
 //! # A document sorts its entries by kind
 //!
 //! `apollo-parser` gives a document one `definitions()` over a generated `Definition` union enum.
-//! This layer has no union, so a document exposes one iterator per entry kind — eighteen for the
-//! mixed root, sixteen for the SDL-only one. Complete and checkable, but it loses document order
+//! This layer has no union, so a document exposes one iterator per entry kind — nineteen for the
+//! mixed root, seventeen for the SDL-only one. Complete and checkable, but it loses document order
 //! **across** kinds; a formatter walks [`syntax`](Document::syntax)`().children()` instead. See
 //! `ast/value.rs`'s module docs for the same ruling and the same Phase B answer.
 //!
@@ -26,8 +26,8 @@ use crate::{
       },
       executable::{FragmentDefinition, OperationDefinition},
       extension::{
-        EnumTypeExtension, InputObjectTypeExtension, InterfaceTypeExtension, ObjectTypeExtension,
-        ScalarTypeExtension, SchemaExtension, UnionTypeExtension,
+        DirectiveExtension, EnumTypeExtension, InputObjectTypeExtension, InterfaceTypeExtension,
+        ObjectTypeExtension, ScalarTypeExtension, SchemaExtension, UnionTypeExtension,
       },
       import::ImportDefinition,
     },
@@ -75,6 +75,8 @@ ast_node!(
     input_object_type_extensions: many InputObjectTypeExtension,
     /// Every schema extension in the document, in order.
     schema_extensions: many SchemaExtension,
+    /// Every directive extension in the document, in order.
+    directive_extensions: many DirectiveExtension,
   }
 );
 
@@ -120,5 +122,7 @@ ast_node!(
     input_object_type_extensions: many InputObjectTypeExtension,
     /// Every schema extension in the document, in order.
     schema_extensions: many SchemaExtension,
+    /// Every directive extension in the document, in order.
+    directive_extensions: many DirectiveExtension,
   }
 );

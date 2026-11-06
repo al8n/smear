@@ -109,10 +109,10 @@
 //!
 //! GraphQL's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
-//! The population is every call that reports without building a hole — **38**
+//! The population is every call that reports without building a hole — **39**
 //! `recover::report_unexpected::<…>` sites and **11** `recover::unclosed_{list,object,parens}::<…>`
 //! sites across `graphql/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 49 are mapped** below, one probe each: a text that reaches the site with a hole-free tree,
+//! **all 50 are mapped** below, one probe each: a text that reaches the site with a hole-free tree,
 //! and what this projection answers for it. `every_report_and_build_site_has_a_measured_answer`
 //! holds the same rows, asserts their count per file and family against the source's own spelling
 //! of each call, and measures every answer.
@@ -120,7 +120,7 @@
 //! **The "what the site leaves out" column is where the lenient set comes from.** A site either
 //! leaves out one token with **no AST image** (a closer, an `on`), leaves out a constituent the AST
 //! holds (a member, a name, a tail — never lenient), or leaves nothing out and reports something
-//! present (a description, a spelling a rule refuses). **Eleven project; thirty-eight refuse.**
+//! present (a description, a spelling a rule refuses). **Eleven project; thirty-nine refuse.**
 //!
 //! | file | site | probe | what the site leaves out | the projection |
 //! |---|---|---|---|---|
@@ -130,6 +130,7 @@
 //! | `document.rs` | report | `extend enum E` | a constituent with an image | `MissingChild { EnumTypeExtension }` |
 //! | `document.rs` | report | `extend input I` | a constituent with an image | `MissingChild { InputObjectTypeExtension }` |
 //! | `document.rs` | report | `extend schema` | a constituent with an image | `MissingChild { SchemaExtension }` |
+//! | `document.rs` | report | `extend directive @d` | a constituent with an image | `MissingChild { DirectiveExtension }` |
 //! | `document.rs` | report | `extend` | a constituent with an image — the `extend` is rubble | `UnexpectedChild { Document, Name }` |
 //! | `document.rs` | report | `"d" { f }` | nothing — a present node is refused | `UnexpectedChild { OperationDefinition, Description }` |
 //! | `document.rs` | report | `"d" extend scalar S @k` | nothing — a present node is refused | `UnexpectedChild { ScalarTypeExtension, Description }` |
@@ -453,19 +454,19 @@ use crate::{
       Alias, Argument, Arguments, BooleanValue, ConstArgument, ConstArguments, ConstDirective,
       ConstDirectives, ConstInputValue, ConstList, ConstObject, ConstObjectField,
       DefaultInputValue, DefinitionOrExtension, Described, DescribedExecutableDefinition,
-      DescribedVariableDefinition, Directive, Directives, Document, EnumTypeDefinition,
-      EnumTypeExtension, EnumValue, EnumValuesDefinition, ExecutableDefinition, ExecutableDocument,
-      Field, FieldsDefinition, FloatValue, FragmentName, FragmentSpread, ImplementInterfaces,
-      InlineFragment, InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension,
-      InputValue, IntValue, InterfaceTypeDefinition, InterfaceTypeExtension, List, ListType,
-      Location, Name, NamedOperationDefinition, NamedType, NullValue, Object, ObjectField,
-      ObjectTypeDefinition, ObjectTypeExtension, OperationDefinition, OperationType,
-      RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
-      ScalarTypeExtension, SchemaDefinition, SchemaExtension, Selection, SelectionSet, StringValue,
-      Type, TypeCondition, TypeDefinition, TypeExtension, TypeSystemDefinition,
-      TypeSystemDefinitionOrExtension, TypeSystemDocument, TypeSystemExtension, UnionMemberTypes,
-      UnionTypeDefinition, UnionTypeExtension, VariableDefinition, VariableValue,
-      VariablesDefinition,
+      DescribedVariableDefinition, Directive, DirectiveExtension, Directives, Document,
+      EnumTypeDefinition, EnumTypeExtension, EnumValue, EnumValuesDefinition, ExecutableDefinition,
+      ExecutableDocument, Field, FieldsDefinition, FloatValue, FragmentName, FragmentSpread,
+      ImplementInterfaces, InlineFragment, InputFieldsDefinition, InputObjectTypeDefinition,
+      InputObjectTypeExtension, InputValue, IntValue, InterfaceTypeDefinition,
+      InterfaceTypeExtension, List, ListType, Location, Name, NamedOperationDefinition, NamedType,
+      NullValue, Object, ObjectField, ObjectTypeDefinition, ObjectTypeExtension,
+      OperationDefinition, OperationType, RootOperationTypeDefinition,
+      RootOperationTypesDefinition, ScalarTypeDefinition, ScalarTypeExtension, SchemaDefinition,
+      SchemaExtension, Selection, SelectionSet, StringValue, Type, TypeCondition, TypeDefinition,
+      TypeExtension, TypeSystemDefinition, TypeSystemDefinitionOrExtension, TypeSystemDocument,
+      TypeSystemExtension, UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension,
+      VariableDefinition, VariableValue, VariablesDefinition,
     },
     kinds::{GraphQLLang, SyntaxKind},
     lossless::Parse,
@@ -1413,8 +1414,8 @@ fn float_text<'src>(source: &'src str, token: Token<'_>) -> Out<&'src str> {
 // documents
 // ---------------------------------------------------------------------------------------------
 
-/// The seven extension kinds, each its own transcription.
-const EXTENSION_KINDS: [SyntaxKind; 7] = [
+/// The eight extension kinds, each its own transcription.
+const EXTENSION_KINDS: [SyntaxKind; 8] = [
   K::ScalarTypeExtension,
   K::ObjectTypeExtension,
   K::InterfaceTypeExtension,
@@ -1422,6 +1423,7 @@ const EXTENSION_KINDS: [SyntaxKind; 7] = [
   K::EnumTypeExtension,
   K::InputObjectTypeExtension,
   K::SchemaExtension,
+  K::DirectiveExtension,
 ];
 
 /// The eight type-system definition kinds.
@@ -1438,10 +1440,10 @@ const TYPE_SYSTEM_DEFINITION_KINDS: [SyntaxKind; 8] = [
 
 /// What the mixed root's definition run holds: either executable definition, a type-system
 /// definition or an extension.
-const MIXED_ENTRY_KINDS: [SyntaxKind; 17] = entry_kinds::<17>(true, true);
+const MIXED_ENTRY_KINDS: [SyntaxKind; 18] = entry_kinds::<18>(true, true);
 
 /// What the SDL root's definition run holds — the mixed run without the two executable kinds.
-const TYPE_SYSTEM_ENTRY_KINDS: [SyntaxKind; 15] = entry_kinds::<15>(false, true);
+const TYPE_SYSTEM_ENTRY_KINDS: [SyntaxKind; 16] = entry_kinds::<16>(false, true);
 
 /// What the executable root's definition run holds.
 const EXECUTABLE_ENTRY_KINDS: [SyntaxKind; 2] = entry_kinds::<2>(true, false);
@@ -1727,7 +1729,7 @@ fn type_system_definition<'src>(
   })
 }
 
-/// `Some` when `node` is one of the seven extension kinds, `None` when it is anything else.
+/// `Some` when `node` is one of the eight extension kinds, `None` when it is anything else.
 ///
 /// An extension carries no description. The lossless production reports a string written in front
 /// of an `extend` and — unlike GraphQLx, where the string stays outside — builds the extension
@@ -1784,6 +1786,10 @@ fn type_system_extension<'src>(
     K::SchemaExtension => {
       let (extension, extent) = schema_extension(node, source)?;
       (TypeSystemExtension::Schema(extension), extent)
+    }
+    K::DirectiveExtension => {
+      let (extension, extent) = directive_extension(node, source)?;
+      (TypeSystemExtension::Directive(extension), extent)
     }
     _ => return Ok(None),
   }))
@@ -3745,16 +3751,17 @@ fn directive_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, crate::graphql::ast::DirectiveDefinition<&'src str>>> {
-  // `Description? directive @ Name ArgumentsDefinition? repeatable? on DirectiveLocations` — three
-  // keyword positions, each read by its spelling in its own place. The walk this replaces took
-  // "the `Name` at index 2 is `repeatable` or `on`" and never read the `on`, so
-  // `directive @d foo FIELD` answered what `directive @d on FIELD` answers.
+  // `Description? directive @ Name ArgumentsDefinition? Directives[Const]? repeatable? on
+  // DirectiveLocations` — three keyword positions, each read by its spelling in its own place. The
+  // walk this replaces took "the `Name` at index 2 is `repeatable` or `on`" and never read the
+  // `on`, so `directive @d foo FIELD` answered what `directive @d on FIELD` answers.
   let mut cursor = Cursor::new(node);
   let description_node = cursor.opt_node(K::Description);
   cursor.keyword(ContextualKeyword::Directive, "the `directive` keyword")?;
   cursor.token(K::At, "the `@` before a directive's name")?;
   let name = cursor.name_token(source, "a name after the keyword")?;
   let arguments_node = cursor.opt_node(K::ArgumentsDefinition);
+  let directives_node = cursor.opt_node(K::Directives);
   let repeatable = cursor.opt_keyword(ContextualKeyword::Repeatable).is_some();
   // Lenient, as a fragment definition's `on` is: no AST image, and the production reports a
   // missing one and still builds the definition, hole-free, around the locations. The locations
@@ -3766,6 +3773,7 @@ fn directive_definition<'src>(
   let (description, described) = hoisted_description(description_node, source)?;
   let arguments_definition =
     cursor.keep_opt(optional_arguments_definition(arguments_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
   let locations = cursor.keep(directive_locations(locations_node)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
@@ -3775,6 +3783,7 @@ fn directive_definition<'src>(
       to_span(inner),
       name,
       arguments_definition,
+      directives,
       repeatable,
       locations,
     ),
@@ -4157,4 +4166,30 @@ fn schema_extension<'src>(
   };
   let extent = cursor.range("a token")?;
   Ok((SchemaExtension::new(to_span(extent), data), extent))
+}
+
+/// `extend directive @ Name Directives[Const]` — named, as the type extensions are, but behind an
+/// `@` and with one mandatory tail, so this walks the node itself rather than going through
+/// [`extension_parts`].
+fn directive_extension<'src>(
+  node: Node<'_>,
+  source: &'src str,
+) -> Out<(DirectiveExtension<&'src str>, TextRange)> {
+  let mut cursor = Cursor::new(node);
+  cursor.keyword(ContextualKeyword::Extend, "the `extend` keyword")?;
+  cursor.keyword(ContextualKeyword::Directive, "the `directive` keyword")?;
+  cursor.token(K::At, "the `@` before a directive's name")?;
+  let name = cursor.name_token(source, "an extended directive's name")?;
+  let directives_node = cursor.opt_node(K::Directives);
+  cursor.end()?;
+
+  // The extension's only tail, so the grammar makes it mandatory.
+  let directives = cursor
+    .keep_optional(optional_const_directives(directives_node, source)?)
+    .ok_or_else(|| missing(node, "the directives a directive extension must add"))?;
+  let extent = cursor.range("a token")?;
+  Ok((
+    DirectiveExtension::new(to_span(extent), name, directives),
+    extent,
+  ))
 }

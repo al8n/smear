@@ -427,7 +427,7 @@ fn a_round_trip_gate_is_blind_to_a_lost_definition_node() {
 /// Byte forms the corpus does not contain, round-tripped here instead.
 ///
 /// Gate 2 measured that no corpus entry carries a carriage return, a tab or a BOM; none carries a
-/// non-ASCII byte either, and 83 of the 87 end in a newline — the three `invalid_lex_*` entries
+/// non-ASCII byte either, and 84 of the 88 end in a newline — the three `invalid_lex_*` entries
 /// must not, and the empty one has nothing to end with. So the corpus on its own would leave
 /// a whole set of real-editor and real-document byte shapes untested by the one gate that is about
 /// bytes. Every case below is a source the parser must reproduce exactly, including the ones it

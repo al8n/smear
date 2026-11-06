@@ -20,22 +20,24 @@
 //!
 //! The meta types are checked before they are dropped, and the check is for contradictions of the
 //! specification's shape and nothing more: each one's kind, that it implements nothing, the type of
-//! every field and argument it reports that smear's meta-schema has, and that nothing is listed
-//! twice. A document cannot define a `__` type at all, so the SDL door always carries smear's
-//! meta-schema, and what a response says about those types beyond their shape — descriptions, the
-//! order the members are listed in, members a server adds ahead of the specification or keeps
-//! from behind it — is that server's rendering, not the schema it describes. So that is not kept,
-//! while a meta type the response contradicts is refused rather than quietly replaced. Any other
-//! `__` type is an introspection extension's own, and is dropped along with the extension's fields.
+//! every field and argument it reports that smear's meta-schema has — an `includeDeprecated` may
+//! still be the October 2021 specification's `Boolean` rather than the draft's `Boolean!` — and
+//! that nothing is listed twice. A document cannot define a `__` type at all, so the SDL door
+//! always carries smear's meta-schema, and what a response says about those types beyond their
+//! shape — descriptions, the order the members are listed in, members a server adds ahead of the
+//! specification or keeps from behind it — is that server's rendering, not the schema it describes.
+//! So that is not kept, while a meta type the response contradicts is refused rather than quietly
+//! replaced. Any other `__` type is an introspection extension's own, and is dropped along with the
+//! extension's fields.
 //!
-//! A built-in scalar or a specified directive is dropped only while that last clause holds. One
-//! the response reports other than as the build injects it says something the injected one would
-//! lose — for a scalar, a `specifiedByURL`, a `null` description or a description other than the
+//! A built-in scalar or a specified directive is dropped only while that last clause holds. One the
+//! response reports other than as the build injects it says something the injected one would lose —
+//! for a scalar, a `specifiedByURL`, a `null` description or a description other than the
 //! built-in's own; for a directive, any of its description, locations, arguments (with their
-//! descriptions, types and defaults) or repeatability — so it is written out as a definition of its
-//! own. That is how the SDL door reads a document that spelled the built-in out, flag, text and
-//! place among its siblings all three, so the two doors agree on it. A server whose built-in texts
-//! are not graphql-js's has its built-ins written out the same way, keeping its own.
+//! descriptions, types and defaults), repeatability or deprecation — so it is written out as a
+//! definition of its own. That is how the SDL door reads a document that spelled the built-in out,
+//! flag, text and place among its siblings all three, so the two doors agree on it. A server whose
+//! built-in texts are not graphql-js's has its built-ins written out the same way, keeping its own.
 //!
 //! It emits **nothing it has not checked**, and most of the checking happened before it ran.
 //! [`decode`](super::decode) admits a name only if it spells one, and resolves type kinds and
@@ -84,7 +86,8 @@ use super::{
   json::Text,
   model::{
     Deprecated, IntrospectedDirective, IntrospectedEnumValue, IntrospectedField,
-    IntrospectedInputValue, IntrospectedKind, IntrospectedSchema, IntrospectedType, Name, TypeRef,
+    IntrospectedInputValue, IntrospectedKind, IntrospectedSchema, IntrospectedType, Name, Reason,
+    TypeRef,
   },
 };
 
@@ -396,19 +399,35 @@ impl Renderer {
     }
   }
 
-  /// ` @deprecated(reason: …)` behind a member the response reports deprecated, its reason quoted
-  /// or `null` as the response wrote it — the one applied directive besides `@oneOf` and
-  /// `@specifiedBy` that introspection carries.
+  /// ` @deprecated` behind a member the response reports deprecated, or behind a directive
+  /// definition's arguments — the one applied directive besides `@oneOf` and `@specifiedBy` that
+  /// introspection carries — with the reason in the state the response wrote it:
+  ///
+  /// - **A string** is the reason, quoted: ` @deprecated(reason: "…")`.
+  /// - **`null`** is written as one, ` @deprecated(reason: null)`, and the build refuses it as the
+  ///   SDL door refuses the same spelling against the specified `reason: String!`, unless the
+  ///   response also reports a `@deprecated` of its own whose `reason` is nullable — as a server
+  ///   older than the draft does — which the door writes out and the build then reads it against.
+  /// - **Omitted** — the query asked for `isDeprecated` and not for `deprecationReason` — is a bare
+  ///   ` @deprecated`, and the build gives it the default of the `@deprecated` it reads usages
+  ///   against, by draft §6.4.1's rule for an argument a usage leaves out: `No longer supported`
+  ///   for the specified directive, and the server's own default — a string, or `null` — when the
+  ///   response reports a `@deprecated` of its own, which the door writes out. `reason: null`
+  ///   would claim the server sent a `null` it never wrote, which the specified directive refuses.
   fn deprecated(&mut self, deprecated: &Deprecated<'_>) {
     let Some(reason) = deprecated else {
       return;
     };
-    self.out.push_str(" @deprecated(reason: ");
+    self.out.push_str(" @deprecated");
     match reason {
-      Some(reason) => quote(reason.as_str(), &mut self.out),
-      None => self.out.push_str("null"),
+      Reason::Text(reason) => {
+        self.out.push_str("(reason: ");
+        quote(reason.as_str(), &mut self.out);
+        self.out.push(')');
+      }
+      Reason::Null => self.out.push_str("(reason: null)"),
+      Reason::Omitted => {}
     }
-    self.out.push(')');
   }
 
   /// One of the eight meta types: refused when the response has listed it already, and otherwise
@@ -452,6 +471,9 @@ impl Renderer {
     self.out.push_str("directive @");
     self.out.push_str(name);
     self.arguments(&directive.args, name)?;
+    // Draft §3.13's `Directives[Const]?` stands between the arguments and `repeatable`, and
+    // `@deprecated` is the one of them introspection reports.
+    self.deprecated(&directive.deprecated);
     if directive.is_repeatable {
       self.out.push_str(" repeatable");
     }
@@ -559,12 +581,13 @@ static SPECIFIED_DIRECTIVES: [SpecifiedDirective; 5] = {
         .with(DirectiveLocation::FieldDefinition)
         .with(DirectiveLocation::ArgumentDefinition)
         .with(DirectiveLocation::InputFieldDefinition)
-        .with(DirectiveLocation::EnumValue),
+        .with(DirectiveLocation::EnumValue)
+        .with(DirectiveLocation::DirectiveDefinition),
       repeatable: false,
       argument: Some(SpecifiedArgument {
         name: "reason",
         description: "Explains why this element was deprecated, usually also including a suggestion for how to access supported similar data. Formatted using the Markdown syntax, as specified by [CommonMark](https://commonmark.org/).",
-        ty: "String",
+        ty: "String!",
         default: Some("\"No longer supported\""),
       }),
     },
@@ -592,8 +615,8 @@ static SPECIFIED_DIRECTIVES: [SpecifiedDirective; 5] = {
 
 /// Whether a response's directive is one of the five specified directives exactly as the build
 /// injects it — the same description or none asked for, the same locations, the same argument with
-/// the same description, type and default, and the same repeatability — so leaving it to the
-/// build loses nothing.
+/// the same description, type and default, the same repeatability, and no deprecation — so leaving
+/// it to the build loses nothing.
 fn is_the_specified_directive(directive: &IntrospectedDirective<'_>) -> bool {
   let name = directive.name.as_str();
   let Some(specified) = SPECIFIED_DIRECTIVES
@@ -606,6 +629,7 @@ fn is_the_specified_directive(directive: &IntrospectedDirective<'_>) -> bool {
   says_only(directive.description.as_ref(), specified.description)
     && locations == specified.locations
     && directive.is_repeatable == specified.repeatable
+    && directive.deprecated.is_none()
     && match (directive.args.as_slice(), &specified.argument) {
       ([], None) => true,
       ([argument], Some(expected)) => is_the_specified_argument(argument, expected, name),
@@ -835,16 +859,24 @@ struct MetaField {
   args: &'static [MetaArgument],
 }
 
-/// A meta field's argument: its name and its type spelled as SDL.
+/// A meta field's argument: its name, its type spelled as SDL, and the type an earlier
+/// specification gave it.
 struct MetaArgument {
   name: &'static str,
   ty: &'static str,
+  /// Accepted from a response beside [`ty`](Self::ty): the October 2021 specification's spelling
+  /// of an argument the draft has since changed, which a server older than the draft still reports
+  /// and which the schema it describes does not depend on.
+  older: Option<&'static str>,
 }
 
-/// The `includeDeprecated` argument five meta fields declare.
+/// The `includeDeprecated` argument six meta fields declare: `Boolean! = false` in the draft
+/// (§4.2), and `Boolean = false` in the October 2021 specification and graphql-js 16, so a 16-era
+/// response is read rather than refused.
 const INCLUDE_DEPRECATED: &[MetaArgument] = &[MetaArgument {
   name: "includeDeprecated",
-  ty: "Boolean",
+  ty: "Boolean!",
+  older: Some("Boolean"),
 }];
 
 /// Shorthand for a meta field without arguments.
@@ -878,7 +910,7 @@ static META_TYPES: [MetaType; 8] = [
       meta_field("queryType", "__Type!"),
       meta_field("mutationType", "__Type"),
       meta_field("subscriptionType", "__Type"),
-      meta_field("directives", "[__Directive!]!"),
+      filtered_field("directives", "[__Directive!]!"),
     ],
   },
   MetaType {
@@ -943,9 +975,11 @@ static META_TYPES: [MetaType; 8] = [
     fields: &[
       meta_field("name", "String!"),
       meta_field("description", "String"),
+      meta_field("isRepeatable", "Boolean!"),
       meta_field("locations", "[__DirectiveLocation!]!"),
       filtered_field("args", "[__InputValue!]!"),
-      meta_field("isRepeatable", "Boolean!"),
+      meta_field("isDeprecated", "Boolean!"),
+      meta_field("deprecationReason", "String"),
     ],
   },
   MetaType {
@@ -958,14 +992,15 @@ static META_TYPES: [MetaType; 8] = [
 /// Holds a response's entry for one of the eight meta types to smear's meta-schema.
 ///
 /// What is refused is a contradiction: another kind, an interface, a field or an argument smear's
-/// meta-schema has given another type, or a member listed twice. What is ignored is everything
-/// else the entry says — members the specification's meta-schema lacks, which a server adds ahead
-/// of it or keeps from behind it (graphql-js 15's `__Type.specifiedByUrl`, an applied-directives
-/// extension's fields, the legacy `__Directive.onOperation`, `onFragment` and `onField`, a
-/// `__TypeKind` or `__DirectiveLocation` value from a later specification), its descriptions and
-/// its order — and what it leaves out is not missed, as a server older than `isRepeatable`,
-/// `isOneOf`, `specifiedByURL` or input-value deprecation leaves them out. No document can define
-/// these types, so both doors carry smear's.
+/// meta-schema has given another type — save an `includeDeprecated` typed `Boolean`, as the October
+/// 2021 specification typed it — or a member listed twice. What is ignored is everything else the
+/// entry says — members the specification's meta-schema lacks, which a server adds ahead of it or
+/// keeps from behind it (graphql-js 15's `__Type.specifiedByUrl`, an applied-directives extension's
+/// fields, the legacy `__Directive.onOperation`, `onFragment` and `onField`, a `__TypeKind` or
+/// `__DirectiveLocation` value from a later specification), its descriptions and its order — and
+/// what it leaves out is not missed, as a server older than `isRepeatable`, `isOneOf`,
+/// `specifiedByURL`, input-value deprecation or directive deprecation leaves them out. No document
+/// can define these types, so both doors carry smear's.
 fn check_meta_type(ty: &IntrospectedType<'_>, meta: &MetaType, kind: TypeKind) -> Rendered {
   let name = meta.name;
   if kind != meta.kind {
@@ -1023,7 +1058,7 @@ fn check_meta_type(ty: &IntrospectedType<'_>, meta: &MetaType, kind: TypeKind) -
         continue;
       };
       let spelled = type_reference(&argument.ty, &owner, argument_name)?;
-      if spelled != declared.ty {
+      if spelled != declared.ty && declared.older != Some(spelled.as_str()) {
         return Err(not_the_meta_type(
           Some(owner.as_str()),
           std::format!("{argument_name}: {spelled} rather than {}", declared.ty),

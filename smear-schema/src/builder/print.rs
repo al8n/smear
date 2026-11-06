@@ -1,19 +1,22 @@
-//! The canonical text of a constant value, in graphql-js's `print` form.
+//! The canonical text of a constant value, in graphql-js 16's `print` form.
 //!
 //! # What canonical means here
 //!
 //! Draft §4's `defaultValue` is "a GraphQL-formatted string", and the schema keeps one per input
-//! value that declares a default. It is printed once, at build, the way graphql-js prints a value
-//! node: a list as `[a, b]`, an object as `{a: 1, b: 2}`, a string re-encoded as a quoted string —
-//! a block string included, since graphql-js prints what it decoded rather than how it was spelled —
-//! and an integer, a float, an enum value, a boolean and `null` as written. Two spellings of one
-//! literal therefore print the same, and printing a printed value gives it back unchanged.
+//! value that declares a default. It is printed once, at build, the way graphql-js 16 prints a
+//! value node: a list as `[a, b]`, an object as `{a: 1, b: 2}`, a string re-encoded as a quoted
+//! string — a block string included, since graphql-js 16 prints what it decoded rather than how it
+//! was spelled — and an integer, a float, an enum value, a boolean and `null` as written. Two
+//! spellings of one literal therefore print the same, and printing a printed value gives it back
+//! unchanged.
 //!
-//! What it is not is graphql-js's `defaultValue` for the same schema. graphql-js prints the value
-//! *after coercing it* to the argument's type, so `[Int] = 1` reports `[1]`, a `Float` written `1.0`
-//! reports `1`, and an input object reports the fields its own defaults fill in. This prints the
-//! literal the document wrote, because coercion is execution's and the schema keeps no coerced
-//! values.
+//! Draft §4.2.4 names no print form, and graphql-js's has moved since: 17 prints an object as
+//! `{ a: 1 }`, keeps a block string a block string, and breaks a list or an object past eighty
+//! columns across lines. Its `defaultValue` is the literal the document wrote, as this one is, in
+//! that form. graphql-js 16's is not even the literal: it prints the value *after coercing it* to
+//! the argument's type, so `[Int] = 1` reports `[1]`, a `Float` written `1.0` reports `1`, and an
+//! input object reports the fields its own defaults fill in. This prints the literal the document
+//! wrote, because coercion is execution's and the schema keeps no coerced values.
 //!
 //! # A walk with a stack of its own
 //!
@@ -77,7 +80,7 @@ pub(crate) enum Unprinted {
   Unreadable(SimpleSpan),
 }
 
-/// Prints a constant value in graphql-js's `print` form. See the module header for the form.
+/// Prints a constant value in graphql-js 16's `print` form. See the module header for the form.
 ///
 /// The introspection door prints a response's default with this too, where it has to compare a
 /// specified directive's argument with the one the build injects.

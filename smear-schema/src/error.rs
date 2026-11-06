@@ -48,7 +48,11 @@ pub enum SchemaErrorKind {
   SharedRootOperationType,
   /// The schema provides no query root operation type (draft §3.3).
   MissingQueryRootOperationType,
-  /// `extend` names a type the document does not define (draft §3.3).
+  /// `extend` names a type or a directive the document does not define (draft §3.4.3, §3.13.6).
+  ///
+  /// A type extension's "The named type must already be defined", and a directive extension's
+  /// "The previous directive must already be defined". A definition the specification provides is
+  /// defined, so `extend scalar Int` and `extend directive @deprecated` are not this.
   UndefinedExtensionTarget,
   /// `extend` names a type of a different kind than the extension's keyword (draft §3.3).
   ExtensionKindMismatch,
@@ -343,8 +347,9 @@ pub enum SchemaErrorKind {
   /// deployment writes the width. The constant's own documentation has the measurement, the
   /// reason it is a separate number, and the rewrite a wider directive takes.
   TooManyDirectiveArguments,
-  /// A directive definition refers to itself, directly or through the types it names
-  /// (draft §3.13.1).
+  /// A directive definition refers to itself, directly or through the types and directives it
+  /// names — from its arguments, from the definition itself, or from an `extend directive` of it
+  /// (draft §3.13, §3.13.6).
   SelfReferentialDirective,
   /// `@specifiedBy` is applied to a built-in scalar, by its definition or by an `extend scalar`
   /// (draft §3.13.4).
@@ -372,8 +377,9 @@ pub enum SchemaErrorKind {
   UnsupportedDirectiveLocation,
   /// A directive that is not `repeatable` is used twice in the same location (draft §3.13).
   ///
-  /// A type and its extensions are one location: `type T @d` plus `extend type T @d` is a repeat,
-  /// which is what merging extensions before the check makes fall out.
+  /// A definition and its extensions are one location: `type T @d` plus `extend type T @d` is a
+  /// repeat, and so is `directive @e @d` plus `extend directive @e @d` (draft §3.13.6), which is
+  /// what merging extensions before the check makes fall out.
   DuplicateDirectiveUse,
   /// A directive is given an argument its definition does not declare (draft §3.13).
   UndefinedDirectiveArgument,
@@ -845,9 +851,9 @@ impl SchemaErrorKind {
       Self::MissingQueryRootOperationType => {
         Some("define `type Query`, or name an existing object type with `schema { query: … }`.")
       }
-      Self::UndefinedExtensionTarget => {
-        Some("`extend` adds to a type the document defines; define it, or drop the `extend`.")
-      }
+      Self::UndefinedExtensionTarget => Some(
+        "`extend` adds to a type or directive the document defines; define it, or drop the `extend`.",
+      ),
       Self::ExtensionKindMismatch => {
         Some("the `extend` keyword has to match the kind of the definition it extends.")
       }
@@ -964,7 +970,7 @@ impl SchemaErrorKind {
         "every usage rescans the whole declared list, so it is bounded at the schema; gather the arguments into one input object.",
       ),
       Self::SelfReferentialDirective => Some(
-        "a directive may not appear on its own definition, nor on any type that definition names.",
+        "a directive may not appear on its own definition or an extension of it, nor on any type or directive they name.",
       ),
       Self::SpecifiedByOnBuiltInScalar => Some(
         "a built-in scalar is specified by the GraphQL specification itself, so it takes no specification URL; drop the `@specifiedBy`.",
@@ -973,7 +979,7 @@ impl SchemaErrorKind {
         Some("add the location to the directive's definition, or move the usage.")
       }
       Self::DuplicateDirectiveUse => Some(
-        "declare the directive `repeatable`, or apply it once; a type and its extensions are one location.",
+        "declare the directive `repeatable`, or apply it once; a definition and its extensions are one location.",
       ),
       Self::MissingRequiredDirectiveArgument => Some(
         "a required argument is non-null with no default: pass it, or give the definition a default.",

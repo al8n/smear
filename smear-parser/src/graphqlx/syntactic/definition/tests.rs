@@ -295,6 +295,65 @@ fn extension_dispatch_selects_all_named_shapes() {
   }
 }
 
+/// Draft §3.13 and §3.13.6 in GraphQLx's own name binding: a directive definition's directives
+/// sit after its arguments and before `repeatable`, its locations keep their trailing `where`, and
+/// a directive extension names its target with an extension path.
+#[test]
+fn a_directive_definition_carries_its_own_directives_and_an_extension_adds_more() {
+  let source = "directive @tag<T>(x: T) @meta(level: 1) @ns::other repeatable \
+                on FIELD | DIRECTIVE_DEFINITION where T: Node";
+  let definition =
+    drive_str(ast::DirectiveDefinition::graphqlx, source).expect("directive definition");
+  let directives = definition
+    .directives()
+    .expect("the definition's own directives");
+  assert_eq!(directives.directives().len(), 2);
+  assert!(definition.repeatable());
+  assert_eq!(
+    definition
+      .locations()
+      .target()
+      .locations()
+      .iter()
+      .map(ast::Location::as_str)
+      .collect::<Vec<_>>(),
+    ["FIELD", "DIRECTIVE_DEFINITION"]
+  );
+  assert!(definition.locations().where_clause().is_some());
+  assert!(
+    drive_str(
+      ast::DirectiveDefinition::graphqlx,
+      "directive @tag repeatable @meta on FIELD"
+    )
+    .is_err(),
+    "the directives come before `repeatable`"
+  );
+
+  let source = "extend directive @ns::tag @meta(level: 1) @other";
+  let extension =
+    drive_str(ast::DirectiveExtension::graphqlx, source).expect("directive extension");
+  assert_eq!(extension.span(), &SimpleSpan::new(0, source.len()));
+  assert_eq!(extension.name().path().segments().len(), 2);
+  assert_eq!(extension.directives().directives().len(), 2);
+  let extension =
+    drive_str(ast::TypeSystemExtension::graphqlx, source).expect("type-system extension");
+  assert!(extension.is_directive());
+  assert!(
+    drive_str(ast::TypeExtension::graphqlx, source).is_err(),
+    "a directive extension is not a type extension"
+  );
+  for source in [
+    "extend directive @tag",
+    "extend directive tag @meta",
+    "extend directive @tag @meta(level: $v)",
+  ] {
+    assert!(
+      drive_str(ast::DirectiveExtension::graphqlx, source).is_err(),
+      "{source:?} is refused"
+    );
+  }
+}
+
 /// A committed definition or extension phase names the production it expected: under
 /// `smear::syntax::unexpected-token` where a token stood in its place, and under
 /// `smear::syntax::unexpected-end-of-input` where the source ended there.
@@ -404,6 +463,15 @@ fn a_rejected_phase_names_the_production_it_expected() {
       refusal(drive_str(ast::SchemaExtension::graphqlx, "extend schema")),
       end,
       "unexpected end of input, expected directives or a root operation types definition",
+    ),
+    (
+      "a directive extension that adds nothing",
+      refusal(drive_str(
+        ast::DirectiveExtension::graphqlx,
+        "extend directive @tag",
+      )),
+      end,
+      "unexpected end of input, expected `@`",
     ),
     (
       "a root operation with no operation type",

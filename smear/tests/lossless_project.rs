@@ -2241,7 +2241,7 @@ fn the_root_shape_is_asserted_rather_than_searched() {
 }
 
 /// `(entry, root)` pairs over the valid corpus whose root is exactly one container.
-const ROOTS_WITH_ONE_CONTAINER: usize = 165;
+const ROOTS_WITH_ONE_CONTAINER: usize = 168;
 
 /// The rest: every one of them carries a hole and holds no container.
 const ROOTS_OF_RUBBLE: usize = 3;
@@ -2410,6 +2410,7 @@ fn a_described_extension_refuses() {
     ("\"d\" extend scalar S @k", K::ScalarTypeExtension),
     ("\"d\" extend type T @k", K::ObjectTypeExtension),
     ("\"d\" extend schema @k", K::SchemaExtension),
+    ("\"d\" extend directive @d @k", K::DirectiveExtension),
   ] {
     let parse = parse_document(src);
     assert!(parse.has_errors(), "{src}");
@@ -3405,6 +3406,14 @@ const SITES: &[Site] = &[
   (
     "document.rs",
     "report",
+    "extend directive @d",
+    Root::Mixed,
+    "MissingChild DirectiveExtension",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
     "extend",
     Root::Mixed,
     "UnexpectedChild Document Name",
@@ -3926,7 +3935,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (38, 11),
+    (39, 11),
     "the two families' populations"
   );
 
@@ -4190,7 +4199,7 @@ fn every_walk_is_a_transcription() {
 }
 
 /// The walks, one cursor each — every production this file transcribes.
-const CURSORS: usize = 56;
+const CURSORS: usize = 57;
 
 /// **Codex round 1 on al8n/smear#217/#218.** A raw kind outside this dialect's space refuses at
 /// every typed door rather than panicking.

@@ -3,7 +3,7 @@
 //! Two halves. The **shaped** half, first, is one test per grammar area, each walking a real tree
 //! through the wrappers rather than through
 //! [`SyntaxNode`](smear::parser::graphqlx::lossless::SyntaxNode). The **totality** half, from
-//! [`the_probe_table_is_exactly_the_shipped_inventory`] on, sweeps all 78 wrappers and all 297
+//! [`the_probe_table_is_exactly_the_shipped_inventory`] on, sweeps all 79 wrappers and all 302
 //! getters over the shared corpus and answers five questions the shaped half cannot: whether the
 //! probe table still matches what the crate ships, whether every getter ever *projected* anything,
 //! whether every getter's name states the kind it projects, whether each node kind casts to exactly
@@ -48,20 +48,21 @@ use smear::parser::graphqlx::{
     ast::{
       Alias, Argument, Arguments, ArgumentsDefinition, AstChildren, AstTokens, BooleanValue,
       CastNode, DefaultValue, DefinitionName, DefinitionTypeGenerics, DefinitionTypeParam,
-      DefinitionTypePath, Directive, DirectiveDefinition, DirectiveLocations, Directives, Document,
-      EnumTypeDefinition, EnumTypeExtension, EnumValue, EnumValueDefinition, EnumValuesDefinition,
-      ExecutableDefinitionName, ExecutableDefinitionTypeGenerics, ExecutableDocument,
-      ExtensionName, ExtensionTypeGenerics, Field, FieldDefinition, FieldsDefinition, FloatValue,
-      FragmentDefinition, FragmentSpread, ImplementInterfaces, ImportDefinition, ImportList,
-      InlineFragment, InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension,
-      InputValueDefinition, IntValue, InterfaceTypeDefinition, InterfaceTypeExtension, ListType,
-      ListValue, MapEntry, MapType, MapValue, NamedSpecifier, NullValue, ObjectField,
-      ObjectTypeDefinition, ObjectTypeExtension, ObjectValue, OperationDefinition, Path,
-      RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
-      ScalarTypeExtension, SchemaDefinition, SchemaExtension, SelectionSet, SetType, SetValue,
-      StringValue, TypeCondition, TypeGenerics, TypePath, TypeSystemDocument, UnionMemberTypes,
-      UnionTypeDefinition, UnionTypeExtension, VariableDefinition, VariableValue,
-      VariablesDefinition, WhereClause, WherePredicate, WildcardSpecifier,
+      DefinitionTypePath, Directive, DirectiveDefinition, DirectiveExtension, DirectiveLocations,
+      Directives, Document, EnumTypeDefinition, EnumTypeExtension, EnumValue, EnumValueDefinition,
+      EnumValuesDefinition, ExecutableDefinitionName, ExecutableDefinitionTypeGenerics,
+      ExecutableDocument, ExtensionName, ExtensionTypeGenerics, Field, FieldDefinition,
+      FieldsDefinition, FloatValue, FragmentDefinition, FragmentSpread, ImplementInterfaces,
+      ImportDefinition, ImportList, InlineFragment, InputFieldsDefinition,
+      InputObjectTypeDefinition, InputObjectTypeExtension, InputValueDefinition, IntValue,
+      InterfaceTypeDefinition, InterfaceTypeExtension, ListType, ListValue, MapEntry, MapType,
+      MapValue, NamedSpecifier, NullValue, ObjectField, ObjectTypeDefinition, ObjectTypeExtension,
+      ObjectValue, OperationDefinition, Path, RootOperationTypeDefinition,
+      RootOperationTypesDefinition, ScalarTypeDefinition, ScalarTypeExtension, SchemaDefinition,
+      SchemaExtension, SelectionSet, SetType, SetValue, StringValue, TypeCondition, TypeGenerics,
+      TypePath, TypeSystemDocument, UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension,
+      VariableDefinition, VariableValue, VariablesDefinition, WhereClause, WherePredicate,
+      WildcardSpecifier,
     },
     generic::test_support::{
       parse_definition_type_generics, parse_executable_definition_type_generics,
@@ -497,6 +498,44 @@ fn an_extensions_target_is_a_path_where_a_definitions_name_is_not() {
   assert_eq!(node_text!(scalar.directives()), Some("@d".to_string()));
 }
 
+#[test]
+fn a_directive_definition_and_its_extension_reach_their_own_directives() {
+  // Draft §3.13 puts a directive definition's own run between its arguments and `repeatable`, so
+  // `directives()` must answer the run and not the `ArgumentsDefinition` in front of it. A
+  // directive extension's target is an `ExtensionName` behind its `@`, and its run is its only
+  // tail.
+  let parse = parse_document(
+    "directive @dd(y: Int) @k repeatable on FIELD\nextend directive @ns::dd @m(z: 1)",
+  );
+  assert!(
+    !parse.has_errors(),
+    "the directive fixture must parse clean"
+  );
+  let root = parse.syntax();
+
+  let definition: DirectiveDefinition = first(&root);
+  assert_eq!(
+    node_text!(definition.arguments_definition()),
+    Some("(y: Int)".to_string())
+  );
+  assert_eq!(node_text!(definition.directives()), Some("@k ".to_string()));
+
+  let extension: DirectiveExtension = first(&root);
+  assert!(DirectiveDefinition::cast_node(extension.syntax().clone()).is_none());
+  assert_eq!(
+    node_text!(extension.extension_name()),
+    Some("ns::dd ".to_string())
+  );
+  assert_eq!(
+    node_text!(extension.directives()),
+    Some("@m(z: 1)".to_string())
+  );
+
+  let document: Document = first(&root);
+  assert_eq!(texts!(document.directive_definitions()).len(), 1);
+  assert_eq!(texts!(document.directive_extensions()).len(), 1);
+}
+
 // ---------------------------------------------------------------------------------------------
 // generic
 // ---------------------------------------------------------------------------------------------
@@ -635,6 +674,7 @@ fn a_document_sorts_its_entries_by_kind() {
   assert!(texts!(document.interface_type_definitions()).is_empty());
   assert!(texts!(document.schema_definitions()).is_empty());
   assert!(texts!(document.schema_extensions()).is_empty());
+  assert!(texts!(document.directive_extensions()).is_empty());
 }
 
 // ===========================================================================================
@@ -669,7 +709,7 @@ impl Projection {
   }
 }
 
-/// Something a getter can project — one of the 78 wrappers, or a token.
+/// Something a getter can project — one of the 79 wrappers, or a token.
 ///
 /// The trait exists for its two associated functions: an element type knows whether its getters
 /// look at a node's *children* or at its *tokens*, and therefore what the kind-blind rival on that
@@ -711,12 +751,12 @@ impl Element for SyntaxToken {
   }
 }
 
-/// The node-side rival for [`Element::rival_one`], shared by all 78 wrappers.
+/// The node-side rival for [`Element::rival_one`], shared by all 79 wrappers.
 fn first_child_node(parent: &SyntaxNode) -> Projection {
   Projection::One(parent.children().next().map(|n| span_of(n.text_range())))
 }
 
-/// The node-side rival for [`Element::rival_many`], shared by all 78 wrappers.
+/// The node-side rival for [`Element::rival_many`], shared by all 79 wrappers.
 fn all_child_nodes(parent: &SyntaxNode) -> Projection {
   let spans: Vec<Span> = parent.children().map(|n| span_of(n.text_range())).collect();
   Projection::Many(spans.len(), spans.first().copied())
@@ -814,7 +854,7 @@ macro_rules! wrapper_table {
       )*
     }
 
-    /// Every wrapper whose cast accepts `node` — one row of the 78x78 cast matrix.
+    /// Every wrapper whose cast accepts `node` — one row of the 79x79 cast matrix.
     fn accepting_wrappers(node: &SyntaxNode) -> Vec<&'static str> {
       let mut out = Vec::new();
       $( if $ty::cast_node(node.clone()).is_some() { out.push(stringify!($ty)); } )*
@@ -936,8 +976,8 @@ wrapper_table! {
     opt input_fields_definition,
   }
   DirectiveDefinition {
-    tok_any description, opt definition_name, opt arguments_definition, opt directive_locations,
-    opt where_clause,
+    tok_any description, opt definition_name, opt arguments_definition, opt directives,
+    opt directive_locations, opt where_clause,
   }
   SchemaDefinition { tok_any description, opt directives, opt root_operation_types_definition }
   ScalarTypeExtension { opt extension_name, opt directives }
@@ -957,6 +997,7 @@ wrapper_table! {
     opt extension_name, opt directives, opt where_clause, opt input_fields_definition,
   }
   SchemaExtension { opt directives, opt root_operation_types_definition }
+  DirectiveExtension { opt extension_name, opt directives }
   DefinitionTypeParam {
     tok name, opt definition_type_path, opt list_type, opt set_type, opt map_type,
   }
@@ -979,6 +1020,7 @@ wrapper_table! {
     many directive_definitions, many schema_definitions, many scalar_type_extensions,
     many object_type_extensions, many interface_type_extensions, many union_type_extensions,
     many enum_type_extensions, many input_object_type_extensions, many schema_extensions,
+    many directive_extensions,
   }
   TypeSystemDocument {
     many import_definitions, many scalar_type_definitions, many object_type_definitions,
@@ -986,7 +1028,7 @@ wrapper_table! {
     many input_object_type_definitions, many directive_definitions, many schema_definitions,
     many scalar_type_extensions, many object_type_extensions, many interface_type_extensions,
     many union_type_extensions, many enum_type_extensions, many input_object_type_extensions,
-    many schema_extensions,
+    many schema_extensions, many directive_extensions,
   }
 }
 
@@ -1055,7 +1097,7 @@ impl Registry {
 
   /// Parse one source through all three roots and probe every tree.
   ///
-  /// All three, because `parse_document` reaches 76 of the 78 wrappers structurally:
+  /// All three, because `parse_document` reaches 77 of the 79 wrappers structurally:
   /// [`ExecutableDocument`] and [`TypeSystemDocument`] are *roots*, and a parse has one. Driving
   /// the other two over the same bytes is what gate 3 does for the same reason.
   fn sweep_source(&mut self, src: &str) {
@@ -1133,14 +1175,14 @@ fn corpus() -> Vec<(String, String)> {
 
 /// Sources this gate adds on top of the corpus, and what each one is for.
 ///
-/// The corpus reaches **every one of the 78 wrappers** on its own and calls all 297 getters, but 63
+/// The corpus reaches **every one of the 79 wrappers** on its own and calls all 302 getters, but 64
 /// of those getters had nothing to project from it: a getter is only exercised by a document that
 /// writes the shape it reaches for, and no corpus entry writes a float inside a set, a map on both
-/// halves of a map entry, a description on a scalar, or a `where` on an extension. These four are
-/// that complement and nothing else — they were written against the measured list in
-/// [`CORPUS_CANNOT_PROJECT`], which is what keeps them honest, and
-/// [`every_added_source_earns_its_place`] leaves each of them out in turn to check it is still the
-/// only thing in the sweep carrying what it carries.
+/// halves of a map entry, a description on a scalar, a `where` on an extension, or a directive
+/// definition's own directives. These five are that complement and nothing else — they were
+/// written against the measured list in [`CORPUS_CANNOT_PROJECT`], which is what keeps them
+/// honest, and [`every_added_source_earns_its_place`] leaves each of them out in turn to check it
+/// is still the only thing in the sweep carrying what it carries.
 ///
 /// They are fixtures rather than corpus entries on purpose: the corpus is shared with gates 1, 2, 3
 /// and 5, and a file added here would move gate 5's golden set for a reason that has nothing to do
@@ -1198,6 +1240,12 @@ const FIXTURES: &[(&str, &str)] = &[
      m: <Int => <Int => Int>> \
      }",
   ),
+  // A directive definition's own directives, between its arguments and `repeatable` (draft
+  // §3.13), and the `DIRECTIVE_DEFINITION` location they are applied at.
+  (
+    "a_directive_definition_with_its_own_directives",
+    "directive @dd(x: Int) @d(y: 1) repeatable on FIELD | DIRECTIVE_DEFINITION",
+  ),
 ];
 
 /// Every source this gate adds on top of the corpus, valid and malformed alike.
@@ -1252,9 +1300,9 @@ struct SourceGetter {
   target: String,
 }
 
-/// The ten files the 78 `ast_node!` invocations live in.
+/// The ten files the 79 `ast_node!` invocations live in.
 ///
-/// Ten and not the GraphQL twin's seven: this dialect puts the seven type-system extensions in
+/// Ten and not the GraphQL twin's seven: this dialect puts the eight type-system extensions in
 /// `extension.rs` and the generic machinery in `generic.rs`, and adds `import.rs` for a production
 /// GraphQL has no counterpart for at all.
 const AST_FILES: &[&str] = &[
@@ -1482,7 +1530,7 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 
 /// Getters whose name is not the plain snake of the kind they project, with that projection pinned.
 ///
-/// Twenty-one of 297, in two classes.
+/// Twenty-one of 302, in two classes.
 ///
 /// **Role-named, twenty.** Each names a position the grammar has and the kind space does not.
 /// Fourteen are `description`: divergence 12 removed GraphQL's `Description` node, so a description
@@ -1496,7 +1544,7 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 /// **Receiver-elided, one.** `Path::separators` projects `K::PathSeparator` and drops the word the
 /// receiver already says; `Path::path_separators` would stutter. It is here rather than in a rule
 /// because a rule that let any getter drop its wrapper's name as a prefix would be a rule invented
-/// for one getter, and it would weaken the check for the other 296.
+/// for one getter, and it would weaken the check for the other 301.
 ///
 /// Every entry carries its projection, so a getter re-aimed at another kind reds here rather than
 /// slipping through as a pinned exception.
@@ -1550,13 +1598,13 @@ fn the_probe_table_is_exactly_the_shipped_inventory() {
   // every comparison below vacuous, so the counts are pinned before they are used.
   assert_eq!(
     shipped.len(),
-    297,
-    "the wrapper sources should declare 297 getters"
+    302,
+    "the wrapper sources should declare 302 getters"
   );
   let shipped_wrappers: BTreeSet<&str> = shipped.iter().map(|g| g.wrapper.as_str()).collect();
-  assert_eq!(shipped_wrappers.len(), 78, "…over 78 wrappers");
-  assert_eq!(DECLARED.len(), 297, "the table declares 297 getters");
-  assert_eq!(TABLE_WRAPPERS.len(), 78, "…over 78 wrappers");
+  assert_eq!(shipped_wrappers.len(), 79, "…over 79 wrappers");
+  assert_eq!(DECLARED.len(), 302, "the table declares 302 getters");
+  assert_eq!(TABLE_WRAPPERS.len(), 79, "…over 79 wrappers");
 
   let table: BTreeSet<(&str, &str, &str)> = DECLARED.iter().copied().collect();
   assert_eq!(table.len(), DECLARED.len(), "the table repeats an entry");
@@ -1588,7 +1636,7 @@ fn every_getter_is_named_for_what_it_projects() {
   // The defect this catches is the one no other gate can see: a getter aimed at a **plausible
   // neighbour** — `interface_type_definitions: many ObjectTypeDefinition` — which compiles,
   // navigates, answers `Some`, round-trips and keeps every byte. Only the name disagrees with the
-  // kind, so the name is what has to be checked, for all 297 rather than for the handful a fixture
+  // kind, so the name is what has to be checked, for all 302 rather than for the handful a fixture
   // happens to count.
   let mut pinned: BTreeSet<(String, String, String, String)> = NAME_EXCEPTIONS
     .iter()
@@ -1653,17 +1701,18 @@ fn every_getter_is_named_for_what_it_projects() {
 ///
 /// The positive control for [`no_getter_reaches_a_name_by_counting_keywords`]. "This dialect has no
 /// positional getter" is a claim about an absence, and an absence is satisfied just as well by an
-/// inventory that lost its getters as by a grammar that never needed them — so the fifteen
+/// inventory that lost its getters as by a grammar that never needed them — so the sixteen
 /// positions where the twin *would* have counted are pinned by what they hold instead.
 ///
-/// Fifteen is the twin's fourteen plus one. GraphQL spells `type T` as two `K::Name` tokens under
-/// one parent and reaches the second by index, fourteen times over; here each of those is a
+/// Sixteen is the twin's fifteen plus one. GraphQL spells `type T` as two `K::Name` tokens under
+/// one parent and reaches the second by index, fifteen times over; here each of those is a
 /// [`DefinitionName`] or an [`ExtensionName`] node. The extra one is
 /// [`OperationDefinition`]: GraphQL wraps `query` in an `OperationType` **node**, which leaves the
 /// operation's own name as the first bare `K::Name` and reachable with a plain `tok`, while this
 /// dialect has no such node and puts the name in a [`DefinitionName`] instead.
 const NAME_NODE_CARRIERS: &[(&str, &str, &str)] = &[
   ("DirectiveDefinition", "definition_name", "DefinitionName"),
+  ("DirectiveExtension", "extension_name", "ExtensionName"),
   ("EnumTypeDefinition", "definition_name", "DefinitionName"),
   ("EnumTypeExtension", "extension_name", "ExtensionName"),
   (
@@ -1698,7 +1747,7 @@ const NAME_NODE_CARRIERS: &[(&str, &str, &str)] = &[
 
 #[test]
 fn no_getter_reaches_a_name_by_counting_keywords() {
-  // Task 10's ruling 2 in the GraphQL twin became fourteen `tok_nth 1 K::Name` and
+  // Task 10's ruling 2 in the GraphQL twin became fifteen `tok_nth 1 K::Name` and
   // `tok_nth 2 K::Name` getters, each counting past a definition's or an extension's keywords —
   // and the twin's gate 4 then had to assert that every one of those indices was right, because an
   // index correct for `type T` is wrong for `extend type T`. **This dialect has no such getter**,
@@ -1742,7 +1791,7 @@ fn no_getter_reaches_a_name_by_counting_keywords() {
     carriers, pinned,
     "the set of wrappers that name themselves through a node moved"
   );
-  assert_eq!(carriers.len(), 15);
+  assert_eq!(carriers.len(), 16);
 }
 
 #[test]
@@ -1754,7 +1803,7 @@ fn every_wrapper_casts_from_a_real_parse() {
      their kind being misspelled:{}",
     listed(reg.uncast())
   );
-  assert_eq!(reg.casts.len(), 78);
+  assert_eq!(reg.casts.len(), 79);
 }
 
 #[test]
@@ -1771,13 +1820,13 @@ fn every_getter_is_called_and_projects_something() {
      from a getter pointed at a kind that cannot occur:{}",
     listed(reg.unanswered())
   );
-  assert_eq!(reg.getters.len(), 297);
+  assert_eq!(reg.getters.len(), 302);
 }
 
 #[test]
 fn each_node_kind_casts_to_exactly_the_wrapper_that_names_it() {
   // The near-neighbour decline, made total. The shaped half above asserts it for the sharpest pairs
-  // by hand; this asserts it for every kind against all 78 wrappers at once, and it is the check a
+  // by hand; this asserts it for every kind against all 79 wrappers at once, and it is the check a
   // wrapper pointed at a *neighbouring* kind fails — that wrapper then accepts a node another
   // wrapper already answers for, and the row carries two names instead of one.
   let reg = sweep_everything();
@@ -1820,8 +1869,8 @@ fn each_node_kind_casts_to_exactly_the_wrapper_that_names_it() {
     "no Gap token occurred in the whole sweep, so the assertion above is about nothing"
   );
 
-  // 78 wrappers plus `Root` and `Error`; `Gap` is excluded by the assertion above.
-  assert_eq!(checked, 80);
+  // 79 wrappers plus `Root` and `Error`; `Gap` is excluded by the assertion above.
+  assert_eq!(checked, 81);
 }
 
 /// Every getter the shared corpus alone calls but never gives anything to project.
@@ -1831,16 +1880,17 @@ fn each_node_kind_casts_to_exactly_the_wrapper_that_names_it() {
 /// write a set of floats would make one fixture redundant, and nothing would say so —
 /// [`every_added_source_earns_its_place`] is the other half of that guard.
 ///
-/// Note what is *not* here. The corpus reaches all 78 wrappers and calls all 297 getters on its
+/// Note what is *not* here. The corpus reaches all 79 wrappers and calls all 302 getters on its
 /// own; every entry below is a getter with a node to run on and nothing in it to find, which is a
 /// statement about what GraphQLx the corpus writes rather than about what the typed layer can
 /// reach.
 ///
-/// The 63 cluster in three places, and all three are GraphQLx's own additions showing up as corpus
-/// gaps: 35 are a value kind in a value position (the corpus writes integers, strings and objects
-/// and little else, so `set`, `map`, floats, booleans, `null`, enums and variables are missing from
-/// most positions), 15 are a set type or a map type somewhere other than the top level, and 7 are a
-/// description on a definition the corpus never describes.
+/// 63 of the 64 cluster in three places, and all three are GraphQLx's own additions showing up as
+/// corpus gaps: 35 are a value kind in a value position (the corpus writes integers, strings and
+/// objects and little else, so `set`, `map`, floats, booleans, `null`, enums and variables are
+/// missing from most positions), 15 are a set type or a map type somewhere other than the top
+/// level, and 7 are a description on a definition the corpus never describes. The 64th is a
+/// directive definition's own directives, which no corpus entry writes.
 const CORPUS_CANNOT_PROJECT: &[(&str, &str)] = &[
   ("DefaultValue", "enum_value"),
   ("DefaultValue", "float_value"),
@@ -1853,6 +1903,7 @@ const CORPUS_CANNOT_PROJECT: &[(&str, &str)] = &[
   ("DefinitionTypeParam", "map_type"),
   ("DefinitionTypeParam", "set_type"),
   ("DirectiveDefinition", "description"),
+  ("DirectiveDefinition", "directives"),
   ("EnumTypeDefinition", "description"),
   ("InputObjectTypeDefinition", "description"),
   ("InputObjectTypeExtension", "where_clause"),
@@ -2045,12 +2096,12 @@ fn every_added_source_earns_its_place() {
      already have — either the corpus grew into their shape or they were never needed:{}",
     listed(freeloaders)
   );
-  assert_eq!(sources.len(), 12);
+  assert_eq!(sources.len(), 13);
 }
 
 #[test]
 fn a_hole_in_front_of_a_definitions_name_costs_the_whole_definition() {
-  // **This is why 14 of [`UNDISCRIMINATED`] cannot be closed, and it is measured rather than
+  // **This is why 15 of [`UNDISCRIMINATED`] cannot be closed, and it is measured rather than
   // asserted away.** Every SDL definition and every extension names itself through a node here, and
   // that node is always the first child — so `definition_name()` and "take the first child node"
   // are the same function on every tree the grammar builds. The one thing that would separate them
@@ -2064,7 +2115,7 @@ fn a_hole_in_front_of_a_definitions_name_costs_the_whole_definition() {
     !root
       .descendants()
       .any(|n| n.kind() == K::ObjectTypeDefinition),
-    "the definition survived, so a hole before its name is now reachable and 14 census entries \
+    "the definition survived, so a hole before its name is now reachable and 15 census entries \
      can be closed"
   );
   assert!(
@@ -2072,7 +2123,7 @@ fn a_hole_in_front_of_a_definitions_name_costs_the_whole_definition() {
     "the junk went somewhere other than an Error node"
   );
 
-  // The contrast, and the reason the census is 46 rather than 50: a hole **inside** a body keeps
+  // The contrast, and the reason the census is 47 rather than 51: a hole **inside** a body keeps
   // the enclosing node, and the `Error` then lands in a list wrapper where a kind-blind rival can
   // see it. `VariablesDefinition` is where that happens, which is what
   // [`RECOVERY_FIXTURES`] is built out of.
@@ -2105,15 +2156,15 @@ fn every_recovery_fixture_really_is_malformed() {
 
 /// The getters no tree this gate sweeps ever separates from a kind-blind rival, and why.
 ///
-/// 46 of 297. Every other getter is **measured** to answer differently, at least once, from a
+/// 47 of 302. Every other getter is **measured** to answer differently, at least once, from a
 /// getter of the same arity that ignored kinds entirely — the property that makes this sweep's
 /// fixtures worth anything: over `"{ a }"` a `cast::child` is indistinguishable from "take the
 /// first child", and a suite built out of fixtures like that reports full coverage of a layer it
 /// never tested.
 ///
-/// The 46 fall into four shapes, and none of them is a weak fixture:
+/// The 47 fall into four shapes, and none of them is a weak fixture:
 ///
-/// - **The wanted child is always the node's first, 28.** Every `definition_name`, every
+/// - **The wanted child is always the node's first, 29.** Every `definition_name`, every
 ///   `extension_name`, every `type_path` and every `path` opens its parent. See the finding below.
 /// - **The wanted token is always the node's first, 8.** An `Alias` is `name :`, an `Argument` is
 ///   `name : value`, a `DefinitionName` is `Name <A>`. "The first token" and "the `Name` token" are
@@ -2128,7 +2179,7 @@ fn every_recovery_fixture_really_is_malformed() {
 /// # The finding: this census is **larger** than the GraphQL twin's, and the design predicted the
 /// opposite
 ///
-/// GraphQL pins 24 of 204, 11.8%. This pins 46 of 297, 15.5% — more, absolutely and
+/// GraphQL pins 24 of 210, 11.4%. This pins 47 of 302, 15.6% — more, absolutely and
 /// proportionally. The design expected fewer, on the reasoning that divergences 1, 2, 10 and 11
 /// replace single-token positions with paths and generics lists, so nodes that held exactly one
 /// child over there hold structure here. **That reasoning has the direction backwards**, and the
@@ -2139,8 +2190,8 @@ fn every_recovery_fixture_really_is_malformed() {
 ///
 /// What actually drives the difference is the other half of the same divergence. GraphQL reads a
 /// definition's name with `tok_nth 1 K::Name`, and a positional getter is separable **by being
-/// positional**: index 1 is not "the first token", so it beats the rival on every tree. Fourteen
-/// getters over there are discriminated for exactly that reason. Here those fourteen are
+/// positional**: index 1 is not "the first token", so it beats the rival on every tree. Fifteen
+/// getters over there are discriminated for exactly that reason. Here those fifteen are
 /// [`DefinitionName`] and [`ExtensionName`] nodes, found by kind, sitting first — so the dialect
 /// traded a whole class of off-by-one defect (which
 /// [`no_getter_reaches_a_name_by_counting_keywords`] records as gone) for a class of blindness in
@@ -2157,6 +2208,7 @@ const UNDISCRIMINATED: &[(&str, &str)] = &[
   ("DefinitionTypePath", "path"),
   ("Directive", "type_path"),
   ("DirectiveDefinition", "definition_name"),
+  ("DirectiveExtension", "extension_name"),
   ("Directives", "directives"),
   ("EnumTypeDefinition", "definition_name"),
   ("EnumTypeExtension", "extension_name"),
@@ -2220,7 +2272,7 @@ fn every_getter_but_these_answers_differently_from_a_kind_blind_rival() {
   );
   assert_eq!(
     DECLARED.len() - undiscriminated.len(),
-    251,
-    "251 of the 297 getters are proved to beat a kind-blind rival"
+    255,
+    "255 of the 302 getters are proved to beat a kind-blind rival"
   );
 }

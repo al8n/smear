@@ -1,8 +1,11 @@
-//! The renderer's comparison data, held to what the build injects.
+//! The renderer's comparison data, held to what the build injects, and the spellings it writes for
+//! a deprecation.
 
 use std::{format, string::String, vec::Vec};
 
-use super::{super::parse, META_TYPES, SPECIFIED_DIRECTIVES, canonical_default, listed_twice};
+use super::{
+  super::parse, META_TYPES, SPECIFIED_DIRECTIVES, canonical_default, listed_twice, render,
+};
 use crate::{PackedType, Schema, builtin};
 
 /// The SDL spelling of a packed type reference.
@@ -101,7 +104,8 @@ fn a_default_compares_by_its_canonical_text() {
 }
 
 /// The meta-schema the door holds a response's meta types to is the one every build injects: kind,
-/// and fields in smear's order with their types and arguments.
+/// and fields in smear's order with their types and arguments. An argument's older spelling, where
+/// it has one, is the same type made nullable.
 #[test]
 fn the_meta_types_are_the_injected_ones() {
   let document = parse("type Query { ok: Int }").expect("the SDL parses");
@@ -145,6 +149,58 @@ fn the_meta_types_are_the_injected_ones() {
       })
       .collect();
     assert_eq!(fields, expected, "{name}");
+
+    for field in meta.fields {
+      for argument in field.args {
+        if let Some(older) = argument.older {
+          assert_eq!(
+            Some(older),
+            argument.ty.strip_suffix('!'),
+            "{name}.{}({})",
+            field.name,
+            argument.name
+          );
+        }
+      }
+    }
+  }
+}
+
+/// A deprecation reason is written in the state the response wrote it: a string as the `reason` it
+/// is, `null` as `null`, and one the query did not ask for as a bare `@deprecated` — which is how
+/// the definition's default comes to answer — on a field, an argument, an enum value and a
+/// directive alike.
+#[test]
+fn a_deprecation_reason_is_written_in_the_state_the_response_wrote_it() {
+  let sdl = render(
+    r#"{"__schema":{"queryType":{"name":"Query"},"directives":[
+      {"name":"old","locations":["FIELD"],"args":[],"isDeprecated":true}
+    ],"types":[
+      {"kind":"OBJECT","name":"Query","fields":[
+        {"name":"withText","args":[],"type":{"kind":"SCALAR","name":"Int"},
+         "isDeprecated":true,"deprecationReason":"Gone."},
+        {"name":"withNull","args":[],"type":{"kind":"SCALAR","name":"Int"},
+         "isDeprecated":true,"deprecationReason":null},
+        {"name":"withNone","args":[],"type":{"kind":"SCALAR","name":"Int"},"isDeprecated":true},
+        {"name":"argument","args":[
+          {"name":"by","type":{"kind":"SCALAR","name":"Int"},"defaultValue":null,
+           "isDeprecated":true}
+        ],"type":{"kind":"SCALAR","name":"Int"}}
+      ]},
+      {"kind":"ENUM","name":"Verdict","enumValues":[{"name":"NO","isDeprecated":true}]}
+    ]}}"#,
+  )
+  .expect("a document");
+
+  for line in [
+    "  withText: Int @deprecated(reason: \"Gone.\")\n",
+    "  withNull: Int @deprecated(reason: null)\n",
+    "  withNone: Int @deprecated\n",
+    "  argument(by: Int @deprecated): Int\n",
+    "  NO @deprecated\n",
+    "directive @old @deprecated on FIELD\n",
+  ] {
+    assert!(sdl.contains(line), "{line:?} is not in\n{sdl}");
   }
 }
 

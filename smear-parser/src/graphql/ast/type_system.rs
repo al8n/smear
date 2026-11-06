@@ -154,12 +154,17 @@ pub type InputObjectTypeExtension<S, Ty = Type<Name<S>>> =
   >;
 
 /// Directive definition
-/// (`directive '@' Name ArgumentsDefinition? repeatable? 'on' DirectiveLocations`).
+/// (`directive '@' Name ArgumentsDefinition? Directives? repeatable? 'on' DirectiveLocations`).
 pub type DirectiveDefinition<S, Ty = Type<Name<S>>> = crate::type_system::DirectiveDefinition<
   Name<S>,
   ArgumentsDefinition<S, Ty>,
+  ConstDirectives<S>,
   DirectiveLocations<Location>,
 >;
+
+/// Directive extension (`extend directive '@' Name Directives`).
+pub type DirectiveExtension<S> =
+  crate::type_system::DirectiveExtension<Name<S>, ConstDirectives<S>>;
 
 /// Root operation type definition (`OperationType ':' Name`).
 pub type RootOperationTypeDefinition<S> =
@@ -257,9 +262,12 @@ pub type TypeSystemDefinition<S, Ty = Type<Name<S>>> = crate::type_system::TypeS
 pub type DescribedTypeSystemDefinition<S, Ty = Type<Name<S>>> =
   Described<TypeSystemDefinition<S, Ty>, S>;
 
-/// Type-system extension: a named type or schema extension.
-pub type TypeSystemExtension<S, Ty = Type<Name<S>>> =
-  crate::type_system::TypeSystemExtension<TypeExtension<S, Ty>, SchemaExtension<S>>;
+/// Type-system extension: a named type, directive, or schema extension.
+pub type TypeSystemExtension<S, Ty = Type<Name<S>>> = crate::type_system::TypeSystemExtension<
+  TypeExtension<S, Ty>,
+  DirectiveExtension<S>,
+  SchemaExtension<S>,
+>;
 
 /// A type-system definition (with optional description) or extension.
 pub type TypeSystemDefinitionOrExtension<S, Ty = Type<Name<S>>> =

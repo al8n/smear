@@ -1,6 +1,6 @@
 {
  "provenance": {
-  "graphql": "16.11.0",
+  "graphql": "17.1.0",
   "generator": "introspectionFromSchema(buildSchema(sdl), options)",
   "options": {
    "descriptions": true,
@@ -8,16 +8,18 @@
    "directiveIsRepeatable": true,
    "schemaDescription": true,
    "inputValueDeprecation": true,
-   "oneOf": true
+   "experimentalDirectiveDeprecation": true,
+   "oneOf": true,
+   "typeDepth": 9
   },
   "sdl": "smear/tests/fixtures/schemas/introspection_defaults.graphql",
-  "sdlSha256": "a1e1b62423dc61543f98687e4d2fa0051ef3b185655fe10b3d5c4826a39ed879",
+  "sdlSha256": "f30d2c11bb454c1f68429e22e2f2abe8c6aac2d2d68b0f77840fd62989ac2d17",
   "query": "smear/tests/fixtures/executables/introspection_query.graphql",
-  "querySha256": "5734100704c67c9132dcb506b454d99a042aed6b6b77faffa0b8e44d06d1a663"
+  "querySha256": "961143d934d6b10de7bfc594b678ac9a31b5873a922585297cea81d9bf6979ae"
  },
  "data": {
   "__schema": {
-   "description": "Defaults whose printed literal is not their coerced value.\n\ngraphql-js reports a default as `print(astFromValue(valueFromAST(literal, type), type))`, and\nsmear as the literal the document wrote, printed. Every default below is one of the cases that\nmakes the two differ, and the introspection parity differential reads them both ways.",
+   "description": "Defaults spelled where two printers could part.\n\ngraphql-js reports a default as its own `print` of the literal the document wrote, and smear as\nthe same literal printed in graphql-js 16's form. Both write a number and an enum value as it was\nspelled and an inline string as its value, quoted, so those agree to the byte; an input object is\nthe shape here the two forms print apart. The introspection parity differential reads each default\nas the constant value it spells.",
    "queryType": {
     "name": "Query",
     "kind": "OBJECT"
@@ -34,7 +36,7 @@
      "fields": [
       {
        "name": "list",
-       "description": "A single item where a list is expected, which coercion wraps — at every depth.",
+       "description": "A single item where a list is expected, at every depth, printed as written.",
        "args": [
         {
          "name": "item",
@@ -43,12 +45,12 @@
           "kind": "LIST",
           "name": null,
           "ofType": {
-           "kind": "SCALAR",
            "name": "Int",
+           "kind": "SCALAR",
            "ofType": null
           }
          },
-         "defaultValue": "[7]",
+         "defaultValue": "7",
          "isDeprecated": false,
          "deprecationReason": null
         },
@@ -59,20 +61,20 @@
           "kind": "LIST",
           "name": null,
           "ofType": {
-           "kind": "LIST",
            "name": null,
+           "kind": "LIST",
            "ofType": {
-            "kind": "NON_NULL",
             "name": null,
+            "kind": "NON_NULL",
             "ofType": {
-             "kind": "SCALAR",
              "name": "String",
+             "kind": "SCALAR",
              "ofType": null
             }
            }
           }
          },
-         "defaultValue": "[[\"x\"]]",
+         "defaultValue": "\"x\"",
          "isDeprecated": false,
          "deprecationReason": null
         },
@@ -83,16 +85,16 @@
           "kind": "LIST",
           "name": null,
           "ofType": {
-           "kind": "NON_NULL",
            "name": null,
+           "kind": "NON_NULL",
            "ofType": {
-            "kind": "ENUM",
             "name": "Colour",
+            "kind": "ENUM",
             "ofType": null
            }
           }
          },
-         "defaultValue": "[RED]",
+         "defaultValue": "RED",
          "isDeprecated": false,
          "deprecationReason": null
         }
@@ -107,7 +109,7 @@
       },
       {
        "name": "float",
-       "description": "A float with a fraction part of zero or an exponent, which coercion reads as a number.",
+       "description": "A float with a fraction part of zero or an exponent, compared by its spelling.",
        "args": [
         {
          "name": "whole",
@@ -117,7 +119,7 @@
           "name": "Float",
           "ofType": null
          },
-         "defaultValue": "1",
+         "defaultValue": "1.0",
          "isDeprecated": false,
          "deprecationReason": null
         },
@@ -129,7 +131,7 @@
           "name": "Float",
           "ofType": null
          },
-         "defaultValue": "1500",
+         "defaultValue": "1.5e3",
          "isDeprecated": false,
          "deprecationReason": null
         },
@@ -141,7 +143,7 @@
           "name": "Float",
           "ofType": null
          },
-         "defaultValue": "-0.0025",
+         "defaultValue": "-0.25E-2",
          "isDeprecated": false,
          "deprecationReason": null
         },
@@ -168,7 +170,7 @@
       },
       {
        "name": "id",
-       "description": "An ID spelled as a string of digits, which an integer-valued ID prints as.",
+       "description": "An ID spelled as a string of digits, as a string, and as an integer.",
        "args": [
         {
          "name": "digits",
@@ -178,7 +180,7 @@
           "name": "ID",
           "ofType": null
          },
-         "defaultValue": "4",
+         "defaultValue": "\"4\"",
          "isDeprecated": false,
          "deprecationReason": null
         },
@@ -227,7 +229,7 @@
           "name": "Range",
           "ofType": null
          },
-         "defaultValue": "{min: 1, max: 9, step: 1}",
+         "defaultValue": "{ max: 9, min: 1 }",
          "isDeprecated": false,
          "deprecationReason": null
         }
@@ -242,7 +244,7 @@
       },
       {
        "name": "raw",
-       "description": "A custom scalar, whose literal coercion is untyped: an enum value reads as its name.",
+       "description": "A custom scalar given an enum value.",
        "args": [
         {
          "name": "value",
@@ -252,7 +254,7 @@
           "name": "Raw",
           "ofType": null
          },
-         "defaultValue": "\"AS_WRITTEN\"",
+         "defaultValue": "AS_WRITTEN",
          "isDeprecated": false,
          "deprecationReason": null
         }
@@ -444,14 +446,14 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "LIST",
          "name": null,
+         "kind": "LIST",
          "ofType": {
-          "kind": "NON_NULL",
           "name": null,
+          "kind": "NON_NULL",
           "ofType": {
-           "kind": "OBJECT",
            "name": "__Type",
+           "kind": "OBJECT",
            "ofType": null
           }
          }
@@ -468,8 +470,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "OBJECT",
          "name": "__Type",
+         "kind": "OBJECT",
          "ofType": null
         }
        },
@@ -503,19 +505,36 @@
       {
        "name": "directives",
        "description": "A list of all directives supported by this server.",
-       "args": [],
+       "args": [
+        {
+         "name": "includeDeprecated",
+         "description": null,
+         "type": {
+          "kind": "NON_NULL",
+          "name": null,
+          "ofType": {
+           "name": "Boolean",
+           "kind": "SCALAR",
+           "ofType": null
+          }
+         },
+         "defaultValue": "false",
+         "isDeprecated": false,
+         "deprecationReason": null
+        }
+       ],
        "type": {
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "LIST",
          "name": null,
+         "kind": "LIST",
          "ofType": {
-          "kind": "NON_NULL",
           "name": null,
+          "kind": "NON_NULL",
           "ofType": {
-           "kind": "OBJECT",
            "name": "__Directive",
+           "kind": "OBJECT",
            "ofType": null
           }
          }
@@ -545,8 +564,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "ENUM",
          "name": "__TypeKind",
+         "kind": "ENUM",
          "ofType": null
         }
        },
@@ -597,9 +616,13 @@
          "name": "includeDeprecated",
          "description": null,
          "type": {
-          "kind": "SCALAR",
-          "name": "Boolean",
-          "ofType": null
+          "kind": "NON_NULL",
+          "name": null,
+          "ofType": {
+           "name": "Boolean",
+           "kind": "SCALAR",
+           "ofType": null
+          }
          },
          "defaultValue": "false",
          "isDeprecated": false,
@@ -610,11 +633,11 @@
         "kind": "LIST",
         "name": null,
         "ofType": {
-         "kind": "NON_NULL",
          "name": null,
+         "kind": "NON_NULL",
          "ofType": {
-          "kind": "OBJECT",
           "name": "__Field",
+          "kind": "OBJECT",
           "ofType": null
          }
         }
@@ -630,11 +653,11 @@
         "kind": "LIST",
         "name": null,
         "ofType": {
-         "kind": "NON_NULL",
          "name": null,
+         "kind": "NON_NULL",
          "ofType": {
-          "kind": "OBJECT",
           "name": "__Type",
+          "kind": "OBJECT",
           "ofType": null
          }
         }
@@ -650,11 +673,11 @@
         "kind": "LIST",
         "name": null,
         "ofType": {
-         "kind": "NON_NULL",
          "name": null,
+         "kind": "NON_NULL",
          "ofType": {
-          "kind": "OBJECT",
           "name": "__Type",
+          "kind": "OBJECT",
           "ofType": null
          }
         }
@@ -670,9 +693,13 @@
          "name": "includeDeprecated",
          "description": null,
          "type": {
-          "kind": "SCALAR",
-          "name": "Boolean",
-          "ofType": null
+          "kind": "NON_NULL",
+          "name": null,
+          "ofType": {
+           "name": "Boolean",
+           "kind": "SCALAR",
+           "ofType": null
+          }
          },
          "defaultValue": "false",
          "isDeprecated": false,
@@ -683,11 +710,11 @@
         "kind": "LIST",
         "name": null,
         "ofType": {
-         "kind": "NON_NULL",
          "name": null,
+         "kind": "NON_NULL",
          "ofType": {
-          "kind": "OBJECT",
           "name": "__EnumValue",
+          "kind": "OBJECT",
           "ofType": null
          }
         }
@@ -703,9 +730,13 @@
          "name": "includeDeprecated",
          "description": null,
          "type": {
-          "kind": "SCALAR",
-          "name": "Boolean",
-          "ofType": null
+          "kind": "NON_NULL",
+          "name": null,
+          "ofType": {
+           "name": "Boolean",
+           "kind": "SCALAR",
+           "ofType": null
+          }
          },
          "defaultValue": "false",
          "isDeprecated": false,
@@ -716,11 +747,11 @@
         "kind": "LIST",
         "name": null,
         "ofType": {
-         "kind": "NON_NULL",
          "name": null,
+         "kind": "NON_NULL",
          "ofType": {
-          "kind": "OBJECT",
           "name": "__InputValue",
+          "kind": "OBJECT",
           "ofType": null
          }
         }
@@ -834,8 +865,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "SCALAR",
          "name": "String",
+         "kind": "SCALAR",
          "ofType": null
         }
        },
@@ -862,9 +893,13 @@
          "name": "includeDeprecated",
          "description": null,
          "type": {
-          "kind": "SCALAR",
-          "name": "Boolean",
-          "ofType": null
+          "kind": "NON_NULL",
+          "name": null,
+          "ofType": {
+           "name": "Boolean",
+           "kind": "SCALAR",
+           "ofType": null
+          }
          },
          "defaultValue": "false",
          "isDeprecated": false,
@@ -875,14 +910,14 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "LIST",
          "name": null,
+         "kind": "LIST",
          "ofType": {
-          "kind": "NON_NULL",
           "name": null,
+          "kind": "NON_NULL",
           "ofType": {
-           "kind": "OBJECT",
            "name": "__InputValue",
+           "kind": "OBJECT",
            "ofType": null
           }
          }
@@ -899,8 +934,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "OBJECT",
          "name": "__Type",
+         "kind": "OBJECT",
          "ofType": null
         }
        },
@@ -915,8 +950,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "SCALAR",
          "name": "Boolean",
+         "kind": "SCALAR",
          "ofType": null
         }
        },
@@ -956,8 +991,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "SCALAR",
          "name": "String",
+         "kind": "SCALAR",
          "ofType": null
         }
        },
@@ -984,8 +1019,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "OBJECT",
          "name": "__Type",
+         "kind": "OBJECT",
          "ofType": null
         }
        },
@@ -1012,8 +1047,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "SCALAR",
          "name": "Boolean",
+         "kind": "SCALAR",
          "ofType": null
         }
        },
@@ -1053,8 +1088,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "SCALAR",
          "name": "String",
+         "kind": "SCALAR",
          "ofType": null
         }
        },
@@ -1081,8 +1116,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "SCALAR",
          "name": "Boolean",
+         "kind": "SCALAR",
          "ofType": null
         }
        },
@@ -1122,8 +1157,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "SCALAR",
          "name": "String",
+         "kind": "SCALAR",
          "ofType": null
         }
        },
@@ -1150,8 +1185,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "SCALAR",
          "name": "Boolean",
+         "kind": "SCALAR",
          "ofType": null
         }
        },
@@ -1166,14 +1201,14 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "LIST",
          "name": null,
+         "kind": "LIST",
          "ofType": {
-          "kind": "NON_NULL",
           "name": null,
+          "kind": "NON_NULL",
           "ofType": {
-           "kind": "ENUM",
            "name": "__DirectiveLocation",
+           "kind": "ENUM",
            "ofType": null
           }
          }
@@ -1190,9 +1225,13 @@
          "name": "includeDeprecated",
          "description": null,
          "type": {
-          "kind": "SCALAR",
-          "name": "Boolean",
-          "ofType": null
+          "kind": "NON_NULL",
+          "name": null,
+          "ofType": {
+           "name": "Boolean",
+           "kind": "SCALAR",
+           "ofType": null
+          }
          },
          "defaultValue": "false",
          "isDeprecated": false,
@@ -1203,18 +1242,46 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "LIST",
          "name": null,
+         "kind": "LIST",
          "ofType": {
-          "kind": "NON_NULL",
           "name": null,
+          "kind": "NON_NULL",
           "ofType": {
-           "kind": "OBJECT",
            "name": "__InputValue",
+           "kind": "OBJECT",
            "ofType": null
           }
          }
         }
+       },
+       "isDeprecated": false,
+       "deprecationReason": null
+      },
+      {
+       "name": "isDeprecated",
+       "description": null,
+       "args": [],
+       "type": {
+        "kind": "NON_NULL",
+        "name": null,
+        "ofType": {
+         "name": "Boolean",
+         "kind": "SCALAR",
+         "ofType": null
+        }
+       },
+       "isDeprecated": false,
+       "deprecationReason": null
+      },
+      {
+       "name": "deprecationReason",
+       "description": null,
+       "args": [],
+       "type": {
+        "kind": "SCALAR",
+        "name": "String",
+        "ofType": null
        },
        "isDeprecated": false,
        "deprecationReason": null
@@ -1279,7 +1346,13 @@
       },
       {
        "name": "VARIABLE_DEFINITION",
-       "description": "Location adjacent to a variable definition.",
+       "description": "Location adjacent to an operation variable definition.",
+       "isDeprecated": false,
+       "deprecationReason": null
+      },
+      {
+       "name": "FRAGMENT_VARIABLE_DEFINITION",
+       "description": "Location adjacent to a fragment variable definition.",
        "isDeprecated": false,
        "deprecationReason": null
       },
@@ -1348,6 +1421,12 @@
        "description": "Location adjacent to an input object field definition.",
        "isDeprecated": false,
        "deprecationReason": null
+      },
+      {
+       "name": "DIRECTIVE_DEFINITION",
+       "description": "Location adjacent to a directive definition.",
+       "isDeprecated": false,
+       "deprecationReason": null
       }
      ],
      "possibleTypes": null
@@ -1358,6 +1437,8 @@
      "name": "include",
      "description": "Directs the executor to include this field or fragment only when the `if` argument is true.",
      "isRepeatable": false,
+     "isDeprecated": false,
+     "deprecationReason": null,
      "locations": [
       "FIELD",
       "FRAGMENT_SPREAD",
@@ -1371,8 +1452,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "SCALAR",
          "name": "Boolean",
+         "kind": "SCALAR",
          "ofType": null
         }
        },
@@ -1386,6 +1467,8 @@
      "name": "skip",
      "description": "Directs the executor to skip this field or fragment when the `if` argument is true.",
      "isRepeatable": false,
+     "isDeprecated": false,
+     "deprecationReason": null,
      "locations": [
       "FIELD",
       "FRAGMENT_SPREAD",
@@ -1399,8 +1482,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "SCALAR",
          "name": "Boolean",
+         "kind": "SCALAR",
          "ofType": null
         }
        },
@@ -1414,20 +1497,27 @@
      "name": "deprecated",
      "description": "Marks an element of a GraphQL schema as no longer supported.",
      "isRepeatable": false,
+     "isDeprecated": false,
+     "deprecationReason": null,
      "locations": [
       "FIELD_DEFINITION",
       "ARGUMENT_DEFINITION",
       "INPUT_FIELD_DEFINITION",
-      "ENUM_VALUE"
+      "ENUM_VALUE",
+      "DIRECTIVE_DEFINITION"
      ],
      "args": [
       {
        "name": "reason",
        "description": "Explains why this element was deprecated, usually also including a suggestion for how to access supported similar data. Formatted using the Markdown syntax, as specified by [CommonMark](https://commonmark.org/).",
        "type": {
-        "kind": "SCALAR",
-        "name": "String",
-        "ofType": null
+        "kind": "NON_NULL",
+        "name": null,
+        "ofType": {
+         "name": "String",
+         "kind": "SCALAR",
+         "ofType": null
+        }
        },
        "defaultValue": "\"No longer supported\"",
        "isDeprecated": false,
@@ -1439,6 +1529,8 @@
      "name": "specifiedBy",
      "description": "Exposes a URL that specifies the behavior of this scalar.",
      "isRepeatable": false,
+     "isDeprecated": false,
+     "deprecationReason": null,
      "locations": [
       "SCALAR"
      ],
@@ -1450,8 +1542,8 @@
         "kind": "NON_NULL",
         "name": null,
         "ofType": {
-         "kind": "SCALAR",
          "name": "String",
+         "kind": "SCALAR",
          "ofType": null
         }
        },
@@ -1465,6 +1557,8 @@
      "name": "oneOf",
      "description": "Indicates exactly one field must be supplied and this field must not be `null`.",
      "isRepeatable": false,
+     "isDeprecated": false,
+     "deprecationReason": null,
      "locations": [
       "INPUT_OBJECT"
      ],

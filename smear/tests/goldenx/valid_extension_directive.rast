@@ -1,0 +1,19 @@
+Root@0..23
+  Document@0..23
+    DirectiveExtension@0..23
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..16 "directive"
+      Space@16..17 " "
+      At@17..18 "@"
+      ExtensionName@18..20
+        Path@18..20
+          Name@18..19 "d"
+          Space@19..20 " "
+      Directives@20..23
+        Directive@20..23
+          At@20..21 "@"
+          TypePath@21..23
+            Path@21..23
+              Name@21..22 "k"
+              Newline@22..23 "\n"

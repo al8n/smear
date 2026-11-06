@@ -1296,23 +1296,33 @@ jobs:
   # `validator-oracle` job above records. The pin is the `v16.11.0` tag's commit, and
   # `UPSTREAM_COMMIT` in the test file carries the same SHA — bumping one without the other is
   # what the drift gate exists to catch.
+  #
+  # A SECOND PIN, `v17.1.0`'s commit as npm records it for that release, is the introspection
+  # query's. `proto_introspection.rs::the_introspection_query_is_graphql_jss_own` re-derives the
+  # committed `introspection_query.graphql` from that release's `getIntrospectionQuery.ts` through
+  # `SMEAR_GRAPHQL_JS_17`, because the goldens `introspection_parity` compares against are
+  # graphql-js 17.1.0's answers to it; the two oracles above stay on 16.11.0 until they move
+  # together.
   proto-oracle:
     name: proto-oracle
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
-    - name: Fetch graphql-js at the pinned oracle release
+    - name: Fetch graphql-js at the pinned oracle releases
       run: |
         mkdir -p "$RUNNER_TEMP/graphql-js"
         curl -sSfL https://github.com/graphql/graphql-js/archive/c18e9f6aada9ae086ddf836e4d822cf1426f3868.tar.gz \
           | tar -xz -C "$RUNNER_TEMP/graphql-js" --strip-components=1
+        mkdir -p "$RUNNER_TEMP/graphql-js-17"
+        curl -sSfL https://github.com/graphql/graphql-js/archive/a58e1fb9c38e3483ee7ac9380e11cd1715ebe5e6.tar.gz \
+          | tar -xz -C "$RUNNER_TEMP/graphql-js-17" --strip-components=1
         # Fail here, loudly, rather than let a drift gate take its unset-variable branch and
         # report a green run over a lane that fetched nothing. One `test -f` per ported upstream
         # file, because a tarball that no longer carries one of them is exactly the case the
         # unset-variable branch would swallow.
         test -f "$RUNNER_TEMP/graphql-js/src/execution/__tests__/nonnull-test.ts"
         test -f "$RUNNER_TEMP/graphql-js/src/execution/__tests__/mutations-test.ts"
-        test -f "$RUNNER_TEMP/graphql-js/src/utilities/getIntrospectionQuery.ts"
+        test -f "$RUNNER_TEMP/graphql-js-17/src/utilities/getIntrospectionQuery.ts"
     - name: Install Rust
       run: rustup update stable --no-self-update && rustup default stable
     - name: Cache cargo build and registry
@@ -1328,12 +1338,13 @@ jobs:
     - name: cargo test --test proto_nonnull_oracle --test proto_mutation_oracle --test proto_execute --test proto_introspection --test introspection_parity
       env:
         SMEAR_GRAPHQL_JS: ${{ runner.temp }}/graphql-js
+        SMEAR_GRAPHQL_JS_17: ${{ runner.temp }}/graphql-js-17
       # `--nocapture` because the counts are the artifact: how many cases reached a comparison, how
       # many error entries, paths and locations were compared, and how many anchors were verified
       # against upstream. A green tick alone would not say whether the oracle compared 29 entries
       # or none. `proto_introspection`'s budget record is the same kind of artifact: what graphql-js's
       # full introspection query costs over GitHub's and GitLab's schemas, against the defaults.
-      # `introspection_parity` compares the executor's answer with graphql-js 16.11.0's
+      # `introspection_parity` compares the executor's answer with graphql-js 17.1.0's
       # `introspectionFromSchema` for the same SDL, read from the goldens committed under
       # `smear/tests/oracle/graphql-js-introspection/` (so it needs neither node nor
       # `SMEAR_GRAPHQL_JS`), and prints which of its eight recorded differences fired per schema.

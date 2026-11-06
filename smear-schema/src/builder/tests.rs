@@ -657,16 +657,16 @@ fn a_refused_possible_table_is_a_typed_refusal() {
 /// The built-ins' share of the text arena is reserved exactly, which is what makes it one
 /// allocation on every build — and the share itself is a constant, recorded here.
 ///
-/// 5 103 bytes: graphql-js's descriptions of the eight introspection types, the five scalars and
-/// the five specified directives, at every element that has one, plus the six defaults they print
-/// — `false` five times and `"No longer supported"` once. A walk over the parsed built-ins derives
+/// 5 152 bytes: graphql-js's descriptions of the eight introspection types, the five scalars and
+/// the five specified directives, at every element that has one, plus the seven defaults they print
+/// — `false` six times and `"No longer supported"` once. A walk over the parsed built-ins derives
 /// it; injecting them writes it; the two have to be the same number, and the reservation has to be
 /// that number and no more, or a warm build pays a growth or a shrink it does not need.
 #[test]
 fn the_built_in_text_reservation_is_exact() {
   let reserved = BuiltIns::parse().text_bytes;
   assert_eq!(
-    reserved, 5_103,
+    reserved, 5_152,
     "the built-in SDL's text changed size; if that is intended, record the new number here and in \
      the allocation gate's ceiling note"
   );
@@ -772,6 +772,31 @@ fn a_refused_text_arena_is_a_typed_refusal() {
     std::vec![SchemaErrorKind::TooManyInternedBytes],
     "{errors}"
   );
+}
+
+/// The reason every bare `@deprecated` takes is written into the arena once, and only by a build
+/// that has one: the first usage adds the reason's bytes, every later one adds nothing, and a build
+/// with none adds nothing at all.
+#[test]
+fn a_bare_reason_is_written_once_and_only_when_a_usage_asks_for_it() {
+  const DEFINITION: &str =
+    "directive @deprecated(reason: String = \"Custom\") on FIELD_DEFINITION | ENUM_VALUE\n";
+  let arena = |sdl: &str| {
+    Schema::build(&parse(&std::format!("{DEFINITION}{sdl}")))
+      .expect("a schema")
+      .text
+      .len()
+  };
+  let none = arena("type Query { a: Int b: Int } enum E { X }");
+  let one = arena("type Query { a: Int @deprecated b: Int } enum E { X }");
+  let three =
+    arena("type Query { a: Int @deprecated b: Int @deprecated } enum E { X @deprecated }");
+  assert_eq!(
+    one,
+    none + "Custom".len(),
+    "the first bare usage writes the reason"
+  );
+  assert_eq!(three, one, "every later one shares it");
 }
 
 /// Every declaration-order table is a permutation of each group it covers, over a schema with

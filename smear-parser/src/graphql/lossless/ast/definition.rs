@@ -314,6 +314,8 @@ ast_node!(
     name: tok_nth 1 K::Name,
     /// The directive's argument definitions, if it declares any.
     arguments_definition: opt ArgumentsDefinition,
+    /// The directives applied to the definition itself, if it was given any.
+    directives: opt Directives,
     /// The locations the directive may be applied at.
     directive_locations: opt DirectiveLocations,
   }

@@ -1,18 +1,19 @@
-//! Typed wrappers over the seven type-system extension kinds and the two document roots.
+//! Typed wrappers over the eight type-system extension kinds and the two document roots.
 //!
 //! # An extension's name is its *third* `Name`, not its second
 //!
 //! `extend`, the shape keyword and the extended type's name are three [`Name`](K::Name) tokens
 //! under one node — the `extend` lands inside its extension, not beside it, because the
 //! production is a retro-wrap around a mark minted before it. So every `name` getter here is
-//! `tok_nth 2` where `ast/definition.rs`'s are `tok_nth 1`. [`SchemaExtension`] takes no `name`
-//! getter at all, a schema having nothing to be called.
+//! `tok_nth 2` where `ast/definition.rs`'s are `tok_nth 1`. [`DirectiveExtension`]'s is too: the
+//! `@` before its name is an [`At`](K::At) token, not a `Name`. [`SchemaExtension`] takes no
+//! `name` getter at all, a schema having nothing to be called.
 //!
 //! # A document sorts its definitions by kind
 //!
 //! `apollo-parser` gives [`Document`] one `definitions()` over a generated `Definition` union
 //! enum. This layer has no union, so a document exposes one iterator per definition kind —
-//! seventeen for the mixed root, fifteen for the SDL-only one. Complete and checkable, but it
+//! eighteen for the mixed root, sixteen for the SDL-only one. Complete and checkable, but it
 //! loses document order **across** kinds; a formatter walks
 //! [`syntax`](Document::syntax)`().children()` instead. See `ast/value.rs`'s module docs for the
 //! same ruling and the same Phase B answer.
@@ -131,6 +132,19 @@ ast_node!(
 
 ast_node!(
   lang = crate::graphql::kinds::GraphQLLang;
+  /// A directive extension, `extend directive @d @k`.
+  ///
+  /// Like [`ScalarTypeExtension`], it has one tail, and its directives are mandatory.
+  DirectiveExtension => K::DirectiveExtension {
+    /// The extended directive's name — the third `Name`, after `extend` and `directive`.
+    name: tok_nth 2 K::Name,
+    /// The directives the extension adds.
+    directives: opt Directives,
+  }
+);
+
+ast_node!(
+  lang = crate::graphql::kinds::GraphQLLang;
   /// A mixed executable-plus-type-system document — what
   /// [`parse_document`](crate::graphql::lossless::parse_document) builds.
   Document => K::Document {
@@ -168,6 +182,8 @@ ast_node!(
     input_object_type_extensions: many InputObjectTypeExtension,
     /// Every schema extension in the document, in order.
     schema_extensions: many SchemaExtension,
+    /// Every directive extension in the document, in order.
+    directive_extensions: many DirectiveExtension,
   }
 );
 
@@ -211,5 +227,7 @@ ast_node!(
     input_object_type_extensions: many InputObjectTypeExtension,
     /// Every schema extension in the document, in order.
     schema_extensions: many SchemaExtension,
+    /// Every directive extension in the document, in order.
+    directive_extensions: many DirectiveExtension,
   }
 );

@@ -1,4 +1,4 @@
-//! Document-level productions: the seven type-system extensions, the two document roots, and
+//! Document-level productions: the eight type-system extensions, the two document roots, and
 //! the dispatchers that choose between everything this suite can parse.
 //!
 //! The conventions are `value.rs`'s and are not repeated here — the two kind spaces, the
@@ -50,7 +50,7 @@
 //! # Divergences from `apollo-parser`, decided rather than inherited
 //!
 //! `apollo-parser`'s `grammar/document.rs` and `grammar/extensions.rs` agree on the dispatch
-//! and on all seven extension shapes. They differ in three places:
+//! and on the seven type and schema extension shapes. They differ in three places:
 //!
 //! - **An extension with no body is reported.** apollo accepts `extend type T` (its optional
 //!   components are each independently optional); `syntactic/`'s `extension.rs` errors on every
@@ -86,8 +86,8 @@ use super::{
   recover,
   recover::{
     BLOCK_EXTENSION_TAIL_HEADS, DEFINITION_HEADS, DESCRIBED_DEFINITION_HEADS,
-    OBJECT_EXTENSION_TAIL_HEADS, SCALAR_EXTENSION_TAIL_HEADS, TYPE_EXTENSION_HEADS,
-    TYPE_SYSTEM_DEFINITION_HEADS, UNION_EXTENSION_TAIL_HEADS,
+    DIRECTIVE_EXTENSION_TAIL_HEADS, OBJECT_EXTENSION_TAIL_HEADS, SCALAR_EXTENSION_TAIL_HEADS,
+    TYPE_EXTENSION_HEADS, TYPE_SYSTEM_DEFINITION_HEADS, UNION_EXTENSION_TAIL_HEADS,
   },
   trivia::{expect, peek_as, peek_kind},
   value::Constness,
@@ -278,8 +278,35 @@ lossless_production! {
     .parse_input(inp)
   }
 
+  /// `extend directive @ Name Directives`
+  ///
+  /// [`scalar_type_extension`]'s single shape, with the `@` the directive's name is written
+  /// after: its directives are **mandatory**, so an absent `@` after the name is reported rather
+  /// than skipped. The `@` before the name is required too, as in a directive definition.
+  ///
+  /// **Precondition: `mark` rides at the `extend`, which is already committed, and the head is
+  /// an `Identifier` spelled `directive`.** [`type_system_extension`] establishes both.
+  fn directive_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
+    node_at(
+      mark,
+      K::DirectiveExtension.raw(),
+      |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        expect::<Src, Ctx>(inp, Kind::At)?;
+        expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
+          directives::<Src, Ctx>(inp, Constness::Const)
+        } else {
+          // Reported, and nothing is consumed: whatever is here starts the next definition.
+          recover::report_unexpected::<Src, Ctx>(inp, DIRECTIVE_EXTENSION_TAIL_HEADS)
+        }
+      },
+    )
+    .parse_input(inp)
+  }
+
   /// The shape keyword and the extended type's name — the two `Identifier`s every extension but
-  /// [`schema_extension`] opens with, once the `extend` is behind it.
+  /// [`schema_extension`] and [`directive_extension`] opens with, once the `extend` is behind it.
   fn expect_two_names<'inp, Src, Ctx>(inp) {
     expect::<Src, Ctx>(inp, Kind::Identifier)?;
     expect::<Src, Ctx>(inp, Kind::Identifier)
@@ -300,6 +327,7 @@ lossless_production! {
       Some(ContextualKeyword::Enum) => enum_type_extension::<Src, Ctx>(inp, mark),
       Some(ContextualKeyword::Input) => input_object_type_extension::<Src, Ctx>(inp, mark),
       Some(ContextualKeyword::Schema) => schema_extension::<Src, Ctx>(inp, mark),
+      Some(ContextualKeyword::Directive) => directive_extension::<Src, Ctx>(inp, mark),
       // Nothing this `extend` can extend. The mark is left unspent — an unspent mark
       // materializes into nothing — so the `extend` stays a direct child of the document rather
       // than being wrapped in an extension node that names a shape it does not have. Progress is

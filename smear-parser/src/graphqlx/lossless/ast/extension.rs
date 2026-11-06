@@ -1,4 +1,4 @@
-//! Typed wrappers over the seven type-system extension node kinds.
+//! Typed wrappers over the eight type-system extension node kinds.
 //!
 //! One file rather than a section of `ast/document.rs`, which is where the GraphQL twin keeps
 //! them: GraphQLx's productions put the extensions in their own `lossless/extension.rs`, and the
@@ -12,7 +12,9 @@
 //! [`ExtensionName`] node holding a whole path, so the two keywords are the node's only direct
 //! `Name` tokens and no getter reaches either.
 //!
-//! [`SchemaExtension`] takes no target getter at all, a schema having nothing to be called.
+//! [`DirectiveExtension`]'s target is an [`ExtensionName`] node too, behind the `@` its name is
+//! written after. [`SchemaExtension`] takes no target getter at all, a schema having nothing to be
+//! called.
 //!
 //! # No extension is described
 //!
@@ -126,6 +128,19 @@ ast_node!(
     where_clause: opt WhereClause,
     /// The input fields the extension adds, if any.
     input_fields_definition: opt InputFieldsDefinition,
+  }
+);
+
+ast_node!(
+  lang = crate::graphqlx::kinds::GraphQLxLang;
+  /// A directive extension, `extend directive @d @k`.
+  ///
+  /// Like [`ScalarTypeExtension`], it has one tail, and its directives are mandatory.
+  DirectiveExtension => K::DirectiveExtension {
+    /// The extended directive's name, and the generic arguments the extension applies.
+    extension_name: opt ExtensionName,
+    /// The directives the extension adds.
+    directives: opt Directives,
   }
 );
 

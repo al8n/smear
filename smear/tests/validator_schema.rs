@@ -407,6 +407,39 @@ const BRANCHES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     "type Query { ok(a: I): Int } interface I { a: Int } type A implements I { a: Int }",
     &[SchemaErrorKind::ArgumentTypeNotInputType],
   ),
+  // -- §3.13 and §3.13.6, where the list is a directive definition's own -----------------------
+  //
+  // The census rows of these four kinds write their directive, or their extension, against a
+  // type. These are the same rules at `DIRECTIVE_DEFINITION`, where the list is the one a
+  // directive definition carries and an `extend directive` adds to.
+  (
+    SchemaErrorKind::UndefinedExtensionTarget,
+    "type Query { ok: Int } directive @k on DIRECTIVE_DEFINITION extend directive @nope @k",
+    &[SchemaErrorKind::UndefinedExtensionTarget],
+  ),
+  (
+    SchemaErrorKind::UnsupportedDirectiveLocation,
+    "type Query { ok: Int } directive @k on FIELD directive @d @k on FIELD",
+    &[SchemaErrorKind::UnsupportedDirectiveLocation],
+  ),
+  (
+    SchemaErrorKind::DuplicateDirectiveUse,
+    "type Query { ok: Int }
+     directive @k on DIRECTIVE_DEFINITION
+     directive @d @k on FIELD
+     extend directive @d @k",
+    &[SchemaErrorKind::DuplicateDirectiveUse],
+  ),
+  (
+    SchemaErrorKind::SelfReferentialDirective,
+    "type Query { ok: Int } directive @d @d on DIRECTIVE_DEFINITION",
+    &[SchemaErrorKind::SelfReferentialDirective],
+  ),
+  (
+    SchemaErrorKind::SelfReferentialDirective,
+    "type Query { ok: Int } directive @d on DIRECTIVE_DEFINITION extend directive @d @d",
+    &[SchemaErrorKind::SelfReferentialDirective],
+  ),
 ];
 
 /// Every branch row fires exactly what it says, and every one names a kind the census already
@@ -695,6 +728,10 @@ const RENDERED: &[(&str, &[&str])] = &[
     &["undefined directive: `d.a.nope`"],
   ),
   (
+    "type Query { ok: Int } directive @d @nope on FIELD",
+    &["undefined directive: `d.nope`"],
+  ),
+  (
     "directive @d on SCALAR\ntype Query { ok: Int @d }",
     &["directive is not allowed here: `Query.ok.d`"],
   ),
@@ -722,6 +759,12 @@ const RENDERED: &[(&str, &[&str])] = &[
   (
     "directive @d(a: Int) on ARGUMENT_DEFINITION\ntype Query { ok(b: Int @d(a: 1, a: 2)): Int }",
     &["directive argument is passed twice: `Query.ok.b.@d.a`"],
+  ),
+  (
+    "directive @k(a: Int) on DIRECTIVE_DEFINITION
+     directive @d @k(a: \"x\") on FIELD
+     type Query { ok: Int }",
+    &["directive argument value does not fit its declared type: `d.@k.a`"],
   ),
 ];
 
@@ -759,6 +802,7 @@ fn legal_directive_usages_are_accepted() {
      directive @onEnumValue on ENUM_VALUE
      directive @onInputObject on INPUT_OBJECT
      directive @onInputField on INPUT_FIELD_DEFINITION
+     directive @onDirectiveDef on DIRECTIVE_DEFINITION
      schema @onSchema { query: Query }
      type Query @onObject { ok(a: Int @onArgDef): Int @onFieldDef }
      scalar Custom @onScalar
@@ -766,20 +810,25 @@ fn legal_directive_usages_are_accepted() {
      type Impl implements I @onObject { ok: Int }
      union U @onUnion = Query | Impl
      enum E @onEnum { A @onEnumValue }
-     input In @onInputObject { a: Int @onInputField }",
+     input In @onInputObject { a: Int @onInputField }
+     directive @annotated @onDirectiveDef on FIELD",
   );
 
-  // The same location reached through an extension, including `extend schema`.
+  // The same location reached through an extension, including `extend schema` and
+  // `extend directive`.
   built(
     "directive @onSchema repeatable on SCHEMA
      directive @onObject on OBJECT
      directive @onEnumValue on ENUM_VALUE
+     directive @onDirectiveDef on DIRECTIVE_DEFINITION
      schema @onSchema { query: Query }
      extend schema @onSchema
      type Query { ok: Int }
      type T @onObject { a: Int }
      enum E { A }
-     extend enum E { B @onEnumValue }",
+     extend enum E { B @onEnumValue }
+     directive @annotated on FIELD
+     extend directive @annotated @onDirectiveDef",
   );
 
   // `repeatable` means what it says.
@@ -851,6 +900,293 @@ fn a_type_and_its_extensions_are_one_directive_location() {
   );
 }
 
+/// Draft §3.13 gives a directive definition `Directives[Const]?`, applied at
+/// `DIRECTIVE_DEFINITION`, and §3.13.6's `extend directive` adds to them: the accepting direction
+/// of every rule the tests after this one refuse with.
+#[test]
+fn directives_on_a_directive_definition_are_accepted() {
+  // On the definition, between its arguments and `repeatable`, at the location the applied
+  // directive's own definition lists.
+  built(
+    "type Query { ok: Int }
+     directive @meta(level: Int) on DIRECTIVE_DEFINITION
+     directive @d(a: Int) @meta(level: 1) repeatable on FIELD",
+  );
+  // Through an extension: of a directive the document defines, written before that definition,
+  // and of one the specification provides.
+  built(
+    "type Query { ok: Int }
+     extend directive @d @meta
+     directive @meta on DIRECTIVE_DEFINITION
+     directive @d on FIELD
+     extend directive @deprecated @meta",
+  );
+  // A `repeatable` directive, by the definition and again by every extension.
+  built(
+    "type Query { ok: Int }
+     directive @tag(name: String!) repeatable on DIRECTIVE_DEFINITION
+     directive @d @tag(name: \"a\") on FIELD
+     extend directive @d @tag(name: \"b\") @tag(name: \"c\")
+     extend directive @d @tag(name: \"d\")",
+  );
+  // A non-repeatable one once on each of two definitions, which are two locations.
+  built(
+    "type Query { ok: Int }
+     directive @k on DIRECTIVE_DEFINITION
+     directive @d @k on FIELD
+     directive @e on FIELD
+     extend directive @e @k",
+  );
+  // A chain that never comes back is not a cycle, whether an extension or a type an argument
+  // accepts is one of its links.
+  built(
+    "type Query { ok: Int }
+     directive @a on DIRECTIVE_DEFINITION
+     directive @b @a on DIRECTIVE_DEFINITION
+     directive @c on DIRECTIVE_DEFINITION
+     extend directive @c @b",
+  );
+  built(
+    "type Query { ok: Int }
+     directive @a(x: In) on DIRECTIVE_DEFINITION
+     directive @b on INPUT_FIELD_DEFINITION
+     input In { f: Int @b }
+     directive @c @a(x: { f: 1 }) on FIELD",
+  );
+}
+
+/// A directive written on a directive definition, or provided by an `extend directive`, is a usage
+/// at `DIRECTIVE_DEFINITION`, held to every rule a usage anywhere else is held to.
+#[test]
+fn a_directive_on_a_directive_definition_is_checked_at_its_location() {
+  // Not listed there: refused at the usage, on the definition and through an extension alike, and
+  // owned by the directive it is written on.
+  for sdl in [
+    "type Query { ok: Int } directive @k on FIELD directive @d @k on FIELD",
+    "type Query { ok: Int } directive @k on FIELD directive @d on FIELD extend directive @d @k",
+  ] {
+    let errors = refused(sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::UnsupportedDirectiveLocation],
+      "{sdl}"
+    );
+    assert_eq!(errors.len(), 1, "{errors}");
+    let error = &errors.errors()[0];
+    assert_eq!(error.to_string(), "directive is not allowed here: `d.k`");
+    assert_eq!(
+      error.span().start(),
+      sdl.rfind("@k").expect("the usage") + 1,
+      "{sdl}"
+    );
+  }
+
+  // No other location stands in for it: a directive listing all nineteen of the others is still
+  // refused there.
+  let errors = refused(
+    "type Query { ok: Int }
+     directive @k on QUERY | MUTATION | SUBSCRIPTION | FIELD | FRAGMENT_DEFINITION
+       | FRAGMENT_SPREAD | INLINE_FRAGMENT | VARIABLE_DEFINITION | SCHEMA | SCALAR | OBJECT
+       | FIELD_DEFINITION | ARGUMENT_DEFINITION | INTERFACE | UNION | ENUM | ENUM_VALUE
+       | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+     directive @d @k on FIELD",
+  );
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::UnsupportedDirectiveLocation]
+  );
+
+  // Undefined, and missing a required argument, exactly as on any other element.
+  let errors = refused("type Query { ok: Int } directive @d @nope on FIELD");
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::UndefinedDirective]);
+  let errors = refused(
+    "type Query { ok: Int }
+     directive @k(level: Int!) on DIRECTIVE_DEFINITION
+     directive @d on FIELD
+     extend directive @d @k",
+  );
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::MissingRequiredDirectiveArgument]
+  );
+  assert_eq!(errors.errors()[0].owner(), Some("d.@k"));
+}
+
+/// Draft §3.13.6: "Any non-repeatable directives provided must not already apply to the previous
+/// directive." A directive definition and its extensions are one location, as a type and its
+/// extensions are.
+#[test]
+fn a_directive_definition_and_its_extensions_are_one_directive_location() {
+  let sdl = "type Query { ok: Int }
+     directive @k on DIRECTIVE_DEFINITION
+     directive @d @k on FIELD
+     extend directive @d @k";
+  let errors = refused(sdl);
+  assert_eq!(errors.kinds(), vec![SchemaErrorKind::DuplicateDirectiveUse]);
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.to_string(), "directive is not repeatable: `d.k`");
+  // At the extension's `@k`, pointing back at the definition's.
+  assert_eq!(
+    error.span().start(),
+    sdl.rfind("@k").expect("the extension's") + 1
+  );
+  let first = sdl.find("@d @k").expect("the definition's") + 4;
+  assert_eq!(error.related(), Some(SimpleSpan::new(first, first + 1)));
+
+  // Two extensions repeat it between them, and one extension within itself.
+  for sdl in [
+    "type Query { ok: Int } directive @k on DIRECTIVE_DEFINITION directive @d on FIELD
+     extend directive @d @k extend directive @d @k",
+    "type Query { ok: Int } directive @k on DIRECTIVE_DEFINITION directive @d on FIELD
+     extend directive @d @k @k",
+  ] {
+    let errors = refused(sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::DuplicateDirectiveUse],
+      "{sdl}"
+    );
+    assert_eq!(errors.len(), 1, "{errors}");
+  }
+
+  // The positive control: declared `repeatable`, the same three shapes build.
+  for sdl in [
+    "type Query { ok: Int } directive @k repeatable on DIRECTIVE_DEFINITION
+     directive @d @k on FIELD extend directive @d @k",
+    "type Query { ok: Int } directive @k repeatable on DIRECTIVE_DEFINITION directive @d on FIELD
+     extend directive @d @k extend directive @d @k",
+    "type Query { ok: Int } directive @k repeatable on DIRECTIVE_DEFINITION directive @d on FIELD
+     extend directive @d @k @k",
+  ] {
+    built(sdl);
+  }
+}
+
+/// Draft §3.13.6: "The previous directive must already be defined."
+#[test]
+fn an_extension_of_an_undefined_directive_is_refused() {
+  let sdl = "type Query { ok: Int } directive @k on DIRECTIVE_DEFINITION extend directive @nope @k";
+  let errors = refused(sdl);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::UndefinedExtensionTarget]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.subject(), "nope");
+  assert_eq!(error.owner(), None);
+  assert_eq!(&sdl[error.span().start()..error.span().end()], "nope");
+  assert_eq!(error.to_string(), "extension target is not defined: `nope`");
+
+  // A type is not a directive, nor a directive a type: the two names live apart.
+  for sdl in [
+    "type Query { ok: Int } directive @k on DIRECTIVE_DEFINITION extend directive @Query @k",
+    "type Query { ok: Int } directive @d on FIELD extend type d { more: Int }",
+  ] {
+    let errors = refused(sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::UndefinedExtensionTarget],
+      "{sdl}"
+    );
+  }
+
+  // The directives of an extension with nothing to extend are not checked against a definition it
+  // does not have: one mistake, one diagnostic, as for a type extension.
+  let errors = refused("type Query { ok: Int } extend directive @nope @alsoNope");
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::UndefinedExtensionTarget]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+
+  // The positive control: defined, the same extension builds.
+  built(
+    "type Query { ok: Int }
+     directive @k on DIRECTIVE_DEFINITION
+     directive @nope on FIELD
+     extend directive @nope @k",
+  );
+}
+
+/// Draft §3.13's "must not contain the use of a Directive which references itself directly" and
+/// "indirectly", through the directives on a definition and on its extensions. §3.13.6's rules 3
+/// and 4 ask the same of an extension's directives, and get the same answer: the extension's
+/// directives are the definition's, so one check is both.
+#[test]
+fn a_directive_reaching_itself_through_its_definitions_directives_is_refused() {
+  let cases: &[(&str, &[&str])] = &[
+    // Directly, on the definition and through an extension.
+    ("directive @d @d on DIRECTIVE_DEFINITION", &["d"]),
+    (
+      "directive @d on DIRECTIVE_DEFINITION extend directive @d @d",
+      &["d"],
+    ),
+    // Indirectly, through another directive's definition, and with an extension closing the loop.
+    (
+      "directive @a @b on DIRECTIVE_DEFINITION directive @b @a on DIRECTIVE_DEFINITION",
+      &["a", "b"],
+    ),
+    (
+      "directive @a on DIRECTIVE_DEFINITION
+       directive @b @a on DIRECTIVE_DEFINITION
+       extend directive @a @b",
+      &["a", "b"],
+    ),
+    // Indirectly, through a type an argument accepts, closed on a definition and by an extension.
+    (
+      "directive @a(x: In) on DIRECTIVE_DEFINITION
+       directive @b @a on INPUT_FIELD_DEFINITION
+       input In { f: Int @b }",
+      &["a", "b"],
+    ),
+    (
+      "directive @a(x: In) on DIRECTIVE_DEFINITION
+       directive @b on INPUT_FIELD_DEFINITION
+       input In { f: Int @b }
+       extend directive @b @a",
+      &["a", "b"],
+    ),
+  ];
+  for (sdl, cyclic) in cases {
+    let sdl = format!("{ROOT}{sdl}");
+    let errors = refused(&sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::SelfReferentialDirective],
+      "{sdl}"
+    );
+    let blamed: Vec<&str> = errors
+      .errors()
+      .iter()
+      .map(|error| error.subject())
+      .collect();
+    assert_eq!(blamed, *cyclic, "{sdl}");
+  }
+
+  // Blamed on the definition, where the cycle is, even when an extension closed it.
+  let sdl = "type Query { ok: Int } directive @d on DIRECTIVE_DEFINITION extend directive @d @d";
+  let errors = refused(sdl);
+  assert_eq!(
+    errors.errors()[0].span().start(),
+    sdl.find("@d").expect("the definition") + 1
+  );
+
+  // A directive that merely uses a self-referential one is not on the cycle, so it is not blamed.
+  let errors = refused(
+    "type Query { ok: Int }
+     directive @a @a on DIRECTIVE_DEFINITION
+     directive @b @a on DIRECTIVE_DEFINITION",
+  );
+  let blamed: Vec<&str> = errors
+    .errors()
+    .iter()
+    .map(|error| error.subject())
+    .collect();
+  assert_eq!(blamed, ["a"]);
+}
+
 /// Use-site refusals name the element the directive sits on, and the `@name` its arguments belong
 /// to.
 #[test]
@@ -897,6 +1233,20 @@ fn directive_usage_errors_name_their_coordinate() {
       SchemaErrorKind::UndefinedDirective,
       "nowhere",
       "schema",
+    ),
+    (
+      "type Query { ok: Int } directive @d on FIELD extend directive @d @nowhere",
+      SchemaErrorKind::UndefinedDirective,
+      "nowhere",
+      "d",
+    ),
+    (
+      "directive @meta(a: Int) on DIRECTIVE_DEFINITION
+       directive @d @meta(b: 1) on FIELD
+       type Query { ok: Int }",
+      SchemaErrorKind::UndefinedDirectiveArgument,
+      "b",
+      "d.@meta",
     ),
     (
       "directive @onObject(a: Int) on OBJECT
@@ -2078,7 +2428,8 @@ fn a_duplicate_within_one_document_points_within_it() {
 }
 
 /// The same across the related rules an extension in another document reaches: a field added
-/// again, a directive applied again, and a root operation provided again.
+/// again, a directive applied again, to a type or to a directive definition, and a root operation
+/// provided again.
 #[test]
 fn an_extension_in_another_document_points_back_at_what_it_repeats() {
   assert_points_across(
@@ -2092,6 +2443,16 @@ fn an_extension_in_another_document_points_back_at_what_it_repeats() {
     &[
       "directive @tag on OBJECT type Query @tag { ok: Int }",
       "extend type Query @tag",
+    ],
+    SchemaErrorKind::DuplicateDirectiveUse,
+    (1, "tag", 0),
+    (0, "tag", 1),
+    "first applied here",
+  );
+  assert_points_across(
+    &[
+      "type Query { ok: Int } directive @tag on DIRECTIVE_DEFINITION directive @d @tag on FIELD",
+      "extend directive @d @tag",
     ],
     SchemaErrorKind::DuplicateDirectiveUse,
     (1, "tag", 0),
@@ -3275,10 +3636,11 @@ fn input_object_default_cycle_verdict_is_declaration_order_independent() {
 // ---------------------------------------------------------------------------------------------
 
 /// A schema carrying every datum draft §4 returns that a `Schema` keeps: the schema's own
-/// description, descriptions at every element that takes one — inline, block, and empty — each of
-/// the three deprecation answers on a field, an argument, an input field and an enum value, a
-/// `@specifiedBy` on a definition and another arriving by `extend scalar`, and defaults of every
-/// shape the canonical printer writes.
+/// description, descriptions at every element that takes one — inline, block, and empty — both
+/// deprecation answers on a field, an argument, an input field and an enum value, a directive
+/// deprecated by its definition and another by an `extend directive`, a `@specifiedBy` on a
+/// definition and another arriving by `extend scalar`, and defaults of every shape the canonical
+/// printer writes.
 const METADATA: &str = r#"
 """
 The schema of a small library.
@@ -3315,7 +3677,7 @@ type Book implements Titled & Node {
     "Which format."
     format: Format = HARDCOVER
   ): String @deprecated
-  isbn: ISBN @deprecated(reason: null)
+  isbn: ISBN
   shelf: [Int] @deprecated(reason: "Use `location`.\nIt moved.")
 }
 
@@ -3324,7 +3686,7 @@ enum Format {
   PAPERBACK
   HARDCOVER @deprecated(reason: "Out of print")
   EBOOK @deprecated
-  AUDIO @deprecated(reason: null)
+  AUDIO
 }
 
 input BookFilter {
@@ -3359,6 +3721,11 @@ directive @cached(
 ) repeatable on FIELD_DEFINITION
 
 directive @audit on OBJECT
+
+"Replaced by `@cached`."
+directive @memo(seconds: Int) @deprecated(reason: "Use `@cached`.") on FIELD_DEFINITION
+
+extend directive @audit @deprecated
 "#;
 
 fn ty(schema: &Schema, name: &str) -> TypeId {
@@ -3432,7 +3799,7 @@ fn every_datum_section_4_returns_is_kept() {
   );
   assert_eq!(schema.specified_by_url(ty(&schema, "Book")), None);
 
-  // Fields: a description, and each of the three deprecation answers.
+  // Fields: a description, and each deprecation answer.
   let (_, id) = member(&schema, "Node", "id");
   assert_eq!(schema.text(id.description()), Some("The id."));
   let (author, meta) = member(&schema, "Book", "author");
@@ -3443,11 +3810,7 @@ fn every_datum_section_4_returns_is_kept() {
     "a bare `@deprecated` carries the specified default"
   );
   let (_, isbn_field) = member(&schema, "Book", "isbn");
-  assert_eq!(
-    deprecated(&schema, isbn_field.deprecation()),
-    Some(None),
-    "`reason: null` is deprecated with a null reason, not undeprecated"
-  );
+  assert_eq!(deprecated(&schema, isbn_field.deprecation()), None);
   let (_, shelf) = member(&schema, "Book", "shelf");
   assert_eq!(
     deprecated(&schema, shelf.deprecation()),
@@ -3497,7 +3860,7 @@ fn every_datum_section_4_returns_is_kept() {
     Some(Some("unused"))
   );
 
-  // Enum values: a description, and the three deprecation answers.
+  // Enum values: a description, and each deprecation answer.
   let values: Vec<_> = schema
     .enum_values_in_order(ty(&schema, "Format"))
     .map(|(value, meta)| {
@@ -3514,7 +3877,7 @@ fn every_datum_section_4_returns_is_kept() {
       ("PAPERBACK", Some("Paper covers."), None),
       ("HARDCOVER", None, Some(Some("Out of print"))),
       ("EBOOK", None, Some(Some("No longer supported"))),
-      ("AUDIO", None, Some(None)),
+      ("AUDIO", None, None),
     ]
   );
 
@@ -3533,6 +3896,248 @@ fn every_datum_section_4_returns_is_kept() {
   let (_, scope) = argument(&schema, cached.args(), "scope");
   assert_eq!(schema.text(scope.description()), None);
   assert_eq!(schema.text(scope.default_value()), None);
+
+  // And a directive's own deprecation: by its definition, by an `extend directive`, and none.
+  let directives: Vec<_> = schema
+    .directives_in_order()
+    .map(|(directive, meta)| {
+      (
+        schema.name(directive.name()),
+        schema.text(meta.description()),
+        deprecated(&schema, meta.deprecation()),
+      )
+    })
+    .collect();
+  assert_eq!(
+    directives,
+    [
+      ("cached", Some("Marks a field as cached."), None),
+      ("audit", None, Some(Some("No longer supported"))),
+      (
+        "memo",
+        Some("Replaced by `@cached`."),
+        Some(Some("Use `@cached`."))
+      ),
+      (
+        "skip",
+        Some("Directs the executor to skip this field or fragment when the `if` argument is true."),
+        None
+      ),
+      (
+        "include",
+        Some(
+          "Directs the executor to include this field or fragment only when the `if` argument is \
+           true."
+        ),
+        None
+      ),
+      (
+        "deprecated",
+        Some("Marks an element of a GraphQL schema as no longer supported."),
+        None
+      ),
+      (
+        "specifiedBy",
+        Some("Exposes a URL that specifies the behavior of this scalar."),
+        None
+      ),
+      (
+        "oneOf",
+        Some("Indicates exactly one field must be supplied and this field must not be `null`."),
+        None
+      ),
+    ]
+  );
+}
+
+/// Draft §3.13.3 declares the specified `@deprecated`'s `reason` as `String!`, so
+/// `@deprecated(reason: null)` offers its argument a value it does not accept, at every location
+/// the directive may stand — and is refused, where it was once read as deprecated with no reason.
+/// A document that redefines `@deprecated` with a nullable `reason` is the one place a `null`
+/// reason still builds, and it is kept as written: deprecated, with no reason.
+#[test]
+fn a_null_deprecation_reason_is_refused() {
+  for sdl in [
+    "type Query { ok: Int @deprecated(reason: null) }",
+    "type Query { ok(a: Int @deprecated(reason: null)): Int }",
+    "type Query { ok: Int } input In { a: Int @deprecated(reason: null) }",
+    "type Query { ok: Int } enum E { A B @deprecated(reason: null) }",
+    "type Query { ok: Int } directive @d @deprecated(reason: null) on FIELD",
+    "type Query { ok: Int } directive @d on FIELD extend directive @d @deprecated(reason: null)",
+  ] {
+    let errors = refused(sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::InvalidDirectiveArgumentValue],
+      "{sdl}"
+    );
+  }
+
+  let redefined = built(
+    "directive @deprecated(reason: String) on FIELD_DEFINITION
+     type Query { ok: Int @deprecated(reason: null) }",
+  );
+  let (_, ok) = member(&redefined, "Query", "ok");
+  assert_eq!(deprecated(&redefined, ok.deprecation()), Some(None));
+}
+
+/// A bare `@deprecated` at every location the directive may stand, for the tests below to set
+/// beside whichever definition of `@deprecated` they mean: a field, a field's argument, a field an
+/// `extend type` adds, an input field, an enum value, a directive definition, a directive's
+/// argument and an `extend directive`.
+const BARE_USAGES: &str = "
+type Query { old(by: Int @deprecated): Int @deprecated }
+extend type Query { added: Int @deprecated }
+input Filter { old: Int @deprecated }
+enum Verdict { YES NO @deprecated }
+directive @gone(by: Int @deprecated) @deprecated on FIELD
+directive @faded on FIELD
+extend directive @faded @deprecated
+";
+
+/// The five locations the specified `@deprecated` declares, for a replacement to declare as well.
+const DEPRECATED_LOCATIONS: &str = "FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE | DIRECTIVE_DEFINITION";
+
+/// What each bare `@deprecated` in [`BARE_USAGES`] came back as, in that document's order, read by
+/// [`deprecated`].
+fn bare_deprecations(schema: &Schema) -> [(&'static str, Option<Option<&str>>); 8] {
+  let (old, old_meta) = member(schema, "Query", "old");
+  let (_, by) = argument(schema, old.args(), "by");
+  let (_, added) = member(schema, "Query", "added");
+  let (_, input_field) = schema
+    .input_fields_in_order(ty(schema, "Filter"))
+    .find(|(field, _)| schema.name(field.name()) == "old")
+    .expect("Filter.old");
+  let (_, value) = schema
+    .enum_values_in_order(ty(schema, "Verdict"))
+    .find(|(value, _)| schema.name(*value) == "NO")
+    .expect("Verdict.NO");
+  let (gone, gone_meta) = schema
+    .directives_in_order()
+    .find(|(directive, _)| schema.name(directive.name()) == "gone")
+    .expect("@gone");
+  let (_, gone_by) = argument(schema, gone.args(), "by");
+  let (_, faded) = schema
+    .directives_in_order()
+    .find(|(directive, _)| schema.name(directive.name()) == "faded")
+    .expect("@faded");
+  [
+    ("a field", deprecated(schema, old_meta.deprecation())),
+    ("a field's argument", deprecated(schema, by.deprecation())),
+    (
+      "a field an `extend type` adds",
+      deprecated(schema, added.deprecation()),
+    ),
+    (
+      "an input field",
+      deprecated(schema, input_field.deprecation()),
+    ),
+    ("an enum value", deprecated(schema, value.deprecation())),
+    (
+      "a directive definition",
+      deprecated(schema, gone_meta.deprecation()),
+    ),
+    (
+      "a directive's argument",
+      deprecated(schema, gone_by.deprecation()),
+    ),
+    (
+      "an `extend directive`",
+      deprecated(schema, faded.deprecation()),
+    ),
+  ]
+}
+
+/// Asserts that every bare `@deprecated` in a schema built over [`BARE_USAGES`] came back
+/// deprecated with `reason`.
+fn assert_every_bare_reason(schema: &Schema, reason: Option<&str>, sdl: &str) {
+  for (location, found) in bare_deprecations(schema) {
+    assert_eq!(found, Some(reason), "{location}\n---\n{sdl}");
+  }
+}
+
+/// A bare `@deprecated` takes the default of its definition's `reason`, as draft §6.4.1 gives any
+/// argument a usage leaves out, and the specified definition's is `No longer supported` — at every
+/// location the directive may stand.
+#[test]
+fn a_bare_deprecated_takes_the_specified_default() {
+  assert_every_bare_reason(
+    &built(BARE_USAGES),
+    Some("No longer supported"),
+    BARE_USAGES,
+  );
+}
+
+/// A document that replaces `@deprecated` with a default of its own gives every bare usage that
+/// default, not the specified one's.
+#[test]
+fn a_bare_deprecated_takes_a_replacements_string_default() {
+  let sdl = format!(
+    "directive @deprecated(reason: String = \"Custom\") on {DEPRECATED_LOCATIONS}\n{BARE_USAGES}"
+  );
+  assert_every_bare_reason(&built(&sdl), Some("Custom"), &sdl);
+}
+
+/// A replacement whose `reason` defaults to `null` gives every bare usage a `null` reason —
+/// deprecated, with no reason — and not the specified default.
+#[test]
+fn a_bare_deprecated_takes_a_replacements_null_default() {
+  let sdl = format!(
+    "directive @deprecated(reason: String = null) on {DEPRECATED_LOCATIONS}\n{BARE_USAGES}"
+  );
+  assert_every_bare_reason(&built(&sdl), None, &sdl);
+}
+
+/// A replacement that gives a bare usage no string to take gives it a `null` reason: a nullable
+/// `reason` with no default, which leaves the usage no value at all; no `reason` argument; and a
+/// default of another shape, which reads as a written `reason` of that shape does. A non-null
+/// `reason` with no default is the one exception, because a bare usage of it omits a required
+/// argument, and the build refuses that.
+#[test]
+fn a_bare_deprecated_with_no_string_default_to_take_has_a_null_reason() {
+  for definition in [
+    "directive @deprecated(reason: String)",
+    "directive @deprecated",
+    "directive @deprecated(reason: Int = 3)",
+  ] {
+    let sdl = format!("{definition} on {DEPRECATED_LOCATIONS}\n{BARE_USAGES}");
+    assert_every_bare_reason(&built(&sdl), None, &sdl);
+  }
+
+  let errors = refused(
+    "directive @deprecated(reason: String!) on FIELD_DEFINITION
+     type Query { ok: Int @deprecated }",
+  );
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::MissingRequiredDirectiveArgument]
+  );
+}
+
+/// The definition a bare `@deprecated` takes its reason from is the one the build ends with,
+/// wherever it is written: a replacement after its bare usages in the same document, or in a later
+/// document of the same build, still decides every one of them.
+#[test]
+fn a_replacement_written_after_its_bare_usages_still_decides_their_reason() {
+  let replacement =
+    format!("directive @deprecated(reason: String = \"Custom\") on {DEPRECATED_LOCATIONS}");
+
+  let sdl = format!("{BARE_USAGES}\n{replacement}");
+  assert_every_bare_reason(&built(&sdl), Some("Custom"), &sdl);
+
+  let usages = parse(BARE_USAGES);
+  let later = parse(&replacement);
+  let mut builder = SchemaBuilder::new();
+  builder.document(&usages);
+  builder.document(&later);
+  let schema = builder
+    .finish()
+    .unwrap_or_else(|errors| panic!("expected a schema, got:\n{errors}"));
+  assert_every_bare_reason(
+    &schema,
+    Some("Custom"),
+    "the replacement in a later document",
+  );
 }
 
 /// Absent is not empty: `""` is a description of no bytes, and returned as one.
@@ -3626,6 +4231,7 @@ fn declaration_order_is_kept_beside_the_sorted_tables() {
     [
       "cached",
       "audit",
+      "memo",
       "skip",
       "include",
       "deprecated",

@@ -224,15 +224,21 @@ pub type SchemaDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
 pub type DescribedSchemaDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
   Described<SchemaDefinition<S, Span, Ty>, S, Span>;
 
-/// A GraphQLx directive definition with generic declaration and an optional
-/// `where` clause after its directive locations.
+/// A GraphQLx directive definition with generic declaration, optional directives
+/// of its own after its arguments, and an optional `where` clause after its
+/// directive locations.
 pub type DirectiveDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
   crate::type_system::DirectiveDefinition<
     DefinitionName<S, Span, Ty>,
     ArgumentsDefinition<S, Span, Ty>,
+    ConstDirectives<S, Span>,
     Constrained<DirectiveLocations<Span>, WhereClause<S, Span, Ty>, Span>,
     Span,
   >;
+
+/// A GraphQLx directive extension with a generic-capable extension path.
+pub type DirectiveExtension<S, Span = SimpleSpan> =
+  crate::type_system::DirectiveExtension<ExtensionName<S, Span>, ConstDirectives<S, Span>, Span>;
 
 /// A GraphQLx scalar type extension with a generic-capable extension path.
 pub type ScalarTypeExtension<S, Span = SimpleSpan> =
@@ -375,9 +381,13 @@ pub type TypeSystemDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
 pub type DescribedTypeSystemDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
   Described<TypeSystemDefinition<S, Span, Ty>, S, Span>;
 
-/// A GraphQLx type-system extension: a named type or schema extension.
+/// A GraphQLx type-system extension: a named type, directive, or schema extension.
 pub type TypeSystemExtension<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::type_system::TypeSystemExtension<TypeExtension<S, Span, Ty>, SchemaExtension<S, Span, Ty>>;
+  crate::type_system::TypeSystemExtension<
+    TypeExtension<S, Span, Ty>,
+    DirectiveExtension<S, Span>,
+    SchemaExtension<S, Span, Ty>,
+  >;
 
 /// A described GraphQLx type-system definition or a type-system extension.
 pub type TypeSystemDefinitionOrExtension<S, Span = SimpleSpan, Ty = Type<S, Span>> =

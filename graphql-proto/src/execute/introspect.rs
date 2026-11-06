@@ -254,11 +254,19 @@ where
         "mutationType" => root(schema, RootOperation::Mutation),
         "subscriptionType" => root(schema, RootOperation::Subscription),
         "directives" => {
+          let Some(include) = self.include_deprecated(ctx, slot) else {
+            return;
+          };
+          let meta = schema.directive_meta();
           return self.list(
             slot,
             pending,
             schema.directive_order().iter().copied(),
-            |at| Some(Element::Object(Entity::Directive(at))),
+            |at| {
+              let meta = meta.get(at as usize)?;
+              (include || !meta.deprecation().is_deprecated())
+                .then_some(Element::Object(Entity::Directive(at)))
+            },
           );
         }
         _ => Answer::Null,
@@ -331,6 +339,8 @@ where
           }
           "args" => return self.arguments(ctx, slot, def.args(), pending),
           "isRepeatable" => Answer::Leaf(MetaLeaf::Bool(def.is_repeatable())),
+          "isDeprecated" => Answer::Leaf(MetaLeaf::Bool(meta.deprecation().is_deprecated())),
+          "deprecationReason" => text(meta.deprecation().reason()),
           _ => Answer::Null,
         }
       }
@@ -345,6 +355,13 @@ where
   /// as an interface or a union, `enumValues` as an enum, `inputFields` and `isOneOf` as an input
   /// object and `specifiedByURL` as a scalar, and `null` for each of them otherwise; `ofType` is
   /// `null` for every named type. An object implementing nothing answers `interfaces` with `[]`.
+  ///
+  /// **The kind picks the answer; it does not decide whether the arguments are coerced.** `fields`,
+  /// `enumValues` and `inputFields` take `includeDeprecated`, and draft §6.4.1 coerces a field's
+  /// arguments before the field is resolved, whatever it will answer. So the argument is coerced
+  /// first, once, on every `__Type` — a scalar, which has none of the three lists, and a wrapper
+  /// reference as much as the kind that has the list — and a `null` for it is a field error on all
+  /// of them. Only then does the kind choose between the list and `null`.
   fn answer_type(
     &mut self,
     ctx: &mut V,
@@ -354,6 +371,16 @@ where
     pending: &mut Pending,
   ) {
     let schema = self.schema;
+    // Before the wrapper branch and before the kind is looked at, for the reason above. The other
+    // fields declare no such argument, so `include` is not read for them.
+    let include = if matches!(field, "fields" | "enumValues" | "inputFields") {
+      let Some(include) = self.include_deprecated(ctx, slot) else {
+        return;
+      };
+      include
+    } else {
+      false
+    };
     let id = ty.id;
     let def = schema.type_def(id);
     let packed = PackedType::from_parts(def.name(), id, ty.wrappers);
@@ -377,9 +404,6 @@ where
       ("description", _) => text(schema.type_meta(id).description()),
       ("specifiedByURL", TypeKind::Scalar) => text(schema.type_meta(id).specified_by()),
       ("fields", TypeKind::Object | TypeKind::Interface) => {
-        let Some(include) = self.include_deprecated(ctx, slot) else {
-          return;
-        };
         let fields = schema.fields_of(id);
         let meta = schema.field_meta_of(id);
         return self.list(
@@ -422,9 +446,6 @@ where
         });
       }
       ("enumValues", TypeKind::Enum) => {
-        let Some(include) = self.include_deprecated(ctx, slot) else {
-          return;
-        };
         let meta = schema.enum_value_meta_of(id);
         return self.list(
           slot,
@@ -438,9 +459,6 @@ where
         );
       }
       ("inputFields", TypeKind::InputObject) => {
-        let Some(include) = self.include_deprecated(ctx, slot) else {
-          return;
-        };
         // An input object's field group is a range of the input-value table, so a position in the
         // group is a row of the table once the range's start is added back.
         let start = def.fields().start();
@@ -594,25 +612,24 @@ where
   /// Draft §4's `includeDeprecated`, read through draft §6.4.1: `None` when coercing it raised and
   /// the field is already nulled.
   ///
-  /// The meta-schema declares it `Boolean = false`, and an explicit `null` asks for the same thing:
-  /// draft §4 gives the argument no third meaning, so both are `false` here rather than a reading
-  /// of the default's text. A variable is read through [`Values::as_bool`], as `@skip`'s is.
+  /// The meta-schema declares it `Boolean! = false` (draft §4.2). An absent argument, or a variable
+  /// the request did not supply, is the default, read as `false` here rather than off the default's
+  /// text. An explicit `null` — written, or a variable's value — is draft §6.4.1 step 5.i.i's
+  /// field error, which [`coerce_arguments`](Executor::coerce_arguments) has raised before this
+  /// reads anything, so no `null` reaches the match below. A variable is read through
+  /// [`Values::as_bool`], as `@skip`'s is.
+  ///
+  /// Every site that declares the argument asks for it before it chooses an answer, and not only
+  /// when the answer will be a list: `answer_type` asks for the three `__Type` lists on every type,
+  /// so a `null` is a field error wherever it is written.
   fn include_deprecated(&mut self, ctx: &mut V, slot: u32) -> Option<bool> {
     if self.coerce_arguments(ctx, slot) != Coercion::Coerced {
       return None;
     }
     let read = match self.scratch_args.first().map(|argument| &argument.source) {
-      None
-      | Some(ArgumentSource::SchemaDefault)
-      | Some(ArgumentSource::Literal(InputValue::Null(_))) => Some(false),
+      None | Some(ArgumentSource::SchemaDefault) => Some(false),
       Some(ArgumentSource::Literal(InputValue::Boolean(literal))) => Some(literal.value()),
-      Some(ArgumentSource::Variable { value, .. }) => {
-        if ctx.is_null(value) {
-          Some(false)
-        } else {
-          ctx.as_bool(value)
-        }
-      }
+      Some(ArgumentSource::Variable { value, .. }) => ctx.as_bool(value),
       Some(ArgumentSource::Literal(_)) => None,
     };
     // The values are this walk's to drop: it is their only reader, and it has read them.

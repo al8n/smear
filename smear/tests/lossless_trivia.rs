@@ -569,7 +569,7 @@ fn the_corpus_supplies_no_carriage_return_tab_or_bom() {
 
 /// The two roots [`parse_document`] cannot reach are exactly the two named, and they are roots.
 ///
-/// The coverage assertion drives three entry points to reach 59 kinds. That is only honest if
+/// The coverage assertion drives three entry points to reach 60 kinds. That is only honest if
 /// the reason `parse_document` alone falls short is structural — a parse has one root — rather
 /// than a corpus gap somebody could have closed. So the claim is measured: over the whole valid
 /// corpus, `parse_document` opens every node kind except those two, and each of those two is
@@ -601,14 +601,14 @@ fn parse_document_reaches_every_node_kind_but_the_two_alternate_roots() {
   );
 }
 
-/// The must-be-covered set is the 59 node kinds, and nothing has drifted into or out of it.
+/// The must-be-covered set is the 60 node kinds, and nothing has drifted into or out of it.
 #[test]
 fn the_covered_set_is_every_node_kind() {
   let kinds = node_kinds();
   assert_eq!(
     kinds.len(),
-    59,
-    "Phase A declares 59 node kinds; the set this gate covers is {kinds:?}"
+    60,
+    "Phase A declares 60 node kinds; the set this gate covers is {kinds:?}"
   );
   assert_eq!(
     kinds.len() + NOT_OPENED_BY_A_PRODUCTION.len(),

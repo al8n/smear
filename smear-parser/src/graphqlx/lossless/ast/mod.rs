@@ -65,7 +65,7 @@ use crate::graphqlx::{
 // is re-exported flat below: a consumer names `ast::Field`, not `ast::selection::Field`. The
 // modules stay public so a reader can find a wrapper beside the production that builds it — which
 // is why there are ten of them and not the nine the GraphQL twin has: GraphQLx's productions put
-// the seven type-system extensions in their own file, and the wrappers follow.
+// the eight type-system extensions in their own file, and the wrappers follow.
 pub mod definition;
 pub mod directive;
 pub mod document;

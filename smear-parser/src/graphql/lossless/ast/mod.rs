@@ -7,7 +7,7 @@
 //! the `Syntax` component model. That is a deliberate upstream split (tokora 0.8.0, PR #132),
 //! and this module takes the navigation side of it.
 //!
-//! What is smear's own is the [`ast_node!`](crate::ast_node) macro: fifty-nine wrappers with
+//! What is smear's own is the [`ast_node!`](crate::ast_node) macro: sixty wrappers with
 //! identical bodies is a code-generation problem, not a trait-design one. The macro and its four
 //! helpers now live at the crate root, parameterised by `rowan::Language`; **everything left in
 //! this module is the pinning of that language to this dialect**, so a wrapper file's only

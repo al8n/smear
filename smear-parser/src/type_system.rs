@@ -1097,6 +1097,8 @@ pub enum TypeSystemDirectiveLocation<Span = SimpleSpan> {
   InputObject(Span),
   /// `INPUT_FIELD_DEFINITION`.
   InputFieldDefinition(Span),
+  /// `DIRECTIVE_DEFINITION`.
+  DirectiveDefinition(Span),
 }
 
 impl<Span> TypeSystemDirectiveLocation<Span> {
@@ -1155,6 +1157,11 @@ impl<Span> TypeSystemDirectiveLocation<Span> {
   pub const fn input_field_definition(span: Span) -> Self {
     Self::InputFieldDefinition(span)
   }
+  /// Creates the `DIRECTIVE_DEFINITION` location.
+  #[inline]
+  pub const fn directive_definition(span: Span) -> Self {
+    Self::DirectiveDefinition(span)
+  }
 
   /// Returns the location span.
   #[inline]
@@ -1170,7 +1177,8 @@ impl<Span> TypeSystemDirectiveLocation<Span> {
       | Self::Enum(span)
       | Self::EnumValue(span)
       | Self::InputObject(span)
-      | Self::InputFieldDefinition(span) => span,
+      | Self::InputFieldDefinition(span)
+      | Self::DirectiveDefinition(span) => span,
     }
   }
 
@@ -1189,6 +1197,7 @@ impl<Span> TypeSystemDirectiveLocation<Span> {
       Self::EnumValue(_) => "ENUM_VALUE",
       Self::InputObject(_) => "INPUT_OBJECT",
       Self::InputFieldDefinition(_) => "INPUT_FIELD_DEFINITION",
+      Self::DirectiveDefinition(_) => "DIRECTIVE_DEFINITION",
     }
   }
 }
@@ -1214,7 +1223,8 @@ impl<Span> IntoSpan<Span> for TypeSystemDirectiveLocation<Span> {
       | Self::Enum(span)
       | Self::EnumValue(span)
       | Self::InputObject(span)
-      | Self::InputFieldDefinition(span) => span,
+      | Self::InputFieldDefinition(span)
+      | Self::DirectiveDefinition(span) => span,
     }
   }
 }
@@ -1236,6 +1246,7 @@ impl<Span> IntoComponents for TypeSystemDirectiveLocation<Span> {
       Self::EnumValue(span) => (span, "ENUM_VALUE"),
       Self::InputObject(span) => (span, "INPUT_OBJECT"),
       Self::InputFieldDefinition(span) => (span, "INPUT_FIELD_DEFINITION"),
+      Self::DirectiveDefinition(span) => (span, "DIRECTIVE_DEFINITION"),
     }
   }
 }
@@ -1407,28 +1418,36 @@ impl<DirectiveLocation, Container, Span> DirectiveLocations<DirectiveLocation, C
 }
 
 /// A directive definition.
+///
+/// See the [GraphQL Directive Definition specification](https://spec.graphql.org/draft/#DirectiveDefinition):
+/// `Description? directive @ Name ArgumentsDefinition? Directives[Const]? repeatable? on
+/// DirectiveLocations`. The directives written on the definition sit after its arguments.
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
-pub struct DirectiveDefinition<Name, Arguments, Locations, Span = SimpleSpan> {
+pub struct DirectiveDefinition<Name, Arguments, Directives, Locations, Span = SimpleSpan> {
   span: Span,
   name: Name,
   arguments_definition: Option<Arguments>,
+  directives: Option<Directives>,
   repeatable: bool,
   locations: Locations,
 }
 
 impl_node_traits!(
-  DirectiveDefinition<Name, Arguments, Locations, Span>,
-  (Span, Name, Option<Arguments>, bool, Locations),
-  (span, name, arguments_definition, repeatable, locations)
+  DirectiveDefinition<Name, Arguments, Directives, Locations, Span>,
+  (Span, Name, Option<Arguments>, Option<Directives>, bool, Locations),
+  (span, name, arguments_definition, directives, repeatable, locations)
 );
 
-impl<Name, Arguments, Locations, Span> DirectiveDefinition<Name, Arguments, Locations, Span> {
+impl<Name, Arguments, Directives, Locations, Span>
+  DirectiveDefinition<Name, Arguments, Directives, Locations, Span>
+{
   /// Creates a directive definition in source order.
   #[inline]
   pub const fn new(
     span: Span,
     name: Name,
     arguments_definition: Option<Arguments>,
+    directives: Option<Directives>,
     repeatable: bool,
     locations: Locations,
   ) -> Self {
@@ -1436,6 +1455,7 @@ impl<Name, Arguments, Locations, Span> DirectiveDefinition<Name, Arguments, Loca
       span,
       name,
       arguments_definition,
+      directives,
       repeatable,
       locations,
     }
@@ -1457,6 +1477,12 @@ impl<Name, Arguments, Locations, Span> DirectiveDefinition<Name, Arguments, Loca
   #[inline]
   pub const fn arguments_definition(&self) -> Option<&Arguments> {
     self.arguments_definition.as_ref()
+  }
+
+  /// Returns the optional directives applied to the definition itself.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
   }
 
   /// Returns whether the directive is repeatable.
@@ -2368,6 +2394,53 @@ where
   }
 }
 
+/// A directive extension (`extend directive @Name Directives`).
+///
+/// See the [GraphQL Directive Extension specification](https://spec.graphql.org/draft/#DirectiveExtension).
+/// The grammar gives it exactly one shape, so its directives are mandatory.
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+pub struct DirectiveExtension<Name, Directives, Span = SimpleSpan> {
+  span: Span,
+  name: Name,
+  directives: Directives,
+}
+
+impl_node_traits!(
+  DirectiveExtension<Name, Directives, Span>,
+  (Span, Name, Directives),
+  (span, name, directives)
+);
+
+impl<Name, Directives, Span> DirectiveExtension<Name, Directives, Span> {
+  /// Creates a directive extension from its complete span, name, and directives.
+  #[inline]
+  pub const fn new(span: Span, name: Name, directives: Directives) -> Self {
+    Self {
+      span,
+      name,
+      directives,
+    }
+  }
+
+  /// Returns the span including the leading `extend` keyword.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns the extended directive's name, without its `@`.
+  #[inline]
+  pub const fn name(&self) -> &Name {
+    &self.name
+  }
+
+  /// Returns the required directives being added.
+  #[inline]
+  pub const fn directives(&self) -> &Directives {
+    &self.directives
+  }
+}
+
 /// A type-system definition: named type, directive, or schema.
 #[derive(Debug, Clone, PartialEq, Eq, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
@@ -2430,53 +2503,62 @@ impl<TypeDefinition, DirectiveDefinition, SchemaDefinition>
   }
 }
 
-/// A type-system extension: named type or schema.
+/// A type-system extension: named type, directive, or schema.
 #[derive(Debug, Clone, PartialEq, Eq, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
-pub enum TypeSystemExtension<TypeExtension, SchemaExtension> {
+pub enum TypeSystemExtension<TypeExtension, DirectiveExtension, SchemaExtension> {
   /// A named type extension.
   Type(TypeExtension),
+  /// A directive extension.
+  Directive(DirectiveExtension),
   /// A schema extension.
   Schema(SchemaExtension),
 }
 
-impl<TypeExtension, SchemaExtension, Span> AsSpan<Span>
-  for TypeSystemExtension<TypeExtension, SchemaExtension>
+impl<TypeExtension, DirectiveExtension, SchemaExtension, Span> AsSpan<Span>
+  for TypeSystemExtension<TypeExtension, DirectiveExtension, SchemaExtension>
 where
   TypeExtension: AsSpan<Span>,
+  DirectiveExtension: AsSpan<Span>,
   SchemaExtension: AsSpan<Span>,
 {
   #[inline]
   fn as_span(&self) -> &Span {
     match self {
       Self::Type(value) => value.as_span(),
+      Self::Directive(value) => value.as_span(),
       Self::Schema(value) => value.as_span(),
     }
   }
 }
 
-impl<TypeExtension, SchemaExtension, Span> IntoSpan<Span>
-  for TypeSystemExtension<TypeExtension, SchemaExtension>
+impl<TypeExtension, DirectiveExtension, SchemaExtension, Span> IntoSpan<Span>
+  for TypeSystemExtension<TypeExtension, DirectiveExtension, SchemaExtension>
 where
   TypeExtension: IntoSpan<Span>,
+  DirectiveExtension: IntoSpan<Span>,
   SchemaExtension: IntoSpan<Span>,
 {
   #[inline]
   fn into_span(self) -> Span {
     match self {
       Self::Type(value) => value.into_span(),
+      Self::Directive(value) => value.into_span(),
       Self::Schema(value) => value.into_span(),
     }
   }
 }
 
-impl<TypeExtension, SchemaExtension> TypeSystemExtension<TypeExtension, SchemaExtension> {
+impl<TypeExtension, DirectiveExtension, SchemaExtension>
+  TypeSystemExtension<TypeExtension, DirectiveExtension, SchemaExtension>
+{
   /// Returns the span of the selected extension arm.
   #[inline]
   pub fn span<Span>(&self) -> &Span
   where
     TypeExtension: AsSpan<Span>,
+    DirectiveExtension: AsSpan<Span>,
     SchemaExtension: AsSpan<Span>,
   {
     self.as_span()
@@ -2545,9 +2627,9 @@ mod tests {
   };
 
   use super::{
-    ArgumentsDefinition, DirectiveDefinition, DirectiveLocations, ExecutableDirectiveLocation,
-    FieldDefinition, InputValueDefinition, Location, ObjectTypeDefinition,
-    TypeSystemDirectiveLocation,
+    ArgumentsDefinition, DirectiveDefinition, DirectiveExtension, DirectiveLocations,
+    ExecutableDirectiveLocation, FieldDefinition, InputValueDefinition, Location,
+    ObjectTypeDefinition, TypeSystemDirectiveLocation, TypeSystemExtension,
   };
 
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2602,16 +2684,48 @@ mod tests {
     assert_eq!(object.directives(), Some(&"@root"));
     assert_eq!(object.fields_definition(), Some(&"{ users: [User!]! }"));
 
-    let directive = DirectiveDefinition::<_, _, _, CustomSpan>::new(
+    let directive = DirectiveDefinition::<_, _, _, _, CustomSpan>::new(
       CustomSpan(4),
       "deprecated",
       None::<&str>,
+      Some("@experimental"),
       true,
       "FIELD_DEFINITION",
     );
     assert_eq!(directive.arguments_definition(), None);
+    assert_eq!(directive.directives(), Some(&"@experimental"));
     assert!(directive.repeatable());
     assert_eq!(directive.locations(), &"FIELD_DEFINITION");
+    assert_eq!(
+      directive.into_components(),
+      (
+        CustomSpan(4),
+        "deprecated",
+        None,
+        Some("@experimental"),
+        true,
+        "FIELD_DEFINITION"
+      )
+    );
+
+    let extension =
+      DirectiveExtension::<_, _, CustomSpan>::new(CustomSpan(5), "deprecated", "@experimental");
+    assert_eq!(extension.as_span(), &CustomSpan(5));
+    assert_eq!(extension.name(), &"deprecated");
+    assert_eq!(extension.directives(), &"@experimental");
+    assert_eq!(
+      extension.into_components(),
+      (CustomSpan(5), "deprecated", "@experimental")
+    );
+
+    type Extension = DirectiveExtension<&'static str, &'static str, CustomSpan>;
+    let extension = TypeSystemExtension::<Extension, Extension, Extension>::Directive(
+      Extension::new(CustomSpan(6), "d", "@k"),
+    );
+    assert!(extension.is_directive());
+    assert_eq!(extension.span::<CustomSpan>(), &CustomSpan(6));
+    let span: CustomSpan = extension.into_span();
+    assert_eq!(span, CustomSpan(6));
   }
 
   #[test]
@@ -2656,6 +2770,15 @@ mod tests {
       &CustomSpan(2)
     );
     assert_eq!(AsRef::<str>::as_ref(&input_field), "INPUT_FIELD_DEFINITION");
+
+    let directive = TypeSystemDirectiveLocation::directive_definition(CustomSpan(3));
+    assert!(directive.is_directive_definition());
+    assert_eq!(directive.unwrap_directive_definition_ref(), &CustomSpan(3));
+    assert_eq!(AsRef::<str>::as_ref(&directive), "DIRECTIVE_DEFINITION");
+    assert_eq!(
+      directive.into_components(),
+      (CustomSpan(3), "DIRECTIVE_DEFINITION")
+    );
 
     let location: Location<CustomSpan> = query.into();
     assert!(location.is_executable());

@@ -202,9 +202,10 @@ pub(crate) const TYPE_EXTENSION_HEADS: &[Kind] = &[Kind::Identifier];
 
 /// The token kinds an extension's tail may begin with — the "at least one component" report.
 ///
-/// Every one of `syntactic/`'s seven extension tails ends in a `(None, None, …) => Err` arm, and a
-/// scalar extension goes further and requires its directives outright. A bare `extend type T`
-/// re-prints as valid text, so the verdict is the only witness the rule has.
+/// Every one of `syntactic/`'s eight extension tails refuses an empty tail: six through a
+/// `(None, None, …) => Err` arm, and a scalar or a directive extension by requiring its directives
+/// outright. A bare `extend type T` re-prints as valid text, so the verdict is the only witness the
+/// rule has.
 pub(crate) const EXTENSION_TAIL_HEADS: &[Kind] =
   &[Kind::At, Kind::LBrace, Kind::Equal, Kind::Identifier];
 

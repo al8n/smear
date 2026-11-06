@@ -41,7 +41,7 @@ macro_rules! node_text {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The seven extensions.
+// The eight extensions.
 // ---------------------------------------------------------------------------------------------
 
 #[test]
@@ -54,6 +54,7 @@ fn each_extension_keyword_opens_its_own_node_over_an_extension_name() {
     ("extend enum E { RED }", K::EnumTypeExtension),
     ("extend input In { f: Int }", K::InputObjectTypeExtension),
     ("extend schema { query: Q }", K::SchemaExtension),
+    ("extend directive @d @k", K::DirectiveExtension),
   ] {
     let parse = parse_type_system_extension(src);
     assert!(!parse.has_errors(), "{src} must parse clean");
@@ -73,8 +74,9 @@ fn each_extension_keyword_opens_its_own_node_over_an_extension_name() {
 
 /// Every extension needs **at least one** component after its name.
 ///
-/// `syntactic/`'s six extension tails each end in a `(None, None, …) => Err` arm, and gate 1
-/// compares verdicts. The name alone re-prints as valid text, so only the verdict can see it.
+/// `syntactic/`'s six extension tails each end in a `(None, None, …) => Err` arm, a scalar's and a
+/// directive's require their directives, and gate 1 compares verdicts. The name alone re-prints as
+/// valid text, so only the verdict can see it.
 #[test]
 fn a_bare_extension_with_no_components_reports() {
   for src in [
@@ -85,6 +87,7 @@ fn a_bare_extension_with_no_components_reports() {
     "extend enum E",
     "extend input In",
     "extend schema",
+    "extend directive @d",
   ] {
     let parse = parse_type_system_extension(src);
     assert!(parse.has_errors(), "{src} must report");
@@ -109,6 +112,43 @@ fn an_extension_names_a_path_with_optional_generic_arguments() {
       K::Path
     ]
   );
+}
+
+/// A directive extension's target is an `ExtensionName` too, behind the `@` that is a token of the
+/// extension itself (draft §3.13.6).
+#[test]
+fn a_directive_extension_names_a_path_after_its_at() {
+  assert_eq!(
+    kinds!(
+      parse_type_system_extension,
+      "extend directive @ns::d @k(a: 1)"
+    ),
+    vec![
+      K::Root,
+      K::DirectiveExtension,
+      K::ExtensionName,
+      K::Path,
+      K::Directives,
+      K::Directive,
+      K::TypePath,
+      K::Path,
+      K::Arguments,
+      K::Argument,
+      K::IntValue,
+    ]
+  );
+  assert_eq!(
+    node_text!(
+      parse_type_system_extension,
+      "extend directive @ns::d @k",
+      K::ExtensionName
+    )
+    .as_deref(),
+    Some("ns::d ")
+  );
+  let parse = parse_type_system_extension("extend directive d @k");
+  assert!(parse.has_errors(), "the `@` before the name is required");
+  assert_eq!(parse.syntax().text().to_string(), "extend directive d @k");
 }
 
 /// Divergence 16's two **extension** sites, which the design omitted.

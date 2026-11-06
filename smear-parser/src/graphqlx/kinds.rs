@@ -23,7 +23,7 @@
 //!
 //! - **`Identifier` becomes [`Name`](SyntaxKind::Name).** GraphQLx's grammar calls this token a
 //!   name — `graphqlx::syntactic::name` builds `graphqlx::ast::Name` — and every contextual
-//!   keyword (`query`, `on`, `import`, `where`, `set`, `map`, `true`, …, forty-four of them) is
+//!   keyword (`query`, `on`, `import`, `where`, `set`, `map`, `true`, …, forty-five of them) is
 //!   *also* this image, told apart on its spelling and never on its kind.
 //! - **The three line terminators fold onto one [`Newline`](SyntaxKind::Newline).** `\n`, `\r` and
 //!   `\r\n` are three spellings of one lexical concept; the lexer splits them because it must match
@@ -70,7 +70,7 @@ use crate::lossless::KindSpace;
 ///
 /// # Layout
 ///
-/// The discriminants are the default `0..113` and [`ALL`](Self::ALL) is in declaration order, so
+/// The discriminants are the default `0..114` and [`ALL`](Self::ALL) is in declaration order, so
 /// [`raw`](Self::raw) is an index and [`from_raw`](Self::from_raw) is a bounds check. Four blocks,
 /// in this order:
 ///
@@ -78,8 +78,8 @@ use crate::lossless::KindSpace;
 /// |---|---|
 /// | `0..26` | the twenty-six non-trivia images, in `LosslessTokenKind`'s declaration order |
 /// | `26..32` | the six trivia images, in the same order, with the line terminators folded |
-/// | `32..110` | the seventy-eight node kinds |
-/// | `110..113` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
+/// | `32..111` | the seventy-nine node kinds |
+/// | `111..114` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
 ///
 /// **Nothing may be appended after [`Root`](Self::Root)** — the shared runner is parameterised over
 /// the last three positions, and the seven images GraphQL lacks therefore live *inside* the image
@@ -130,7 +130,7 @@ pub enum SyntaxKind {
   Minus,
   /// `::` — a path separator.
   PathSeparator,
-  /// An identifier: every GraphQLx name, and every one of the forty-four contextual keywords.
+  /// An identifier: every GraphQLx name, and every one of the forty-five contextual keywords.
   ///
   /// The lexer calls this image `Identifier`; the tree calls it what GraphQLx's grammar calls it.
   Name,
@@ -273,8 +273,8 @@ pub enum SyntaxKind {
   EnumTypeDefinition,
   /// `input DefinitionName Directives? WhereClause? InputFieldsDefinition?`.
   InputObjectTypeDefinition,
-  /// `directive @ DefinitionName ArgumentsDefinition? repeatable? on DirectiveLocations
-  /// WhereClause?`.
+  /// `directive @ DefinitionName ArgumentsDefinition? Directives? repeatable? on
+  /// DirectiveLocations WhereClause?`.
   DirectiveDefinition,
   /// `implements &? TypePath (& TypePath)*`.
   ImplementInterfaces,
@@ -320,6 +320,8 @@ pub enum SyntaxKind {
   EnumTypeExtension,
   /// `extend input ExtensionName Directives? WhereClause? InputFieldsDefinition?`.
   InputObjectTypeExtension,
+  /// `extend directive @ ExtensionName Directives`.
+  DirectiveExtension,
 
   // ---- imports: GraphQLx only, no GraphQL counterpart at all ----
   /// `import ImportClause from "file"`.
@@ -464,7 +466,7 @@ impl SyntaxKind {
     Self::EnumValuesDefinition,
     Self::EnumValueDefinition,
     Self::DirectiveLocations,
-    // SDL extensions (87..94)
+    // SDL extensions (87..95)
     Self::SchemaExtension,
     Self::ScalarTypeExtension,
     Self::ObjectTypeExtension,
@@ -472,12 +474,13 @@ impl SyntaxKind {
     Self::UnionTypeExtension,
     Self::EnumTypeExtension,
     Self::InputObjectTypeExtension,
-    // imports (94..98)
+    Self::DirectiveExtension,
+    // imports (95..99)
     Self::ImportDefinition,
     Self::ImportList,
     Self::NamedSpecifier,
     Self::WildcardSpecifier,
-    // generics (98..107)
+    // generics (99..108)
     Self::DefinitionTypeParam,
     Self::DefinitionTypeGenerics,
     Self::ExtensionTypeGenerics,
@@ -487,11 +490,11 @@ impl SyntaxKind {
     Self::ExecutableDefinitionName,
     Self::WherePredicate,
     Self::WhereClause,
-    // documents (107..110)
+    // documents (108..111)
     Self::Document,
     Self::ExecutableDocument,
     Self::TypeSystemDocument,
-    // bookkeeping (110..113)
+    // bookkeeping (111..114)
     Self::Error,
     Self::Gap,
     Self::Root,

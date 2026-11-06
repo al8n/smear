@@ -83,6 +83,8 @@ pub enum ContextualKeyword {
   InputObjectLocation,
   /// `INPUT_FIELD_DEFINITION`
   InputFieldDefinitionLocation,
+  /// `DIRECTIVE_DEFINITION`
+  DirectiveDefinitionLocation,
 }
 
 impl ContextualKeyword {
@@ -128,6 +130,7 @@ impl ContextualKeyword {
       Self::EnumValueLocation => "ENUM_VALUE",
       Self::InputObjectLocation => "INPUT_OBJECT",
       Self::InputFieldDefinitionLocation => "INPUT_FIELD_DEFINITION",
+      Self::DirectiveDefinitionLocation => "DIRECTIVE_DEFINITION",
     }
   }
 }
@@ -180,6 +183,7 @@ pub fn contextual_keyword(source: &[u8]) -> Option<ContextualKeyword> {
     b"ENUM_VALUE" => Some(ContextualKeyword::EnumValueLocation),
     b"INPUT_OBJECT" => Some(ContextualKeyword::InputObjectLocation),
     b"INPUT_FIELD_DEFINITION" => Some(ContextualKeyword::InputFieldDefinitionLocation),
+    b"DIRECTIVE_DEFINITION" => Some(ContextualKeyword::DirectiveDefinitionLocation),
     _ => None,
   }
 }
@@ -217,7 +221,7 @@ where
 /// `crate::keyword_prefix` can compare it against GraphQLx's without either list being derived
 /// from the other.
 #[cfg(test)]
-pub(crate) const KEYWORDS: [ContextualKeyword; 38] = [
+pub(crate) const KEYWORDS: [ContextualKeyword; 39] = [
   ContextualKeyword::Type,
   ContextualKeyword::Interface,
   ContextualKeyword::Union,
@@ -256,6 +260,7 @@ pub(crate) const KEYWORDS: [ContextualKeyword; 38] = [
   ContextualKeyword::EnumValueLocation,
   ContextualKeyword::InputObjectLocation,
   ContextualKeyword::InputFieldDefinitionLocation,
+  ContextualKeyword::DirectiveDefinitionLocation,
 ];
 
 #[cfg(test)]
@@ -309,7 +314,8 @@ impl ContextualKeyword {
       | Self::EnumLocation
       | Self::EnumValueLocation
       | Self::InputObjectLocation
-      | Self::InputFieldDefinitionLocation => {}
+      | Self::InputFieldDefinitionLocation
+      | Self::DirectiveDefinitionLocation => {}
     }
     assert!(
       KEYWORDS.contains(&self),

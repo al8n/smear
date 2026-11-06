@@ -50,6 +50,27 @@ extension_tail!(
 );
 
 extension_tail!(
+  directive_extension_after_keyword,
+  inp,
+  start,
+  DirectiveExtension<GraphqlSlice<'inp, Src>>,
+  {
+    guard_definition_phase(inp, Expectation::At, |token| token.is_at())?;
+    at(inp)?;
+    let name = take_name(inp)?;
+    let directives = match optional_const_directives(inp)? {
+      Some(directives) => directives,
+      None => return expected_definition_phase(inp, Expectation::At),
+    };
+    Ok(DirectiveExtension::new(
+      SimpleSpan::new(start, directives.span().end()),
+      name,
+      directives,
+    ))
+  }
+);
+
+extension_tail!(
   object_extension_after_keyword,
   inp,
   start,
@@ -433,6 +454,9 @@ where
           Some(ContextualKeyword::Schema) => {
             schema_extension_after_keyword(inp, start).map(TypeSystemExtension::Schema)
           }
+          Some(ContextualKeyword::Directive) => {
+            directive_extension_after_keyword(inp, start).map(TypeSystemExtension::Directive)
+          }
           Some(
             keyword @ (ContextualKeyword::Scalar
             | ContextualKeyword::Type
@@ -570,6 +594,22 @@ definition_parser!(
 );
 
 definition_parser!(
+  /// Parses a directive extension.
+  ///
+  /// Its directives are mandatory: the grammar gives it no other tail.
+  /// See the [GraphQL Directive Extension specification](https://spec.graphql.org/draft/#DirectiveExtension).
+  pub directive_extension,
+  inp,
+  DirectiveExtension<GraphqlSlice<'inp, Src>>,
+  [contextual],
+  {
+    let start = take_contextual_keyword(inp, ContextualKeyword::Extend)?.start();
+    take_contextual_keyword(inp, ContextualKeyword::Directive)?;
+    directive_extension_after_keyword(inp, start)
+  }
+);
+
+definition_parser!(
   /// Parses a named type extension with fused single-consumption dispatch.
   ///
   /// See the [GraphQL Type Extension specification](https://spec.graphql.org/draft/#TypeExtension).
@@ -604,7 +644,7 @@ definition_parser!(
 );
 
 definition_parser!(
-  /// Parses a schema or named type extension with fused single-consumption dispatch.
+  /// Parses a schema, directive or named type extension with fused single-consumption dispatch.
   ///
   /// See the [GraphQL Type System Extension specification](https://spec.graphql.org/draft/#TypeSystemExtension).
   pub type_system_extension,
@@ -701,6 +741,15 @@ impl_definition_api!(
   [contextual]
 );
 impl_definition_api!(
+  /// Parses a directive extension.
+  ///
+  /// See the [GraphQL Directive Extension specification](https://spec.graphql.org/draft/#DirectiveExtension).
+  S,
+  DirectiveExtension<S>,
+  directive_extension,
+  [contextual]
+);
+impl_definition_api!(
   /// Parses a named type extension.
   ///
   /// See the [GraphQL Type Extension specification](https://spec.graphql.org/draft/#TypeExtension).
@@ -710,7 +759,7 @@ impl_definition_api!(
   [contextual]
 );
 impl_definition_api!(
-  /// Parses a schema or named type extension.
+  /// Parses a schema, directive or named type extension.
   ///
   /// See the [GraphQL Type System Extension specification](https://spec.graphql.org/draft/#TypeSystemExtension).
   S,

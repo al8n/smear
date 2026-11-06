@@ -1,11 +1,11 @@
 {
  "provenance": {
-  "graphql": "16.11.0",
+  "graphql": "17.1.0",
   "generator": "graphqlSync({ schema: buildSchema(GOLDEN_SDL), source: GOLDEN_QUERY })",
   "sdl": "smear/tests/proto_introspection.rs: GOLDEN_SDL",
-  "sdlSha256": "f541c7547f83a285b62cde2b3ed117500cd567314c85441e520fea2620199f17",
+  "sdlSha256": "b3ef8c44bce16e72cad6311794030da87d5fdb7814242896b06f0fae8c547087",
   "query": "smear/tests/proto_introspection.rs: GOLDEN_QUERY",
-  "querySha256": "ae96b99f2e7c7a9f0ac2a59a33cf8b47288d7904ace3bc3822aa44a4d0a65648",
+  "querySha256": "ac0d9f19d21a75baaa449c4413b6236cc8d1b88aa515b347e7dd778fd4628198",
   "smear": "smear/tests/golden/introspection_every_datum.json"
  },
  "data": {
@@ -104,6 +104,19 @@
      ]
     },
     {
+     "name": "origin",
+     "isRepeatable": false,
+     "locations": [
+      "DIRECTIVE_DEFINITION"
+     ],
+     "args": [
+      {
+       "name": "note",
+       "defaultValue": null
+      }
+     ]
+    },
+    {
      "name": "include",
      "isRepeatable": false,
      "locations": [
@@ -140,7 +153,8 @@
       "FIELD_DEFINITION",
       "ARGUMENT_DEFINITION",
       "INPUT_FIELD_DEFINITION",
-      "ENUM_VALUE"
+      "ENUM_VALUE",
+      "DIRECTIVE_DEFINITION"
      ],
      "args": [
       {
@@ -170,6 +184,53 @@
      ],
      "args": []
     }
+   ],
+   "all": [
+    {
+     "name": "tag",
+     "isDeprecated": false,
+     "deprecationReason": null
+    },
+    {
+     "name": "origin",
+     "isDeprecated": false,
+     "deprecationReason": null
+    },
+    {
+     "name": "label",
+     "isDeprecated": true,
+     "deprecationReason": "use @tag"
+    },
+    {
+     "name": "flag",
+     "isDeprecated": true,
+     "deprecationReason": "No longer supported"
+    },
+    {
+     "name": "include",
+     "isDeprecated": false,
+     "deprecationReason": null
+    },
+    {
+     "name": "skip",
+     "isDeprecated": false,
+     "deprecationReason": null
+    },
+    {
+     "name": "deprecated",
+     "isDeprecated": false,
+     "deprecationReason": null
+    },
+    {
+     "name": "specifiedBy",
+     "isDeprecated": false,
+     "deprecationReason": null
+    },
+    {
+     "name": "oneOf",
+     "isDeprecated": false,
+     "deprecationReason": null
+    }
    ]
   },
   "person": {
@@ -196,9 +257,6 @@
     },
     {
      "name": "id"
-    },
-    {
-     "name": "legacy"
     }
    ],
    "all": [
@@ -353,19 +411,6 @@
        "name": "ID",
        "ofType": null
       }
-     }
-    },
-    {
-     "name": "legacy",
-     "description": null,
-     "isDeprecated": false,
-     "deprecationReason": null,
-     "args": [],
-     "every": [],
-     "type": {
-      "kind": "SCALAR",
-      "name": "String",
-      "ofType": null
      }
     }
    ],

@@ -31,6 +31,6 @@ fn a_raw_value_outside_the_space_is_rejected_by_the_fallible_door() {
 #[test]
 fn the_declaration_order_array_is_complete() {
   // If a variant is added to the enum but not to ALL, `from_raw` silently loses it.
-  assert_eq!(K::ALL.len(), 87, "ALL must list every SyntaxKind variant");
+  assert_eq!(K::ALL.len(), 88, "ALL must list every SyntaxKind variant");
   assert_eq!(K::ALL[K::ALL.len() - 1], K::Root, "Root is declared last");
 }
