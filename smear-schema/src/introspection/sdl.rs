@@ -409,9 +409,11 @@ impl Renderer {
   ///   response also reports a `@deprecated` of its own whose `reason` is nullable — as a server
   ///   older than the draft does — which the door writes out and the build then reads it against.
   /// - **Omitted** — the query asked for `isDeprecated` and not for `deprecationReason` — is a bare
-  ///   ` @deprecated`, so the definition's default reason answers: `No longer supported` for the
-  ///   specified directive. `reason: null` would claim the server sent a `null` it never wrote, and
-  ///   the build would refuse the response for it.
+  ///   ` @deprecated`, and the build gives it the default of the `@deprecated` it reads usages
+  ///   against, by draft §6.4.1's rule for an argument a usage leaves out: `No longer supported`
+  ///   for the specified directive, and the server's own default — a string, or `null` — when the
+  ///   response reports a `@deprecated` of its own, which the door writes out. `reason: null`
+  ///   would claim the server sent a `null` it never wrote, which the specified directive refuses.
   fn deprecated(&mut self, deprecated: &Deprecated<'_>) {
     let Some(reason) = deprecated else {
       return;

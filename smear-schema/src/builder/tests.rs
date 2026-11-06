@@ -774,6 +774,31 @@ fn a_refused_text_arena_is_a_typed_refusal() {
   );
 }
 
+/// The reason every bare `@deprecated` takes is written into the arena once, and only by a build
+/// that has one: the first usage adds the reason's bytes, every later one adds nothing, and a build
+/// with none adds nothing at all.
+#[test]
+fn a_bare_reason_is_written_once_and_only_when_a_usage_asks_for_it() {
+  const DEFINITION: &str =
+    "directive @deprecated(reason: String = \"Custom\") on FIELD_DEFINITION | ENUM_VALUE\n";
+  let arena = |sdl: &str| {
+    Schema::build(&parse(&std::format!("{DEFINITION}{sdl}")))
+      .expect("a schema")
+      .text
+      .len()
+  };
+  let none = arena("type Query { a: Int b: Int } enum E { X }");
+  let one = arena("type Query { a: Int @deprecated b: Int } enum E { X }");
+  let three =
+    arena("type Query { a: Int @deprecated b: Int @deprecated } enum E { X @deprecated }");
+  assert_eq!(
+    one,
+    none + "Custom".len(),
+    "the first bare usage writes the reason"
+  );
+  assert_eq!(three, one, "every later one shares it");
+}
+
 /// Every declaration-order table is a permutation of each group it covers, over a schema with
 /// every kind of group in it — the meta-fields, an argument-less directive and an interface closure
 /// wider than one included.

@@ -780,6 +780,39 @@ fn directives_are_filtered_by_include_deprecated() {
   );
 }
 
+/// A bare `@deprecated` is answered with the reason its definition's default gives it: `null`
+/// against a replacement whose `reason` defaults to `null`, and the replacement's own text against
+/// one whose default is a string — not the specified `No longer supported`, which neither schema
+/// declares.
+#[test]
+fn a_bare_deprecated_is_answered_with_its_definitions_default() {
+  for (default, reason) in [("null", JsonValue::Null), ("\"Custom\"", json!("Custom"))] {
+    let sdl = format!(
+      "directive @deprecated(reason: String = {default}) on FIELD_DEFINITION | \
+       ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE | DIRECTIVE_DEFINITION
+       type Query {{ ok: Int }}
+       type Widget {{ id: ID old: Int @deprecated }}"
+    );
+    let answer = run(
+      &sdl,
+      r#"{
+        __type(name: "Widget") {
+          fields(includeDeprecated: true) { name isDeprecated deprecationReason }
+        }
+      }"#,
+    );
+    assert!(answer.errors.is_empty(), "{:?}", answer.errors);
+    assert_eq!(
+      answer.data["__type"]["fields"],
+      json!([
+        { "name": "id", "isDeprecated": false, "deprecationReason": null },
+        { "name": "old", "isDeprecated": true, "deprecationReason": reason }
+      ]),
+      "{sdl}"
+    );
+  }
+}
+
 /// Draft §4's kind-dependent nulls, for every kind a type can be, a reference's two wrappers
 /// included.
 #[test]

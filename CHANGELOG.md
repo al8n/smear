@@ -268,7 +268,10 @@ All notable changes to Smear are documented in this file.
   `isDeprecated` still falls back to the reason as graphql-js reads it, and a
   deprecated element whose `deprecationReason` the response omits is written as
   a bare `@deprecated`, so the definition's default reason applies, where a
-  `null` one is refused.
+  `null` one is refused. A bare `@deprecated` now takes its reason from the
+  effective definition's default (a replacement's own string or `null`), where
+  it always read "No longer supported", so the door's omitted reasons resolve
+  the same way.
 - `graphql-proto`: introspection answers `__Directive.isDeprecated` and
   `deprecationReason`, and `__Schema.directives` leaves a deprecated directive
   out unless `includeDeprecated` is `true`. `includeDeprecated: null`, written or

@@ -1840,6 +1840,41 @@ fn a_nullable_deprecated_keeps_a_null_reason_apart_from_an_unasked_one() {
   }
 }
 
+/// A server whose own `@deprecated` gives `reason` another default has that default answer every
+/// reason its response leaves out, on all four kinds of element.
+///
+/// The response lists the directive, so the door writes it out, and the build gives each bare
+/// `@deprecated` the default of the definition it reads it against: `null` where the server's
+/// `reason` defaults to `null` or has no default, and the server's own text where its default is a
+/// string — never the specified `No longer supported`, which this server does not declare.
+#[test]
+fn an_unasked_reason_takes_the_servers_own_default() {
+  const STRING: &str = r#"{"kind":"SCALAR","name":"String"}"#;
+  const NON_NULL_STRING: &str = r#"{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}"#;
+
+  for (ty, default, expected) in [
+    (STRING, r#""null""#, None),
+    (STRING, "null", None),
+    (
+      NON_NULL_STRING,
+      r#""\"Custom\"""#,
+      Some(String::from("Custom")),
+    ),
+  ] {
+    let own = std::format!(
+      r#"{{"name":"deprecated","locations":[
+        "FIELD_DEFINITION","ARGUMENT_DEFINITION","INPUT_FIELD_DEFINITION","ENUM_VALUE",
+        "DIRECTIVE_DEFINITION"
+      ],"args":[{{"name":"reason","type":{ty},"defaultValue":{default}}}]}},"#
+    );
+    let json = deprecated_elements(["", "", "", ""], &own);
+    let schema = from_response(&json);
+    for (element, found) in element_deprecations(&schema) {
+      assert_eq!(found, Some(expected.clone()), "{element}\n---\n{json}");
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------------------------
 // the meta-schema: held to its shape, not to a server's rendering of it
 // ---------------------------------------------------------------------------------------------

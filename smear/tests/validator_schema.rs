@@ -3981,6 +3981,165 @@ fn a_null_deprecation_reason_is_refused() {
   assert_eq!(deprecated(&redefined, ok.deprecation()), Some(None));
 }
 
+/// A bare `@deprecated` at every location the directive may stand, for the tests below to set
+/// beside whichever definition of `@deprecated` they mean: a field, a field's argument, a field an
+/// `extend type` adds, an input field, an enum value, a directive definition, a directive's
+/// argument and an `extend directive`.
+const BARE_USAGES: &str = "
+type Query { old(by: Int @deprecated): Int @deprecated }
+extend type Query { added: Int @deprecated }
+input Filter { old: Int @deprecated }
+enum Verdict { YES NO @deprecated }
+directive @gone(by: Int @deprecated) @deprecated on FIELD
+directive @faded on FIELD
+extend directive @faded @deprecated
+";
+
+/// The five locations the specified `@deprecated` declares, for a replacement to declare as well.
+const DEPRECATED_LOCATIONS: &str = "FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE | DIRECTIVE_DEFINITION";
+
+/// What each bare `@deprecated` in [`BARE_USAGES`] came back as, in that document's order, read by
+/// [`deprecated`].
+fn bare_deprecations(schema: &Schema) -> [(&'static str, Option<Option<&str>>); 8] {
+  let (old, old_meta) = member(schema, "Query", "old");
+  let (_, by) = argument(schema, old.args(), "by");
+  let (_, added) = member(schema, "Query", "added");
+  let (_, input_field) = schema
+    .input_fields_in_order(ty(schema, "Filter"))
+    .find(|(field, _)| schema.name(field.name()) == "old")
+    .expect("Filter.old");
+  let (_, value) = schema
+    .enum_values_in_order(ty(schema, "Verdict"))
+    .find(|(value, _)| schema.name(*value) == "NO")
+    .expect("Verdict.NO");
+  let (gone, gone_meta) = schema
+    .directives_in_order()
+    .find(|(directive, _)| schema.name(directive.name()) == "gone")
+    .expect("@gone");
+  let (_, gone_by) = argument(schema, gone.args(), "by");
+  let (_, faded) = schema
+    .directives_in_order()
+    .find(|(directive, _)| schema.name(directive.name()) == "faded")
+    .expect("@faded");
+  [
+    ("a field", deprecated(schema, old_meta.deprecation())),
+    ("a field's argument", deprecated(schema, by.deprecation())),
+    (
+      "a field an `extend type` adds",
+      deprecated(schema, added.deprecation()),
+    ),
+    (
+      "an input field",
+      deprecated(schema, input_field.deprecation()),
+    ),
+    ("an enum value", deprecated(schema, value.deprecation())),
+    (
+      "a directive definition",
+      deprecated(schema, gone_meta.deprecation()),
+    ),
+    (
+      "a directive's argument",
+      deprecated(schema, gone_by.deprecation()),
+    ),
+    (
+      "an `extend directive`",
+      deprecated(schema, faded.deprecation()),
+    ),
+  ]
+}
+
+/// Asserts that every bare `@deprecated` in a schema built over [`BARE_USAGES`] came back
+/// deprecated with `reason`.
+fn assert_every_bare_reason(schema: &Schema, reason: Option<&str>, sdl: &str) {
+  for (location, found) in bare_deprecations(schema) {
+    assert_eq!(found, Some(reason), "{location}\n---\n{sdl}");
+  }
+}
+
+/// A bare `@deprecated` takes the default of its definition's `reason`, as draft §6.4.1 gives any
+/// argument a usage leaves out, and the specified definition's is `No longer supported` — at every
+/// location the directive may stand.
+#[test]
+fn a_bare_deprecated_takes_the_specified_default() {
+  assert_every_bare_reason(
+    &built(BARE_USAGES),
+    Some("No longer supported"),
+    BARE_USAGES,
+  );
+}
+
+/// A document that replaces `@deprecated` with a default of its own gives every bare usage that
+/// default, not the specified one's.
+#[test]
+fn a_bare_deprecated_takes_a_replacements_string_default() {
+  let sdl = format!(
+    "directive @deprecated(reason: String = \"Custom\") on {DEPRECATED_LOCATIONS}\n{BARE_USAGES}"
+  );
+  assert_every_bare_reason(&built(&sdl), Some("Custom"), &sdl);
+}
+
+/// A replacement whose `reason` defaults to `null` gives every bare usage a `null` reason —
+/// deprecated, with no reason — and not the specified default.
+#[test]
+fn a_bare_deprecated_takes_a_replacements_null_default() {
+  let sdl = format!(
+    "directive @deprecated(reason: String = null) on {DEPRECATED_LOCATIONS}\n{BARE_USAGES}"
+  );
+  assert_every_bare_reason(&built(&sdl), None, &sdl);
+}
+
+/// A replacement that gives a bare usage no string to take gives it a `null` reason: a nullable
+/// `reason` with no default, which leaves the usage no value at all; no `reason` argument; and a
+/// default of another shape, which reads as a written `reason` of that shape does. A non-null
+/// `reason` with no default is the one exception, because a bare usage of it omits a required
+/// argument, and the build refuses that.
+#[test]
+fn a_bare_deprecated_with_no_string_default_to_take_has_a_null_reason() {
+  for definition in [
+    "directive @deprecated(reason: String)",
+    "directive @deprecated",
+    "directive @deprecated(reason: Int = 3)",
+  ] {
+    let sdl = format!("{definition} on {DEPRECATED_LOCATIONS}\n{BARE_USAGES}");
+    assert_every_bare_reason(&built(&sdl), None, &sdl);
+  }
+
+  let errors = refused(
+    "directive @deprecated(reason: String!) on FIELD_DEFINITION
+     type Query { ok: Int @deprecated }",
+  );
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::MissingRequiredDirectiveArgument]
+  );
+}
+
+/// The definition a bare `@deprecated` takes its reason from is the one the build ends with,
+/// wherever it is written: a replacement after its bare usages in the same document, or in a later
+/// document of the same build, still decides every one of them.
+#[test]
+fn a_replacement_written_after_its_bare_usages_still_decides_their_reason() {
+  let replacement =
+    format!("directive @deprecated(reason: String = \"Custom\") on {DEPRECATED_LOCATIONS}");
+
+  let sdl = format!("{BARE_USAGES}\n{replacement}");
+  assert_every_bare_reason(&built(&sdl), Some("Custom"), &sdl);
+
+  let usages = parse(BARE_USAGES);
+  let later = parse(&replacement);
+  let mut builder = SchemaBuilder::new();
+  builder.document(&usages);
+  builder.document(&later);
+  let schema = builder
+    .finish()
+    .unwrap_or_else(|errors| panic!("expected a schema, got:\n{errors}"));
+  assert_every_bare_reason(
+    &schema,
+    Some("Custom"),
+    "the replacement in a later document",
+  );
+}
+
 /// Absent is not empty: `""` is a description of no bytes, and returned as one.
 #[test]
 fn an_empty_description_is_not_an_absent_one() {
