@@ -1099,7 +1099,7 @@ fn colliding_names_of(
   width: usize,
 ) -> std::vec::Vec<std::string::String> {
   let mut by_bucket: std::vec::Vec<std::vec::Vec<std::string::String>> =
-    std::vec::from_elem(std::vec::Vec::new(), mask as usize + 1);
+    std::vec![std::vec::Vec::new(); mask as usize + 1];
   for candidate in 0u64.. {
     let name = std::format!("{prefix}{candidate:0width$}");
     let at = smear_schema::bucket(smear_schema::hash_bytes(name.as_bytes()), mask) as usize;
@@ -3196,7 +3196,7 @@ fn with_both_lends_open(
   let tree = std::rc::Rc::new(core::cell::Cell::new(0usize));
   let mut space = Counting {
     mint: std::rc::Rc::clone(&tree),
-    variables: std::vec::from_elem((), 1)
+    variables: std::vec![(); 1]
       .into_iter()
       .map(|()| ("text", Tracked::new(&arguments, Value::Text)))
       .collect(),
