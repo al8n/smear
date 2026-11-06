@@ -439,10 +439,16 @@ fn prose<'a>(scanner: &mut Scanner<'a>, what: &str) -> Scanned<Option<Text<'a>>>
   nullable(scanner, |scanner| scanner.text(what))
 }
 
-/// `isDeprecated`, which a response may write as `null` or leave out when its query did not ask;
-/// both read as unwritten.
-fn is_deprecated(scanner: &mut Scanner<'_>, what: &str) -> Scanned<Option<bool>> {
-  nullable(scanner, |scanner| scanner.boolean(what))
+/// `isDeprecated`, which draft §4 types `Boolean!` on a field, an input value, an enum value and a
+/// directive alike, so `null` is refused like any other non-boolean — as it is for
+/// `__Directive.isRepeatable`.
+///
+/// A conforming response never writes one: a non-null violation propagates the `null` to the parent
+/// instead. A member the response *omits* is a different thing and never reaches this function — a
+/// query that did not ask for the flag leaves it out — so its slot reads as unwritten, and
+/// `deprecated` falls back to the reason as graphql-js does.
+fn is_deprecated(scanner: &mut Scanner<'_>, what: &str) -> Scanned<bool> {
+  scanner.boolean(what)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -710,7 +716,7 @@ fn field<'a>(scanner: &mut Scanner<'a>, owner_at: usize) -> Scanned<Introspected
     description: description.flatten(),
     args: args.unwrap_or_default(),
     ty: ty.ok_or_else(|| scanner.missing("type"))?,
-    deprecated: deprecated(is_deprecated_slot.flatten(), deprecation_reason.flatten()),
+    deprecated: deprecated(is_deprecated_slot, deprecation_reason.flatten()),
   })
 }
 
@@ -759,7 +765,7 @@ fn input_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspec
     description,
     ty: ty.ok_or_else(|| scanner.missing("type"))?,
     default_value: default_value.flatten(),
-    deprecated: deprecated(is_deprecated_slot.flatten(), deprecation_reason.flatten()),
+    deprecated: deprecated(is_deprecated_slot, deprecation_reason.flatten()),
   })
 }
 
@@ -797,7 +803,7 @@ fn enum_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspect
   Ok(IntrospectedEnumValue {
     name: name.ok_or_else(|| scanner.missing("name"))?,
     description: description.flatten(),
-    deprecated: deprecated(is_deprecated_slot.flatten(), deprecation_reason.flatten()),
+    deprecated: deprecated(is_deprecated_slot, deprecation_reason.flatten()),
   })
 }
 
@@ -861,7 +867,7 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
     locations: locations.ok_or_else(|| scanner.missing("locations"))?,
     args: args.unwrap_or_default(),
     is_repeatable: is_repeatable.unwrap_or(false),
-    deprecated: deprecated(is_deprecated_slot.flatten(), deprecation_reason.flatten()),
+    deprecated: deprecated(is_deprecated_slot, deprecation_reason.flatten()),
   })
 }
 

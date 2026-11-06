@@ -1123,7 +1123,7 @@ fn prose_is_read_wherever_draft_4_has_it() {
        ]},
        {"kind":"SCALAR","name":"Url","specifiedByURL":"https://url.spec.whatwg.org/"},
        {"kind":"ENUM","name":"E","enumValues":[
-         {"name":"A","description":null,"isDeprecated":null},
+         {"name":"A","description":null},
          {"name":"B","isDeprecated":true}
        ]}"#,
   );
@@ -1223,6 +1223,141 @@ fn a_directive_deprecation_is_read() {
       None,
     ]
   );
+}
+
+/// One `__Field`, one `__InputValue`, one `__EnumValue` and one `__Directive` — the four types
+/// draft §4 gives an `isDeprecated` — each as a response, keyed by the member a refusal of its flag
+/// names.
+///
+/// `members` is the one part that varies: written after the other members of each, leading comma
+/// included, or empty.
+fn deprecation_sites(members: &str) -> [(&'static str, String); 4] {
+  [
+    (
+      "__Field.isDeprecated",
+      response(&format!(
+        r#"{{"kind":"OBJECT","name":"Query","fields":[
+          {{"name":"ok","args":[],"type":{{"kind":"SCALAR","name":"Int"}}{members}}}
+        ]}}"#
+      )),
+    ),
+    (
+      "__InputValue.isDeprecated",
+      response(&format!(
+        r#"{{"kind":"OBJECT","name":"Query","fields":[
+          {{"name":"ok","args":[
+            {{"name":"arg","type":{{"kind":"SCALAR","name":"Int"}}{members}}}
+          ],"type":{{"kind":"SCALAR","name":"Int"}}}}
+        ]}}"#
+      )),
+    ),
+    (
+      "__EnumValue.isDeprecated",
+      response(&format!(
+        r#"{OK_QUERY},{{"kind":"ENUM","name":"Verdict","enumValues":[{{"name":"YES"{members}}}]}}"#
+      )),
+    ),
+    (
+      "__Directive.isDeprecated",
+      with_directives(&format!(
+        r#"{{"name":"weird","locations":["FIELD"],"args":[]{members}}}"#
+      )),
+    ),
+  ]
+}
+
+/// An explicit `null` for `isDeprecated` is a malformed response, on all four types that have one.
+///
+/// Draft §4 types the flag `Boolean!`, and a non-null violation propagates the `null` to the parent
+/// instead of writing it, so no conforming server sends one. Read as an omitted flag it would leave
+/// the decision to `deprecationReason`: a reason beside the `null` would deprecate the member, and
+/// with none the member would silently build as not deprecated. Both are pinned, and in both
+/// orders, because the flag and the reason are separate members and either may be written first.
+#[test]
+fn an_explicit_null_flag_is_refused_on_all_four_types() {
+  for members in [
+    r#","isDeprecated":null"#,
+    r#","isDeprecated":null,"deprecationReason":"Gone.""#,
+    r#","deprecationReason":"Gone.","isDeprecated":null"#,
+  ] {
+    for (flag, json) in deprecation_sites(members) {
+      assert_eq!(
+        refused(&json).0,
+        ResponseErrorKind::MalformedResponse,
+        "{flag} with `{members}`\n---\n{json}"
+      );
+      let subject = subject_of(&json);
+      assert!(
+        subject.starts_with(&format!(
+          "invalid type: null, expected a boolean for `{flag}`"
+        )),
+        "{flag} with `{members}`: {subject}"
+      );
+    }
+  }
+
+  // The control that makes the refusals above evidence rather than a tautology: with the `null`
+  // swapped for anything else the flag can be, or left out, the same four fixtures are read.
+  for members in [
+    "",
+    r#","isDeprecated":false"#,
+    r#","isDeprecated":true"#,
+    r#","deprecationReason":"Gone.""#,
+  ] {
+    for (flag, json) in deprecation_sites(members) {
+      assert!(
+        read(&json).is_ok(),
+        "{flag} with `{members}` was refused\n---\n{json}"
+      );
+    }
+  }
+}
+
+/// A directive's `isDeprecated` decides whenever it is written, and the reason decides only when it
+/// is not.
+///
+/// A flag that is not written is a query that did not ask for it, and the response is read as
+/// graphql-js reads every response: deprecated if and only if there is a reason. `null` is neither
+/// and is refused, as the test above pins, so this one pins what the spellings that are read still
+/// build.
+#[test]
+fn a_directive_flag_decides_when_written_and_the_reason_when_it_is_not() {
+  let cases: &[(&str, &str, Option<Option<&str>>)] = &[
+    (
+      "no flag, a reason",
+      r#","deprecationReason":"Use @kept.""#,
+      Some(Some("Use @kept.")),
+    ),
+    ("no flag, no reason", "", None),
+    (
+      "false, a reason",
+      r#","isDeprecated":false,"deprecationReason":"Use @kept.""#,
+      None,
+    ),
+    ("true, no reason", r#","isDeprecated":true"#, Some(None)),
+    (
+      "true, a null reason",
+      r#","isDeprecated":true,"deprecationReason":null"#,
+      Some(None),
+    ),
+    (
+      "true, a reason",
+      r#","isDeprecated":true,"deprecationReason":"Use @kept.""#,
+      Some(Some("Use @kept.")),
+    ),
+  ];
+
+  for (what, members, expected) in cases {
+    let json = with_directives(&format!(
+      r#"{{"name":"gone","locations":["FIELD"],"args":[]{members}}}"#
+    ));
+    let schema = read(&json).expect("a schema");
+    let found = schema.directives[0]
+      .deprecated
+      .as_ref()
+      .map(|reason| reason.as_ref().map(Text::as_str));
+    assert_eq!(found, *expected, "{what}\n---\n{json}");
+  }
 }
 
 /// The wrapper chain a hostile response can build is bounded before the renderer walks it.
