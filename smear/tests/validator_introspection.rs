@@ -1690,6 +1690,157 @@ fn every_envelope_is_read() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// a deprecation reason: text, `null`, or not asked for
+// ---------------------------------------------------------------------------------------------
+
+/// A response with one deprecated element of each of the four kinds draft §4 gives an
+/// `isDeprecated`: a field, a field's argument, an enum value and a directive.
+///
+/// `reasons` is what follows `"isDeprecated":true` on each of them, in that order: a leading comma
+/// and a `deprecationReason`, or nothing for a query that did not ask for one. `directives` are
+/// the response's own, ahead of the deprecated one and each followed by a comma.
+fn deprecated_elements(reasons: [&str; 4], directives: &str) -> String {
+  let [field, argument, value, directive] = reasons;
+  std::format!(
+    r#"{{"__schema":{{"queryType":{{"name":"Query"}},"directives":[
+      {directives}
+      {{"name":"old","locations":["FIELD"],"args":[],"isDeprecated":true{directive}}}
+    ],"types":[
+      {{"kind":"OBJECT","name":"Query","fields":[
+        {{"name":"ok","args":[],"type":{{"kind":"SCALAR","name":"Int"}}}},
+        {{"name":"old","args":[
+          {{"name":"by","type":{{"kind":"SCALAR","name":"Int"}},"defaultValue":null,
+            "isDeprecated":true{argument}}}
+        ],"type":{{"kind":"SCALAR","name":"Int"}},"isDeprecated":true{field}}}
+      ]}},
+      {{"kind":"ENUM","name":"Verdict","enumValues":[
+        {{"name":"YES"}},
+        {{"name":"NO","isDeprecated":true{value}}}
+      ]}}
+    ]}}}}"#
+  )
+}
+
+/// What [`deprecated_elements`] came back as, element by element in its order, each read by
+/// [`deprecated`]: `None` when the element is not deprecated, and its reason, itself `None` for a
+/// `null` one, when it is.
+fn element_deprecations(schema: &Schema) -> [(&'static str, Option<Option<String>>); 4] {
+  let (query, _) = schema.type_by_name(b"Query").expect("Query");
+  let (old, old_meta) = schema
+    .fields_in_order(query)
+    .find(|(field, _)| schema.name(field.name()) == "old")
+    .expect("Query.old");
+  let (_, by) = schema
+    .inputs_in_order(old.args())
+    .next()
+    .expect("Query.old(by:)");
+  let (verdict, _) = schema.type_by_name(b"Verdict").expect("Verdict");
+  let (_, no) = schema
+    .enum_values_in_order(verdict)
+    .find(|(value, _)| schema.name(*value) == "NO")
+    .expect("Verdict.NO");
+  let (_, directive) = schema
+    .directives_in_order()
+    .find(|(def, _)| schema.name(def.name()) == "old")
+    .expect("@old");
+  [
+    ("a field", deprecated(schema, old_meta.deprecation())),
+    ("an argument", deprecated(schema, by.deprecation())),
+    ("an enum value", deprecated(schema, no.deprecation())),
+    ("a directive", deprecated(schema, directive.deprecation())),
+  ]
+}
+
+/// A deprecated element whose `deprecationReason` the response leaves out takes the definition's
+/// default reason, on all four kinds of element.
+///
+/// A query may ask for `isDeprecated` and not for `deprecationReason`, and the response to it says
+/// an element is deprecated and nothing about why. That is not a `null` reason, which the specified
+/// `@deprecated`'s `reason: String!` refuses: the door writes a bare `@deprecated`, which the build
+/// reads as it reads one in a document.
+#[test]
+fn an_unasked_deprecation_reason_takes_the_default_on_all_four_kinds() {
+  let json = deprecated_elements(["", "", "", ""], "");
+  let schema = from_response(&json);
+  for (element, found) in element_deprecations(&schema) {
+    assert_eq!(
+      found,
+      Some(Some(String::from("No longer supported"))),
+      "{element}\n---\n{json}"
+    );
+  }
+}
+
+/// A `null` reason is a value, and the specified `@deprecated` refuses it, on all four kinds of
+/// element.
+///
+/// Draft §3.13.3 declares the specified directive's `reason` as `String!`, so a server that wrote
+/// `"deprecationReason": null` beside `"isDeprecated": true` is refused by the build as
+/// `InvalidDirectiveArgumentValue`, as the SDL door refuses `@deprecated(reason: null)` wherever
+/// it stands. Each element is refused alone, with the other three carrying a reason, and the same
+/// response with the member left out builds, so what is refused is the `null` and not the element.
+#[test]
+fn a_null_deprecation_reason_is_refused_on_all_four_kinds() {
+  const TEXT: &str = r#","deprecationReason":"Gone.""#;
+  const NULL: &str = r#","deprecationReason":null"#;
+
+  for (at, element) in ["a field", "an argument", "an enum value", "a directive"]
+    .into_iter()
+    .enumerate()
+  {
+    let mut reasons = [TEXT; 4];
+    reasons[at] = NULL;
+    let json = deprecated_elements(reasons, "");
+    let error = refused(&json);
+    let Some(errors) = error.schema_errors() else {
+      panic!("{element}: refused by the shape, not by draft §3: {error}\n---\n{json}");
+    };
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::InvalidDirectiveArgumentValue],
+      "{element}\n---\n{json}"
+    );
+  }
+
+  // The control that makes the refusals above evidence rather than a tautology: with the member
+  // left out instead of `null`, the same four elements build.
+  from_response(&deprecated_elements(["", "", "", ""], ""));
+}
+
+/// A server whose `@deprecated` takes a nullable `reason`, as one older than the draft does, keeps
+/// the three states of a reason apart end to end.
+///
+/// The response lists that directive itself, so the door writes it out and the build reads every
+/// `@deprecated` against it rather than against the specified `String!`. A `null` reason is then a
+/// value the definition accepts, and builds as deprecated with no reason; one the query did not ask
+/// for is still the default, and the two stay different where both build.
+#[test]
+fn a_nullable_deprecated_keeps_a_null_reason_apart_from_an_unasked_one() {
+  const NULLABLE_DEPRECATED: &str = r#"{"name":"deprecated","locations":[
+    "FIELD_DEFINITION","ARGUMENT_DEFINITION","INPUT_FIELD_DEFINITION","ENUM_VALUE",
+    "DIRECTIVE_DEFINITION"
+  ],"args":[
+    {"name":"reason","type":{"kind":"SCALAR","name":"String"},
+     "defaultValue":"\"No longer supported\""}
+  ]},"#;
+
+  for (reason, expected) in [
+    (
+      r#","deprecationReason":"Gone.""#,
+      Some(Some(String::from("Gone."))),
+    ),
+    (r#","deprecationReason":null"#, Some(None)),
+    ("", Some(Some(String::from("No longer supported")))),
+  ] {
+    let json = deprecated_elements([reason; 4], NULLABLE_DEPRECATED);
+    let schema = from_response(&json);
+    for (element, found) in element_deprecations(&schema) {
+      assert_eq!(found, expected, "{element} with `{reason}`\n---\n{json}");
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // the meta-schema: held to its shape, not to a server's rendering of it
 // ---------------------------------------------------------------------------------------------
 

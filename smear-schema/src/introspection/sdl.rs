@@ -86,7 +86,8 @@ use super::{
   json::Text,
   model::{
     Deprecated, IntrospectedDirective, IntrospectedEnumValue, IntrospectedField,
-    IntrospectedInputValue, IntrospectedKind, IntrospectedSchema, IntrospectedType, Name, TypeRef,
+    IntrospectedInputValue, IntrospectedKind, IntrospectedSchema, IntrospectedType, Name, Reason,
+    TypeRef,
   },
 };
 
@@ -398,24 +399,33 @@ impl Renderer {
     }
   }
 
-  /// ` @deprecated(reason: …)` behind a member the response reports deprecated, or behind a
-  /// directive definition's arguments, its reason quoted or `null` as the response wrote it — the
-  /// one applied directive besides `@oneOf` and `@specifiedBy` that introspection carries.
+  /// ` @deprecated` behind a member the response reports deprecated, or behind a directive
+  /// definition's arguments — the one applied directive besides `@oneOf` and `@specifiedBy` that
+  /// introspection carries — with the reason in the state the response wrote it:
   ///
-  /// A `null` reason is written as one, and the build refuses it as the SDL door refuses
-  /// `@deprecated(reason: null)` against the specified `reason: String!`, unless the response also
-  /// reports a `@deprecated` of its own whose `reason` is nullable — as a server older than the
-  /// draft does — which the door writes out and the build then reads it against.
+  /// - **A string** is the reason, quoted: ` @deprecated(reason: "…")`.
+  /// - **`null`** is written as one, ` @deprecated(reason: null)`, and the build refuses it as the
+  ///   SDL door refuses the same spelling against the specified `reason: String!`, unless the
+  ///   response also reports a `@deprecated` of its own whose `reason` is nullable — as a server
+  ///   older than the draft does — which the door writes out and the build then reads it against.
+  /// - **Omitted** — the query asked for `isDeprecated` and not for `deprecationReason` — is a bare
+  ///   ` @deprecated`, so the definition's default reason answers: `No longer supported` for the
+  ///   specified directive. `reason: null` would claim the server sent a `null` it never wrote, and
+  ///   the build would refuse the response for it.
   fn deprecated(&mut self, deprecated: &Deprecated<'_>) {
     let Some(reason) = deprecated else {
       return;
     };
-    self.out.push_str(" @deprecated(reason: ");
+    self.out.push_str(" @deprecated");
     match reason {
-      Some(reason) => quote(reason.as_str(), &mut self.out),
-      None => self.out.push_str("null"),
+      Reason::Text(reason) => {
+        self.out.push_str("(reason: ");
+        quote(reason.as_str(), &mut self.out);
+        self.out.push(')');
+      }
+      Reason::Null => self.out.push_str("(reason: null)"),
+      Reason::Omitted => {}
     }
-    self.out.push(')');
   }
 
   /// One of the eight meta types: refused when the response has listed it already, and otherwise

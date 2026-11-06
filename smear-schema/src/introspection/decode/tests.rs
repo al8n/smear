@@ -9,7 +9,7 @@ use crate::introspection::{
   ResponseErrorKind,
   json::Text,
   model::{
-    Deprecated, IntrospectedInputValue, IntrospectedSchema, IntrospectedType, Name, TypeRef,
+    Deprecated, IntrospectedInputValue, IntrospectedSchema, IntrospectedType, Name, Reason, TypeRef,
   },
 };
 // The byte gates at the foot of this file read `json::visited`, a thread-local counter, and
@@ -146,8 +146,8 @@ impl<'a> Census<'a> {
   }
 
   fn deprecated(&mut self, deprecated: &Deprecated<'a>) {
-    if let Some(reason) = deprecated {
-      self.text(reason.as_ref());
+    if let Some(Reason::Text(reason)) = deprecated {
+      self.text(Some(reason));
     }
   }
 
@@ -1148,11 +1148,8 @@ fn prose_is_read_wherever_draft_4_has_it() {
     Some("Fine.")
   );
   assert_eq!(
-    fields[0]
-      .deprecated
-      .as_ref()
-      .map(|reason| reason.as_ref().map(Text::as_str)),
-    Some(Some("Gone."))
+    fields[0].deprecated,
+    Some(Reason::Text(Text::Borrowed("Gone.")))
   );
   assert_eq!(
     fields[0].args[0]
@@ -1161,20 +1158,18 @@ fn prose_is_read_wherever_draft_4_has_it() {
       .map(|description| description.as_ref().map(Text::as_str)),
     Some(Some("An argument."))
   );
-  assert!(
-    matches!(fields[0].args[0].deprecated, Some(None)),
-    "`isDeprecated: true` beside a `null` reason is deprecated with no reason"
+  assert_eq!(
+    fields[0].args[0].deprecated,
+    Some(Reason::Null),
+    "`isDeprecated: true` beside a `null` reason is deprecated with a `null` one"
   );
   assert!(
     fields[1].deprecated.is_none(),
     "the flag decides, and a reason beside `false` is dropped"
   );
   assert_eq!(
-    fields[2]
-      .deprecated
-      .as_ref()
-      .map(|reason| reason.as_ref().map(Text::as_str)),
-    Some(Some("a reason and no flag")),
+    fields[2].deprecated,
+    Some(Reason::Text(Text::Borrowed("a reason and no flag"))),
     "a reason and no flag is read as graphql-js reads it"
   );
 
@@ -1184,7 +1179,11 @@ fn prose_is_read_wherever_draft_4_has_it() {
   );
   let values = schema.types[2].enum_values.as_ref().expect("values");
   assert!(values[0].description.is_none() && values[0].deprecated.is_none());
-  assert!(matches!(values[1].deprecated, Some(None)));
+  assert_eq!(
+    values[1].deprecated,
+    Some(Reason::Omitted),
+    "`isDeprecated: true` and no reason member says nothing about the reason, which is not `null`"
+  );
 }
 
 /// A directive's `isDeprecated` and `deprecationReason` are read as a field's are: the flag
@@ -1195,31 +1194,28 @@ fn a_directive_deprecation_is_read() {
   let json = with_directives(
     r#"{"name":"gone","locations":["FIELD"],"args":[],
         "isDeprecated":true,"deprecationReason":"Use @kept."},
-       {"name":"bare","locations":["FIELD"],"args":[],
+       {"name":"nulled","locations":["FIELD"],"args":[],
         "isDeprecated":true,"deprecationReason":null},
+       {"name":"unexplained","locations":["FIELD"],"args":[],"isDeprecated":true},
        {"name":"kept","locations":["FIELD"],"args":[],
         "isDeprecated":false,"deprecationReason":"ignored beside false"},
        {"name":"old","locations":["FIELD"],"args":[],"deprecationReason":"a reason and no flag"},
        {"name":"unasked","locations":["FIELD"],"args":[]}"#,
   );
   let schema = read(&json).expect("a schema");
-  let deprecations: Vec<Option<Option<&str>>> = schema
+  let deprecations: Vec<Deprecated<'_>> = schema
     .directives
     .iter()
-    .map(|directive| {
-      directive
-        .deprecated
-        .as_ref()
-        .map(|reason| reason.as_ref().map(Text::as_str))
-    })
+    .map(|directive| directive.deprecated.clone())
     .collect();
   assert_eq!(
     deprecations,
     [
-      Some(Some("Use @kept.")),
-      Some(None),
+      Some(Reason::Text(Text::Borrowed("Use @kept."))),
+      Some(Reason::Null),
+      Some(Reason::Omitted),
       None,
-      Some(Some("a reason and no flag")),
+      Some(Reason::Text(Text::Borrowed("a reason and no flag"))),
       None,
     ]
   );
@@ -1317,33 +1313,49 @@ fn an_explicit_null_flag_is_refused_on_all_four_types() {
 /// is not.
 ///
 /// A flag that is not written is a query that did not ask for it, and the response is read as
-/// graphql-js reads every response: deprecated if and only if there is a reason. `null` is neither
-/// and is refused, as the test above pins, so this one pins what the spellings that are read still
-/// build.
+/// graphql-js reads every response: deprecated if and only if the reason is text. A `null` flag is
+/// refused, as the test above pins, so this one pins what the spellings that are read come to: each
+/// of the three flags beside each of the reason's three states. It is where a flag that is `true`
+/// keeps a `null` reason apart from one that was not written.
 #[test]
 fn a_directive_flag_decides_when_written_and_the_reason_when_it_is_not() {
-  let cases: &[(&str, &str, Option<Option<&str>>)] = &[
+  let cases: &[(&str, &str, Option<Reason<'_>>)] = &[
+    ("no flag, no reason", "", None),
+    (
+      "no flag, a null reason",
+      r#","deprecationReason":null"#,
+      None,
+    ),
     (
       "no flag, a reason",
       r#","deprecationReason":"Use @kept.""#,
-      Some(Some("Use @kept.")),
+      Some(Reason::Text(Text::Borrowed("Use @kept."))),
     ),
-    ("no flag, no reason", "", None),
+    ("false, no reason", r#","isDeprecated":false"#, None),
+    (
+      "false, a null reason",
+      r#","isDeprecated":false,"deprecationReason":null"#,
+      None,
+    ),
     (
       "false, a reason",
       r#","isDeprecated":false,"deprecationReason":"Use @kept.""#,
       None,
     ),
-    ("true, no reason", r#","isDeprecated":true"#, Some(None)),
+    (
+      "true, no reason",
+      r#","isDeprecated":true"#,
+      Some(Reason::Omitted),
+    ),
     (
       "true, a null reason",
       r#","isDeprecated":true,"deprecationReason":null"#,
-      Some(None),
+      Some(Reason::Null),
     ),
     (
       "true, a reason",
       r#","isDeprecated":true,"deprecationReason":"Use @kept.""#,
-      Some(Some("Use @kept.")),
+      Some(Reason::Text(Text::Borrowed("Use @kept."))),
     ),
   ];
 
@@ -1352,11 +1364,10 @@ fn a_directive_flag_decides_when_written_and_the_reason_when_it_is_not() {
       r#"{{"name":"gone","locations":["FIELD"],"args":[]{members}}}"#
     ));
     let schema = read(&json).expect("a schema");
-    let found = schema.directives[0]
-      .deprecated
-      .as_ref()
-      .map(|reason| reason.as_ref().map(Text::as_str));
-    assert_eq!(found, *expected, "{what}\n---\n{json}");
+    assert_eq!(
+      &schema.directives[0].deprecated, expected,
+      "{what}\n---\n{json}"
+    );
   }
 }
 

@@ -265,7 +265,10 @@ All notable changes to Smear are documented in this file.
   it refuses an explicit `null` for any `isDeprecated`, on a field, an input
   value, an enum value or a directive (draft §4 types all four `Boolean!`), as
   `MalformedResponse` where it read as unwritten, while an omitted
-  `isDeprecated` still falls back to the reason as graphql-js reads it.
+  `isDeprecated` still falls back to the reason as graphql-js reads it, and a
+  deprecated element whose `deprecationReason` the response omits is written as
+  a bare `@deprecated`, so the definition's default reason applies, where a
+  `null` one is refused.
 - `graphql-proto`: introspection answers `__Directive.isDeprecated` and
   `deprecationReason`, and `__Schema.directives` leaves a deprecated directive
   out unless `includeDeprecated` is `true`. `includeDeprecated: null`, written or

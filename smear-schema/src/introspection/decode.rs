@@ -447,6 +447,11 @@ fn prose<'a>(scanner: &mut Scanner<'a>, what: &str) -> Scanned<Option<Text<'a>>>
 /// instead. A member the response *omits* is a different thing and never reaches this function — a
 /// query that did not ask for the flag leaves it out — so its slot reads as unwritten, and
 /// `deprecated` falls back to the reason as graphql-js does.
+///
+/// The reason's slot reaches `deprecated` as the reader left it, unflattened: a `deprecationReason`
+/// the query did not ask for and one the server wrote as `null` are two states
+/// ([`Reason`](super::model::Reason)), and only the second is a value the specified `@deprecated`
+/// can refuse.
 fn is_deprecated(scanner: &mut Scanner<'_>, what: &str) -> Scanned<bool> {
   scanner.boolean(what)
 }
@@ -716,7 +721,7 @@ fn field<'a>(scanner: &mut Scanner<'a>, owner_at: usize) -> Scanned<Introspected
     description: description.flatten(),
     args: args.unwrap_or_default(),
     ty: ty.ok_or_else(|| scanner.missing("type"))?,
-    deprecated: deprecated(is_deprecated_slot, deprecation_reason.flatten()),
+    deprecated: deprecated(is_deprecated_slot, deprecation_reason),
   })
 }
 
@@ -765,7 +770,7 @@ fn input_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspec
     description,
     ty: ty.ok_or_else(|| scanner.missing("type"))?,
     default_value: default_value.flatten(),
-    deprecated: deprecated(is_deprecated_slot, deprecation_reason.flatten()),
+    deprecated: deprecated(is_deprecated_slot, deprecation_reason),
   })
 }
 
@@ -803,7 +808,7 @@ fn enum_value<'a>(scanner: &mut Scanner<'a>, owner: Owner) -> Scanned<Introspect
   Ok(IntrospectedEnumValue {
     name: name.ok_or_else(|| scanner.missing("name"))?,
     description: description.flatten(),
-    deprecated: deprecated(is_deprecated_slot, deprecation_reason.flatten()),
+    deprecated: deprecated(is_deprecated_slot, deprecation_reason),
   })
 }
 
@@ -867,7 +872,7 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
     locations: locations.ok_or_else(|| scanner.missing("locations"))?,
     args: args.unwrap_or_default(),
     is_repeatable: is_repeatable.unwrap_or(false),
-    deprecated: deprecated(is_deprecated_slot, deprecation_reason.flatten()),
+    deprecated: deprecated(is_deprecated_slot, deprecation_reason),
   })
 }
 
