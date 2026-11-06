@@ -101,7 +101,8 @@ fn a_default_compares_by_its_canonical_text() {
 }
 
 /// The meta-schema the door holds a response's meta types to is the one every build injects: kind,
-/// and fields in smear's order with their types and arguments.
+/// and fields in smear's order with their types and arguments. An argument's older spelling, where
+/// it has one, is the same type made nullable.
 #[test]
 fn the_meta_types_are_the_injected_ones() {
   let document = parse("type Query { ok: Int }").expect("the SDL parses");
@@ -145,6 +146,20 @@ fn the_meta_types_are_the_injected_ones() {
       })
       .collect();
     assert_eq!(fields, expected, "{name}");
+
+    for field in meta.fields {
+      for argument in field.args {
+        if let Some(older) = argument.older {
+          assert_eq!(
+            Some(older),
+            argument.ty.strip_suffix('!'),
+            "{name}.{}({})",
+            field.name,
+            argument.name
+          );
+        }
+      }
+    }
   }
 }
 

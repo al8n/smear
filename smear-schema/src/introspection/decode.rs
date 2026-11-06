@@ -6,7 +6,7 @@
 //! The previous reader allocated the same bytes three times — into a JSON value tree, into records
 //! whose every field was owned, and finally into the schema's interner. The first two exist only
 //! because a general reader has to answer "what is this?" for every node before anything can ask
-//! it a question. **The shape is closed**: 8 types and 41 members, none of them open, so at every
+//! it a question. **The shape is closed**: 8 types and 43 members, none of them open, so at every
 //! point this file already knows which member of which type it expects and dispatches on that.
 //! Nothing is built in order to be inspected, and the model borrows the response outright.
 //!
@@ -810,6 +810,8 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
   let mut locations = None;
   let mut args = None;
   let mut is_repeatable = None;
+  let mut is_deprecated_slot = None;
+  let mut deprecation_reason = None;
 
   let mut members = scanner.enter_object("__Directive")?;
   while let Some(key) = scanner.next_key(&mut members)? {
@@ -833,6 +835,12 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
       "isRepeatable" => member(scanner, &mut is_repeatable, |scanner| {
         scanner.boolean("__Directive.isRepeatable")
       })?,
+      "isDeprecated" => member(scanner, &mut is_deprecated_slot, |scanner| {
+        is_deprecated(scanner, "__Directive.isDeprecated")
+      })?,
+      "deprecationReason" => member(scanner, &mut deprecation_reason, |scanner| {
+        prose(scanner, "__Directive.deprecationReason")
+      })?,
       _ => scanner.skip_value()?,
     }
   }
@@ -843,6 +851,8 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
   let locations = refusals.take(locations);
   let args = refusals.take(args);
   let is_repeatable = refusals.take(is_repeatable);
+  let is_deprecated_slot = refusals.take(is_deprecated_slot);
+  let deprecation_reason = refusals.take(deprecation_reason);
   refusals.check(scanner)?;
 
   Ok(IntrospectedDirective {
@@ -851,6 +861,7 @@ fn directive<'a>(scanner: &mut Scanner<'a>) -> Scanned<IntrospectedDirective<'a>
     locations: locations.ok_or_else(|| scanner.missing("locations"))?,
     args: args.unwrap_or_default(),
     is_repeatable: is_repeatable.unwrap_or(false),
+    deprecated: deprecated(is_deprecated_slot.flatten(), deprecation_reason.flatten()),
   })
 }
 

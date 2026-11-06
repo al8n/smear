@@ -149,10 +149,12 @@ fn refused(json: &str) -> IntrospectionError {
 /// non-conventional root names (so the `schema` block has to round-trip rather than the
 /// `Query`/`Mutation` convention covering for it), an interface implementing an interface, a
 /// five-wrapper type reference, all three [`DefaultKind`]s, a `@oneOf` input object, a repeatable
-/// directive, applied directives that introspection cannot carry, and a custom scalar. And what
-/// draft §4 returns beyond the shape: a description everywhere one may stand — block strings,
-/// escapes, an empty one — each of the three deprecations, a `@specifiedBy`, defaults whose
-/// canonical text is not their spelling, and lists declared out of the order they are stored in.
+/// directive, applied directives that introspection cannot carry — on a directive definition and an
+/// `extend directive` too — and a custom scalar. And what draft §4 returns beyond the shape: a
+/// description everywhere one may stand — block strings, escapes, an empty one — both deprecations,
+/// with a reason and bare, a directive deprecated by its definition and another by an
+/// `extend directive`, a `@specifiedBy`, defaults whose canonical text is not their spelling, and
+/// lists declared out of the order they are stored in.
 const FIXTURE: &str = include_str!("fixtures/schemas/introspection_agreement.graphql");
 
 // ---------------------------------------------------------------------------------------------
@@ -349,12 +351,13 @@ mod server {
       .map(|(arg, meta)| input_value(schema, arg, meta))
       .collect();
     std::format!(
-      r#"{{"name":{},"description":{},"locations":[{}],"args":[{}],"isRepeatable":{}}}"#,
+      r#"{{"name":{},"description":{},"locations":[{}],"args":[{}],"isRepeatable":{},{}}}"#,
       json_string(schema.name(directive.name())),
       json_text(schema.text(meta.description())),
       locations.join(","),
       args.join(","),
       directive.is_repeatable(),
+      deprecation(schema, meta.deprecation()),
     )
   }
 
@@ -504,6 +507,7 @@ struct DirectiveFacts {
   repeatable: bool,
   built_in: bool,
   description: Option<String>,
+  deprecated: Option<Option<String>>,
   args: BTreeMap<String, InputFacts>,
   arg_order: Vec<String>,
 }
@@ -690,6 +694,7 @@ fn facts(schema: &Schema) -> Facts {
         repeatable: def.is_repeatable(),
         built_in: def.is_built_in(),
         description: text(schema, meta.description()),
+        deprecated: deprecated(schema, meta.deprecation()),
         args,
         arg_order,
       },
@@ -856,7 +861,16 @@ fn the_agreement_is_not_vacuous() {
       "the fixture no longer defines `{name}`; the gate's reach shrank"
     );
   }
-  for name in ["auth", "tag", "skip", "include", "deprecated"] {
+  for name in [
+    "auth",
+    "tag",
+    "origin",
+    "visibility",
+    "cached",
+    "skip",
+    "include",
+    "deprecated",
+  ] {
     assert!(
       observed.directives.contains_key(name),
       "the fixture no longer reaches `@{name}`"
@@ -967,9 +981,19 @@ fn the_agreement_is_not_vacuous() {
     "a bare `@deprecated` is not reached"
   );
   assert_eq!(
-    observed.types["Role"].enum_values["OWNER"].deprecated,
-    Some(None),
-    "`@deprecated(reason: null)` is not reached"
+    observed.directives["visibility"].deprecated,
+    Some(Some("use `@auth`".to_owned())),
+    "a directive deprecated by its definition is not reached"
+  );
+  assert_eq!(
+    observed.directives["cached"].deprecated,
+    Some(Some("No longer supported".to_owned())),
+    "a directive deprecated by an `extend directive` is not reached"
+  );
+  assert_eq!(
+    observed.directives["origin"].locations,
+    1 << 19,
+    "a directive declared at `DIRECTIVE_DEFINITION` alone is not reached"
   );
   assert!(
     observed.types["User"].fields["posts"].args["after"]
@@ -1184,7 +1208,7 @@ fn redefining_a_built_in_is_the_one_flag_introspection_loses() {
 /// texts, and its place among the document's directives.
 ///
 /// One spelling for each way an entry can differ: its description, a `null` one, its locations,
-/// its argument's type, its argument's default, and its repeatability.
+/// its argument's type, its argument's default, its repeatability, and its deprecation.
 #[test]
 fn a_specified_directive_the_response_reports_otherwise_is_written_out() {
   const REASON: &str = "\"Explains why this element was deprecated, usually also including a suggestion for how to access supported similar data. Formatted using the Markdown syntax, as specified by [CommonMark](https://commonmark.org/).\"";
@@ -1200,7 +1224,7 @@ fn a_specified_directive_the_response_reports_otherwise_is_written_out() {
     (
       "deprecated",
       std::format!(
-        "{DEPRECATED} directive @deprecated({REASON} reason: String = \"No longer supported\") on FIELD_DEFINITION | ENUM_VALUE"
+        "{DEPRECATED} directive @deprecated({REASON} reason: String! = \"No longer supported\") on FIELD_DEFINITION | ENUM_VALUE"
       ),
     ),
     (
@@ -1212,13 +1236,19 @@ fn a_specified_directive_the_response_reports_otherwise_is_written_out() {
     (
       "deprecated",
       std::format!(
-        "{DEPRECATED} directive @deprecated({REASON} reason: String = \"Gone.\") on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE"
+        "{DEPRECATED} directive @deprecated({REASON} reason: String! = \"Gone.\") on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE | DIRECTIVE_DEFINITION"
       ),
     ),
     (
       "specifiedBy",
       String::from(
         "\"Exposes a URL that specifies the behavior of this scalar.\" directive @specifiedBy(\"The URL that specifies the behavior of this scalar.\" url: String!) repeatable on SCALAR",
+      ),
+    ),
+    (
+      "oneOf",
+      String::from(
+        "\"Indicates exactly one field must be supplied and this field must not be `null`.\" directive @oneOf @deprecated(reason: \"Gone.\") on INPUT_OBJECT",
       ),
     ),
   ];
@@ -1304,9 +1334,10 @@ fn a_specified_directive_spelled_as_the_build_injects_it_loses_its_flag_and_its_
 /// [`server`] is this file's own reading of what a server returns, and it shares an author with
 /// the door; the executor shares neither — it answers a real query, through draft §6.3's
 /// collection, and its response is written by the writer a service would use. The query is
-/// graphql-js 16.11.0's `getIntrospectionQuery` with every option on, committed byte for byte as
-/// `fixtures/executables/introspection_query.graphql` and re-checked against upstream by
-/// `proto_introspection.rs` whenever the `proto-oracle` job has upstream to hand.
+/// graphql-js 17.1.0's `getIntrospectionQuery` with every flag on, directive deprecation included,
+/// committed byte for byte as `fixtures/executables/introspection_query.graphql` and re-checked
+/// against upstream by `proto_introspection.rs` whenever the `proto-oracle` job has upstream to
+/// hand.
 ///
 /// Needs `proto` as well as this file's `introspection`, and the two imply neither each other.
 #[cfg(feature = "proto")]
@@ -1328,8 +1359,9 @@ mod executed {
 
   use super::Facts;
 
-  /// graphql-js 16.11.0's `getIntrospectionQuery({ descriptions, specifiedByUrl,
-  /// directiveIsRepeatable, schemaDescription, inputValueDeprecation, oneOf })`, all `true`.
+  /// graphql-js 17.1.0's `getIntrospectionQuery({ descriptions, specifiedByUrl,
+  /// directiveIsRepeatable, schemaDescription, inputValueDeprecation,
+  /// experimentalDirectiveDeprecation, oneOf, typeDepth: 9 })`, the seven flags `true`.
   pub(super) const QUERY: &str = include_str!("fixtures/executables/introspection_query.graphql");
 
   /// A driver with nothing to say: no field of the query reaches one.
@@ -1666,23 +1698,27 @@ fn with_meta_types(meta_types: &str) -> String {
   response(&std::format!("{OK_QUERY},{meta_types}"))
 }
 
-/// graphql-js's `__Directive`, in graphql-js's order: `isRepeatable` third, where smear's is last.
-const GRAPHQL_JS_DIRECTIVE: &str = r#"{"kind":"OBJECT","name":"__Directive","interfaces":[],"fields":[
+/// A server's `__Directive`, listed in an order of its own: `isRepeatable` last, the place smear's
+/// meta-schema gave it before it followed the draft's.
+const REORDERED_DIRECTIVE: &str = r#"{"kind":"OBJECT","name":"__Directive","interfaces":[],"fields":[
   {"name":"name","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}}},
   {"name":"description","args":[],"type":{"kind":"SCALAR","name":"String"}},
-  {"name":"isRepeatable","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}},
   {"name":"locations","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
     {"kind":"NON_NULL","ofType":{"kind":"ENUM","name":"__DirectiveLocation"}}}}},
   {"name":"args","args":[
-    {"name":"includeDeprecated","type":{"kind":"SCALAR","name":"Boolean"},"defaultValue":"false"}
+    {"name":"includeDeprecated","type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}},
+     "defaultValue":"false"}
   ],"type":{"kind":"NON_NULL","ofType":{"kind":"LIST","ofType":
-    {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__InputValue"}}}}}
+    {"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__InputValue"}}}}},
+  {"name":"isRepeatable","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}},
+  {"name":"isDeprecated","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}},
+  {"name":"deprecationReason","args":[],"type":{"kind":"SCALAR","name":"String"}}
 ]}"#;
 
 /// The meta types are held to draft §4's shape and nothing more: what a server says about them
-/// beyond it — the order graphql-js lists `__Directive`'s fields in, a description of its own or a
-/// `null` one, members the specification's meta-schema lacks — is not kept, and what an older
-/// server leaves out is not missed.
+/// beyond it — the order it lists `__Directive`'s fields in, a description of its own or a `null`
+/// one, members the specification's meta-schema lacks — is not kept, and what an older server
+/// leaves out is not missed.
 #[test]
 fn a_meta_type_is_held_to_its_shape_and_not_to_its_rendering() {
   let own = built("type Query { ok: Int }");
@@ -1700,16 +1736,18 @@ fn a_meta_type_is_held_to_its_shape_and_not_to_its_rendering() {
       .map(str::to_owned)
   };
 
-  // graphql-js lists `isRepeatable` third, and the schema keeps smear's order, `isRepeatable` last.
-  let graphql_js = from_response(&with_meta_types(GRAPHQL_JS_DIRECTIVE));
+  // The server lists `isRepeatable` last, and the schema keeps the draft's order, third.
+  let reordered = from_response(&with_meta_types(REORDERED_DIRECTIVE));
   assert_eq!(
-    field_names(&graphql_js, b"__Directive"),
+    field_names(&reordered, b"__Directive"),
     [
       "name",
       "description",
+      "isRepeatable",
       "locations",
       "args",
-      "isRepeatable",
+      "isDeprecated",
+      "deprecationReason",
       "__typename"
     ],
     "the order a server lists a meta type's fields in is its rendering, not the schema's"
@@ -1733,8 +1771,9 @@ fn a_meta_type_is_held_to_its_shape_and_not_to_its_rendering() {
     );
   }
 
-  // An older server: no `specifiedByURL` or `isOneOf` on `__Type`, no `isRepeatable` on
-  // `__Directive`, and `__Directive.args` taking no `includeDeprecated`.
+  // An older server: no `specifiedByURL` or `isOneOf` on `__Type`, no `isRepeatable`,
+  // `isDeprecated` or `deprecationReason` on `__Directive`, `__Directive.args` taking no
+  // `includeDeprecated`, and `__Type.fields` taking the October 2021 specification's nullable one.
   let older = from_response(&with_meta_types(
     r#"{"kind":"OBJECT","name":"__Type","fields":[
       {"name":"kind","args":[],"type":{"kind":"NON_NULL","ofType":{"kind":"ENUM","name":"__TypeKind"}}},
@@ -1840,7 +1879,7 @@ fn a_meta_type_that_contradicts_its_shape_is_refused() {
         ],"type":{"kind":"LIST","ofType":{"kind":"NON_NULL","ofType":{"kind":"OBJECT","name":"__Field"}}}}
       ]}"#,
       Some("__Type.fields"),
-      "includeDeprecated: String rather than Boolean",
+      "includeDeprecated: String rather than Boolean!",
     ),
     // An interface, where the meta types implement nothing.
     (
@@ -1908,6 +1947,63 @@ fn a_meta_type_that_contradicts_its_shape_is_refused() {
     assert_eq!(error.kind(), ResponseErrorKind::InvalidMetaType, "{json}");
     assert_eq!(error.owner(), owner, "{json}");
     assert_eq!(error.subject(), subject, "{json}");
+  }
+}
+
+/// `includeDeprecated` is `Boolean!` in the draft and was `Boolean` in the October 2021
+/// specification, so the door reads either on each of the six meta fields that take it — a
+/// graphql-js 16 response as well as a 17 one — and refuses any other type, naming the draft's.
+#[test]
+fn include_deprecated_is_read_in_either_spelling() {
+  let list = |of: &str, non_null: bool| -> String {
+    let items = std::format!(
+      r#"{{"kind":"LIST","ofType":{{"kind":"NON_NULL","ofType":{{"kind":"OBJECT","name":"{of}"}}}}}}"#
+    );
+    if non_null {
+      std::format!(r#"{{"kind":"NON_NULL","ofType":{items}}}"#)
+    } else {
+      items
+    }
+  };
+  let fields = [
+    ("__Schema", "directives", list("__Directive", true)),
+    ("__Type", "fields", list("__Field", false)),
+    ("__Type", "enumValues", list("__EnumValue", false)),
+    ("__Type", "inputFields", list("__InputValue", false)),
+    ("__Field", "args", list("__InputValue", true)),
+    ("__Directive", "args", list("__InputValue", true)),
+  ];
+  let nullable = r#"{"kind":"SCALAR","name":"Boolean"}"#;
+  let non_null = r#"{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"Boolean"}}"#;
+  let neither = r#"{"kind":"SCALAR","name":"Int"}"#;
+  for (meta, field, ty) in &fields {
+    let meta_type = |argument: &str| {
+      with_meta_types(&std::format!(
+        r#"{{"kind":"OBJECT","name":"{meta}","fields":[
+          {{"name":"{field}","args":[
+            {{"name":"includeDeprecated","type":{argument},"defaultValue":"false"}}
+          ],"type":{ty}}}
+        ]}}"#
+      ))
+    };
+    for argument in [nullable, non_null] {
+      let json = meta_type(argument);
+      if let Err(error) = Schema::from_introspection(&json) {
+        panic!("{meta}.{field}: {error}\n---\n{json}");
+      }
+    }
+    let json = meta_type(neither);
+    let IntrospectionError::Response(error) = refused(&json) else {
+      panic!("refused by draft §3, not by the shape\n---\n{json}");
+    };
+    let owner = std::format!("{meta}.{field}");
+    assert_eq!(error.kind(), ResponseErrorKind::InvalidMetaType, "{json}");
+    assert_eq!(error.owner(), Some(owner.as_str()), "{json}");
+    assert_eq!(
+      error.subject(),
+      "includeDeprecated: Int rather than Boolean!",
+      "{json}"
+    );
   }
 }
 
@@ -2235,9 +2331,10 @@ fn a_default_value_cannot_carry_a_directive() {
     (
       with_directives(
         r#"{"name":"deprecated","locations":[
-          "FIELD_DEFINITION","ARGUMENT_DEFINITION","INPUT_FIELD_DEFINITION","ENUM_VALUE"
+          "FIELD_DEFINITION","ARGUMENT_DEFINITION","INPUT_FIELD_DEFINITION","ENUM_VALUE",
+          "DIRECTIVE_DEFINITION"
         ],"args":[
-          {"name":"reason","type":{"kind":"SCALAR","name":"String"},
+          {"name":"reason","type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}},
            "defaultValue":"\"No longer supported\" @deprecated"}
         ]}"#,
       ),
@@ -2282,9 +2379,10 @@ fn a_default_value_cannot_carry_a_directive() {
 
   let injected = from_response(&with_directives(
     r#"{"name":"deprecated","locations":[
-      "FIELD_DEFINITION","ARGUMENT_DEFINITION","INPUT_FIELD_DEFINITION","ENUM_VALUE"
+      "FIELD_DEFINITION","ARGUMENT_DEFINITION","INPUT_FIELD_DEFINITION","ENUM_VALUE",
+      "DIRECTIVE_DEFINITION"
     ],"args":[
-      {"name":"reason","type":{"kind":"SCALAR","name":"String"},
+      {"name":"reason","type":{"kind":"NON_NULL","ofType":{"kind":"SCALAR","name":"String"}},
        "defaultValue":"\"No longer supported\" "}
     ]}"#,
   ));

@@ -3636,10 +3636,11 @@ fn input_object_default_cycle_verdict_is_declaration_order_independent() {
 // ---------------------------------------------------------------------------------------------
 
 /// A schema carrying every datum draft §4 returns that a `Schema` keeps: the schema's own
-/// description, descriptions at every element that takes one — inline, block, and empty — each of
-/// the three deprecation answers on a field, an argument, an input field and an enum value, a
-/// `@specifiedBy` on a definition and another arriving by `extend scalar`, and defaults of every
-/// shape the canonical printer writes.
+/// description, descriptions at every element that takes one — inline, block, and empty — both
+/// deprecation answers on a field, an argument, an input field and an enum value, a directive
+/// deprecated by its definition and another by an `extend directive`, a `@specifiedBy` on a
+/// definition and another arriving by `extend scalar`, and defaults of every shape the canonical
+/// printer writes.
 const METADATA: &str = r#"
 """
 The schema of a small library.
@@ -3676,7 +3677,7 @@ type Book implements Titled & Node {
     "Which format."
     format: Format = HARDCOVER
   ): String @deprecated
-  isbn: ISBN @deprecated(reason: null)
+  isbn: ISBN
   shelf: [Int] @deprecated(reason: "Use `location`.\nIt moved.")
 }
 
@@ -3685,7 +3686,7 @@ enum Format {
   PAPERBACK
   HARDCOVER @deprecated(reason: "Out of print")
   EBOOK @deprecated
-  AUDIO @deprecated(reason: null)
+  AUDIO
 }
 
 input BookFilter {
@@ -3720,6 +3721,11 @@ directive @cached(
 ) repeatable on FIELD_DEFINITION
 
 directive @audit on OBJECT
+
+"Replaced by `@cached`."
+directive @memo(seconds: Int) @deprecated(reason: "Use `@cached`.") on FIELD_DEFINITION
+
+extend directive @audit @deprecated
 "#;
 
 fn ty(schema: &Schema, name: &str) -> TypeId {
@@ -3793,7 +3799,7 @@ fn every_datum_section_4_returns_is_kept() {
   );
   assert_eq!(schema.specified_by_url(ty(&schema, "Book")), None);
 
-  // Fields: a description, and each of the three deprecation answers.
+  // Fields: a description, and each deprecation answer.
   let (_, id) = member(&schema, "Node", "id");
   assert_eq!(schema.text(id.description()), Some("The id."));
   let (author, meta) = member(&schema, "Book", "author");
@@ -3804,11 +3810,7 @@ fn every_datum_section_4_returns_is_kept() {
     "a bare `@deprecated` carries the specified default"
   );
   let (_, isbn_field) = member(&schema, "Book", "isbn");
-  assert_eq!(
-    deprecated(&schema, isbn_field.deprecation()),
-    Some(None),
-    "`reason: null` is deprecated with a null reason, not undeprecated"
-  );
+  assert_eq!(deprecated(&schema, isbn_field.deprecation()), None);
   let (_, shelf) = member(&schema, "Book", "shelf");
   assert_eq!(
     deprecated(&schema, shelf.deprecation()),
@@ -3858,7 +3860,7 @@ fn every_datum_section_4_returns_is_kept() {
     Some(Some("unused"))
   );
 
-  // Enum values: a description, and the three deprecation answers.
+  // Enum values: a description, and each deprecation answer.
   let values: Vec<_> = schema
     .enum_values_in_order(ty(&schema, "Format"))
     .map(|(value, meta)| {
@@ -3875,7 +3877,7 @@ fn every_datum_section_4_returns_is_kept() {
       ("PAPERBACK", Some("Paper covers."), None),
       ("HARDCOVER", None, Some(Some("Out of print"))),
       ("EBOOK", None, Some(Some("No longer supported"))),
-      ("AUDIO", None, Some(None)),
+      ("AUDIO", None, None),
     ]
   );
 
@@ -3894,6 +3896,89 @@ fn every_datum_section_4_returns_is_kept() {
   let (_, scope) = argument(&schema, cached.args(), "scope");
   assert_eq!(schema.text(scope.description()), None);
   assert_eq!(schema.text(scope.default_value()), None);
+
+  // And a directive's own deprecation: by its definition, by an `extend directive`, and none.
+  let directives: Vec<_> = schema
+    .directives_in_order()
+    .map(|(directive, meta)| {
+      (
+        schema.name(directive.name()),
+        schema.text(meta.description()),
+        deprecated(&schema, meta.deprecation()),
+      )
+    })
+    .collect();
+  assert_eq!(
+    directives,
+    [
+      ("cached", Some("Marks a field as cached."), None),
+      ("audit", None, Some(Some("No longer supported"))),
+      (
+        "memo",
+        Some("Replaced by `@cached`."),
+        Some(Some("Use `@cached`."))
+      ),
+      (
+        "skip",
+        Some("Directs the executor to skip this field or fragment when the `if` argument is true."),
+        None
+      ),
+      (
+        "include",
+        Some(
+          "Directs the executor to include this field or fragment only when the `if` argument is \
+           true."
+        ),
+        None
+      ),
+      (
+        "deprecated",
+        Some("Marks an element of a GraphQL schema as no longer supported."),
+        None
+      ),
+      (
+        "specifiedBy",
+        Some("Exposes a URL that specifies the behavior of this scalar."),
+        None
+      ),
+      (
+        "oneOf",
+        Some("Indicates exactly one field must be supplied and this field must not be `null`."),
+        None
+      ),
+    ]
+  );
+}
+
+/// Draft §3.13.3 declares the specified `@deprecated`'s `reason` as `String!`, so
+/// `@deprecated(reason: null)` offers its argument a value it does not accept, at every location
+/// the directive may stand — and is refused, where it was once read as deprecated with no reason.
+/// A document that redefines `@deprecated` with a nullable `reason` is the one place a `null`
+/// reason still builds, and it is kept as written: deprecated, with no reason.
+#[test]
+fn a_null_deprecation_reason_is_refused() {
+  for sdl in [
+    "type Query { ok: Int @deprecated(reason: null) }",
+    "type Query { ok(a: Int @deprecated(reason: null)): Int }",
+    "type Query { ok: Int } input In { a: Int @deprecated(reason: null) }",
+    "type Query { ok: Int } enum E { A B @deprecated(reason: null) }",
+    "type Query { ok: Int } directive @d @deprecated(reason: null) on FIELD",
+    "type Query { ok: Int } directive @d on FIELD extend directive @d @deprecated(reason: null)",
+  ] {
+    let errors = refused(sdl);
+    assert_eq!(
+      errors.kinds(),
+      vec![SchemaErrorKind::InvalidDirectiveArgumentValue],
+      "{sdl}"
+    );
+  }
+
+  let redefined = built(
+    "directive @deprecated(reason: String) on FIELD_DEFINITION
+     type Query { ok: Int @deprecated(reason: null) }",
+  );
+  let (_, ok) = member(&redefined, "Query", "ok");
+  assert_eq!(deprecated(&redefined, ok.deprecation()), Some(None));
 }
 
 /// Absent is not empty: `""` is a description of no bytes, and returned as one.

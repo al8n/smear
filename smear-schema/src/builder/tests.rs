@@ -657,16 +657,16 @@ fn a_refused_possible_table_is_a_typed_refusal() {
 /// The built-ins' share of the text arena is reserved exactly, which is what makes it one
 /// allocation on every build — and the share itself is a constant, recorded here.
 ///
-/// 5 103 bytes: graphql-js's descriptions of the eight introspection types, the five scalars and
-/// the five specified directives, at every element that has one, plus the six defaults they print
-/// — `false` five times and `"No longer supported"` once. A walk over the parsed built-ins derives
+/// 5 152 bytes: graphql-js's descriptions of the eight introspection types, the five scalars and
+/// the five specified directives, at every element that has one, plus the seven defaults they print
+/// — `false` six times and `"No longer supported"` once. A walk over the parsed built-ins derives
 /// it; injecting them writes it; the two have to be the same number, and the reservation has to be
 /// that number and no more, or a warm build pays a growth or a shrink it does not need.
 #[test]
 fn the_built_in_text_reservation_is_exact() {
   let reserved = BuiltIns::parse().text_bytes;
   assert_eq!(
-    reserved, 5_103,
+    reserved, 5_152,
     "the built-in SDL's text changed size; if that is intended, record the new number here and in \
      the allocation gate's ceiling note"
   );

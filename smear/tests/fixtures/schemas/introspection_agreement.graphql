@@ -25,6 +25,21 @@ directive @auth(
 
 directive @tag(name: String!) on FIELD_DEFINITION | ENUM_VALUE
 
+"Where a definition came from."
+directive @origin(note: String!) on DIRECTIVE_DEFINITION
+
+"""
+Who could see a field before `@auth` could say.
+"""
+directive @visibility(level: Int = 1)
+  @origin(note: "the first schema")
+  @deprecated(reason: "use `@auth`")
+  on FIELD_DEFINITION
+
+directive @cached(seconds: Int = 60) on OBJECT | FIELD_DEFINITION
+
+extend directive @cached @origin(note: "an extension") @deprecated
+
 "Anything with an id."
 interface Node {
   "Unique across every type that implements `Node`."
@@ -77,7 +92,7 @@ enum Role {
   ADMIN
   MEMBER
   GUEST @tag(name: "legacy") @deprecated
-  OWNER @deprecated(reason: null)
+  OWNER
 }
 
 "How to narrow a list of posts."

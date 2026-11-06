@@ -8,10 +8,12 @@
         types {
           ...FullType
         }
-        directives {
+        directives(includeDeprecated: true) {
           name
           description
           isRepeatable
+          isDeprecated
+          deprecationReason
           locations
           args(includeDeprecated: true) {
             ...InputValue
@@ -68,32 +70,32 @@
       kind
       name
       ofType {
-        kind
         name
+        kind
         ofType {
-          kind
           name
+          kind
           ofType {
-            kind
             name
+            kind
             ofType {
-              kind
               name
+              kind
               ofType {
-                kind
                 name
+                kind
                 ofType {
-                  kind
                   name
+                  kind
                   ofType {
-                    kind
                     name
+                    kind
                     ofType {
-                      kind
                       name
+                      kind
                       ofType {
-                        kind
                         name
+                        kind
                       }
                     }
                   }

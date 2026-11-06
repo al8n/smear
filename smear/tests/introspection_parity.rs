@@ -1,16 +1,16 @@
 #![cfg(feature = "proto")]
 
-//! The executor's draft §4 answer, against graphql-js 16.11.0's answer for the same SDL.
+//! The executor's draft §4 answer, against graphql-js 17.1.0's answer for the same SDL.
 //!
 //! # What is compared, and against what
 //!
 //! For each fixture below, smear builds the [`Schema`] from the SDL, executes graphql-js's full
 //! introspection query — the committed `introspection_query.graphql`, `getIntrospectionQuery` with
-//! all six options on — with the `proto` executor, writes the response with `smear::json`, and
-//! reads its `data` back with `serde_json`.
+//! seven of its eight options on and `typeDepth` at its default of 9 — with the `proto` executor,
+//! writes the response with `smear::json`, and reads its `data` back with `serde_json`.
 //!
 //! graphql-js's side is a committed golden under `tests/oracle/graphql-js-introspection/`:
-//! `introspectionFromSchema(buildSchema(sdl), options)` with the same six options, written by
+//! `introspectionFromSchema(buildSchema(sdl), options)` with the same eight options, written by
 //! `ci/introspection-parity/generate.mjs`. CI never runs node. Each golden records its provenance
 //! — the release, the options, and the SHA-256 of the SDL and of the query it answered — and a case
 //! holds all of it to the fixture and the query it is about to compare before it compares anything,
@@ -24,7 +24,7 @@
 //!
 //! # The eight recorded differences
 //!
-//! Each was checked against graphql-js 16.11.0's real output, and against smear's answer where one
+//! Each was checked against graphql-js 17.1.0's real output, and against smear's answer where one
 //! is committed: `tests/golden/introspection_every_datum.json`, whose graphql-js twin the generator
 //! writes as `every_datum.json` beside the goldens, for a schema carrying every datum draft §4
 //! returns.
@@ -37,42 +37,41 @@
 //!    its type map one that no field, argument or input field names. smear's extra types must be
 //!    exactly the built-in scalars its own answer never references — a subset of `Int`, `Float` and
 //!    `ID`, since the meta-schema references `String` and `Boolean` — and are then set aside.
-//! 3. **`defaultValue`.** smear prints the literal the document wrote, in graphql-js's print form;
-//!    graphql-js prints the value after coercing it to the input value's type,
-//!    `print(astFromValue(valueFromAST(literal, type), type))`. So smear's text is re-rendered the
-//!    graphql-js way — directed by the `type` beside it and by graphql-js's own `__schema.types` —
-//!    and compared with graphql-js's text as a string. The rules that makes:
-//!    - a single item where a list is expected is wrapped, at every depth: `7` is `[7]` for `[Int]`;
-//!    - an input object's fields come in the type's field order, with every omitted field that has
-//!      a default filled in from it: `{max: 9, min: 1}` is `{min: 1, max: 9, step: 1}`;
-//!    - a `Float` is a JavaScript number and prints as one: `1.0` is `1` and `1.5e3` is `1500`;
-//!    - an `ID` whose value is a string of digits prints as an integer: `"4"` is `4`;
-//!    - a custom scalar's literal is coerced untyped, so an enum value is its name as a string:
-//!      `AS_WRITTEN` is `"AS_WRITTEN"`;
-//!    - a string, block strings included, prints as `printString` quotes it, and a list and an
-//!      object as `[1, 2]` and `{a: 1}`. That is the form smear's own text already has, and it is
-//!      asserted rather than normalised: smear's text must parse and print back to itself before it
-//!      is re-rendered, so a change to smear's printer fails here instead of being absorbed.
-//! 4. **`__Directive`'s field order.** smear declares `isRepeatable` last and graphql-js third.
-//!    `__Directive`'s fields are compared as a set; every other type's, meta types included, in
-//!    order.
-//! 5. **`@deprecated(reason: null)`.** smear answers `isDeprecated: true, deprecationReason: null`;
-//!    graphql-js answers `isDeprecated: false, deprecationReason: null`, its `isDeprecated` being
-//!    `deprecationReason != null`. Accepted exactly there, and pinned both ways: the places it is
-//!    accepted must number the places the SDL spells `@deprecated(reason: null)`.
-//! 6. **A directive's `locations` order.** smear lists them in `DirectiveLocation` bit order and
-//!    graphql-js as declared. Compared as a set.
-//! 7. **`__schema.directives` order.** Both list the document's directives first; graphql-js then
+//! 3. **`defaultValue`'s print form.** Both sides print the literal the document wrote, and draft
+//!    §4.2.4 asks only for "a String encoding (using the GraphQL language)" of the default, naming
+//!    no form. The two forms differ: smear's is graphql-js 16's, `{a: 1}` and `{}` with every
+//!    string inline, and graphql-js 17 writes `{ a: 1 }` and `{  }`, keeps a block string a block
+//!    string, and breaks a list or an object past eighty columns across lines. So two texts that
+//!    differ are each parsed as a constant value and compared as values: an integer, a float and an
+//!    enum value by kind and spelling, so `1500` is not `1.5e3` and `1` is not `1.0`; a string by
+//!    its value, a block string's as draft §2.10.4's `BlockStringValue` gives it; a list item by
+//!    item; and an object field by field, in order. smear's own text is held to its form rather
+//!    than absorbed: it must parse and print back to itself, so a change to smear's printer fails
+//!    here.
+//! 4. **A directive's `locations` order.** smear lists them in `DirectiveLocation` bit order and
+//!    graphql-js as declared. Compared as a set, which for `@deprecated` holds the draft's five
+//!    locations on both sides.
+//! 5. **`__schema.directives` order.** Both list the document's directives first; graphql-js then
 //!    appends the specified ones as `include`, `skip`, `deprecated`, `specifiedBy`, `oneOf`, and
 //!    smear as `skip`, `include`, …. Compared as a set keyed by name.
-//! 8. **An interface's `possibleTypes` order.** Compared as a set; a union's members keep their
+//! 6. **An interface's `possibleTypes` order.** Compared as a set; a union's members keep their
 //!    declared order, and that is compared. smear lists an interface's implementations in object
 //!    order and graphql-js in its type map's order, and for a schema built from SDL both are the
 //!    document's order — so this one has never fired: no fixture differs, and none can.
+//! 7. **`__DirectiveLocation`'s `FRAGMENT_VARIABLE_DEFINITION`.** graphql-js 17 lists it after
+//!    `VARIABLE_DEFINITION`, for the fragment variables it parses. The draft's
+//!    `__DirectiveLocation` (§4.2) has twenty values, ending `INPUT_FIELD_DEFINITION` and
+//!    `DIRECTIVE_DEFINITION`, and this is not one of them. Exactly that value is set aside from
+//!    graphql-js's listing, once, and the rest is compared in order.
+//! 8. **`VARIABLE_DEFINITION`'s description.** graphql-js 17 describes it as "Location adjacent to
+//!    an operation variable definition.", to tell it from 7, and smear keeps graphql-js 16's
+//!    "Location adjacent to a variable definition.": the draft gives the meta-schema no
+//!    descriptions. Accepted for exactly that pair of texts, on exactly that value.
 //!
-//! Everything else must be equal: descriptions, `isDeprecated` and `deprecationReason`,
-//! `specifiedByURL`, `isOneOf`, interfaces, a union's possible types, enum values, input fields,
-//! directives and their arguments, every `ofType` chain, and the root types.
+//! Everything else must be equal: descriptions, `isDeprecated` and `deprecationReason` — a
+//! directive's included — `specifiedByURL`, `isOneOf`, interfaces, a union's possible types, enum
+//! values, input fields, directives and their arguments, every `ofType` chain, the root types, and
+//! every type's fields in order, `__Directive`'s among them.
 //!
 //! # Which difference fires where
 //!
@@ -82,18 +81,19 @@
 //! |---|---|---|---|---|
 //! | 1. types reordered | yes | yes | yes | yes |
 //! | 2. extra built-in scalars | `Float` | `Float` | none | none |
-//! | 3. defaults re-rendered | 0 | 0 | 0 | 9 |
-//! | 4. `__Directive` reordered | yes | yes | yes | yes |
-//! | 5. `reason: null` | 1 | 0 | 0 | 0 |
-//! | 6. locations reordered | `@auth`, `@deprecated` | `@deprecated` | `@deprecated` | `@deprecated` |
-//! | 7. directives reordered | yes | yes | yes | yes |
-//! | 8. possible types reordered | none | none | none | none |
+//! | 3. defaults printed in another form | 2 | 0 | 7 | 1 |
+//! | 4. locations reordered | `@auth`, `@deprecated` | `@deprecated` | `@deprecated` | `@deprecated` |
+//! | 5. directives reordered | yes | yes | yes | yes |
+//! | 6. possible types reordered | none | none | none | none |
+//! | 7. `FRAGMENT_VARIABLE_DEFINITION` set aside | yes | yes | yes | yes |
+//! | 8. `VARIABLE_DEFINITION`'s description | yes | yes | yes | yes |
 //!
-//! The three B2 fixtures — the agreement fixture `validator_introspection.rs` holds every construct
-//! in, and GitHub's and GitLab's schemas — show every difference but two. Not one of their 536
-//! defaults prints differently once coerced, so `defaults` exists for this file alone: one default
-//! per rule of difference 3, and nothing else in it differs any other way. Difference 8 has no such
-//! fixture, because no schema built from SDL can show it.
+//! The agreement fixture — the one `validator_introspection.rs` holds every construct a schema can
+//! in, a deprecated directive and an `extend directive` among them — and GitHub's and GitLab's
+//! schemas show every difference but 6 between them, and no schema built from SDL can show that
+//! one. `defaults` exists for this file alone: numbers, enum values and strings spelled where two
+//! print forms could part — both print them as written, so they must agree to the byte — and an
+//! input object the two print each in its own form.
 
 use std::{
   collections::{BTreeMap, BTreeSet},
@@ -120,20 +120,34 @@ use smear::{
 // the fixtures, and the record each one has to produce
 // ------------------------------------------------------------------------------------------
 
-/// graphql-js 16.11.0's `getIntrospectionQuery` with all six options on, byte for byte.
+/// graphql-js 17.1.0's `getIntrospectionQuery` with seven of its eight options on and `typeDepth`
+/// at 9, byte for byte.
 const QUERY: &str = include_str!("fixtures/executables/introspection_query.graphql");
 
 /// [`QUERY`]'s path from the workspace root, as a golden's provenance records it.
 const QUERY_PATH: &str = "smear/tests/fixtures/executables/introspection_query.graphql";
 
 /// The release every golden is graphql-js's answer from.
-const RELEASE: &str = "16.11.0";
+const RELEASE: &str = "17.1.0";
 
 /// The five built-in scalars, which smear injects whether or not anything references them.
 const BUILT_IN_SCALARS: [&str; 5] = ["Int", "Float", "String", "Boolean", "ID"];
 
 /// The built-in scalars difference 2 may set aside: the meta-schema references the other two.
 const UNREFERENCED_SCALARS: [&str; 3] = ["Int", "Float", "ID"];
+
+/// The `__DirectiveLocation` value graphql-js 17 adds and the draft does not define: difference 7.
+const FRAGMENT_VARIABLE_DEFINITION: &str = "FRAGMENT_VARIABLE_DEFINITION";
+
+/// The `__DirectiveLocation` value whose description is difference 8.
+const VARIABLE_DEFINITION: &str = "VARIABLE_DEFINITION";
+
+/// [`VARIABLE_DEFINITION`]'s description in smear's meta-schema, which is graphql-js 16's.
+const SMEARS_VARIABLE_DEFINITION: &str = "Location adjacent to a variable definition.";
+
+/// [`VARIABLE_DEFINITION`]'s description in graphql-js 17's.
+const GRAPHQL_JSS_VARIABLE_DEFINITION: &str =
+  "Location adjacent to an operation variable definition.";
 
 /// One schema, the golden graphql-js answered it with, and what the comparison has to record.
 struct Fixture {
@@ -144,9 +158,9 @@ struct Fixture {
   sdl: &'static str,
   /// Difference 2's set.
   extra_scalars: &'static [&'static str],
-  /// How many defaults difference 3 re-rendered.
-  defaults_coerced: usize,
-  /// The directives difference 6 found listed out of bit order.
+  /// How many defaults difference 3 found printed in another form.
+  defaults_reprinted: usize,
+  /// The directives difference 4 found listed out of bit order.
   locations_reordered: &'static [&'static str],
 }
 
@@ -155,7 +169,7 @@ const AGREEMENT: Fixture = Fixture {
   path: "smear/tests/fixtures/schemas/introspection_agreement.graphql",
   sdl: include_str!("fixtures/schemas/introspection_agreement.graphql"),
   extra_scalars: &["Float"],
-  defaults_coerced: 0,
+  defaults_reprinted: 2,
   locations_reordered: &["auth", "deprecated"],
 };
 
@@ -164,7 +178,7 @@ const GITHUB: Fixture = Fixture {
   path: "smear/tests/fixtures/schemas/github_schema.graphql",
   sdl: include_str!("fixtures/schemas/github_schema.graphql"),
   extra_scalars: &["Float"],
-  defaults_coerced: 0,
+  defaults_reprinted: 0,
   locations_reordered: &["deprecated"],
 };
 
@@ -173,7 +187,7 @@ const GITLAB: Fixture = Fixture {
   path: "smear/tests/fixtures/schemas/gitlab_schema.graphql",
   sdl: include_str!("fixtures/schemas/gitlab_schema.graphql"),
   extra_scalars: &[],
-  defaults_coerced: 0,
+  defaults_reprinted: 7,
   locations_reordered: &["deprecated"],
 };
 
@@ -182,7 +196,7 @@ const DEFAULTS: Fixture = Fixture {
   path: "smear/tests/fixtures/schemas/introspection_defaults.graphql",
   sdl: include_str!("fixtures/schemas/introspection_defaults.graphql"),
   extra_scalars: &[],
-  defaults_coerced: 9,
+  defaults_reprinted: 1,
   locations_reordered: &["deprecated"],
 };
 
@@ -194,32 +208,32 @@ struct Record {
   /// Difference 2.
   extra_scalars: BTreeSet<String>,
   /// Difference 3.
-  defaults_coerced: usize,
+  defaults_reprinted: usize,
   /// Difference 4.
-  directive_fields_reordered: bool,
-  /// Difference 5.
-  reason_null: usize,
-  /// Difference 6.
   locations_reordered: BTreeSet<String>,
-  /// Difference 7.
+  /// Difference 5.
   directives_reordered: bool,
-  /// Difference 8.
+  /// Difference 6.
   possible_types_reordered: BTreeSet<String>,
+  /// Difference 7.
+  fragment_variable_definition: bool,
+  /// Difference 8.
+  variable_definition_described: bool,
 }
 
 impl Record {
-  /// What `fixture` has to record: its own three rows of the table, the rows every fixture shares,
-  /// and difference 5 counted off its SDL.
+  /// What `fixture` has to record: its own three rows of the table, and the rows every fixture
+  /// shares.
   fn expected(fixture: &Fixture) -> Self {
     Self {
       types_reordered: true,
       extra_scalars: names(fixture.extra_scalars),
-      defaults_coerced: fixture.defaults_coerced,
-      directive_fields_reordered: true,
-      reason_null: fixture.sdl.matches("@deprecated(reason: null)").count(),
+      defaults_reprinted: fixture.defaults_reprinted,
       locations_reordered: names(fixture.locations_reordered),
       directives_reordered: true,
       possible_types_reordered: BTreeSet::new(),
+      fragment_variable_definition: true,
+      variable_definition_described: true,
     }
   }
 }
@@ -250,7 +264,7 @@ fn gitlabs_schema_differs_from_graphql_js_only_as_recorded() {
   differs_only_as_recorded(&GITLAB);
 }
 
-/// One default per rule of difference 3, which no other fixture exercises.
+/// Defaults spelled where the two print forms could part, at spellings no other fixture holds.
 #[test]
 fn the_defaults_fixture_differs_from_graphql_js_only_as_recorded() {
   differs_only_as_recorded(&DEFAULTS);
@@ -263,12 +277,11 @@ fn differs_only_as_recorded(fixture: &Fixture) {
   let smear = smear_answer(fixture.sdl);
   let graphql_js = &golden["data"];
 
-  let mut comparison = Comparison::new(&graphql_js["__schema"]);
+  let mut comparison = Comparison::default();
   comparison.data(&smear, graphql_js);
   let Comparison {
     unexplained,
     record,
-    ..
   } = comparison;
 
   println!(
@@ -312,9 +325,11 @@ fn provenance(fixture: &Fixture, provenance: &Value) {
       "directiveIsRepeatable": true,
       "schemaDescription": true,
       "inputValueDeprecation": true,
+      "experimentalDirectiveDeprecation": true,
       "oneOf": true,
+      "typeDepth": 9,
     }),
-    "{name}: the golden's options are not the six the committed query was generated with"
+    "{name}: the golden's options are not the eight the committed query was generated with"
   );
   assert_eq!(provenance["sdl"], fixture.path, "{name}: the golden's SDL");
   assert_eq!(
@@ -449,34 +464,14 @@ fn smear_answer(sdl: &str) -> Value {
 // the comparison
 // ------------------------------------------------------------------------------------------
 
-/// graphql-js's `__schema.types`, by name: what difference 3 reads an input type off.
-type Types<'j> = BTreeMap<&'j str, &'j Value>;
-
 /// One comparison of two answers: what no rule explains, and how often each rule was needed.
-struct Comparison<'j> {
-  types: Types<'j>,
+#[derive(Default)]
+struct Comparison {
   unexplained: Vec<String>,
   record: Record,
 }
 
-impl<'j> Comparison<'j> {
-  fn new(graphql_js: &'j Value) -> Self {
-    let types: Types<'j> = graphql_js["types"]
-      .as_array()
-      .map(|types| {
-        types
-          .iter()
-          .filter_map(|ty| Some((ty["name"].as_str()?, ty)))
-          .collect()
-      })
-      .unwrap_or_default();
-    Self {
-      types,
-      unexplained: Vec::new(),
-      record: Record::default(),
-    }
-  }
-
+impl Comparison {
   fn differ(&mut self, path: &str, what: String) {
     self.unexplained.push(format!("{path}: {what}"));
   }
@@ -509,7 +504,7 @@ impl<'j> Comparison<'j> {
   }
 
   /// The answer's `data`.
-  fn data(&mut self, smear: &Value, graphql_js: &'j Value) {
+  fn data(&mut self, smear: &Value, graphql_js: &Value) {
     if !self.same_keys("data", smear, graphql_js) {
       return;
     }
@@ -522,7 +517,7 @@ impl<'j> Comparison<'j> {
     }
   }
 
-  fn schema(&mut self, smear: &Value, graphql_js: &'j Value) {
+  fn schema(&mut self, smear: &Value, graphql_js: &Value) {
     let path = "__schema";
     if !self.same_keys(path, smear, graphql_js) {
       return;
@@ -534,7 +529,7 @@ impl<'j> Comparison<'j> {
       match key.as_str() {
         "types" => self.types(&here, ours, theirs, &referenced),
         "directives" => {
-          // Difference 7: compared as a set keyed by name.
+          // Difference 5: compared as a set keyed by name.
           if self.list(&here, ours, theirs, false, Self::directive) {
             self.record.directives_reordered = true;
           }
@@ -549,7 +544,7 @@ impl<'j> Comparison<'j> {
     &mut self,
     path: &str,
     smear: &Value,
-    graphql_js: &'j Value,
+    graphql_js: &Value,
     referenced: &BTreeSet<String>,
   ) {
     let (Some(ours), Some(theirs)) = (self.named(path, smear), self.named(path, graphql_js)) else {
@@ -614,7 +609,7 @@ impl<'j> Comparison<'j> {
   }
 
   /// One `__Type` of `__schema.types`, with every field the query selects.
-  fn full_type(&mut self, path: &str, smear: &Value, graphql_js: &'j Value) {
+  fn full_type(&mut self, path: &str, smear: &Value, graphql_js: &Value) {
     if !self.same_keys(path, smear, graphql_js) {
       return;
     }
@@ -625,14 +620,15 @@ impl<'j> Comparison<'j> {
       let here = format!("{path}.{key}");
       match key.as_str() {
         "fields" => {
-          // Difference 4: `__Directive`'s fields are compared as a set, and only its.
-          let ordered = name != "__Directive";
-          if self.list(&here, ours, theirs, ordered, Self::field) && !ordered {
-            self.record.directive_fields_reordered = true;
-          }
+          self.list(&here, ours, theirs, true, Self::field);
         }
         "inputFields" => {
           self.list(&here, ours, theirs, true, Self::input_value);
+        }
+        "enumValues" if name == "__DirectiveLocation" => {
+          // Differences 7 and 8.
+          let theirs = self.without_fragment_variable_definition(&here, theirs);
+          self.list(&here, ours, &theirs, true, Self::directive_location);
         }
         "enumValues" => {
           self.list(&here, ours, theirs, true, Self::enum_value);
@@ -641,7 +637,7 @@ impl<'j> Comparison<'j> {
           self.list(&here, ours, theirs, true, Self::member);
         }
         "possibleTypes" => {
-          // Difference 8: an interface's are compared as a set, and a union's in order.
+          // Difference 6: an interface's are compared as a set, and a union's in order.
           let ordered = kind != "INTERFACE";
           if self.list(&here, ours, theirs, ordered, Self::member) && !ordered {
             self.record.possible_types_reordered.insert(name.to_owned());
@@ -652,11 +648,10 @@ impl<'j> Comparison<'j> {
     }
   }
 
-  fn field(&mut self, path: &str, smear: &Value, graphql_js: &'j Value) {
+  fn field(&mut self, path: &str, smear: &Value, graphql_js: &Value) {
     if !self.same_keys(path, smear, graphql_js) {
       return;
     }
-    self.deprecation(path, smear, graphql_js);
     for (key, theirs) in graphql_js.as_object().into_iter().flatten() {
       let Some(ours) = smear.get(key) else { continue };
       let here = format!("{path}.{key}");
@@ -664,48 +659,77 @@ impl<'j> Comparison<'j> {
         "args" => {
           self.list(&here, ours, theirs, true, Self::input_value);
         }
-        "isDeprecated" | "deprecationReason" => {}
         _ => self.exact(&here, ours, theirs),
       }
     }
   }
 
-  fn input_value(&mut self, path: &str, smear: &Value, graphql_js: &'j Value) {
+  fn input_value(&mut self, path: &str, smear: &Value, graphql_js: &Value) {
     if !self.same_keys(path, smear, graphql_js) {
       return;
     }
-    self.deprecation(path, smear, graphql_js);
     for (key, theirs) in graphql_js.as_object().into_iter().flatten() {
       let Some(ours) = smear.get(key) else { continue };
       let here = format!("{path}.{key}");
       match key.as_str() {
-        "defaultValue" => self.default_value(&here, ours, theirs, &graphql_js["type"]),
-        "isDeprecated" | "deprecationReason" => {}
+        "defaultValue" => self.default_value(&here, ours, theirs),
         _ => self.exact(&here, ours, theirs),
       }
     }
   }
 
-  fn enum_value(&mut self, path: &str, smear: &Value, graphql_js: &'j Value) {
+  fn enum_value(&mut self, path: &str, smear: &Value, graphql_js: &Value) {
     if !self.same_keys(path, smear, graphql_js) {
       return;
     }
-    self.deprecation(path, smear, graphql_js);
     for (key, theirs) in graphql_js.as_object().into_iter().flatten() {
       let Some(ours) = smear.get(key) else { continue };
-      match key.as_str() {
-        "isDeprecated" | "deprecationReason" => {}
-        _ => self.exact(&format!("{path}.{key}"), ours, theirs),
-      }
+      self.exact(&format!("{path}.{key}"), ours, theirs);
     }
   }
 
+  /// Difference 7: graphql-js's `__DirectiveLocation` values without
+  /// [`FRAGMENT_VARIABLE_DEFINITION`], which has to be among them exactly once.
+  fn without_fragment_variable_definition(&mut self, path: &str, graphql_js: &Value) -> Value {
+    let Some(values) = graphql_js.as_array() else {
+      return graphql_js.clone();
+    };
+    let kept: Vec<Value> = values
+      .iter()
+      .filter(|value| value["name"] != FRAGMENT_VARIABLE_DEFINITION)
+      .cloned()
+      .collect();
+    match values.len() - kept.len() {
+      1 => self.record.fragment_variable_definition = true,
+      count => self.differ(
+        path,
+        format!("graphql-js lists `{FRAGMENT_VARIABLE_DEFINITION}` {count} times rather than once"),
+      ),
+    }
+    Value::Array(kept)
+  }
+
+  /// One of `__DirectiveLocation`'s values, compared as any enum value is, save difference 8:
+  /// [`VARIABLE_DEFINITION`]'s description, smear's text against graphql-js 17's and no other.
+  fn directive_location(&mut self, path: &str, smear: &Value, graphql_js: &Value) {
+    if graphql_js["name"] == VARIABLE_DEFINITION
+      && smear["description"] == SMEARS_VARIABLE_DEFINITION
+      && graphql_js["description"] == GRAPHQL_JSS_VARIABLE_DEFINITION
+    {
+      self.record.variable_definition_described = true;
+      let mut theirs = graphql_js.clone();
+      theirs["description"] = smear["description"].clone();
+      return self.enum_value(path, smear, &theirs);
+    }
+    self.enum_value(path, smear, graphql_js);
+  }
+
   /// An interface, a possible type or a list member compared whole: a named type reference.
-  fn member(&mut self, path: &str, smear: &Value, graphql_js: &'j Value) {
+  fn member(&mut self, path: &str, smear: &Value, graphql_js: &Value) {
     self.exact(path, smear, graphql_js);
   }
 
-  fn directive(&mut self, path: &str, smear: &Value, graphql_js: &'j Value) {
+  fn directive(&mut self, path: &str, smear: &Value, graphql_js: &Value) {
     if !self.same_keys(path, smear, graphql_js) {
       return;
     }
@@ -727,7 +751,7 @@ impl<'j> Comparison<'j> {
     }
   }
 
-  /// Difference 6: a directive's locations, compared as a set. Answers whether the order differed.
+  /// Difference 4: a directive's locations, compared as a set. Answers whether the order differed.
   fn locations(&mut self, path: &str, smear: &Value, graphql_js: &Value) -> bool {
     let (Some(ours), Some(theirs)) = (smear.as_array(), graphql_js.as_array()) else {
       self.exact(path, smear, graphql_js);
@@ -745,63 +769,34 @@ impl<'j> Comparison<'j> {
     ours != theirs
   }
 
-  /// Difference 5, on any object that answers `isDeprecated` and `deprecationReason`.
-  fn deprecation(&mut self, path: &str, smear: &Value, graphql_js: &Value) {
-    let pair = |value: &Value| {
-      (
-        value.get("isDeprecated").cloned(),
-        value.get("deprecationReason").cloned(),
-      )
-    };
-    let (ours, theirs) = (pair(smear), pair(graphql_js));
-    if ours == theirs {
-      return;
-    }
-    let absent_reason = Some(Value::Null);
-    if ours == (Some(Value::Bool(true)), absent_reason.clone())
-      && theirs == (Some(Value::Bool(false)), absent_reason)
-    {
-      self.record.reason_null += 1;
-      return;
-    }
-    self.differ(
-      path,
-      format!("deprecation: smear {ours:?} | graphql-js {theirs:?}"),
-    );
-  }
-
-  /// Difference 3: smear's literal, re-rendered the way graphql-js prints a coerced default.
-  fn default_value(&mut self, path: &str, smear: &Value, graphql_js: &Value, ty: &Value) {
+  /// Difference 3: two texts of one default, compared as the constant values they spell — smear's
+  /// held to its own print form first, so a change to its printer fails rather than being
+  /// absorbed.
+  fn default_value(&mut self, path: &str, smear: &Value, graphql_js: &Value) {
     if smear == graphql_js {
       return;
     }
-    let Some(text) = smear.as_str() else {
+    let (Some(ours), Some(theirs)) = (smear.as_str(), graphql_js.as_str()) else {
       return self.exact(path, smear, graphql_js);
     };
-    let literal = match Const::parse(text) {
+    let literal = match Const::parse(ours) {
       Ok(literal) => literal,
-      Err(error) => return self.differ(path, format!("smear's `{text}` does not parse: {error}")),
+      Err(error) => return self.differ(path, format!("smear's `{ours}` does not parse: {error}")),
     };
     let printed = literal.print();
-    if printed != text {
+    if printed != ours {
       return self.differ(
         path,
-        format!("smear's `{text}` is not in print form, which prints it `{printed}`"),
+        format!("smear's `{ours}` is not in print form, which prints it `{printed}`"),
       );
     }
-    let rendered = coerce(&literal, ty, &self.types)
-      .and_then(|value| ast_from_value(&value, ty, &self.types))
-      .map(|ast| ast.print());
-    if rendered.as_deref() == graphql_js.as_str() {
-      self.record.defaults_coerced += 1;
-    } else {
-      self.differ(
+    match Const::parse(theirs) {
+      Ok(value) if value == literal => self.record.defaults_reprinted += 1,
+      Ok(_) => self.differ(path, format!("smear `{ours}` | graphql-js `{theirs}`")),
+      Err(error) => self.differ(
         path,
-        format!(
-          "smear `{text}`, coerced `{rendered:?}` | graphql-js {}",
-          show(graphql_js)
-        ),
-      );
+        format!("graphql-js's `{theirs}` does not parse: {error}"),
+      ),
     }
   }
 
@@ -814,9 +809,9 @@ impl<'j> Comparison<'j> {
     &mut self,
     path: &str,
     smear: &Value,
-    graphql_js: &'j Value,
+    graphql_js: &Value,
     ordered: bool,
-    each: fn(&mut Self, &str, &Value, &'j Value),
+    each: fn(&mut Self, &str, &Value, &Value),
   ) -> bool {
     if smear.is_null() && graphql_js.is_null() {
       return false;
@@ -933,11 +928,13 @@ fn referenced(schema: &Value) -> BTreeSet<String> {
 }
 
 // ------------------------------------------------------------------------------------------
-// difference 3: graphql-js's coercion and printing, over a parsed literal
+// difference 3: a printed default, read back as the constant value it spells
 // ------------------------------------------------------------------------------------------
 
-/// A constant GraphQL value: a literal as parsed, or an AST as graphql-js's `astFromValue` builds
-/// one — the two are one shape, which is what lets one printer serve both.
+/// A constant GraphQL value, as parsed out of a printed default.
+///
+/// Equality is difference 3's: an integer, a float and an enum value compare by kind and by
+/// spelling, a string by its value, a list item by item, and an object field by field in order.
 #[derive(Clone, Debug, PartialEq)]
 enum Const {
   Null,
@@ -946,7 +943,8 @@ enum Const {
   Int(String),
   /// A float, as spelled.
   Float(String),
-  /// A string's value, decoded.
+  /// A string's value: an inline string's escapes decoded, a block string's lines as draft
+  /// §2.10.4's `BlockStringValue` gives them.
   Str(String),
   Enum(String),
   List(Vec<Const>),
@@ -954,8 +952,8 @@ enum Const {
 }
 
 impl Const {
-  /// Parses a constant value: the inline strings, numbers, names, lists and objects a printed
-  /// default is made of. A block string is refused, because neither printer writes one.
+  /// Parses a constant value: the strings, block strings included, numbers, names, lists and
+  /// objects either side's printed default is made of, in either side's spacing.
   fn parse(text: &str) -> Result<Self, String> {
     let mut reader = Reader { text, at: 0 };
     let value = reader.value()?;
@@ -967,7 +965,7 @@ impl Const {
     }
   }
 
-  /// graphql-js's `print` of a value node.
+  /// smear's print form of the value, which is graphql-js 16's `print` of a value node.
   fn print(&self) -> String {
     let mut out = String::new();
     self.write(&mut out);
@@ -1163,10 +1161,10 @@ impl<'t> Reader<'t> {
     })
   }
 
-  /// An inline string, its escapes decoded.
+  /// A string: an inline one with its escapes decoded, or a block string.
   fn string(&mut self) -> Result<Const, String> {
     if self.text[self.at..].starts_with("\"\"\"") {
-      return Err(format!("a block string at byte {}", self.at));
+      return self.block_string();
     }
     self.at += 1;
     let mut value = String::new();
@@ -1231,288 +1229,135 @@ impl<'t> Reader<'t> {
     }
     char::from_u32(code).ok_or_else(|| format!("U+{code:X} is not a character"))
   }
-}
 
-/// A value after graphql-js's input coercion: what `valueFromAST` returns, in JavaScript's terms.
-#[derive(Clone, Debug, PartialEq)]
-enum Js {
-  Null,
-  Bool(bool),
-  Number(f64),
-  Str(String),
-  List(Vec<Js>),
-  Object(Vec<(String, Js)>),
-}
-
-/// graphql-js 16.11.0's `valueFromAST(literal, type)`, with no variables: `None` is its
-/// `undefined`, an invalid value.
-///
-/// `ty` is an introspection type reference and `types` graphql-js's own `__schema.types`, which is
-/// where an input object's fields — their order, types and defaults — and an enum's values are read.
-fn coerce(literal: &Const, ty: &Value, types: &Types<'_>) -> Option<Js> {
-  match ty["kind"].as_str() {
-    Some("NON_NULL") => {
-      if matches!(literal, Const::Null) {
-        return None;
-      }
-      coerce(literal, &ty["ofType"], types)
-    }
-    _ if matches!(literal, Const::Null) => Some(Js::Null),
-    // A single item where a list is expected is the list of that item.
-    Some("LIST") => match literal {
-      Const::List(items) => items
-        .iter()
-        .map(|item| coerce(item, &ty["ofType"], types))
-        .collect::<Option<Vec<_>>>()
-        .map(Js::List),
-      item => coerce(item, &ty["ofType"], types).map(|value| Js::List(vec![value])),
-    },
-    _ => {
-      let name = ty["name"].as_str()?;
-      let definition = types.get(name)?;
-      match definition["kind"].as_str()? {
-        "INPUT_OBJECT" => coerce_input_object(literal, definition, types),
-        "ENUM" => {
-          let members = definition["enumValues"].as_array()?;
-          match literal {
-            Const::Enum(value)
-              if members
-                .iter()
-                .any(|member| member["name"] == value.as_str()) =>
-            {
-              Some(Js::Str(value.clone()))
-            }
-            _ => None,
-          }
-        }
-        _ => coerce_scalar(literal, name),
+  /// A block string, after its opening `"""`: its characters as written, `\"""` standing for
+  /// `"""`, up to the closing `"""`, and its value as draft §2.10.4's `BlockStringValue` gives it.
+  fn block_string(&mut self) -> Result<Const, String> {
+    self.at += 3;
+    let mut raw = String::new();
+    loop {
+      let rest = &self.text[self.at..];
+      if rest.starts_with("\\\"\"\"") {
+        raw.push_str("\"\"\"");
+        self.at += 4;
+      } else if rest.starts_with("\"\"\"") {
+        self.at += 3;
+        return Ok(Const::Str(block_string_value(&raw)));
+      } else {
+        let ch = rest
+          .chars()
+          .next()
+          .ok_or_else(|| "an unterminated block string".to_owned())?;
+        raw.push(ch);
+        self.at += ch.len_utf8();
       }
     }
   }
 }
 
-/// An input object: its fields in the type's order, a written field coerced, an omitted one filled
-/// from its default, and `@oneOf` held to exactly one non-null field.
-fn coerce_input_object(literal: &Const, definition: &Value, types: &Types<'_>) -> Option<Js> {
-  let Const::Object(written) = literal else {
-    return None;
-  };
-  let mut fields = Vec::new();
-  for field in definition["inputFields"].as_array()? {
-    let name = field["name"].as_str()?;
-    // graphql-js keys the written fields by name, so a repeated one is read as its last.
-    match written.iter().rev().find(|(key, _)| key.as_str() == name) {
-      Some((_, value)) => fields.push((name.to_owned(), coerce(value, &field["type"], types)?)),
-      None => match field["defaultValue"].as_str() {
-        // graphql-js keeps the coerced default; its printing coerces back to the same value.
-        Some(default) => fields.push((
-          name.to_owned(),
-          coerce(&Const::parse(default).ok()?, &field["type"], types)?,
-        )),
-        None if field["type"]["kind"] == "NON_NULL" => return None,
-        None => {}
-      },
-    }
-  }
-  if definition["isOneOf"].as_bool() == Some(true)
-    && (fields.len() != 1 || matches!(fields[0].1, Js::Null))
-  {
-    return None;
-  }
-  Some(Js::Object(fields))
-}
-
-/// A scalar's `parseLiteral`: the five built-in ones as graphql-js defines them, and a custom
-/// scalar's as `valueFromASTUntyped`.
-fn coerce_scalar(literal: &Const, name: &str) -> Option<Js> {
-  match (name, literal) {
-    ("Int", Const::Int(spelling)) => {
-      let value: i64 = spelling.parse().ok()?;
-      if i32::try_from(value).is_err() {
-        return None;
+/// Draft §2.10.4's `BlockStringValue`: the raw value split at every line terminator, the common
+/// indentation of every line but the first taken off, the leading and the trailing lines of
+/// nothing but white space dropped, and what is left joined with line feeds.
+fn block_string_value(raw: &str) -> String {
+  let white = |ch: char| ch == ' ' || ch == '\t';
+  let bytes = raw.as_bytes();
+  let mut lines: Vec<&str> = Vec::new();
+  let (mut start, mut at) = (0, 0);
+  while at < bytes.len() {
+    match bytes[at] {
+      b'\n' => {
+        lines.push(&raw[start..at]);
+        at += 1;
+        start = at;
       }
-      Some(Js::Number(value as f64))
-    }
-    ("Float", Const::Int(spelling) | Const::Float(spelling)) => {
-      spelling.parse::<f64>().ok().map(Js::Number)
-    }
-    ("String", Const::Str(value)) => Some(Js::Str(value.clone())),
-    ("Boolean", Const::Bool(flag)) => Some(Js::Bool(*flag)),
-    ("ID", Const::Str(value) | Const::Int(value)) => Some(Js::Str(value.clone())),
-    ("Int" | "Float" | "String" | "Boolean" | "ID", _) => None,
-    _ => Some(untyped(literal)),
-  }
-}
-
-/// graphql-js's `valueFromASTUntyped`.
-fn untyped(literal: &Const) -> Js {
-  match literal {
-    Const::Null => Js::Null,
-    Const::Bool(flag) => Js::Bool(*flag),
-    Const::Int(spelling) | Const::Float(spelling) => {
-      Js::Number(spelling.parse().unwrap_or(f64::NAN))
-    }
-    Const::Str(value) | Const::Enum(value) => Js::Str(value.clone()),
-    Const::List(items) => Js::List(items.iter().map(untyped).collect()),
-    Const::Object(fields) => Js::Object(
-      fields
-        .iter()
-        .map(|(name, value)| (name.clone(), untyped(value)))
-        .collect(),
-    ),
-  }
-}
-
-/// graphql-js 16.11.0's `astFromValue(value, type)`: `None` is its `null`, no value to print.
-fn ast_from_value(value: &Js, ty: &Value, types: &Types<'_>) -> Option<Const> {
-  match ty["kind"].as_str() {
-    Some("NON_NULL") => {
-      ast_from_value(value, &ty["ofType"], types).filter(|ast| !matches!(ast, Const::Null))
-    }
-    _ if matches!(value, Js::Null) => Some(Const::Null),
-    Some("LIST") => match value {
-      Js::List(items) => Some(Const::List(
-        items
-          .iter()
-          .filter_map(|item| ast_from_value(item, &ty["ofType"], types))
-          .collect(),
-      )),
-      item => ast_from_value(item, &ty["ofType"], types),
-    },
-    _ => {
-      let name = ty["name"].as_str()?;
-      let definition = types.get(name)?;
-      match definition["kind"].as_str()? {
-        "INPUT_OBJECT" => {
-          let Js::Object(present) = value else {
-            return None;
-          };
-          let mut fields = Vec::new();
-          for field in definition["inputFields"].as_array()? {
-            let field_name = field["name"].as_str()?;
-            let Some((_, value)) = present.iter().find(|(key, _)| key.as_str() == field_name)
-            else {
-              continue;
-            };
-            if let Some(ast) = ast_from_value(value, &field["type"], types) {
-              fields.push((field_name.to_owned(), ast));
-            }
-          }
-          Some(Const::Object(fields))
-        }
-        "ENUM" => match value {
-          Js::Str(member) => Some(Const::Enum(member.clone())),
-          _ => None,
-        },
-        _ => serialize(value, name),
+      b'\r' => {
+        lines.push(&raw[start..at]);
+        at += if bytes.get(at + 1) == Some(&b'\n') {
+          2
+        } else {
+          1
+        };
+        start = at;
       }
+      _ => at += 1,
     }
   }
-}
-
-/// A scalar's `serialize`, and the node `astFromValue` makes of what it returns.
-fn serialize(value: &Js, name: &str) -> Option<Const> {
-  let number = |number: f64| {
-    let text = js_number(number);
-    Some(if is_integer(&text) {
-      Const::Int(text)
-    } else {
-      Const::Float(text)
+  lines.push(&raw[start..]);
+  let common = lines
+    .iter()
+    .skip(1)
+    .filter_map(|line| {
+      let indent = line.chars().take_while(|&ch| white(ch)).count();
+      (indent < line.chars().count()).then_some(indent)
     })
-  };
-  match (name, value) {
-    ("Int" | "Float", Js::Number(n)) if n.is_finite() => number(*n),
-    ("String", Js::Str(text)) => Some(Const::Str(text.clone())),
-    ("Boolean", Js::Bool(flag)) => Some(Const::Bool(*flag)),
-    // An `ID` that is a string of digits is printed as an integer.
-    ("ID", Js::Str(text)) if is_integer(text) => Some(Const::Int(text.clone())),
-    ("ID", Js::Str(text)) => Some(Const::Str(text.clone())),
-    ("Int" | "Float" | "String" | "Boolean" | "ID", _) => None,
-    // A custom scalar serialises as itself.
-    (_, Js::Bool(flag)) => Some(Const::Bool(*flag)),
-    (_, Js::Number(n)) if n.is_finite() => number(*n),
-    (_, Js::Str(text)) => Some(Const::Str(text.clone())),
-    _ => None,
-  }
-}
-
-/// graphql-js's `integerStringRegExp`, `^-?(?:0|[1-9][0-9]*)$`.
-fn is_integer(text: &str) -> bool {
-  match text.strip_prefix('-').unwrap_or(text).as_bytes() {
-    [b'0'] => true,
-    [b'1'..=b'9', rest @ ..] => rest.iter().all(u8::is_ascii_digit),
-    _ => false,
-  }
-}
-
-/// JavaScript's `String(number)` for a finite number: the shortest digits that round-trip, written
-/// out in full between 10⁻⁷ and 10²¹ and in exponent form outside it.
-fn js_number(number: f64) -> String {
-  if number == 0.0 {
-    return "0".to_owned();
-  }
-  if number < 0.0 {
-    return format!("-{}", js_number(-number));
-  }
-  let scientific = format!("{number:e}");
-  let (mantissa, exponent) = scientific
-    .split_once('e')
-    .expect("an exponent form has an exponent");
-  let exponent: i32 = exponent.parse().expect("the exponent is an integer");
-  let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
-  let count = digits.len() as i32;
-  // The decimal point sits after this many of the digits.
-  let point = exponent + 1;
-  if (count..=21).contains(&point) {
-    format!("{digits}{}", "0".repeat((point - count) as usize))
-  } else if (1..=21).contains(&point) {
-    let (whole, fraction) = digits.split_at(point as usize);
-    format!("{whole}.{fraction}")
-  } else if (-5..=0).contains(&point) {
-    format!("0.{}{digits}", "0".repeat(-point as usize))
-  } else {
-    let shown = point - 1;
-    let sign = if shown < 0 { '-' } else { '+' };
-    let (first, rest) = digits.split_at(1);
-    if rest.is_empty() {
-      format!("{first}e{sign}{}", shown.abs())
-    } else {
-      format!("{first}.{rest}e{sign}{}", shown.abs())
+    .min();
+  if let Some(common) = common {
+    for line in lines.iter_mut().skip(1) {
+      // The indentation is spaces and tabs, a byte each, so a count of them is a byte offset — and
+      // a line of white space shorter than it loses the whole of itself.
+      let whole = *line;
+      *line = &whole[common.min(whole.len())..];
     }
   }
-}
-
-// ------------------------------------------------------------------------------------------
-// the normaliser's own pieces, against graphql-js's real output
-// ------------------------------------------------------------------------------------------
-
-/// The number formatting difference 3 rests on reproduces JavaScript's, read off node running
-/// `String(n)`, at each of its four forms and both of their edges.
-#[test]
-fn javascripts_number_formatting_is_reproduced() {
-  for (number, javascript) in [
-    (1.0, "1"),
-    (1500.0, "1500"),
-    (-0.0025, "-0.0025"),
-    (2.5, "2.5"),
-    (100.0, "100"),
-    (0.1, "0.1"),
-    (123.456, "123.456"),
-    (1e21, "1e+21"),
-    (1.2345678901234568e20, "123456789012345680000"),
-    (1e-6, "0.000001"),
-    (1e-7, "1e-7"),
-    (1.5e-7, "1.5e-7"),
-    (5e-324, "5e-324"),
-    (f64::MAX, "1.7976931348623157e+308"),
-    (-0.0, "0"),
-  ] {
-    assert_eq!(js_number(number), javascript, "{number:e}");
+  while lines.first().is_some_and(|line| line.chars().all(white)) {
+    lines.remove(0);
   }
+  while lines.last().is_some_and(|line| line.chars().all(white)) {
+    lines.pop();
+  }
+  lines.join("\n")
 }
 
-/// The string printer reproduces graphql-js's `printString`, read off node, and the parser reads
-/// back what it wrote.
+// ------------------------------------------------------------------------------------------
+// difference 3's own pieces
+// ------------------------------------------------------------------------------------------
+
+/// Two printings of one constant value read back as one value, whichever form printed them, and
+/// two values stay two however alike their spellings: difference 3's rule, at its edges.
+#[test]
+fn printed_defaults_compare_as_values() {
+  let same = |ours: &str, theirs: &str| {
+    assert!(Const::parse(ours).is_ok(), "`{ours}` parses");
+    assert_eq!(
+      Const::parse(ours),
+      Const::parse(theirs),
+      "`{ours}` and `{theirs}`"
+    );
+  };
+  // An object and an empty one in both forms, and a string inline and as a block string.
+  same(
+    "{published: false, ranked: [[1, null], []]}",
+    "{ published: false, ranked: [[1, null], []] }",
+  );
+  same("{}", "{  }");
+  same(r#""the \"newest\" first""#, r#""""the "newest" first""""#);
+  // A block string's value: the common indentation and the blank first and last lines go, an
+  // escaped triple quote is a triple quote, and a line terminator of either kind is a line feed.
+  same(
+    "\"multi\\n  line\"",
+    "\"\"\"\n    multi\n      line\n  \"\"\"",
+  );
+  same("\"a\\\"\\\"\\\"b\"", "\"\"\"a\\\"\"\"b\"\"\"");
+  same("\"x\\ny\"", "\"\"\"x\r\ny\"\"\"");
+  // A list broken across lines, as graphql-js 17 prints one past eighty columns.
+  same("[1, 2]", "[\n  1,\n  2\n]");
+
+  let apart = |ours: &str, theirs: &str| {
+    assert_ne!(
+      Const::parse(ours),
+      Const::parse(theirs),
+      "`{ours}` and `{theirs}`"
+    );
+  };
+  // A number and an enum value by kind and spelling, and an object's fields in order.
+  apart("1500", "1.5e3");
+  apart("1", "1.0");
+  apart("RED", "\"RED\"");
+  apart("{a: 1, b: 2}", "{b: 2, a: 1}");
+}
+
+/// The string printer of smear's print form reproduces graphql-js's `printString`, read off node,
+/// and the parser reads back what it wrote.
 #[test]
 fn graphql_jss_print_string_is_reproduced() {
   for (value, graphql_js) in [

@@ -39,9 +39,11 @@
 //!   emits no such field and no such directive.
 //! - `__Type.isOneOf` — nullable in the meta-schema and absent from every server predating
 //!   OneOf Input Objects.
-//! - `isDeprecated`, on a field, an input value and an enum value — non-null in the meta-schema,
-//!   and absent whenever the introspection query did not ask for it; input-value deprecation is
-//!   younger still. Absent reads as not deprecated, unless a `deprecationReason` was written.
+//! - `isDeprecated`, on a field, an input value, an enum value and a directive — non-null in the
+//!   meta-schema, and absent whenever the introspection query did not ask for it; input-value
+//!   deprecation is younger still, and directive deprecation youngest, asked for by graphql-js's
+//!   query only under `experimentalDirectiveDeprecation`. Absent reads as not deprecated, unless a
+//!   `deprecationReason` was written.
 //!
 //! # Prose is kept, because the schema keeps it
 //!
@@ -242,6 +244,9 @@ pub(super) struct IntrospectedDirective<'a> {
   pub(super) locations: Vec<DirectiveLocation>,
   pub(super) args: Vec<IntrospectedInputValue<'a>>,
   pub(super) is_repeatable: bool,
+  /// Draft §4.2.6's `isDeprecated` and `deprecationReason`, which the renderer writes back as the
+  /// `@deprecated` on the directive's definition.
+  pub(super) deprecated: Deprecated<'a>,
 }
 
 /// `isDeprecated` and `deprecationReason`, read together: `None` when the member is not

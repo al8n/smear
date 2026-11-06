@@ -233,7 +233,7 @@ const MINIMAL: &str = "type Query { ok: Int }";
 /// each allocated once at its final length so none grows or shrinks:
 ///
 /// - the text arena — one, because `SchemaBuilder::inject` reserves the built-ins' share of it
-///   (5 103 bytes of graphql-js's descriptions and their printed defaults, computed once where the
+///   (5 152 bytes of graphql-js's descriptions and their printed defaults, computed once where the
 ///   built-in SDL is parsed) before decoding a byte, and [`MINIMAL`] adds no text of its own;
 /// - `type_meta`, `field_meta`, `input_meta`, `enum_value_meta` and `directive_meta`, one row per
 ///   row of the table each sits beside;

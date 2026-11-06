@@ -83,12 +83,14 @@ impl Default for Text {
   }
 }
 
-/// Whether a field, an input value or an enum value is deprecated, and why.
+/// Whether a field, an input value, an enum value or a directive is deprecated, and why.
 ///
-/// Three answers, because draft §4 has three: not deprecated (`isDeprecated: false`,
-/// `deprecationReason: null`); deprecated with a reason; and deprecated with `null` for a reason,
-/// which `@deprecated(reason: null)` writes and which is `Deprecated(Text::NONE)`. A bare
-/// `@deprecated` is the second of those, with the specification's default, `No longer supported`.
+/// Draft §4 answers `isDeprecated` and `deprecationReason`, and the specified `@deprecated` gives
+/// two pairs of them: not deprecated (`false`, `null`), and deprecated with a reason — a bare
+/// `@deprecated` carrying the specification's default, `No longer supported`. Its `reason` is
+/// `String!` (draft §3.13.3), so `@deprecated(reason: null)` is refused at build rather than kept.
+/// `Deprecated(Text::NONE)`, deprecated with `null` for a reason, is what a document that
+/// redefines `@deprecated` with a nullable `reason` can still write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Deprecation {
   /// No `@deprecated` is applied.
@@ -267,21 +269,32 @@ impl EnumValueMeta {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DirectiveMeta {
   description: Text,
+  deprecation: Deprecation,
 }
 
 impl DirectiveMeta {
-  /// No description.
-  pub const EMPTY: Self = Self::new(Text::NONE);
+  /// No description, not deprecated.
+  pub const EMPTY: Self = Self::new(Text::NONE, Deprecation::NotDeprecated);
 
   /// Assembles a row.
   #[inline]
-  pub const fn new(description: Text) -> Self {
-    Self { description }
+  pub const fn new(description: Text, deprecation: Deprecation) -> Self {
+    Self {
+      description,
+      deprecation,
+    }
   }
 
   /// Returns the directive's description.
   #[inline]
   pub const fn description(&self) -> Text {
     self.description
+  }
+
+  /// Returns whether the directive is deprecated, and why: the `@deprecated` written on its
+  /// definition, or else on one of its `extend directive`s.
+  #[inline]
+  pub const fn deprecation(&self) -> Deprecation {
+    self.deprecation
   }
 }

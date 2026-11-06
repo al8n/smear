@@ -1980,6 +1980,11 @@ struct RawDirectiveDef {
   built_in: bool,
   /// The description, decoded into the text arena.
   description: Text,
+  /// The `@deprecated` written on the definition, its reason decoded into the text arena, or else
+  /// the first one its `extend directive`s provide, which
+  /// [`apply_extensions`](SchemaBuilder::apply_extensions) takes: what draft §4.2.6's
+  /// `isDeprecated` and `deprecationReason` return.
+  deprecation: Deprecation,
 }
 
 /// A schema, type or directive extension, converted to owned form and applied once every
@@ -2006,6 +2011,8 @@ struct RawExtension {
   schema: Option<(SimpleSpan, u32)>,
   /// An `extend scalar`'s `@specifiedBy(url:)`, decoded into the text arena.
   specified_by: Text,
+  /// An `extend directive`'s `@deprecated`, its reason decoded into the text arena.
+  deprecation: Deprecation,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2745,10 +2752,13 @@ impl SchemaBuilder {
 
   /// Reads the `@deprecated` applied in a written list, its reason decoded into the text arena.
   ///
-  /// Draft §4 has three answers and so does this: no `@deprecated`; a reason, which is
-  /// [`DEFAULT_DEPRECATION_REASON`] for a bare one; and `reason: null`, which `isDeprecated: true`
-  /// reports beside a `null` reason — where graphql-js reads a `null` reason as not deprecated at
-  /// all. A reason of any other shape is `InvalidDirectiveArgumentValue`'s to report.
+  /// Two answers: no `@deprecated`, and a reason, which is [`DEFAULT_DEPRECATION_REASON`] for a
+  /// bare one. The specified directive declares `reason: String!` (draft §3.13.3), so
+  /// `reason: null`, like a reason of any other shape that is not a string, reaches
+  /// `check_const_value` and is `InvalidDirectiveArgumentValue`, and this answers
+  /// `Deprecated(Text::NONE)` for a build that is refused. Only a document that redefines
+  /// `@deprecated` with a nullable `reason` builds with that answer: deprecated, with `null` for a
+  /// reason.
   fn deprecation<S>(&mut self, directives: Option<&ConstDirectives<S>>, subject: Sym) -> Deprecation
   where
     S: AsRef<[u8]>,
@@ -2945,6 +2955,7 @@ impl SchemaBuilder {
       None => Vec::new(),
     };
     let directives = self.directive_uses(def.directives(), DirectiveLocation::DirectiveDefinition);
+    let deprecation = self.deprecation(def.directives(), name.sym);
     let mut locations = DirectiveLocations::EMPTY;
     for location in def.locations().locations() {
       if let Some(mapped) = map_location(location) {
@@ -2975,6 +2986,7 @@ impl SchemaBuilder {
       repeatable,
       built_in,
       description,
+      deprecation,
     });
   }
 
@@ -3643,11 +3655,13 @@ impl SchemaBuilder {
         }
       },
       TypeSystemExtension::Directive(def) => {
-        raw.directive = Some(self.located(def.name()));
+        let target = self.located(def.name());
+        raw.directive = Some(target);
         raw.directives = self.directive_uses(
           Some(def.directives()),
           DirectiveLocation::DirectiveDefinition,
         );
+        raw.deprecation = self.deprecation(Some(def.directives()), target.sym);
       }
     }
     self.extensions.push(raw);
@@ -3697,11 +3711,20 @@ impl SchemaBuilder {
       // because the two are one location: `directive @e @d` plus `extend directive @e @d` repeats
       // a non-repeatable `@d`, and a directive the extension provides is one the definition
       // reaches when `validate_directive_cycles` asks whether it reaches itself.
+      //
+      // A `@deprecated` the extension provides deprecates the directive, unless the definition or
+      // an earlier extension already did: graphql-js reads the definition first and then its
+      // extensions in order. Two of them are `DuplicateDirectiveUse` anyway, so the order decides
+      // nothing about a schema that builds.
       if let Some(target) = extension.directive {
         match self.directive_index(target.sym) {
-          Some(index) => self.directives[index]
-            .directives
-            .extend(extension.directives),
+          Some(index) => {
+            let directive = &mut self.directives[index];
+            directive.directives.extend(extension.directives);
+            if !directive.deprecation.is_deprecated() {
+              directive.deprecation = extension.deprecation;
+            }
+          }
           None => {
             let subject = self.text(target.sym).to_owned();
             self.push(SchemaErrorKind::UndefinedExtensionTarget, &subject, target);
@@ -7610,7 +7633,7 @@ impl SchemaBuilder {
       let Some(at) = position_of_directive(&directives, raw.name.sym) else {
         continue;
       };
-      directive_meta[at] = DirectiveMeta::new(raw.description);
+      directive_meta[at] = DirectiveMeta::new(raw.description, raw.deprecation);
       if let Args::Bounded(declared) = raw.args.read() {
         place_inputs(
           &mut input_meta,

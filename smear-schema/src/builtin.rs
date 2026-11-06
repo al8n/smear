@@ -27,11 +27,18 @@
 //! like any other, so introspecting the built-ins answers what the reference implementation
 //! answers. Validation reads none of it, and a description interns no name.
 //!
-//! What still differs from graphql-js's introspection of the same schema, recorded for the parity
-//! work that compares the two: `__Directive` declares `isRepeatable` last where graphql-js declares
-//! it third; `__Schema.types` lists the document's types in document order, then these, where
-//! graphql-js walks the types reachable from the roots; and a built-in scalar nothing references is
-//! still injected, where graphql-js leaves it out of the type map.
+//! The shapes are the draft's (§3.13 and §4.2), which graphql-js 17 follows: `@deprecated` takes a
+//! `String!` reason and may stand on a directive definition, `__Directive` lists `isRepeatable`
+//! third and answers `isDeprecated` and `deprecationReason`, `__Schema.directives` takes
+//! `includeDeprecated`, and every `includeDeprecated` is `Boolean! = false`.
+//!
+//! What still differs from graphql-js 17.1.0's introspection of the same schema, recorded for the
+//! parity work that compares the two: `__Schema.types` lists the document's types in document
+//! order, then these, where graphql-js walks the types reachable from the roots; a built-in scalar
+//! nothing references is still injected, where graphql-js leaves it out of the type map;
+//! `__DirectiveLocation` has the draft's twenty values, without the `FRAGMENT_VARIABLE_DEFINITION`
+//! graphql-js 17 adds for fragment variables; and `VARIABLE_DEFINITION` keeps graphql-js 16's
+//! description, where 17 says "an operation variable definition" to tell it from that location.
 
 /// The five built-in scalars, injected when the document does not define them.
 pub const BUILT_IN_SCALARS_SDL: &str = "\
@@ -83,8 +90,8 @@ directive @deprecated(
   \"\"\"
   Explains why this element was deprecated, usually also including a suggestion for how to access supported similar data. Formatted using the Markdown syntax, as specified by [CommonMark](https://commonmark.org/).
   \"\"\"
-  reason: String = \"No longer supported\"
-) on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE
+  reason: String! = \"No longer supported\"
+) on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION | ENUM_VALUE | DIRECTIVE_DEFINITION
 \"Exposes a URL that specifies the behavior of this scalar.\"
 directive @specifiedBy(\"The URL that specifies the behavior of this scalar.\" url: String!) on SCALAR
 \"Indicates exactly one field must be supplied and this field must not be `null`.\"
@@ -109,7 +116,7 @@ type __Schema {
   \"If this server support subscription, the type that subscription operations will be rooted at.\"
   subscriptionType: __Type
   \"A list of all directives supported by this server.\"
-  directives: [__Directive!]!
+  directives(includeDeprecated: Boolean! = false): [__Directive!]!
 }
 
 \"\"\"
@@ -122,11 +129,11 @@ type __Type {
   name: String
   description: String
   specifiedByURL: String
-  fields(includeDeprecated: Boolean = false): [__Field!]
+  fields(includeDeprecated: Boolean! = false): [__Field!]
   interfaces: [__Type!]
   possibleTypes: [__Type!]
-  enumValues(includeDeprecated: Boolean = false): [__EnumValue!]
-  inputFields(includeDeprecated: Boolean = false): [__InputValue!]
+  enumValues(includeDeprecated: Boolean! = false): [__EnumValue!]
+  inputFields(includeDeprecated: Boolean! = false): [__InputValue!]
   ofType: __Type
   isOneOf: Boolean
 }
@@ -135,7 +142,7 @@ type __Type {
 type __Field {
   name: String!
   description: String
-  args(includeDeprecated: Boolean = false): [__InputValue!]!
+  args(includeDeprecated: Boolean! = false): [__InputValue!]!
   type: __Type!
   isDeprecated: Boolean!
   deprecationReason: String
@@ -188,9 +195,11 @@ In some cases, you need to provide options to alter GraphQL's execution behavior
 type __Directive {
   name: String!
   description: String
-  locations: [__DirectiveLocation!]!
-  args(includeDeprecated: Boolean = false): [__InputValue!]!
   isRepeatable: Boolean!
+  locations: [__DirectiveLocation!]!
+  args(includeDeprecated: Boolean! = false): [__InputValue!]!
+  isDeprecated: Boolean!
+  deprecationReason: String
 }
 
 \"A Directive can be adjacent to many parts of the GraphQL language, a __DirectiveLocation describes one such possible adjacencies.\"
@@ -233,6 +242,8 @@ enum __DirectiveLocation {
   INPUT_OBJECT
   \"Location adjacent to an input object field definition.\"
   INPUT_FIELD_DEFINITION
+  \"Location adjacent to a directive definition.\"
+  DIRECTIVE_DEFINITION
 }
 ";
 

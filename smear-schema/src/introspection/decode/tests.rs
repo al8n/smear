@@ -100,6 +100,7 @@ impl<'a> Census<'a> {
     for directive in &schema.directives {
       census.name(Some(directive.name));
       census.text(directive.description.as_ref().and_then(Option::as_ref));
+      census.deprecated(&directive.deprecated);
       for arg in &directive.args {
         census.input(arg);
       }
@@ -186,7 +187,7 @@ impl<'a> Census<'a> {
 ///
 /// `pad` lengthens every name, which is what a copying reader would pay for and a borrowing one
 /// does not. `default` is one prose member and the rest — a description at every level that takes
-/// one, a deprecation reason at each of the three, a `specifiedByURL` — hold no escape.
+/// one, a deprecation reason at each of the four, a `specifiedByURL` — hold no escape.
 fn corpus(pad: usize, default: &str) -> String {
   let p = "z".repeat(pad);
   format!(
@@ -199,7 +200,7 @@ fn corpus(pad: usize, default: &str) -> String {
         {{"name":"tag{p}","description":"Tags.","locations":["FIELD_DEFINITION","OBJECT"],"args":[
           {{"name":"note{p}","description":"A note.","type":{{"kind":"SCALAR","name":"String{p}"}},
             "defaultValue":null,"isDeprecated":true,"deprecationReason":"Unused."}}
-        ],"isRepeatable":true}}
+        ],"isRepeatable":true,"isDeprecated":true,"deprecationReason":"Retired."}}
       ],
       "types":[
         {{"kind":"OBJECT","name":"Query{p}","description":"The root.",
@@ -1184,6 +1185,44 @@ fn prose_is_read_wherever_draft_4_has_it() {
   let values = schema.types[2].enum_values.as_ref().expect("values");
   assert!(values[0].description.is_none() && values[0].deprecated.is_none());
   assert!(matches!(values[1].deprecated, Some(None)));
+}
+
+/// A directive's `isDeprecated` and `deprecationReason` are read as a field's are: the flag
+/// decides, a reason beside `false` is dropped, and a reason with no flag is read as graphql-js
+/// reads it.
+#[test]
+fn a_directive_deprecation_is_read() {
+  let json = with_directives(
+    r#"{"name":"gone","locations":["FIELD"],"args":[],
+        "isDeprecated":true,"deprecationReason":"Use @kept."},
+       {"name":"bare","locations":["FIELD"],"args":[],
+        "isDeprecated":true,"deprecationReason":null},
+       {"name":"kept","locations":["FIELD"],"args":[],
+        "isDeprecated":false,"deprecationReason":"ignored beside false"},
+       {"name":"old","locations":["FIELD"],"args":[],"deprecationReason":"a reason and no flag"},
+       {"name":"unasked","locations":["FIELD"],"args":[]}"#,
+  );
+  let schema = read(&json).expect("a schema");
+  let deprecations: Vec<Option<Option<&str>>> = schema
+    .directives
+    .iter()
+    .map(|directive| {
+      directive
+        .deprecated
+        .as_ref()
+        .map(|reason| reason.as_ref().map(Text::as_str))
+    })
+    .collect();
+  assert_eq!(
+    deprecations,
+    [
+      Some(Some("Use @kept.")),
+      Some(None),
+      None,
+      Some(Some("a reason and no flag")),
+      None,
+    ]
+  );
 }
 
 /// The wrapper chain a hostile response can build is bounded before the renderer walks it.

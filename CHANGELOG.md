@@ -246,6 +246,30 @@ All notable changes to Smear are documented in this file.
   `UndefinedExtensionTarget`. A directive that reaches itself through the
   directives on its definition or its extensions, directly or through other
   directives and types, is `SelfReferentialDirective`.
+- `smear-schema`!: the meta-schema and the specified `@deprecated` follow the
+  draft (§3.13.3 and §4.2). `@deprecated(reason: String! = "No longer supported")`
+  may also stand on a directive definition, and `@deprecated(reason: null)` is
+  refused as `InvalidDirectiveArgumentValue` where it built as deprecated with no
+  reason. `__DirectiveLocation` gains `DIRECTIVE_DEFINITION`. `__Directive` lists
+  its fields in the draft's order — `name`, `description`, `isRepeatable`,
+  `locations`, `args`, then the new `isDeprecated` and `deprecationReason` — and
+  `__Schema.directives` takes `includeDeprecated`. Every `includeDeprecated` is
+  `Boolean! = false`, so `includeDeprecated: null` no longer validates. A
+  directive definition or an `extend directive` carrying `@deprecated` deprecates
+  the directive: `DirectiveMeta::new` takes its `Deprecation` as a second
+  argument, and `DirectiveMeta::deprecation` returns it.
+  `Schema::from_introspection` reads a directive's `isDeprecated` and
+  `deprecationReason` and writes them back as the `@deprecated` on its
+  definition, and accepts an `includeDeprecated` typed `Boolean`, as the October
+  2021 specification and graphql-js 16 type it, beside the draft's `Boolean!`.
+- `graphql-proto`: introspection answers `__Directive.isDeprecated` and
+  `deprecationReason`, and `__Schema.directives` leaves a deprecated directive
+  out unless `includeDeprecated` is `true`. `includeDeprecated: null`, written or
+  as a variable's value, is draft §6.4.1's `Kind::ArgumentNull` field error where
+  it read as `false`.
+- The introspection parity oracle compares the executor's answers with graphql-js
+  17.1.0's instead of 16.11.0's, directive deprecation included, and its eight
+  recorded differences are redrawn for that release.
 
 ## [0.0.1] - 2026-10-30
 
