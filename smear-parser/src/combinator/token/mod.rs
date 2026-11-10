@@ -16,6 +16,7 @@ use tokora::{
   InputRef, Lexer, ParseAttempt, ParseInput, TryParseInput,
   error::{UnexpectedEot, UnexpectedToken},
   token::{IdentifierToken, KeywordToken, PunctuatorToken},
+  types::{Ident, Keyword},
 };
 
 use super::{Equivalent, ErrorOf, ParseCtx, SliceOf};
@@ -80,8 +81,7 @@ punct_atoms!(
 
 /// The identifier lexer `L` yields, over its source slice and span, tagged with
 /// language `Lang` — the value both identifier atoms produce.
-pub type IdentOf<'inp, L, Lang = ()> =
-  tokora::types::Ident<SliceOf<'inp, L>, <L as Lexer<'inp>>::Span, Lang>;
+pub type IdentOf<'inp, L, Lang = ()> = Ident<SliceOf<'inp, L>, <L as Lexer<'inp>>::Span, Lang>;
 
 /// Commits to an identifier; errors on anything else.
 #[inline]
@@ -94,7 +94,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
 {
-  tokora::types::Ident::parse(inp)
+  Ident::parse(inp)
 }
 
 /// Declines (no tokens consumed) unless the next token is an identifier.
@@ -108,7 +108,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
 {
-  tokora::types::Ident::try_parse(inp)
+  Ident::try_parse(inp)
 }
 
 /// Returns `true` for the three spellings the spec excludes from `EnumValue`:
@@ -222,7 +222,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
 {
-  tokora::types::Keyword::parse_exact(&kw).parse_input(inp)
+  Keyword::parse_exact(&kw).parse_input(inp)
 }
 
 /// Declines (no tokens consumed) unless the next token is the keyword whose
@@ -238,7 +238,7 @@ where
   Ctx: ParseCtx<'inp, L, Lang>,
   Lang: ?Sized,
 {
-  tokora::types::Keyword::try_parse_exact(&kw).try_parse_input(inp)
+  Keyword::try_parse_exact(&kw).try_parse_input(inp)
 }
 
 /// Generates a committed/declining atom pair for one keyword spelling, mapping

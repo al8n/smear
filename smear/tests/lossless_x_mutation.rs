@@ -38,19 +38,24 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use rowan::{GreenNodeBuilder, Language, NodeOrToken};
-use smear::parser::graphqlx::{
-  GraphQLx,
-  ast::{Document, ExecutableDocument, TypeSystemDocument},
-  error::GraphqlxErrors,
-  kinds::{GraphQLxLang, SyntaxKind as K},
-  lossless::{
-    SyntaxNode, ast::Document as DocumentNode, ast::ExecutableDocument as ExecutableDocumentNode,
-    ast::TypeSystemDocument as TypeSystemDocumentNode, parse_document, parse_executable_document,
-    parse_type_system_document,
+use smear::parser::{
+  graphqlx::{
+    GraphQLx,
+    ast::{Document, ExecutableDocument, TypeSystemDocument},
+    error::GraphqlxErrors,
+    kinds::{GraphQLxLang, SyntaxKind as K},
+    lossless::{
+      SyntaxNode,
+      ast::{
+        Document as DocumentNode, ExecutableDocument as ExecutableDocumentNode,
+        TypeSystemDocument as TypeSystemDocumentNode,
+      },
+      parse_document, parse_executable_document, parse_type_system_document,
+    },
+    syntactic::{GraphqlxLexer, document, executable_document, type_system_document},
   },
-  syntactic::{GraphqlxLexer, document, executable_document, type_system_document},
+  lossless::ast::CastNode,
 };
-use smear::parser::lossless::ast::CastNode;
 use tokora::{Parse as _, Parser};
 
 type SyntaxElement = rowan::NodeOrToken<SyntaxNode, rowan::SyntaxToken<GraphQLxLang>>;

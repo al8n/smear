@@ -83,14 +83,16 @@
 
 use std::path::PathBuf;
 
-use smear::parser::graphql::{
-  kinds::SyntaxKind as K,
-  lossless::{
-    Parse, SyntaxNode, parse_document, parse_document_from, parse_executable_document,
-    parse_executable_document_from, parse_type_system_document, parse_type_system_document_from,
+use smear::parser::{
+  graphql::{
+    kinds::SyntaxKind as K,
+    lossless::{
+      Parse, SyntaxNode, parse_document, parse_document_from, parse_executable_document,
+      parse_executable_document_from, parse_type_system_document, parse_type_system_document_from,
+    },
   },
+  lossless::Refused,
 };
-use smear::parser::lossless::Refused;
 
 /// The corpus entries whose bytes are kept by the sink's gap tiling rather than by the grammar.
 ///

@@ -23,10 +23,12 @@ use tokora::cst::{Cst, Sink};
 #[cfg(feature = "test-support")]
 use super::GraphqlLosslessLexer;
 use super::{GraphqlLosslessErrors, GraphqlLosslessSlice, GraphqlLosslessToken};
-use crate::graphql::{error::ErrorData, kinds::SyntaxKind as K};
 #[cfg(feature = "test-support")]
 use crate::lossless::KindSpace;
-use crate::lossless::{LosslessSource, Refused};
+use crate::{
+  graphql::{error::ErrorData, kinds::SyntaxKind as K},
+  lossless::{LosslessSource, Refused},
+};
 
 /// The profile every GraphQL lossless parse uses.
 ///

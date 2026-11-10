@@ -461,3 +461,6 @@ keyword! {
   /// ```
   (DirectiveDefinitionLocation, "DIRECTIVE_DEFINITION_KW", "DIRECTIVE_DEFINITION"),
 }
+
+#[cfg(all(test, feature = "graphql", feature = "graphqlx"))]
+mod tests;

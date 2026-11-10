@@ -188,9 +188,6 @@ pub mod graphql;
 #[cfg_attr(docsrs, doc(cfg(feature = "graphqlx")))]
 pub mod graphqlx;
 
-#[cfg(all(test, feature = "graphql", feature = "graphqlx"))]
-mod keyword_prefix;
-
 mod string_lexer;
 
 // Ungated: a byte source's block string literals are walked in every feature set, through

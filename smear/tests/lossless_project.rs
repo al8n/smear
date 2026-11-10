@@ -70,13 +70,15 @@ use smear::parser::{
     error::GraphqlErrors,
     kinds::{GraphQLLang, SyntaxKind as K},
     lossless::{
-      ProjectErrorKind, Recovery, SyntaxNode, Unverified, Verified, ast::Document as DocumentNode,
-      ast::ExecutableDocument as ExecutableDocumentNode,
-      ast::TypeSystemDocument as TypeSystemDocumentNode, parse_document, parse_executable_document,
-      parse_type_system_document, project, project_executable_document,
-      project_executable_document_recovered, project_executable_document_verified,
-      project_type_system_document, project_type_system_document_recovered,
-      project_type_system_document_verified, verify_parse,
+      ProjectErrorKind, Recovery, SyntaxNode, Unverified, Verified,
+      ast::{
+        Document as DocumentNode, ExecutableDocument as ExecutableDocumentNode,
+        TypeSystemDocument as TypeSystemDocumentNode,
+      },
+      parse_document, parse_executable_document, parse_type_system_document, project,
+      project_executable_document, project_executable_document_recovered,
+      project_executable_document_verified, project_type_system_document,
+      project_type_system_document_recovered, project_type_system_document_verified, verify_parse,
     },
     syntactic::{GraphqlLexer, document, executable_document, type_system_document},
   },
@@ -4315,8 +4317,10 @@ fn foreign_root_parse<'a>(src: &'a str, root: u16) -> smear::parser::graphql::lo
 #[test]
 fn a_parse_minted_over_a_wrong_root_is_refused_not_reported_complete() {
   use smear::parser::graphql::lossless::{
-    Verified, ast::ExecutableDocument as ExecutableDocumentNode,
-    ast::TypeSystemDocument as TypeSystemDocumentNode,
+    Verified,
+    ast::{
+      ExecutableDocument as ExecutableDocumentNode, TypeSystemDocument as TypeSystemDocumentNode,
+    },
   };
 
   for root in [GraphQLLang::kind_to_raw(K::Name).0, 60_000] {

@@ -156,16 +156,16 @@ struct SourceFile {
 
 const FILES: &[SourceFile] = &[
   SourceFile {
-    path: "src/graphql/error.rs",
-    text: include_str!("../src/graphql/error.rs"),
+    path: "src/graphql/error/mod.rs",
+    text: include_str!("../src/graphql/error/mod.rs"),
   },
   SourceFile {
     path: "src/graphql/ast/value.rs",
     text: include_str!("../src/graphql/ast/value.rs"),
   },
   SourceFile {
-    path: "src/graphql/ast/materialized.rs",
-    text: include_str!("../src/graphql/ast/materialized.rs"),
+    path: "src/graphql/ast/materialized/mod.rs",
+    text: include_str!("../src/graphql/ast/materialized/mod.rs"),
   },
   SourceFile {
     path: "src/graphql/syntactic/value/mod.rs",
