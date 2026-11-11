@@ -1,1 +1,1 @@
-type T implements & ns::I<Int> & ::a::J { f: Int }
+type T implements & ns::I<Int> & ^::a::J { f: Int }

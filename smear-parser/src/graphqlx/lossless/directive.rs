@@ -5,7 +5,7 @@
 //! # The one divergence, and it is in every tree
 //!
 //! **A directive's name is a [`TypePath`](K::TypePath), not a `Name`** (divergence 10,
-//! `graphqlx/syntactic/directive/mod.rs:81-107`). `@ns::cache<Int>` parses, `@::ns::d` parses, and
+//! `graphqlx/syntactic/directive/mod.rs:81-108`). `@ns::cache<Int>` parses, `@^::ns::d` parses, and
 //! even `@deprecated` nests `Directive > TypePath > Path`. A port of GraphQL's
 //! `expect(Identifier)` would build `Directive` with a bare `Name` token child — a tree that
 //! re-prints its source byte for byte and that no consumer can navigate, which is why

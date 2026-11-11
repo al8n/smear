@@ -75,12 +75,11 @@ fn valid_bump_grows_span_and_next_lex_matches_logos() {
 
 #[test]
 fn bump_after_error_token_matches_logos() {
-  // `..x`: `..` is an unterminated-spread error token spanning `0..2`
-  // (delegated to Logos in GraphQLx), and `x` follows so a one-byte bump
-  // stays a valid boundary. Frozen reference: the error token's `Debug` text
-  // is exactly the constant below; after `bump(1)` the span grows to 0..3 and
-  // the slice becomes "..x".
-  let src = "..x";
+  // `.x`: a lone `.` is an unterminated-spread error token spanning `0..1`,
+  // and `x` follows so a one-byte bump stays a valid boundary. Frozen
+  // reference: the error token's `Debug` text is exactly the constant below;
+  // after `bump(1)` the span grows to 0..2 and the slice becomes ".x".
+  let src = ".x";
   let mut simd = SyntacticLexer::<str>::new(src);
 
   let s0 = simd.lex();
@@ -90,20 +89,20 @@ fn bump_after_error_token_matches_logos() {
   );
   assert_eq!(
     format!("{s0:?}"),
-    "Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 2 }, \
+    "Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 1 }, \
      data: UnterminatedSpreadOperator }])))",
     "error token"
   );
-  assert_eq!(simd.span(), SimpleSpan::new(0, 2), "error token span");
+  assert_eq!(simd.span(), SimpleSpan::new(0, 1), "error token span");
 
   let n = 1usize;
   simd.bump(&n);
   assert_eq!(
     simd.span(),
-    SimpleSpan::new(0, 3),
+    SimpleSpan::new(0, 2),
     "span after bump past error"
   );
-  assert_eq!(simd.slice(), "..x", "slice after bump past error");
+  assert_eq!(simd.slice(), ".x", "slice after bump past error");
 }
 
 #[cfg(feature = "std")]

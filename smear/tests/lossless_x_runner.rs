@@ -46,11 +46,11 @@ fn the_graphqlx_sink_builds_at_all() {
 /// Every byte reaches the tree, trivia included.
 ///
 /// The lossless guarantee, and the reason the sink refuses trivia-skipping lexers. The source
-/// exercises the images GraphQL has no counterpart for — `<`, `>`, `::`, `=>`, `*` — because those
-/// are the ones a mapper copied from the other dialect could not have.
+/// exercises the images GraphQL has no counterpart for — `<`, `>`, `::`, `~`, `..`, `^`, `=>`, `*`
+/// — because those are the ones a mapper copied from the other dialect could not have.
 #[test]
 fn every_byte_reaches_the_tree_including_trivia() {
-  let src = "# leading\nimport * from \"a\"\ntype T<A> { f: map<::ns::K => V> }\n";
+  let src = "# leading\nimport * from \"a\"\ntype T<A> { f: map<^::ns::K => ~::V> g: ..::W }\n";
   let parse = parse_document(src);
   assert_eq!(
     parse.syntax().text().to_string(),

@@ -90,8 +90,8 @@ where
 /// a fixed `peek::<U2>()` answers about *trivia*, which is the trap Task 10's `set`/`map` dispatch
 /// recorded and worked around by consuming the keyword and peeking again. **One GraphQLx
 /// production cannot use that workaround.** A `where` clause's continuation test is
-/// `(Identifier, Colon | PathSeparator | LAngle) | (PathSeparator, Identifier)`
-/// (`graphqlx/syntactic/generic/mod.rs:442-453`), and on the *decline* branch the head belongs to
+/// `(Identifier, Colon | PathSeparator | LAngle) | (Tilde | Caret | DotDot, PathSeparator)`
+/// (`graphqlx/syntactic/generic/mod.rs:481-507`), and on the *decline* branch the head belongs to
 /// the next definition — `directive @d on FIELD where A: B` followed by `type X { f: Int }` ends
 /// its clause at `B`, and a one-token test would read `type` as another predicate's bounded type,
 /// consume it, and lose the whole `ObjectTypeDefinition`. There is no retro-wrap for a token that

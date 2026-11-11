@@ -1357,7 +1357,7 @@ fn the_lossless_door_refuses_a_bang_chain_on_the_same_token() {
 /// So the tail carries `n ∈ {0, 1, 4, 64}` invalid lexemes, and the assertion is the same at every
 /// value: **one** diagnostic, and the *same* first diagnostic — span and severity byte-identical
 /// to the `n = 0` cell, which is what says the tail changed nothing rather than merely changed
-/// nothing visible. `~` is the lexeme, because no GraphQL or GraphQLx token starts with it.
+/// nothing visible. `?` is the lexeme, because no GraphQL or GraphQLx token starts with it.
 ///
 /// # What this still does not cover
 ///
@@ -1426,7 +1426,7 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
       // The `n = 0` reading, held across the whole tail axis below.
       let mut clean_first: Option<(core::ops::Range<usize>, _)> = None;
       for &bad in TAILS {
-        let src = format!("{base} {}", "~ ".repeat(bad));
+        let src = format!("{base} {}", "? ".repeat(bad));
         let limits = LosslessLimits::with_max_nesting_depth(CEILING);
         let (diags, text) = if dialect == "graphql" {
           let p = smear::parser::graphql::lossless::parse_document_with_limits(&src, limits);
@@ -1566,7 +1566,7 @@ fn a_refusal_ends_every_document_root() {
   for (root, door, base) in roots {
     let mut clean_first = None;
     for bad in [0usize, 4] {
-      let src = format!("{base} {}", "~ ".repeat(bad));
+      let src = format!("{base} {}", "? ".repeat(bad));
       let (count, text, first) = door(&src, LosslessLimits::with_max_nesting_depth(CEILING));
       assert_eq!(
         count,

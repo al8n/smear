@@ -73,9 +73,12 @@ pub use crate::value::{
 #[allow(type_alias_bounds)]
 pub type Name<S: ?Sized, Span = SimpleSpan> = crate::name::Name<S, Span, GraphQLx>;
 
-/// A `::`-separated GraphQLx path.
+/// A GraphQLx path: an optional [`PathRoot`], then `::`-separated names.
 pub type Path<S, Span = SimpleSpan, Container = DefaultVec<Name<S, Span>>> =
   crate::path::Path<Name<S, Span>, Span, Container>;
+
+/// The root a GraphQLx [`Path`] starts at: none, `~::`, `^::`, or `..::` repeated.
+pub use crate::path::PathRoot;
 
 /// A GraphQLx boolean literal.
 pub type BooleanValue<S, Span = SimpleSpan> = crate::value::BooleanValue<S, Span, GraphQLx>;

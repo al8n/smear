@@ -13,23 +13,28 @@
 //! puts one under the [`ListType`] and one under the [`DefinitionTypePath`] inside it, and a getter
 //! matching direct children only is what keeps the two apart.
 //!
-//! # Reading a path's leading `::` off its tokens
+//! # Reading a path's root off its tokens
 //!
-//! `graphqlx::ast::Path` carries `fully_qualified: bool` and the tree records the same fact by
-//! keeping the token, there being no node for a one-token qualifier. [`Path::separators`] is
-//! therefore the whole answer: a path has one `::` between each pair of segments, plus one more in
-//! front when it is fully qualified, so `separators().count() == names().count()` **is** the flag.
-//! `a::b` is two names and one separator; `::a::b` is two and two.
+//! `graphqlx::ast::Path` carries a `PathRoot`, and the tree records the same fact by keeping the
+//! root's tokens as the path's leading children, there being no node for a root. Its sigil says
+//! which root it is:
 //!
-//! A `tok K::PathSeparator` getter would have looked like the natural spelling and been wrong in
-//! exactly the case it exists for — it answers `Some` for `a::b` too, the first separator being a
-//! separator either way.
+//! - [`Path::tilde_token`] answers for `~::a`, the own package's root;
+//! - [`Path::caret_token`] answers for `^::a`, a dependency, whose name is the first of
+//!   [`Path::names`];
+//! - [`Path::dot_dot_tokens`] yields one `..` per parent level of `..::..::a`;
+//! - none of them answers for a relative path, `a`.
+//!
+//! [`Path::separators`] counts every `::`, a root's included: one per root token pair and one
+//! between each pair of segments. `a::b` is two names and one separator; `^::a::b` is two and two,
+//! and `..::..::a` is one and two. A separator is never the first token of a path, so counting
+//! separators against names reads no root by itself.
 
 use crate::{ast_node, graphqlx::kinds::SyntaxKind as K};
 
 ast_node!(
   lang = crate::graphqlx::kinds::GraphQLxLang;
-  /// A `::`-separated path, `::? Name (:: Name)*`.
+  /// A `::`-separated path under an optional root, `PathRoot? Name (:: Name)*`.
   ///
   /// GraphQLx only: GraphQL has no path at all, and every position that would hold a `NamedType`
   /// there holds a [`TypePath`] or a [`DefinitionTypePath`] over one of these here.
@@ -38,9 +43,15 @@ ast_node!(
     names: toks K::Name,
     /// Every `::` in the path, in order.
     ///
-    /// One per gap between segments, plus a leading one when the path is fully qualified — see
-    /// this module's docs for the count that reads the flag off.
+    /// One per gap between segments, plus one after each of the root's sigils — see this module's
+    /// docs for how a root is read.
     separators: toks K::PathSeparator,
+    /// The `~` of a package root, `~::`.
+    tilde_token: tok K::Tilde,
+    /// The `^` of a dependency root, `^::`.
+    caret_token: tok K::Caret,
+    /// The `..` of a parent-module root, one per level of `..::`.
+    dot_dot_tokens: toks K::DotDot,
   }
 );
 

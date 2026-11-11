@@ -357,6 +357,43 @@ All notable changes to Smear are documented in this file.
   for the nesting limit to count, and a long enough chain overflowed the native
   stack. Parses under the `Fatal` emitter the shipped entry points use are
   unchanged.
+- `smear-lexer`! and `smear-parser`!: a GraphQLx path takes a root, and no path
+  starts with `::`. Both GraphQLx lexers gain three punctuators, `~` (`Tilde`),
+  `..` (`DotDot`) and `^` (`Caret`), after `PathSeparator` in the token and
+  token-kind enums, which moves the raw value of every later
+  `LosslessTokenKind` by three. `..` is taken by longest match after `...`, so
+  `....` is `...` then a stray `.`, `.....` is `...` then `..`, and a lone `.`
+  is the only unterminated spread left. A path is `PathRoot? Name (:: Name)*`:
+  `~::` roots it at the own package, `^::` at a dependency its first segment
+  names, and `..::`, once per level, at the parent module, with trivia allowed
+  between a root's tokens. The leading `::` of a fully qualified path is gone:
+  a `::` where a path begins is refused, and the syntactic refusal is the new
+  `ErrorData::LeadingPathSeparator`, of the new
+  `SyntaxErrorKind::LeadingPathSeparator` (`smear::syntax::leading-path-separator`),
+  whose help says that a dependency path starts with `^::`. Every path position
+  — a type, a value, a directive name, an `implements` entry or union member,
+  an extension's target, a root operation type, a `where` predicate and its
+  bounds, a type condition, a spread's target — opens on a name or a root's
+  sigil and no longer on `::`, so `[^::a::B, ^::c::D]` and
+  `IndexMap<string, ^::geo::Point>` hold two members each where a leading `::`
+  joined them into one. A `where` clause continues on a name followed by `:`,
+  `::` or `<`, or on a root's sigil followed by `::`. The AST `Path` trades
+  `fully_qualified: bool` for `root: PathRoot`, an enum of `Relative`,
+  `Package(Span)`, `Dependency(Span)` and `Parent { span, count }` re-exported
+  from `graphqlx::ast`: `Path::new` takes the root before the segments,
+  `root()` replaces `is_fully_qualified()`, `IntoComponents` yields
+  `(Span, PathRoot<Span>, Container)`, and a path's span starts at its root. The
+  reserved first segments — `true`, `false` and `null` of an enum value, `on`
+  of a spread's target — are reserved in a relative path only. In the lossless
+  layer a root's tokens are the leading children of its `Path` node, the typed
+  `Path` gains `tilde_token`, `caret_token` and `dot_dot_tokens`, and
+  `SyntaxKind` gains the images `Tilde`, `DotDot` and `Caret` after
+  `PathSeparator`, which moves the raw value of every later kind by three.
+  `smear_lexer::punctuator` gains `Tilde` and `Caret`, and `smear-parser`'s
+  `combinator` gains `tilde`, `try_tilde`, `caret` and `try_caret`. The
+  syntactic `path`, `try_path`, `Path::graphqlx` and `Path::try_graphqlx`
+  require the dialect error conversion every other path production already
+  required.
 
 ## [0.0.1] - 2026-10-30
 

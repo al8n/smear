@@ -79,9 +79,9 @@ fn error_path_span_slice_check_match_logos() {
       "#0 is_err=true span=SimpleSpan { start: 0, end: 1 } slice=\"?\"\n#0 check=Ok(())\n",
     ),
     (
-      "..x",
-      "#0 is_err=true span=SimpleSpan { start: 0, end: 2 } slice=\"..\"\n#0 check=Ok(())\n\
-       #1 is_err=false span=SimpleSpan { start: 2, end: 3 } slice=\"x\"\n",
+      ".x",
+      "#0 is_err=true span=SimpleSpan { start: 0, end: 1 } slice=\".\"\n#0 check=Ok(())\n\
+       #1 is_err=false span=SimpleSpan { start: 1, end: 2 } slice=\"x\"\n",
     ),
   ];
 

@@ -4440,9 +4440,9 @@ fn the_separated_atoms_refuse_at_the_obstruction() {
   }
 
   // The caller-built half: the doubled and wrong-kind shapes the parser recovers with a hole, in
-  // every separated walk, and the path's own three.
+  // every separated walk, and the path's own five.
   type Case = (K, fn(&mut Tree), ProjectErrorKind, &'static str);
-  let cases: [Case; 9] = [
+  let cases: [Case; 11] = [
     (
       K::WherePredicate,
       |tree| {
@@ -4552,6 +4552,7 @@ fn the_separated_atoms_refuse_at_the_obstruction() {
       K::Path,
       |tree| {
         tree
+          .token(K::Caret, "^")
           .token(K::PathSeparator, "::")
           .token(K::PathSeparator, "::");
         tree.token(K::Name, "a");
@@ -4561,6 +4562,32 @@ fn the_separated_atoms_refuse_at_the_obstruction() {
         found: K::PathSeparator,
       },
       "::a",
+    ),
+    // A `::` in front of the first segment roots nothing, so it is a leading separator.
+    (
+      K::Path,
+      |tree| {
+        tree.token(K::PathSeparator, "::");
+        tree.token(K::Name, "a");
+      },
+      ProjectErrorKind::UnexpectedChild {
+        parent: K::Path,
+        found: K::PathSeparator,
+      },
+      "::a",
+    ),
+    // A root's sigil without the `::` that ends it.
+    (
+      K::Path,
+      |tree| {
+        tree.token(K::Caret, "^");
+        tree.token(K::Name, "a");
+      },
+      ProjectErrorKind::UnexpectedChild {
+        parent: K::Path,
+        found: K::Name,
+      },
+      "a",
     ),
   ];
   for (parent, inside, want, at) in cases {
@@ -4957,10 +4984,10 @@ fn executable_value(value: impl FnOnce(&mut Tree), text: &str) -> (SyntaxNode, S
 fn every_derived_rule_position_refuses_its_spelling_in_a_hand_built_tree() {
   // The four positions the syntactic crate refuses a spelling at, each reached by a tree the
   // lossless parser never builds — the mutation law cannot see them — and each still accepting the
-  // qualified spellings the parser accepts.
+  // rooted and qualified spellings the parser accepts.
   let rule = |kind: ProjectErrorKind| matches!(kind, ProjectErrorKind::SemanticRule { .. });
 
-  // An enum value spelled `true`, `false` or `null`, unqualified: executable grammar …
+  // An enum value spelled `true`, `false` or `null`, relative: executable grammar …
   for spelling in ["true", "false", "null"] {
     let text = std::format!("{{f(a:{spelling})}}");
     let (node, text) = executable_value(
@@ -5004,7 +5031,7 @@ fn every_derived_rule_position_refuses_its_spelling_in_a_hand_built_tree() {
   assert_eq!(rebuilt.text().to_string(), text_owned);
   assert!(rule(refuse_tree(rebuilt, &text_owned)), "{text_owned}");
 
-  // A fragment spread whose target is an unqualified `on`.
+  // A fragment spread whose target is a relative `on`.
   let text = "{...on}";
   let mut tree = Tree::new();
   tree.open(K::Document);
@@ -5037,11 +5064,12 @@ fn every_derived_rule_position_refuses_its_spelling_in_a_hand_built_tree() {
     );
   }
 
-  // The qualified spellings stay the parser's, in both value grammars and in a spread.
+  // The rooted and qualified spellings stay the parser's, in both value grammars and in a spread.
   for src in [
-    "{ f(a: ::true, b: x::null, c: ns::on) }",
-    "scalar S @k(a: ::false, b: y::true)",
+    "{ f(a: ^::true, b: x::null, c: ns::on, d: ~::null, e: ..::on) }",
+    "scalar S @k(a: ^::false, b: y::true)",
     "{ ...ns::on }",
+    "{ ...^::on }",
   ] {
     let parse = parse_document(src);
     assert!(!parse.has_errors(), "{src}");

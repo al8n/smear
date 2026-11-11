@@ -250,7 +250,7 @@ fn separator_tails_preserve_leading_spans_and_committed_diagnostics() {
         && unexpected.found().is_none()
   ));
 
-  let object_source = "type User implements & ::pkg::Node & Resource<T> where T: Node { id: ID }";
+  let object_source = "type User implements & ^::pkg::Node & Resource<T> where T: Node { id: ID }";
   let object = drive_str(ast::ObjectTypeDefinition::graphqlx, object_source)
     .expect("leading implements separator and following where clause");
   let implements = object.implements().expect("implements clause");
@@ -268,7 +268,7 @@ fn separator_tails_preserve_leading_spans_and_committed_diagnostics() {
       .is_some()
   );
 
-  let members_source = "= | ::pkg::User | Post<T>";
+  let members_source = "= | ^::pkg::User | Post<T>";
   let members = drive_str(ast::UnionMemberTypes::graphqlx, members_source)
     .expect("leading union-member separator");
   assert_eq!(members.members().len(), 2);

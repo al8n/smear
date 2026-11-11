@@ -167,6 +167,8 @@ pub mod graphql;
 ///
 /// GraphQLx adds these tokens for advanced features:
 /// - **Path separator**: `::` for namespaced types (`namespace::Type`)
+/// - **Path roots**: `~`, `^` and `..`, each before a `::`, root a path at the package, at a
+///   dependency or at the parent module (`~::geo::Point`, `^::geo::Point`, `..::Point`)
 /// - **Angle brackets**: `<`, `>` for generics (`Container<T>`)
 /// - **Fat arrow**: `=>` for map entries (`map!{ key => value }`)
 /// - **Arithmetic operators**: `+`, `-` for extended type operations

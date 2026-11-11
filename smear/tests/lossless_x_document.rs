@@ -413,7 +413,7 @@ fn parse_document_round_trips_every_fixture() {
     "query Q($x: set<Int> = set!{ 1 }) { a: f(m: map!{ 1 => 2 }) { ...F ... on T { g } } }",
     "!!! not a document at all &&&",
     "type T { f: Int",
-    "union U = | A | ::ns::B where A: C & D",
+    "union U = | A | ^::ns::B where A: C & D",
   ] {
     let parse = parse_document(src);
     assert_eq!(

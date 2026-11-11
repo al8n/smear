@@ -3,7 +3,7 @@
 //! Two halves. The **shaped** half, first, is one test per grammar area, each walking a real tree
 //! through the wrappers rather than through
 //! [`SyntaxNode`](smear::parser::graphqlx::lossless::SyntaxNode). The **totality** half, from
-//! [`the_probe_table_is_exactly_the_shipped_inventory`] on, sweeps all 77 wrappers and all 280
+//! [`the_probe_table_is_exactly_the_shipped_inventory`] on, sweeps all 77 wrappers and all 283
 //! getters over the shared corpus and answers five questions the shaped half cannot: whether the
 //! probe table still matches what the crate ships, whether every getter ever *projected* anything,
 //! whether every getter's name states the kind it projects, whether each node kind casts to exactly
@@ -121,7 +121,7 @@ macro_rules! node_text {
 
 #[test]
 fn the_value_wrappers_project_the_kind_they_name() {
-  let parse = parse_value("{ a: [1, 2.5], b: set!{ X }, c: map!{ 1 => ::ns::Y } }");
+  let parse = parse_value("{ a: [1, 2.5], b: set!{ X }, c: map!{ 1 => ^::ns::Y } }");
   assert!(!parse.has_errors(), "the value fixture must parse clean");
   let root = parse.syntax();
 
@@ -134,7 +134,7 @@ fn the_value_wrappers_project_the_kind_they_name() {
     vec![
       "a: [1, 2.5]".to_string(),
       "b: set!{ X }".to_string(),
-      "c: map!{ 1 => ::ns::Y }".to_string(),
+      "c: map!{ 1 => ^::ns::Y }".to_string(),
     ]
   );
 
@@ -149,21 +149,21 @@ fn the_value_wrappers_project_the_kind_they_name() {
   assert_eq!(texts!(set.enum_values()), vec!["X ".to_string()]);
 
   // Divergence 9: an enum value wraps a whole `Path`, so this getter reaches a node and not a
-  // token, and the qualified spelling is what proves the path level is real.
+  // token, and the rooted spelling is what proves the path level is real.
   let enum_value: EnumValue = root
     .descendants()
     .filter_map(EnumValue::cast_node)
-    .find(|e| e.syntax().text().to_string().starts_with("::ns::Y"))
-    .expect("the fixture holds a fully qualified enum value");
+    .find(|e| e.syntax().text().to_string().starts_with("^::ns::Y"))
+    .expect("the fixture holds a rooted enum value");
   // The trailing space is inside the path: its terminating `::` peek crosses whatever follows the
   // last segment, and a node's extent runs to wherever the parse had reached when it closed.
-  assert_eq!(node_text!(enum_value.path()), Some("::ns::Y ".to_string()));
+  assert_eq!(node_text!(enum_value.path()), Some("^::ns::Y ".to_string()));
 
   // `MapEntry` holds two values with nothing between them but the `=>`, so both halves come back
   // through the plural getters — the shape the module docs record as GraphQLx's own.
   let entry: MapEntry = first(&root);
   assert_eq!(texts!(entry.int_values()), vec!["1".to_string()]);
-  assert_eq!(texts!(entry.enum_values()), vec!["::ns::Y ".to_string()]);
+  assert_eq!(texts!(entry.enum_values()), vec!["^::ns::Y ".to_string()]);
 
   // The object field's key is a plain `Name` and its value is a node, so `tok` answers the key.
   let field = object
@@ -181,7 +181,7 @@ fn the_value_wrappers_project_the_kind_they_name() {
 
 #[test]
 fn the_type_wrappers_keep_the_bang_on_the_type_it_modifies() {
-  let parse = parse_type_ref("[::ns::Box<Int!>]!");
+  let parse = parse_type_ref("[^::ns::Box<Int!>]!");
   assert!(!parse.has_errors(), "the list fixture must parse clean");
   let root = parse.syntax();
 
@@ -192,15 +192,18 @@ fn the_type_wrappers_keep_the_bang_on_the_type_it_modifies() {
   assert_eq!(tok(list.bang_token()), Some("!".to_string()));
   assert_eq!(
     node_text!(list.definition_type_path()),
-    Some("::ns::Box<Int!>".to_string())
+    Some("^::ns::Box<Int!>".to_string())
   );
   assert!(list.list_type().is_none());
 
-  // A path's leading `::` is a token of the path, and the only way to read it off the token
-  // getters is that a fully qualified path has as many separators as it has names.
+  // A path's root is tokens of the path: the dependency root's `^` answers through its own
+  // getter, and its `::` is counted with the separator between the segments.
   let path: Path = first(&root);
   assert_eq!(tok_texts!(path.names()), vec!["ns", "Box"]);
   assert_eq!(tok_texts!(path.separators()), vec!["::", "::"]);
+  assert_eq!(tok(path.caret_token()), Some("^".to_string()));
+  assert_eq!(tok(path.tilde_token()), None);
+  assert!(tok_texts!(path.dot_dot_tokens()).is_empty());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -574,7 +577,7 @@ fn the_three_generic_lists_are_told_apart_by_their_members() {
   assert_eq!(node_text!(ext.path()), Some("ns::T".to_string()));
 
   // A predicate's constrained type and its bounds are all `TypePath`s under one node.
-  let where_parse = parse_where_clause("where A: B & C<X>, ::d::E: F");
+  let where_parse = parse_where_clause("where A: B & C<X>, ^::d::E: F");
   assert!(
     !where_parse.has_errors(),
     "the where fixture must parse clean"
@@ -884,7 +887,7 @@ wrapper_table! {
     opt null_value, opt enum_value, opt list_value, opt set_value, opt map_value,
     opt object_value,
   }
-  Path { toks names, toks separators }
+  Path { toks names, toks separators, tok tilde_token, tok caret_token, toks dot_dot_tokens }
   TypeGenerics { many definition_type_paths, many list_types }
   DefinitionTypePath { opt path, opt type_generics, tok bang_token }
   ListType { opt definition_type_path, opt list_type, tok bang_token }
@@ -1155,7 +1158,7 @@ fn corpus() -> Vec<(String, String)> {
 
 /// Sources this gate adds on top of the corpus, and what each one is for.
 ///
-/// The corpus reaches **every one of the 77 wrappers** on its own and calls all 280 getters, but 49
+/// The corpus reaches **every one of the 77 wrappers** on its own and calls all 283 getters, but 49
 /// of those getters had nothing to project from it: a getter is only exercised by a document that
 /// writes the shape it reaches for, and no corpus entry writes a float inside a set, a map on both
 /// halves of a map entry, a description on a scalar, a `where` on an extension, or a directive
@@ -1505,7 +1508,7 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 
 /// Getters whose name is not the plain snake of the kind they project, with that projection pinned.
 ///
-/// Twenty-one of 280, in two classes.
+/// Twenty-one of 283, in two classes.
 ///
 /// **Role-named, twenty.** Each names a position the grammar has and the kind space does not.
 /// Fourteen are `description`: divergence 12 removed GraphQL's `Description` node, so a description
@@ -1519,7 +1522,7 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 /// **Receiver-elided, one.** `Path::separators` projects `K::PathSeparator` and drops the word the
 /// receiver already says; `Path::path_separators` would stutter. It is here rather than in a rule
 /// because a rule that let any getter drop its wrapper's name as a prefix would be a rule invented
-/// for one getter, and it would weaken the check for the other 279.
+/// for one getter, and it would weaken the check for the other 282.
 ///
 /// Every entry carries its projection, so a getter re-aimed at another kind reds here rather than
 /// slipping through as a pinned exception.
@@ -1573,12 +1576,12 @@ fn the_probe_table_is_exactly_the_shipped_inventory() {
   // every comparison below vacuous, so the counts are pinned before they are used.
   assert_eq!(
     shipped.len(),
-    280,
-    "the wrapper sources should declare 280 getters"
+    283,
+    "the wrapper sources should declare 283 getters"
   );
   let shipped_wrappers: BTreeSet<&str> = shipped.iter().map(|g| g.wrapper.as_str()).collect();
   assert_eq!(shipped_wrappers.len(), 77, "…over 77 wrappers");
-  assert_eq!(DECLARED.len(), 280, "the table declares 280 getters");
+  assert_eq!(DECLARED.len(), 283, "the table declares 283 getters");
   assert_eq!(TABLE_WRAPPERS.len(), 77, "…over 77 wrappers");
 
   let table: BTreeSet<(&str, &str, &str)> = DECLARED.iter().copied().collect();
@@ -1611,7 +1614,7 @@ fn every_getter_is_named_for_what_it_projects() {
   // The defect this catches is the one no other gate can see: a getter aimed at a **plausible
   // neighbour** — `interface_type_definitions: many ObjectTypeDefinition` — which compiles,
   // navigates, answers `Some`, round-trips and keeps every byte. Only the name disagrees with the
-  // kind, so the name is what has to be checked, for all 280 rather than for the handful a fixture
+  // kind, so the name is what has to be checked, for all 283 rather than for the handful a fixture
   // happens to count.
   let mut pinned: BTreeSet<(String, String, String, String)> = NAME_EXCEPTIONS
     .iter()
@@ -1795,7 +1798,7 @@ fn every_getter_is_called_and_projects_something() {
      from a getter pointed at a kind that cannot occur:{}",
     listed(reg.unanswered())
   );
-  assert_eq!(reg.getters.len(), 280);
+  assert_eq!(reg.getters.len(), 283);
 }
 
 #[test]
@@ -1855,7 +1858,7 @@ fn each_node_kind_casts_to_exactly_the_wrapper_that_names_it() {
 /// write a set of floats would make one fixture redundant, and nothing would say so —
 /// [`every_added_source_earns_its_place`] is the other half of that guard.
 ///
-/// Note what is *not* here. The corpus reaches all 77 wrappers and calls all 280 getters on its
+/// Note what is *not* here. The corpus reaches all 77 wrappers and calls all 283 getters on its
 /// own; every entry below is a getter with a node to run on and nothing in it to find, which is a
 /// statement about what GraphQLx the corpus writes rather than about what the typed layer can
 /// reach.
@@ -2118,7 +2121,7 @@ fn every_recovery_fixture_really_is_malformed() {
 
 /// The getters no tree this gate sweeps ever separates from a kind-blind rival, and why.
 ///
-/// 47 of 280. Every other getter is **measured** to answer differently, at least once, from a
+/// 47 of 283. Every other getter is **measured** to answer differently, at least once, from a
 /// getter of the same arity that ignored kinds entirely — the property that makes this sweep's
 /// fixtures worth anything: over `"{ a }"` a `cast::child` is indistinguishable from "take the
 /// first child", and a suite built out of fixtures like that reports full coverage of a layer it
@@ -2141,7 +2144,7 @@ fn every_recovery_fixture_really_is_malformed() {
 /// # The finding: this census is **larger** than the GraphQL twin's, and the design predicted the
 /// opposite
 ///
-/// GraphQL pins 24 of 210, 11.4%. This pins 47 of 280, 16.8% — more, absolutely and
+/// GraphQL pins 24 of 210, 11.4%. This pins 47 of 283, 16.6% — more, absolutely and
 /// proportionally. The design expected fewer, on the reasoning that divergences 1, 2, 10 and 11
 /// replace single-token positions with paths and generics lists, so nodes that held exactly one
 /// child over there hold structure here. **That reasoning has the direction backwards**, and the
@@ -2234,7 +2237,7 @@ fn every_getter_but_these_answers_differently_from_a_kind_blind_rival() {
   );
   assert_eq!(
     DECLARED.len() - undiscriminated.len(),
-    233,
-    "233 of the 280 getters are proved to beat a kind-blind rival"
+    236,
+    "236 of the 283 getters are proved to beat a kind-blind rival"
   );
 }

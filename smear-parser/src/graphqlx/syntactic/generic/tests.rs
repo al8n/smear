@@ -225,7 +225,7 @@ fn generic_parameters_and_headers_are_source_generic() {
   );
 
   fn check_extension_name<S: AsRef<[u8]>>(name: ast::ExtensionName<S>) {
-    assert!(name.path().is_fully_qualified());
+    assert!(matches!(name.path().root(), ast::PathRoot::Dependency(_)));
     assert_eq!(name.path().segments().len(), 2);
     assert_eq!(
       name.generics().expect("extension generics").params().len(),
@@ -234,7 +234,7 @@ fn generic_parameters_and_headers_are_source_generic() {
   }
   accept_all!(
     ast::ExtensionName::graphqlx,
-    "::pkg::Result<T U>",
+    "^::pkg::Result<T U>",
     check_extension_name
   );
 
@@ -255,7 +255,7 @@ fn generic_parameters_and_headers_are_source_generic() {
 #[test]
 fn type_paths_and_where_constraints_are_source_generic() {
   fn check_type_path<S: AsRef<[u8]>>(path: ast::TypePath<S>) {
-    assert!(path.path().is_fully_qualified());
+    assert!(matches!(path.path().root(), ast::PathRoot::Dependency(_)));
     assert_eq!(path.path().segments().len(), 2);
     assert_eq!(
       path.type_generics().expect("type generics").params().len(),
@@ -264,7 +264,7 @@ fn type_paths_and_where_constraints_are_source_generic() {
   }
   accept_all!(
     ast::TypePath::graphqlx,
-    "::pkg::Result<String Item>",
+    "^::pkg::Result<String Item>",
     check_type_path
   );
 
@@ -338,6 +338,34 @@ fn where_tails_preserve_multi_bound_and_predicate_spans() {
     error.into_data(),
     ErrorData::UnexpectedToken(unexpected) if unexpected.found().is_none()
   ));
+}
+
+#[test]
+fn where_clause_continues_on_a_root_and_not_on_a_bare_separator() {
+  // The window continues on a root's sigil followed by its `::`.
+  for src in [
+    "where T: Node<X> ^::dep::U: Serializable",
+    "where T: Node<X> ~::U: Serializable",
+    "where T: Node<X> ..::U: Serializable",
+    "where T: Node<X> .. :: .. :: U: Serializable",
+  ] {
+    let clause = drive_str(ast::WhereClause::graphqlx, src).expect(src);
+    assert_eq!(clause.predicates().len(), 2, "{src:?}");
+  }
+
+  // A `::` roots nothing, so after a bound it cannot join it opens no predicate: the clause ends
+  // in front of it and leaves it to the caller.
+  let (predicate_count, following) = drive_str(
+    |inp| {
+      let clause = ast::WhereClause::graphqlx(inp)?;
+      let following = inp.next()?.map(|token| token.data().kind());
+      Ok((clause.predicates().len(), following))
+    },
+    "where T: Node<X> ::U: Serializable",
+  )
+  .expect("the clause stops before the `::`");
+  assert_eq!(predicate_count, 1);
+  assert_eq!(following, Some(SyntacticTokenKind::PathSeparator));
 }
 
 #[test]

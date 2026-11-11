@@ -60,7 +60,7 @@ lossless_production! {
     }
     expect::<Src, Ctx>(inp, Kind::Identifier)?;
     match peek_kind::<Src, Ctx>(inp)? {
-      Some(Kind::Identifier | Kind::PathSeparator) => path::<Src, Ctx>(inp),
+      Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret) => path::<Src, Ctx>(inp),
       // `as` with nothing after it. Reported without consuming: whatever is here belongs to the
       // enclosing list, which is about to read it as the next member or as its own `}`.
       _ => recover::report_unexpected::<Src, Ctx>(inp, super::recover::PATH_HEADS),

@@ -1,12 +1,12 @@
-Root@0..62
-  Document@0..62
-    ObjectTypeDefinition@0..61
+Root@0..63
+  Document@0..63
+    ObjectTypeDefinition@0..62
       Name@0..4 "type"
       Space@4..5 " "
       DefinitionName@5..7
         Name@5..6 "T"
         Space@6..7 " "
-      Directives@7..39
+      Directives@7..40
         Directive@7..30
           At@7..8 "@"
           TypePath@8..22
@@ -30,32 +30,33 @@ Root@0..62
                 Int@28..29 "5"
             RParen@29..30 ")"
         Space@30..31 " "
-        Directive@31..39
+        Directive@31..40
           At@31..32 "@"
-          TypePath@32..39
-            Path@32..39
-              PathSeparator@32..34 "::"
-              Name@34..35 "a"
-              PathSeparator@35..37 "::"
-              Name@37..38 "b"
-              Space@38..39 " "
-      FieldsDefinition@39..61
-        LBrace@39..40 "{"
-        Space@40..41 " "
-        FieldDefinition@41..60
-          Name@41..42 "f"
-          Colon@42..43 ":"
-          Space@43..44 " "
-          DefinitionTypePath@44..48
-            Path@44..48
-              Name@44..47 "Int"
-              Space@47..48 " "
-          Directives@48..60
-            Directive@48..60
-              At@48..49 "@"
-              TypePath@49..60
-                Path@49..60
-                  Name@49..59 "deprecated"
-                  Space@59..60 " "
-        RBrace@60..61 "}"
-    Newline@61..62 "\n"
+          TypePath@32..40
+            Path@32..40
+              Caret@32..33 "^"
+              PathSeparator@33..35 "::"
+              Name@35..36 "a"
+              PathSeparator@36..38 "::"
+              Name@38..39 "b"
+              Space@39..40 " "
+      FieldsDefinition@40..62
+        LBrace@40..41 "{"
+        Space@41..42 " "
+        FieldDefinition@42..61
+          Name@42..43 "f"
+          Colon@43..44 ":"
+          Space@44..45 " "
+          DefinitionTypePath@45..49
+            Path@45..49
+              Name@45..48 "Int"
+              Space@48..49 " "
+          Directives@49..61
+            Directive@49..61
+              At@49..50 "@"
+              TypePath@50..61
+                Path@50..61
+                  Name@50..60 "deprecated"
+                  Space@60..61 " "
+        RBrace@61..62 "}"
+    Newline@62..63 "\n"

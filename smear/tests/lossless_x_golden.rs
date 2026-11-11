@@ -118,16 +118,17 @@ const UPDATE_VAR: &str = "UPDATE_GOLDEN";
 
 /// The token images the lossless lexer surfaces as trivia, as they enter the tree.
 ///
-/// The kind space's trivia block verbatim — `kinds.rs` puts the six at `26..32`, immediately before
+/// The kind space's trivia block verbatim — `kinds.rs` puts the six at `29..35`, immediately before
 /// [`K::IMAGE_BLOCK`]. `Gap` is deliberately not among them: it is the sink's fill for a region no
 /// token covers, not something the lexer produced.
 const TRIVIA_IMAGES: &[K] = &[K::Bom, K::Comma, K::Space, K::Tab, K::Newline, K::Comment];
 
 /// The corpus entries whose `Gap` hangs off `Root` rather than off a node inside the tree.
 ///
-/// **Measured, not copied.** The GraphQLx lexer accepts seven images GraphQL rejects — `*`, `+`,
-/// `-`, `<`, `>`, `::`, `=>` — so "the lexer refuses this byte for byte" is a different set in the
-/// two dialects, and an entry inherited from `tests/corpus/` is not automatically tokenless here.
+/// **Measured, not copied.** The GraphQLx lexer accepts ten images GraphQL rejects — `*`, `+`,
+/// `-`, `<`, `>`, `::`, `~`, `..`, `^`, `=>` — so "the lexer refuses this byte for byte" is a
+/// different set in the two dialects, and an entry inherited from `tests/corpus/` is not
+/// automatically tokenless here.
 ///
 /// The rule these satisfy is stated at
 /// [`only_a_source_with_no_committed_token_tiles_its_gap_at_the_root`], and this list is its
@@ -209,10 +210,10 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// is **two** productions probing for **two different tokens**, and reading them as one gets the
 /// grammar wrong.
 ///
-/// **A [`Path`](K::Path) probes for `::`.** `path` is `::? Name (:: Name)*`, and `path_tail` in
+/// **A [`Path`](K::Path) probes for `::`.** `path` is `PathRoot? Name (:: Name)*`, and `path_tail` in
 /// `graphqlx/lossless/ty.rs` is a `while eat_if(PathSeparator)`, so its last act on every path in
 /// the corpus is a probe for a separator that is not there. `TypePath > Path` (77 witnesses) and
-/// `DefinitionTypePath > Path` (69) are the two commonest pairings in this list after
+/// `DefinitionTypePath > Path` (70) are the two commonest pairings in this list after
 /// `Root > Document`; `EnumValue > Path`, `NamedSpecifier > Path`, `WildcardSpecifier > Path` and
 /// `ExtensionName > Path` are the same node in four other positions. So in `type T { f: Int }` the
 /// `Path` under `f`'s type spans `"Int "`.
@@ -226,7 +227,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// `graphqlx/lossless/generic.rs` states the divergence beside the production: "**A `Path`, where
 /// `definition_name` takes a bare `Name`**" — `extend type ns::T` names a qualified target and
 /// `type ns::T` does not. So in `type T { f: Int }` the `DefinitionName` spans `"T "`;
-/// `ObjectTypeDefinition > DefinitionName` (44) is the third commonest pairing here, and
+/// `ObjectTypeDefinition > DefinitionName` (46) is the third commonest pairing here, and
 /// `FragmentDefinition > ExecutableDefinitionName` plus the eight remaining `> DefinitionName`
 /// pairings are the same shape in other positions.
 ///
@@ -395,11 +396,11 @@ const SHAPE_CASES: &[(&str, &str)] = &[
     "fragment <T, U> F<A, B> on N::M<W> { f }",
   ),
   // Divergence 10: a directive's name is a type path with its own generics, so `@ns::d<A>` is four
-  // levels of structure where GraphQL has one token. The second directive is the leading-`::`
-  // spelling, whose `Path` starts one token earlier.
+  // levels of structure where GraphQL has one token. The second directive's name has a dependency
+  // root, whose `^` and `::` are the `Path`'s first two tokens.
   (
     "directive_name_is_a_type_path",
-    "type T @ns::d<A>(a: 1) @::x::y { f: Int }",
+    "type T @ns::d<A>(a: 1) @^::x::y { f: Int }",
   ),
   // Divergences 14, 15 and 16 together: a generic parameter with a **type** default (not a
   // `DefaultValue` — the `=` here introduces a type reference), and a `where` clause on the
@@ -431,12 +432,12 @@ const SHAPE_CASES: &[(&str, &str)] = &[
     "set_retro_wrap_across_trivia",
     "{ f(a: set\n  # c\n  ! { 1 }, b: map\n  , !\n  # d\n  { 1 => 2 }) }\n",
   ),
-  // The `Path` production on its own: a leading `::`, three segments and generics at the end, inside
-  // a list and under a non-null fold. `Path` is GraphQLx's most-opened node kind (3474 hits in gate
-  // 2's sweep) and the one whose boundaries nothing else pins.
+  // The `Path` production on its own: a dependency root, two segments and generics at the end,
+  // inside a list and under a non-null fold. `Path` is GraphQLx's most-opened node kind (3474 hits
+  // in gate 2's sweep) and the one whose boundaries nothing else pins.
   (
     "qualified_path_nesting",
-    "type T { f: [::ns::Inner<Int>!]! }",
+    "type T { f: [^::ns::Inner<Int>!]! }",
   ),
 ];
 

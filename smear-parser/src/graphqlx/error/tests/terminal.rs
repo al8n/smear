@@ -103,8 +103,8 @@ fn the_terminal_arms_answer_for_every_variant() {
         );
         cells += 1;
       })+)+
-      // A census that selected nothing exits `ok`. 10 = 9 variants + `Lexer`'s second sample.
-      assert_eq!(cells, 10, "the cell set collapsed");
+      // A census that selected nothing exits `ok`. 11 = 10 variants + `Lexer`'s second sample.
+      assert_eq!(cells, 11, "the cell set collapsed");
     };
   }
 
@@ -139,6 +139,8 @@ fn the_terminal_arms_answer_for_every_variant() {
       Err::unexpected_token(SyntacticTokenKind::Colon, Expectation::Name, span).into_data(),
       false
     )],
+    // A path written with a leading `::`: a grammar rejection like the one above it.
+    LeadingPathSeparator => [(Err::leading_path_separator(span).into_data(), false)],
     Other => [(ErrorData::Other(std::borrow::Cow::Borrowed("x")), false)],
     // A malformed lexeme kept by its kind: a grammar rejection, as the note it replaced was.
     Lexical => [(ErrorData::Lexical(SyntaxErrorKind::UnknownCharacter), false)],

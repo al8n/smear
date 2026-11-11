@@ -10,9 +10,10 @@
 //! - **A fourth balanced pair.** GraphQLx's `<>` is depth-counted by the lexer alongside `()`,
 //!   `[]` and `{}` (`smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`), so the `unclosed` list
 //!   below has four entries and [`crate::graphqlx::error::Unclosed`] a fourth variant.
-//! - **A wider image space.** Seven images GraphQL has no counterpart for — `<`, `>`, `::`, `=>`,
-//!   `*`, `+`, `-` — which is why [`crate::graphqlx::kinds::SyntaxKind`] cannot be GraphQL's space
-//!   with a tail appended, and why [`kind_map`] is not GraphQL's mapper with arms added.
+//! - **A wider image space.** Ten images GraphQL has no counterpart for — `<`, `>`, `::`, `~`,
+//!   `..`, `^`, `=>`, `*`, `+`, `-` — which is why [`crate::graphqlx::kinds::SyntaxKind`] cannot be
+//!   GraphQL's space with a tail appended, and why [`kind_map`] is not GraphQL's mapper with arms
+//!   added.
 //! - **A different expectation vocabulary.** The two dialects' `Expectation` enums agree on their
 //!   first nine variants and neither is a superset, so this module's private `expectation_of` is
 //!   hand-written per dialect. It is the one member the design's measurement showed survives every
@@ -252,8 +253,10 @@ crate::lossless::lossless_error_impls! {
 /// *syntactic* suite this one is compared against. `IntValue` and `FloatValue` exist in the enum
 /// and are reached from productions that name a value shape directly.
 ///
-/// The seven rows GraphQL has no counterpart for — `<`, `>`, `*`, `+`, `-`, `::`, `=>` — are the
-/// same seven images that widened the kind space.
+/// The seven rows GraphQL has no counterpart for — `<`, `>`, `*`, `+`, `-`, `::`, `=>` — are seven
+/// of the ten images that widened the kind space. The other three, the root sigils `~`, `..` and
+/// `^`, have no row and fall back with the trivia: no production demands one, each being taken only
+/// after a peek has seen it.
 fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectation {
   match expected {
     Some(Expected::One(kind)) => match kind {

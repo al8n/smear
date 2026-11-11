@@ -160,13 +160,75 @@ fn names_and_paths_are_source_generic() {
   accept_all!(ast::Name::graphqlx, "true", check_name);
 
   fn check_path<S: AsRef<[u8]>>(path: ast::Path<S>) {
-    assert!(path.is_fully_qualified());
+    assert_eq!(
+      path.root(),
+      &ast::PathRoot::Dependency(SimpleSpan::new(0, 3))
+    );
     assert_eq!(path.segments().len(), 2);
     assert!("Core".equivalent(path.segments()[0].source()));
     assert!("Item".equivalent(path.segments()[1].source()));
-    assert_eq!(path.span(), &SimpleSpan::new(0, 12));
+    assert_eq!(path.span(), &SimpleSpan::new(0, 13));
   }
-  accept_all!(syntactic::path, "::Core::Item", check_path);
+  accept_all!(syntactic::path, "^::Core::Item", check_path);
+}
+
+#[test]
+fn every_path_root_is_read_and_a_leading_separator_is_refused() {
+  use core::num::NonZeroUsize;
+  use std::string::ToString;
+  use tokora::diagnostic::Diagnose;
+
+  let twice = NonZeroUsize::new(2).expect("two is not zero");
+  for (src, root, end) in [
+    ("Core::Item", ast::PathRoot::Relative, 10),
+    (
+      "~::Core::Item",
+      ast::PathRoot::Package(SimpleSpan::new(0, 3)),
+      13,
+    ),
+    (
+      "^ :: Core",
+      ast::PathRoot::Dependency(SimpleSpan::new(0, 4)),
+      9,
+    ),
+    (
+      "..:: .. ::Core",
+      ast::PathRoot::Parent {
+        span: SimpleSpan::new(0, 10),
+        count: twice,
+      },
+      14,
+    ),
+  ] {
+    let path = drive_str(syntactic::path, src).expect(src);
+    assert_eq!(path.root(), &root, "{src:?}");
+    assert_eq!(
+      path.span(),
+      &SimpleSpan::new(0, end),
+      "{src:?}: a path's span starts at its root"
+    );
+  }
+
+  // `::` only joins: where a path begins it roots nothing, and the refusal says how a dependency
+  // path is written.
+  let error = drive_str(syntactic::path, "::Core::Item")
+    .expect_err("a leading `::` must be refused")
+    .into_iter()
+    .next()
+    .expect("one error");
+  assert!(
+    matches!(error.data(), ErrorData::LeadingPathSeparator),
+    "{:?}",
+    error.data()
+  );
+  assert_eq!(error.span(), SimpleSpan::new(0, 2));
+  assert_eq!(error.to_string(), "a path cannot start with `::`");
+  assert_eq!(error.help(), Some("a dependency path starts with `^::`"));
+
+  // A root's sigil without its `::` is refused at the token in its place.
+  for src in ["~Core", "^Core", "..Core", ".. .. ::Core"] {
+    assert!(drive_str(syntactic::path, src).is_err(), "{src:?}");
+  }
 }
 
 #[test]
@@ -196,11 +258,11 @@ fn extended_values_cover_set_map_object_and_variables() {
     assert!(matches!(set.values()[0], ast::InputValue::Int(_)));
     assert!(matches!(set.values()[1], ast::InputValue::Boolean(_)));
     assert!(matches!(set.values()[2], ast::InputValue::Enum(_)));
-    assert_eq!(set.span(), &SimpleSpan::new(0, 28));
+    assert_eq!(set.span(), &SimpleSpan::new(0, 29));
   }
   accept_all!(
     ast::InputValue::graphqlx,
-    "set!{ 1 true ::Some::Value }",
+    "set!{ 1 true ^::Some::Value }",
     check_set
   );
 
@@ -535,7 +597,7 @@ fn graphqlx_types_cover_paths_and_generics() {
       _ => panic!("expected path type"),
     };
     assert!(path.required());
-    assert!(path.path().is_fully_qualified());
+    assert!(matches!(path.path().root(), ast::PathRoot::Dependency(_)));
     assert_eq!(path.path().segments().len(), 2);
     let generics = path.type_generics().expect("generic arguments");
     assert_eq!(generics.params().len(), 2);
@@ -544,7 +606,7 @@ fn graphqlx_types_cover_paths_and_generics() {
   }
   accept_all!(
     ast::Type::graphqlx,
-    "::Core::Result<String [Value!]>!",
+    "^::Core::Result<String [Value!]>!",
     check_path_type
   );
 

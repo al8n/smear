@@ -580,7 +580,7 @@ const OPEN: &[(&str, usize)] = &[];
 
 /// The `(entry, door)` pairs the law runs over: every hole-free parse of every corpus entry under
 /// each of the three doors that builds that door's container.
-const PAIRS: usize = 259;
+const PAIRS: usize = 267;
 
 /// Of [`PAIRS`], the ones whose unmutated tree already lacks a lenient token — every mutation of
 /// them is compared against a restored text.
@@ -588,37 +588,37 @@ const LENIENT_BASES: usize = 5;
 
 /// Mutations tried, per door, per operation — the population, cell by cell.
 const TRIED: &[((&str, &str), usize)] = &[
-  (("executable", "delete"), 1324),
-  (("executable", "duplicate"), 1324),
-  (("executable", "retext"), 1479),
-  (("executable", "swap"), 700),
-  (("executable", "transplant"), 14_294),
-  (("mixed", "delete"), 3300),
-  (("mixed", "duplicate"), 3300),
-  (("mixed", "retext"), 4298),
-  (("mixed", "swap"), 1699),
-  (("mixed", "transplant"), 37_022),
-  (("type-system", "delete"), 1946),
-  (("type-system", "duplicate"), 1946),
-  (("type-system", "retext"), 2769),
-  (("type-system", "swap"), 983),
-  (("type-system", "transplant"), 21_346),
+  (("executable", "delete"), 1405),
+  (("executable", "duplicate"), 1405),
+  (("executable", "retext"), 1564),
+  (("executable", "swap"), 748),
+  (("executable", "transplant"), 15_020),
+  (("mixed", "delete"), 3412),
+  (("mixed", "duplicate"), 3412),
+  (("mixed", "retext"), 4418),
+  (("mixed", "swap"), 1766),
+  (("mixed", "transplant"), 38_005),
+  (("type-system", "delete"), 1977),
+  (("type-system", "duplicate"), 1977),
+  (("type-system", "retext"), 2804),
+  (("type-system", "swap"), 1002),
+  (("type-system", "transplant"), 21_603),
 ];
 
 /// Mutations tried in total.
-const TRIED_TOTAL: usize = 97_730;
+const TRIED_TOTAL: usize = 100_518;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 86_639;
+const UNFAITHFUL: usize = 89_175;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 8452;
+const EQUAL: usize = 8636;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 2318;
+const BOTH_REFUSE: usize = 2378;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
-const LENIENT_EQUAL: usize = 253;
+const LENIENT_EQUAL: usize = 261;
 
 /// Skeleton-faithful with a lenient token missing, and both refusing the restored text.
 const LENIENT_BOTH_REFUSE: usize = 68;
@@ -633,7 +633,7 @@ const LENIENT_BOTH_REFUSE: usize = 68;
 /// values are pinned by `every_unclosed_closer_projects_what_the_closed_text_parses_to` and
 /// `nested_missing_closers_restore_innermost_first` instead.
 const LENIENT_HITS: [usize; 21] = [
-  86, 88, 6, 4, 6, 2, 42, 15, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  92, 90, 6, 4, 6, 2, 42, 15, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
 /// How many restorations each row contributed to [`LENIENT_BOTH_REFUSE`] — restored texts the
@@ -651,7 +651,8 @@ const LENIENT_REFUSED_HITS: [usize; 21] = [
 /// no image would be a lenient position still strict. Every entry left has an image: a directive
 /// location, a generic parameter or argument name, a path segment. Round six's first run of this
 /// census found two image-less ones — `(DirectiveDefinition, on)` and `(ExtensionTypeGenerics,
-/// >)` — which are the last two [`LENIENT`] rows now.
+/// >)` — which are the last two [`LENIENT`] rows now. Deleting a relative path's first segment
+/// is never faithful: it leaves a path that starts with `::`, which the parser refuses.
 const STRICT_DELETIONS: &[(&str, usize)] = &[
   ("DirectiveLocations Name ARGUMENT_DEFINITION", 2),
   ("DirectiveLocations Name INPUT_FIELD_DEFINITION", 2),
@@ -659,7 +660,6 @@ const STRICT_DELETIONS: &[(&str, usize)] = &[
   ("ExecutableDefinitionTypeGenerics Name T", 2),
   ("ExtensionTypeGenerics Name A", 6),
   ("ExtensionTypeGenerics Name B", 2),
-  ("Path Name ns", 2),
 ];
 
 #[derive(Default)]

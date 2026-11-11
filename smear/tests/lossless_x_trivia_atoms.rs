@@ -6,7 +6,7 @@
 //! *not* shared is what they are instantiated over: a different lexer, whose own `is_trivia`
 //! decides what the skip crosses. GraphQLx's ignored set happens to be the same eight forms as
 //! GraphQL's — and "happens to be" is exactly the kind of claim that needs a test rather than a
-//! sentence, because GraphQLx widened the significant vocabulary by seven images and could as
+//! sentence, because GraphQLx widened the significant vocabulary by ten images and could as
 //! easily have widened the ignored one.
 //!
 //! Two atoms are covered here that GraphQL's twin leaves to its productions. `peek_as` is the
@@ -84,17 +84,18 @@ fn is_trivia_covers_every_graphqlx_ignored_token_and_commits_it() {
   }
 }
 
-/// And nothing else — including the six images GraphQL has no counterpart for.
+/// And nothing else — including the images GraphQL has no counterpart for.
 ///
 /// A lead the lexer calls significant stops the skip at itself, so the atom never reaches the
-/// brace behind it. The GraphQLx-only leads are the point: `*`, `+`, `-`, `<`, `::` and `=>` are
-/// tokens *no* GraphQLx production consumes in most positions, which is exactly the shape a lexer
-/// change could quietly reclassify as ignorable without any production noticing.
+/// brace behind it. The GraphQLx-only leads are the point: `*`, `+`, `-`, `<`, `::`, `=>` and the
+/// root sigils `~`, `..` and `^` are tokens *no* GraphQLx production consumes in most positions,
+/// which is exactly the shape a lexer change could quietly reclassify as ignorable without any
+/// production noticing.
 #[test]
 fn is_trivia_covers_nothing_significant() {
   for lead in [
     "a", "1", "$", "\"s\"", "...", "@", ":", // shared with GraphQL
-    "*", "+", "-", "<", ">", "::", "=>", // GraphQLx only
+    "*", "+", "-", "<", ">", "::", "=>", "~", "..", "^", // GraphQLx only
   ] {
     let src = format!("{lead}{{");
     assert_ne!(

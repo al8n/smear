@@ -293,15 +293,15 @@
 //! | position | the syntactic refusal | the projection |
 //! |---|---|---|
 //! | a fragment's name is not `on` | `generic/mod.rs:392` (`Expectation::FragmentName`) | `name_except` in `executable_definition_name` |
-//! | a fragment spread's target is not an unqualified `on…` | `selection/mod.rs:446` (the spread dispatch reads `on` as an inline fragment's head) and `:551` (`fragment_type_path`, `Expectation::Path`) | `path_except` through `type_path_except` in `fragment_spread` |
-//! | an enum value is not an unqualified `true…`, `false…` or `null…` | `value.rs:290-295` (the enum production, `Expectation::EnumValue`), and the value dispatch that reads those spellings as a boolean or a null in both grammars — `value.rs:811-820` non-const, `:922-931` const | `path_except` in `enum_value`, shared by both value grammars |
+//! | a fragment spread's target is not a relative `on…` | `selection/mod.rs:440` (the spread dispatch reads `on` as an inline fragment's head) and `:541-542` (`fragment_type_path`, `Expectation::Path`) | `path_except` through `type_path_except` in `fragment_spread` |
+//! | an enum value is not a relative `true…`, `false…` or `null…` | `value.rs:290-295` (the enum production, `Expectation::EnumValue`), and the value dispatch that reads those spellings as a boolean or a null in both grammars — `value.rs:814-823` non-const, `:925-934` const | `path_except` in `enum_value`, shared by both value grammars |
 //! | an enum value definition is not named `true`, `false` or `null` | `definition/enum_type.rs:21-22` (`Expectation::EnumValue`) | `name_except` in `enum_value_definition` |
 //!
 //! Each answers [`SemanticRule`](ProjectErrorKind::SemanticRule) at the offending segment, and a
-//! path rule reads only the first segment of a path with no leading `::` — `::on`, `ns::on`,
-//! `::true` and `x::true` are the parser's too. The two path rules are invisible to the mutation
-//! law: a tree the parser builds never holds them, and a retexted one re-parses to a different
-//! skeleton. Hand-built cells pin all four. Beside them, two shapes rather than rules:
+//! path rule reads only the first segment of a relative path, one with no root — `^::on`, `..::on`,
+//! `ns::on`, `~::true` and `x::true` are the parser's too. The two path rules are invisible to the
+//! mutation law: a tree the parser builds never holds them, and a retexted one re-parses to a
+//! different skeleton. Hand-built cells pin all four. Beside them, two shapes rather than rules:
 //!
 //! - **A variable has no place in a constant position.** The AST's own type system forbids it —
 //!   [`ConstInputValue`] has no `Variable` variant — so it is
@@ -515,7 +515,7 @@
 //! | [`TypeGenerics`](SyntaxKind::TypeGenerics), both spellings | `Type+` in `< >` | `MissingChild` | kind-level only |
 //! | [`WhereClause`](SyntaxKind::WhereClause) | `Predicate+` | `MissingChild` | `a_where_clause_with_nothing_to_constrain_refuses` |
 //! | a predicate's bounds | `TypePath+` after `:` | `MissingChild` | kind-level only |
-//! | [`Path`](SyntaxKind::Path) | `Name+` separated by `::` | `MissingChild` | kind-level only |
+//! | [`Path`](SyntaxKind::Path) | a root's tokens, then `Name+` separated by `::` | `MissingChild` | kind-level only |
 //! | [`Directives`](SyntaxKind::Directives), [`ConstDirectives`](SyntaxKind::Directives) | `Directive+` | `MissingChild` | `a_present_directive_run_with_no_directive_refuses` |
 //! | [`SelectionSet`](SyntaxKind::SelectionSet) | `Selection+` in `{ }` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
 //! | [`VariablesDefinition`](SyntaxKind::VariablesDefinition) | `Definition+` in `( )` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
@@ -574,6 +574,7 @@
 //! `smear-parser/tests/deep_projection_x.rs` reads the flatness off a real projection, one fixture
 //! per cycle plus one per GraphQLx-only carrier.
 
+use core::num::NonZeroUsize;
 use std::vec::Vec;
 
 use rowan_0_17::{NodeOrToken, TextRange, TextSize};
@@ -601,13 +602,13 @@ use crate::{
       InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension, InputValue,
       IntValue, InterfaceTypeDefinition, InterfaceTypeExtension, List, Map, MapEntry, Name,
       NamedOperationDefinition, Nest, Nested, NullValue, Object, ObjectField, ObjectTypeDefinition,
-      ObjectTypeExtension, OperationDefinition, OperationType, Path, RootOperationTypeDefinition,
-      RootOperationTypesDefinition, ScalarTypeDefinition, ScalarTypeExtension, SchemaDefinition,
-      SchemaExtension, Selection, SelectionSet, Set, StringValue, Type, TypeCondition,
-      TypeDefinition, TypeExtension, TypeGenerics, TypePath, TypeSystemDefinition,
-      TypeSystemDocument, TypeSystemExtension, UnionMemberTypes, UnionTypeDefinition,
-      UnionTypeExtension, VariableDefinition, VariableValue, VariablesDefinition, WhereClause,
-      WherePredicate,
+      ObjectTypeExtension, OperationDefinition, OperationType, Path, PathRoot,
+      RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
+      ScalarTypeExtension, SchemaDefinition, SchemaExtension, Selection, SelectionSet, Set,
+      StringValue, Type, TypeCondition, TypeDefinition, TypeExtension, TypeGenerics, TypePath,
+      TypeSystemDefinition, TypeSystemDocument, TypeSystemExtension, UnionMemberTypes,
+      UnionTypeDefinition, UnionTypeExtension, VariableDefinition, VariableValue,
+      VariablesDefinition, WhereClause, WherePredicate,
     },
     kinds::{GraphQLxLang, SyntaxKind},
     lossless::Parse,
@@ -2465,32 +2466,32 @@ fn optional_constrained_after<'src, T>(
 // paths
 // ---------------------------------------------------------------------------------------------
 
-/// A `::`-separated path, and its extent.
+/// A rooted, `::`-separated path, and its extent.
 ///
-/// GraphQLx only, and the node every name-shaped position in this dialect goes through. The
-/// leading `::` is **part of the path** rather than a prefix on it — `graphqlx::ast::Path` carries
-/// `fully_qualified` and the tree records the same fact by keeping the token — so the flag is read
-/// off whether the node's first non-trivia token is a separator, which is the same question the
-/// wrapper layer answers by counting.
+/// GraphQLx only, and the node every name-shaped position in this dialect goes through. The root
+/// is **part of the path** rather than a prefix on it — `graphqlx::ast::Path` carries a
+/// [`PathRoot`] and the tree records the same fact by keeping the root's tokens as the node's
+/// leading children — so the root is read off those tokens, which is the same question the
+/// wrapper layer answers with its `tilde_token`, `caret_token` and `dot_dot_tokens` getters.
 fn path<'src>(node: Node<'_>, source: &'src str) -> Out<(Path<&'src str>, TextRange)> {
   path_except(node, source, &[], "")
 }
 
-/// [`path`] at a position the syntactic parser makes a **rule** of: an **unqualified** path whose
+/// [`path`] at a position the syntactic parser makes a **rule** of: a **relative** path whose
 /// first segment spells one of `reserved` is [`SemanticRule`](ProjectErrorKind::SemanticRule)
-/// naming `rule`. `::on` and `ns::on` are untouched — the syntactic productions refuse only the
-/// first segment of a path with no leading `::`.
+/// naming `rule`. `^::on`, `..::on` and `ns::on` are untouched — the syntactic productions refuse
+/// only the first segment of a path with no root.
 fn path_except<'src>(
   node: Node<'_>,
   source: &'src str,
   reserved: &[ContextualKeyword],
   rule: &'static str,
 ) -> Out<(Path<&'src str>, TextRange)> {
-  // `::? Name (:: Name)*` — the leading separator is what `fully_qualified` records, and every
-  // segment goes through the name door; the first one through the rule's, when unqualified.
+  // `PathRoot? Name (:: Name)*` — the root's tokens are what `PathRoot` records, and every segment
+  // goes through the name door; the first one through the rule's, when the path is relative.
   let mut cursor = Cursor::new(node);
-  let fully_qualified = cursor.opt_token(K::PathSeparator).is_some();
-  let mut first = !fully_qualified;
+  let root = path_root(&mut cursor)?;
+  let mut first = root.is_relative();
   let (segments, _) = cursor.separated(
     |cursor| {
       if core::mem::take(&mut first) {
@@ -2509,10 +2510,43 @@ fn path_except<'src>(
     "a path segment",
   )?;
   let extent = cursor.finish("a token")?;
-  Ok((
-    Path::new(to_span(extent), segments, fully_qualified),
-    extent,
-  ))
+  Ok((Path::new(to_span(extent), root, segments), extent))
+}
+
+/// The root a `Path` node's leading tokens spell: `~ ::`, `^ ::`, `.. ::` once per level, or none.
+///
+/// Strict, as every token atom here is: a sigil must be followed by its `::`. A `::` in front of
+/// the first segment is not a root, and the segment walk refuses it as the leading separator it is.
+fn path_root(cursor: &mut Cursor<'_>) -> Out<PathRoot> {
+  if let Some(sigil) = cursor.opt_token(K::Tilde) {
+    let separator = cursor.token(K::PathSeparator, "the `::` after a root's `~`")?;
+    return Ok(PathRoot::Package(root_span(sigil, separator)));
+  }
+  if let Some(sigil) = cursor.opt_token(K::Caret) {
+    let separator = cursor.token(K::PathSeparator, "the `::` after a root's `^`")?;
+    return Ok(PathRoot::Dependency(root_span(sigil, separator)));
+  }
+  let Some(sigil) = cursor.opt_token(K::DotDot) else {
+    return Ok(PathRoot::Relative);
+  };
+  let mut separator = cursor.token(K::PathSeparator, "the `::` after a root's `..`")?;
+  let mut count = NonZeroUsize::MIN;
+  while cursor.opt_token(K::DotDot).is_some() {
+    separator = cursor.token(K::PathSeparator, "the `::` after a root's `..`")?;
+    count = count.saturating_add(1);
+  }
+  Ok(PathRoot::Parent {
+    span: root_span(sigil, separator),
+    count,
+  })
+}
+
+/// A root's span: from its first token to its last `::`.
+fn root_span(first: Token<'_>, last: Token<'_>) -> SimpleSpan {
+  SimpleSpan::new(
+    usize::from(first.text_range().start()),
+    usize::from(last.text_range().end()),
+  )
 }
 
 /// `Path TypeGenerics?` in a position that admits no `!`.
@@ -3059,7 +3093,7 @@ fn enum_value<'src>(node: Node<'_>, source: &'src str) -> Out<(EnumValue<&'src s
   let mut cursor = Cursor::new(node);
   let path_node = cursor.node(K::Path, "a path")?;
   cursor.end()?;
-  // `true`, `false` and `null` as an unqualified first segment are a boolean and a null in both
+  // `true`, `false` and `null` as a relative path's first segment are a boolean and a null in both
   // value grammars' dispatch, and the enum production refuses them (`syntactic/value.rs`), so an
   // enum value spelled that way is outside the parser's image.
   let (path, path_extent) = path_except(
@@ -4020,7 +4054,7 @@ fn fragment_spread<'src>(
   let directives_node = cursor.opt_node(K::Directives);
   cursor.end()?;
   // `... on` is an inline fragment's head in both parsers (`selection/mod.rs`'s spread dispatch,
-  // and `fragment_type_path`'s refusal), so an unqualified target spelled `on` is no spread any
+  // and `fragment_type_path`'s refusal), so a relative target spelled `on` is no spread any
   // source produces.
   let path = cursor.keep(type_path_except(
     path_node,

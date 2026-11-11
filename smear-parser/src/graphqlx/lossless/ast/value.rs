@@ -29,7 +29,7 @@
 //! # An enum value wraps a whole path
 //!
 //! Divergence 9's value half: `graphqlx::ast::EnumValue` carries a `Path`, so `Colour` is
-//! `EnumValue > Path > Name` and `::ns::Colour` is a fully qualified one. [`EnumValue::path`] is a
+//! `EnumValue > Path > Name` and `^::ns::Colour` is a rooted one. [`EnumValue::path`] is a
 //! *child* getter for that reason, where GraphQL's `EnumValue::name` is a token getter. The SDL
 //! half diverges the other way — see
 //! [`EnumValueDefinition`](super::definition::EnumValueDefinition), whose value is a bare `Name`.
@@ -114,7 +114,7 @@ ast_node!(
   ///
   /// See this module's docs for divergence 9 and for the SDL half, which goes the other way.
   EnumValue => K::EnumValue {
-    /// The path naming the value, `Colour` or `::ns::Colour`.
+    /// The path naming the value, `Colour` or `^::ns::Colour`.
     path: opt Path,
   }
 );

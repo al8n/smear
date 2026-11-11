@@ -21,12 +21,12 @@ use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken,
   argument::{arguments, const_arguments},
-  path_after_first, try_name,
+  path_after_first, path_root, try_name,
   ty::try_type_generics,
   unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt, extent_end, extent_since, try_at, try_double_colon},
+  combinator::{ParseCtx, TokenSpannedExt, extent_end, extent_since, try_at},
   graphqlx::{
     GraphQLx,
     ast::{ConstDirective, ConstDirectives, Directive, Directives, TypePath},
@@ -90,19 +90,19 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let separator = try_double_colon(inp)?;
-  let fully_qualified = matches!(&separator, ParseAttempt::Accept(_));
+  // The root, if one is written; a `::` here is refused, since it roots nothing.
+  let root = path_root(inp)?;
   let first = match try_name(inp)? {
     ParseAttempt::Accept(name) => name,
     ParseAttempt::Decline => return unexpected_here(inp, Expectation::Path),
   };
-  // Already the first token's start — `::` when the path is fully qualified, the leading segment
-  // otherwise — so this is `extent_start` by another route and does not need to peek again.
-  let start = match separator {
-    ParseAttempt::Accept(separator) => separator.span().start(),
-    ParseAttempt::Decline => first.span().start(),
-  };
-  let path = path_after_first(start, first, fully_qualified, inp)?;
+  // Already the first token's start — the root's first token when the path has a root, the
+  // leading segment otherwise — so this is `extent_start` by another route and does not need to
+  // peek again.
+  let start = root
+    .span()
+    .map_or_else(|| first.span().start(), |span| span.start());
+  let path = path_after_first(start, first, root, inp)?;
   let generics = try_type_generics(inp)?;
   Ok(TypePath::new(extent_since(inp, start), path, generics))
 }

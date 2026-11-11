@@ -9,7 +9,7 @@ use super::{
   Argument, BooleanValue, DefinitionName, DefinitionTypeGenerics, DefinitionTypeParam,
   ExecutableDefinitionName, ExecutableDefinitionTypeGenerics, ExtensionName, ExtensionTypeGenerics,
   ExtensionTypeParam, Field, ImportMember, InputValue, Name, NamedSpecifier, OperationType, Path,
-  Selection, TypePath, WhereClause, WherePredicate,
+  PathRoot, Selection, TypePath, WhereClause, WherePredicate,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -25,7 +25,11 @@ fn name(span: u8, source: &'static str) -> Name<&'static str, CustomSpan> {
 }
 
 fn path(span: u8, source: &'static str) -> Path<&'static str, CustomSpan> {
-  Path::new(CustomSpan(span), Vec::from([name(span, source)]), false)
+  Path::new(
+    CustomSpan(span),
+    PathRoot::Relative,
+    Vec::from([name(span, source)]),
+  )
 }
 
 #[test]

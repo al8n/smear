@@ -137,7 +137,7 @@ fn variables_support_descriptions_defaults_and_constant_directives() {
   }
   accept_all!(
     ast::DescribedVariableDefinition::graphqlx,
-    "\"page size\" $limit: ::paging::Int = 10 @range(min: 1)",
+    "\"page size\" $limit: ^::paging::Int = 10 @range(min: 1)",
     check_variable
   );
 
@@ -248,7 +248,10 @@ fn fragments_preserve_generic_headers_paths_and_where_constraints() {
         .len(),
       1
     );
-    assert!(fragment.type_condition().name().path().is_fully_qualified());
+    assert!(matches!(
+      fragment.type_condition().name().path().root(),
+      ast::PathRoot::Dependency(_)
+    ));
     assert_eq!(
       fragment
         .directives()
@@ -270,7 +273,7 @@ fn fragments_preserve_generic_headers_paths_and_where_constraints() {
   }
   accept_all!(
     ast::FragmentDefinition::graphqlx,
-    "fragment<T> Item<T> on ::model::Item<T> @cache where T: Node { id }",
+    "fragment<T> Item<T> on ^::model::Item<T> @cache where T: Node { id }",
     check
   );
 }
@@ -302,7 +305,7 @@ fn described_executables_and_documents_dispatch_imports_without_reclassifying_he
   }
   accept_all!(
     ast::ExecutableDocument::graphqlx,
-    "import { Node } from \"types\" \"query docs\" query Get<T> { items { ... ::Item<T> } } fragment<T> Item<T> on ::model::Item<T> { id }",
+    "import { Node } from \"types\" \"query docs\" query Get<T> { items { ... ^::Item<T> } } fragment<T> Item<T> on ^::model::Item<T> { id }",
     check_document
   );
 
@@ -345,7 +348,7 @@ fn a_description_reaches_every_position_the_grammar_gives_one() {
   );
   accept_all!(
     ast::DescribedExecutableDefinition::graphqlx,
-    "\"\"\"fragment\"\"\" fragment F on ::model::Item { id }",
+    "\"\"\"fragment\"\"\" fragment F on ^::model::Item { id }",
     described_fragment
   );
   accept_all!(

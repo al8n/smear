@@ -174,7 +174,7 @@ fn direct_directive_apis_accept_standard_graphql_forms_over_every_source() {
 fn directives_use_generic_capable_type_paths_and_store_empty_or_absent_arguments_as_none() {
   fn check_generic_path<S: AsRef<[u8]>>(directive: ast::Directive<S>) {
     let name = directive.name();
-    assert!(name.path().is_fully_qualified());
+    assert!(matches!(name.path().root(), ast::PathRoot::Dependency(_)));
     assert_eq!(name.path().segments().len(), 2);
     assert_eq!(
       name.type_generics().expect("type arguments").params().len(),
@@ -187,7 +187,7 @@ fn directives_use_generic_capable_type_paths_and_store_empty_or_absent_arguments
   }
   accept_all!(
     ast::Directive::graphqlx,
-    "@::tool::cache<Key>(ttl: 1)",
+    "@^::tool::cache<Key>(ttl: 1)",
     check_generic_path
   );
 
@@ -251,9 +251,18 @@ fn directives_commit_and_report_typed_malformed_or_unclosed_inputs() {
     Expectation::Path,
     None,
   );
+  // A `::` where the name begins roots nothing and is refused as such; a root with no name after
+  // it is a missing path.
+  let error = drive_str(|inp| ast::Directive::graphqlx(inp).map(|_| ()), "@::")
+    .expect_err("a leading `::` is refused")
+    .into_iter()
+    .next()
+    .expect("one error");
+  assert_eq!(error.span(), SimpleSpan::new(1, 3));
+  assert!(matches!(error.into_data(), ErrorData::LeadingPathSeparator));
   assert_unexpected(
     |inp| ast::Directive::graphqlx(inp).map(|_| ()),
-    "@::",
+    "@^::",
     Expectation::Path,
     None,
   );

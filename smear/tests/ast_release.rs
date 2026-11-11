@@ -205,7 +205,11 @@ fn a_deep_graphqlx_generic_argument_type_is_released() {
     for _ in 0..DEPTH {
       ty = x::Type::Path(x::DefinitionTypePath::new(
         span(),
-        x::Path::new(span(), Vec::from([x::Name::new(span(), "Wrap")]), false),
+        x::Path::new(
+          span(),
+          x::PathRoot::Relative,
+          Vec::from([x::Name::new(span(), "Wrap")]),
+        ),
         Some(x::TypeGenerics::new(span(), Vec::from([ty]).into())),
         false,
       ));
@@ -218,7 +222,11 @@ fn a_deep_graphqlx_generic_argument_type_is_released() {
 fn graphqlx_leaf() -> x::Type<&'static str> {
   x::Type::Path(x::DefinitionTypePath::new(
     span(),
-    x::Path::new(span(), Vec::from([x::Name::new(span(), "Leaf")]), false),
+    x::Path::new(
+      span(),
+      x::PathRoot::Relative,
+      Vec::from([x::Name::new(span(), "Leaf")]),
+    ),
     None,
     false,
   ))

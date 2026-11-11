@@ -1,7 +1,8 @@
 //! The GraphQLx dialect assembly layer.
 //!
-//! GraphQLx extends GraphQL's lexical name and value grammar with `::` paths,
-//! `set`/`map` collection constructors, generic type arguments, and imports.
+//! GraphQLx extends GraphQL's lexical name and value grammar with `::` paths
+//! under an optional `~::`, `^::` or `..::` root, `set`/`map` collection
+//! constructors, generic type arguments, and imports.
 //! Its parsers are specialized to the concrete GraphQLx syntactic lexer while
 //! retaining source-generic, zero-copy AST slices.
 

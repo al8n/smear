@@ -667,7 +667,7 @@ fn the_graphqlx_syntactic_lexer_skips_a_bom_at_any_offset() {
 ///
 /// - **soundness** — every token every form produces is trivia, and maps into the image block;
 /// - **completeness** — the trivia images are a *suffix* of the image block (the kind space's
-///   documented layout: twenty-six non-trivia images, then six trivia ones), and the alphabet
+///   documented layout: twenty-nine non-trivia images, then six trivia ones), and the alphabet
 ///   reaches every kind in that suffix.
 ///
 /// The suffix formulation is what makes this survive a change rather than merely describe today. A

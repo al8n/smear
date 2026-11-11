@@ -7,7 +7,7 @@
 //!
 //! GraphQL's lossless CST has a `NonNullType` node that wraps the type it modifies. **GraphQLx's
 //! kind space has no such kind, and that is a derived fact rather than a preference.**
-//! `graphqlx/syntactic/ty.rs:219-233` builds `DefinitionTypePath` and `ListType` each carrying its
+//! `graphqlx/syntactic/ty.rs:215-229` builds `DefinitionTypePath` and `ListType` each carrying its
 //! own `required: bool`; nothing in the GraphQLx grammar or AST names a non-null node, so Task 8's
 //! census — which fails on a kind that names nothing in GraphQLx's own sources — could not have
 //! admitted one.
@@ -57,20 +57,39 @@ lossless_production! {
     Ok(())
   }
 
-  /// `::? Name (:: Name)*`
+  /// A path's root — `~ ::`, `^ ::`, or `.. ::` once per level — or nothing. Opens no node: the
+  /// root's tokens are leading token children of the [`path`] that roots them.
   ///
-  /// **The leading `::` is part of the path, not a prefix operator on it.** `graphqlx::ast::Path`
-  /// carries `fully_qualified: bool`, and the tree records the same fact by keeping the token: a
-  /// consumer asks whether the path's first child is a `PathSeparator`. That is why there is no
-  /// separate node for the qualifier — a node whose entire content is one token says nothing the
-  /// token does not.
+  /// A fixed pair of tokens per sigil, the `.. ::` pairs read in a loop rather than by recursion, so
+  /// a long chain costs no stack; their count is bounded by the input, as the `:: Name` suffixes
+  /// after them are. A sigil without its `::` is the `expect`'s to refuse.
+  fn path_root<'inp, Src, Ctx>(inp) {
+    if eat_if::<Src, Ctx>(inp, Kind::Tilde)? || eat_if::<Src, Ctx>(inp, Kind::Caret)? {
+      return expect::<Src, Ctx>(inp, Kind::PathSeparator);
+    }
+    while eat_if::<Src, Ctx>(inp, Kind::DotDot)? {
+      expect::<Src, Ctx>(inp, Kind::PathSeparator)?;
+    }
+    Ok(())
+  }
+
+  /// `PathRoot? Name (:: Name)*`
+  ///
+  /// **The root is part of the path, not a prefix operator on it.** `graphqlx::ast::Path` carries a
+  /// `PathRoot`, and the tree records the same fact by keeping the root's tokens as the path's
+  /// leading children: a consumer reads which root the path has off whether its first token is a
+  /// `Tilde`, a `Caret` or a `DotDot`. That is why there is no separate node for the root — a node
+  /// whose entire content is the root's two tokens says nothing the tokens do not.
+  ///
+  /// **A `::` is not a head.** It only joins two segments, so a path never starts with one, and a
+  /// caller that dispatches here on a `::` gets the `expect`'s refusal of a missing name.
   fn path<'inp, Src, Ctx>(inp) {
     peek_kind::<Src, Ctx>(inp)?;
     node(
       K::Path.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
-        // Optional, and its absence is not an error: `Colour` and `::Colour` are both paths.
-        eat_if::<Src, Ctx>(inp, Kind::PathSeparator)?;
+        // Optional, and its absence is not an error: `Colour` and `^::geo::Colour` are both paths.
+        path_root::<Src, Ctx>(inp)?;
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         path_tail::<Src, Ctx>(inp)
       },
@@ -80,7 +99,7 @@ lossless_production! {
 
   /// `< Type (Type)* >` — the arguments applied to a path.
   ///
-  /// Nonempty: `graphqlx/syntactic/ty.rs:82` is `.at_least(1)`, so `Foo<>` is an error rather than
+  /// Nonempty: `graphqlx/syntactic/ty.rs:86` is `.at_least(1)`, so `Foo<>` is an error rather than
   /// a path with no arguments. The first element is parsed unconditionally and the loop handles the
   /// rest, which is what makes the emptiness a diagnostic instead of a silently accepted shape.
   fn type_generics<'inp, Src, Ctx>(inp) {
@@ -183,14 +202,16 @@ lossless_production! {
 
   /// `DefinitionTypePath | ListType`
   ///
-  /// **Three heads, against GraphQL's two** (`graphqlx/syntactic/ty.rs:38-45`): a path's name, a
-  /// path's leading `::`, or a list's `[`. Opens no node of its own — the chosen production opens,
-  /// and closes, its own, `!` included.
+  /// **Five heads, against GraphQL's two** (`graphqlx/syntactic/ty.rs:38-49`): a path's name, one of
+  /// its three root sigils `~`, `..` and `^`, or a list's `[`. Opens no node of its own — the chosen
+  /// production opens, and closes, its own, `!` included.
   fn type_ref<'inp, Src, Ctx>(inp) {
     // The head peek first, so the leading trivia it crosses is committed BEFORE any node opens and
     // therefore lands outside it.
     match peek_kind::<Src, Ctx>(inp)? {
-      Some(Kind::Identifier | Kind::PathSeparator) => definition_type_path::<Src, Ctx>(inp),
+      Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret) => {
+        definition_type_path::<Src, Ctx>(inp)
+      }
       Some(Kind::LBracket) => list_type::<Src, Ctx>(inp),
       // No type starts here. Report and consume, exactly as `value`'s dispatcher does: an `Err`
       // would abort every enclosing production.
@@ -200,15 +221,15 @@ lossless_production! {
 
   /// A path where a path — and not a type — is what the grammar wants, with recovery.
   ///
-  /// [`path`]'s `expect` returns `Err` on a head that is neither a name nor a `::`, which aborts
-  /// every enclosing production. This is the door a *list* of paths uses, where one bad member
+  /// [`path`]'s `expect` returns `Err` on a head that is neither a name nor a root's sigil, which
+  /// aborts every enclosing production. This is the door a *list* of paths uses, where one bad member
   /// must cost one `Error` node and not the list.
   // No list production names it yet, so its driver is its only caller and the gate takes it —
   // see `lossless_drivers!` on why the allow is narrowed to the gate rather than written bare.
   #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
   fn path_or_recover<'inp, Src, Ctx>(inp) {
     match peek_kind::<Src, Ctx>(inp)? {
-      Some(Kind::Identifier | Kind::PathSeparator) => path::<Src, Ctx>(inp),
+      Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret) => path::<Src, Ctx>(inp),
       _ => recover::unexpected::<Src, Ctx>(inp, PATH_HEADS),
     }
   }

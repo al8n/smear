@@ -33,8 +33,10 @@
 //!   [`InputValueDefinition`], a [`FieldDefinition`] and an [`EnumValueDefinition`] each carry
 //!   their description as a direct string token.
 //! - **Several tokens of one kind** ([`tokens`]). [`Path`] holds its segments as bare
-//!   [`Name`](crate::graphqlx::kinds::SyntaxKind::Name) tokens and its `::`s as bare
-//!   [`PathSeparator`](crate::graphqlx::kinds::SyntaxKind::PathSeparator) tokens;
+//!   [`Name`](crate::graphqlx::kinds::SyntaxKind::Name) tokens, its `::`s as bare
+//!   [`PathSeparator`](crate::graphqlx::kinds::SyntaxKind::PathSeparator) tokens, and a
+//!   parent-module root's `..`s as bare [`DotDot`](crate::graphqlx::kinds::SyntaxKind::DotDot)
+//!   tokens;
 //!   [`DirectiveLocations`], [`ExtensionTypeGenerics`] and
 //!   [`ExecutableDefinitionTypeGenerics`] each hold a whole list of bare `Name` tokens, their
 //!   members having no node kind of their own.

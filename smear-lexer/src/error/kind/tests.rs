@@ -18,8 +18,8 @@ fn names_a_position(text: &str) -> bool {
 }
 
 #[test]
-fn the_inventory_lists_twenty_three_distinct_kinds() {
-  assert_eq!(SyntaxErrorKind::ALL.len(), 23);
+fn the_inventory_lists_twenty_four_distinct_kinds() {
+  assert_eq!(SyntaxErrorKind::ALL.len(), 24);
   for (i, a) in SyntaxErrorKind::ALL.iter().enumerate() {
     for b in &SyntaxErrorKind::ALL[i + 1..] {
       assert_ne!(a, b, "{a:?} is listed twice");

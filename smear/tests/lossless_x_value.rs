@@ -112,36 +112,80 @@ fn an_enum_value_wraps_a_path_node() {
   assert_eq!(text!(parse_value, "ns::Colour"), "ns::Colour");
 }
 
-/// Divergence 8: a bare `::` in value position opens a fully qualified enum value.
+/// Divergence 8: a root's sigil in value position opens a rooted enum value.
 ///
 /// GraphQL has no value head that is not a name, a literal or a bracket, so this arm has no
-/// counterpart to port and is the one a port would simply be missing — after which `::ns::Colour`
+/// counterpart to port and is the one a port would simply be missing — after which `^::ns::Colour`
 /// would reach `recover::unexpected` and become an `Error` node that still round-trips.
 #[test]
-fn a_leading_path_separator_opens_a_fully_qualified_enum_value() {
+fn a_root_sigil_opens_a_rooted_enum_value() {
+  for (src, tokens) in [
+    (
+      "^::ns::Colour",
+      vec![
+        K::Caret,
+        K::PathSeparator,
+        K::Name,
+        K::PathSeparator,
+        K::Name,
+      ],
+    ),
+    (
+      "~::ns::Colour",
+      vec![
+        K::Tilde,
+        K::PathSeparator,
+        K::Name,
+        K::PathSeparator,
+        K::Name,
+      ],
+    ),
+    (
+      "..::..::Colour",
+      vec![
+        K::DotDot,
+        K::PathSeparator,
+        K::DotDot,
+        K::PathSeparator,
+        K::Name,
+      ],
+    ),
+  ] {
+    assert_eq!(
+      kinds!(parse_value, src),
+      vec![K::Root, K::EnumValue, K::Path],
+      "{src:?}: a root is part of the path, not junk in front of it"
+    );
+    assert_eq!(text!(parse_value, src), src);
+
+    // The root is token children of the Path, which is how a consumer reads which root it is.
+    let parse = parse_value(src);
+    let path = parse
+      .syntax()
+      .descendants()
+      .find(|n| n.kind() == K::Path)
+      .expect("the parse produced no Path node");
+    assert_eq!(
+      path
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .map(|t| t.kind())
+        .collect::<Vec<_>>(),
+      tokens,
+      "{src:?}: the root's tokens must be inside the Path, or nothing records the root"
+    );
+  }
+
+  // A `::` roots nothing: it only joins, so a value that starts with one is junk in front of the
+  // name after it.
+  let parse = parse_value("::ns::Colour");
+  assert!(parse.has_errors(), "a leading `::` must report");
   assert_eq!(
     kinds!(parse_value, "::ns::Colour"),
-    vec![K::Root, K::EnumValue, K::Path],
-    "a leading `::` is part of the path, not junk in front of it"
+    vec![K::Root, K::Error],
+    "the leading `::` is recovered as junk, not opened as a path"
   );
   assert_eq!(text!(parse_value, "::ns::Colour"), "::ns::Colour");
-
-  // The qualifier is a token child of the Path, which is how a consumer reads `fully_qualified`.
-  let parse = parse_value("::ns::Colour");
-  let path = parse
-    .syntax()
-    .descendants()
-    .find(|n| n.kind() == K::Path)
-    .expect("the parse produced no Path node");
-  assert_eq!(
-    path
-      .children_with_tokens()
-      .filter_map(|e| e.into_token())
-      .map(|t| t.kind())
-      .collect::<Vec<_>>(),
-    vec![K::PathSeparator, K::Name, K::PathSeparator, K::Name],
-    "the leading `::` must be inside the Path, or nothing records that it was fully qualified"
-  );
 }
 
 /// The three reserved spellings are reserved in a path's **first** segment only.
@@ -161,6 +205,15 @@ fn the_reserved_spellings_are_reserved_only_in_the_first_segment() {
     kinds!(parse_value, "x::true"),
     vec![K::Root, K::EnumValue, K::Path]
   );
+  // A rooted path has no unreserved-first-segment rule to break: its first segment follows the
+  // root, so `~::null` and `^::true` are enum values.
+  for src in ["~::null", "^::true", "..::false"] {
+    assert_eq!(
+      kinds!(parse_value, src),
+      vec![K::Root, K::EnumValue, K::Path],
+      "{src:?}: a rooted path's first segment is not reserved"
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -352,15 +405,15 @@ fn constness_reaches_every_nested_value_position() {
 // Divergences 2, 3, 4 — paths, generics and type references.
 // ---------------------------------------------------------------------------------------------
 
-/// A type reference's three heads, each reaching its own node kind.
+/// A type reference's heads — a name, a root's sigil, a `[` — each reaching its own node kind.
 #[test]
-fn a_type_reference_has_three_heads() {
+fn a_type_reference_opens_on_a_name_a_root_or_a_bracket() {
   assert_eq!(
     kinds!(parse_type_ref, "Int"),
     vec![K::Root, K::DefinitionTypePath, K::Path]
   );
   assert_eq!(
-    kinds!(parse_type_ref, "::ns::Int"),
+    kinds!(parse_type_ref, "^::ns::Int"),
     vec![K::Root, K::DefinitionTypePath, K::Path]
   );
   assert_eq!(
@@ -503,7 +556,9 @@ fn trivia_does_not_change_any_shape_in_this_area() {
     ("{a:1}", "{ a : 1 , }"),
     ("set!{1}", " set  !  { 1 } "),
     ("map!{1=>2}", "map ! { 1 => 2 }"),
-    ("::a::b", " :: a :: b "),
+    ("^::a::b", " ^ :: a :: b "),
+    ("~::a", " ~ :: a "),
+    ("..::..::a", " .. :: .. :: a "),
   ] {
     assert_eq!(
       kinds!(parse_value, compact),
@@ -668,7 +723,9 @@ fn every_named_value_head_actually_opens_a_value() {
     ("[]", K::ListValue),
     ("{}", K::ObjectValue),
     ("a", K::EnumValue),
-    ("::a", K::EnumValue),
+    ("~::a", K::EnumValue),
+    ("..::a", K::EnumValue),
+    ("^::a", K::EnumValue),
   ] {
     let kinds = kinds!(parse_value, src);
     assert_eq!(
@@ -680,7 +737,7 @@ fn every_named_value_head_actually_opens_a_value() {
 
   // …and a kind the set does *not* name reaches the recovery instead. Without this the loop above
   // would pass for a set that named every kind in the lexer.
-  for src in [")", "!", "=>", "*", "|"] {
+  for src in [")", "!", "=>", "*", "|", "::a"] {
     assert_eq!(
       kinds!(parse_value, src),
       vec![K::Root, K::Error],
@@ -694,7 +751,9 @@ fn every_named_value_head_actually_opens_a_value() {
 fn every_named_type_head_actually_opens_a_type() {
   for (src, first) in [
     ("Int", K::DefinitionTypePath),
-    ("::Int", K::DefinitionTypePath),
+    ("~::Int", K::DefinitionTypePath),
+    ("..::Int", K::DefinitionTypePath),
+    ("^::Int", K::DefinitionTypePath),
     ("[Int]", K::ListType),
   ] {
     assert_eq!(
@@ -704,7 +763,7 @@ fn every_named_type_head_actually_opens_a_type() {
     );
   }
 
-  for src in [")", "!", "$x", "1", "<Int>"] {
+  for src in [")", "!", "$x", "1", "<Int>", "::Int"] {
     assert_eq!(
       kinds!(parse_type_ref, src),
       vec![K::Root, K::Error],

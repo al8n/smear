@@ -232,20 +232,69 @@ fn asterisk_and_spread() {
 }
 
 #[test]
-fn dot_forms_delegate_for_the_exact_error() {
-  // `..` and a lone `.` are unterminated-spread errors; `.5` is a
-  // missing-integer-part float. All are delegated, so the fast path never
-  // mis-reports one as another.
-  let mut lexer = SyntacticLexer::<str>::new("..5");
-  let first = lexer.lex().unwrap();
-  assert!(first.is_err());
-  assert_eq!(lexer.error_span(), Some(tokora::SimpleSpan::new(0, 2)));
-  let second = lexer.lex().unwrap();
-  assert_eq!(second, Ok(SyntacticToken::LitInt(LitInt::Decimal("5"))));
+fn dot_forms_take_the_longest_token() {
+  // `..` is the parent-module sigil, taken by longest match after `...`: `..5` is `..` then `5`,
+  // `.....` is `...` then `..`, and `....` is `...` then a stray `.`.
+  assert_eq!(
+    lex_all("..5"),
+    vec![
+      SyntacticToken::DotDot,
+      SyntacticToken::LitInt(LitInt::Decimal("5")),
+    ]
+  );
+  assert_eq!(
+    lex_all("....."),
+    vec![SyntacticToken::Spread, SyntacticToken::DotDot]
+  );
+  let mut lexer = SyntacticLexer::<str>::new("....");
+  assert_eq!(lexer.lex().unwrap(), Ok(SyntacticToken::Spread));
+  assert!(lexer.lex().unwrap().is_err());
+  assert_eq!(lexer.error_span(), Some(tokora::SimpleSpan::new(3, 4)));
+
+  // A lone `.` is still an unterminated-spread error and `.5` a missing-integer-part float. Both
+  // are delegated, so the fast path never mis-reports one as another.
+  let mut lexer = SyntacticLexer::<str>::new(".x");
+  assert!(lexer.lex().unwrap().is_err());
+  assert_eq!(lexer.error_span(), Some(tokora::SimpleSpan::new(0, 1)));
+  assert_eq!(lexer.lex().unwrap(), Ok(SyntacticToken::Identifier("x")));
 
   let mut lexer = SyntacticLexer::<str>::new(".5");
   assert!(lexer.lex().unwrap().is_err());
   assert_eq!(lexer.error_span(), Some(tokora::SimpleSpan::new(0, 2)));
+
+  // A number is lexed first: `1..` is the invalid float `1.`, whose error takes the `.` after it
+  // as an invalid suffix, so no `..` is left over.
+  let mut lexer = SyntacticLexer::<str>::new("1..");
+  assert!(lexer.lex().unwrap().is_err());
+  assert_eq!(lexer.error_span(), Some(tokora::SimpleSpan::new(0, 3)));
+  assert!(lexer.lex().is_none());
+}
+
+#[test]
+fn the_root_sigils_are_single_tokens_that_end_a_number() {
+  assert_eq!(
+    lex_all("~::a ^::b ..::c"),
+    vec![
+      SyntacticToken::Tilde,
+      SyntacticToken::PathSeparator,
+      SyntacticToken::Identifier("a"),
+      SyntacticToken::Caret,
+      SyntacticToken::PathSeparator,
+      SyntacticToken::Identifier("b"),
+      SyntacticToken::DotDot,
+      SyntacticToken::PathSeparator,
+      SyntacticToken::Identifier("c"),
+    ]
+  );
+  assert_eq!(
+    lex_all("1~2^"),
+    vec![
+      SyntacticToken::LitInt(LitInt::Decimal("1")),
+      SyntacticToken::Tilde,
+      SyntacticToken::LitInt(LitInt::Decimal("2")),
+      SyntacticToken::Caret,
+    ]
+  );
 }
 
 #[test]
@@ -479,6 +528,14 @@ fn keyword_literal_and_punctuator_capabilities_are_mapped() {
     <SyntacticToken<&str> as PunctuatorToken<'_>>::spread(),
     Some(crate::graphqlx::syntactic::SyntacticTokenKind::Spread)
   );
+  assert_eq!(
+    <SyntacticToken<&str> as PunctuatorToken<'_>>::tilde(),
+    Some(crate::graphqlx::syntactic::SyntacticTokenKind::Tilde)
+  );
+  assert_eq!(
+    <SyntacticToken<&str> as PunctuatorToken<'_>>::caret(),
+    Some(crate::graphqlx::syntactic::SyntacticTokenKind::Caret)
+  );
 }
 
 /// Census: every declared `SyntacticTokenKind` variant must be producible by some
@@ -544,5 +601,8 @@ fn syntactic_token_kind_census() {
     Plus => SyntacticToken::Plus,
     Minus => SyntacticToken::Minus,
     PathSeparator => SyntacticToken::PathSeparator,
+    Tilde => SyntacticToken::Tilde,
+    DotDot => SyntacticToken::DotDot,
+    Caret => SyntacticToken::Caret,
   }
 }

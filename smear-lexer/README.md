@@ -197,7 +197,7 @@ GraphQLx is a **superset of GraphQL**, meaning it includes all standard GraphQL 
   - **Floats** (all GraphQL formats plus):
     - Hexadecimal: `0x1.8p3`, `0xA.Bp-2`, `-0x1.FFFFFEp127`
     - Decimal (same as GraphQL): `3.14`, `-0.5`, `1e10`, `2.5E-3`
-- **Punctuators**: `<` `>` `::` `=>` `*` `+` `-`
+- **Punctuators**: `<` `>` `::` `=>` `*` `+` `-` `~` `^` `..`, where `..` is taken by longest match after `...`, so `....` is `...` then a stray `.`
 
     ```rust,ignore
     use smear_lexer::graphqlx::syntactic::Lexer;

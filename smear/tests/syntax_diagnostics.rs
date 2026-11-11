@@ -651,7 +651,8 @@ mod graphqlx {
 
   /// Every kind a GraphQLx document can be refused with, from a real input through the syntactic
   /// door. `UnexpectedCharacter` and `LeadingZero` are GraphQL's alone: GraphQLx lexes `+` and
-  /// `-` as operators and admits a leading zero.
+  /// `-` as operators and admits a leading zero. `LeadingPathSeparator` is GraphQLx's alone, GraphQL
+  /// having no paths.
   #[test]
   fn every_kind_is_reached_from_a_real_document() {
     use Message::{Exact, Starts};
@@ -663,7 +664,7 @@ mod graphqlx {
         Exact("unknown character"),
       ),
       (
-        "{ ..x }",
+        "{ .x }",
         SyntaxErrorKind::UnterminatedSpread,
         Exact("unterminated spread operator"),
       ),
@@ -721,6 +722,11 @@ mod graphqlx {
         "{ id",
         SyntaxErrorKind::UnclosedDelimiter,
         Exact("unclosed `{`"),
+      ),
+      (
+        "type T { f: ::geo::Point }",
+        SyntaxErrorKind::LeadingPathSeparator,
+        Exact("a path cannot start with `::`"),
       ),
     ];
     for (src, kind, message) in rows {
