@@ -19,9 +19,10 @@
 //!   contract straight from tokora.
 //! - **Every severity is [`Severity::Error`]** today. The other rungs exist for a deprecation-lint
 //!   class that does not exist yet, and nothing here invents a warning to justify them.
-//! - **[`Location::entire`] has one user**, the introspection door's `ResponseError`, whose input
-//!   is a machine-generated response with no position worth pointing at. Every other family points
-//!   at the bytes it refused.
+//! - **[`Location::entire`] has two users**, each an input with no position worth pointing at: the
+//!   introspection door's `ResponseError`, whose input is a machine-generated response, and the
+//!   GraphQLx analyzer's diagnostics about a package as a whole, which point at that package's
+//!   package source, a source with no text. Every other family points at the bytes it refused.
 //! - **No path segments.** All four refuse an input before any request has produced a result,
 //!   so none has a field of one to point at.
 //!

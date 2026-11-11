@@ -13,6 +13,17 @@ All notable changes to Smear are documented in this file.
   with the aliases `bytes`, `bstr`, `hipstr` and `smol-bytes`, forward `smear-parser`'s, and
   `smear`'s features of the same names forward to them. `smear-schema`'s builder now takes
   those three kernels from `smear-semantics`, behind `build`, with no change in behaviour.
+- `smear-analysis`: the analyzer's entrance and exits. `graphqlx::analyze` takes a root
+  `Package` and its dependencies, each file's text any `SourceText` (`&str`, `&[u8]`, or a
+  source feature's type), within `Limits`, and answers an `Analysis` with no type parameter:
+  a `Model` of the packages, the `Diagnostics` and a `SourceMap`. Packages and sources are
+  numbered deterministically, whatever order they are passed in. The package set's file
+  paths, package names, dependencies and total size are checked, under the new
+  `smear::graphqlx` codes `DiagnosticKind` lists, and every file is parsed with the GraphQLx
+  syntactic parser, its syntax errors reported at that file. `Diagnostic::builder` is
+  public, so a consumer's findings join smear's in one ordered list, and `SourceMap::bind`
+  pairs an analysis with the texts it was made from. The model's modules and definitions are
+  not resolved yet.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the six features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`,

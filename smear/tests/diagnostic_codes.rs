@@ -22,9 +22,11 @@
 //! - An error carrying a related span always has a phrase for it — checked over the two corpora
 //!   that fire every variant, because the two halves live in different files and a kind that
 //!   started attaching a related span without one would drop it with nothing to say so.
-//! - [`Location::entire`] has exactly one user. A family that stopped pointing at its spans would
-//!   pass every other gate in this file — and a syntax error, which always has a place in the text,
-//!   is held to that alongside the schema and validation families.
+//! - [`Location::entire`] has exactly one user among the families read here, the introspection
+//!   door. A family that stopped pointing at its spans would pass every other gate in this file —
+//!   and a syntax error, which always has a place in the text, is held to that alongside the schema
+//!   and validation families. The GraphQLx analyzer's package-level diagnostics are the other
+//!   documented user, and `analysis_packages.rs` holds them to their package sources.
 
 // Everything below names `smear::validator`, which does not exist in the crate's API surface with
 // the feature off; the introspection door needs its own feature on top of that and is gated per

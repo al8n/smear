@@ -47,3 +47,10 @@ const ALLOC: &[(&str, &str)] = &[];
 
 /// `std`'s embedded files.
 const STD: &[(&str, &str)] = &[];
+
+/// Whether `name` is a built-in package's name, which no supplied package may take.
+pub(crate) fn is_built_in(name: &[u8]) -> bool {
+  BUILT_INS
+    .iter()
+    .any(|package: &BuiltIn| package.name.as_bytes() == name)
+}

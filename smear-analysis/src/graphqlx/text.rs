@@ -65,7 +65,7 @@ mod private {
 
     /// The text as `str`, or `None` for bytes that are not UTF-8.
     #[inline]
-    pub(crate) fn as_text(self) -> Option<&'a str> {
+    pub(crate) fn text(self) -> Option<&'a str> {
       match self {
         Self::Text(text) => Some(text),
         Self::Bytes(bytes) => core::str::from_utf8(bytes).ok(),

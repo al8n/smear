@@ -58,6 +58,19 @@ impl DiagnosticKind {
     }
   }
 
+  /// The short phrase the analysis puts beside the kind's primary location.
+  pub(crate) const fn title(&self) -> &'static str {
+    match self {
+      Self::DuplicateFilePath => "duplicate file path",
+      Self::InvalidFilePath => "invalid file path",
+      Self::InvalidPackageName => "invalid package name",
+      Self::ReservedPackageName => "reserved package name",
+      Self::DuplicatePackageName => "duplicate package name",
+      Self::MissingDependency => "dependency not supplied",
+      Self::ResourceLimit => "resource limit exceeded",
+    }
+  }
+
   /// The severity the analysis reports the kind at.
   #[inline]
   pub const fn severity(&self) -> Severity {

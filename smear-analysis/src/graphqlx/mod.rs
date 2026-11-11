@@ -13,6 +13,27 @@
 //! The analysis is Sans-I/O: the caller walks its directories, applies its include rules, reads
 //! its files and reads its manifest, and supplies every package up front.
 //!
+//! # What comes out
+//!
+//! [`analyze`] answers an [`Analysis`]: the [`Model`], its [`Diagnostics`] and its [`SourceMap`].
+//! None of the three has a type parameter or a lifetime, whatever text type went in, and
+//! [`Analysis::is_ok`] is the verdict.
+//!
+//! ```
+//! use smear_analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};
+//!
+//! let root = Package::new("app", Layout::Directory, Tier::Std)
+//!   .with_files([SourceFile::new("schema.graphqlx", "type Query { ok: Int }")]);
+//! let analysis = analyze(&root, &[], &Limits::new());
+//! assert!(analysis.is_ok());
+//!
+//! // The texts stay with the caller, and are paired with the analysis again to render.
+//! let model = analysis.model();
+//! let file = model.package(model.root_package()).sources().into_iter().nth(1);
+//! let texts = analysis.sources().bind(&root, &[]);
+//! assert_eq!(file.and_then(|id| texts.text(id)), Some("type Query { ok: Int }"));
+//! ```
+//!
 //! # Sources
 //!
 //! Every package has a package source, numbered before its files, and every file is a source. A
@@ -29,20 +50,27 @@
 //! order, under a ceiling that keeps the least of them. [`DiagnosticKind`] lists the
 //! `smear::graphqlx` codes smear reports.
 
+mod analysis;
 mod builtin;
+mod check;
 mod code;
 mod diagnostic;
 mod id;
 mod limits;
+mod lower;
+mod model;
 mod package;
+mod parse;
 mod set;
 mod source;
 mod text;
 
+pub use analysis::{Analysis, analyze};
 pub use code::DiagnosticKind;
 pub use diagnostic::{Diagnostic, DiagnosticBuilder, Diagnostics};
 pub use id::{IdIter, IdRange, PackageId, SourceId};
 pub use limits::Limits;
+pub use model::{Model, PackageInfo, PackageKind};
 pub use package::{IntegerProvider, Layout, Package, SourceFile, Tier};
 pub use source::{Bound, Source, SourceMap};
 pub use text::SourceText;

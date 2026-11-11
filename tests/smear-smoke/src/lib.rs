@@ -295,6 +295,30 @@ pub fn graphqlx_parser(
   .parse_str(src)
 }
 
+/// `analysis` — the GraphQLx analyzer: a one-file package analyzed, and its file's text read back
+/// through the source map the result carries, which is what a renderer does.
+///
+/// Returns the verdict, how many diagnostics were kept, and the file's text as bound.
+pub fn graphqlx_analysis(src: &str) -> (bool, usize, Option<String>) {
+  use smear::analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};
+
+  let root = Package::new("app", Layout::Directory, Tier::Std)
+    .with_files([SourceFile::new("schema.graphqlx", src)]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  let model = analysis.model();
+  let file = model
+    .package(model.root_package())
+    .sources()
+    .into_iter()
+    .nth(1);
+  let texts = analysis.sources().bind(&root, &[]);
+  (
+    analysis.is_ok(),
+    analysis.diagnostics().len(),
+    file.and_then(|id| texts.text(id)).map(String::from),
+  )
+}
+
 /// `validator` — the built-once schema, reached through the dependency edge and built from a
 /// parsed SDL document.
 ///
@@ -1478,6 +1502,21 @@ mod tests {
   #[test]
   fn the_validator_admits_every_source_slice_type() {
     super::validator_source_lattice();
+  }
+
+  /// The GraphQLx analyzer, driven across the dependency edge: a package that parses is clean, one
+  /// that does not is refused with a diagnostic, and either way its text binds back.
+  #[test]
+  fn the_analyzer_parses_a_package_and_binds_its_text() {
+    let (ok, kept, text) = super::graphqlx_analysis("type Query { ok: Int }");
+    assert!(ok);
+    assert_eq!(kept, 0);
+    assert_eq!(text.as_deref(), Some("type Query { ok: Int }"));
+
+    let (ok, kept, text) = super::graphqlx_analysis("type Query {");
+    assert!(!ok);
+    assert!(kept > 0);
+    assert_eq!(text.as_deref(), Some("type Query {"));
   }
 
   /// The validator, driven end to end across the dependency edge.

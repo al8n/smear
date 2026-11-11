@@ -55,6 +55,12 @@ impl SourceId {
   }
 }
 
+/// A table length as the dense `u32` its ids are. A table of `2^32` rows is out of reach of any
+/// input that fits in memory, so the saturation is never reached.
+pub(crate) fn dense(len: usize) -> u32 {
+  u32::try_from(len).unwrap_or(u32::MAX)
+}
+
 /// The ids an [`IdRange`] can hold.
 mod sealed {
   /// A dense `u32` id. Sealed: only this crate's ids implement it.

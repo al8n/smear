@@ -5,7 +5,7 @@ use core::cmp::Ordering;
 use std::{boxed::Box, string::String, vec, vec::Vec};
 
 use super::{
-  id::{IdRange, PackageId, SourceId},
+  id::{IdRange, PackageId, SourceId, dense},
   package::Package,
   set::{self, PackageView, ROOT},
   text::SourceText,
@@ -64,12 +64,6 @@ impl SourceSlot {
   fn key(&self) -> &[u8] {
     self.raw.as_deref().unwrap_or(self.path.as_bytes())
   }
-}
-
-/// A table length as the dense `u32` its ids are; a table of `2^32` rows is out of reach of any
-/// input that fits in memory.
-fn dense(len: usize) -> u32 {
-  u32::try_from(len).unwrap_or(u32::MAX)
 }
 
 /// A path as the map keeps it: its text, and its bytes when they are not that text.
@@ -137,6 +131,11 @@ impl SourceMap {
       packages: slots,
       sources,
     }
+  }
+
+  /// The sources of the package at `index`: its package source, then its files.
+  pub(crate) fn package_sources(&self, index: usize) -> IdRange<SourceId> {
+    self.packages[index].sources
   }
 
   /// How many sources the map holds. Every id below it is one of them; every id at or past it is
@@ -246,7 +245,7 @@ impl SourceMap {
     if set::compare_paths(found.key(), key) != Ordering::Equal || found.len != wanted.len {
       return None;
     }
-    package.files.get(at)?.text.as_text()
+    package.files.get(at)?.text.text()
   }
 }
 

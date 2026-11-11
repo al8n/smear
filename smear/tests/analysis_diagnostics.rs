@@ -3,11 +3,15 @@
 //!
 //! Each level of the order has a test of its own, so a level that stops deciding fails by name.
 //! Each test collects its two diagnostics in both orders: the order a list keeps is a property of
-//! the diagnostics, never of the order they arrived in.
+//! the diagnostics, never of the order they arrived in. The ceiling is driven through `analyze`,
+//! which is where a list gets one.
 #![cfg(all(feature = "alloc", feature = "analysis"))]
 
 use smear::{
-  analysis::graphqlx::{Diagnostic, Diagnostics},
+  analysis::graphqlx::{
+    Analysis, Diagnostic, DiagnosticKind, Diagnostics, Layout, Limits, Package, SourceFile, Tier,
+    analyze,
+  },
   diagnostic::{Code, Diagnose, DiagnoseExt, Location, Severity},
   lexer::tokora::SimpleSpan,
 };
@@ -257,4 +261,82 @@ fn merge_keeps_both_lists_whole_in_one_order_and_adds_their_counts() {
 
   let owned: Vec<Diagnostic> = ours.clone().into_iter().collect();
   assert_eq!(owned, listed(&ours));
+}
+
+/// A root package with one file that does not parse, beside a dependency that takes a built-in's
+/// name.
+///
+/// The analysis checks the package set before it parses, so the dependency's diagnostic is reported
+/// first; but the root's file numbers before the dependency's package source, so the syntax error
+/// is the lesser of the two.
+fn refused_twice(limits: &Limits) -> Analysis {
+  let root = Package::new("app", Layout::Directory, Tier::Std)
+    .with_files([SourceFile::new("a.graphqlx", "type A {\n")]);
+  let dependencies = [Package::new("core", Layout::Directory, Tier::Std)
+    .with_files([SourceFile::new("c.graphqlx", "scalar C\n")])];
+  analyze(&root, &dependencies, limits)
+}
+
+#[test]
+fn without_a_ceiling_reached_every_diagnostic_is_kept() {
+  let analysis = refused_twice(&Limits::new());
+  let diagnostics = analysis.diagnostics();
+  assert_eq!(diagnostics.len(), 2, "{diagnostics:#?}");
+  assert!(!diagnostics.truncated());
+  assert_eq!(diagnostics.error_count(), 2);
+  let codes: Vec<&str> = diagnostics
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.code().as_str())
+    .collect();
+  assert!(codes[0].starts_with("smear::syntax::"), "{codes:?}");
+  assert_eq!(
+    codes[1],
+    DiagnosticKind::ReservedPackageName.code().as_str()
+  );
+}
+
+/// The ceiling keeps the least diagnostics in the order, not the first reported, and every error
+/// is still counted, so the verdict cannot turn.
+#[test]
+fn the_ceiling_keeps_the_least_and_counts_what_it_drops() {
+  let all = refused_twice(&Limits::new());
+  let least = all
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("two diagnostics")
+    .clone();
+
+  let analysis = refused_twice(&Limits::new().with_max_diagnostics(1));
+  let diagnostics = analysis.diagnostics();
+  assert_eq!(listed(diagnostics), [least]);
+  assert!(diagnostics.truncated());
+  assert_eq!(diagnostics.error_count(), 2);
+  assert!(diagnostics.has_errors());
+  assert!(!analysis.is_ok());
+}
+
+#[test]
+fn a_ceiling_of_zero_keeps_nothing_and_still_counts() {
+  let analysis = refused_twice(&Limits::new().with_max_diagnostics(0));
+  let diagnostics = analysis.diagnostics();
+  assert!(diagnostics.is_empty());
+  assert!(diagnostics.truncated());
+  assert_eq!(diagnostics.error_count(), 2);
+  assert!(!analysis.is_ok());
+}
+
+#[test]
+fn merging_a_truncated_list_is_truncated() {
+  let analysis = refused_twice(&Limits::new().with_max_diagnostics(1));
+  let mut list: Diagnostics = [Diagnostic::builder(CODE, at(1_000, 0, 1))
+    .severity(Severity::Warning)
+    .build()]
+  .into_iter()
+  .collect();
+  assert!(!list.truncated());
+  list.merge(analysis.diagnostics().clone());
+  assert!(list.truncated());
+  assert_eq!(list.len(), 2);
+  assert_eq!(list.error_count(), 2);
 }
