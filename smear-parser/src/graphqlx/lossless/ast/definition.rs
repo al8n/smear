@@ -37,7 +37,7 @@ use crate::{
     lossless::ast::{
       directive::Directives,
       generic::{DefinitionName, WhereClause},
-      ty::{DefinitionTypePath, ListType, MapType, SetType, TypePath},
+      ty::{DefinitionTypePath, ListType, TypePath},
       value::DefaultValue,
     },
   },
@@ -57,10 +57,6 @@ ast_node!(
     definition_type_path: opt DefinitionTypePath,
     /// The input value's type, when it is a list.
     list_type: opt ListType,
-    /// The input value's type, when it is a set.
-    set_type: opt SetType,
-    /// The input value's type, when it is a map.
-    map_type: opt MapType,
     /// The input value's default, if it was given one.
     default_value: opt DefaultValue,
     /// The definition's directives, if it was given any.
@@ -92,10 +88,6 @@ ast_node!(
     definition_type_path: opt DefinitionTypePath,
     /// The field's type, when it is a list.
     list_type: opt ListType,
-    /// The field's type, when it is a set.
-    set_type: opt SetType,
-    /// The field's type, when it is a map.
-    map_type: opt MapType,
     /// The definition's directives, if it was given any.
     directives: opt Directives,
   }

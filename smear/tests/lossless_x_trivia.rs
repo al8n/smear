@@ -11,21 +11,20 @@
 //! # What GraphQLx puts at stake that GraphQL does not
 //!
 //! GraphQL's discriminating junctions are all *delimiters* — `$ x`, `@ d`, `... F`, `alias : f`,
-//! `Int !`, `f (a: 1)` — and a skip lost at one of them costs a rejection. GraphQLx has three
+//! `Int !`, `f (a: 1)` — and a skip lost at one of them costs a rejection. GraphQLx has two
 //! junctions where the **node kind itself** is decided on what the next significant token turns out
-//! to be, so a lost skip there is not a rejection but a *different tree*:
+//! to be:
 //!
-//! - `set`/`map` followed by `{` is a [`SetValue`](K::SetValue)/[`MapValue`](K::MapValue); the same
-//!   spelling not followed by `{` is an ordinary [`EnumValue`](K::EnumValue). The production commits
-//!   the keyword and retro-wraps, so the `{` may be any amount of trivia away.
-//! - `<T>` is a [`SetType`](K::SetType) and `<K => V>` a [`MapType`](K::MapType), decided on the
-//!   token after the first inner type.
+//! - `set`/`map` followed by `!` is a [`SetValue`](K::SetValue)/[`MapValue`](K::MapValue); the same
+//!   spelling not followed by `!` is an ordinary [`EnumValue`](K::EnumValue). The production commits
+//!   the keyword and retro-wraps, so the `!` may be any amount of trivia away, and the `{` any
+//!   amount past the `!`.
 //! - a `where` predicate's continuation is a **two-token** window, and `peek_second_kind` is the
 //!   only atom in the suite that has to cross trivia *between* two tokens rather than in front of
 //!   one. A fixed `peek::<U2>()` answers `Space` for `A : B`; this gate is what would notice.
 //!
-//! The first two are why the shape comparison is not redundant with the verdict one here the way it
-//! nearly is in GraphQL: `set {1}` mis-decided still parses, it just parses as something else.
+//! A skip lost at the first costs a rejection too, as GraphQL's do: `set ! {1}` mis-decided reads
+//! `set` as an enum value and strands the `!`, which no position after a value admits.
 //!
 //! # The alphabet
 //!
@@ -62,7 +61,7 @@
 //! Both exception sets are **derived**, not hand-listed. [`node_kinds`] takes the kind space minus
 //! its image prefix and minus the bookkeeping triple the [`KindSpace`] trait names, so a kind added
 //! anywhere in the node block defaults into the must-be-covered set — the safe direction — and a
-//! eightieth node kind nobody reaches is a failure rather than an omission.
+//! seventy-eighth node kind nobody reaches is a failure rather than an omission.
 //!
 //! And the counter has a blind spot of its own, which the plan does not name and a mutation found:
 //! a **loop that runs exactly once** reports full coverage while its continuation test is dead.
@@ -835,17 +834,15 @@ fn the_injection_and_the_shape_projection_are_both_live() {
 
 /// A junction at which an atom's answer decides something, named by the pair that forms it.
 ///
-/// Five, and the first three are GraphQLx's own. The last two are the retro-wrap probes GraphQL also
+/// Four, and the first two are GraphQLx's own. The last two are the retro-wrap probes GraphQL also
 /// has — `try_eat` is reached from the alias probe after a field name and the non-null probe after a
 /// type, and its `skip_while` is the only thing that lets either see past trivia.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Junction {
-  /// `set` or `map`, trivia, then `{` — the value retro-wrap probe. Without the skip the keyword
-  /// stays an [`EnumValue`](K::EnumValue) and the braces become a syntax error.
-  SetOrMapThenBrace,
-  /// A type, trivia, then `=>` — the map-type discriminator inside `<…>`.
-  TypeThenFatArrow,
-  /// A type, trivia, then `>` — the set-type discriminator, the other side of the same decision.
+  /// `set` or `map`, trivia, then `!` — the value retro-wrap probe. Without the skip the keyword
+  /// stays an [`EnumValue`](K::EnumValue) and the `!` becomes a syntax error.
+  SetOrMapThenBang,
+  /// A type, trivia, then `>` — the probe that ends a generic argument list.
   TypeThenRAngle,
   /// A name, trivia, then `:` — the alias probe, and the `where` predicate's two-token window.
   NameThenColon,
@@ -857,15 +854,14 @@ impl Junction {
   /// This junction's position in [`ALL_JUNCTIONS`].
   ///
   /// A **total** match with no wildcard, which is the only thing that makes [`ALL_JUNCTIONS`] safe
-  /// to hand-write: a sixth variant stops this compiling, where it would otherwise be a silent
+  /// to hand-write: a fifth variant stops this compiling, where it would otherwise be a silent
   /// omission from a list nothing else checks.
   const fn index(self) -> usize {
     match self {
-      Self::SetOrMapThenBrace => 0,
-      Self::TypeThenFatArrow => 1,
-      Self::TypeThenRAngle => 2,
-      Self::NameThenColon => 3,
-      Self::TypeThenBang => 4,
+      Self::SetOrMapThenBang => 0,
+      Self::TypeThenRAngle => 1,
+      Self::NameThenColon => 2,
+      Self::TypeThenBang => 3,
     }
   }
 }
@@ -873,8 +869,7 @@ impl Junction {
 /// Every [`Junction`], so the complement below is over the whole set rather than over whatever the
 /// corpus happened to produce. Kept honest by [`Junction::index`].
 const ALL_JUNCTIONS: &[Junction] = &[
-  Junction::SetOrMapThenBrace,
-  Junction::TypeThenFatArrow,
+  Junction::SetOrMapThenBang,
   Junction::TypeThenRAngle,
   Junction::NameThenColon,
   Junction::TypeThenBang,
@@ -885,26 +880,24 @@ const ALL_JUNCTIONS: &[Junction] = &[
 ///
 /// Phase A found its GraphQL corpus padding *neither* of the two junctions it names, which is what
 /// let it say the injection sweep was the corpus's only witness for `try_eat`'s skip. GraphQLx pads
-/// two of five, and for a reason worth keeping: `set { 1, 2 }` and `<Int => String>` are how the two
-/// GraphQLx-only forms are **idiomatically written**, so the corpus that was built to cover the
-/// grammar covers those two junctions as a side effect —
+/// one of four, and not as a side effect of how the form is written: `set!{ 1, 2 }` is written
+/// tight, and the corpus carries the padded spelling because trivia between `set`, `!` and `{` is a
+/// ruling of its own —
 ///
-/// - `SetOrMapThenBrace` by `valid_x_set_and_map_values.graphqlx` and
-///   `valid_x_map_entry_compound_key.graphqlx`;
-/// - `TypeThenFatArrow` by five entries, `valid_x_set_and_map_types.graphqlx` among them.
+/// - `SetOrMapThenBang` by `valid_x_set_bang_across_trivia.graphqlx` and
+///   `valid_x_const_set_bang_across_trivia.graphqlx`.
 ///
-/// The three that remain — `>` closing a set type, `:` after a name, `!` after a type — are still
-/// written tight everywhere, so the injection sweep is still their only corpus-scale fixture. The
-/// pin is a set rather than an emptiness check precisely because the interesting movement is in both
-/// directions: a junction entering this set stops needing the sweep, and one leaving it starts.
-const JUNCTIONS_THE_COMPACT_CORPUS_PADS: &[Junction] =
-  &[Junction::SetOrMapThenBrace, Junction::TypeThenFatArrow];
+/// The three that remain — `>` closing a generic list, `:` after a name, `!` after a type — are
+/// still written tight everywhere, so the injection sweep is still their only corpus-scale fixture.
+/// The pin is a set rather than an emptiness check precisely because the interesting movement is in
+/// both directions: a junction entering this set stops needing the sweep, and one leaving it starts.
+const JUNCTIONS_THE_COMPACT_CORPUS_PADS: &[Junction] = &[Junction::SetOrMapThenBang];
 
 /// Every kind-deciding junction `src` writes with trivia in it.
 ///
-/// Tracks the previous **significant** token, so `set\n{` is a hit and `type T {` is not — the
-/// distinction the crude "is there trivia before a `{`" scan cannot make, and the one that decides
-/// whether the corpus covers the retro-wrap probe.
+/// Tracks the previous **significant** token, so `set\n!` is a hit and `Int !` is a different one —
+/// the distinction the crude "is there trivia before a `!`" scan cannot make, and the one that
+/// decides whether the corpus covers the retro-wrap probe.
 fn padded_junctions(src: &str) -> BTreeSet<Junction> {
   let mut found = BTreeSet::new();
   let mut lexer = LosslessLexer::<'_, &str>::new(src);
@@ -921,13 +914,8 @@ fn padded_junctions(src: &str) -> BTreeSet<Junction> {
     let text = &src[span.start()..span.end()];
     if trivia_since_previous {
       match token.kind() {
-        LK::LBrace
-          if previous == Some(LK::Identifier) && matches!(previous_text, "set" | "map") =>
-        {
-          found.insert(Junction::SetOrMapThenBrace);
-        }
-        LK::FatArrow => {
-          found.insert(Junction::TypeThenFatArrow);
+        LK::Bang if previous == Some(LK::Identifier) && matches!(previous_text, "set" | "map") => {
+          found.insert(Junction::SetOrMapThenBang);
         }
         LK::RAngle => {
           found.insert(Junction::TypeThenRAngle);
@@ -948,19 +936,17 @@ fn padded_junctions(src: &str) -> BTreeSet<Junction> {
   found
 }
 
-/// Which of the five junctions the compact corpus already covers, and which the sweep is the only
+/// Which of the four junctions the compact corpus already covers, and which the sweep is the only
 /// witness for.
 ///
-/// This is the measurement behind this gate's claim to discriminate, and GraphQLx's version matters
-/// more than GraphQL's because the consequence is worse. GraphQL's unpadded junctions cost a
-/// *rejection* when an atom stops crossing trivia; two of GraphQLx's cost a **different tree that
-/// still parses** — `set` not followed by `{` is an `EnumValue`, `<T>` without a `=>` is a
-/// `SetType` — which the verdict half of this gate cannot see at all and only the shape half can.
+/// This is the measurement behind this gate's claim to discriminate. Every one of these junctions
+/// costs a *rejection* when an atom stops crossing trivia, as GraphQL's do: `set` not followed by
+/// `!` is an `EnumValue`, and the `!` it leaves behind is a token no position after a value admits.
 ///
 /// So which junctions the corpus already reaches is asserted rather than assumed, and the answer
-/// turned out to be two of five rather than Phase A's zero of two. See
+/// turned out to be one of four rather than Phase A's zero of two. See
 /// [`JUNCTIONS_THE_COMPACT_CORPUS_PADS`]. The complement is the load-bearing half and is asserted
-/// non-empty: if the corpus ever grows to cover all five, this gate stops being the sole fixture for
+/// non-empty: if the corpus ever grows to cover all four, this gate stops being the sole fixture for
 /// any of them and the sentence in the module docs that says otherwise has to go.
 #[test]
 fn the_compact_corpus_cannot_discriminate_the_kind_deciding_junctions() {
@@ -1006,13 +992,12 @@ fn the_compact_corpus_cannot_discriminate_the_kind_deciding_junctions() {
      only witness for any of them"
   );
 
-  // …and the padded form pads all five, which is what makes the sweep the witness for the ones
+  // …and the padded form pads all four, which is what makes the sweep the witness for the ones
   // the corpus leaves out. Each discriminator is driven separately: a scan that only ever
   // produced `NameThenColon` would satisfy a single `is_empty()` check and say nothing about the
-  // three GraphQLx ones.
+  // two GraphQLx ones.
   for (probe, expected) in [
-    ("set{1}", Junction::SetOrMapThenBrace),
-    ("map<Int=>Int>", Junction::TypeThenFatArrow),
+    ("set!{1}", Junction::SetOrMapThenBang),
     ("set<Int>", Junction::TypeThenRAngle),
     ("alias:f", Junction::NameThenColon),
     ("Int!", Junction::TypeThenBang),
@@ -1158,8 +1143,8 @@ fn the_covered_set_is_every_node_kind() {
   let kinds = node_kinds();
   assert_eq!(
     kinds.len(),
-    79,
-    "GraphQLx declares 79 node kinds; the set this gate covers is {kinds:?}"
+    77,
+    "GraphQLx declares 77 node kinds; the set this gate covers is {kinds:?}"
   );
   assert_eq!(
     kinds.len() + K::IMAGE_BLOCK + 3,

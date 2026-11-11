@@ -16,7 +16,7 @@ Root@0..60
               Space@12..13 " "
               SetValue@13..25
                 Name@13..16 "set"
-                Space@16..17 " "
+                Bang@16..17 "!"
                 LBrace@17..18 "{"
                 Space@18..19 " "
                 IntValue@19..20
@@ -35,7 +35,7 @@ Root@0..60
               Space@29..30 " "
               MapValue@30..56
                 Name@30..33 "map"
-                Space@33..34 " "
+                Bang@33..34 "!"
                 LBrace@34..35 "{"
                 Space@35..36 " "
                 MapEntry@36..46

@@ -49,23 +49,7 @@ fn graphqlx_carriers_support_custom_spans() {
 
   use crate::path::Path;
 
-  use super::{DefinitionTypePath, MapType, SetType, TypeGenerics};
-
-  let set = SetType::<_, CustomSpan>::new(CustomSpan(3), "Element", true);
-  assert_eq!(set.as_span(), &CustomSpan(3));
-  assert_eq!(set.ty(), &"Element");
-  assert!(set.required());
-  assert_eq!(set.into_components(), (CustomSpan(3), "Element", true));
-
-  let map = MapType::<_, _, CustomSpan>::new(CustomSpan(4), "Key", "Value", false);
-  assert_eq!(map.as_span(), &CustomSpan(4));
-  assert_eq!(map.key(), &"Key");
-  assert_eq!(map.value(), &"Value");
-  assert!(!map.required());
-  assert_eq!(
-    map.into_components(),
-    (CustomSpan(4), "Key", "Value", false)
-  );
+  use super::{DefinitionTypePath, TypeGenerics};
 
   let generics = TypeGenerics::<_, CustomSpan>::new(CustomSpan(5), vec!["Argument"]);
   assert_eq!(generics.as_span(), &CustomSpan(5));

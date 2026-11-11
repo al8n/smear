@@ -1,7 +1,7 @@
 //! GraphQL document validation.
 //!
-//! Standard GraphQL only. The `graphqlx` dialect's generics, `where` constraints, map and set
-//! types and namespaced paths have no specification semantics to validate against, so nothing in
+//! Standard GraphQL only. The `graphqlx` dialect's generics, `where` constraints, set and map
+//! literals and namespaced paths have no specification semantics to validate against, so nothing in
 //! this module knows about them.
 //!
 //! # What is here

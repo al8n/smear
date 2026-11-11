@@ -691,6 +691,231 @@ fn the_value_cycles_have_the_same_bypass_and_the_same_bound() {
   }
 }
 
+/// The four productions that share a collection literal's `!`-then-`{` step — `set!` and `map!`,
+/// each in an argument (`Value`) and in a variable's default (`Value[Const]`) — as the text in
+/// front of the literal, its keyword, and the text after it.
+#[cfg(feature = "graphqlx")]
+const BANG_POSITIONS: [(&str, &str, &str); 4] = [
+  ("{ f(a: ", "set", ") }"),
+  ("{ f(a: ", "map", ") }"),
+  ("query Q($v: Int = ", "set", ") { f }"),
+  ("query Q($v: Int = ", "map", ") { f }"),
+];
+
+/// How many prefixes a deep cell chains. See
+/// [`the_recovering_syntactic_door_refuses_a_bang_chain_at_its_first_brace`] for why this many.
+#[cfg(feature = "graphqlx")]
+const BANG_CHAIN: usize = 50_000;
+
+/// `prefixes` copies of `keyword! `, then `0`, between `before` and `after`.
+#[cfg(feature = "graphqlx")]
+fn bang_chain(before: &str, keyword: &str, prefixes: usize, after: &str) -> String {
+  let mut src =
+    String::with_capacity(before.len() + prefixes * (keyword.len() + 2) + 1 + after.len());
+  src.push_str(before);
+  for _ in 0..prefixes {
+    src.push_str(keyword);
+    src.push_str("! ");
+  }
+  src.push('0');
+  src.push_str(after);
+  src
+}
+
+/// `set! set! set! … 0` — a value cycle with no delimiter in it at all, refused at the first `{`
+/// it is missing.
+///
+/// # Why the ceiling cannot see it
+///
+/// Every bypass above still opens a bracket a level and defeats the *count* of them. This shape
+/// opens none. `!` commits a collection, every member of a collection begins with a value, and
+/// `set` and `map` start values — so a collection that read its members without first seeing its
+/// `{` would let each prefix enter the next collection with nothing lexed for the tally to count,
+/// and no syntactic production spends a frame budget of its own beside the tally. The brace
+/// delimiter reads on in exactly that way under a **recovering** emitter: it reports the missing
+/// opener, the report is recorded rather than raised, and the members follow. So the `{` is
+/// refused before the delimiter is entered, by the one step the four productions in
+/// [`BANG_POSITIONS`] share.
+///
+/// # Why a recovering emitter, when the documented entry points pin `Fatal`
+///
+/// Under `Fatal` the delimiter's report is itself the refusal, so no fail-fast cell can tell that
+/// step from its absence. The productions are public and generic over the context, which makes a
+/// recovering syntactic parse a reachable configuration — `syntactic_x_span_extent.rs` drives the
+/// same door the same way — and it is the only one in which this cycle can form.
+///
+/// # Why the first assertions are the ordering guard
+///
+/// [`deep_input_returns_rather_than_aborting`]'s discipline, with the refusal's **position** as the
+/// discriminating signal. A parse that reads past a missing `{` still returns an error, but from
+/// where the members it read run out, at the far end of the chain. So each cell first pins the
+/// refusal on the token straight after the `!` — `{` expected, that token found — over
+/// `keyword! 1` and over a two-prefix chain, neither of which can overflow anything, and only then
+/// hands the parser the deep chain.
+///
+/// # Why fifty thousand
+///
+/// A parser that read on would spend, per prefix, at least a `value` frame, the brace delimiter's
+/// driver and its element closure, and `smear-lexer`'s `limits` measures one level of the
+/// syntactic door at about 34 KiB of debug stack over inline fragments. At even one kibibyte a
+/// prefix, [`BANG_CHAIN`] prefixes is twenty-four times the 2 MiB a test thread is handed, so a
+/// regression the guard missed would abort the run rather than pass it.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn the_recovering_syntactic_door_refuses_a_bang_chain_at_its_first_brace() {
+  use smear::{
+    lexer::{
+      graphqlx::syntactic::SyntacticTokenKind,
+      tokora::{
+        Parse as _, Parser, ParserContext, SimpleSpan, cache::DefaultCache, emitter::Verbose,
+      },
+    },
+    parser::graphqlx::{
+      GraphQLx,
+      ast::Document,
+      error::{ErrorData, Expectation, GraphqlxErrors},
+      syntactic::{GraphqlxLexer, document},
+    },
+  };
+
+  /// The recording emitter, with the grammar brand spelled out: `Emitter<'inp, L, Lang>` is
+  /// implemented only where the brand matches.
+  type RecoveringEmitter<'inp> = Verbose<GraphqlxErrors<&'inp str>, SimpleSpan, GraphQLx>;
+  type RecoveringCtx<'inp> = ParserContext<
+    'inp,
+    GraphqlxLexer<'inp, str>,
+    RecoveringEmitter<'inp>,
+    DefaultCache<'inp, GraphqlxLexer<'inp, str>>,
+    GraphQLx,
+  >;
+
+  /// Parses `src` through the document root with a recovering emitter at the default nesting
+  /// ceiling, and asserts that what came back is the missing `{`, refused on `found` at `span`.
+  fn assert_brace_refused(src: &str, span: SimpleSpan, found: SyntacticTokenKind, what: &str) {
+    let parsed: Result<Document<&str>, GraphqlxErrors<&str>> =
+      Parser::with_parser_and_context::<
+        '_,
+        GraphqlxLexer<'_, str>,
+        Document<&str>,
+        RecoveringCtx<'_>,
+        _,
+        GraphQLx,
+      >(document, ParserContext::of(RecoveringEmitter::default()))
+      .parse_str(src);
+    let errors = match parsed {
+      Ok(_) => panic!("{what}: parsed to a document, so nothing refused the missing `{{`"),
+      Err(errors) => errors,
+    };
+    let Some(first) = errors.first() else {
+      panic!("{what}: the parse returned a refusal holding no error");
+    };
+    assert_eq!(
+      first.span(),
+      span,
+      "{what}: the refusal is not on the token after the `!`"
+    );
+    let ErrorData::UnexpectedToken(unexpected) = first.data() else {
+      panic!(
+        "{what}: the refusal is not an unexpected token: {:?}",
+        first.data()
+      );
+    };
+    assert_eq!(unexpected.expected(), &Expectation::LBrace, "{what}");
+    assert_eq!(unexpected.found(), Some(&found), "{what}");
+  }
+
+  let mut cells = 0usize;
+  for (before, keyword, after) in BANG_POSITIONS {
+    // The token straight after the first `!`: a chain's second keyword, or the `1` of a pin.
+    let at = before.len() + keyword.len() + "! ".len();
+    let next_keyword = SimpleSpan::new(at, at + keyword.len());
+
+    // THE GUARD, AND IT MUST STAY FIRST — see this function's docs.
+    let pin = format!("{before}{keyword}! 1{after}");
+    assert_brace_refused(
+      &pin,
+      SimpleSpan::new(at, at + 1),
+      SyntacticTokenKind::Int,
+      &pin,
+    );
+    cells += 1;
+    let short = bang_chain(before, keyword, 2, after);
+    assert_brace_refused(&short, next_keyword, SyntacticTokenKind::Identifier, &short);
+    cells += 1;
+
+    let deep = bang_chain(before, keyword, BANG_CHAIN, after);
+    let what = format!("{BANG_CHAIN} `{keyword}!` prefixes after {before:?}");
+    assert_brace_refused(&deep, next_keyword, SyntacticTokenKind::Identifier, &what);
+    cells += 1;
+  }
+
+  // Four positions, and each is a pin, a guard chain and a deep chain.
+  assert_eq!(cells, 4 * 3, "the cell set collapsed");
+}
+
+/// The lossless door refuses the same chain on the same token, and is bounded twice over.
+///
+/// `collection_body` spends a frame-budget level before it reads the `!`, so even a body that read
+/// on past a missing `{` would go no deeper than the ceiling; and it does not read on, because its
+/// `expect` for the `{` reports the mismatch and returns it, and the document root resynchronises
+/// past the rest of the chain instead of descending into it.
+///
+/// The assertions are on the **first** diagnostic, because the recovery that follows reports the
+/// rest of the chain on its own account: an error rather than a recovery hole, on the token
+/// straight after the first `!`. `Parse` keeps a span, a severity and a skip count and drops the
+/// typed payload, so the `{` expectation itself is the syntactic twin's to pin; position and
+/// severity are what this door can be held to. The deep cells are the same [`BANG_CHAIN`]
+/// prefixes, so the recovery over their tail is part of what has to return, and the tree has to
+/// keep every byte of it.
+#[cfg(all(feature = "rowan", feature = "graphqlx"))]
+#[test]
+fn the_lossless_door_refuses_a_bang_chain_on_the_same_token() {
+  use smear::parser::graphqlx::lossless::parse_document;
+
+  /// Asserts that the first diagnostic of `src`'s parse is an error over `span` rather than a
+  /// recovery hole, and that the tree kept every byte.
+  fn assert_brace_refused(src: &str, span: core::ops::Range<usize>, what: &str) {
+    let parse = parse_document(src);
+    let Some(first) = parse.diagnostics().first() else {
+      panic!("{what}: the parse reported nothing");
+    };
+    assert_eq!(
+      first.span(),
+      span,
+      "{what}: the refusal is not on the token after the `!`"
+    );
+    assert_eq!(first.severity(), tokora::emitter::Severity::Error, "{what}");
+    assert!(
+      first.skipped_tokens().is_none(),
+      "{what}: the first report is a recovery hole, not the refusal"
+    );
+    let text = parse.syntax().text().to_string();
+    assert!(
+      text == src,
+      "{what}: the tree kept {} of {} bytes, and the lossless guarantee survives a refusal",
+      text.len(),
+      src.len()
+    );
+  }
+
+  let mut cells = 0usize;
+  for (before, keyword, after) in BANG_POSITIONS {
+    let at = before.len() + keyword.len() + "! ".len();
+
+    let pin = format!("{before}{keyword}! 1{after}");
+    assert_brace_refused(&pin, at..at + 1, &pin);
+    cells += 1;
+
+    let deep = bang_chain(before, keyword, BANG_CHAIN, after);
+    let what = format!("{BANG_CHAIN} `{keyword}!` prefixes after {before:?}");
+    assert_brace_refused(&deep, at..at + keyword.len(), &what);
+    cells += 1;
+  }
+
+  // Four positions, and each is a pin and a deep chain.
+  assert_eq!(cells, 4 * 2, "the cell set collapsed");
+}
+
 /// A nesting refusal is **one** diagnostic, at every recursive cycle in both dialects — smear
 /// issue #169.
 ///
@@ -725,10 +950,10 @@ fn the_value_cycles_have_the_same_bypass_and_the_same_bound() {
 /// One shape per recursive cycle in each dialect's productions, enumerated by taking the strongly
 /// connected components of the lossless call graph over the productions that descend: GraphQL has
 /// three (`selection_set`; `list_value` ↔ `object_value`; `list_type`), GraphQLx has the same
-/// three widened (`collection_body` joins the value cycle, `type_generics` and `set_or_map_type`
-/// join the type cycle). The remaining descending productions — every member block, both argument
-/// lists, the variables definition, GraphQLx's `import_list` and `angle_name_list` — are in no
-/// cycle and cannot reach the ceiling on their own.
+/// three widened (`collection_body` joins the value cycle, `type_generics` joins the type cycle).
+/// The remaining descending productions — every member block, both argument lists, the variables
+/// definition, GraphQLx's `import_list` and `angle_name_list` — are in no cycle and cannot reach
+/// the ceiling on their own.
 ///
 /// # The tail is an axis, because the first version of this test had only one value of it
 ///
@@ -798,12 +1023,8 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
       nest("A<", ">", DEPTH, "query Q($v: ", ") { f }"),
     ),
     (
-      "set_or_map_type",
-      nest("<", ">", DEPTH, "query Q($v: ", ") { f }"),
-    ),
-    (
       "collection_body",
-      nest("set {", "}", DEPTH, "{ f(a: ", ") }"),
+      nest("set!{", "}", DEPTH, "{ f(a: ", ") }"),
     ),
   ];
 
@@ -851,8 +1072,8 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
   }
 
   // A filtered run that selects nothing exits `ok`, and so does a loop whose `continue` swallowed
-  // every cell. 11 dialect-cycle pairs (4 shared x 2 dialects, plus 3 GraphQLx-only) x 4 tails.
-  assert_eq!(cells, 11 * TAILS.len(), "the cell set collapsed");
+  // every cell. 10 dialect-cycle pairs (4 shared x 2 dialects, plus 2 GraphQLx-only) x 4 tails.
+  assert_eq!(cells, 10 * TAILS.len(), "the cell set collapsed");
 }
 
 /// A refusal ends the document at **every** document root, not only the mixed one — smear issue

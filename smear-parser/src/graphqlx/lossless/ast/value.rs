@@ -23,7 +23,7 @@
 //!   same kind and the value would be unreachable. Its eleven getters are therefore `many`, and a
 //!   consumer that needs the halves apart walks the entry's children: the key is the first, the
 //!   value the one after the `=>`.
-//! - **[`SetValue`] holds a run of them.** `set { … }` is a collection like [`ListValue`], not a
+//! - **[`SetValue`] holds a run of them.** `set!{ … }` is a collection like [`ListValue`], not a
 //!   single-valued position.
 //!
 //! # An enum value wraps a whole path
@@ -152,11 +152,12 @@ ast_node!(
 
 ast_node!(
   lang = crate::graphqlx::kinds::GraphQLxLang;
-  /// A set value, `set { … }` — GraphQLx only.
+  /// A set value, `set!{ … }` — GraphQLx only.
   ///
-  /// [`ListValue`]'s shape under a contextual keyword. The keyword is *inside* the node, the
-  /// production retro-wrapping at a mark minted in front of it, so `set` alone and `set::Thing` —
-  /// which are ordinary enum values — stay distinguishable from this without re-reading the text.
+  /// [`ListValue`]'s shape under a contextual keyword and a `!`. Both are *inside* the node, the
+  /// production retro-wrapping at a mark minted in front of the keyword, so `set` alone and
+  /// `set::Thing` — which are ordinary enum values — stay distinguishable from this without
+  /// re-reading the text.
   SetValue => K::SetValue {
     /// Every variable in the set.
     variable_values: many VariableValue,
@@ -185,7 +186,7 @@ ast_node!(
 
 ast_node!(
   lang = crate::graphqlx::kinds::GraphQLxLang;
-  /// A map value, `map { k => v, … }` — GraphQLx only.
+  /// A map value, `map!{ k => v, … }` — GraphQLx only.
   MapValue => K::MapValue {
     /// Every entry of the map, in order.
     map_entries: many MapEntry,
@@ -276,7 +277,7 @@ ast_node!(
   /// can genuinely answer `Some` — and a consumer reporting the mistake needs it to.
   ///
   /// A generic parameter's default is **not** one of these: `Name = Type` introduces a type
-  /// reference, so [`DefinitionTypeParam`](super::generic::DefinitionTypeParam) projects the four
+  /// reference, so [`DefinitionTypeParam`](super::generic::DefinitionTypeParam) projects the two
   /// type kinds and never this node. The two spell the same token and mean different things.
   DefaultValue => K::DefaultValue {
     /// The default, when it is a variable.

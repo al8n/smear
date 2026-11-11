@@ -1,1 +1,1 @@
-type T { a: Int!, b: [Int!]!, c: <Int>!, d: <Int => String>! }
+type T { a: Int!, b: [Int!]!, c: HashSet<Int>!, d: HashMap<Int, String>! }

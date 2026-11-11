@@ -1,0 +1,45 @@
+Root@0..55
+  Document@0..55
+    OperationDefinition@0..54
+      Name@0..5 "query"
+      Space@5..6 " "
+      SelectionSet@6..54
+        LBrace@6..7 "{"
+        Newline@7..8 "\n"
+        Space@8..9 " "
+        Space@9..10 " "
+        Field@10..53
+          Name@10..11 "f"
+          Arguments@11..52
+            LParen@11..12 "("
+            Argument@12..51
+              Name@12..13 "s"
+              Colon@13..14 ":"
+              Space@14..15 " "
+              SetValue@15..51
+                Name@15..18 "set"
+                Space@18..19 " "
+                Comment@19..28 "# keyword"
+                Newline@28..29 "\n"
+                Space@29..30 " "
+                Space@30..31 " "
+                Space@31..32 " "
+                Space@32..33 " "
+                Bang@33..34 "!"
+                Space@34..35 " "
+                Comment@35..41 "# bang"
+                Newline@41..42 "\n"
+                Space@42..43 " "
+                Space@43..44 " "
+                Space@44..45 " "
+                Space@45..46 " "
+                LBrace@46..47 "{"
+                Space@47..48 " "
+                IntValue@48..49
+                  Int@48..49 "1"
+                Space@49..50 " "
+                RBrace@50..51 "}"
+            RParen@51..52 ")"
+          Newline@52..53 "\n"
+        RBrace@53..54 "}"
+    Newline@54..55 "\n"

@@ -274,11 +274,10 @@ const _: () = assert!(
 /// | selection sets `{ f … }` | 673 | **671** |
 /// | inline fragments | 722 | 720 |
 /// | generic angle brackets `A< … >` | — | 850 |
-/// | collection body `set { … }` | — | 832 |
+/// | collection body `set!{ … }` | — | 832 |
 /// | input objects `{k: … }` | 886 | 884 |
 /// | list types `[ … ]Int` | 1083 | 1384 |
 /// | list values `[ … ]` | 1303 | 1299 |
-/// | set-or-map type `< … >` | — | 1873 |
 ///
 /// **The shape list is the suite's own, not a guess.** It is the strongly-connected components of
 /// each dialect's lossless call graph — the enumeration `smear/tests/nesting_depth.rs`'s

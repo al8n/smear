@@ -1,0 +1,1 @@
+query { f(a: [set {a: 1}]) }

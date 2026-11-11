@@ -149,7 +149,7 @@ pub mod graphql;
 /// Lexers for GraphQLx (extended GraphQL).
 ///
 /// This module extends the standard GraphQL lexer with additional tokens for GraphQLx
-/// features like generics, imports, map types, and namespacing.
+/// features like generics, imports, set and map literals, and namespacing.
 ///
 /// # Token Streams
 ///
@@ -168,7 +168,7 @@ pub mod graphql;
 /// GraphQLx adds these tokens for advanced features:
 /// - **Path separator**: `::` for namespaced types (`namespace::Type`)
 /// - **Angle brackets**: `<`, `>` for generics (`Container<T>`)
-/// - **Fat arrow**: `=>` for map types (`<Key => Value>`)
+/// - **Fat arrow**: `=>` for map entries (`map!{ key => value }`)
 /// - **Arithmetic operators**: `+`, `-` for extended type operations
 /// - **Asterisk**: `*` for wildcard imports
 ///

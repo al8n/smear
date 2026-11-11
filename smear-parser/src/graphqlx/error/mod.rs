@@ -242,7 +242,7 @@ pub enum Unclosed {
   List,
   /// A brace-delimited object, set, map, or import list, missing `}`.
   Object,
-  /// An angle-delimited set, map, or type-argument list, missing `>`.
+  /// An angle-delimited type-argument list, missing `>`.
   Angle,
 }
 

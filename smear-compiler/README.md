@@ -6,9 +6,9 @@
 
 Draft §5 GraphQL document validation, over the built-once schema `smear-schema` produces.
 
-Standard GraphQL only. The `graphqlx` dialect's generics, `where` constraints, map and set types
-and namespaced paths have no specification semantics to validate against, so nothing here knows
-about them.
+Standard GraphQL only. The `graphqlx` dialect's generics, `where` constraints, set and map
+literals and namespaced paths have no specification semantics to validate against, so nothing here
+knows about them.
 
 Three axes:
 

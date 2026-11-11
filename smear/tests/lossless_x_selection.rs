@@ -74,7 +74,7 @@ fn an_argument_wraps_its_name_colon_and_value() {
     vec![K::Root, K::Argument, K::IntValue]
   );
   assert_eq!(
-    kinds!(parse_argument, "x: set { 1 }"),
+    kinds!(parse_argument, "x: set!{ 1 }"),
     vec![K::Root, K::Argument, K::SetValue, K::IntValue],
     "an argument's value is a GraphQLx value, so a set constructor reaches it"
   );

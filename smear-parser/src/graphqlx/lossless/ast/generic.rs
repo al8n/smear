@@ -32,7 +32,7 @@ use crate::{
   ast_node,
   graphqlx::{
     kinds::SyntaxKind as K,
-    lossless::ast::ty::{DefinitionTypePath, ListType, MapType, Path, SetType, TypePath},
+    lossless::ast::ty::{DefinitionTypePath, ListType, Path, TypePath},
   },
 };
 
@@ -41,7 +41,7 @@ ast_node!(
   /// One declared generic parameter, `Name (= Type)?`.
   ///
   /// **The default is a type reference, not a
-  /// [`DefaultValue`](super::value::DefaultValue).** The `=` here introduces a type, so the four
+  /// [`DefaultValue`](super::value::DefaultValue).** The `=` here introduces a type, so the two
   /// getters below are the type kinds; reusing the value node would put a value where a type
   /// belongs, and the two spell the same token.
   DefinitionTypeParam => K::DefinitionTypeParam {
@@ -51,10 +51,6 @@ ast_node!(
     definition_type_path: opt DefinitionTypePath,
     /// The parameter's default, when it is a list type.
     list_type: opt ListType,
-    /// The parameter's default, when it is a set type.
-    set_type: opt SetType,
-    /// The parameter's default, when it is a map type.
-    map_type: opt MapType,
   }
 );
 

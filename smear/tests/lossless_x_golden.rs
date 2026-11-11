@@ -21,13 +21,12 @@
 //!
 //! # Why GraphQLx needs this more than GraphQL does
 //!
-//! Three of GraphQLx's productions decide a **node kind** rather than a verdict, so their failure
+//! Two of GraphQLx's productions decide a **node kind** rather than a verdict, so their failure
 //! mode is a tree that is wrong and valid:
 //!
-//! - `set`/`map` before a `{` is a [`SetValue`](K::SetValue)/[`MapValue`](K::MapValue) and the same
-//!   spelling anywhere else is an [`EnumValue`](K::EnumValue) — `{ a: set }` and `{ a: set { 1 } }`
+//! - `set`/`map` before a `!` is a [`SetValue`](K::SetValue)/[`MapValue`](K::MapValue) and the same
+//!   spelling anywhere else is an [`EnumValue`](K::EnumValue) — `{ a: set }` and `{ a: set!{ 1 } }`
 //!   differ *only* in the tree;
-//! - `<T>` is a [`SetType`](K::SetType) and `<K => V>` a [`MapType`](K::MapType);
 //! - a directive's name is a [`TypePath`](K::TypePath) with its own generics, so `@ns::d<T>(a: 1)`
 //!   has four levels of structure where GraphQL has one token.
 //!
@@ -48,7 +47,7 @@
 //! - **indent** — a re-parented subtree shifts a whole block, so re-parenting is the loudest diff
 //!   the format can produce rather than the quietest;
 //! - **kind** — a production that opens the wrong node changes one word per site, which is what a
-//!   `SetType` silently becoming a `MapType` looks like;
+//!   `SetValue` silently becoming a `MapValue` looks like;
 //! - **range** — a node boundary that moved changes numbers even when no line appears or vanishes,
 //!   which is the "`Arguments` opened after the `(` instead of before" shape;
 //! - **token text** — tokens are in the tree, so a token attached to the wrong parent is a moved
@@ -100,7 +99,7 @@
 //! what that costs — an `expect` that skips trivia on its accepting branch as well as before it
 //! moves trailing placement across the whole corpus while round-trip, the gap census, the parity
 //! gate, the injection gate and the projection differential all stay green. So the sentence is now
-//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-eight pairings re-derived on every run by
+//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-seven pairings re-derived on every run by
 //! [`only_the_recorded_nodes_close_on_their_trailing_trivia`]. It is nearly twice its GraphQL
 //! twin's length for a reason the constant states: two GraphQLx productions end on a probe for an
 //! optional continuation that is usually not there — `::` for a path, `<` for a definition's name
@@ -172,7 +171,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// Every `parent > node` pairing where a node closes *after* the trivia behind it, so that the
 /// trivia lands inside the node's range instead of beside it.
 ///
-/// **Forty-eight entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
+/// **Forty-seven entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
 /// one and its full account is on the GraphQL twin's constant: an atom commits the trivia it
 /// crosses to whichever node is open at that moment, a production about to open a node crosses its
 /// leading trivia at a dispatch peek made *before* the mark, and trailing trivia has no such
@@ -213,7 +212,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// **A [`Path`](K::Path) probes for `::`.** `path` is `::? Name (:: Name)*`, and `path_tail` in
 /// `graphqlx/lossless/ty.rs` is a `while eat_if(PathSeparator)`, so its last act on every path in
 /// the corpus is a probe for a separator that is not there. `TypePath > Path` (77 witnesses) and
-/// `DefinitionTypePath > Path` (68) are the two commonest pairings in this list after
+/// `DefinitionTypePath > Path` (69) are the two commonest pairings in this list after
 /// `Root > Document`; `EnumValue > Path`, `NamedSpecifier > Path`, `WildcardSpecifier > Path` and
 /// `ExtensionName > Path` are the same node in four other positions. So in `type T { f: Int }` the
 /// `Path` under `f`'s type spans `"Int "`.
@@ -227,7 +226,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// `graphqlx/lossless/generic.rs` states the divergence beside the production: "**A `Path`, where
 /// `definition_name` takes a bare `Name`**" — `extend type ns::T` names a qualified target and
 /// `type ns::T` does not. So in `type T { f: Int }` the `DefinitionName` spans `"T "`;
-/// `ObjectTypeDefinition > DefinitionName` (43) is the third commonest pairing here, and
+/// `ObjectTypeDefinition > DefinitionName` (44) is the third commonest pairing here, and
 /// `FragmentDefinition > ExecutableDefinitionName` plus the eight remaining `> DefinitionName`
 /// pairings are the same shape in other positions.
 ///
@@ -295,7 +294,6 @@ const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "FieldDefinition > DefinitionTypePath",
   "FieldDefinition > Directives",
   "FieldDefinition > ListType",
-  "FieldDefinition > SetType",
   "FieldsDefinition > FieldDefinition",
   "FragmentDefinition > Directives",
   "FragmentDefinition > ExecutableDefinitionName",
@@ -382,10 +380,10 @@ const SHAPE_CASES: &[(&str, &str)] = &[
   ),
   // ---- GraphQLx's own ----
   //
-  // Divergences 3, 4 and 5 in one tree: a map type, inside a list type, under a non-null fold. Three
-  // node kinds that only exist here, nested in the one order that makes an off-by-one-level parent
-  // invisible to every other gate.
-  ("map_type_inside_a_list", "type T { f: [<K => V>]! }"),
+  // Divergences 2, 3 and 4 in one tree: a map type — a path with two type arguments — inside a
+  // list type, under a non-null fold. Three node kinds that only exist here, nested in the one order
+  // that makes an off-by-one-level parent invisible to every other gate.
+  ("map_type_inside_a_list", "type T { f: [HashMap<K, V>]! }"),
   // Divergence 13: a fragment definition carries **two** generic lists, and — read off the golden
   // rather than assumed — they are the *same node kind* at two different depths. The one before the
   // name is a sibling of `ExecutableDefinitionName`; the one after it is that node's child. So the
@@ -422,16 +420,16 @@ const SHAPE_CASES: &[(&str, &str)] = &[
   // rather than merely stored.
   (
     "contextual_set_both_readings",
-    "query A { f(a: set) }\nquery B { f(a: set { 1 }) }\n",
+    "query A { f(a: set) }\nquery B { f(a: set!{ 1 }) }\n",
   ),
   // The GraphQLx half of the retro-wrap claim, and the one with a kind at stake rather than a
-  // wrapper. `set` commits as a keyword and the production retro-wraps only if a `{` follows, which
-  // may be any amount of trivia away; lose that skip and this is an `EnumValue` followed by a syntax
-  // error. A comment is used rather than a space so the crossed trivia is impossible to mistake for
-  // formatting.
+  // wrapper. `set` commits as a keyword and the production retro-wraps only if a `!` follows, which
+  // may be any amount of trivia away, as may the `{` after it; lose that skip and this is an
+  // `EnumValue` followed by a syntax error. A comment is used rather than a space so the crossed
+  // trivia is impossible to mistake for formatting.
   (
     "set_retro_wrap_across_trivia",
-    "{ f(a: set\n  # c\n  { 1 }, b: map\n  , { 1 => 2 }) }\n",
+    "{ f(a: set\n  # c\n  ! { 1 }, b: map\n  , !\n  # d\n  { 1 => 2 }) }\n",
   ),
   // The `Path` production on its own: a leading `::`, three segments and generics at the end, inside
   // a list and under a non-null fold. `Path` is GraphQLx's most-opened node kind (3474 hits in gate
@@ -922,7 +920,7 @@ fn the_render_answers_differently_for_trees_that_text_cannot_separate() {
 #[test]
 fn the_render_separates_the_two_readings_of_a_contextual_keyword() {
   const ENUM_VALUE: &str = "{ f(a: set) }";
-  const SET_LITERAL: &str = "{ f(a: set { 1 }) }";
+  const SET_LITERAL: &str = "{ f(a: set!{ 1 }) }";
 
   assert!(
     !parse_document(ENUM_VALUE).has_errors() && !parse_document(SET_LITERAL).has_errors(),
@@ -934,33 +932,12 @@ fn the_render_separates_the_two_readings_of_a_contextual_keyword() {
   let as_set = render_str(SET_LITERAL);
   assert!(
     as_enum.contains("EnumValue@") && !as_enum.contains("SetValue@"),
-    "`set` in value position with no `{{` after it is an enum value:\n{as_enum}"
+    "`set` in value position with no `!` after it is an enum value:\n{as_enum}"
   );
   assert!(
     as_set.contains("SetValue@") && !as_set.contains("EnumValue@"),
-    "`set {{ 1 }}` is a set literal, and the keyword must not survive as an enum value \
+    "`set!{{ 1 }}` is a set literal, and the keyword must not survive as an enum value \
      beside it:\n{as_set}"
-  );
-}
-
-/// `<T>` and `<K => V>` are two node kinds, and the render is what says which one was built.
-///
-/// The second of GraphQLx's kind-deciding productions. Both spellings are valid types in the same
-/// positions, so a discriminator that answered the wrong one would build a well-formed tree of the
-/// wrong shape — a defect with no verdict, no byte difference, and no padded-versus-compact
-/// disagreement.
-#[test]
-fn the_render_separates_a_set_type_from_a_map_type() {
-  let set = render_str("type T { f: <Int> }");
-  let map = render_str("type T { f: <Int => String> }");
-
-  assert!(
-    set.contains("SetType@") && !set.contains("MapType@"),
-    "`<Int>` is a set type:\n{set}"
-  );
-  assert!(
-    map.contains("MapType@") && !map.contains("SetType@"),
-    "`<Int => String>` is a map type, and no set type hides inside it:\n{map}"
   );
 }
 
@@ -1171,13 +1148,12 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
     "an ordinary definition must open none of its nodes on trivia, or the sweep above cannot tell \
      a defect from the normal case"
   );
-  // GraphQLx's own: the two name wrappers whose entire content is where they start, and the three
+  // GraphQLx's own: the two name wrappers whose entire content is where they start, and the two
   // kind-deciding productions. A space before any of these is the shape this census exists for.
   for src in [
     "type T <A> where A : Node { f: A }",
     "extend type T <A> { f: A }",
-    "{ f(a: set { 1 }, b: map { 1 => 2 }) }",
-    "type T { f: <Int => String> }",
+    "{ f(a: set ! { 1 }, b: map ! { 1 => 2 }) }",
     "@ns::d<T>(a: 1) on FIELD",
   ] {
     assert!(
@@ -1204,7 +1180,7 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
 /// appeared where a production began holding its node open across a peek, and list pairings
 /// vanished, because trivia eaten by the `expect` that ends an element never reaches the loop peek
 /// that used to leave it inside the preceding sibling. So the failure is reported as the two
-/// differences rather than as two forty-eight-element vectors: which half moved is what tells a
+/// differences rather than as two forty-seven-element vectors: which half moved is what tells a
 /// reader whether a production gained a probe or lost one.
 #[test]
 fn only_the_recorded_nodes_close_on_their_trailing_trivia() {

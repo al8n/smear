@@ -40,7 +40,7 @@ use crate::{
       },
       import::ImportDefinition,
       selection::{SelectionSet, TypeCondition},
-      ty::{DefinitionTypePath, ListType, MapType, SetType},
+      ty::{DefinitionTypePath, ListType},
       value::{DefaultValue, VariableValue},
     },
   },
@@ -63,10 +63,6 @@ ast_node!(
     definition_type_path: opt DefinitionTypePath,
     /// The variable's type, when it is a list.
     list_type: opt ListType,
-    /// The variable's type, when it is a set.
-    set_type: opt SetType,
-    /// The variable's type, when it is a map.
-    map_type: opt MapType,
     /// The variable's default, if it was given one.
     default_value: opt DefaultValue,
     /// The definition's directives, if it was given any.

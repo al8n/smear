@@ -178,12 +178,10 @@ fn a_deep_arc_type_is_released_through_its_last_owner() {
   });
 }
 
-/// GraphQLx nests four ways, and the two reachable from outside this workspace are here.
+/// GraphQLx nests two ways, and both are here.
 ///
 /// `ListType` is nameable as `graphql::ast::ListType` — the same carrier, re-exported by the other
-/// dialect — so a consumer with both features on can build this arm. `SetType` and `MapType` are
-/// re-exported by neither, so their arms cannot be built outside the crate at all and their
-/// release is pinned in `smear-parser`'s own `graphqlx::ast` tests instead.
+/// dialect — so a consumer with both features on can build this arm.
 #[cfg(all(feature = "graphql", feature = "graphqlx"))]
 #[test]
 fn a_deep_graphqlx_list_type_is_released() {
@@ -196,9 +194,9 @@ fn a_deep_graphqlx_list_type_is_released() {
   });
 }
 
-/// The fourth route, and the one no reading of the three pointer arms finds: a path's generic
-/// arguments are types, so `A<A<A<…>>>` nests without a `Box` anywhere in the cycle. Every
-/// constructor it needs is public.
+/// The second route, and the one no reading of the pointer arm finds: a path's generic arguments
+/// are types, so `A<A<A<…>>>` nests without a `Box` anywhere in the cycle. Every constructor it
+/// needs is public.
 #[cfg(feature = "graphqlx")]
 #[test]
 fn a_deep_graphqlx_generic_argument_type_is_released() {

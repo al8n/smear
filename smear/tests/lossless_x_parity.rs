@@ -35,8 +35,8 @@
 //!
 //! Phase A's sweep found **eleven** divergences over 240 sources, all in one direction, across two
 //! spec rules — const positions and `FragmentName but not "on"`. Phase B's sweep found **zero**
-//! over 257: twenty-three const sites × eight value forms (including `set { $v }`,
-//! `map { $v => 1 }` and `map { 1 => $v }`, which have no GraphQL counterpart), four non-const
+//! over 257: twenty-three const sites × eight value forms (including `set!{ $v }`,
+//! `map!{ $v => 1 }` and `map!{ 1 => $v }`, which have no GraphQL counterpart), four non-const
 //! sites for the control, and forty-one hand-aimed GraphQLx candidates — a fragment named `on`, an
 //! import member aliased to `null` and to `set`, a type named `set`, a field named `set` with and
 //! without a selection set, `where` at each of its eight sites, `<>`, `<Int => >`, `Int!!`, and a
@@ -61,9 +61,9 @@
 //! surfaces every byte and each atom has to cross it deliberately. An atom that stops crossing
 //! turns valid formatted GraphQLx into a rejection in one suite only.
 //!
-//! GraphQLx raises the stakes on that: three of its productions decide a **node kind** on what the
-//! next significant token is — `set`/`map` followed by `{`, `<T>` versus `<K => V>`, and a `where`
-//! clause's two-token continuation window — and each has to reach past arbitrary trivia to ask.
+//! GraphQLx raises the stakes on that: two of its productions decide a **node kind** on what the
+//! next significant token is — `set`/`map` followed by `!`, and a `where` clause's two-token
+//! continuation window — and each has to reach past arbitrary trivia to ask.
 //!
 //! **The padding is not defined here.** The plan's Step 6 says to assert the padded set is exactly
 //! the one gate 2 derives, and two agreeing `const`s in two test binaries cannot be that — nothing
@@ -418,12 +418,11 @@ fn both_alternate_roots_agree_with_their_syntactic_counterparts() {
 ///
 /// Hand-written source never puts trivia at the junctions where a lossless atom's answer decides
 /// something. In GraphQL those junctions are `$ x`, `@ d`, `... F`, `alias : f`, `Int !`,
-/// `f (a: 1)`. GraphQLx adds three where the *node kind* itself is at stake:
+/// `f (a: 1)`. GraphQLx adds two where the *node kind* itself is at stake:
 ///
-/// - `set { … }` versus the enum value `set` — decided on whether the next significant token is a
-///   `{`, which may be any number of trivia away, which is why the production commits the keyword
+/// - `set!{ … }` versus the enum value `set` — decided on whether the next significant token is a
+///   `!`, which may be any number of trivia away, which is why the production commits the keyword
 ///   and retro-wraps rather than peeking two tokens;
-/// - `<T>` versus `<K => V>` — a set type or a map type, decided after the first inner type;
 /// - a `where` clause's continuation — a two-token window whose second token is reached across
 ///   trivia.
 ///

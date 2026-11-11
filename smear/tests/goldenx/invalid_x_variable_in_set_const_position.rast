@@ -20,7 +20,7 @@ Root@0..36
               Space@12..13 " "
               SetValue@13..23
                 Name@13..16 "set"
-                Space@16..17 " "
+                Bang@16..17 "!"
                 LBrace@17..18 "{"
                 Space@18..19 " "
                 VariableValue@19..21

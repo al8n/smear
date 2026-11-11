@@ -1,19 +1,17 @@
-//! Typed wrappers over the seven path and type-reference node kinds.
+//! Typed wrappers over the five path and type-reference node kinds.
 //!
-//! A type reference is a four-way union — `DefinitionTypePath | ListType | SetType | MapType` —
-//! and this layer has no union type, so every position that holds one carries four `opt` getters
-//! of which exactly one answers. See `ast/value.rs`'s module docs for the same ruling at greater
-//! width.
+//! A type reference is a two-way union — `DefinitionTypePath | ListType` — and this layer has no
+//! union type, so every position that holds one carries two `opt` getters of which exactly one
+//! answers. See `ast/value.rs`'s module docs for the same ruling at greater width.
 //!
 //! # There is no non-null wrapper: the `!` is a token of the type it modifies
 //!
 //! GraphQL's kind space has a `NonNullType` node wrapping the type it modifies. GraphQLx's has
-//! none — `graphqlx/syntactic/ty.rs` gives [`DefinitionTypePath`], [`ListType`], [`SetType`] and
-//! [`MapType`] each a `required: bool` — so the `!` reaches the tree as a
-//! [`Bang`](K::Bang) **token child** of the type node, and every one of the four takes a
-//! `bang_token` getter whose *presence* is the non-null flag. `[Int!]!` puts one under the
-//! [`ListType`] and one under the [`DefinitionTypePath`] inside it, and a getter matching direct
-//! children only is what keeps the two apart.
+//! none — `graphqlx/syntactic/ty.rs` gives [`DefinitionTypePath`] and [`ListType`] each a
+//! `required: bool` — so the `!` reaches the tree as a [`Bang`](K::Bang) **token child** of the
+//! type node, and both take a `bang_token` getter whose *presence* is the non-null flag. `[Int!]!`
+//! puts one under the [`ListType`] and one under the [`DefinitionTypePath`] inside it, and a getter
+//! matching direct children only is what keeps the two apart.
 //!
 //! # Reading a path's leading `::` off its tokens
 //!
@@ -50,7 +48,7 @@ ast_node!(
   lang = crate::graphqlx::kinds::GraphQLxLang;
   /// The generic arguments applied to a path, `< Type+ >`.
   ///
-  /// The arguments are type references, so they come back through four iterators — one per type
+  /// The arguments are type references, so they come back through two iterators — one per type
   /// kind. A consumer needing them in written order walks [`syntax`](TypeGenerics::syntax)
   /// instead; see `ast/value.rs`'s module docs for the same ruling and the same Phase B answer.
   TypeGenerics => K::TypeGenerics {
@@ -58,10 +56,6 @@ ast_node!(
     definition_type_paths: many DefinitionTypePath,
     /// Every argument that is a list type, in order.
     list_types: many ListType,
-    /// Every argument that is a set type, in order.
-    set_types: many SetType,
-    /// Every argument that is a map type, in order.
-    map_types: many MapType,
   }
 );
 
@@ -89,56 +83,9 @@ ast_node!(
     definition_type_path: opt DefinitionTypePath,
     /// The element type, when it is itself a list.
     list_type: opt ListType,
-    /// The element type, when it is a set.
-    set_type: opt SetType,
-    /// The element type, when it is a map.
-    map_type: opt MapType,
     /// The `!`, present exactly when the list itself is non-null.
     ///
     /// The element's own `!` is a token of the *element*, so `[Int!]` answers `None` here.
-    bang_token: tok K::Bang,
-  }
-);
-
-ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
-  /// A set type reference, `< T > '!'?` — GraphQLx only.
-  ///
-  /// [`MapType`] is the same bytes up to the `=>`, which is why the production decides the kind by
-  /// a retro-wrap and why the two are separate wrappers rather than one with an optional half.
-  SetType => K::SetType {
-    /// The element type, when it is a path type.
-    definition_type_path: opt DefinitionTypePath,
-    /// The element type, when it is a list.
-    list_type: opt ListType,
-    /// The element type, when it is itself a set.
-    set_type: opt SetType,
-    /// The element type, when it is a map.
-    map_type: opt MapType,
-    /// The `!`, present exactly when the set itself is non-null.
-    bang_token: tok K::Bang,
-  }
-);
-
-ast_node!(
-  lang = crate::graphqlx::kinds::GraphQLxLang;
-  /// A map type reference, `< K => V > '!'?` — GraphQLx only.
-  ///
-  /// **The getters are plural, and that is forced.** A map type holds two full type references
-  /// with nothing between them but the `=>`, so an `opt` getter would answer the *key* whenever
-  /// key and value are the same kind and the value would be unreachable. A consumer that needs the
-  /// two apart walks [`syntax`](MapType::syntax)`().children()`: the key is the first node child
-  /// and the value is the one after the `=>`.
-  MapType => K::MapType {
-    /// Every half of the map that is a path type — the key, the value, or both.
-    definition_type_paths: many DefinitionTypePath,
-    /// Every half of the map that is a list type.
-    list_types: many ListType,
-    /// Every half of the map that is a set type.
-    set_types: many SetType,
-    /// Every half of the map that is itself a map type.
-    map_types: many MapType,
-    /// The `!`, present exactly when the map itself is non-null.
     bang_token: tok K::Bang,
   }
 );

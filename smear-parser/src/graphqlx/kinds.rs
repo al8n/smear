@@ -37,14 +37,13 @@
 //!
 //! Seven images (`<`, `>`, `::`, `=>`, `*`, `+`, `-`) and, among the nodes, the whole import and
 //! generic families, [`SetValue`](SyntaxKind::SetValue)/[`MapValue`](SyntaxKind::MapValue)/
-//! [`MapEntry`](SyntaxKind::MapEntry), [`SetType`](SyntaxKind::SetType)/
-//! [`MapType`](SyntaxKind::MapType), [`Path`](SyntaxKind::Path),
+//! [`MapEntry`](SyntaxKind::MapEntry), [`Path`](SyntaxKind::Path),
 //! [`TypePath`](SyntaxKind::TypePath) and [`TypeGenerics`](SyntaxKind::TypeGenerics).
 //!
 //! And what it *lacks*: GraphQLx has no non-null node. `graphqlx::syntactic::ty` folds a trailing
-//! `!` into the type node it follows — `DefinitionTypePath`, `ListType`, `SetType` and `MapType`
-//! each carry their own `required` flag (`smear-parser/src/ty/mod.rs`) — so the `!` is a
-//! [`Bang`](SyntaxKind::Bang) token child of the type it modifies rather than a wrapper around it.
+//! `!` into the type node it follows — `DefinitionTypePath` and `ListType` each carry their own
+//! `required` flag (`smear-parser/src/ty/mod.rs`) — so the `!` is a [`Bang`](SyntaxKind::Bang)
+//! token child of the type it modifies rather than a wrapper around it.
 //! It likewise has no bare named-type node: every type head is a `::`-separated
 //! [`Path`](SyntaxKind::Path) with optional generic arguments, which is
 //! [`DefinitionTypePath`](SyntaxKind::DefinitionTypePath).
@@ -70,7 +69,7 @@ use crate::lossless::KindSpace;
 ///
 /// # Layout
 ///
-/// The discriminants are the default `0..114` and [`ALL`](Self::ALL) is in declaration order, so
+/// The discriminants are the default `0..112` and [`ALL`](Self::ALL) is in declaration order, so
 /// [`raw`](Self::raw) is an index and [`from_raw`](Self::from_raw) is a bounds check. Four blocks,
 /// in this order:
 ///
@@ -78,8 +77,8 @@ use crate::lossless::KindSpace;
 /// |---|---|
 /// | `0..26` | the twenty-six non-trivia images, in `LosslessTokenKind`'s declaration order |
 /// | `26..32` | the six trivia images, in the same order, with the line terminators folded |
-/// | `32..111` | the seventy-nine node kinds |
-/// | `111..114` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
+/// | `32..109` | the seventy-seven node kinds |
+/// | `109..112` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
 ///
 /// **Nothing may be appended after [`Root`](Self::Root)** — the shared runner is parameterised over
 /// the last three positions, and the seven images GraphQL lacks therefore live *inside* the image
@@ -94,11 +93,11 @@ pub enum SyntaxKind {
   At,
   /// `$` — a variable marker.
   Dollar,
-  /// `=>` — a map entry's and a map type's separator.
+  /// `=>` — a map entry's separator.
   FatArrow,
-  /// `<` — a generic list's and a set/map type's opener.
+  /// `<` — a generic list's opener.
   LAngle,
-  /// `>` — a generic list's and a set/map type's closer.
+  /// `>` — a generic list's closer.
   RAngle,
   /// `(` — an argument list's opener.
   LParen,
@@ -120,7 +119,8 @@ pub enum SyntaxKind {
   RBrace,
   /// `|` — a union member separator.
   Pipe,
-  /// `!` — the non-null modifier, a token child of the type it modifies.
+  /// `!` — the non-null modifier, a token child of the type it modifies, and the token after the
+  /// keyword of a [`SetValue`](Self::SetValue) or a [`MapValue`](Self::MapValue).
   Bang,
   /// `&` — an `implements` and a `where`-bound separator.
   Ampersand,
@@ -182,9 +182,9 @@ pub enum SyntaxKind {
   VariableValue,
   /// `[ Value* ]`.
   ListValue,
-  /// `set { Value* }` — GraphQLx only.
+  /// `set!{ Value* }` — GraphQLx only.
   SetValue,
-  /// `map { MapEntry* }` — GraphQLx only.
+  /// `map!{ MapEntry* }` — GraphQLx only.
   MapValue,
   /// `Value => Value` inside a [`MapValue`](Self::MapValue) — GraphQLx only.
   MapEntry,
@@ -204,10 +204,6 @@ pub enum SyntaxKind {
   DefinitionTypePath,
   /// `[ Type ] '!'?`.
   ListType,
-  /// `< Type > '!'?` — GraphQLx only.
-  SetType,
-  /// `< Type => Type > '!'?` — GraphQLx only.
-  MapType,
   /// `Path TypeGenerics?` in a non-type position: a directive's name, an interface, a union member,
   /// a type condition, a fragment spread's target, a `where` bound — GraphQLx only.
   TypePath,
@@ -422,19 +418,17 @@ impl SyntaxKind {
     Self::ObjectValue,
     Self::ObjectField,
     Self::DefaultValue,
-    // types, paths, arguments, directives (46..57)
+    // types, paths, arguments, directives (46..55)
     Self::Path,
     Self::TypeGenerics,
     Self::DefinitionTypePath,
     Self::ListType,
-    Self::SetType,
-    Self::MapType,
     Self::TypePath,
     Self::Argument,
     Self::Arguments,
     Self::Directive,
     Self::Directives,
-    // selections and executable definitions (57..67)
+    // selections and executable definitions (55..65)
     Self::Alias,
     Self::Field,
     Self::FragmentSpread,
@@ -445,7 +439,7 @@ impl SyntaxKind {
     Self::VariablesDefinition,
     Self::OperationDefinition,
     Self::FragmentDefinition,
-    // SDL definitions (67..87)
+    // SDL definitions (65..85)
     Self::SchemaDefinition,
     Self::RootOperationTypesDefinition,
     Self::RootOperationTypeDefinition,
@@ -466,7 +460,7 @@ impl SyntaxKind {
     Self::EnumValuesDefinition,
     Self::EnumValueDefinition,
     Self::DirectiveLocations,
-    // SDL extensions (87..95)
+    // SDL extensions (85..93)
     Self::SchemaExtension,
     Self::ScalarTypeExtension,
     Self::ObjectTypeExtension,
@@ -475,12 +469,12 @@ impl SyntaxKind {
     Self::EnumTypeExtension,
     Self::InputObjectTypeExtension,
     Self::DirectiveExtension,
-    // imports (95..99)
+    // imports (93..97)
     Self::ImportDefinition,
     Self::ImportList,
     Self::NamedSpecifier,
     Self::WildcardSpecifier,
-    // generics (99..108)
+    // generics (97..106)
     Self::DefinitionTypeParam,
     Self::DefinitionTypeGenerics,
     Self::ExtensionTypeGenerics,
@@ -490,11 +484,11 @@ impl SyntaxKind {
     Self::ExecutableDefinitionName,
     Self::WherePredicate,
     Self::WhereClause,
-    // documents (108..111)
+    // documents (106..109)
     Self::Document,
     Self::ExecutableDocument,
     Self::TypeSystemDocument,
-    // bookkeeping (111..114)
+    // bookkeeping (109..112)
     Self::Error,
     Self::Gap,
     Self::Root,

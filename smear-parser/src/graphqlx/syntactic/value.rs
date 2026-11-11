@@ -1,8 +1,9 @@
 //! GraphQLx value productions.
 //!
 //! Scalar heads are dispatched from one consumed token. `set` and `map` remain
-//! ordinary path segments unless their immediately following token is `{`, at
-//! which point they become collection constructors.
+//! ordinary path segments unless their immediately following token is `!`, at
+//! which point they become collection constructors and a `{` must follow the
+//! `!`.
 //!
 //! GraphQLx retains GraphQL input values while extending enum values to paths
 //! and adding `set` and `map` collection values.
@@ -25,7 +26,8 @@ use super::{
 };
 use crate::{
   combinator::{
-    ParseCtx, TokenSpannedExt, colon, dollar, extent_since, extent_start, fat_arrow, try_equal,
+    ParseCtx, TokenSpannedExt, bang, colon, dollar, extent_since, extent_start, fat_arrow,
+    try_equal,
   },
   graphqlx::{
     GraphQLx,
@@ -649,6 +651,33 @@ value_parser!(
   }
 );
 
+/// The `!` after a `set` or `map` keyword, and the `{` it must be followed by.
+///
+/// The `!` is committed: the two dispatchers come here only once they have peeked it, and the
+/// standalone productions name it as their expectation when it is missing. The `{` is required
+/// before any member is read, so anything else in its place, end of input included, is refused
+/// here and left unconsumed rather than handed to the brace delimiter. Under a recovering emitter
+/// that delimiter reports a missing opener and reads members anyway, and every member begins with
+/// a value, so `set! set! set! …` would enter one collection per prefix with no brace opened for
+/// the nesting limit to count.
+fn collection_bang<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<(), GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  bang(inp)?;
+  if !matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::LBrace)) {
+    return unexpected_here(inp, Expectation::LBrace);
+  }
+  Ok(())
+}
+
 fn set_after_keyword<'inp, Src, Ctx>(
   start: usize,
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
@@ -662,6 +691,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
+  collection_bang(inp)?;
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| value(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
@@ -684,6 +714,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
+  collection_bang(inp)?;
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_value(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
@@ -706,6 +737,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
+  collection_bang(inp)?;
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| map_entry(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
@@ -728,6 +760,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
+  collection_bang(inp)?;
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_map_entry(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
@@ -788,7 +821,7 @@ value_parser!(
           Ok(InputValue::Null(NullValue::new(span, source)))
         }
         (GraphqlxToken::<'inp, Src>::Identifier(source), Some(ContextualKeyword::Set)) => {
-          if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::LBrace)) {
+          if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::Bang)) {
             set_after_keyword(span.start(), inp).map(InputValue::Set)
           } else {
             enum_after_first(span.start(), super::ast::Name::new(span, source), false, inp)
@@ -796,7 +829,7 @@ value_parser!(
           }
         }
         (GraphqlxToken::<'inp, Src>::Identifier(source), Some(ContextualKeyword::Map)) => {
-          if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::LBrace)) {
+          if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::Bang)) {
             map_after_keyword(span.start(), inp).map(InputValue::Map)
           } else {
             enum_after_first(span.start(), super::ast::Name::new(span, source), false, inp)
@@ -899,7 +932,7 @@ value_parser!(
           Ok(ConstInputValue::Null(NullValue::new(span, source)))
         }
         (GraphqlxToken::<'inp, Src>::Identifier(source), Some(ContextualKeyword::Set)) => {
-          if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::LBrace)) {
+          if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::Bang)) {
             const_set_after_keyword(span.start(), inp).map(ConstInputValue::Set)
           } else {
             enum_after_first(span.start(), super::ast::Name::new(span, source), false, inp)
@@ -907,7 +940,7 @@ value_parser!(
           }
         }
         (GraphqlxToken::<'inp, Src>::Identifier(source), Some(ContextualKeyword::Map)) => {
-          if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::LBrace)) {
+          if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::Bang)) {
             const_map_after_keyword(span.start(), inp).map(ConstInputValue::Map)
           } else {
             enum_after_first(span.start(), super::ast::Name::new(span, source), false, inp)
@@ -1141,7 +1174,7 @@ graphqlx_value_api!(
 graphqlx_value_api!(
   /// Parses a committed executable GraphQLx set value.
   ///
-  /// `set { ... }` is a GraphQLx dialect extension with no corresponding
+  /// `set!{ ... }` is a GraphQLx dialect extension with no corresponding
   /// GraphQL draft production.
   Set<S>,
   set_value,
@@ -1150,7 +1183,7 @@ graphqlx_value_api!(
 graphqlx_value_api!(
   /// Parses a committed constant GraphQLx set value.
   ///
-  /// `set { ... }` is a GraphQLx dialect extension with no corresponding
+  /// `set!{ ... }` is a GraphQLx dialect extension with no corresponding
   /// GraphQL draft production.
   ConstSet<S>,
   const_set_value,
@@ -1177,7 +1210,7 @@ graphqlx_value_api!(
 graphqlx_value_api!(
   /// Parses a committed executable GraphQLx map value.
   ///
-  /// `map { ... }` is a GraphQLx dialect extension with no corresponding
+  /// `map!{ ... }` is a GraphQLx dialect extension with no corresponding
   /// GraphQL draft production.
   Map<S>,
   map_value,
@@ -1186,7 +1219,7 @@ graphqlx_value_api!(
 graphqlx_value_api!(
   /// Parses a committed constant GraphQLx map value.
   ///
-  /// `map { ... }` is a GraphQLx dialect extension with no corresponding
+  /// `map!{ ... }` is a GraphQLx dialect extension with no corresponding
   /// GraphQL draft production.
   ConstMap<S>,
   const_map_value,
@@ -1292,7 +1325,7 @@ impl<S> DefaultInputValue<S> {
 }
 
 value_parser!(
-  /// Parses a committed executable GraphQLx set value (`set { Value* }`).
+  /// Parses a committed executable GraphQLx set value (`set!{ Value* }`).
   ///
   /// Set values are a GraphQLx dialect extension with no corresponding GraphQL
   /// draft production.
@@ -1304,7 +1337,7 @@ value_parser!(
     match inp.next_or_stop()? {
       Some(Spanned { span, data: token }) if keyword_of(&token) == Some(ContextualKeyword::Set) => {
         if super::peek_kind(inp)?.is_none() {
-          return unexpected_here(inp, Expectation::LBrace);
+          return unexpected_here(inp, Expectation::Bang);
         }
         set_after_keyword(span.start(), inp)
       }
@@ -1317,7 +1350,7 @@ value_parser!(
 );
 
 value_parser!(
-  /// Parses a committed constant GraphQLx set value (`set { ConstValue* }`).
+  /// Parses a committed constant GraphQLx set value (`set!{ ConstValue* }`).
   ///
   /// Set values are a GraphQLx dialect extension with no corresponding GraphQL
   /// draft production.
@@ -1329,7 +1362,7 @@ value_parser!(
     match inp.next_or_stop()? {
       Some(Spanned { span, data: token }) if keyword_of(&token) == Some(ContextualKeyword::Set) => {
         if super::peek_kind(inp)?.is_none() {
-          return unexpected_here(inp, Expectation::LBrace);
+          return unexpected_here(inp, Expectation::Bang);
         }
         const_set_after_keyword(span.start(), inp)
       }
@@ -1342,7 +1375,7 @@ value_parser!(
 );
 
 value_parser!(
-  /// Parses a committed executable GraphQLx map value (`map { Value => Value }`).
+  /// Parses a committed executable GraphQLx map value (`map!{ Value => Value }`).
   ///
   /// Map values are a GraphQLx dialect extension with no corresponding GraphQL
   /// draft production.
@@ -1354,7 +1387,7 @@ value_parser!(
     match inp.next_or_stop()? {
       Some(Spanned { span, data: token }) if keyword_of(&token) == Some(ContextualKeyword::Map) => {
         if super::peek_kind(inp)?.is_none() {
-          return unexpected_here(inp, Expectation::LBrace);
+          return unexpected_here(inp, Expectation::Bang);
         }
         map_after_keyword(span.start(), inp)
       }
@@ -1367,7 +1400,7 @@ value_parser!(
 );
 
 value_parser!(
-  /// Parses a committed constant GraphQLx map value (`map { ConstValue => ConstValue }`).
+  /// Parses a committed constant GraphQLx map value (`map!{ ConstValue => ConstValue }`).
   ///
   /// Map values are a GraphQLx dialect extension with no corresponding GraphQL
   /// draft production.
@@ -1379,7 +1412,7 @@ value_parser!(
     match inp.next_or_stop()? {
       Some(Spanned { span, data: token }) if keyword_of(&token) == Some(ContextualKeyword::Map) => {
         if super::peek_kind(inp)?.is_none() {
-          return unexpected_here(inp, Expectation::LBrace);
+          return unexpected_here(inp, Expectation::Bang);
         }
         const_map_after_keyword(span.start(), inp)
       }

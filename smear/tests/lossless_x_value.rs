@@ -167,22 +167,22 @@ fn the_reserved_spellings_are_reserved_only_in_the_first_segment() {
 // Divergences 6 and 7 — set and map, and the contextual dispatch.
 // ---------------------------------------------------------------------------------------------
 
-/// `set { … }` and `map { … }` are collection constructors, and the keyword is inside the node.
+/// `set!{ … }` and `map!{ … }` are collection constructors, and the keyword is inside the node.
 #[test]
 fn set_and_map_open_their_own_nodes_over_the_keyword() {
   assert_eq!(
-    kinds!(parse_value, "set { 1, 2 }"),
+    kinds!(parse_value, "set!{ 1, 2 }"),
     vec![K::Root, K::SetValue, K::IntValue, K::IntValue]
   );
   assert_eq!(
-    kinds!(parse_value, "map { 1 => 2 }"),
+    kinds!(parse_value, "map!{ 1 => 2 }"),
     vec![K::Root, K::MapValue, K::MapEntry, K::IntValue, K::IntValue]
   );
 
   // The keyword is a child of the node, not a sibling of it. Retro-wrapping from a mark minted
   // before the keyword is the only thing that puts it there, and a node opened at the `{` would
   // round-trip identically while losing the one token that says which collection it is.
-  let parse = parse_value("set { 1 }");
+  let parse = parse_value("set!{ 1 }");
   let set = parse
     .syntax()
     .descendants()
@@ -190,7 +190,7 @@ fn set_and_map_open_their_own_nodes_over_the_keyword() {
     .expect("the parse produced no SetValue node");
   assert_eq!(
     set.text().to_string(),
-    "set { 1 }",
+    "set!{ 1 }",
     "the SetValue node must span its keyword"
   );
 }
@@ -198,11 +198,11 @@ fn set_and_map_open_their_own_nodes_over_the_keyword() {
 /// Divergence 7, and the novel shape this task's mutation targets.
 ///
 /// `set` and `map` are collection constructors **only** when the immediately following token is a
-/// `{`; everywhere else they are ordinary path segments. `{ a: set }` is an object whose field
+/// `!`; everywhere else they are ordinary path segments. `{ a: set }` is an object whose field
 /// holds an enum value spelled `set`, and treating the keyword as a constructor regardless would
 /// turn that into a malformed set.
 #[test]
-fn set_and_map_are_ordinary_enum_values_when_no_brace_follows() {
+fn set_and_map_are_ordinary_enum_values_when_no_bang_follows() {
   assert_eq!(
     kinds!(parse_value, "set"),
     vec![K::Root, K::EnumValue, K::Path],
@@ -229,6 +229,21 @@ fn set_and_map_are_ordinary_enum_values_when_no_brace_follows() {
     "a `set` that continues into a path is one path of two segments"
   );
   assert_eq!(text!(parse_value, "set::Thing"), "set::Thing");
+  // A `{` straight after the keyword is not the constructor either: the list holds the enum value
+  // `set` and then an object, as it does in GraphQL.
+  assert_eq!(
+    kinds!(parse_value, "[set {a: 1}]"),
+    vec![
+      K::Root,
+      K::ListValue,
+      K::EnumValue,
+      K::Path,
+      K::ObjectValue,
+      K::ObjectField,
+      K::IntValue
+    ],
+    "`set` before a `{` is an enum value, and the braces are an object of their own"
+  );
 }
 
 /// The lookahead is over the next **significant** token, not the next raw one.
@@ -236,17 +251,37 @@ fn set_and_map_are_ordinary_enum_values_when_no_brace_follows() {
 /// The reason `collection_or_enum` retro-wraps instead of peeking two tokens: over a
 /// trivia-surfacing stream the token after `set` is usually a space, so a fixed two-token peek
 /// answers `Space` and every padded set in the corpus becomes an enum value followed by a stray
-/// object. Both forms below must produce the same tree.
+/// `!`. Both forms below must produce the same tree.
 #[test]
 fn the_set_lookahead_crosses_trivia_before_it_answers() {
   let want = vec![K::Root, K::SetValue, K::IntValue];
-  assert_eq!(kinds!(parse_value, "set{1}"), want, "the compact form");
+  assert_eq!(kinds!(parse_value, "set!{1}"), want, "the compact form");
   assert_eq!(
-    kinds!(parse_value, "set # c\n\t{ 1 }"),
+    kinds!(parse_value, "set # c\n\t! # d\n{ 1 }"),
     want,
-    "a comment and a tab between the keyword and the brace"
+    "a comment and a tab between the keyword and the `!`, and a comment before the brace"
   );
-  assert_eq!(text!(parse_value, "set # c\n\t{ 1 }"), "set # c\n\t{ 1 }");
+  assert_eq!(
+    text!(parse_value, "set # c\n\t! # d\n{ 1 }"),
+    "set # c\n\t! # d\n{ 1 }"
+  );
+
+  // The trivia lands inside the node, between its tokens, and the `!` is a direct token child of
+  // it rather than a stray beside it.
+  let parse = parse_value("set # c\n\t! # d\n{ 1 }");
+  let set = parse
+    .syntax()
+    .descendants()
+    .find(|n| n.kind() == K::SetValue)
+    .expect("the parse produced no SetValue node");
+  assert_eq!(set.text().to_string(), "set # c\n\t! # d\n{ 1 }");
+  assert!(
+    set
+      .children_with_tokens()
+      .filter_map(|e| e.into_token())
+      .any(|t| t.kind() == K::Bang),
+    "the `!` must be a direct token child of the SetValue"
+  );
 }
 
 /// A map entry is `Value => Value`, and both halves are full values.
@@ -298,9 +333,9 @@ fn constness_reaches_every_nested_value_position() {
   for src in [
     "[$x]",
     "{a: $x}",
-    "set { $x }",
-    "map { $x => 1 }",
-    "map { 1 => $x }",
+    "set!{ $x }",
+    "map!{ $x => 1 }",
+    "map!{ 1 => $x }",
   ] {
     assert!(
       parse_const_value(src).has_errors(),
@@ -314,12 +349,12 @@ fn constness_reaches_every_nested_value_position() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Divergences 2, 3, 4, 5 — paths, generics and type references.
+// Divergences 2, 3, 4 — paths, generics and type references.
 // ---------------------------------------------------------------------------------------------
 
-/// A type reference's four heads, each reaching its own node kind.
+/// A type reference's three heads, each reaching its own node kind.
 #[test]
-fn a_type_reference_has_four_heads() {
+fn a_type_reference_has_three_heads() {
   assert_eq!(
     kinds!(parse_type_ref, "Int"),
     vec![K::Root, K::DefinitionTypePath, K::Path]
@@ -332,44 +367,6 @@ fn a_type_reference_has_four_heads() {
     kinds!(parse_type_ref, "[Int]"),
     vec![K::Root, K::ListType, K::DefinitionTypePath, K::Path]
   );
-  assert_eq!(
-    kinds!(parse_type_ref, "<Int>"),
-    vec![K::Root, K::SetType, K::DefinitionTypePath, K::Path]
-  );
-}
-
-/// Divergence 5: `<…>` is a set until a `=>` says otherwise.
-///
-/// The decision is made *after* the first inner type is parsed, so the node kind is unknown when
-/// the `<` is committed and the wrap has to be retroactive. A production that guessed `SetType` up
-/// front and corrected later cannot: the event is already in the stream.
-#[test]
-fn the_angle_form_is_a_set_until_a_fat_arrow_makes_it_a_map() {
-  assert_eq!(
-    kinds!(parse_type_ref, "<Int>"),
-    vec![K::Root, K::SetType, K::DefinitionTypePath, K::Path]
-  );
-  assert_eq!(
-    kinds!(parse_type_ref, "<K => V>"),
-    vec![
-      K::Root,
-      K::MapType,
-      K::DefinitionTypePath,
-      K::Path,
-      K::DefinitionTypePath,
-      K::Path
-    ]
-  );
-
-  // The retro-wrap covers the opener: a node that began after the `<` would round-trip identically
-  // and would not contain the token that makes it a set.
-  let parse = parse_type_ref("<K => V>");
-  let map = parse
-    .syntax()
-    .descendants()
-    .find(|n| n.kind() == K::MapType)
-    .expect("the parse produced no MapType node");
-  assert_eq!(map.text().to_string(), "<K => V>");
 }
 
 /// Divergence 4: `!` is a token child of the node it follows, and there is no wrapper.
@@ -381,12 +378,7 @@ fn the_angle_form_is_a_set_until_a_fat_arrow_makes_it_a_map() {
 /// answer.
 #[test]
 fn the_non_null_marker_is_a_child_of_the_type_it_modifies() {
-  for (src, kind) in [
-    ("Int!", K::DefinitionTypePath),
-    ("[Int]!", K::ListType),
-    ("<Int>!", K::SetType),
-    ("<K => V>!", K::MapType),
-  ] {
+  for (src, kind) in [("Int!", K::DefinitionTypePath), ("[Int]!", K::ListType)] {
     let parse = parse_type_ref(src);
     let node = parse
       .syntax()
@@ -509,8 +501,8 @@ fn trivia_does_not_change_any_shape_in_this_area() {
   for (compact, padded) in [
     ("[1,2]", "  [ 1 , # c\n 2 ] "),
     ("{a:1}", "{ a : 1 , }"),
-    ("set{1}", " set  { 1 } "),
-    ("map{1=>2}", "map { 1 => 2 }"),
+    ("set!{1}", " set  !  { 1 } "),
+    ("map!{1=>2}", "map ! { 1 => 2 }"),
     ("::a::b", " :: a :: b "),
   ] {
     assert_eq!(
@@ -523,7 +515,7 @@ fn trivia_does_not_change_any_shape_in_this_area() {
     assert_eq!(text!(parse_value, padded), padded);
   }
 
-  for (compact, padded) in [("[Int]!", " [ Int ] ! "), ("<K=>V>", "< K => V >")] {
+  for (compact, padded) in [("[Int]!", " [ Int ] ! "), ("Map<K,V>!", "Map < K , V > !")] {
     assert_eq!(
       kinds!(parse_type_ref, compact),
       kinds!(parse_type_ref, padded),
@@ -704,7 +696,6 @@ fn every_named_type_head_actually_opens_a_type() {
     ("Int", K::DefinitionTypePath),
     ("::Int", K::DefinitionTypePath),
     ("[Int]", K::ListType),
-    ("<Int>", K::SetType),
   ] {
     assert_eq!(
       kinds!(parse_type_ref, src).get(1),
@@ -713,7 +704,7 @@ fn every_named_type_head_actually_opens_a_type() {
     );
   }
 
-  for src in [")", "!", "$x", "1"] {
+  for src in [")", "!", "$x", "1", "<Int>"] {
     assert_eq!(
       kinds!(parse_type_ref, src),
       vec![K::Root, K::Error],

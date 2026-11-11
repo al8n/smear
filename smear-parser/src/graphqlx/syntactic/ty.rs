@@ -1,8 +1,8 @@
 //! GraphQLx recursive type-reference productions.
 //!
-//! GraphQLx extends GraphQL's named/list references with paths, generic type
-//! arguments, set types (`<T>`), and map types (`<K => V>`). A trailing `!`
-//! is folded into the node it immediately follows.
+//! GraphQLx extends GraphQL's named/list references with paths and generic
+//! type arguments. A trailing `!` is folded into the node it immediately
+//! follows.
 //!
 //! See the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
 
@@ -22,7 +22,7 @@ use super::{
   peek_kind, unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt, extent_since, extent_start, try_bang, try_fat_arrow},
+  combinator::{ParseCtx, TokenSpannedExt, extent_since, extent_start, try_bang},
   graphqlx::{
     GraphQLx,
     ast::{DefinitionTypePath, Nest, Type, TypeGenerics},
@@ -33,8 +33,6 @@ use crate::{
 enum TypeCore<S> {
   Path(super::ast::Path<S>, Option<TypeGenerics<S>>),
   List(Type<S>),
-  Set(Type<S>),
-  Map(Type<S>, Type<S>),
 }
 
 fn type_head_kind(kind: SyntacticTokenKind) -> bool {
@@ -43,7 +41,6 @@ fn type_head_kind(kind: SyntacticTokenKind) -> bool {
     SyntacticTokenKind::Identifier
       | SyntacticTokenKind::PathSeparator
       | SyntacticTokenKind::LBracket
-      | SyntacticTokenKind::LAngle
   )
 }
 
@@ -165,35 +162,10 @@ where
     .map(|delimited| TypeCore::List(delimited.into_data()))
 }
 
-fn angle_type_core<'inp, Src, Ctx>(
-  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
-) -> Result<TypeCore<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
-{
-  (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
-    let key_or_element = ty(inp)?;
-    match try_fat_arrow(inp)? {
-      ParseAttempt::Accept(_) => ty(inp).map(|value| TypeCore::Map(key_or_element, value)),
-      ParseAttempt::Decline => Ok(TypeCore::Set(key_or_element)),
-    }
-  })
-  .delimited_by_angles()
-  .parse_input(inp)
-  .map(|delimited| delimited.into_data())
-}
-
 /// Parses a committed recursive GraphQLx type reference.
 ///
 /// GraphQLx retains GraphQL's named/list references and trailing `!`, while
-/// extending named types to paths with optional type arguments and adding set
-/// (`<T>`) and map (`<K => V>`) references.
+/// extending named types to paths with optional type arguments.
 ///
 /// See the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
 pub fn ty<'inp, Src, Ctx>(
@@ -239,7 +211,6 @@ where
     ParseAttempt::Accept(core) => core,
     ParseAttempt::Decline => match peek_kind(inp)? {
       Some(SyntacticTokenKind::LBracket) => list_type_core(inp)?,
-      Some(SyntacticTokenKind::LAngle) => angle_type_core(inp)?,
       _ => return unexpected_here(inp, Expectation::Type),
     },
   };
@@ -247,7 +218,7 @@ where
   let span = extent_since(inp, node_start);
   Ok(match core {
     TypeCore::Path(path, generics) => {
-      // A path's arguments are the fourth way a GraphQLx type nests, so the list that closes the
+      // A path's arguments are the second way a GraphQLx type nests, so the list that closes the
       // cycle is the one `Nested` releases. Every other carrier that holds an argument list holds
       // a flat one, which is why the conversion is here rather than in `try_type_generics`.
       let generics = generics.map(|generics| {
@@ -259,12 +230,6 @@ where
     TypeCore::List(element) => {
       Type::List(Nest::new(crate::ty::ListType::new(span, element, required)))
     }
-    TypeCore::Set(element) => {
-      Type::Set(Nest::new(crate::ty::SetType::new(span, element, required)))
-    }
-    TypeCore::Map(key, value) => Type::Map(Nest::new(crate::ty::MapType::new(
-      span, key, value, required,
-    ))),
   })
 }
 
@@ -272,7 +237,7 @@ impl<S> Type<S> {
   /// Parses one committed GraphQLx type reference.
   ///
   /// The parser follows GraphQL's type-reference structure, extended with
-  /// GraphQLx paths, generic type arguments, set types, and map types.
+  /// GraphQLx paths and generic type arguments.
   ///
   /// See [`ty`] and the [GraphQL Type References specification](https://spec.graphql.org/draft/#sec-Type-References).
   pub fn graphqlx<'inp, Src, Ctx>(

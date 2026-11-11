@@ -173,8 +173,8 @@ allocation, no dependency smear does not already have, and not behind a feature.
 ### A kit for building GraphQL-like languages
 
 The combinators, the generic AST nodes and the CST substrate are the reusable part, and GraphQLx is
-the proof that they are: **114 syntax kinds against standard GraphQL's 88**, adding generics, `where`
-clauses, type paths, map and set types, imports and wildcard specifiers. It is a different language
+the proof that they are: **112 syntax kinds against standard GraphQL's 88**, adding generics, `where`
+clauses, type paths, set and map literals, imports and wildcard specifiers. It is a different language
 built on the same substrate, not GraphQL with a few extras — and it is where you would start in
 building your own.
 

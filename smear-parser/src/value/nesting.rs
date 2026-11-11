@@ -68,7 +68,7 @@
 //!
 //! The *type* grammar does not have that property, which is why this module exports two shapes
 //! rather than one. `graphql::ast::Type` nests through a single owned `Box`, and `graphqlx`'s
-//! nests through three of them plus a generic-argument container; [`Nest`] covers the owned-pointer
+//! nests through one as well plus a generic-argument container; [`Nest`] covers the owned-pointer
 //! positions and [`Nested`] covers the container ones, over one worklist and one [`Nestable`].
 //!
 //! A recursion through a *single* owned value has no such door, and [`Nest`] is the answer to it:
@@ -205,8 +205,8 @@
 //! came back with another instance of the same shape, because each repair was aimed at the last
 //! finding rather than at the property. The table below is the property.
 //!
-//! * **Type tree, `Span`** — `NamedType`, `ListType`, `SetType`, `MapType`, `TypeGenerics`,
-//!   `DefinitionTypePath`, each owning one by value: six constructors, all bounded.
+//! * **Type tree, `Span`** — `NamedType`, `ListType`, `TypeGenerics`, `DefinitionTypePath`, each
+//!   owning one by value: four constructors, all bounded.
 //! * **Type tree, `Name`** — and this is the one parameter no alias pins. `graphql::ast::Type`,
 //!   `RcType` and `ArcType` take the name payload as *their own* type parameter, so a caller
 //!   supplies it directly and `NamedType`'s `Name` arm is a leaf to the walk. Bounded at
@@ -879,10 +879,9 @@ let _: List<&'static str, core::ops::Range<usize>> = List::new(0..2, Nested::emp
 ### The same defect one tree over, which is the *type* tree
 
 `Nest` covers the recursion the type carriers form, and their `Span` is a door of its own: a
-`Type` arm holds a `ListType`, a `SetType`, a `MapType` or a `DefinitionTypePath`, and every one of
-those owns a span by value. GraphQLx is again the only dialect leaving `Span` a parameter, so this
-is where it is writable — and the six constructors in the type carriers carry the bound for exactly
-the reason the eight value ones do.
+`Type` arm holds a `ListType` or a `DefinitionTypePath`, and both own a span by value. GraphQLx is
+again the only dialect leaving `Span` a parameter, so this is where it is writable — and the four
+constructors in the type carriers carry the bound for exactly the reason the eight value ones do.
 
 ```compile_fail,E0277
 use smear_parser::graphqlx::ast::{Type, TypeGenerics};
@@ -1315,7 +1314,7 @@ pub trait Nestable: Sized + Sealed {
   /// value tree's payload parameters that is now a type error rather than an abort: [`Leaf`] is
   /// the bound `S`, `Span` and `I` carry at the constructors that seat them, and it says exactly
   /// what this paragraph needs — dropping the payload reaches no node. The *type* carriers'
-  /// own `Span` takes it at their six constructors for the same reason; see [`Nested`] for the
+  /// own `Span` takes it at their four constructors for the same reason; see [`Nested`] for the
   /// scope that follows and [`Nest`] for that tree's half of it.
   ///
   /// # A container is handed over, never poured
@@ -1398,10 +1397,10 @@ impl<N: NestNode> Nestable for Absent<N> {
 ///
 /// A source is either **a container the tree already owned** — adopted, never copied — or **one**
 /// node held by value, which is a *second* handover waiting for the first one's subtree to finish:
-/// a map type's value after its key, or a map entry's second half. A chain of single children is
-/// on neither: [`push`](Self::push) puts the first child in a register instead, so a `Nest` chain
-/// of any depth leaves the stack empty and allocates nothing. Measured on `aarch64-apple-darwin`,
-/// release: `graphql::ast::Type` nested **20 000 000** deep releases in **0 bytes** and 0 entries.
+/// a map entry's second half. A chain of single children is on neither: [`push`](Self::push) puts
+/// the first child in a register instead, so a `Nest` chain of any depth leaves the stack empty
+/// and allocates nothing. Measured on `aarch64-apple-darwin`, release: `graphql::ast::Type` nested
+/// **20 000 000** deep releases in **0 bytes** and 0 entries.
 ///
 /// # Why this is not the design the first round rejected
 ///
@@ -1943,8 +1942,7 @@ impl<T: Nestable> tokora::container::Container<T> for Nested<T> {
 ///
 /// Sealed through the same private trait this module seals [`Nestable`] with. Implemented for
 /// [`Box`], [`Rc`] and [`Arc`], which are the three the `ty!` macro in `graphql::ast::ty`
-/// instantiates its enums over; `graphqlx`'s type enum uses the [`Box`] impl for all three of its
-/// pointer arms.
+/// instantiates its enums over; `graphqlx`'s type enum uses the [`Box`] impl for its pointer arm.
 ///
 /// [`into_pointee`](Self::into_pointee) is `Option` rather than `T` because two of the three are
 /// *shared*: an [`Rc`] or [`Arc`] with another owner left has nothing to unlink, and answering
@@ -2051,7 +2049,7 @@ impl<T: Nestable> NestPtr for Arc<T> {
 /// An owned pointer whose release is a loop rather than a descent.
 ///
 /// [`Nested`]'s counterpart for the positions that own **one** child instead of a container of
-/// them: `Type`'s list element in both dialects, and GraphQLx's set element and map key and value.
+/// them: `Type`'s list element in both dialects.
 /// It answers as the pointer it wraps does — it derefs to the pointee, and clones, compares,
 /// hashes and prints exactly as `Box<T>`, `Rc<T>` or `Arc<T>` would, refcount semantics included —
 /// and what it adds is the [`Drop`] that keeps a type nested through this crate's own carriers from
@@ -2088,10 +2086,9 @@ impl<T: Nestable> NestPtr for Arc<T> {
 /// **20 000 000** deep released in **0 bytes** above the tree and 0 worklist entries. It used to
 /// pay one allocation, a `Vec` that never grew past its first, and it now pays none.
 ///
-/// A pointee that *branches* does reach the stack, and both branching pointees in this workspace
-/// are GraphQLx's: a `MapType`'s key and value are two types, and a path's generic arguments are a
-/// container. Those pay what [`Nested`]'s header prices — one entry per branching ancestor — and
-/// nothing more.
+/// A pointee that *branches* does reach the stack, and the one branching pointee in this workspace
+/// is GraphQLx's: a path's generic arguments are a container. That pays what [`Nested`]'s header
+/// prices — one entry per branching ancestor — and nothing more.
 ///
 /// **There is no sequential drain here to interleave away**, which is why this release hands over
 /// once and drains once, and [`Nested`]'s does it per element. A `Nest` owns exactly one pointee.
@@ -2110,11 +2107,11 @@ impl<T: Nestable> NestPtr for Arc<T> {
 /// and every payload one of them can hold, on the same terms as [`Nested`]'s.
 ///
 /// A name in a type position inherits `Name`'s four doors, which are bounded whatever tree the
-/// name ends up in. The type carriers' **own** `Span` has six doors of its own —
-/// `NamedType::new`, `ListType::new`, `SetType::new`, `MapType::new`, `TypeGenerics::new` and
-/// `DefinitionTypePath::new`, each owning its span by value — and every one of them takes
-/// `Span: Leaf`. Those six are the whole list: the fields are private, and the carriers expose
-/// only [`AsSpan`](tokora::span::AsSpan), [`IntoSpan`](tokora::span::IntoSpan) and
+/// name ends up in. The type carriers' **own** `Span` has four doors of its own —
+/// `NamedType::new`, `ListType::new`, `TypeGenerics::new` and `DefinitionTypePath::new`, each
+/// owning its span by value — and every one of them takes `Span: Leaf`. Those four are the whole
+/// list: the fields are private, and the carriers expose only
+/// [`AsSpan`](tokora::span::AsSpan), [`IntoSpan`](tokora::span::IntoSpan) and
 /// [`IntoComponents`](tokora::utils::IntoComponents), which read out and never put back — no
 /// `From`, no `FromComponents`, no `ErrorNode`, no `Default`, no `DerefMut`.
 ///
