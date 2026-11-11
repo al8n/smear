@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0/MIT-blue.svg)](https://github.com/al8n/smear)
 
 The algorithms smear's two semantic layers share: the GraphQL schema builder in `smear-schema` and
-the GraphQLx analyzer.
+the GraphQLx analyzer in `smear-analysis`.
 
 - `interner` — byte spellings interned into dense symbols, refused rather than wrapped at the
   arena's two ceilings.
@@ -30,6 +30,7 @@ Each is generic over its caller's symbol type and names nothing of either layer.
 - `smear-schema` — the built-once schema representation and its builder
 - `smear-compiler` — draft §5 validation and diagnostics
 - `graphql-proto` — the Sans-I/O protocol machine
+- `smear-analysis` — the GraphQLx schema analyzer
 - `smear` — the umbrella that re-exports the layers, each behind a feature
 
 `smear` does not re-export this crate: it is reached through the layers built on it.

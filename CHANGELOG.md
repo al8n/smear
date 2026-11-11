@@ -4,6 +4,15 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-semantics` and `smear-analysis`: two new crates. `smear-semantics` holds the
+  algorithms smear's two semantic layers share: the byte-spelling interner, duplicate-name
+  detection and the graph-cycle kernel. `smear` does not re-export it. `smear-analysis` is
+  the GraphQLx schema analyzer, reached as `smear::analysis` behind the new `analysis`
+  capability feature, which implies `parser` and `graphqlx` and no tier; the analyzer itself
+  needs `alloc`. Its source features `bytes_1`, `bstr_1`, `hipstr_0_8` and `smol-bytes_0_2`,
+  with the aliases `bytes`, `bstr`, `hipstr` and `smol-bytes`, forward `smear-parser`'s, and
+  `smear`'s features of the same names forward to them. `smear-schema`'s builder now takes
+  those three kernels from `smear-semantics`, behind `build`, with no change in behaviour.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the six features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`,

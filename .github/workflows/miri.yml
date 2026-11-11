@@ -268,9 +268,10 @@ name: Miri
 # DEPENDENCIES' features, not any member's own. `rowan` is off in every cell.
 #
 # `--verify-exclusions` runs in ONE cell: `miri-sb-x86_64-unknown-linux-gnu-smear-compiler`. It is
-# a native host build of the six members plus `smear`, so it answers the same on every target,
-# member and model, and it was most of what each cell of that run spent before its first test —
-# 5 to 6 minutes on Linux and 18 to 24 on macOS. The `include:` entry below is the designation.
+# a native host build of the six members plus each excluded one, `smear` and `smear-analysis`, so
+# it answers the same on every target, member and model, and it was most of what each cell of that
+# run spent before its first test — 5 to 6 minutes on Linux and 18 to 24 on macOS. The `include:`
+# entry below is the designation.
 #
 # THE CEILING IS ON THE MIRI STEP, NOT THE JOB, because the two end differently. A job past its
 # `timeout-minutes` is CANCELLED, which is how all eight cells of that run ended at the 360-minute

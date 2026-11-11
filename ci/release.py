@@ -56,11 +56,12 @@ PUBLISH_ORDER = (
     "smear-schema",
     "smear-compiler",
     "graphql-proto",
+    "smear-analysis",
     "smear",
 )
 BOOTSTRAP_0_0_1 = frozenset((
     "smear-lexer", "smear-parser", "smear-semantics", "smear-schema", "smear-compiler",
-    "graphql-proto",
+    "graphql-proto", "smear-analysis",
 ))
 BOOTSTRAP_LOGIN = "al8n"
 UNPUBLISHED_MEMBERS = frozenset(("smear-noatomic", "smear-smoke", "source-census"))
@@ -71,9 +72,10 @@ INTERNAL_EDGES = {
     "smear-schema": frozenset(("smear-parser", "smear-semantics")),
     "smear-compiler": frozenset(("smear-parser", "smear-schema")),
     "graphql-proto": frozenset(("smear-parser", "smear-schema")),
+    "smear-analysis": frozenset(("smear-lexer", "smear-parser", "smear-semantics")),
     "smear": frozenset((
-        "graphql-proto", "smear-compiler", "smear-lexer", "smear-parser", "smear-schema",
-        "smear-semantics",
+        "graphql-proto", "smear-analysis", "smear-compiler", "smear-lexer", "smear-parser",
+        "smear-schema", "smear-semantics",
     )),
 }
 REQUIRED_WORKFLOWS = {
@@ -1967,7 +1969,9 @@ class ReleaseSelfTests(unittest.TestCase):
                 output = root / "bootstrap.json"
                 result = bootstrap_packages(manifest, target, self.commit, 0, output)
                 self.assertEqual(
-                    selected, ["smear-semantics", "smear-schema", "smear-compiler", "graphql-proto"]
+                    selected,
+                    ["smear-semantics", "smear-schema", "smear-compiler", "graphql-proto",
+                     "smear-analysis"],
                 )
                 self.assertEqual([p["name"] for p in result["packages"]], list(PUBLISH_ORDER[:-1]))
                 self.assertEqual(load_json(output), result)

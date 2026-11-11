@@ -239,6 +239,27 @@ pub use smear_compiler as validator;
 #[doc(inline)]
 pub use graphql_proto as proto;
 
+/// GraphQLx schema analysis.
+///
+#[cfg_attr(
+  feature = "alloc",
+  doc = "[`graphqlx`](analysis::graphqlx) is the analyzer: GraphQLx packages in, a resolved model \
+         and its diagnostics out."
+)]
+#[cfg_attr(
+  not(feature = "alloc"),
+  doc = "`graphqlx` is the analyzer: GraphQLx packages in, a resolved model and its diagnostics \
+         out. It needs `alloc`."
+)]
+///
+/// GraphQLx only: standard GraphQL is validated against the draft specification by `validator`.
+///
+/// The layer is the `smear-analysis` crate.
+#[cfg(feature = "analysis")]
+#[cfg_attr(docsrs, doc(cfg(feature = "analysis")))]
+#[doc(inline)]
+pub use smear_analysis as analysis;
+
 // THE ONE MODULE THIS CRATE OWNS, and it is here rather than one layer down for a stated reason.
 //
 // `graphql-proto` refuses to write a response out because writing one means writing the driver's
@@ -267,10 +288,10 @@ pub mod __private {
 // ── THE UMBRELLA'S FEATURES ARE THE GATE, AND THIS IS WHAT MAKES THAT TRUE ───────────────────
 //
 // A feature of `smear` gates what it claims ONLY where this file writes the `#[cfg]`. `parser`,
-// `validator` and `proto` do — they gate the `pub use` statements above, and a second dependency
-// naming the member directly cannot conjure the module. Every other feature here merely FORWARDS
-// to a member feature, and the `#[cfg]` that decides the item then lives inside the member, where
-// cargo unifies it across the whole graph.
+// `validator`, `proto` and `analysis` do — they gate the `pub use` statements above, and a second
+// dependency naming the member directly cannot conjure the module. Every other feature here merely
+// FORWARDS to a member feature, and the `#[cfg]` that decides the item then lives inside the member,
+// where cargo unifies it across the whole graph.
 //
 // Measured on this tree, not argued. A consumer with
 //
@@ -299,7 +320,7 @@ pub mod __private {
 // it was unreachable and after the split it was silent.
 //
 // WHAT THIS FENCE DOES NOT COVER, stated because a claim wider than what it holds is the defect it
-// was built against. It covers MEMBER features — the 34 `cargo metadata` reports across the five
+// was built against. It covers MEMBER features — the 40 `cargo metadata` reports across the six
 // crates smear re-exports and `smear-semantics`, which it asserts without mounting. Several `smear`
 // features ALSO forward to third-party ones: `bytes_1` forwards `tokora/bytes_1`, and
 // `impl Source for bytes::Bytes` comes from tokora, not from `smear-lexer`. Measured on this tree:
@@ -445,17 +466,17 @@ const _: () = {
 };
 
 // `smear-semantics` is the one member asserted here that this crate does not mount. It sits beneath
-// `smear-schema`'s builder, so it is in the graph whenever `validator` is, and the optional edge
-// `validator` turns on exists so this block can read its witnesses.
-#[cfg(feature = "validator")]
+// `smear-schema`'s builder and beneath `smear-analysis`, so it is in the graph whenever `validator`
+// or `analysis` is, and the optional edge both turn on exists so this block can read its witnesses.
+#[cfg(any(feature = "validator", feature = "analysis"))]
 const _: () = {
   assert!(
     smear_semantics::__features::ALLOC == cfg!(feature = "alloc"),
-    "`smear-semantics/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and the kernels beneath `smear::validator` would then be built at\n     a tier this consumer never asked for. Enable `smear/alloc` too, or stop enabling\n     `smear-semantics/alloc`."
+    "`smear-semantics/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and the kernels beneath `smear::validator` and `smear::analysis`\n     would then be built at a tier this consumer never asked for. Enable `smear/alloc` too, or\n     stop enabling `smear-semantics/alloc`."
   );
   assert!(
     smear_semantics::__features::STD == cfg!(feature = "std"),
-    "`smear-semantics/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and the kernels beneath `smear::validator` would then be built at\n     a tier this consumer never asked for. Enable `smear/std` too, or stop enabling\n     `smear-semantics/std`."
+    "`smear-semantics/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and the kernels beneath `smear::validator` and `smear::analysis`\n     would then be built at a tier this consumer never asked for. Enable `smear/std` too, or\n     stop enabling `smear-semantics/std`."
   );
 };
 
@@ -488,5 +509,33 @@ const _: () = {
   assert!(
     graphql_proto::__features::STD == cfg!(feature = "std"),
     "`graphql-proto/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/std` too, or stop enabling\n     `graphql-proto/std`."
+  );
+};
+
+#[cfg(feature = "analysis")]
+const _: () = {
+  assert!(
+    smear_analysis::__features::ALLOC == cfg!(feature = "alloc"),
+    "`smear-analysis/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/alloc` too, or stop enabling\n     `smear-analysis/alloc`."
+  );
+  assert!(
+    smear_analysis::__features::BSTR_1 == cfg!(feature = "bstr_1"),
+    "`smear-analysis/bstr_1` and `smear/bstr_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bstr_1` too, or stop enabling\n     `smear-analysis/bstr_1`."
+  );
+  assert!(
+    smear_analysis::__features::BYTES_1 == cfg!(feature = "bytes_1"),
+    "`smear-analysis/bytes_1` and `smear/bytes_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bytes_1` too, or stop enabling\n     `smear-analysis/bytes_1`."
+  );
+  assert!(
+    smear_analysis::__features::HIPSTR_0_8 == cfg!(feature = "hipstr_0_8"),
+    "`smear-analysis/hipstr_0_8` and `smear/hipstr_0_8` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/hipstr_0_8` too, or stop enabling\n     `smear-analysis/hipstr_0_8`."
+  );
+  assert!(
+    smear_analysis::__features::SMOL_BYTES_0_2 == cfg!(feature = "smol-bytes_0_2"),
+    "`smear-analysis/smol-bytes_0_2` and `smear/smol-bytes_0_2` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smol-bytes_0_2` too, or stop enabling\n     `smear-analysis/smol-bytes_0_2`."
+  );
+  assert!(
+    smear_analysis::__features::STD == cfg!(feature = "std"),
+    "`smear-analysis/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/std` too, or stop enabling\n     `smear-analysis/std`."
   );
 };

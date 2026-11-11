@@ -27,6 +27,7 @@ smear = { path = "../../smear", default-features = false, features = [
   "validator",
   "proto",
   "introspection",
+  "analysis",
   "materialized-numbers",
   "test-support",
   "bstr",

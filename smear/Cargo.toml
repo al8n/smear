@@ -58,14 +58,14 @@ default = ["std", "graphql", "graphqlx", "parser", "smallvec_1"]
 # dialects, and the parser, which a `smear` dependency compiled unconditionally. A default build
 # compiles the same code before and after the merge.
 
-alloc = ["smear-lexer/alloc", "smear-parser?/alloc", "smear-schema/alloc", "smear-semantics?/alloc", "smear-compiler?/alloc", "graphql-proto?/alloc", "tokora/alloc", "bstr_1?/alloc"]
+alloc = ["smear-lexer/alloc", "smear-parser?/alloc", "smear-schema/alloc", "smear-semantics?/alloc", "smear-compiler?/alloc", "graphql-proto?/alloc", "smear-analysis?/alloc", "tokora/alloc", "bstr_1?/alloc"]
 
 # `thiserror/default` is gone from this list and is NOT a lost forward. The only
 # `#[derive(thiserror::Error)]` in the tree is `smear-lexer`'s `LengthError`, so the crate that
 # derives it is now the crate that owns the forward, and `smear-lexer/std` below is what turns it
 # on. `smear-smoke::std_tier` asserts that exact `impl std::error::Error` across a real dependency
 # edge, so a dropped forward is a compile error in a member rather than a silent tier change.
-std = ["alloc", "smear-lexer/std", "smear-parser?/std", "smear-schema/std", "smear-semantics?/std", "smear-compiler?/std", "graphql-proto?/std", "tokora/default", "bytes_1?/default", "bstr_1?/default", "hipstr_0_8?/default", "smol-bytes_0_2?/default"]
+std = ["alloc", "smear-lexer/std", "smear-parser?/std", "smear-schema/std", "smear-semantics?/std", "smear-compiler?/std", "graphql-proto?/std", "smear-analysis?/std", "tokora/default", "bytes_1?/default", "bstr_1?/default", "hipstr_0_8?/default", "smol-bytes_0_2?/default"]
 
 graphql = ["smear-lexer/graphql", "smear-parser?/graphql"]
 # Tracks a moving dialect spec: the GraphQLx surface is semver-exempt until the dialect
@@ -132,6 +132,13 @@ proto = ["validator", "dep:graphql-proto", "dep:itoa", "dep:zmij"]
 # *from*, and `smear-schema/src/builtin.rs` carries that distinction at the other end.
 introspection = ["validator", "smear-compiler/introspection", "smear-schema/introspection"]
 
+# GraphQLx schema analysis (`smear::analysis`): GraphQLx packages in, a resolved model and its
+# diagnostics out. It implies `parser` and `graphqlx`, because the analyzer reads the GraphQLx
+# parser's tree, and no tier: like every capability here it compiles nothing that allocates until
+# `alloc` is on as well. It turns on `smear-semantics` beside `smear-analysis`, which is the edge the
+# feature fence in `src/lib.rs` reads that crate's witnesses through.
+analysis = ["parser", "graphqlx", "dep:smear-analysis", "dep:smear-semantics"]
+
 # The five source backings. Each forwards to `smear-lexer`, which is where the `Source`
 # implementations live; the `dep:` half survives only for the three this package's own test
 # targets still name by type, and the `tokora/<backing>` half is kept beside it rather than left
@@ -144,13 +151,13 @@ introspection = ["validator", "smear-compiler/introspection", "smear-schema/intr
 smallvec = ["smallvec_1"]
 smallvec_1 = ["alloc", "smear-lexer/smallvec_1", "smear-parser?/smallvec_1"]
 bytes = ["bytes_1"]
-bytes_1 = ["dep:bytes_1", "alloc", "smear-lexer/bytes_1", "smear-parser?/bytes_1", "tokora/bytes_1"]
+bytes_1 = ["dep:bytes_1", "alloc", "smear-lexer/bytes_1", "smear-parser?/bytes_1", "smear-analysis?/bytes_1", "tokora/bytes_1"]
 bstr = ["bstr_1"]
-bstr_1 = ["dep:bstr_1", "smear-lexer/bstr_1", "smear-parser?/bstr_1", "tokora/bstr_1"]
+bstr_1 = ["dep:bstr_1", "smear-lexer/bstr_1", "smear-parser?/bstr_1", "smear-analysis?/bstr_1", "tokora/bstr_1"]
 hipstr = ["hipstr_0_8"]
-hipstr_0_8 = ["dep:hipstr_0_8", "alloc", "smear-lexer/hipstr_0_8", "smear-parser?/hipstr_0_8", "tokora/hipstr_0_8"]
+hipstr_0_8 = ["dep:hipstr_0_8", "alloc", "smear-lexer/hipstr_0_8", "smear-parser?/hipstr_0_8", "smear-analysis?/hipstr_0_8", "tokora/hipstr_0_8"]
 smol-bytes = ["smol-bytes_0_2"]
-smol-bytes_0_2 = ["dep:smol-bytes_0_2", "alloc", "smear-lexer/smol-bytes_0_2", "smear-parser?/smol-bytes_0_2", "tokora/smol-bytes_0_2"]
+smol-bytes_0_2 = ["dep:smol-bytes_0_2", "alloc", "smear-lexer/smol-bytes_0_2", "smear-parser?/smol-bytes_0_2", "smear-analysis?/smol-bytes_0_2", "tokora/smol-bytes_0_2"]
 
 # The umbrella twin of `smear-parser/materialized-numbers` — a second set of GraphQL value
 # productions carrying `i64` and `f64` where the slice parser carries a source slice.
@@ -249,9 +256,12 @@ graphql-proto = { workspace = true, optional = true }
 # reads one.
 smear-compiler = { workspace = true, optional = true }
 
+# GraphQLx schema analysis, behind `analysis`.
+smear-analysis = { workspace = true, optional = true }
+
 # MOUNTED NOWHERE, and a dependency anyway: the edge exists so the feature fence in `src/lib.rs`
-# can read this crate's witnesses. The crate sits beneath `smear-schema`'s builder, and `validator`,
-# which turns that builder on, turns this edge on with it.
+# can read this crate's witnesses. The crate sits beneath `smear-schema`'s builder and beneath
+# `smear-analysis`, and `validator` and `analysis`, which turn those on, turn this edge on too.
 smear-semantics = { workspace = true, optional = true }
 
 # ── THE TWO NUMBER FORMATTERS, BEHIND `proto` WITH THE MODULE THAT USES THEM ─────────────────

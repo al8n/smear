@@ -79,10 +79,10 @@ UMBRELLA = "smear"
 # not re-exported by anything and have no features; the planner rejects an unexpected member rather
 # than skipping it, so a new layer cannot arrive unnoticed. `smear-semantics` is the one member
 # here that `smear` does not re-export: it asserts the crate's features all the same, through the
-# edge `validator` turns on.
+# edge `validator` and `analysis` turn on.
 MEMBERS = (
   "smear-lexer", "smear-parser", "smear-semantics", "smear-schema", "smear-compiler",
-  "graphql-proto",
+  "graphql-proto", "smear-analysis",
 )
 
 # THE ONLY ESCAPE FROM BEING ASSERTED IS TO NAME A DIFFERENT TWIN, never to be left out.
@@ -161,6 +161,7 @@ PRESENCE = {
   "smear-semantics": ("parser", "graphql", "validator"),
   "smear-compiler": ("parser", "graphql", "validator"),
   "graphql-proto": ("parser", "graphql", "validator", "proto"),
+  "smear-analysis": ("parser", "graphqlx", "analysis"),
 }
 
 

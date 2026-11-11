@@ -84,6 +84,7 @@ smear-schema = { path = "../../smear-schema", default-features = false, optional
 smear-semantics = { path = "../../smear-semantics", default-features = false, optional = true }
 smear-compiler = { path = "../../smear-compiler", default-features = false, optional = true }
 graphql-proto = { path = "../../graphql-proto", default-features = false, optional = true }
+smear-analysis = { path = "../../smear-analysis", default-features = false, optional = true }
 
 # The consumer's own copy of a source crate, for the one probe whose capability is a trait impl
 # rather than a path. It carries no smear feature, which is the same omission pql's `tokora` entry

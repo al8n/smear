@@ -317,8 +317,7 @@ MIRI_PACKAGES = (
 # and the lexer's and the parser's cells still interpret their default set.
 MIRI_SHARD_FEATURES = {"smear-schema": ("build",)}
 
-# The publishable member deliberately NOT selected, and the reason is now a BEHAVIOUR rather than a
-# count.
+# The publishable members deliberately NOT selected, each with the behaviour that keeps it out.
 #
 # `smear-schema` used to be here, excused by "0 lib unit tests at the feature set these scripts
 # build" — measured with an isolated `cargo test -p smear-schema --lib`, which is not that feature
@@ -334,6 +333,10 @@ MIRI_SHARD_FEATURES = {"smear-schema": ("build",)}
 # the graph. Measured: `cargo test -p smear -p smear-compiler --lib` exits 101 on
 # `smear-schema/build` and `smear/validator` disagree. It also has no lib unit tests at any feature
 # set, but that is now the second reason rather than the only one.
+#
+# `smear-analysis` co-selects and builds an empty lib harness, which a cell selecting it would fail
+# on. `--verify-exclusions` builds it beside the selected members, so the day it gains a lib unit
+# test the exclusion fails and it moves into `MIRI_PACKAGES`.
 MIRI_NOT_SELECTED = {
     "smear": {
         "outcome": "forbidden",
@@ -341,6 +344,11 @@ MIRI_NOT_SELECTED = {
                "forces `smear-schema/build`, the umbrella at default features has `validator` off, "
                "and `smear/src/lib.rs`'s equivalence assertion refuses that graph. It carries no "
                "lib unit tests at any feature set either",
+    },
+    "smear-analysis": {
+        "outcome": "empty",
+        "why": "its lib target holds no unit test, so a cell selecting it would interpret an "
+               "empty harness, which this file fails a cell for",
     },
 }
 
@@ -426,7 +434,10 @@ def verify_exclusions(cargo: str = "cargo") -> int:
                 continue
             if message.get("reason") != "compiler-artifact" or not message.get("executable"):
                 continue
-            if f"/{member}-" in message["executable"] or f"/{member}/" in message["executable"]:
+            # Cargo names a lib test binary after the CRATE, `-` spelled `_`, as `package_of`
+            # reads it; matched by package name, a hyphenated member never finds its own.
+            stem = pathlib.Path(message["executable"]).name.rsplit("-", 1)[0]
+            if stem == member.replace("-", "_"):
                 executable = message["executable"]
         if executable is None:
             failures.append(
