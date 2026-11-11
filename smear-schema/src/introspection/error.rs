@@ -406,7 +406,7 @@ impl Diagnose for ResponseError {
   }
 
   #[inline]
-  fn label(&self, _: usize) -> Option<Label> {
+  fn label(&self, _: usize) -> Option<Label<'_>> {
     None
   }
 

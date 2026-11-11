@@ -28,11 +28,16 @@ All notable changes to Smear are documented in this file.
   (#251).
 - `smear-schema`: `SchemaErrorKind::UnreadableText` is no longer reachable from
   a parsed document. The kind is kept.
-- Builds on tokora 0.12 and smol-bytes 0.2. Paths through the
-  `smear::lexer::tokora` re-export follow tokora 0.12's layout. The `smol-bytes`
-  feature of `smear`, `smear-lexer` and `smear-parser` now enables tokora's
-  `smol-bytes_0_2` integration instead of `smol_bytes_0_1`, so the four
+- Builds on tokora 0.13 and smol-bytes 0.2. Paths through the
+  `smear::lexer::tokora` re-export follow the layout tokora adopted in 0.12. The
+  `smol-bytes` feature of `smear`, `smear-lexer` and `smear-parser` now enables
+  tokora's `smol-bytes_0_2` integration instead of `smol_bytes_0_1`, so the four
   smol-bytes source types are smol-bytes 0.2's. Supersedes #235.
+- **Diagnostics follow tokora 0.13: label and help text is borrowed from the
+  diagnostic.** `Diagnose::label` on every smear error type returns
+  `Option<Label<'_>>`; `primary_label` and `help` are unchanged in what they
+  return, and no smear diagnostic composes a label or help text yet. A caller
+  that named the type `Label` writes `Label<'_>`.
 - `smear-lexer`, `smear-parser` and `smear`: under `smol-bytes`, the four
   smol-bytes 0.2 types (`Bytes` and `Utf8Bytes`, each shared and compact) are
   now accepted as sources by both dialects' syntactic lexers and parsers, and as

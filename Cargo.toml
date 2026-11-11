@@ -97,6 +97,11 @@ smear-parser = { path = "smear-parser", version = "0.0.1", default-features = fa
 smear-compiler = { path = "smear-compiler", version = "0.0.1", default-features = false }
 smear-schema = { path = "smear-schema", version = "0.0.1", default-features = false }
 
+# TEMPORARY, removed before this branch leaves draft: tokora 0.13.0 is not published yet, and
+# this branch proves its diagnostic contract first. See CHANGELOG `[Unreleased]`.
+[patch.crates-io]
+tokora = { git = "https://github.com/al8n/tokora", rev = "d4648189a812bfcd663168c0630d9a6edd4b7323" }
+
 [workspace.lints.rust]
 # `priority = -1` because `unused_extern_crates` below is a MEMBER of this group, and cargo
 # refuses a group and one of its lints at the same priority — the group has to be resolved first

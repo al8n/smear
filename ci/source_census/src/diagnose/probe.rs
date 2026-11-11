@@ -155,7 +155,12 @@ fn manifest(crate_dir: &Path) -> Result<String, String> {
      [dependencies.{name}]\n\
      path = \"{}\"\n\
      default-features = false\n\
-     features = [\n{list}\n]\n",
+     features = [\n{list}\n]\n\
+     \n\
+     # TEMPORARY, removed before this branch leaves draft: tokora 0.13.0 is not published yet, and\n\
+     # this branch proves its diagnostic contract first. See CHANGELOG `[Unreleased]`.\n\
+     [patch.crates-io]\n\
+     tokora = {{ git = \"https://github.com/al8n/tokora\", rev = \"d4648189a812bfcd663168c0630d9a6edd4b7323\" }}\n",
     crate_dir.display(),
   ))
 }

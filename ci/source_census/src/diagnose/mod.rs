@@ -70,7 +70,7 @@ pub const TRAIT: &str = "Diagnose";
 ///
 /// It is not in this crate any more: the declaration is `tokora::diagnostic::Diagnose`, which
 /// `smear-schema` re-exports, so nothing here extends the list and it names every method that
-/// declaration carries itself — the nine `Diagnose` requires, as of tokora 0.12. A method tokora
+/// declaration carries itself — the nine `Diagnose` requires, as of tokora 0.13. A method tokora
 /// adds is therefore a line here. `related_label` is named beside them because it is not a trait
 /// method at all: it is the per-kind half of the `related()` implication
 /// `tests/diagnostic_codes.rs` pins.

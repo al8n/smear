@@ -230,7 +230,7 @@ impl<S> DiagnosticDisplay<'_, S> {
   /// Computed once so that [`Diagnose::labels`] and [`Diagnose::label`] cannot disagree about how
   /// many there are.
   #[inline]
-  const fn secondary(&self) -> Option<Label> {
+  const fn secondary(&self) -> Option<Label<'_>> {
     match (
       self.diagnostic.related,
       self.diagnostic.rule.related_label(),
@@ -287,7 +287,7 @@ where
   }
 
   #[inline]
-  fn label(&self, index: usize) -> Option<Label> {
+  fn label(&self, index: usize) -> Option<Label<'_>> {
     match index {
       0 => self.secondary(),
       _ => None,

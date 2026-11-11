@@ -456,7 +456,7 @@ fn only_rendering_allocates() {
   // primary label, every secondary label, every response-path segment, help — and write the
   // message out, without touching the allocator. That is what makes `&dyn Diagnose` usable in a
   // request path at all, and it holds only because every vocabulary type is `Copy` and every
-  // label and help string is `&'static`.
+  // label and help string is borrowed from the diagnostic rather than built by the read.
   //
   // Three things about the measurement below, each load-bearing:
   //

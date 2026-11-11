@@ -610,7 +610,7 @@ impl<Char, StateError> Diagnose for LexerError<Char, StateError> {
   }
 
   #[inline]
-  fn label(&self, _: usize) -> Option<Label> {
+  fn label(&self, _: usize) -> Option<Label<'_>> {
     None
   }
 

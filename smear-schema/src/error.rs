@@ -1229,7 +1229,7 @@ impl SchemaError {
   /// Both halves are needed for a label to exist, and the pair is computed once here so that
   /// [`Diagnose::labels`] and [`Diagnose::label`] cannot disagree about how many there are.
   #[inline]
-  const fn secondary(&self) -> Option<Label> {
+  const fn secondary(&self) -> Option<Label<'_>> {
     match (self.related, self.kind.related_label()) {
       (Some((span, document)), Some(text)) => Some(Label::new(Location::new(document, span), text)),
       _ => None,
@@ -1279,7 +1279,7 @@ impl Diagnose for SchemaError {
   }
 
   #[inline]
-  fn label(&self, index: usize) -> Option<Label> {
+  fn label(&self, index: usize) -> Option<Label<'_>> {
     match index {
       0 => self.secondary(),
       _ => None,
