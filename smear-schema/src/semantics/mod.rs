@@ -10,3 +10,4 @@
 
 pub(crate) mod duplicates;
 pub(crate) mod interner;
+pub(crate) mod scc;
