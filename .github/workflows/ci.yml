@@ -390,7 +390,7 @@ jobs:
     # `cargo hack clippy --each-feature` typed by hand is a different question: this file sets
     # `RUSTFLAGS: -Dwarnings` for every job, so a rustc lint is an error here and a warning there.
     # That gap cleared this branch twice on the same construct, and the second time a stacked
-    # branch found it. `ci/hack.sh` carries the flags, both passes and the reasoning.
+    # branch found it. `ci/hack.sh` carries the flags, all three passes and the reasoning.
     - name: ci/hack.sh
       run: bash ci/hack.sh
 
@@ -542,12 +542,13 @@ jobs:
       - name: Install Rust
         run: rustup update stable && rustup default stable
       # The same tier claim from the crate's own side, and it is a CELL rather than a sentence.
-      # `smear-schema`'s default configuration is `core` + `alloc` with `tokora` as its only
-      # dependency; `build` and `introspection` are what raise it, and neither is in `default`.
-      # `cargo hack --each-feature` reaches this configuration too, but only as one row of a
-      # matrix — naming it here means a regression says which claim broke.
-      - name: cargo check -p smear-schema --no-default-features
-        run: cargo check -p smear-schema --no-default-features
+      # `smear-schema`'s reader tier is `core` + `alloc` with `tokora` as its only dependency, and
+      # it needs the `alloc` feature: with no tier feature the crate keeps only `diagnostic` and
+      # `builtin`. `build` and `introspection` are what raise it further, and neither is in
+      # `default`. `cargo hack --each-feature` reaches this configuration too, but only as one row
+      # of a matrix — naming it here means a regression says which claim broke.
+      - name: cargo check -p smear-schema --no-default-features --features alloc
+        run: cargo check -p smear-schema --no-default-features --features alloc
       # ASSERT THE GRAPH, not only that the code compiles. `cargo check` passing says nothing about
       # what is in the dependency graph, and the claim `smear-schema`'s `build` feature exists to
       # support is exactly a graph claim: a machine that READS a schema at execution time does not
@@ -625,32 +626,40 @@ jobs:
         key: ${{ runner.os }}-coverage-dotcargo
     - name: Run build
       run: |
+        # Pass 1 — the core tier: no tier feature, so no allocator. Rows whose feature implies
+        # `alloc` or `std` (`bytes`, `smallvec`, `default`, `--all-features`, …) are above it.
         cargo hack build --each-feature
-        # Pass 2 — the pairwise isolation cells the crate split used to provide by accident.
+        # Pass 2 — the alloc tier, which is what pass 1 covered until `alloc` became a feature.
+        # `alloc` is not in the exclude list: cargo-hack refuses a feature named by both flags.
+        # `rowan` and `lossless-coverage` imply `std`, so their rows would repeat pass 1.
+        cargo hack build --each-feature --features alloc --ignore-unknown-features \
+          --exclude-features std,default,rowan,lossless-coverage --exclude-all-features
+        # Pass 3 — the pairwise isolation cells the crate split used to provide by accident.
         # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its
         # build always contained the parser; a single-crate `--each-feature` never builds `parser`
         # together with exactly one other feature. This restores those pairs deliberately, and the
         # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
+        # They are alloc-tier cells, because the parser needs an allocator.
         #
         # `smear-lexer` needs no pass of its own, and that is measured rather than assumed: not one
-        # of its features implies another — every entry in its `[features]` table is either empty
-        # or a forward to a dependency — so pass 1 already builds each of them in the only
-        # combination the old single-crate run gave them.
+        # of its features implies another capability — every entry in its `[features]` table is a
+        # tier, an empty capability or a forward to a dependency — so pass 2 already builds each of
+        # them in the only combination the old single-crate run gave them.
         #
         # `rowan`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
-        # because they already imply `parser`, so their pass-1 cells ARE pairs; `default`,
-        # `--no-default-features` and `--all-features` are excluded because those three runs would
-        # duplicate pass-1 exactly.
+        # because they already imply `parser`, so their pass-2 cells ARE pairs; `default`, `std`
+        # and `--all-features` are excluded because the `std` tier is pass 1's, and
+        # `--no-default-features` because `parser,alloc` is already pass 2's `parser` row.
         #
-        # `parser` itself is NOT in the exclude list: cargo-hack rejects a feature named by both
-        # `--features` and `--exclude-features` (verified against 0.6.43, "specified by both"),
-        # and it does not need to be there — it already skips the `parser,parser` cell on its own.
+        # `parser` and `alloc` are NOT in the exclude list: cargo-hack rejects a feature named by
+        # both `--features` and `--exclude-features` (verified against 0.6.43, "specified by
+        # both"), and it already skips the `parser,parser` and `alloc,alloc` cells on its own.
         # Nine cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
-        cargo hack build -p smear --each-feature --features parser \
-          --exclude-features rowan,lossless-coverage,validator,introspection,proto,default \
+        cargo hack build -p smear --each-feature --features parser,alloc \
+          --exclude-features rowan,lossless-coverage,validator,introspection,proto,default,std \
           --exclude-no-default-features --exclude-all-features
-        # Pass 3 — the six criterion benches, which NOTHING ELSE IN CI COMPILES.
+        # Pass 4 — the six criterion benches, which NOTHING ELSE IN CI COMPILES.
         #
         # Measured on this tree: `cargo test`'s default target selection is lib + bins + tests +
         # examples; a `[[bench]]` target is not in it, and neither `cargo build --workspace
@@ -842,19 +851,24 @@ jobs:
 
         # `package|features|rendered page`.
         #
-        # Every leg is `--no-default-features` plus exactly one dialect, because a
+        # Every dialect leg is `--no-default-features` plus exactly one dialect, because a
         # cross-dialect link is only unresolvable when the other dialect is absent.
         # `rowan` rides along on the parser-side legs because the lossless tree —
         # where Phase B found the first such link — is compiled out without it, and
         # `rowan` implies `parser`, so those two legs document the tower while the
         # bare-dialect legs document the crate as the lexer alone. Six legs became
         # four with the merge: the facade's own pair tested resolution forwarding
-        # through a layer that no longer exists.
+        # through a layer that no longer exists. The bare-dialect legs carry `alloc` because the
+        # dialect modules exist only with it.
+        #
+        # The last leg is the core tier, every capability and no tier feature: a conditional doc
+        # that names a path existing only with `alloc` fails there.
         legs=(
           "smear|rowan,graphql|smear"
           "smear|rowan,graphqlx|smear"
-          "smear|graphql|smear"
-          "smear|graphqlx|smear"
+          "smear|alloc,graphql|smear"
+          "smear|alloc,graphqlx|smear"
+          "smear|graphql,graphqlx,parser,validator,proto,introspection|smear"
         )
 
         for leg in "${legs[@]}"; do
@@ -1431,9 +1445,10 @@ jobs:
         # nowhere, and this is the one leg that enforces all of them. There is no second nightly
         # doctest step because none is needed: the audit of al8n/smear#173 found no coded fence
         # whose item needs a feature this feature set lacks, and none whose point is that a feature
-        # is OFF. The gates, by what the fence's item needs:
-        #   - nothing: `graphql-proto` (2); `smear-lexer`'s `keyword!` (1), the string carriers
-        #     under `string_lexer` (11)
+        # is OFF. The gates, by what the fence's item needs; the `alloc` tier is on here, through
+        # `rowan` and `std`, and every item but `keyword!` needs it:
+        #   - no capability: `graphql-proto` (2); `smear-lexer`'s `keyword!` (1), the string
+        #     carriers under `string_lexer` (11)
         #   - `graphql`: `smear-lexer`'s `LosslessLexer` accessors (3); `smear-parser`'s
         #     `graphql::ast` hash-key fences (4: `OperationType` and the three `type_system`
         #     locations) and `value::nesting`'s `Leaf` fences under a `cfg_attr(graphql, doc)` (5)
