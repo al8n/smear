@@ -8,4 +8,5 @@
 //! analyzer will both depend on, and that move stays a `git mv` only while nothing in here names
 //! the builder.
 
+pub(crate) mod duplicates;
 pub(crate) mod interner;
