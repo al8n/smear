@@ -216,6 +216,9 @@ use tokora::SimpleSpan;
 
 use crate::{Ceiling, Extensions, Limits, StartError};
 
+#[cfg(test)]
+mod tests;
+
 /// A map [`RequestErrorResult::set_extensions`] refused, carrying it back.
 ///
 /// Separate from [`SetExtensionsError`](crate::SetExtensionsError), whose other two variants are
@@ -1214,6 +1217,3 @@ impl fmt::Write for Bounded {
     Ok(())
   }
 }
-
-#[cfg(test)]
-mod tests;
