@@ -15,22 +15,27 @@ readme = "README.md"
 default = ["std"]
 
 # The analyzer allocates, so without `alloc` this crate is its feature witnesses alone. `std` flips
-# the crate attribute and nothing else.
-alloc = ["smear-lexer/alloc", "smear-parser/alloc", "smear-semantics/alloc", "tokora/alloc"]
-std = ["alloc", "smear-lexer/std", "smear-parser/std", "smear-semantics/std", "tokora/std"]
+# the crate attribute and nothing else, beyond the tier forwards to the optional source crates
+# below, which mirror `smear-parser`'s.
+alloc = ["smear-lexer/alloc", "smear-parser/alloc", "smear-semantics/alloc", "tokora/alloc", "bstr_1?/alloc"]
+std = ["alloc", "smear-lexer/std", "smear-parser/std", "smear-semantics/std", "tokora/std", "bytes_1?/default", "bstr_1?/default", "hipstr_0_8?/default", "smol-bytes_0_2?/default"]
 
 # The source texts the analyzer accepts beyond `str` and `[u8]`. Each versioned feature forwards
 # `smear-parser`'s of the same name, whose GraphQLx lexer and parser do the reading, and implies the
 # tier its dependency crate links: `alloc` for all but `bstr_1`. The unversioned name is a pure
 # alias for the current major and carries nothing else.
+#
+# Each also turns on this crate's own edge to the source crate, because `SourceText` is implemented
+# here for that crate's type and the orphan rule puts the impl here or nowhere: no member re-exports
+# `bytes`, `bstr`, `hipstr` or `smol-bytes`, so naming the type needs the dependency.
 bytes = ["bytes_1"]
-bytes_1 = ["alloc", "smear-parser/bytes_1"]
+bytes_1 = ["dep:bytes_1", "alloc", "smear-parser/bytes_1"]
 bstr = ["bstr_1"]
-bstr_1 = ["smear-parser/bstr_1"]
+bstr_1 = ["dep:bstr_1", "smear-parser/bstr_1"]
 hipstr = ["hipstr_0_8"]
-hipstr_0_8 = ["alloc", "smear-parser/hipstr_0_8"]
+hipstr_0_8 = ["dep:hipstr_0_8", "alloc", "smear-parser/hipstr_0_8"]
 smol-bytes = ["smol-bytes_0_2"]
-smol-bytes_0_2 = ["alloc", "smear-parser/smol-bytes_0_2"]
+smol-bytes_0_2 = ["dep:smol-bytes_0_2", "alloc", "smear-parser/smol-bytes_0_2"]
 
 [dependencies]
 tokora.workspace = true
@@ -38,6 +43,15 @@ tokora.workspace = true
 smear-lexer.workspace = true
 smear-parser = { workspace = true, features = ["graphqlx"] }
 smear-semantics.workspace = true
+
+# The source crates `SourceText` is implemented for, declared exactly as `smear-parser` declares
+# them and turned on only by the feature of the same name.
+bstr_1 = { workspace = true, optional = true }
+bytes_1 = { workspace = true, optional = true }
+# Not a workspace entry: there is none for `hipstr`, and `smear-parser` states the same requirement
+# inline for the same reason.
+hipstr_0_8 = { package = "hipstr", version = "0.8", default-features = false, optional = true }
+smol-bytes_0_2 = { workspace = true, optional = true }
 
 [lints]
 workspace = true
