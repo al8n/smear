@@ -124,6 +124,14 @@ impl<S> core::fmt::Debug for Interner<S> {
   }
 }
 
+/// The map of an [`Interner`] that [`Interner::into_parts`] took apart.
+///
+/// Nothing reads it again. It is handed back rather than dropped inside `into_parts`, so that
+/// when its memory is released is the caller's decision.
+pub(crate) struct Retired {
+  _map: BTreeMap<Box<[u8]>, u32>,
+}
+
 impl<S: Symbol> Interner<S> {
   pub(crate) fn intern(&mut self, bytes: &[u8]) -> S {
     self.intern_within(bytes, MAX_ARENA_BYTES, MAX_ARENA_SYMBOLS)
@@ -220,9 +228,9 @@ impl<S: Symbol> Interner<S> {
     self.refused
   }
 
-  /// The arena's bytes and its spans, in that order; the map goes with the interner.
-  pub(crate) fn into_parts(self) -> (Vec<u8>, Vec<(u32, u32)>) {
-    (self.strings, self.spans)
+  /// The arena's bytes, its spans, and the retired map, in that order.
+  pub(crate) fn into_parts(self) -> (Vec<u8>, Vec<(u32, u32)>, Retired) {
+    (self.strings, self.spans, Retired { _map: self.map })
   }
 
   /// The spans, one per symbol: the builder's tests read the arena's shape through this.

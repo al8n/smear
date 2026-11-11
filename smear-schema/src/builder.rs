@@ -7442,7 +7442,10 @@ impl SchemaBuilder {
       type_of_sym[raw.name.sym.get() as usize] = index as u32;
     }
 
-    let (strings, spans) = interner.into_parts();
+    // The map is kept to the end of `flatten` rather than released here: the tables below are
+    // built with it alive, and `smear/tests/validator_allocation.rs` compares this build's peaks
+    // exactly.
+    let (strings, spans, _retired) = interner.into_parts();
     let strings = strings.into_boxed_slice();
     let spans = spans.into_boxed_slice();
     let index = {
