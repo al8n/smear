@@ -6946,6 +6946,11 @@ impl SchemaBuilder {
   // -- flattening -------------------------------------------------------------------------------
 
   fn flatten(self) -> Result<Schema, SchemaErrors> {
+    // The interner's map is released last of everything `flatten` owns, which is why its slot is
+    // declared first. Releasing a `RawValue` allocates, so where the map sits in that teardown is
+    // part of the build's allocation timeline, and `smear/tests/validator_allocation.rs` reads
+    // that timeline exactly.
+    let mut _retired = None;
     let Self {
       interner,
       types: raw_types,
@@ -7442,10 +7447,8 @@ impl SchemaBuilder {
       type_of_sym[raw.name.sym.get() as usize] = index as u32;
     }
 
-    // The map is kept to the end of `flatten` rather than released here: the tables below are
-    // built with it alive, and `smear/tests/validator_allocation.rs` compares this build's peaks
-    // exactly.
-    let (strings, spans, _retired) = interner.into_parts();
+    let (strings, spans, retired) = interner.into_parts();
+    _retired = Some(retired);
     let strings = strings.into_boxed_slice();
     let spans = spans.into_boxed_slice();
     let index = {
