@@ -120,6 +120,8 @@ mod builder;
 mod error;
 #[cfg(feature = "alloc")]
 mod repr;
+#[cfg(all(feature = "alloc", feature = "build"))]
+mod semantics;
 
 /// The literal-shape coercion table, shared with the executable rules.
 ///
