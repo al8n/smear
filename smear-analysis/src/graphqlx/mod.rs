@@ -12,11 +12,25 @@
 //!
 //! The analysis is Sans-I/O: the caller walks its directories, applies its include rules, reads
 //! its files and reads its manifest, and supplies every package up front.
+//!
+//! # Sources
+//!
+//! Every package has a package source, numbered before its files, and every file is a source. A
+//! [`SourceId`] numbers them densely, and the [`SourceMap`] records each one's package, path and
+//! length, never its text: the texts stay with the caller, and [`SourceMap::bind`] pairs the map
+//! with them again for a renderer. The built-in packages `core`, `alloc` and `std` have
+//! [`PackageId`]s and sources like any other, and smear supplies their texts itself.
 
+mod builtin;
+mod id;
 mod limits;
 mod package;
+mod set;
+mod source;
 mod text;
 
+pub use id::{IdIter, IdRange, PackageId, SourceId};
 pub use limits::Limits;
 pub use package::{IntegerProvider, Layout, Package, SourceFile, Tier};
+pub use source::{Bound, Source, SourceMap};
 pub use text::SourceText;

@@ -110,6 +110,18 @@ impl IntegerProvider {
   pub const fn unsigned(&self) -> RangeInclusive<u32> {
     RangeInclusive::new(self.unsigned.0, self.unsigned.1)
   }
+
+  /// Everything the provider holds, as one key the package order breaks ties with.
+  #[inline]
+  pub(crate) const fn key(&self) -> (&str, u32, u32, u32, u32) {
+    (
+      self.name,
+      self.signed.0,
+      self.signed.1,
+      self.unsigned.0,
+      self.unsigned.1,
+    )
+  }
 }
 
 /// One package: its name, how its files map to modules, its tier, its files, the packages it

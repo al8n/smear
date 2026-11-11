@@ -1,6 +1,6 @@
 //! The texts a source file may hold, and how the analysis reads each one.
 
-use private::View;
+pub(crate) use private::View;
 
 /// A source file's text: any representation the GraphQLx syntactic parser reads.
 ///
@@ -51,6 +51,26 @@ mod private {
     Text(&'a str),
     /// The text is bytes, which may or may not be UTF-8.
     Bytes(&'a [u8]),
+  }
+
+  impl<'a> View<'a> {
+    /// The text's bytes, whichever way it was borrowed.
+    #[inline]
+    pub(crate) fn bytes(self) -> &'a [u8] {
+      match self {
+        Self::Text(text) => text.as_bytes(),
+        Self::Bytes(bytes) => bytes,
+      }
+    }
+
+    /// The text as `str`, or `None` for bytes that are not UTF-8.
+    #[inline]
+    pub(crate) fn as_text(self) -> Option<&'a str> {
+      match self {
+        Self::Text(text) => Some(text),
+        Self::Bytes(bytes) => core::str::from_utf8(bytes).ok(),
+      }
+    }
   }
 }
 
