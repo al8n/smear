@@ -121,3 +121,6 @@ pub(crate) fn on_cycle(
 
   cyclic
 }
+
+#[cfg(test)]
+mod tests;

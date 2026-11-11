@@ -90,3 +90,6 @@ impl<S: Copy + Ord> Duplicates<S> {
     }
   }
 }
+
+#[cfg(test)]
+mod tests;
