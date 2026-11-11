@@ -103,10 +103,11 @@ $CARGO $TOOLCHAIN hack clippy --each-feature --features alloc --ignore-unknown-f
 # capability or a forward to a dependency — so pass 2 already builds each of them in the only
 # combination the old single-crate run gave it.
 #
-# `rowan_0_17`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded because
-# they already imply `parser`, so their pass-2 cells ARE pairs; `default`, `std` and `--all-features`
-# are excluded because the `std` tier is pass 1's, and `--no-default-features` because
-# `parser,alloc` is already pass 2's `parser` row. The aliases are excluded as in pass 1.
+# `rowan_0_17`, `lossless-coverage`, `validator`, `introspection`, `proto` and `analysis` are
+# excluded because they already imply `parser`, so their pass-2 cells ARE pairs; `default`,
+# `std` and `--all-features` are excluded because the `std` tier is pass 1's, and
+# `--no-default-features` because `parser,alloc` is already pass 2's `parser` row. The aliases are
+# excluded as in pass 1.
 #
 # `parser` and `alloc` are NOT in the exclude list: cargo-hack rejects a feature named by both
 # `--features` and `--exclude-features` (verified against 0.6.43, "specified by both"), and it
@@ -120,7 +121,7 @@ echo "== pass 3: the parser x feature pairs, on the alloc tier =="
 # shellcheck disable=SC2086
 $CARGO $TOOLCHAIN hack clippy -p smear --each-feature --features parser,alloc --tests --keep-going \
   --exclude-features \
-  rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,default,std,bytes,bstr,hipstr,smol-bytes,smallvec \
+  rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,analysis,default,std,bytes,bstr,hipstr,smol-bytes,smallvec \
   --exclude-no-default-features --exclude-all-features || status=1
 
 exit "$status"

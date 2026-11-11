@@ -187,11 +187,11 @@ jobs:
         # two that matter are `parser` x `bytes_1` (60 parser cfg sites) and `parser` x dialect.
         # They are alloc-tier cells, because the parser needs an allocator.
         #
-        # `rowan_0_17`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
-        # because they already imply `parser`, so their pass-2 cells ARE pairs; `default`, `std`
-        # and `--all-features` are excluded because the `std` tier is pass 1's, and
-        # `--no-default-features` because `parser,alloc` is already pass 2's `parser` row. The
-        # aliases (`rowan` among them) are excluded as in pass 1.
+        # `rowan_0_17`, `lossless-coverage`, `validator`, `introspection`, `proto` and
+        # `analysis` are excluded because they already imply `parser`, so their pass-2 cells ARE
+        # pairs; `default`, `std` and `--all-features` are excluded because the `std` tier is pass
+        # 1's, and `--no-default-features` because `parser,alloc` is already pass 2's `parser` row.
+        # The aliases (`rowan` among them) are excluded as in pass 1.
         #
         # `parser` and `alloc` are NOT in the exclude list: cargo-hack rejects a feature named by
         # both `--features` and `--exclude-features` (verified against 0.6.43, "specified by
@@ -199,7 +199,7 @@ jobs:
         # Nine cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
         cargo hack build -p smear --each-feature --features parser,alloc \
-          --exclude-features rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,default,std,bytes,bstr,hipstr,smol-bytes,smallvec \
+          --exclude-features rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,analysis,default,std,bytes,bstr,hipstr,smol-bytes,smallvec \
           --exclude-no-default-features --exclude-all-features
 
   test:

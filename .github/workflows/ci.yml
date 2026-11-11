@@ -74,10 +74,10 @@ on:
     # below. Ignoring them meant the one job that can catch such a break never ran for the one
     # change class that causes it.
     #
-    # `smear-schema`, `smear-compiler` and `graphql-proto` carry a README that is NOT included:
-    # their crate roots have hand-written `//!` headers, as the modules they came from did. Those
-    # three are crates.io landing pages only, and nothing compiles them — a stated bound, not a
-    # claim that the `docs` job covers them.
+    # `smear-schema`, `smear-compiler`, `graphql-proto`, `smear-semantics` and `smear-analysis` carry
+    # a README that is NOT included: their crate roots have hand-written `//!` headers, the first
+    # three as the modules they came from did. Those five are crates.io landing pages only, and
+    # nothing compiles them — a stated bound, not a claim that the `docs` job covers them.
     #
     # Only the markdown no crate compiles is ignored, which is the root `docs/` notes tree.
     #
@@ -626,7 +626,7 @@ jobs:
       - name: the alloc tier builds on thumbv7em-none-eabihf
         run: >-
           cargo build -p smear --no-default-features
-          --features alloc,graphql,graphqlx,parser,validator,proto,introspection,materialized-numbers,test-support,bstr_1,smol-bytes_0_2,smallvec_1,bytes_1,hipstr_0_8
+          --features alloc,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,bstr_1,smol-bytes_0_2,smallvec_1,bytes_1,hipstr_0_8
           --target thumbv7em-none-eabihf
       - name: the core tier links no allocator
         run: bash ci/noalloc.sh
@@ -692,11 +692,11 @@ jobs:
         # tier, an empty capability or a forward to a dependency — so pass 2 already builds each of
         # them in the only combination the old single-crate run gave them.
         #
-        # `rowan_0_17`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
-        # because they already imply `parser`, so their pass-2 cells ARE pairs; `default`, `std`
-        # and `--all-features` are excluded because the `std` tier is pass 1's, and
-        # `--no-default-features` because `parser,alloc` is already pass 2's `parser` row. The
-        # aliases (`rowan` among them) are excluded as in pass 1.
+        # `rowan_0_17`, `lossless-coverage`, `validator`, `introspection`, `proto` and
+        # `analysis` are excluded because they already imply `parser`, so their pass-2 cells ARE
+        # pairs; `default`, `std` and `--all-features` are excluded because the `std` tier is pass
+        # 1's, and `--no-default-features` because `parser,alloc` is already pass 2's `parser` row.
+        # The aliases (`rowan` among them) are excluded as in pass 1.
         #
         # `parser` and `alloc` are NOT in the exclude list: cargo-hack rejects a feature named by
         # both `--features` and `--exclude-features` (verified against 0.6.43, "specified by
@@ -704,7 +704,7 @@ jobs:
         # Nine cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
         cargo hack build -p smear --each-feature --features parser,alloc \
-          --exclude-features rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,default,std,bytes,bstr,hipstr,smol-bytes,smallvec \
+          --exclude-features rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,analysis,default,std,bytes,bstr,hipstr,smol-bytes,smallvec \
           --exclude-no-default-features --exclude-all-features
         # Pass 4 — the six criterion benches, which NOTHING ELSE IN CI COMPILES.
         #
@@ -918,7 +918,7 @@ jobs:
           "smear|rowan_0_17,graphqlx|smear"
           "smear|alloc,graphql|smear"
           "smear|alloc,graphqlx|smear"
-          "smear|graphql,graphqlx,parser,validator,proto,introspection|smear"
+          "smear|graphql,graphqlx,parser,validator,proto,introspection,analysis|smear"
         )
 
         for leg in "${legs[@]}"; do

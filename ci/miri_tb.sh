@@ -224,7 +224,8 @@ export MIRIFLAGS
 # four of those `unsafe` sites are in `smear-lexer/src/string_lexer/`. The members are
 # `smear-lexer`, `smear-parser`, `smear-schema`, `smear-compiler` and `graphql-proto`, and a cell
 # runs ONE of them (see below): 144, 367, 21, 16 and 64 lib unit tests, each counted at its own
-# cell's feature set on 2026-09-25.
+# cell's feature set on 2026-09-25. `smear-semantics` joined them later, with the 14 lib unit
+# tests that left `smear-schema` alongside the builder's three kernels.
 #
 # THAT DISTINCTION COST A ROUND. `smear-schema` was excluded on "0 lib unit tests", measured with an
 # isolated `cargo test -p smear-schema --lib` — but the five-member selection contained
@@ -237,8 +238,9 @@ export MIRIFLAGS
 # `smear` IS DELIBERATELY OUT, and not for a test count: co-selecting it with `smear-compiler` does
 # not COMPILE. The compiler forces `smear-schema/build`, the umbrella at default features has
 # `validator` off, and the equivalence assertion in `smear/src/lib.rs` refuses that graph. It has no
-# lib unit tests either. `MIRI_NOT_SELECTED` records the behaviour, and `--verify-exclusions`
-# re-runs it under this same selection.
+# lib unit tests either. `smear-analysis` is out because it has no lib unit test to interpret.
+# `MIRI_NOT_SELECTED` records both behaviours, and `--verify-exclusions` re-runs them under
+# this same selection.
 #
 # THE SELECTION BELOW IS NOT WRITTEN HERE. It is read from `MIRI_PACKAGES`. Those were two
 # hand-maintained lists and they drifted: the constant grew to six members through the split while
