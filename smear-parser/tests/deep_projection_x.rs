@@ -12,15 +12,15 @@
 //! GraphQLx has three cycles where the vanilla dialect has four, and the arithmetic is not a
 //! narrowing:
 //!
-//! - the **value** cycle absorbs two more containers — `set { … }` and `map { k => v }` — and a map
-//!   entry is the one place a single child slot yields *two* subtrees, so it nests through its key
-//!   as well as through its value;
+//! - the **value** cycle absorbs two more containers — `set!{ … }` and `map!{ k => v }` — and a
+//!   map entry is the one place a single child slot yields *two* subtrees, so it nests through its
+//!   key as well as through its value;
 //! - the **type** cycle absorbs what GraphQL splits off as a `NonNullType` wrapper (the `!` is a
-//!   token here) and gains three shapes of its own: a set type, a map type through either half, and
-//!   a path's **generic arguments**, which nest without passing through a bracket at all;
+//!   token here) and gains one shape of its own: a path's **generic arguments**, which nest without
+//!   passing through a bracket at all;
 //! - the **selection** cycle is the vanilla dialect's, unchanged.
 //!
-//! So there are nine fixtures below rather than four, and each of them is a separate walk over
+//! So there are seven fixtures below rather than four, and each of them is a separate walk over
 //! separate frame types. A shape with no fixture is a shape whose worklist nobody measured.
 //!
 //! # Why the reading is a stack address and not a thread that is too small
@@ -279,41 +279,41 @@ fn a_list_value_projects_flat() {
   });
 }
 
-/// `set { set { … } }` — GraphQLx only, and a container the vanilla dialect's fixture set has no
+/// `set!{ set!{ … } }` — GraphQLx only, and a container the vanilla dialect's fixture set has no
 /// shape for.
 #[test]
 fn a_set_value_projects_flat() {
   assert_projection_is_flat("const_value / set", false, |depth| {
     constant(&nested_value(depth, |inner| {
-      std::format!("set {{ {inner} }}")
+      std::format!("set!{{ {inner} }}")
     }))
   });
 }
 
-/// `map { 1 => map { … } }` — the entry's **value** half.
+/// `map!{ 1 => map!{ … } }` — the entry's **value** half.
 #[test]
 fn a_map_values_value_half_projects_flat() {
   assert_projection_is_flat("const_value / map value", false, |depth| {
     constant(&nested_value(depth, |inner| {
-      std::format!("map {{ 1 => {inner} }}")
+      std::format!("map!{{ 1 => {inner} }}")
     }))
   });
 }
 
-/// `map { map { … } => 2 }` — the entry's **key** half, which is the one a frame has to hold a
+/// `map!{ map!{ … } => 2 }` — the entry's **key** half, which is the one a frame has to hold a
 /// finished value across. Measured separately because the two halves are two states of one frame
 /// and a walk could be flat in one and not the other.
 #[test]
 fn a_map_values_key_half_projects_flat() {
   assert_projection_is_flat("const_value / map key", false, |depth| {
     constant(&nested_value(depth, |inner| {
-      std::format!("map {{ {inner} => 2 }}")
+      std::format!("map!{{ {inner} => 2 }}")
     }))
   });
 }
 
 // ---------------------------------------------------------------------------------------------
-// the type cycle — four shapes, three of them GraphQLx-only
+// the type cycle — two shapes, one of them GraphQLx-only
 // ---------------------------------------------------------------------------------------------
 
 #[test]
@@ -323,28 +323,9 @@ fn a_nested_list_type_projects_flat() {
   });
 }
 
-/// `<<<Int>>>` — GraphQLx only.
-#[test]
-fn a_nested_set_type_projects_flat() {
-  assert_projection_is_flat("ty / set", false, |depth| {
-    typed(&nested_type(depth, |inner| std::format!("<{inner}>")))
-  });
-}
-
-/// `<Int => <Int => … >>` — GraphQLx only, and the type-side twin of the map entry: two subtrees
-/// under one node, with the key travelling on the frame while the value is built.
-#[test]
-fn a_nested_map_type_projects_flat() {
-  assert_projection_is_flat("ty / map", false, |depth| {
-    typed(&nested_type(depth, |inner| {
-      std::format!("<Int => {inner}>")
-    }))
-  });
-}
-
-/// `A<A<A<Int>>>` — the fourth way a GraphQLx type nests, and the one a reading of the three
-/// bracket shapes alone would miss: a path's arguments are types, so this nests without passing
-/// through a bracket at all.
+/// `A<A<A<Int>>>` — the second way a GraphQLx type nests, and the one a reading of the bracket
+/// shape alone would miss: a path's arguments are types, so this nests without passing through a
+/// bracket at all.
 #[test]
 fn a_nested_generic_argument_list_projects_flat() {
   assert_projection_is_flat("ty / generics", false, |depth| {

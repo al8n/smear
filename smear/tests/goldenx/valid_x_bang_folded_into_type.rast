@@ -1,12 +1,12 @@
-Root@0..63
-  Document@0..63
-    ObjectTypeDefinition@0..62
+Root@0..75
+  Document@0..75
+    ObjectTypeDefinition@0..74
       Name@0..4 "type"
       Space@4..5 " "
       DefinitionName@5..7
         Name@5..6 "T"
         Space@6..7 " "
-      FieldsDefinition@7..62
+      FieldsDefinition@7..74
         LBrace@7..8 "{"
         Space@8..9 " "
         FieldDefinition@9..18
@@ -33,36 +33,41 @@ Root@0..63
             Bang@27..28 "!"
           Comma@28..29 ","
           Space@29..30 " "
-        FieldDefinition@30..41
+        FieldDefinition@30..48
           Name@30..31 "c"
           Colon@31..32 ":"
           Space@32..33 " "
-          SetType@33..39
-            LAngle@33..34 "<"
-            DefinitionTypePath@34..37
-              Path@34..37
-                Name@34..37 "Int"
-            RAngle@37..38 ">"
-            Bang@38..39 "!"
-          Comma@39..40 ","
-          Space@40..41 " "
-        FieldDefinition@41..61
-          Name@41..42 "d"
-          Colon@42..43 ":"
-          Space@43..44 " "
-          MapType@44..60
-            LAngle@44..45 "<"
-            DefinitionTypePath@45..49
-              Path@45..49
-                Name@45..48 "Int"
-                Space@48..49 " "
-            FatArrow@49..51 "=>"
-            Space@51..52 " "
-            DefinitionTypePath@52..58
-              Path@52..58
-                Name@52..58 "String"
-            RAngle@58..59 ">"
-            Bang@59..60 "!"
-          Space@60..61 " "
-        RBrace@61..62 "}"
-    Newline@62..63 "\n"
+          DefinitionTypePath@33..46
+            Path@33..40
+              Name@33..40 "HashSet"
+            TypeGenerics@40..45
+              LAngle@40..41 "<"
+              DefinitionTypePath@41..44
+                Path@41..44
+                  Name@41..44 "Int"
+              RAngle@44..45 ">"
+            Bang@45..46 "!"
+          Comma@46..47 ","
+          Space@47..48 " "
+        FieldDefinition@48..73
+          Name@48..49 "d"
+          Colon@49..50 ":"
+          Space@50..51 " "
+          DefinitionTypePath@51..72
+            Path@51..58
+              Name@51..58 "HashMap"
+            TypeGenerics@58..71
+              LAngle@58..59 "<"
+              DefinitionTypePath@59..64
+                Path@59..64
+                  Name@59..62 "Int"
+                  Comma@62..63 ","
+                  Space@63..64 " "
+              DefinitionTypePath@64..70
+                Path@64..70
+                  Name@64..70 "String"
+              RAngle@70..71 ">"
+            Bang@71..72 "!"
+          Space@72..73 " "
+        RBrace@73..74 "}"
+    Newline@74..75 "\n"

@@ -51,12 +51,11 @@
 //!
 //! # The shapes this dialect has and the other does not
 //!
-//! Five families get a witness of their own below, because each is a *mapping* divergence rather
+//! Four families get a witness of their own below, because each is a *mapping* divergence rather
 //! than a renaming and an aggregate sweep would report only that two large values differ:
 //! [`a_definitions_name_is_a_node_and_not_a_token_at_an_index`],
 //! [`a_description_is_a_token_of_the_definition_it_precedes`],
-//! [`a_map_entrys_two_halves_are_told_apart_by_their_order`],
-//! [`a_map_types_two_halves_are_told_apart_by_their_order`] and
+//! [`a_map_entrys_two_halves_are_told_apart_by_their_order`] and
 //! [`a_where_predicate_is_a_constrained_type_and_then_its_bounds`].
 
 use std::{
@@ -141,7 +140,7 @@ const TYPE_SYSTEM_ENTRY_FLOOR: usize = 47;
 /// Read off the syntactic parse's `Debug` rendering — the same total projection
 /// `tests/support/span_extent.rs` walks — so a corpus that stopped reaching the imports, the
 /// generics or the set/map families is a floor failure rather than a silent narrowing.
-const OWNER_FLOOR: usize = 93;
+const OWNER_FLOOR: usize = 91;
 
 // ---------------------------------------------------------------------------------------------
 // harnesses
@@ -1052,7 +1051,7 @@ fn a_variable_definition_hoists_where_a_field_definition_does_not() {
 fn a_map_entrys_two_halves_are_told_apart_by_their_order() {
   // One child stream, two subtrees, and nothing but the `=>` between them: the typed wrapper layer
   // has to expose plural getters here and the projection has to read positionally.
-  let src = "type T @d(m: map { 1 => 2 }) { f: Int }";
+  let src = "type T @d(m: map!{ 1 => 2 }) { f: Int }";
   let parse = parse_document(src);
   let entry = parse
     .syntax()
@@ -1095,38 +1094,8 @@ fn a_map_entrys_two_halves_are_told_apart_by_their_order() {
 }
 
 #[test]
-fn a_map_types_two_halves_are_told_apart_by_their_order() {
-  let src = "type T { f: <Int => String> }";
-  let parse = parse_document(src);
-  let map = parse
-    .syntax()
-    .descendants()
-    .find(|node| node.kind() == K::MapType)
-    .expect("a map type node");
-  assert_eq!(
-    map
-      .children()
-      .filter(|child| child.kind() == K::DefinitionTypePath)
-      .count(),
-    2,
-    "both halves are the same kind"
-  );
-
-  let projected = project(&parse, src).expect("projects");
-  assert_eq!(projected, oracle(src).expect("parses"));
-
-  let ty = first_field_type(&projected);
-  let map = ty.try_unwrap_map_ref().expect("a map type");
-  assert_eq!(
-    (map.key().span().start(), map.value().span().start()),
-    (13, 20),
-    "the key is the first half and the value the second"
-  );
-}
-
-#[test]
 fn a_where_predicate_is_a_constrained_type_and_then_its_bounds() {
-  // The third two-subtree carrier, and the widest: every half is a `TypePath`, so the constrained
+  // The second two-subtree carrier, and the widest: every half is a `TypePath`, so the constrained
   // type is the first and everything after it is a bound.
   let src = "type T<A> where A: Node & Other { f: A }";
   let parse = parse_document(src);
@@ -1285,8 +1254,8 @@ fn a_written_down_empty_argument_list_is_none_with_a_span() {
     "query Q { f @d() }",
     "type T @d(a: []) { f: Int }",
     "type T @d(a: {}) { f: Int }",
-    "type T @d(a: set { }) { f: Int }",
-    "type T @d(a: map { }) { f: Int }",
+    "type T @d(a: set!{ }) { f: Int }",
+    "type T @d(a: map!{ }) { f: Int }",
   ] {
     let parse = parse_document(what);
     assert!(!parse.has_errors(), "{what}: the lossless parse rejects it");
@@ -1520,7 +1489,7 @@ fn a_gap_token_is_a_hole_the_scan_sees() {
 /// They ran the source verification and no hole scan, on the claim that the walk would reach any
 /// hole inside the subtree. The claim is false: the walk's permissive arms route a child they have
 /// no slot for through `Extent::unread`, which folds its bytes into the parent's span and never
-/// looks at its kind. A `MapType` with an `Error` child after its two halves is the shortest
+/// looks at its kind. A type node with an `Error` child after its constituents is the shortest
 /// witness, and it projected `Ok`.
 ///
 /// # After
@@ -1528,9 +1497,9 @@ fn a_gap_token_is_a_hole_the_scan_sees() {
 /// A subtree-scoped, token-aware `scan_holes` after `open_node` in all three typed doors.
 #[test]
 fn a_typed_door_scans_its_own_subtree_for_holes() {
-  // `type T{f:<Int=>Str junk>}` — both halves of the map type are there and well-shaped, and the
-  // `Error` node after them is what the walk has no slot for.
-  let text = "type T{f:<Int=>Str junk>}";
+  // `type T{f:[Int junk]}` — the list type's element is there and well-shaped, and the `Error`
+  // node after it is what the walk has no slot for.
+  let text = "type T{f:[Int junk]}";
   let mut tree = Tree::new();
   tree.open(K::Document);
   tree.open(K::ObjectTypeDefinition);
@@ -1540,14 +1509,12 @@ fn a_typed_door_scans_its_own_subtree_for_holes() {
   tree.token(K::LBrace, "{");
   tree.open(K::FieldDefinition);
   tree.token(K::Name, "f").token(K::Colon, ":");
-  tree.open(K::MapType);
-  tree.token(K::LAngle, "<");
+  tree.open(K::ListType);
+  tree.token(K::LBracket, "[");
   tree.named_type("Int");
-  tree.token(K::FatArrow, "=>");
-  tree.named_type("Str");
   tree.token(K::Space, " ");
   tree.open(K::Error).token(K::Name, "junk").close();
-  tree.token(K::RAngle, ">");
+  tree.token(K::RBracket, "]");
   tree.close();
   tree.close();
   tree.token(K::RBrace, "}");
@@ -1567,11 +1534,11 @@ fn a_typed_door_scans_its_own_subtree_for_holes() {
   assert_eq!(
     kind,
     ProjectErrorKind::UnexpectedChild {
-      parent: K::MapType,
+      parent: K::ListType,
       found: K::Error,
     },
     "the scan refuses the hole before any walk — and since al8n/smear#58's sixth round the \
-     transcribed `MapType` walk would refuse it too, at the same element"
+     transcribed `ListType` walk would refuse it too, at the same element"
   );
 }
 
@@ -2428,25 +2395,6 @@ fn const_argument_value<'a>(
     .arguments()
     .expect("an argument list");
   arguments.arguments()[0].value()
-}
-
-/// The type of the first definition's first field.
-fn first_field_type<'a>(
-  document: &'a Document<&'a str>,
-) -> &'a smear::parser::graphqlx::ast::Type<&'a str> {
-  let described = document.definitions()[0]
-    .try_unwrap_definition_ref()
-    .expect("a definition");
-  let object = described
-    .node()
-    .try_unwrap_type_system_ref()
-    .expect("a type-system definition")
-    .try_unwrap_type_ref()
-    .expect("a type definition")
-    .try_unwrap_object_ref()
-    .expect("an object type");
-  let fields = object.fields_definition().expect("a fields definition");
-  fields.target().field_definitions()[0].node().ty()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -4042,7 +3990,7 @@ const SITES: &[Site] = &[
   (
     "value.rs",
     "unclosed",
-    "{ f(a: set {1",
+    "{ f(a: set!{1",
     Root::Mixed,
     "Ok",
     Absent::Token(K::SetValue, "}"),
@@ -4071,19 +4019,11 @@ const SITES: &[Site] = &[
     "Ok",
     Absent::Token(K::ListType, "]"),
   ),
-  (
-    "ty.rs",
-    "unclosed",
-    "type T { f: <Int",
-    Root::Mixed,
-    "Ok",
-    Absent::Token(K::SetType, ">"),
-  ),
 ];
 
-/// The second node kind three shared sites build: `angle_name_list` serves both bare-name generic
-/// lists, `set_or_map_type` both angle types, and `collection_body` both keyword containers. One
-/// probe per kind, so the derivation below sees every `(node, token)` a site can leave.
+/// The second node kind two shared sites build: `angle_name_list` serves both bare-name generic
+/// lists, and `collection_body` both keyword containers. One probe per kind, so the derivation
+/// below sees every `(node, token)` a site can leave.
 const SHARED: &[(&str, &str, Absent)] = &[
   (
     "generic.rs",
@@ -4091,13 +4031,8 @@ const SHARED: &[(&str, &str, Absent)] = &[
     Absent::Token(K::ExecutableDefinitionTypeGenerics, ">"),
   ),
   (
-    "ty.rs",
-    "type T { f: <Int => Str",
-    Absent::Token(K::MapType, ">"),
-  ),
-  (
     "value.rs",
-    "{ f(a: map {1 => 2",
+    "{ f(a: map!{1 => 2",
     Absent::Token(K::MapValue, "}"),
   ),
 ];
@@ -4265,7 +4200,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (49, 17),
+    (49, 16),
     "the two families' populations"
   );
 
@@ -4331,7 +4266,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
 }
 
 /// How many of [`SITES`]' probes project.
-const PROJECTING_SITES: usize = 16;
+const PROJECTING_SITES: usize = 15;
 
 /// Image-less tokens a site can leave out whose probe is **not** a witness — none: even the three
 /// closers whose definition is lost at end of input leave their list in the tree, an orphan child
@@ -4818,7 +4753,7 @@ fn every_walk_is_a_transcription() {
     1,
     "the cursor's trivia skip, and nothing else"
   );
-  assert_eq!(count("Cursor::new("), 75, "the walks, one cursor each");
+  assert_eq!(count("Cursor::new("), 74, "the walks, one cursor each");
 }
 
 #[test]
@@ -4920,14 +4855,12 @@ fn every_unclosed_closer_projects_what_the_closed_text_parses_to() {
   for (open, closers) in [
     ("{ f(a: [1", "])}"),
     ("{ f(a: {b: 1", "})}"),
-    ("{ f(a: set {1", "})}"),
-    ("{ f(a: map {1 => 2", "})}"),
+    ("{ f(a: set!{1", "})}"),
+    ("{ f(a: map!{1 => 2", "})}"),
     ("scalar S @k(a: [1", "])"),
-    ("scalar S @k(a: {b: set {1", "}})"),
+    ("scalar S @k(a: {b: set!{1", "}})"),
     ("type T { f: A<B", ">}"),
     ("type T { f: [Int", "]}"),
-    ("type T { f: <Int", ">}"),
-    ("type T { f: <Int => Str", ">}"),
     ("type T<A", ">"),
   ] {
     let parse = parse_document(open);

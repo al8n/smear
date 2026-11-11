@@ -410,7 +410,7 @@ fn parse_document_round_trips_every_fixture() {
     "extend schema @d",
     "type T<A = Int> implements ns::I<A> @d where A: Node { f(a: Int = 1): [A!]! @d }",
     "directive @d<T>(a: Int) repeatable on FIELD | OBJECT where T: Node\ntype X { f: Int }",
-    "query Q($x: set<Int> = set { 1 }) { a: f(m: map { 1 => 2 }) { ...F ... on T { g } } }",
+    "query Q($x: set<Int> = set!{ 1 }) { a: f(m: map!{ 1 => 2 }) { ...F ... on T { g } } }",
     "!!! not a document at all &&&",
     "type T { f: Int",
     "union U = | A | ::ns::B where A: C & D",

@@ -3,7 +3,7 @@
 //! The syntactic span-extent gate for GraphQLx — the twin of `syntactic_span_extent.rs`.
 //!
 //! The two corpus sweeps carry `#[cfg_attr(miri, ignore)]`, as that file's do and for that file's
-//! reason, plus one of its own: this gate's valid sweep is the LARGER of the pair — 90 corpus
+//! reason, plus one of its own: this gate's valid sweep is the LARGER of the pair — 93 corpus
 //! entries against its 56, over a dialect with three times as many span-carrying productions. No
 //! Miri cell has ever reached this file at all, because cargo runs test binaries in name order
 //! and its twin sits immediately before it, unfinished. Read that file's header for the
@@ -65,9 +65,9 @@ use extent::{ALPHABET, Extents, FoundSpan, Violation, check, discriminating, inj
 
 /// The smallest number of distinct span-carrying node types this corpus reaches.
 ///
-/// A floor, not a pin — see the GraphQL twin. Ninety-three against GraphQL's sixty-eight, which is
+/// A floor, not a pin — see the GraphQL twin. Ninety-one against GraphQL's sixty-eight, which is
 /// the dialect's extra surface showing up as extra node types rather than as extra entries.
-const OWNER_FLOOR: usize = 93;
+const OWNER_FLOOR: usize = 91;
 
 /// The floors the `invalid_` sweep carries — the GraphQL twin documents what each one is for.
 const INVALID_ENTRY_FLOOR: usize = 45;

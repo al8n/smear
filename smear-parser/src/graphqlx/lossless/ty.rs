@@ -1,5 +1,5 @@
-//! Paths and type references: `Path`, `TypeGenerics`, `TypePath`, `DefinitionTypePath`,
-//! `ListType`, `SetType` and `MapType`.
+//! Paths and type references: `Path`, `TypeGenerics`, `TypePath`, `DefinitionTypePath` and
+//! `ListType`.
 //!
 //! The conventions are `value.rs`'s and are not repeated here.
 //!
@@ -7,24 +7,15 @@
 //!
 //! GraphQL's lossless CST has a `NonNullType` node that wraps the type it modifies. **GraphQLx's
 //! kind space has no such kind, and that is a derived fact rather than a preference.**
-//! `graphqlx/syntactic/ty.rs:250-261` builds `DefinitionTypePath`, `ListType`, `SetType` and
-//! `MapType` each carrying its own `required: bool`; nothing in the GraphQLx grammar or AST names a
-//! non-null node, so Task 8's census — which fails on a kind that names nothing in GraphQLx's own
-//! sources — could not have admitted one.
+//! `graphqlx/syntactic/ty.rs:219-233` builds `DefinitionTypePath` and `ListType` each carrying its
+//! own `required: bool`; nothing in the GraphQLx grammar or AST names a non-null node, so Task 8's
+//! census — which fails on a kind that names nothing in GraphQLx's own sources — could not have
+//! admitted one.
 //!
 //! The consequence for this file is concrete: the `!` is a [`Bang`](K::Bang) **token child of the
 //! type node**, so every type production consumes its own optional `!` from *inside* its `node(…)`
 //! closure. A production that ate the `!` outside its node would leave it as a sibling, which
 //! round-trips identically and is wrong about which type is non-null.
-//!
-//! # The angle form is the one shape that cannot open its node up front
-//!
-//! `< T >` is a set and `< K => V >` is a map, and the two are told apart only *after* the first
-//! inner type has been parsed and a `=>` has been probed for (`ty.rs:182-192`). The kind is
-//! therefore unknown when the `<` is committed, which is what [`tokora::combinator::node_at`] is
-//! for: mint an inert mark before the `<`, parse until the answer is known, then retro-wrap at the
-//! mark with the kind that won. GraphQL uses the same mechanism for the opposite reason — its
-//! unknown is a *suffix*, this one's is a *separator* — and it is the same three events either way.
 //!
 //! # A path commits its leading trivia before its node opens
 //!
@@ -41,7 +32,7 @@ use tokora::ParseInput as _;
 
 use crate::graphqlx::kinds::SyntaxKind as K;
 
-use super::coverage::{node, node_at};
+use super::coverage::node;
 
 use super::{
   GraphqlxLosslessInput, recover,
@@ -89,7 +80,7 @@ lossless_production! {
 
   /// `< Type (Type)* >` — the arguments applied to a path.
   ///
-  /// Nonempty: `graphqlx/syntactic/ty.rs:87` is `.at_least(1)`, so `Foo<>` is an error rather than
+  /// Nonempty: `graphqlx/syntactic/ty.rs:82` is `.at_least(1)`, so `Foo<>` is an error rather than
   /// a path with no arguments. The first element is parsed unconditionally and the loop handles the
   /// rest, which is what makes the emptiness a diagnostic instead of a silently accepted shape.
   fn type_generics<'inp, Src, Ctx>(inp) {
@@ -190,59 +181,17 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `< Type > '!'?` or `< Type => Type > '!'?` — the one production whose node kind is decided
-  /// after its first token is committed.
+  /// `DefinitionTypePath | ListType`
   ///
-  /// Accept a `=>` after the first inner type and it is a [`MapType`](K::MapType); decline and it
-  /// is a [`SetType`](K::SetType) (`graphqlx/syntactic/ty.rs:182-192`). The mark is minted before
-  /// the `<` so the retro-wrap covers the opener, and the closer and the `!` are parsed **inside**
-  /// the wrap so they are children of the node rather than siblings of it.
-  ///
-  /// The caller has already crossed the leading trivia at its dispatch peek, so the mark is minted
-  /// after that trivia is committed and the node starts at its own `<`.
-  fn set_or_map_type<'inp, Src, Ctx>(inp) {
-    let mut frame = super::descend::<Src, Ctx>(inp)?;
-    let inp = &mut *frame;
-    let mark = inp.cst_mark();
-    expect::<Src, Ctx>(inp, Kind::LAngle)?;
-    let open = opener_span(inp.span().end());
-    type_ref::<Src, Ctx>(inp)?;
-    let is_map = eat_if::<Src, Ctx>(inp, Kind::FatArrow)?;
-    if is_map {
-      type_ref::<Src, Ctx>(inp)?;
-    }
-    let kind = if is_map { K::MapType } else { K::SetType };
-    node_at(
-      mark,
-      kind.raw(),
-      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
-        loop {
-          if eat_if::<Src, Ctx>(inp, Kind::RAngle)? {
-            eat_if::<Src, Ctx>(inp, Kind::Bang)?;
-            return Ok(());
-          }
-          if peek_kind::<Src, Ctx>(inp)?.is_none() {
-            return recover::unclosed_angle::<Src, Ctx>(inp, open);
-          }
-          recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS)?;
-        }
-      },
-    )
-    .parse_input(inp)
-  }
-
-  /// `DefinitionTypePath | ListType | SetType | MapType`
-  ///
-  /// **Four heads, against GraphQL's two** (`graphqlx/syntactic/ty.rs:42-50`): a path's name, a
-  /// path's leading `::`, a list's `[`, or a set/map's `<`. Opens no node of its own — the chosen
-  /// production opens, and closes, its own, `!` included.
+  /// **Three heads, against GraphQL's two** (`graphqlx/syntactic/ty.rs:38-45`): a path's name, a
+  /// path's leading `::`, or a list's `[`. Opens no node of its own — the chosen production opens,
+  /// and closes, its own, `!` included.
   fn type_ref<'inp, Src, Ctx>(inp) {
     // The head peek first, so the leading trivia it crosses is committed BEFORE any node opens and
     // therefore lands outside it.
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::Identifier | Kind::PathSeparator) => definition_type_path::<Src, Ctx>(inp),
       Some(Kind::LBracket) => list_type::<Src, Ctx>(inp),
-      Some(Kind::LAngle) => set_or_map_type::<Src, Ctx>(inp),
       // No type starts here. Report and consume, exactly as `value`'s dispatcher does: an `Err`
       // would abort every enclosing production.
       _ => recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS),
@@ -273,7 +222,7 @@ lossless_drivers! {
   mod test_support;
 
   /// `super::type_ref` over `src` — the entry every type position uses, and the only door to
-  /// `definition_type_path`, `list_type` and the set/map retro-wrap.
+  /// `definition_type_path` and `list_type`.
   fn parse_type_ref => type_ref;
 
   /// `super::type_path` over `src` — the non-type path position, which carries no `!`.

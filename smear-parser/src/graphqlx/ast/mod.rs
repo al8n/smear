@@ -47,7 +47,7 @@ pub type DefaultVec<T> = Vec<T>;
 /// Re-exported here because both reach a consumer's signatures whether or not they name them.
 /// [`Nested`] is the default `Container` argument of every value alias below, of
 /// [`SelectionSet`] and of [`DefinitionTypePath`]'s type arguments;
-/// [`Nest`] is the payload type of three public [`Type`] variants, so it reaches a consumer's
+/// [`Nest`] is the payload type of a public [`Type`] variant, so it reaches a consumer's
 /// `match` as well. [`Nested`] is a `Vec` in every respect a consumer can observe and [`Nest`]
 /// answers as the pointer it wraps does; what each adds is the iterative release that keeps a
 /// value, a selection or a type nested through these carriers from aborting the process on the way
@@ -208,9 +208,9 @@ pub enum InputValue<S, Span = SimpleSpan> {
   Null(NullValue<S, Span>),
   /// A list literal.
   List(List<S, Span>),
-  /// A `set { ... }` literal.
+  /// A `set!{ ... }` literal.
   Set(Set<S, Span>),
-  /// A `map { key => value ... }` literal.
+  /// A `map!{ key => value ... }` literal.
   Map(Map<S, Span>),
   /// An object literal.
   Object(Object<S, Span>),
@@ -405,10 +405,10 @@ pub type TypeGenerics<S, Span = SimpleSpan, Container = DefaultVec<Type<S, Span>
 
 /// A path type, its optional generic type arguments, and a non-null modifier.
 ///
-/// `TypeContainer` is [`Nested`], and this is this dialect's *fourth* route into [`Type`]: a path's
-/// arguments are types, so `A<B<C<…>>>` nests without passing through any of the three pointer
-/// arms. [`Nest`] cannot see that cycle — there is no owned pointer in it — so the container is
-/// what stands in it, exactly as it does for the value collections.
+/// `TypeContainer` is [`Nested`], and this is this dialect's *second* route into [`Type`]: a path's
+/// arguments are types, so `A<B<C<…>>>` nests without passing through the pointer arm. [`Nest`]
+/// cannot see that cycle — there is no owned pointer in it — so the container is what stands in
+/// it, exactly as it does for the value collections.
 pub type DefinitionTypePath<
   S,
   Span = SimpleSpan,
@@ -422,14 +422,14 @@ pub type DefinitionTypePath<
 ///
 /// Releasing a deeply nested one used to abort the process, one native frame per level, and no
 /// parse was needed to build one: every carrier's constructor is public, so a caller can grow the
-/// nesting in a loop and merely leaving scope was enough. The repair is [`Nest`] in the three
-/// pointer arms and [`Nested`] in [`TypeGenerics`] — **not** a `Drop` on this enum, which `E0509`
-/// would have charged every by-value `unwrap_*` and `try_unwrap_*` for, and which for a
+/// nesting in a loop and merely leaving scope was enough. The repair is [`Nest`] in the pointer
+/// arm and [`Nested`] in [`TypeGenerics`] — **not** a `Drop` on this enum, which `E0509` would
+/// have charged every by-value `unwrap_*` and `try_unwrap_*` for, and which for a
 /// single-owned-child cycle could not have been written at all. [`Nest`]'s own documentation
 /// derives why.
 ///
-/// This dialect nests four ways where vanilla GraphQL nests one, and all four are covered:
-/// [`Nestable`] below is the walk, and it matches without a wildcard arm so a fifth is a compile
+/// This dialect nests two ways where vanilla GraphQL nests one, and both are covered:
+/// [`Nestable`] below is the walk, and it matches without a wildcard arm so a third is a compile
 /// error here rather than a silent return to recursing.
 ///
 /// `Drop` is one of **four** generated impls that descend one frame per level on this enum, and
@@ -461,17 +461,13 @@ pub enum Type<S, Span = SimpleSpan> {
   Path(DefinitionTypePath<S, Span>),
   /// A list type (`[T]`).
   List(Nest<Box<crate::ty::ListType<Self, Span>>>),
-  /// A set type (`<T>`).
-  Set(Nest<Box<crate::ty::SetType<Self, Span>>>),
-  /// A map type (`<K => V>`).
-  Map(Nest<Box<crate::ty::MapType<Self, Self, Span>>>),
 }
 
 impl<S, Span> Sealed for Type<S, Span> {}
 
 /// A type's children are types, so neither carrier lane exists on this enum: an object field and
-/// a map entry are *value* carriers, and a map **type**'s key and value are types handed over one
-/// at a time through [`Worklist::push`].
+/// a map entry are *value* carriers, and a list type's element is a type handed over through
+/// [`Worklist::push`].
 impl<S, Span> NestNode for Type<S, Span> {
   type Field = Absent<Self>;
   type Entry = Absent<Self>;
@@ -487,7 +483,7 @@ impl<S, Span> Nestable for Type<S, Span> {
   fn into_children(self, worklist: &mut Worklist<Self>) {
     match self {
       // A path holds no type EXCEPT through its generic arguments, which is the arm a reading of
-      // the three pointer variants alone would miss.
+      // the pointer variant alone would miss.
       Self::Path(path) => {
         let (_, _, generics, _) = path.into_components();
         if let Some(generics) = generics {
@@ -500,19 +496,6 @@ impl<S, Span> Nestable for Type<S, Span> {
       Self::List(nest) => {
         if let Some(list) = nest.into_inner() {
           worklist.push(list.into_components().1);
-        }
-      }
-      Self::Set(nest) => {
-        if let Some(set) = nest.into_inner() {
-          worklist.push(set.into_components().1);
-        }
-      }
-      // A map's KEY is a type too, and it nests exactly as the value does.
-      Self::Map(nest) => {
-        if let Some(map) = nest.into_inner() {
-          let (_, key, value, _) = map.into_components();
-          worklist.push(key);
-          worklist.push(value);
         }
       }
     }
@@ -534,39 +517,6 @@ impl<S, Span> Nestable for crate::ty::ListType<Type<S, Span>, Span> {
   }
 }
 
-impl<S, Span> Sealed for crate::ty::SetType<Type<S, Span>, Span> {}
-
-/// The pointee side of the walk: a set carrier is `(span, element, required)`.
-impl<S, Span> Nestable for crate::ty::SetType<Type<S, Span>, Span> {
-  /// The type tree: rank 1. It holds no value node and no selection.
-  const RANK: u8 = 1;
-
-  type Node = Type<S, Span>;
-
-  #[inline]
-  fn into_children(self, worklist: &mut Worklist<Type<S, Span>>) {
-    worklist.push(self.into_components().1);
-  }
-}
-
-impl<S, Span> Sealed for crate::ty::MapType<Type<S, Span>, Type<S, Span>, Span> {}
-
-/// The pointee side of the walk: a map carrier is `(span, key, value, required)`, and both the key
-/// and the value are types.
-impl<S, Span> Nestable for crate::ty::MapType<Type<S, Span>, Type<S, Span>, Span> {
-  /// The type tree: rank 1. It holds no value node and no selection.
-  const RANK: u8 = 1;
-
-  type Node = Type<S, Span>;
-
-  #[inline]
-  fn into_children(self, worklist: &mut Worklist<Type<S, Span>>) {
-    let (_, key, value, _) = self.into_components();
-    worklist.push(key);
-    worklist.push(value);
-  }
-}
-
 impl<S, Span> Type<S, Span> {
   /// Returns the span covering this complete type reference.
   #[inline]
@@ -574,8 +524,6 @@ impl<S, Span> Type<S, Span> {
     match self {
       Self::Path(value) => value.span(),
       Self::List(value) => value.span(),
-      Self::Set(value) => value.span(),
-      Self::Map(value) => value.span(),
     }
   }
 
@@ -585,8 +533,6 @@ impl<S, Span> Type<S, Span> {
     match self {
       Self::Path(value) => value.required(),
       Self::List(value) => value.required(),
-      Self::Set(value) => value.required(),
-      Self::Map(value) => value.required(),
     }
   }
 }
@@ -607,8 +553,6 @@ impl<S, Span> IntoSpan<Span> for Type<S, Span> {
       // this dialect, so the pointee has to come back out. `Box` is the sole owner, which is what
       // makes that infallible.
       Self::List(value) => value.into_sole().into_span(),
-      Self::Set(value) => value.into_sole().into_span(),
-      Self::Map(value) => value.into_sole().into_span(),
     }
   }
 }

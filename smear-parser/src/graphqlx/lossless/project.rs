@@ -23,8 +23,8 @@
 //! The contract, the error vocabulary, the span rule, the `(tree, source)` verification and the
 //! green traversal are [the substrate](crate::lossless::project)'s, and the entry shapes are the
 //! naming symmetry its header states. **Everything below that is this dialect's**: sixteen of
-//! GraphQLx's seventy-nine wrappers are structurally identical to a GraphQL one, thirty-seven share
-//! a name with a different shape, and twenty-six have no GraphQL image at all. Three of those
+//! GraphQLx's seventy-seven wrappers are structurally identical to a GraphQL one, thirty-seven
+//! share a name with a different shape, and twenty-four have no GraphQL image at all. Three of those
 //! differences are *mapping* divergences rather than renamings, and each one changes what a walk
 //! has to do rather than what it has to call something:
 //!
@@ -39,12 +39,12 @@
 //!   [`InlineString`](SyntaxKind::InlineString) or [`BlockString`](SyntaxKind::BlockString) token
 //!   of the definition node, and the hoist is a token the fold holds back rather than a child it
 //!   skips.
-//! - **Three carriers hold two subtrees in one child stream.**
-//!   [`MapEntry`](SyntaxKind::MapEntry) is `Value => Value`, [`MapType`](SyntaxKind::MapType) is
-//!   `< Type => Type >`, and a [`WherePredicate`](SyntaxKind::WherePredicate) is a constrained
-//!   type followed by its bounds. Nothing tells the halves apart but their order, so the walks
-//!   below read them positionally out of one `children()` pass — and for the two that nest, the
-//!   half in hand travels **on the worklist frame**.
+//! - **Two carriers hold two subtrees in one child stream.**
+//!   [`MapEntry`](SyntaxKind::MapEntry) is `Value => Value`, and a
+//!   [`WherePredicate`](SyntaxKind::WherePredicate) is a constrained type followed by its bounds.
+//!   Nothing tells the halves apart but their order, so the walks below read them positionally out
+//!   of one `children()` pass — and for the one that nests, the half in hand travels **on the
+//!   worklist frame**.
 //!
 //! # Why `source` is a parameter, and why it stays `&str`
 //!
@@ -118,9 +118,9 @@
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
 //! Every one of those shapes reaches this projection looking well-formed, and each needs an
 //! answer. The population is every call that reports without building a hole — **49**
-//! `recover::report_unexpected::<…>` sites and **17** `recover::unclosed_{list,object,parens,angle}::<…>`
+//! `recover::report_unexpected::<…>` sites and **16** `recover::unclosed_{list,object,parens,angle}::<…>`
 //! sites across `graphqlx/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 66 are mapped** in the table below, one probe each: a text that reaches the site with a
+//! **all 65 are mapped** in the table below, one probe each: a text that reaches the site with a
 //! hole-free tree, and what this projection answers for it. The table is executable:
 //! `every_report_and_build_site_has_a_measured_answer` holds the same rows, asserts their count
 //! per file and family against the source's own spelling of each call, and measures every answer.
@@ -133,7 +133,7 @@
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Sixteen project; fifty refuse.** The sixteen are the lenient rows a site can leave with a
+//! **Fifteen project; fifty refuse.** The fifteen are the lenient rows a site can leave with a
 //! well-formed value. The others refuse either the shape the site built, or — for the unclosed
 //! sites whose definition the parser cannot finish at end of input — the rubble the document is
 //! left holding.
@@ -201,11 +201,10 @@
 //! | `value.rs` | report | `type T { f(a: Int = $v): Int }` | nothing — a present token is refused | `UnexpectedChild { DefaultValue, VariableValue }` |
 //! | `value.rs` | unclosed | `{ f(a: [1` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
-//! | `value.rs` | unclosed | `{ f(a: set {1` | `}` of `SetValue` — **no image** | **projects** |
+//! | `value.rs` | unclosed | `{ f(a: set!{1` | `}` of `SetValue` — **no image** | **projects** |
 //! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: A<B` | `>` of `TypeGenerics` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: [Int` | `]` of `ListType` — **no image** | **projects** |
-//! | `ty.rs` | unclosed | `type T { f: <Int` | `>` of `SetType` — **no image** | **projects** |
 //!
 //! The rows are what the named cells pin by shape, where a shape has one:
 //!
@@ -254,12 +253,10 @@
 //! | [`DefinitionTypeGenerics`](SyntaxKind::DefinitionTypeGenerics) | `>` | `generic.rs` unclosed — `type T<A` |
 //! | [`TypeGenerics`](SyntaxKind::TypeGenerics) | `>` | `ty.rs` unclosed — `type T { f: A<B` |
 //! | [`ListType`](SyntaxKind::ListType) | `]` | `ty.rs` unclosed — `type T { f: [Int` |
-//! | [`SetType`](SyntaxKind::SetType) | `>` | `ty.rs` unclosed — `type T { f: <Int` |
-//! | [`MapType`](SyntaxKind::MapType) | `>` | `ty.rs` unclosed — `type T { f: <Int => Str` |
 //! | [`ListValue`](SyntaxKind::ListValue) | `]` | `value.rs` unclosed — `{ f(a: [1` |
 //! | [`ObjectValue`](SyntaxKind::ObjectValue) | `}` | `value.rs` unclosed — `{ f(a: {b: 1` |
-//! | [`SetValue`](SyntaxKind::SetValue) | `}` | `value.rs` unclosed — `{ f(a: set {1` |
-//! | [`MapValue`](SyntaxKind::MapValue) | `}` | `value.rs` unclosed — `{ f(a: map {1 => 2` |
+//! | [`SetValue`](SyntaxKind::SetValue) | `}` | `value.rs` unclosed — `{ f(a: set!{1` |
+//! | [`MapValue`](SyntaxKind::MapValue) | `}` | `value.rs` unclosed — `{ f(a: map!{1 => 2` |
 //! | [`VariablesDefinition`](SyntaxKind::VariablesDefinition) | `)` | `executable.rs` unclosed — `query Q($a: Int`; refuses either way, the operation being lost |
 //! | [`ArgumentsDefinition`](SyntaxKind::ArgumentsDefinition) | `)` | `definition.rs` unclosed — `type T { f(a: Int`; refuses either way, the definition being lost |
 //! | [`ExecutableDefinitionTypeGenerics`](SyntaxKind::ExecutableDefinitionTypeGenerics) | `>` | `generic.rs` unclosed — `fragment <T`; refuses either way, the fragment being lost |
@@ -267,8 +264,8 @@
 //! **This table is the criterion's whole extension, derived rather than listed.** A position is
 //! lenient iff its token has no AST image and the lossless parser builds a hole-free tree holding
 //! the node without it; the report-and-build census above enumerates every place the parser leaves
-//! a token out without a hole, and its twenty-three image-less rows — each witnessed by its own
-//! probe's tree — are these twenty-three, which the cell asserts. Three of them are witnessed only
+//! a token out without a hole, and its twenty-one image-less rows — each witnessed by its own
+//! probe's tree — are these twenty-one, which the cell asserts. Three of them are witnessed only
 //! as **orphans**: at end of input the operation, the field or the fragment around the list cannot
 //! be finished, so the root keeps the list as a stray child of the document beside the lost
 //! definition's tokens, and every projection of such a tree refuses at the rubble. Those three,
@@ -297,7 +294,7 @@
 //! |---|---|---|
 //! | a fragment's name is not `on` | `generic/mod.rs:392` (`Expectation::FragmentName`) | `name_except` in `executable_definition_name` |
 //! | a fragment spread's target is not an unqualified `on…` | `selection/mod.rs:446` (the spread dispatch reads `on` as an inline fragment's head) and `:551` (`fragment_type_path`, `Expectation::Path`) | `path_except` through `type_path_except` in `fragment_spread` |
-//! | an enum value is not an unqualified `true…`, `false…` or `null…` | `value.rs:288-293` (the enum production, `Expectation::EnumValue`), and the value dispatch that reads those spellings as a boolean or a null in both grammars — `value.rs:781-790` non-const, `:892-901` const | `path_except` in `enum_value`, shared by both value grammars |
+//! | an enum value is not an unqualified `true…`, `false…` or `null…` | `value.rs:290-295` (the enum production, `Expectation::EnumValue`), and the value dispatch that reads those spellings as a boolean or a null in both grammars — `value.rs:811-820` non-const, `:922-931` const | `path_except` in `enum_value`, shared by both value grammars |
 //! | an enum value definition is not named `true`, `false` or `null` | `definition/enum_type.rs:21-22` (`Expectation::EnumValue`) | `name_except` in `enum_value_definition` |
 //!
 //! Each answers [`SemanticRule`](ProjectErrorKind::SemanticRule) at the offending segment, and a
@@ -454,7 +451,7 @@
 //! | an import's clause | `ImportList \| WildcardSpecifier` | `import_definition` — one `one_of`, so the second alternative is left for `end` | `an_import_with_both_clause_alternatives_refuses_in_either_order` |
 //! | an operation's head | `Description? OperationType … \| SelectionSet` | `operation_definition` — the shorthand branch refuses a description, a name, variables, directives and a where clause | `a_described_shorthand_refuses_and_its_recovery_is_not_complete` |
 //! | a definition's or an extension's tail | one tail per keyword | structural: no row above holds two tails | the two cross-product cells |
-//! | a slot filled from a **kind set** — a type reference under a field, input value or variable definition, the element of a list or set type, a value under an object field | one `Type` / one `Value` | one `one_of` atom; the next atom in the sequence refuses a second | `a_one_of_slot_group_refuses_its_second_member` |
+//! | a slot filled from a **kind set** — a type reference under a field, input value or variable definition, the element of a list type, a value under an object field | one `Type` / one `Value` | one `one_of` atom; the next atom in the sequence refuses a second | `a_one_of_slot_group_refuses_its_second_member` |
 //!
 //! ## The same rule one level down: leaf text
 //!
@@ -564,17 +561,15 @@
 //! # No node dispatch below spends a native frame per level
 //!
 //! The grammar is bounded above a value, and **three cycles are not**: `value` ↔
-//! `object_field`/`map_entry`, `selection_set` ↔ `field`/`inline_fragment`, and `ty` ↔ a list's,
-//! a set's and a map's element and a path's generic arguments. Each is a **worklist**, as in
+//! `object_field`/`map_entry`, `selection_set` ↔ `field`/`inline_fragment`, and `ty` ↔ a list's
+//! element and a path's generic arguments. Each is a **worklist**, as in
 //! `graphql/lossless/project.rs`. al8n/smear#201.
 //!
 //! Three cycles rather than GraphQL's four, and it is not a smaller surface: the const and
 //! non-const value walks are one machine parameterised by a trait here as they are there, and what
 //! GraphQL splits off as a `NonNullType` wrapper is a `!` token of the type it modifies here, so
 //! the type cycle absorbs it. What the type cycle gains instead is a *branching* level GraphQL's
-//! does not have — a path's generic arguments are types, so `A<B<C<…>>>` nests without a bracket
-//! — and a map's key and value are two subtrees under one node, which is the shape the frame's
-//! open slot exists for.
+//! does not have — a path's generic arguments are types, so `A<B<C<…>>>` nests without a bracket.
 //!
 //! `smear-parser/tests/deep_projection_x.rs` reads the flatness off a real projection, one fixture
 //! per cycle plus one per GraphQLx-only carrier.
@@ -647,9 +642,9 @@ use crate::type_system::{
 // The target six definitions and extensions hold their `where` clause with.
 use crate::generic::Constrained;
 
-// The three type carriers this dialect's `Type` stands behind a `Nest`. The enum names its
-// pointees inline rather than aliasing them, so the projection has to as well.
-use crate::ty::{ListType, MapType, SetType};
+// The type carrier this dialect's `Type` stands behind a `Nest`. The enum names its pointee
+// inline rather than aliasing it, so the projection has to as well.
+use crate::ty::ListType;
 
 use SyntaxKind as K;
 
@@ -725,7 +720,7 @@ impl super::ast::Document {
   /// claim that the walk would reach any hole inside the subtree anyway — and that claim is false,
   /// because the walk's permissive arms route a child they have no slot for into the parent's
   /// *extent*: its bytes are folded and its kind is never looked at.
-  /// A `MapType` with an `Error` child after its two halves is the shortest witness. al8n/smear#58.
+  /// A `ListType` with an `Error` child after its element is the shortest witness. al8n/smear#58.
   pub fn to_ast<'src>(&self, source: &'src str) -> Out<Document<&'src str>> {
     let node = Node::of(self.syntax());
     open_node(node, source)?;
@@ -2581,10 +2576,10 @@ fn flat_type_generics<'src>(
 // type references
 // ---------------------------------------------------------------------------------------------
 
-/// The four type-reference node kinds. **There is no non-null wrapper**: a `!` is a
+/// The two type-reference node kinds. **There is no non-null wrapper**: a `!` is a
 /// [`Bang`](SyntaxKind::Bang) token of the node it modifies, so each of these carries its own
 /// `required` flag and the fold picks it up with the rest of the node's tokens.
-const TYPE_KINDS: [SyntaxKind; 4] = [K::DefinitionTypePath, K::ListType, K::SetType, K::MapType];
+const TYPE_KINDS: [SyntaxKind; 2] = [K::DefinitionTypePath, K::ListType];
 
 /// The generic-argument list a **type** carries.
 ///
@@ -2596,33 +2591,21 @@ type NestedTypeGenerics<'src> =
 
 /// A type container the walk has entered and not finished.
 ///
-/// `[[[Int]]]`, `<<<Int>>>` and `A<A<A<Int>>>` all nest without bound at the lexer's own ceiling,
-/// so the walk that reads them is a loop over these rather than a native frame per level — see the
-/// module header's *No node dispatch below spends a native frame per level*.
+/// `[[[Int]]]` and `A<A<A<Int>>>` both nest without bound at the lexer's own ceiling, so the walk
+/// that reads them is a loop over these rather than a native frame per level — see the module
+/// header's *No node dispatch below spends a native frame per level*.
 enum TypeFrame<'g, 'src> {
-  /// A `[ T ]` or a `< T >`: one element, and the node's own tokens — brackets and `!` — already
-  /// folded.
+  /// A `[ T ]`: one element, and the node's own tokens — brackets and `!` — already folded.
   Wrapper {
-    /// The `ListType` or `SetType` node, and the owner of the finished type's span.
+    /// The `ListType` node, and the owner of the finished type's span.
     node: Node<'g>,
     extent: Extent,
     required: bool,
-  },
-  /// A `< K => V >`: two full types under one node, told apart only by their order.
-  Map {
-    /// The `MapType` node.
-    node: Node<'g>,
-    extent: Extent,
-    required: bool,
-    /// The value half, which the walk descends into once the key is built.
-    value: Node<'g>,
-    /// The key, once the level below has handed it back.
-    key: Option<Type<&'src str>>,
   },
   /// A `DefinitionTypePath`'s `< T+ >`, and the path that will wrap the arguments.
   ///
-  /// The fourth way this dialect's types nest, and the one a reading of the three bracket shapes
-  /// alone would miss.
+  /// The second way this dialect's types nest, and the one a reading of the bracket shape alone
+  /// would miss.
   Generics {
     /// The `TypeGenerics` node's cursor: its fold, and the arguments not yet read.
     cursor: Cursor<'g>,
@@ -2640,8 +2623,8 @@ enum TypeFrame<'g, 'src> {
 /// # The frame travels by value, and this dialect is why
 ///
 /// The vanilla dialect resumes its frames through `&mut self`, which it can because every frame it
-/// has is finished by the value handed to it. Two of the three here are not: a map's key has to
-/// **survive** while its value is built, and a path's arguments accumulate. Closing one therefore
+/// has is finished by the value handed to it. One of the two here is not: a path's arguments
+/// accumulate, and the path they belong to **survives** while they are built. Closing it therefore
 /// means moving an owned AST value out of the frame, which a `&mut` resume can only do through a
 /// slot whose empty state no input produces — an unreachable refusal, or a panic in a door whose
 /// whole contract is that it has neither. So the frame is handed over and handed back, at a
@@ -2705,18 +2688,15 @@ fn open_type_chain<'g, 'src>(
         });
         node = first;
       }
-      K::ListType | K::SetType => {
-        // `[ Type ] !?` and `< Type > !?` — one element, so the whole sequence is read before the
-        // descent and the frame carries only the fold.
-        let (open, close) = match node.kind() {
-          K::ListType => (K::LBracket, K::RBracket),
-          _ => (K::LAngle, K::RAngle),
-        };
+      K::ListType => {
+        // `[ Type ] !?` — one element, so the whole sequence is read before the descent and the
+        // frame carries only the fold.
         let mut cursor = Cursor::new(node);
-        cursor.token(open, "the delimiter a type wrapper opens with")?;
+        cursor.token(K::LBracket, "the delimiter a type wrapper opens with")?;
         let wrapped = cursor.one_of(&TYPE_KINDS, "a type reference")?;
         // The closer is lenient; the `!` follows it in the production, so there is none without it.
-        let required = cursor.opt_token(close).is_some() && cursor.opt_token(K::Bang).is_some();
+        let required =
+          cursor.opt_token(K::RBracket).is_some() && cursor.opt_token(K::Bang).is_some();
         cursor.end()?;
         frames.push(TypeFrame::Wrapper {
           node,
@@ -2724,24 +2704,6 @@ fn open_type_chain<'g, 'src>(
           required,
         });
         node = wrapped;
-      }
-      K::MapType => {
-        // `< Type => Type > !?` — two full types told apart only by their order around the `=>`.
-        let mut cursor = Cursor::new(node);
-        cursor.token(K::LAngle, "the `<` a map type opens with")?;
-        let key = cursor.one_of(&TYPE_KINDS, "a key type")?;
-        cursor.token(K::FatArrow, "the `=>` between a key type and a value type")?;
-        let value = cursor.one_of(&TYPE_KINDS, "a value type")?;
-        let required = cursor.opt_token(K::RAngle).is_some() && cursor.opt_token(K::Bang).is_some();
-        cursor.end()?;
-        frames.push(TypeFrame::Map {
-          node,
-          extent: cursor.extent,
-          required,
-          value,
-          key: None,
-        });
-        node = key;
       }
       found => return Err(unexpected(node, found, node.text_range())),
     }
@@ -2762,47 +2724,8 @@ fn resume_type<'g, 'src>(
     } => {
       extent.cover(piece);
       let extent = extent.range(node, "a token")?;
-      let span = to_span(extent);
-      let built = match node.kind() {
-        K::SetType => Type::Set(Nest::new(SetType::new(span, value, required))),
-        _ => Type::List(Nest::new(ListType::new(span, value, required))),
-      };
+      let built = Type::List(Nest::new(ListType::new(to_span(extent), value, required)));
       ResumedType::Done(built, extent)
-    }
-    TypeFrame::Map {
-      node,
-      mut extent,
-      required,
-      value: value_node,
-      key,
-    } => {
-      extent.cover(piece);
-      match key {
-        // The key came back; the value half is what the walk goes to next, and the key rides on
-        // the frame while it does.
-        None => ResumedType::Descend(
-          TypeFrame::Map {
-            node,
-            extent,
-            required,
-            value: value_node,
-            key: Some(value),
-          },
-          value_node,
-        ),
-        Some(key) => {
-          let extent = extent.range(node, "a token")?;
-          ResumedType::Done(
-            Type::Map(Nest::new(MapType::new(
-              to_span(extent),
-              key,
-              value,
-              required,
-            ))),
-            extent,
-          )
-        }
-      }
     }
     TypeFrame::Generics {
       mut cursor,
@@ -3129,7 +3052,7 @@ fn boolean_literal<'src>(
 /// An enum value in a **value** position — a whole [`Path`](SyntaxKind::Path), not a name.
 ///
 /// Divergence 9's value half. The AST's span is the **path's**, which is what the syntactic parser
-/// builds; on any tree its production made the two are the same bytes, `set { … }`'s retro-wrap
+/// builds; on any tree its production made the two are the same bytes, `set!{ … }`'s retro-wrap
 /// included, because both marks are minted in front of the same token.
 fn enum_value<'src>(node: Node<'_>, source: &'src str) -> Out<(EnumValue<&'src str>, TextRange)> {
   // `Path`
@@ -3386,7 +3309,7 @@ impl<'g, 'src, G: ValueGrammar<'src>> OpenEntry<'g, 'src, G> {
 
 /// A container value suspended while the value below it is built.
 ///
-/// `{a: {a: … }}`, `[[…]]`, `set { set { … } }` and `map { … => map { … } }` all nest without
+/// `{a: {a: … }}`, `[[…]]`, `set!{ set!{ … } }` and `map!{ … => map!{ … } }` all nest without
 /// bound at the lexer's own ceiling, so the walk that reads them is a loop over these rather than a
 /// native frame per level.
 struct ValueFrame<'g, 'src, G: ValueGrammar<'src>> {
@@ -3562,7 +3485,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         return Ok((G::enumeration(value), extent));
       }
       K::ListValue | K::SetValue | K::ObjectValue | K::MapValue => {
-        // `[ Value* ]`, `set { Value* }`, `{ ObjectField* }`, `map { MapEntry* }` — the opener
+        // `[ Value* ]`, `set!{ Value* }`, `{ ObjectField* }`, `map!{ MapEntry* }` — the opener
         // here, each member one descent, and the closer when the members run out.
         let mut cursor = Cursor::new(node);
         match node.kind() {
@@ -3571,6 +3494,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
           }
           K::SetValue => {
             cursor.keyword(ContextualKeyword::Set, "the `set` keyword")?;
+            cursor.token(K::Bang, "the `!` after the `set` keyword")?;
             cursor.token(K::LBrace, "the `{` a set opens with")?;
           }
           K::ObjectValue => {
@@ -3578,6 +3502,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
           }
           _ => {
             cursor.keyword(ContextualKeyword::Map, "the `map` keyword")?;
+            cursor.token(K::Bang, "the `!` after the `map` keyword")?;
             cursor.token(K::LBrace, "the `{` a map opens with")?;
           }
         }

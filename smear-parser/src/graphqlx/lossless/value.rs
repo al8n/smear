@@ -18,13 +18,14 @@
 //! shape the AST has, so a typed wrapper can ask an enum value for its segments.
 //!
 //! **2. A bare `::` is a value head.** `::ns::Colour` in value position is a fully qualified enum
-//! value (`value.rs:843-845`), which is why `recover::VALUE_HEADS` carries `PathSeparator` and
+//! value (`value.rs:872-874`), which is why `recover::VALUE_HEADS` carries `PathSeparator` and
 //! GraphQL's does not.
 //!
 //! **3. `set` and `map` are contextual, and the test is the *immediately following* token.**
-//! `set { 1, 2 }` is a [`SetValue`](crate::graphqlx::kinds::SyntaxKind::SetValue); `set` alone,
-//! and `set::Thing`, are ordinary enum values (`value.rs:791-806, 902-917`). See this module's
-//! private `collection_or_enum` for why the test needs a retro-wrap rather than a two-token peek.
+//! `set!{ 1, 2 }` is a [`SetValue`](crate::graphqlx::kinds::SyntaxKind::SetValue); `set` alone,
+//! `set::Thing`, and the `set` of `set { a: 1 }`, are ordinary enum values
+//! (`value.rs:820-835, 931-946`). See this module's private `collection_or_enum` for why the test
+//! needs a retro-wrap rather than a two-token peek.
 //!
 //! **4. `MapEntry` is `Value => Value`,** with both halves full values — a map key is not
 //! restricted to a name.
@@ -91,12 +92,12 @@ impl Constness {
 ///
 /// A parameter rather than two near-identical productions: the two differ only in the node kind
 /// they wrap with and in whether their members are values or entries, and the *decision* — is the
-/// next token a `{`? — is one piece of code either way.
+/// next token a `!`? — is one piece of code either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Collection {
-  /// `set { Value* }`.
+  /// `set!{ Value* }`.
   Set,
-  /// `map { MapEntry* }`.
+  /// `map!{ MapEntry* }`.
   Map,
 }
 
@@ -302,7 +303,7 @@ lossless_production! {
   /// `Value => Value` — a map entry, and both halves are full values.
   ///
   /// GraphQLx only; there is no GraphQL production to port. The key is not restricted to a name, so
-  /// `map { [1] => "a" }` is well-formed.
+  /// `map!{ [1] => "a" }` is well-formed.
   fn map_entry<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::MapEntry.raw(),
@@ -315,12 +316,14 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// The `{ … }` body of a `set` or `map`, retro-wrapped so the keyword is inside the node.
+  /// The `! { … }` body of a `set` or `map`, retro-wrapped so the keyword is inside the node.
   ///
   /// `mark` is minted by [`collection_or_enum`] **before** the keyword is consumed, which is what
   /// puts `set` and `map` inside their own node — the AST spans from the keyword
   /// (`Set::new(SimpleSpan::new(start, span.end()), …)` where `start` is the keyword's), and a node
-  /// that began at the `{` would lose the only token that says which collection it is.
+  /// that began at the `{` would lose the only token that says which collection it is. The `!` is
+  /// consumed inside the wrap too, so it is a child of the node, and any trivia between the keyword,
+  /// the `!` and the `{` lands between the node's own tokens.
   fn collection_body<'inp, Src, Ctx>(
     inp,
     mark: tokora::cst::EventMark,
@@ -337,6 +340,7 @@ lossless_production! {
       mark,
       kind.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::Bang)?;
         expect::<Src, Ctx>(inp, Kind::LBrace)?;
         let open = opener_span(inp.span().end());
         loop {
@@ -364,12 +368,12 @@ lossless_production! {
   ///
   /// # Why this needs a retro-wrap and not a two-token peek
   ///
-  /// The grammar's test is *"is the immediately following token a `{`?"* — and over a
+  /// The grammar's test is *"is the immediately following token a `!`?"* — and over a
   /// trivia-surfacing stream "immediately following" means the next **significant** token, which
-  /// may be any number of trivia tokens away. `set /* c */ { 1 }` is a set. A fixed `peek::<U2>()`
-  /// sees the raw stream and would answer `Space`, so the only way to ask the question is to
-  /// consume the keyword and then peek — after which, if the answer is "no", the keyword has
-  /// already been committed outside any node.
+  /// may be any number of trivia tokens away. `set /* c */ ! { 1 }` is a set. A fixed
+  /// `peek::<U2>()` sees the raw stream and would answer `Space`, so the only way to ask the
+  /// question is to consume the keyword and then peek — after which, if the answer is "no", the
+  /// keyword has already been committed outside any node.
   ///
   /// Two marks are minted before that commit, so either answer can still open its node over the
   /// keyword: the outer becomes [`SetValue`](K::SetValue)/[`MapValue`](K::MapValue) or
@@ -384,7 +388,7 @@ lossless_production! {
     let inner = inp.cst_mark();
     expect::<Src, Ctx>(inp, Kind::Identifier)?;
 
-    if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
+    if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Bang) {
       return collection_body::<Src, Ctx>(inp, outer, konst, collection);
     }
 

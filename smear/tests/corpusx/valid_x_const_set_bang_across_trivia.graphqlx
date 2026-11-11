@@ -1,0 +1,5 @@
+type T @d(s: set # keyword
+  ! # bang
+  { 1 }) {
+  f: Int
+}

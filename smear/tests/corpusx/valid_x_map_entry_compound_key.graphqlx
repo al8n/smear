@@ -1,1 +1,1 @@
-query { f(m: map { [1] => "a", { k: 1 } => set { X } }) }
+query { f(m: map!{ [1] => "a", { k: 1 } => set!{ X } }) }

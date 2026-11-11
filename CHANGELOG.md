@@ -311,6 +311,22 @@ All notable changes to Smear are documented in this file.
   `RefusedEntry`, `SourceEventError` and `json::Error` implement
   `core::error::Error` in every configuration, where they implemented
   `std::error::Error` only with `std`.
+- `smear-parser`!: GraphQLx drops its collection type syntax and respells its
+  collection literals. `<T>` and `<K => V>` no longer parse as types: a `<`
+  only follows a path, as its type arguments, so a set or a map is an ordinary
+  generic scalar (`HashSet<T>`, `HashMap<K, V>`). The literals are `set!{…}`
+  and `map!{…}`: `set` and `map` open one only when the next significant token
+  is `!`, a `{` must follow the `!`, and trivia may stand between the three.
+  Anywhere else they are the enum value or path they always were, so
+  `[set {a: 1}]` is now the enum value `set` followed by an object, as in
+  GraphQL. The AST `Type` loses its `Set` and `Map` variants, and the
+  `SetType` and `MapType` carriers go with them. The standalone `set_value`,
+  `map_value` and their const twins report `Expectation::Bang` where the `!` is
+  missing. In the lossless layer `SyntaxKind` loses `SetType` and `MapType`,
+  which moves the raw value of every later kind by two; their typed wrappers go,
+  and with them every `set_type`, `map_type`, `set_types` and `map_types`
+  getter. `SetValue` and `MapValue` keep their kinds and hold the `!` as a
+  token between the keyword and the `{`.
 
 ## [0.0.1] - 2026-10-30
 

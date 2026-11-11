@@ -1,1 +1,1 @@
-query { f(m: map { 1 }) }
+query { f(m: map!{ 1 }) }

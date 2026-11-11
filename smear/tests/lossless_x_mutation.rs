@@ -83,7 +83,7 @@ const fn is_trivia(kind: K) -> bool {
 /// instrument: its [`STRICT_DELETIONS`] census would name any image-less position the derivation
 /// missed. A token with an image is never lenient: `(NamedSpecifier, Path)` and
 /// `(WherePredicate, TypePath)` are al8n/smear#58 round five's two findings, not rows.
-const LENIENT: [(K, K, &str); 23] = [
+const LENIENT: [(K, K, &str); 21] = [
   // The unclosed-delimiter family — `recover.rs`'s `unclosed_{object,parens}`, which report and
   // build no hole. `the_unclosed_brace_class_projects_although_the_parser_rejects_it` pins the
   // value.
@@ -111,8 +111,6 @@ const LENIENT: [(K, K, &str); 23] = [
   (K::DefinitionTypeGenerics, K::RAngle, ">"),
   (K::TypeGenerics, K::RAngle, ">"),
   (K::ListType, K::RBracket, "]"),
-  (K::SetType, K::RAngle, ">"),
-  (K::MapType, K::RAngle, ">"),
   (K::ListValue, K::RBracket, "]"),
   (K::ObjectValue, K::RBrace, "}"),
   (K::SetValue, K::RBrace, "}"),
@@ -582,7 +580,7 @@ const OPEN: &[(&str, usize)] = &[];
 
 /// The `(entry, door)` pairs the law runs over: every hole-free parse of every corpus entry under
 /// each of the three doors that builds that door's container.
-const PAIRS: usize = 253;
+const PAIRS: usize = 259;
 
 /// Of [`PAIRS`], the ones whose unmutated tree already lacks a lenient token — every mutation of
 /// them is compared against a restored text.
@@ -590,37 +588,37 @@ const LENIENT_BASES: usize = 5;
 
 /// Mutations tried, per door, per operation — the population, cell by cell.
 const TRIED: &[((&str, &str), usize)] = &[
-  (("executable", "delete"), 1273),
-  (("executable", "duplicate"), 1273),
-  (("executable", "retext"), 1434),
-  (("executable", "swap"), 669),
-  (("executable", "transplant"), 13_750),
-  (("mixed", "delete"), 3197),
-  (("mixed", "duplicate"), 3197),
-  (("mixed", "retext"), 4183),
-  (("mixed", "swap"), 1645),
-  (("mixed", "transplant"), 35_990),
-  (("type-system", "delete"), 1894),
-  (("type-system", "duplicate"), 1894),
-  (("type-system", "retext"), 2699),
-  (("type-system", "swap"), 960),
-  (("type-system", "transplant"), 20_858),
+  (("executable", "delete"), 1324),
+  (("executable", "duplicate"), 1324),
+  (("executable", "retext"), 1479),
+  (("executable", "swap"), 700),
+  (("executable", "transplant"), 14_294),
+  (("mixed", "delete"), 3300),
+  (("mixed", "duplicate"), 3300),
+  (("mixed", "retext"), 4298),
+  (("mixed", "swap"), 1699),
+  (("mixed", "transplant"), 37_022),
+  (("type-system", "delete"), 1946),
+  (("type-system", "duplicate"), 1946),
+  (("type-system", "retext"), 2769),
+  (("type-system", "swap"), 983),
+  (("type-system", "transplant"), 21_346),
 ];
 
 /// Mutations tried in total.
-const TRIED_TOTAL: usize = 94_916;
+const TRIED_TOTAL: usize = 97_730;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 84_231;
+const UNFAITHFUL: usize = 86_732;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 8064;
+const EQUAL: usize = 8303;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 2306;
+const BOTH_REFUSE: usize = 2374;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
-const LENIENT_EQUAL: usize = 247;
+const LENIENT_EQUAL: usize = 253;
 
 /// Skeleton-faithful with a lenient token missing, and both refusing the restored text.
 const LENIENT_BOTH_REFUSE: usize = 68;
@@ -629,20 +627,20 @@ const LENIENT_BOTH_REFUSE: usize = 68;
 /// the value witnesses this law finds.
 ///
 /// The tenth row (an extension's `>`) has none and cannot: the list is hole-free without it only
-/// at end of input, where the extension has no tail. The last thirteen — the closers the
+/// at end of input, where the extension has no tail. The last eleven — the closers the
 /// report-and-build census added in round seven — have none from this corpus: deleting a closer
 /// mid-document re-parses to a different skeleton, and only end of input keeps it faithful. Their
 /// values are pinned by `every_unclosed_closer_projects_what_the_closed_text_parses_to` and
 /// `nested_missing_closers_restore_innermost_first` instead.
-const LENIENT_HITS: [usize; 23] = [
-  82, 86, 6, 4, 6, 2, 42, 15, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+const LENIENT_HITS: [usize; 21] = [
+  86, 88, 6, 4, 6, 2, 42, 15, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
 /// How many restorations each row contributed to [`LENIENT_BOTH_REFUSE`] — restored texts the
 /// parser still rejects for another reason, and the projection refuses too. **Every row is
 /// exercised** in one of the two: a row with neither would be an exemption no mutation reaches.
-const LENIENT_REFUSED_HITS: [usize; 23] = [
-  8, 22, 4, 6, 4, 4, 12, 2, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+const LENIENT_REFUSED_HITS: [usize; 21] = [
+  8, 22, 4, 6, 4, 4, 12, 2, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
 /// Every faithful **deletion of a token** the parser and the projection both refuse, as
@@ -672,8 +670,8 @@ struct Tally {
   both_refuse: usize,
   lenient_equal: usize,
   lenient_both_refuse: usize,
-  lenient_hits: [usize; 23],
-  lenient_refused_hits: [usize; 23],
+  lenient_hits: [usize; 21],
+  lenient_refused_hits: [usize; 21],
   strict_deletions: BTreeMap<String, usize>,
   violations: Vec<String>,
 }
@@ -988,7 +986,7 @@ fn nested_missing_closers_restore_innermost_first() {
     ("{ f(a: 1", "{ f(a: 1 ) }"),
     ("{ f(a: [1", "{ f(a: [1 ] ) }"),
     ("{ f(a: {b: 1", "{ f(a: {b: 1 } ) }"),
-    ("{ f(a: set {[1", "{ f(a: set {[1 ] } ) }"),
+    ("{ f(a: set!{[1", "{ f(a: set!{[1 ] } ) }"),
     ("type T { f: [A<B", "type T { f: [A<B > ] }"),
   ] {
     let tree = Door::Mixed.parse(text);

@@ -725,10 +725,10 @@ fn the_value_cycles_have_the_same_bypass_and_the_same_bound() {
 /// One shape per recursive cycle in each dialect's productions, enumerated by taking the strongly
 /// connected components of the lossless call graph over the productions that descend: GraphQL has
 /// three (`selection_set`; `list_value` ↔ `object_value`; `list_type`), GraphQLx has the same
-/// three widened (`collection_body` joins the value cycle, `type_generics` and `set_or_map_type`
-/// join the type cycle). The remaining descending productions — every member block, both argument
-/// lists, the variables definition, GraphQLx's `import_list` and `angle_name_list` — are in no
-/// cycle and cannot reach the ceiling on their own.
+/// three widened (`collection_body` joins the value cycle, `type_generics` joins the type cycle).
+/// The remaining descending productions — every member block, both argument lists, the variables
+/// definition, GraphQLx's `import_list` and `angle_name_list` — are in no cycle and cannot reach
+/// the ceiling on their own.
 ///
 /// # The tail is an axis, because the first version of this test had only one value of it
 ///
@@ -798,12 +798,8 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
       nest("A<", ">", DEPTH, "query Q($v: ", ") { f }"),
     ),
     (
-      "set_or_map_type",
-      nest("<", ">", DEPTH, "query Q($v: ", ") { f }"),
-    ),
-    (
       "collection_body",
-      nest("set {", "}", DEPTH, "{ f(a: ", ") }"),
+      nest("set!{", "}", DEPTH, "{ f(a: ", ") }"),
     ),
   ];
 
@@ -851,8 +847,8 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
   }
 
   // A filtered run that selects nothing exits `ok`, and so does a loop whose `continue` swallowed
-  // every cell. 11 dialect-cycle pairs (4 shared x 2 dialects, plus 3 GraphQLx-only) x 4 tails.
-  assert_eq!(cells, 11 * TAILS.len(), "the cell set collapsed");
+  // every cell. 10 dialect-cycle pairs (4 shared x 2 dialects, plus 2 GraphQLx-only) x 4 tails.
+  assert_eq!(cells, 10 * TAILS.len(), "the cell set collapsed");
 }
 
 /// A refusal ends the document at **every** document root, not only the mixed one — smear issue

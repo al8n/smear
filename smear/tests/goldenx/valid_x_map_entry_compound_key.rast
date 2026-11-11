@@ -16,7 +16,7 @@ Root@0..58
               Space@12..13 " "
               MapValue@13..54
                 Name@13..16 "map"
-                Space@16..17 " "
+                Bang@16..17 "!"
                 LBrace@17..18 "{"
                 Space@18..19 " "
                 MapEntry@19..29
@@ -49,7 +49,7 @@ Root@0..58
                   Space@42..43 " "
                   SetValue@43..52
                     Name@43..46 "set"
-                    Space@46..47 " "
+                    Bang@46..47 "!"
                     LBrace@47..48 "{"
                     Space@48..49 " "
                     EnumValue@49..51

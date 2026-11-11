@@ -1,0 +1,56 @@
+Root@0..60
+  Document@0..60
+    ObjectTypeDefinition@0..59
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..7
+        Name@5..6 "T"
+        Space@6..7 " "
+      Directives@7..47
+        Directive@7..46
+          At@7..8 "@"
+          TypePath@8..9
+            Path@8..9
+              Name@8..9 "d"
+          Arguments@9..46
+            LParen@9..10 "("
+            Argument@10..45
+              Name@10..11 "s"
+              Colon@11..12 ":"
+              Space@12..13 " "
+              SetValue@13..45
+                Name@13..16 "set"
+                Space@16..17 " "
+                Comment@17..26 "# keyword"
+                Newline@26..27 "\n"
+                Space@27..28 " "
+                Space@28..29 " "
+                Bang@29..30 "!"
+                Space@30..31 " "
+                Comment@31..37 "# bang"
+                Newline@37..38 "\n"
+                Space@38..39 " "
+                Space@39..40 " "
+                LBrace@40..41 "{"
+                Space@41..42 " "
+                IntValue@42..43
+                  Int@42..43 "1"
+                Space@43..44 " "
+                RBrace@44..45 "}"
+            RParen@45..46 ")"
+        Space@46..47 " "
+      FieldsDefinition@47..59
+        LBrace@47..48 "{"
+        Newline@48..49 "\n"
+        Space@49..50 " "
+        Space@50..51 " "
+        FieldDefinition@51..58
+          Name@51..52 "f"
+          Colon@52..53 ":"
+          Space@53..54 " "
+          DefinitionTypePath@54..58
+            Path@54..58
+              Name@54..57 "Int"
+              Newline@57..58 "\n"
+        RBrace@58..59 "}"
+    Newline@59..60 "\n"

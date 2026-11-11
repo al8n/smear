@@ -128,7 +128,7 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   // ---- a choice is not a region: every alternative is already its own node ----
   (
     "Type",
-    "a choice of DefinitionTypePath | ListType | SetType | MapType; the tree records which won",
+    "a choice of DefinitionTypePath | ListType; the tree records which won",
   ),
   (
     "Ty",
@@ -262,11 +262,11 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   ),
   (
     "Set",
-    "the AST alias for `set_value`; the kind is SetValue, against SetType",
+    "the AST alias for `set_value`; the kind takes the production's name, SetValue",
   ),
   (
     "Map",
-    "the AST alias for `map_value`; the kind is MapValue, against MapType",
+    "the AST alias for `map_value`; the kind takes the production's name, MapValue",
   ),
   (
     "Object",
@@ -702,10 +702,10 @@ fn lexed_samples() -> BTreeMap<LosslessTokenKind, LosslessToken<&'static str>> {
 ///
 /// 1. **`pub struct` / `pub enum` / `pub type` in `ast/**`** — what GraphQLx declares.
 /// 2. **`crate::<module>::Name` in `ast/**`, excluding `crate::graphqlx::…`** — the shared carriers
-///    GraphQLx *binds*. Without this, `ListType`, `SetType`, `MapType`, `TypeGenerics` and
-///    `DefinitionTypePath` would look unanchored: GraphQLx names them in an enum payload and a type
-///    alias rather than declaring them. The `graphqlx::` exclusion keeps the dialect marker and the
-///    module's own re-references out.
+///    GraphQLx *binds*. Without this, `ListType`, `TypeGenerics` and `DefinitionTypePath` would
+///    look unanchored: GraphQLx names them in an enum payload and a type alias rather than
+///    declaring them. The `graphqlx::` exclusion keeps the dialect marker and the module's own
+///    re-references out.
 /// 3. **`pub fn` at column zero in `syntactic/**`** — a top-level public production. Column zero
 ///    rather than any indentation, because `pub fn graphqlx` inside a `macro_rules!` body is an
 ///    entry point on an AST type, not a production of its own.

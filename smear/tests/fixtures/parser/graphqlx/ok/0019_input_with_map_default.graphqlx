@@ -2,5 +2,5 @@
 
 input CreateUserInput {
   name: String!
-  preferences: <String! => String!>!
+  preferences: HashMap<String!, String!>!
 }

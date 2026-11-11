@@ -10,7 +10,7 @@ Root@0..26
     Colon@11..12 ":"
     Space@12..13 " "
     Name@13..16 "map"
-    Space@16..17 " "
+    Bang@16..17 "!"
     LBrace@17..18 "{"
     Space@18..19 " "
     IntValue@19..20

@@ -199,8 +199,8 @@ name: Miri
 #         subject: Miri decides whether an execution has undefined behaviour, and none of those is
 #         that question. Each member's tests were run alone on aarch64-apple-darwin on 2026-09-25; a
 #         test past five minutes under either aliasing model is a candidate, one past a minute under
-#         Stacked Borrows is read for its kind as well, and behaviour stays whatever it costs —
-#         `smear-parser`'s 100 000-deep map type is released in 498.2 s and runs. By file:
+#         Stacked Borrows is read for its kind as well, and behaviour stays whatever it costs.
+#         By file:
 #         `graphql-proto/src/execute/tests.rs` 20 (cost and allocation gates, one source census),
 #         `graphql-proto/src/request/error/tests.rs` 1 (an allocation gate),
 #         `graphql-proto/tests/response_order.rs` 2 (the two exhaustive arrival-order sweeps),

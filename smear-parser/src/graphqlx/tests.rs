@@ -196,7 +196,7 @@ fn extended_values_cover_set_map_object_and_variables() {
   }
   accept_all!(
     ast::InputValue::graphqlx,
-    "set { 1 true ::Some::Value }",
+    "set!{ 1 true ::Some::Value }",
     check_set
   );
 
@@ -212,7 +212,7 @@ fn extended_values_cover_set_map_object_and_variables() {
   }
   accept_all!(
     syntactic::value::value,
-    "map { one => 1 two => set { false } }",
+    "map!{ one => 1 two => set!{ false } }",
     check_map
   );
 
@@ -296,12 +296,12 @@ fn public_value_composition_parsers_and_direct_apis_are_source_generic() {
   fn check_set<S: AsRef<[u8]>>(value: ast::Set<S>) {
     assert_eq!(value.values().len(), 1);
   }
-  accept_all!(syntactic::value::set_value, "set { 1 }", check_set);
+  accept_all!(syntactic::value::set_value, "set!{ 1 }", check_set);
 
   fn check_map<S: AsRef<[u8]>>(value: ast::Map<S>) {
     assert_eq!(value.entries().len(), 1);
   }
-  accept_all!(syntactic::value::map_value, "map { key => 1 }", check_map);
+  accept_all!(syntactic::value::map_value, "map!{ key => 1 }", check_map);
 
   fn check_entry<S: AsRef<[u8]>>(value: ast::MapEntry<S>) {
     assert!(matches!(value.key(), ast::InputValue::Enum(_)));
@@ -408,19 +408,19 @@ fn direct_value_and_collection_errors_report_local_expectations() {
   );
   assert_unexpected(
     |inp| ast::InputValue::graphqlx(inp).map(|_| ()),
-    "map { key value }",
+    "map!{ key value }",
     Expectation::FatArrow,
     Some(SyntacticTokenKind::Identifier),
   );
   assert_unexpected(
     |inp| ast::InputValue::graphqlx(inp).map(|_| ()),
-    "map { key => }",
+    "map!{ key => }",
     Expectation::InputValue,
     Some(SyntacticTokenKind::RBrace),
   );
   assert_unexpected(
     |inp| ast::InputValue::graphqlx(inp).map(|_| ()),
-    "set { => }",
+    "set!{ => }",
     Expectation::InputValue,
     Some(SyntacticTokenKind::FatArrow),
   );
@@ -428,55 +428,103 @@ fn direct_value_and_collection_errors_report_local_expectations() {
   assert_unexpected(
     |inp| ast::Set::graphqlx(inp).map(|_| ()),
     "set value",
-    Expectation::LBrace,
+    Expectation::Bang,
     Some(SyntacticTokenKind::Identifier),
   );
   assert_unexpected(
     |inp| ast::Set::graphqlx(inp).map(|_| ()),
     "set",
+    Expectation::Bang,
+    None,
+  );
+  assert_unexpected(
+    |inp| ast::Set::graphqlx(inp).map(|_| ()),
+    "set! value",
+    Expectation::LBrace,
+    Some(SyntacticTokenKind::Identifier),
+  );
+  assert_unexpected(
+    |inp| ast::Set::graphqlx(inp).map(|_| ()),
+    "set!",
     Expectation::LBrace,
     None,
   );
   assert_unexpected(
     |inp| ast::ConstSet::graphqlx(inp).map(|_| ()),
     "set value",
-    Expectation::LBrace,
+    Expectation::Bang,
     Some(SyntacticTokenKind::Identifier),
   );
   assert_unexpected(
     |inp| ast::ConstSet::graphqlx(inp).map(|_| ()),
     "set",
+    Expectation::Bang,
+    None,
+  );
+  assert_unexpected(
+    |inp| ast::ConstSet::graphqlx(inp).map(|_| ()),
+    "set! value",
+    Expectation::LBrace,
+    Some(SyntacticTokenKind::Identifier),
+  );
+  assert_unexpected(
+    |inp| ast::ConstSet::graphqlx(inp).map(|_| ()),
+    "set!",
     Expectation::LBrace,
     None,
   );
   assert_unexpected(
     |inp| ast::Map::graphqlx(inp).map(|_| ()),
     "map value",
-    Expectation::LBrace,
+    Expectation::Bang,
     Some(SyntacticTokenKind::Identifier),
   );
   assert_unexpected(
     |inp| ast::Map::graphqlx(inp).map(|_| ()),
     "map",
+    Expectation::Bang,
+    None,
+  );
+  assert_unexpected(
+    |inp| ast::Map::graphqlx(inp).map(|_| ()),
+    "map! value",
+    Expectation::LBrace,
+    Some(SyntacticTokenKind::Identifier),
+  );
+  assert_unexpected(
+    |inp| ast::Map::graphqlx(inp).map(|_| ()),
+    "map!",
     Expectation::LBrace,
     None,
   );
   assert_unexpected(
     |inp| ast::ConstMap::graphqlx(inp).map(|_| ()),
     "map value",
-    Expectation::LBrace,
+    Expectation::Bang,
     Some(SyntacticTokenKind::Identifier),
   );
   assert_unexpected(
     |inp| ast::ConstMap::graphqlx(inp).map(|_| ()),
     "map",
+    Expectation::Bang,
+    None,
+  );
+  assert_unexpected(
+    |inp| ast::ConstMap::graphqlx(inp).map(|_| ()),
+    "map! value",
+    Expectation::LBrace,
+    Some(SyntacticTokenKind::Identifier),
+  );
+  assert_unexpected(
+    |inp| ast::ConstMap::graphqlx(inp).map(|_| ()),
+    "map!",
     Expectation::LBrace,
     None,
   );
 }
 
 #[test]
-fn graphqlx_types_cover_paths_generics_sets_and_maps() {
+fn graphqlx_types_cover_paths_and_generics() {
   fn check_path_type<S: AsRef<[u8]>>(ty: ast::Type<S>) {
     let path = match ty {
       ast::Type::Path(path) => path,
@@ -496,27 +544,6 @@ fn graphqlx_types_cover_paths_generics_sets_and_maps() {
     check_path_type
   );
 
-  fn check_set_type<S: AsRef<[u8]>>(ty: ast::Type<S>) {
-    let set = match ty {
-      ast::Type::Set(set) => set,
-      _ => panic!("expected set type"),
-    };
-    assert!(set.required());
-    assert!(matches!(set.ty(), ast::Type::Path(_)));
-  }
-  accept_all!(syntactic::ty::ty, "<Item>!", check_set_type);
-
-  fn check_map_type<S: AsRef<[u8]>>(ty: ast::Type<S>) {
-    let map = match ty {
-      ast::Type::Map(map) => map,
-      _ => panic!("expected map type"),
-    };
-    assert!(matches!(map.key(), ast::Type::Path(_)));
-    assert!(matches!(map.value(), ast::Type::List(_)));
-    assert!(!map.required());
-  }
-  accept_all!(ast::Type::graphqlx, "<Key => [Value]>", check_map_type);
-
   fn check_nested<S: AsRef<[u8]>>(ty: ast::Type<S>) {
     let outer = match ty {
       ast::Type::Path(path) => path,
@@ -533,13 +560,15 @@ fn graphqlx_types_cover_paths_generics_sets_and_maps() {
   }
   accept_all!(
     ast::Type::graphqlx,
-    "Outer<Inner<[Item]> <Key => <Value>>>",
+    "Outer<Inner<[Item]> Map<Key, Set<Value>>>",
     check_nested
   );
 
   reject_all!(ast::Type::graphqlx, "Foo<>");
   reject_all!(ast::Type::graphqlx, "Foo<");
-  reject_all!(ast::Type::graphqlx, "<Key => >");
+  // A `<` only ever follows a path, as its arguments: no type starts with one.
+  reject_all!(ast::Type::graphqlx, "<Item>");
+  reject_all!(ast::Type::graphqlx, "<Key => Value>");
 }
 
 #[test]
@@ -613,11 +642,11 @@ fn failures_keep_typed_expectations_and_unclosed_kinds() {
     ErrorData::Unclosed(Unclosed::List)
   ));
 
-  let angle_error = drive_str(|inp| ast::Type::graphqlx(inp).map(|_| ()), "<Item")
-    .expect_err("unterminated angle type should fail")
+  let angle_error = drive_str(|inp| ast::Type::graphqlx(inp).map(|_| ()), "Box<Item")
+    .expect_err("an unterminated type-argument list should fail")
     .into_iter()
     .next()
-    .expect("unterminated angle type should emit an error");
+    .expect("an unterminated type-argument list should emit an error");
   assert!(matches!(
     angle_error.into_data(),
     ErrorData::Unclosed(Unclosed::Angle)

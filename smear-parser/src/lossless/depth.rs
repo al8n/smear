@@ -1363,8 +1363,7 @@ where
 /// its own. Measured: 66 nested selection sets under a ceiling of 66 returned **67** diagnostics —
 /// the refusal, then one per remaining significant token — and the count grew with the document
 /// (804 at 800 levels). Every recursive cycle in both dialects behaved the same way, `list_value`,
-/// `object_value`, `list_type`, GraphQLx's `type_generics`, `set_or_map_type` and
-/// `collection_body` included.
+/// `object_value`, `list_type`, GraphQLx's `type_generics` and `collection_body` included.
 ///
 /// **It is the same posture the lexer's trip already has**: end the document.
 /// `lossless::runner::finish_root`'s `The trip ends the document, deliberately` note carries the

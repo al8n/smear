@@ -1,10 +1,10 @@
 "Nested map values"
 
 input AdvancedConfig {
-  database: <
-    String! => <String! => String!>!
-  >! = map {
-    "credentials" => map {
+  database: HashMap<
+    String!, HashMap<String!, String!>!
+  >! = map!{
+    "credentials" => map!{
       "username" => "admin"
       "password" => "secret"
     }
