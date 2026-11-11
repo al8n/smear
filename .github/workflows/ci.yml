@@ -592,6 +592,44 @@ jobs:
             exit 1
           fi
 
+  # The alloc and core tiers, on a target that has no `std`.
+  #
+  # A host build cannot show that no dependency was resolved with `std`, because the host has it.
+  # Here a crate that links `std` does not build. `thumbv7em-none-eabihf` has compare-and-swap, so
+  # `Arc` is not the question being asked; `thumbv6m` stays with `noatomic`, for the representation.
+  #
+  #   * alloc tier: every feature that implies no `std`, built on top of `alloc`.
+  #   * core tier: `ci/noalloc.sh` builds a `staticlib` with every capability and no tier feature.
+  #     rustc refuses a non-rlib artifact whose graph links `alloc` unless a global allocator
+  #     exists, so a green build proves that nothing in the graph links it, and the script's
+  #     control, the same build with `alloc`, must fail on exactly that.
+  tiers:
+    name: tiers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Cache cargo build and registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-tiers-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-tiers-
+      - name: Install Rust
+        run: rustup update stable && rustup default stable
+      - name: rustup target add thumbv7em-none-eabihf
+        run: rustup target add thumbv7em-none-eabihf
+      - name: the alloc tier builds on thumbv7em-none-eabihf
+        run: >-
+          cargo build -p smear --no-default-features
+          --features alloc,graphql,graphqlx,parser,validator,proto,introspection,materialized-numbers,test-support,bstr,smol-bytes,smallvec,bytes,hipstr
+          --target thumbv7em-none-eabihf
+      - name: the core tier links no allocator
+        run: bash ci/noalloc.sh
+
   build:
     name: build
     strategy:
