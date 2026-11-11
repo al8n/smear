@@ -759,36 +759,36 @@ fn graphql_syntactic_simd_source_matrix_u8() {
   }
 }
 
-#[cfg(all(feature = "graphql", feature = "bytes"))]
+#[cfg(all(feature = "graphql", feature = "bytes_1"))]
 #[test]
 fn graphql_syntactic_simd_source_matrix_bytes() {
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
-    let owned = bytes::Bytes::copy_from_slice(src.as_bytes());
+    let owned = bytes_1::Bytes::copy_from_slice(src.as_bytes());
     assert_matches_str_stream!(
       "Bytes",
       name,
-      SyntacticLexer::<bytes::Bytes>::new(&owned),
+      SyntacticLexer::<bytes_1::Bytes>::new(&owned),
       src,
       same_lexer_errors
     );
   }
 }
 
-#[cfg(all(feature = "graphql", feature = "bstr"))]
+#[cfg(all(feature = "graphql", feature = "bstr_1"))]
 #[test]
 fn graphql_syntactic_simd_source_matrix_bstr() {
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
     assert_matches_str_stream!(
       "BStr",
       name,
-      SyntacticLexer::<bstr::BStr>::new(bstr::BStr::new(src.as_bytes())),
+      SyntacticLexer::<bstr_1::BStr>::new(bstr_1::BStr::new(src.as_bytes())),
       src,
       same_lexer_errors
     );
   }
 }
 
-#[cfg(all(feature = "graphql", feature = "hipstr"))]
+#[cfg(all(feature = "graphql", feature = "hipstr_0_8"))]
 #[test]
 fn graphql_syntactic_simd_source_matrix_hipstr() {
   // `HipStr` scans `str`, so its errors are `SyntacticLexerErrors<char>` —
@@ -797,56 +797,56 @@ fn graphql_syntactic_simd_source_matrix_hipstr() {
     byte == str_
   }
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
-    let owned = hipstr::HipStr::from(*src);
+    let owned = hipstr_0_8::HipStr::from(*src);
     assert_matches_str_stream!(
       "HipStr",
       name,
-      SyntacticLexer::<hipstr::HipStr<'_>>::new(&owned),
+      SyntacticLexer::<hipstr_0_8::HipStr<'_>>::new(&owned),
       src,
       eq_char
     );
   }
 }
 
-#[cfg(all(feature = "graphql", feature = "hipstr"))]
+#[cfg(all(feature = "graphql", feature = "hipstr_0_8"))]
 #[test]
 fn graphql_syntactic_simd_source_matrix_hipbyt() {
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
-    let owned = hipstr::HipByt::from(src.as_bytes());
+    let owned = hipstr_0_8::HipByt::from(src.as_bytes());
     assert_matches_str_stream!(
       "HipByt",
       name,
-      SyntacticLexer::<hipstr::HipByt<'_>>::new(&owned),
+      SyntacticLexer::<hipstr_0_8::HipByt<'_>>::new(&owned),
       src,
       same_lexer_errors
     );
   }
 }
 
-#[cfg(all(feature = "graphql", feature = "smol-bytes"))]
+#[cfg(all(feature = "graphql", feature = "smol-bytes_0_2"))]
 #[test]
 fn graphql_syntactic_simd_source_matrix_smol_bytes() {
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
-    let owned = smol_bytes::shared::Bytes::copy_from_slice(src.as_bytes());
+    let owned = smol_bytes_0_2::shared::Bytes::copy_from_slice(src.as_bytes());
     assert_matches_str_stream!(
       "shared Bytes",
       name,
-      SyntacticLexer::<smol_bytes::shared::Bytes>::new(&owned),
+      SyntacticLexer::<smol_bytes_0_2::shared::Bytes>::new(&owned),
       src,
       same_lexer_errors
     );
-    let owned = smol_bytes::compact::Bytes::copy_from_slice(src.as_bytes());
+    let owned = smol_bytes_0_2::compact::Bytes::copy_from_slice(src.as_bytes());
     assert_matches_str_stream!(
       "compact Bytes",
       name,
-      SyntacticLexer::<smol_bytes::compact::Bytes>::new(&owned),
+      SyntacticLexer::<smol_bytes_0_2::compact::Bytes>::new(&owned),
       src,
       same_lexer_errors
     );
   }
 }
 
-#[cfg(all(feature = "graphql", feature = "smol-bytes"))]
+#[cfg(all(feature = "graphql", feature = "smol-bytes_0_2"))]
 #[test]
 fn graphql_syntactic_simd_source_matrix_smol_utf8_bytes() {
   // Both `Utf8Bytes` forms scan `str`, so their errors are
@@ -856,19 +856,19 @@ fn graphql_syntactic_simd_source_matrix_smol_utf8_bytes() {
     byte == str_
   }
   for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
-    let owned = smol_bytes::Utf8Bytes::from(*src);
+    let owned = smol_bytes_0_2::Utf8Bytes::from(*src);
     assert_matches_str_stream!(
       "shared Utf8Bytes",
       name,
-      SyntacticLexer::<smol_bytes::Utf8Bytes>::new(&owned),
+      SyntacticLexer::<smol_bytes_0_2::Utf8Bytes>::new(&owned),
       src,
       eq_char
     );
-    let owned = smol_bytes::compact::Utf8Bytes::from(*src);
+    let owned = smol_bytes_0_2::compact::Utf8Bytes::from(*src);
     assert_matches_str_stream!(
       "compact Utf8Bytes",
       name,
-      SyntacticLexer::<smol_bytes::compact::Utf8Bytes>::new(&owned),
+      SyntacticLexer::<smol_bytes_0_2::compact::Utf8Bytes>::new(&owned),
       src,
       eq_char
     );
@@ -1326,37 +1326,37 @@ fn graphqlx_syntactic_simd_source_matrix_u8() {
   }
 }
 
-#[cfg(all(feature = "graphqlx", feature = "bytes"))]
+#[cfg(all(feature = "graphqlx", feature = "bytes_1"))]
 #[test]
 fn graphqlx_syntactic_simd_source_matrix_bytes() {
   for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
-    let owned = bytes::Bytes::copy_from_slice(src.as_bytes());
-    assert_gx_matches_str_stream!("Bytes", name, GxSimd::<bytes::Bytes>::new(&owned), src);
+    let owned = bytes_1::Bytes::copy_from_slice(src.as_bytes());
+    assert_gx_matches_str_stream!("Bytes", name, GxSimd::<bytes_1::Bytes>::new(&owned), src);
   }
 }
 
-#[cfg(all(feature = "graphqlx", feature = "smol-bytes"))]
+#[cfg(all(feature = "graphqlx", feature = "smol-bytes_0_2"))]
 #[test]
 fn graphqlx_syntactic_simd_source_matrix_smol_bytes() {
   for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
-    let owned = smol_bytes::shared::Bytes::copy_from_slice(src.as_bytes());
+    let owned = smol_bytes_0_2::shared::Bytes::copy_from_slice(src.as_bytes());
     assert_gx_matches_str_stream!(
       "shared Bytes",
       name,
-      GxSimd::<smol_bytes::shared::Bytes>::new(&owned),
+      GxSimd::<smol_bytes_0_2::shared::Bytes>::new(&owned),
       src
     );
-    let owned = smol_bytes::compact::Bytes::copy_from_slice(src.as_bytes());
+    let owned = smol_bytes_0_2::compact::Bytes::copy_from_slice(src.as_bytes());
     assert_gx_matches_str_stream!(
       "compact Bytes",
       name,
-      GxSimd::<smol_bytes::compact::Bytes>::new(&owned),
+      GxSimd::<smol_bytes_0_2::compact::Bytes>::new(&owned),
       src
     );
   }
 }
 
-#[cfg(all(feature = "graphqlx", feature = "smol-bytes"))]
+#[cfg(all(feature = "graphqlx", feature = "smol-bytes_0_2"))]
 #[test]
 fn graphqlx_syntactic_simd_source_matrix_smol_utf8_bytes() {
   // Both `Utf8Bytes` forms scan `str`, so their errors are the exact type the
@@ -1368,19 +1368,19 @@ fn graphqlx_syntactic_simd_source_matrix_smol_utf8_bytes() {
     byte == str_
   }
   for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
-    let owned = smol_bytes::Utf8Bytes::from(*src);
+    let owned = smol_bytes_0_2::Utf8Bytes::from(*src);
     assert_gx_matches_str_stream!(
       "shared Utf8Bytes",
       name,
-      GxSimd::<smol_bytes::Utf8Bytes>::new(&owned),
+      GxSimd::<smol_bytes_0_2::Utf8Bytes>::new(&owned),
       src,
       eq_char
     );
-    let owned = smol_bytes::compact::Utf8Bytes::from(*src);
+    let owned = smol_bytes_0_2::compact::Utf8Bytes::from(*src);
     assert_gx_matches_str_stream!(
       "compact Utf8Bytes",
       name,
-      GxSimd::<smol_bytes::compact::Utf8Bytes>::new(&owned),
+      GxSimd::<smol_bytes_0_2::compact::Utf8Bytes>::new(&owned),
       src,
       eq_char
     );

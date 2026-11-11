@@ -1,4 +1,4 @@
-#![cfg(all(feature = "graphql", feature = "rowan"))]
+#![cfg(all(feature = "graphql", feature = "rowan_0_17"))]
 
 //! The mutation law for the GraphQL projection: a falsifier for "a walk represents every
 //! non-trivia byte, or it refuses".

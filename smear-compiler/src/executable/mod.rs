@@ -629,7 +629,7 @@ impl Invalid {
 /// Gated to its one caller rather than left ungated: without `rowan` there is no door that refuses
 /// before a [`Validator`] exists, so an ungated constructor is dead code in exactly the feature
 /// selection `cargo clippy --no-default-features -D warnings` builds.
-#[cfg(feature = "rowan")]
+#[cfg(feature = "rowan_0_17")]
 impl Invalid {
   /// The verdict of a run a resource bound abandoned, with `emitted` diagnostics behind it and
   /// `stopped` saying whether the sink asked to stop on one of them.

@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 //! Gate 6 — cross-dialect isolation.
 //!
@@ -39,7 +39,7 @@
 //! `crate::graphql::lossless::ast` — prose, not code, and therefore invisible to every other gate.
 //! It is a **compile-time reference across the boundary**: an intra-doc link resolves only when the
 //! other dialect's feature is on, so
-//! `cargo doc --no-default-features --features rowan,graphqlx` failed on it under `-D warnings`.
+//! `cargo doc --no-default-features --features rowan_0_17,graphqlx` failed on it under `-D warnings`.
 //! That is why [`FORBIDDEN`]'s patterns are counted over **every line** rather than over code
 //! alone.
 

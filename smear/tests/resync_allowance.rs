@@ -1,5 +1,5 @@
 #![cfg(all(
-  feature = "rowan",
+  feature = "rowan_0_17",
   feature = "parser",
   feature = "test-support",
   feature = "std"

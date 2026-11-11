@@ -26,7 +26,7 @@ Add to your `Cargo.toml`:
 [dependencies]
 # The lexer alone. For the parser tower, the validator or the protocol machine on top of it,
 # depend on `smear` and enable the matching feature there.
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1"] }
 ```
 
 ### Basic Usage
@@ -112,11 +112,11 @@ let tokens = Lexer::<&[u8]>::new(&source[..]);
 
 ### Shared Ownership (`bytes::Bytes`)
 
-Enable the `bytes` feature for cheap cloning with Arc-backed storage:
+Enable the `bytes_1` feature for cheap cloning with Arc-backed storage:
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec", "bytes"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1", "bytes_1"] }
 ```
 
 ```rust,ignore
@@ -130,11 +130,11 @@ let tokens = Lexer::<Bytes>::new(source);
 
 ### `hipstr` Types
 
-Enable the `hipstr` feature for inline-optimized strings:
+Enable the `hipstr_0_8` feature for inline-optimized strings:
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec", "hipstr"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1", "hipstr_0_8"] }
 ```
 
 ```rust,ignore
@@ -147,11 +147,11 @@ let tokens = Lexer::<HipStr>::new(source);
 
 ### `smol-bytes` Types
 
-Enable the `smol-bytes` feature for smol-bytes 0.2's inline-optimized buffers, `Bytes` and `Utf8Bytes`, each in a shared and a compact form (`smol_bytes::shared::Bytes`, `smol_bytes::compact::Bytes`, `smol_bytes::Utf8Bytes`, `smol_bytes::compact::Utf8Bytes`). The two `Utf8Bytes` are text sources; the two `Bytes` are byte sources and follow the UTF-8 rule above.
+Enable the `smol-bytes_0_2` feature for smol-bytes 0.2's inline-optimized buffers, `Bytes` and `Utf8Bytes`, each in a shared and a compact form (`smol_bytes::shared::Bytes`, `smol_bytes::compact::Bytes`, `smol_bytes::Utf8Bytes`, `smol_bytes::compact::Utf8Bytes`). The two `Utf8Bytes` are text sources; the two `Bytes` are byte sources and follow the UTF-8 rule above.
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec", "smol-bytes"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1", "smol-bytes_0_2"] }
 ```
 
 ```rust,ignore
@@ -183,7 +183,7 @@ Enable the `graphqlx` feature for extended tokens:
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphqlx", "smallvec"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphqlx", "smallvec_1"] }
 ```
 
 GraphQLx is a **superset of GraphQL**, meaning it includes all standard GraphQL tokens plus additional extensions:
@@ -238,22 +238,27 @@ Common error types:
 
 Every feature this crate declares. `smear` forwards each of them under the same name, so a
 consumer of the umbrella spells the same word; see `smear`'s own table for the features that
-belong to the layers above (`parser`, `validator`, `proto`, `rowan`, …).
+belong to the layers above (`parser`, `validator`, `proto`, `rowan_0_17`, …).
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `alloc` | The allocating API: the dialect lexers, the lossless lexer, the error types and the string lexers. Off, the crate is `no_std` and keeps only `hints`, `keywords` (with `keyword!`), `limits` and `punctuator`. Implied by `std`, `smallvec`, `bytes`, `hipstr` and `smol-bytes` | via `std` |
+| `alloc` | The allocating API: the dialect lexers, the lossless lexer, the error types and the string lexers. Off, the crate is `no_std` and keeps only `hints`, `keywords` (with `keyword!`), `limits` and `punctuator`. Implied by `std`, `smallvec_1`, `bytes_1`, `hipstr_0_8` and `smol-bytes_0_2` | via `std` |
 | `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
 | `graphql` | Standard GraphQL lexer. Needs `alloc` | ✓ |
 | `graphqlx` | Extended GraphQL lexer; semver-exempt while the dialect moves. Needs `alloc` | ✓ |
-| `smallvec` | Use `smallvec` for small collections. Implies `alloc` | ✓ |
-| `bytes` | Support `bytes::Bytes` source type. Implies `alloc` | |
-| `bstr` | Support `bstr::BStr` source type. Implies no tier | |
-| `hipstr` | Support `hipstr::{HipStr, HipByt}` source type. Implies `alloc` | |
-| `smol-bytes` | Support smol-bytes 0.2 `smol_bytes::{Bytes, Utf8Bytes}` and `smol_bytes::compact::{Bytes, Utf8Bytes}` source types. Implies `alloc` | |
+| `smallvec_1` | Use `smallvec` 1 for small collections. Implies `alloc` | ✓ |
+| `bytes_1` | Support `bytes::Bytes` source type, from `bytes` 1. Implies `alloc` | |
+| `bstr_1` | Support `bstr::BStr` source type, from `bstr` 1. Implies no tier | |
+| `hipstr_0_8` | Support `hipstr::{HipStr, HipByt}` source type, from `hipstr` 0.8. Implies `alloc` | |
+| `smol-bytes_0_2` | Support smol-bytes 0.2 `smol_bytes::{Bytes, Utf8Bytes}` and `smol_bytes::compact::{Bytes, Utf8Bytes}` source types. Implies `alloc` | |
 
 A capability feature (`graphql`, `graphqlx`) never switches a tier on, so a `default-features = false`
 consumer names `alloc` itself, or `std`, which implies it.
+
+The five dependency features carry the major of the crate they enable, and the dependency is named
+the same way, so a second major of one of them can be added beside it. The unversioned names —
+`smallvec`, `bytes`, `bstr`, `hipstr` and `smol-bytes` — are aliases for the current version: each
+enables its versioned feature and nothing else.
 
 ## Performance Characteristics
 

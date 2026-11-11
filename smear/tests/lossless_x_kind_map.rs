@@ -27,7 +27,7 @@
 //!   `K::Error` or `K::Name` instead of panicking would make an unmapped token indistinguishable
 //!   from a mapped one, which is precisely the state `#[non_exhaustive]` forces this file to guard
 //!   against.
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 use std::{collections::BTreeSet, fs, path::PathBuf};
 

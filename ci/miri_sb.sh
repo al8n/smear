@@ -210,7 +210,7 @@ export MIRIFLAGS
 # path still fails under Stacked Borrows.
 #
 # So a named selection is not a cost/benefit trade about minutes. The lossless tower CANNOT be
-# interpreted, at any price, until rowan is fixed — and the 37 `#![cfg(feature = "rowan")]`
+# interpreted, at any price, until rowan is fixed — and the 37 `#![cfg(feature = "rowan_0_17")]`
 # targets in `smear/tests/` are therefore excluded here rather than left to fail. Naming the
 # packages is the mechanism because it is the one that a future workspace member cannot undo:
 # feature unification is over the SELECTED packages, and this selects exactly these.

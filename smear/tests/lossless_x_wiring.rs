@@ -1,13 +1,13 @@
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 //! The GraphQLx lossless suite's wiring guards — the twin of `lossless_wiring.rs`.
 //!
 //! # Why this is a file and not four items in the GraphQL one
 //!
-//! It was four items in the GraphQL one, under `#![cfg(all(feature = "rowan", feature =
+//! It was four items in the GraphQL one, under `#![cfg(all(feature = "rowan_0_17", feature =
 //! "graphql"))]` and an inner `#[cfg(feature = "graphqlx")]` each. That reads as "compiled when
 //! both dialects are on", and it is — but the build these guards exist for is
-//! `--features "rowan,graphqlx"`, where the *header* is false and every one of them is compiled
+//! `--features "rowan_0_17,graphqlx"`, where the *header* is false and every one of them is compiled
 //! away. Nothing said so, because `smear`'s self dev-dependency was missing
 //! `default-features = false`, so `graphql` was unconditionally on for every test target and the
 //! narrow build did not exist to be wrong about. #136 made it exist; this file is what these four

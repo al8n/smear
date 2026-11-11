@@ -484,7 +484,7 @@ mod graphql {
   /// The lossless door keeps a lexical refusal's whole batch where the syntactic door keeps only
   /// its kind. The error itself carries the zeroed span, and reads its kind, its sentence and its
   /// position off the batch's first error.
-  #[cfg(feature = "rowan")]
+  #[cfg(feature = "rowan_0_17")]
   #[test]
   fn a_kept_lexer_batch_answers_through_its_first_error() {
     use smear::{
@@ -521,7 +521,7 @@ mod graphql {
 
   /// No production demands a trivia kind, so the lossless door's expectation table sends one to
   /// `Unspecified`, and the sentence drops its "expected" clause rather than naming it.
-  #[cfg(feature = "rowan")]
+  #[cfg(feature = "rowan_0_17")]
   #[test]
   fn a_trivia_expectation_names_none() {
     use smear::{
@@ -847,7 +847,7 @@ mod graphqlx {
   /// GraphQLx's lossless door keeps a lexical refusal's whole batch as GraphQL's does, and the
   /// error reads its kind, its sentence and its position off the batch's first error rather than
   /// off the zeroed span it carries itself.
-  #[cfg(feature = "rowan")]
+  #[cfg(feature = "rowan_0_17")]
   #[test]
   fn a_kept_lexer_batch_answers_through_its_first_error() {
     use smear::{

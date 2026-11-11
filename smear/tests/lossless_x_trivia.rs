@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 //! Gate 2: GraphQLx trivia injection, with a per-production hit counter.
 //!

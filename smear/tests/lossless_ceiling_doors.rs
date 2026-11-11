@@ -122,35 +122,35 @@ macro_rules! dialect {
         cell::<LL<'_, &[u8]>>("&[u8]", s.as_bytes());
       }
 
-      #[cfg(feature = "bytes")]
+      #[cfg(feature = "bytes_1")]
       #[test]
       fn bytes_source() {
         let s = "-".repeat(RUN);
-        cell::<LL<'_, bytes::Bytes>>("bytes::Bytes", s.as_bytes());
+        cell::<LL<'_, bytes_1::Bytes>>("bytes::Bytes", s.as_bytes());
       }
 
-      #[cfg(feature = "hipstr")]
+      #[cfg(feature = "hipstr_0_8")]
       #[test]
       fn hipstr_source() {
         let s = "-".repeat(RUN);
-        cell::<LL<'_, hipstr::HipStr<'_>>>("HipStr", s.as_str());
+        cell::<LL<'_, hipstr_0_8::HipStr<'_>>>("HipStr", s.as_str());
       }
 
-      #[cfg(feature = "hipstr")]
+      #[cfg(feature = "hipstr_0_8")]
       #[test]
       fn hipbyt_source() {
         let s = "-".repeat(RUN);
-        cell::<LL<'_, hipstr::HipByt<'_>>>("HipByt", s.as_bytes());
+        cell::<LL<'_, hipstr_0_8::HipByt<'_>>>("HipByt", s.as_bytes());
       }
 
-      #[cfg(feature = "smol-bytes")]
+      #[cfg(feature = "smol-bytes_0_2")]
       #[test]
       fn smol_bytes_sources() {
         let s = "-".repeat(RUN);
-        cell::<LL<'_, smol_bytes::shared::Bytes>>("smol_bytes::shared::Bytes", s.as_bytes());
-        cell::<LL<'_, smol_bytes::compact::Bytes>>("smol_bytes::compact::Bytes", s.as_bytes());
-        cell::<LL<'_, smol_bytes::Utf8Bytes>>("smol_bytes::Utf8Bytes", s.as_str());
-        cell::<LL<'_, smol_bytes::compact::Utf8Bytes>>(
+        cell::<LL<'_, smol_bytes_0_2::shared::Bytes>>("smol_bytes::shared::Bytes", s.as_bytes());
+        cell::<LL<'_, smol_bytes_0_2::compact::Bytes>>("smol_bytes::compact::Bytes", s.as_bytes());
+        cell::<LL<'_, smol_bytes_0_2::Utf8Bytes>>("smol_bytes::Utf8Bytes", s.as_str());
+        cell::<LL<'_, smol_bytes_0_2::compact::Utf8Bytes>>(
           "smol_bytes::compact::Utf8Bytes",
           s.as_str(),
         );

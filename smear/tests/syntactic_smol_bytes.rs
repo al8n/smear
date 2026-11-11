@@ -1,4 +1,7 @@
-#![cfg(all(feature = "smol-bytes", any(feature = "graphql", feature = "graphqlx")))]
+#![cfg(all(
+  feature = "smol-bytes_0_2",
+  any(feature = "graphql", feature = "graphqlx")
+))]
 
 //! Both dialects' syntactic lexers and parsers take smol-bytes' four types as sources.
 //!
@@ -79,10 +82,10 @@ extend type Query { other(list: [Int] = [1, 2, 3]): Int }
       }};
     }
 
-    lexes_like_str!(smol_bytes::shared::Bytes, "shared Bytes");
-    lexes_like_str!(smol_bytes::compact::Bytes, "compact Bytes");
-    lexes_like_str!(smol_bytes::Utf8Bytes, "shared Utf8Bytes");
-    lexes_like_str!(smol_bytes::compact::Utf8Bytes, "compact Utf8Bytes");
+    lexes_like_str!(smol_bytes_0_2::shared::Bytes, "shared Bytes");
+    lexes_like_str!(smol_bytes_0_2::compact::Bytes, "compact Bytes");
+    lexes_like_str!(smol_bytes_0_2::Utf8Bytes, "shared Utf8Bytes");
+    lexes_like_str!(smol_bytes_0_2::compact::Utf8Bytes, "compact Utf8Bytes");
   }
 
   #[test]
@@ -90,17 +93,19 @@ extend type Query { other(list: [Int] = [1, 2, 3]): Int }
     for doc in ILL_FORMED {
       let want = refusal!(SyntacticLexer::<[u8]>::new(doc));
 
-      let owned = smol_bytes::shared::Bytes::from(doc);
+      let owned = smol_bytes_0_2::shared::Bytes::from(doc);
       assert_eq!(
-        refusal!(SyntacticLexer::<smol_bytes::shared::Bytes>::new(&owned)),
+        refusal!(SyntacticLexer::<smol_bytes_0_2::shared::Bytes>::new(&owned)),
         want,
         "shared Bytes: {}",
         doc.escape_ascii()
       );
 
-      let owned = smol_bytes::compact::Bytes::from(doc);
+      let owned = smol_bytes_0_2::compact::Bytes::from(doc);
       assert_eq!(
-        refusal!(SyntacticLexer::<smol_bytes::compact::Bytes>::new(&owned)),
+        refusal!(SyntacticLexer::<smol_bytes_0_2::compact::Bytes>::new(
+          &owned
+        )),
         want,
         "compact Bytes: {}",
         doc.escape_ascii()
@@ -162,11 +167,23 @@ extend type Query { other(list: [Int] = [1, 2, 3]): Int }
       );
       assert_eq!(want.2, 4, "a type, a query, a fragment and an extension");
 
-      assert_eq!(outline!(smol_bytes::shared::Bytes), want, "shared Bytes");
-      assert_eq!(outline!(smol_bytes::compact::Bytes), want, "compact Bytes");
-      assert_eq!(outline!(smol_bytes::Utf8Bytes), want, "shared Utf8Bytes");
       assert_eq!(
-        outline!(smol_bytes::compact::Utf8Bytes),
+        outline!(smol_bytes_0_2::shared::Bytes),
+        want,
+        "shared Bytes"
+      );
+      assert_eq!(
+        outline!(smol_bytes_0_2::compact::Bytes),
+        want,
+        "compact Bytes"
+      );
+      assert_eq!(
+        outline!(smol_bytes_0_2::Utf8Bytes),
+        want,
+        "shared Utf8Bytes"
+      );
+      assert_eq!(
+        outline!(smol_bytes_0_2::compact::Utf8Bytes),
         want,
         "compact Utf8Bytes"
       );
@@ -210,10 +227,10 @@ extend type User<String> { displayName: String }
       }};
     }
 
-    lexes_like_str!(smol_bytes::shared::Bytes, "shared Bytes");
-    lexes_like_str!(smol_bytes::compact::Bytes, "compact Bytes");
-    lexes_like_str!(smol_bytes::Utf8Bytes, "shared Utf8Bytes");
-    lexes_like_str!(smol_bytes::compact::Utf8Bytes, "compact Utf8Bytes");
+    lexes_like_str!(smol_bytes_0_2::shared::Bytes, "shared Bytes");
+    lexes_like_str!(smol_bytes_0_2::compact::Bytes, "compact Bytes");
+    lexes_like_str!(smol_bytes_0_2::Utf8Bytes, "shared Utf8Bytes");
+    lexes_like_str!(smol_bytes_0_2::compact::Utf8Bytes, "compact Utf8Bytes");
   }
 
   #[test]
@@ -221,17 +238,19 @@ extend type User<String> { displayName: String }
     for doc in ILL_FORMED {
       let want = refusal!(SyntacticLexer::<[u8]>::new(doc));
 
-      let owned = smol_bytes::shared::Bytes::from(doc);
+      let owned = smol_bytes_0_2::shared::Bytes::from(doc);
       assert_eq!(
-        refusal!(SyntacticLexer::<smol_bytes::shared::Bytes>::new(&owned)),
+        refusal!(SyntacticLexer::<smol_bytes_0_2::shared::Bytes>::new(&owned)),
         want,
         "shared Bytes: {}",
         doc.escape_ascii()
       );
 
-      let owned = smol_bytes::compact::Bytes::from(doc);
+      let owned = smol_bytes_0_2::compact::Bytes::from(doc);
       assert_eq!(
-        refusal!(SyntacticLexer::<smol_bytes::compact::Bytes>::new(&owned)),
+        refusal!(SyntacticLexer::<smol_bytes_0_2::compact::Bytes>::new(
+          &owned
+        )),
         want,
         "compact Bytes: {}",
         doc.escape_ascii()
@@ -293,11 +312,23 @@ extend type User<String> { displayName: String }
       );
       assert_eq!(want.2, 4, "an import, a type, a query and an extension");
 
-      assert_eq!(outline!(smol_bytes::shared::Bytes), want, "shared Bytes");
-      assert_eq!(outline!(smol_bytes::compact::Bytes), want, "compact Bytes");
-      assert_eq!(outline!(smol_bytes::Utf8Bytes), want, "shared Utf8Bytes");
       assert_eq!(
-        outline!(smol_bytes::compact::Utf8Bytes),
+        outline!(smol_bytes_0_2::shared::Bytes),
+        want,
+        "shared Bytes"
+      );
+      assert_eq!(
+        outline!(smol_bytes_0_2::compact::Bytes),
+        want,
+        "compact Bytes"
+      );
+      assert_eq!(
+        outline!(smol_bytes_0_2::Utf8Bytes),
+        want,
+        "shared Utf8Bytes"
+      );
+      assert_eq!(
+        outline!(smol_bytes_0_2::compact::Utf8Bytes),
         want,
         "compact Utf8Bytes"
       );

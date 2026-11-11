@@ -46,8 +46,15 @@ status=0
 # Pass 1 — every feature of every member, one at a time, plus none and all.
 #
 # Its rows are the CORE tier — no allocator, each crate exporting only what needs none — except
-# the rows whose feature implies a tier: `std`, `default`, `rowan`, `lossless-coverage` and
-# `--all-features` reach `std`; `bytes`, `hipstr`, `smallvec` and `smol-bytes` reach `alloc`.
+# the rows whose feature implies a tier: `std`, `default`, `rowan_0_17`, `lossless-coverage` and
+# `--all-features` reach `std`; `bytes_1`, `hipstr_0_8`, `smallvec_1` and `smol-bytes_0_2` reach
+# `alloc`.
+#
+# THE UNVERSIONED DEPENDENCY NAMES ARE NOT ROWS. `bytes`, `bstr`, `hipstr`, `smol-bytes`,
+# `smallvec` and `rowan` are pure aliases of the versioned features (`bytes = ["bytes_1"]`), so
+# each of their rows would build what the versioned row builds and double the matrix. They are
+# excluded here and in every pass below. `--exclude-features` also drops cargo-hack's
+# `--all-features` row, so the second command asks for it by name.
 #
 # `--tests` is on every pass, and it is what makes each row check the member's TEST code too: unit
 # tests and `tests/*.rs`, built with the row's features and nothing else. Without it a row compiles
@@ -66,26 +73,29 @@ status=0
 # `--tests`, not dropping it again.
 echo "== pass 1: the core tier, cargo hack clippy --each-feature --tests =="
 # shellcheck disable=SC2086
-$CARGO $TOOLCHAIN hack clippy --each-feature --tests --keep-going || status=1
+$CARGO $TOOLCHAIN hack clippy --each-feature --tests --keep-going \
+  --exclude-features bytes,bstr,hipstr,smol-bytes,smallvec,rowan || status=1
+$CARGO $TOOLCHAIN hack clippy --all-features --tests --keep-going || status=1
 
 # Pass 2 — the alloc tier: every feature, one at a time, on top of `alloc`.
 #
 # This is what pass 1 covered until `alloc` became a feature of its own: a build with an allocator
 # and no `std`. `alloc` is NOT in the exclude list, because cargo-hack refuses a feature named by
 # both `--features` and `--exclude-features`; it skips the `alloc,alloc` cell on its own. The
-# no-default row stays on purpose: with `--features alloc` it is "alloc alone". `rowan` and
+# no-default row stays on purpose: with `--features alloc` it is "alloc alone". `rowan_0_17` and
 # `lossless-coverage` imply `std`, so their rows would repeat pass 1.
 echo "== pass 2: the alloc tier =="
 # shellcheck disable=SC2086
 $CARGO $TOOLCHAIN hack clippy --each-feature --features alloc --ignore-unknown-features --tests \
-  --keep-going --exclude-features std,default,rowan,lossless-coverage \
+  --keep-going --exclude-features \
+  std,default,rowan,rowan_0_17,lossless-coverage,bytes,bstr,hipstr,smol-bytes,smallvec \
   --exclude-all-features || status=1
 
 # Pass 3 — the pairwise isolation cells the crate split used to provide by accident.
 # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its build
 # always contained the parser; a single-crate `--each-feature` never builds `parser` together with
 # exactly one other feature. This restores those pairs deliberately, and the two that matter are
-# `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect. They are alloc-tier cells,
+# `parser` x `bytes_1` (60 parser cfg sites) and `parser` x dialect. They are alloc-tier cells,
 # because the parser needs an allocator: `--features parser,alloc`.
 #
 # `smear-lexer` needs no pass of its own, and that is measured rather than assumed: not one of its
@@ -93,10 +103,10 @@ $CARGO $TOOLCHAIN hack clippy --each-feature --features alloc --ignore-unknown-f
 # capability or a forward to a dependency — so pass 2 already builds each of them in the only
 # combination the old single-crate run gave it.
 #
-# `rowan`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded because they
-# already imply `parser`, so their pass-2 cells ARE pairs; `default`, `std` and `--all-features` are
-# excluded because the `std` tier is pass 1's, and `--no-default-features` because `parser,alloc`
-# is already pass 2's `parser` row.
+# `rowan_0_17`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded because
+# they already imply `parser`, so their pass-2 cells ARE pairs; `default`, `std` and `--all-features`
+# are excluded because the `std` tier is pass 1's, and `--no-default-features` because
+# `parser,alloc` is already pass 2's `parser` row. The aliases are excluded as in pass 1.
 #
 # `parser` and `alloc` are NOT in the exclude list: cargo-hack rejects a feature named by both
 # `--features` and `--exclude-features` (verified against 0.6.43, "specified by both"), and it
@@ -109,7 +119,8 @@ $CARGO $TOOLCHAIN hack clippy --each-feature --features alloc --ignore-unknown-f
 echo "== pass 3: the parser x feature pairs, on the alloc tier =="
 # shellcheck disable=SC2086
 $CARGO $TOOLCHAIN hack clippy -p smear --each-feature --features parser,alloc --tests --keep-going \
-  --exclude-features rowan,lossless-coverage,validator,introspection,proto,default,std \
+  --exclude-features \
+  rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,default,std,bytes,bstr,hipstr,smol-bytes,smallvec \
   --exclude-no-default-features --exclude-all-features || status=1
 
 exit "$status"

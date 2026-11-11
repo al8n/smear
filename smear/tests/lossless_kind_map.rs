@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan", feature = "graphql"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphql"))]
 
 use smear::{
   lexer::graphql::lossless::{LosslessLexer, LosslessToken as T, LosslessTokenKind as LK},

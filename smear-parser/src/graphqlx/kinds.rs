@@ -62,7 +62,7 @@
 //!   and a non-constant position, so `ConstList` and `List` are one
 //!   [`ListValue`](SyntaxKind::ListValue).
 
-#[cfg(feature = "rowan")]
+#[cfg(feature = "rowan_0_17")]
 use crate::lossless::KindSpace;
 
 /// A GraphQLx concrete-syntax-tree kind: one token image, one node, or one bookkeeping tile.
@@ -518,7 +518,7 @@ impl SyntaxKind {
   }
 }
 
-#[cfg(feature = "rowan")]
+#[cfg(feature = "rowan_0_17")]
 impl KindSpace for SyntaxKind {
   const NAME: &'static str = "graphqlx";
   const ERROR: Self = Self::Error;
@@ -537,22 +537,22 @@ impl KindSpace for SyntaxKind {
   }
 }
 
-/// The [`rowan::Language`] a GraphQLx lossless tree is typed over.
+/// The [`rowan_0_17::Language`] a GraphQLx lossless tree is typed over.
 ///
 /// **A second `Language`, and therefore a `SyntaxNode` incompatible with GraphQL's.** That is
 /// intended: a GraphQLx tree is not a GraphQL tree, the two spaces do not even agree on what raw
 /// `0` means, and a shared `Language` would let one dialect's node be handed to the other's typed
 /// wrapper with nothing but a silent wrong answer to show for it.
-#[cfg(feature = "rowan")]
+#[cfg(feature = "rowan_0_17")]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GraphQLxLang {}
 
-#[cfg(feature = "rowan")]
-impl rowan::Language for GraphQLxLang {
+#[cfg(feature = "rowan_0_17")]
+impl rowan_0_17::Language for GraphQLxLang {
   type Kind = SyntaxKind;
 
   #[inline]
-  fn kind_from_raw(raw: rowan::SyntaxKind) -> Self::Kind {
+  fn kind_from_raw(raw: rowan_0_17::SyntaxKind) -> Self::Kind {
     // `rowan::Language` has no fallible form. The sink's kind validator is what rejects a raw
     // value this space does not name, before a green node is ever built with it; reaching here
     // with one means that validator was bypassed.
@@ -561,7 +561,7 @@ impl rowan::Language for GraphQLxLang {
   }
 
   #[inline]
-  fn kind_to_raw(kind: Self::Kind) -> rowan::SyntaxKind {
-    rowan::SyntaxKind(kind.raw())
+  fn kind_to_raw(kind: Self::Kind) -> rowan_0_17::SyntaxKind {
+    rowan_0_17::SyntaxKind(kind.raw())
   }
 }

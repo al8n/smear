@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan", feature = "graphql"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphql"))]
 
 //! Task 7's gate: the ten selection and executable-definition node kinds, their
 //! trivia-invariance, their verbatim round-trip, and the recovery shapes that keep a malformed

@@ -27,7 +27,7 @@ pub mod kinds;
 // is. `kinds` above is *not* gated, which is the asymmetry that keeps the `graphqlx`-without-
 // `rowan` build green: the kind space describes GraphQLx's grammar, while a tree over it needs
 // rowan.
-#[cfg(feature = "rowan")]
+#[cfg(feature = "rowan_0_17")]
 pub mod lossless;
 /// GraphQLx syntactic productions over the concrete lexer.
 pub mod syntactic;

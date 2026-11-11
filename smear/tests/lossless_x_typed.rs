@@ -34,7 +34,7 @@
 //! position where the grammar puts *two* values under one node with nothing between them but a
 //! `=>`: [`MapEntry`]. It cannot take `opt` getters, and the value test below asserts the plural
 //! form answers both halves.
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 use std::{
   collections::{BTreeMap, BTreeSet},

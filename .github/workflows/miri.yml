@@ -156,7 +156,7 @@ name: Miri
 # of it is derived and all of it is printed by `ci/miri_scope.py`: per cell at its end, and for
 # `smear/tests/`, the fixture `--selftest` partitions, before every cell starts:
 #
-#   64  `smear/tests/`, outside every cell. 44 are `#![cfg(feature = "rowan")]` — the entire
+#   64  `smear/tests/`, outside every cell. 44 are `#![cfg(feature = "rowan_0_17")]` — the entire
 #       lossless CST tower. `rowan` itself has undefined behaviour reachable from its ordinary
 #       public API, live in every published version including `0.17.0` (2026-08-02), reported
 #       upstream since 2021 and unfixed. `ci/miri_sb.sh` and `ci/miri_tb.sh` carry the two sites,

@@ -10,7 +10,7 @@
 //! `{ … }` import list is the same bytes whether its members are nodes or loose tokens, and an
 //! extension's generic list is the same bytes whether it carries the extension kind or the
 //! executable one.
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,

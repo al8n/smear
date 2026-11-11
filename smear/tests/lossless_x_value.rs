@@ -9,7 +9,7 @@
 //! Every test asserts the **node-kind pre-order** of a real parse rather than a verdict. A verdict
 //! is blind to a lost node, and a lost node is the defect class the golden gate exists for; a
 //! pre-order sees it here, one production at a time, before there is a document to hide it in.
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,

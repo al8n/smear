@@ -14,9 +14,13 @@ type StrCtx<'inp> =
 type SliceCtx<'inp> =
   FatalContext<'inp, GraphqlxLexer<'inp, [u8]>, GraphqlxErrors<&'inp [u8]>, GraphQLx>;
 
-#[cfg(feature = "bytes")]
-type BytesCtx<'inp> =
-  FatalContext<'inp, GraphqlxLexer<'inp, ::bytes::Bytes>, GraphqlxErrors<::bytes::Bytes>, GraphQLx>;
+#[cfg(feature = "bytes_1")]
+type BytesCtx<'inp> = FatalContext<
+  'inp,
+  GraphqlxLexer<'inp, ::bytes_1::Bytes>,
+  GraphqlxErrors<::bytes_1::Bytes>,
+  GraphQLx,
+>;
 
 fn drive_str<'inp, Output>(
   parser: impl for<'ctx> FnMut(
@@ -52,18 +56,18 @@ fn drive_slice<'inp, Output>(
   .parse_slice(source)
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 fn drive_owned_bytes<'inp, Output>(
   parser: impl for<'ctx> FnMut(
-    &mut GraphqlxInput<'inp, 'ctx, ::bytes::Bytes, BytesCtx<'inp>>,
-  ) -> Result<Output, GraphqlxErrors<::bytes::Bytes>>,
-  source: &'inp ::bytes::Bytes,
-) -> Result<Output, GraphqlxErrors<::bytes::Bytes>> {
+    &mut GraphqlxInput<'inp, 'ctx, ::bytes_1::Bytes, BytesCtx<'inp>>,
+  ) -> Result<Output, GraphqlxErrors<::bytes_1::Bytes>>,
+  source: &'inp ::bytes_1::Bytes,
+) -> Result<Output, GraphqlxErrors<::bytes_1::Bytes>> {
   Parser::with_parser::<
     'inp,
-    GraphqlxLexer<'inp, ::bytes::Bytes>,
+    GraphqlxLexer<'inp, ::bytes_1::Bytes>,
     Output,
-    GraphqlxErrors<::bytes::Bytes>,
+    GraphqlxErrors<::bytes_1::Bytes>,
     _,
     GraphQLx,
   >(parser)
@@ -157,16 +161,16 @@ fn type_system_document_preserves_imports_generic_paths_and_descriptions() {
   );
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 #[test]
 fn type_system_direct_apis_preserve_owned_bytes() {
-  let source = ::bytes::Bytes::from_static(b"type Box<T> { value: T }");
-  let definition: ast::ObjectTypeDefinition<::bytes::Bytes> =
+  let source = ::bytes_1::Bytes::from_static(b"type Box<T> { value: T }");
+  let definition: ast::ObjectTypeDefinition<::bytes_1::Bytes> =
     drive_owned_bytes(ast::ObjectTypeDefinition::graphqlx, &source)
       .expect("owned Bytes object definition");
   assert_eq!(
     definition.name().name().source(),
-    &::bytes::Bytes::from_static(b"Box")
+    &::bytes_1::Bytes::from_static(b"Box")
   );
 }
 

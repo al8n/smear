@@ -288,7 +288,7 @@ pub fn parse_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
 /// not `PartialEq` — it holds a green tree — so the comparison is over everything it publishes.
 ///
 /// ```
-/// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
+/// # #[cfg(all(feature = "graphql", feature = "rowan_0_17"))] {
 /// use smear_parser::graphql::lossless::{parse_document, parse_document_from};
 ///
 /// let src = "type T { f: Int } query Q { f }";
@@ -307,7 +307,7 @@ pub fn parse_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
 /// tree to reprint and nothing to hand a door that pairs a parse with a source.
 ///
 /// ```
-/// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
+/// # #[cfg(all(feature = "graphql", feature = "rowan_0_17"))] {
 /// use smear_parser::{graphql::lossless::parse_document_from, lossless::Refused};
 ///
 /// // Nineteen bytes; byte 13 is not a UTF-8 lead.

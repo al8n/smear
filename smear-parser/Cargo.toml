@@ -23,10 +23,10 @@ readme = "README.md"
 [features]
 # The subset of `smear`'s own default that reaches this layer. `smear` names every member feature
 # explicitly with `default-features = false`, so this list governs a DIRECT dependent only.
-default = ["std", "graphql", "graphqlx", "smallvec"]
+default = ["std", "graphql", "graphqlx", "smallvec_1"]
 
-alloc = ["smear-lexer/alloc", "tokora/alloc", "bstr?/alloc"]
-std = ["alloc", "smear-lexer/std", "tokora/std", "bytes?/default", "bstr?/default", "hipstr?/default", "smol-bytes?/default"]
+alloc = ["smear-lexer/alloc", "tokora/alloc", "bstr_1?/alloc"]
+std = ["alloc", "smear-lexer/std", "tokora/std", "bytes_1?/default", "bstr_1?/default", "hipstr_0_8?/default", "smol-bytes_0_2?/default"]
 
 # The two dialects, forwarded to the lexer because a parser for a dialect needs that dialect's
 # tokens. Every doc link to one is `#[cfg_attr]`-gated for the reason `smear-lexer` records.
@@ -73,7 +73,7 @@ materialized-numbers = ["graphql"]
 # forwards, and the reason is `value::Leaf` (al8n/smear#176).
 #
 # THE RULE DID NOT CHANGE; ITS CONDITION DID. These were forwards because "nothing in `src/`
-# outside a `#[cfg(feature = "bytes")]` test names one of these types — the parser is generic over
+# outside a `#[cfg(feature = "bytes_1")]` test names one of these types — the parser is generic over
 # `Src`". Something does now: `S` carries a `Leaf` bound, `Leaf` is this crate's trait, and the
 # orphan rule means an impl for a foreign source type can be written **here or nowhere**. A
 # consumer parsing over `HipStr` cannot declare `HipStr` a leaf themselves, so a forward-only
@@ -94,11 +94,20 @@ materialized-numbers = ["graphql"]
 # * `bytes` yields `Bytes` — an owned, refcount-sliced type. It was already a direct dependency.
 # * `hipstr` yields `HipStr<'h>` / `HipByt<'h>`, and `smol-bytes` yields four owned types. Both
 #   become direct dependencies for the impls, which is the same reason `bytes` already was.
-smallvec = ["alloc", "smear-lexer/smallvec"]
-bytes = ["dep:bytes", "alloc", "smear-lexer/bytes", "tokora/bytes_1"]
-bstr = ["dep:bstr", "smear-lexer/bstr"]
-hipstr = ["dep:hipstr", "alloc", "smear-lexer/hipstr", "tokora/hipstr_0_8"]
-smol-bytes = ["dep:smol-bytes", "alloc", "smear-lexer/smol-bytes", "tokora/smol-bytes_0_2"]
+#
+# Each is the versioned feature, which is the switch; the unversioned name below it is a pure alias
+# for the current major. The dependency key carries the version too, so the crate is `bytes_1` in
+# code.
+smallvec = ["smallvec_1"]
+smallvec_1 = ["alloc", "smear-lexer/smallvec_1"]
+bytes = ["bytes_1"]
+bytes_1 = ["dep:bytes_1", "alloc", "smear-lexer/bytes_1", "tokora/bytes_1"]
+bstr = ["bstr_1"]
+bstr_1 = ["dep:bstr_1", "smear-lexer/bstr_1"]
+hipstr = ["hipstr_0_8"]
+hipstr_0_8 = ["dep:hipstr_0_8", "alloc", "smear-lexer/hipstr_0_8", "tokora/hipstr_0_8"]
+smol-bytes = ["smol-bytes_0_2"]
+smol-bytes_0_2 = ["dep:smol-bytes_0_2", "alloc", "smear-lexer/smol-bytes_0_2", "tokora/smol-bytes_0_2"]
 
 # The lossless CST tower. `std` because the runner needs it.
 #
@@ -107,13 +116,14 @@ smol-bytes = ["dep:smol-bytes", "alloc", "smear-lexer/smol-bytes", "tokora/smol-
 # under Stacked Borrows from building any green tree and under Tree Borrows from dropping any red
 # one. #77 has the evidence and `ci/miri_scope.py` fails the Miri matrix if this feature ever
 # resolves ON inside it.
-rowan = ["dep:rowan", "tokora/rowan", "std"]
+rowan = ["rowan_0_17"]
+rowan_0_17 = ["dep:rowan_0_17", "tokora/rowan_0_17", "std"]
 
 # Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
 # trivia-injection gate can prove its corpus reached every production instead of asserting success
 # over whichever handful of shapes it happens to exercise. Test-only: it changes no behaviour, and
 # without it the instrumentation is not compiled at all.
-lossless-coverage = ["rowan"]
+lossless-coverage = ["rowan_0_17"]
 
 # Compiles the lossless suites' `test_support` scaffolding. Every item it exposes is reachable
 # only from an integration test, which is a separate crate and therefore sees `pub` and nothing
@@ -132,13 +142,13 @@ tokora.workspace = true
 
 smear-lexer.workspace = true
 
-bstr = { workspace = true, optional = true }
-bytes = { workspace = true, optional = true }
+bstr_1 = { workspace = true, optional = true }
+bytes_1 = { workspace = true, optional = true }
 # Not a workspace entry: there is none for `hipstr`, and `smear` states the same requirement
 # inline for the same reason.
-hipstr = { version = "0.8", default-features = false, optional = true }
-smol-bytes = { workspace = true, optional = true }
-rowan = { version = "0.17", optional = true }
+hipstr_0_8 = { package = "hipstr", version = "0.8", default-features = false, optional = true }
+smol-bytes_0_2 = { workspace = true, optional = true }
+rowan_0_17 = { package = "rowan", version = "0.17", optional = true }
 
 [lints]
 workspace = true

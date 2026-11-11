@@ -458,77 +458,80 @@ mod tests {
     assert_contextual_keyword::<&[u8]>(b"QUERY", ContextualKeyword::QueryLocation);
   }
 
-  #[cfg(feature = "bytes")]
+  #[cfg(feature = "bytes_1")]
   #[test]
   fn classifies_bytes() {
     assert_contextual_keyword(
-      bytes::Bytes::from_static(b"query"),
+      bytes_1::Bytes::from_static(b"query"),
       ContextualKeyword::Query,
     );
     assert_contextual_keyword(
-      bytes::Bytes::from_static(b"QUERY"),
+      bytes_1::Bytes::from_static(b"QUERY"),
       ContextualKeyword::QueryLocation,
     );
   }
 
-  #[cfg(feature = "bstr")]
+  #[cfg(feature = "bstr_1")]
   #[test]
   fn classifies_bstr() {
-    assert_contextual_keyword(bstr::BStr::new(b"query"), ContextualKeyword::Query);
-    assert_contextual_keyword(bstr::BStr::new(b"QUERY"), ContextualKeyword::QueryLocation);
+    assert_contextual_keyword(bstr_1::BStr::new(b"query"), ContextualKeyword::Query);
+    assert_contextual_keyword(
+      bstr_1::BStr::new(b"QUERY"),
+      ContextualKeyword::QueryLocation,
+    );
   }
 
-  #[cfg(feature = "hipstr")]
+  #[cfg(feature = "hipstr_0_8")]
   #[test]
   fn classifies_hipstr_sources() {
-    assert_contextual_keyword(hipstr::HipStr::from("query"), ContextualKeyword::Query);
+    assert_contextual_keyword(hipstr_0_8::HipStr::from("query"), ContextualKeyword::Query);
     assert_contextual_keyword(
-      hipstr::HipStr::from("QUERY"),
+      hipstr_0_8::HipStr::from("QUERY"),
       ContextualKeyword::QueryLocation,
     );
     assert_contextual_keyword(
-      hipstr::HipByt::from(b"query" as &[u8]),
+      hipstr_0_8::HipByt::from(b"query" as &[u8]),
       ContextualKeyword::Query,
     );
     assert_contextual_keyword(
-      hipstr::HipByt::from(b"QUERY" as &[u8]),
+      hipstr_0_8::HipByt::from(b"QUERY" as &[u8]),
       ContextualKeyword::QueryLocation,
     );
   }
 
-  #[cfg(feature = "smol-bytes")]
+  #[cfg(feature = "smol-bytes_0_2")]
   #[test]
   fn classifies_smol_bytes_sources() {
     assert_contextual_keyword(
-      smol_bytes::shared::Bytes::from_static(b"query"),
+      smol_bytes_0_2::shared::Bytes::from_static(b"query"),
       ContextualKeyword::Query,
     );
     assert_contextual_keyword(
-      smol_bytes::shared::Bytes::from_static(b"QUERY"),
+      smol_bytes_0_2::shared::Bytes::from_static(b"QUERY"),
       ContextualKeyword::QueryLocation,
     );
     assert_contextual_keyword(
-      smol_bytes::compact::Bytes::from_static(b"query"),
+      smol_bytes_0_2::compact::Bytes::from_static(b"query"),
       ContextualKeyword::Query,
     );
     assert_contextual_keyword(
-      smol_bytes::compact::Bytes::from_static(b"QUERY"),
+      smol_bytes_0_2::compact::Bytes::from_static(b"QUERY"),
       ContextualKeyword::QueryLocation,
     );
     assert_contextual_keyword(
-      smol_bytes::Utf8Bytes::from_static("query"),
+      smol_bytes_0_2::Utf8Bytes::from_static("query"),
       ContextualKeyword::Query,
     );
     assert_contextual_keyword(
-      smol_bytes::Utf8Bytes::from_static("QUERY"),
+      smol_bytes_0_2::Utf8Bytes::from_static("QUERY"),
       ContextualKeyword::QueryLocation,
     );
     assert_contextual_keyword(
-      smol_bytes::compact::Utf8Bytes::from_static("query"),
+      smol_bytes_0_2::compact::Utf8Bytes::from_static("query"),
       ContextualKeyword::Query,
     );
     assert_contextual_keyword(
-      smol_bytes::compact::Utf8Bytes::from_static("QUERY"),
+      smol_bytes_0_2::compact::Utf8Bytes::from_static("QUERY"),
       ContextualKeyword::QueryLocation,
     );
   }

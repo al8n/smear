@@ -30,11 +30,11 @@ use crate::{
 pub use crate::graphql::kinds::GraphQLLang;
 
 /// A GraphQL lossless syntax node.
-pub type SyntaxNode = rowan::SyntaxNode<GraphQLLang>;
+pub type SyntaxNode = rowan_0_17::SyntaxNode<GraphQLLang>;
 /// A GraphQL lossless syntax token.
-pub type SyntaxToken = rowan::SyntaxToken<GraphQLLang>;
+pub type SyntaxToken = rowan_0_17::SyntaxToken<GraphQLLang>;
 /// A node-or-token in the GraphQL lossless CST.
-pub type SyntaxElement = rowan::SyntaxElement<GraphQLLang>;
+pub type SyntaxElement = rowan_0_17::SyntaxElement<GraphQLLang>;
 
 /// The source slice emitted by [`GraphqlLosslessLexer`] for `Src`.
 ///

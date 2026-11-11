@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan", feature = "graphql"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphql"))]
 // `smear-parser` is `#![deny(missing_docs)]` and Task 10 generates its fifty-nine wrappers
 // *inside* it, so the macro's ability to carry documentation onto the items it emits is a hard
 // requirement rather than a nicety. Denying the lint here is what tests it: an attribute that

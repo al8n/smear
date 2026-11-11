@@ -651,9 +651,9 @@ impl DelegateStringError for [u8] {
   }
 }
 
-#[cfg(all(feature = "bytes", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(feature = "bytes_1", any(feature = "graphql", feature = "graphqlx")))]
 const _: () = {
-  use bytes::Bytes;
+  use bytes_1::Bytes;
 
   impl DelegateStringError for Bytes {
     const UTF8: bool = false;
@@ -667,9 +667,9 @@ const _: () = {
   }
 };
 
-#[cfg(all(feature = "hipstr", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(feature = "hipstr_0_8", any(feature = "graphql", feature = "graphqlx")))]
 const _: () = {
-  use hipstr::{HipByt, HipStr};
+  use hipstr_0_8::{HipByt, HipStr};
 
   impl DelegateStringError for HipByt<'_> {
     const UTF8: bool = false;
@@ -699,9 +699,12 @@ const _: () = {
   }
 };
 
-#[cfg(all(feature = "smol-bytes", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  feature = "smol-bytes_0_2",
+  any(feature = "graphql", feature = "graphqlx")
+))]
 const _: () = {
-  impl DelegateStringError for smol_bytes::shared::Bytes {
+  impl DelegateStringError for smol_bytes_0_2::shared::Bytes {
     const UTF8: bool = false;
 
     type Char = u8;
@@ -713,7 +716,7 @@ const _: () = {
     }
   }
 
-  impl DelegateStringError for smol_bytes::compact::Bytes {
+  impl DelegateStringError for smol_bytes_0_2::compact::Bytes {
     const UTF8: bool = false;
 
     type Char = u8;
@@ -725,7 +728,7 @@ const _: () = {
     }
   }
 
-  impl DelegateStringError for smol_bytes::Utf8Bytes {
+  impl DelegateStringError for smol_bytes_0_2::Utf8Bytes {
     const UTF8: bool = true;
 
     type Char = char;
@@ -740,7 +743,7 @@ const _: () = {
     }
   }
 
-  impl DelegateStringError for smol_bytes::compact::Utf8Bytes {
+  impl DelegateStringError for smol_bytes_0_2::compact::Utf8Bytes {
     const UTF8: bool = true;
 
     type Char = char;
@@ -756,9 +759,9 @@ const _: () = {
   }
 };
 
-#[cfg(all(feature = "bstr", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(feature = "bstr_1", any(feature = "graphql", feature = "graphqlx")))]
 const _: () = {
-  use bstr::BStr;
+  use bstr_1::BStr;
 
   impl DelegateStringError for BStr {
     const UTF8: bool = false;

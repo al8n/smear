@@ -16,7 +16,7 @@
 //! this task that a reviewer cannot check by symmetry with GraphQL, and it is the line that
 //! decides whether an unterminated generic list reports `Unclosed::Angle` or the catch-all's
 //! `Other("unclosed delimiter")`.
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 use smear::parser::{
   graphqlx::{

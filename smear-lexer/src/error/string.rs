@@ -812,10 +812,10 @@ impl<Char> StringError<Char> {
   }
 }
 
-#[cfg(feature = "smallvec")]
-type DefaultStringErrorsContainer<Char = char> = smallvec::SmallVec<[StringError<Char>; 1]>;
+#[cfg(feature = "smallvec_1")]
+type DefaultStringErrorsContainer<Char = char> = smallvec_1::SmallVec<[StringError<Char>; 1]>;
 
-#[cfg(not(feature = "smallvec"))]
+#[cfg(not(feature = "smallvec_1"))]
 type DefaultStringErrorsContainer<Char = char> = std::vec::Vec<StringError<Char>>;
 
 /// A container for storing multiple string errors.

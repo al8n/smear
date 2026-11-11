@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan", feature = "parser"))]
+#![cfg(all(feature = "rowan_0_17", feature = "parser"))]
 
 //! The cost curve of lossless recovery — smear issue #168.
 //!
@@ -7,7 +7,7 @@
 //! numbers is at least reporting them for a parse that covered its input. Run it with
 //!
 //! ```text
-//! cargo test --release -p smear --features rowan --test resync_cost -- --ignored --nocapture
+//! cargo test --release -p smear --features rowan_0_17 --test resync_cost -- --ignored --nocapture
 //! ```
 //!
 //! It is committed because the numbers in #168 were taken from an uncommitted harness and the

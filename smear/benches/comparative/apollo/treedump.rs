@@ -10,10 +10,10 @@
 //! root, and the two round-trip to the same bytes. Everything in that gap is this file's to catch.
 //!
 //! ```text
-//! cargo run -p smear --features rowan,validator --example treedump --release | shasum -a 256
-//! cargo run -p smear --features rowan,validator --example treedump --release -- perturbed | shasum -a 256
-//! cargo run -p smear --features rowan,validator --example treedump --release -- selfcheck
-//! cargo run -p smear --features rowan,validator --example treedump --release -- malformed | shasum -a 256
+//! cargo run -p smear --features rowan_0_17,validator --example treedump --release | shasum -a 256
+//! cargo run -p smear --features rowan_0_17,validator --example treedump --release -- perturbed | shasum -a 256
+//! cargo run -p smear --features rowan_0_17,validator --example treedump --release -- selfcheck
+//! cargo run -p smear --features rowan_0_17,validator --example treedump --release -- malformed | shasum -a 256
 //! ```
 //!
 //! # This file is the human-facing half of the harness
@@ -48,7 +48,7 @@
 //!   `malformed` run. Redirect it to a file rather than a terminal.
 //!
 //!   ```text
-//!   cargo run -p smear --features rowan,validator --example treedump --release -- prefixes > /tmp/prefixes.dump
+//!   cargo run -p smear --features rowan_0_17,validator --example treedump --release -- prefixes > /tmp/prefixes.dump
 //!   shasum -a 256 /tmp/prefixes.dump
 //!   ```
 //!
@@ -66,7 +66,7 @@
 //! for t in /path/to/tokora-a /path/to/tokora-b; do
 //!   CARGO_TARGET_DIR=/tmp/td-$(basename $t) \
 //!   cargo --config "patch.crates-io.tokora.path=\"$t\"" \
-//!     run -p smear --features rowan,validator --example treedump --release | shasum -a 256
+//!     run -p smear --features rowan_0_17,validator --example treedump --release | shasum -a 256
 //! done
 //! ```
 //!

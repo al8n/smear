@@ -30,7 +30,8 @@ std = ["alloc", "smear-parser/std", "smear-schema/std", "tokora/std"]
 #
 # EVERYTHING THIS FEATURE COMPILES IS OUTSIDE MIRI'S REACH until `rowan` is fixed upstream — #77 has
 # the evidence, and `ci/miri_scope.py` fails the Miri matrix if it ever resolves ON inside it.
-rowan = ["smear-parser/rowan", "std"]
+rowan = ["rowan_0_17"]
+rowan_0_17 = ["smear-parser/rowan_0_17", "std"]
 
 # The second construction door, forwarded rather than re-implemented: `Schema::from_introspection`
 # lives in `smear-schema` and this crate re-exports its error type.

@@ -15,9 +15,13 @@ type StrCtx<'inp> =
 type SliceCtx<'inp> =
   FatalContext<'inp, GraphqlxLexer<'inp, [u8]>, GraphqlxErrors<&'inp [u8]>, GraphQLx>;
 
-#[cfg(feature = "bytes")]
-type BytesCtx<'inp> =
-  FatalContext<'inp, GraphqlxLexer<'inp, ::bytes::Bytes>, GraphqlxErrors<::bytes::Bytes>, GraphQLx>;
+#[cfg(feature = "bytes_1")]
+type BytesCtx<'inp> = FatalContext<
+  'inp,
+  GraphqlxLexer<'inp, ::bytes_1::Bytes>,
+  GraphqlxErrors<::bytes_1::Bytes>,
+  GraphQLx,
+>;
 
 fn drive_str<'inp, O>(
   f: impl for<'c> FnMut(
@@ -48,12 +52,12 @@ fn drive_slice<'inp, O>(
   .parse_slice(input)
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 fn drive_bytes_as_slice<'inp, O>(
   f: impl for<'c> FnMut(
     &mut GraphqlxInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlxErrors<&'inp [u8]>>,
-  input: &'inp ::bytes::Bytes,
+  input: &'inp ::bytes_1::Bytes,
 ) -> Result<O, GraphqlxErrors<&'inp [u8]>> {
   Parser::with_parser::<
     'inp,
@@ -66,18 +70,18 @@ fn drive_bytes_as_slice<'inp, O>(
   .parse_bytes(input)
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 fn drive_owned_bytes<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut GraphqlxInput<'inp, 'c, ::bytes::Bytes, BytesCtx<'inp>>,
-  ) -> Result<O, GraphqlxErrors<::bytes::Bytes>>,
-  input: &'inp ::bytes::Bytes,
-) -> Result<O, GraphqlxErrors<::bytes::Bytes>> {
+    &mut GraphqlxInput<'inp, 'c, ::bytes_1::Bytes, BytesCtx<'inp>>,
+  ) -> Result<O, GraphqlxErrors<::bytes_1::Bytes>>,
+  input: &'inp ::bytes_1::Bytes,
+) -> Result<O, GraphqlxErrors<::bytes_1::Bytes>> {
   Parser::with_parser::<
     'inp,
-    GraphqlxLexer<'inp, ::bytes::Bytes>,
+    GraphqlxLexer<'inp, ::bytes_1::Bytes>,
     O,
-    GraphqlxErrors<::bytes::Bytes>,
+    GraphqlxErrors<::bytes_1::Bytes>,
     _,
     GraphQLx,
   >(f)
@@ -88,9 +92,9 @@ macro_rules! accept_all {
   ($parser:expr, $src:expr, $check:path) => {{
     $check(drive_str($parser, $src).expect(concat!("str accepts: ", $src)));
     $check(drive_slice($parser, $src.as_bytes()).expect(concat!("slice accepts: ", $src)));
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let owned = ::bytes::Bytes::from_static($src.as_bytes());
+      let owned = ::bytes_1::Bytes::from_static($src.as_bytes());
       $check(drive_bytes_as_slice($parser, &owned).expect(concat!("bytes accepts: ", $src)));
     }
   }};
@@ -307,11 +311,14 @@ fn selection_set_is_nonempty_recursive_and_reports_local_failures() {
   );
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 #[test]
 fn direct_selection_api_preserves_owned_bytes_payloads() {
-  let source = ::bytes::Bytes::from_static(b"user { id }");
-  let field: ast::Field<::bytes::Bytes> = drive_owned_bytes(ast::Field::graphqlx, &source)
+  let source = ::bytes_1::Bytes::from_static(b"user { id }");
+  let field: ast::Field<::bytes_1::Bytes> = drive_owned_bytes(ast::Field::graphqlx, &source)
     .expect("owned Bytes field parses without a borrowed fallback");
-  assert_eq!(field.name().source(), &::bytes::Bytes::from_static(b"user"));
+  assert_eq!(
+    field.name().source(),
+    &::bytes_1::Bytes::from_static(b"user")
+  );
 }

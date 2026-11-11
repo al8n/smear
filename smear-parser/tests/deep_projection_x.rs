@@ -35,7 +35,7 @@
 //! was made from and an anchor in this frame, taken at two depths. A walk that recursed puts one
 //! frame per level in that difference; a walk that does not puts nothing.
 
-#![cfg(all(feature = "graphqlx", feature = "rowan", feature = "std"))]
+#![cfg(all(feature = "graphqlx", feature = "rowan_0_17", feature = "std"))]
 
 use std::{
   alloc::{GlobalAlloc, Layout, System},
@@ -201,17 +201,17 @@ fn assert_projection_is_flat(what: &str, executable: bool, build: impl Fn(usize)
 }
 
 /// The fixture's green depth, read off the parse rather than derived from the level count.
-fn green_depth(root: &rowan::GreenNode) -> usize {
+fn green_depth(root: &rowan_0_17::GreenNode) -> usize {
   let mut deepest = 1usize;
-  let mut stack: Vec<(usize, rowan::Children<'_>)> = std::vec![(1, root.children())];
+  let mut stack: Vec<(usize, rowan_0_17::Children<'_>)> = std::vec![(1, root.children())];
   while let Some((level, children)) = stack.last_mut() {
     let level = *level;
     match children.next() {
-      Some(rowan::NodeOrToken::Node(child)) => {
+      Some(rowan_0_17::NodeOrToken::Node(child)) => {
         deepest = deepest.max(level + 1);
         stack.push((level + 1, child.children()));
       }
-      Some(rowan::NodeOrToken::Token(_)) => {}
+      Some(rowan_0_17::NodeOrToken::Token(_)) => {}
       None => {
         stack.pop();
       }

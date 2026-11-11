@@ -1134,11 +1134,11 @@ impl<T: Leaf> Leaf for core::ops::Range<T> {}
 /// `Bytes` is its own slice type — a refcount into a shared buffer — so a `Bytes`-backed parse
 /// carries `Bytes` in every `S` position.
 ///
-/// Its owner-erasing constructor is [`Bytes::from_owner`](bytes::Bytes::from_owner); a value built
+/// Its owner-erasing constructor is [`Bytes::from_owner`](bytes_1::Bytes::from_owner); a value built
 /// through one carries whatever destructor its owner has, and that door is the holder's.
-#[cfg(feature = "bytes")]
-#[cfg_attr(docsrs, doc(cfg(feature = "bytes")))]
-impl Leaf for bytes::Bytes {}
+#[cfg(feature = "bytes_1")]
+#[cfg_attr(docsrs, doc(cfg(feature = "bytes_1")))]
+impl Leaf for bytes_1::Bytes {}
 
 /// The borrow-or-own pair, in all three of their states: inline, borrowed, and reference-counted
 /// are all buffers.
@@ -1151,34 +1151,34 @@ impl Leaf for bytes::Bytes {}
 /// over an unsealed `Kind`, which could have carried drop glue, but `hipstr::HipStr<'borrow>` and
 /// `hipstr::HipByt<'borrow>` are aliases pinned to hipstr's own `Arc` backend (`src/lib.rs:116`
 /// and `:113`) and those aliases are what tokora implements `Source` and `Slice` for.
-#[cfg(feature = "hipstr")]
-#[cfg_attr(docsrs, doc(cfg(feature = "hipstr")))]
-impl Leaf for hipstr::HipStr<'_> {}
+#[cfg(feature = "hipstr_0_8")]
+#[cfg_attr(docsrs, doc(cfg(feature = "hipstr_0_8")))]
+impl Leaf for hipstr_0_8::HipStr<'_> {}
 
-#[cfg(feature = "hipstr")]
-#[cfg_attr(docsrs, doc(cfg(feature = "hipstr")))]
-impl Leaf for hipstr::HipByt<'_> {}
+#[cfg(feature = "hipstr_0_8")]
+#[cfg_attr(docsrs, doc(cfg(feature = "hipstr_0_8")))]
+impl Leaf for hipstr_0_8::HipByt<'_> {}
 
 /// Four owned slice types, which is why this backing needs four lines: `smol-bytes` splits shared
 /// from compact and bytes from UTF-8, and `Source` is implemented for each.
 ///
 /// The shared form forwards `bytes`' owner-erasing constructor and the other three can adopt a
 /// value built through it; that door is the holder's, as it is for `bytes` itself.
-#[cfg(feature = "smol-bytes")]
-#[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes")))]
-impl Leaf for smol_bytes::shared::Bytes {}
+#[cfg(feature = "smol-bytes_0_2")]
+#[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes_0_2")))]
+impl Leaf for smol_bytes_0_2::shared::Bytes {}
 
-#[cfg(feature = "smol-bytes")]
-#[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes")))]
-impl Leaf for smol_bytes::compact::Bytes {}
+#[cfg(feature = "smol-bytes_0_2")]
+#[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes_0_2")))]
+impl Leaf for smol_bytes_0_2::compact::Bytes {}
 
-#[cfg(feature = "smol-bytes")]
-#[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes")))]
-impl Leaf for smol_bytes::Utf8Bytes {}
+#[cfg(feature = "smol-bytes_0_2")]
+#[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes_0_2")))]
+impl Leaf for smol_bytes_0_2::Utf8Bytes {}
 
-#[cfg(feature = "smol-bytes")]
-#[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes")))]
-impl Leaf for smol_bytes::compact::Utf8Bytes {}
+#[cfg(feature = "smol-bytes_0_2")]
+#[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes_0_2")))]
+impl Leaf for smol_bytes_0_2::compact::Utf8Bytes {}
 
 // The scalars, which are the part of a `Copy` blanket that collides with nothing. A source
 // representation is often an interned handle rather than text, and a handle is an integer; these

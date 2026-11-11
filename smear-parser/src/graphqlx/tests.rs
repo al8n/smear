@@ -22,10 +22,14 @@ type StrCtx<'inp> =
 /// The fatal context a `[u8]`-sourced parse runs under.
 type SliceCtx<'inp> =
   FatalContext<'inp, GraphqlxLexer<'inp, [u8]>, GraphqlxErrors<&'inp [u8]>, GraphQLx>;
-/// The fatal context for an owned, refcount-sliced [`bytes::Bytes`] source.
-#[cfg(feature = "bytes")]
-type BytesCtx<'inp> =
-  FatalContext<'inp, GraphqlxLexer<'inp, ::bytes::Bytes>, GraphqlxErrors<::bytes::Bytes>, GraphQLx>;
+/// The fatal context for an owned, refcount-sliced [`bytes_1::Bytes`] source.
+#[cfg(feature = "bytes_1")]
+type BytesCtx<'inp> = FatalContext<
+  'inp,
+  GraphqlxLexer<'inp, ::bytes_1::Bytes>,
+  GraphqlxErrors<::bytes_1::Bytes>,
+  GraphQLx,
+>;
 
 /// Drives `f` over a `str` source under `Fatal<GraphqlxErrors<&str>>`.
 fn drive_str<'inp, O>(
@@ -58,12 +62,12 @@ fn drive_slice<'inp, O>(
   .parse_slice(input)
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 fn drive_bytes_as_slice<'inp, O>(
   f: impl for<'c> FnMut(
     &mut GraphqlxInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlxErrors<&'inp [u8]>>,
-  input: &'inp ::bytes::Bytes,
+  input: &'inp ::bytes_1::Bytes,
 ) -> Result<O, GraphqlxErrors<&'inp [u8]>> {
   Parser::with_parser::<
     'inp,
@@ -76,20 +80,20 @@ fn drive_bytes_as_slice<'inp, O>(
   .parse_bytes(input)
 }
 
-/// Drives `f` over an owned [`bytes::Bytes`] source rather than Tokora's
+/// Drives `f` over an owned [`bytes_1::Bytes`] source rather than Tokora's
 /// byte-slice convenience adapter.
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 fn drive_owned_bytes<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut GraphqlxInput<'inp, 'c, ::bytes::Bytes, BytesCtx<'inp>>,
-  ) -> Result<O, GraphqlxErrors<::bytes::Bytes>>,
-  input: &'inp ::bytes::Bytes,
-) -> Result<O, GraphqlxErrors<::bytes::Bytes>> {
+    &mut GraphqlxInput<'inp, 'c, ::bytes_1::Bytes, BytesCtx<'inp>>,
+  ) -> Result<O, GraphqlxErrors<::bytes_1::Bytes>>,
+  input: &'inp ::bytes_1::Bytes,
+) -> Result<O, GraphqlxErrors<::bytes_1::Bytes>> {
   Parser::with_parser::<
     'inp,
-    GraphqlxLexer<'inp, ::bytes::Bytes>,
+    GraphqlxLexer<'inp, ::bytes_1::Bytes>,
     O,
-    GraphqlxErrors<::bytes::Bytes>,
+    GraphqlxErrors<::bytes_1::Bytes>,
     _,
     GraphQLx,
   >(f)
@@ -101,9 +105,9 @@ macro_rules! accept_all {
   ($parser:expr, $src:expr, $check:path) => {{
     $check(drive_str($parser, $src).expect(concat!("str accept: ", $src)));
     $check(drive_slice($parser, $src.as_bytes()).expect(concat!("slice accept: ", $src)));
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let owned = ::bytes::Bytes::from_static($src.as_bytes());
+      let owned = ::bytes_1::Bytes::from_static($src.as_bytes());
       $check(drive_bytes_as_slice($parser, &owned).expect(concat!("bytes accept: ", $src)));
     }
   }};
@@ -323,12 +327,12 @@ fn public_value_composition_parsers_and_direct_apis_are_source_generic() {
       .expect("import API witness");
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 #[test]
 fn owned_bytes_source_keeps_refcount_sliced_ast_payloads() {
-  let backing = ::bytes::Bytes::from_static(b"prefix 0x2A suffix");
+  let backing = ::bytes_1::Bytes::from_static(b"prefix 0x2A suffix");
   let source = backing.slice(7..11);
-  let int: ast::IntValue<::bytes::Bytes> =
+  let int: ast::IntValue<::bytes_1::Bytes> =
     drive_owned_bytes(ast::IntValue::graphqlx, &source).expect("owned Bytes int API witness");
 
   match int.source() {
@@ -754,9 +758,9 @@ fn complete_document_accepts_every_graphqlx_fixture_over_all_borrowed_sources() 
       drive_slice(ast::Document::graphqlx, source.as_bytes())
         .expect("slice accepts complete GraphQLx fixture"),
     );
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let owned = ::bytes::Bytes::from_static(source.as_bytes());
+      let owned = ::bytes_1::Bytes::from_static(source.as_bytes());
       check_document(
         drive_bytes_as_slice(ast::Document::graphqlx, &owned)
           .expect("Bytes slice accepts complete GraphQLx fixture"),
@@ -799,13 +803,13 @@ fn complete_document_preserves_mixed_entries_and_definition_descriptions() {
   ));
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 #[test]
 fn complete_document_direct_api_preserves_owned_bytes() {
-  let source = ::bytes::Bytes::from_static(
+  let source = ::bytes_1::Bytes::from_static(
     b"import { User } from \"types.graphqlx\"\ntype User { id: ID }\nquery Users { users { id } }",
   );
-  let document: ast::Document<::bytes::Bytes> =
+  let document: ast::Document<::bytes_1::Bytes> =
     drive_owned_bytes(ast::Document::graphqlx, &source).expect("owned Bytes document");
   assert_eq!(document.definitions().len(), 3);
 }

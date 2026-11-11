@@ -7,24 +7,30 @@
 
 super::token!(slice_token<'a>(&'a [u8], u8, slice, false, br"#[^\n\r]*?"));
 
-#[cfg(feature = "bytes")]
-super::token!(bytes_token(bytes::Bytes, u8, slice, false, br"#[^\n\r]*?"));
-
-#[cfg(feature = "hipstr")]
-super::token!(hipstr_token<'a>(hipstr::HipByt<'a>, u8, slice, false, br"#[^\n\r]*?", &'a [u8]));
-
-#[cfg(feature = "smol-bytes")]
-super::token!(smol_bytes_token(
-  smol_bytes::shared::Bytes,
+#[cfg(feature = "bytes_1")]
+super::token!(bytes_token(
+  bytes_1::Bytes,
   u8,
   slice,
   false,
   br"#[^\n\r]*?"
 ));
 
-#[cfg(feature = "smol-bytes")]
+#[cfg(feature = "hipstr_0_8")]
+super::token!(hipstr_token<'a>(hipstr_0_8::HipByt<'a>, u8, slice, false, br"#[^\n\r]*?", &'a [u8]));
+
+#[cfg(feature = "smol-bytes_0_2")]
+super::token!(smol_bytes_token(
+  smol_bytes_0_2::shared::Bytes,
+  u8,
+  slice,
+  false,
+  br"#[^\n\r]*?"
+));
+
+#[cfg(feature = "smol-bytes_0_2")]
 super::token!(smol_compact_bytes_token(
-  smol_bytes::compact::Bytes,
+  smol_bytes_0_2::compact::Bytes,
   u8,
   slice,
   false,

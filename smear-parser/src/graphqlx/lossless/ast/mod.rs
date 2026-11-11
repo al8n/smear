@@ -12,7 +12,7 @@
 //! That sentence is deliberately not a link, and the omission is load-bearing. An intra-doc link to
 //! the other dialect's module is a **compile-time reference across the isolation boundary**: it
 //! resolves only when that dialect's feature is on, so
-//! `cargo doc --no-default-features --features rowan,graphqlx` fails on it under `-D warnings`.
+//! `cargo doc --no-default-features --features rowan_0_17,graphqlx` fails on it under `-D warnings`.
 //! `tests/lossless_isolation.rs` is what keeps it out, and the type-level statement that the two
 //! trees cannot be crossed lives on [`graphqlx`](crate::graphqlx) at the crate root, which is the
 //! one module whose job is to name both dialects.

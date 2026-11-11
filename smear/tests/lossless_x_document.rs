@@ -8,7 +8,7 @@
 //! The assertions stay node-kind pre-orders and node extents. The document level's own defects are
 //! text-invisible in the same way the productions' were: a description attached to the wrong entry,
 //! an extension parsed as a definition, an entry that swallowed the next one.
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,

@@ -264,7 +264,7 @@ use tokora::SimpleSpan;
 
 // SAME CFG AS THE ITEMS THAT NAME THEM. Everything below `FromNestingLimit` in this file — the
 // verdict cluster and `descend` — is compiled only where a dialect is, so under
-// `--no-default-features --features rowan` each of these imports is an `unused_imports` denial
+// `--no-default-features --features rowan_0_17` each of these imports is an `unused_imports` denial
 // under `-Dwarnings`. Splitting the `use` is the repair, and it has a second half that is easy to
 // miss AND that has exactly one spelling, because two rustdoc lints close on it from opposite
 // sides. Every link to one of these names from an item that is NOT gated — the module header
@@ -408,7 +408,7 @@ pub trait FromTokenBudget {
 ///
 /// **Narrowing an item in this substrate is not the local tidy-up it looks like** — see
 /// `lossless/mod.rs`'s `pub` IS LOAD-BEARING note. A `pub` item is exempt from `dead_code`; a
-/// `pub(crate)` one is not, and under `--no-default-features --features rowan` this substrate is
+/// `pub(crate)` one is not, and under `--no-default-features --features rowan_0_17` this substrate is
 /// compiled with **no dialect in the crate**, so nothing calls any of this cluster there. That is
 /// why every item of it carries the same `any(graphql, graphqlx)` cfg `mod macros` carries: not to
 /// silence a lint, but because a verdict machinery whose only callers are dialect assemblies has

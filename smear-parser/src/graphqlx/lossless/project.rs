@@ -6,7 +6,7 @@
 //! parse to a consumer that wants typed nodes.
 //!
 //! ```
-//! # #[cfg(all(feature = "graphqlx", feature = "rowan"))] {
+//! # #[cfg(all(feature = "graphqlx", feature = "rowan_0_17"))] {
 //! use smear_parser::graphqlx::lossless::{parse_document, project};
 //!
 //! let source = "type Query { field: Int }";
@@ -576,7 +576,7 @@
 
 use std::vec::Vec;
 
-use rowan::{NodeOrToken, TextRange, TextSize};
+use rowan_0_17::{NodeOrToken, TextRange, TextSize};
 use tokora::SimpleSpan;
 
 use smear_lexer::{
@@ -742,7 +742,7 @@ impl super::ast::Document {
 /// answer a different question from the one the executable root asks.
 ///
 /// ```
-/// # #[cfg(all(feature = "graphqlx", feature = "rowan"))] {
+/// # #[cfg(all(feature = "graphqlx", feature = "rowan_0_17"))] {
 /// use smear_parser::graphqlx::lossless::{parse_executable_document, project_executable_document};
 ///
 /// let source = "query Q { hero { name } }";
@@ -781,7 +781,7 @@ pub fn project_executable_document<'src>(
 /// [`Recovery`].
 ///
 /// ```
-/// # #[cfg(all(feature = "graphqlx", feature = "rowan"))] {
+/// # #[cfg(all(feature = "graphqlx", feature = "rowan_0_17"))] {
 /// use smear_parser::graphqlx::lossless::{
 ///   parse_executable_document, project_executable_document_recovered,
 /// };
@@ -845,7 +845,7 @@ impl super::ast::ExecutableDocument {
 /// [`project_executable_document`]'s reason mirrored.
 ///
 /// ```
-/// # #[cfg(all(feature = "graphqlx", feature = "rowan"))] {
+/// # #[cfg(all(feature = "graphqlx", feature = "rowan_0_17"))] {
 /// use smear_parser::graphqlx::lossless::{
 ///   parse_type_system_document, project_type_system_document,
 /// };
@@ -877,7 +877,7 @@ pub fn project_type_system_document<'src>(
 /// with the same accounting.
 ///
 /// ```
-/// # #[cfg(all(feature = "graphqlx", feature = "rowan"))] {
+/// # #[cfg(all(feature = "graphqlx", feature = "rowan_0_17"))] {
 /// use smear_parser::graphqlx::lossless::{
 ///   parse_type_system_document, project_type_system_document_recovered,
 /// };
@@ -1256,8 +1256,8 @@ fn child_node(parent: Node<'_>, kind: SyntaxKind) -> Option<Node<'_>> {
 }
 
 /// `kind` as the green tree stores it.
-fn raw_of(kind: SyntaxKind) -> rowan::SyntaxKind {
-  <GraphQLxLang as rowan::Language>::kind_to_raw(kind)
+fn raw_of(kind: SyntaxKind) -> rowan_0_17::SyntaxKind {
+  <GraphQLxLang as rowan_0_17::Language>::kind_to_raw(kind)
 }
 
 // ---------------------------------------------------------------------------------------------

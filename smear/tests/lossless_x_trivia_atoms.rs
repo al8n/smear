@@ -14,7 +14,7 @@
 //! are ordinary identifier tokens to this lexer — and `try_eat` is the retro-wrap probe. GraphQLx
 //! has no productions yet, so an atom whose only witness is a production that does not exist has
 //! no witness at all.
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 use smear::parser::graphqlx::lossless::trivia::test_support::{
   self as atoms, Keyword, Kind, eat_if_brace_of, expect_brace_of, peek_keyword_of, peek_kind_of,

@@ -4,6 +4,17 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the six features
+  that enable an optional dependency are versioned, as tokora's are, and the
+  dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`,
+  `smallvec` and `rowan` become `bytes_1`, `bstr_1`, `hipstr_0_8`,
+  `smol-bytes_0_2`, `smallvec_1` and `rowan_0_17`; the unversioned names remain as
+  aliases that float with the current major, each enabling its versioned feature
+  and nothing else, so code gated on them is unaffected. The optional
+  dependencies are keyed by the versioned name too (`bytes_1`, `bstr_1`,
+  `hipstr_0_8`, `smol-bytes_0_2`, `smallvec_1`, `rowan_0_17`), so a downstream
+  crate that named smear's optional dependency by its old key (`smear/dep:bytes`
+  style, or a `[patch]`) must respell it. `default` lists `smallvec_1`.
 - `smear-lexer`: string literals in byte sources (`[u8]`, `Bytes`, `BStr`,
   `HipByt`) must be well-formed UTF-8. Ill-formed content is refused with
   `StringError::UnsupportedCharacter`, carrying each sequence's span.

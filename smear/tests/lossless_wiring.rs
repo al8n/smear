@@ -1,10 +1,10 @@
-#![cfg(all(feature = "rowan", feature = "graphql"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphql"))]
 
 //! The GraphQL lossless suite's wiring guards, plus the one guard that is about the `rowan`
 //! feature rather than about a dialect.
 //!
 //! `lossless_x_wiring.rs` is the GraphQLx twin and carries that dialect's half. The two were one
-//! file until #136, and that only held while a `--features "rowan,graphqlx"` test build compiled
+//! file until #136, and that only held while a `--features "rowan_0_17,graphqlx"` test build compiled
 //! `graphql` anyway — which it did, because the self dev-dependency omitted
 //! `default-features = false` and re-enabled both dialects for every test target. See that
 //! manifest entry for the measurement.
@@ -31,7 +31,7 @@ use trivia_probe::assert_trivia_survives_lexing;
 /// while building the binary that runs the check — which is what `clippy::assertions_on_constants`
 /// says, and it is right. A `const` item is the same assertion moved to the moment the answer
 /// exists: a false declaration is then a build failure with this message in it, in **every**
-/// `--features rowan` build, rather than one red test in the one profile that runs the suite.
+/// `--features rowan_0_17` build, rather than one red test in the one profile that runs the suite.
 /// Nothing is weakened by the move; the check is strictly earlier and strictly wider.
 ///
 /// **What it does not check is that the declaration is true.** It is a promise about behaviour

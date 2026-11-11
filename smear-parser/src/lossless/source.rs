@@ -36,7 +36,7 @@
 //! `parse_document(s)` and `parse_document_from(s.as_bytes())` describe the same parse:
 //!
 //! ```
-//! # #[cfg(all(feature = "graphql", feature = "rowan"))] {
+//! # #[cfg(all(feature = "graphql", feature = "rowan_0_17"))] {
 //! use smear_parser::graphql::lossless::{parse_document, parse_document_from};
 //!
 //! let src = "type T { f: Int } query Q { f }";
@@ -386,49 +386,49 @@ viewed_as!(
 // `&str` is.
 
 viewed_as!(
-  #[cfg(feature = "bytes")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "bytes")))]
-  bytes::Bytes => |s| &s[..]
+  #[cfg(feature = "bytes_1")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "bytes_1")))]
+  bytes_1::Bytes => |s| &s[..]
 );
 
 viewed_as!(
-  #[cfg(feature = "bstr")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "bstr")))]
-  bstr::BStr => |s| <bstr::BStr as AsRef<[u8]>>::as_ref(s)
+  #[cfg(feature = "bstr_1")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "bstr_1")))]
+  bstr_1::BStr => |s| <bstr_1::BStr as AsRef<[u8]>>::as_ref(s)
 );
 
 viewed_as!(
-  #[cfg(feature = "hipstr")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "hipstr")))]
-  hipstr::HipStr<'_> => |s| s.as_str()
+  #[cfg(feature = "hipstr_0_8")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "hipstr_0_8")))]
+  hipstr_0_8::HipStr<'_> => |s| s.as_str()
 );
 
 viewed_as!(
-  #[cfg(feature = "hipstr")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "hipstr")))]
-  hipstr::HipByt<'_> => |s| &s[..]
+  #[cfg(feature = "hipstr_0_8")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "hipstr_0_8")))]
+  hipstr_0_8::HipByt<'_> => |s| &s[..]
 );
 
 viewed_as!(
-  #[cfg(feature = "smol-bytes")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes")))]
-  smol_bytes::shared::Bytes => |s| &s[..]
+  #[cfg(feature = "smol-bytes_0_2")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes_0_2")))]
+  smol_bytes_0_2::shared::Bytes => |s| &s[..]
 );
 
 viewed_as!(
-  #[cfg(feature = "smol-bytes")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes")))]
-  smol_bytes::compact::Bytes => |s| &s[..]
+  #[cfg(feature = "smol-bytes_0_2")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes_0_2")))]
+  smol_bytes_0_2::compact::Bytes => |s| &s[..]
 );
 
 viewed_as!(
-  #[cfg(feature = "smol-bytes")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes")))]
-  smol_bytes::Utf8Bytes => |s| s.as_str()
+  #[cfg(feature = "smol-bytes_0_2")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes_0_2")))]
+  smol_bytes_0_2::Utf8Bytes => |s| s.as_str()
 );
 
 viewed_as!(
-  #[cfg(feature = "smol-bytes")]
-  #[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes")))]
-  smol_bytes::compact::Utf8Bytes => |s| s.as_str()
+  #[cfg(feature = "smol-bytes_0_2")]
+  #[cfg_attr(docsrs, doc(cfg(feature = "smol-bytes_0_2")))]
+  smol_bytes_0_2::compact::Utf8Bytes => |s| s.as_str()
 );
