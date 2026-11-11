@@ -224,8 +224,8 @@ crate::lossless::lossless_error_impls! {
   // alongside the other three (`increase_recursion!`/`decrease_recursion!`,
   // `smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`), so `<…>` is a genuinely balanced pair
   // and an unterminated one has a real report to make. `unclosed_angle` already existed on the
-  // dialect error (`graphqlx/error.rs:252`), so the fourth pair costs nothing here and does not
-  // fall through to the catch-all's `ErrorData::Other("unclosed delimiter")`.
+  // dialect error (`graphqlx/error/mod.rs:473`), so the fourth pair costs nothing here and does
+  // not fall through to the catch-all's `ErrorData::Other("unclosed delimiter")`.
   unclosed     = {
     "[]" => unclosed_list,
     "()" => unclosed_parentheses,
@@ -247,10 +247,10 @@ crate::lossless::lossless_error_impls! {
 /// Two rows differ from the GraphQL twin in a way that looks like a bug and is not.
 /// [`Int`](LosslessTokenKind::Int) and [`Float`](LosslessTokenKind::Float) map to
 /// [`Expectation::InputValue`], not to `IntValue`/`FloatValue`, because that is what GraphQLx's
-/// own `expectation_from_token_kind` (`graphqlx/error.rs:337-338`) does — and the two GraphQLx
-/// layers agreeing matters more than the two dialects agreeing, since it is the *syntactic* suite
-/// this one is compared against. `IntValue` and `FloatValue` exist in the enum and are reached
-/// from productions that name a value shape directly.
+/// own `expectation_from_token_kind` (`graphqlx/error/mod.rs:768-769`) does — and the two
+/// GraphQLx layers agreeing matters more than the two dialects agreeing, since it is the
+/// *syntactic* suite this one is compared against. `IntValue` and `FloatValue` exist in the enum
+/// and are reached from productions that name a value shape directly.
 ///
 /// The seven rows GraphQL has no counterpart for — `<`, `>`, `*`, `+`, `-`, `::`, `=>` — are the
 /// same seven images that widened the kind space.

@@ -75,8 +75,9 @@
 //! # Two axes, four tables, and what each failure means
 //!
 //! [`MERGE_BASE_ATTRS`] is what `git show c3e35b8:<path>` said for every enum that already
-//! existed there, read once and copied here verbatim; [`MERGE_BASE_VARIANTS`] is the same
-//! reading of the variant signatures. [`RECORDED_DIFFERENCES`] and
+//! existed there, read once and copied here, values verbatim and file keys re-pointed at the
+//! current path; [`MERGE_BASE_VARIANTS`] is the same reading of the variant signatures.
+//! [`RECORDED_DIFFERENCES`] and
 //! [`RECORDED_VARIANT_DIFFERENCES`] are every enum whose current value on that axis does not
 //! match — because it is new since the merge base, or because it changed and the change was
 //! reviewed on its own merits. An enum in neither table for an axis, or one whose current value
@@ -319,7 +320,8 @@ fn find_public_enums(file: &SourceFile) -> Vec<FoundEnum> {
 }
 
 /// The attribute set each currently-existing public enum had at `c3e35b8`, this branch's merge
-/// base into `feat/proto` — read once from `git show c3e35b8:<path>` and copied here verbatim.
+/// base into `feat/proto` — read once from `git show c3e35b8:<path>` and copied here, values
+/// verbatim and file keys re-pointed at the current path.
 ///
 /// `(file, enum name, attribute lines in source order)`.
 #[rustfmt::skip]
@@ -822,11 +824,12 @@ const REMOVED_WITH_ITS_VARIANT: &str = "the hint payload of an `ErrorData` varia
 
 /// Every merge-base enum that no longer exists, each with why it went.
 ///
-/// **The merge-base tables stay verbatim**, because they are the merge base by definition: a row
-/// edited out of them would be a baseline that no longer says what `c3e35b8` said. So a removal is
-/// recorded here instead, and [`audit`] consults this list before it reports a vanished baseline
-/// row. Both directions of a stale entry fail: a removal whose enum the scan still finds did not
-/// happen, and a removal naming no merge-base row on an axis records nothing on that axis.
+/// **The merge-base tables keep their values verbatim**, with only the file keys re-pointed at the
+/// current path, because they are the merge base by definition: a row edited out of them would be
+/// a baseline that no longer says what `c3e35b8` said. So a removal is recorded here instead, and
+/// [`audit`] consults this list before it reports a vanished baseline row. Both directions of a
+/// stale entry fail: a removal whose enum the scan still finds did not happen, and a removal naming
+/// no merge-base row on an axis records nothing on that axis.
 ///
 /// `(file, enum name, reason)`.
 const RECORDED_REMOVALS: &[(&str, &str, &str)] = &[

@@ -411,8 +411,8 @@ impl<V> RequestError<V> {
   ///   [`Location::entire`](smear_schema::diagnostic::Location::entire), which is no point in the
   ///   text.
   /// - **No `extensions`.** The diagnostic's code is the driver's to publish or not, through
-  ///   [`set_extensions`](RequestError::set_extensions); `request/error/mod.rs`'s header has why this
-  ///   crate does not invent an `extensions.code`.
+  ///   [`set_extensions`](RequestError::set_extensions); `request/error/mod.rs`'s header has why
+  ///   this crate does not invent an `extensions.code`.
   ///
   /// # Refusal
   ///
@@ -570,8 +570,8 @@ impl<V> core::error::Error for RefusedEntry<V> {}
 
 /// One entry of a draft §7.1.3 result's `errors`, as [`RequestErrorResult::errors`] reads it.
 ///
-/// Two kinds, because two parties raise request errors — `request/error/mod.rs`'s module header has
-/// which raises which. A serialiser need not tell them apart: [`Display`](fmt::Display) is
+/// Two kinds, because two parties raise request errors — `request/error/mod.rs`'s module header
+/// has which raises which. A serialiser need not tell them apart: [`Display`](fmt::Display) is
 /// §7.1.6's `message` for both, and for the executor's refusal
 /// [`locations`](RequestErrorEntry::locations) is empty and
 /// [`extensions`](RequestErrorEntry::extensions) is `None`, so one writer that handles a driver's
