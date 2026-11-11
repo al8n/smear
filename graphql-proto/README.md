@@ -18,6 +18,16 @@ wasm or FFI handle second-class.
 It depends on `smear-schema` with **default features off**, so reading a schema at execution time
 does not put the front end in the graph.
 
+## Feature flags
+
+| Feature | Description | Default |
+|---------|-------------|---------|
+| `alloc` | The executor, the response tree, the request errors and the `Values` trait. Off, the crate is `no_std` and exports nothing. Implied by `std` | via `std` |
+| `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
+
+The crate has no capability feature, so a `default-features = false` consumer names `alloc` itself,
+or `std`, which implies it.
+
 ## Part of the Smear Ecosystem
 
 - `smear-lexer` — lexical analysis
