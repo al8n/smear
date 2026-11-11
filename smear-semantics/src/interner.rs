@@ -133,6 +133,8 @@ pub struct Retired {
 }
 
 impl<S: Symbol> Interner<S> {
+  /// The symbol `bytes` was interned with, or a new one; a new spelling that would pass either
+  /// arena ceiling is not stored and gets the placeholder [`Interner::refused`] reports.
   pub fn intern(&mut self, bytes: &[u8]) -> S {
     self.intern_within(bytes, MAX_ARENA_BYTES, MAX_ARENA_SYMBOLS)
   }
@@ -195,6 +197,8 @@ impl<S: Symbol> Interner<S> {
     sym
   }
 
+  /// The symbol `bytes` was interned with, or `None` when this arena never interned it. It interns
+  /// nothing.
   pub fn lookup(&self, bytes: &[u8]) -> Option<S> {
     self.map.get(bytes).copied().map(S::from_index)
   }
@@ -210,11 +214,14 @@ impl<S: Symbol> Interner<S> {
     &self.strings[start as usize..end as usize]
   }
 
+  /// The spelling `sym` was interned with, as text, or `""` when that spelling is not UTF-8.
   pub fn text(&self, sym: S) -> &str {
     // ASCII by construction; every name is admitted through `is_name` first.
     core::str::from_utf8(self.bytes(sym)).unwrap_or("")
   }
 
+  /// The number of symbols minted, the refusal placeholder included, saturating at `u32::MAX`.
+  //
   // No `is_empty` beside it: callers read the symbol count to size tables by it and to refuse
   // past a ceiling, never to ask whether the arena is empty.
   #[allow(clippy::len_without_is_empty)]

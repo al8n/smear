@@ -7,6 +7,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
 
 // Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
 // compile them all out and still build green.
