@@ -364,6 +364,25 @@ fn a_hipbyt_source_refuses_ill_formed_text() {
   }
 }
 
+#[cfg(feature = "smol-bytes")]
+#[test]
+fn a_smol_bytes_source_refuses_ill_formed_text() {
+  for (doc, at) in ILL_FORMED {
+    let owned = smol_bytes::shared::Bytes::copy_from_slice(doc);
+    assert_refused(
+      SyntacticLexer::<smol_bytes::shared::Bytes>::new(&owned).lex(),
+      &at,
+      "shared Bytes",
+    );
+    let owned = smol_bytes::compact::Bytes::copy_from_slice(doc);
+    assert_refused(
+      SyntacticLexer::<smol_bytes::compact::Bytes>::new(&owned).lex(),
+      &at,
+      "compact Bytes",
+    );
+  }
+}
+
 /// The valid non-ASCII literals in the table, as text, both kinds.
 fn valid_text() -> Vec<String> {
   let mut docs = Vec::new();
@@ -412,6 +431,37 @@ fn a_hipstr_source_accepts_valid_text() {
       doc.escape_debug()
     );
   }
+}
+
+#[cfg(feature = "smol-bytes")]
+#[test]
+fn a_smol_utf8_source_accepts_valid_text() {
+  macro_rules! accepts_valid_text {
+    ($source:ty, $label:literal) => {
+      for doc in valid_text() {
+        let owned = <$source>::from(doc.as_str());
+        let mut lexer = SyntacticLexer::<$source>::new(&owned);
+        match lexer.lex() {
+          Some(Ok(SyntacticToken::LitInlineStr(_) | SyntacticToken::LitBlockStr(_))) => {}
+          other => panic!(
+            "{}: {}: expected a literal, got {other:?}",
+            $label,
+            doc.escape_debug()
+          ),
+        }
+        assert_eq!(
+          lexer.span().end(),
+          doc.trim_end().len(),
+          "{}: {}",
+          $label,
+          doc.escape_debug()
+        );
+      }
+    };
+  }
+
+  accepts_valid_text!(smol_bytes::Utf8Bytes, "shared Utf8Bytes");
+  accepts_valid_text!(smol_bytes::compact::Utf8Bytes, "compact Utf8Bytes");
 }
 
 /// The lossless byte lexer reaches the same Logos path through `Lexable`, and refuses alike.

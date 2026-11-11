@@ -22,6 +22,12 @@ All notable changes to Smear are documented in this file.
   feature of `smear`, `smear-lexer` and `smear-parser` now enables tokora's
   `smol-bytes_0_2` integration instead of `smol_bytes_0_1`, so the four
   smol-bytes source types are smol-bytes 0.2's. Supersedes #235.
+- `smear-lexer`, `smear-parser` and `smear`: under `smol-bytes`, the four
+  smol-bytes 0.2 types (`Bytes` and `Utf8Bytes`, each shared and compact) are
+  now accepted as sources by both dialects' syntactic lexers and parsers, and as
+  slice types by both dialects' lossless lexers. The two `Bytes` are byte
+  sources and are held to the UTF-8 rule for string literals and comments; the
+  two `Utf8Bytes` are text sources, like `str` and `HipStr`.
 - `smear-compiler`: `Rule::NoSchemaIntrospection`, an opt-in policy rule that
   refuses every `__schema` and `__type` field selection an operation reaches,
   at the field's name. It is the policy graphql-js ships as

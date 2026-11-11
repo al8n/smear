@@ -573,9 +573,10 @@ pub(crate) trait DelegateStringError {
   /// The source's slices are already well-formed UTF-8, so string literals and
   /// comments need no validation.
   ///
-  /// `true` for `str` and `HipStr`, whose types guarantee it. `false` for `[u8]`,
-  /// `Bytes`, `BStr` and `HipByt`, whose string literals (smear#246) and comments
-  /// (smear#251) the fast path checks for UTF-8 on the way past. Both dialects'
+  /// `true` for `str`, `HipStr` and smol-bytes' `Utf8Bytes`, whose types guarantee
+  /// it. `false` for `[u8]`, `Bytes`, `BStr`, `HipByt` and smol-bytes' `Bytes`,
+  /// whose string literals (smear#246) and comments (smear#251) the fast path
+  /// checks for UTF-8 on the way past. Both dialects'
   /// SIMD lexers read it to pick `CHECK_UTF8` for `skip_inline_str_simd`,
   /// `skip_block_str_from_bytes` and their own `skip_comment`, always as a
   /// literal `true` or `false` in one of two `if` arms, so each monomorphization
@@ -694,6 +695,63 @@ const _: () = {
     ) -> (StringErrors<char>, usize) {
       let s: &str = self.as_ref();
       s.delegate_string_error(token_start, block)
+    }
+  }
+};
+
+#[cfg(all(feature = "smol-bytes", any(feature = "graphql", feature = "graphqlx")))]
+const _: () = {
+  impl DelegateStringError for smol_bytes::shared::Bytes {
+    const UTF8: bool = false;
+
+    type Char = u8;
+
+    #[inline]
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<u8>, usize) {
+      let s: &[u8] = &self[..];
+      s.delegate_string_error(token_start, block)
+    }
+  }
+
+  impl DelegateStringError for smol_bytes::compact::Bytes {
+    const UTF8: bool = false;
+
+    type Char = u8;
+
+    #[inline]
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<u8>, usize) {
+      let s: &[u8] = &self[..];
+      s.delegate_string_error(token_start, block)
+    }
+  }
+
+  impl DelegateStringError for smol_bytes::Utf8Bytes {
+    const UTF8: bool = true;
+
+    type Char = char;
+
+    #[inline]
+    fn delegate_string_error(
+      &self,
+      token_start: usize,
+      block: bool,
+    ) -> (StringErrors<char>, usize) {
+      self.as_str().delegate_string_error(token_start, block)
+    }
+  }
+
+  impl DelegateStringError for smol_bytes::compact::Utf8Bytes {
+    const UTF8: bool = true;
+
+    type Char = char;
+
+    #[inline]
+    fn delegate_string_error(
+      &self,
+      token_start: usize,
+      block: bool,
+    ) -> (StringErrors<char>, usize) {
+      self.as_str().delegate_string_error(token_start, block)
     }
   }
 };

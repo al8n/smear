@@ -28,9 +28,10 @@
 //! # What is enumerated, and why it is more than the two aliases
 //!
 //! The two dialect aliases are not the whole entry surface. Each is generic over the **slice**
-//! type, and `token!` instantiates five of them per dialect — `&str` and `HipStr` over a `str`
-//! source, `&[u8]`, `bytes::Bytes` and `HipByt` over a `[u8]` source. Ten cells, and every one is a
-//! public path a consumer can name. `smear-parser`'s `GraphqlLosslessLexer` / `GraphqlxLosslessLexer`
+//! type, and `token!` instantiates nine of them per dialect — `&str`, `HipStr` and the two
+//! smol-bytes `Utf8Bytes` over a `str` source, `&[u8]`, `bytes::Bytes`, `HipByt` and the two
+//! smol-bytes `Bytes` over a `[u8]` source. Eighteen cells, and every one is a public path a
+//! consumer can name. `smear-parser`'s `GraphqlLosslessLexer` / `GraphqlxLosslessLexer`
 //! and the `Lexer` alias beside each are further aliases *of these*, so they are the same types
 //! rather than more of them.
 //!
@@ -140,6 +141,19 @@ macro_rules! dialect {
       fn hipbyt_source() {
         let s = "-".repeat(RUN);
         cell::<LL<'_, hipstr::HipByt<'_>>>("HipByt", s.as_bytes());
+      }
+
+      #[cfg(feature = "smol-bytes")]
+      #[test]
+      fn smol_bytes_sources() {
+        let s = "-".repeat(RUN);
+        cell::<LL<'_, smol_bytes::shared::Bytes>>("smol_bytes::shared::Bytes", s.as_bytes());
+        cell::<LL<'_, smol_bytes::compact::Bytes>>("smol_bytes::compact::Bytes", s.as_bytes());
+        cell::<LL<'_, smol_bytes::Utf8Bytes>>("smol_bytes::Utf8Bytes", s.as_str());
+        cell::<LL<'_, smol_bytes::compact::Utf8Bytes>>(
+          "smol_bytes::compact::Utf8Bytes",
+          s.as_str(),
+        );
       }
     }
   };

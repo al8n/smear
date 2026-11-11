@@ -241,7 +241,7 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
 
 // `SyntacticToken`'s public `Token` surface — the SIMD lexer's `Token`
 // associated type, one generic impl over every source flavor. `S: Slice<'a>`
-// supplies the `Char` for the frozen `Error` type (str/HipStr -> char,
+// supplies the `Char` for the frozen `Error` type (str/HipStr/Utf8Bytes -> char,
 // &[u8]/Bytes/HipByt -> u8).
 
 impl<'a, S> tokora::Token<'a> for SyntacticToken<S>

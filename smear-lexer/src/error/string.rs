@@ -663,10 +663,10 @@ impl<Char> EscapedCharacter<Char> {
 pub enum StringError<Char = char> {
   /// A byte sequence in a string literal that is not well-formed UTF-8.
   ///
-  /// Only a byte source (`[u8]`, `Bytes`, `BStr`, `HipByt`) can hold one, and its lexer reports
-  /// each ill-formed sequence in an inline or block literal as one of these. The span is the
-  /// sequence's maximal subpart: the bytes up to where they stop being a prefix of any valid
-  /// sequence, at least one.
+  /// Only a byte source (`[u8]`, `Bytes`, `BStr`, `HipByt`, smol-bytes' `Bytes`) can hold one,
+  /// and its lexer reports each ill-formed sequence in an inline or block literal as one of
+  /// these. The span is the sequence's maximal subpart: the bytes up to where they stop being a
+  /// prefix of any valid sequence, at least one.
   #[from(skip)]
   UnsupportedCharacter(Lexeme<Char>),
   /// An unexpected line terminator in a string literal.

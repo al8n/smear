@@ -12,7 +12,7 @@ Blazing fast, zero-copy lexer for GraphQL and GraphQL-like DSLs.
 
 - **True Zero-Copy**: All tokens hold slices into the original source—no string allocations
 - **Dual Token Streams**: Choose `SyntacticToken` (fast, skips trivia) for servers or `LosslessToken` (complete, preserves formatting) for tooling
-- **Generic Over Source Types**: Works with `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::{HipStr, HipByt}`, and custom types
+- **Generic Over Source Types**: Works with `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::{HipStr, HipByt}`, smol-bytes 0.2's `Bytes` and `Utf8Bytes`, and custom types
 - **Draft Spec Compliant**: Fully implements GraphQL draft specification lexical grammar
 - **GraphQLx Support**: Extended tokens for generics, imports, namespacing, and more
 - **`no_std` Compatible**: Three tiers — core, `alloc` and `std`. With no allocator the crate still compiles and keeps `hints`, `keywords`, `limits` and `punctuator`; the lexers need `alloc`
@@ -101,7 +101,7 @@ let tokens = Lexer::<&str>::new(source);
 
 ### Byte Slices (`&[u8]`)
 
-For binary protocols, or input not yet known to be UTF-8. A byte source is not validated as UTF-8 wholesale, but its string literals and comments must be well-formed UTF-8: an inline or block string literal that is not is refused with `StringError::UnsupportedCharacter`, a comment with `LexerErrorData::UnknownLexeme`, one error per ill-formed sequence, at that sequence's span. `bytes::Bytes`, `bstr::BStr` and `hipstr::HipByt` are byte sources too and follow the same rule.
+For binary protocols, or input not yet known to be UTF-8. A byte source is not validated as UTF-8 wholesale, but its string literals and comments must be well-formed UTF-8: an inline or block string literal that is not is refused with `StringError::UnsupportedCharacter`, a comment with `LexerErrorData::UnknownLexeme`, one error per ill-formed sequence, at that sequence's span. `bytes::Bytes`, `bstr::BStr`, `hipstr::HipByt` and smol-bytes' two `Bytes` are byte sources too and follow the same rule.
 
 ```rust,ignore
 use smear_lexer::graphql::syntactic::Lexer;
@@ -143,6 +143,23 @@ use hipstr::HipStr;
 
 let source = HipStr::from("{ field }");
 let tokens = Lexer::<HipStr>::new(source);
+```
+
+### `smol-bytes` Types
+
+Enable the `smol-bytes` feature for smol-bytes 0.2's inline-optimized buffers, `Bytes` and `Utf8Bytes`, each in a shared and a compact form (`smol_bytes::shared::Bytes`, `smol_bytes::compact::Bytes`, `smol_bytes::Utf8Bytes`, `smol_bytes::compact::Utf8Bytes`). The two `Utf8Bytes` are text sources; the two `Bytes` are byte sources and follow the UTF-8 rule above.
+
+```toml
+[dependencies]
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec", "smol-bytes"] }
+```
+
+```rust,ignore
+use smear_lexer::graphql::syntactic::Lexer;
+use smol_bytes::Utf8Bytes;
+
+let source = Utf8Bytes::from("{ field }");
+let tokens = Lexer::<Utf8Bytes>::new(source);
 ```
 
 ## GraphQL Token Types

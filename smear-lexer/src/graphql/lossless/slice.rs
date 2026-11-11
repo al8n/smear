@@ -12,3 +12,21 @@ super::token!(bytes_token(bytes::Bytes, u8, slice, false, br"#[^\n\r]*?"));
 
 #[cfg(feature = "hipstr")]
 super::token!(hipstr_token<'a>(hipstr::HipByt<'a>, u8, slice, false, br"#[^\n\r]*?", &'a [u8]));
+
+#[cfg(feature = "smol-bytes")]
+super::token!(smol_bytes_token(
+  smol_bytes::shared::Bytes,
+  u8,
+  slice,
+  false,
+  br"#[^\n\r]*?"
+));
+
+#[cfg(feature = "smol-bytes")]
+super::token!(smol_compact_bytes_token(
+  smol_bytes::compact::Bytes,
+  u8,
+  slice,
+  false,
+  br"#[^\n\r]*?"
+));

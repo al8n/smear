@@ -7,3 +7,21 @@ super::token!(str_token<'a>(&'a str, char, str, true, "#[^\n\r]*?",));
 
 #[cfg(feature = "hipstr")]
 super::token!(hipstr_token<'a>(hipstr::HipStr<'a>, char, str, true, "#[^\n\r]*?", &'a str));
+
+#[cfg(feature = "smol-bytes")]
+super::token!(smol_utf8_token(
+  smol_bytes::Utf8Bytes,
+  char,
+  str,
+  true,
+  "#[^\n\r]*?"
+));
+
+#[cfg(feature = "smol-bytes")]
+super::token!(smol_compact_utf8_token(
+  smol_bytes::compact::Utf8Bytes,
+  char,
+  str,
+  true,
+  "#[^\n\r]*?"
+));

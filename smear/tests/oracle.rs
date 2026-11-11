@@ -389,14 +389,16 @@ fn graphql_syntactic_simd_low_recursion_parity() {
 // fooled by formatting coincidences: anything they don't recognize is a hard
 // mismatch (`_ => false`), never a silent pass.
 //
-// The four owned/shared sources are covered too (each feature-gated), driven
+// The owned/shared sources are covered too (each feature-gated), driven
 // through the same lockstep comparison. They split by the primitive Logos
-// scans (see `ScanSource` in `graphql/simd.rs`): `Bytes`/`BStr`/`HipByt` scan
-// `[u8]` (`Char = u8`), so they reuse `same_lexer_errors` (u8-vs-char) exactly
-// like `<[u8]>`; `HipStr` scans `str` (`Char = char`), so its errors are the
-// *same* concrete type as the `<str>` reference's and compare by plain `==`.
-// Tokens compare via `same_token` for all of them — it is generic over any
-// `AsBytes` slice, so it handles `Bytes`, `&[u8]`, and `HipStr`/`HipByt` alike.
+// scans (see `ScanSource` in `graphql/simd.rs`): `Bytes`/`BStr`/`HipByt` and
+// smol-bytes' two `Bytes` scan `[u8]` (`Char = u8`), so they reuse
+// `same_lexer_errors` (u8-vs-char) exactly like `<[u8]>`; `HipStr` and
+// smol-bytes' two `Utf8Bytes` scan `str` (`Char = char`), so their errors are
+// the *same* concrete type as the `<str>` reference's and compare by plain
+// `==`. Tokens compare via `same_token` for all of them — it is generic over
+// any `AsBytes` slice, so it handles `Bytes`, `&[u8]`, and `HipStr`/`HipByt`
+// and the smol-bytes types alike.
 
 // Dialect-agnostic: shared by the GraphQL comparators below and the GraphQLx
 // ones further down, so this stays ungated (needed whenever either dialect
@@ -821,6 +823,58 @@ fn graphql_syntactic_simd_source_matrix_hipbyt() {
   }
 }
 
+#[cfg(all(feature = "graphql", feature = "smol-bytes"))]
+#[test]
+fn graphql_syntactic_simd_source_matrix_smol_bytes() {
+  for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
+    let owned = smol_bytes::shared::Bytes::copy_from_slice(src.as_bytes());
+    assert_matches_str_stream!(
+      "shared Bytes",
+      name,
+      SyntacticLexer::<smol_bytes::shared::Bytes>::new(&owned),
+      src,
+      same_lexer_errors
+    );
+    let owned = smol_bytes::compact::Bytes::copy_from_slice(src.as_bytes());
+    assert_matches_str_stream!(
+      "compact Bytes",
+      name,
+      SyntacticLexer::<smol_bytes::compact::Bytes>::new(&owned),
+      src,
+      same_lexer_errors
+    );
+  }
+}
+
+#[cfg(all(feature = "graphql", feature = "smol-bytes"))]
+#[test]
+fn graphql_syntactic_simd_source_matrix_smol_utf8_bytes() {
+  // Both `Utf8Bytes` forms scan `str`, so their errors are
+  // `SyntacticLexerErrors<char>` — the exact type the `<str>` reference
+  // produces — and compare by `==`.
+  fn eq_char(byte: &SyntacticLexerErrors<char>, str_: &SyntacticLexerErrors<char>) -> bool {
+    byte == str_
+  }
+  for (name, src) in CORPUS.iter().chain(MALFORMED).chain(EDGES) {
+    let owned = smol_bytes::Utf8Bytes::from(*src);
+    assert_matches_str_stream!(
+      "shared Utf8Bytes",
+      name,
+      SyntacticLexer::<smol_bytes::Utf8Bytes>::new(&owned),
+      src,
+      eq_char
+    );
+    let owned = smol_bytes::compact::Utf8Bytes::from(*src);
+    assert_matches_str_stream!(
+      "compact Utf8Bytes",
+      name,
+      SyntacticLexer::<smol_bytes::compact::Utf8Bytes>::new(&owned),
+      src,
+      eq_char
+    );
+  }
+}
+
 #[cfg(feature = "graphql")]
 #[test]
 fn graphql_lossless_oracle() {
@@ -1215,7 +1269,16 @@ fn same_gx_token<B: AsRef<[u8]>>(byte: &GxToken<B>, str_: &GxToken<&str>) -> boo
 /// every token/error pair is source-agnostically equivalent.
 #[cfg(feature = "graphqlx")]
 macro_rules! assert_gx_matches_str_stream {
-  ($label:expr, $fixture:expr, $byte_lexer:expr, $str_src:expr) => {{
+  ($label:expr, $fixture:expr, $byte_lexer:expr, $str_src:expr) => {
+    assert_gx_matches_str_stream!(
+      $label,
+      $fixture,
+      $byte_lexer,
+      $str_src,
+      same_gx_lexer_errors
+    )
+  };
+  ($label:expr, $fixture:expr, $byte_lexer:expr, $str_src:expr, $err_eq:expr) => {{
     let mut byte_lex = $byte_lexer;
     let mut str_lex = GxSimd::<str>::new($str_src);
     let mut idx = 0usize;
@@ -1239,7 +1302,7 @@ macro_rules! assert_gx_matches_str_stream {
         }
         (Some(Err(be)), Some(Err(se))) => {
           assert!(
-            same_gx_lexer_errors(&be, &se),
+            $err_eq(&be, &se),
             "{}/{}#{idx}: error mismatch:\n  byte={be:?}\n  str={se:?}",
             $label,
             $fixture
@@ -1269,6 +1332,58 @@ fn graphqlx_syntactic_simd_source_matrix_bytes() {
   for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
     let owned = bytes::Bytes::copy_from_slice(src.as_bytes());
     assert_gx_matches_str_stream!("Bytes", name, GxSimd::<bytes::Bytes>::new(&owned), src);
+  }
+}
+
+#[cfg(all(feature = "graphqlx", feature = "smol-bytes"))]
+#[test]
+fn graphqlx_syntactic_simd_source_matrix_smol_bytes() {
+  for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
+    let owned = smol_bytes::shared::Bytes::copy_from_slice(src.as_bytes());
+    assert_gx_matches_str_stream!(
+      "shared Bytes",
+      name,
+      GxSimd::<smol_bytes::shared::Bytes>::new(&owned),
+      src
+    );
+    let owned = smol_bytes::compact::Bytes::copy_from_slice(src.as_bytes());
+    assert_gx_matches_str_stream!(
+      "compact Bytes",
+      name,
+      GxSimd::<smol_bytes::compact::Bytes>::new(&owned),
+      src
+    );
+  }
+}
+
+#[cfg(all(feature = "graphqlx", feature = "smol-bytes"))]
+#[test]
+fn graphqlx_syntactic_simd_source_matrix_smol_utf8_bytes() {
+  // Both `Utf8Bytes` forms scan `str`, so their errors are the exact type the
+  // `<str>` reference produces and compare by `==`.
+  fn eq_char(
+    byte: &GxLexerErrors<char, RecursionLimitExceeded>,
+    str_: &GxLexerErrors<char, RecursionLimitExceeded>,
+  ) -> bool {
+    byte == str_
+  }
+  for (name, src) in GRAPHQLX_EXTRA.iter().chain(GRAPHQLX_SIMD_EXTRA) {
+    let owned = smol_bytes::Utf8Bytes::from(*src);
+    assert_gx_matches_str_stream!(
+      "shared Utf8Bytes",
+      name,
+      GxSimd::<smol_bytes::Utf8Bytes>::new(&owned),
+      src,
+      eq_char
+    );
+    let owned = smol_bytes::compact::Utf8Bytes::from(*src);
+    assert_gx_matches_str_stream!(
+      "compact Utf8Bytes",
+      name,
+      GxSimd::<smol_bytes::compact::Utf8Bytes>::new(&owned),
+      src,
+      eq_char
+    );
   }
 }
 
