@@ -327,6 +327,14 @@ All notable changes to Smear are documented in this file.
   and with them every `set_type`, `map_type`, `set_types` and `map_types`
   getter. `SetValue` and `MapValue` keep their kinds and hold the `!` as a
   token between the keyword and the `{`.
+- `smear-parser`: under a recovering emitter, an inline fragment whose `{` is
+  missing is refused at the token standing in its place, in both GraphQL and
+  GraphQLx, with the expected-`{` error the fail-fast emitter already raised
+  there. The brace delimiter reported the missing opener and then read members,
+  so `{ ... on Q ... on Q … }` recursed once per fragment with one brace open
+  for the nesting limit to count, and a long enough chain overflowed the native
+  stack. Parses under the `Fatal` emitter the shipped entry points use are
+  unchanged.
 
 ## [0.0.1] - 2026-10-30
 

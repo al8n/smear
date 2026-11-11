@@ -345,6 +345,13 @@ where
   ))
 }
 
+/// Finishes an inline fragment once its type condition and directives are read.
+///
+/// The `{` is confirmed before the selection set is entered, for the reason GraphQL's twin
+/// records: under a recovering emitter the brace delimiter reports a wrong opener and then reads
+/// members anyway, so `{ ... on Q ... on Q …` would recurse once per fragment with no brace opened
+/// for the nesting limit to count. The refusal is the delimiter's own fail-fast one, and end of
+/// input is still left to the delimiter.
 fn inline_fragment_after_directives<'inp, Src, Ctx>(
   start: usize,
   type_condition: Option<TypeCondition<GraphqlxSlice<'inp, Src>>>,
@@ -362,6 +369,12 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let directives = (!directives.directives().is_empty()).then_some(directives);
+  if inp
+    .peek_kind()?
+    .is_some_and(|kind| kind != SyntacticTokenKind::LBrace)
+  {
+    return unexpected_here(inp, Expectation::LBrace);
+  }
   let selection_set = selection_set(inp)?;
   Ok(InlineFragment::new(
     SimpleSpan::new(start, selection_set.span().end()),

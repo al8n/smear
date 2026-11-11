@@ -590,6 +590,395 @@ fn the_graphqlx_recovery_bypass_returns_with_both_closer_families() {
   }
 }
 
+/// `{ ... on Q ... on Q … }`: `fragments` inline fragments inside **one** brace, none of which
+/// opens a selection set of its own.
+///
+/// The shape [`inline_fragments`] is not. There every fragment opens a `{` and the ceiling counts
+/// it. Here each fragment's `{` would have to stand where the next `...` stands, so a parser that
+/// reads members after a missing opener enters the next fragment from inside the last one: a
+/// native frame per fragment, over a source that opens one brace in total.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+fn braceless_inline_fragments(fragments: usize) -> String {
+  let mut src = String::with_capacity(fragments * 9 + 3);
+  src.push_str("{ ");
+  for _ in 0..fragments {
+    src.push_str("... on Q ");
+  }
+  src.push('}');
+  src
+}
+
+/// The token a [`braceless_inline_fragments`] chain of two or more is refused at: its second `...`,
+/// which stands where the first fragment's `{` belongs. Both dialects name it, at both doors.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+fn second_spread(src: &str) -> core::ops::Range<usize> {
+  let (at, spread) = src
+    .match_indices("...")
+    .nth(1)
+    .expect("the chain holds a second fragment");
+  at..at + spread.len()
+}
+
+/// How many fragments the deep braceless chains carry.
+///
+/// Far past any native stack this suite runs on, by `MAX_NESTING_DEPTH`'s measured table: a level
+/// of inline fragments costs the syntactic door about 34 KiB of stack in a debug build and 4 KiB
+/// optimised, so a parse that recursed once per fragment here would want some 1.7 GB of it, or
+/// 200 MB optimised, from a test thread that has 2 MiB.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+const BRACELESS_CHAIN: usize = 50_000;
+
+/// A recovering GraphQL parse's refusal: where it stands, the token kind found there, and what was
+/// expected instead.
+#[cfg(feature = "graphql")]
+type GraphqlRefusal = (
+  core::ops::Range<usize>,
+  Option<smear::lexer::graphql::syntactic::SyntacticTokenKind>,
+  smear::parser::graphql::error::Expectation,
+);
+
+/// The one error GraphQL's syntactic document root returns for `src` under a **recovering**
+/// emitter.
+///
+/// Not a shipped configuration, since the entry points pin `Fatal`, but a reachable one: every
+/// production is generic over its context, and `syntactic_span_extent.rs` runs this same wiring
+/// over the invalid corpus. It is also the only context the braceless cells mean anything in. A
+/// recording emitter is what lets a brace delimiter report a missing opener and read members
+/// anyway; under `Fatal` that report is the return.
+#[cfg(feature = "graphql")]
+fn graphql_recovering_refusal(src: &str, what: &str) -> GraphqlRefusal {
+  use smear::parser::graphql::{
+    GraphQL,
+    ast::Document,
+    error::{ErrorData, GraphqlErrors},
+    syntactic::{GraphqlLexer, document},
+  };
+  use tokora::{
+    Parse as _, Parser, ParserContext, SimpleSpan, cache::DefaultCache, emitter::Verbose,
+  };
+
+  type RecoveringEmitter<'inp> = Verbose<GraphqlErrors<&'inp str>, SimpleSpan, GraphQL>;
+  type RecoveringCtx<'inp> = ParserContext<
+    'inp,
+    GraphqlLexer<'inp, str>,
+    RecoveringEmitter<'inp>,
+    DefaultCache<'inp, GraphqlLexer<'inp, str>>,
+    GraphQL,
+  >;
+
+  let parsed: Result<Document<&str>, GraphqlErrors<&str>> =
+    Parser::with_parser_and_context::<
+      '_,
+      GraphqlLexer<'_, str>,
+      Document<&str>,
+      RecoveringCtx<'_>,
+      _,
+      GraphQL,
+    >(document, ParserContext::of(RecoveringEmitter::default()))
+    .parse_str(src);
+  let Err(errors) = parsed else {
+    panic!(
+      "{what}: the recovering parse returned a tree, so a fragment read members it never opened"
+    );
+  };
+  assert_eq!(
+    errors.len(),
+    1,
+    "{what}: a refusal is one error: {errors:?}"
+  );
+  let error = &errors[0];
+  let span = error.span();
+  match error.data() {
+    ErrorData::UnexpectedToken(token) => (
+      span.start()..span.end(),
+      token.found().copied(),
+      *token.expected(),
+    ),
+    other => panic!("{what}: refused with {other:?} where an unexpected token belongs"),
+  }
+}
+
+/// A fragment whose `{` is missing is refused where the `{` belongs, and nothing after it is read.
+///
+/// Under `Fatal` the brace delimiter's own wrong-opener report ends the parse at `x`, and the
+/// production's refusal is that same value: expected `{`, found a name, at `x`. A recording emitter
+/// is where the two come apart. Left to the delimiter, it absorbs the report, the delimiter reads
+/// `x` as the fragment's only selection and closes the set it never opened on the `}`, and the
+/// document comes back as a tree. The production's refusal is *returned*, which no emitter can
+/// absorb, so an `Err` holding that one error is the parse stopping at `x` before reading it as a
+/// selection.
+#[cfg(feature = "graphql")]
+#[test]
+fn a_fragment_missing_its_brace_is_refused_where_the_brace_belongs() {
+  use smear::{lexer::graphql::syntactic::SyntacticTokenKind, parser::graphql::error::Expectation};
+
+  let src = "{ ... on Q x }";
+  let x = src.find('x').expect("the witness holds its stray name");
+  assert_eq!(
+    graphql_recovering_refusal(src, src),
+    (
+      x..x + 1,
+      Some(SyntacticTokenKind::Identifier),
+      Expectation::LBrace
+    ),
+    "the fragment must refuse `x` as its missing opener, not read it as a selection"
+  );
+}
+
+/// `{ ... on Q ... on Q … }` under a recovering emitter **returns**, refused at its first missing
+/// `{`, however long the chain.
+///
+/// No bracket ceiling can bound this shape. The source opens one brace, so the lexer's tally reads
+/// 1 the whole way, and a fragment that entered its selection set without a `{` would read the
+/// next fragment as its member: one native frame per fragment with nothing counting, which at
+/// [`BRACELESS_CHAIN`] fragments is a `SIGABRT` rather than a red test. What bounds it is the first
+/// fragment refusing at the second `...`, the token standing where its `{` belongs, so the parse
+/// stops at the fifth token however long the chain.
+///
+/// # Why the first assertion is the ordering guard
+///
+/// The discipline [`deep_input_returns_rather_than_aborting`] states, with a discriminating signal:
+/// three fragments overflow nothing, so the assertion is reachable whatever the parser does, and a
+/// parser that reads on returns a recovered tree there instead of the refusal. Only once it holds
+/// is the deep chain handed over.
+#[cfg(feature = "graphql")]
+#[test]
+fn a_braceless_fragment_chain_returns_rather_than_aborting() {
+  use smear::{lexer::graphql::syntactic::SyntacticTokenKind, parser::graphql::error::Expectation};
+
+  // THE GUARD, AND IT MUST STAY FIRST — see this function's docs.
+  let short = braceless_inline_fragments(3);
+  let refusal = (
+    second_spread(&short),
+    Some(SyntacticTokenKind::Spread),
+    Expectation::LBrace,
+  );
+  assert_eq!(
+    graphql_recovering_refusal(&short, "three fragments"),
+    refusal,
+    "the first fragment must refuse the second `...` before anything deep is parsed"
+  );
+
+  let deep = braceless_inline_fragments(BRACELESS_CHAIN);
+  assert_eq!(
+    graphql_recovering_refusal(&deep, "the deep chain"),
+    refusal,
+    "{BRACELESS_CHAIN} fragments must return the same refusal rather than overflow the stack"
+  );
+}
+
+/// A recovering GraphQLx parse's refusal, as [`GraphqlRefusal`] is GraphQL's.
+#[cfg(feature = "graphqlx")]
+type GraphqlxRefusal = (
+  core::ops::Range<usize>,
+  Option<smear::lexer::graphqlx::syntactic::SyntacticTokenKind>,
+  smear::parser::graphqlx::error::Expectation,
+);
+
+/// The one error GraphQLx's syntactic document root returns for `src` under a **recovering**
+/// emitter — [`graphql_recovering_refusal`]'s twin, which carries the reasoning.
+#[cfg(feature = "graphqlx")]
+fn graphqlx_recovering_refusal(src: &str, what: &str) -> GraphqlxRefusal {
+  use smear::parser::graphqlx::{
+    GraphQLx,
+    ast::Document,
+    error::{ErrorData, GraphqlxErrors},
+    syntactic::{GraphqlxLexer, document},
+  };
+  use tokora::{
+    Parse as _, Parser, ParserContext, SimpleSpan, cache::DefaultCache, emitter::Verbose,
+  };
+
+  type RecoveringEmitter<'inp> = Verbose<GraphqlxErrors<&'inp str>, SimpleSpan, GraphQLx>;
+  type RecoveringCtx<'inp> = ParserContext<
+    'inp,
+    GraphqlxLexer<'inp, str>,
+    RecoveringEmitter<'inp>,
+    DefaultCache<'inp, GraphqlxLexer<'inp, str>>,
+    GraphQLx,
+  >;
+
+  let parsed: Result<Document<&str>, GraphqlxErrors<&str>> =
+    Parser::with_parser_and_context::<
+      '_,
+      GraphqlxLexer<'_, str>,
+      Document<&str>,
+      RecoveringCtx<'_>,
+      _,
+      GraphQLx,
+    >(document, ParserContext::of(RecoveringEmitter::default()))
+    .parse_str(src);
+  let Err(errors) = parsed else {
+    panic!(
+      "{what}: the recovering parse returned a tree, so a fragment read members it never opened"
+    );
+  };
+  assert_eq!(
+    errors.len(),
+    1,
+    "{what}: a refusal is one error: {errors:?}"
+  );
+  let error = &errors[0];
+  let span = error.span();
+  match error.data() {
+    ErrorData::UnexpectedToken(token) => (
+      span.start()..span.end(),
+      token.found().copied(),
+      *token.expected(),
+    ),
+    other => panic!("{what}: refused with {other:?} where an unexpected token belongs"),
+  }
+}
+
+/// GraphQLx refuses a fragment whose `{` is missing at the same token, with the same expectation.
+///
+/// The dialect has its own selection productions and its own copy of the fragment's tail, so the
+/// GraphQL cell proves nothing about it.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn a_graphqlx_fragment_missing_its_brace_is_refused_where_the_brace_belongs() {
+  use smear::{
+    lexer::graphqlx::syntactic::SyntacticTokenKind, parser::graphqlx::error::Expectation,
+  };
+
+  let src = "{ ... on Q x }";
+  let x = src.find('x').expect("the witness holds its stray name");
+  assert_eq!(
+    graphqlx_recovering_refusal(src, src),
+    (
+      x..x + 1,
+      Some(SyntacticTokenKind::Identifier),
+      Expectation::LBrace
+    ),
+    "the fragment must refuse `x` as its missing opener, not read it as a selection"
+  );
+}
+
+/// The GraphQLx chain returns too, refused at the same token, behind the same ordering guard.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn a_graphqlx_braceless_fragment_chain_returns_rather_than_aborting() {
+  use smear::{
+    lexer::graphqlx::syntactic::SyntacticTokenKind, parser::graphqlx::error::Expectation,
+  };
+
+  // THE GUARD, AND IT MUST STAY FIRST — see the GraphQL twin's docs.
+  let short = braceless_inline_fragments(3);
+  let refusal = (
+    second_spread(&short),
+    Some(SyntacticTokenKind::Spread),
+    Expectation::LBrace,
+  );
+  assert_eq!(
+    graphqlx_recovering_refusal(&short, "three fragments"),
+    refusal,
+    "the first fragment must refuse the second `...` before anything deep is parsed"
+  );
+
+  let deep = braceless_inline_fragments(BRACELESS_CHAIN);
+  assert_eq!(
+    graphqlx_recovering_refusal(&deep, "the deep chain"),
+    refusal,
+    "{BRACELESS_CHAIN} fragments must return the same refusal rather than overflow the stack"
+  );
+}
+
+/// The lossless door refuses the same chain at the same token, and returns.
+///
+/// This door does not recurse on the shape, and the cell repairs nothing in it. Its
+/// `selection_set` takes a `depth::descend` frame before it reads anything and then `expect`s the
+/// `{`, and `expect` hands the refusal back rather than recording it and reading on, so the first
+/// fragment unwinds to the document root and recovery resumes at the document level. What the cell
+/// holds is that the two doors agree: the first diagnostic is an error on the second `...`, the
+/// token the syntactic refusal names, and the tree still covers every byte.
+#[cfg(all(feature = "rowan", feature = "graphql"))]
+#[test]
+fn the_lossless_door_refuses_the_braceless_chain_at_the_same_token() {
+  use smear::parser::graphql::{kinds::SyntaxKind as K, lossless::parse_document};
+  use tokora::emitter::Severity;
+
+  // THE ORDERING GUARD, on a chain too short to overflow anything: selection sets nest no deeper
+  // than the ceiling here, or the deep chain below would not return.
+  let shallow = parse_document(&braceless_inline_fragments(MAX_NESTING_DEPTH + 8));
+  let deepest = shallow
+    .syntax()
+    .descendants()
+    .filter(|n| n.kind() == K::SelectionSet)
+    .map(|n| {
+      n.ancestors()
+        .filter(|a| a.kind() == K::SelectionSet)
+        .count()
+    })
+    .max()
+    .unwrap_or(0);
+  assert!(
+    deepest <= MAX_NESTING_DEPTH,
+    "the chain nested {deepest} selection sets under a ceiling of {MAX_NESTING_DEPTH}"
+  );
+
+  for fragments in [3, BRACELESS_CHAIN] {
+    let src = braceless_inline_fragments(fragments);
+    let parse = parse_document(&src);
+    assert_eq!(
+      parse
+        .diagnostics()
+        .first()
+        .map(|d| (d.span(), d.severity())),
+      Some((second_spread(&src), Severity::Error)),
+      "{fragments} fragments: the first report must be the refusal the syntactic door returns"
+    );
+    assert_eq!(
+      parse.syntax().text().to_string(),
+      src,
+      "{fragments} fragments: the lossless guarantee survives the refusal"
+    );
+  }
+}
+
+/// The GraphQLx lossless door agrees with its syntactic one the same way.
+#[cfg(all(feature = "rowan", feature = "graphqlx"))]
+#[test]
+fn the_graphqlx_lossless_door_refuses_the_braceless_chain_at_the_same_token() {
+  use smear::parser::graphqlx::{kinds::SyntaxKind as K, lossless::parse_document};
+  use tokora::emitter::Severity;
+
+  // The ordering guard, as in the GraphQL twin.
+  let shallow = parse_document(&braceless_inline_fragments(MAX_NESTING_DEPTH + 8));
+  let deepest = shallow
+    .syntax()
+    .descendants()
+    .filter(|n| n.kind() == K::SelectionSet)
+    .map(|n| {
+      n.ancestors()
+        .filter(|a| a.kind() == K::SelectionSet)
+        .count()
+    })
+    .max()
+    .unwrap_or(0);
+  assert!(
+    deepest <= MAX_NESTING_DEPTH,
+    "the chain nested {deepest} selection sets under a ceiling of {MAX_NESTING_DEPTH}"
+  );
+
+  for fragments in [3, BRACELESS_CHAIN] {
+    let src = braceless_inline_fragments(fragments);
+    let parse = parse_document(&src);
+    assert_eq!(
+      parse
+        .diagnostics()
+        .first()
+        .map(|d| (d.span(), d.severity())),
+      Some((second_spread(&src), Severity::Error)),
+      "{fragments} fragments: the first report must be the refusal the syntactic door returns"
+    );
+    assert_eq!(
+      parse.syntax().text().to_string(),
+      src,
+      "{fragments} fragments: the lossless guarantee survives the refusal"
+    );
+  }
+}
+
 /// The converse: a document with far **more** delimiters than the ceiling, none of them nested,
 /// is still accepted.
 ///
