@@ -242,7 +242,7 @@ fn set_and_map_are_ordinary_enum_values_when_no_bang_follows() {
       K::ObjectField,
       K::IntValue
     ],
-    "`set` before a `{` is an enum value, and the braces are an object of their own"
+    "`set` before a `{{` is an enum value, and the braces are an object of their own"
   );
 }
 
