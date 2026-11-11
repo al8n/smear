@@ -831,8 +831,11 @@ jobs:
     - name: cargo test -p smear --no-run (rowan + graphqlx only)
       run: cargo test -p smear --no-run --no-default-features --features "std,parser,rowan_0_17,graphqlx"
 
+    # This suite pins measured values (mutation populations, goldens, censuses) in several test
+    # binaries, and a failing pin prints the value it measured. `cargo test` stops at the first
+    # binary that fails; `--no-fail-fast` makes one run report every binary instead of the first.
     - name: Run test
-      run: cargo test --all-features -- --quiet
+      run: cargo test --all-features --no-fail-fast -- --quiet
 
   # Build the documentation under `-D warnings`.
   #

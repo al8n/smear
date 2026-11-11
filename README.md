@@ -378,8 +378,8 @@ Two limits on that claim, because they are the difference between "compiles" and
 itself does **not** build for `thumbv6m-none-eabi`: its AST offers an `Arc`-backed list spelling that
 needs native atomics, which is why the no-atomic proof is about the schema representation rather than
 the crate. And per [#124], the `not(std)` arm is compile-checked but **executed** by nothing: the one
-row that runs the suite is `cargo test --all-features`, which has `std` on. Until [#136] a test build
-could not even *compile* it — the crate's dev-dependency on itself omitted
+row that runs the suite is `cargo test --all-features --no-fail-fast`, which has `std` on. Until
+[#136] a test build could not even *compile* it — the crate's dev-dependency on itself omitted
 `default-features = false`, so a `--no-default-features` selection resolved `std` back on, and every
 narrowed row was really the default build wearing a narrower name. Treat `no_std` as a supported
 build, not as a tested runtime.
