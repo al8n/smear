@@ -654,9 +654,12 @@ value_parser!(
 /// The `!` after a `set` or `map` keyword, and the `{` it must be followed by.
 ///
 /// The `!` is committed: the two dispatchers come here only once they have peeked it, and the
-/// standalone productions name it as their expectation when it is missing. The `{` is guarded at
-/// end of input only, so the diagnostic there names it as it names `!` one token earlier; any other
-/// token in its place is the brace delimiter's to report.
+/// standalone productions name it as their expectation when it is missing. The `{` is required
+/// before any member is read, so anything else in its place, end of input included, is refused
+/// here and left unconsumed rather than handed to the brace delimiter. Under a recovering emitter
+/// that delimiter reports a missing opener and reads members anyway, and every member begins with
+/// a value, so `set! set! set! …` would enter one collection per prefix with no brace opened for
+/// the nesting limit to count.
 fn collection_bang<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<(), GraphqlxError<'inp, Src, Ctx>>
@@ -669,7 +672,7 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   bang(inp)?;
-  if super::peek_kind(inp)?.is_none() {
+  if !matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::LBrace)) {
     return unexpected_here(inp, Expectation::LBrace);
   }
   Ok(())
