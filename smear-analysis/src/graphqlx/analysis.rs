@@ -1,16 +1,18 @@
 //! The entrance, [`analyze`], and what it answers, [`Analysis`].
 
-use std::vec::Vec;
+use core::cmp::Ordering;
+use std::{string::String, vec::Vec};
 
 use super::{
   check,
   diagnostic::{Collector, Diagnostics},
+  id::PackageId,
   limits::Limits,
   lower,
-  model::Model,
+  model::{Model, ModelBuilder, ModuleKind, PackageKind},
   package::Package,
   parse,
-  set::{self, PackageView},
+  set::{self, PackageView, ROOT},
   source::SourceMap,
   text::SourceText,
 };
@@ -101,7 +103,7 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
 
   let dependencies = check::package_set(&packages, &sources, &mut collector);
   let within = check::source_bytes(&packages, &sources, limits, &mut collector);
-  let model = Model::of(&packages, &sources, dependencies);
+  let model = model_of(&packages, &sources, dependencies);
 
   let documents = parse::files(&packages, &sources, within, &mut collector);
   debug_assert_eq!(
@@ -116,4 +118,37 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
     diagnostics: collector.finish(),
     sources,
   }
+}
+
+/// The model of `packages`, which are in id order and numbered by `sources`, with `dependencies`
+/// resolved, one list per package: every package, and each package's root module.
+fn model_of(
+  packages: &[PackageView<'_>],
+  sources: &SourceMap,
+  dependencies: Vec<Vec<PackageId>>,
+) -> Model {
+  let mut builder = ModelBuilder::default();
+  for ((index, view), resolved) in packages.iter().enumerate().zip(dependencies) {
+    let kind = match index.cmp(&ROOT) {
+      Ordering::Less => PackageKind::BuiltIn,
+      Ordering::Equal => PackageKind::Root,
+      Ordering::Greater => PackageKind::Dependency,
+    };
+    let name: String = String::from_utf8_lossy(view.name).into_owned();
+    let package = builder.push_package(
+      &name,
+      kind,
+      view.tier,
+      view.layout,
+      sources.package_sources(index).len(),
+    );
+    for dependency in resolved {
+      builder.push_dependency(package, dependency);
+    }
+    if let Some(integers) = view.integers {
+      builder.set_integers(package, integers.clone());
+    }
+    builder.push_module(package, None, None, ModuleKind::Root);
+  }
+  builder.finish()
 }

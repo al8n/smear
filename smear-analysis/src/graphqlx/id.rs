@@ -55,6 +55,117 @@ impl SourceId {
   }
 }
 
+/// Declares one of the model's dense ids: a `u32` newtype with `new` and `get`, as [`PackageId`]
+/// and [`SourceId`] are, and the sealed impl an [`IdRange`] of it needs.
+macro_rules! model_id {
+  ($(#[$meta:meta])* $name:ident) => {
+    $(#[$meta])*
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct $name(u32);
+
+    impl $name {
+      /// The id whose index is `index`.
+      ///
+      /// The caller is responsible for the index belonging to the model it is used against.
+      #[inline]
+      pub const fn new(index: u32) -> Self {
+        Self(index)
+      }
+
+      /// The raw index.
+      #[inline]
+      pub const fn get(&self) -> u32 {
+        self.0
+      }
+    }
+
+    impl sealed::Dense for $name {
+      #[inline]
+      fn at(index: u32) -> Self {
+        Self(index)
+      }
+
+      #[inline]
+      fn index(self) -> u32 {
+        self.0
+      }
+    }
+  };
+}
+
+model_id! {
+  /// A module of one analysis: a package's root module, a directory module, or an inline `mod`.
+  ///
+  /// Dense from 0, in package order. Within a package, by module path, compared segment by
+  /// segment, each segment bytewise, so a package's root module comes first and a module precedes
+  /// its descendants. Two inline `mod`s with one path are one module.
+  ModuleId
+}
+
+model_id! {
+  /// A type or directive definition of one analysis.
+  ///
+  /// Dense from 0, ordered by package, then module path (as [`ModuleId`] orders it), then source
+  /// id, then position. The definitions materialised for intrinsic primitives sit at `core`'s
+  /// package source, so they come first in `core`'s root module, in the order `bool`, `f32`, `f64`,
+  /// then the signed widths ascending, then the unsigned widths ascending.
+  DefId
+}
+
+model_id! {
+  /// A field, argument, input field or enum value of one analysis.
+  ///
+  /// Dense from 0, ordered by the owner's [`DefId`]. Within an owner, its direct members come
+  /// first (fields, input fields, enum values, or a directive definition's arguments) in
+  /// contribution order: the definition, then each extension by source id and position, and in
+  /// written order within each. Then, field by field in that order, each field's arguments. So an
+  /// owner's direct members, and each field's arguments, are runs of consecutive ids.
+  MemberId
+}
+
+model_id! {
+  /// One written type occurrence of one analysis: what a diagnostic about a type points at.
+  ///
+  /// Dense from 0, in the order the walk over every package reaches them, nested occurrences in
+  /// pre-order: an occurrence first, then its arguments or its element.
+  TypeExprId
+}
+
+model_id! {
+  /// A type's identity in one analysis: two occurrences of one type share one `TyId`, so `==` on
+  /// `TyId` is type equality.
+  ///
+  /// Dense from 0, interned as the walk over every package reaches each type expression, a type's
+  /// arguments before the type itself. A type no expression writes (an argument filled from a
+  /// default, an alias's argument) is interned where the walk first needs it.
+  TyId
+}
+
+model_id! {
+  /// One value occurrence of one analysis: a default, an argument's value, or a value nested in
+  /// one.
+  ///
+  /// Dense from 0, in the order the walk over every package reaches them, nested values in
+  /// pre-order: a list, set, map or object first, then what it holds.
+  ValueId
+}
+
+model_id! {
+  /// One directive application of one analysis: one `@directive(…)` as written.
+  ///
+  /// Dense from 0, in the order the walk over every package reaches them.
+  ApplicationId
+}
+
+model_id! {
+  /// An interned name of one analysis.
+  ///
+  /// Dense from 0, by first occurrence in source-id order, then position. A name the analyzer
+  /// makes itself is interned when it is made. Read it with
+  /// [`Model::name`](super::Model::name).
+  Sym
+}
+
 /// A table length as the dense `u32` its ids are. A table of `2^32` rows is out of reach of any
 /// input that fits in memory, so the saturation is never reached.
 pub(crate) fn dense(len: usize) -> u32 {

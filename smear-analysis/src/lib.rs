@@ -56,4 +56,6 @@ pub mod __features {
   pub const SMOL_BYTES_0_2: bool = cfg!(feature = "smol-bytes_0_2");
   /// `std`, as this crate resolved it.
   pub const STD: bool = cfg!(feature = "std");
+  /// `test-support`, as this crate resolved it.
+  pub const TEST_SUPPORT: bool = cfg!(feature = "test-support");
 }

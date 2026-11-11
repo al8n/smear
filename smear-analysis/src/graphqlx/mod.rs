@@ -65,12 +65,25 @@ mod set;
 mod source;
 mod text;
 
+// The model's builder, for `smear`'s integration tests. Hidden, and compiled only with the
+// feature: the builder is crate-private API.
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub mod test_support;
+
 pub use analysis::{Analysis, analyze};
 pub use code::DiagnosticKind;
 pub use diagnostic::{Diagnostic, DiagnosticBuilder, Diagnostics};
-pub use id::{IdIter, IdRange, PackageId, SourceId};
+pub use id::{
+  ApplicationId, DefId, IdIter, IdRange, MemberId, ModuleId, PackageId, SourceId, Sym, TyId,
+  TypeExprId, ValueId,
+};
 pub use limits::Limits;
-pub use model::{Model, PackageInfo, PackageKind};
+pub use model::{
+  ApplicationArgument, Collection, DefKind, DirectiveLocation, LiteralKind, MemberKind, Model,
+  ModuleKind, ObjectEntry, Origin, PackageInfo, PackageKind, PathRoot, Primitive, Resolution, Root,
+  RootOperation, TypeBound,
+};
 pub use package::{IntegerProvider, Layout, Package, SourceFile, Tier};
 pub use source::{Bound, Source, SourceMap};
 pub use text::SourceText;

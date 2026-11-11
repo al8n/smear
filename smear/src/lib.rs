@@ -538,4 +538,8 @@ const _: () = {
     smear_analysis::__features::STD == cfg!(feature = "std"),
     "`smear-analysis/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/std` too, or stop enabling\n     `smear-analysis/std`."
   );
+  assert!(
+    smear_analysis::__features::TEST_SUPPORT == cfg!(feature = "test-support"),
+    "`smear-analysis/test-support` and `smear/test-support` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/test-support` too, or stop enabling\n     `smear-analysis/test-support`."
+  );
 };

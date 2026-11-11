@@ -37,6 +37,12 @@ hipstr_0_8 = ["dep:hipstr_0_8", "alloc", "smear-parser/hipstr_0_8"]
 smol-bytes = ["smol-bytes_0_2"]
 smol-bytes_0_2 = ["dep:smol-bytes_0_2", "alloc", "smear-parser/smol-bytes_0_2"]
 
+# Compiles `graphqlx::test_support`, the door through which `smear`'s integration tests build small
+# models with the crate-private model builder, and the part of the builder only that door calls
+# until the analyzer's later phases call it. Hidden and not API; `smear/test-support` forwards it,
+# and the umbrella's self dev-dependency turns it on for every `smear` test target.
+test-support = []
+
 [dependencies]
 tokora.workspace = true
 
