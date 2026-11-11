@@ -18,7 +18,7 @@ use std::{vec, vec::Vec};
 /// `successors` is asked twice — once to size each row, once to fill it — rather than pushing
 /// into a vector per node, because one row per node is `nodes` allocations and this is two. The
 /// scratch it writes through is reused across both passes and every node.
-pub(crate) fn on_cycle(
+pub fn on_cycle(
   nodes: usize,
   marked: usize,
   mut successors: impl FnMut(usize, &mut Vec<u32>),

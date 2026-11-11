@@ -1,0 +1,52 @@
+//! The algorithms smear's two semantic layers share: the GraphQL schema builder and the GraphQLx
+//! analyzer.
+//!
+//! [`interner`] turns byte spellings into dense symbols, [`duplicates`] finds the earlier position
+//! of a name list that wrote a given name, and [`scc`] finds which nodes of a directed graph lie on
+//! a cycle. Each is generic over its caller's symbol type, and all three need `alloc`.
+#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![forbid(unsafe_code)]
+
+// Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
+// compile them all out and still build green.
+#[cfg(all(feature = "std", not(feature = "alloc")))]
+compile_error!("the `std` feature must enable `alloc`: check this crate's [features] table");
+
+// The alloc-as-std alias: the modules spell their allocations `std::vec::Vec`, which resolves to
+// `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build. The `#[allow]`
+// is the exception the workspace's `unused_extern_crates = "deny"` records: the alias's users are
+// gated, and the lint fires in any configuration that compiles none of them.
+#[cfg(all(feature = "alloc", not(feature = "std")))]
+#[allow(unused_extern_crates)]
+extern crate alloc as std;
+
+#[cfg(feature = "std")]
+#[allow(unused_extern_crates)]
+extern crate std;
+
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+pub mod duplicates;
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+pub mod interner;
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+pub mod scc;
+
+/// The features this crate was compiled with, as constants the umbrella asserts against.
+///
+/// **Not public API.** `smear` mounts nothing of this crate, but layers it does mount are built on
+/// it, so it asserts these against its own features as it does every member's: a second dependency
+/// naming this crate directly cannot raise its tier behind a `smear` consumer who never asked.
+///
+/// `ci/feature_reachability.py` derives this list from `cargo metadata` and fails when a feature
+/// this crate declares has no constant here or no assertion in `smear`.
+#[doc(hidden)]
+pub mod __features {
+  /// `alloc`, as this crate resolved it.
+  pub const ALLOC: bool = cfg!(feature = "alloc");
+  /// `std`, as this crate resolved it.
+  pub const STD: bool = cfg!(feature = "std");
+}

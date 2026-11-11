@@ -33,12 +33,13 @@ default = ["std"]
 
 # `alloc` is the reader tier: the representation is `core` + `alloc`, and without it this crate is
 # `diagnostic` and `builtin` alone. `std` flips the crate attribute and nothing else at that tier.
-alloc = ["tokora/alloc", "smear-parser?/alloc"]
-std = ["alloc", "tokora/std", "smear-parser?/std"]
+alloc = ["tokora/alloc", "smear-parser?/alloc", "smear-semantics?/alloc"]
+std = ["alloc", "tokora/std", "smear-parser?/std", "smear-semantics?/std"]
 
 # Draft §3 "Type Validation" and the SDL door: `Schema::build`, `SchemaBuilder`, `SchemaError` and
 # the literal-shape table. This is the edge that pulls `smear-parser`, because the builder consumes
-# a parsed `TypeSystemDocument`.
+# a parsed `TypeSystemDocument`, and `smear-semantics`, whose interner, duplicate index and cycle
+# kernel the builder runs on.
 #
 # `error.rs` IS BEHIND THIS, which the design's §2 did not say and which is the one place this
 # manifest reads differently from it. `SchemaError` is what the build refuses with; ungated, this
@@ -46,7 +47,7 @@ std = ["alloc", "tokora/std", "smear-parser?/std"]
 # unreachable-variant shape §8 files as a defect twice over — and `error.rs`'s own two doc links
 # point at `Schema::build`, so they would be unresolvable under `-D warnings` in exactly the
 # configuration that kept them. It costs the reader tier 1173 lines of compile it has no use for.
-build = ["dep:smear-parser", "smear-parser/graphql"]
+build = ["dep:smear-parser", "smear-parser/graphql", "dep:smear-semantics"]
 
 # The second construction door: building a `Schema` out of a draft §4 introspection response
 # instead of out of SDL. It renders the response as SDL and hands it to the same builder, so draft
@@ -64,6 +65,7 @@ introspection = ["build"]
 tokora.workspace = true
 
 smear-parser = { workspace = true, optional = true }
+smear-semantics = { workspace = true, optional = true }
 
 [lints]
 workspace = true

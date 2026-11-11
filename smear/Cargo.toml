@@ -58,14 +58,14 @@ default = ["std", "graphql", "graphqlx", "parser", "smallvec_1"]
 # dialects, and the parser, which a `smear` dependency compiled unconditionally. A default build
 # compiles the same code before and after the merge.
 
-alloc = ["smear-lexer/alloc", "smear-parser?/alloc", "smear-schema/alloc", "smear-compiler?/alloc", "graphql-proto?/alloc", "tokora/alloc", "bstr_1?/alloc"]
+alloc = ["smear-lexer/alloc", "smear-parser?/alloc", "smear-schema/alloc", "smear-semantics?/alloc", "smear-compiler?/alloc", "graphql-proto?/alloc", "tokora/alloc", "bstr_1?/alloc"]
 
 # `thiserror/default` is gone from this list and is NOT a lost forward. The only
 # `#[derive(thiserror::Error)]` in the tree is `smear-lexer`'s `LengthError`, so the crate that
 # derives it is now the crate that owns the forward, and `smear-lexer/std` below is what turns it
 # on. `smear-smoke::std_tier` asserts that exact `impl std::error::Error` across a real dependency
 # edge, so a dropped forward is a compile error in a member rather than a silent tier change.
-std = ["alloc", "smear-lexer/std", "smear-parser?/std", "smear-schema/std", "smear-compiler?/std", "graphql-proto?/std", "tokora/default", "bytes_1?/default", "bstr_1?/default", "hipstr_0_8?/default", "smol-bytes_0_2?/default"]
+std = ["alloc", "smear-lexer/std", "smear-parser?/std", "smear-schema/std", "smear-semantics?/std", "smear-compiler?/std", "graphql-proto?/std", "tokora/default", "bytes_1?/default", "bstr_1?/default", "hipstr_0_8?/default", "smol-bytes_0_2?/default"]
 
 graphql = ["smear-lexer/graphql", "smear-parser?/graphql"]
 # Tracks a moving dialect spec: the GraphQLx surface is semver-exempt until the dialect
@@ -96,10 +96,11 @@ parser = ["dep:smear-parser"]
 # validator.
 #
 # It adds no THIRD-PARTY dependency — it adds `smear-compiler` and turns on `smear-schema/build`,
-# which is where the §3 pass lives. The schema representation itself is `core` + `alloc`, which the
-# `smear-noatomic` workspace member holds to by compiling those very files for
-# `thumbv6m-none-eabi` with an empty `[dependencies]` table of its own.
-validator = ["parser", "graphql", "dep:smear-compiler", "smear-schema/build"]
+# which is where the §3 pass lives, and the edge to `smear-semantics`, the kernels that pass runs
+# on, so the feature fence in `src/lib.rs` can read them. The schema representation itself is
+# `core` + `alloc`, which the `smear-noatomic` workspace member holds to by compiling those very
+# files for `thumbv6m-none-eabi` with an empty `[dependencies]` table of its own.
+validator = ["parser", "graphql", "dep:smear-compiler", "smear-schema/build", "dep:smear-semantics"]
 
 # Draft §6 execution (`smear::proto`): the Sans-I/O query executor.
 #
@@ -247,6 +248,11 @@ graphql-proto = { workspace = true, optional = true }
 # difference between it and the protocol machine above: this crate produces a `Schema`, that one
 # reads one.
 smear-compiler = { workspace = true, optional = true }
+
+# MOUNTED NOWHERE, and a dependency anyway: the edge exists so the feature fence in `src/lib.rs`
+# can read this crate's witnesses. The crate sits beneath `smear-schema`'s builder, and `validator`,
+# which turns that builder on, turns this edge on with it.
+smear-semantics = { workspace = true, optional = true }
 
 # ── THE TWO NUMBER FORMATTERS, BEHIND `proto` WITH THE MODULE THAT USES THEM ─────────────────
 #

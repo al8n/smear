@@ -10,7 +10,7 @@ whole graph, so any other dependency naming that member can switch the capabilit
 
 Every gate in this repository builds THIS workspace, where nothing else requests those member
 features. The leak needs a **second requester in a downstream graph**, so it needs a downstream.
-`ci/downstream/` is one: its own workspace root, path dependencies on all six crates, no
+`ci/downstream/` is one: its own workspace root, a path dependency on every published crate, no
 dev-dependencies, and no smear feature in its manifest.
 
 Measured before the repair, with `smear = { default-features = false, features = ["std",
@@ -77,8 +77,13 @@ UMBRELLA = "smear"
 
 # Members whose features `smear` forwards. `smear-smoke`, `smear-noatomic` and `source-census` are
 # not re-exported by anything and have no features; the planner rejects an unexpected member rather
-# than skipping it, so a sixth layer cannot arrive unnoticed.
-MEMBERS = ("smear-lexer", "smear-parser", "smear-schema", "smear-compiler", "graphql-proto")
+# than skipping it, so a new layer cannot arrive unnoticed. `smear-semantics` is the one member
+# here that `smear` does not re-export: it asserts the crate's features all the same, through the
+# edge `validator` turns on.
+MEMBERS = (
+  "smear-lexer", "smear-parser", "smear-semantics", "smear-schema", "smear-compiler",
+  "graphql-proto",
+)
 
 # THE ONLY ESCAPE FROM BEING ASSERTED IS TO NAME A DIFFERENT TWIN, never to be left out.
 #
@@ -153,6 +158,7 @@ PRESENCE = {
   "smear-lexer": (),
   "smear-schema": (),
   "smear-parser": ("parser",),
+  "smear-semantics": ("parser", "graphql", "validator"),
   "smear-compiler": ("parser", "graphql", "validator"),
   "graphql-proto": ("parser", "graphql", "validator", "proto"),
 }

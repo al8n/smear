@@ -8,6 +8,7 @@ members = [
   "smear-parser",
   "smear-compiler",
   "smear-schema",
+  "smear-semantics",
   "tests/smear-smoke",
 ]
 
@@ -25,11 +26,11 @@ members = [
 # change this arithmetic, because a package's own dev-dependencies are not another member's
 # feature request.
 #
-# THE SPLIT DID NOT CHANGE THIS ARITHMETIC, and it is worth saying why not: the five member crates
-# below `smear` are reached only THROUGH it, so `smear-smoke`'s request travels down the same edges
-# a dependent's does. What the split does change is that a bare workspace command now also selects
-# those five directly, each at its own default — which is a wider build, not a wider resolve of
-# `smear`.
+# THE SPLIT DID NOT CHANGE THIS ARITHMETIC, and it is worth saying why not: the member crates below
+# `smear` are reached only THROUGH it, so `smear-smoke`'s request travels down the same edges a
+# dependent's does. What the split does change is that a bare workspace command now also selects
+# those members directly, each at its own default — which is a wider build, not a wider resolve
+# of `smear`.
 #
 # TWO members this arithmetic does not reach, both deliberately and for different reasons.
 #
@@ -96,6 +97,7 @@ smear-lexer = { path = "smear-lexer", version = "0.0.1", default-features = fals
 smear-parser = { path = "smear-parser", version = "0.0.1", default-features = false }
 smear-compiler = { path = "smear-compiler", version = "0.0.1", default-features = false }
 smear-schema = { path = "smear-schema", version = "0.0.1", default-features = false }
+smear-semantics = { path = "smear-semantics", version = "0.0.1", default-features = false }
 
 # TEMPORARY, removed before this branch leaves draft: tokora 0.13.0 is not published yet, and
 # this branch proves its diagnostic contract first. See CHANGELOG `[Unreleased]`.

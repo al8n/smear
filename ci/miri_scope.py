@@ -279,12 +279,20 @@ MIRI_IGNORE_BUDGET = sum(MIRI_DECLARED_IGNORES.values())
 # entire lossless tower entered a Miri cell that nobody widened. Checked for each of the four:
 # `smear-lexer` declares no `rowan` feature at all; `smear-parser` and `smear-compiler` do declare
 # one but it is not in their `default` and these scripts pass no `--features`, so the resolve
-# leaves it off; `graphql-proto` declares only `std`. This file's own feature-set guard prints what
+# leaves it off; `graphql-proto` declares only `std`. `smear-semantics`, added since, declares its
+# two tiers and nothing else and depends on nothing. This file's own feature-set guard prints what
 # actually resolved, so none of that is taken on trust.
 #
 # `ci/feature_reachability.py` requires every publishable member to be in this tuple or in
 # `MIRI_NOT_SELECTED` below, so the account grows with the workspace instead of being remembered.
-MIRI_PACKAGES = ("smear-lexer", "smear-parser", "smear-schema", "smear-compiler", "graphql-proto")
+MIRI_PACKAGES = (
+    "smear-lexer",
+    "smear-parser",
+    "smear-semantics",
+    "smear-schema",
+    "smear-compiler",
+    "graphql-proto",
+)
 
 # ONE MEMBER PER CELL, AND THE FEATURES THAT KEEP THAT A SCHEDULING CHANGE.
 #
@@ -844,7 +852,7 @@ def partition(
     """Split `<tests_dir>/*.rs` into ({excluded target: why}, [compiled targets]).
 
     `resolves` names the feature set in the printed reason, because a shard's is its member's and
-    not `smear`'s. A tree that does not exist partitions to nothing: two members have no `tests/`.
+    not `smear`'s. A tree that does not exist partitions to nothing: three members have no `tests/`.
     """
     excluded: dict[str, str] = {}
     compiled: list[str] = []
@@ -1552,7 +1560,7 @@ def main() -> int:
         args.tests_dir = args.tests_dir or pathlib.Path("smear/tests")
         args.manifest = args.manifest or pathlib.Path("smear/Cargo.toml")
 
-    # A member's `tests/` may be absent — two of the five have none — and its cell still checks
+    # A member's `tests/` may be absent — three of the six have none — and its cell still checks
     # the lib binary. Without `--package` an absent tree is still the misconfiguration it was.
     if not args.package and not args.tests_dir.is_dir():
         print(f"::error::miri_scope: no such directory: {args.tests_dir}", file=sys.stderr)

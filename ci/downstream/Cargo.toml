@@ -81,6 +81,7 @@ smear = { path = "../../smear", default-features = false }
 smear-lexer = { path = "../../smear-lexer", default-features = false, optional = true }
 smear-parser = { path = "../../smear-parser", default-features = false, optional = true }
 smear-schema = { path = "../../smear-schema", default-features = false, optional = true }
+smear-semantics = { path = "../../smear-semantics", default-features = false, optional = true }
 smear-compiler = { path = "../../smear-compiler", default-features = false, optional = true }
 graphql-proto = { path = "../../graphql-proto", default-features = false, optional = true }
 

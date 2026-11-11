@@ -299,14 +299,15 @@ pub mod __private {
 // it was unreachable and after the split it was silent.
 //
 // WHAT THIS FENCE DOES NOT COVER, stated because a claim wider than what it holds is the defect it
-// was built against. It covers MEMBER features — the 32 `cargo metadata` reports across the five
-// crates smear re-exports. Several `smear` features ALSO forward to third-party ones: `bytes_1`
-// forwards `tokora/bytes_1`, and `impl Source for bytes::Bytes` comes from tokora, not from
-// `smear-lexer`. Measured on this tree: a consumer with `smear/bytes_1` off and `tokora/bytes_1`
-// enabled directly gets that impl, and nothing here fires — tokora publishes no feature witnesses
-// and this repository cannot give it any. That is NOT a regression from the split: `smear/bytes`
-// forwarded `tokora/bytes_1` on `origin/feat/proto` too, so the same graph did the same thing
-// before any crate moved. It is a pre-existing bound of the umbrella, now written down.
+// was built against. It covers MEMBER features — the 34 `cargo metadata` reports across the five
+// crates smear re-exports and `smear-semantics`, which it asserts without mounting. Several `smear`
+// features ALSO forward to third-party ones: `bytes_1` forwards `tokora/bytes_1`, and
+// `impl Source for bytes::Bytes` comes from tokora, not from `smear-lexer`. Measured on this tree:
+// a consumer with `smear/bytes_1` off and `tokora/bytes_1` enabled directly gets that impl, and
+// nothing here fires — tokora publishes no feature witnesses and this repository cannot give it
+// any. That is NOT a regression from the split: `smear/bytes` forwarded `tokora/bytes_1` on
+// `origin/feat/proto` too, so the same graph did the same thing before any crate moved. It is a
+// pre-existing bound of the umbrella, now written down.
 //
 // The unversioned names — `bytes`, `bstr`, `hipstr`, `smol-bytes`, `smallvec`, `rowan` — are pure
 // aliases of the versioned features above and publish no witness of their own: enabling a member's
@@ -440,6 +441,21 @@ const _: () = {
   assert!(
     smear_schema::__features::STD == cfg!(feature = "std"),
     "`smear-schema/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/std` too, or stop enabling\n     `smear-schema/std`."
+  );
+};
+
+// `smear-semantics` is the one member asserted here that this crate does not mount. It sits beneath
+// `smear-schema`'s builder, so it is in the graph whenever `validator` is, and the optional edge
+// `validator` turns on exists so this block can read its witnesses.
+#[cfg(feature = "validator")]
+const _: () = {
+  assert!(
+    smear_semantics::__features::ALLOC == cfg!(feature = "alloc"),
+    "`smear-semantics/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and the kernels beneath `smear::validator` would then be built at\n     a tier this consumer never asked for. Enable `smear/alloc` too, or stop enabling\n     `smear-semantics/alloc`."
+  );
+  assert!(
+    smear_semantics::__features::STD == cfg!(feature = "std"),
+    "`smear-semantics/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and the kernels beneath `smear::validator` would then be built at\n     a tier this consumer never asked for. Enable `smear/std` too, or stop enabling\n     `smear-semantics/std`."
   );
 };
 

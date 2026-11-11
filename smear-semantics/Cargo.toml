@@ -1,0 +1,27 @@
+[package]
+name = "smear-semantics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "The algorithms smear's GraphQL schema builder and GraphQLx analyzer share: a byte-spelling interner, duplicate-name detection and a graph-cycle kernel."
+keywords = ["graphql", "interner", "scc", "no-std"]
+categories = ["algorithms", "no-std"]
+readme = "README.md"
+
+[features]
+default = ["std"]
+
+# The three kernels allocate, so without `alloc` this crate is empty. `std` flips the crate
+# attribute and nothing else.
+alloc = []
+std = ["alloc"]
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

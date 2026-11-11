@@ -322,7 +322,7 @@ jobs:
   # naming the path and the positive beside it proves nothing.
   #
   # `ci/downstream.sh` copies tracked files into a private snapshot, uses one audited unlocked
-  # metadata pass to refresh only its six local path-package versions, then certifies the planner
+  # metadata pass to refresh only its local path-package versions, then certifies the planner
   # and runs every cargo leg `--locked` there. The committed lock and checkout stay unchanged,
   # while third-party pins remain hermetic and a red reads "your feature is broken" rather than "upstream released
   # something".
@@ -397,8 +397,8 @@ jobs:
   # ── WHAT CROSS-COMPILES, AND FOR WHOM ───────────────────────────────────────────────────────
   #
   # Fifteen targets, one question: does the crate a consumer installs build for them. Since the
-  # crate split that is all six of `smear`, `smear-lexer`, `smear-parser`, `smear-schema`,
-  # `smear-compiler` and `graphql-proto` — the publishable members, a property
+  # crate split that is all seven of `smear`, `smear-lexer`, `smear-parser`, `smear-semantics`,
+  # `smear-schema`, `smear-compiler` and `graphql-proto` — the publishable members, a property
   # of the manifests rather than an opinion, and the step below re-reads it out of `cargo
   # metadata` so the list cannot go stale in silence. The other three are `publish = false`: two
   # tripwires and the `source-genericity` gate's `syn` reader, none of which any target here will
@@ -494,8 +494,8 @@ jobs:
           PUBLISHABLE="$(cargo metadata --no-deps --format-version 1 \
             | python3 -c 'import json,sys; print(",".join(sorted(p["name"] for p in json.load(sys.stdin)["packages"] if p.get("publish") != [])))')"
           echo "publishable members: $PUBLISHABLE"
-          if [ "$PUBLISHABLE" != "graphql-proto,smear,smear-compiler,smear-lexer,smear-parser,smear-schema" ]; then
-            echo "::error::this matrix cross-compiles '-p smear -p smear-lexer -p smear-parser -p smear-schema -p smear-compiler -p graphql-proto', but the publishable members are now: $PUBLISHABLE"
+          if [ "$PUBLISHABLE" != "graphql-proto,smear,smear-compiler,smear-lexer,smear-parser,smear-schema,smear-semantics" ]; then
+            echo "::error::this matrix cross-compiles '-p smear -p smear-lexer -p smear-parser -p smear-semantics -p smear-schema -p smear-compiler -p graphql-proto', but the publishable members are now: $PUBLISHABLE"
             echo "::error::add the new one to the build below, or mark it publish = false if it does not ship"
             exit 1
           fi
@@ -506,7 +506,8 @@ jobs:
       - name: cargo build (every publishable member) --all-features --target ${{ matrix.target }}
         run: |
           rustup target add ${{ matrix.target }}
-          cargo build -p smear -p smear-lexer -p smear-parser -p smear-schema -p smear-compiler -p graphql-proto \
+          cargo build -p smear -p smear-lexer -p smear-parser -p smear-semantics -p smear-schema \
+            -p smear-compiler -p graphql-proto \
             --all-features --target ${{ matrix.target }}
 
   # The validator's schema representation, on a core with no compare-and-swap.

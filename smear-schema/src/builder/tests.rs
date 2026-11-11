@@ -19,9 +19,9 @@ use smear_parser::graphql::ast::{
   ConstArgument, ConstArguments, ConstDirective, ConstDirectives, ConstList, Described, EnumValue,
   FloatValue, IntValue, Nested,
 };
+use smear_semantics::interner::MAX_ARENA_SYMBOLS;
 
 use super::*;
-use crate::semantics::interner::MAX_ARENA_SYMBOLS;
 
 /// `type Query { ok: Int }` and friends, through the same door `Schema::build` uses.
 fn parse<'a>(sdl: &'a str) -> TypeSystemDocument<&'a str> {
