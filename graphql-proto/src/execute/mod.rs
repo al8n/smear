@@ -1448,7 +1448,7 @@ pub enum StartError {
   /// enum whose whole `errors` entry in a §7.1.3 [`RequestErrorResult`](super::RequestErrorResult)
   /// is one rendered [`Display`](fmt::Display). Carrying more would mean the executor raising a
   /// second request error beside its refusal, and it raises one — the population
-  /// `request_error.rs` states. The driver-supplied [`RequestError`](super::RequestError) is for the
+  /// `request/error/mod.rs` states. The driver-supplied [`RequestError`](super::RequestError) is for the
   /// request errors raised where no executor exists, not for detail about this one, and the same
   /// line leaves [`NoMutationRoot`](Self::NoMutationRoot)'s span uncarried.
   SourceSelectionRefused,
@@ -1930,7 +1930,7 @@ struct Entry {
 /// to be kept out by a flag test, or be impossible for a stated structural reason.
 ///
 /// The **operation kind** is the second axis and it is outer: the private `Phase` slot — named
-/// rather than linked, being private, the way `request_error.rs` names its own module header —
+/// rather than linked, being private, the way `request/error/mod.rs` names its own module header —
 /// says whether the executor
 /// is running a query, a mutation or a subscription, and for a subscription which
 /// [`ResponseStream`] state it is in. Draft §6.2.3's five entry points read it and the other nine

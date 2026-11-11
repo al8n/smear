@@ -202,7 +202,7 @@ name: Miri
 #         Stacked Borrows is read for its kind as well, and behaviour stays whatever it costs —
 #         `smear-parser`'s 100 000-deep map type is released in 498.2 s and runs. By file:
 #         `graphql-proto/src/execute/tests.rs` 20 (cost and allocation gates, one source census),
-#         `graphql-proto/src/request_error/tests.rs` 1 (an allocation gate),
+#         `graphql-proto/src/request/error/tests.rs` 1 (an allocation gate),
 #         `graphql-proto/tests/response_order.rs` 2 (the two exhaustive arrival-order sweeps),
 #         `smear-parser/tests/syntactic_terminal_reads.rs` 2 (source censuses),
 #         `smear-schema/src/builder/tests.rs` 1 (a price at a ceiling) and

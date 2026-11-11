@@ -681,7 +681,7 @@ pub const EXEMPTIONS: &[Exemption] = &[
   },
   // ── §7.1.3's driver-supplied entry, whose message is the driver's sentence ───────────────────
   Exemption {
-    module: "smear::proto::request_error",
+    module: "smear::proto::request::error",
     entry: "RequestError::new",
     param: "message",
     kind: Kind::NotSource,

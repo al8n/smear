@@ -339,7 +339,7 @@ impl core::error::Error for RequestErrorCeiling {}
 /// Draft §7.1.6's *Error Result Format*, entry by entry: the `message` it must carry, the
 /// `locations` it should, and the `extensions` it may. There is no `path`, because §7.1.6 asks for
 /// one only of an error associated with "a particular field in the GraphQL result" and a request
-/// error result has no result. `request_error.rs`'s module header has who raises these and why
+/// error result has no result. `request/error/mod.rs`'s module header has who raises these and why
 /// they are carried here rather than assembled by the driver.
 ///
 /// # Built under a budget, and re-checked by the result that lists it
@@ -411,7 +411,7 @@ impl<V> RequestError<V> {
   ///   [`Location::entire`](smear_schema::diagnostic::Location::entire), which is no point in the
   ///   text.
   /// - **No `extensions`.** The diagnostic's code is the driver's to publish or not, through
-  ///   [`set_extensions`](RequestError::set_extensions); `request_error.rs`'s header has why this
+  ///   [`set_extensions`](RequestError::set_extensions); `request/error/mod.rs`'s header has why this
   ///   crate does not invent an `extensions.code`.
   ///
   /// # Refusal
@@ -570,7 +570,7 @@ impl<V> core::error::Error for RefusedEntry<V> {}
 
 /// One entry of a draft §7.1.3 result's `errors`, as [`RequestErrorResult::errors`] reads it.
 ///
-/// Two kinds, because two parties raise request errors — `request_error.rs`'s module header has
+/// Two kinds, because two parties raise request errors — `request/error/mod.rs`'s module header has
 /// which raises which. A serialiser need not tell them apart: [`Display`](fmt::Display) is
 /// §7.1.6's `message` for both, and for the executor's refusal
 /// [`locations`](RequestErrorEntry::locations) is empty and
@@ -648,7 +648,7 @@ impl<V> fmt::Display for RequestErrorEntry<'_, V> {
 
 /// Draft §7.1.3's *request error result*: the response for a request that failed before execution.
 ///
-/// `request_error.rs`'s module header has why this is a type, which two kinds of entry its
+/// `request/error/mod.rs`'s module header has why this is a type, which two kinds of entry its
 /// `errors` list holds and who raises each, and what bounds what it retains.
 ///
 /// Named as a file rather than linked, because the module is private — the type reaches a consumer
