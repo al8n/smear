@@ -440,5 +440,4 @@ impl<V> fmt::Display for SourceEventError<V> {
   }
 }
 
-#[cfg(feature = "std")]
-impl<V: fmt::Debug> std::error::Error for SourceEventError<V> {}
+impl<V: fmt::Debug> core::error::Error for SourceEventError<V> {}

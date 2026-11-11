@@ -1567,8 +1567,7 @@ impl fmt::Display for StartError {
   }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for StartError {}
+impl core::error::Error for StartError {}
 
 /// Why [`Executor::set_extensions`] refused, carrying the map back.
 ///
@@ -1617,8 +1616,7 @@ impl<V> fmt::Display for SetExtensionsError<V> {
   }
 }
 
-#[cfg(feature = "std")]
-impl<V: fmt::Debug> std::error::Error for SetExtensionsError<V> {}
+impl<V: fmt::Debug> core::error::Error for SetExtensionsError<V> {}
 
 /// A draft §7.1.6 `extensions` map [`Executor::handle_field_error_with`] did not attach, carried
 /// back.
@@ -1690,8 +1688,7 @@ impl<V> fmt::Display for UnattachedExtensions<V> {
   }
 }
 
-#[cfg(feature = "std")]
-impl<V> std::error::Error for UnattachedExtensions<V> {}
+impl<V> core::error::Error for UnattachedExtensions<V> {}
 
 /// What a slot needs from the document, kept out of [`Slot`] so the response types stay free of
 /// the source type `S`.

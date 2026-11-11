@@ -26,7 +26,7 @@ readme = "README.md"
 
 [features]
 default = ["std"]
-
+alloc = ["tokora/alloc"]
 std = ["smear-parser/std", "smear-schema/std", "tokora/std"]
 
 [dependencies]

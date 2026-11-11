@@ -2708,7 +2708,7 @@ fn an_undefined_root_is_refused_by_draft_3() {
 /// or an error that crossed a thread would be an error that borrowed a request buffer.
 #[test]
 fn every_refusal_is_owned_and_renders() {
-  fn owned<T: Send + Sync + Clone + std::fmt::Display + std::error::Error + 'static>(
+  fn owned<T: Send + Sync + Clone + core::fmt::Display + core::error::Error + 'static>(
     value: T,
   ) -> T {
     value

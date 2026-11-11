@@ -51,7 +51,7 @@ use smear::lexer::tokora::{Lexer as _, Parse as _, Parser};
 ///
 /// Written as a bound rather than a call so the probe IS the trait implementation.
 pub fn std_tier() -> &'static str {
-  fn assert_error<E: std::error::Error>() -> &'static str {
+  fn assert_error<E: core::error::Error>() -> &'static str {
     core::any::type_name::<E>()
   }
   assert_error::<smear::lexer::error::LengthError>()

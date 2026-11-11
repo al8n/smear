@@ -176,8 +176,7 @@ impl<V> fmt::Display for Full<V> {
   }
 }
 
-#[cfg(feature = "std")]
-impl<V: fmt::Debug> std::error::Error for Full<V> {}
+impl<V: fmt::Debug> core::error::Error for Full<V> {}
 
 /// Draft §7.1.7's `extensions` map, and draft §7.1.6's per-error one.
 ///

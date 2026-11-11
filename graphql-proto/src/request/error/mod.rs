@@ -263,8 +263,7 @@ impl<V> fmt::Display for TooLarge<V> {
   }
 }
 
-#[cfg(feature = "std")]
-impl<V> std::error::Error for TooLarge<V> {}
+impl<V> core::error::Error for TooLarge<V> {}
 
 /// Which of the ceilings a request error entry meets refused it.
 ///
@@ -329,8 +328,7 @@ impl fmt::Display for RequestErrorCeiling {
   }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for RequestErrorCeiling {}
+impl core::error::Error for RequestErrorCeiling {}
 
 /// A request error the driver raised: one entry of a draft §7.1.3 result's `errors`, built where no
 /// executor exists.
@@ -565,8 +563,7 @@ impl<V> fmt::Display for RefusedEntry<V> {
   }
 }
 
-#[cfg(feature = "std")]
-impl<V> std::error::Error for RefusedEntry<V> {}
+impl<V> core::error::Error for RefusedEntry<V> {}
 
 /// One entry of a draft §7.1.3 result's `errors`, as [`RequestErrorResult::errors`] reads it.
 ///

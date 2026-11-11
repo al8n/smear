@@ -2835,7 +2835,7 @@ const ENTRY_PROTOCOL: &[EntryPoint] = &[
 ];
 
 /// This module's own source, which is where the method set comes from.
-const SOURCE: &str = include_str!("../execute.rs");
+const SOURCE: &str = include_str!("./mod.rs");
 
 /// One public method taking `&mut self`: its name, and its body.
 struct Entry<'s> {
