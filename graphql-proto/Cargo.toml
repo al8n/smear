@@ -26,8 +26,8 @@ readme = "README.md"
 
 [features]
 default = ["std"]
-
-std = ["smear-parser/std", "smear-schema/std", "tokora/std"]
+alloc = ["smear-parser/alloc", "smear-schema/alloc", "tokora/alloc"]
+std = ["alloc", "smear-parser/std", "smear-schema/std", "tokora/std"]
 
 [dependencies]
 tokora.workspace = true

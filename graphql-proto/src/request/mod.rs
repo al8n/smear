@@ -54,6 +54,9 @@ use smear_schema::{PackedType, Schema, Sym, TypeId};
 
 use super::response::{Path, Slot};
 
+/// The error types for the request.
+pub mod error;
+
 /// Identifies an outstanding field request.
 ///
 /// Tagged twice, because a stale id can be stale in two different ways and only one of them is
@@ -440,7 +443,7 @@ impl<'r, 'a, S, V> SourceField<'r, 'a, S, V> {
   /// The first of possibly several, exactly as [`FieldRequest::location`] is: draft §6.3 merges
   /// every selection sharing the response key, and [`merged`](SourceField::merged) has the rest.
   #[inline]
-  pub fn location(&self) -> SimpleSpan {
+  pub const fn location(&self) -> SimpleSpan {
     *self.field.span()
   }
 

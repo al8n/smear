@@ -1,0 +1,33 @@
+# The core-tier proof: `smear` with every capability and no tier feature, as a `staticlib` with no
+# `#[global_allocator]`; rustc refuses that if anything in the graph links `alloc`. Not a workspace
+# member, like `ci/downstream/`: its empty `[workspace]` keeps other members' features out of it.
+[package]
+name = "smear-noalloc"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["staticlib"]
+
+[features]
+default = []
+# The control: with `smear/alloc` the build must FAIL on the missing allocator (`ci/noalloc.sh`).
+alloc = ["smear/alloc"]
+
+# Every `smear` feature, `default` aside, whose closure holds neither `alloc` nor `std`: a
+# capability never switches a tier on. `ci/noalloc.sh` fails unless this list is exactly that set.
+[dependencies]
+smear = { path = "../../smear", default-features = false, features = [
+  "graphql",
+  "graphqlx",
+  "parser",
+  "validator",
+  "proto",
+  "introspection",
+  "materialized-numbers",
+  "test-support",
+  "bstr",
+] }

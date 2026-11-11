@@ -84,7 +84,7 @@
 // it was a hard `E0432`/`E0433` under any feature selection that excludes `introspection`,
 // including plain `--features validator`. `cargo test -p smear --no-run` in CI now compiles the
 // default-feature selection that always excludes it.
-#![cfg(feature = "introspection")]
+#![cfg(all(feature = "alloc", feature = "introspection"))]
 #![allow(missing_docs)]
 
 use std::collections::BTreeMap;
@@ -2708,7 +2708,7 @@ fn an_undefined_root_is_refused_by_draft_3() {
 /// or an error that crossed a thread would be an error that borrowed a request buffer.
 #[test]
 fn every_refusal_is_owned_and_renders() {
-  fn owned<T: Send + Sync + Clone + std::fmt::Display + std::error::Error + 'static>(
+  fn owned<T: Send + Sync + Clone + core::fmt::Display + core::error::Error + 'static>(
     value: T,
   ) -> T {
     value

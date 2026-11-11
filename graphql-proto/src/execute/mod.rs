@@ -1448,9 +1448,9 @@ pub enum StartError {
   /// enum whose whole `errors` entry in a §7.1.3 [`RequestErrorResult`](super::RequestErrorResult)
   /// is one rendered [`Display`](fmt::Display). Carrying more would mean the executor raising a
   /// second request error beside its refusal, and it raises one — the population
-  /// `request_error.rs` states. The driver-supplied [`RequestError`](super::RequestError) is for the
-  /// request errors raised where no executor exists, not for detail about this one, and the same
-  /// line leaves [`NoMutationRoot`](Self::NoMutationRoot)'s span uncarried.
+  /// `request/error/mod.rs` states. The driver-supplied [`RequestError`](super::RequestError) is
+  /// for the request errors raised where no executor exists, not for detail about this one, and the
+  /// same line leaves [`NoMutationRoot`](Self::NoMutationRoot)'s span uncarried.
   SourceSelectionRefused,
   /// Draft §6.2.3.1 step 8: `CoerceArgumentValues` rejected an argument of the source field.
   ///
@@ -1567,8 +1567,7 @@ impl fmt::Display for StartError {
   }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for StartError {}
+impl core::error::Error for StartError {}
 
 /// Why [`Executor::set_extensions`] refused, carrying the map back.
 ///
@@ -1617,8 +1616,7 @@ impl<V> fmt::Display for SetExtensionsError<V> {
   }
 }
 
-#[cfg(feature = "std")]
-impl<V: fmt::Debug> std::error::Error for SetExtensionsError<V> {}
+impl<V: fmt::Debug> core::error::Error for SetExtensionsError<V> {}
 
 /// A draft §7.1.6 `extensions` map [`Executor::handle_field_error_with`] did not attach, carried
 /// back.
@@ -1690,8 +1688,7 @@ impl<V> fmt::Display for UnattachedExtensions<V> {
   }
 }
 
-#[cfg(feature = "std")]
-impl<V> std::error::Error for UnattachedExtensions<V> {}
+impl<V> core::error::Error for UnattachedExtensions<V> {}
 
 /// What a slot needs from the document, kept out of [`Slot`] so the response types stay free of
 /// the source type `S`.
@@ -1933,14 +1930,13 @@ struct Entry {
 /// to be kept out by a flag test, or be impossible for a stated structural reason.
 ///
 /// The **operation kind** is the second axis and it is outer: the private `Phase` slot — named
-/// rather than linked, being private, the way `request_error.rs` names its own module header —
-/// says whether the executor
-/// is running a query, a mutation or a subscription, and for a subscription which
-/// [`ResponseStream`] state it is in. Draft §6.2.3's five entry points read it and the other nine
-/// do not, which is the column the last two rows of the table below add. The two axes are not the
-/// same question — a subscription's `Idle` is "between events", where a query's is "before the
-/// operation" — and collapsing them is how a machine ends up delivering an event's response into a
-/// stream that has already completed.
+/// rather than linked, being private, the way `request/error/mod.rs` names its own module header
+/// — says whether the executor is running a query, a mutation or a subscription, and for a
+/// subscription which [`ResponseStream`] state it is in. Draft §6.2.3's five entry points read it
+/// and the other nine do not, which is the column the last two rows of the table below add. The two
+/// axes are not the same question — a subscription's `Idle` is "between events", where a query's
+/// is "before the operation" — and collapsing them is how a machine ends up delivering an event's
+/// response into a stream that has already completed.
 ///
 /// | method | discharge | execution phases | stream states | how the rest are kept out |
 /// |---|---|---|---|---|

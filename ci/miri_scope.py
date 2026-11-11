@@ -227,7 +227,7 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "miri.yml"
 # file's header carries its measurement, and each attribute names its kind:
 #
 #   graphql-proto/src/execute/tests.rs       20 more: cost and allocation gates, one source census
-#   graphql-proto/src/request_error/tests.rs an allocation gate, the executor-side one's twin
+#   graphql-proto/src/request/error/tests.rs an allocation gate, the executor-side one's twin
 #   graphql-proto/tests/response_order.rs    the two 226 800-order sweeps; the named cases run
 #   smear-parser/tests/syntactic_terminal_reads.rs
 #                                            two source censuses; the positive control runs
@@ -238,7 +238,7 @@ MIRI_DECLARED_IGNORES = {
     "smear/tests/syntactic_x_span_extent.rs": 2,
     "graphql-proto/src/response/tests.rs": 1,
     "graphql-proto/src/execute/tests.rs": 21,
-    "graphql-proto/src/request_error/tests.rs": 1,
+    "graphql-proto/src/request/error/tests.rs": 1,
     "graphql-proto/tests/response_order.rs": 2,
     "smear-parser/tests/syntactic_terminal_reads.rs": 2,
     "smear-schema/src/builder/tests.rs": 1,

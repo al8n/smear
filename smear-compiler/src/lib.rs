@@ -11,7 +11,7 @@
 //!   Validation" pass that runs while building it. A server rejects a malformed SDL exactly once,
 //!   at startup, and never rediscovers it per request.
 #![cfg_attr(
-  feature = "introspection",
+  all(feature = "alloc", feature = "introspection"),
   doc = "- [`schema::introspection`] — the second \
          construction door, building that same schema out of a server's draft §4 introspection \
          response. It renders the response as SDL and hands it to the same builder, so draft §3 \
@@ -22,7 +22,7 @@
 //!   [`Sink`] and worked out in the caller's
 //!   [`Scratch`].
 #![cfg_attr(
-  feature = "rowan",
+  all(feature = "alloc", feature = "rowan"),
   doc = "- [`validate_executable_lossless`] — the \
          same rules over a lossless rowan CST, by projecting it to that same AST rather than by \
          being a second validator. The IDE door: it recovers per definition, so a document \
@@ -124,13 +124,18 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
 
+// Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
+// compile them all out and still build green.
+#[cfg(all(feature = "std", not(feature = "alloc")))]
+compile_error!("the `std` feature must enable `alloc`: check this crate's [features] table");
+
 // The alloc-as-std alias: the crate's files spell their allocations `std::boxed::Box`, which
-// resolves to `alloc` in a `no_std` build and to the real `std` otherwise.
+// resolves to `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build.
 //
 // `#[allow(unused_extern_crates)]`, ON EVERY MEMBER AND NOT ONLY THE ONE THAT TRIPS TODAY. The
 // alias is a crate-wide compatibility shim whose USERS are feature-gated, and
 // `unused_extern_crates` is a lint about the item: it fires in any configuration that happens to
-// compile none of them. On this tree that is `smear-parser --no-default-features`, where every
+// compile none of them. On this tree that is `smear-parser` with `alloc` alone, where every
 // `std::` use is inside a dialect or `rowan` module — but the construct is identical in all five
 // members and which one trips is an accident of where the uses sit. Measured: `smear-lexer` 41,
 // `smear-parser` 70, `smear-schema` 15, `smear-compiler` 8, `graphql-proto` 82.
@@ -144,7 +149,7 @@
 // locally, with no `RUSTFLAGS` needed. That deny is the repair for the gate, not for the code:
 // this construct reddened CI twice, and both times the local run that cleared it was narrower
 // than CI's.
-#[cfg(not(feature = "std"))]
+#[cfg(all(feature = "alloc", not(feature = "std")))]
 #[allow(unused_extern_crates)]
 extern crate alloc as std;
 
@@ -162,31 +167,48 @@ extern crate std;
 #[doc(inline)]
 pub use smear_schema as schema;
 
+#[cfg(feature = "alloc")]
 mod diagnostic;
+#[cfg(feature = "alloc")]
 mod executable;
-#[cfg(feature = "rowan")]
+#[cfg(all(feature = "alloc", feature = "rowan"))]
 mod lossless;
+#[cfg(feature = "alloc")]
 mod rule;
+#[cfg(feature = "alloc")]
 mod scratch;
+#[cfg(feature = "alloc")]
 mod sink;
 
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use diagnostic::{Context, Diagnostic, DiagnosticDisplay, MergeConflict};
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use executable::{Invalid, Refusal, validate_executable, validate_executable_with};
 
-#[cfg(feature = "rowan")]
-#[cfg_attr(docsrs, doc(cfg(feature = "rowan")))]
+#[cfg(all(feature = "alloc", feature = "rowan"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "rowan"))))]
 pub use lossless::{
   LosslessInvalid, LosslessSchemaErrors, Recovery, Verified, validate_executable_lossless,
   validate_executable_lossless_verified_with, validate_executable_lossless_with,
   validate_schema_lossless,
 };
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use rule::{Rule, RuleSet};
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use schema::{Schema, SchemaBuilder, SchemaError, SchemaErrorKind, SchemaErrors};
 
-#[cfg(feature = "introspection")]
-#[cfg_attr(docsrs, doc(cfg(feature = "introspection")))]
+#[cfg(all(feature = "alloc", feature = "introspection"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "introspection"))))]
 pub use schema::IntrospectionError;
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use scratch::{Budget, Scratch};
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use sink::{Collect, Count, First, Ignore, Sink};
 
 /// The features this crate was compiled with, as constants the umbrella asserts against.
@@ -207,6 +229,8 @@ pub use sink::{Collect, Count, First, Ignore, Sink};
 /// this crate declares has no constant here or no assertion in `smear`.
 #[doc(hidden)]
 pub mod __features {
+  /// `alloc`, as this crate resolved it.
+  pub const ALLOC: bool = cfg!(feature = "alloc");
   /// `introspection`, as this crate resolved it.
   pub const INTROSPECTION: bool = cfg!(feature = "introspection");
   /// `rowan`, as this crate resolved it.

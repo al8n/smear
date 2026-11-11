@@ -129,9 +129,9 @@ jobs:
     - name: Install cargo-hack
       run: cargo install cargo-hack
     # ONE STRING, SHARED WITH `ci.yml` AND WITH A LOCAL RUN. This job used to carry its own copy of
-    # the two passes, and a fix landing in one copy only is a mistake this project has made three
-    # times. `ci/hack.sh` carries the flags, both passes and the reasoning, and its status is what
-    # fails the step, so a failing pass 1 no longer stops the step before pass 2.
+    # its passes, and a fix landing in one copy only is a mistake this project has made three
+    # times. `ci/hack.sh` carries the flags, all three passes and the reasoning, and its status is
+    # what fails the step, so a failing pass 1 no longer stops the step before pass 2.
     - name: ci/hack.sh
       run: bash ci/hack.sh
 
@@ -165,25 +165,33 @@ jobs:
         key: ${{ runner.os }}-coverage-dotcargo
     - name: Run build
       run: |
+        # Pass 1 — the core tier: no tier feature, so no allocator. Rows whose feature implies
+        # `alloc` or `std` (`bytes`, `smallvec`, `default`, `--all-features`, …) are above it.
         cargo hack build --each-feature
-        # Pass 2 — the pairwise isolation cells the crate split used to provide by accident.
+        # Pass 2 — the alloc tier, which is what pass 1 covered until `alloc` became a feature.
+        # `alloc` is not in the exclude list: cargo-hack refuses a feature named by both flags.
+        # `rowan` and `lossless-coverage` imply `std`, so their rows would repeat pass 1.
+        cargo hack build --each-feature --features alloc --ignore-unknown-features \
+          --exclude-features std,default,rowan,lossless-coverage --exclude-all-features
+        # Pass 3 — the pairwise isolation cells the crate split used to provide by accident.
         # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its
         # build always contained the parser; a single-crate `--each-feature` never builds `parser`
         # together with exactly one other feature. This restores those pairs deliberately, and the
         # two that matter are `parser` x `bytes` (60 parser cfg sites) and `parser` x dialect.
+        # They are alloc-tier cells, because the parser needs an allocator.
         #
         # `rowan`, `lossless-coverage`, `validator`, `introspection` and `proto` are excluded
-        # because they already imply `parser`, so their pass-1 cells ARE pairs; `default`,
-        # `--no-default-features` and `--all-features` are excluded because those three runs would
-        # duplicate pass-1 exactly.
+        # because they already imply `parser`, so their pass-2 cells ARE pairs; `default`, `std`
+        # and `--all-features` are excluded because the `std` tier is pass 1's, and
+        # `--no-default-features` because `parser,alloc` is already pass 2's `parser` row.
         #
-        # `parser` itself is NOT in the exclude list: cargo-hack rejects a feature named by both
-        # `--features` and `--exclude-features` (verified against 0.6.43, "specified by both"),
-        # and it does not need to be there — it already skips the `parser,parser` cell on its own.
+        # `parser` and `alloc` are NOT in the exclude list: cargo-hack rejects a feature named by
+        # both `--features` and `--exclude-features` (verified against 0.6.43, "specified by
+        # both"), and it already skips the `parser,parser` and `alloc,alloc` cells on its own.
         # Nine cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
-        cargo hack build -p smear --each-feature --features parser \
-          --exclude-features rowan,lossless-coverage,validator,introspection,proto,default \
+        cargo hack build -p smear --each-feature --features parser,alloc \
+          --exclude-features rowan,lossless-coverage,validator,introspection,proto,default,std \
           --exclude-no-default-features --exclude-all-features
 
   test:

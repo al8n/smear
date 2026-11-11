@@ -281,6 +281,36 @@ All notable changes to Smear are documented in this file.
 - The introspection parity oracle compares the executor's answers with graphql-js
   17.1.0's instead of 16.11.0's, directive deprecation included, and its eight
   recorded differences are redrawn for that release.
+- All six crates gain an `alloc` feature, and `std` implies it: three tiers,
+  core (neither), `alloc` and `std`, each including the one below. With neither,
+  a crate compiles in every feature combination and exports only what needs no
+  allocation: in `smear-lexer`, `hints`, `keywords` (with `keyword!`), `limits`
+  and `punctuator`; in `smear-parser`, `combinator` (with
+  `typed_keyword_atom!`); in `smear-schema`, `diagnostic` and `builtin`;
+  `smear-compiler` re-exports `smear-schema` as `schema` and `graphql-proto`
+  exports nothing. `smear` exposes the same items through `smear::lexer`,
+  `smear::parser`, `smear::diagnostic` and `smear::validator::schema`. Each
+  crate's `__features` gains `ALLOC`, which `smear` asserts equal to every
+  member's. The workspace no longer pins tokora's `alloc`: each crate's `alloc`
+  forwards `tokora/alloc`.
+- All six crates!: a build with `default-features = false` no longer includes
+  the allocating API: the dialect lexers and parsers, the schema
+  representation and builder, the validator, the executor and `smear::json`. A
+  capability feature (`graphql`, `graphqlx`, `parser`, `validator`, `proto`,
+  `introspection`, …) never switches a tier on, so such a consumer adds `alloc`
+  (or `std`, which implies it) itself; without it the build compiles and lacks
+  those items.
+- `smear`, `smear-lexer` and `smear-parser`: the `bytes`, `hipstr`, `smallvec`
+  and `smol-bytes` features imply `alloc`, because each of those crates links
+  `alloc` itself. `bstr` implies no tier, and `rowan` still implies `std`.
+- `smear`! and `smear-compiler`!: the `introspection` feature no longer implies
+  `std`. The draft §4 reader is `core` and `alloc` only, so it needs `alloc`,
+  which `introspection` does not imply.
+- `graphql-proto` and `smear`: `StartError`, `SetExtensionsError`,
+  `UnattachedExtensions`, `Full`, `TooLarge`, `RequestErrorCeiling`,
+  `RefusedEntry`, `SourceEventError` and `json::Error` implement
+  `core::error::Error` in every configuration, where they implemented
+  `std::error::Error` only with `std`.
 
 ## [0.0.1] - 2026-10-30
 

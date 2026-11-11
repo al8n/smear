@@ -30,7 +30,7 @@
 // the feature off; the introspection door needs its own feature on top of that and is gated per
 // item rather than per file, so the two families that are always present stay checked in a
 // `--features validator` build.
-#![cfg(feature = "validator")]
+#![cfg(all(feature = "alloc", feature = "validator"))]
 #![allow(missing_docs)]
 
 use std::{path::PathBuf, string::String, vec::Vec};

@@ -52,6 +52,101 @@ use super::{
 use groups::{Appending, Groups};
 use table::Table;
 
+/// The fragment index's storage, and the receipt that is the only way to reserve it.
+///
+/// # What this is defending against
+///
+/// [`Fragments::build`] pays for the index pass in two charges, and the second — one unit per
+/// fragment — is a number nothing knows until the definitions have been walked. The first version
+/// walked them by *populating* `defs`, charged `defs.len()`, and cleared the vector when that
+/// charge was refused.
+///
+/// Clearing a vector returns no capacity, and this table is owned by the executor and deliberately
+/// kept across `reset`. So a refused operation left a fragment-sized allocation behind, and every
+/// retry — also refused — found it still there and freed nothing. **The verdict never moved**,
+/// which is precisely what makes the defect easy to be green over: a fixture comparing answers
+/// passes against it on the first call and on all of them after. What moved is what a refusal
+/// *costs*, and a ceiling whose refusal still spends the server's memory is not bounding the thing
+/// it names.
+///
+/// # Why a module and a receipt rather than a rule about ordering
+///
+/// [`groups`] is the precedent: a property about what a caller may do, and when, is a
+/// type here rather than a sentence in a doc comment. The property is *no storage is reserved
+/// before a charge that bounds it has been accepted*, and it is enforced the same way. The three
+/// vectors are private to this module, so nothing in the crate outside it can put an entry in one —
+/// and inside it, both of the things that fill them sit behind a charge that bounds what they fill.
+/// [`Table::charge`] builds the selection that becomes `defs`, at most one pointer per definition,
+/// after [`Fragments::build`] has spent one unit per definition. [`Table::fill`] sizes `heads` and
+/// `chain`, both functions of the fragment count alone, and takes a [`Paid`](table::Paid) — whose
+/// fields are private to this module and whose only constructor is `charge`, which returns one only
+/// when [`Visits::spend`] has said yes to the fragment charge.
+///
+/// Populating after the charge is therefore not a discipline `build` keeps. It is the only program
+/// that compiles: there is no other argument for `fill` and no second way to the vectors. Putting
+/// the defect back means adding a writer to this module, which is a diff that says what it is
+/// doing.
+///
+/// # The receipt carries the fragments, which is what stops the population walking again
+///
+/// A receipt holding only a *number* would leave the caller free to pay for one slice and populate
+/// from another — the count and the population agreeing by argument again. A receipt holding the
+/// *slice* closed that, and left a second hole in the same accounting: `fill` sieved the fragments
+/// back out of it, so the pass walked every definition **twice** while the second charge priced
+/// only the fragments. The definitions charge bought one walk and two were taken, and the extra one
+/// is a scan of the document's *operations* — a quantity the fragment count says nothing about. A
+/// document of 4,000 named operations spreading one fragment paid 4,001 units for the walk and
+/// spent 8,002.
+///
+/// So the walk that counts is the walk that selects: it keeps what it finds, the receipt carries
+/// that, and `fill` cannot walk the definitions because it is not given them. The count and the
+/// population are the same walk over the same data and now over the same *selection*, by
+/// construction rather than by argument.
+///
+/// The vector that walk builds is the vector the table keeps — moved into `defs` where the old
+/// version reserved a second one, and dropped with the receipt when the fragment charge is refused,
+/// which is how a refusal still ends with nothing reserved.
+mod table;
+
+/// The group list, and the phase split that keeps a scan out of the walk.
+///
+/// # What this is defending against
+///
+/// Finding a response key's group used to be a scan of the groups collected so far, which is one of
+/// the three linear lookups that made a selection set of `n` distinct keys cost `n²`. It is now a
+/// direct index through [`Scratch`]'s `keys` table, and the danger is that somebody puts the scan back:
+/// `groups.iter().position(|group| group.key == key)` is one line, is obviously correct, and on
+/// `{ k0: a k1: a … k4095: a }` walks about 8.4 million entries.
+///
+/// **No gate in this crate can see that.** The other two lookups are probe loops, so a scan charges
+/// [`Visits`] what it compares and both the upper and the lower bound in
+/// `a_repeated_response_key_charges_one_comparison_each_time`'s section move. This one has no loop
+/// to charge: `visits.spent()` reads the same either way, and
+/// `distinct_response_keys_are_linear_however_they_are_spelled` goes green over the quadratic. A
+/// counter cannot guard work that declines to count itself.
+///
+/// # Why it is two types
+///
+/// The residual that stood here said the vector could not be hidden, because `expand` iterates it
+/// to commit the groups — so the type would have to permit and forbid the same access. It does
+/// iterate it, but not at the same time, and *when* is the whole of the argument:
+///
+/// - **During the walk**, the only operations are appending a group and reading one back by the
+///   index that append just returned. No iteration, no length, no search.
+/// - **Before and after the walk**, everything is iteration: `collect_fields` unmarks the previous
+///   collection's keys, assigns each group its contiguous range, and `expand` commits them. See
+///   [`collect_fields`].
+///
+/// Two capabilities in disjoint phases are two types. [`Groups`] is the whole list, and
+/// [`Appending`] is what a walk is handed: it can `push` and it can read a group's `first` span, and
+/// it holds the only reference to the vector while it exists. The vector is private to *this
+/// module* rather than to `collect`, so the restriction binds [`walk`] too — a scan by
+/// key is not something the walk can be written to do, whatever a future editor believes about it.
+///
+/// The cost is this module and a `push` that returns its index. That buys a guarantee where there
+/// was a sentence.
+mod groups;
+
 /// Why [`Interner::intern`] could not store a name, and the ceiling that refused it.
 ///
 /// Two, because the two degrade differently at the one caller that does not simply fail: a name is
@@ -542,7 +637,7 @@ struct Fit {
 /// an executor that keeps this table across `reset`. That does not move the verdict, and it is
 /// still the property broken: a ceiling that refuses and charges the server memory anyway has not
 /// bounded what it says it bounds. The count now comes from a walk that allocates nothing, and the
-/// storage is behind a type only an accepted charge produces. See [`mod table`](table).
+/// storage is behind a type only an accepted charge produces. See [`table`].
 ///
 /// **The rule this leaves behind, for the structures phases 2–8 will add:** asking whether a
 /// lookup is charged is half the question. The other half is whether the thing being looked *in*
@@ -561,7 +656,7 @@ struct Fit {
 /// where open addressing would have had nowhere to put the entry.
 pub(super) struct Fragments<'a, S> {
   document: &'a ExecutableDocument<S>,
-  /// The index itself, and the three vectors this type cannot reach. See [`mod table`](table).
+  /// The index itself, and the three vectors this type cannot reach. See [`table`].
   table: Table<'a, S>,
 }
 
@@ -607,7 +702,7 @@ where
   /// every call, because [`Visits`] is rebuilt by `reset` and the two charges are the same two
   /// amounts each time. That is what makes it worth writing down: an adversary could not change the
   /// answer, only make a refusal cost memory that outlived it, and a fixture keyed on the answer is
-  /// green over exactly that. The ordering is now enforced by [`mod table`](table) rather than by
+  /// green over exactly that. The ordering is now enforced by [`table`] rather than by
   /// this function keeping to it.
   ///
   /// Nothing can fail after [`Table::fill`] begins, because nothing that can fail is left: both
@@ -710,393 +805,6 @@ where
   }
 }
 
-/// The fragment index's storage, and the receipt that is the only way to reserve it.
-///
-/// # What this is defending against
-///
-/// [`Fragments::build`] pays for the index pass in two charges, and the second — one unit per
-/// fragment — is a number nothing knows until the definitions have been walked. The first version
-/// walked them by *populating* `defs`, charged `defs.len()`, and cleared the vector when that
-/// charge was refused.
-///
-/// Clearing a vector returns no capacity, and this table is owned by the executor and deliberately
-/// kept across `reset`. So a refused operation left a fragment-sized allocation behind, and every
-/// retry — also refused — found it still there and freed nothing. **The verdict never moved**,
-/// which is precisely what makes the defect easy to be green over: a fixture comparing answers
-/// passes against it on the first call and on all of them after. What moved is what a refusal
-/// *costs*, and a ceiling whose refusal still spends the server's memory is not bounding the thing
-/// it names.
-///
-/// # Why a module and a receipt rather than a rule about ordering
-///
-/// [`mod groups`](groups) is the precedent: a property about what a caller may do, and when, is a
-/// type here rather than a sentence in a doc comment. The property is *no storage is reserved
-/// before a charge that bounds it has been accepted*, and it is enforced the same way. The three
-/// vectors are private to this module, so nothing in the crate outside it can put an entry in one —
-/// and inside it, both of the things that fill them sit behind a charge that bounds what they fill.
-/// [`Table::charge`] builds the selection that becomes `defs`, at most one pointer per definition,
-/// after [`Fragments::build`] has spent one unit per definition. [`Table::fill`] sizes `heads` and
-/// `chain`, both functions of the fragment count alone, and takes a [`Paid`](table::Paid) — whose
-/// fields are private to this module and whose only constructor is `charge`, which returns one only
-/// when [`Visits::spend`] has said yes to the fragment charge.
-///
-/// Populating after the charge is therefore not a discipline `build` keeps. It is the only program
-/// that compiles: there is no other argument for `fill` and no second way to the vectors. Putting
-/// the defect back means adding a writer to this module, which is a diff that says what it is
-/// doing.
-///
-/// # The receipt carries the fragments, which is what stops the population walking again
-///
-/// A receipt holding only a *number* would leave the caller free to pay for one slice and populate
-/// from another — the count and the population agreeing by argument again. A receipt holding the
-/// *slice* closed that, and left a second hole in the same accounting: `fill` sieved the fragments
-/// back out of it, so the pass walked every definition **twice** while the second charge priced
-/// only the fragments. The definitions charge bought one walk and two were taken, and the extra one
-/// is a scan of the document's *operations* — a quantity the fragment count says nothing about. A
-/// document of 4,000 named operations spreading one fragment paid 4,001 units for the walk and
-/// spent 8,002.
-///
-/// So the walk that counts is the walk that selects: it keeps what it finds, the receipt carries
-/// that, and `fill` cannot walk the definitions because it is not given them. The count and the
-/// population are the same walk over the same data and now over the same *selection*, by
-/// construction rather than by argument.
-///
-/// The vector that walk builds is the vector the table keeps — moved into `defs` where the old
-/// version reserved a second one, and dropped with the receipt when the fragment charge is refused,
-/// which is how a refusal still ends with nothing reserved.
-mod table {
-  use tokora::SimpleSpan;
-
-  use smear_parser::graphql::ast::{
-    DescribedExecutableDefinition, ExecutableDefinition, FragmentDefinition,
-  };
-  use smear_schema::{bucket, hash_bytes};
-
-  use super::{Compared, Fault, NONE, Visits, byte_units, metered_eq};
-
-  /// One accepted charge, and the fragments it was taken over.
-  ///
-  /// Neither [`Copy`] nor [`Clone`], and [`Table::fill`] takes it by value, so one charge admits
-  /// one population and a second needs a second charge.
-  pub(super) struct Paid<'a, S> {
-    /// The fragments the charged walk selected, which is also what the population indexes — not a
-    /// count of them, and not the slice they were selected out of. See the module.
-    fragments: std::vec::Vec<&'a FragmentDefinition<S>>,
-    /// What hashing every one of those names costs, in [`byte_units`], saturating.
-    ///
-    /// Carried on the receipt rather than recomputed by [`Table::fill`] so that the number the
-    /// population is admitted to spend is the number that was accepted, and so that the table can
-    /// keep it: a warm executor charges this again without the names being read a second time.
-    name_units: u32,
-  }
-
-  /// A document's named fragments, chained by the hash of their names.
-  pub(super) struct Table<'a, S> {
-    /// The named fragments in document order, empty until [`fill`](Table::fill) has run. An index
-    /// into this is a *fragment ordinal*, which is what [`Visited`](super::Visited) is a bitset
-    /// over.
-    defs: std::vec::Vec<&'a FragmentDefinition<S>>,
-    /// Each definition's whole [`hash_bytes`], parallel to `defs`.
-    ///
-    /// The same eight bytes an entry, bought for the same thing, that [`Interner`](super::Interner)
-    /// buys them for: a chain step rejects a bucket collision on this word and the name's length,
-    /// so the `memcmp` a collision used to force is not made at all. The names here are the
-    /// **document's**, and the hash is unkeyed, so the collision is constructible — and without the
-    /// stored hash `k` colliding names of `L` bytes cost `k` charged units and `k · L` compared
-    /// bytes on every spread that lands in that bucket. al8n/smear#172.
-    hashes: std::vec::Vec<u64>,
-    /// The newest ordinal in each bucket, or [`NONE`]. Power-of-two length.
-    heads: std::vec::Vec<u32>,
-    /// The ordinal pushed into the same bucket before this one, or [`NONE`]. Parallel to `defs`.
-    chain: std::vec::Vec<u32>,
-    /// Whether the pass has run. Distinct from `defs.is_empty()`, which is also true of a document
-    /// that defines no fragments and must not be indexed again on every spread it does not have.
-    ///
-    /// It is **not** the record of who has paid: this outlives the operation and the charge does
-    /// not. That one is `Visits::fragments_charged`.
-    indexed: bool,
-    /// What hashing every indexed name cost, in [`byte_units`], for the operation that paid it.
-    ///
-    /// Zero until [`fill`](Table::fill) has run. It is here for the same reason the count is
-    /// re-spent on the cached path: a table this executor already built is work a later operation
-    /// does not repeat, and a *charge* a later operation must repeat anyway, or the same request
-    /// is refused cold and served warm.
-    name_units: u32,
-    /// Entries compared, over the executor's whole life.
-    ///
-    /// The gate for "a refused probe run stops at the refusal" reads this. It cannot be read from
-    /// the budget: every comparison is charged before it happens, so the charge and the comparison
-    /// count agree by construction and a version that charged afterwards would agree with itself
-    /// too. Only a count taken independently of the charge can tell the two apart.
-    #[cfg(test)]
-    compares: u64,
-    /// Definitions the index pass has read, over the executor's whole life.
-    ///
-    /// Counted here for the same reason `compares` is, one step further out. The pass is charged
-    /// one unit per definition and one per fragment, and *that total does not move* when the
-    /// population walks the definitions a second time to sieve the fragments out of them: the
-    /// budget is spent up front, from a slice length, so it reads the same over one walk and over
-    /// two. Only a count taken at the read itself can say how many walks there were.
-    #[cfg(test)]
-    walked: u64,
-    /// Name bytes [`fill`](Table::fill) has hashed, over the executor's whole life.
-    ///
-    /// Counted for the reason `walked` is, one dimension over. `Table::charge` prices this pass and
-    /// `fill` performs it, so the charge and the pass agree by construction and a version that
-    /// priced it in *definitions* — as this did — agrees with itself too. Only a count taken at the
-    /// read can say whether a refused operation hashed a name before it was refused.
-    /// al8n/smear#196.
-    #[cfg(test)]
-    hashed: u64,
-  }
-
-  impl<'a, S> Table<'a, S> {
-    /// A table that has read nothing and reserved nothing.
-    pub(super) const fn new() -> Self {
-      Self {
-        defs: std::vec::Vec::new(),
-        hashes: std::vec::Vec::new(),
-        heads: std::vec::Vec::new(),
-        chain: std::vec::Vec::new(),
-        indexed: false,
-        name_units: 0,
-        #[cfg(test)]
-        compares: 0,
-        #[cfg(test)]
-        walked: 0,
-        #[cfg(test)]
-        hashed: 0,
-      }
-    }
-
-    /// Walks `definitions` once keeping the fragments, charges for indexing them, and answers with
-    /// the receipt that admits populating this table from what the walk kept.
-    ///
-    /// The walk retains at most one pointer per definition, which is what
-    /// [`Fragments::build`](super::Fragments::build) has already spent before it calls this — so
-    /// the selection is storage a charge has already admitted, and it is the *only* storage: it is
-    /// moved into `defs` rather than copied into a second vector. What that costs is a `defs`
-    /// capacity grown to reach the count instead of reserved exactly for it: at most one spare
-    /// pointer per fragment, in a table that already keeps up to five `u32` slots for each. A
-    /// refusal drops the vector and leaves the table not cleared but *untouched*, there being
-    /// nothing in it yet to clear.
-    ///
-    /// The count charge is exact rather than an upper bound, because chaining has no data-dependent
-    /// insertion loop: indexing what the walk selected costs one push each whatever the names are.
-    ///
-    /// # And a second charge, because one push each is not one *pass* each
-    ///
-    /// A push is a constant, and the hash [`Table::fill`] takes to decide the bucket is not: it
-    /// reads the whole fragment name, and draft §2.1.9 puts no ceiling on one. A count charge in
-    /// front of a byte pass is the wrong-dimension defect this branch exists to close, and here it
-    /// was reachable from a *valid* document — one long fragment name and the spread that selects
-    /// it exhausts the definition and fragment counts exactly, and `fill` then hashes the whole
-    /// spelling before the metered lookup that follows can refuse anything.
-    ///
-    /// So the pass is priced with the names' own lengths, before `fill` may run. Reading a name's
-    /// length is not reading the name — it is a slice header — so the accumulation below is not
-    /// itself the work being charged for, exactly as the merge engine's argument scan is charged
-    /// off lengths it reads before it compares anything. Saturating, which the poison in
-    /// [`Visits::take`] then turns into a refusal rather than into an accepted `u32::MAX`.
-    /// al8n/smear#196.
-    pub(super) fn charge(
-      &mut self,
-      definitions: &'a [DescribedExecutableDefinition<S>],
-      visits: &mut Visits,
-      location: SimpleSpan,
-    ) -> Result<Paid<'a, S>, Fault<'static>>
-    where
-      S: AsRef<[u8]>,
-    {
-      let mut fragments = std::vec::Vec::new();
-      let mut name_units = 0u32;
-      for described in definitions {
-        #[cfg(test)]
-        {
-          self.walked += 1;
-        }
-        if let ExecutableDefinition::Fragment(fragment) = described.node() {
-          name_units =
-            name_units.saturating_add(byte_units(fragment.name().source().as_ref().len()));
-          fragments.push(fragment);
-        }
-      }
-      visits.spend(u32::try_from(fragments.len()).unwrap_or(u32::MAX), location)?;
-      visits.spend(name_units, location)?;
-      Ok(Paid {
-        fragments,
-        name_units,
-      })
-    }
-
-    /// Whether the pass has run. See the field.
-    #[inline]
-    pub(super) const fn is_indexed(&self) -> bool {
-      self.indexed
-    }
-
-    /// What hashing the indexed names cost the operation that built this table. See the field.
-    #[inline]
-    pub(super) const fn name_units(&self) -> u32 {
-      self.name_units
-    }
-
-    /// How many fragments it holds, which is what the population cost.
-    #[inline]
-    pub(super) fn count(&self) -> usize {
-      self.defs.len()
-    }
-
-    /// Entries this executor's fragment lookups have compared. See the field.
-    #[cfg(test)]
-    #[inline]
-    pub(super) const fn compares(&self) -> u64 {
-      self.compares
-    }
-
-    /// Definitions this executor's index pass has read. See the field.
-    #[cfg(test)]
-    #[inline]
-    pub(super) const fn walked(&self) -> u64 {
-      self.walked
-    }
-
-    /// Name bytes this executor's index pass has hashed. See the field.
-    #[cfg(test)]
-    #[inline]
-    pub(super) const fn hashed(&self) -> u64 {
-      self.hashed
-    }
-
-    /// Entries the three vectors have reserved room for.
-    ///
-    /// *Capacity* and not length, because the defect this module closes populated the table and
-    /// then cleared it: every length reads zero and every allocation is exactly where it was.
-    #[cfg(test)]
-    pub(super) fn reserved(&self) -> usize {
-      self.defs.capacity() + self.hashes.capacity() + self.heads.capacity() + self.chain.capacity()
-    }
-  }
-
-  impl<'a, S> Table<'a, S>
-  where
-    S: AsRef<[u8]>,
-  {
-    /// Indexes the fragments `paid` paid for, over one entry each and no walk of the document.
-    ///
-    /// Infallible, and that is the property rather than a convenience: everything able to refuse
-    /// has refused before a [`Paid`] exists, so no failure survives into the population — and
-    /// therefore no half-built table to undo, and no `clear` leaving behind a capacity a refusal
-    /// has no way to give back.
-    ///
-    /// It costs what the fragment charge bought and nothing else. The receipt is the selection, so
-    /// there is no definitions slice here to sieve a second time and no second allocation to fill:
-    /// the vector is moved in, and every term left is one per fragment.
-    pub(super) fn fill(&mut self, paid: Paid<'a, S>) {
-      debug_assert!(
-        !self.indexed,
-        "the table is being populated a second time; the second selection would replace `defs` \
-         while `heads` and `chain` still chain the ordinals of the first"
-      );
-      let Paid {
-        fragments,
-        name_units,
-      } = paid;
-      self.indexed = true;
-      // Kept so a warm executor charges what a cold one charges. The number was already accepted
-      // by the receipt above; storing it means the *verdict* does not depend on whether this table
-      // happens to be built, which is the same thing `Names::reset` had to fix one crate over.
-      self.name_units = name_units;
-      let count = fragments.len();
-      if count == 0 {
-        return;
-      }
-      self.defs = fragments;
-      // Load factor a half, as `NameIndex` uses. Clamped rather than checked, because a chained
-      // table with fewer buckets than entries is slower and still correct — there is no capacity
-      // this can fail to have.
-      let buckets = count
-        .next_power_of_two()
-        .saturating_mul(2)
-        .min(1usize << 31);
-      let mask = (buckets - 1) as u32;
-      self.heads.resize(buckets, NONE);
-      self.chain.resize(count, NONE);
-      self.hashes.reserve(count);
-      for ordinal in 0..count {
-        // One pass over each fragment's name, once per document, and the hash is kept so that no
-        // later lookup or growth has to make it again. It used to be charged in *definitions*
-        // rather than in bytes, on the argument that reading every name exactly once for the
-        // executor's whole life is a single pass over text the parser has already read, with no
-        // factor a client can apply to it. "No factor" is true and is not the question: one pass
-        // over a name draft §2.1.9 puts no ceiling on is still a pass whose length the client
-        // chose, and the counts in front of it can be exhausted exactly by a valid document that
-        // then gets the whole spelling hashed for free. `Table::charge` prices it now, in
-        // `byte_units`, before this may run. al8n/smear#196.
-        let name = self.defs[ordinal].name().source().as_ref();
-        #[cfg(test)]
-        {
-          self.hashed += name.len() as u64;
-        }
-        let hash = hash_bytes(name);
-        self.hashes.push(hash);
-        let at = bucket(hash, mask) as usize;
-        self.chain[ordinal] = self.heads[at];
-        self.heads[at] = ordinal as u32;
-      }
-    }
-
-    /// The fragment `name` denotes and its ordinal, charging **before** each entry compared and
-    /// before every pass over the spelling. See [`Fragments::get`](super::Fragments::get).
-    ///
-    /// The entry charge bounds the chain; it did not bound the chain's *cost*, because comparing
-    /// one entry was `fragment.name() == name` at whatever length the document wrote. The whole
-    /// hash is stored beside each definition now, so a chain step tests two integers and reads no
-    /// bytes, and the two passes that do read the spelling — hashing it to find the bucket, and the
-    /// one `memcmp` a matching hash and length admits — are charged in [`byte_units`] first.
-    /// Without that, `k` colliding `L`-byte names cost `k` units and `k · L` bytes per lookup, and
-    /// a document is free to pay for the pile-up once and walk it on every spread. al8n/smear#172.
-    pub(super) fn get(
-      &mut self,
-      name: &[u8],
-      visits: &mut Visits,
-      location: SimpleSpan,
-    ) -> Result<Option<(u32, &'a FragmentDefinition<S>)>, Fault<'static>> {
-      if self.heads.is_empty() {
-        return Ok(None);
-      }
-      visits.spend_bytes(name.len(), location)?;
-      let hash = hash_bytes(name);
-      let mask = (self.heads.len() - 1) as u32;
-      let mut ordinal = self.heads[bucket(hash, mask) as usize];
-      while ordinal != NONE {
-        visits.spend(1, location)?;
-        #[cfg(test)]
-        {
-          self.compares += 1;
-        }
-        // What that unit buys: two integers, and no read of a name a client chose the length of.
-        let fragment = self.defs[ordinal as usize];
-        let spelling = fragment.name().source().as_ref();
-        if self.hashes[ordinal as usize] == hash && spelling.len() == name.len() {
-          // Charged for the bytes the `memcmp` reads, not for the length it is over. Reaching
-          // here needs the whole stored hash **and** the length to agree, so the bytes are about
-          // to be equal and this ordinarily pays `byte_units(len)` exactly as the whole-length
-          // charge did; what it no longer does is bill a genuine hash collision for a pass that
-          // stops at its first differing byte. al8n/smear#198's twenty-third round.
-          match metered_eq(spelling, name, visits) {
-            Compared::Equal => return Ok(Some((ordinal, fragment))),
-            Compared::Differs => (),
-            Compared::Refused => return Err(visits.budget_fault(location)),
-          }
-        }
-        ordinal = self.chain[ordinal as usize];
-      }
-      Ok(None)
-    }
-  }
-}
-
 /// Draft §6.3's `visitedFragments`, as a bitset over fragment ordinals.
 ///
 /// # The membership test and the reset are bounded separately
@@ -1169,123 +877,6 @@ pub(super) struct Group {
   /// So the span is stored once, here, at the moment the group is created, and both paths read this
   /// field. There is no longer an equivalence to establish: there is one value.
   pub(super) first: SimpleSpan,
-}
-
-/// The group list, and the phase split that keeps a scan out of the walk.
-///
-/// # What this is defending against
-///
-/// Finding a response key's group used to be a scan of the groups collected so far, which is one of
-/// the three linear lookups that made a selection set of `n` distinct keys cost `n²`. It is now a
-/// direct index through [`Scratch`]'s `keys` table, and the danger is that somebody puts the scan back:
-/// `groups.iter().position(|group| group.key == key)` is one line, is obviously correct, and on
-/// `{ k0: a k1: a … k4095: a }` walks about 8.4 million entries.
-///
-/// **No gate in this crate can see that.** The other two lookups are probe loops, so a scan charges
-/// [`Visits`] what it compares and both the upper and the lower bound in
-/// `a_repeated_response_key_charges_one_comparison_each_time`'s section move. This one has no loop
-/// to charge: `visits.spent()` reads the same either way, and
-/// `distinct_response_keys_are_linear_however_they_are_spelled` goes green over the quadratic. A
-/// counter cannot guard work that declines to count itself.
-///
-/// # Why it is two types
-///
-/// The residual that stood here said the vector could not be hidden, because `expand` iterates it
-/// to commit the groups — so the type would have to permit and forbid the same access. It does
-/// iterate it, but not at the same time, and *when* is the whole of the argument:
-///
-/// - **During the walk**, the only operations are appending a group and reading one back by the
-///   index that append just returned. No iteration, no length, no search.
-/// - **Before and after the walk**, everything is iteration: `collect_fields` unmarks the previous
-///   collection's keys, assigns each group its contiguous range, and `expand` commits them. See
-///   [`collect_fields`].
-///
-/// Two capabilities in disjoint phases are two types. [`Groups`] is the whole list, and
-/// [`Appending`] is what a walk is handed: it can `push` and it can read a group's `first` span, and
-/// it holds the only reference to the vector while it exists. The vector is private to *this
-/// module* rather than to `collect`, so the restriction binds [`walk`] too — a scan by
-/// key is not something the walk can be written to do, whatever a future editor believes about it.
-///
-/// The cost is this module and a `push` that returns its index. That buys a guarantee where there
-/// was a sentence.
-mod groups {
-  use tokora::SimpleSpan;
-
-  use super::Group;
-
-  /// One response key's group of selections, in the order the keys were first seen.
-  ///
-  /// Cleared, never shrunk, like the rest of [`Scratch`](super::Scratch).
-  #[derive(Default)]
-  pub(super) struct Groups {
-    inner: std::vec::Vec<Group>,
-  }
-
-  impl Groups {
-    /// The walk's view: append, and read back what was appended. See the module.
-    pub(super) fn appending(&mut self) -> Appending<'_> {
-      Appending {
-        inner: &mut self.inner,
-      }
-    }
-
-    /// Every group, for the phases that are allowed to enumerate them.
-    #[inline]
-    pub(super) fn as_slice(&self) -> &[Group] {
-      &self.inner
-    }
-
-    /// Every group, mutably, for the range assignment that follows the walk.
-    #[inline]
-    pub(super) fn iter_mut(&mut self) -> core::slice::IterMut<'_, Group> {
-      self.inner.iter_mut()
-    }
-
-    #[inline]
-    pub(super) fn clear(&mut self) {
-      self.inner.clear();
-    }
-
-    /// What the vector is holding, for the gate that pins the scratch against the ceiling that
-    /// refuses it.
-    #[cfg(test)]
-    #[inline]
-    pub(super) fn capacity(&self) -> usize {
-      self.inner.capacity()
-    }
-  }
-
-  /// The groups, as a walk may touch them: append one, and read one back by its index.
-  ///
-  /// The field is private to this module, so nothing in `collect` — [`walk`](super::walk)
-  /// included — can reach the vector through it. That is the mechanism; see the module for why the
-  /// alternative guards do not work here.
-  pub(super) struct Appending<'g> {
-    inner: &'g mut std::vec::Vec<Group>,
-  }
-
-  impl Appending<'_> {
-    /// Appends `group` and answers with its index, which is the only index a walk ever has.
-    ///
-    /// Returning it rather than making the caller read `len()` first is what leaves this type with
-    /// no length: a search needs a bound to walk to, and there is none to ask for.
-    #[inline]
-    pub(super) fn push(&mut self, group: Group) -> u32 {
-      let index = self.inner.len() as u32;
-      self.inner.push(group);
-      index
-    }
-
-    /// The span of the group's first selection. See [`Group::first`].
-    ///
-    /// One field rather than the whole group, because one field is what the walk reads — and a span
-    /// carries no response key, so even a caller with an index cannot compare its way through the
-    /// list.
-    #[inline]
-    pub(super) fn first(&self, index: u32) -> SimpleSpan {
-      self.inner[index as usize].first
-    }
-  }
 }
 
 /// The response keys and type names a response refers to, held once as bytes.
@@ -1705,7 +1296,7 @@ pub(super) struct Scratch<'a, S> {
   /// One entry per distinct response key, in the order the keys were first seen.
   ///
   /// Private, and reached through [`groups`](Scratch::groups) and [`walking`](Scratch::walking),
-  /// because the walk and the commit are allowed different things. See [`mod groups`](groups).
+  /// because the walk and the commit are allowed different things. See [`groups`].
   groups: Groups,
   /// The group each interned key landed in, or [`NONE`] — indexed by the key's interner id.
   ///
@@ -1748,7 +1339,7 @@ pub(super) struct ScratchCapacity {
 ///
 /// One struct rather than five more parameters, and the restriction is the point: [`walk`] never
 /// holds a [`Scratch`], so it has no way to reach the group vector other than the [`Appending`] in
-/// here — which cannot enumerate. See [`mod groups`](groups).
+/// here — which cannot enumerate. See [`groups`].
 struct Walking<'s, 'a, S> {
   fields: &'s mut std::vec::Vec<(u32, &'a Field<S>)>,
   groups: Appending<'s>,
@@ -1921,7 +1512,7 @@ where
 ///
 /// The group index is the one of the three a charge cannot guard, and it is guarded by this
 /// function's *arguments* instead: what arrives is a [`Walking`], whose [`Appending`] can append a
-/// group and read one back and cannot enumerate. [`mod groups`](groups) has the reasoning.
+/// group and read one back and cannot enumerate. [`groups`] has the reasoning.
 ///
 /// # The order is the recursion's, exactly
 ///

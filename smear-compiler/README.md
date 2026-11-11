@@ -28,9 +28,14 @@ rendering and the caller of the §3 build. A name that misdescribes its contents
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `std` | Standard library support (off = `no_std`; `alloc` is required either way) | ✓ |
-| `rowan` | The lossless door — the same rules over a rowan CST, by projection | |
-| `introspection` | Re-exports `smear-schema`'s draft §4 construction door and its error type | |
+| `alloc` | The validator: the rules, `Scratch` and `Budget`, the sinks and the diagnostics. Off, the crate is `no_std` and re-exports only `smear-schema`'s core items as `schema`. Implied by `std` | via `std` |
+| `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
+| `rowan` | The lossless door — the same rules over a rowan CST, by projection. Implies `std` | |
+| `introspection` | Re-exports `smear-schema`'s draft §4 construction door and its error type. Needs `alloc`, which it does not imply | |
+
+A capability feature (`introspection`) never switches a tier on, so a `default-features = false`
+consumer names `alloc` itself, or `std`, which implies it. `rowan` is the exception: it needs
+`std`, so it implies it.
 
 ## Part of the Smear Ecosystem
 

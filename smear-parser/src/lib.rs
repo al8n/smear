@@ -7,13 +7,18 @@
 // root it started on, and it covers the parser alone once more rather than reaching the lexer.
 #![allow(clippy::type_complexity)]
 
+// Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
+// compile them all out and still build green.
+#[cfg(all(feature = "std", not(feature = "alloc")))]
+compile_error!("the `std` feature must enable `alloc`: check this crate's [features] table");
+
 // The alloc-as-std alias: the crate's files spell their allocations `std::boxed::Box`, which
-// resolves to `alloc` in a `no_std` build and to the real `std` otherwise.
+// resolves to `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build.
 //
 // `#[allow(unused_extern_crates)]`, ON EVERY MEMBER AND NOT ONLY THE ONE THAT TRIPS TODAY. The
 // alias is a crate-wide compatibility shim whose USERS are feature-gated, and
 // `unused_extern_crates` is a lint about the item: it fires in any configuration that happens to
-// compile none of them. On this tree that is `smear-parser --no-default-features`, where every
+// compile none of them. On this tree that is `smear-parser` with `alloc` alone, where every
 // `std::` use is inside a dialect or `rowan` module — but the construct is identical in all five
 // members and which one trips is an accident of where the uses sit. Measured: `smear-lexer` 41,
 // `smear-parser` 70, `smear-schema` 15, `smear-compiler` 8, `graphql-proto` 82.
@@ -27,7 +32,7 @@
 // locally, with no `RUSTFLAGS` needed. That deny is the repair for the gate, not for the code:
 // this construct reddened CI twice, and both times the local run that cleared it was narrower
 // than CI's.
-#[cfg(not(feature = "std"))]
+#[cfg(all(feature = "alloc", not(feature = "std")))]
 #[allow(unused_extern_crates)]
 extern crate alloc as std;
 
@@ -83,52 +88,53 @@ const _: () = assert!(
 );
 
 /// Name-node carrier shared by the GraphQL-family dialect ASTs.
-#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
 mod name;
 
 /// Namespaced-path carrier used by the GraphQLx dialect AST; vanilla GraphQL
 /// has no namespaced paths.
-#[cfg(feature = "graphqlx")]
+#[cfg(all(feature = "alloc", feature = "graphqlx"))]
 mod path;
 
 /// Generic-definition carriers shared by extended GraphQL-family dialect ASTs.
-#[cfg(feature = "graphqlx")]
+#[cfg(all(feature = "alloc", feature = "graphqlx"))]
 mod generic;
 
 /// Selection-node carriers shared by the GraphQL-family dialect ASTs.
-#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
 mod selection;
 
 /// Executable-document carriers shared by the GraphQL-family dialect ASTs.
-#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
 mod executable;
 
 /// Type-reference carriers shared by the GraphQL-family dialect ASTs.
-#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
 mod ty;
 
 /// Argument-node carriers shared by the dialect ASTs, copied type-only from the
 /// frozen crate.
-#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
 mod argument;
 
 /// Directive-node carriers shared by the dialect ASTs, copied type-only from the
 /// frozen crate.
-#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
 mod directive;
 
 /// Type-system AST carriers shared by the GraphQL-family dialects.
-#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
 mod type_system;
 
 /// Value-node carriers shared by the dialect ASTs, copied type-only from the
 /// frozen crate.
-#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
 mod value;
 
 /// The GraphQL dialect: productions, syntax kinds, keyword atoms, AST node types,
 /// and the dialect error, all keyed to the [`GraphQL`](graphql::GraphQL) marker.
-#[cfg(feature = "graphql")]
+#[cfg(all(feature = "alloc", feature = "graphql"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "graphql"))))]
 pub mod graphql;
 
 /// The GraphQLx dialect: namespaced paths, collection values, generic type
@@ -186,7 +192,8 @@ declaration is where the two dialects are introduced, so it is the one place the
 itself a boundary crossing.
 "#
 )]
-#[cfg(feature = "graphqlx")]
+#[cfg(all(feature = "alloc", feature = "graphqlx"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "graphqlx"))))]
 pub mod graphqlx;
 
 /// The features this crate was compiled with, as constants the umbrella asserts against.
@@ -207,6 +214,8 @@ pub mod graphqlx;
 /// this crate declares has no constant here or no assertion in `smear`.
 #[doc(hidden)]
 pub mod __features {
+  /// `alloc`, as this crate resolved it.
+  pub const ALLOC: bool = cfg!(feature = "alloc");
   /// `bstr`, as this crate resolved it.
   pub const BSTR: bool = cfg!(feature = "bstr");
   /// `bytes`, as this crate resolved it.

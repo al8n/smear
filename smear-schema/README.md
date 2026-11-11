@@ -11,8 +11,8 @@ Three consumers, and they do not want the same thing:
 
 - **`smear-compiler` builds a schema**, so it enables `build` and gets `smear-parser` underneath.
 - **`graphql-proto` reads one** at execution time, and **`smear-derive` will generate from one** —
-  neither needs a front end, so both depend on this crate with `default-features = false` and get
-  `core` + `alloc` with `tokora` as the only dependency.
+  neither needs a front end, so both depend on this crate with `default-features = false` and
+  `alloc`, and get `core` + `alloc` with `tokora` as the only dependency.
 
 It validates nothing about a *document* and parses nothing. Draft §5 validation is
 `smear-compiler`'s.
@@ -21,9 +21,13 @@ It validates nothing about a *document* and parses nothing. Draft §5 validation
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `std` | Standard library support (off = `no_std`; `alloc` is required either way) | ✓ |
-| `build` | `Schema::build`, `SchemaBuilder` and `SchemaError` — the SDL door. Pulls `smear-parser` | |
-| `introspection` | `Schema::from_introspection` — the draft §4 door. Implies `build` | |
+| `alloc` | The schema representation and everything built on it: `Schema` and its tables. Off, the crate is `no_std` and keeps only `diagnostic` and `builtin`. Implied by `std` | via `std` |
+| `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
+| `build` | `Schema::build`, `SchemaBuilder` and `SchemaError` — the SDL door. Pulls `smear-parser`. Needs `alloc` | |
+| `introspection` | `Schema::from_introspection` — the draft §4 door. Implies `build`; needs `alloc` | |
+
+A capability feature (`build`, `introspection`) never switches a tier on, so a
+`default-features = false` consumer names `alloc` itself, or `std`, which implies it.
 
 ## Why the builder is a feature and not another crate
 

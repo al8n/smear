@@ -571,6 +571,8 @@
 //! executor under Miri, one arrival order each; this file's other six tests took 19.2 s under
 //! those flags and 36.8 s under Tree Borrows.
 
+#![cfg(feature = "alloc")]
+
 use graphql_proto::{Executor, Leaf, Node, ReqId, Values};
 use smear_parser::{
   graphql::{

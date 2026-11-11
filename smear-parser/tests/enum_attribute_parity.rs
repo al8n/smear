@@ -75,8 +75,9 @@
 //! # Two axes, four tables, and what each failure means
 //!
 //! [`MERGE_BASE_ATTRS`] is what `git show c3e35b8:<path>` said for every enum that already
-//! existed there, read once and copied here verbatim; [`MERGE_BASE_VARIANTS`] is the same
-//! reading of the variant signatures. [`RECORDED_DIFFERENCES`] and
+//! existed there, read once and copied here, values verbatim and file keys re-pointed at the
+//! current path; [`MERGE_BASE_VARIANTS`] is the same reading of the variant signatures.
+//! [`RECORDED_DIFFERENCES`] and
 //! [`RECORDED_VARIANT_DIFFERENCES`] are every enum whose current value on that axis does not
 //! match — because it is new since the merge base, or because it changed and the change was
 //! reviewed on its own merits. An enum in neither table for an axis, or one whose current value
@@ -319,51 +320,52 @@ fn find_public_enums(file: &SourceFile) -> Vec<FoundEnum> {
 }
 
 /// The attribute set each currently-existing public enum had at `c3e35b8`, this branch's merge
-/// base into `feat/proto` — read once from `git show c3e35b8:<path>` and copied here verbatim.
+/// base into `feat/proto` — read once from `git show c3e35b8:<path>` and copied here, values
+/// verbatim and file keys re-pointed at the current path.
 ///
 /// `(file, enum name, attribute lines in source order)`.
 #[rustfmt::skip]
 const MERGE_BASE_ATTRS: &[(&str, &str, &[&str])] = &[
-  ("src/graphql/error.rs", "VariableValueHint", &[
+  ("src/graphql/error/mod.rs", "VariableValueHint", &[
     "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]",
     "#[non_exhaustive]",
   ]),
-  ("src/graphql/error.rs", "ObjectFieldValueHint", &[
+  ("src/graphql/error/mod.rs", "ObjectFieldValueHint", &[
     "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]",
     "#[non_exhaustive]",
   ]),
-  ("src/graphql/error.rs", "SchemaExtensionHint", &[
+  ("src/graphql/error/mod.rs", "SchemaExtensionHint", &[
     "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]",
     "#[non_exhaustive]",
   ]),
-  ("src/graphql/error.rs", "UnionTypeExtensionHint", &[
+  ("src/graphql/error/mod.rs", "UnionTypeExtensionHint", &[
     "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]",
     "#[non_exhaustive]",
   ]),
-  ("src/graphql/error.rs", "InputObjectTypeExtensionHint", &[
+  ("src/graphql/error/mod.rs", "InputObjectTypeExtensionHint", &[
     "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]",
     "#[non_exhaustive]",
   ]),
-  ("src/graphql/error.rs", "ObjectTypeExtensionHint", &[
+  ("src/graphql/error/mod.rs", "ObjectTypeExtensionHint", &[
     "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]",
     "#[non_exhaustive]",
   ]),
-  ("src/graphql/error.rs", "InterfaceTypeExtensionHint", &[
+  ("src/graphql/error/mod.rs", "InterfaceTypeExtensionHint", &[
     "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]",
     "#[non_exhaustive]",
   ]),
-  ("src/graphql/error.rs", "EnumTypeExtensionHint", &[
+  ("src/graphql/error/mod.rs", "EnumTypeExtensionHint", &[
     "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]",
     "#[non_exhaustive]",
   ]),
-  ("src/graphql/error.rs", "Expectation", &[
+  ("src/graphql/error/mod.rs", "Expectation", &[
     "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]",
     "#[non_exhaustive]",
   ]),
-  ("src/graphql/error.rs", "Unclosed", &[
+  ("src/graphql/error/mod.rs", "Unclosed", &[
     "#[derive(Debug, Copy, Clone, IsVariant)]",
   ]),
-  ("src/graphql/error.rs", "ErrorData", &[
+  ("src/graphql/error/mod.rs", "ErrorData", &[
     "#[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]",
     "#[unwrap(ref, ref_mut)]",
     "#[try_unwrap(ref, ref_mut)]",
@@ -388,23 +390,23 @@ const MERGE_BASE_ATTRS: &[(&str, &str, &[&str])] = &[
 /// `(file, enum name, variant signatures in source order)`.
 #[rustfmt::skip]
 const MERGE_BASE_VARIANTS: &[(&str, &str, &[&str])] = &[
-  ("src/graphql/error.rs", "VariableValueHint", &[
+  ("src/graphql/error/mod.rs", "VariableValueHint", &[
     "Name",
     "Dollar",
   ]),
-  ("src/graphql/error.rs", "ObjectFieldValueHint", &[
+  ("src/graphql/error/mod.rs", "ObjectFieldValueHint", &[
     "Colon",
     "Value",
     "Name",
   ]),
-  ("src/graphql/error.rs", "SchemaExtensionHint", &[
+  ("src/graphql/error/mod.rs", "SchemaExtensionHint", &[
     "Directives",
     "RootOperationTypesDefinition",
     "Extend",
     "Schema",
     "DirectivesOrRootOperationTypesDefinition",
   ]),
-  ("src/graphql/error.rs", "UnionTypeExtensionHint", &[
+  ("src/graphql/error/mod.rs", "UnionTypeExtensionHint", &[
     "Directives",
     "UnionMemberTypes",
     "Name",
@@ -412,7 +414,7 @@ const MERGE_BASE_VARIANTS: &[(&str, &str, &[&str])] = &[
     "Union",
     "DirectivesOrUnionMemberTypes",
   ]),
-  ("src/graphql/error.rs", "InputObjectTypeExtensionHint", &[
+  ("src/graphql/error/mod.rs", "InputObjectTypeExtensionHint", &[
     "Directives",
     "InputFieldsDefinition",
     "Name",
@@ -420,7 +422,7 @@ const MERGE_BASE_VARIANTS: &[(&str, &str, &[&str])] = &[
     "Input",
     "DirectivesOrInputFieldsDefinition",
   ]),
-  ("src/graphql/error.rs", "ObjectTypeExtensionHint", &[
+  ("src/graphql/error/mod.rs", "ObjectTypeExtensionHint", &[
     "Implements",
     "Directives",
     "FieldsDefinition",
@@ -429,7 +431,7 @@ const MERGE_BASE_VARIANTS: &[(&str, &str, &[&str])] = &[
     "Type",
     "ImplementsOrDirectivesOrFieldsDefinition",
   ]),
-  ("src/graphql/error.rs", "InterfaceTypeExtensionHint", &[
+  ("src/graphql/error/mod.rs", "InterfaceTypeExtensionHint", &[
     "Implements",
     "Directives",
     "FieldsDefinition",
@@ -438,7 +440,7 @@ const MERGE_BASE_VARIANTS: &[(&str, &str, &[&str])] = &[
     "Interface",
     "ImplementsOrDirectivesOrFieldsDefinition",
   ]),
-  ("src/graphql/error.rs", "EnumTypeExtensionHint", &[
+  ("src/graphql/error/mod.rs", "EnumTypeExtensionHint", &[
     "Directives",
     "EnumValuesDefinition",
     "Name",
@@ -446,7 +448,7 @@ const MERGE_BASE_VARIANTS: &[(&str, &str, &[&str])] = &[
     "Enum",
     "DirectivesOrEnumValuesDefinition",
   ]),
-  ("src/graphql/error.rs", "Expectation", &[
+  ("src/graphql/error/mod.rs", "Expectation", &[
     "InlineString",
     "BlockString",
     "Dollar",
@@ -484,12 +486,12 @@ const MERGE_BASE_VARIANTS: &[(&str, &str, &[&str])] = &[
     "StringValue",
     "Keyword(&'static str)",
   ]),
-  ("src/graphql/error.rs", "Unclosed", &[
+  ("src/graphql/error/mod.rs", "Unclosed", &[
     "Parentheses",
     "List",
     "Object",
   ]),
-  ("src/graphql/error.rs", "ErrorData", &[
+  ("src/graphql/error/mod.rs", "ErrorData", &[
     "Lexer(LexerErrors<Char, StateError>)",
     "IntOverflow(S)",
     "FloatOverflow(S)",
@@ -565,7 +567,7 @@ struct Recorded {
 /// first entry below is that attribute, on the second attempt, in the table.
 const RECORDED_DIFFERENCES: &[Recorded] = &[
   Recorded {
-    file: "src/graphql/error.rs",
+    file: "src/graphql/error/mod.rs",
     name: "ErrorData",
     expected: &[
       "#[derive(Debug, Clone, From, IsVariant, Unwrap, TryUnwrap)]",
@@ -602,7 +604,7 @@ const RECORDED_DIFFERENCES: &[Recorded] = &[
        value-tree production converts the leaf it just read, so one body builds both trees.",
   },
   Recorded {
-    file: "src/graphql/ast/materialized.rs",
+    file: "src/graphql/ast/materialized/mod.rs",
     name: "InputValue",
     expected: &[
       "#[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]",
@@ -614,7 +616,7 @@ const RECORDED_DIFFERENCES: &[Recorded] = &[
        absent where the slice tree has it, because a materialised `Float` leaf is an `f64`.",
   },
   Recorded {
-    file: "src/graphql/ast/materialized.rs",
+    file: "src/graphql/ast/materialized/mod.rs",
     name: "ConstInputValue",
     expected: &[
       "#[derive(Debug, Clone, PartialEq, From, IsVariant, Unwrap, TryUnwrap)]",
@@ -624,7 +626,7 @@ const RECORDED_DIFFERENCES: &[Recorded] = &[
     reason: "new enum, same reason as `materialized::InputValue` above.",
   },
   Recorded {
-    file: "src/graphql/error.rs",
+    file: "src/graphql/error/mod.rs",
     name: "IntWidth",
     expected: &[
       "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, derive_more::Display)]",
@@ -650,7 +652,7 @@ const RECORDED_DIFFERENCES: &[Recorded] = &[
 /// absence from this table asserts.
 const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
   Recorded {
-    file: "src/graphql/error.rs",
+    file: "src/graphql/error/mod.rs",
     name: "ErrorData",
     expected: &[
       "Lexer(LexerErrors<Char, StateError>)",
@@ -715,7 +717,7 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
        named changes, not the enum.",
   },
   Recorded {
-    file: "src/graphql/error.rs",
+    file: "src/graphql/error/mod.rs",
     name: "Expectation",
     expected: &[
       "InlineString",
@@ -768,14 +770,14 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
        are the merge base's, unedited.",
   },
   Recorded {
-    file: "src/graphql/error.rs",
+    file: "src/graphql/error/mod.rs",
     name: "IntWidth",
     expected: &["I32", "I64"],
     reason: "new enum: the two readings of `Int` the `materialized-numbers` feature ships. No \
        merge-base entry exists because the enum did not.",
   },
   Recorded {
-    file: "src/graphql/ast/materialized.rs",
+    file: "src/graphql/ast/materialized/mod.rs",
     name: "InputValue",
     expected: &[
       "Variable(AstVariableValue<S>)",
@@ -797,7 +799,7 @@ const RECORDED_VARIANT_DIFFERENCES: &[Recorded] = &[
        `I` appearing on that line would be a defect this row fails on.",
   },
   Recorded {
-    file: "src/graphql/ast/materialized.rs",
+    file: "src/graphql/ast/materialized/mod.rs",
     name: "ConstInputValue",
     expected: &[
       "Boolean(AstBooleanValue<S>)",
@@ -822,46 +824,47 @@ const REMOVED_WITH_ITS_VARIANT: &str = "the hint payload of an `ErrorData` varia
 
 /// Every merge-base enum that no longer exists, each with why it went.
 ///
-/// **The merge-base tables stay verbatim**, because they are the merge base by definition: a row
-/// edited out of them would be a baseline that no longer says what `c3e35b8` said. So a removal is
-/// recorded here instead, and [`audit`] consults this list before it reports a vanished baseline
-/// row. Both directions of a stale entry fail: a removal whose enum the scan still finds did not
-/// happen, and a removal naming no merge-base row on an axis records nothing on that axis.
+/// **The merge-base tables keep their values verbatim**, with only the file keys re-pointed at the
+/// current path, because they are the merge base by definition: a row edited out of them would be
+/// a baseline that no longer says what `c3e35b8` said. So a removal is recorded here instead, and
+/// [`audit`] consults this list before it reports a vanished baseline row. Both directions of a
+/// stale entry fail: a removal whose enum the scan still finds did not happen, and a removal naming
+/// no merge-base row on an axis records nothing on that axis.
 ///
 /// `(file, enum name, reason)`.
 const RECORDED_REMOVALS: &[(&str, &str, &str)] = &[
   (
-    "src/graphql/error.rs",
+    "src/graphql/error/mod.rs",
     "VariableValueHint",
     REMOVED_WITH_ITS_VARIANT,
   ),
   (
-    "src/graphql/error.rs",
+    "src/graphql/error/mod.rs",
     "SchemaExtensionHint",
     REMOVED_WITH_ITS_VARIANT,
   ),
   (
-    "src/graphql/error.rs",
+    "src/graphql/error/mod.rs",
     "UnionTypeExtensionHint",
     REMOVED_WITH_ITS_VARIANT,
   ),
   (
-    "src/graphql/error.rs",
+    "src/graphql/error/mod.rs",
     "InputObjectTypeExtensionHint",
     REMOVED_WITH_ITS_VARIANT,
   ),
   (
-    "src/graphql/error.rs",
+    "src/graphql/error/mod.rs",
     "ObjectTypeExtensionHint",
     REMOVED_WITH_ITS_VARIANT,
   ),
   (
-    "src/graphql/error.rs",
+    "src/graphql/error/mod.rs",
     "InterfaceTypeExtensionHint",
     REMOVED_WITH_ITS_VARIANT,
   ),
   (
-    "src/graphql/error.rs",
+    "src/graphql/error/mod.rs",
     "EnumTypeExtensionHint",
     REMOVED_WITH_ITS_VARIANT,
   ),

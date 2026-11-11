@@ -1,4 +1,4 @@
-#![cfg(feature = "proto")]
+#![cfg(all(feature = "alloc", feature = "proto"))]
 
 //! Draft §4 introspection, answered by the executor.
 //!

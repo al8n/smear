@@ -184,10 +184,10 @@ use core::fmt;
 /// `subscribe.rs`'s module header has why this is a state rather than a container, what the driver
 /// owes in each of them, and which arm of draft §6.2.3.2 is structurally unreachable.
 ///
-/// Named as a file rather than linked, because the module is private — the type reaches a consumer
-/// through the crate root's `pub use`, so rustdoc renders no page for the module and a `[…](self)`
-/// link is a public item pointing at a private one. `extensions.rs` and `request_error.rs` refer to
-/// their own headers the same way, for the same reason.
+/// Named as a file rather than linked, because the module is private — the type reaches a
+/// consumer through the crate root's `pub use`, so rustdoc renders no page for the module and a
+/// `[…](self)` link is a public item pointing at a private one. `extensions.rs` and
+/// `request/error/mod.rs` refer to their own headers the same way, for the same reason.
 ///
 /// # Not `#[non_exhaustive]`, and the rule says why
 ///
@@ -440,5 +440,4 @@ impl<V> fmt::Display for SourceEventError<V> {
   }
 }
 
-#[cfg(feature = "std")]
-impl<V: fmt::Debug> std::error::Error for SourceEventError<V> {}
+impl<V: fmt::Debug> core::error::Error for SourceEventError<V> {}

@@ -10,8 +10,8 @@
 //! needs the parser underneath it; `graphql-proto` READS one at execution time and `smear-derive`
 //! will generate from one, and neither has any use for a front end. So the builder and the
 //! introspection door sit behind `build`, which is what pulls `smear-parser` — and a consumer who
-//! only reads a schema depends on this crate with `default-features = false` and gets `core` +
-//! `alloc` with `tokora` as the one dependency.
+//! only reads a schema depends on this crate with `default-features = false` and `alloc`, and gets
+//! `core` + `alloc` with `tokora` as the one dependency.
 //!
 //! That is a FEATURE boundary and not a crate boundary, and the distinction is the whole reason
 //! this crate is shaped this way: [`Schema::build`] and `Schema::from_introspection` are
@@ -20,7 +20,7 @@
 //! tier the feature buys outright.
 //!
 #![cfg_attr(
-  feature = "build",
+  all(feature = "alloc", feature = "build"),
   doc = "```
 use smear_parser::{
   graphql::{
@@ -56,13 +56,18 @@ assert!(schema.type_by_name(b\"__Schema\").is_some());
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+// Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
+// compile them all out and still build green.
+#[cfg(all(feature = "std", not(feature = "alloc")))]
+compile_error!("the `std` feature must enable `alloc`: check this crate's [features] table");
+
 // The alloc-as-std alias: the crate's files spell their allocations `std::boxed::Box`, which
-// resolves to `alloc` in a `no_std` build and to the real `std` otherwise.
+// resolves to `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build.
 //
 // `#[allow(unused_extern_crates)]`, ON EVERY MEMBER AND NOT ONLY THE ONE THAT TRIPS TODAY. The
 // alias is a crate-wide compatibility shim whose USERS are feature-gated, and
 // `unused_extern_crates` is a lint about the item: it fires in any configuration that happens to
-// compile none of them. On this tree that is `smear-parser --no-default-features`, where every
+// compile none of them. On this tree that is `smear-parser` with `alloc` alone, where every
 // `std::` use is inside a dialect or `rowan` module — but the construct is identical in all five
 // members and which one trips is an accident of where the uses sit. Measured: `smear-lexer` 41,
 // `smear-parser` 70, `smear-schema` 15, `smear-compiler` 8, `graphql-proto` 82.
@@ -76,7 +81,7 @@ assert!(schema.type_by_name(b\"__Schema\").is_some());
 // locally, with no `RUSTFLAGS` needed. That deny is the repair for the gate, not for the code:
 // this construct reddened CI twice, and both times the local run that cleared it was narrower
 // than CI's.
-#[cfg(not(feature = "std"))]
+#[cfg(all(feature = "alloc", not(feature = "std")))]
 #[allow(unused_extern_crates)]
 extern crate alloc as std;
 
@@ -105,14 +110,15 @@ pub mod builtin;
 // Deliberately no outer doc comment, for the reason recorded on `diagnostic` above: an outer
 // comment here would silently reinterpret every `super::` link in `introspection/mod.rs` as one
 // rooted in this crate's root, and they would all stop resolving under `RUSTDOCFLAGS="-D warnings"`.
-#[cfg(feature = "introspection")]
-#[cfg_attr(docsrs, doc(cfg(feature = "introspection")))]
+#[cfg(all(feature = "alloc", feature = "introspection"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "introspection"))))]
 pub mod introspection;
 
-#[cfg(feature = "build")]
+#[cfg(all(feature = "alloc", feature = "build"))]
 mod builder;
-#[cfg(feature = "build")]
+#[cfg(all(feature = "alloc", feature = "build"))]
 mod error;
+#[cfg(feature = "alloc")]
 mod repr;
 
 /// The literal-shape coercion table, shared with the executable rules.
@@ -121,11 +127,11 @@ mod repr;
 /// anyone outside it, and `repr` — the part of this crate that is published widest — stays free of
 /// it. It followed the builder down from `smear-compiler` because the builder is its only caller;
 /// re-confirmed on this tree by restricting its visibility and rebuilding.
-#[cfg(feature = "build")]
+#[cfg(all(feature = "alloc", feature = "build"))]
 pub(crate) mod literal;
 
-#[cfg(feature = "introspection")]
-#[cfg_attr(docsrs, doc(cfg(feature = "introspection")))]
+#[cfg(all(feature = "alloc", feature = "introspection"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "introspection"))))]
 pub use introspection::IntrospectionError;
 
 /// Draft §6.3's collection indexes the *document's* names the way [`NameIndex`] indexes the
@@ -136,18 +142,21 @@ pub use introspection::IntrospectionError;
 /// the workspace. It was `pub(crate)` behind `#[cfg(feature = "proto")]` while both lived in one
 /// crate; a crate boundary has no narrower spelling to offer, and two functions is the whole of the
 /// widening.
+#[cfg(feature = "alloc")]
 #[doc(hidden)]
 pub use repr::name::{bucket, hash_bytes};
 
-#[cfg(feature = "build")]
-#[cfg_attr(docsrs, doc(cfg(feature = "build")))]
+#[cfg(all(feature = "alloc", feature = "build"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "build"))))]
 pub use builder::{
   MAX_CONST_VALUE_DEPTH, MAX_INTERFACE_IMPLEMENTATION_MISMATCHES,
   MAX_MISSING_TRANSITIVE_INTERFACES, SchemaBuilder,
 };
-#[cfg(feature = "build")]
-#[cfg_attr(docsrs, doc(cfg(feature = "build")))]
+#[cfg(all(feature = "alloc", feature = "build"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "build"))))]
 pub use error::{SchemaError, SchemaErrorKind, SchemaErrors};
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use repr::{
   DefaultKind, Deprecation, DirectiveDef, DirectiveLocation, DirectiveLocations, DirectiveMeta,
   EnumValueMeta, FieldDef, FieldMeta, InputValueDef, InputValueMeta, MAX_DIRECTIVE_ARGUMENTS,
@@ -174,6 +183,8 @@ pub use repr::{
 /// this crate declares has no constant here or no assertion in `smear`.
 #[doc(hidden)]
 pub mod __features {
+  /// `alloc`, as this crate resolved it.
+  pub const ALLOC: bool = cfg!(feature = "alloc");
   /// `build`, as this crate resolved it.
   pub const BUILD: bool = cfg!(feature = "build");
   /// `introspection`, as this crate resolved it.

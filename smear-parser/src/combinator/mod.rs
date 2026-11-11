@@ -46,5 +46,5 @@ pub use tokora::{
   utils::Equivalent,
 };
 
-#[cfg(test)]
+#[cfg(all(test, feature = "alloc"))]
 mod tests;

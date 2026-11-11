@@ -63,8 +63,9 @@ members = [
 # dependency edge to `smear`, so a member entry would add its features to the workspace-wide resolve
 # and unify them into smear's own build — which is exactly the unification it exists to escape. It
 # carries its own `[workspace]` table; this says the same thing a second time, so a future `members`
-# glob cannot swallow it.
-exclude = ["ci/downstream"]
+# glob cannot swallow it. `ci/noalloc/` is excluded for the same reason: no other member's features
+# may unify into its `smear`.
+exclude = ["ci/downstream", "ci/noalloc"]
 
 resolver = "3"
 
@@ -81,41 +82,8 @@ bstr = { version = "1", default-features = false }
 bytes = { version = "1", default-features = false }
 smol-bytes = { version = "0.2", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
-# `rowan` is in tokora's PUBLIC API: `Cst::checkpoint` returns `rowan::Checkpoint`, `Cst::finish`
-# returns `rowan::GreenNode`, `cst::cast::token` returns `rowan::SyntaxToken`. So smear's `rowan`
-# and tokora's `rowan` are not two independent choices — they are one choice made twice, and if
-# they disagree on the major, cargo links both crates and the types stop matching. The failure is
-# not subtle and it is not a deprecation: `expected rowan::GreenNode, found rowan::GreenNode`.
-# `0.9` is therefore the floor, not a preference: published tokora 0.8.0 pins `rowan = "0.16"`,
-# and 0.9.0 is the first release carrying `rowan = "0.17"` to match the pins in `smear` and
-# `smear-smoke`. Because tokora is `0.x`, the minor IS the major — `^0.8.0` cannot reach 0.9.0 —
-# so this requirement had to be edited rather than moved by `cargo update`.
-#
-# `combinators` is named explicitly and is NOT a rowan consequence. tokora 0.9.0 put each
-# combinator family behind its own feature and made the `combinators` umbrella a DEFAULT feature;
-# this workspace passes `default-features = false`, so without naming it the build loses the
-# entire 0.8 combinator surface (`parens`, `then`, `then_ignore`, `repeated_while`,
-# `Ident::parse`, `Keyword::parse_exact`, ...) — 166 errors when measured. Whether smear wants the
-# umbrella or a narrower set of families is a compile-time-footprint question left open.
-#
-# WHAT MOVED, 0.10.0 -> 0.11.0 — tokora renamed the items below; smear names none of them, so
-# the floor moving to `0.11` costs nothing here. The arraydeque backing swapped from
-# `generic-arraydeque` to `hybrid-arraydeque`, and tokora retired its own
-# `#![recursion_limit = "256"]`. The renames are `tokora::utils::{GenericArrayDeque -> ArrayDeque,
-# generic_arraydeque -> arraydeque}`, `ArrayLength -> ArraySize`, and `ConstGenericArrayDeque ->
-# ArrayDequeN`. What smear actually reaches — `tokora::utils::typenum::U1`, `DowncastRef`,
-# `IntoComponents`, `IntoEquivalent`, the display traits — is unchanged. The rest of 0.10.0 ->
-# 0.11.0 is tokora's own changelog, not a smear concern.
-#
-# WHAT MOVED, 0.11.0 -> 0.12.0 — every public item now has one canonical path, and smear spells
-# the 0.12 ones, so `0.12` is the floor: `tokora::parser` is `tokora::combinator`, the parsing
-# traits and drivers live in `tokora::parse` with the ones a production needs also at the root
-# (`tokora::ParseAttempt`, not `tokora::try_parse_input::ParseAttempt`), the three-level families
-# such as `error::token`, `state::tracker` and `utils::sdl_display` are flattened into their
-# parents, and there is no prelude. Every feature this line names kept its name. The one rename
-# that reaches a manifest is the smol-bytes backing, `smol_bytes_0_1` -> `smol-bytes_0_2`, which
-# each member's `smol-bytes` feature names.
-tokora = { version = "0.12", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
+
+tokora = { version = "0.12", default-features = false, features = ["logos", "unstable-raw", "combinators"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }

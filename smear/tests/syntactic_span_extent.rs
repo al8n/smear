@@ -1,4 +1,4 @@
-#![cfg(all(feature = "graphql", feature = "parser"))]
+#![cfg(all(feature = "alloc", feature = "graphql", feature = "parser"))]
 
 //! The syntactic span-extent gate for GraphQL: trivia injection, with a per-node-type
 //! discrimination counter.

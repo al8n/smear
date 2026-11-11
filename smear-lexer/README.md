@@ -15,7 +15,7 @@ Blazing fast, zero-copy lexer for GraphQL and GraphQL-like DSLs.
 - **Generic Over Source Types**: Works with `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::{HipStr, HipByt}`, and custom types
 - **Draft Spec Compliant**: Fully implements GraphQL draft specification lexical grammar
 - **GraphQLx Support**: Extended tokens for generics, imports, namespacing, and more
-- **`no_std` Compatible**: Works in embedded environments with optional `alloc` support
+- **`no_std` Compatible**: Three tiers — core, `alloc` and `std`. With no allocator the crate still compiles and keeps `hints`, `keywords`, `limits` and `punctuator`; the lexers need `alloc`
 - **Comprehensive Error Reporting**: Detailed, actionable error messages with source location tracking
 
 ## Quick Start
@@ -225,14 +225,18 @@ belong to the layers above (`parser`, `validator`, `proto`, `rowan`, …).
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `std` | Standard library support (off = `no_std`; `alloc` is required either way) | ✓ |
-| `graphql` | Standard GraphQL lexer | ✓ |
-| `graphqlx` | Extended GraphQL lexer; semver-exempt while the dialect moves | ✓ |
-| `smallvec` | Use `smallvec` for small collections | ✓ |
-| `bytes` | Support `bytes::Bytes` source type | |
-| `bstr` | Support `bstr::BStr` source type | |
-| `hipstr` | Support `hipstr::{HipStr, HipByt}` source type | |
-| `smol-bytes` | Support smol-bytes 0.2 `smol_bytes::{Bytes, Utf8Bytes}` and `smol_bytes::compact::{Bytes, Utf8Bytes}` source types | |
+| `alloc` | The allocating API: the dialect lexers, the lossless lexer, the error types and the string lexers. Off, the crate is `no_std` and keeps only `hints`, `keywords` (with `keyword!`), `limits` and `punctuator`. Implied by `std`, `smallvec`, `bytes`, `hipstr` and `smol-bytes` | via `std` |
+| `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
+| `graphql` | Standard GraphQL lexer. Needs `alloc` | ✓ |
+| `graphqlx` | Extended GraphQL lexer; semver-exempt while the dialect moves. Needs `alloc` | ✓ |
+| `smallvec` | Use `smallvec` for small collections. Implies `alloc` | ✓ |
+| `bytes` | Support `bytes::Bytes` source type. Implies `alloc` | |
+| `bstr` | Support `bstr::BStr` source type. Implies no tier | |
+| `hipstr` | Support `hipstr::{HipStr, HipByt}` source type. Implies `alloc` | |
+| `smol-bytes` | Support smol-bytes 0.2 `smol_bytes::{Bytes, Utf8Bytes}` and `smol_bytes::compact::{Bytes, Utf8Bytes}` source types. Implies `alloc` | |
+
+A capability feature (`graphql`, `graphqlx`) never switches a tier on, so a `default-features = false`
+consumer names `alloc` itself, or `std`, which implies it.
 
 ## Performance Characteristics
 

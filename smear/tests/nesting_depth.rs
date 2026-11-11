@@ -1,4 +1,4 @@
-#![cfg(feature = "parser")]
+#![cfg(all(feature = "alloc", feature = "parser"))]
 
 //! The nesting ceiling, and the `SIGABRT` it exists to stop — smear issue #61.
 //!

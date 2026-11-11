@@ -316,5 +316,9 @@ macro_rules! typed_keyword_atom {
 // `-D warnings` reads as four errors. `cfg(test)` alone said the tests exist in any `parser`
 // build; they do not, and until #136 the self dev-dependency's missing `default-features = false`
 // meant no `parser`-without-a-dialect test build was ever produced to say so.
-#[cfg(all(test, any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  test,
+  feature = "alloc",
+  any(feature = "graphql", feature = "graphqlx")
+))]
 mod tests;

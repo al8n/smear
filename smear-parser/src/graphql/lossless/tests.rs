@@ -1539,7 +1539,7 @@ fn a_refusal_first_taken_inside_the_drain_is_reported_on_both_draining_arms() {
   /// The ordinary `Recoverable` arm: a non-terminal failure over the same untouched tail.
   ///
   /// `FloatOverflow` is the cheapest dialect error whose `MaybeTerminal` arm is `false`
-  /// (`graphql/error.rs`'s wildcard-free `is_terminal` match), which is the only property this
+  /// (`graphql/error/mod.rs`'s wildcard-free `is_terminal` match), which is the only property this
   /// root needs of it. The bespoke `E::Syntax` it replaces went with the emitter: the door owns
   /// the emitter now, so the error type is the dialect's.
   fn recoverable_with_tail<'inp>(

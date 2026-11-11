@@ -1,4 +1,4 @@
-#![cfg(feature = "proto")]
+#![cfg(all(feature = "alloc", feature = "proto"))]
 
 //! The draft §6.2.2 oracle: `graphql-js`'s `mutations-test.ts`, hand-ported case for case.
 //!

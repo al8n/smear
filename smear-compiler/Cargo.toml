@@ -22,7 +22,8 @@ readme = "README.md"
 [features]
 default = ["std"]
 
-std = ["smear-parser/std", "smear-schema/std", "tokora/std"]
+alloc = ["smear-parser/alloc", "smear-schema/alloc", "tokora/alloc"]
+std = ["alloc", "smear-parser/std", "smear-schema/std", "tokora/std"]
 
 # The lossless door: the same draft §5 rules over a rowan CST, by projecting it to the same AST
 # rather than by being a second validator. `std` because the runner needs it.
@@ -33,7 +34,7 @@ rowan = ["smear-parser/rowan", "std"]
 
 # The second construction door, forwarded rather than re-implemented: `Schema::from_introspection`
 # lives in `smear-schema` and this crate re-exports its error type.
-introspection = ["smear-schema/introspection", "std"]
+introspection = ["smear-schema/introspection"]
 
 [dependencies]
 tokora.workspace = true

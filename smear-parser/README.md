@@ -9,6 +9,20 @@ Atomic parser-combinators for GraphQL-family dialects.
 Builds AST nodes from the token streams `smear-lexer` produces, composed with the `tokora`
 combinator library, plus the lossless CST tower behind the `rowan` feature.
 
+## Feature flags
+
+Every crate in the stack has three tiers, each including the one below: core, `alloc` and `std`.
+
+| Feature | Description | Default |
+|---------|-------------|---------|
+| `alloc` | The parsers and ASTs of both dialects. Off, the crate is `no_std` and keeps only `combinator` (with `typed_keyword_atom!`) and the `lexer` re-export. Implied by `std`, `smallvec`, `bytes`, `hipstr` and `smol-bytes` | via `std` |
+| `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
+| `rowan` | The lossless CST tower. Implies `std` | |
+
+The dialects (`graphql`, `graphqlx`) and the other features are the ones `smear`'s own table
+describes. A capability feature never switches a tier on, so a `default-features = false` consumer
+names `alloc` itself, or `std`, which implies it.
+
 ## Part of the Smear Ecosystem
 
 - `smear-lexer` — lexical analysis

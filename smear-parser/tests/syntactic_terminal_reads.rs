@@ -46,7 +46,7 @@
 //! each was past five minutes — and the positive control, which scans one small tree, runs:
 //! `the_forbidden_patterns_match_rust_that_exists` took 3.8 s.
 
-#![cfg(any(feature = "graphql", feature = "graphqlx"))]
+#![cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
 #![allow(missing_docs)]
 
 use std::path::{Path, PathBuf};

@@ -31,10 +31,10 @@ readme = "README.md"
 # names this crate.
 default = ["std"]
 
-# Flips the crate attribute and nothing else at this tier: the representation is `core` + `alloc`
-# in both configurations, which `cargo check -p smear-schema --no-default-features` in CI is what
-# says.
-std = ["tokora/std", "smear-parser?/std"]
+# `alloc` is the reader tier: the representation is `core` + `alloc`, and without it this crate is
+# `diagnostic` and `builtin` alone. `std` flips the crate attribute and nothing else at that tier.
+alloc = ["tokora/alloc", "smear-parser?/alloc"]
+std = ["alloc", "tokora/std", "smear-parser?/std"]
 
 # Draft §3 "Type Validation" and the SDL door: `Schema::build`, `SchemaBuilder`, `SchemaError` and
 # the literal-shape table. This is the edge that pulls `smear-parser`, because the builder consumes
@@ -53,20 +53,6 @@ build = ["dep:smear-parser", "smear-parser/graphql"]
 # §3 runs there too and the two doors cannot drift apart — which is why it implies `build` rather
 # than duplicating it. It no longer costs a dependency of its own; what it still gates that `build`
 # does not is the `introspection` module and the `IntrospectionError` it re-exports.
-#
-# ── WHY THIS LINE NO LONGER NAMES `std`, `dep:serde` OR `dep:serde_json` ─────────────────────
-#
-# `std` was here because `serde_json` is a `std`-only crate and the reader was
-# `serde_json::from_str`, and because the refusals went through `std::error::Error`. Neither is
-# true: the reader is `introspection/json.rs` and `introspection/decode.rs`, which are `core` +
-# `alloc` throughout, and the error types implement `core::error::Error`. That left `std` held only
-# by `serde`/`serde_json` themselves — both declared `features = [..., "std"]` — and those were
-# held by nothing: no `use serde` survived in this crate. "The dependency is unused" and "the
-# dependency is gone" are different claims, and only the second is checkable by `cargo tree`; the
-# two `dep:` entries are gone from `[dependencies]` below, and `cargo tree -p smear-schema
-# --no-default-features --features introspection` lists neither package. Re-measured on this tree,
-# not trusted from the older record: `cargo check` with the same flags still succeeds with this
-# line reading `["build"]`.
 introspection = ["build"]
 
 [dependencies]
