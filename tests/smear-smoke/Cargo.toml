@@ -30,6 +30,7 @@ publish = false
 # compile time, so it is one source of truth rather than two that agree today.
 smear = { path = "../../smear", default-features = false, features = [
   "std",
+  "alloc",
   "graphql",
   "graphqlx",
   "parser",

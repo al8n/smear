@@ -22,7 +22,7 @@
 // the same defect `validator_schema.rs` carried until #100 — so it was a hard `E0433` compile
 // error under any feature selection that excludes `validator`, including the crate's own default
 // features. `cargo test -p smear --no-run` in CI now compiles exactly that selection.
-#![cfg(feature = "validator")]
+#![cfg(all(feature = "alloc", feature = "validator"))]
 #![allow(missing_docs)]
 
 // The instrument. `tests/support/counting.rs` owns the allocator, the thread-local counters and

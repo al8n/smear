@@ -1,4 +1,4 @@
-#![cfg(feature = "validator")]
+#![cfg(all(feature = "alloc", feature = "validator"))]
 
 //! Draft §5: a description is documentation, and nothing a validation rule can see.
 //!

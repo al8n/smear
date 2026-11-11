@@ -1,4 +1,8 @@
-#![cfg(all(feature = "parser", any(feature = "graphql", feature = "graphqlx")))]
+#![cfg(all(
+  feature = "alloc",
+  feature = "parser",
+  any(feature = "graphql", feature = "graphqlx")
+))]
 #![allow(missing_docs)]
 
 //! Draft §2 syntax errors answer the diagnostic contract — the close of al8n/smear#126's phase E.

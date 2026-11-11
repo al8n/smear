@@ -39,7 +39,7 @@
 //! below puts [`DEPTH`] two orders of magnitude past the boundary on any host, so the cell states
 //! the *shape* rather than betting on the runner's stack.
 
-#![cfg(all(feature = "parser", feature = "graphql"))]
+#![cfg(all(feature = "alloc", feature = "parser", feature = "graphql"))]
 #![allow(missing_docs)]
 
 use std::{boxed::Box, string::String, vec::Vec};

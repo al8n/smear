@@ -240,5 +240,5 @@ pub enum WhiteSpaceHint {
   Tab,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "alloc"))]
 mod tests;

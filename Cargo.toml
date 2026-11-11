@@ -82,7 +82,7 @@ bytes = { version = "1", default-features = false }
 smol-bytes = { version = "0.2", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
 
-tokora = { version = "0.12", default-features = false, features = ["logos", "alloc", "unstable-raw", "combinators"] }
+tokora = { version = "0.12", default-features = false, features = ["logos", "unstable-raw", "combinators"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }

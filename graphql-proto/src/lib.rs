@@ -435,13 +435,18 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
 
+// Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
+// compile them all out and still build green.
+#[cfg(all(feature = "std", not(feature = "alloc")))]
+compile_error!("the `std` feature must enable `alloc`: check this crate's [features] table");
+
 // The alloc-as-std alias: the crate's files spell their allocations `std::boxed::Box`, which
-// resolves to `alloc` in a `no_std` build and to the real `std` otherwise.
+// resolves to `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build.
 //
 // `#[allow(unused_extern_crates)]`, ON EVERY MEMBER AND NOT ONLY THE ONE THAT TRIPS TODAY. The
 // alias is a crate-wide compatibility shim whose USERS are feature-gated, and
 // `unused_extern_crates` is a lint about the item: it fires in any configuration that happens to
-// compile none of them. On this tree that is `smear-parser --no-default-features`, where every
+// compile none of them. On this tree that is `smear-parser` with `alloc` alone, where every
 // `std::` use is inside a dialect or `rowan` module — but the construct is identical in all five
 // members and which one trips is an accident of where the uses sit. Measured: `smear-lexer` 41,
 // `smear-parser` 70, `smear-schema` 15, `smear-compiler` 8, `graphql-proto` 82.
@@ -455,7 +460,7 @@
 // locally, with no `RUSTFLAGS` needed. That deny is the repair for the gate, not for the code:
 // this construct reddened CI twice, and both times the local run that cleared it was narrower
 // than CI's.
-#[cfg(not(feature = "std"))]
+#[cfg(all(feature = "alloc", not(feature = "std")))]
 #[allow(unused_extern_crates)]
 extern crate alloc as std;
 
@@ -463,22 +468,40 @@ extern crate alloc as std;
 #[allow(unused_extern_crates)]
 extern crate std;
 
+#[cfg(feature = "alloc")]
 mod collect;
+#[cfg(feature = "alloc")]
 mod error;
+#[cfg(feature = "alloc")]
 mod execute;
+#[cfg(feature = "alloc")]
 mod extensions;
+#[cfg(feature = "alloc")]
 mod request;
 
+#[cfg(feature = "alloc")]
 mod response;
+#[cfg(feature = "alloc")]
 mod subscribe;
+#[cfg(feature = "alloc")]
 mod values;
 
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use collect::variable_key;
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use error::{Error, Kind, Resource};
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use execute::{
   Executor, Limits, Response, SetExtensionsError, StartError, UnattachedExtensions,
 };
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use extensions::{Ceiling, Extensions, Full};
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use request::{
   Argument, ArgumentSource, FieldRequest, ReqId, SourceField,
   error::{
@@ -486,8 +509,14 @@ pub use request::{
     TooLarge,
   },
 };
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use response::{Ancestors, Children, INLINE_SEGMENTS, Node, Path, PathIter, Segment};
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use subscribe::{ResponseStream, SourceEventError};
+#[cfg(feature = "alloc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use values::{Leaf, Values};
 
 /// The features this crate was compiled with, as constants the umbrella asserts against.
@@ -508,6 +537,8 @@ pub use values::{Leaf, Values};
 /// this crate declares has no constant here or no assertion in `smear`.
 #[doc(hidden)]
 pub mod __features {
+  /// `alloc`, as this crate resolved it.
+  pub const ALLOC: bool = cfg!(feature = "alloc");
   /// `std`, as this crate resolved it.
   pub const STD: bool = cfg!(feature = "std");
 }

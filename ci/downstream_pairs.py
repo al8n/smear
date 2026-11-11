@@ -24,6 +24,8 @@ forwarded pairs behaved that way. The four features `smear` `#[cfg]`s itself —
     EQ-POS(member, f)   smear/std, smear/f, member/f          must COMPILE
     EQ-LEAK(member, f)  smear/std,           member/f         must FAIL, on the equivalence assert
 
+An `alloc` pair's EQ-LEAK drops `smear/std`, which implies `smear/alloc`; a `std` pair has none.
+
 EQ is **total over every member feature** — the pair list comes out of `cargo metadata`, so a
 feature added to a member without a leg here is an error rather than a silent gap. It needs no
 consumer code: the assertion lives in `smear`, so the disagreeing graph fails to compile on its own.
@@ -262,10 +264,17 @@ def plan(workspace_manifest: pathlib.Path, fixture_manifest: pathlib.Path) -> in
         base.append(f"smear/{other_twin}")
     legs.append(("EQ-POS", f"{member}/{feature}",
                  ",".join(base + [f"smear/{twin}", f"{member}/{feature}"])))
-    # A pair whose presence features already imply its twin cannot be put into disagreement, so
-    # there is no graph to build. Recorded rather than skipped in silence.
+    # A pair whose base already implies its twin cannot be put into disagreement, so there is no
+    # graph to build: a twin among the presence features, or `std`, which every base carries.
+    # Recorded rather than skipped in silence.
     if twin in PRESENCE[member] or twin == "std":
       legs.append(("EQ-LEAK-NA", f"{member}/{feature}", ",".join(base)))
+    # `smear/std` implies `smear/alloc` as well, so an `alloc` pair leaks on the base without it:
+    # the presence features alone, the one graph where the member has `alloc` and `smear` does not.
+    elif twin == "alloc":
+      leak_base = [f for f in base if f != "smear/std"]
+      legs.append(("EQ-LEAK", f"{member}/{feature}",
+                   ",".join(leak_base + [f"{member}/{feature}"])))
     else:
       legs.append(("EQ-LEAK", f"{member}/{feature}",
                    ",".join(base + [f"{member}/{feature}"])))

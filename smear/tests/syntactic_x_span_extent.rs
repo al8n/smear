@@ -1,4 +1,4 @@
-#![cfg(all(feature = "graphqlx", feature = "parser"))]
+#![cfg(all(feature = "alloc", feature = "graphqlx", feature = "parser"))]
 
 //! The syntactic span-extent gate for GraphQLx — the twin of `syntactic_span_extent.rs`.
 //!

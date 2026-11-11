@@ -32,18 +32,18 @@
 //!
 //! # Why `smear` itself is not built for the target
 //!
-//! It cannot be. `smear-parser`'s `graphql::ast` offers an `Arc`-backed spelling of recursive list
-//! types (`ArcType`), which needs `alloc::sync` and therefore native atomics, and the crate's
-//! `memspan` dependency is pulled in with `std`. The claim under test was never that the parser
-//! reaches an embedded core — it is that the *schema* does, because a build-once, read-many value
-//! is shared as `&Schema` and lets the caller pick the pointer: `alloc::sync::Arc` where there
-//! are atomics, `portable_atomic_util::Arc` where there are not.
+//! It cannot be once the parser's AST is in it. `smear-parser`'s `graphql::ast` offers an
+//! `Arc`-backed spelling of recursive list types (`ArcType`), which needs `alloc::sync` and
+//! therefore native atomics. The claim under test was never that the parser reaches an embedded
+//! core — it is that the *schema* does, because a build-once, read-many value is shared as
+//! `&Schema` and lets the caller pick the pointer: `alloc::sync::Arc` where there are atomics,
+//! `portable_atomic_util::Arc` where there are not.
 
 #![no_std]
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-// The same aliasing `smear` uses when its `std` feature is off, which is what lets the included
+// The same aliasing `smear` uses with `alloc` on and `std` off, which is what lets the included
 // files spell their allocations `std::boxed::Box` in both crates.
 extern crate alloc as std;
 

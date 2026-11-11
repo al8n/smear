@@ -31,10 +31,10 @@ readme = "README.md"
 # names this crate.
 default = ["std"]
 
-# Flips the crate attribute and nothing else at this tier: the representation is `core` + `alloc`
-# in both configurations, which `cargo check -p smear-schema --no-default-features` in CI is what
-# says.
-std = ["tokora/std", "smear-parser?/std"]
+# `alloc` is the reader tier: the representation is `core` + `alloc`, and without it this crate is
+# `diagnostic` and `builtin` alone. `std` flips the crate attribute and nothing else at that tier.
+alloc = ["tokora/alloc", "smear-parser?/alloc"]
+std = ["alloc", "tokora/std", "smear-parser?/std"]
 
 # Draft §3 "Type Validation" and the SDL door: `Schema::build`, `SchemaBuilder`, `SchemaError` and
 # the literal-shape table. This is the edge that pulls `smear-parser`, because the builder consumes

@@ -46,7 +46,7 @@
 
 // The same gate every other validator test carries: `smear::validator` does not exist in the
 // crate's API surface with the feature off.
-#![cfg(feature = "validator")]
+#![cfg(all(feature = "alloc", feature = "validator"))]
 #![allow(missing_docs)]
 
 // The allocation instrument, for the two questions a unit count cannot answer: whether the
