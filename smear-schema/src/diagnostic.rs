@@ -12,7 +12,8 @@
 //!
 //! - **Codes** are `smear::<family>::<rule>`: `smear::syntax::unterminated-string`,
 //!   `smear::schema::duplicate-type-name`, `smear::validation::field-selection-merging`,
-//!   `smear::introspection::malformed-json`. One namespace spans the four families, so a renderer
+//!   `smear::introspection::malformed-json`, and the GraphQLx analyzer's
+//!   `smear::graphqlx::missing-dependency`. One namespace spans the five families, so a renderer
 //!   holding all of them never needs to know which enum a code came from. The syntax family's
 //!   kinds are `smear-lexer`'s `SyntaxErrorKind`, whose lexer and parser errors implement the
 //!   contract straight from tokora.

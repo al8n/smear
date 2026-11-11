@@ -2,8 +2,16 @@
 # pinned here so that a RENAME — the one change no compiler notices and every consumer
 # feels — has to be an edit to this file.
 #
-# Bless with `UPDATE_GOLDEN=1 cargo test -p smear --features validator,introspection \
-# --test diagnostic_codes`, which rewrites this and then fails.
+# Bless with `UPDATE_GOLDEN=1 cargo test -p smear --features \
+# validator,introspection,analysis --test diagnostic_codes`, which rewrites this and then
+# fails.
+DiagnosticKind::DuplicateFilePath = smear::graphqlx::duplicate-file-path
+DiagnosticKind::DuplicatePackageName = smear::graphqlx::duplicate-package-name
+DiagnosticKind::InvalidFilePath = smear::graphqlx::invalid-file-path
+DiagnosticKind::InvalidPackageName = smear::graphqlx::invalid-package-name
+DiagnosticKind::MissingDependency = smear::graphqlx::missing-dependency
+DiagnosticKind::ReservedPackageName = smear::graphqlx::reserved-package-name
+DiagnosticKind::ResourceLimit = smear::graphqlx::resource-limit
 ResponseErrorKind::DoubleNonNull = smear::introspection::double-non-null
 ResponseErrorKind::InvalidEnumValue = smear::introspection::invalid-enum-value
 ResponseErrorKind::InvalidMetaType = smear::introspection::invalid-meta-type
