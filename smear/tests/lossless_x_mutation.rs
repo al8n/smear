@@ -609,13 +609,13 @@ const TRIED: &[((&str, &str), usize)] = &[
 const TRIED_TOTAL: usize = 97_730;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 86_732;
+const UNFAITHFUL: usize = 86_639;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 8303;
+const EQUAL: usize = 8452;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 2374;
+const BOTH_REFUSE: usize = 2318;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
 const LENIENT_EQUAL: usize = 253;
@@ -873,6 +873,9 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
   );
   for ((door, op), count) in &tally.tried {
     println!("TRIED {door} {op} {count}");
+  }
+  for (deleted, count) in &tally.strict_deletions {
+    println!("STRICT {deleted} {count}");
   }
 
   let mut classes: BTreeMap<String, usize> = BTreeMap::new();
