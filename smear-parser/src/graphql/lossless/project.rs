@@ -483,9 +483,10 @@ use crate::{
 
 // Spelled out rather than folded into the group above, so `tests/lossless_isolation.rs`'s source
 // census — which reads `crate::…` prefixes out of the text — can see the edge. These are the
-// **shared, dialect-free** AST carriers: the undescribed cores three `Described<…>` aliases wrap,
-// and the six `…Data` enums an extension's alternatives are encoded in. Neither has a spelling
-// under `graphql::ast`, and a projection has to construct both.
+// **dialect-free** AST carriers: the undescribed cores three `Described<…>` aliases wrap, and the
+// six `…Data` enums an extension's alternatives are encoded in, of which the union, enum and input
+// object ones are GraphQL's alone and the other three are shared with GraphQLx. Neither has a
+// spelling under `graphql::ast`, and a projection has to construct both.
 use crate::type_system::{
   ArgumentsDefinition, DirectiveDefinition, DirectiveLocations, EnumTypeExtensionData,
   EnumValueDefinition, FieldDefinition, InputObjectTypeExtensionData, InputValueDefinition,

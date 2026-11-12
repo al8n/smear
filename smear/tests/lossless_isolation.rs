@@ -222,9 +222,10 @@ fn the_two_lossless_layers_do_not_reference_each_other() {
 /// The narrow reason they are needed at all: some carriers a projection constructs have no
 /// spelling under the dialect's own `ast` module. On the GraphQL side that is three `Described<…>`
 /// aliases and six `…Data` extension enums, all under `crate::type_system`. GraphQLx adds five
-/// described cores and the same six enums, and one more root: `crate::generic::Constrained` is the
-/// carrier its six `where` sites hold their clause with, and it has no `graphqlx::ast` name of its
-/// own, and `crate::ty` holds the three carriers this dialect's `Type` stands behind a `Nest` —
+/// described cores and three of those six enums — the object, interface and schema ones, its other
+/// four being its own under `graphqlx::ast` — and one more root: `crate::generic::Constrained` is
+/// the carrier its six `where` sites hold their clause with, and it has no `graphqlx::ast` name of
+/// its own, and `crate::ty` holds the three carriers this dialect's `Type` stands behind a `Nest` —
 /// the enum names its pointees inline rather than aliasing them, so the projection has to as well.
 /// Every other AST type either projection builds is reached through its dialect's `ast` module,
 /// which is why this is three roots and not twenty.

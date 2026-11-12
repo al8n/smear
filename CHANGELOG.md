@@ -476,7 +476,7 @@ All notable changes to Smear are documented in this file.
   In the AST the eight `graphqlx::ast` aliases keep their names and stand for
   carriers of GraphQLx's own, each with an `implements` slot after the name and
   an `implements()` accessor, so each `new` takes the clause after the name;
-  the shared carriers the GraphQL dialect binds do not change. The four
+  the carriers the GraphQL dialect binds do not change. The four
   extensions' payloads are GraphQLx's own too, under the names they had:
   `UnionTypeExtensionData`, `EnumTypeExtensionData` and
   `InputObjectTypeExtensionData` gain an `Implements(_)` variant, their

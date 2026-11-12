@@ -1,11 +1,11 @@
 //! The four type kinds GraphQLx lets implement interfaces where GraphQL does not — scalars, enums,
 //! unions and input objects — as definitions and as extensions.
 //!
-//! Each carrier is the shared type-system carrier of the same name with an `implements` slot after
+//! Each carrier is GraphQL's type-system carrier of the same name with an `implements` slot after
 //! its name, and a scalar definition carries a `where` clause after its directives as well. GraphQL
-//! gives none of these kinds an `implements` clause, so the shared carriers keep their shape and the
-//! GraphQLx aliases bind these instead. An extension's payload names each
-//! nonempty form the grammar allows, as the object extension's does: interfaces alone, or
+//! gives none of these kinds an `implements` clause, so its carriers keep their shape, compiled
+//! only with `graphql`, and the GraphQLx aliases bind these instead. An extension's payload names
+//! each nonempty form the grammar allows, as the object extension's does: interfaces alone, or
 //! directives or the kind's own body with optional interfaces before them.
 
 use derive_more::IsVariant;

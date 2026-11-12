@@ -221,12 +221,12 @@
 //!   own name, description and span and puts its items where the walk reaches them. Bounded, and
 //!   every item in a module shares the module's `S` and `Span`, so the bound reaches each of them.
 //!   **This tree has a residual the other four do not**, and it is stated rather than closed: the
-//!   definitions and extensions an item holds are carriers shared with GraphQL, whose constructors
-//!   take no bound, so a caller who builds a `Nested` of items directly, without a module, can seat a
-//!   `Span` of its own in them, and the `Ty` parameter is bounded nowhere — the default is the type
-//!   tree's own node, which no bound can tell from a payload. A caller who instantiates either with
-//!   a type that owns a module builds a recursion this release does not see, which is
-//!   `al8n/smear#176`'s shape at a door this tree does not own.
+//!   definitions and extensions an item holds are carriers, shared with GraphQL or GraphQLx's own,
+//!   whose constructors take no bound, so a caller who builds a `Nested` of items directly, without
+//!   a module, can seat a `Span` of its own in them, and the `Ty` parameter is bounded nowhere —
+//!   the default is the type tree's own node, which no bound can tell from a payload. A caller who
+//!   instantiates either with a type that owns a module builds a recursion this release does not
+//!   see, which is `al8n/smear#176`'s shape at a door this tree does not own.
 //!
 //! Each list is closed on the same evidence as `Name`'s four: private fields, and only `AsSpan`,
 //! `IntoSpan` and `IntoComponents` — which read out and never put back. No `From`, no
