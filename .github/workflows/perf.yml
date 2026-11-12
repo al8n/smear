@@ -136,12 +136,15 @@ jobs:
     - name: Cache cargo registry and both sides' target directories
       uses: actions/cache@v6
       with:
-        # The two target directories are worth caching and the reason is specific to this gate:
-        # `ci/perf/run.sh` materialises each side with `git archive`, which writes fresh mtimes, so
-        # cargo re-fingerprints and rebuilds every WORKSPACE MEMBER on every run no matter what is
-        # cached. What it does not rebuild is the dependency graph — criterion, apollo-compiler,
-        # the three comparison parsers, rowan twice — whose sources come from the registry with
-        # stable mtimes. That is the large half and it is what this restores.
+        # The two target directories are worth caching for the dependency graph alone —
+        # criterion, apollo-compiler, the three comparison parsers, rowan twice — which cargo
+        # fingerprints by package version, not by file times. That is the large half of every
+        # build and it is what this restores. It does not spare the WORKSPACE MEMBERS, and must not:
+        # `ci/perf/run.sh` extracts each side with `tar -m`, so every file is newer than anything
+        # restored here and cargo compiles every member on both sides on every run. `git archive`
+        # alone stamps a commit's files with the COMMIT's time, and a cache saved after that by a
+        # build of another revision with the same manifests would then pass for this side's build;
+        # the script also refuses a side whose own packages did not compile.
         path: |
           ~/.cargo/registry
           ~/.cargo/git

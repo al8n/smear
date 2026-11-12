@@ -62,6 +62,11 @@
 # not compile against the merge-base's library. Each is a statement about the two revisions and the
 # instrument, not a performance finding.
 #
+# A side must also compile its own packages in the run that measures it, because a side that cargo
+# takes for fresh is measured from whatever its target directory held before, so `sides.py
+# compiled` stops the run the same way, with nothing measured, when any of a side's own artifacts or
+# either bench target comes back fresh.
+#
 # ── THE TWO GATES, AND WHY BOTH ─────────────────────────────────────────────────────────────
 #
 # **Peak allocation is the sharp one and the one this repository needs.** Every allocation defect
@@ -328,8 +333,16 @@ materialise() {
   # `git archive` rather than `git worktree add`: it materialises a tree with no `.git`, no
   # `target/` and no bookkeeping to clean up, and it takes the tree from the OBJECT rather than
   # from the working directory — so an uncommitted edit cannot leak into a side.
-  git archive "$head_sha" | tar -x -C "$PERF_WORK/head"
-  git archive "$base_sha" | tar -x -C "$PERF_WORK/base"
+  #
+  # `tar -m`, so every file carries the time it was extracted. The archive of a COMMIT stamps each
+  # file with the commit's time, and cargo takes a path package for fresh when its artifacts are
+  # newer than its sources: a cache restored from a later build of another revision with the same
+  # manifests would stand in for this side unseen. With `-m` the sources are newer than anything
+  # cached, so both sides' members are compiled on every run, as in every sound run so far, and only
+  # the registry dependencies come from the cache. GNU tar (`--touch`) and bsdtar both read `-m` as
+  # "do not extract the modification time".
+  git archive "$head_sha" | tar -x -m -C "$PERF_WORK/head"
+  git archive "$base_sha" | tar -x -m -C "$PERF_WORK/base"
 
   # What each side's manifests declare, as cargo reads them. `--no-deps` resolves nothing.
   for side in head base; do
@@ -463,6 +476,20 @@ build_side() {
          > "$PERF_WORK/$1.build.json" )
 }
 
+# `compiled head|base`, after that side's build: the run goes on only if the build compiled the
+# side's own packages and both bench targets (see the header). `sides.py compiled` reads the
+# messages `build_side` saved and names every artifact cargo took for fresh.
+compiled() {
+  local status=0
+  python3 "$perf_dir/sides.py" compiled "$1" "$PERF_WORK/$1" "$PERF_WORK/$1.build.json" \
+    "${perf_targets[@]}" || status=$?
+  if [ "$status" -eq 3 ]; then
+    stop "the $1 side did not compile its own packages, so nothing was measured"
+  elif [ "$status" -ne 0 ]; then
+    stop "the $1 side's build messages could not be read"
+  fi
+}
+
 # Sourced rather than run — by a harness that wants the two trees, the profile check and the locks
 # without a build — the file stops here, having defined its stages and run none of them.
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then
@@ -511,6 +538,7 @@ build_side head || {
   echo "::error::\`PERF_LOCK\` pins it."
   exit 1
 }
+compiled head
 
 outcome="NOT MEASURED: the base side did not build"
 outcome="$outcome, so the two revisions are not comparable by this instrument"
@@ -523,6 +551,7 @@ build_side base || {
   echo "::error::instrument, not here."
   exit 1
 }
+compiled base
 
 python3 "$perf_dir/sides.py" features \
   "$PERF_WORK/base" "$PERF_WORK/base.build.json" "$PERF_WORK/head" "$PERF_WORK/head.build.json"
