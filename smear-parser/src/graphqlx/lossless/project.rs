@@ -5286,12 +5286,12 @@ fn extension_parts<'src>(node: Node<'_>, source: &'src str) -> Out<ExtensionPart
   cursor.keyword(keyword, spelling)?;
   let name_node = cursor.node(K::ExtensionName, "an extended type's name")?;
 
-  let mut implements_node = None;
   let mut where_node = None;
   let mut fields_node = None;
   let mut input_fields_node = None;
   let mut members_node = None;
   let mut values_node = None;
+  let implements_node;
   let directives_node;
   match node.kind() {
     // `extend scalar ExtensionName ImplementInterfaces? Directives[Const]?`
