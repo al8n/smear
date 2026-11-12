@@ -130,8 +130,9 @@ impl Primitive {
   }
 
   /// Its place among `core`'s materialised definitions: `bool`, `f32`, `f64`, then the signed
-  /// widths ascending, then the unsigned widths ascending.
-  pub(super) const fn rank(self) -> (u8, u32) {
+  /// widths ascending, then the unsigned widths ascending. Two primitives share it only when they
+  /// are one.
+  pub(crate) const fn rank(self) -> (u8, u32) {
     match self {
       Self::Bool => (0, 0),
       Self::F32 => (1, 0),
@@ -298,7 +299,8 @@ impl<'a> Def<'a> {
   }
 
   /// Where its name is written in its definition. A primitive `core` materialises has no position
-  /// of its own: it answers the whole of `core`'s package source.
+  /// of its own: it answers the whole of `core`'s package source. A GraphQL built-in the root
+  /// package replaces answers where the root package names it.
   #[inline]
   pub fn location(&self) -> Location {
     self.row().location
@@ -415,9 +417,10 @@ impl<'a> Def<'a> {
   }
 
   /// The tier it requires: the least of `core`, `alloc` and `std` that holds everything it uses.
+  /// A definition of `core`, `alloc` or `std` requires its package's tier, whatever it names.
   //
-  // The tier phase computes it. Until that phase lands, every definition answers `Core`: the least
-  // tier, and so a lower bound of the tier the phase will compute.
+  // The tier phase computes it for every other definition. Until that phase lands, each of those
+  // answers `Core`: the least tier, and so a lower bound of the tier the phase will compute.
   #[inline]
   pub fn tier(&self) -> Tier {
     self.row().tier

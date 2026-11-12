@@ -7,9 +7,11 @@
 
 pub use super::model::ModelBuilder;
 
-use tokora::diagnostic::Code;
+use tokora::diagnostic::{Code, Location};
 
-use super::{Visitor, analysis::Analysis, limits::Limits, model::Model, rules::Rules};
+use super::{
+  Visitor, analysis::Analysis, id::ModuleId, limits::Limits, model::Model, rules::Rules,
+};
 
 /// An analysis of the finished `model`: what [`conclude`] answers when no rule runs.
 pub fn analysis_of(model: Model, limits: &Limits) -> Analysis {
@@ -33,3 +35,10 @@ pub fn conclude<V: Visitor + ?Sized>(model: Model, limits: &Limits, rules: &mut 
 /// smear's own rules, each by its type's name with the codes it reports: the table the liveness
 /// test reads.
 pub const RULES: &[(&str, &[Code])] = Rules::TABLE;
+
+/// The extent of the inline `mod` that declares `module`, from its description, or its `mod`, to
+/// its `}`: what the model keeps crate-private until extents are public, for the tests that check
+/// what the module tree records.
+pub fn module_extent(model: &Model, module: ModuleId) -> Option<Location> {
+  model.module(module).extent()
+}

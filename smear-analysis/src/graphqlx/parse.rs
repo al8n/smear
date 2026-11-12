@@ -4,6 +4,11 @@
 //! The caller's text type is gone before this module is reached: a file is a `View`, text or
 //! bytes. A byte text that is UTF-8 is parsed as text, so only two parsers are compiled, one over
 //! `str` and one over `[u8]`, and the second only ever reads bytes that are not UTF-8.
+//!
+//! A file that holds nothing but what the lexer skips, white space, commas, byte order marks and
+//! comments, is accepted here as a document with no item, before the parser sees it: the
+//! type-system document production wants one item at least, and a directory may hold a file that
+//! only documents it.
 
 use std::{
   string::{String, ToString},
@@ -17,7 +22,7 @@ use smear_parser::graphqlx::{
   syntactic::{GraphqlxLexer, type_system_document},
 };
 use tokora::{
-  Parse as _, Parser,
+  Parse as _, Parser, SimpleSpan,
   diagnostic::{Diagnose, DiagnoseExt, Location},
 };
 
@@ -29,14 +34,11 @@ use super::{
   text::View,
 };
 
-/// One file's document: the hand-over from parsing to lowering.
+/// One file's document: the hand-over from parsing to the phases that read documents.
 ///
-/// It borrows the caller's text, so it lives inside one analysis and no longer. Lowering reads it
-/// and copies into the model every spelling the model keeps; once the model is built, nothing of
-/// the caller's text type remains.
-// Read by the lowering that builds the model's modules and definitions; until it lands, nothing
-// reads a document, and `dead_code` would say so of each variant's field.
-#[allow(dead_code)]
+/// It borrows the caller's text, so it lives inside one analysis and no longer. The phases read it
+/// and copy into the model every spelling the model keeps; once the model is built, nothing of the
+/// caller's text type remains.
 pub(crate) enum Parsed<'a> {
   /// A text, or a byte text that is UTF-8.
   Text(TypeSystemDocument<&'a str>),
@@ -53,10 +55,16 @@ pub(crate) struct Documents<'a> {
   entries: Vec<Option<Parsed<'a>>>,
 }
 
-impl Documents<'_> {
+impl<'a> Documents<'a> {
   /// How many sources the documents cover: every source of the analysis.
   pub(crate) fn len(&self) -> usize {
     self.entries.len()
+  }
+
+  /// The document of `source`: `None` for a package source, a file the parser refused, and a
+  /// supplied file past the size limit.
+  pub(crate) fn get(&self, source: SourceId) -> Option<&Parsed<'a>> {
+    self.entries.get(source.get() as usize)?.as_ref()
   }
 }
 
@@ -100,12 +108,19 @@ fn parse<'a>(text: View<'a>, source: SourceId, reporter: &mut Reporter) -> Optio
   }
 }
 
-/// The type-system document `text` holds, or `None` once its syntax errors are reported.
+/// The type-system document `text` holds, or `None` once its syntax errors are reported. A blank
+/// text holds a document with no item.
 fn parse_text<'a>(
   text: &'a str,
   source: SourceId,
   reporter: &mut Reporter,
 ) -> Option<TypeSystemDocument<&'a str>> {
+  if blank(text.as_bytes()) {
+    return Some(TypeSystemDocument::<&'a str>::new(
+      SimpleSpan::new(0, text.len()),
+      Vec::new(),
+    ));
+  }
   let parsed: Result<TypeSystemDocument<&'a str>, GraphqlxErrors<&'a str>> =
     Parser::with_parser::<
       '_,
@@ -150,6 +165,30 @@ fn parse_bytes<'a>(
         reporter.report(syntax(error, source));
       }
       None
+    }
+  }
+}
+
+/// Whether `text` holds nothing but what the lexer skips: spaces, tabs, line terminators, commas,
+/// byte order marks, and comments, each from its `#` to the end of its line.
+///
+/// It accepts only those bytes, so a text it calls blank is one the lexer reads as no token at
+/// all; anything else, whatever it is, goes to the parser.
+fn blank(text: &[u8]) -> bool {
+  let mut rest = text;
+  loop {
+    match rest {
+      [] => return true,
+      [b' ' | b'\t' | b'\r' | b'\n' | b',', tail @ ..] => rest = tail,
+      [0xEF, 0xBB, 0xBF, tail @ ..] => rest = tail,
+      [b'#', tail @ ..] => {
+        let end = tail
+          .iter()
+          .position(|byte: &u8| *byte == b'\n' || *byte == b'\r')
+          .unwrap_or(tail.len());
+        rest = &tail[end..];
+      }
+      _ => return false,
     }
   }
 }

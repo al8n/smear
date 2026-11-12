@@ -140,8 +140,10 @@ pub(super) struct ModuleRow {
   /// Its path from its package's root module, in the model's path pool: empty for a root module.
   pub(super) path: Run,
   pub(super) kind: ModuleKind,
-  /// Where an inline `mod` declares it.
+  /// Where the inline `mod` that declares it names it: the first in source order when two do.
   pub(super) location: Option<Location>,
+  /// That declaration's extent: from its description, or its `mod`, to its `}`.
+  pub(super) extent: Option<Location>,
   pub(super) description: Option<DescriptionRow>,
   /// Its definitions: derived when the model is finished.
   pub(super) defs: IdRange<DefId>,

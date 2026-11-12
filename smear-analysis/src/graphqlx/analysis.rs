@@ -4,12 +4,12 @@ use core::cmp::Ordering;
 use std::{string::String, vec::Vec};
 
 use super::{
-  check,
+  check, collect, declare,
   diagnostic::{Diagnostics, Reporter},
   id::PackageId,
   limits::Limits,
   lower,
-  model::{Model, ModelBuilder, ModuleKind, PackageKind},
+  model::{Model, ModelBuilder, PackageKind},
   package::Package,
   parse,
   rules::Rules,
@@ -98,6 +98,25 @@ impl Analysis {
 /// - Parses every file with the GraphQLx syntactic parser. A file's syntax errors are reported at
 ///   that file, with the parser's own code, message, labels and help, and the other files are
 ///   parsed all the same.
+/// - Builds each package's module tree: its root module; in the
+///   [`Directory`](super::Layout::Directory) layout a module for every directory that holds a file
+///   and for every directory on the way to one, each directory's files sharing its module, and in
+///   the [`Flat`](super::Layout::Flat) layout every file in the root module; and a module for every
+///   inline `mod`, inside the module it is written in. A directory whose name is not a Name, a
+///   directory or a `mod` nested deeper than [`Limits::max_module_depth`], and a `mod` of a module
+///   the package already has are reported. Every package's root module is held; the first module a
+///   supplied package's directory or `mod` would add past [`Limits::max_modules`] is reported, and
+///   no module is added after it.
+/// - Collects every module's declarations and numbers them: each type and directive definition a
+///   placed file declares is a definition of the model, the built-in packages' included, and so is
+///   every intrinsic primitive the packages write where they may have it, which `core` holds first
+///   in its root module. A file holding only white space, commas and comments declares nothing,
+///   and is no syntax error. In the root package's root module, a scalar named as a GraphQL scalar
+///   (`Int`, `Float`, `String`, `Boolean`, `ID`) and a directive named as a GraphQL specified
+///   directive replace the built-in of that name, which keeps its id. Two definitions of one name
+///   in one namespace of one module, a supplied definition named with `__`, and a type named as a
+///   child module of its module are reported. The first definition a supplied package would add
+///   past [`Limits::max_definitions`] is reported, and nothing after it is collected.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///
@@ -140,17 +159,19 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
 
   let dependencies = check::package_set(&packages, &sources, &mut reporter);
   let within = check::source_bytes(&packages, &sources, limits, &mut reporter);
-  let model = model_of(&packages, &sources, dependencies);
-
   let documents = parse::files(&packages, &sources, within, &mut reporter);
   debug_assert_eq!(
     documents.len(),
     sources.len() as usize,
     "one document entry per source"
   );
-  lower::lower(&documents);
 
-  conclude(model, sources, reporter, &mut Rules::default())
+  let mut builder = builder_of(&packages, &sources, dependencies);
+  let collected = collect::items(&packages, &sources, &documents, limits, &mut reporter);
+  let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
+  lower::lower(&declarations);
+
+  conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }
 
 /// What every analysis ends with, once its phases have written `model` and reported into
@@ -177,13 +198,13 @@ fn conclude<V: Visitor + ?Sized>(
   }
 }
 
-/// The model of `packages`, which are in id order and numbered by `sources`, with `dependencies`
-/// resolved, one list per package: every package, and each package's root module.
-fn model_of(
+/// A model builder holding every package of `packages`, which are in id order and numbered by
+/// `sources`, with its resolved `dependencies`, one list per package, and its integer provider.
+fn builder_of(
   packages: &[PackageView<'_>],
   sources: &SourceMap,
   dependencies: Vec<Vec<PackageId>>,
-) -> Model {
+) -> ModelBuilder {
   let mut builder = ModelBuilder::default();
   for ((index, view), resolved) in packages.iter().enumerate().zip(dependencies) {
     let kind = match index.cmp(&ROOT) {
@@ -205,7 +226,6 @@ fn model_of(
     if let Some(integers) = view.integers {
       builder.set_integers(package, integers.clone());
     }
-    builder.push_module(package, None, None, ModuleKind::Root);
   }
-  builder.finish()
+  builder
 }

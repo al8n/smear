@@ -15,7 +15,7 @@ use smear::{
     Package, PackageId, PackageInfo, PackageKind, Path, PathRoot, Primitive, Resolution, Root,
     RootOperation, Schema, SourceId, Sym, Tier, Ty, TyId, TyKind, TypeBound, TypeExpr, TypeExprId,
     TypeExprKind, TypeParam, TypeParams, Value, ValueId, ValueKind, analyze,
-    test_support::ModelBuilder,
+    test_support::{self, ModelBuilder},
   },
   diagnostic::Location,
   lexer::tokora::SimpleSpan,
@@ -323,7 +323,7 @@ fn fixture() -> Model {
     VISION
   );
   assert_eq!(b.push_module(GEO, None, None, ModuleKind::Root), GEO_ROOT);
-  b.set_module_location(VISION, at(APP_MEDIA, 100, 106));
+  b.set_module_declaration(VISION, at(APP_MEDIA, 100, 106), at(APP_MEDIA, 90, 140));
   b.set_module_description(VISION, "Vision.", at(APP_MEDIA, 90, 99));
 
   // Definitions, by module, then source, then position: `core`'s materialised `i32` first.
@@ -1222,9 +1222,14 @@ fn analyze_gives_every_package_its_root_module() {
     assert!(module.path().is_empty());
     assert_eq!(module.parent(), None);
     assert!(module.children().is_empty());
-    assert!(module.defs().is_empty());
+    // The built-in packages' root modules hold the built-in library; the root's file-less package
+    // holds nothing.
+    assert_eq!(
+      module.defs().is_empty(),
+      package == model.root_package(),
+      "{module:?}"
+    );
   }
-  assert!(model.defs().is_empty());
 }
 
 #[test]
@@ -1274,6 +1279,11 @@ fn modules_answer_their_package_path_parent_children_kind_location_description_a
   assert!(vision.children().is_empty());
   assert_eq!(vision.kind(), ModuleKind::Inline);
   assert_eq!(vision.location(), Some(at(APP_MEDIA, 100, 106)));
+  assert_eq!(
+    test_support::module_extent(&model, VISION),
+    Some(at(APP_MEDIA, 90, 140))
+  );
+  assert_eq!(test_support::module_extent(&model, MEDIA), None);
   let description = vision.description().expect("the inline `mod` is described");
   assert_eq!(description.text(), "Vision.");
   assert_eq!(description.location(), at(APP_MEDIA, 90, 99));
@@ -2038,43 +2048,16 @@ fn the_schema_answers_its_roots_applications_description_and_contributions() {
 
 #[test]
 fn the_builtins_are_found_by_name_in_the_built_in_packages() {
+  // `core` here defines three of them, and `analysis_modules_builtins.rs` asks an analysis's model,
+  // which has every one, for the rest.
   let model = fixture();
   let builtins: Builtins<'_> = model.builtins();
-  assert_eq!(builtins.deprecated(), Some(DEPRECATED));
-  assert_eq!(builtins.string(), Some(STRING));
-  assert_eq!(builtins.map_key(), Some(MAP_KEY));
-  // `core` here defines none of the others.
-  for missing in [
-    builtins.marker(),
-    builtins.set(),
-    builtins.map(),
-    builtins.r#extern(),
-    builtins.repr(),
-    builtins.heap(),
-    builtins.specified_by(),
-    builtins.one_of(),
-    builtins.skip(),
-    builtins.include(),
-    builtins.type_ref(),
-    builtins.non_zero(),
-    builtins.bytes(),
-    builtins.id(),
-  ] {
-    assert_eq!(missing, None);
-  }
+  assert_eq!(builtins.deprecated(), DEPRECATED);
+  assert_eq!(builtins.string(), STRING);
+  assert_eq!(builtins.map_key(), MAP_KEY);
   assert_eq!(builtins.primitive(Primitive::signed(32)), Some(I32));
   assert_eq!(builtins.primitive(Primitive::unsigned(32)), None);
   assert_eq!(builtins.primitive(Primitive::Bool), None);
-
-  // A model whose built-in packages define nothing has no built-in at all.
-  let analysis = analyze(
-    &Package::<&str>::new("app", Layout::Flat, Tier::Std),
-    &[],
-    &Limits::new(),
-  );
-  let empty: Builtins<'_> = analysis.model().builtins();
-  assert_eq!(empty.deprecated(), None);
-  assert_eq!(empty.primitive(Primitive::signed(32)), None);
 }
 
 #[test]

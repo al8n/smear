@@ -27,6 +27,25 @@ pub enum DiagnosticKind {
   /// A package declares a dependency that is not supplied.
   MissingDependency,
 
+  // -- The module tree ---------------------------------------------------------------------------
+  /// A directory of a `Directory` package is not a GraphQLx Name, so it cannot be a module.
+  /// Reported once per directory, at the whole of its package's package source; the files under
+  /// it are parsed, and what they declare is not collected.
+  InvalidDirectoryName,
+  /// An inline `mod` declares a module its package already has: through a directory, or through
+  /// an earlier `mod`. Reported at the later declaration, with a label at the first; the two are
+  /// one module.
+  ModuleDefinedTwice,
+  /// A module declares a type with the name of one of its child modules, so that one name in its
+  /// scope would be two things. Reported at the type, with a label at the child module.
+  ModuleTypeCollision,
+
+  // -- Items -------------------------------------------------------------------------------------
+  /// A file holds an item, or a part of one, of a kind this analyzer does not know: a parser newer
+  /// than the analyzer read the file. What the item declares, or the part names, is not in the
+  /// model. Reported once per file, at the first such item.
+  UnknownItem,
+
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
   ResourceLimit,
@@ -41,6 +60,10 @@ impl DiagnosticKind {
     Self::ReservedPackageName,
     Self::DuplicatePackageName,
     Self::MissingDependency,
+    Self::InvalidDirectoryName,
+    Self::ModuleDefinedTwice,
+    Self::ModuleTypeCollision,
+    Self::UnknownItem,
     Self::ResourceLimit,
   ];
 
@@ -54,6 +77,10 @@ impl DiagnosticKind {
       Self::ReservedPackageName => Code::new("smear::graphqlx::reserved-package-name"),
       Self::DuplicatePackageName => Code::new("smear::graphqlx::duplicate-package-name"),
       Self::MissingDependency => Code::new("smear::graphqlx::missing-dependency"),
+      Self::InvalidDirectoryName => Code::new("smear::graphqlx::invalid-directory-name"),
+      Self::ModuleDefinedTwice => Code::new("smear::graphqlx::module-defined-twice"),
+      Self::ModuleTypeCollision => Code::new("smear::graphqlx::module-type-collision"),
+      Self::UnknownItem => Code::new("smear::graphqlx::unknown-item"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -67,6 +94,10 @@ impl DiagnosticKind {
       Self::ReservedPackageName => "reserved package name",
       Self::DuplicatePackageName => "duplicate package name",
       Self::MissingDependency => "dependency not supplied",
+      Self::InvalidDirectoryName => "invalid directory name",
+      Self::ModuleDefinedTwice => "module defined twice",
+      Self::ModuleTypeCollision => "module and type of one name",
+      Self::UnknownItem => "item of an unknown kind",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -81,7 +112,33 @@ impl DiagnosticKind {
       | Self::ReservedPackageName
       | Self::DuplicatePackageName
       | Self::MissingDependency
+      | Self::InvalidDirectoryName
+      | Self::ModuleDefinedTwice
+      | Self::ModuleTypeCollision
+      | Self::UnknownItem
       | Self::ResourceLimit => Severity::Error,
     }
   }
+}
+
+/// The codes of GraphQL's own rules that the analysis reports under `smear-schema`'s codes, since
+/// the rule is the same rule in both dialects (K17).
+pub(crate) mod schema {
+  use tokora::diagnostic::Code;
+
+  /// Two definitions in one module give a type one name: `smear-schema`'s `DuplicateTypeName`.
+  pub(crate) const DUPLICATE_TYPE_NAME: Code = Code::new("smear::schema::duplicate-type-name");
+
+  /// Two definitions in one module give a directive one name: `smear-schema`'s
+  /// `DuplicateDirectiveDefinition`.
+  pub(crate) const DUPLICATE_DIRECTIVE_DEFINITION: Code =
+    Code::new("smear::schema::duplicate-directive-definition");
+
+  /// A supplied package's type name begins with `__`: `smear-schema`'s `ReservedTypeName`.
+  pub(crate) const RESERVED_TYPE_NAME: Code = Code::new("smear::schema::reserved-type-name");
+
+  /// A supplied package's directive name begins with `__`: `smear-schema`'s
+  /// `ReservedDirectiveName`.
+  pub(crate) const RESERVED_DIRECTIVE_NAME: Code =
+    Code::new("smear::schema::reserved-directive-name");
 }

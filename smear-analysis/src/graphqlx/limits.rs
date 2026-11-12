@@ -2,6 +2,8 @@
 
 /// See [`Limits::max_definitions`].
 const DEFAULT_DEFINITIONS: u32 = 1 << 20;
+/// See [`Limits::max_modules`].
+const DEFAULT_MODULES: u32 = 1 << 16;
 /// See [`Limits::max_module_depth`].
 const DEFAULT_MODULE_DEPTH: u32 = 64;
 /// See [`Limits::max_path_segments`].
@@ -24,14 +26,16 @@ const DEFAULT_NEAR_MISS_COMPARISONS: u32 = 1 << 20;
 /// The bounds one analysis runs under.
 ///
 /// A package set is untrusted input, and the analysis bounds every resource such input could
-/// otherwise grow without limit: the number of definitions, how deep modules, `use` trees and type
-/// arguments nest, how long a path is, how many rounds the glob fixpoint runs, how many
-/// instantiations it records, and how many bytes of source it reads. A bound that is passed is
+/// otherwise grow without limit: the number of definitions and of modules, how deep modules, `use`
+/// trees and type arguments nest, how long a path is, how many rounds the glob fixpoint runs, how
+/// many instantiations it records, and how many bytes of source it reads. A bound that is passed is
 /// reported as `smear::graphqlx::resource-limit`, never as a panic. Two bounds are not refusals:
 /// the diagnostic ceiling and the near-miss budget limit what the analysis says, not what it
 /// accepts.
 ///
-/// Every bound is a count, and `0` admits none of what it counts.
+/// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
+/// is always declared whole and every package has its root module: see
+/// [`Limits::max_definitions`] and [`Limits::max_modules`].
 ///
 /// # Building one
 ///
@@ -50,6 +54,7 @@ const DEFAULT_NEAR_MISS_COMPARISONS: u32 = 1 << 20;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Limits {
   max_definitions: u32,
+  max_modules: u32,
   max_module_depth: u32,
   max_path_segments: u32,
   max_use_depth: u32,
@@ -76,6 +81,7 @@ impl Limits {
   pub const fn new() -> Self {
     Self {
       max_definitions: DEFAULT_DEFINITIONS,
+      max_modules: DEFAULT_MODULES,
       max_module_depth: DEFAULT_MODULE_DEPTH,
       max_path_segments: DEFAULT_PATH_SEGMENTS,
       max_use_depth: DEFAULT_USE_DEPTH,
@@ -88,8 +94,16 @@ impl Limits {
     }
   }
 
-  /// How many definitions the model may hold, over every package: the types and directives the
-  /// files declare, and the primitives the analysis materializes for the widths they name.
+  /// How many definitions the model may hold, over every package. Every definition the model would
+  /// hold counts, the built-in library's own included: each type and directive a file declares, and
+  /// each primitive `core` makes for a width a package writes. A root package's definition that
+  /// replaces one of GraphQL's built-ins takes that built-in's definition and adds none, unless the
+  /// built-in is a primitive that no package writes, which it makes.
+  ///
+  /// The built-in library is always declared whole, so a limit below its own count admits no
+  /// supplied definition at all. The first definition a supplied package would add past the limit,
+  /// a type, a directive or a primitive it writes, is reported once, where it is named, and nothing
+  /// after it is collected: no item of the rest of its file, nor of any file after it.
   ///
   /// The default is 2^20. A hand-written schema declares thousands of definitions, not a million,
   /// and the bound is what stops a generated or hostile package set from growing the model's
@@ -99,8 +113,34 @@ impl Limits {
     self.max_definitions
   }
 
+  /// How many modules the model may hold, over every package. Every module the model would hold
+  /// counts: each package's root module, each directory module of a `Directory` package, and the
+  /// module of each inline `mod` that declares one its package does not have yet. A `mod` of a
+  /// module the package already has adds none.
+  ///
+  /// The built-in packages' modules and every package's root module are always held, so a limit
+  /// below their count admits no other module. The first module a supplied package's directory or
+  /// `mod` would add past the limit is reported once: a `mod` where it names its module, a directory
+  /// at its package's package source. No module is added after it: the files under a refused
+  /// directory are parsed but placed in no module, and nothing inside a refused `mod` is collected,
+  /// as past [`max_module_depth`](Self::max_module_depth). What sits in a module already held is
+  /// still collected.
+  ///
+  /// The default is 2^16. The model keeps each module's path, one name per segment, so this bound
+  /// and [`max_module_depth`](Self::max_module_depth) together bound the model's path table: it
+  /// holds at most their product of names.
+  #[inline]
+  pub const fn max_modules(&self) -> u32 {
+    self.max_modules
+  }
+
   /// How deep a module may sit below its package's root module, each directory and each inline
-  /// `mod` counting one level: the module of `media/vision.graphqlx` is two deep.
+  /// `mod` counting one level: the files of `media/vision/` are a module two deep, and a `mod`
+  /// written in one of them declares a module three deep.
+  ///
+  /// A directory deeper than this is reported once, at its package's package source, and the
+  /// files under it are parsed but place nothing in any module; a `mod` deeper than this is
+  /// reported where it names its module, and nothing inside it is collected.
   ///
   /// The default is 64. A source tree is rarely ten directories deep; the module tree is walked
   /// with an explicit stack, so the bound limits that stack's growth rather than protecting the
@@ -206,6 +246,14 @@ impl Limits {
   #[must_use]
   pub const fn with_max_definitions(mut self, max: u32) -> Self {
     self.max_definitions = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_modules`](Self::max_modules) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_modules(mut self, max: u32) -> Self {
+    self.max_modules = max;
     self
   }
 

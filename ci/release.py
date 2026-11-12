@@ -80,6 +80,7 @@ INTERNAL_EDGES = {
 }
 REQUIRED_WORKFLOWS = {
     "CI": ".github/workflows/ci.yml",
+    "Windows": ".github/workflows/windows.yml",
     "macOS": ".github/workflows/macos.yml",
     "Miri": ".github/workflows/miri.yml",
 }

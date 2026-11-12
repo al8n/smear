@@ -2,10 +2,11 @@ name: CI
 
 # ── THIS IS THE FAST LANE ───────────────────────────────────────────────────────────────────
 #
-# Every job here runs on `ubuntu-latest` or `windows-latest`. Nothing macOS-bound lives in this
-# file: the Miri matrices are in `.github/workflows/miri.yml` and the four ordinary macOS legs
-# are in `.github/workflows/macos.yml`, and those two headers carry the measurement that
-# separated them.
+# Every job here runs on `ubuntu-latest`. The four ordinary Windows legs are in
+# `.github/workflows/windows.yml`, so that Windows can be paused without pausing this lane, and
+# nothing macOS-bound lives here either: the Miri matrices are in `.github/workflows/miri.yml` and
+# the four ordinary macOS legs are in `.github/workflows/macos.yml`, and those two headers carry
+# the measurement that separated them.
 #
 # The short version: on 2026-08-06 `CI` had not concluded on any of the last four pull requests
 # — two of which merged anyway — while `loc` completed on the same refs, so it was never an
@@ -98,10 +99,10 @@ on:
       - 'docs/**.md'
       - '**.txt'
   workflow_dispatch:
-  # KEPT here and DROPPED from `macos.yml` and `miri.yml` — the one deliberate difference between
-  # the three files' trigger blocks, and the reason `ci/check_workflow_triggers.sh` locks
-  # `on.push.branches` across them rather than the whole `on:` block. Two things before touching
-  # it.
+  # KEPT here and in `windows.yml`, DROPPED from `macos.yml` and `miri.yml` — the one deliberate
+  # difference between those files' trigger blocks, and the reason `ci/check_workflow_triggers.sh`
+  # locks `on.push.branches` across them rather than the whole `on:` block. Two things before
+  # touching it.
   #
   # A `schedule` only ever runs the DEFAULT branch's copy of a workflow, against the default
   # branch's ref. So while `main` is default and this file lives on the trunk, this line does
@@ -114,7 +115,8 @@ on:
   # This line is therefore a decision about what happens the moment the default branch becomes the
   # trunk. A weekly build of unchanged code earns its runner time on THIS lane — it is where a new
   # nightly, a new clippy lint or a yanked dependency shows up between merges, for ~1h31m of
-  # ubuntu and windows time. It does not earn it on the other two, whose weekly cost would be a
+  # ubuntu and windows time, the windows half of it now in `windows.yml`, which carries the same
+  # cron. It does not earn it on the other two, whose weekly cost would be a
   # 6-9h macOS queue and a 14h wall clock to re-prove what the merge that produced the code
   # already proved; see #73.
   schedule: [cron: "0 1 */7 * *"]
@@ -141,8 +143,9 @@ concurrency:
   # the next merge, which reads as `fail` in `gh pr checks` and is still no verdict. Keyed on the
   # event it cannot drift at the next rename.
   #
-  # `${{ github.workflow }}` leading the group is what keeps the three lanes apart: `CI-...`,
-  # `Miri-...` and `macOS-...` are different groups, so no lane can cancel another's run.
+  # `${{ github.workflow }}` leading the group is what keeps the lanes apart: `CI-...`,
+  # `Windows-...`, `macOS-...` and `Miri-...` are different groups, so no lane can cancel another's
+  # run.
   group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.sha || '' }}
   cancel-in-progress: ${{ !(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
 
@@ -157,6 +160,10 @@ concurrency:
 # `ParserError: ...ps1:19 | Missing expression after unary operator '--'`. PowerShell has no
 # `\` continuation, so it read `--exclude-features` as a unary minus applied to a minus.
 #
+# Those Windows cells now live in `.github/workflows/windows.yml`, which states the same default
+# for this reason. It stays stated here too: nothing in this file needs PowerShell, and a
+# `windows-latest` entry added back to one of these matrices would otherwise bring the trap back.
+#
 # WHY THE FILE-WIDE DEFAULT RATHER THAN `shell: bash` ON THE TWO STEPS THAT BURNED. The
 # per-step form fixes those two and leaves the trap armed for the third: the next multi-line
 # `run:` added to any windows-hosted job here — a `\`, a `$(...)`, a heredoc, a `case` — fails
@@ -165,11 +172,11 @@ concurrency:
 # that goes stale. A default cannot go stale: a step has to opt OUT to get the old behaviour.
 #
 # AND WHY IT IS SAFE TO IMPOSE ON EVERY STEP. Checked, not assumed. Exactly one step in this
-# repository is written in PowerShell — `Use lld-link (Windows)` in the `test` job below, with
-# its `$env:GITHUB_ENV`, `Test-Path` and `&` call operator — and it declares `shell: pwsh`
-# itself. A step-level `shell:` overrides `defaults.run.shell`, so that step is untouched by
-# this block; it is also the reason the default is safe to state so broadly, and the reason to
-# keep its explicit `shell:` if it is ever edited.
+# repository is written in PowerShell — `Use lld-link (Windows)`, in this file's `test` job until
+# the Windows leg moved and in `windows.yml`'s since, with its `$env:GITHUB_ENV`, `Test-Path` and
+# `&` call operator — and it declares `shell: pwsh` itself. A step-level `shell:` overrides
+# `defaults.run.shell`, so that step is untouched by this block; it is also the reason the default
+# is safe to state so broadly, and the reason to keep its explicit `shell:` if it is ever edited.
 #
 # The one behaviour this DOES change on ubuntu: naming bash explicitly selects
 # `bash --noprofile --norc -eo pipefail {0}` where the host default was `bash -e {0}`, so
@@ -365,16 +372,15 @@ jobs:
     name: rustfmt
     strategy:
       matrix:
-        # `macos-latest` is deliberately absent — it lives in
-        # `.github/workflows/macos.yml`. See this file's header before adding it back.
+        # `macos-latest` and `windows-latest` are deliberately absent — they live in
+        # `.github/workflows/macos.yml` and `.github/workflows/windows.yml`. See this file's header
+        # before adding either back.
         os:
           - ubuntu-latest
-          - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v7
     - name: Install Rust
-      # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
       run: rustup update stable --no-self-update && rustup default stable
     - name: Check formatting
       run: cargo fmt --all -- --check
@@ -385,20 +391,20 @@ jobs:
     name: clippy
     strategy:
       # `fail-fast: false`, for the reason `test` gives: each leg is its own question. It lints the
-      # workspace as its own host compiles it, code under a platform `cfg` included, so a red
-      # ubuntu leg says nothing about the windows one and must not cancel it.
+      # workspace as its own host compiles it, code under a platform `cfg` included, so a red leg
+      # says nothing about another host's and must not cancel it. The Windows leg is
+      # `windows.yml`'s now, so one entry is left; the setting stays for any leg added back.
       fail-fast: false
       matrix:
-        # `macos-latest` is deliberately absent — it lives in
-        # `.github/workflows/macos.yml`. See this file's header before adding it back.
+        # `macos-latest` and `windows-latest` are deliberately absent — they live in
+        # `.github/workflows/macos.yml` and `.github/workflows/windows.yml`. See this file's header
+        # before adding either back.
         os:
           - ubuntu-latest
-          - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v7
     - name: Install Rust
-      # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
       run: rustup update stable --no-self-update && rustup default stable
     - name: Install cargo-hack
       run: cargo install cargo-hack
@@ -676,14 +682,15 @@ jobs:
     name: build
     strategy:
       # `fail-fast: false`, as in `clippy` and `test`: each leg builds every feature row for its own
-      # host, so neither answer stands in for the other, and a red leg must not cancel its sibling.
+      # host, so no answer stands in for another, and a red leg must not cancel a sibling. One
+      # entry is left since the Windows leg moved to `windows.yml`; the setting stays for the next.
       fail-fast: false
       matrix:
-        # `macos-latest` is deliberately absent — it lives in
-        # `.github/workflows/macos.yml`. See this file's header before adding it back.
+        # `macos-latest` and `windows-latest` are deliberately absent — they live in
+        # `.github/workflows/macos.yml` and `.github/workflows/windows.yml`. See this file's header
+        # before adding either back.
         os:
           - ubuntu-latest
-          - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v7
@@ -698,7 +705,6 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-build-
     - name: Install Rust
-      # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
       run: rustup update stable --no-self-update && rustup default stable
     - name: Install cargo-hack
       run: cargo install cargo-hack
@@ -707,6 +713,8 @@ jobs:
       with:
         path: ~/.cargo
         key: ${{ runner.os }}-coverage-dotcargo
+    # `windows.yml` and `macos.yml` carry copies of this step and nothing compares them, so an edit
+    # here is an edit there too. `macos.yml`'s copy runs passes 1 to 4 only.
     - name: Run build
       run: |
         # Pass 1 — the core tier: no tier feature, so no allocator. The rows that name a tier
@@ -790,19 +798,21 @@ jobs:
   test:
     name: test
     strategy:
-      # `fail-fast: false` because the two legs are two independent questions: does the suite pass
-      # on Linux, and does it pass on Windows. Under the default a red `ubuntu-latest` leg cancels
-      # the `windows-latest` one and the Windows answer is lost — on 2026-11-12 two runs lost the
-      # Windows results of both this job and `clippy` that way. It is the loss `--no-fail-fast` on
+      # `fail-fast: false` because each leg is an independent question: does the suite pass on
+      # Linux, does it pass on Windows. Under the default a red `ubuntu-latest` leg cancelled the
+      # `windows-latest` one and the Windows answer was lost — on 2026-11-12 two runs lost the
+      # Windows results of both this job and `clippy` that way. The Windows leg is `windows.yml`'s
+      # now, a separate run that nothing here can cancel, so with one entry left the setting
+      # decides nothing today and stays for any leg added back. It is the loss `--no-fail-fast` on
       # `Run test` below prevents one level down, between test binaries rather than between hosts.
       # `cross` carries the note on why a cancelled leg reads as a failure in `gh pr checks`.
       fail-fast: false
       matrix:
-        # `macos-latest` is deliberately absent — it lives in
-        # `.github/workflows/macos.yml`. See this file's header before adding it back.
+        # `macos-latest` and `windows-latest` are deliberately absent — they live in
+        # `.github/workflows/macos.yml` and `.github/workflows/windows.yml`. See this file's header
+        # before adding either back.
         os:
           - ubuntu-latest
-          - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v7
@@ -817,7 +827,6 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-test-
     - name: Install Rust
-      # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
       run: rustup update stable --no-self-update && rustup default stable
     - name: Install cargo-hack
       run: cargo install cargo-hack
@@ -826,33 +835,11 @@ jobs:
       with:
         path: ~/.cargo
         key: ${{ runner.os }}-coverage-dotcargo
-    - name: Use lld-link (Windows)
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        # lld already comes with Chocolatey llvm on GH runners; install/upgrade if needed
-        choco upgrade -y llvm
-
-        # Ensure LLVM bin is on PATH (where lld-link.exe lives)
-        $llvmBin = 'C:\Program Files\LLVM\bin'
-        if (-not (Test-Path $llvmBin)) {
-          Write-Error "LLVM bin not found at $llvmBin"
-          exit 1
-        }
-        echo "PATH=$llvmBin;$env:PATH" >> $env:GITHUB_ENV
-
-        # Verify
-        & "$llvmBin\lld-link.exe" --version
-
-        # Tell Cargo to use lld-link for MSVC target
-        echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=lld-link.exe" >> $env:GITHUB_ENV
-
-        # Make PDB generation lighter & avoid incremental weirdness in CI
-        echo "RUSTFLAGS=$env:RUSTFLAGS -C link-arg=/DEBUG:FASTLINK -C link-arg=/INCREMENTAL:NO" >> $env:GITHUB_ENV
-
     # The `if: runner.os == 'macOS'` step that used to sit here moved with the macOS leg to
-    # `.github/workflows/macos.yml`; no host in this job's matrix can satisfy that guard, so
-    # leaving it would have been a step that reads as coverage and compiles nothing.
+    # `.github/workflows/macos.yml`, and `Use lld-link (Windows)`, guarded by
+    # `if: runner.os == 'Windows'`, moved with the Windows leg to `.github/workflows/windows.yml`.
+    # No host in this job's matrix can satisfy either guard, so leaving them would have been steps
+    # that read as coverage and compile nothing.
 
     # `smear/tests/**` is compiled by nothing above this job: `clippy` and `build` never pass
     # `--tests`, so they never touch it at all, and `Run test` below runs only `--all-features`,
@@ -1486,6 +1473,10 @@ jobs:
   # created at all — it does not appear in the job list of #64's or #66's run. With the macOS
   # cells gone from those matrices it becomes reachable again, which means the first runs after
   # this change are the first time in a while that anything has watched `coverage` finish.
+  #
+  # The `windows-latest` cells left those matrices for `windows.yml` the same way, and a `needs:`
+  # cannot name a job in another workflow: `coverage` no longer waits for the Windows legs, and a
+  # red Windows leg no longer keeps it from running.
   coverage:
     name: coverage
     runs-on: ubuntu-latest

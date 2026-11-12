@@ -7,6 +7,10 @@ name: perf
 # committed baseline — and `smear/benches/solo/perf/mod.rs` carries the workloads and why each
 # declares two sizes.
 #
+# A comparison needs no pull request. `gh workflow run perf.yml --ref <branch> -f base=<rev>` runs
+# `perf-against` alone: `ci/perf/run.sh --against <rev>`, that branch against the revision itself.
+# Without `-f base`, a dispatch runs `perf-floor`'s self-comparison, as a push to `main` does.
+#
 # ── WHY A LANE OF ITS OWN AND NOT A JOB IN `CI` ─────────────────────────────────────────────
 #
 # Three reasons, in the order they decide it.
@@ -47,10 +51,10 @@ name: perf
 # `/usr/bin/python3` works. GitHub's `ubuntu-latest` ships far newer and no setup step is needed.
 
 # `push`/`pull_request` triggers and `paths-ignore` are deliberately identical to
-# `.github/workflows/ci.yml`, `macos.yml` and `miri.yml`; read the comment in `ci.yml` for why the
-# ignore list carries no blanket `**.md`. `ci/check_workflow_triggers.sh` enforces that the
-# `on.push.branches` lists stay identical across every workflow that has one, because that is the
-# part where a divergence is silent.
+# `.github/workflows/ci.yml`, `windows.yml`, `macos.yml` and `miri.yml`; read the comment in
+# `ci.yml` for why the ignore list carries no blanket `**.md`. `ci/check_workflow_triggers.sh`
+# enforces that the `on.push.branches` lists stay identical across every workflow that has one,
+# because that is the part where a divergence is silent.
 on:
   push:
     # `main` is both the DEFAULT branch and the TRUNK. Any further entry is a live integration
@@ -78,6 +82,15 @@ on:
       - 'docs/**.md'
       - '**.txt'
   workflow_dispatch:
+    # Empty, a dispatch is the self-comparison it always was. Set, it is `perf-against` alone.
+    inputs:
+      base:
+        description: >-
+          Compare the dispatched ref against this revision itself: a hash, a tag or a branch.
+          Empty runs the self-comparison.
+        required: false
+        default: ''
+        type: string
   # NO `schedule`. A gate that compares a branch against its own merge-base has nothing to say
   # about the passage of time: with no new commits there is no delta to measure, and `--self` on an
   # unchanged tree re-proves what the previous push already proved. `ci.yml`'s cron is the lane
@@ -86,11 +99,15 @@ on:
 
 concurrency:
   # Identical in shape to `CI`'s and `Miri`'s; see the comment in `ci.yml` for why
-  # `${{ github.workflow }}` leads the group and why a push is keyed on the commit SHA.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.sha || '' }}
+  # `${{ github.workflow }}` leads the group and why a push is keyed on the commit SHA. One
+  # addition: a dispatch with `base` carries the base in its group, so dispatches of different
+  # bases on one ref run side by side rather than the later cancelling the earlier, while a repeat
+  # of the same base replaces the one before it. Without the input the suffix is empty, and a push
+  # or a pull request gets the group it always got.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.sha || '' }}${{ inputs.base && format('-against-{0}', inputs.base) || '' }}
   cancel-in-progress: ${{ !(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
 
-# Every `run:` here is bash — the same block the other three workflows carry, and `ci.yml`'s has
+# Every `run:` here is bash — the same block every other workflow here carries, and `ci.yml`'s has
 # the full account. Nothing in this file runs on a Windows host today, and the default is stated
 # anyway so that adding such a job later cannot reintroduce the PowerShell parse failure #84 hit.
 defaults:
@@ -136,12 +153,15 @@ jobs:
     - name: Cache cargo registry and both sides' target directories
       uses: actions/cache@v6
       with:
-        # The two target directories are worth caching and the reason is specific to this gate:
-        # `ci/perf/run.sh` materialises each side with `git archive`, which writes fresh mtimes, so
-        # cargo re-fingerprints and rebuilds every WORKSPACE MEMBER on every run no matter what is
-        # cached. What it does not rebuild is the dependency graph — criterion, apollo-compiler,
-        # the three comparison parsers, rowan twice — whose sources come from the registry with
-        # stable mtimes. That is the large half and it is what this restores.
+        # The two target directories are worth caching for the dependency graph alone —
+        # criterion, apollo-compiler, the three comparison parsers, rowan twice — which cargo
+        # fingerprints by package version, not by file times. That is the large half of every
+        # build and it is what this restores. It does not spare the WORKSPACE MEMBERS, and must not:
+        # `ci/perf/run.sh` extracts each side with `tar -m`, so every file is newer than anything
+        # restored here and cargo compiles every member on both sides on every run. `git archive`
+        # alone stamps a commit's files with the COMMIT's time, and a cache saved after that by a
+        # build of another revision with the same manifests would then pass for this side's build;
+        # the script also refuses a side whose own packages did not compile.
         path: |
           ~/.cargo/registry
           ~/.cargo/git
@@ -170,7 +190,11 @@ jobs:
   # that a repeated reading cannot see.
   perf-floor:
     name: perf-floor
-    if: github.event_name != 'pull_request'
+    # A push, and a dispatch without `base`. A dispatch with `base` is `perf-against`'s alone; the
+    # clause that says so tests the event first, so neither a push nor a pull request reads it.
+    if: >-
+      github.event_name != 'pull_request'
+      && !(github.event_name == 'workflow_dispatch' && inputs.base != '')
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -197,3 +221,37 @@ jobs:
       env:
         PERF_ROUNDS: 6
       run: ci/perf/run.sh --self
+
+  # ── A COMPARISON WITHOUT A PULL REQUEST ───────────────────────────────────────────────────
+  #
+  # A dispatch with `base`: the dispatched ref against that revision ITSELF, not against a
+  # merge-base with it. The rest is the `perf` job's comparison — same steps, same rounds — for a
+  # question no pull request asks. The input reaches the script through `env:` and a quoted
+  # variable, never through the text of the command.
+  perf-against:
+    name: perf-against
+    if: github.event_name == 'workflow_dispatch' && inputs.base != ''
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        # All history, every branch (as `origin/<name>`) and every tag, so `base` can name any.
+        fetch-depth: 0
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Cache cargo registry and both sides' target directories
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ${{ runner.temp }}/smear-perf/target-head
+          ${{ runner.temp }}/smear-perf/target-base
+        key: ${{ runner.os }}-perf-${{ hashFiles('**/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-perf-
+    - name: ci/perf/run.sh --against "$PERF_BASE"
+      env:
+        PERF_BASE: ${{ inputs.base }}
+      run: ci/perf/run.sh --against "$PERF_BASE"
