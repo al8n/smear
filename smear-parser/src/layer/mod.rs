@@ -6,10 +6,13 @@
 //! tree. Both answer the same AST: a consumer that is handed a document never learns which layer
 //! made it, and a consumer that is handed text takes the layer as a value.
 //!
-//! Each dialect module declares its own sealed `Layer` trait, implements it for the two values
-//! typed by its dialect, and names them `Syntactic` and `Lossless`. This module holds what the
-//! dialects share: the values, the answer ([`Parsed`], [`Recovery`], [`Rejected`]), the sink
-//! ([`Report`], [`from_fn`]), and [`SyntaxTree`], what a kept tree answers for an extent.
+//! Each dialect module declares its own `Layer` trait, implements it for the two values typed by
+//! its dialect, and names them `Syntactic` and `Lossless`. The trait is sealed for each layer and
+//! source: an impl exists for the syntactic layer over each source its lexer reads and for the
+//! lossless layer over `str`, and no other crate can add one, whatever source it brings. This
+//! module holds what the dialects share: the values, the answer ([`Parsed`], [`Recovery`],
+//! [`Rejected`]), the sink ([`Report`], [`from_fn`]), and [`SyntaxTree`], what a kept tree answers
+//! for an extent.
 
 use core::{fmt, marker::PhantomData, ops::ControlFlow};
 
@@ -432,7 +435,7 @@ impl<D: ?Sized> fmt::Debug for Lossless<D> {
 /// A syntax tree that can find the node an extent belongs to.
 ///
 /// It lets a crate that names no tree type offer the lookup over whatever a layer kept.
-pub trait SyntaxTree: sealed::Sealed {
+pub trait SyntaxTree: sealed::SealedTree {
   /// What the tree answers for an extent.
   type Node;
 
@@ -441,15 +444,24 @@ pub trait SyntaxTree: sealed::Sealed {
   fn covering_node(&self, span: SimpleSpan) -> Option<Self::Node>;
 }
 
-/// What keeps the layer traits closed: only this crate implements `Sealed`.
+/// What keeps the layer traits and [`SyntaxTree`] closed: only this crate implements these.
 pub(crate) mod sealed {
-  /// Implemented by the two layers and the lossless tree, and by nothing outside this crate.
-  pub trait Sealed {}
+  /// The seal of a dialect's `Layer<'src, Src>`, with that trait's own parameters: implemented for
+  /// a layer over each source it reads, beside the `Layer` impl it seals, and by nothing outside
+  /// this crate.
+  ///
+  /// A seal with no source parameter would hold for a layer whatever the source, and another
+  /// crate could then implement `Layer` over a source of its own: the orphan rule admits such an
+  /// impl because the source is local to it, and no impl here would overlap it.
+  #[cfg(all(
+    any(feature = "std", feature = "alloc"),
+    any(feature = "graphql", feature = "graphqlx")
+  ))]
+  pub trait Sealed<'src, Src: ?Sized> {}
 
-  impl<D: ?Sized> Sealed for super::Syntactic<D> {}
-
-  #[cfg(all(feature = "rowan_0_17", feature = "std"))]
-  impl<D: ?Sized> Sealed for super::Lossless<D> {}
+  /// The seal of [`SyntaxTree`](super::SyntaxTree): implemented by the lossless tree, and by
+  /// nothing outside this crate.
+  pub trait SealedTree {}
 }
 
 // ── The layers' compile-time pins ──────────────────────────────────────────────────────────────
@@ -460,9 +472,13 @@ pub(crate) mod sealed {
 // only. Each section is gated as the names its blocks use, so a build without a feature has neither
 // the pin nor its twin.
 //
-// The two `ignore` blocks record and do not pin: what the lossless layer's inherent method does
-// with a `String`, while `str` is the one source that layer reads. CI runs them with
-// `--include-ignored` beside the pins, printing what the compiler said of each.
+// The seal's pins are written as another crate would write them, which a doctest is. Each
+// implements a dialect's `Layer` for one of the layer values over `M`, a source of the doctest's
+// own, and its twin is the same block with the impl written for `Mirror`, a local trait that has
+// `Layer`'s items. `M` is one type in all of them: a real tokora source whose slice is `&str`. So
+// nothing but the seal refuses a pin: the orphan rule admits the impl, because `M` is local to it,
+// and no impl of this crate overlaps it, because each of those names one of the lexer's own
+// sources.
 #[cfg_attr(
   all(any(feature = "std", feature = "alloc"), feature = "graphqlx"),
   doc = r##"
@@ -503,7 +519,8 @@ assert!(!messages.is_empty());
 
 # The syntactic layer reads the sources its lexer reads
 
-A `String` is not a source, and a `&String` does not coerce at a generic `&Src`:
+The layer has one impl for each of them, and none for anything else. A `String` is not a source,
+and a `&String` does not coerce at a generic `&Src`:
 
 ```compile_fail,E0277
 use smear_parser::graphqlx::Syntactic;
@@ -521,7 +538,8 @@ let text = String::from("type T { f: Int }");
 let _ = Syntactic::new().type_system_document(text.as_ref(), &mut ());
 ```
 
-A `&&str` makes the source `&str`, which is a tokora source the lexer does not read:
+A `&&str` makes the source `&str`, which is a tokora source and not one the lexer reads, so the
+layer has no impl over it:
 
 ```compile_fail,E0277
 use smear_parser::graphqlx::Syntactic;
@@ -572,6 +590,327 @@ fn read<'s, Src: Source<usize> + ?Sized, P: Layer<'s, Src>>(parser: &P, source: 
 
 assert!(read(&Syntactic::new(), "type T { f: Int }"));
 ```
+
+# The trait is sealed for each layer and source
+
+Another crate cannot implement it for a layer value of a brand of its own, over a source of its
+own:
+
+```compile_fail,E0277
+use smear_parser::{
+  graphqlx::{self, ast::TypeSystemDocument, error::GraphqlxError},
+  layer::{Parsed, Report},
+};
+use tokora::{Source, diagnostic::Diagnose};
+
+#[derive(Debug)]
+struct M;
+
+impl Source<usize> for M {
+  type Slice<'s>
+    = &'s str
+  where
+    Self: 's;
+
+  fn is_empty(&self) -> bool {
+    unimplemented!()
+  }
+
+  fn len(&self) -> usize {
+    unimplemented!()
+  }
+
+  fn as_slice(&self) -> Self::Slice<'_> {
+    unimplemented!()
+  }
+
+  fn slice<R>(&self, _: R) -> Option<Self::Slice<'_>>
+  where
+    R: core::ops::RangeBounds<usize>,
+  {
+    unimplemented!()
+  }
+
+  fn is_boundary(&self, _: usize) -> bool {
+    unimplemented!()
+  }
+}
+
+trait Mirror<'src, Src: ?Sized = str> {
+  type Error: Diagnose;
+  type Failure;
+  type Tree;
+
+  fn type_system_document<K>(
+    &self,
+    source: &'src Src,
+    report: &mut K,
+  ) -> Result<
+    Parsed<TypeSystemDocument<<Src as Source<usize>>::Slice<'src>>, Self::Tree>,
+    Self::Failure,
+  >
+  where
+    Src: Source<usize>,
+    K: Report<Self::Error> + ?Sized;
+}
+
+struct MyBrand;
+
+impl<'a> graphqlx::Layer<'a, M> for smear_parser::layer::Syntactic<MyBrand> {
+  type Error = GraphqlxError<&'a str>;
+  type Failure = ();
+  type Tree = ();
+
+  fn type_system_document<K>(
+    &self,
+    _: &'a M,
+    _: &mut K,
+  ) -> Result<Parsed<TypeSystemDocument<<M as Source<usize>>::Slice<'a>>, ()>, ()>
+  where
+    K: Report<Self::Error> + ?Sized,
+  {
+    unimplemented!()
+  }
+}
+```
+
+The same block, for the local trait:
+
+```
+use smear_parser::{
+  graphqlx::{self, ast::TypeSystemDocument, error::GraphqlxError},
+  layer::{Parsed, Report},
+};
+use tokora::{Source, diagnostic::Diagnose};
+
+#[derive(Debug)]
+struct M;
+
+impl Source<usize> for M {
+  type Slice<'s>
+    = &'s str
+  where
+    Self: 's;
+
+  fn is_empty(&self) -> bool {
+    unimplemented!()
+  }
+
+  fn len(&self) -> usize {
+    unimplemented!()
+  }
+
+  fn as_slice(&self) -> Self::Slice<'_> {
+    unimplemented!()
+  }
+
+  fn slice<R>(&self, _: R) -> Option<Self::Slice<'_>>
+  where
+    R: core::ops::RangeBounds<usize>,
+  {
+    unimplemented!()
+  }
+
+  fn is_boundary(&self, _: usize) -> bool {
+    unimplemented!()
+  }
+}
+
+trait Mirror<'src, Src: ?Sized = str> {
+  type Error: Diagnose;
+  type Failure;
+  type Tree;
+
+  fn type_system_document<K>(
+    &self,
+    source: &'src Src,
+    report: &mut K,
+  ) -> Result<
+    Parsed<TypeSystemDocument<<Src as Source<usize>>::Slice<'src>>, Self::Tree>,
+    Self::Failure,
+  >
+  where
+    Src: Source<usize>,
+    K: Report<Self::Error> + ?Sized;
+}
+
+struct MyBrand;
+
+impl<'a> Mirror<'a, M> for smear_parser::layer::Syntactic<MyBrand> {
+  type Error = GraphqlxError<&'a str>;
+  type Failure = ();
+  type Tree = ();
+
+  fn type_system_document<K>(
+    &self,
+    _: &'a M,
+    _: &mut K,
+  ) -> Result<Parsed<TypeSystemDocument<<M as Source<usize>>::Slice<'a>>, ()>, ()>
+  where
+    K: Report<Self::Error> + ?Sized,
+  {
+    unimplemented!()
+  }
+}
+```
+
+Nor for the dialect's own syntactic layer, over a source of its own. This is the case the seal
+alone decides: the layer's impls each name one of the lexer's sources, so none of them overlaps an
+impl over `M`, whatever `M`'s slice is:
+
+```compile_fail,E0277
+use smear_parser::{
+  graphqlx::{self, ast::TypeSystemDocument, error::GraphqlxError},
+  layer::{Parsed, Report},
+};
+use tokora::{Source, diagnostic::Diagnose};
+
+#[derive(Debug)]
+struct M;
+
+impl Source<usize> for M {
+  type Slice<'s>
+    = &'s str
+  where
+    Self: 's;
+
+  fn is_empty(&self) -> bool {
+    unimplemented!()
+  }
+
+  fn len(&self) -> usize {
+    unimplemented!()
+  }
+
+  fn as_slice(&self) -> Self::Slice<'_> {
+    unimplemented!()
+  }
+
+  fn slice<R>(&self, _: R) -> Option<Self::Slice<'_>>
+  where
+    R: core::ops::RangeBounds<usize>,
+  {
+    unimplemented!()
+  }
+
+  fn is_boundary(&self, _: usize) -> bool {
+    unimplemented!()
+  }
+}
+
+trait Mirror<'src, Src: ?Sized = str> {
+  type Error: Diagnose;
+  type Failure;
+  type Tree;
+
+  fn type_system_document<K>(
+    &self,
+    source: &'src Src,
+    report: &mut K,
+  ) -> Result<
+    Parsed<TypeSystemDocument<<Src as Source<usize>>::Slice<'src>>, Self::Tree>,
+    Self::Failure,
+  >
+  where
+    Src: Source<usize>,
+    K: Report<Self::Error> + ?Sized;
+}
+
+impl<'a> graphqlx::Layer<'a, M> for graphqlx::Syntactic {
+  type Error = GraphqlxError<&'a str>;
+  type Failure = ();
+  type Tree = ();
+
+  fn type_system_document<K>(
+    &self,
+    _: &'a M,
+    _: &mut K,
+  ) -> Result<Parsed<TypeSystemDocument<<M as Source<usize>>::Slice<'a>>, ()>, ()>
+  where
+    K: Report<Self::Error> + ?Sized,
+  {
+    unimplemented!()
+  }
+}
+```
+
+The same block, for the local trait:
+
+```
+use smear_parser::{
+  graphqlx::{self, ast::TypeSystemDocument, error::GraphqlxError},
+  layer::{Parsed, Report},
+};
+use tokora::{Source, diagnostic::Diagnose};
+
+#[derive(Debug)]
+struct M;
+
+impl Source<usize> for M {
+  type Slice<'s>
+    = &'s str
+  where
+    Self: 's;
+
+  fn is_empty(&self) -> bool {
+    unimplemented!()
+  }
+
+  fn len(&self) -> usize {
+    unimplemented!()
+  }
+
+  fn as_slice(&self) -> Self::Slice<'_> {
+    unimplemented!()
+  }
+
+  fn slice<R>(&self, _: R) -> Option<Self::Slice<'_>>
+  where
+    R: core::ops::RangeBounds<usize>,
+  {
+    unimplemented!()
+  }
+
+  fn is_boundary(&self, _: usize) -> bool {
+    unimplemented!()
+  }
+}
+
+trait Mirror<'src, Src: ?Sized = str> {
+  type Error: Diagnose;
+  type Failure;
+  type Tree;
+
+  fn type_system_document<K>(
+    &self,
+    source: &'src Src,
+    report: &mut K,
+  ) -> Result<
+    Parsed<TypeSystemDocument<<Src as Source<usize>>::Slice<'src>>, Self::Tree>,
+    Self::Failure,
+  >
+  where
+    Src: Source<usize>,
+    K: Report<Self::Error> + ?Sized;
+}
+
+impl<'a> Mirror<'a, M> for graphqlx::Syntactic {
+  type Error = GraphqlxError<&'a str>;
+  type Failure = ();
+  type Tree = ();
+
+  fn type_system_document<K>(
+    &self,
+    _: &'a M,
+    _: &mut K,
+  ) -> Result<Parsed<TypeSystemDocument<<M as Source<usize>>::Slice<'a>>, ()>, ()>
+  where
+    K: Report<Self::Error> + ?Sized,
+  {
+    unimplemented!()
+  }
+}
+```
 "##
 )]
 #[cfg_attr(
@@ -579,7 +918,7 @@ assert!(read(&Syntactic::new(), "type T { f: Int }"));
   doc = r##"
 # The lossless layer reads `str` and nothing else
 
-Bytes through the inherent method:
+Its one impl decides the source, so bytes are a mismatched type. Through the inherent method:
 
 ```compile_fail,E0308
 use smear_parser::graphqlx::Lossless;
@@ -590,7 +929,7 @@ let _ = Lossless::new().type_system_document(bytes, &mut ());
 
 and through the trait:
 
-```compile_fail,E0277
+```compile_fail,E0308
 use smear_parser::graphqlx::{Layer, Lossless};
 
 let bytes: &[u8] = b"type T { f: Int }";
@@ -613,27 +952,162 @@ let parsed = Layer::type_system_document(&Lossless::new(), text, &mut ())
 assert!(parsed.is_valid());
 ```
 
-What the inherent method does with a `String` while `str` is its one source, recorded and not
-pinned:
+# The lossless layer is sealed over `str` alone
 
-```ignore
-use smear_parser::graphqlx::Lossless;
+Another crate cannot implement the trait for it over a source of its own:
 
-let text = String::from("type T { f: Int }");
-let parsed = Lossless::new()
-  .type_system_document(&text, &mut ())
-  .expect("short enough for a tree");
-assert!(parsed.is_valid());
+```compile_fail,E0277
+use smear_parser::{
+  graphqlx::{self, ast::TypeSystemDocument, error::GraphqlxError},
+  layer::{Parsed, Report},
+};
+use tokora::{Source, diagnostic::Diagnose};
+
+#[derive(Debug)]
+struct M;
+
+impl Source<usize> for M {
+  type Slice<'s>
+    = &'s str
+  where
+    Self: 's;
+
+  fn is_empty(&self) -> bool {
+    unimplemented!()
+  }
+
+  fn len(&self) -> usize {
+    unimplemented!()
+  }
+
+  fn as_slice(&self) -> Self::Slice<'_> {
+    unimplemented!()
+  }
+
+  fn slice<R>(&self, _: R) -> Option<Self::Slice<'_>>
+  where
+    R: core::ops::RangeBounds<usize>,
+  {
+    unimplemented!()
+  }
+
+  fn is_boundary(&self, _: usize) -> bool {
+    unimplemented!()
+  }
+}
+
+trait Mirror<'src, Src: ?Sized = str> {
+  type Error: Diagnose;
+  type Failure;
+  type Tree;
+
+  fn type_system_document<K>(
+    &self,
+    source: &'src Src,
+    report: &mut K,
+  ) -> Result<
+    Parsed<TypeSystemDocument<<Src as Source<usize>>::Slice<'src>>, Self::Tree>,
+    Self::Failure,
+  >
+  where
+    Src: Source<usize>,
+    K: Report<Self::Error> + ?Sized;
+}
+
+impl<'a> graphqlx::Layer<'a, M> for graphqlx::Lossless {
+  type Error = GraphqlxError<&'a str>;
+  type Failure = ();
+  type Tree = ();
+
+  fn type_system_document<K>(
+    &self,
+    _: &'a M,
+    _: &mut K,
+  ) -> Result<Parsed<TypeSystemDocument<<M as Source<usize>>::Slice<'a>>, ()>, ()>
+  where
+    K: Report<Self::Error> + ?Sized,
+  {
+    unimplemented!()
+  }
+}
 ```
 
-```ignore
-use smear_parser::graphqlx::Lossless;
+The same block, for the local trait:
 
-let text = String::from("type T { f: Int }");
-let parsed = Lossless::new()
-  .type_system_document(text.as_ref(), &mut ())
-  .expect("short enough for a tree");
-assert!(parsed.is_valid());
+```
+use smear_parser::{
+  graphqlx::{self, ast::TypeSystemDocument, error::GraphqlxError},
+  layer::{Parsed, Report},
+};
+use tokora::{Source, diagnostic::Diagnose};
+
+#[derive(Debug)]
+struct M;
+
+impl Source<usize> for M {
+  type Slice<'s>
+    = &'s str
+  where
+    Self: 's;
+
+  fn is_empty(&self) -> bool {
+    unimplemented!()
+  }
+
+  fn len(&self) -> usize {
+    unimplemented!()
+  }
+
+  fn as_slice(&self) -> Self::Slice<'_> {
+    unimplemented!()
+  }
+
+  fn slice<R>(&self, _: R) -> Option<Self::Slice<'_>>
+  where
+    R: core::ops::RangeBounds<usize>,
+  {
+    unimplemented!()
+  }
+
+  fn is_boundary(&self, _: usize) -> bool {
+    unimplemented!()
+  }
+}
+
+trait Mirror<'src, Src: ?Sized = str> {
+  type Error: Diagnose;
+  type Failure;
+  type Tree;
+
+  fn type_system_document<K>(
+    &self,
+    source: &'src Src,
+    report: &mut K,
+  ) -> Result<
+    Parsed<TypeSystemDocument<<Src as Source<usize>>::Slice<'src>>, Self::Tree>,
+    Self::Failure,
+  >
+  where
+    Src: Source<usize>,
+    K: Report<Self::Error> + ?Sized;
+}
+
+impl<'a> Mirror<'a, M> for graphqlx::Lossless {
+  type Error = GraphqlxError<&'a str>;
+  type Failure = ();
+  type Tree = ();
+
+  fn type_system_document<K>(
+    &self,
+    _: &'a M,
+    _: &mut K,
+  ) -> Result<Parsed<TypeSystemDocument<<M as Source<usize>>::Slice<'a>>, ()>, ()>
+  where
+    K: Report<Self::Error> + ?Sized,
+  {
+    unimplemented!()
+  }
+}
 ```
 "##
 )]
@@ -658,7 +1132,7 @@ let _ = Lossless::new().type_system_document(&body, &mut ());
 
 and through the trait:
 
-```compile_fail,E0277
+```compile_fail,E0308
 use smear_parser::graphqlx::{Layer, Lossless};
 
 let body = bytes_1::Bytes::from_static(b"type T { f: Int }");
@@ -679,6 +1153,223 @@ assert!(parsed.is_valid());
 let parsed = Layer::type_system_document(&Lossless::new(), text, &mut ())
   .expect("short enough for a tree");
 assert!(parsed.is_valid());
+```
+"##
+)]
+#[cfg_attr(
+  all(any(feature = "std", feature = "alloc"), feature = "graphql"),
+  doc = r##"
+# GraphQL's trait is sealed for each layer and source
+
+The seal is a supertrait of each dialect's own trait, so each dialect has its pin. Another crate
+cannot implement GraphQL's trait for GraphQL's syntactic layer over a source of its own:
+
+```compile_fail,E0277
+use smear_parser::{
+  graphql::{
+    self,
+    ast::{ExecutableDocument, TypeSystemDocument},
+    error::GraphqlError,
+  },
+  layer::{Parsed, Report},
+};
+use tokora::{Source, diagnostic::Diagnose};
+
+#[derive(Debug)]
+struct M;
+
+impl Source<usize> for M {
+  type Slice<'s>
+    = &'s str
+  where
+    Self: 's;
+
+  fn is_empty(&self) -> bool {
+    unimplemented!()
+  }
+
+  fn len(&self) -> usize {
+    unimplemented!()
+  }
+
+  fn as_slice(&self) -> Self::Slice<'_> {
+    unimplemented!()
+  }
+
+  fn slice<R>(&self, _: R) -> Option<Self::Slice<'_>>
+  where
+    R: core::ops::RangeBounds<usize>,
+  {
+    unimplemented!()
+  }
+
+  fn is_boundary(&self, _: usize) -> bool {
+    unimplemented!()
+  }
+}
+
+trait Mirror<'src, Src: ?Sized = str> {
+  type Error: Diagnose;
+  type Failure;
+  type Tree;
+
+  fn type_system_document<K>(
+    &self,
+    source: &'src Src,
+    report: &mut K,
+  ) -> Result<
+    Parsed<TypeSystemDocument<<Src as Source<usize>>::Slice<'src>>, Self::Tree>,
+    Self::Failure,
+  >
+  where
+    Src: Source<usize>,
+    K: Report<Self::Error> + ?Sized;
+
+  fn executable_document<K>(
+    &self,
+    source: &'src Src,
+    report: &mut K,
+  ) -> Result<
+    Parsed<ExecutableDocument<<Src as Source<usize>>::Slice<'src>>, Self::Tree>,
+    Self::Failure,
+  >
+  where
+    Src: Source<usize>,
+    K: Report<Self::Error> + ?Sized;
+}
+
+impl<'a> graphql::Layer<'a, M> for graphql::Syntactic {
+  type Error = GraphqlError<&'a str>;
+  type Failure = ();
+  type Tree = ();
+
+  fn type_system_document<K>(
+    &self,
+    _: &'a M,
+    _: &mut K,
+  ) -> Result<Parsed<TypeSystemDocument<<M as Source<usize>>::Slice<'a>>, ()>, ()>
+  where
+    K: Report<Self::Error> + ?Sized,
+  {
+    unimplemented!()
+  }
+
+  fn executable_document<K>(
+    &self,
+    _: &'a M,
+    _: &mut K,
+  ) -> Result<Parsed<ExecutableDocument<<M as Source<usize>>::Slice<'a>>, ()>, ()>
+  where
+    K: Report<Self::Error> + ?Sized,
+  {
+    unimplemented!()
+  }
+}
+```
+
+The same block, for the local trait:
+
+```
+use smear_parser::{
+  graphql::{
+    self,
+    ast::{ExecutableDocument, TypeSystemDocument},
+    error::GraphqlError,
+  },
+  layer::{Parsed, Report},
+};
+use tokora::{Source, diagnostic::Diagnose};
+
+#[derive(Debug)]
+struct M;
+
+impl Source<usize> for M {
+  type Slice<'s>
+    = &'s str
+  where
+    Self: 's;
+
+  fn is_empty(&self) -> bool {
+    unimplemented!()
+  }
+
+  fn len(&self) -> usize {
+    unimplemented!()
+  }
+
+  fn as_slice(&self) -> Self::Slice<'_> {
+    unimplemented!()
+  }
+
+  fn slice<R>(&self, _: R) -> Option<Self::Slice<'_>>
+  where
+    R: core::ops::RangeBounds<usize>,
+  {
+    unimplemented!()
+  }
+
+  fn is_boundary(&self, _: usize) -> bool {
+    unimplemented!()
+  }
+}
+
+trait Mirror<'src, Src: ?Sized = str> {
+  type Error: Diagnose;
+  type Failure;
+  type Tree;
+
+  fn type_system_document<K>(
+    &self,
+    source: &'src Src,
+    report: &mut K,
+  ) -> Result<
+    Parsed<TypeSystemDocument<<Src as Source<usize>>::Slice<'src>>, Self::Tree>,
+    Self::Failure,
+  >
+  where
+    Src: Source<usize>,
+    K: Report<Self::Error> + ?Sized;
+
+  fn executable_document<K>(
+    &self,
+    source: &'src Src,
+    report: &mut K,
+  ) -> Result<
+    Parsed<ExecutableDocument<<Src as Source<usize>>::Slice<'src>>, Self::Tree>,
+    Self::Failure,
+  >
+  where
+    Src: Source<usize>,
+    K: Report<Self::Error> + ?Sized;
+}
+
+impl<'a> Mirror<'a, M> for graphql::Syntactic {
+  type Error = GraphqlError<&'a str>;
+  type Failure = ();
+  type Tree = ();
+
+  fn type_system_document<K>(
+    &self,
+    _: &'a M,
+    _: &mut K,
+  ) -> Result<Parsed<TypeSystemDocument<<M as Source<usize>>::Slice<'a>>, ()>, ()>
+  where
+    K: Report<Self::Error> + ?Sized,
+  {
+    unimplemented!()
+  }
+
+  fn executable_document<K>(
+    &self,
+    _: &'a M,
+    _: &mut K,
+  ) -> Result<Parsed<ExecutableDocument<<M as Source<usize>>::Slice<'a>>, ()>, ()>
+  where
+    K: Report<Self::Error> + ?Sized,
+  {
+    unimplemented!()
+  }
+}
 ```
 "##
 )]

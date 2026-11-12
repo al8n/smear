@@ -363,6 +363,30 @@ mod lossless {
     assert_eq!(from_owned.document(), from_str.document());
   }
 
+  // The next two calls compile only while `str` is the one source the lossless layer reads: the
+  // compiler takes the source from that layer's single impl, and then coerces the argument as at
+  // a `&str` parameter. A second source for the layer makes the source ambiguous again and both
+  // stop compiling, which is their purpose: they are deleted with that change, and no
+  // documentation shows either call. A holder of a `String` writes `as_str()`.
+
+  #[test]
+  fn a_string_reference_is_read_while_the_lossless_layer_has_one_impl() {
+    let owned = String::from(DOC);
+    let parsed = Lossless::new()
+      .type_system_document(&owned, &mut ())
+      .expect("short enough for a tree");
+    assert!(parsed.is_valid());
+  }
+
+  #[test]
+  fn as_ref_names_a_source_while_the_lossless_layer_has_one_impl() {
+    let owned = String::from(DOC);
+    let parsed = Lossless::new()
+      .type_system_document(owned.as_ref(), &mut ())
+      .expect("short enough for a tree");
+    assert!(parsed.is_valid());
+  }
+
   #[test]
   fn the_lossless_layer_through_the_trait() {
     let lossless = Lossless::new();

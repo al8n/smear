@@ -168,7 +168,7 @@ impl<L: rowan_0_17::Language> Parse<L> {
   }
 }
 
-impl<L: rowan_0_17::Language> crate::layer::sealed::Sealed for Parse<L> {}
+impl<L: rowan_0_17::Language> crate::layer::sealed::SealedTree for Parse<L> {}
 
 /// The lookup a consumer that names no tree type offers through
 /// [`SyntaxTree`](crate::layer::SyntaxTree): [`Parse::covering_node`].
