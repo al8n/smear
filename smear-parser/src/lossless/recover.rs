@@ -598,12 +598,12 @@ pub(crate) const SCAN_ALLOWANCE_FLOOR: usize = 4_096;
 /// token, so the two readings differ by at most the peek [`report_unexpected`] takes — a couple of
 /// events against a floor of four thousand.
 ///
-/// # Both helpers consult it, and both must
+/// # Every helper that scans consults it, and each must
 ///
-/// [`unexpected`] carries 47 of the tree's 52 recovery call sites and [`resync_to`] the other 5,
-/// and each reaches the quadratic on tails the other's predicate is blind to. Guarding one leaves
-/// the other live — which is smear issue #167 round 2's finding on this very subsystem, restated
-/// one helper along.
+/// [`unexpected`] carries most of the tree's recovery call sites, [`resync_to`] the document
+/// roots' and [`resync_to_closing`] a module body's, and each reaches the quadratic on tails the
+/// others' predicates are blind to. Guarding one leaves the others live — which is smear issue
+/// #167 round 2's finding on this very subsystem, restated one helper along.
 ///
 /// # It is a rate limiter, not a latch
 ///
@@ -690,8 +690,9 @@ pub mod scan_allowance {
     LAST_REFUSAL_COMMITTED.with(|c| c.set(committed));
   }
 
-  /// Ungated, unlike its two neighbours: [`super::resync_to`] is the caller and it exists without
-  /// a dialect, so there is no `dead_code` to move one level down.
+  /// Ungated, unlike its two neighbours: [`super::resync_to`] and [`super::resync_to_closing`]
+  /// are the callers and they exist without a dialect, so there is no `dead_code` to move one
+  /// level down.
   #[inline]
   pub(super) fn record_restart_point_at_hand() {
     RESTART_POINTS_AT_HAND.with(|c| c.set(c.get().saturating_add(1)));
@@ -734,7 +735,8 @@ pub mod scan_allowance {
     PEAK_COMMITTED.with(Cell::get)
   }
 
-  /// How many times [`resync_to`](super::resync_to) took its **refused** path and found a restart
+  /// How many times [`resync_to`](super::resync_to) or
+  /// [`resync_to_closing`](super::resync_to_closing) took its **refused** path and found a restart
   /// point already at hand — the `head_satisfies` arm, and the only place it is exercised.
   ///
   /// `refusals() > 0` is not a substitute and the difference is measured, not theoretical. The
@@ -858,6 +860,88 @@ where
   // `None` is "there is nothing left to eat". `try_expect(|_| true)` never declines against a real
   // token, so its only `Ok(None)` is absence — or a terminal stop folded into it, which would have
   // this helper report progress over a scanner that had already given up. smear issue #177.
+  if inp.try_expect_or_stop(|_| true)?.is_some() {
+    inp.cst_start_at(mark, error_kind);
+    inp.cst_finish(error_kind);
+  }
+  Ok(())
+}
+
+/// [`resync_to`] for wreckage that left delimiters **open**: skip it, closing them on the way, and
+/// stop before the next restart point outside them.
+///
+/// `left` is how many delimiters of `delimiters`' pairs the wreckage opened and did not close. A
+/// scan that began inside them would take the first closer it met for the enclosing shape's own —
+/// `sync_balanced` counts from zero and saturates there — so this scan spends its first `left`
+/// closers at depth zero on the wreckage. Each is skipped, and **nothing is a restart point until
+/// all of them are behind it**: a restart keyword inside the wreckage is crossed, where a looser
+/// rule would restart on it and later take the wreckage's own closer for the enclosing shape's.
+///
+/// # Why it is a function of its own
+///
+/// The count lives in the predicate, and [`resync_to`] takes its predicate as a `fn` pointer,
+/// which captures nothing. Everything else is [`resync_to`]'s, for the reasons its notes give: it
+/// reports nothing; it crosses the trivia in front of the wreckage first; a scan that finds no
+/// restart point rewinds, and one token goes into an `Error` node; and under an exhausted scan
+/// allowance only the head is asked. With `left` above zero the head is no restart point whatever
+/// it is, so that case takes the one token as well.
+///
+/// # The count is the caller's to re-derive
+///
+/// A scan that finds nothing rewinds, and what it counted is forgotten with it. A caller that
+/// derives `left` from state the rewind restores — a lexer's own count of open delimiters — reads
+/// the right number again on its next call, less whatever the one consumed token closed.
+pub fn resync_to_closing<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+  delimiters: fn(&<L::Token as Token<'inp>>::Kind) -> Balance<u8>,
+  is_restart_point: fn(&L::Token) -> bool,
+  left: usize,
+  error_kind: u16,
+  allowance_exhausted: bool,
+) -> Result<(), ErrorOf<'inp, L, Ctx, Lang>>
+where
+  Lang: ?Sized,
+  L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
+  L::Token: FromLogos<'inp>,
+  Ctx: ParseContext<'inp, L, Lang>,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<usize, Lang>>,
+{
+  if crate::lossless::trivia::peek_kind(inp)?.is_none() {
+    return Ok(());
+  }
+
+  let restart_point_at_hand = if allowance_exhausted {
+    // No scan, so nothing can be closed: with a delimiter still open the head is inside the
+    // wreckage, and only `left == 0` can have a restart point at hand.
+    let at_hand = left == 0 && inp.head_satisfies(is_restart_point)?;
+    #[cfg(all(feature = "test-support", feature = "std"))]
+    if at_hand {
+      scan_allowance::record_restart_point_at_hand();
+    }
+    at_hand
+  } else {
+    let mut left = left;
+    inp
+      .sync_balanced(delimiters, |t| {
+        if left == 0 {
+          return is_restart_point(t.data);
+        }
+        // `sync_balanced` consults this at scan depth zero only, so a closer seen here closes a
+        // delimiter the wreckage left open and never one the scan itself crossed.
+        if delimiters(&<L::Token as Token<'inp>>::kind(t.data)).is_close() {
+          left -= 1;
+        }
+        false
+      })?
+      .is_some()
+  };
+  if restart_point_at_hand {
+    return Ok(());
+  }
+
+  let mark = inp.cst_mark();
+  // `_or_stop`, for the reason [`resync_to`]'s fallback gives.
   if inp.try_expect_or_stop(|_| true)?.is_some() {
     inp.cst_start_at(mark, error_kind);
     inp.cst_finish(error_kind);

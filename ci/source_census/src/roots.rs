@@ -1,4 +1,5 @@
-//! Who calls `drain_unless_stopped` and `root_turn`, derived from the tokens rather than believed.
+//! Who calls `drain_unless_stopped`, `root_turn` and `judge_turn`, derived from the tokens rather
+//! than believed.
 //!
 //! # Why this claim and not another
 //!
@@ -33,7 +34,7 @@
 //!
 //! # Every spelling of a call, or a refusal
 //!
-//! Watching two names is not the same as watching two functions. `use …::root_turn as turn;`
+//! Watching a name is not the same as watching a function. `use …::root_turn as turn;`
 //! binds a second spelling; a scan that knows only the original reads that line as an import,
 //! ignores it, and then cannot see `turn(inp, stop, entry)` at all. The call needs no `DECLARED`
 //! row and the gate stays green — the caller-set claim false again, with the census agreeing with
@@ -106,14 +107,18 @@ use proc_macro2::{Delimiter, Spacing, TokenStream, TokenTree};
 
 /// The directory the census reads.
 ///
-/// One crate, and that is not an assumption: both functions are `pub(crate)`, and the declaration
-/// each scan finds carries the spelling in [`Hit::visibility`], which is checked. So no file
-/// outside this crate can hold a call at all; if either ever becomes `pub`, that check fails
+/// One crate, and that is not an assumption: every watched function is `pub(crate)`, and the
+/// declaration each scan finds carries the spelling in [`Hit::visibility`], which is checked. So
+/// no file outside this crate can hold a call at all; if one ever becomes `pub`, that check fails
 /// beside the caller table — the boundary this root rests on is itself a thing that reddens.
 pub(crate) const ROOT: &str = "smear-parser/src";
 
-/// The two functions whose caller set is pinned.
-const WATCHED: &[&str] = &["drain_unless_stopped", "root_turn"];
+/// The three functions whose caller set is pinned.
+///
+/// `judge_turn` is the verdict `root_turn` records, without the slot. It is watched for the
+/// reason the other two are: a frame that calls it is a frame that catches a failure and decides
+/// whether the document goes on, and that decision belongs to a caller set someone can read.
+const WATCHED: &[&str] = &["drain_unless_stopped", "root_turn", "judge_turn"];
 
 /// An identifier without its `r#` escape, which is not part of its name.
 ///
@@ -130,7 +135,7 @@ fn watched(spelling: &str) -> Option<&'static str> {
   WATCHED.iter().copied().find(|name| *name == bare)
 }
 
-/// The file both are declared in, which is also the only file allowed to declare them.
+/// The file all of them are declared in, which is also the only file allowed to declare them.
 const DECLARED_IN: &str = "smear-parser/src/lossless/depth.rs";
 
 /// Fewer `.rs` files than this under [`ROOT`] and the census is looking at the wrong tree.
@@ -146,8 +151,12 @@ const FILE_FLOOR: usize = 60;
 /// function it will land in has no name yet.
 type Declared = (&'static str, &'static str, &'static str, usize);
 
-/// Every caller of [`WATCHED`], in four families.
+/// Every caller of [`WATCHED`], in five families.
 ///
+/// - **The slot-less turn** has two callers. `root_turn` is one: it is `judge_turn` and the write
+///   to the root's slot. GraphQLx's `mod_body` is the other, and the only frame below a root
+///   that catches: a module's body resynchronises past an item that failed with an ordinary
+///   error, and returns a failure that ends the document to the root above it.
 /// - **The dialect door**, and it is no longer watched by name. It used to be: six `*_entry`
 ///   productions calling `drain_unless_stopped`, then a `document_root` frame taking a token
 ///   (round 4), then one generic `parse_lossless_document` (round 5). Round 7 generates a door per
@@ -178,6 +187,19 @@ type Declared = (&'static str, &'static str, &'static str, usize);
 /// Note the four distinct `drive` functions: same name, four different tests, three different
 /// counts. That is why the key is a path and not a bare function name.
 const DECLARED: &[Declared] = &[
+  // the slot-less turn: the root's own, and the one catch below a root
+  (
+    "judge_turn",
+    "smear-parser/src/lossless/depth.rs",
+    "root_turn",
+    1,
+  ),
+  (
+    "judge_turn",
+    "smear-parser/src/graphqlx/lossless/document.rs",
+    "mod_body",
+    1,
+  ),
   // the six `*_entry` productions
   // the six document roots
   (
@@ -584,7 +606,7 @@ pub fn scan(file: &str, text: &str) -> Result<Scan, String> {
   let stream: TokenStream = text
     .parse()
     .map_err(|e| format!("{file}: this file does not tokenize: {e}"))?;
-  // What this file calls the two functions is read before anything is counted, because a rename
+  // What this file calls the watched functions is read before anything is counted, because a rename
   // decides which identifiers the walk below is even looking at.
   let bound = bindings(file, &stream);
   let mut hits = Vec::new();
