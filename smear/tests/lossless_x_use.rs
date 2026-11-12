@@ -9,7 +9,7 @@
 //! verdicts, because the defects in this area change nesting while leaving the text identical: a
 //! `use` group is the same bytes whether its trees are nodes or loose tokens, and an extension's
 //! generic list is the same bytes whether it carries the extension kind or the executable one.
-#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 
 use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,

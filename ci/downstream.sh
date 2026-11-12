@@ -118,10 +118,12 @@ after = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8").splitlines(keepend
 expected = {
   "graphql-proto",
   "smear",
+  "smear-analysis",
   "smear-compiler",
   "smear-lexer",
   "smear-parser",
   "smear-schema",
+  "smear-semantics",
 }
 
 if len(before) != len(after):
@@ -169,7 +171,7 @@ if ! $CARGO metadata --manifest-path "$MANIFEST" --format-version 1 \
   exit 1
 fi
 if ! assert_seed_delta "$LOCK_BEFORE" "$FIXTURE/Cargo.lock"; then
-  echo "FAIL: metadata changed more than the six local path-package versions in the private lock." >&2
+  echo "FAIL: metadata changed more than the local path-package versions in the private lock." >&2
   exit 1
 fi
 LOCK_SEEDED="$tmp/Cargo.lock.seeded"

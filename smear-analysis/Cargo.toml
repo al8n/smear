@@ -1,0 +1,67 @@
+[package]
+name = "smear-analysis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "The GraphQLx schema analyzer: GraphQLx packages in, a resolved model and its diagnostics out."
+keywords = ["graphql", "graphqlx", "schema", "analyzer", "no-std"]
+categories = ["parsing", "compilers", "no-std"]
+readme = "README.md"
+
+[features]
+default = ["std"]
+
+# The analyzer allocates, so with neither `std` nor `alloc` this crate is its feature witnesses
+# alone. Either tier compiles it, and `std` also flips the crate attribute; each forwards weakly to
+# the optional source crates below, as `smear-parser`'s do.
+alloc = ["smear-lexer/alloc", "smear-parser/alloc", "smear-semantics/alloc", "tokora/alloc", "bstr_1?/alloc", "smol-bytes_0_2?/alloc"]
+std = ["smear-lexer/std", "smear-parser/std", "smear-semantics/std", "tokora/std", "bytes_1?/std", "bstr_1?/std", "hipstr_0_8?/std", "smol-bytes_0_2?/std"]
+
+# The source texts the analyzer accepts beyond `str` and `[u8]`. Each versioned feature forwards
+# `smear-parser`'s of the same name, whose GraphQLx lexer and parser do the reading, and implies no
+# tier: the analyzer needs `std` or `alloc`, which a dependent without default features names
+# beside it. The unversioned name is a pure alias for the current major and carries nothing else.
+#
+# Each also turns on this crate's own edge to the source crate, because `SourceText` is implemented
+# here for that crate's type and the orphan rule puts the impl here or nowhere: no member re-exports
+# `bytes`, `bstr`, `hipstr` or `smol-bytes`, so naming the type needs the dependency.
+bytes = ["bytes_1"]
+bytes_1 = ["dep:bytes_1", "smear-parser/bytes_1"]
+bstr = ["bstr_1"]
+bstr_1 = ["dep:bstr_1", "smear-parser/bstr_1"]
+hipstr = ["hipstr_0_8"]
+hipstr_0_8 = ["dep:hipstr_0_8", "smear-parser/hipstr_0_8"]
+smol-bytes = ["smol-bytes_0_2"]
+smol-bytes_0_2 = ["dep:smol-bytes_0_2", "smear-parser/smol-bytes_0_2"]
+
+# Compiles `graphqlx::test_support`, the door through which `smear`'s integration tests build small
+# models with the crate-private model builder, and the part of the builder only that door calls
+# until the analyzer's later phases call it. Hidden and not API; `smear/test-support` forwards it,
+# and the umbrella's self dev-dependency turns it on for every `smear` test target.
+test-support = []
+
+[dependencies]
+tokora.workspace = true
+
+smear-lexer.workspace = true
+smear-parser = { workspace = true, features = ["graphqlx"] }
+smear-semantics.workspace = true
+
+# The source crates `SourceText` is implemented for, declared exactly as `smear-parser` declares
+# them and turned on only by the feature of the same name.
+bstr_1 = { workspace = true, optional = true }
+bytes_1 = { workspace = true, optional = true }
+# Not a workspace entry: there is none for `hipstr`, and `smear-parser` states the same requirement
+# inline for the same reason.
+hipstr_0_8 = { package = "hipstr", version = "0.8", default-features = false, optional = true }
+smol-bytes_0_2 = { workspace = true, optional = true }
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

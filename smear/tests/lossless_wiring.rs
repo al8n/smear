@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan_0_17", feature = "graphql"))]
+#![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphql"))]
 
 //! The GraphQL lossless suite's wiring guards, plus the one guard that is about the `rowan`
 //! feature rather than about a dialect.

@@ -10,7 +10,7 @@ use std::{vec, vec::Vec};
 /// 0.060 ms, and one sixty-four-argument list was *cheaper* than sixty-four one-argument lists —
 /// and because it is `MAX_FIELD_ARGUMENTS`, so a declared argument list, which a ceiling already
 /// holds at that width, never builds an index it could not need. al8n/smear#198.
-pub(crate) const NARROW_LIST: usize = 64;
+pub const NARROW_LIST: usize = 64;
 
 /// Which earlier position of a name list wrote the name at a given position.
 ///
@@ -37,7 +37,7 @@ pub(crate) const NARROW_LIST: usize = 64;
 /// name; this is eight bytes per position while the index is built and four while it is read. A
 /// position is a `u32` because everything `smear-schema` addresses is — `Sym` itself, `Range32`,
 /// the flat tables `flatten` builds — so the width is the representation's and not a new one.
-pub(crate) enum Duplicates<S> {
+pub enum Duplicates<S> {
   /// The names written so far and the position that wrote each, scanned in order.
   Trail(Vec<(S, u32)>),
   /// One entry per position: the position that first wrote that position's name, which is the
@@ -50,7 +50,7 @@ impl<S: Copy + Ord> Duplicates<S> {
   ///
   /// The accessor is read at most once per position and only on the wide path; a narrow list
   /// never calls it.
-  pub(crate) fn over(len: usize, name: impl Fn(usize) -> S) -> Self {
+  pub fn over(len: usize, name: impl Fn(usize) -> S) -> Self {
     if len <= NARROW_LIST {
       return Self::Trail(Vec::with_capacity(len));
     }
@@ -74,7 +74,7 @@ impl<S: Copy + Ord> Duplicates<S> {
   ///
   /// Call it once per position, in source order, and only where the rule actually applies — a
   /// repeatable directive is not recorded, exactly as the trail did not record one.
-  pub(crate) fn first(&mut self, position: usize, name: S) -> Option<usize> {
+  pub fn first(&mut self, position: usize, name: S) -> Option<usize> {
     match self {
       Self::Trail(trail) => match trail.iter().find(|(written, _)| *written == name) {
         Some(&(_, at)) => Some(at as usize),

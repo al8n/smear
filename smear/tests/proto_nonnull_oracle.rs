@@ -1,4 +1,4 @@
-#![cfg(all(feature = "alloc", feature = "proto"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "proto"))]
 
 //! The draft §6.4.4 oracle: `graphql-js`'s `nonnull-test.ts`, hand-ported case for case.
 //!

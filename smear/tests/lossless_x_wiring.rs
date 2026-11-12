@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 
 //! The GraphQLx lossless suite's wiring guards — the twin of `lossless_wiring.rs`.
 //!

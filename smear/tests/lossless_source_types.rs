@@ -1,4 +1,8 @@
-#![cfg(all(feature = "rowan_0_17", any(feature = "graphql", feature = "graphqlx")))]
+#![cfg(all(
+  feature = "rowan_0_17",
+  feature = "std",
+  any(feature = "graphql", feature = "graphqlx")
+))]
 
 //! Every lossless door takes the source types the syntactic doors take, and the one boundary that
 //! is UTF-8 answers `Err(Refused)` — no parse at all — rather than a diagnostic or a panic.

@@ -23,20 +23,19 @@ readme = "README.md"
 # crate IS, and a gate that can only ever be on is not a gate.
 
 [features]
-# Element-for-element the subset of `smear`'s own default that reaches this layer: `std`, both
-# dialects, and `smallvec`. `smear` names every member feature explicitly with
-# `default-features = false`, so this list governs a DIRECT dependent and nothing else.
-default = ["std", "graphql", "graphqlx", "smallvec_1"]
-alloc = ["tokora/alloc", "memspan/alloc", "bstr_1?/alloc"]
+# Element-for-element the subset of `smear`'s own default that reaches this layer: `std` and both
+# dialects. `smear` names every member feature explicitly with `default-features = false`, so this
+# list governs a DIRECT dependent and nothing else.
+default = ["std", "graphql", "graphqlx"]
+alloc = ["tokora/alloc", "memspan/alloc", "bstr_1?/alloc", "smol-bytes_0_2?/alloc"]
 std = [
-  "alloc",
   "tokora/std",
   "memspan/std",
-  "thiserror/default",
-  "bytes_1?/default",
-  "bstr_1?/default",
-  "hipstr_0_8?/default",
-  "smol-bytes_0_2?/default",
+  "thiserror/std",
+  "bytes_1?/std",
+  "bstr_1?/std",
+  "hipstr_0_8?/std",
+  "smol-bytes_0_2?/std",
 ]
 
 # The two dialects. Each is a module only in a build that enables it, which is why every doc link
@@ -53,17 +52,17 @@ graphqlx = []
 # dependency key carries the same version, so the crate is `bytes_1` in code. The unversioned name
 # is a pure alias for the current major and carries nothing else.
 #
-# All but `bstr_1` imply `alloc`: each links it, `smol-bytes_0_2` through tokora's own edge to it.
-smallvec = ["smallvec_1"]
-smallvec_1 = ["dep:smallvec_1", "alloc"]
+# None implies a tier, and `std` and `alloc` above reach the dependencies weakly, with `?/`, so a
+# tier never turns one on either. All but `bstr_1` link `alloc` whatever the tier, `smol-bytes_0_2`
+# through tokora's own edge to it, and every item that names one is gated on `std` or `alloc` too.
 bytes = ["bytes_1"]
-bytes_1 = ["dep:bytes_1", "alloc", "tokora/bytes_1"]
+bytes_1 = ["dep:bytes_1", "tokora/bytes_1"]
 bstr = ["bstr_1"]
 bstr_1 = ["dep:bstr_1", "tokora/bstr_1"]
 hipstr = ["hipstr_0_8"]
-hipstr_0_8 = ["dep:hipstr_0_8", "alloc", "tokora/hipstr_0_8"]
+hipstr_0_8 = ["dep:hipstr_0_8", "tokora/hipstr_0_8"]
 smol-bytes = ["smol-bytes_0_2"]
-smol-bytes_0_2 = ["dep:smol-bytes_0_2", "alloc", "tokora/smol-bytes_0_2"]
+smol-bytes_0_2 = ["dep:smol-bytes_0_2", "tokora/smol-bytes_0_2"]
 
 [dependencies]
 derive_more.workspace = true
@@ -78,7 +77,6 @@ hipstr_0_8 = { package = "hipstr", version = "0.8", default-features = false, op
 bytes_1 = { workspace = true, optional = true }
 smol-bytes_0_2 = { workspace = true, optional = true }
 bstr_1 = { workspace = true, optional = true }
-smallvec_1 = { package = "smallvec", version = "1", default-features = false, features = ["const_new"], optional = true }
 
 [lints]
 workspace = true

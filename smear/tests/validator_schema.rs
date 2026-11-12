@@ -16,7 +16,7 @@
 // match its real dependency (`rowan`, a dialect, or both); this one did not, so it was a hard
 // `E0433` compile error — not a cfg'd-out no-op — under any feature selection that excludes
 // `validator`, including plain `--features graphql,parser`.
-#![cfg(all(feature = "alloc", feature = "validator"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "validator"))]
 #![allow(missing_docs)]
 
 use smear::{

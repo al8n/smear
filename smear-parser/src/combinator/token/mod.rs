@@ -320,7 +320,7 @@ macro_rules! typed_keyword_atom {
 // meant no `parser`-without-a-dialect test build was ever produced to say so.
 #[cfg(all(
   test,
-  feature = "alloc",
+  any(feature = "std", feature = "alloc"),
   any(feature = "graphql", feature = "graphqlx")
 ))]
 mod tests;

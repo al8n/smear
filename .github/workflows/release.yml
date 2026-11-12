@@ -92,7 +92,7 @@ jobs:
       # The root lock is deliberately ignored. Cargo 1.99.1 cannot verify this
       # unpublished DAG in a dry run: its temporary registry has no checksum for
       # the local dependency it just packaged. Exact-SHA CI is the source/build
-      # verdict; this step creates the six byte-evidence archives with locked,
+      # verdict; this step creates the eight byte-evidence archives with locked,
       # no-verify packaging. Real locked publishes verify after each dependency
       # becomes publicly indexed.
       - name: Generate lock and package pre-approval archives
@@ -107,7 +107,7 @@ jobs:
             --target-dir "$RUNNER_TEMP/smear-release/verify-target" \
             --evidence-dir "$RUNNER_TEMP/smear-release/preflight"
 
-      # Bootstrap the five missing names from this exact evidence while the
+      # Bootstrap the seven missing names from this exact evidence while the
       # protected publish job waits. Approve THIS run afterward; never resolve
       # another lock or rerun verify after a sibling has been published.
       - name: Retain the exact manual-bootstrap evidence
@@ -222,7 +222,7 @@ jobs:
             --expected-manifest "$RUNNER_TEMP/smear-release/publish/preflight.json" \
             --output "$RUNNER_TEMP/smear-release/publish/local.json"
 
-      # One exchange covers all six crates only when all six crates.io configs
+      # One exchange covers all eight crates only when all eight crates.io configs
       # match al8n/smear + release.yml + the crates-io environment.
       - name: Exchange the approved workflow identity for one temporary token
         id: auth

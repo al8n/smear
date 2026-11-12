@@ -18,9 +18,9 @@ to run FROM THE MEMBERS, which are the superset, and check against the umbrella.
         or F is in EXEMPT with a written reason
 
 TRANSITIVE, not direct. `smear`'s `lossless-coverage = ["rowan_0_17", …]` reaches
-`smear-lexer/std` through `rowan_0_17 -> std -> smear-lexer/std`, and a check that only read the
-umbrella's direct `member/feature` entries would call that unreachable. What the gate asks is
-whether SOME feature of `smear` turns M/F on, which is the question a dependent asks.
+`smear-compiler/rowan_0_17` through `rowan_0_17 -> smear-compiler?/rowan_0_17`, and a check that
+only read the umbrella's direct `member/feature` entries would call that unreachable. What the gate
+asks is whether SOME feature of `smear` turns M/F on, which is the question a dependent asks.
 
 BOTH SIDES COME OUT OF `cargo metadata`. Nothing here is hardcoded except the umbrella's name and
 the exemption table, and no count is written down anywhere: a census whose expected number is a
@@ -123,7 +123,7 @@ UMBRELLA = "smear"
 #   EXEMPT (features)              this feature need not be        an entry matching nothing is a
 #     (this file)                  forwarded                       finding; empty today
 #   EXEMPT_SELECTION               this member need not be in      an entry matching nothing is a
-#     (this file)                  that selection                  finding; empty today
+#     (this file)                  that selection                  finding; one entry today
 #   FLOOR_BEARING                  only this file may import a     two-sided: others may not, and
 #     (this file)                  floor-bearing stdlib module     the owner must
 #   SELECTIONS / READERS           these are the selections that   a reader that cannot find its
@@ -157,6 +157,8 @@ UMBRELLA = "smear"
 #     (miri_scope)                 declared total
 #   CELL_FLAGS                     value of each bare cfg in a     self-verifying: an unmodelled
 #     (miri_scope)                 Miri cell                       cfg raises rather than guesses
+#   EXEMPT (paths)                 this file may spell `alloc`     an entry matching nothing is a
+#     (tier_gates)                 outside the heap gate           finding; empty today
 #   EXEMPTIONS (40 entries)        this error type is outside      an entry matching nothing is a
 #     (source_census, Rust)        the diagnostic contract         hard error
 #
@@ -208,10 +210,15 @@ EXEMPT: dict[tuple[str, str], str] = {}
 # not read it. `None` is not an allowed answer: a table that cannot be located is a finding.
 SELECTIONS = ("miri", "census", "cross")
 
-# (selection, member) pairs deliberately outside a selection, each with the argument. Empty today.
-# An entry that matches nothing — because the member is gone, or is in the selection after all —
-# is a failure, exactly like a stale feature exemption.
-EXEMPT_SELECTION: dict[tuple[str, str], str] = {}
+# (selection, member) pairs deliberately outside a selection, each with the argument. An entry that
+# matches nothing — because the member is gone, or is in the selection after all — is a failure,
+# exactly like a stale feature exemption.
+EXEMPT_SELECTION: dict[tuple[str, str], str] = {
+  ("census", "smear-semantics"): "the census reads each crate root under the `smear::` path a "
+  "consumer of the umbrella writes for it, and `smear` mounts nothing of this crate, so there is "
+  "no such path to read it under. What it computes reaches a consumer only through the layers "
+  "built on it, and those are censused under their own mounts",
+}
 
 # The shapes `--selftest` plants, named once so the verdict and the selftest cannot drift.
 PLANTS = {
@@ -1242,6 +1249,12 @@ def selftest() -> int:
   members = {"smear", "smear-lexer", "smear-parser"}
   honest = {key: set(members) for key in SELECTIONS}
 
+  # The real exemption table names real members, which no planted tree holds, so each of its rows
+  # would read as stale in these cases: they run against an empty table, and the real one is put
+  # back after the last of them.
+  real_exemptions = dict(EXEMPT_SELECTION)
+  EXEMPT_SELECTION.clear()
+
   real = check_selections(members, honest)
   if real:
     problems.append(f"a fully covered tree should have no selection finding and had: {real}")
@@ -1273,6 +1286,7 @@ def selftest() -> int:
   del EXEMPT_SELECTION[("miri", "no-such-member")]
   if not any("matches nothing" in f for f in stale):
     problems.append(f"plant (i) a stale selection exemption must fail, got {stale}")
+  EXEMPT_SELECTION.update(real_exemptions)
 
   problems = [p for p in problems if p]
   if problems:

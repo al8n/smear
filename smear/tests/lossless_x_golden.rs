@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 
 //! Gate 5: GraphQLx golden trees — the **shape** gate, and the only one that can see a mis-shaped
 //! tree.

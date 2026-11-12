@@ -20,7 +20,7 @@
 //! tier the feature buys outright.
 //!
 #![cfg_attr(
-  all(feature = "alloc", feature = "build"),
+  all(any(feature = "std", feature = "alloc"), feature = "build"),
   doc = "```
 use smear_parser::{
   graphql::{
@@ -53,13 +53,9 @@ assert!(schema.type_by_name(b\"__Schema\").is_some());
 )]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, allow(unused_attributes))]
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
-
-// Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
-// compile them all out and still build green.
-#[cfg(all(feature = "std", not(feature = "alloc")))]
-compile_error!("the `std` feature must enable `alloc`: check this crate's [features] table");
 
 // The alloc-as-std alias: the crate's files spell their allocations `std::boxed::Box`, which
 // resolves to `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build.
@@ -81,7 +77,7 @@ compile_error!("the `std` feature must enable `alloc`: check this crate's [featu
 // locally, with no `RUSTFLAGS` needed. That deny is the repair for the gate, not for the code:
 // this construct reddened CI twice, and both times the local run that cleared it was narrower
 // than CI's.
-#[cfg(all(feature = "alloc", not(feature = "std")))]
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
 #[allow(unused_extern_crates)]
 extern crate alloc as std;
 
@@ -110,18 +106,19 @@ pub mod builtin;
 // Deliberately no outer doc comment, for the reason recorded on `diagnostic` above: an outer
 // comment here would silently reinterpret every `super::` link in `introspection/mod.rs` as one
 // rooted in this crate's root, and they would all stop resolving under `RUSTDOCFLAGS="-D warnings"`.
-#[cfg(all(feature = "alloc", feature = "introspection"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "introspection"))))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "introspection"))]
+#[cfg_attr(
+  docsrs,
+  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "introspection")))
+)]
 pub mod introspection;
 
-#[cfg(all(feature = "alloc", feature = "build"))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "build"))]
 mod builder;
-#[cfg(all(feature = "alloc", feature = "build"))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "build"))]
 mod error;
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 mod repr;
-#[cfg(all(feature = "alloc", feature = "build"))]
-mod semantics;
 
 /// The literal-shape coercion table, shared with the executable rules.
 ///
@@ -129,11 +126,14 @@ mod semantics;
 /// anyone outside it, and `repr` — the part of this crate that is published widest — stays free of
 /// it. It followed the builder down from `smear-compiler` because the builder is its only caller;
 /// re-confirmed on this tree by restricting its visibility and rebuilding.
-#[cfg(all(feature = "alloc", feature = "build"))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "build"))]
 pub(crate) mod literal;
 
-#[cfg(all(feature = "alloc", feature = "introspection"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "introspection"))))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "introspection"))]
+#[cfg_attr(
+  docsrs,
+  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "introspection")))
+)]
 pub use introspection::IntrospectionError;
 
 /// Draft §6.3's collection indexes the *document's* names the way [`NameIndex`] indexes the
@@ -144,21 +144,27 @@ pub use introspection::IntrospectionError;
 /// the workspace. It was `pub(crate)` behind `#[cfg(feature = "proto")]` while both lived in one
 /// crate; a crate boundary has no narrower spelling to offer, and two functions is the whole of the
 /// widening.
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 #[doc(hidden)]
 pub use repr::name::{bucket, hash_bytes};
 
-#[cfg(all(feature = "alloc", feature = "build"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "build"))))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "build"))]
+#[cfg_attr(
+  docsrs,
+  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "build")))
+)]
 pub use builder::{
   MAX_CONST_VALUE_DEPTH, MAX_INTERFACE_IMPLEMENTATION_MISMATCHES,
   MAX_MISSING_TRANSITIVE_INTERFACES, SchemaBuilder,
 };
-#[cfg(all(feature = "alloc", feature = "build"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "build"))))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "build"))]
+#[cfg_attr(
+  docsrs,
+  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "build")))
+)]
 pub use error::{SchemaError, SchemaErrorKind, SchemaErrors};
-#[cfg(feature = "alloc")]
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use repr::{
   DefaultKind, Deprecation, DirectiveDef, DirectiveLocation, DirectiveLocations, DirectiveMeta,
   EnumValueMeta, FieldDef, FieldMeta, InputValueDef, InputValueMeta, MAX_DIRECTIVE_ARGUMENTS,

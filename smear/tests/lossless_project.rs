@@ -1,4 +1,4 @@
-#![cfg(all(feature = "graphql", feature = "rowan_0_17"))]
+#![cfg(all(feature = "graphql", feature = "rowan_0_17", feature = "std"))]
 
 //! The differential gate for the GraphQL CST → AST projection (issue #58).
 //!

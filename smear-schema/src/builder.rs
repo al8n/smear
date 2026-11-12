@@ -42,6 +42,7 @@ use smear_parser::{
   },
   lexer::{error::StringValueError, string_value_len, string_value_pieces},
 };
+use smear_semantics::{self as semantics, duplicates::NARROW_LIST};
 
 use self::{
   declared::{Args, ArgsMut, Declared},
@@ -57,7 +58,6 @@ use super::{
     MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, MAX_WRAPPERS, NameIndex, PackedType, Range32, RootOperation,
     Schema, Sym, Text, TypeDef, TypeFlags, TypeId, TypeKind, TypeMeta, is_name, is_reserved,
   },
-  semantics::{self, duplicates::NARROW_LIST},
 };
 
 // The canonical text of a default value, and the string escaping the introspection door shares.

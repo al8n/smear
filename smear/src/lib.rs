@@ -1,12 +1,8 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, allow(unused_attributes))]
 #![deny(missing_docs)]
-
-// Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
-// compile them all out and still build green.
-#[cfg(all(feature = "std", not(feature = "alloc")))]
-compile_error!("the `std` feature must enable `alloc`: check this crate's [features] table");
 
 // THE ALIAS IS BACK, AND `json` IS WHY. It left when this crate lost its last module — every
 // member carries its own, and an umbrella that forwards a `no_std` stack must not itself link
@@ -17,13 +13,14 @@ compile_error!("the `std` feature must enable `alloc`: check this crate's [featu
 // is two `Vec`s and the reason for each is in `json::response`. The claim it replaces is in
 // `json`'s own header, restated as what the two allocations cost rather than deleted.
 //
-// Gated on `alloc` and `proto`, the two features that compile the module: `#[cfg]`d rather than
+// Gated on `alloc` and `proto` without `std`: with `std` the module's `std::` paths are the
+// standard library's, and without `proto` there is no module to need it. `#[cfg]`d rather than
 // unconditional so that a lexer-only or parser-only build — neither of which has anything to
 // allocate — still links neither `alloc` nor `std` through this file. Every member spells the
 // alias the same way and for the same reason, and the `#[allow]` is the workspace-wide exception
 // `unused_extern_crates = "deny"` requires: the users are feature-gated, so a configuration that
 // compiles none of them would otherwise fail on the item itself.
-#[cfg(all(feature = "alloc", feature = "proto", not(feature = "std")))]
+#[cfg(all(not(feature = "std"), feature = "alloc", feature = "proto"))]
 #[allow(unused_extern_crates)]
 extern crate alloc as std;
 
@@ -59,10 +56,10 @@ pub use smear_schema::diagnostic;
 /// - `lossless` — preserves every byte of trivia. For formatters, linters, IDEs and
 ///   syntax highlighters, where the source must round-trip exactly.
 ///
-/// A dialect is a module only in a build that enables its feature and `alloc`, so each link below
-/// is gated to the build that has something to link to. Ungated, they are `unresolved link`
-/// errors under `RUSTDOCFLAGS="-D warnings"` in every single-dialect configuration — the failure
-/// the `docs` CI job's dialect-alone legs exist to catch.
+/// A dialect is a module only in a build that enables its feature and `std` or `alloc`, so each
+/// link below is gated to the build that has something to link to. Ungated, they are
+/// `unresolved link` errors under `RUSTDOCFLAGS="-D warnings"` in every single-dialect
+/// configuration — the failure the `docs` CI job's dialect-alone legs exist to catch.
 ///
 /// This module is the crate's irreducible base and carries no feature of its own: the parser
 /// cannot exist without it, and a build with both switched off would be an empty crate. The
@@ -77,16 +74,19 @@ pub use smear_schema::diagnostic;
 /// Available dialects:
 ///
 #[cfg_attr(
-  all(feature = "alloc", feature = "graphql"),
+  all(any(feature = "std", feature = "alloc"), feature = "graphql"),
   doc = "- [`graphql`](lexer::graphql)"
 )]
-#[cfg_attr(all(not(feature = "alloc"), feature = "graphql"), doc = "- `graphql`")]
 #[cfg_attr(
-  all(feature = "alloc", feature = "graphqlx"),
+  all(not(any(feature = "std", feature = "alloc")), feature = "graphql"),
+  doc = "- `graphql`"
+)]
+#[cfg_attr(
+  all(any(feature = "std", feature = "alloc"), feature = "graphqlx"),
   doc = "- [`graphqlx`](lexer::graphqlx)"
 )]
 #[cfg_attr(
-  all(not(feature = "alloc"), feature = "graphqlx"),
+  all(not(any(feature = "std", feature = "alloc")), feature = "graphqlx"),
   doc = "- `graphqlx`"
 )]
 ///
@@ -106,22 +106,25 @@ pub use smear_lexer::keyword;
 ///
 /// Atomic parser combinators that build AST nodes from the token streams produced by [`lexer`],
 /// composed with the `tokora` combinator library, plus the lossless CST tower behind the
-/// `rowan_0_17` feature.
+/// `rowan_0_17` feature and `std`.
 ///
 /// Available dialects, each link gated on its feature for the reason recorded on [`lexer`]:
 ///
 #[cfg_attr(
-  all(feature = "alloc", feature = "graphql"),
+  all(any(feature = "std", feature = "alloc"), feature = "graphql"),
   doc = "- [`graphql`](parser::graphql)"
 )]
-#[cfg_attr(all(not(feature = "alloc"), feature = "graphql"), doc = "- `graphql`")]
 #[cfg_attr(
-  all(feature = "alloc", feature = "graphqlx"),
+  all(not(any(feature = "std", feature = "alloc")), feature = "graphql"),
+  doc = "- `graphql`"
+)]
+#[cfg_attr(
+  all(any(feature = "std", feature = "alloc"), feature = "graphqlx"),
   doc = "- [`graphqlx`](parser::graphqlx) — adds `use` items, inline modules, generics, \
          where-clauses, set and map literals, and namespaced paths on top of GraphQL."
 )]
 #[cfg_attr(
-  all(not(feature = "alloc"), feature = "graphqlx"),
+  all(not(any(feature = "std", feature = "alloc")), feature = "graphqlx"),
   doc = "- `graphqlx` — adds `use` items, inline modules, generics, where-clauses, set and map \
          literals, and namespaced paths on top of GraphQL."
 )]
@@ -147,25 +150,25 @@ pub use smear_parser::typed_keyword_atom;
 /// Re-exported for the reason [`keyword!`](keyword) is. Gated on `rowan` rather than on `parser`
 /// because the module that defines it is: a `#[macro_export]` macro exists exactly when the file
 /// holding it is compiled.
-#[cfg(feature = "rowan_0_17")]
-#[cfg_attr(docsrs, doc(cfg(feature = "rowan_0_17")))]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "rowan_0_17", feature = "std"))))]
 pub use smear_parser::ast_node;
 
 /// GraphQL document validation, and the built-once schema every rule reads.
 ///
 #[cfg_attr(
-  feature = "alloc",
+  any(feature = "std", feature = "alloc"),
   doc = "Draft §3 \"Type Validation\" runs inside [`Schema::build`](validator::Schema::build), so \
          a malformed SDL is refused once at startup rather than rediscovered per request."
 )]
 #[cfg_attr(
-  not(feature = "alloc"),
+  not(any(feature = "std", feature = "alloc")),
   doc = "Draft §3 \"Type Validation\" runs inside `Schema::build`, so a malformed SDL is refused \
          once at startup rather than rediscovered per request."
 )]
 ///
 #[cfg_attr(
-  all(feature = "alloc", feature = "introspection"),
+  all(any(feature = "std", feature = "alloc"), feature = "introspection"),
   doc = "A schema can also be built from a server's draft §4 introspection response — \
          [`Schema::from_introspection`](validator::Schema::from_introspection), behind the \
          `introspection` feature. It is a second entrance to the same value: it renders the \
@@ -173,20 +176,20 @@ pub use smear_parser::ast_node;
          two doors cannot drift apart."
 )]
 #[cfg_attr(
-  not(all(feature = "alloc", feature = "introspection")),
+  not(all(any(feature = "std", feature = "alloc"), feature = "introspection")),
   doc = "The `introspection` feature adds a second construction door, building the same schema \
          out of a server's draft §4 introspection response instead of out of SDL."
 )]
 ///
 /// Standard GraphQL only —
 #[cfg_attr(
-  all(feature = "alloc", feature = "graphqlx"),
+  all(any(feature = "std", feature = "alloc"), feature = "graphqlx"),
   doc = "[`graphqlx`](parser::graphqlx) has no validator, deliberately: its generics, \
          `where` constraints, set and map literals and namespaced paths have no specification \
          semantics, so validating them would be language design rather than conformance."
 )]
 #[cfg_attr(
-  not(all(feature = "alloc", feature = "graphqlx")),
+  not(all(any(feature = "std", feature = "alloc"), feature = "graphqlx")),
   doc = "the GraphQLx dialect has no validator, deliberately: its extensions have no \
          specification semantics to validate against."
 )]
@@ -201,13 +204,13 @@ pub use smear_compiler as validator;
 /// Draft §6 execution, as a Sans-I/O state machine.
 ///
 #[cfg_attr(
-  feature = "alloc",
+  any(feature = "std", feature = "alloc"),
   doc = "Runs a validated query against a built [`Schema`](validator::Schema) and produces a \
          draft §7.1 response, performing no I/O and calling no resolver: it says which field it \
          needs and waits to be told the answer."
 )]
 #[cfg_attr(
-  not(feature = "alloc"),
+  not(any(feature = "std", feature = "alloc")),
   doc = "Runs a validated query against a built `Schema` and produces a draft §7.1 response, \
          performing no I/O and calling no resolver: it says which field it needs and waits to be \
          told the answer."
@@ -215,14 +218,14 @@ pub use smear_compiler as validator;
 ///
 /// It defines no value type.
 #[cfg_attr(
-  feature = "alloc",
+  any(feature = "std", feature = "alloc"),
   doc = "The driver keeps values in its own representation and answers structural questions \
          about them through [`Values`](proto::Values) — the same choice [`lexer`] makes about its \
          source, made for the same reason: an owned enum would force an allocation per leaf and \
          would make a wasm or FFI handle second-class."
 )]
 #[cfg_attr(
-  not(feature = "alloc"),
+  not(any(feature = "std", feature = "alloc")),
   doc = "The driver keeps values in its own representation and answers structural questions \
          about them through `Values` — the same choice `lexer` makes about its source, made for \
          the same reason: an owned enum would force an allocation per leaf and would make a wasm \
@@ -239,6 +242,27 @@ pub use smear_compiler as validator;
 #[doc(inline)]
 pub use graphql_proto as proto;
 
+/// GraphQLx schema analysis.
+///
+#[cfg_attr(
+  any(feature = "std", feature = "alloc"),
+  doc = "[`graphqlx`](analysis::graphqlx) is the analyzer: GraphQLx packages in, a resolved model \
+         and its diagnostics out."
+)]
+#[cfg_attr(
+  not(any(feature = "std", feature = "alloc")),
+  doc = "`graphqlx` is the analyzer: GraphQLx packages in, a resolved model and its diagnostics \
+         out. It needs `std` or `alloc`."
+)]
+///
+/// GraphQLx only: standard GraphQL is validated against the draft specification by `validator`.
+///
+/// The layer is the `smear-analysis` crate.
+#[cfg(feature = "analysis")]
+#[cfg_attr(docsrs, doc(cfg(feature = "analysis")))]
+#[doc(inline)]
+pub use smear_analysis as analysis;
+
 // THE ONE MODULE THIS CRATE OWNS, and it is here rather than one layer down for a stated reason.
 //
 // `graphql-proto` refuses to write a response out because writing one means writing the driver's
@@ -248,15 +272,18 @@ pub use graphql_proto as proto;
 // the values — which is this crate and no other. Neither layer grows a question it should not
 // have.
 //
-// Gated on `proto` and `alloc` alone. The materialised implementations inside it need
-// `materialized-numbers` too and carry their own `#[cfg]`, so the module and the number formatters
-// are in an `alloc` + `proto` build whether or not the value trees are, and
+// Gated on `proto` and a tier, `std` or `alloc`, alone. The materialised implementations inside it
+// need `materialized-numbers` too and carry their own `#[cfg]`, so the module and the number
+// formatters are in every `proto` build with a tier whether or not the value trees are, and
 // `cargo hack --each-feature --features alloc` compiles it in the `proto` cell rather than only
 // under `--all-features`. NO NEW FEATURE: a `json` feature would be one more cell in each of
 // `ci/hack.sh`'s passes and a pair `ci/feature_reachability.py` would have to be told about, to
 // gate a module that is already exactly as reachable as the crate it writes.
-#[cfg(all(feature = "alloc", feature = "proto"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "proto"))))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "proto"))]
+#[cfg_attr(
+  docsrs,
+  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "proto")))
+)]
 pub mod json;
 
 #[doc(hidden)]
@@ -267,10 +294,10 @@ pub mod __private {
 // ── THE UMBRELLA'S FEATURES ARE THE GATE, AND THIS IS WHAT MAKES THAT TRUE ───────────────────
 //
 // A feature of `smear` gates what it claims ONLY where this file writes the `#[cfg]`. `parser`,
-// `validator` and `proto` do — they gate the `pub use` statements above, and a second dependency
-// naming the member directly cannot conjure the module. Every other feature here merely FORWARDS
-// to a member feature, and the `#[cfg]` that decides the item then lives inside the member, where
-// cargo unifies it across the whole graph.
+// `validator`, `proto` and `analysis` do — they gate the `pub use` statements above, and a second
+// dependency naming the member directly cannot conjure the module. Every other feature here merely
+// FORWARDS to a member feature, and the `#[cfg]` that decides the item then lives inside the member,
+// where cargo unifies it across the whole graph.
 //
 // Measured on this tree, not argued. A consumer with
 //
@@ -299,16 +326,17 @@ pub mod __private {
 // it was unreachable and after the split it was silent.
 //
 // WHAT THIS FENCE DOES NOT COVER, stated because a claim wider than what it holds is the defect it
-// was built against. It covers MEMBER features — the 32 `cargo metadata` reports across the five
-// crates smear re-exports. Several `smear` features ALSO forward to third-party ones: `bytes_1`
-// forwards `tokora/bytes_1`, and `impl Source for bytes::Bytes` comes from tokora, not from
-// `smear-lexer`. Measured on this tree: a consumer with `smear/bytes_1` off and `tokora/bytes_1`
-// enabled directly gets that impl, and nothing here fires — tokora publishes no feature witnesses
-// and this repository cannot give it any. That is NOT a regression from the split: `smear/bytes`
-// forwarded `tokora/bytes_1` on `origin/feat/proto` too, so the same graph did the same thing
-// before any crate moved. It is a pre-existing bound of the umbrella, now written down.
+// was built against. It covers MEMBER features — the 39 `cargo metadata` reports across the six
+// crates smear re-exports and `smear-semantics`, which it asserts without mounting. Several `smear`
+// features ALSO forward to third-party ones: `bytes_1` forwards `tokora/bytes_1`, and
+// `impl Source for bytes::Bytes` comes from tokora, not from `smear-lexer`. Measured on this tree:
+// a consumer with `smear/bytes_1` off and `tokora/bytes_1` enabled directly gets that impl, and
+// nothing here fires — tokora publishes no feature witnesses and this repository cannot give it
+// any. That is NOT a regression from the split: `smear/bytes` forwarded `tokora/bytes_1` on
+// `origin/feat/proto` too, so the same graph did the same thing before any crate moved. It is a
+// pre-existing bound of the umbrella, now written down.
 //
-// The unversioned names — `bytes`, `bstr`, `hipstr`, `smol-bytes`, `smallvec`, `rowan` — are pure
+// The unversioned names — `bytes`, `bstr`, `hipstr`, `smol-bytes`, `rowan` — are pure
 // aliases of the versioned features above and publish no witness of their own: enabling a member's
 // alias turns its versioned feature on, which is the pair asserted, so the alias adds no state for
 // the fence to hold.
@@ -343,10 +371,6 @@ const _: () = {
   assert!(
     smear_lexer::__features::HIPSTR_0_8 == cfg!(feature = "hipstr_0_8"),
     "`smear-lexer/hipstr_0_8` and `smear/hipstr_0_8` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/hipstr_0_8` too, or stop enabling\n     `smear-lexer/hipstr_0_8`."
-  );
-  assert!(
-    smear_lexer::__features::SMALLVEC_1 == cfg!(feature = "smallvec_1"),
-    "`smear-lexer/smallvec_1` and `smear/smallvec_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smallvec_1` too, or stop enabling\n     `smear-lexer/smallvec_1`."
   );
   assert!(
     smear_lexer::__features::SMOL_BYTES_0_2 == cfg!(feature = "smol-bytes_0_2"),
@@ -397,10 +421,6 @@ const _: () = {
     "`smear-parser/rowan_0_17` and `smear/rowan_0_17` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/rowan_0_17` too, or stop enabling\n     `smear-parser/rowan_0_17`."
   );
   assert!(
-    smear_parser::__features::SMALLVEC_1 == cfg!(feature = "smallvec_1"),
-    "`smear-parser/smallvec_1` and `smear/smallvec_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smallvec_1` too, or stop enabling\n     `smear-parser/smallvec_1`."
-  );
-  assert!(
     smear_parser::__features::SMOL_BYTES_0_2 == cfg!(feature = "smol-bytes_0_2"),
     "`smear-parser/smol-bytes_0_2` and `smear/smol-bytes_0_2` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smol-bytes_0_2` too, or stop enabling\n     `smear-parser/smol-bytes_0_2`."
   );
@@ -443,6 +463,21 @@ const _: () = {
   );
 };
 
+// `smear-semantics` is the one member asserted here that this crate does not mount. It sits beneath
+// `smear-schema`'s builder and beneath `smear-analysis`, so it is in the graph whenever `validator`
+// or `analysis` is, and the optional edge both turn on exists so this block can read its witnesses.
+#[cfg(any(feature = "validator", feature = "analysis"))]
+const _: () = {
+  assert!(
+    smear_semantics::__features::ALLOC == cfg!(feature = "alloc"),
+    "`smear-semantics/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and the kernels beneath `smear::validator` and `smear::analysis`\n     would then be built at a tier this consumer never asked for. Enable `smear/alloc` too, or\n     stop enabling `smear-semantics/alloc`."
+  );
+  assert!(
+    smear_semantics::__features::STD == cfg!(feature = "std"),
+    "`smear-semantics/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and the kernels beneath `smear::validator` and `smear::analysis`\n     would then be built at a tier this consumer never asked for. Enable `smear/std` too, or\n     stop enabling `smear-semantics/std`."
+  );
+};
+
 #[cfg(feature = "validator")]
 const _: () = {
   assert!(
@@ -472,5 +507,37 @@ const _: () = {
   assert!(
     graphql_proto::__features::STD == cfg!(feature = "std"),
     "`graphql-proto/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/std` too, or stop enabling\n     `graphql-proto/std`."
+  );
+};
+
+#[cfg(feature = "analysis")]
+const _: () = {
+  assert!(
+    smear_analysis::__features::ALLOC == cfg!(feature = "alloc"),
+    "`smear-analysis/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/alloc` too, or stop enabling\n     `smear-analysis/alloc`."
+  );
+  assert!(
+    smear_analysis::__features::BSTR_1 == cfg!(feature = "bstr_1"),
+    "`smear-analysis/bstr_1` and `smear/bstr_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bstr_1` too, or stop enabling\n     `smear-analysis/bstr_1`."
+  );
+  assert!(
+    smear_analysis::__features::BYTES_1 == cfg!(feature = "bytes_1"),
+    "`smear-analysis/bytes_1` and `smear/bytes_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bytes_1` too, or stop enabling\n     `smear-analysis/bytes_1`."
+  );
+  assert!(
+    smear_analysis::__features::HIPSTR_0_8 == cfg!(feature = "hipstr_0_8"),
+    "`smear-analysis/hipstr_0_8` and `smear/hipstr_0_8` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/hipstr_0_8` too, or stop enabling\n     `smear-analysis/hipstr_0_8`."
+  );
+  assert!(
+    smear_analysis::__features::SMOL_BYTES_0_2 == cfg!(feature = "smol-bytes_0_2"),
+    "`smear-analysis/smol-bytes_0_2` and `smear/smol-bytes_0_2` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smol-bytes_0_2` too, or stop enabling\n     `smear-analysis/smol-bytes_0_2`."
+  );
+  assert!(
+    smear_analysis::__features::STD == cfg!(feature = "std"),
+    "`smear-analysis/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/std` too, or stop enabling\n     `smear-analysis/std`."
+  );
+  assert!(
+    smear_analysis::__features::TEST_SUPPORT == cfg!(feature = "test-support"),
+    "`smear-analysis/test-support` and `smear/test-support` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/test-support` too, or stop enabling\n     `smear-analysis/test-support`."
   );
 };

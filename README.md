@@ -201,7 +201,7 @@ smear = { version = "0.0.1", features = ["validator"] }
 ### Parsing
 
 ```rust
-# #[cfg(all(feature = "alloc", feature = "parser", feature = "graphql"))] {
+# #[cfg(all(any(feature = "std", feature = "alloc"), feature = "parser", feature = "graphql"))] {
 use smear::{
   lexer::tokora::{Parse as _, Parser},
   parser::graphql::{
@@ -232,7 +232,7 @@ Build the schema once, then validate each request against it. The `Scratch` and 
 to the caller and are reused across requests — that is what makes the steady state allocation-free.
 
 ```rust
-# #[cfg(all(feature = "alloc", feature = "validator"))] {
+# #[cfg(all(any(feature = "std", feature = "alloc"), feature = "validator"))] {
 use smear::{
   lexer::tokora::{Parse as _, Parser},
   parser::graphql::{
@@ -283,8 +283,10 @@ assert_eq!(diagnostic.subject_source(), Some(&"title"));
 
 ## Architecture
 
-Five layers, one crate each, and `smear` is an umbrella that re-exports all of them. The lower two
-are generic over the source type and the dialect; the upper three are standard GraphQL only.
+Six layers, one crate each, and `smear` is an umbrella that re-exports all of them; a seventh crate
+holds the algorithms two of them share. The lower two are generic over the source type and the
+dialect; the schema, validator and execution layers are standard GraphQL only, and the analysis
+layer is GraphQLx only.
 
 | Layer | Crate | Reached as | What it is |
 |---|---|---|---|
@@ -293,6 +295,8 @@ are generic over the source type and the dialect; the upper three are standard G
 | Schema | `smear-schema` | `smear::validator::schema` | The built-once `Schema` and, behind its `build` feature, draft §3 inside the builder. A consumer that only *reads* a schema takes it with `default-features = false` and `alloc` and gets no front end |
 | Validator | `smear-compiler` | `smear::validator` | The draft §5 rules over a parsed request, the rule vocabulary and the diagnostic rendering |
 | Execution | `graphql-proto` | `smear::proto` | Draft §6 as a Sans-I/O state machine: it says which field it needs next and waits to be told the answer, so the driver keeps the values, the resolvers and the runtime. Query, serial mutation and subscription execution are behind the non-default `proto` feature; it returns a response tree that `smear::json` writes as §7.2.1 JSON |
+| Analysis | `smear-analysis` | `smear::analysis` | The GraphQLx schema analyzer: GraphQLx packages in, a resolved model and its diagnostics out. Its rules are visitors over the model, and a consumer's own rules walk it the same way. Behind the non-default `analysis` feature |
+| Shared algorithms | `smear-semantics` | not re-exported | The interner, duplicate-name detection and cycle kernel that the schema builder and the analyzer both run on |
 | Diagnostic | `tokora`, re-exported by `smear-schema` | `smear::diagnostic` | The contract every error family above answers, so rendering is the consumer's choice. The trait is `tokora::diagnostic::Diagnose`: the lexer's and the parser's syntax errors implement it straight from `tokora`, and `smear-schema` re-exports it as the ungated `smear::diagnostic` path it has always been |
 
 **Depend on `smear` and enable features, or depend on a member directly** — the two are the same
@@ -305,70 +309,75 @@ enumerating the members rather than by reading the umbrella's own table.
 
 ## Feature Flags
 
-Seventeen features, and six aliases. The lexer is not one of them: it is the irreducible base, the
+Seventeen features, and five aliases. The lexer is not one of them: it is the irreducible base, the
 parser cannot exist without it, and a gate that can only ever be on is not a gate.
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `alloc` | The allocating API: the dialect lexers and parsers, the validator, the executor and `json`. Off, `smear` is `no_std` and exports only what needs no allocator, as the tiers section below spells out. Implied by `std`, `smallvec_1`, `bytes_1`, `hipstr_0_8` and `smol-bytes_0_2` | via `std` |
-| `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
+| `alloc` | The allocating API without the standard library: the dialect lexers and parsers, the validator, the executor and `json`. `std` gives the same API; with neither, `smear` is `no_std` and exports only what needs no allocator, as the tiers section below spells out. Implied by no feature | |
+| `std` | Standard library support, and with it the allocating API; it does not turn `alloc` on. Off, the crate is `no_std` | ✓ |
 | `graphql` | Standard GraphQL, in every layer | ✓ |
 | `graphqlx` | Extended GraphQL, in the lexer and parser. Semver-exempt until the dialect stabilises | ✓ |
 | `parser` | `smear::parser` — the combinators and the ASTs. Off, `smear-parser` is not in the graph at all and the umbrella is the lexer alone | ✓ |
-| `smallvec_1` | Use `smallvec` 1 for small collections. Implies `alloc` | ✓ |
 | `validator` | `smear::validator` — the draft §5 rules, plus `smear-schema`'s `build` feature for the §3 pass. Implies `parser` and `graphql`. Adds no third-party dependency | |
 | `proto` | `smear::proto` — draft §6 query, serial mutation and subscription execution as a Sans-I/O state machine. It returns a response tree that `smear::json` writes as §7.2.1 JSON. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds no third-party dependency and defines no value type: the driver's own representation reaches it through a trait | |
-| `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator`; needs `alloc`, which it does not imply. Adds no third-party dependency | |
+| `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator`; needs `std` or `alloc`, which it does not imply. Adds no third-party dependency | |
+| `analysis` | `smear::analysis` — the GraphQLx schema analyzer: GraphQLx packages in, a resolved model and its diagnostics out, and rules as visitors over the model, smear's own and a consumer's. Implies `parser` and `graphqlx`; needs `std` or `alloc`, which it does not imply. Adds no third-party dependency | |
 | `materialized-numbers` | A second set of GraphQL value productions whose `Int` and `Float` leaves carry a number instead of a source slice. One tree, generic over the integer: `Int` is `i32` — the width draft §3.5.1 specifies — or `i64`, the reading that takes §2.9.1's unbounded grammar at its word and accepts literals the specification does not; a refusal names which. `Float` is `f64` at both, because draft §3.5.2 says `Float` **is** IEEE 754 double precision. **Numbers only** — strings keep their slice, because materialisation is required to allocate nothing the slice parser did not already allocate. Implies `parser` and `graphql`; adds no dependency, leaves the slice AST and the slice parser untouched, and keeps the slice parser available for the literals neither width can hold | |
-| `rowan_0_17` | The lossless CST tower, over `rowan` 0.17, and with `validator` the lossless validation doors. Implies `parser` and `std` | |
-| `bytes_1` | Support the `bytes::Bytes` source type, from `bytes` 1. Implies `alloc` | |
+| `rowan_0_17` | The lossless CST tower, over `rowan` 0.17, and with `validator` the lossless validation doors. Implies `parser` and no tier; the tower needs `std` | |
+| `bytes_1` | Support the `bytes::Bytes` source type, from `bytes` 1. Implies no tier | |
 | `bstr_1` | Support the `bstr::BStr` source type, from `bstr` 1. Implies no tier | |
-| `hipstr_0_8` | Support the `hipstr::{HipStr, HipByt}` source types, from `hipstr` 0.8. Implies `alloc` | |
-| `smol-bytes_0_2` | Support the smol-bytes 0.2 `smol_bytes::{Bytes, Utf8Bytes}` and `smol_bytes::compact::{Bytes, Utf8Bytes}` source types. Implies `alloc` | |
+| `hipstr_0_8` | Support the `hipstr::{HipStr, HipByt}` source types, from `hipstr` 0.8. Implies no tier | |
+| `smol-bytes_0_2` | Support the smol-bytes 0.2 `smol_bytes::{Bytes, Utf8Bytes}` and `smol_bytes::compact::{Bytes, Utf8Bytes}` source types. Implies no tier | |
 | `lossless-coverage` | Per-node-kind hit counters for the lossless gates. Implies `rowan_0_17` | |
-| `test-support` | The lossless suites' `test_support` scaffolding | |
+| `test-support` | The lossless suites' `test_support` scaffolding, and with `analysis` the analyzer's `test_support`, a hidden door to its model builder, and to analyses of the models it builds, for `smear`'s own tests. Not API | |
 
-A capability feature (`graphql`, `graphqlx`, `parser`, `validator`, `proto`, `introspection`, …)
-never switches a tier on, so a `default-features = false` consumer names `alloc` itself. The
-features that bring in a dependency which links `alloc` on its own — `smallvec_1`, `bytes_1`,
-`hipstr_0_8` and `smol-bytes_0_2` — imply it, and `rowan_0_17` implies `std`.
+No feature but `default` switches a tier on: not a capability (`graphql`, `graphqlx`, `parser`,
+`validator`, `proto`, `introspection`, `analysis`, …), and not a dependency feature, although
+`bytes_1`, `hipstr_0_8` and `smol-bytes_0_2` bring in a crate that links `alloc` on its own. So a
+`default-features = false` consumer names `std` or `alloc` itself, and names `std` beside
+`rowan_0_17`, because the lossless tower is written against the standard library.
 
-The six dependency features carry the major of the crate they enable, and the dependency is named
+The five dependency features carry the major of the crate they enable, and the dependency is named
 the same way, so a second major of one of them can be added beside it. The unversioned names —
-`smallvec`, `bytes`, `bstr`, `hipstr`, `smol-bytes` and `rowan` — are aliases for the current
-version: each enables its versioned feature and nothing else.
+`bytes`, `bstr`, `hipstr`, `smol-bytes` and `rowan` — are aliases for the current version: each
+enables its versioned feature and nothing else.
 
 A lexer-only consumer — a syntax highlighter, a formatter front-end, token-level tooling — turns the
 parser off, or names the member and skips the umbrella entirely. The two resolve the same code:
 
 ```toml
 [dependencies]
-smear = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1"] }
+smear = { version = "0.0.1", default-features = false, features = ["std", "graphql"] }
 # or
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql"] }
 ```
 
-### The tiers: core, `alloc` and `std`
+### The tiers: `std` and `alloc`
 
-Every crate has the same three tiers, each including the one below it: **core** (neither `alloc` nor
-`std`), **`alloc`**, and **`std`**, which implies `alloc` and is in `default`.
+Every crate has the same two tier features, and they are independent: **`std`**, which is in
+`default`, and **`alloc`**. The allocating API exists when either is on, so there are four builds
+and every one is valid: neither, the **core** tier; `alloc` alone; `std` alone, the default; and
+both. `std` does not turn `alloc` on, and no feature but `default` turns either on.
 
 With neither, the crate is `no_std`, needs no allocator and compiles in every feature combination,
 but it exports only what needs no allocation: `smear::lexer`'s `hints`, `keywords` (with
 `keyword!`), `limits` and `punctuator`; `smear::parser`'s `combinator` (with `typed_keyword_atom!`);
 and, through `smear::validator::schema`, the schema crate's `diagnostic` and `builtin`. The dialect
-lexers and parsers, the schema representation and builder, the validator, the executor and
-`smear::json` need `alloc`. A build that asks for them without it compiles and simply lacks them.
+lexers and parsers, the schema representation and builder, the validator, the analyzer, the
+executor and `smear::json` need `std` or `alloc`. A build that asks for them with neither compiles
+and simply lacks them. The lossless CST tower needs `std` itself.
 
 ```toml
 [dependencies]
 smear = { version = "0.0.1", default-features = false, features = ["alloc", "graphql", "parser"] }
 ```
 
-CI proves both lower tiers on `thumbv7em-none-eabihf`, a target with no `std`. The `alloc` tier is
-built there with every feature that implies no `std`. The core tier is built as a `staticlib` with
-every capability and no global allocator, which rustc refuses if anything in the graph links
-`alloc`; a control that adds `alloc` to the same build must fail on exactly that.
+CI proves both builds without `std` on `thumbv7em-none-eabihf`, a target with no `std`. The `alloc`
+tier is built there with every feature whose dependencies build without `std`, and `cargo tree`
+asserts that nothing in that graph has its `std` feature on. The core tier is built as a
+`staticlib` with every capability and no global allocator, which rustc refuses if anything in the
+graph links `alloc`; a control that adds `alloc` to the same build must fail on exactly that.
 
 Beyond those, CI cross-compiles `smear` with `--all-features` for fourteen targets including five
 WebAssembly ones, and builds the validator's schema representation for `thumbv6m-none-eabi` — a core

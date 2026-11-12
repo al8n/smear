@@ -31,11 +31,11 @@
 //!   *package `smear-smoke` depends on `smear` with feature `lossless-coverage` but `smear` does
 //!   not have that feature*.
 //!
-//! One caveat on the second direction, found while proving it. Six of the thirteen features —
-//! `bytes_1`, `bstr_1`, `hipstr_0_8`, `smol-bytes_0_2`, `smallvec_1`, `rowan_0_17` — share a name
-//! with an OPTIONAL DEPENDENCY, so deleting the explicit `[features]` line does not remove the
+//! One caveat on the second direction, found while proving it. Four of the seventeen features —
+//! `bytes_1`, `bstr_1`, `hipstr_0_8` and `smol-bytes_0_2` — share a name with an OPTIONAL
+//! DEPENDENCY, so deleting the explicit `[features]` line does not remove the
 //! name: cargo falls back to the implicit feature an optional dependency creates, resolution
-//! succeeds, and only the `tokora/<backing>` half is silently lost. Those six still red here — the
+//! succeeds, and only the `tokora/<backing>` half is silently lost. Those four still red here — the
 //! probe below needs the surface that half enables, so deleting `smol-bytes_0_2 = [...]` broke
 //! compilation of [`smol_bytes_source`] — but they red as a compile error rather than as a
 //! resolution error, and they red BECAUSE a probe names the surface. That is the case for writing
@@ -293,6 +293,30 @@ pub fn graphqlx_parser(
     Document::<&str>::graphqlx,
   )
   .parse_str(src)
+}
+
+/// `analysis` — the GraphQLx analyzer: a one-file package analyzed, and its file's text read back
+/// through the source map the result carries, which is what a renderer does.
+///
+/// Returns the verdict, how many diagnostics were kept, and the file's text as bound.
+pub fn graphqlx_analysis(src: &str) -> (bool, usize, Option<String>) {
+  use smear::analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};
+
+  let root = Package::new("app", Layout::Directory, Tier::Std)
+    .with_files([SourceFile::new("schema.graphqlx", src)]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  let model = analysis.model();
+  let file = model
+    .package(model.root_package())
+    .sources()
+    .into_iter()
+    .nth(1);
+  let texts = analysis.sources().bind(&root, &[]);
+  (
+    analysis.is_ok(),
+    analysis.diagnostics().len(),
+    file.and_then(|id| texts.text(id)).map(String::from),
+  )
 }
 
 /// `validator` — the built-once schema, reached through the dependency edge and built from a
@@ -570,15 +594,6 @@ pub fn graphql_execute(sdl: &str, query: &str, value: Option<&str>) -> (Option<S
     _ => None,
   };
   (leaf, errors)
-}
-
-/// `smallvec_1` — the error container is SmallVec-backed rather than `Vec`-backed.
-///
-/// The coercion is the probe: with the feature off the deref target is a `Vec` and the binding
-/// does not type-check.
-pub fn smallvec_backed_errors(errors: &smear::lexer::graphql::error::LexerErrors) -> usize {
-  let inline: &smallvec_1::SmallVec<[smear::lexer::graphql::error::LexerError; 1]> = errors;
-  inline.len()
 }
 
 /// `rowan_0_17` — the lossless CST tower, reachable through the crate named `smear` for the first time
@@ -1478,6 +1493,21 @@ mod tests {
   #[test]
   fn the_validator_admits_every_source_slice_type() {
     super::validator_source_lattice();
+  }
+
+  /// The GraphQLx analyzer, driven across the dependency edge: a package that parses is clean, one
+  /// that does not is refused with a diagnostic, and either way its text binds back.
+  #[test]
+  fn the_analyzer_parses_a_package_and_binds_its_text() {
+    let (ok, kept, text) = super::graphqlx_analysis("type Query { ok: Int }");
+    assert!(ok);
+    assert_eq!(kept, 0);
+    assert_eq!(text.as_deref(), Some("type Query { ok: Int }"));
+
+    let (ok, kept, text) = super::graphqlx_analysis("type Query {");
+    assert!(!ok);
+    assert!(kept > 0);
+    assert_eq!(text.as_deref(), Some("type Query {"));
   }
 
   /// The validator, driven end to end across the dependency edge.

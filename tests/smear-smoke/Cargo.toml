@@ -37,8 +37,7 @@ smear = { path = "../../smear", default-features = false, features = [
   "validator",
   "introspection",
   "proto",
-  "smallvec",
-  "smallvec_1",
+  "analysis",
   "bytes",
   "bytes_1",
   "bstr",
@@ -61,7 +60,6 @@ bstr_1 = { workspace = true }
 bytes_1 = { workspace = true }
 hipstr_0_8 = { package = "hipstr", version = "0.8", default-features = false }
 smol-bytes_0_2 = { workspace = true }
-smallvec_1 = { package = "smallvec", version = "1", default-features = false, features = ["const_new"] }
 # Must track `smear`'s rowan exactly, and for this crate that is the whole point rather than
 # housekeeping. `smear-smoke` exists to stand where a real dependent stands; a dependent whose own
 # `rowan` disagreed with smear's on the major would get two rowans and `expected rowan::SyntaxNode,

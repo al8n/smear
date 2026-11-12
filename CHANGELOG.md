@@ -4,17 +4,76 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
-- `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the six features
+- `smear-lexer`!: both dialects' `LexerErrors` and `StringErrors` keep their errors in a `Vec`
+  in every configuration, where they held them in a one-slot `SmallVec` while the `smallvec`
+  feature was on, as it was by default. A token's `Result` no longer carries room for a whole
+  error when it holds none. Measured against the `SmallVec` containers, the three parse
+  workloads ran in 14 % to 15.5 % less time, the six schema and validation workloads moved by
+  no more than 0.81 %, and peak allocation was unchanged. Each container derives `From`,
+  `Into`, `Deref`, `DerefMut`, `AsRef` and `AsMut` over its storage, so its deref target and
+  its conversions are now `Vec`'s, and `StringErrors`' `IntoIterator::IntoIter` is
+  `vec::IntoIter`.
+- `smear`!, `smear-lexer`! and `smear-parser`!: the `smallvec` integration is removed. Each of
+  the three loses its `smallvec_1` feature, the `smallvec` alias and their place in its
+  `default`, and `smear-lexer` its optional `smallvec` dependency. The feature switched only the
+  lexers' error containers, which are a `Vec` in every configuration now. 0.0.1 released the
+  `smallvec` feature, in each crate's `default`, and no alias is left in its place: a dependent
+  that names it drops it from its feature list.
+- `smear-semantics` and `smear-analysis`: two new crates. `smear-semantics` holds the
+  algorithms smear's two semantic layers share: the byte-spelling interner, duplicate-name
+  detection and the graph-cycle kernel. `smear` does not re-export it. `smear-analysis` is
+  the GraphQLx schema analyzer, reached as `smear::analysis` behind the new `analysis`
+  capability feature, which implies `parser` and `graphqlx` and no tier; the analyzer itself
+  needs `std` or `alloc`. Its source features `bytes_1`, `bstr_1`, `hipstr_0_8` and
+  `smol-bytes_0_2`, with the aliases `bytes`, `bstr`, `hipstr` and `smol-bytes`, forward
+  `smear-parser`'s and imply no tier, and `smear`'s features of the same names forward to them.
+  `smear-schema`'s builder now takes those three kernels from `smear-semantics`, behind
+  `build`, with no change in behaviour.
+- `smear-analysis`: the analyzer's entrance, its exits and its rules. `graphqlx::analyze`
+  takes a root `Package` and its dependencies, each file's text any `SourceText` (`&str`,
+  `&[u8]`, or a source feature's type), within `Limits`, and answers an `Analysis` with no
+  type parameter: a `Model` of the packages, the `Diagnostics` and a `SourceMap`. Packages and
+  sources are numbered deterministically, whatever order they are passed in. The package
+  set's file paths, package names, dependencies and total size are checked, under the new
+  `smear::graphqlx` codes `DiagnosticKind` lists; a message quotes a name or a path whole when
+  it is at most 128 bytes, and otherwise as its first and last 64 bytes around `…`, each cut
+  moved back to the start of a character, unless that would leave nothing out, so no message
+  grows with what it quotes. Every file is parsed with the GraphQLx syntactic parser,
+  its syntax errors reported at that file. `Diagnostic::builder` is public, so a consumer's
+  findings join smear's in one ordered list, and `SourceMap::bind` pairs an analysis with the
+  texts it was made from, finding each file again by its package and its path alone: it
+  answers no text for a file whose path another file of its package has, for the files of a
+  dependency whose name another dependency has, or for the root's files when the root is
+  given under another name. The `Model` is dense tables read through `Copy` views, each
+  numbered by its own id: packages, modules, definitions and their contributions, members,
+  type occurrences and interned types, values, directive applications, the schema and the
+  built-ins, with `canonical_name`, `lookup` and `module_by_path`; `lookup` keeps a type's and
+  a directive's names apart, the second names a module gives included. Rules are visitors: a
+  `Visitor` implements the hooks it needs, each with an empty default body, from `begin`
+  through entering and leaving packages, modules, definitions and members and reaching type
+  occurrences, values, directive applications and the schema, to `end`; `visit` walks an
+  analysis's model for one over the packages `Packages` selects, hands each hook a `Cx` that
+  says where the walk is (its `Site` says where an occurrence sits) and takes what the visitor
+  reports, and answers those diagnostics under the analysis's ceiling. A consumer's walk marks
+  nothing and holds memory bounded by that ceiling. Visitors compose at compile time: a tuple
+  of up to twelve, an `Option` of one, a `&mut V`, a `Box<V>` and `()` are each a visitor.
+  `analyze` runs smear's own rule set, which holds no rule yet, through the same walk over the
+  supplied packages, and an error that a phase or a rule reports marks the contributions,
+  members and definitions that hold where it points, as their `has_errors()` says, whether the
+  ceiling keeps the diagnostic or not. So far `analyze` fills in only the packages and their
+  root modules. A new `test-support` feature, which `smear/test-support` forwards, compiles a
+  hidden door to the crate-private model builder, and to analyses of the models it builds, for
+  `smear`'s own tests; it is not API.
+- `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features
   that enable an optional dependency are versioned, as tokora's are, and the
-  dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`,
-  `smallvec` and `rowan` become `bytes_1`, `bstr_1`, `hipstr_0_8`,
-  `smol-bytes_0_2`, `smallvec_1` and `rowan_0_17`; the unversioned names remain as
-  aliases that float with the current major, each enabling its versioned feature
-  and nothing else, so code gated on them is unaffected. The optional
-  dependencies are keyed by the versioned name too (`bytes_1`, `bstr_1`,
-  `hipstr_0_8`, `smol-bytes_0_2`, `smallvec_1`, `rowan_0_17`), so a downstream
-  crate that named smear's optional dependency by its old key (`smear/dep:bytes`
-  style, or a `[patch]`) must respell it. `default` lists `smallvec_1`.
+  dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`
+  and `rowan` become `bytes_1`, `bstr_1`, `hipstr_0_8`, `smol-bytes_0_2` and
+  `rowan_0_17`; the unversioned names remain as aliases that float with the
+  current major, each enabling its versioned feature and nothing else, so code
+  gated on them is unaffected. The optional dependencies are keyed by the
+  versioned name too (`bytes_1`, `bstr_1`, `hipstr_0_8`, `smol-bytes_0_2`,
+  `rowan_0_17`), so a downstream crate that named smear's optional dependency by
+  its old key (`smear/dep:bytes` style, or a `[patch]`) must respell it.
 - `smear-lexer`: string literals in byte sources (`[u8]`, `Bytes`, `BStr`,
   `HipByt`) must be well-formed UTF-8. Ill-formed content is refused with
   `StringError::UnsupportedCharacter`, carrying each sequence's span.
@@ -303,9 +362,11 @@ All notable changes to Smear are documented in this file.
 - The introspection parity oracle compares the executor's answers with graphql-js
   17.1.0's instead of 16.11.0's, directive deprecation included, and its eight
   recorded differences are redrawn for that release.
-- All six crates gain an `alloc` feature, and `std` implies it: three tiers,
-  core (neither), `alloc` and `std`, each including the one below. With neither,
-  a crate compiles in every feature combination and exports only what needs no
+- All six crates gain an `alloc` feature beside `std`, and the two are
+  independent tiers: `std` does not imply `alloc`, and the allocating API exists
+  when either is on. Every combination is a valid build: neither, the core tier;
+  `alloc` alone; `std` alone, the default; and both. With neither, a crate
+  compiles in every feature combination and exports only what needs no
   allocation: in `smear-lexer`, `hints`, `keywords` (with `keyword!`), `limits`
   and `punctuator`; in `smear-parser`, `combinator` (with
   `typed_keyword_atom!`); in `smear-schema`, `diagnostic` and `builtin`;
@@ -319,15 +380,17 @@ All notable changes to Smear are documented in this file.
   the allocating API: the dialect lexers and parsers, the schema
   representation and builder, the validator, the executor and `smear::json`. A
   capability feature (`graphql`, `graphqlx`, `parser`, `validator`, `proto`,
-  `introspection`, …) never switches a tier on, so such a consumer adds `alloc`
-  (or `std`, which implies it) itself; without it the build compiles and lacks
-  those items.
-- `smear`, `smear-lexer` and `smear-parser`: the `bytes`, `hipstr`, `smallvec`
-  and `smol-bytes` features imply `alloc`, because each of those crates links
-  `alloc` itself. `bstr` implies no tier, and `rowan` still implies `std`.
+  `introspection`, …) never switches a tier on, so such a consumer names `std`
+  or `alloc` itself; with neither the build compiles and lacks those items.
+- `smear`!, `smear-lexer`, `smear-parser`! and `smear-compiler`!: a feature
+  that enables an optional dependency implies no tier. `bytes_1`, `hipstr_0_8`
+  and `smol-bytes_0_2` do not imply `alloc`, although each of those crates
+  links `alloc` itself, and `rowan_0_17` no longer implies `std`. So a
+  `default-features = false` consumer names `std` or `alloc` beside a source
+  feature, and `std` beside `rowan_0_17`: the lossless tower is gated on `std`.
 - `smear`! and `smear-compiler`!: the `introspection` feature no longer implies
-  `std`. The draft §4 reader is `core` and `alloc` only, so it needs `alloc`,
-  which `introspection` does not imply.
+  `std`. The draft §4 reader is `core` and `alloc` only, so it needs `std` or
+  `alloc`, neither of which `introspection` implies.
 - `graphql-proto` and `smear`: `StartError`, `SetExtensionsError`,
   `UnattachedExtensions`, `Full`, `TooLarge`, `RequestErrorCeiling`,
   `RefusedEntry`, `SourceEventError` and `json::Error` implement

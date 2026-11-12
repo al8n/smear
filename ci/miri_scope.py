@@ -279,12 +279,23 @@ MIRI_IGNORE_BUDGET = sum(MIRI_DECLARED_IGNORES.values())
 # entire lossless tower entered a Miri cell that nobody widened. Checked for each of the four:
 # `smear-lexer` declares no `rowan` feature at all; `smear-parser` and `smear-compiler` do declare
 # one but it is not in their `default` and these scripts pass no `--features`, so the resolve
-# leaves it off; `graphql-proto` declares only `std`. This file's own feature-set guard prints what
-# actually resolved, so none of that is taken on trust.
+# leaves it off; `graphql-proto` declares only `std`. `smear-semantics`, added since, declares its
+# two tiers and nothing else and depends on nothing. `smear-analysis`, added when its first lib unit
+# tests were, declares no `rowan` feature and takes `smear-parser` with `graphqlx` and without
+# `rowan`. This file's own feature-set guard prints what actually resolved, so none of that is
+# taken on trust.
 #
 # `ci/feature_reachability.py` requires every publishable member to be in this tuple or in
 # `MIRI_NOT_SELECTED` below, so the account grows with the workspace instead of being remembered.
-MIRI_PACKAGES = ("smear-lexer", "smear-parser", "smear-schema", "smear-compiler", "graphql-proto")
+MIRI_PACKAGES = (
+    "smear-lexer",
+    "smear-parser",
+    "smear-semantics",
+    "smear-schema",
+    "smear-compiler",
+    "graphql-proto",
+    "smear-analysis",
+)
 
 # ONE MEMBER PER CELL, AND THE FEATURES THAT KEEP THAT A SCHEDULING CHANGE.
 #
@@ -303,14 +314,12 @@ MIRI_PACKAGES = ("smear-lexer", "smear-parser", "smear-schema", "smear-compiler"
 #
 # What this does NOT restore is a DEPENDENCY's features. Selected alone, the `smear-schema`,
 # `smear-compiler` and `graphql-proto` cells resolve `smear-lexer` and `smear-parser` without
-# `graphqlx` and `smallvec` (and without the `default` label, which no cfg reads): `graphqlx` is a
-# dialect none of the three calls, and `smallvec` swaps the lexer's error container from
-# `SmallVec<[_; 1]>` to `Vec`. Each member's OWN code is compiled exactly as the five compiled it,
-# and the lexer's and the parser's cells still interpret their default set.
+# `graphqlx`, a dialect none of the three calls (and without the `default` label, which no cfg
+# reads). Each member's OWN code is compiled exactly as the five compiled it, and the lexer's and
+# the parser's cells still interpret their default set.
 MIRI_SHARD_FEATURES = {"smear-schema": ("build",)}
 
-# The publishable member deliberately NOT selected, and the reason is now a BEHAVIOUR rather than a
-# count.
+# The publishable members deliberately NOT selected, each with the behaviour that keeps it out.
 #
 # `smear-schema` used to be here, excused by "0 lib unit tests at the feature set these scripts
 # build" — measured with an isolated `cargo test -p smear-schema --lib`, which is not that feature
@@ -326,6 +335,9 @@ MIRI_SHARD_FEATURES = {"smear-schema": ("build",)}
 # the graph. Measured: `cargo test -p smear -p smear-compiler --lib` exits 101 on
 # `smear-schema/build` and `smear/validator` disagree. It also has no lib unit tests at any feature
 # set, but that is now the second reason rather than the only one.
+#
+# `smear-analysis` was here as an "empty" exclusion until its first lib unit tests, which moved it
+# into `MIRI_PACKAGES`, as the exclusion said they would.
 MIRI_NOT_SELECTED = {
     "smear": {
         "outcome": "forbidden",
@@ -418,7 +430,10 @@ def verify_exclusions(cargo: str = "cargo") -> int:
                 continue
             if message.get("reason") != "compiler-artifact" or not message.get("executable"):
                 continue
-            if f"/{member}-" in message["executable"] or f"/{member}/" in message["executable"]:
+            # Cargo names a lib test binary after the CRATE, `-` spelled `_`, as `package_of`
+            # reads it; matched by package name, a hyphenated member never finds its own.
+            stem = pathlib.Path(message["executable"]).name.rsplit("-", 1)[0]
+            if stem == member.replace("-", "_"):
                 executable = message["executable"]
         if executable is None:
             failures.append(
@@ -844,7 +859,7 @@ def partition(
     """Split `<tests_dir>/*.rs` into ({excluded target: why}, [compiled targets]).
 
     `resolves` names the feature set in the printed reason, because a shard's is its member's and
-    not `smear`'s. A tree that does not exist partitions to nothing: two members have no `tests/`.
+    not `smear`'s. A tree that does not exist partitions to nothing: three members have no `tests/`.
     """
     excluded: dict[str, str] = {}
     compiled: list[str] = []
@@ -1552,7 +1567,7 @@ def main() -> int:
         args.tests_dir = args.tests_dir or pathlib.Path("smear/tests")
         args.manifest = args.manifest or pathlib.Path("smear/Cargo.toml")
 
-    # A member's `tests/` may be absent — two of the five have none — and its cell still checks
+    # A member's `tests/` may be absent — three of the six have none — and its cell still checks
     # the lib binary. Without `--package` an absent tree is still the misconfiguration it was.
     if not args.package and not args.tests_dir.is_dir():
         print(f"::error::miri_scope: no such directory: {args.tests_dir}", file=sys.stderr)

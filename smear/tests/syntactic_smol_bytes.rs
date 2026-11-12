@@ -1,5 +1,6 @@
 #![cfg(all(
   feature = "smol-bytes_0_2",
+  any(feature = "std", feature = "alloc"),
   any(feature = "graphql", feature = "graphqlx")
 ))]
 

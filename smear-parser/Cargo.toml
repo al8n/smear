@@ -23,10 +23,10 @@ readme = "README.md"
 [features]
 # The subset of `smear`'s own default that reaches this layer. `smear` names every member feature
 # explicitly with `default-features = false`, so this list governs a DIRECT dependent only.
-default = ["std", "graphql", "graphqlx", "smallvec_1"]
+default = ["std", "graphql", "graphqlx"]
 
-alloc = ["smear-lexer/alloc", "tokora/alloc", "bstr_1?/alloc"]
-std = ["alloc", "smear-lexer/std", "tokora/std", "bytes_1?/default", "bstr_1?/default", "hipstr_0_8?/default", "smol-bytes_0_2?/default"]
+alloc = ["smear-lexer/alloc", "tokora/alloc", "bstr_1?/alloc", "smol-bytes_0_2?/alloc"]
+std = ["smear-lexer/std", "tokora/std", "bytes_1?/std", "bstr_1?/std", "hipstr_0_8?/std", "smol-bytes_0_2?/std"]
 
 # The two dialects, forwarded to the lexer because a parser for a dialect needs that dialect's
 # tokens. Every doc link to one is `#[cfg_attr]`-gated for the reason `smear-lexer` records.
@@ -98,18 +98,18 @@ materialized-numbers = ["graphql"]
 # Each is the versioned feature, which is the switch; the unversioned name below it is a pure alias
 # for the current major. The dependency key carries the version too, so the crate is `bytes_1` in
 # code.
-smallvec = ["smallvec_1"]
-smallvec_1 = ["alloc", "smear-lexer/smallvec_1"]
 bytes = ["bytes_1"]
-bytes_1 = ["dep:bytes_1", "alloc", "smear-lexer/bytes_1", "tokora/bytes_1"]
+bytes_1 = ["dep:bytes_1", "smear-lexer/bytes_1", "tokora/bytes_1"]
 bstr = ["bstr_1"]
 bstr_1 = ["dep:bstr_1", "smear-lexer/bstr_1"]
 hipstr = ["hipstr_0_8"]
-hipstr_0_8 = ["dep:hipstr_0_8", "alloc", "smear-lexer/hipstr_0_8", "tokora/hipstr_0_8"]
+hipstr_0_8 = ["dep:hipstr_0_8", "smear-lexer/hipstr_0_8", "tokora/hipstr_0_8"]
 smol-bytes = ["smol-bytes_0_2"]
-smol-bytes_0_2 = ["dep:smol-bytes_0_2", "alloc", "smear-lexer/smol-bytes_0_2", "tokora/smol-bytes_0_2"]
+smol-bytes_0_2 = ["dep:smol-bytes_0_2", "smear-lexer/smol-bytes_0_2", "tokora/smol-bytes_0_2"]
 
-# The lossless CST tower. `std` because the runner needs it.
+# The lossless CST tower. It names no tier: the tower is gated on `std`, because it is written
+# against the standard library and rowan 0.17 is a `std` crate, so a dependent without default
+# features names `std` beside it.
 #
 # EVERYTHING THIS FEATURE COMPILES IS OUTSIDE MIRI'S REACH, and will stay outside it until
 # `rowan` is fixed upstream — `rowan 0.17.0` executes undefined behaviour on the ordinary path,
@@ -117,7 +117,7 @@ smol-bytes_0_2 = ["dep:smol-bytes_0_2", "alloc", "smear-lexer/smol-bytes_0_2", "
 # one. #77 has the evidence and `ci/miri_scope.py` fails the Miri matrix if this feature ever
 # resolves ON inside it.
 rowan = ["rowan_0_17"]
-rowan_0_17 = ["dep:rowan_0_17", "tokora/rowan_0_17", "std"]
+rowan_0_17 = ["dep:rowan_0_17", "tokora/rowan_0_17"]
 
 # Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
 # trivia-injection gate can prove its corpus reached every production instead of asserting success
@@ -148,7 +148,7 @@ bytes_1 = { workspace = true, optional = true }
 # inline for the same reason.
 hipstr_0_8 = { package = "hipstr", version = "0.8", default-features = false, optional = true }
 smol-bytes_0_2 = { workspace = true, optional = true }
-rowan_0_17 = { package = "rowan", version = "0.17", optional = true }
+rowan_0_17 = { package = "rowan", version = "0.17", default-features = false, optional = true }
 
 [lints]
 workspace = true

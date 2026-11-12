@@ -1,4 +1,4 @@
-#![cfg(all(feature = "graphqlx", feature = "rowan_0_17"))]
+#![cfg(all(feature = "graphqlx", feature = "rowan_0_17", feature = "std"))]
 
 //! The mutation law: a falsifier for "a walk represents every non-trivia byte, or it refuses".
 //!

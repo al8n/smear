@@ -1,16 +1,12 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, allow(unused_attributes))]
 #![deny(missing_docs)]
 // Was `#[allow(clippy::result_large_err)]` on `pub mod lexer;` in `smear`'s crate root, which is
 // where it landed when #84 merged the two crates. Splitting them again puts it back on the crate
 // root it started on, and it covers the lexer alone once more rather than reaching the parser.
 #![allow(clippy::result_large_err)]
-
-// Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
-// compile them all out and still build green.
-#[cfg(all(feature = "std", not(feature = "alloc")))]
-compile_error!("the `std` feature must enable `alloc`: check this crate's [features] table");
 
 // The alloc-as-std alias: the crate's files spell their allocations `std::boxed::Box`, which
 // resolves to `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build.
@@ -32,7 +28,7 @@ compile_error!("the `std` feature must enable `alloc`: check this crate's [featu
 // locally, with no `RUSTFLAGS` needed. That deny is the repair for the gate, not for the code:
 // this construct reddened CI twice, and both times the local run that cleared it was narrower
 // than CI's.
-#[cfg(all(feature = "alloc", not(feature = "std")))]
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
 #[allow(unused_extern_crates)]
 extern crate alloc as std;
 
@@ -40,19 +36,25 @@ extern crate alloc as std;
 #[allow(unused_extern_crates)]
 extern crate std;
 
-#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 #[cfg_attr(
   docsrs,
-  doc(cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx"))))
+  doc(cfg(all(
+    any(feature = "std", feature = "alloc"),
+    any(feature = "graphql", feature = "graphqlx")
+  )))
 )]
 pub use lossless_lexer::LosslessLexer;
 
-#[cfg(feature = "alloc")]
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use string_lexer::*;
 
-#[cfg(feature = "alloc")]
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use error::SyntaxErrorKind;
 
 pub use tokora;
@@ -69,8 +71,8 @@ pub mod __private {
 }
 
 /// The error module contains error types and traits for lexer errors.
-#[cfg(feature = "alloc")]
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub mod error;
 /// The hints module contains types and traits for expected token hints.
 pub mod hints;
@@ -142,8 +144,11 @@ pub mod punctuator;
 ///   // Only syntactically significant tokens (whitespace automatically skipped)
 /// }
 /// ```
-#[cfg(all(feature = "alloc", feature = "graphql"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "graphql"))))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "graphql"))]
+#[cfg_attr(
+  docsrs,
+  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "graphql")))
+)]
 pub mod graphql;
 
 /// Lexers for GraphQLx (extended GraphQL).
@@ -201,27 +206,39 @@ pub mod graphql;
 /// # Note
 ///
 /// GraphQLx requires the `unstable` and `graphqlx` feature flag.
-#[cfg(all(feature = "alloc", feature = "graphqlx"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "graphqlx"))))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "graphqlx"))]
+#[cfg_attr(
+  docsrs,
+  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "graphqlx")))
+)]
 pub mod graphqlx;
 
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 mod string_lexer;
 
 // Gated with `string_lexer` and not with the dialects: a byte source's block string literals are
 // walked through `LitStr::try_from(&[u8])` as well as through the dialects.
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 pub(crate) mod utf8;
 
-#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 mod handlers;
 
-#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 mod lossless_lexer;
 
 /// Dialect-agnostic SIMD-lexer primitives shared by the GraphQL and GraphQLx
 /// SIMD lexers.
-#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 pub(crate) mod simd;
 
 /// The features this crate was compiled with, as constants the umbrella asserts against.
@@ -254,8 +271,6 @@ pub mod __features {
   pub const GRAPHQLX: bool = cfg!(feature = "graphqlx");
   /// `hipstr_0_8`, as this crate resolved it.
   pub const HIPSTR_0_8: bool = cfg!(feature = "hipstr_0_8");
-  /// `smallvec_1`, as this crate resolved it.
-  pub const SMALLVEC_1: bool = cfg!(feature = "smallvec_1");
   /// `smol-bytes_0_2`, as this crate resolved it.
   pub const SMOL_BYTES_0_2: bool = cfg!(feature = "smol-bytes_0_2");
   /// `std`, as this crate resolved it.

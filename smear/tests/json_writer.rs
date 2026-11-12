@@ -1,4 +1,8 @@
-#![cfg(all(feature = "alloc", feature = "proto", feature = "materialized-numbers"))]
+#![cfg(all(
+  any(feature = "std", feature = "alloc"),
+  feature = "proto",
+  feature = "materialized-numbers"
+))]
 
 //! The draft §7.2.1 writer's gate, and the whole of its design is *where the expectation comes
 //! from*.

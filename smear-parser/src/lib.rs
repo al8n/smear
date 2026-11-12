@@ -1,16 +1,12 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, allow(unused_attributes))]
 #![deny(missing_docs)]
 // Was `#[allow(clippy::type_complexity)]` on `pub mod parser;` in `smear`'s crate root, which is
 // where it landed when #84 merged the two crates. Splitting them again puts it back on the crate
 // root it started on, and it covers the parser alone once more rather than reaching the lexer.
 #![allow(clippy::type_complexity)]
-
-// Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
-// compile them all out and still build green.
-#[cfg(all(feature = "std", not(feature = "alloc")))]
-compile_error!("the `std` feature must enable `alloc`: check this crate's [features] table");
 
 // The alloc-as-std alias: the crate's files spell their allocations `std::boxed::Box`, which
 // resolves to `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build.
@@ -32,7 +28,7 @@ compile_error!("the `std` feature must enable `alloc`: check this crate's [featu
 // locally, with no `RUSTFLAGS` needed. That deny is the repair for the gate, not for the code:
 // this construct reddened CI twice, and both times the local run that cleared it was narrower
 // than CI's.
-#[cfg(all(feature = "alloc", not(feature = "std")))]
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
 #[allow(unused_extern_crates)]
 extern crate alloc as std;
 
@@ -51,7 +47,7 @@ pub mod combinator;
 
 /// The dialect-generic lossless substrate: the kind-space contract, the trivia atoms, the
 /// `Parse` surface, the coverage shims and the typed-wrapper macro's helpers.
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 pub mod lossless;
 
 // -- THE LEXER'S CEILING AGAINST THE SUBSTRATE'S, AND WHY THE COMPARISON IS WRITTEN HERE -------
@@ -79,7 +75,7 @@ pub mod lossless;
 // not widen it. The plant that proves it is live is a `HARD_MAX` of 342: that value passes
 // `HARD_MAX`'s OWN 1.9x margin assertion, so every gate that predates this invariant admits it,
 // and it is exactly the edit that reopens the projection window.
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 const _: () = assert!(
   smear_lexer::limits::HARD_MAX <= lossless::project::MAX_DOOR_BRACKETS,
   "the lossless doors can accept a document whose green tree is deeper than the projection's walks \
@@ -88,59 +84,86 @@ const _: () = assert!(
 );
 
 /// Name-node carrier shared by the GraphQL-family dialect ASTs.
-#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 mod name;
 
 /// Namespaced-path carrier used by the GraphQLx dialect AST; vanilla GraphQL
 /// has no namespaced paths.
-#[cfg(all(feature = "alloc", feature = "graphqlx"))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "graphqlx"))]
 mod path;
 
 /// Generic-definition carriers shared by extended GraphQL-family dialect ASTs.
-#[cfg(all(feature = "alloc", feature = "graphqlx"))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "graphqlx"))]
 mod generic;
 
 /// Selection-node carriers shared by the GraphQL-family dialect ASTs.
-#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 mod selection;
 
 /// Executable-document carriers shared by the GraphQL-family dialect ASTs.
-#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 mod executable;
 
 /// Type-reference carriers shared by the GraphQL-family dialect ASTs.
-#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 mod ty;
 
 /// Argument-node carriers shared by the dialect ASTs, copied type-only from the
 /// frozen crate.
-#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 mod argument;
 
 /// Directive-node carriers shared by the dialect ASTs, copied type-only from the
 /// frozen crate.
-#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 mod directive;
 
 /// Type-system AST carriers shared by the GraphQL-family dialects.
-#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 mod type_system;
 
 /// Value-node carriers shared by the dialect ASTs, copied type-only from the
 /// frozen crate.
-#[cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 mod value;
 
 /// The GraphQL dialect: productions, syntax kinds, keyword atoms, AST node types,
 /// and the dialect error, all keyed to the [`GraphQL`](graphql::GraphQL) marker.
-#[cfg(all(feature = "alloc", feature = "graphql"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "graphql"))))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "graphql"))]
+#[cfg_attr(
+  docsrs,
+  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "graphql")))
+)]
 pub mod graphql;
 
 /// The GraphQLx dialect: namespaced paths, collection values, generic type
 /// references, and `use` items over the concrete GraphQLx lexer.
 #[cfg_attr(
-  all(feature = "graphql", feature = "rowan_0_17"),
+  all(feature = "graphql", feature = "rowan_0_17", feature = "std"),
   doc = r#"
 # A GraphQL node may not be cast through a GraphQLx wrapper
 
@@ -192,8 +215,11 @@ declaration is where the two dialects are introduced, so it is the one place the
 itself a boundary crossing.
 "#
 )]
-#[cfg(all(feature = "alloc", feature = "graphqlx"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "graphqlx"))))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "graphqlx"))]
+#[cfg_attr(
+  docsrs,
+  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "graphqlx")))
+)]
 pub mod graphqlx;
 
 /// The features this crate was compiled with, as constants the umbrella asserts against.
@@ -232,8 +258,6 @@ pub mod __features {
   pub const MATERIALIZED_NUMBERS: bool = cfg!(feature = "materialized-numbers");
   /// `rowan_0_17`, as this crate resolved it.
   pub const ROWAN_0_17: bool = cfg!(feature = "rowan_0_17");
-  /// `smallvec_1`, as this crate resolved it.
-  pub const SMALLVEC_1: bool = cfg!(feature = "smallvec_1");
   /// `smol-bytes_0_2`, as this crate resolved it.
   pub const SMOL_BYTES_0_2: bool = cfg!(feature = "smol-bytes_0_2");
   /// `std`, as this crate resolved it.

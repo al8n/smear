@@ -1,7 +1,7 @@
 //! Fails a build when a public entry takes source text at a concrete type, or when a public error
 //! type does not answer the diagnostic contract.
 //!
-//! `smear` ships five source-representation integrations so a consumer can pick one. §3, syntactic
+//! `smear` ships four source-representation integrations so a consumer can pick one. §3, syntactic
 //! §5 and §6/§7 honour that with `S: AsRef<[u8]>`. Nothing fails when a new public entry spells the
 //! same parameter `&str` instead: it compiles, it passes every test, it reads naturally, and the
 //! narrowing is discovered by a consumer at a call site. That is al8n/smear#122, and this is the
@@ -74,7 +74,7 @@ use rule::Cost;
 /// Every crate root the default run reads, each mounted at the path a consumer of the umbrella
 /// writes for it.
 ///
-/// One row per workspace member that carries public API, and the mount name is the umbrella's
+/// One row per workspace member the umbrella mounts, and the mount name is the umbrella's
 /// spelling rather than the member's own crate name — `smear::lexer`, not `smear_lexer`. The
 /// census's question is "what can a dependent reach", a dependent reaches all of this through
 /// `smear`, and both exemption tables and D2's generated probe are written in that vocabulary.
@@ -85,6 +85,8 @@ use rule::Cost;
 /// publishable workspace member is missing from it, so a member added and not mounted here is a
 /// red gate rather than a surface the census quietly stops reading. Miri losing the lexer, and
 /// this census going blind, were both that defect; the check exists so neither recurs by growth.
+/// `smear-semantics` is the one publishable member with no row: the umbrella mounts nothing of it,
+/// and that check's exemption table carries the argument.
 const DEFAULT_ROOTS: &[(&str, &str)] = &[
   ("smear/src/lib.rs", "smear"),
   ("smear-lexer/src/lib.rs", "smear::lexer"),
@@ -92,6 +94,7 @@ const DEFAULT_ROOTS: &[(&str, &str)] = &[
   ("smear-schema/src/lib.rs", "smear::validator::schema"),
   ("smear-compiler/src/lib.rs", "smear::validator"),
   ("graphql-proto/src/lib.rs", "smear::proto"),
+  ("smear-analysis/src/lib.rs", "smear::analysis"),
 ];
 
 fn main() -> ExitCode {

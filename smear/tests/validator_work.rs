@@ -46,7 +46,7 @@
 
 // The same gate every other validator test carries: `smear::validator` does not exist in the
 // crate's API surface with the feature off.
-#![cfg(all(feature = "alloc", feature = "validator"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "validator"))]
 #![allow(missing_docs)]
 
 // The allocation instrument, for the two questions a unit count cannot answer: whether the
@@ -997,7 +997,7 @@ fn a_uniqueness_sort_cannot_outrun_the_ledger() {
 /// verifies the pair first, outside the ledger, and at this fixture's nesting that allocates
 /// nothing; `validator_allocation.rs` pins the zero. Measured on this tree: projecting the
 /// 161,801-byte pair — 120,016 elements — allocates 16,022 times, and refusing it allocates none.
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[test]
 fn the_projection_is_charged_before_it_runs() {
   use smear::{
@@ -1250,7 +1250,7 @@ fn a_disabled_coercion_rule_does_not_read_the_literal() {
 ///
 /// So the mismatch is answered as a mismatch **at every budget and at every shape**, and the
 /// prepayment is measured where it still exists — on a pair the door will actually project.
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[test]
 fn the_projection_prepayment_prices_the_pair_it_projects() {
   use smear::{
@@ -1340,7 +1340,7 @@ fn the_projection_prepayment_prices_the_pair_it_projects() {
 /// with hundreds of top-level elements is not a floor, it is an under-count wearing one. And the
 /// sink's `ControlFlow::Break` was discarded while the verdict hardcoded `stopped: false`, so a
 /// `First` sink could be told to stop by a verdict that then said it had not been.
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[test]
 fn a_refused_projection_reports_what_it_did_not_look_at() {
   use smear::{
@@ -1574,7 +1574,7 @@ fn a_definition_local_rule_does_not_pay_per_operation() {
 /// The reviewer's own counterexample to the `1`: a parse with nothing in it has a true skipped
 /// count of **zero**, so `1` was not the floor it was documented as. The repair is that there is no
 /// number — the state carries no [`Recovery`], and the rendering branches on the state.
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[test]
 fn a_refused_projection_of_an_empty_parse_reports_no_recovery() {
   use smear::{
@@ -3766,7 +3766,7 @@ fn a_sort_is_charged_for_the_bytes_its_comparisons_read() {
 /// and at a budget of zero the verified door must leave none. Measured on this tree: 508 and
 /// 280,228 elements; verifying the large pair allocates twice, the unverified door twice, and the
 /// verified door never.
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[test]
 fn a_verified_pair_is_bounded_from_the_first_instruction() {
   use smear::{
@@ -3895,7 +3895,7 @@ fn a_verified_pair_is_bounded_from_the_first_instruction() {
 /// Two documents of the **same source length** and very different element counts, so the byte term
 /// is held constant and only the structural one moves. A charge that reads `source.len()` cannot
 /// tell them apart; one that reads the pair's own count must.
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[test]
 fn the_projection_charge_follows_the_tree_and_not_the_bytes() {
   use smear::{

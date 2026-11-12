@@ -10,7 +10,7 @@
 //! is blind to a lost node and to a *misplaced* one, and the misplaced node is the harder defect:
 //! a tree whose nesting is wrong still re-prints its source byte for byte, so no round-trip gate
 //! can see it. Several tests below exist only to pin nesting that text fidelity cannot.
-#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 
 use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,

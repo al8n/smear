@@ -30,7 +30,7 @@
 // the same defect `validator_schema.rs` carried until #100 — so it was a hard `E0433` compile
 // error under any feature selection that excludes `validator`, including the crate's own default
 // features. `cargo test -p smear --no-run` in CI now compiles exactly that selection.
-#![cfg(all(feature = "alloc", feature = "validator"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "validator"))]
 #![allow(missing_docs)]
 
 use std::vec::Vec;

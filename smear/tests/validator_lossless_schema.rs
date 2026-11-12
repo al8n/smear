@@ -1,4 +1,4 @@
-#![cfg(all(feature = "validator", feature = "rowan_0_17"))]
+#![cfg(all(feature = "validator", feature = "rowan_0_17", feature = "std"))]
 
 //! The differential gate for the validator's lossless **schema** door.
 //!

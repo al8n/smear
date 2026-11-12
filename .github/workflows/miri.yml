@@ -167,8 +167,8 @@ name: Miri
 #       rowan-gated `deep_projection` targets, its two behind `materialized-numbers`, which it
 #       does not default to, and `enum_attribute_parity`, a source census that excludes itself
 #       with `not(miri)`; and `smear-schema`'s `introspection_allocation`, behind `introspection`.
-#       Excluded / compiled per cell: smear-lexer 0/0, smear-parser 5/1, smear-schema 1/0,
-#       smear-compiler 0/0, graphql-proto 0/2.
+#       Excluded / compiled per cell: smear-lexer 0/0, smear-parser 5/1, smear-semantics 0/0,
+#       smear-schema 1/0, smear-compiler 0/0, graphql-proto 0/2, smear-analysis 0/0.
 #   36  individual tests, not targets, and not all of them in `smear/tests/`:
 #
 #       * the two corpus sweeps in each of `tests/syntactic_span_extent.rs` and
@@ -236,7 +236,7 @@ name: Miri
 # nothing. The row above exists because that gap was found while adding it.
 #
 # What is left in a cell is its member's lib unit tests and the member's integration targets its
-# partition compiles, three across the five. The SIMD lexer's own tests are among them, and that
+# partition compiles, three across the six. The SIMD lexer's own tests are among them, and that
 # is where this project's `unsafe` is and what the job exists for.
 #
 # This is an exclusion, not a silence. `ci/miri_scope.py` derives every line above by parsing
@@ -251,9 +251,9 @@ name: Miri
 # ── ONE MEMBER PER CELL, AND A CEILING ON EACH ──────────────────────────────────────────────
 #
 # A cell selects ONE member of `ci/miri_scope.py`'s `MIRI_PACKAGES`, and the matrix is target x
-# member: 4 x 5 cells per aliasing model, 40 in all, named `miri-{sb,tb}-<target>-<member>`. The
-# five used to share one `cargo miri test` per cell, and run 35944196326 (at c964a6a) is why they
-# no longer do: all eight cells were cancelled at the six-hour job ceiling inside
+# member: 4 x 7 cells per aliasing model, 56 in all, named `miri-{sb,tb}-<target>-<member>`. The
+# first five used to share one `cargo miri test` per cell, and run 35944196326 (at c964a6a) is why
+# they no longer do: all eight cells were cancelled at the six-hour job ceiling inside
 # `graphql-proto`'s lib binary, which cargo runs first — six of its 64 tests done under Stacked
 # Borrows, one under Tree Borrows — so no other member had been interpreted on a push since
 # 2026-08-21. A cell of one member finishes or fails on its own clock.
@@ -268,9 +268,10 @@ name: Miri
 # DEPENDENCIES' features, not any member's own. `rowan` is off in every cell.
 #
 # `--verify-exclusions` runs in ONE cell: `miri-sb-x86_64-unknown-linux-gnu-smear-compiler`. It is
-# a native host build of the five members plus `smear`, so it answers the same on every target,
-# member and model, and it was most of what each cell of that run spent before its first test —
-# 5 to 6 minutes on Linux and 18 to 24 on macOS. The `include:` entry below is the designation.
+# a native host build of the seven members plus the excluded one, `smear`, so it answers the same
+# on every target, member and model, and it was most of what each cell of that
+# run spent before its first test — 5 to 6 minutes on Linux and 18 to 24 on macOS. The `include:`
+# entry below is the designation.
 #
 # THE CEILING IS ON THE MIRI STEP, NOT THE JOB, because the two end differently. A job past its
 # `timeout-minutes` is CANCELLED, which is how all eight cells of that run ended at the 360-minute
@@ -295,6 +296,11 @@ name: Miri
 # were slowest: `smear-schema` under Tree Borrows took 3.0x its local wall on i686 rather than
 # 1.45x, and `smear-parser` under Tree Borrows 2.8x on aarch64-apple-darwin. `graphql-proto` under
 # Tree Borrows measured 23.7 at worst, so it is one cell.
+#
+# `smear-semantics` is not in the table: it joined after that run, carrying the 14 lib unit tests
+# that left `smear-schema`'s lib binary with its kernels, and it takes the floor, 60, under both
+# models until a run measures it. `smear-analysis` joined later still, with its first lib unit
+# tests, and takes the same floor.
 
 # `push`/`pull_request` triggers and `paths-ignore` are deliberately identical to
 # `.github/workflows/ci.yml` and `.github/workflows/macos.yml`; read the comment there for why the
@@ -413,9 +419,11 @@ jobs:
         package:
           - smear-lexer
           - smear-parser
+          - smear-semantics
           - smear-schema
           - smear-compiler
           - graphql-proto
+          - smear-analysis
         # `timeout` is the Miri step's ceiling in minutes, per member: the worst Miri-step wall
         # measured on run 36141578092 across the four targets x2, floor 60, cap 240. The header's
         # "ONE MEMBER PER CELL" section carries the measurements and why it is on the
@@ -425,11 +433,15 @@ jobs:
             timeout: 60
           - package: smear-parser
             timeout: 130
+          - package: smear-semantics
+            timeout: 60
           - package: smear-schema
             timeout: 120
           - package: smear-compiler
             timeout: 60
           - package: graphql-proto
+            timeout: 60
+          - package: smear-analysis
             timeout: 60
     # `aarch64-apple-darwin` cannot be built from a Linux host — `criterion` -> `alloca` -> a C
     # build script; see the header. Every other target here builds on Linux and should stay
@@ -514,9 +526,11 @@ jobs:
         package:
           - smear-lexer
           - smear-parser
+          - smear-semantics
           - smear-schema
           - smear-compiler
           - graphql-proto
+          - smear-analysis
         # `timeout` is the Miri step's ceiling in minutes, per member: the worst Miri-step wall
         # measured on run 36141578092 across the four targets x2, floor 60, cap 240. The header's
         # "ONE MEMBER PER CELL" section carries the measurements and why it is on the
@@ -527,11 +541,15 @@ jobs:
             timeout: 60
           - package: smear-parser
             timeout: 60
+          - package: smear-semantics
+            timeout: 60
           - package: smear-schema
             timeout: 60
           - package: smear-compiler
             timeout: 60
           - package: graphql-proto
+            timeout: 60
+          - package: smear-analysis
             timeout: 60
           - target: x86_64-unknown-linux-gnu
             package: smear-compiler

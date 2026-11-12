@@ -17,8 +17,11 @@ default = []
 # The control: with `smear/alloc` the build must FAIL on the missing allocator (`ci/noalloc.sh`).
 alloc = ["smear/alloc"]
 
-# Every `smear` feature, `default` aside, whose closure holds neither `alloc` nor `std`: a
-# capability never switches a tier on. `ci/noalloc.sh` fails unless this list is exactly that set.
+# Every `smear` feature, `default` aside, whose closure holds neither `alloc` nor `std` nor a
+# feature whose dependency links a tier whatever smear asks for (`LINKS_A_TIER` in `ci/noalloc.sh`):
+# no feature but a tier switches a tier on, but `bytes_1`, `hipstr_0_8`, `smol-bytes_0_2` and
+# `rowan_0_17` bring a dependency that links one. `ci/noalloc.sh` fails unless this list is exactly
+# that set.
 [dependencies]
 smear = { path = "../../smear", default-features = false, features = [
   "graphql",
@@ -27,6 +30,7 @@ smear = { path = "../../smear", default-features = false, features = [
   "validator",
   "proto",
   "introspection",
+  "analysis",
   "materialized-numbers",
   "test-support",
   "bstr",

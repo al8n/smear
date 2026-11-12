@@ -52,25 +52,31 @@ USER_AGENT = f"smear-release/{TOOLCHAIN} (+https://github.com/{REPOSITORY})"
 PUBLISH_ORDER = (
     "smear-lexer",
     "smear-parser",
+    "smear-semantics",
     "smear-schema",
     "smear-compiler",
     "graphql-proto",
+    "smear-analysis",
     "smear",
 )
 BOOTSTRAP_0_0_1 = frozenset((
-    "smear-lexer", "smear-parser", "smear-schema", "smear-compiler", "graphql-proto",
+    "smear-lexer", "smear-parser", "smear-semantics", "smear-schema", "smear-compiler",
+    "graphql-proto", "smear-analysis",
 ))
 BOOTSTRAP_LOGIN = "al8n"
 UNPUBLISHED_MEMBERS = frozenset(("smear-noatomic", "smear-smoke", "source-census"))
 INTERNAL_EDGES = {
     "smear-lexer": frozenset(),
     "smear-parser": frozenset(("smear-lexer",)),
-    "smear-schema": frozenset(("smear-parser",)),
+    "smear-semantics": frozenset(),
+    "smear-schema": frozenset(("smear-parser", "smear-semantics")),
     "smear-compiler": frozenset(("smear-parser", "smear-schema")),
     "graphql-proto": frozenset(("smear-parser", "smear-schema")),
-    "smear": frozenset(
-        ("graphql-proto", "smear-compiler", "smear-lexer", "smear-parser", "smear-schema")
-    ),
+    "smear-analysis": frozenset(("smear-lexer", "smear-parser", "smear-semantics")),
+    "smear": frozenset((
+        "graphql-proto", "smear-analysis", "smear-compiler", "smear-lexer", "smear-parser",
+        "smear-schema", "smear-semantics",
+    )),
 }
 REQUIRED_WORKFLOWS = {
     "CI": ".github/workflows/ci.yml",
@@ -356,7 +362,7 @@ def verify_workspace(metadata: dict[str, object], version: str) -> dict[str, dic
                 f"{name} internal edges are {sorted(actual_edges)}, "
                 f"expected {sorted(INTERNAL_EDGES[name])}"
             )
-    print(f"ok: exact six-package {version} release graph verified")
+    print(f"ok: exact {len(PUBLISH_ORDER)}-package {version} release graph verified")
     return by_name
 
 
@@ -762,7 +768,7 @@ def classify_version(
             return "bootstrap"
     fail(
         f"{name}@{version} has unacceptable provenance; only exact GitHub OIDC provenance is "
-        "accepted, except the five al8n-published 0.0.1 bootstrap siblings"
+        "accepted, except the al8n-published 0.0.1 bootstrap siblings"
     )
 
 
@@ -1151,7 +1157,7 @@ def bootstrap_packages(
     poll_timeout: float, output: Path,
 ) -> dict[str, object]:
     if manifest.get("version") != "0.0.1" or set(PUBLISH_ORDER[:-1]) != BOOTSTRAP_0_0_1:
-        fail("manual bootstrap is restricted to the five 0.0.1 siblings; never smear")
+        fail("manual bootstrap is restricted to the 0.0.1 siblings; never smear")
     if os.environ.get("GITHUB_ACTIONS"):
         fail("bootstrap is local-only; never put a manual publishing credential in Actions")
     token = os.environ.get("CARGO_REGISTRY_TOKEN")
@@ -1551,7 +1557,7 @@ def cmd_prepare(args: argparse.Namespace) -> None:
     target_dir = Path(args.target_dir).resolve()
     run(cargo_args("generate-lockfile"), env=cargo_env(target_dir))
     verify_workspace(cargo_metadata(target_dir), args.version)
-    # Cargo 1.99.1 cannot dry-run this unpublished DAG: it creates all six archives, then its
+    # Cargo 1.99.1 cannot dry-run this unpublished DAG: it creates every archive, then its
     # temporary registry reports "no hash listed" when smear-parser tries to resolve the local
     # smear-lexer archive. Exact-SHA CI supplies the build/test verdict. This step records the
     # bytes with locked/no-verify packaging; real `cargo publish --locked` performs Cargo's
@@ -1576,7 +1582,7 @@ def cmd_prepare(args: argparse.Namespace) -> None:
 def cmd_bootstrap(args: argparse.Namespace) -> None:
     verify_event_context(args.version, args.commit)
     if args.version != "0.0.1" or os.environ.get("GITHUB_ACTIONS"):
-        fail("manual bootstrap is local-only and restricted to the five 0.0.1 siblings")
+        fail("manual bootstrap is local-only and restricted to the 0.0.1 siblings")
     verify_git_commit(args.commit)
     tracked = run(["git", "ls-files", "--error-unmatch", "Cargo.lock"], capture=True, check=False)
     if tracked.returncode == 0:
@@ -1811,7 +1817,8 @@ class ReleaseSelfTests(unittest.TestCase):
             bundle = root / "bundle"
             export_preflight(bundle, lock, manifest, target)
             self.assertEqual(self.read_fixture(bundle, manifest), (lock, manifest))
-            self.assertEqual(len(list(bundle.rglob("*"))), 10)  # nine files and crates/
+            # The lock, the manifest, SHA256SUMS, `crates/`, and one archive per package.
+            self.assertEqual(len(list(bundle.rglob("*"))), 4 + len(PUBLISH_ORDER))
             with self.assertRaises(FileExistsError):
                 export_preflight(bundle, lock, manifest, target)
 
@@ -1904,7 +1911,7 @@ class ReleaseSelfTests(unittest.TestCase):
         registry.version.assert_not_called()
         with mock.patch.dict(os.environ, {"GITHUB_RUN_ATTEMPT": "1"}):
             bootstrap_prepare_guard("0.0.1", registry)
-            self.assertEqual(registry.version.call_count, 5)
+            self.assertEqual(registry.version.call_count, len(BOOTSTRAP_0_0_1))
             registry.version.return_value = {"checksum": self.checksum}
             with self.assertRaisesRegex(ReleaseError, "never prepare again"):
                 bootstrap_prepare_guard("0.0.1", registry)
@@ -1961,7 +1968,11 @@ class ReleaseSelfTests(unittest.TestCase):
                                               "verify_bootstrap_lock": mock.Mock()}):
                 output = root / "bootstrap.json"
                 result = bootstrap_packages(manifest, target, self.commit, 0, output)
-                self.assertEqual(selected, ["smear-schema", "smear-compiler", "graphql-proto"])
+                self.assertEqual(
+                    selected,
+                    ["smear-semantics", "smear-schema", "smear-compiler", "graphql-proto",
+                     "smear-analysis"],
+                )
                 self.assertEqual([p["name"] for p in result["packages"]], list(PUBLISH_ORDER[:-1]))
                 self.assertEqual(load_json(output), result)
                 selected.clear()

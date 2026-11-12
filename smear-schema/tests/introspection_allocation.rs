@@ -32,7 +32,7 @@
 // The door itself is behind `introspection`, so with the feature off this file is an empty crate
 // rather than a hard `E0432` — the gate `smear/tests/validator_introspection.rs` carried until it
 // was given the same header.
-#![cfg(all(feature = "alloc", feature = "introspection"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "introspection"))]
 #![allow(missing_docs)]
 
 use std::{

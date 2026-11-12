@@ -22,7 +22,7 @@
 // the same defect `validator_schema.rs` carried until #100 — so it was a hard `E0433` compile
 // error under any feature selection that excludes `validator`, including the crate's own default
 // features. `cargo test -p smear --no-run` in CI now compiles exactly that selection.
-#![cfg(all(feature = "alloc", feature = "validator"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "validator"))]
 #![allow(missing_docs)]
 
 // The instrument. `tests/support/counting.rs` owns the allocator, the thread-local counters and
@@ -615,7 +615,7 @@ fn read_the_whole_contract(subject: &dyn Diagnose, sink: &mut StackBuffer<512>) 
 /// repository's twelve-level corpus, and not "an ordinary document". The per-element cost this
 /// exists against — one allocation per element walked past — is what the discrimination below still
 /// reads off the red tree.
-#[cfg(all(feature = "graphql", feature = "rowan_0_17"))]
+#[cfg(all(feature = "graphql", feature = "rowan_0_17", feature = "std"))]
 #[test]
 fn the_whole_root_check_allocates_nothing() {
   use smear::parser::graphql::lossless::{parse_executable_document, verify_parse};

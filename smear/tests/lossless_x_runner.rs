@@ -13,7 +13,7 @@
 //!   the sink rather than by calling the mapper directly;
 //! - the profile's validator refuses a kind outside the space, at the emit door;
 //! - a materialization failure names *this* dialect.
-#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 
 use smear::parser::graphqlx::{
   kinds::{GraphQLxLang, SyntaxKind as X},

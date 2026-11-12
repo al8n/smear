@@ -345,9 +345,9 @@ impl SyntaxKind {
 ///
 /// Every member forwards to the inherent item of the same name; the trait exists so the shared
 /// runner, coverage counter and typed layer can be written once over `K: KindSpace` rather than
-/// once per dialect. Gated on `rowan` because that is the only feature under which any of those
-/// three is compiled.
-#[cfg(feature = "rowan_0_17")]
+/// once per dialect. Gated on `rowan` and `std` because that is the only configuration under which
+/// any of those three is compiled.
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 impl crate::lossless::KindSpace for SyntaxKind {
   const NAME: &'static str = "graphql";
   const ERROR: Self = Self::Error;
@@ -401,7 +401,7 @@ impl rowan_0_17::Language for GraphQLLang {
 
 #[cfg(test)]
 mod tests {
-  #[cfg(feature = "rowan_0_17")]
+  #[cfg(all(feature = "rowan_0_17", feature = "std"))]
   #[test]
   fn the_space_satisfies_the_shared_contract() {
     // The three properties this module used to assert by hand — declaration index, tombstone,

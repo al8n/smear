@@ -1,4 +1,4 @@
-#![cfg(all(feature = "alloc", feature = "proto"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "proto"))]
 
 //! Draft §6 execution over shapes `nonnull-test.ts` does not reach.
 //!

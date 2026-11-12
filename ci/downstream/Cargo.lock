@@ -226,6 +226,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "smear-analysis"
+version = "0.0.0"
+dependencies = [
+ "smear-lexer",
+ "smear-parser",
+ "smear-semantics",
+ "tokora",
+]
+
+[[package]]
 name = "smear-compiler"
 version = "0.0.0"
 dependencies = [
@@ -241,10 +251,12 @@ dependencies = [
  "bytes",
  "graphql-proto",
  "smear",
+ "smear-analysis",
  "smear-compiler",
  "smear-lexer",
  "smear-parser",
  "smear-schema",
+ "smear-semantics",
 ]
 
 [[package]]
@@ -273,8 +285,13 @@ name = "smear-schema"
 version = "0.0.0"
 dependencies = [
  "smear-parser",
+ "smear-semantics",
  "tokora",
 ]
+
+[[package]]
+name = "smear-semantics"
+version = "0.0.0"
 
 [[package]]
 name = "syn"

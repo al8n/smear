@@ -4,7 +4,7 @@
 use std::{borrow::ToOwned, boxed::Box, collections::BTreeMap, vec::Vec};
 
 /// A dense symbol: an index into one interner's arena.
-pub(crate) trait Symbol: Copy {
+pub trait Symbol: Copy {
   /// The symbol whose index into the arena is `index`.
   fn from_index(index: u32) -> Self;
 
@@ -38,7 +38,7 @@ pub(crate) trait Symbol: Copy {
 /// `strings[start..end]`, and past `u32::MAX` bytes there is no `start` to record — the cast that
 /// used to record one wrapped, which is the defect this constant closes rather than a capacity it
 /// buys. See the [`Interner`] header for the two failures wrapping produced.
-pub(crate) const MAX_ARENA_BYTES: u32 = u32::MAX;
+pub const MAX_ARENA_BYTES: u32 = u32::MAX;
 
 /// The largest number of distinct spellings an [`Interner`] will hold.
 ///
@@ -48,7 +48,7 @@ pub(crate) const MAX_ARENA_BYTES: u32 = u32::MAX;
 /// reached first from every direction but one: the single empty spelling, which the map admits
 /// once and then deduplicates. It is checked anyway, because "the other guard covers it" is a
 /// property of today's call sites rather than of this type.
-pub(crate) const MAX_ARENA_SYMBOLS: u32 = u32::MAX;
+pub const MAX_ARENA_SYMBOLS: u32 = u32::MAX;
 
 /// An arena of distinct byte spellings, each stored once and addressed by a dense [`Symbol`].
 ///
@@ -80,7 +80,7 @@ pub(crate) const MAX_ARENA_SYMBOLS: u32 = u32::MAX;
 /// The two numeric literal arms used to be a third population and are not one any more: they
 /// retain nothing at all, which is a stronger answer than a ceiling and is not available to these
 /// two.
-pub(crate) struct Interner<S> {
+pub struct Interner<S> {
   strings: Vec<u8>,
   spans: Vec<(u32, u32)>,
   map: BTreeMap<Box<[u8]>, u32>,
@@ -128,12 +128,14 @@ impl<S> core::fmt::Debug for Interner<S> {
 ///
 /// Nothing reads it again. It is handed back rather than dropped inside `into_parts`, so that
 /// when its memory is released is the caller's decision.
-pub(crate) struct Retired {
+pub struct Retired {
   _map: BTreeMap<Box<[u8]>, u32>,
 }
 
 impl<S: Symbol> Interner<S> {
-  pub(crate) fn intern(&mut self, bytes: &[u8]) -> S {
+  /// The symbol `bytes` was interned with, or a new one; a new spelling that would pass either
+  /// arena ceiling is not stored and gets the placeholder [`Interner::refused`] reports.
+  pub fn intern(&mut self, bytes: &[u8]) -> S {
     self.intern_within(bytes, MAX_ARENA_BYTES, MAX_ARENA_SYMBOLS)
   }
 
@@ -143,7 +145,7 @@ impl<S: Symbol> Interner<S> {
   /// boundary: the real one is four gigabytes of interned bytes, which no suite allocates. This is
   /// the whole mechanism — [`Interner::intern`] adds only the two numbers — so a cell driven to an
   /// injected ceiling exercises the same guards a document past the real one would.
-  pub(crate) fn intern_within(&mut self, bytes: &[u8], max_bytes: u32, max_symbols: u32) -> S {
+  pub fn intern_within(&mut self, bytes: &[u8], max_bytes: u32, max_symbols: u32) -> S {
     if let Some(sym) = self.map.get(bytes) {
       return S::from_index(*sym);
     }
@@ -195,7 +197,9 @@ impl<S: Symbol> Interner<S> {
     sym
   }
 
-  pub(crate) fn lookup(&self, bytes: &[u8]) -> Option<S> {
+  /// The symbol `bytes` was interned with, or `None` when this arena never interned it. It interns
+  /// nothing.
+  pub fn lookup(&self, bytes: &[u8]) -> Option<S> {
     self.map.get(bytes).copied().map(S::from_index)
   }
 
@@ -205,17 +209,23 @@ impl<S: Symbol> Interner<S> {
   /// `start <= end <= strings.len()`, and `sym` is the index it returned, so both reads are in
   /// bounds by construction. A `get` here would answer a future break with the empty spelling
   /// instead of saying so.
-  pub(crate) fn bytes(&self, sym: S) -> &[u8] {
+  pub fn bytes(&self, sym: S) -> &[u8] {
     let (start, end) = self.spans[sym.index() as usize];
     &self.strings[start as usize..end as usize]
   }
 
-  pub(crate) fn text(&self, sym: S) -> &str {
+  /// The spelling `sym` was interned with, as text, or `""` when that spelling is not UTF-8.
+  pub fn text(&self, sym: S) -> &str {
     // ASCII by construction; every name is admitted through `is_name` first.
     core::str::from_utf8(self.bytes(sym)).unwrap_or("")
   }
 
-  pub(crate) fn len(&self) -> u32 {
+  /// The number of symbols minted, the refusal placeholder included, saturating at `u32::MAX`.
+  //
+  // No `is_empty` beside it: callers read the symbol count to size tables by it and to refuse
+  // past a ceiling, never to ask whether the arena is empty.
+  #[allow(clippy::len_without_is_empty)]
+  pub fn len(&self) -> u32 {
     // `intern_within` refuses past `MAX_ARENA_SYMBOLS`, so this is the count rather than a wrap of
     // it. Saturating rather than `as` is what makes that a claim a reader can check: a count past
     // the width answers `u32::MAX`, which `flatten` refuses as `SchemaErrorKind::TooManyNames`
@@ -224,24 +234,22 @@ impl<S: Symbol> Interner<S> {
   }
 
   /// The placeholder the first refusal minted, or `None` while the arena has refused nothing.
-  pub(crate) fn refused(&self) -> Option<S> {
+  pub fn refused(&self) -> Option<S> {
     self.refused
   }
 
   /// The arena's bytes, its spans, and the retired map, in that order.
-  pub(crate) fn into_parts(self) -> (Vec<u8>, Vec<(u32, u32)>, Retired) {
+  pub fn into_parts(self) -> (Vec<u8>, Vec<(u32, u32)>, Retired) {
     (self.strings, self.spans, Retired { _map: self.map })
   }
 
   /// The spans, one per symbol: the builder's tests read the arena's shape through this.
-  #[cfg(test)]
-  pub(crate) fn spans(&self) -> &[(u32, u32)] {
+  pub fn spans(&self) -> &[(u32, u32)] {
     &self.spans
   }
 
   /// The interned bytes: the builder's tests read the arena's shape through this.
-  #[cfg(test)]
-  pub(crate) fn strings(&self) -> &[u8] {
+  pub fn strings(&self) -> &[u8] {
     &self.strings
   }
 }

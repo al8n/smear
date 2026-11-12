@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan_0_17", feature = "graphql"))]
+#![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphql"))]
 
 //! Task 5's gate: the eleven value node kinds, their trivia-invariance, their verbatim
 //! round-trip, and the two recovery shapes that keep a malformed value from costing the rest

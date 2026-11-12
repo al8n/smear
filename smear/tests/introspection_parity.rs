@@ -1,4 +1,4 @@
-#![cfg(all(feature = "alloc", feature = "proto"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "proto"))]
 
 //! The executor's draft §4 answer, against graphql-js 17.1.0's answer for the same SDL.
 //!

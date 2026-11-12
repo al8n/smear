@@ -15,22 +15,24 @@
 //! # The properties beside it
 //!
 //! - Codes are unique across families and spelled `smear::<family>::<kebab-case>`, because a
-//!   renderer sees all four families in one pass and cannot disambiguate by enum.
+//!   renderer sees all five families in one pass and cannot disambiguate by enum.
 //! - Every current variant is [`Severity::Error`]. The severity axis exists for a deprecation-lint
 //!   class that does not exist yet, and saying so here stops anyone inventing a warning to justify
 //!   the field.
 //! - An error carrying a related span always has a phrase for it — checked over the two corpora
 //!   that fire every variant, because the two halves live in different files and a kind that
 //!   started attaching a related span without one would drop it with nothing to say so.
-//! - [`Location::entire`] has exactly one user. A family that stopped pointing at its spans would
-//!   pass every other gate in this file — and a syntax error, which always has a place in the text,
-//!   is held to that alongside the schema and validation families.
+//! - [`Location::entire`] has exactly one user among the families read here, the introspection
+//!   door. A family that stopped pointing at its spans would pass every other gate in this file —
+//!   and a syntax error, which always has a place in the text, is held to that alongside the schema
+//!   and validation families. The GraphQLx analyzer's package-level diagnostics are the other
+//!   documented user, and `analysis_packages.rs` holds them to their package sources.
 
 // Everything below names `smear::validator`, which does not exist in the crate's API surface with
 // the feature off; the introspection door needs its own feature on top of that and is gated per
 // item rather than per file, so the two families that are always present stay checked in a
 // `--features validator` build.
-#![cfg(all(feature = "alloc", feature = "validator"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "validator"))]
 #![allow(missing_docs)]
 
 use std::{path::PathBuf, string::String, vec::Vec};
@@ -187,21 +189,41 @@ fn introspection_rows() -> Vec<String> {
   rows
 }
 
+/// The fifth family, the GraphQLx analyzer's, present only where `analysis` is compiled.
+#[cfg(feature = "analysis")]
+fn analysis_rows() -> Vec<String> {
+  use smear::analysis::graphqlx::DiagnosticKind;
+
+  let mut rows: Vec<String> = DiagnosticKind::ALL
+    .iter()
+    .map(|kind| {
+      row(
+        &std::format!("DiagnosticKind::{kind:?}"),
+        kind.code().as_str(),
+      )
+    })
+    .collect();
+  rows.sort();
+  rows
+}
+
 /// Every row this build can derive, sorted.
 fn derived_rows() -> Vec<String> {
   let mut rows = always_present_rows();
   #[cfg(feature = "introspection")]
   rows.extend(introspection_rows());
+  #[cfg(feature = "analysis")]
+  rows.extend(analysis_rows());
   rows.sort();
   rows
 }
 
 /// Whether a golden row belongs to a family this build compiled.
 ///
-/// A `--features validator` build has no `ResponseErrorKind`, so its rows are not evidence of
-/// anything here and are skipped rather than reported as missing. Nothing is lost by that: the
-/// complete build checks the file's length as well, so a row belonging to no family at all is
-/// still caught.
+/// A `--features validator` build has no `ResponseErrorKind` and no `DiagnosticKind`, so their
+/// rows are not evidence of anything here and are skipped rather than reported as missing.
+/// Nothing is lost by that: the complete build checks the file's length as well, so a row
+/// belonging to no family at all is still caught.
 fn in_this_build(line: &str) -> bool {
   if line.starts_with("SchemaErrorKind::")
     || line.starts_with("Rule::")
@@ -209,7 +231,8 @@ fn in_this_build(line: &str) -> bool {
   {
     return true;
   }
-  cfg!(feature = "introspection") && line.starts_with("ResponseErrorKind::")
+  (cfg!(feature = "introspection") && line.starts_with("ResponseErrorKind::"))
+    || (cfg!(feature = "analysis") && line.starts_with("DiagnosticKind::"))
 }
 
 const UPDATE_VAR: &str = "UPDATE_GOLDEN";
@@ -247,16 +270,17 @@ fn codes_match_the_golden() {
   let derived = derived_rows();
 
   // Blessing needs the whole file, so only the complete build may write one. A partial build that
-  // wrote would delete the third family's rows and call it an update.
-  #[cfg(feature = "introspection")]
+  // wrote would delete the third or the fifth family's rows and call it an update.
+  #[cfg(all(feature = "introspection", feature = "analysis"))]
   if std::env::var(UPDATE_VAR).as_deref() == Ok("1") {
     let body = std::format!(
       "# Every diagnostic code, one per line, sorted. Derived from the kind enumerations and\n\
        # pinned here so that a RENAME — the one change no compiler notices and every consumer\n\
        # feels — has to be an edit to this file.\n\
        #\n\
-       # Bless with `UPDATE_GOLDEN=1 cargo test -p smear --features validator,introspection \\\n\
-       # --test diagnostic_codes`, which rewrites this and then fails.\n{}\n",
+       # Bless with `UPDATE_GOLDEN=1 cargo test -p smear --features \\\n\
+       # validator,introspection,analysis --test diagnostic_codes`, which rewrites this and then\n\
+       # fails.\n{}\n",
       derived.join("\n")
     );
     std::fs::write(golden_path(), body).expect("the code golden is writable");
@@ -277,13 +301,13 @@ fn codes_match_the_golden() {
     scoped,
     derived_refs,
     "the codes this build derives are not the ones committed in {}; if the change is intended, \
-     bless it with `{UPDATE_VAR}=1` from a build with `introspection` on",
+     bless it with `{UPDATE_VAR}=1` from a build with `introspection` and `analysis` on",
     golden_path().display()
   );
 
   // Only the complete build can say the file holds nothing else: under a narrower selection a row
   // for an absent family is not stale, it is merely out of scope.
-  #[cfg(feature = "introspection")]
+  #[cfg(all(feature = "introspection", feature = "analysis"))]
   assert_eq!(
     golden.len(),
     derived.len(),
@@ -297,7 +321,7 @@ fn codes_match_the_golden() {
 /// A code names exactly one rule, and is spelled the way the namespace says.
 ///
 /// Uniqueness is the property that makes one flat namespace usable at all: a renderer holding
-/// diagnostics from four families keys off the code and nothing else, so two families answering
+/// diagnostics from five families keys off the code and nothing else, so two families answering
 /// the same string would silently merge two rules.
 #[test]
 fn codes_are_unique_and_well_formed() {
@@ -320,8 +344,11 @@ fn codes_are_unique_and_well_formed() {
     let rule = parts.next().unwrap_or_else(|| panic!("{code} has no rule"));
     assert_eq!(parts.next(), None, "{code} has more than three segments");
     assert!(
-      matches!(family, "schema" | "validation" | "introspection" | "syntax"),
-      "{code} names the family {family:?}, which is not one of the four"
+      matches!(
+        family,
+        "schema" | "validation" | "introspection" | "syntax" | "graphqlx"
+      ),
+      "{code} names the family {family:?}, which is not one of the five"
     );
     assert!(
       !rule.is_empty()
@@ -360,6 +387,10 @@ fn every_current_variant_is_an_error() {
     assert_eq!(rule.severity(), Severity::Error, "{rule:?}");
   }
   for kind in SyntaxErrorKind::ALL {
+    assert_eq!(kind.severity(), Severity::Error, "{kind:?}");
+  }
+  #[cfg(feature = "analysis")]
+  for kind in smear::analysis::graphqlx::DiagnosticKind::ALL {
     assert_eq!(kind.severity(), Severity::Error, "{kind:?}");
   }
   assert!(
