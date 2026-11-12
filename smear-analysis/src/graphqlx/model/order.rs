@@ -55,6 +55,7 @@ pub(super) fn check(model: &Model) {
   packages(model);
   modules(model);
   defs(model);
+  contributions(model);
   members(model);
   lists(model);
   walk(model);
@@ -202,6 +203,33 @@ fn defs(model: &Model) {
       }
     }
     previous = Some(row);
+  }
+}
+
+/// Contributions: a definition's own first, then only extensions; the schema's definitions, then
+/// only extensions.
+fn contributions(model: &Model) {
+  for (index, def) in model.defs.iter().enumerate() {
+    for (position, part) in def
+      .contributions
+      .of(&model.contributions)
+      .iter()
+      .enumerate()
+    {
+      assert_eq!(
+        part.extension,
+        position > 0,
+        "definition {index}'s first contribution is its own, and every later one an extension"
+      );
+    }
+  }
+  let mut extending = false;
+  for part in model.schema.contributions.of(&model.contributions) {
+    assert!(
+      part.extension || !extending,
+      "the schema's definitions are appended before its extensions"
+    );
+    extending = part.extension;
   }
 }
 

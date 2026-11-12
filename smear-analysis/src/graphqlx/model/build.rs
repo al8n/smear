@@ -10,20 +10,22 @@
 //!   path, compared segment by segment, each segment bytewise;
 //! - definitions, by item collection: by package, module path, source id, then position, the
 //!   materialised primitives first in `core`'s root module;
-//! - contributions, with their definition: the definition, then each extension by source id and
-//!   position; the schema's after every definition's;
-//! - members, by item collection: owner by owner, the direct members by contribution and as
-//!   written, then each field's arguments, field by field;
+//! - contributions, by lowering, with their definition: the definition, then each extension by
+//!   source id and position; the schema's after every definition's, its definitions before its
+//!   extensions;
+//! - members, by lowering: owner by owner, the direct members by contribution and as written, then
+//!   each field's arguments, field by field;
 //! - type occurrences, values and applications, by lowering: in the order of the walk over every
 //!   package, an occurrence before what it nests (`order` spells the walk out);
-//! - types, by interning as resolution reaches each type occurrence: a type's arguments before it;
+//! - types, by interning as instantiation reaches each type occurrence: a type's arguments before
+//!   it;
 //! - names, by interning: by first occurrence, in source-id order, then position.
 //!
-//! The later phases write onto rows already appended: resolution gives occurrences their kinds and
-//! types, and applications their directives; instantiation adds instantiations and satisfactions;
-//! coercion gives values their shapes and types; the tier phase gives definitions and types their
-//! tiers. What none of them wrote keeps the neutral value its row was appended with, which the
-//! accessors document.
+//! The later phases write onto rows already appended: resolution gives occurrences their kinds,
+//! and applications their directives; instantiation gives occurrences their types, and adds
+//! instantiations and satisfactions; coercion gives values their shapes and types; the tier phase
+//! gives definitions and types their tiers. What none of them wrote keeps the neutral value its
+//! row was appended with, which the accessors document.
 //!
 //! # The checks
 //!
@@ -41,19 +43,20 @@ use smear_semantics::interner::{Interner, Symbol};
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{DefId, IdRange, ModuleId, PackageId, Sym, TyId, dense},
+  id::{DefId, IdRange, MemberId, ModuleId, PackageId, Sym, TyId, dense},
   package::{IntegerProvider, Layout, Tier},
 };
 
 use super::{
   Model, Namespace, PackageKind,
-  def::{DefKind, Origin, Primitive},
+  def::{DefKind, DirectiveLocation, Origin, Primitive},
+  member::MemberKind,
   module::ModuleKind,
   order,
   table::{
     AliasRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, ContributionRow, DefRow,
-    DescriptionRow, KIND_UNRESOLVED, ModuleRow, NO_DEF, PackageRow, Run, TyRow, TypeExprRow,
-    UNSET_MODULE, UNSET_TY, ValueRow,
+    DescriptionRow, KIND_UNRESOLVED, MemberRow, ModuleRow, NO_DEF, PackageRow, Run, TyRow,
+    TypeExprRow, TypeParamRow, UNSET_MODULE, UNSET_TY, ValueRow,
   },
 };
 
@@ -275,19 +278,19 @@ impl ModelBuilder {
     id
   }
 
-  /// Appends a contribution to `def`: its definition, or one of its extensions, named at
-  /// `location` and spanning `extent`, from its description or first keyword to its last token.
-  /// Answers its index among `def`'s contributions.
+  /// Appends `def`'s own contribution: its definition, named at `location` and spanning `extent`,
+  /// from its description or first keyword to its last token. Answers its index among `def`'s
+  /// contributions, which is 0.
   ///
   /// A definition's contributions are appended together, the definition first, then each
-  /// extension by source id and position, before the next definition's.
+  /// extension by source id and position (`push_extension`), before the next definition's.
   pub fn push_contribution(&mut self, def: DefId, location: Location, extent: Location) -> u32 {
     let row = &mut self.model.defs[def.get() as usize];
     let index = row.contributions.len;
     grow(
       &mut self.model.contributions,
       &mut row.contributions,
-      contribution_row(location, extent),
+      contribution_row(location, extent, false),
     );
     index
   }
@@ -296,6 +299,33 @@ impl ModelBuilder {
   pub fn set_def_description(&mut self, def: DefId, text: &str, location: Location) {
     let description = self.description(text, location);
     self.model.defs[def.get() as usize].description = Some(description);
+  }
+
+  /// Appends a type parameter named `name`, written at `location`, to `def`. Answers its index.
+  pub fn push_type_param(&mut self, def: DefId, name: Sym, location: Location) -> u32 {
+    let row = &mut self.model.defs[def.get() as usize];
+    let index = row.type_params.len;
+    grow(
+      &mut self.model.type_params,
+      &mut row.type_params,
+      TypeParamRow {
+        name,
+        location,
+        default: None,
+      },
+    );
+    index
+  }
+
+  /// Adds `location` to the locations of the directive definition `def`, after those it has.
+  pub fn push_directive_location(&mut self, def: DefId, location: DirectiveLocation) {
+    let row = &mut self.model.defs[def.get() as usize];
+    grow(&mut self.model.locations, &mut row.locations, location);
+  }
+
+  /// Makes the directive definition `def` repeatable.
+  pub fn set_repeatable(&mut self, def: DefId) {
+    self.model.defs[def.get() as usize].repeatable = true;
   }
 
   /// Makes `def` the intrinsic primitive `primitive`.
@@ -313,6 +343,78 @@ impl ModelBuilder {
   /// namespaces; when it gives one name twice in one namespace, the first added is kept.
   pub fn push_alias(&mut self, module: ModuleId, name: Sym, def: DefId) {
     self.model.aliases.push(AliasRow { module, name, def });
+  }
+
+  /// Appends a direct member of `owner`, contributed by its contribution `contribution`: a `kind`
+  /// named `name`, its name written at `location`, spanning `extent`.
+  ///
+  /// Members are appended in id order: owner by owner; an owner's direct members first, by
+  /// contribution and then as written; then each field's arguments, field by field, through
+  /// [`push_argument`](Self::push_argument).
+  pub fn push_member(
+    &mut self,
+    owner: DefId,
+    contribution: u32,
+    kind: MemberKind,
+    name: Sym,
+    location: Location,
+    extent: Location,
+  ) -> MemberId {
+    let index = dense(self.model.members.len());
+    let row = &mut self.model.defs[owner.get() as usize];
+    debug_assert_eq!(
+      row.kind.member_kind(),
+      Some(kind),
+      "a definition's direct members are of the one kind its own kind has"
+    );
+    row.members = extend_range(row.members, index);
+    let part = slot(row.contributions, contribution);
+    let part = &mut self.model.contributions[part];
+    part.members = extend_range(part.members, index);
+    self
+      .model
+      .members
+      .push(member_row(kind, name, owner, None, location, extent));
+    MemberId::new(index)
+  }
+
+  /// Appends an argument of `field`, named `name`, its name written at `location`, spanning
+  /// `extent`.
+  pub fn push_argument(
+    &mut self,
+    field: MemberId,
+    name: Sym,
+    location: Location,
+    extent: Location,
+  ) -> MemberId {
+    let index = dense(self.model.members.len());
+    let parent = &mut self.model.members[field.get() as usize];
+    debug_assert_eq!(parent.kind, MemberKind::Field, "only a field has arguments");
+    parent.arguments = extend_range(parent.arguments, index);
+    let owner = parent.owner;
+    self.model.members.push(member_row(
+      MemberKind::Argument,
+      name,
+      owner,
+      Some(field),
+      location,
+      extent,
+    ));
+    MemberId::new(index)
+  }
+
+  /// Gives `member` the description `text`, cooked, written at `location`.
+  pub fn set_member_description(&mut self, member: MemberId, text: &str, location: Location) {
+    let description = self.description(text, location);
+    self.model.members[member.get() as usize].description = Some(description);
+  }
+
+  /// Whether a spelling the model keeps was lost: the name arena refused one, as it does past the
+  /// four gigabytes its `u32` offsets address, answering one shared placeholder for it; or the
+  /// text arena holds more bytes than a `u32` addresses, so that a run of it saturates. Either way
+  /// some spelling the model answers is not the one written.
+  pub(crate) fn arenas_overflowed(&self) -> bool {
+    self.names.refused().is_some() || u32::try_from(self.model.text.len()).is_err()
   }
 
   /// The finished model.
@@ -591,14 +693,62 @@ fn holds_any(marks: &[(u32, usize, usize)], extent: Location) -> bool {
     .any(|mark: &(u32, usize, usize)| mark.2 <= end)
 }
 
-/// A contribution at `location`, spanning `extent`, that has contributed nothing yet.
-fn contribution_row(location: Location, extent: Location) -> ContributionRow {
+/// A contribution at `location`, spanning `extent`, that has contributed nothing yet: an
+/// extension when `extension`, and otherwise a definition.
+fn contribution_row(location: Location, extent: Location, extension: bool) -> ContributionRow {
   ContributionRow {
     location,
     extent,
+    extension,
     members: IdRange::new(0, 0),
     implements: Run::default(),
     union_members: Run::default(),
+    applications: Run::default(),
+    marked: false,
+  }
+}
+
+/// The position in its pool of the entry `index` of `run`.
+fn slot(run: Run, index: u32) -> usize {
+  debug_assert!(index < run.len, "the entry is one of the list's");
+  run.start as usize + index as usize
+}
+
+/// `range` with the member `index` added at its end, which must be where it ends: an owner's
+/// direct members, and a field's arguments, are each one run of the member table.
+fn extend_range<Id>(range: IdRange<Id>, index: u32) -> IdRange<Id> {
+  let next = index.saturating_add(1);
+  if range.is_empty() {
+    return IdRange::new(index, next);
+  }
+  debug_assert_eq!(
+    range.end(),
+    index,
+    "a run of members grows only at the end of the member table"
+  );
+  IdRange::new(range.start(), next)
+}
+
+/// A member with no description, type, default, argument or application yet.
+fn member_row(
+  kind: MemberKind,
+  name: Sym,
+  owner: DefId,
+  parent: Option<MemberId>,
+  location: Location,
+  extent: Location,
+) -> MemberRow {
+  MemberRow {
+    kind,
+    name,
+    owner,
+    parent,
+    location,
+    extent,
+    description: None,
+    ty: None,
+    default: None,
+    arguments: IdRange::new(0, 0),
     applications: Run::default(),
     marked: false,
   }

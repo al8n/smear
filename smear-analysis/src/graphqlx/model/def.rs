@@ -495,6 +495,7 @@ pub struct Contribution<'a> {
   implements: &'a [TypeExprId],
   union_members: &'a [TypeExprId],
   applications: &'a [ApplicationId],
+  extension: bool,
   has_errors: bool,
 }
 
@@ -503,6 +504,14 @@ impl<'a> Contribution<'a> {
   #[inline]
   pub const fn location(&self) -> Location {
     self.location
+  }
+
+  /// Whether it is an extension: `false` for a definition's own contribution, which is its first,
+  /// and for a schema definition; `true` for each `extend` of a definition or of the schema, which
+  /// follow them.
+  #[inline]
+  pub const fn is_extension(&self) -> bool {
+    self.extension
   }
 
   /// The direct members it contributed, in id order.
@@ -567,6 +576,7 @@ impl<'a> Contributions<'a> {
       implements: row.implements.of(&model.implements),
       union_members: row.union_members.of(&model.union_members),
       applications: row.applications.of(&model.listed_applications),
+      extension: row.extension,
       has_errors: row.marked,
     }
   }

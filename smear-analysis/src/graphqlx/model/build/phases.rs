@@ -1,26 +1,27 @@
-//! What the phases after item collection write: what definitions hold beyond their identity,
-//! members, type occurrences and types, values, applications, the schema and marks.
+//! What the phases after lowering's first pass write: each definition's extensions, its type
+//! parameters' defaults and its bounds, its `implements` entries, union members and applications,
+//! its built-in meaning and its externs, its instantiations and satisfactions; each member's type,
+//! default and applications; type occurrences and types, values, applications, the schema, and
+//! marks.
 //!
-//! GATED ON HAVING A CALLER. Lowering, resolution, instantiation, coercion and the tier phase are
-//! this module's callers, and until they land the test-support door is its only one: a method that
-//! no shipped build calls is dead code. A phase that lands moves the methods it calls out of this
-//! module, as the module tree and item collection moved theirs.
+//! GATED ON HAVING A CALLER. Lowering, instantiation, coercion and the tier phase are this
+//! module's callers, and until each lands the test-support door is its only one: a method that no
+//! shipped build calls is dead code. A phase that lands moves the methods it calls out of this
+//! module, as the module tree, item collection and lowering's first pass moved theirs.
 
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{ApplicationId, DefId, IdRange, MemberId, Sym, TyId, TypeExprId, ValueId, dense},
+  id::{ApplicationId, DefId, MemberId, Sym, TyId, TypeExprId, ValueId, dense},
   model::{
     application::{ApplicationArgument, Resolution},
-    def::{Collection, DirectiveLocation, TypeBound},
-    member::MemberKind,
+    def::{Collection, TypeBound},
     schema::{Root, RootOperation},
     table::{
       ApplicationRow, ExternRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM,
-      KIND_UNRESOLVED, LiteralRow, MemberRow, NO_DEF, PathRow, Run, TyRow, TypeExprRow,
-      TypeParamRow, UNSET_TY, VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST,
-      VALUE_LITERAL, VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET, VALUE_STRING, VALUE_TYPE,
-      VALUE_UNRESOLVED, ValueRow,
+      KIND_UNRESOLVED, LiteralRow, NO_DEF, PathRow, Run, TyRow, TypeExprRow, UNSET_TY, VALUE_BOOL,
+      VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_MAP, VALUE_NULL,
+      VALUE_OBJECT, VALUE_SET, VALUE_STRING, VALUE_TYPE, VALUE_UNRESOLVED, ValueRow,
     },
     ty::PathRoot,
     value::{LiteralKind, ObjectEntry},
@@ -28,21 +29,22 @@ use crate::graphqlx::{
   package::Tier,
 };
 
-use super::{ModelBuilder, append, contribution_row, extend, grow, push_text, unresolved_ty};
+use super::{ModelBuilder, append, contribution_row, extend, grow, push_text, slot, unresolved_ty};
 
 impl ModelBuilder {
-  /// Appends a type parameter named `name`, written at `location`, to `def`. Answers its index.
-  pub fn push_type_param(&mut self, def: DefId, name: Sym, location: Location) -> u32 {
+  /// Appends an extension of `def` as its next contribution: the extension names `def` at
+  /// `location`, its target path, and spans `extent`, from its `extend` to its last token. Answers
+  /// its index among `def`'s contributions.
+  ///
+  /// It follows `def`'s own contribution (`push_contribution`) and every extension of `def` before
+  /// it by source id and position, and comes before the next definition's contributions.
+  pub fn push_extension(&mut self, def: DefId, location: Location, extent: Location) -> u32 {
     let row = &mut self.model.defs[def.get() as usize];
-    let index = row.type_params.len;
+    let index = row.contributions.len;
     grow(
-      &mut self.model.type_params,
-      &mut row.type_params,
-      TypeParamRow {
-        name,
-        location,
-        default: None,
-      },
+      &mut self.model.contributions,
+      &mut row.contributions,
+      contribution_row(location, extent, true),
     );
     index
   }
@@ -116,17 +118,6 @@ impl ModelBuilder {
     self.model.listed_applications.push(application);
   }
 
-  /// Adds `location` to the locations of the directive definition `def`, after those it has.
-  pub fn push_directive_location(&mut self, def: DefId, location: DirectiveLocation) {
-    let row = &mut self.model.defs[def.get() as usize];
-    grow(&mut self.model.locations, &mut row.locations, location);
-  }
-
-  /// Makes the directive definition `def` repeatable.
-  pub fn set_repeatable(&mut self, def: DefId) {
-    self.model.defs[def.get() as usize].repeatable = true;
-  }
-
   /// Makes `def` a marker.
   pub fn set_marker(&mut self, def: DefId) {
     self.model.defs[def.get() as usize].marker = true;
@@ -160,70 +151,6 @@ impl ModelBuilder {
   /// any order, and each is kept once.
   pub fn push_satisfaction(&mut self, ty: TyId, interface: DefId) {
     self.model.satisfactions.push((ty, interface));
-  }
-
-  /// Appends a direct member of `owner`, contributed by its contribution `contribution`: a `kind`
-  /// named `name`, its name written at `location`, spanning `extent`.
-  ///
-  /// Members are appended in id order: owner by owner; an owner's direct members first, by
-  /// contribution and then as written; then each field's arguments, field by field, through
-  /// [`push_argument`](Self::push_argument).
-  pub fn push_member(
-    &mut self,
-    owner: DefId,
-    contribution: u32,
-    kind: MemberKind,
-    name: Sym,
-    location: Location,
-    extent: Location,
-  ) -> MemberId {
-    let index = dense(self.model.members.len());
-    let row = &mut self.model.defs[owner.get() as usize];
-    debug_assert_eq!(
-      row.kind.member_kind(),
-      Some(kind),
-      "a definition's direct members are of the one kind its own kind has"
-    );
-    row.members = extend_range(row.members, index);
-    let part = slot(row.contributions, contribution);
-    let part = &mut self.model.contributions[part];
-    part.members = extend_range(part.members, index);
-    self
-      .model
-      .members
-      .push(member_row(kind, name, owner, None, location, extent));
-    MemberId::new(index)
-  }
-
-  /// Appends an argument of `field`, named `name`, its name written at `location`, spanning
-  /// `extent`.
-  pub fn push_argument(
-    &mut self,
-    field: MemberId,
-    name: Sym,
-    location: Location,
-    extent: Location,
-  ) -> MemberId {
-    let index = dense(self.model.members.len());
-    let parent = &mut self.model.members[field.get() as usize];
-    debug_assert_eq!(parent.kind, MemberKind::Field, "only a field has arguments");
-    parent.arguments = extend_range(parent.arguments, index);
-    let owner = parent.owner;
-    self.model.members.push(member_row(
-      MemberKind::Argument,
-      name,
-      owner,
-      Some(field),
-      location,
-      extent,
-    ));
-    MemberId::new(index)
-  }
-
-  /// Gives `member` the description `text`, cooked, written at `location`.
-  pub fn set_member_description(&mut self, member: MemberId, text: &str, location: Location) {
-    let description = self.description(text, location);
-    self.model.members[member.get() as usize].description = Some(description);
   }
 
   /// Gives `member` its type, as written.
@@ -605,16 +532,34 @@ impl ModelBuilder {
     );
   }
 
-  /// Appends a contribution to the schema: a schema definition or extension at `location`,
-  /// spanning `extent`. Answers its index among the schema's contributions.
+  /// Appends a schema definition to the schema's contributions: at `location`, its `schema`, and
+  /// spanning `extent`, from its description or its `schema` to its last token. Answers its index
+  /// among the schema's contributions.
   ///
-  /// The schema's contributions are appended after every definition's.
+  /// The schema's contributions are appended after every definition's, its definitions before its
+  /// extensions (`push_schema_extension`).
   pub fn push_schema_contribution(&mut self, location: Location, extent: Location) -> u32 {
     let index = self.model.schema.contributions.len;
     grow(
       &mut self.model.contributions,
       &mut self.model.schema.contributions,
-      contribution_row(location, extent),
+      contribution_row(location, extent, false),
+    );
+    index
+  }
+
+  /// Appends a schema extension to the schema's contributions: at `location`, its `extend`, and
+  /// spanning `extent`, from its `extend` to its last token. Answers its index among the schema's
+  /// contributions.
+  ///
+  /// It follows every schema definition, and every schema extension before it by source id and
+  /// position.
+  pub fn push_schema_extension(&mut self, location: Location, extent: Location) -> u32 {
+    let index = self.model.schema.contributions.len;
+    grow(
+      &mut self.model.contributions,
+      &mut self.model.schema.contributions,
+      contribution_row(location, extent, true),
     );
     index
   }
@@ -661,51 +606,5 @@ impl ModelBuilder {
     let row = self.value_row(value);
     row.shape = shape;
     row.run = run;
-  }
-}
-
-/// The position in its pool of the entry `index` of `run`.
-fn slot(run: Run, index: u32) -> usize {
-  debug_assert!(index < run.len, "the entry is one of the list's");
-  run.start as usize + index as usize
-}
-
-/// `range` with the member `index` added at its end, which must be where it ends: an owner's
-/// direct members, and a field's arguments, are each one run of the member table.
-fn extend_range<Id>(range: IdRange<Id>, index: u32) -> IdRange<Id> {
-  let next = index.saturating_add(1);
-  if range.is_empty() {
-    return IdRange::new(index, next);
-  }
-  debug_assert_eq!(
-    range.end(),
-    index,
-    "a run of members grows only at the end of the member table"
-  );
-  IdRange::new(range.start(), next)
-}
-
-/// A member with no description, type, default, argument or application yet.
-fn member_row(
-  kind: MemberKind,
-  name: Sym,
-  owner: DefId,
-  parent: Option<MemberId>,
-  location: Location,
-  extent: Location,
-) -> MemberRow {
-  MemberRow {
-    kind,
-    name,
-    owner,
-    parent,
-    location,
-    extent,
-    description: None,
-    ty: None,
-    default: None,
-    arguments: IdRange::new(0, 0),
-    applications: Run::default(),
-    marked: false,
   }
 }

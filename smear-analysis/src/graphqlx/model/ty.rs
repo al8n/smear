@@ -250,8 +250,9 @@ impl<'a> TypeExpr<'a> {
   /// Its type: the complete instantiation, with defaults filled and substituted and an alias
   /// expanded. Two occurrences of one type answer one id.
   //
-  // Resolution gives it. An occurrence no phase gave a type, as every one is until resolution
-  // lands, answers the one unresolved type.
+  // The instantiation phase gives it; no phase before it interns a type. Until then every
+  // occurrence answers the one unresolved type, in an analysis that is ok too, which therefore
+  // holds an unresolved type wherever it holds an occurrence: the interim this accessor accepts.
   #[inline]
   pub fn ty(&self) -> TyId {
     self.row().ty

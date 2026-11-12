@@ -86,9 +86,16 @@ All notable changes to Smear are documented in this file.
   hold, every package's root module included, which is always held: the first module a supplied
   package's directory or `mod` would add past it is `resource-limit`, and no module is added
   after it. A file holding an item of a kind the analyzer does not know, which only a newer
-  parser can make, is `unknown-item`, once per file. A new `test-support` feature, which `smear/test-support` forwards, compiles a
-  hidden door to the crate-private model builder, and to analyses of the models it builds, for
-  `smear`'s own tests; it is not API.
+  parser can make, is `unknown-item`, once per file. Lowering then writes what each definition
+  holds beyond its identity: its own contribution, named where its name is written; its type
+  parameters; a directive definition's locations and whether it is `repeatable`; and its
+  members, its direct members as written and then each field's arguments, field by field, each
+  with its description. A GraphQL built-in the root package replaces holds what the root
+  package's definition writes. `Contribution::is_extension()` says whether a contribution is a
+  definition or one of its extensions. Names and texts past what the model's `u32` offsets
+  address are `resource-limit`. A new `test-support` feature, which `smear/test-support`
+  forwards, compiles a hidden door to the crate-private model builder, and to analyses of the
+  models it builds, for `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`

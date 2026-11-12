@@ -117,6 +117,13 @@ impl Analysis {
 ///   in one namespace of one module, a supplied definition named with `__`, and a type named as a
 ///   child module of its module are reported. The first definition a supplied package would add
 ///   past [`Limits::max_definitions`] is reported, and nothing after it is collected.
+/// - Lowers what each definition holds beyond its identity: its own contribution, where its name
+///   is written; its type parameters; a directive definition's locations and whether it is
+///   `repeatable`; and its members, its direct members as written and then each field's
+///   arguments, each with its description. A replaced built-in holds what the root package's
+///   definition writes, and smear's own definition of it contributes nothing. Names and texts past
+///   what the model's `u32` offsets address, which only a [`Limits::max_source_bytes`] far above
+///   its default admits, are reported at the root package's package source.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///
@@ -169,7 +176,7 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
   let mut builder = builder_of(&packages, &sources, dependencies);
   let collected = collect::items(&packages, &sources, &documents, limits, &mut reporter);
   let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
-  lower::lower(&declarations);
+  lower::lower(&declarations, &sources, &mut builder, &mut reporter);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }

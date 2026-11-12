@@ -18,10 +18,11 @@
 //! [`analyze`] answers an [`Analysis`]: the [`Model`], its [`Diagnostics`] and its [`SourceMap`].
 //! None of the three has a type parameter or a lifetime, whatever text type went in, and
 //! [`Analysis::is_ok`] is the verdict. So far the model holds the packages, their modules, from
-//! their directories and their inline `mod`s, and every definition's identity: its kind, name,
-//! module, location, origin and description, the built-in library's and the primitives the
-//! program writes included, with canonical names and lookup. The phases that write the rest of it
-//! are still to come.
+//! their directories and their inline `mod`s, and every definition, the built-in library's and the
+//! primitives the program writes included, with canonical names and lookup: its kind, name,
+//! module, location, origin and description, its own contribution, its type parameters, a
+//! directive definition's locations, and its members with their descriptions. The phases that
+//! write the rest of it are still to come.
 //!
 //! ```
 //! use smear_analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};
