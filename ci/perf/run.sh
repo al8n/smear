@@ -29,7 +29,8 @@
 # of reaching a file it does not follow. A list would go stale silently: a fixture added to the
 # corpus and missing from the list would be read from the merge-base's tree on one side and from the
 # head's on the other, and the difference would be reported as the library's. The log names every
-# file laid over and whether the merge-base's own copy differed from it.
+# file laid over and whether the merge-base's own copy differed from it. With `--against` (see
+# USAGE) the base side is the named revision's own tree instead, built the same way.
 #
 # So the instrument is the constant and the REVISION is the variable — sources, manifests, features
 # and dependencies together, which is what a pull request is. Until #272 the base side was the
@@ -84,8 +85,13 @@
 #
 # ── USAGE ───────────────────────────────────────────────────────────────────────────────────
 #
-#     ci/perf/run.sh <base-ref>   # compare HEAD against its merge-base with <base-ref>
-#     ci/perf/run.sh --self       # compare HEAD against ITSELF: the gates' own noise floor
+#     ci/perf/run.sh <base-ref>         # compare HEAD against its merge-base with <base-ref>
+#     ci/perf/run.sh --against <rev>    # compare HEAD against <rev> ITSELF, not a merge-base
+#     ci/perf/run.sh --self             # compare HEAD against ITSELF: the gates' own noise floor
+#
+# `--against` asks what no pull request asks: this tree against a revision as it is. CI runs it
+# for a dispatch of `perf.yml` with the input `base`, `gh workflow run perf.yml --ref <branch> -f
+# base=<rev>`; <rev> is a hash, a tag or a branch, tried as given and then as `origin/<rev>`.
 #
 # `--self` is the thing to run first on a new host. It says what that machine's floor is before any
 # number from it is trusted, and for the allocation gate it is also the reproducibility check: two
@@ -320,10 +326,10 @@ stop() {
 
 # ── THE TWO TREES ───────────────────────────────────────────────────────────────────────────
 #
-# `materialise <head-sha> <base-sha>` puts the head's tree in `$PERF_WORK/head` and the
-# merge-base's in `$PERF_WORK/base`, checks that one instrument can read both, and lays the head's
-# instrument over the base. Nothing in it compiles, which is what lets a harness source this file
-# and call it.
+# `materialise <head-sha> <base-sha>` puts the head's tree in `$PERF_WORK/head` and the base's —
+# the merge-base, or the revision `--against` names — in `$PERF_WORK/base`, checks that one
+# instrument can read both, and lays the head's instrument over the base. Nothing in it compiles,
+# which is what lets a harness source this file and call it.
 materialise() {
   local head_sha="$1" base_sha="$2" side file note status=0
 
@@ -490,13 +496,35 @@ compiled() {
   fi
 }
 
+# `resolve_against <rev>` sets `base` to the commit <rev> names, once: as given (a hash, a tag, a
+# local branch), then as `origin/<rev>`, which is where a CI checkout keeps every other branch. It
+# stops the run with a plain error when neither names a commit. An argument not spelled like a
+# revision is refused before git reads it, and is not echoed.
+resolve_against() {
+  case "$1" in
+    '' | -* | *[!A-Za-z0-9._/@^~{}+-]*)
+      stop "--against takes a revision, a hash, a tag or a branch, and this is not spelled like one"
+      ;;
+  esac
+  base="$(git rev-parse --verify --quiet "$1^{commit}" \
+    || git rev-parse --verify --quiet "refs/remotes/origin/$1^{commit}" || true)"
+  if [ -z "$base" ]; then
+    stop "\`$1\` names no commit in this checkout, as given or as origin/$1"
+  fi
+}
+
 # Sourced rather than run — by a harness that wants the two trees, the profile check and the locks
 # without a build — the file stops here, having defined its stages and run none of them.
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then
   return 0
 fi
 
-if [ "$#" -ne 1 ]; then
+if [ "${1:-}" = "--against" ]; then
+  arguments=2
+else
+  arguments=1
+fi
+if [ "$#" -ne "$arguments" ]; then
   # Both patterns are anchored at `^# ` so that THIS line — which contains the start pattern as
   # data — cannot re-open the range and print the rest of the script.
   sed -n '/^# ── USAGE/,/^# PERF_ROUNDS/p' "$0" | sed 's/^# \{0,1\}//'
@@ -510,6 +538,9 @@ trap headline EXIT
 if [ "$1" = "--self" ]; then
   base="$(git rev-parse HEAD)"
   mode="self-comparison"
+elif [ "$1" = "--against" ]; then
+  resolve_against "$2"
+  mode="against $2 itself, not a merge-base"
 else
   base="$(git merge-base HEAD "$(git rev-parse "$1")")"
   mode="vs merge-base"
