@@ -15,6 +15,7 @@ DiagnosticKind::ModuleDefinedTwice = smear::graphqlx::module-defined-twice
 DiagnosticKind::ModuleTypeCollision = smear::graphqlx::module-type-collision
 DiagnosticKind::ReservedPackageName = smear::graphqlx::reserved-package-name
 DiagnosticKind::ResourceLimit = smear::graphqlx::resource-limit
+DiagnosticKind::UnknownItem = smear::graphqlx::unknown-item
 ResponseErrorKind::DoubleNonNull = smear::introspection::double-non-null
 ResponseErrorKind::InvalidEnumValue = smear::introspection::invalid-enum-value
 ResponseErrorKind::InvalidMetaType = smear::introspection::invalid-meta-type

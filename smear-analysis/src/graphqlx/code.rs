@@ -40,6 +40,12 @@ pub enum DiagnosticKind {
   /// scope would be two things. Reported at the type, with a label at the child module.
   ModuleTypeCollision,
 
+  // -- Items -------------------------------------------------------------------------------------
+  /// A file holds an item, or a part of one, of a kind this analyzer does not know: a parser newer
+  /// than the analyzer read the file. What the item declares, or the part names, is not in the
+  /// model. Reported once per file, at the first such item.
+  UnknownItem,
+
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
   ResourceLimit,
@@ -57,6 +63,7 @@ impl DiagnosticKind {
     Self::InvalidDirectoryName,
     Self::ModuleDefinedTwice,
     Self::ModuleTypeCollision,
+    Self::UnknownItem,
     Self::ResourceLimit,
   ];
 
@@ -73,6 +80,7 @@ impl DiagnosticKind {
       Self::InvalidDirectoryName => Code::new("smear::graphqlx::invalid-directory-name"),
       Self::ModuleDefinedTwice => Code::new("smear::graphqlx::module-defined-twice"),
       Self::ModuleTypeCollision => Code::new("smear::graphqlx::module-type-collision"),
+      Self::UnknownItem => Code::new("smear::graphqlx::unknown-item"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -89,6 +97,7 @@ impl DiagnosticKind {
       Self::InvalidDirectoryName => "invalid directory name",
       Self::ModuleDefinedTwice => "module defined twice",
       Self::ModuleTypeCollision => "module and type of one name",
+      Self::UnknownItem => "item of an unknown kind",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -106,6 +115,7 @@ impl DiagnosticKind {
       | Self::InvalidDirectoryName
       | Self::ModuleDefinedTwice
       | Self::ModuleTypeCollision
+      | Self::UnknownItem
       | Self::ResourceLimit => Severity::Error,
     }
   }

@@ -99,6 +99,11 @@ impl<'p> Widths<'p> {
     self.written.insert(primitive.rank(), primitive);
   }
 
+  /// How many nodes of a kind it does not know the pass has met so far.
+  pub(crate) fn unknown(&self) -> u32 {
+    self.unknown
+  }
+
   /// Every primitive written, keyed by its place among `core`'s materialised definitions, and how
   /// many nodes of an unknown kind the pass met.
   pub(crate) fn finish(self) -> (BTreeMap<(u8, u32), Primitive>, u32) {

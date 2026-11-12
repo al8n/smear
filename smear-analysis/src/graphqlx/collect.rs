@@ -22,6 +22,10 @@
 //! definition a supplied package would add past the limit is reported, and the walk collects
 //! nothing after it: no item of the rest of its file, nor of any file after it.
 //!
+//! An item of a kind the walk does not know, or one holding a part the width pass does not know,
+//! which only a parser newer than the walk can make, is reported once per file, at the first such
+//! item, in every build; a debug build also refuses it once the walk ends.
+//!
 //! The walk is written once, generic over the slice type of a parsed document, and called alike
 //! for a document of text and a document of bytes: nothing it does depends on which parser made a
 //! document.
@@ -330,6 +334,8 @@ impl<'d> Walk<'d, '_> {
       next: 0,
       module,
     });
+    // Where the first item of this file that holds a node of a kind the walk does not know is.
+    let mut unknown_at: Option<Location> = None;
     while let Some(frame) = stack.last_mut() {
       // Past the definition limit nothing more is collected.
       if self.full {
@@ -349,6 +355,7 @@ impl<'d> Walk<'d, '_> {
         item: dense(walked.len()),
       };
       walked.push(item);
+      let before = self.unknown_nodes();
       match item {
         TypeSystemItem::Mod(declaration) => {
           if let Some(child) = self.declare(declaration, source, module) {
@@ -376,13 +383,25 @@ impl<'d> Walk<'d, '_> {
           self.uses.push(placed);
         }
         // `TypeSystemItem` is `#[non_exhaustive]`, and an item of a kind this walk does not know
-        // may declare what it cannot place. It is counted, and a debug build refuses the count once
-        // the walk ends, so a parser that grows a kind fails every analysis test until the walk
-        // places it.
+        // may declare what it cannot place. It is counted, and reported below, once per file; and a
+        // debug build refuses the count once the walk ends, so a parser that grows a kind fails
+        // every analysis test until the walk places it.
         _ => self.unknown = self.unknown.saturating_add(1),
       }
+      // An item's span is the parser's to give whatever its kind, so it is where the report goes.
+      if unknown_at.is_none() && self.unknown_nodes() != before {
+        unknown_at = Some(Location::new(source.get(), *item.span()));
+      }
+    }
+    if let Some(at) = unknown_at {
+      self.unknown_item(at);
     }
     walked
+  }
+
+  /// How many nodes of a kind it does not know the walk, and its width pass, have met so far.
+  fn unknown_nodes(&self) -> u32 {
+    self.unknown.saturating_add(self.widths.unknown())
   }
 
   /// Keeps the definition `described`, at `placed`: a type or a directive, when the model may hold
@@ -587,6 +606,26 @@ impl<'d> Walk<'d, '_> {
         ))
         .primary_label(kind.title())
         .help("raise `Limits::max_module_depth`, or nest the directories less deeply")
+        .build(),
+    );
+  }
+
+  /// Reports that a file holds an item, or a part of one, of a kind the walk does not know, the
+  /// first of them at `at`.
+  fn unknown_item(&mut self, at: Location) {
+    let kind = DiagnosticKind::UnknownItem;
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), at)
+        .severity(kind.severity())
+        .message(
+          "this file holds an item, or a part of one, of a kind this analyzer does not know, so \
+           what it declares is not in the model",
+        )
+        .primary_label(kind.title())
+        .help(
+          "the parser that read this file is newer than this analyzer; analyze it with a release \
+           of the analyzer that knows every kind of item the parser reads",
+        )
         .build(),
     );
   }
