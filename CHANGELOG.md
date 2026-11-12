@@ -97,7 +97,9 @@ All notable changes to Smear are documented in this file.
   name of one segment in a place GraphQL has keeps GraphQL's own code. Every `use` item is
   resolved, each module's to a fixpoint, with a module's explicit `use` bindings before its
   globs, which give the declarations and child modules of the modules they name; `use` cycles are
-  legal. A name two globs give two items is `ambiguous-glob` where a path meets it; a string
+  legal. A new `Limits::max_globs`, 64 by default, bounds the modules the globs of one module may
+  name, and so what one lookup searches: the first glob past it is `resource-limit`, once for its
+  module. A name two globs give two items is `ambiguous-glob` where a path meets it; a string
   source names its directory's module, relative to the file it is written in, and is
   `file-path-use` when it names a file and `url-unsupported` when it is a URL. A `use` item that
   names one thing while its module's items resolve and another once all have is

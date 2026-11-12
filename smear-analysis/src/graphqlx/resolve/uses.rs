@@ -37,6 +37,12 @@
 //!
 //! An item's own bindings and globs never answer its own head.
 //!
+//! A module's globs make one row for each module they name, however many items glob it, and one
+//! row answers the lookups of every item but its only maker's. The first glob that would name a
+//! module past `Limits::max_globs` is `resource-limit`, once for the module, and makes no row, as
+//! no later glob of another module does: which glob that is follows the order the module's items
+//! resolve in, which the program alone decides.
+//!
 //! # Termination and cost
 //!
 //! A step only adds bindings and globs, an item is resolved at most once, and a round that resolves
@@ -45,19 +51,20 @@
 //! most `Limits::max_glob_iterations` rounds, and after at most one round per item, since every
 //! round but the last resolves one.
 //!
-//! In a module of `u` items and `g` distinct modules its globs name, a lookup costs a logarithm of
-//! the tables, and one search in each of the `g` modules for its globs. A round of the glob
-//! fixpoint costs one lookup per item on its worklist, and the next worklist: for each name it
-//! bound first, an index search and the waiting items of that name; for each module it globbed
-//! first, the module's declarations and child modules each searched for in the index, or the
-//! distinct waiting heads each searched for in the module, whichever are fewer. A round reads no
-//! item nothing of the round before can answer, so its cost does not grow with the rounds before
-//! it. An item is looked up once by the explicit fixpoint and its at most two wakes, once by step
-//! 4, and by the glob fixpoint once in the first round and again only when woken: at most twice by
-//! the first bindings of its head's name, once per namespace, and at most once by each of the `g`
-//! modules. So the glob fixpoint costs at most `u · (3 + g)` lookups however many rounds it runs,
-//! and its wakes `O(g · u)` searches; a module costs `O(u · g)` lookups at worst, and the analysis
-//! the sum over its modules, which share nothing but the tables they read.
+//! In a module of `u` items whose globs name `g` modules, at most `Limits::max_globs` however
+//! many globs it has, a lookup costs a logarithm of the tables, and one search in each of the `g`
+//! modules for its globs. A round of the glob fixpoint costs one lookup per item on its worklist,
+//! and the next worklist: for each name it bound first, an index search and the waiting items of
+//! that name; for each module it globbed first, the module's declarations and child modules each
+//! searched for in the index, or the distinct waiting heads each searched for in the module,
+//! whichever are fewer. A round reads no item that nothing of the round before can answer, so its
+//! cost does not grow with the rounds before it. An item is looked up once by the explicit fixpoint
+//! and its at most two wakes, once by step 4, and by the glob fixpoint once in the first round and
+//! again only when woken: at most twice by the first bindings of its head's name, once per
+//! namespace, and at most once by each of the `g` modules. So the glob fixpoint costs at most
+//! `u · (3 + g)` lookups however many rounds it runs, and its wakes `O(g · u)` searches; a module
+//! costs `O(u · g)` lookups of `O(g)` searches each at worst, with `g` at most `Limits::max_globs`,
+//! and the analysis the sum over its modules, which share nothing but the tables they read.
 
 use std::{collections::BTreeMap, format, string::String, vec, vec::Vec};
 
@@ -80,8 +87,8 @@ use crate::graphqlx::{
 };
 
 use super::{
-  Bound, ExplicitKey, Failure, Level, Lookup, Position, Query, Scopes, Target, Wanted, Why, Within,
-  quoted,
+  Bound, ExplicitKey, Failure, Glob, Level, Lookup, Position, Query, Scopes, Target, Wanted, Why,
+  Within, quoted,
 };
 
 /// Resolves every `use` item of `declarations` into `scopes`, module by module, and reports what
@@ -121,6 +128,9 @@ pub(super) fn resolve<'x>(
       targets: Vec::new(),
       text: String::new(),
       max_rounds: limits.max_glob_iterations(),
+      globbed: 0,
+      max_globs: limits.max_globs(),
+      globs_full: false,
     };
     run.resolve(declarations);
     start = end;
@@ -232,6 +242,13 @@ struct Run<'r, 'x> {
   text: String,
   /// `Limits::max_glob_iterations`.
   max_rounds: u32,
+  /// How many modules the module's globs name so far: its rows among the globs.
+  globbed: u32,
+  /// `Limits::max_globs`.
+  max_globs: u32,
+  /// Whether a glob of the module would have named a module past `max_globs`, which is reported
+  /// once.
+  globs_full: bool,
 }
 
 impl<'x> Run<'_, 'x> {
@@ -1138,19 +1155,53 @@ impl<'x> Run<'_, 'x> {
     }
   }
 
-  /// Makes a glob, written at `at`, of the module `target`, for the item `cursor` names.
+  /// Makes a glob, written at `at`, of the module `target`, for the item `cursor` names: the
+  /// module's row for `target`, or, when it has one, the mark that another item made it too. The
+  /// first glob that would give the module a row past `Limits::max_globs` is reported, once for the
+  /// module, and every glob that would makes no row.
   fn glob(&mut self, cursor: &Cursor, target: ModuleId, at: Location) {
-    let module = self.module;
-    let first = self
-      .scopes
-      .globs
-      .range((module, target, 0)..=(module, target, u32::MAX))
-      .next()
-      .is_none();
-    self.scopes.globs.insert((module, target, cursor.item), at);
-    if first {
-      self.targets.push(target);
+    let key = (self.module, target);
+    if let Some(row) = self.scopes.globs.get_mut(&key) {
+      if row.item != cursor.item {
+        row.shared = true;
+      }
+      return;
     }
+    if self.globbed == self.max_globs {
+      if !self.globs_full {
+        self.globs_full = true;
+        self.past_glob_limit(at);
+      }
+      return;
+    }
+    self.globbed += 1;
+    self.scopes.globs.insert(
+      key,
+      Glob {
+        at,
+        item: cursor.item,
+        shared: false,
+      },
+    );
+    self.targets.push(target);
+  }
+
+  /// Reports the glob written at `at`, the first of the module that would name a module past
+  /// `Limits::max_globs`.
+  fn past_glob_limit(&mut self, at: Location) {
+    let kind = DiagnosticKind::ResourceLimit;
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), at)
+        .severity(kind.severity())
+        .message(format!(
+          "this glob names a module past the limit of {} modules the globs of one module may name, \
+           so it gives nothing, and no glob of another module after it does",
+          self.max_globs
+        ))
+        .primary_label(kind.title())
+        .help("raise `Limits::max_globs`, or name the items with paths or explicit `use` items")
+        .build(),
+    );
   }
 
   /// Keeps `failure` of the item at `at`, to report once every item is checked.
@@ -1163,10 +1214,10 @@ impl<'x> Run<'_, 'x> {
   /// The source is decoded, then walked from the directory module of `source`, the module of the
   /// directory the file is in, whatever `mod` the item is written in: it starts with `.` or `..`,
   /// each `/`-separated segment after that is `.`, `..` or a name, and one `/` may end it. `.`
-  /// stays, `..` goes up to the parent module, which a root module has none of, and a name goes down
-  /// to the child module of that name; a name that is no child module, but a file of the directory
-  /// reached, names that file. The module reached must be a directory's. A package of the `Flat`
-  /// layout has no directory module, and a URL is not supported.
+  /// stays, `..` goes up to the parent module, which a root module has none of, and a name goes
+  /// down to the child module of that name; a name that is no child module, but a file of the
+  /// directory reached, names that file. The module reached must be a directory's. A package of the
+  /// `Flat` layout has no directory module, and a URL is not supported.
   ///
   /// Each segment costs a lookup of its own spelling, in the child modules and in the files of one
   /// directory, which `scopes` tabled once: nothing read here is proportional to the length of the

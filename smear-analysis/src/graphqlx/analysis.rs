@@ -126,8 +126,9 @@ impl Analysis {
 /// - Resolves every `use` item, each module's to a fixpoint, which `use` cycles do not disturb. A
 ///   path that names nothing is reported once, as is a package the item's package may not reach, a
 ///   string source that is a URL, names a file, leaves its package or stands in a `Flat` package,
-///   a name two globs give two items where an item meets it, and a group nested past
-///   [`Limits::max_use_depth`]. An item that names one thing while the module's items are being
+///   a name two globs give two items where an item meets it, a group nested past
+///   [`Limits::max_use_depth`], and the first glob of a module that would name a module past
+///   [`Limits::max_globs`]. An item that names one thing while the module's items are being
 ///   resolved and another once all are, a `use` of a name its module declares, and two `use` items
 ///   that give one name two items are reported too. A name that does not resolve gets, in its
 ///   help, the nearest name visible where it is written, of the namespace wanted, while the

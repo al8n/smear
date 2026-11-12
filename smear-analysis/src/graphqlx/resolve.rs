@@ -41,10 +41,10 @@
 //! found by binary search in the tables the declarations hand on; its explicit `use` bindings and
 //! its globs, found by range in two ordered maps keyed by the module first; and the prelude's and
 //! the packages' tables, which every module shares. So a module costs its entry and its row among
-//! its parent's children, each name a `use` binds one row, each glob one row, and nothing about it
-//! grows with how deep it sits or what its parent holds. A lookup costs a logarithm of those
-//! tables, but for the globs, which cost one search in each distinct module the module's globs
-//! name; a path costs one lookup per segment.
+//! its parent's children, each name a `use` binds one row, each module its globs name one row,
+//! however many globs name it, and nothing about it grows with how deep it sits or what its parent
+//! holds. A lookup costs a logarithm of those tables, and for the globs one search in each module
+//! the module's globs name, which `Limits::max_globs` bounds; a path costs one lookup per segment.
 //!
 //! # Near misses
 //!
@@ -99,9 +99,9 @@ pub(crate) struct Scopes<'x> {
   /// item, in the declarations' order, and the order the item binds its names in. The first of a
   /// key's run is the one a lookup answers.
   explicit: BTreeMap<ExplicitKey, Bound>,
-  /// Every glob: by module, the module the glob names, and the `use` item, each with where the
-  /// glob is written.
-  globs: BTreeMap<(ModuleId, ModuleId, u32), Location>,
+  /// Every glob, one row for each module and module its globs name, however many globs name it:
+  /// at most `Limits::max_globs` rows a module.
+  globs: BTreeMap<(ModuleId, ModuleId), Glob>,
   /// The directory module of each file of a `Directory` package, by source id: where a string
   /// source written in the file starts. `None` for a package source, a file of a `Flat` package,
   /// and a file placed in no module.
@@ -127,6 +127,16 @@ type ExplicitKey = (ModuleId, u8, Sym, u32, u32);
 struct Bound {
   target: Target,
   at: Location,
+}
+
+/// The globs of one module that name one module: where the first of them is written, the `use`
+/// item that made it, and whether another item made one too. The row answers every lookup but
+/// those of an item that is its only maker, whose own globs never answer its own head.
+#[derive(Clone, Copy)]
+struct Glob {
+  at: Location,
+  item: u32,
+  shared: bool,
 }
 
 /// One package, as name resolution reads it.
@@ -900,8 +910,10 @@ impl Scopes<'_> {
       .map(|(_, bound): (&ExplicitKey, &Bound)| *bound)
   }
 
-  /// What the globs of `module`, but those of the `use` item `exclude`, give `sym` in `namespace`:
-  /// what each distinct module they name declares so, as `declared` answers it.
+  /// What the globs of `module`, but those only the `use` item `exclude` made, give `sym` in
+  /// `namespace`: what each module they name declares so, as `declared` answers it. A module has
+  /// one row for each module its globs name, at most `Limits::max_globs`, so a lookup searches at
+  /// most that many modules.
   fn globbed(
     &self,
     module: ModuleId,
@@ -911,22 +923,19 @@ impl Scopes<'_> {
     exclude: Option<u32>,
   ) -> Lookup {
     let mut first: Option<(Target, Location)> = None;
-    let mut last: Option<ModuleId> = None;
-    let from = (module, ModuleId::new(0), 0);
-    let to = (module, ModuleId::new(u32::MAX), u32::MAX);
-    for (&(_, target, item), &at) in self.globs.range(from..=to) {
-      // Two globs of one module are one: the first is the one asked.
-      if Some(item) == exclude || last == Some(target) {
+    let from = (module, ModuleId::new(0));
+    let to = (module, ModuleId::new(u32::MAX));
+    for (&(_, target), glob) in self.globs.range(from..=to) {
+      if !glob.shared && Some(glob.item) == exclude {
         continue;
       }
-      last = Some(target);
       let Some(found) = self.declared(target, namespace, sym, module_first) else {
         continue;
       };
       match first {
-        None => first = Some((found, at)),
+        None => first = Some((found, glob.at)),
         Some((seen, seen_at)) if seen != found => {
-          return Lookup::Ambiguous((seen, seen_at), (found, at));
+          return Lookup::Ambiguous((seen, seen_at), (found, glob.at));
         }
         Some(_) => {}
       }
@@ -1507,17 +1516,15 @@ impl Scopes<'_> {
       }
       search.offer(&self.near, names.spelling(key.2));
     }
-    let mut last: Option<ModuleId> = None;
-    let first = (module, ModuleId::new(0), 0);
-    let end = (module, ModuleId::new(u32::MAX), u32::MAX);
-    for (&(_, target, _), _) in self.globs.range(first..=end) {
+    let first = (module, ModuleId::new(0));
+    let end = (module, ModuleId::new(u32::MAX));
+    for (&(_, target), _) in self.globs.range(first..=end) {
+      // A module a glob names costs a comparison of its own, whatever it declares.
+      search.visit(&self.near);
       if !search.open() {
         return;
       }
-      if last != Some(target) {
-        last = Some(target);
-        self.offer_declared(search, names, target, namespace);
-      }
+      self.offer_declared(search, names, target, namespace);
     }
     for &root in self.roots.iter().take(ROOT) {
       self.offer_bindings(search, names, root, namespace);

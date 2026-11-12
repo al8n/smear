@@ -423,6 +423,174 @@ fn a_glob_fixpoint_past_its_limit_is_a_resource_limit() {
   );
 }
 
+/// The first glob that would name a module past `Limits::max_globs` is reported once, where it is
+/// written, with the limit, and gives nothing; a later glob of yet another module gives nothing
+/// either, unreported; and another glob of a module already globbed names no module more.
+#[test]
+fn a_glob_past_the_glob_limit_is_refused_and_reported_once() {
+  let text = "use a::*\nuse b::*\nuse a::*\nuse c::*\nuse d::*\nuse B as GotB\nuse C as GotC\n\
+              use D as GotD\n";
+  let root = directory(
+    "app",
+    &[
+      ("lib.graphqlx", text),
+      ("a/x.graphqlx", "scalar A\n"),
+      ("b/x.graphqlx", "scalar B\n"),
+      ("c/x.graphqlx", "scalar C\n"),
+      ("d/x.graphqlx", "scalar D\n"),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new().with_max_globs(2));
+  let lib = file(&analysis, 3, "lib.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        code(DiagnosticKind::ResourceLimit),
+        at(lib, text, "c::*", 0)
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        inside(lib, text, "use C as GotC", 0, "C")
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        inside(lib, text, "use D as GotD", 0, "D")
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let diagnostic = analysis.diagnostics().iter().next().expect("a diagnostic");
+  let message = diagnostic.to_string();
+  assert!(message.contains("limit of 2 modules"), "{message}");
+  assert!(
+    diagnostic
+      .help()
+      .is_some_and(|help: &str| help.contains("`Limits::max_globs`")),
+    "{:?}",
+    diagnostic.help()
+  );
+}
+
+/// Globs that name as many modules as `Limits::max_globs` allows are no error, however many globs
+/// name them; at a limit of 0 the first glob is refused.
+#[test]
+fn the_glob_limit_met_exactly_is_no_error() {
+  let text = "use a::*\nuse b::*\nuse a::*\nuse B as GotB\n";
+  let root = directory(
+    "app",
+    &[
+      ("lib.graphqlx", text),
+      ("a/x.graphqlx", "scalar A\n"),
+      ("b/x.graphqlx", "scalar B\n"),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new().with_max_globs(2));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+
+  let analysis = analyze(&root, &[], &Limits::new().with_max_globs(0));
+  let lib = file(&analysis, 3, "lib.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        code(DiagnosticKind::ResourceLimit),
+        at(lib, text, "a::*", 0)
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        inside(lib, text, "use B as GotB", 0, "B")
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// Which glob the glob limit refuses depends on the program alone: a module's `use` items resolve
+/// in the order of its files' paths and of their places in them, so the files and the dependencies
+/// given in reverse change no diagnostic.
+#[test]
+fn the_glob_limit_refuses_the_same_glob_whatever_the_order_given() {
+  let second = "use ~::b::*\nuse ^::other::*\nuse ~::a::*\n";
+  let files: [(&'static str, &'static str); 4] = [
+    ("m/1.graphqlx", "use ~::a::*\nuse ^::geo::*\n"),
+    ("m/2.graphqlx", second),
+    ("a/x.graphqlx", "scalar A\n"),
+    ("b/x.graphqlx", "scalar B\n"),
+  ];
+  let dependencies = [
+    directory("geo", &[("lib.graphqlx", "scalar Point\n")]),
+    directory("other", &[("lib.graphqlx", "scalar Far\n")]),
+  ];
+  let limits = Limits::new().with_max_globs(2);
+  let forward = analyze(
+    &directory("app", &files).with_dependencies(["geo", "other"]),
+    &dependencies,
+    &limits,
+  );
+  let mut reversed_files = files;
+  reversed_files.reverse();
+  let reversed_dependencies = [dependencies[1].clone(), dependencies[0].clone()];
+  let backward = analyze(
+    &directory("app", &reversed_files).with_dependencies(["other", "geo"]),
+    &reversed_dependencies,
+    &limits,
+  );
+
+  let source = file(&forward, 3, "m/2.graphqlx");
+  assert_eq!(
+    found(&forward),
+    [(
+      code(DiagnosticKind::ResourceLimit),
+      at(source, second, "~::b::*", 0)
+    )],
+    "{:#?}",
+    forward.diagnostics()
+  );
+  assert_eq!(forward.diagnostics(), backward.diagnostics());
+}
+
+/// Many globs of one module are one row, and a search for a near miss pays for each module a glob
+/// names.
+///
+/// A module's globs were kept one row per glob, and a lookup read every row, which skipped a
+/// repeated module but read it all the same; the search for a near miss read them again, and spent
+/// nothing on a module that declares nothing. So G globs of one empty module beside N names that do
+/// not resolve cost G × N rows read by the names' lookups, and G more for each search while the
+/// budget lasted. Now a module's globs make one row per module they name, at most
+/// `Limits::max_globs`, and a search spends a comparison on each module a glob names.
+///
+/// Nothing here can count that work, so the sizes tell the two costs apart: 2^20 globs of one
+/// empty module beside 2^20 items whose head names nothing, about 24 MiB of text. Read row by row,
+/// the lookups alone cost about 10^12 row reads, which is minutes; with one row, they cost about
+/// what parsing the items costs.
+#[test]
+fn many_globs_of_one_module_are_one_row_and_a_near_miss_search_pays_for_each() {
+  const GLOBS: usize = 1 << 20;
+  const MISSING: usize = 1 << 20;
+  let mut text = String::with_capacity(9 * GLOBS + 16 * MISSING + 16);
+  text.push_str("mod e {}\n");
+  for _ in 0..GLOBS {
+    text.push_str("use e::*\n");
+  }
+  for index in 0..MISSING {
+    text.push_str(&format!("use m{index}::T\n"));
+  }
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("lib.graphqlx", text.as_str())]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(analysis.diagnostics().error_count(), MISSING);
+  let unresolved = code(DiagnosticKind::UnresolvedPath);
+  assert!(
+    analysis
+      .diagnostics()
+      .iter()
+      .all(|diagnostic: &Diagnostic| diagnostic.code().as_str() == unresolved)
+  );
+}
+
 /// A chain of renames needs a round a link and no glob: `use A1 as A2` waits in the explicit
 /// fixpoint until both namespaces have `A1`. So a chain longer than the round limit is refused as
 /// a chain of globs is, at the head the next round would resolve, and the message says rounds.
