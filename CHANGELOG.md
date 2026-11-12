@@ -106,12 +106,16 @@ All notable changes to Smear are documented in this file.
   name that does not resolve gets a "did you mean" in its help: the nearest name visible where
   it is written, of the namespace wanted, within `Limits::max_near_miss_comparisons` names
   looked at over the whole analysis. Lowering then writes what each definition holds beyond its
-  identity: its own contribution, named where its name is written; its type parameters; a
-  directive definition's locations and whether it is `repeatable`; and its members, its direct
-  members as written and then each field's arguments, field by field, each with its description.
-  A GraphQL built-in the root package replaces holds what the root package's definition writes.
-  `Contribution::is_extension()` says whether a contribution is a definition or one of its
-  extensions. The schema has a contribution for every schema item any package writes, its
+  identity. Each extension's target is resolved where the extension is written; one that names a
+  definition of another kind than its keyword is `smear::schema::extension-kind-mismatch`, and it
+  and one that names nothing contribute nothing. A definition holds its contributions, its own,
+  named where its name is written, then each extension's, by source and position, named where
+  its target path is written; its type parameters; a directive definition's locations and whether
+  it is `repeatable`; and its members, the direct members of each contribution in turn as written
+  and then each field's arguments, field by field, each with its description. A GraphQL built-in
+  the root package replaces holds what the root package's definition writes, and the root may
+  extend a built-in. `Contribution::is_extension()` says whether a contribution is a definition
+  or one of its extensions. The schema has a contribution for every schema item any package writes, its
   definitions first and then its extensions, each by source and position and named at its
   `schema` or its `extend`; the root package's first schema definition gives it its description,
   and every other schema item is a contribution alone. Names and texts past what the model's

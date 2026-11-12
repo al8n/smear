@@ -132,11 +132,16 @@ impl Analysis {
 ///   that give one name two items are reported too. A name that does not resolve gets, in its
 ///   help, the nearest name visible where it is written, of the namespace wanted, while the
 ///   analysis has [`Limits::max_near_miss_comparisons`] left to spend.
-/// - Lowers what each definition holds beyond its identity: its own contribution, where its name
-///   is written; its type parameters; a directive definition's locations and whether it is
-///   `repeatable`; and its members, its direct members as written and then each field's
-///   arguments, each with its description. A replaced built-in holds what the root package's
-///   definition writes, and smear's own definition of it contributes nothing. Then the schema's
+/// - Lowers what each definition holds beyond its identity. Each extension's target is resolved
+///   where the extension is written: one that names nothing, or names a definition of another
+///   kind than the extension's keyword (`extension-kind-mismatch`), is reported and contributes
+///   nothing; every other is a contribution of its target. A definition holds its contributions,
+///   its own, where its name is written, then its extensions' by source and position, each where
+///   its target path is written; its type parameters; a directive definition's locations and
+///   whether it is `repeatable`; and its members, the direct members of each contribution in turn
+///   as written and then each field's arguments, each with its description. A replaced built-in
+///   holds what the root package's definition writes, and smear's own definition of it
+///   contributes nothing. Then the schema's
 ///   contributions: every package's schema definitions, then its schema extensions, each by source
 ///   and position and each marked as what it is; the root package's first schema definition gives
 ///   the schema its description. Names and texts past what the model's `u32` offsets address,

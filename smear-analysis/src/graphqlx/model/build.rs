@@ -19,7 +19,9 @@
 //!   package, an occurrence before what it nests (`order` spells the walk out);
 //! - types, by interning as instantiation reaches each type occurrence: a type's arguments before
 //!   it;
-//! - names, by interning: by first occurrence, in source-id order, then position.
+//! - names, by interning, in the order the analysis first interns them, phase by phase: the
+//!   module tree, the declarations, the names `use` items bind, then lowering, each in its own
+//!   order, which is a function of the program alone; it is no order over spellings.
 //!
 //! The later phases write onto rows already appended: resolution gives occurrences their kinds,
 //! and applications their directives; instantiation gives occurrences their types, and adds
@@ -227,8 +229,10 @@ impl ModelBuilder {
 
   /// Interns `name`: the symbol it already has, or a new one.
   ///
-  /// Names are interned by first occurrence, in source-id order, then position. A name the
-  /// analyzer makes itself is interned when it is made.
+  /// Symbols are numbered in the order the analysis first interns them, phase by phase: the
+  /// module tree, the declarations, the names `use` items bind, then lowering, each phase in its
+  /// own order. That order is a function of the program alone, never of the order its files and
+  /// dependencies are passed in, and it is not an order over spellings.
   pub fn intern(&mut self, name: &str) -> Sym {
     self.names.intern(name.as_bytes())
   }
@@ -299,7 +303,8 @@ impl ModelBuilder {
   /// contributions, which is 0.
   ///
   /// A definition's contributions are appended together, the definition first, then each
-  /// extension by source id and position (`push_extension`), before the next definition's.
+  /// extension by source id and position ([`push_extension`](Self::push_extension)), before the next
+  /// definition's.
   pub fn push_contribution(&mut self, def: DefId, location: Location, extent: Location) -> u32 {
     let row = &mut self.model.defs[def.get() as usize];
     let index = row.contributions.len;
@@ -307,6 +312,24 @@ impl ModelBuilder {
       &mut self.model.contributions,
       &mut row.contributions,
       contribution_row(location, extent, false),
+    );
+    index
+  }
+
+  /// Appends an extension of `def` as its next contribution: the extension names `def` at
+  /// `location`, its target path, and spans `extent`, from its `extend` to its last token. Answers
+  /// its index among `def`'s contributions.
+  ///
+  /// It follows `def`'s own contribution ([`push_contribution`](Self::push_contribution)) and
+  /// every extension of `def` before it by source id and position, and comes before the next
+  /// definition's contributions.
+  pub fn push_extension(&mut self, def: DefId, location: Location, extent: Location) -> u32 {
+    let row = &mut self.model.defs[def.get() as usize];
+    let index = row.contributions.len;
+    grow(
+      &mut self.model.contributions,
+      &mut row.contributions,
+      contribution_row(location, extent, true),
     );
     index
   }

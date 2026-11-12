@@ -1,17 +1,32 @@
 //! Lowering: what each declaration holds beyond its identity, written into the model.
 //!
+//! # Extensions
+//!
+//! Before the definitions, each extension finds its target: its path, resolved in the module the
+//! extension is written in, in the type namespace, or in the directive namespace for `extend
+//! directive`, with no generic parameter in scope. A target that names nothing is reported by name
+//! resolution, where it is written. A target that names a definition of another kind than the
+//! extension's keyword is reported as `extension-kind-mismatch`, at the target, with a label at the
+//! definition. Either way the extension contributes nothing and nothing inside it is lowered: one
+//! mistake, one diagnostic. Every other extension is a contribution of its target, after the
+//! definition's own, by source id and position wherever each is written: named where its target
+//! path is written, and spanning from its `extend` to its last token. The parameter names an
+//! extension writes name its target's parameters by position, and are no rows of their own.
+//!
 //! # The definitions
 //!
 //! Lowering walks the definitions in `DefId` order and appends, for each, what holds no type
 //! occurrence, value or application:
 //!
-//! 1. its own contribution, from where its declaration is written: named where its name is, and
-//!    spanning from its description, or its first keyword, to its last token. A primitive `core`
-//!    materialises has the whole of `core`'s package source for both, and nothing else;
+//! 1. its contributions: its own, from where its declaration is written, named where its name is
+//!    and spanning from its description, or its first keyword, to its last token; then each of its
+//!    extensions. A primitive `core` materialises has the whole of `core`'s package source for its
+//!    own, which writes nothing else;
 //! 2. its type parameters, in written order, each named where its name is written;
 //! 3. a directive definition's locations, in written order, and whether it is `repeatable`;
-//! 4. its direct members, as written: an object's or an interface's fields, an input object's
-//!    fields, an enum's values, a directive definition's arguments;
+//! 4. its direct members, contribution by contribution and as written within each: an object's or
+//!    an interface's fields, an input object's fields, an enum's values, a directive definition's
+//!    arguments;
 //! 5. then the arguments of its fields, field by field, each field's as written.
 //!
 //! So a definition's direct members come before every argument of its fields, which is the
@@ -55,26 +70,28 @@
 
 use std::{
   collections::{BTreeMap, BTreeSet},
+  format,
   string::String,
   vec::Vec,
 };
 
 use smear_lexer::decode_string_value;
 use smear_parser::graphqlx::ast::{
-  self, DefinitionName, DescribedTypeSystemDefinition, ExecutableDirectiveLocation,
-  FieldDefinition, InputValueDefinition, Name, StringValue, TypeDefinition, TypeSystemDefinition,
-  TypeSystemDirectiveLocation, TypeSystemExtension, TypeSystemItem,
+  self, DefinitionName, DescribedTypeSystemDefinition, EnumValueDefinition,
+  ExecutableDirectiveLocation, FieldDefinition, InputValueDefinition, Name, Path, StringValue,
+  TypeDefinition, TypeExtension, TypeSystemDefinition, TypeSystemDirectiveLocation,
+  TypeSystemExtension, TypeSystemItem,
 };
 use tokora::{SimpleSpan, diagnostic::Location, span::AsSpan};
 
 use super::{
-  code::DiagnosticKind,
+  code::{DiagnosticKind, schema},
   collect::{Items, unknown_item},
   declare::{Declaration, Declarations, Entry, Item},
-  diagnostic::{Diagnostic, Reporter},
+  diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{DefId, IdRange, MemberId, SourceId, Sym, dense},
-  model::{DirectiveLocation, MemberKind, ModelBuilder},
-  resolve::Scopes,
+  model::{DefKind, DirectiveLocation, MemberKind, ModelBuilder},
+  resolve::{Position, Request, Resolved, Scopes, Wanted},
   set::ROOT,
   source::SourceMap,
 };
@@ -83,10 +100,11 @@ use super::{
 const KEYWORD: usize = 6;
 
 /// Lowers what `declarations` holds into `builder`, which holds every package, module and
-/// definition already, reporting into `reporter`; `sources` numbers the packages' sources.
+/// definition already, resolving each path through `scopes` and reporting into `reporter`;
+/// `sources` numbers the packages' sources.
 pub(crate) fn lower(
   declarations: &Declarations<'_, '_>,
-  _scopes: &Scopes<'_>,
+  scopes: &Scopes<'_>,
   sources: &SourceMap,
   builder: &mut ModelBuilder,
   reporter: &mut Reporter,
@@ -94,25 +112,38 @@ pub(crate) fn lower(
   let mut lowering = Lowering {
     builder,
     reporter,
+    scopes,
     text: String::new(),
     field_ids: Vec::new(),
     next_field: 0,
     arguments: BTreeMap::new(),
     reported_unknown: BTreeSet::new(),
   };
+  let attached = lowering.targets(declarations);
+  // `attached` is sorted by target, so each definition's extensions are the next run of it.
+  let mut next = 0;
   for (index, declaration) in declarations.defs.iter().enumerate() {
-    lowering.definition(declarations, DefId::new(dense(index)), declaration);
+    let def = DefId::new(dense(index));
+    let end = next
+      + attached[next..]
+        .iter()
+        .take_while(|extension: &&Attached| extension.target == def)
+        .count();
+    lowering.definition(declarations, def, declaration, &attached[next..end]);
+    next = end;
   }
   let root = sources.package_sources(ROOT);
   lowering.schema(declarations, root);
   lowering.arenas(Location::entire(root.start()));
 }
 
-/// What lowering keeps while it writes: the builder and the reporter it writes into, and what it
-/// reuses or gathers on the way.
-struct Lowering<'l> {
+/// What lowering keeps while it writes: the builder and the reporter it writes into, the scopes it
+/// resolves in, and what it reuses or gathers on the way.
+struct Lowering<'l, 'x> {
   builder: &'l mut ModelBuilder,
   reporter: &'l mut Reporter,
+  /// Every module's scope: what a path means where it is written.
+  scopes: &'l Scopes<'x>,
   /// The description being cooked: one buffer for every description.
   text: String,
   /// The fields of the definition being lowered, in id order, whose arguments follow every one of
@@ -139,6 +170,19 @@ struct Writer {
   source: u32,
 }
 
+/// An extension that joins its target, as the definitions' walk takes it.
+#[derive(Clone, Copy)]
+struct Attached {
+  /// The definition it extends.
+  target: DefId,
+  /// Where it is written.
+  entry: Entry,
+  /// Its target path.
+  location: Location,
+  /// The whole extension, from its `extend` to its last token.
+  extent: Location,
+}
+
 /// What a walk of one contribution's item appends.
 #[derive(Clone, Copy)]
 enum Step {
@@ -163,31 +207,191 @@ struct SchemaPart<'d> {
   description: Option<(&'d [u8], Location)>,
 }
 
-impl Lowering<'_> {
-  /// The definition `def`, declared as `declaration`: its own contribution, then what its item
-  /// writes, its direct members before any field's arguments.
+impl Lowering<'_, '_> {
+  /// Every extension that joins its target, by target, then source id, then position. Each
+  /// target is resolved where its extension is written, in the hand-over's order; an extension
+  /// whose target names nothing, which name resolution reports, or names a definition of another
+  /// kind, which is reported here, joins nothing.
+  fn targets(&mut self, declarations: &Declarations<'_, '_>) -> Vec<Attached> {
+    let mut attached: Vec<Attached> = Vec::with_capacity(declarations.extensions.len());
+    for entry in &declarations.extensions {
+      let joined = match declarations.items.get(entry.item.source.get() as usize) {
+        Some(Some(Items::Text(items))) => self.target(declarations, items, *entry),
+        Some(Some(Items::Bytes(items))) => self.target(declarations, items, *entry),
+        // An extension is an item of a source the walk read.
+        Some(None) | None => None,
+      };
+      if let Some(joined) = joined {
+        attached.push(joined);
+      }
+    }
+    // A source's items are flattened in source order, so an item's index is its position.
+    attached.sort_unstable_by_key(|extension: &Attached| {
+      (
+        extension.target,
+        extension.entry.item.source,
+        extension.entry.item.index,
+      )
+    });
+    attached
+  }
+
+  /// The extension `entry` addresses among `items`, the items of its source, as it joins its
+  /// target; `None` when its target names nothing or names a definition of another kind.
+  fn target<S: AsRef<[u8]>>(
+    &mut self,
+    declarations: &Declarations<'_, '_>,
+    items: &[&TypeSystemItem<S>],
+    entry: Entry,
+  ) -> Option<Attached> {
+    let &item = items.get(entry.item.index as usize)?;
+    let source = entry.item.source;
+    let (keyword, name) = match item {
+      TypeSystemItem::Extension(extension) => match extension {
+        TypeSystemExtension::Type(ty) => match ty {
+          TypeExtension::Scalar(scalar) => (DefKind::Scalar, scalar.name()),
+          TypeExtension::Object(object) => (DefKind::Object, object.name()),
+          TypeExtension::Interface(interface) => (DefKind::Interface, interface.name()),
+          TypeExtension::Union(union) => (DefKind::Union, union.name()),
+          TypeExtension::Enum(enumeration) => (DefKind::Enum, enumeration.name()),
+          TypeExtension::InputObject(input) => (DefKind::InputObject, input.name()),
+        },
+        TypeSystemExtension::Directive(directive) => (DefKind::Directive, directive.name()),
+        // A schema extension is the schema's.
+        TypeSystemExtension::Schema(_) => return None,
+      },
+      // An entry of the extensions is an extension.
+      TypeSystemItem::Definition(_) | TypeSystemItem::Use(_) | TypeSystemItem::Mod(_) => {
+        return None;
+      }
+      // `TypeSystemItem` is `#[non_exhaustive]`: an item of a kind lowering does not know is
+      // reported, and nothing of it is lowered.
+      _ => {
+        self.unknown(source.get(), *item.span());
+        return None;
+      }
+    };
+    let path = name.path();
+    let wanted = if keyword == DefKind::Directive {
+      Wanted::Directive
+    } else {
+      Wanted::Type
+    };
+    let request = Request {
+      module: entry.module,
+      source,
+      wanted,
+      position: Position::ExtensionTarget,
+      params: &[],
+    };
+    let target = match self
+      .scopes
+      .resolve(&*self.builder, self.reporter, &request, path)
+    {
+      Resolved::Def(def) => def,
+      // `NonZeroU32` and its kin name `core`'s `NonZero`.
+      Resolved::NonZero { non_zero, .. } => non_zero,
+      // Name resolution has reported a target that names nothing. A type or a directive is
+      // wanted, which no module is, and no parameter is in scope.
+      Resolved::Module(_) | Resolved::Param(_) | Resolved::Unresolved => return None,
+    };
+    let location = Location::new(source.get(), *path.span());
+    let found = declarations.defs.get(target.get() as usize)?.kind;
+    if found != keyword {
+      let definition = self.builder.def_location(target);
+      self.mismatch(keyword, found, path, location, definition);
+      return None;
+    }
+    Some(Attached {
+      target,
+      entry,
+      location,
+      extent: Location::new(source.get(), *item.span()),
+    })
+  }
+
+  /// Reports an extension whose keyword extends a definition of the kind `keyword`, while its
+  /// target `path`, written at `at`, names a definition of the kind `found`, named at
+  /// `definition`.
+  fn mismatch<S: AsRef<[u8]>>(
+    &mut self,
+    keyword: DefKind,
+    found: DefKind,
+    path: &Path<S>,
+    at: Location,
+    definition: Location,
+  ) {
+    let name: &[u8] = match path.segments().last() {
+      Some(last) => last.source().as_ref(),
+      None => &[],
+    };
+    self.reporter.report(
+      Diagnostic::builder(schema::EXTENSION_KIND_MISMATCH, at)
+        .message(format!(
+          "`extend {}` names `{}`, which is {}",
+          keyword_of(keyword),
+          Excerpt(name),
+          noun_of(found)
+        ))
+        .primary_label("extension does not match the kind of the type it extends")
+        .label(definition, "the definition it extends")
+        .help("the `extend` keyword has to match the kind of the definition it extends.")
+        .build(),
+    );
+  }
+
+  /// The definition `def`, declared as `declaration`, which the extensions `attached` extend:
+  /// its contributions, its own and then each extension's, and what each writes, every direct
+  /// member before any field's arguments.
   fn definition(
     &mut self,
     declarations: &Declarations<'_, '_>,
     def: DefId,
     declaration: &Declaration,
+    attached: &[Attached],
   ) {
     let own = self
       .builder
       .push_contribution(def, declaration.location, declaration.extent);
-    // A primitive `core` materialises writes nothing but its one contribution.
-    let Some(item) = declaration.item else {
-      return;
-    };
-    let at = Writer {
-      def,
-      contribution: own,
-      source: item.source.get(),
-    };
     self.field_ids.clear();
     self.next_field = 0;
-    self.walk(declarations, item, at, Step::Members);
-    self.walk(declarations, item, at, Step::Arguments);
+    // A primitive `core` materialises writes nothing of its own: its extensions may.
+    if let Some(item) = declaration.item {
+      let at = Writer {
+        def,
+        contribution: own,
+        source: item.source.get(),
+      };
+      self.walk(declarations, item, at, Step::Members);
+    }
+    for extension in attached {
+      let contribution = self
+        .builder
+        .push_extension(def, extension.location, extension.extent);
+      let at = Writer {
+        def,
+        contribution,
+        source: extension.entry.item.source.get(),
+      };
+      self.walk(declarations, extension.entry.item, at, Step::Members);
+    }
+    if let Some(item) = declaration.item {
+      let at = Writer {
+        def,
+        contribution: own,
+        source: item.source.get(),
+      };
+      self.walk(declarations, item, at, Step::Arguments);
+    }
+    // Each extension is the contribution after the one before it.
+    for (contribution, extension) in (own.saturating_add(1)..).zip(attached) {
+      let at = Writer {
+        def,
+        contribution,
+        source: extension.entry.item.source.get(),
+      };
+      self.walk(declarations, extension.entry.item, at, Step::Arguments);
+    }
   }
 
   /// Walks `item`, which `at` writes, for `step`, as the parser that made its document read it.
@@ -216,8 +420,12 @@ impl Lowering<'_> {
         Step::Members => self.members(at, described),
         Step::Arguments => self.arguments(at, described),
       },
-      // A definition is declared by a definition item, and by no other kind of item.
-      TypeSystemItem::Use(_) | TypeSystemItem::Mod(_) | TypeSystemItem::Extension(_) => {}
+      TypeSystemItem::Extension(extension) => match step {
+        Step::Members => self.extension_members(at, extension),
+        Step::Arguments => self.extension_arguments(at, extension),
+      },
+      // A contribution is written by a definition or an extension, and by no other kind of item.
+      TypeSystemItem::Use(_) | TypeSystemItem::Mod(_) => {}
       // `TypeSystemItem` is `#[non_exhaustive]`: an item of a kind lowering does not know is
       // reported, and nothing of it is lowered.
       _ => self.unknown(at.source, *item.span()),
@@ -247,15 +455,7 @@ impl Lowering<'_> {
         TypeDefinition::Enum(enumeration) => {
           self.type_params(at, enumeration.name());
           if let Some(values) = enumeration.enum_values_definition() {
-            for value in values.enum_value_definitions() {
-              self.member(
-                at,
-                MemberKind::EnumValue,
-                value.value(),
-                *value.span(),
-                value.description(),
-              );
-            }
+            self.enum_values(at, values.enum_value_definitions());
           }
         }
         TypeDefinition::InputObject(input) => {
@@ -295,8 +495,64 @@ impl Lowering<'_> {
     }
   }
 
-  /// The arguments of the fields of the definition `described`, which `at` writes, field by field
-  /// and each field's as written: each field is the next of the ids its direct members noted.
+  /// The direct members the extension `extension`, which `at` writes, adds, as written.
+  fn extension_members<S: AsRef<[u8]>>(&mut self, at: Writer, extension: &TypeSystemExtension<S>) {
+    // A directive extension adds applications alone, and a schema extension is the schema's.
+    let TypeSystemExtension::Type(ty) = extension else {
+      return;
+    };
+    match ty {
+      TypeExtension::Object(object) => {
+        if let Some(fields) = object.fields_definition() {
+          self.fields(at, fields.target().field_definitions());
+        }
+      }
+      TypeExtension::Interface(interface) => {
+        if let Some(fields) = interface.fields_definition() {
+          self.fields(at, fields.target().field_definitions());
+        }
+      }
+      TypeExtension::Enum(enumeration) => {
+        if let Some(values) = enumeration.enum_values_definition() {
+          self.enum_values(at, values.enum_value_definitions());
+        }
+      }
+      TypeExtension::InputObject(input) => {
+        if let Some(fields) = input.fields_definition() {
+          self.input_values(
+            at,
+            MemberKind::InputField,
+            fields.target().input_value_definitions(),
+          );
+        }
+      }
+      TypeExtension::Scalar(_) | TypeExtension::Union(_) => {}
+    }
+  }
+
+  /// The arguments of the fields the extension `extension`, which `at` writes, adds.
+  fn extension_arguments<S: AsRef<[u8]>>(
+    &mut self,
+    at: Writer,
+    extension: &TypeSystemExtension<S>,
+  ) {
+    let fields = match extension {
+      TypeSystemExtension::Type(ty) => match ty {
+        TypeExtension::Object(object) => object.fields_definition(),
+        TypeExtension::Interface(interface) => interface.fields_definition(),
+        TypeExtension::Scalar(_)
+        | TypeExtension::Union(_)
+        | TypeExtension::Enum(_)
+        | TypeExtension::InputObject(_) => None,
+      },
+      TypeSystemExtension::Directive(_) | TypeSystemExtension::Schema(_) => None,
+    };
+    if let Some(fields) = fields {
+      self.field_arguments(at, fields.target().field_definitions());
+    }
+  }
+
+  /// The arguments of the fields of the definition `described`, which `at` writes.
   fn arguments<S: AsRef<[u8]>>(
     &mut self,
     at: Writer,
@@ -318,10 +574,15 @@ impl Lowering<'_> {
       },
       TypeSystemDefinition::Directive(_) | TypeSystemDefinition::Schema(_) => None,
     };
-    let Some(fields) = fields else {
-      return;
-    };
-    for field in fields.target().field_definitions() {
+    if let Some(fields) = fields {
+      self.field_arguments(at, fields.target().field_definitions());
+    }
+  }
+
+  /// The arguments of `fields`, which `at` writes, field by field and each field's as written:
+  /// each field is the next of the ids its definition's direct members noted.
+  fn field_arguments<S: AsRef<[u8]>>(&mut self, at: Writer, fields: &[FieldDefinition<S>]) {
+    for field in fields {
       let Some(&id) = self.field_ids.get(self.next_field) else {
         return;
       };
@@ -368,6 +629,19 @@ impl Lowering<'_> {
         field.description(),
       );
       self.field_ids.push(id);
+    }
+  }
+
+  /// The enum values `values`, which `at` writes, as direct members.
+  fn enum_values<S: AsRef<[u8]>>(&mut self, at: Writer, values: &[EnumValueDefinition<S>]) {
+    for value in values {
+      self.member(
+        at,
+        MemberKind::EnumValue,
+        value.value(),
+        *value.span(),
+        value.description(),
+      );
     }
   }
 
@@ -564,6 +838,32 @@ impl Lowering<'_> {
         .help("lower `Limits::max_source_bytes`, or supply less source")
         .build(),
     );
+  }
+}
+
+/// The keyword an extension of a definition of `kind` is written with.
+fn keyword_of(kind: DefKind) -> &'static str {
+  match kind {
+    DefKind::Scalar => "scalar",
+    DefKind::Object => "type",
+    DefKind::Interface => "interface",
+    DefKind::Union => "union",
+    DefKind::Enum => "enum",
+    DefKind::InputObject => "input",
+    DefKind::Directive => "directive",
+  }
+}
+
+/// A definition of `kind`, as a message names it.
+fn noun_of(kind: DefKind) -> &'static str {
+  match kind {
+    DefKind::Scalar => "a scalar",
+    DefKind::Object => "an object type",
+    DefKind::Interface => "an interface",
+    DefKind::Union => "a union",
+    DefKind::Enum => "an enum",
+    DefKind::InputObject => "an input object",
+    DefKind::Directive => "a directive",
   }
 }
 

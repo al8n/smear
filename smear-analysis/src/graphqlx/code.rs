@@ -244,4 +244,9 @@ pub(crate) mod schema {
   /// `UndefinedRootOperationType`.
   pub(crate) const UNDEFINED_ROOT_OPERATION_TYPE: Code =
     Code::new("smear::schema::undefined-root-operation-type");
+
+  /// An extension's keyword is not the kind of the definition its target names: `smear-schema`'s
+  /// `ExtensionKindMismatch`.
+  pub(crate) const EXTENSION_KIND_MISMATCH: Code =
+    Code::new("smear::schema::extension-kind-mismatch");
 }

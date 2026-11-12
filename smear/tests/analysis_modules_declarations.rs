@@ -164,11 +164,16 @@ fn every_kind_of_definition_is_a_definition_of_its_module() {
     assert_eq!(definition.origin(), Origin::User);
     assert_eq!(definition.location(), location);
     assert!(!definition.has_errors());
-    let contributions: Vec<Location> = definition
+    let contributions: Vec<(Location, bool)> = definition
       .contributions()
-      .map(|part| part.location())
+      .map(|part| (part.location(), part.is_extension()))
       .collect();
-    assert_eq!(contributions, [location], "{name}: its definition alone");
+    // Its definition, and for `O` the extension too, named where its target path is.
+    let mut parts = vec![(location, false)];
+    if name == "O" {
+      parts.push((named(schema, EVERY_KIND, "extend type ", "O", 0), true));
+    }
+    assert_eq!(contributions, parts, "{name}");
   }
 
   let scalar = model.def(
@@ -524,7 +529,7 @@ fn the_shared_codes_are_smear_schemas() {
   use smear::validator::SchemaErrorKind;
 
   let text = "scalar X\nscalar X\ndirective @d on FIELD\ndirective @d on FIELD\n\
-              scalar __Y\ndirective @__y on FIELD\n";
+              scalar __Y\ndirective @__y on FIELD\nextend type X {\n  f: Int\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
   let analysis = analyze(&root, &[], &Limits::new());
   let mut codes: Vec<&str> = analysis
@@ -538,6 +543,7 @@ fn the_shared_codes_are_smear_schemas() {
     SchemaErrorKind::DuplicateDirectiveDefinition,
     SchemaErrorKind::ReservedTypeName,
     SchemaErrorKind::ReservedDirectiveName,
+    SchemaErrorKind::ExtensionKindMismatch,
   ]
   .iter()
   .map(|kind: &SchemaErrorKind| kind.code().as_str())

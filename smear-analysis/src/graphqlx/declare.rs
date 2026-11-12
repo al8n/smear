@@ -81,8 +81,6 @@ pub(crate) struct Declarations<'d, 'a> {
   /// Every `use` item, by module, then source, then position.
   pub(crate) uses: Vec<Entry>,
   /// Every type and directive extension, by module, then source, then position.
-  // Read by lowering when each extension joins its target; until then nothing reads it.
-  #[allow(dead_code)]
   pub(crate) extensions: Vec<Entry>,
   /// Every schema definition and extension, by module, then source, then position.
   pub(crate) schemas: Vec<Entry>,
@@ -101,10 +99,8 @@ pub(crate) struct Declaration {
   // Read by lowering when it resolves the paths a contribution writes; until then nothing reads it.
   #[allow(dead_code)]
   pub(crate) module: ModuleId,
-  /// Its kind: `Scalar` for a materialised primitive.
-  // Read by lowering when an extension of it is checked against its kind; until then nothing
-  // reads it.
-  #[allow(dead_code)]
+  /// Its kind, which an extension of it is checked against: `Scalar` for a materialised
+  /// primitive.
   pub(crate) kind: DefKind,
   /// Where its name is written; the whole of `core`'s package source for a materialised
   /// primitive, which has no position of its own.

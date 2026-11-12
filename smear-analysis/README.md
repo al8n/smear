@@ -17,8 +17,9 @@ packages, modules, definitions, members, type occurrences and types, values, dir
 applications, the schema and the built-ins, with canonical names and lookup; so far `analyze` fills
 in the packages, their modules, one for every directory of a `Directory` package and one for every
 inline `mod`, and every definition: each type and directive a package declares, and each intrinsic
-primitive the program writes, with its identity, its own contribution, its type parameters, a
-directive definition's locations, and its members with their descriptions; and the schema's
+primitive the program writes, with its identity, its contributions, its own and then each
+extension's, its type parameters, a directive definition's locations, and its members with their
+descriptions; and the schema's
 contributions, one for each schema item, with its description. It resolves every module's `use`
 items too, globs and string sources included, against scopes that end with the prelude and the
 packages each package may reach. The built-in packages, `core`, `alloc` and `std`, are one

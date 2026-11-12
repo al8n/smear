@@ -1,5 +1,5 @@
-//! What the phases after lowering's first pass write: each definition's extensions, its type
-//! parameters' defaults and its bounds, its `implements` entries, union members and applications,
+//! What the phases after lowering's first pass write: each definition's type parameters'
+//! defaults and its bounds, its `implements` entries, union members and applications,
 //! its built-in meaning and its externs, its instantiations and satisfactions; each member's type,
 //! default and applications; type occurrences and types, values, applications, the schema's roots
 //! and applications, and marks.
@@ -29,26 +29,9 @@ use crate::graphqlx::{
   package::Tier,
 };
 
-use super::{ModelBuilder, append, contribution_row, extend, grow, push_text, slot, unresolved_ty};
+use super::{ModelBuilder, append, extend, grow, push_text, slot, unresolved_ty};
 
 impl ModelBuilder {
-  /// Appends an extension of `def` as its next contribution: the extension names `def` at
-  /// `location`, its target path, and spans `extent`, from its `extend` to its last token. Answers
-  /// its index among `def`'s contributions.
-  ///
-  /// It follows `def`'s own contribution (`push_contribution`) and every extension of `def` before
-  /// it by source id and position, and comes before the next definition's contributions.
-  pub fn push_extension(&mut self, def: DefId, location: Location, extent: Location) -> u32 {
-    let row = &mut self.model.defs[def.get() as usize];
-    let index = row.contributions.len;
-    grow(
-      &mut self.model.contributions,
-      &mut row.contributions,
-      contribution_row(location, extent, true),
-    );
-    index
-  }
-
   /// Gives `def`'s type parameter `index` the default `default`.
   pub fn set_type_param_default(&mut self, def: DefId, index: u32, default: TypeExprId) {
     let at = slot(self.model.defs[def.get() as usize].type_params, index);

@@ -1,6 +1,7 @@
-//! The GraphQLx analyzer's lowering: what each definition holds beyond its identity. Its own
-//! contribution, its type parameters, a directive definition's locations, and its members, its
-//! direct members before every argument of its fields, each with its description; what the
+//! The GraphQLx analyzer's lowering: what each definition holds beyond its identity. Its
+//! contributions, its own and its extensions', its type parameters, a directive definition's
+//! locations, and its members, its direct members before every argument of its fields, each with
+//! its description; extensions that name nothing or a definition of another kind; what the
 //! built-in library holds; the schema's contributions and its description; and none of it moved by
 //! the order files and dependencies are passed in.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -108,6 +109,29 @@ fn member_names(model: &Model, range: IdRange<MemberId>) -> Vec<&str> {
   range
     .into_iter()
     .map(|id: MemberId| model.member(id).name())
+    .collect()
+}
+
+/// Each diagnostic's code, primary location, and first label's location, in the list's order.
+fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
+  analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| {
+      (
+        diagnostic.code().as_str(),
+        diagnostic.primary(),
+        diagnostic.label(0).map(|label| label.location()),
+      )
+    })
+    .collect()
+}
+
+/// The names of `members`, in order.
+fn names_of<'a>(model: &'a Model, members: &[MemberId]) -> Vec<&'a str> {
+  members
+    .iter()
+    .map(|member: &MemberId| model.member(*member).name())
     .collect()
 }
 
@@ -629,6 +653,324 @@ fn a_replaced_directive_has_the_roots_arguments() {
   );
 }
 
+/// A definition of every kind that has extensions, each extended once below it.
+const EXTENDED: &str = "type Query {\n  a: Int\n}\nextend type Query {\n  b(x: Int): Int\n}\n\
+                        interface Node {\n  id: ID\n}\nextend interface Node {\n  name: String\n}\n\
+                        input Filter {\n  f: Int\n}\nextend input Filter {\n  g: Int\n}\n\
+                        enum Color {\n  RED\n}\nextend enum Color {\n  GREEN\n}\n\
+                        scalar Date\nextend scalar Date @specifiedBy(url: \"https://example.com\")\n\
+                        union Either = Query\nextend union Either = Query\n\
+                        directive @d on FIELD\nextend directive @d @deprecated\n";
+
+#[test]
+fn an_extension_is_a_contribution_of_its_target() {
+  let analysis = analyze_one(EXTENDED);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  let schema = schema_file(&analysis);
+  let expected = [
+    (
+      Namespace::Type,
+      "Query",
+      "type ",
+      "extend type ",
+      vec!["a"],
+      vec!["b"],
+    ),
+    (
+      Namespace::Type,
+      "Node",
+      "interface ",
+      "extend interface ",
+      vec!["id"],
+      vec!["name"],
+    ),
+    (
+      Namespace::Type,
+      "Filter",
+      "input ",
+      "extend input ",
+      vec!["f"],
+      vec!["g"],
+    ),
+    (
+      Namespace::Type,
+      "Color",
+      "enum ",
+      "extend enum ",
+      vec!["RED"],
+      vec!["GREEN"],
+    ),
+    (
+      Namespace::Type,
+      "Date",
+      "scalar ",
+      "extend scalar ",
+      vec![],
+      vec![],
+    ),
+    (
+      Namespace::Type,
+      "Either",
+      "union ",
+      "extend union ",
+      vec![],
+      vec![],
+    ),
+    (
+      Namespace::Directive,
+      "d",
+      "directive @",
+      "extend directive @",
+      vec![],
+      vec![],
+    ),
+  ];
+  for (namespace, name, keyword, extend, own, added) in expected {
+    let canonical = match namespace {
+      Namespace::Directive => format!("@^::app::{name}"),
+      _ => format!("^::app::{name}"),
+    };
+    let id = def(model, namespace, &canonical);
+    let parts = contributions(model, id);
+    assert_eq!(parts.len(), 2, "{name}");
+    // Its own contribution first, then the extension, named where its target path is.
+    assert_eq!(
+      (parts[0].0, parts[0].1, parts[1].0, parts[1].1),
+      (
+        named(schema, EXTENDED, keyword, name, 0),
+        false,
+        named(schema, EXTENDED, extend, name, 0),
+        true
+      ),
+      "{name}"
+    );
+    // Each holds the members it writes, and the definition holds both runs, its own first.
+    assert_eq!(names_of(model, &parts[0].2), own, "{name}");
+    assert_eq!(names_of(model, &parts[1].2), added, "{name}");
+    let definition = model.def(id);
+    let direct: Vec<MemberId> = definition
+      .fields()
+      .into_iter()
+      .chain(definition.input_fields())
+      .chain(definition.enum_values())
+      .chain(definition.arguments())
+      .collect();
+    let both: Vec<MemberId> = parts[0].2.iter().chain(&parts[1].2).copied().collect();
+    assert_eq!(direct, both, "{name}");
+    assert!(!definition.has_errors(), "{name}");
+  }
+
+  // The argument of the field the extension adds follows every direct member of `Query`.
+  let query = def(model, Namespace::Type, "^::app::Query");
+  let fields = ids(model.def(query).fields());
+  let x = ids(model.member(fields[1]).arguments());
+  assert_eq!(
+    member_names(model, model.member(fields[1]).arguments()),
+    ["x"]
+  );
+  assert_eq!(x[0].get(), fields[1].get() + 1);
+  assert_eq!(model.member(x[0]).parent(), Some(fields[1]));
+}
+
+#[test]
+fn contributions_order_members_by_source_then_position() {
+  // An extension above its definition and one below it in one file; two more in files passed in
+  // the reverse of their paths' order; and one in the module `m`, which names its target from the
+  // package's root.
+  let a = "extend type Shape {\n  fromA: Int\n}\n";
+  let b = "extend type Shape {\n  above: Int\n}\ntype Shape {\n  own: Int\n}\n\
+           extend type Shape {\n  below: Int\n}\n";
+  let c = "extend type Shape {\n  fromC: Int\n}\n";
+  let m = "extend type ~::Shape {\n  fromM: Int\n}\n";
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[
+      ("m/x.graphqlx", m),
+      ("c.graphqlx", c),
+      ("b.graphqlx", b),
+      ("a.graphqlx", a),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let (a_file, b_file, c_file, m_file) = (
+    file(&analysis, 3, "a.graphqlx"),
+    file(&analysis, 3, "b.graphqlx"),
+    file(&analysis, 3, "c.graphqlx"),
+    file(&analysis, 3, "m/x.graphqlx"),
+  );
+  assert!(a_file < b_file && b_file < c_file && c_file < m_file);
+
+  let shape = def(model, Namespace::Type, "^::app::Shape");
+  assert_eq!(
+    member_names(model, model.def(shape).fields()),
+    ["own", "fromA", "above", "below", "fromC", "fromM"]
+  );
+  let locations: Vec<(Location, bool, usize)> = contributions(model, shape)
+    .into_iter()
+    .map(|(location, extension, members, _)| (location, extension, members.len()))
+    .collect();
+  assert_eq!(
+    locations,
+    [
+      (named(b_file, b, "type ", "Shape", 0), false, 1),
+      (named(a_file, a, "extend type ", "Shape", 0), true, 1),
+      (named(b_file, b, "extend type ", "Shape", 0), true, 1),
+      (named(b_file, b, "extend type ", "Shape", 1), true, 1),
+      (named(c_file, c, "extend type ", "Shape", 0), true, 1),
+      (at(m_file, m, "~::Shape", 0), true, 1),
+    ]
+  );
+}
+
+#[test]
+fn an_extension_of_another_kind_contributes_nothing() {
+  let text = "enum E {\n  A\n}\nextend type E {\n  f: Undefined\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  // One diagnostic, at the target, labelled at the definition: nothing inside the extension is
+  // lowered, so the type it names is not looked for.
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::schema::extension-kind-mismatch",
+      named(schema, text, "extend type ", "E", 0),
+      Some(named(schema, text, "enum ", "E", 0)),
+    )]
+  );
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    diagnostic.to_string(),
+    "`extend type` names `E`, which is an enum"
+  );
+  assert_eq!(
+    diagnostic.label(0).map(|label| label.text()),
+    Some("the definition it extends")
+  );
+  assert!(diagnostic.help().is_some());
+
+  // The enum keeps its own contribution alone, and the error is in none of it.
+  let model = analysis.model();
+  let e = def(model, Namespace::Type, "^::app::E");
+  assert_eq!(
+    contributions(model, e),
+    [(
+      named(schema, text, "enum ", "E", 0),
+      false,
+      ids(model.def(e).enum_values()),
+      false
+    )]
+  );
+  assert_eq!(member_names(model, model.def(e).enum_values()), ["A"]);
+  assert!(!model.def(e).has_errors());
+}
+
+#[test]
+fn an_extension_of_nothing_reports_once() {
+  let text = "extend type Missing {\n  f: Undefined\n}\nscalar Kept\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  // The target alone is reported: nothing inside the extension is lowered.
+  let codes: Vec<(&str, Location)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
+    .collect();
+  assert_eq!(
+    codes,
+    [(
+      "smear::schema::undefined-extension-target",
+      named(schema, text, "extend type ", "Missing", 0)
+    )]
+  );
+  let model = analysis.model();
+  let kept = def(model, Namespace::Type, "^::app::Kept");
+  assert_eq!(contributions(model, kept).len(), 1);
+}
+
+#[test]
+fn a_built_in_is_extended_by_the_root() {
+  // `Int` is a second name of `i32`, which `core` materialises; the root package's `Float`
+  // replaces `f64`, which keeps its id.
+  let text = "directive @x on SCALAR\nextend scalar Int @x\nscalar Float\nextend scalar Float @x\n";
+  let analysis = analyze_one(text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  let schema = schema_file(&analysis);
+  let builtins = model.builtins();
+  let i32_def = builtins
+    .primitive(Primitive::signed(32))
+    .expect("`Int` writes `i32`");
+  assert_eq!(
+    contributions(model, i32_def),
+    [
+      (package_source(&analysis, 0), false, vec![], false),
+      (
+        named(schema, text, "extend scalar ", "Int", 0),
+        true,
+        vec![],
+        false
+      ),
+    ]
+  );
+  let f64_def = builtins
+    .primitive(Primitive::F64)
+    .expect("the root package replaces `f64`");
+  assert_eq!(
+    contributions(model, f64_def),
+    [
+      (
+        named(schema, text, "scalar ", "Float", 0),
+        false,
+        vec![],
+        false
+      ),
+      (
+        named(schema, text, "extend scalar ", "Float", 0),
+        true,
+        vec![],
+        false
+      ),
+    ]
+  );
+}
+
+#[test]
+fn a_mismatched_extension_of_a_long_name_quotes_an_excerpt() {
+  let name = "E".repeat(4096);
+  let text = format!("enum {name} {{\n  A\n}}\nextend type {name} {{\n  f: Int\n}}\n");
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  let messages: Vec<String> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.to_string())
+    .collect();
+  assert_eq!(messages.len(), 1);
+  let expected = format!(
+    "`extend type` names `{}…{}`, which is an enum",
+    "E".repeat(64),
+    "E".repeat(64)
+  );
+  assert_eq!(messages[0], expected);
+}
+
 /// The text of `@deprecated`'s `reason` argument's description in the built-in library, cooked.
 const REASON: &str = "Explains why this element was deprecated, usually also including a \
                       suggestion for how to access supported similar data. Formatted using the \
@@ -1009,14 +1351,15 @@ fn reversing_files_and_dependencies_changes_no_id_and_no_diagnostic() {
   let backward = analyze(&root, &dependencies, &Limits::new());
   assert_eq!(render(&forward), render(&backward));
 
-  // What the render compares is what lowering wrote: `Query`'s members and arguments, and the
-  // schema's three contributions, among the rest.
+  // What the render compares is what lowering wrote: `Query`'s members, the extension's among
+  // them, and arguments, and the schema's three contributions, among the rest.
   let model = forward.model();
   let query = def(model, Namespace::Type, "^::app::Query");
   assert_eq!(
     member_names(model, model.def(query).fields()),
-    ["node", "nodes"]
+    ["node", "nodes", "more"]
   );
+  assert_eq!(contributions(model, query).len(), 2);
   let node = ids(model.def(query).fields())[0];
   assert_eq!(
     member_names(model, model.member(node).arguments()),
