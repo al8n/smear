@@ -27,7 +27,7 @@ pub use def::{
 };
 pub use member::{Member, MemberKind};
 pub use module::{Module, ModuleKind};
-pub use name::Description;
+pub use name::{CanonicalName, Description, Namespace};
 pub use schema::{Builtins, Root, RootOperation, Schema};
 pub use ty::{Path, PathRoot, Ty, TyKind, TypeExpr, TypeExprKind};
 pub use value::{FloatValue, IntValue, Literal, LiteralKind, ObjectEntry, Value, ValueKind};
@@ -335,5 +335,6 @@ const _: () = {
   let _ = assert_send_sync::<Application<'static>>;
   let _ = assert_send_sync::<Schema<'static>>;
   let _ = assert_send_sync::<Builtins<'static>>;
+  let _ = assert_send_sync::<CanonicalName<'static>>;
   let _ = assert_send_sync::<ModelBuilder>;
 };

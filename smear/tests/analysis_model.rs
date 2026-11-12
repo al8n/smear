@@ -8,13 +8,14 @@
 
 use smear::{
   analysis::graphqlx::{
-    Application, ApplicationArgument, ApplicationId, Builtins, Collection, Contribution,
-    Contributions, Def, DefId, DefKind, Description, DirectiveLocation, Extern, Externs,
-    FloatValue, IntValue, IntegerProvider, Layout, Limits, Literal, LiteralKind, Member, MemberId,
-    MemberKind, Model, Module, ModuleId, ModuleKind, ObjectEntry, Origin, Package, PackageId,
-    PackageInfo, PackageKind, Path, PathRoot, Primitive, Resolution, Root, RootOperation, Schema,
-    SourceId, Sym, Tier, Ty, TyId, TyKind, TypeBound, TypeExpr, TypeExprId, TypeExprKind,
-    TypeParam, TypeParams, Value, ValueId, ValueKind, analyze, test_support::ModelBuilder,
+    Application, ApplicationArgument, ApplicationId, Builtins, CanonicalName, Collection,
+    Contribution, Contributions, Def, DefId, DefKind, Description, DirectiveLocation, Extern,
+    Externs, FloatValue, IntValue, IntegerProvider, Layout, Limits, Literal, LiteralKind, Member,
+    MemberId, MemberKind, Model, Module, ModuleId, ModuleKind, Namespace, ObjectEntry, Origin,
+    Package, PackageId, PackageInfo, PackageKind, Path, PathRoot, Primitive, Resolution, Root,
+    RootOperation, Schema, SourceId, Sym, Tier, Ty, TyId, TyKind, TypeBound, TypeExpr, TypeExprId,
+    TypeExprKind, TypeParam, TypeParams, Value, ValueId, ValueKind, analyze,
+    test_support::ModelBuilder,
   },
   diagnostic::Location,
   lexer::tokora::SimpleSpan,
@@ -2105,6 +2106,130 @@ fn every_unresolved_shape_and_the_one_type_unresolved_occurrences_share() {
   assert_eq!(spelled(&model, missing.path()), vec!["missing"]);
 }
 
+/// The namespace `def` is named in.
+fn namespace(model: &Model, def: DefId) -> Namespace {
+  if model.def(def).kind() == DefKind::Directive {
+    Namespace::Directive
+  } else {
+    Namespace::Type
+  }
+}
+
+#[test]
+fn every_definition_has_a_canonical_name_that_lookup_reads_back() {
+  let model = fixture();
+  let names = [
+    (I32, "^::core::i32"),
+    (STRING, "^::core::string"),
+    (DEPRECATED, "@^::core::deprecated"),
+    (MAP_KEY, "^::core::MapKey"),
+    (TYPE_META, "^::core::__Type"),
+    (NODE, "^::app::Node"),
+    (QUERY, "^::app::Query"),
+    (COLOR, "^::app::Color"),
+    (FILTER, "^::app::Filter"),
+    (PAGE, "^::app::Page"),
+    (SEARCH, "^::app::Search"),
+    (CACHE, "@^::app::cache"),
+    (PHOTO, "^::app::media::Photo"),
+    (TAGS, "^::app::media::Tags"),
+    (POINT, "^::geo::Point"),
+  ];
+  assert_eq!(names.len(), model.defs().len() as usize);
+  for (def, name) in names {
+    let canonical: CanonicalName<'_> = model.canonical_name(def);
+    assert_eq!(canonical.to_string(), name);
+    let namespace = namespace(&model, def);
+    assert_eq!(model.lookup(namespace, name), Some(def), "{name}");
+    assert_eq!(
+      model.lookup(namespace, name.as_bytes()),
+      Some(def),
+      "{name}"
+    );
+    assert_eq!(
+      model.lookup(namespace, canonical.to_string()),
+      Some(def),
+      "{name}"
+    );
+  }
+  assert_eq!(
+    format!("{:?}", model.canonical_name(QUERY)),
+    "CanonicalName(^::app::Query)"
+  );
+}
+
+#[test]
+fn lookup_reads_a_second_name_and_finds_nothing_for_what_names_nothing() {
+  let model = fixture();
+  // `Int` is a second name `core` gives `i32`.
+  assert_eq!(model.lookup(Namespace::Type, "^::core::Int"), Some(I32));
+  assert_eq!(model.lookup(Namespace::Type, "^::app::Int"), None);
+  assert_eq!(model.lookup(Namespace::Directive, "@^::core::Int"), None);
+
+  // The namespaces are apart: a directive is no type, and a type no directive.
+  assert_eq!(model.lookup(Namespace::Type, "^::app::cache"), None);
+  assert_eq!(model.lookup(Namespace::Directive, "@^::app::Query"), None);
+  // A directive's name is spelled with its `@`, and only a directive's.
+  assert_eq!(model.lookup(Namespace::Directive, "^::app::cache"), None);
+  assert_eq!(model.lookup(Namespace::Type, "@^::app::Query"), None);
+
+  // Only a dependency path to a definition is a canonical name.
+  for name in [
+    "",
+    "Query",
+    "app::Query",
+    "~::Query",
+    "::app::Query",
+    "^::",
+    "^::app",
+    "^::app::",
+    "^::app::::Query",
+    "^::app::media",
+    "^::app::Missing",
+    "^::nope::Query",
+    "^::app::media::Query",
+    "^::app::vision::Photo",
+  ] {
+    assert_eq!(model.lookup(Namespace::Type, name), None, "{name}");
+  }
+  assert_eq!(model.lookup(Namespace::Type, b"^::app::\xffQuery"), None);
+}
+
+#[test]
+fn module_by_path_finds_every_module_by_its_dependency_path() {
+  let model = fixture();
+  for (module, path) in [
+    (CORE_ROOT, "^::core"),
+    (ALLOC_ROOT, "^::alloc"),
+    (STD_ROOT, "^::std"),
+    (APP_ROOT, "^::app"),
+    (MEDIA, "^::app::media"),
+    (VISION, "^::app::media::vision"),
+    (GEO_ROOT, "^::geo"),
+  ] {
+    assert_eq!(model.module_by_path(path), Some(module), "{path}");
+    assert_eq!(
+      model.module_by_path(path.as_bytes()),
+      Some(module),
+      "{path}"
+    );
+  }
+  for path in [
+    "",
+    "app",
+    "~::media",
+    "^::",
+    "^::nope",
+    "^::app::",
+    "^::app::vision",
+    "^::app::media::vision::deeper",
+    "^::app::Query",
+  ] {
+    assert_eq!(model.module_by_path(path), None, "{path}");
+  }
+  assert_eq!(model.module_by_path(b"^::app::\xffmedia"), None);
+}
+
 // Every result type and every view may cross threads.
 const _: () = {
   const fn assert_send_sync<T: Send + Sync>() {}
@@ -2137,4 +2262,6 @@ const _: () = {
   let _ = assert_send_sync::<Resolution<DefId>>;
   let _ = assert_send_sync::<Schema<'static>>;
   let _ = assert_send_sync::<Builtins<'static>>;
+  let _ = assert_send_sync::<CanonicalName<'static>>;
+  let _ = assert_send_sync::<Namespace>;
 };
