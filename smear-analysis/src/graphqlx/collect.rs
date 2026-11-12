@@ -388,8 +388,8 @@ impl<'d> Walk<'d, '_> {
   ) -> Option<u32> {
     let name: &'d [u8] = declaration.name().source().as_ref();
     let at = Location::new(source.get(), *declaration.name().as_span());
-    let depth = self.tree.node(parent).path.len().saturating_add(1);
-    if depth > self.max_depth as usize {
+    let depth = self.tree.node(parent).depth.saturating_add(1);
+    if depth > self.max_depth {
       self.deep_module(at, name, depth);
       return None;
     }
@@ -456,7 +456,7 @@ impl<'d> Walk<'d, '_> {
   }
 
   /// Reports the `mod` named `name` at `at`, whose module would sit `depth` deep, past the limit.
-  fn deep_module(&mut self, at: Location, name: &[u8], depth: usize) {
+  fn deep_module(&mut self, at: Location, name: &[u8], depth: u32) {
     let kind = DiagnosticKind::ResourceLimit;
     let max = self.max_depth;
     self.reporter.report(

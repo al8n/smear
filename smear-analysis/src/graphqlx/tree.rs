@@ -8,9 +8,20 @@
 //! in either layout. One path is one module: a directory module, or else the first `mod` in source
 //! order, declares it, and the walk reports every later declaration.
 //!
-//! The tree is keyed by package, then path, the path compared segment by segment and each segment
-//! bytewise: exactly what the `ModuleId` order compares. Numbering walks the keys in order, so a
-//! package's root module comes first and a module before its descendants.
+//! A module costs the same at any depth: it holds its parent, its own name and its depth, never its
+//! path, and it is found by its parent and its name.
+//!
+//! # Numbering
+//!
+//! [`Tree::push`] numbers the packages in id order, and each package's modules in pre-order: a
+//! module, then each of its children with all of that child's descendants, the children in bytewise
+//! order of their names. That is the `ModuleId` order, which compares two modules' paths segment by
+//! segment, each segment bytewise. Of two modules of one package, either one is the other's
+//! ancestor, whose path is a proper prefix of the other's, and the ancestor comes first in both
+//! orders; or their paths part at one segment, under the module whose path they share, and both
+//! orders put first the one whose segment there is the lesser bytewise: the paths compare as that
+//! segment does, and pre-order numbers the whole of the lesser child's subtree before the other
+//! child.
 
 use std::{collections::BTreeMap, string::String, vec, vec::Vec};
 
@@ -26,10 +37,12 @@ use super::{
 pub(crate) struct Node<'d> {
   /// The index of its package, in id order.
   pub(crate) package: usize,
-  /// Its path from its package's root module, one name per segment.
-  pub(crate) path: Vec<&'d [u8]>,
+  /// Its name, the last segment of its path; empty for a root module.
+  pub(crate) name: &'d [u8],
   /// The node of the module it is inside; `None` for a root module.
   pub(crate) parent: Option<u32>,
+  /// How many modules it sits below its package's root module, whose depth is 0.
+  pub(crate) depth: u32,
   pub(crate) kind: ModuleKind,
   /// For a directory module, its path as the first file under it spells it: what a diagnostic
   /// quotes.
@@ -52,9 +65,10 @@ pub(crate) struct Declared<'d> {
 /// Every module found so far, and the key each is found by.
 pub(crate) struct Tree<'d> {
   nodes: Vec<Node<'d>>,
-  /// Each module's package and path, mapped to its node. The key is what the `ModuleId` order
-  /// compares, and what two declarations of one module share.
-  keys: BTreeMap<(usize, Vec<&'d [u8]>), u32>,
+  /// Every module but a root module, by its parent's node and its name: what two declarations of
+  /// one module share, and, in the map's order, each module's children in bytewise order of their
+  /// names, which numbering reads.
+  children: BTreeMap<(u32, &'d [u8]), u32>,
   /// Each package's root module, by the package's index.
   roots: Vec<u32>,
 }
@@ -64,7 +78,7 @@ impl<'d> Tree<'d> {
   pub(crate) fn new() -> Self {
     Self {
       nodes: Vec::new(),
-      keys: BTreeMap::new(),
+      children: BTreeMap::new(),
       roots: Vec::new(),
     }
   }
@@ -72,10 +86,12 @@ impl<'d> Tree<'d> {
   /// Adds the root module of the package at `package`, the next package in id order; answers its
   /// node.
   pub(crate) fn root(&mut self, package: usize) -> u32 {
-    let node = self.insert(Node {
+    let node = dense(self.nodes.len());
+    self.nodes.push(Node {
       package,
-      path: Vec::new(),
+      name: b"",
       parent: None,
+      depth: 0,
       kind: ModuleKind::Root,
       directory: None,
       declared: None,
@@ -98,42 +114,18 @@ impl<'d> Tree<'d> {
     if let Some(found) = self.child(parent, name) {
       return found;
     }
-    let up = &self.nodes[parent as usize];
-    let package = up.package;
-    let path = extended(&up.path, name);
-    self.insert(Node {
-      package,
-      path,
-      parent: Some(parent),
-      kind: ModuleKind::Directory,
-      directory: Some(directory),
-      declared: None,
-    })
+    self.insert(parent, name, ModuleKind::Directory, Some(directory), None)
   }
 
   /// Adds the module `name` inside `parent`, which only the `mod` `declared` declares so far, and
   /// which the tree must not have yet.
   pub(crate) fn declare(&mut self, parent: u32, name: &'d [u8], declared: Declared<'d>) -> u32 {
-    let up = &self.nodes[parent as usize];
-    let package = up.package;
-    let path = extended(&up.path, name);
-    self.insert(Node {
-      package,
-      path,
-      parent: Some(parent),
-      kind: ModuleKind::Inline,
-      directory: None,
-      declared: Some(declared),
-    })
+    self.insert(parent, name, ModuleKind::Inline, None, Some(declared))
   }
 
   /// The module `name` inside `parent`, when the tree has it.
   pub(crate) fn child(&self, parent: u32, name: &'d [u8]) -> Option<u32> {
-    let up = &self.nodes[parent as usize];
-    self
-      .keys
-      .get(&(up.package, extended(&up.path, name)))
-      .copied()
+    self.children.get(&(parent, name)).copied()
   }
 
   /// The module `node` names.
@@ -146,45 +138,79 @@ impl<'d> Tree<'d> {
     &self.nodes
   }
 
-  /// Appends every module to `builder` in `ModuleId` order: package by package, and within one by
-  /// path; answers each node's id. The builder must hold every package already, and no module yet.
+  /// Appends every module to `builder` in `ModuleId` order: the packages in id order, and each
+  /// package's modules in pre-order, each module's children in bytewise order of their names, with
+  /// an explicit stack; answers each node's id. The builder must hold every package already, and no
+  /// module yet.
   pub(crate) fn push(&self, builder: &mut ModelBuilder) -> Vec<ModuleId> {
+    // The children map is ordered by parent, then name, so each node's children are one run of
+    // `order`, from `starts[node]` to `starts[node + 1]`, in bytewise order of their names.
+    let mut starts: Vec<u32> = vec![0; self.nodes.len() + 1];
+    for &(parent, _) in self.children.keys() {
+      starts[parent as usize] += 1;
+    }
+    let mut total: u32 = 0;
+    for start in &mut starts {
+      let count = *start;
+      *start = total;
+      total += count;
+    }
+    let order: Vec<u32> = self.children.values().copied().collect();
+
     let mut ids: Vec<ModuleId> = vec![ModuleId::new(0); self.nodes.len()];
+    let mut stack: Vec<u32> = Vec::new();
     let mut text = String::new();
-    for &node in self.keys.values() {
-      let row = &self.nodes[node as usize];
-      let package = PackageId::new(dense(row.package));
-      let parent: Option<ModuleId> = row.parent.map(|parent: u32| ids[parent as usize]);
-      let name = row.path.last().copied().map(String::from_utf8_lossy);
-      let id = builder.push_module(package, parent, name.as_deref(), row.kind);
-      ids[node as usize] = id;
-      if let Some(declared) = row.declared {
-        builder.set_module_declaration(id, declared.location, declared.extent);
-        if let Some((spelling, location)) = declared.description {
-          text.clear();
-          // A description the lexer read always decodes; one that did not is left absent.
-          if decode_string_value(spelling, &mut text).is_ok() {
-            builder.set_module_description(id, &text, location);
+    for &root in &self.roots {
+      stack.push(root);
+      while let Some(node) = stack.pop() {
+        let row = &self.nodes[node as usize];
+        let package = PackageId::new(dense(row.package));
+        let parent: Option<ModuleId> = row.parent.map(|parent: u32| ids[parent as usize]);
+        let name = row.parent.map(|_: u32| String::from_utf8_lossy(row.name));
+        let id = builder.push_module(package, parent, name.as_deref(), row.kind);
+        ids[node as usize] = id;
+        if let Some(declared) = row.declared {
+          builder.set_module_declaration(id, declared.location, declared.extent);
+          if let Some((spelling, location)) = declared.description {
+            text.clear();
+            // A description the lexer read always decodes; one that did not is left absent.
+            if decode_string_value(spelling, &mut text).is_ok() {
+              builder.set_module_description(id, &text, location);
+            }
           }
         }
+        // Its children, the last first, so that the first in bytewise order is numbered next, and
+        // all of its descendants before its next sibling.
+        let index = node as usize;
+        let children: &[u32] = &order[starts[index] as usize..starts[index + 1] as usize];
+        stack.extend(children.iter().rev());
       }
     }
     ids
   }
 
-  /// Adds `node`, under its key; answers its index.
-  fn insert(&mut self, node: Node<'d>) -> u32 {
+  /// Adds the module `name` of `kind` inside `parent`; answers its node.
+  fn insert(
+    &mut self,
+    parent: u32,
+    name: &'d [u8],
+    kind: ModuleKind,
+    directory: Option<&'d [u8]>,
+    declared: Option<Declared<'d>>,
+  ) -> u32 {
+    let up = &self.nodes[parent as usize];
+    let node = Node {
+      package: up.package,
+      name,
+      parent: Some(parent),
+      depth: up.depth.saturating_add(1),
+      kind,
+      directory,
+      declared,
+    };
     let index = dense(self.nodes.len());
-    self.keys.insert((node.package, node.path.clone()), index);
+    self.children.insert((parent, name), index);
     self.nodes.push(node);
     index
   }
-}
-
-/// `path`, and then `name`.
-fn extended<'d>(path: &[&'d [u8]], name: &'d [u8]) -> Vec<&'d [u8]> {
-  let mut extended: Vec<&'d [u8]> = Vec::with_capacity(path.len() + 1);
-  extended.extend_from_slice(path);
-  extended.push(name);
-  extended
 }

@@ -609,3 +609,41 @@ fn module_ids_follow_the_package_then_the_path_segment_by_segment() {
   );
   assert_eq!(numbered(&forward), numbered(&backward));
 }
+
+/// A module's descendants are numbered before its next sibling, whatever order the input gives
+/// them in: `a`, `a::b`, then `ab`, where a numbering by depth, or in the order the walk finds
+/// them, would put `ab` before `a::b`. In both layouts: from directories, the files given in
+/// reverse, and from `mod`s, written in reverse.
+#[test]
+fn a_modules_descendants_come_before_its_next_sibling() {
+  let directories = package(
+    "app",
+    Layout::Directory,
+    &[
+      ("ab/1.graphqlx", "scalar AB\n"),
+      ("a/b/2.graphqlx", "scalar B\n"),
+      ("a/3.graphqlx", "scalar A\n"),
+    ],
+  );
+  let mods = package(
+    "app",
+    Layout::Flat,
+    &[("lib.graphqlx", "mod ab {}\nmod a {\n  mod b {}\n}\n")],
+  );
+  for (root, kind) in [
+    (directories, ModuleKind::Directory),
+    (mods, ModuleKind::Inline),
+  ] {
+    let analysis = analyze(&root, &[], &Limits::new());
+    assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+    assert_eq!(
+      tree(analysis.model()),
+      [
+        (3, vec![], ModuleKind::Root),
+        (3, vec!["a"], kind),
+        (3, vec!["a", "b"], kind),
+        (3, vec!["ab"], kind),
+      ]
+    );
+  }
+}

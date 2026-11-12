@@ -157,7 +157,7 @@ pub(crate) fn declarations<'d, 'a>(
   let mut built: BTreeMap<(usize, u8, &'d [u8]), usize> = BTreeMap::new();
   for (at, found) in definitions.iter().enumerate() {
     let node = tree.node(found.placed.module);
-    if node.package < ROOT && node.path.is_empty() {
+    if node.package < ROOT && node.parent.is_none() {
       built
         .entry((node.package, namespace(found.kind), found.name))
         .or_insert(at);
@@ -349,10 +349,10 @@ pub(crate) fn declarations<'d, 'a>(
 
   // A type and a child module of one name, in one module's scope.
   for node in tree.nodes() {
-    let (Some(parent), Some(&name)) = (node.parent, node.path.last()) else {
+    let Some(parent) = node.parent else {
       continue;
     };
-    if let Some(&at) = types.get(&(modules[parent as usize], name)) {
+    if let Some(&at) = types.get(&(modules[parent as usize], node.name)) {
       let whole = Location::entire(sources.package_sources(node.package).start());
       collision(reporter, &definitions[at], node, whole);
     }
