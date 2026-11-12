@@ -51,10 +51,10 @@ name: perf
 # `/usr/bin/python3` works. GitHub's `ubuntu-latest` ships far newer and no setup step is needed.
 
 # `push`/`pull_request` triggers and `paths-ignore` are deliberately identical to
-# `.github/workflows/ci.yml`, `macos.yml` and `miri.yml`; read the comment in `ci.yml` for why the
-# ignore list carries no blanket `**.md`. `ci/check_workflow_triggers.sh` enforces that the
-# `on.push.branches` lists stay identical across every workflow that has one, because that is the
-# part where a divergence is silent.
+# `.github/workflows/ci.yml`, `windows.yml`, `macos.yml` and `miri.yml`; read the comment in
+# `ci.yml` for why the ignore list carries no blanket `**.md`. `ci/check_workflow_triggers.sh`
+# enforces that the `on.push.branches` lists stay identical across every workflow that has one,
+# because that is the part where a divergence is silent.
 on:
   push:
     # `main` is both the DEFAULT branch and the TRUNK. Any further entry is a live integration
@@ -107,7 +107,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.sha || '' }}${{ inputs.base && format('-against-{0}', inputs.base) || '' }}
   cancel-in-progress: ${{ !(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
 
-# Every `run:` here is bash — the same block the other three workflows carry, and `ci.yml`'s has
+# Every `run:` here is bash — the same block every other workflow here carries, and `ci.yml`'s has
 # the full account. Nothing in this file runs on a Windows host today, and the default is stated
 # anyway so that adding such a job later cannot reintroduce the PowerShell parse failure #84 hit.
 defaults:

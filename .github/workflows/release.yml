@@ -76,7 +76,7 @@ jobs:
       - name: Exercise the offline release state machine
         run: python3 ci/release.py selftest
 
-      - name: Require exact-SHA CI, macOS, and Miri success
+      - name: Require exact-SHA CI, Windows, macOS, and Miri success
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_COMMIT: ${{ inputs.commit }}
@@ -196,7 +196,7 @@ jobs:
             --manifest-sha256 "${{ needs.verify.outputs.preflight_manifest_sha256 }}" \
             --manifest-output "$RUNNER_TEMP/smear-release/publish/preflight.json"
 
-      - name: Repeat exact-SHA CI, macOS, and Miri gates
+      - name: Repeat exact-SHA CI, Windows, macOS, and Miri gates
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_COMMIT: ${{ inputs.commit }}

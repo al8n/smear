@@ -87,8 +87,8 @@ A missing crate name cannot be created through trusted publishing.
 
 Use one release run for both the manual bootstrap and OIDC publication:
 
-1. Merge the reviewed release changes and wait for CI, macOS, and Miri push runs
-   to succeed on that exact main SHA. Dispatch `release.yml` from main with that
+1. Merge the reviewed release changes and wait for CI, Windows, macOS, and Miri
+   push runs to succeed on that exact main SHA. Dispatch `release.yml` from main with that
    full SHA and version `0.0.1`.
 2. Let `verify` finish, then leave the `crates-io` publish job waiting for
    approval. `verify` generates the ignored root lock exactly once and exports
