@@ -883,6 +883,18 @@ jobs:
     - name: Run test
       run: cargo test --all-features --no-fail-fast -- --quiet
 
+    # THE PARSER LAYERS' RECORD, AND THE ONE STEP OF THIS JOB THAT CANNOT FAIL IT. The layers'
+    # compile-time pins (`smear-parser/src/layer/mod.rs`, `__pins`) are enforced by `Run test`
+    # above and their error codes by `coverage`; what neither shows is the compiler's own text,
+    # because a passing doctest prints nothing. `--nocapture` prints, for each pin and twin, what
+    # the compiler said of it; `--include-ignored` also runs the two `ignore` blocks that record,
+    # without pinning, what the lossless layer's inherent method does with a `String`; and one
+    # thread keeps each block's output in one piece. It records, so it does not gate.
+    - name: the parser layers' pins, with the compiler's text (recorded)
+      if: ${{ !cancelled() }}
+      continue-on-error: true
+      run: cargo test -p smear-parser --all-features --doc -- --include-ignored --nocapture --test-threads=1 layer::__pins
+
   # Build the documentation under `-D warnings`.
   #
   # An intra-doc link is a compile-time reference, not prose: it resolves against
@@ -1540,23 +1552,26 @@ jobs:
         # It is this leg the decision rests on, because this is the repository's ONLY nightly
         # `cargo test --doc`. A `compile_fail,EXXXX` fence has its ERROR CODE checked only by a
         # nightly rustdoc; on stable a snippet that fails with some other code satisfies the fence
-        # and the run is green. So every coded fence in the workspace — 37 today, across
-        # `smear-lexer` (18), `smear-parser` (17) and `graphql-proto` (2) — is enforced here or
-        # nowhere, and this is the one leg that enforces all of them. There is no second nightly
-        # doctest step because none is needed: the audit of al8n/smear#173 found no coded fence
-        # whose item needs a feature this feature set lacks, and none whose point is that a feature
-        # is OFF. The gates, by what the fence's item needs; the heap is on through `std`, named
-        # here, and every item but `keyword!` needs it:
+        # and the run is green. So every coded fence in the workspace — 47 today, across
+        # `smear-lexer` (18), `smear-parser` (26), `graphql-proto` (2) and `smear-analysis` (1) — is
+        # enforced here or nowhere, and this is the one leg that enforces all of them. There is no
+        # second nightly doctest step because none is needed: the audit of al8n/smear#173 found no
+        # coded fence whose item needs a feature this feature set lacks, and none whose point is
+        # that a feature is OFF. The gates, by what the fence's item needs; the heap is on through
+        # `std`, named here, and every item but `keyword!` needs it:
         #   - no capability: `graphql-proto` (2); `smear-lexer`'s `keyword!` (1), the string
-        #     carriers under `string_lexer` (11)
+        #     carriers under `string_lexer` (11); `smear-analysis`'s `Primitive` (1)
         #   - `graphql`: `smear-lexer`'s `LosslessLexer` accessors (3); `smear-parser`'s
         #     `graphql::ast` hash-key fences (4: `OperationType` and the three `type_system`
         #     locations) and `value::nesting`'s `Leaf` fences under a `cfg_attr(graphql, doc)` (5)
         #   - `graphqlx`: `smear-lexer`'s `LosslessLexer` accessors (3); `smear-parser`'s
-        #     `graphqlx::ast::OperationType` (1) and `value::nesting`'s `cfg_attr(graphqlx, doc)`
-        #     fences (3)
+        #     `graphqlx::ast::OperationType` (1), `value::nesting`'s `cfg_attr(graphqlx, doc)`
+        #     fences (3), and `layer::__pins`' fences over the syntactic layer and a sink (5)
         #   - `graphql`, `rowan` and `std`: the crate-root cross-dialect cast fence (1), a
         #     `cfg_attr(all(graphql, rowan, std), doc)`
+        #   - `graphqlx`, `rowan` and `std`: `layer::__pins`' fences over the lossless layer (2)
+        #   - `graphqlx`, `rowan`, `std` and `bytes_1`: `layer::__pins`' fences over a `Bytes` body
+        #     (2), which is why `bytes_1` is named below
         #   - `materialized-numbers`: `IntOverflow::checked`, `MaterializedInt` and the last
         #     `value::nesting` fence (3), all behind `#[cfg(feature = "materialized-numbers")]` or
         #     a `cfg_attr` on it
@@ -1565,7 +1580,7 @@ jobs:
         # smoke member's edge to carry it.
         run: |
           cargo llvm-cov --no-default-features \
-            --features std,graphql,graphqlx,rowan_0_17,parser,materialized-numbers \
+            --features std,graphql,graphqlx,rowan_0_17,parser,materialized-numbers,bytes_1 \
             --doctests --workspace \
             --cobertura --output-path cobertura.xml
       - name: Upload to codecov.io

@@ -451,3 +451,236 @@ pub(crate) mod sealed {
   #[cfg(all(feature = "rowan_0_17", feature = "std"))]
   impl<D: ?Sized> Sealed for super::Lossless<D> {}
 }
+
+// ── The layers' compile-time pins ──────────────────────────────────────────────────────────────
+//
+// Each `compile_fail` block sits beside a block that compiles and differs from it only in what the
+// pin is about. A `compile_fail` passes for any error, a typo included, so the twin is what says a
+// pin fails for its own reason; the error code says which, and rustdoc checks a code on nightly
+// only. Each section is gated as the names its blocks use, so a build without a feature has neither
+// the pin nor its twin.
+//
+// The two `ignore` blocks record and do not pin: what the lossless layer's inherent method does
+// with a `String`, while `str` is the one source that layer reads. CI runs them with
+// `--include-ignored` beside the pins, printing what the compiler said of each.
+#[cfg_attr(
+  all(any(feature = "std", feature = "alloc"), feature = "graphqlx"),
+  doc = r##"
+# A closure that reads the error writes its type
+
+The closure's body is checked before a layer fixes the error's type, so a body that calls a method
+on the error does not compile without the type:
+
+```compile_fail,E0282
+use core::ops::ControlFlow;
+use smear_parser::{graphqlx::Syntactic, layer::from_fn};
+
+let mut messages = Vec::new();
+let mut sink = from_fn(|error| {
+  messages.push(error.to_string());
+  ControlFlow::Continue(())
+});
+let _ = Syntactic::new().type_system_document("type T {", &mut sink);
+```
+
+and with the type on the parameter it does:
+
+```
+use core::ops::ControlFlow;
+use smear_parser::{
+  graphqlx::{Syntactic, error::GraphqlxError},
+  layer::from_fn,
+};
+
+let mut messages = Vec::new();
+let mut sink = from_fn(|error: &GraphqlxError<&str>| {
+  messages.push(error.to_string());
+  ControlFlow::Continue(())
+});
+let _ = Syntactic::new().type_system_document("type T {", &mut sink);
+assert!(!messages.is_empty());
+```
+
+# The syntactic layer reads the sources its lexer reads
+
+A `String` is not a source, and a `&String` does not coerce at a generic `&Src`:
+
+```compile_fail,E0277
+use smear_parser::graphqlx::Syntactic;
+
+let text = String::from("type T { f: Int }");
+let _ = Syntactic::new().type_system_document(&text, &mut ());
+```
+
+`String` is `AsRef<str>` and `AsRef<[u8]>`, so `as_ref` names no source:
+
+```compile_fail,E0283
+use smear_parser::graphqlx::Syntactic;
+
+let text = String::from("type T { f: Int }");
+let _ = Syntactic::new().type_system_document(text.as_ref(), &mut ());
+```
+
+A `&&str` makes the source `&str`, which is a tokora source the lexer does not read:
+
+```compile_fail,E0277
+use smear_parser::graphqlx::Syntactic;
+
+let text: &str = "type T { f: Int }";
+let _ = Syntactic::new().type_system_document(&text, &mut ());
+```
+
+The three, with the `str` passed:
+
+```
+use smear_parser::graphqlx::Syntactic;
+
+let text = String::from("type T { f: Int }");
+let parsed = Syntactic::new()
+  .type_system_document(text.as_str(), &mut ())
+  .expect("a document");
+assert!(parsed.is_valid());
+
+let text: &str = "type T { f: Int }";
+let parsed = Syntactic::new()
+  .type_system_document(text, &mut ())
+  .expect("a document");
+assert!(parsed.is_valid());
+```
+
+# A consumer generic over the source states the source's bound
+
+The trait's declaration asks nothing of `Src`, and its methods ask `Src: Source<usize>`:
+
+```compile_fail,E0277
+use smear_parser::graphqlx::Layer;
+
+fn read<'s, Src: ?Sized, P: Layer<'s, Src>>(parser: &P, source: &'s Src) -> bool {
+  parser.type_system_document(source, &mut ()).is_ok()
+}
+```
+
+and with the bound stated it compiles:
+
+```
+use smear_parser::graphqlx::{Layer, Syntactic};
+use tokora::Source;
+
+fn read<'s, Src: Source<usize> + ?Sized, P: Layer<'s, Src>>(parser: &P, source: &'s Src) -> bool {
+  parser.type_system_document(source, &mut ()).is_ok()
+}
+
+assert!(read(&Syntactic::new(), "type T { f: Int }"));
+```
+"##
+)]
+#[cfg_attr(
+  all(feature = "graphqlx", feature = "rowan_0_17", feature = "std"),
+  doc = r##"
+# The lossless layer reads `str` and nothing else
+
+Bytes through the inherent method:
+
+```compile_fail,E0308
+use smear_parser::graphqlx::Lossless;
+
+let bytes: &[u8] = b"type T { f: Int }";
+let _ = Lossless::new().type_system_document(bytes, &mut ());
+```
+
+and through the trait:
+
+```compile_fail,E0277
+use smear_parser::graphqlx::{Layer, Lossless};
+
+let bytes: &[u8] = b"type T { f: Int }";
+let _ = Layer::type_system_document(&Lossless::new(), bytes, &mut ());
+```
+
+The two, with the bytes decoded first:
+
+```
+use smear_parser::graphqlx::{Layer, Lossless};
+
+let bytes: &[u8] = b"type T { f: Int }";
+let text = core::str::from_utf8(bytes).expect("UTF-8");
+let parsed = Lossless::new()
+  .type_system_document(text, &mut ())
+  .expect("short enough for a tree");
+assert!(parsed.is_valid());
+let parsed = Layer::type_system_document(&Lossless::new(), text, &mut ())
+  .expect("short enough for a tree");
+assert!(parsed.is_valid());
+```
+
+What the inherent method does with a `String` while `str` is its one source, recorded and not
+pinned:
+
+```ignore
+use smear_parser::graphqlx::Lossless;
+
+let text = String::from("type T { f: Int }");
+let parsed = Lossless::new()
+  .type_system_document(&text, &mut ())
+  .expect("short enough for a tree");
+assert!(parsed.is_valid());
+```
+
+```ignore
+use smear_parser::graphqlx::Lossless;
+
+let text = String::from("type T { f: Int }");
+let parsed = Lossless::new()
+  .type_system_document(text.as_ref(), &mut ())
+  .expect("short enough for a tree");
+assert!(parsed.is_valid());
+```
+"##
+)]
+#[cfg_attr(
+  all(
+    feature = "graphqlx",
+    feature = "rowan_0_17",
+    feature = "std",
+    feature = "bytes_1"
+  ),
+  doc = r##"
+# The lossless layer does not read a `Bytes` body
+
+Through the inherent method:
+
+```compile_fail,E0308
+use smear_parser::graphqlx::Lossless;
+
+let body = bytes_1::Bytes::from_static(b"type T { f: Int }");
+let _ = Lossless::new().type_system_document(&body, &mut ());
+```
+
+and through the trait:
+
+```compile_fail,E0277
+use smear_parser::graphqlx::{Layer, Lossless};
+
+let body = bytes_1::Bytes::from_static(b"type T { f: Int }");
+let _ = Layer::type_system_document(&Lossless::new(), &body, &mut ());
+```
+
+The two, with the body decoded first:
+
+```
+use smear_parser::graphqlx::{Layer, Lossless};
+
+let body = bytes_1::Bytes::from_static(b"type T { f: Int }");
+let text = core::str::from_utf8(&body).expect("UTF-8");
+let parsed = Lossless::new()
+  .type_system_document(text, &mut ())
+  .expect("short enough for a tree");
+assert!(parsed.is_valid());
+let parsed = Layer::type_system_document(&Lossless::new(), text, &mut ())
+  .expect("short enough for a tree");
+assert!(parsed.is_valid());
+```
+"##
+)]
+#[doc(hidden)]
+pub mod __pins {}
