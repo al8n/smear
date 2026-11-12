@@ -1143,8 +1143,8 @@ fn the_covered_set_is_every_node_kind() {
   let kinds = node_kinds();
   assert_eq!(
     kinds.len(),
-    77,
-    "GraphQLx declares 77 node kinds; the set this gate covers is {kinds:?}"
+    75,
+    "GraphQLx declares 75 node kinds; the set this gate covers is {kinds:?}"
   );
   assert_eq!(
     kinds.len() + K::IMAGE_BLOCK + 3,
