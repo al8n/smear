@@ -97,7 +97,7 @@ use super::coverage::node;
 
 use super::{
   GraphqlLosslessInput, recover,
-  recover::{CONST_VALUE_HEADS, OBJECT_FIELD_HEADS, VALUE_HEADS, opener_span},
+  recover::{CONST_VALUE_HEADS, OBJECT_FIELD_HEADS, VALUE_HEADS, is_closer, opener_span},
   trivia::{eat_if, expect, peek_kind},
 };
 
@@ -310,7 +310,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        value::<Src, Ctx>(inp, konst)
+        required_value::<Src, Ctx>(inp, konst)
       },
     )
     .parse_input(inp)
@@ -327,10 +327,25 @@ lossless_production! {
       K::DefaultValue.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Equal)?;
-        value::<Src, Ctx>(inp, Constness::Const)
+        required_value::<Src, Ctx>(inp, Constness::Const)
       },
     )
     .parse_input(inp)
+  }
+
+  /// A value where the grammar requires exactly one: after the `:` of an argument or of an
+  /// object field, and after a default's `=`. Opens no node of its own.
+  ///
+  /// A closing delimiter at the head is the closer of the block this position stands in: it is
+  /// reported and left, and the block closes on it. Every other head is [`value`]'s.
+  ///
+  /// A list calls [`value`] itself and must: its loop ends only because that recovery consumes,
+  /// so an element position that left its head would never end.
+  fn required_value<'inp, Src, Ctx>(inp, konst: Constness) {
+    if peek_kind::<Src, Ctx>(inp)?.is_some_and(is_closer) {
+      return recover::report_unexpected::<Src, Ctx>(inp, konst.value_heads());
+    }
+    value::<Src, Ctx>(inp, konst)
   }
 
   /// Dispatch on the value head. Opens **no** node of its own; the chosen production opens its

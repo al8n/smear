@@ -308,6 +308,20 @@ pub(crate) const fn starts_type(kind: Kind) -> bool {
   )
 }
 
+/// Whether `kind` closes one of this dialect's four delimiter pairs.
+///
+/// Asked where the grammar requires exactly one component — a type after a `:`, a value after an
+/// `=` — and the head starts none. A closer there is the closer of the block the position stands
+/// in, so it is reported and left for that block's own loop, where every other head is junk to
+/// consume. Consuming it would cost the block its end and everything after the block with it.
+#[inline]
+pub(crate) const fn is_closer(kind: Kind) -> bool {
+  matches!(
+    kind,
+    Kind::RParen | Kind::RBracket | Kind::RBrace | Kind::RAngle
+  )
+}
+
 // `starts_description` — the one two-kind test every described position makes. Generated from
 // Task 7's frozen macro rather than written out, so a dialect cannot forget `BlockString` in one
 // of the places it asks. It lives here beside `starts_value` and `starts_type` because it is the

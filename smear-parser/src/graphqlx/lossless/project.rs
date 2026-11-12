@@ -117,10 +117,10 @@
 //! GraphQLx's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
 //! Every one of those shapes reaches this projection looking well-formed, and each needs an
-//! answer. The population is every call that reports without building a hole — **54**
+//! answer. The population is every call that reports without building a hole — **58**
 //! `recover::report_unexpected::<…>` sites and **17** `recover::unclosed_{list,object,parens,angle}::<…>`
 //! sites across `graphqlx/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 71 are mapped** in the table below, one probe each: a text that reaches the site with a
+//! **all 75 are mapped** in the table below, one probe each: a text that reaches the site with a
 //! hole-free tree, and what this projection answers for it. The table is executable:
 //! `every_report_and_build_site_has_a_measured_answer` holds the same rows, asserts their count
 //! per file and family against the source's own spelling of each call, and measures every answer.
@@ -133,7 +133,7 @@
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Sixteen project; fifty-five refuse.** The sixteen are the lenient rows a site can leave with a
+//! **Sixteen project; fifty-nine refuse.** The sixteen are the lenient rows a site can leave with a
 //! well-formed value. The others refuse either the shape the site built, or — for the unclosed
 //! sites whose definition the parser cannot finish at end of input — the rubble the document is
 //! left holding.
@@ -153,6 +153,7 @@
 //! | `document.rs` | report | `mod m` | a constituent with an image | `MissingChild { ModDefinition }` |
 //! | `document.rs` | unclosed | `mod m {` | `}` of `ModDefinition` — **no image** | **projects** |
 //! | `document.rs` | report | `mod m {}` (executable root) | nothing — a present module is refused | `UnexpectedChild { ExecutableDocument, ModDefinition }` |
+//! | `document.rs` | report | `mod m { "d" }` | a constituent with an image — the description is rubble | `UnexpectedChild { ModDefinition, InlineString }` |
 //! | `executable.rs` | report | `query Q() { f }` (executable root) | a constituent with an image | `MissingChild { VariablesDefinition }` |
 //! | `executable.rs` | report | the empty document (executable root) | a constituent with an image | `MissingChild { ExecutableDocument }` |
 //! | `executable.rs` | unclosed | `query Q($a: Int` (executable root) | `)` of `VariablesDefinition` — **no image** | `UnexpectedChild { ExecutableDocument, Name }` |
@@ -204,13 +205,16 @@
 //! | `extension.rs` | report | `extend enum E` | a constituent with an image | `MissingChild { EnumTypeExtension }` |
 //! | `extension.rs` | report | `extend schema` | a constituent with an image | `MissingChild { SchemaExtension }` |
 //! | `extension.rs` | report | `extend directive @d` | a constituent with an image | `MissingChild { DirectiveExtension }` |
+//! | `extension.rs` | report | `mod m { extend }` | a constituent with an image — the `extend` is rubble | `UnexpectedChild { ModDefinition, Name }` |
 //! | `value.rs` | report | `type T { f(a: Int = $v): Int }` | nothing — a present token is refused | `UnexpectedChild { DefaultValue, VariableValue }` |
+//! | `value.rs` | report | `{ f(a: ) }` | a constituent with an image | `MissingChild { Argument }` |
 //! | `value.rs` | unclosed | `{ f(a: [1` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: set!{1` | `}` of `SetValue` — **no image** | **projects** |
 //! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: A<B` | `>` of `TypeGenerics` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: [Int` | `]` of `ListType` — **no image** | **projects** |
+//! | `ty.rs` | report | `type T { f: }` | a constituent with an image | `MissingChild { FieldDefinition }` |
 //!
 //! The rows are what the named cells pin by shape, where a shape has one:
 //!
@@ -218,6 +222,7 @@
 //! |---|---|---|
 //! | a present-but-empty required container | `MissingChild` | `a_present_but_empty_required_container_refuses` |
 //! | a variable in a constant position | `UnexpectedChild` | `a_variable_in_a_constant_position_refuses_through_both_new_containers` |
+//! | **a type or a value missing in front of a closer** | `MissingChild` over the node that wants it — the closer is left for its block, so the tree has no hole | `a_missing_constituent_refuses` |
 //! | a description in front of an extension or a `use` item | `UnexpectedChild { parent: Document, found: InlineString }` — the string stays **outside** the node, so it is rubble at document level | `a_described_use_item_refuses_as_rubble` |
 //! | **a description in front of a shorthand operation** | `UnexpectedChild { parent: OperationDefinition, found: InlineString }` — here the string is **inside** the node | `a_described_shorthand_refuses_and_its_recovery_is_not_complete` |
 //! | an enum value named `true`, `false` or `null` | `SemanticRule` | `an_enum_value_named_true_refuses` |

@@ -978,9 +978,9 @@ fn the_lost_node_class_refuses() {
 
 #[test]
 fn the_recovered_in_place_class_refuses() {
-  // `type T { x: }` keeps its field-definition node and hangs an `Error` hole where the type
+  // `type T { x: ! }` keeps its field-definition node and hangs an `Error` hole where the type
   // should be. The hole is the refusal.
-  let kind = refuse("type T { x: }");
+  let kind = refuse("type T { x: ! }");
   assert_eq!(
     kind,
     ProjectErrorKind::UnexpectedChild {
@@ -1153,9 +1153,9 @@ fn a_divergence_in_bytes_no_constructor_reads_refuses() {
 
 #[test]
 fn a_missing_constituent_refuses() {
-  // No corpus entry reaches this: every shape the recovery produces either keeps the constituent
-  // or leaves an `Error` hole, which is refused earlier. So the witness is synthetic — a field
-  // definition with a name and no type, the shape a future recovery change could start emitting.
+  // A field definition with a name and no type: the shape the parser builds for a type missing
+  // in front of a closer, which it reports and leaves (`invalid_missing_field_type`). The tree is
+  // written out here, so the refusal is pinned at the projection whatever the parser builds.
   let text = "type T{f:}";
   let mut tree = Tree::new();
   tree.open(K::Document);
@@ -3734,6 +3734,14 @@ const SITES: &[Site] = &[
     Absent::Token(K::ListType, "]"),
   ),
   (
+    "ty.rs",
+    "report",
+    "type T { f: }",
+    Root::Mixed,
+    "MissingChild FieldDefinition",
+    Absent::Imaged,
+  ),
+  (
     "value.rs",
     "unclosed",
     "{ f(a: [1",
@@ -3756,6 +3764,14 @@ const SITES: &[Site] = &[
     Root::Mixed,
     "UnexpectedChild DefaultValue Variable",
     Absent::Not,
+  ),
+  (
+    "value.rs",
+    "report",
+    "{ f(a: ) }",
+    Root::Mixed,
+    "MissingChild Argument",
+    Absent::Imaged,
   ),
 ];
 
@@ -3937,7 +3953,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (39, 11),
+    (41, 11),
     "the two families' populations"
   );
 

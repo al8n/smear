@@ -185,6 +185,18 @@ pub(crate) const ROOT_OPERATION_TYPES_HEADS: &[Kind] = &[Kind::LBrace];
 
 pub(crate) use crate::lossless::recover::opener_span;
 
+/// Whether `kind` closes one of GraphQL's three delimiter pairs.
+///
+/// Asked where the grammar requires exactly one component — a type after a `:`, a value after
+/// an `=` — and the head starts none. A closer there is the closer of the block the position
+/// stands in, so it is reported and left for that block's own loop, where every other head is
+/// junk to consume. Consuming it would cost the block its end and everything after the block
+/// with it.
+#[inline]
+pub(crate) const fn is_closer(kind: Kind) -> bool {
+  matches!(kind, Kind::RParen | Kind::RBracket | Kind::RBrace)
+}
+
 /// Where a recovery is willing to stop: a token that could start something the caller knows
 /// how to parse, or a closer the enclosing shape knows how to consume.
 ///

@@ -47,7 +47,7 @@ use super::{
   directive::directives,
   generic::extension_name,
   recover,
-  recover::{EXTENSION_TAIL_HEADS, TYPE_EXTENSION_HEADS},
+  recover::{EXTENSION_TAIL_HEADS, TYPE_EXTENSION_HEADS, is_closer},
   trivia::{expect, peek_as, peek_kind},
   value::Constness,
 };
@@ -270,10 +270,17 @@ lossless_production! {
       Some(Keyword::Input) => input_object_type_extension::<Src, Ctx>(inp, mark),
       Some(Keyword::Schema) => schema_extension::<Src, Ctx>(inp, mark),
       Some(Keyword::Directive) => directive_extension::<Src, Ctx>(inp, mark),
-      // A name that is none of the eight, or no name at all. Reported and skipped — `unexpected`
-      // consumes at least one token whenever input remains, which is the document loops' only
-      // termination argument. The mark is left unspent and materializes into nothing.
-      _ => recover::unexpected::<Src, Ctx>(inp, TYPE_EXTENSION_HEADS),
+      // A name that is none of the eight, or no name at all. Reported and skipped, except a
+      // closing delimiter: that is the closer of the body this extension stands in, so it is
+      // reported and left, and a module ends where it was written. No loop's progress rests on
+      // this arm, the `extend` being consumed already. The mark is left unspent and materializes
+      // into nothing.
+      _ => {
+        if peek_kind::<Src, Ctx>(inp)?.is_some_and(is_closer) {
+          return recover::report_unexpected::<Src, Ctx>(inp, TYPE_EXTENSION_HEADS);
+        }
+        recover::unexpected::<Src, Ctx>(inp, TYPE_EXTENSION_HEADS)
+      }
     }
   }
 

@@ -66,7 +66,7 @@ use super::{
   GraphqlLosslessInput, recover,
   recover::{ARGUMENT_HEADS, opener_span},
   trivia::{eat_if, expect, peek_kind},
-  value::{Constness, value},
+  value::{Constness, required_value},
 };
 
 use crate::lossless::{lossless_drivers, lossless_production};
@@ -86,7 +86,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        value::<Src, Ctx>(inp, konst)
+        required_value::<Src, Ctx>(inp, konst)
       },
     )
     .parse_input(inp)

@@ -87,13 +87,18 @@
 //! [`only_the_recorded_nodes_open_on_their_leading_trivia`] is what says so on every run rather than
 //! once.
 //!
-//! Two shapes were read and judged deliberate, both inherited from Phase A's reading: a member
-//! whose type is missing recovers by consuming the enclosing `}` into an `Error`, so the
-//! surrounding block closes without a right brace; and trailing trivia attaches to whichever node
-//! was still open at the peek that crossed it, which is the preceding sibling inside a list and the
-//! enclosing list after its last element. Both are attachment policy rather than loss.
+//! One shape was read and judged deliberate, inherited from Phase A's reading: trailing trivia
+//! attaches to whichever node was still open at the peek that crossed it, which is the preceding
+//! sibling inside a list and the enclosing list after its last element. It is attachment policy
+//! rather than loss.
 //!
-//! **The second of those was left as prose, and prose is what a re-bless walks through.** Reading a
+//! A missing component is not such a shape, and the goldens hold the rule. A member whose type is
+//! missing reports at the closer that stands where the type should and leaves it, so the
+//! surrounding block closes on its own delimiter (`invalid_missing_field_type`,
+//! `invalid_x_empty_type_generics`, `shape_kept_object_type_definition`) and a definition after it
+//! is parsed whole.
+//!
+//! **That policy was left as prose, and prose is what a re-bless walks through.** Reading a
 //! policy once and judging it deliberate is not the same as pinning it: the goldens were the only
 //! thing holding the placement, and an `UPDATE_GOLDEN=1` run rewrites goldens. smear#131 measured
 //! what that costs — an `expect` that skips trivia on its accepting branch as well as before it

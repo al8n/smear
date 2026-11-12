@@ -1810,9 +1810,9 @@ fn the_lost_node_class_refuses() {
 
 #[test]
 fn the_recovered_in_place_class_refuses() {
-  // `type T { f: }` keeps its field-definition node and hangs an `Error` hole where the type
+  // `type T { f: ! }` keeps its field-definition node and hangs an `Error` hole where the type
   // should be. The hole is the refusal.
-  let kind = refuse(&entry("invalid_missing_field_type.graphqlx"));
+  let kind = refuse("type T { f: ! }");
   assert_eq!(
     kind,
     ProjectErrorKind::UnexpectedChild {
@@ -2166,10 +2166,9 @@ fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
 
 #[test]
 fn a_missing_constituent_refuses() {
-  // No corpus entry reaches this at a *type* position: every shape the recovery produces either
-  // keeps the constituent or leaves an `Error` hole, which is refused earlier. So the witness is
-  // synthetic — a field definition with a name and no type, the shape a future recovery change
-  // could start emitting.
+  // A field definition with a name and no type: the shape the parser builds for a type missing
+  // in front of a closer, which it reports and leaves (`invalid_missing_field_type`). The tree is
+  // written out here, so the refusal is pinned at the projection whatever the parser builds.
   let text = "type T{f:}";
   let mut tree = Tree::new();
   tree.open(K::Document);
@@ -3567,7 +3566,7 @@ fn a_dangling_separator_refuses_in_every_separated_walk() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// the report-and-build table, 71/71
+// the report-and-build table, 75/75
 // ---------------------------------------------------------------------------------------------
 
 /// Which door a probe goes through.
@@ -3712,6 +3711,14 @@ const SITES: &[Site] = &[
     Root::Executable,
     "UnexpectedChild ExecutableDocument ModDefinition",
     Absent::Not,
+  ),
+  (
+    "document.rs",
+    "report",
+    "mod m { \"d\" }",
+    Root::Mixed,
+    "UnexpectedChild ModDefinition InlineString",
+    Absent::Imaged,
   ),
   (
     "executable.rs",
@@ -4122,12 +4129,28 @@ const SITES: &[Site] = &[
     Absent::Imaged,
   ),
   (
+    "extension.rs",
+    "report",
+    "mod m { extend }",
+    Root::Mixed,
+    "UnexpectedChild ModDefinition Name",
+    Absent::Imaged,
+  ),
+  (
     "value.rs",
     "report",
     "type T { f(a: Int = $v): Int }",
     Root::Mixed,
     "UnexpectedChild DefaultValue VariableValue",
     Absent::Not,
+  ),
+  (
+    "value.rs",
+    "report",
+    "{ f(a: ) }",
+    Root::Mixed,
+    "MissingChild Argument",
+    Absent::Imaged,
   ),
   (
     "value.rs",
@@ -4176,6 +4199,14 @@ const SITES: &[Site] = &[
     Root::Mixed,
     "Ok",
     Absent::Token(K::ListType, "]"),
+  ),
+  (
+    "ty.rs",
+    "report",
+    "type T { f: }",
+    Root::Mixed,
+    "MissingChild FieldDefinition",
+    Absent::Imaged,
   ),
 ];
 
@@ -4358,7 +4389,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (54, 17),
+    (58, 17),
     "the two families' populations"
   );
 

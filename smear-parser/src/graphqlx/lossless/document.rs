@@ -75,7 +75,8 @@ use super::{
   recover,
   recover::{
     DEFINITION_HEADS, DESCRIBED_DEFINITION_HEADS, EXECUTABLE_ENTRY_HEADS, MOD_BODY_HEADS,
-    MOD_ITEM_HEADS, NAME_HEADS, TYPE_SYSTEM_ENTRY_HEADS, opener_span, starts_description,
+    MOD_ITEM_HEADS, NAME_HEADS, TYPE_SYSTEM_ENTRY_HEADS, is_closer, opener_span,
+    starts_description,
   },
   trivia::{eat_if, expect, peek_as, peek_kind},
   use_tree::use_definition,
@@ -299,7 +300,16 @@ lossless_production! {
         type_system_extension::<Src, Ctx>(inp, extend_mark)
       }
       Some(_) => type_system_definition_at::<Src, Ctx>(inp, mark),
-      None => recover::unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS),
+      None => {
+        // After a description, a closing delimiter is the closer of the body this item stands
+        // in: reported and left, so a module ends where it was written. The description was this
+        // turn's progress. With nothing consumed the head is skipped whatever it is, because the
+        // roots' loops end only if every turn consumes.
+        if described && peek_kind::<Src, Ctx>(inp)?.is_some_and(is_closer) {
+          return recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS);
+        }
+        recover::unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS)
+      }
     }
   }
 

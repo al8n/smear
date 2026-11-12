@@ -109,10 +109,10 @@
 //!
 //! GraphQL's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
-//! The population is every call that reports without building a hole — **39**
+//! The population is every call that reports without building a hole — **41**
 //! `recover::report_unexpected::<…>` sites and **11** `recover::unclosed_{list,object,parens}::<…>`
 //! sites across `graphql/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 50 are mapped** below, one probe each: a text that reaches the site with a hole-free tree,
+//! **all 52 are mapped** below, one probe each: a text that reaches the site with a hole-free tree,
 //! and what this projection answers for it. `every_report_and_build_site_has_a_measured_answer`
 //! holds the same rows, asserts their count per file and family against the source's own spelling
 //! of each call, and measures every answer.
@@ -120,7 +120,7 @@
 //! **The "what the site leaves out" column is where the lenient set comes from.** A site either
 //! leaves out one token with **no AST image** (a closer, an `on`), leaves out a constituent the AST
 //! holds (a member, a name, a tail — never lenient), or leaves nothing out and reports something
-//! present (a description, a spelling a rule refuses). **Eleven project; thirty-nine refuse.**
+//! present (a description, a spelling a rule refuses). **Eleven project; forty-one refuse.**
 //!
 //! | file | site | probe | what the site leaves out | the projection |
 //! |---|---|---|---|---|
@@ -171,9 +171,11 @@
 //! | `definition.rs` | report | `schema @k` | a constituent with an image | `MissingChild { SchemaDefinition }` |
 //! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: [Int` | `]` of `ListType` — **no image** | **projects** |
+//! | `ty.rs` | report | `type T { f: }` | a constituent with an image | `MissingChild { FieldDefinition }` |
 //! | `value.rs` | unclosed | `{ f(a: [1` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
 //! | `value.rs` | report | `type T { f(a: Int = $v): Int }` | nothing — a present node is refused | `UnexpectedChild { DefaultValue, Variable }` |
+//! | `value.rs` | report | `{ f(a: ) }` | a constituent with an image | `MissingChild { Argument }` |
 //!
 //! ## The missing-token class: where an absent token still projects
 //!

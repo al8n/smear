@@ -73,13 +73,16 @@
 //! [`only_the_recorded_nodes_open_on_their_leading_trivia`], which is that eye-reading turned into
 //! a standing check, so neither this site nor a new one can open on its trivia unnoticed.
 //!
-//! Two further shapes were read and judged deliberate: a `FieldDefinition` whose type is missing
-//! recovers by consuming the enclosing `}` into an `Error`, so the surrounding `FieldsDefinition`
-//! closes without a right brace; and trailing trivia attaches to whichever node was still open at
-//! the peek that crossed it, which is the preceding sibling inside a list and the enclosing list
-//! after its last element. Both are recovery and attachment policy rather than loss.
+//! One further shape was read and judged deliberate: trailing trivia attaches to whichever node
+//! was still open at the peek that crossed it, which is the preceding sibling inside a list and
+//! the enclosing list after its last element. It is attachment policy rather than loss.
 //!
-//! **The second of those was left as prose, and prose is what a re-bless walks through.** Reading
+//! A missing component is not such a shape, and the goldens hold the rule. A `FieldDefinition`
+//! whose type is missing reports at the `}` that stands where the type should and leaves it, so
+//! the surrounding `FieldsDefinition` closes on its own brace (`invalid_missing_field_type`,
+//! `shape_kept_object_type_definition`) and a definition after it is parsed whole.
+//!
+//! **The attachment policy was left as prose, and prose is what a re-bless walks through.** Reading
 //! the policy once and judging it deliberate is not the same as pinning it: the goldens were the
 //! only thing holding the placement, and an `UPDATE_GOLDEN=1` run rewrites goldens. smear#131
 //! measured what that costs — an `expect` that skips trivia on its accepting branch as well as

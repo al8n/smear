@@ -36,7 +36,7 @@ use super::coverage::node;
 
 use super::{
   GraphqlxLosslessInput, recover,
-  recover::{PATH_HEADS, TYPE_HEADS, opener_span, starts_type},
+  recover::{PATH_HEADS, TYPE_HEADS, is_closer, opener_span, starts_type},
   trivia::{eat_if, expect, peek_kind},
 };
 
@@ -110,8 +110,8 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LAngle)?;
         let open = opener_span(inp.span().end());
-        // The mandatory first argument. `type_ref` recovers on a head that starts no type, so an
-        // empty `<>` reports here and the list still closes on its own delimiter.
+        // The mandatory first argument. `type_ref` reports a closer that stands where a type
+        // should and leaves it, so an empty `<>` reports here and the list closes on its own `>`.
         type_ref::<Src, Ctx>(inp)?;
         loop {
           if eat_if::<Src, Ctx>(inp, Kind::RAngle)? {
@@ -213,6 +213,11 @@ lossless_production! {
         definition_type_path::<Src, Ctx>(inp)
       }
       Some(Kind::LBracket) => list_type::<Src, Ctx>(inp),
+      // No type starts here, and the head closes a block: the block this position stands in.
+      // Reported and left, so that block closes on it and what follows the block is still parsed.
+      // Every caller has consumed a token of its own before it asks for a type, and goes on to a
+      // loop that tests its closer first, so leaving the head costs no progress.
+      Some(head) if is_closer(head) => recover::report_unexpected::<Src, Ctx>(inp, TYPE_HEADS),
       // No type starts here. Report and consume, exactly as `value`'s dispatcher does: an `Err`
       // would abort every enclosing production.
       _ => recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS),

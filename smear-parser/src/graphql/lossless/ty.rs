@@ -29,8 +29,9 @@
 //!   `trivia_does_not_change_a_type_reference_shape`, which asserts the node's text.
 //! - **A head that starts no type is recovered, not returned as an error.** apollo pops the
 //!   offending token and reports; this suite routes it to `recover::unexpected`, which
-//!   reports *and* attributes the skipped region to an `Error` node, and — the load-bearing
-//!   half — guarantees progress, so a `type_ref` called from inside a loop cannot stall.
+//!   reports *and* attributes the skipped region to an `Error` node. The one head it leaves
+//!   where it stands is a closing delimiter, which is reported and is still the enclosing
+//!   block's to close on: `type T { f: }` keeps its `}`, and the definition after it.
 //! - **`ListType` keeps looking for its `]`.** apollo parses the inner type and then `expect`s
 //!   the bracket, so `[Int Foo]` leaves `Foo]` to the caller. Here junk between the element and
 //!   the closer is attributed to an `Error` node and the list still closes on its own
@@ -50,7 +51,7 @@ use super::coverage::{node, node_at};
 
 use super::{
   GraphqlLosslessInput, recover,
-  recover::{TYPE_HEADS, opener_span},
+  recover::{TYPE_HEADS, is_closer, opener_span},
   trivia::{eat_if, expect, peek_kind, try_eat},
 };
 
@@ -112,7 +113,8 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::LBracket)?;
         let open = opener_span(inp.span().end());
         // The element type. `type_ref` recovers on a head that starts no type, so this call
-        // reports rather than aborting the list — and it, too, always makes progress.
+        // reports rather than aborting the list. A closer is the one head it leaves, and the
+        // loop below takes it: a `]` as this list's own, any other as junk.
         type_ref::<Src, Ctx>(inp)?;
         loop {
           if eat_if::<Src, Ctx>(inp, Kind::RBracket)? {
@@ -146,6 +148,13 @@ lossless_production! {
     match head {
       Some(Kind::LBracket) => list_type::<Src, Ctx>(inp)?,
       Some(Kind::Identifier) => named_type::<Src, Ctx>(inp)?,
+      // No type starts here, and the head closes a block: the block this position stands in.
+      // Reported and left, so that block closes on it and what follows the block is still
+      // parsed. Every caller has consumed a token of its own before it asks for a type, and goes
+      // on to a loop that tests its closer first, so leaving the head costs no progress.
+      Some(head) if is_closer(head) => {
+        return recover::report_unexpected::<Src, Ctx>(inp, TYPE_HEADS);
+      }
       // No type starts here. Report and consume, exactly as `value`'s dispatcher does: an `Err`
       // would abort every enclosing production, and the mark is simply left unspent — there is
       // no inner type for a `NonNullType` to wrap, so the `!` probe is skipped too.
