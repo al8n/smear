@@ -1,0 +1,11 @@
+Root@0..18
+  Document@0..18
+    ScalarTypeExtension@0..18
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..13 "scalar"
+      Space@13..14 " "
+      ExtensionName@14..18
+        Path@14..18
+          Name@14..17 "Url"
+          Newline@17..18 "\n"

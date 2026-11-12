@@ -1,0 +1,5 @@
+mod m {
+  type T { f: Int }
+}
+type Query { t: m::T }
+{ t }

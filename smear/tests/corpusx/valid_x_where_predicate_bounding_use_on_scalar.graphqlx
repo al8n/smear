@@ -1,0 +1,1 @@
+scalar S<A, use> where A: Node use: Node

@@ -1,0 +1,12 @@
+Root@0..35
+  Document@0..35
+    ModDefinition@0..34
+      InlineString@0..21 "\"Shared media types.\""
+      Newline@21..22 "\n"
+      Name@22..25 "mod"
+      Space@25..26 " "
+      Name@26..31 "media"
+      Space@31..32 " "
+      LBrace@32..33 "{"
+      RBrace@33..34 "}"
+    Newline@34..35 "\n"

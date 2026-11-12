@@ -1,9 +1,9 @@
 //! GraphQLx type-system extension productions.
 
 use super::*;
-use crate::type_system::{
+use crate::graphqlx::ast::{
   EnumTypeExtensionData, InputObjectTypeExtensionData, InterfaceTypeExtensionData,
-  ObjectTypeExtensionData, SchemaExtensionData, UnionTypeExtensionData,
+  ObjectTypeExtensionData, ScalarTypeExtensionData, SchemaExtensionData, UnionTypeExtensionData,
 };
 
 macro_rules! extension_tail {
@@ -46,14 +46,32 @@ extension_tail!(
   [contextual],
   |inp, start| {
     let name = extension_name(inp)?;
-    let directives = match optional_const_directives(inp)? {
-      Some(directives) => directives,
-      None => return expected_definition_phase(inp, Expectation::At),
+    let implements: Option<ImplementInterfaces<GraphqlxSlice<'inp, Src>>> =
+      try_implements(inp)?.into();
+    let directives = optional_const_directives(inp)?;
+    let (end, data) = match (implements, directives) {
+      (implements, Some(directives)) => (
+        directives.span().end(),
+        ScalarTypeExtensionData::Directives {
+          implements,
+          directives,
+        },
+      ),
+      (Some(implements), None) => (
+        implements.span().end(),
+        ScalarTypeExtensionData::Implements(implements),
+      ),
+      (None, None) => {
+        return expected_definition_phase(
+          inp,
+          Expectation::Production("`implements` or directives"),
+        );
+      }
     };
     Ok(ScalarTypeExtension::new(
-      SimpleSpan::new(start, directives.span().end()),
+      SimpleSpan::new(start, end),
       name,
-      directives,
+      data,
     ))
   }
 );
@@ -262,26 +280,38 @@ extension_tail!(
   [contextual],
   |inp, start| {
     let name = extension_name(inp)?;
+    let implements: Option<ImplementInterfaces<GraphqlxSlice<'inp, Src>>> =
+      try_implements(inp)?.into();
     let directives = optional_const_directives(inp)?;
     let member_types = constrained_extension_members(inp)?;
     let end = member_types.as_ref().map_or_else(
       || {
-        directives
-          .as_ref()
-          .map_or(start, |directives| directives.span().end())
+        directives.as_ref().map_or_else(
+          || {
+            implements
+              .as_ref()
+              .map_or(start, |implements| implements.span().end())
+          },
+          |directives| directives.span().end(),
+        )
       },
       |members| members.span().end(),
     );
-    let data = match (directives, member_types) {
-      (directives, Some(member_types)) => UnionTypeExtensionData::Members {
+    let data = match (implements, directives, member_types) {
+      (implements, directives, Some(member_types)) => UnionTypeExtensionData::Members {
+        implements,
         directives,
         member_types,
       },
-      (Some(directives), None) => UnionTypeExtensionData::Directives(directives),
-      (None, None) => {
+      (implements, Some(directives), None) => UnionTypeExtensionData::Directives {
+        implements,
+        directives,
+      },
+      (Some(implements), None, None) => UnionTypeExtensionData::Implements(implements),
+      (None, None, None) => {
         return expected_definition_phase(
           inp,
-          Expectation::Production("directives or union member types"),
+          Expectation::Production("`implements`, directives or union member types"),
         );
       }
     };
@@ -299,27 +329,39 @@ extension_tail!(
   [contextual],
   |inp, start| {
     let name = extension_name(inp)?;
+    let implements: Option<ImplementInterfaces<GraphqlxSlice<'inp, Src>>> =
+      try_implements(inp)?.into();
     let directives = optional_const_directives(inp)?;
     let enum_values_definition: Option<EnumValuesDefinition<GraphqlxSlice<'inp, Src>>> =
       try_enum_values_definition(inp)?.into();
     let end = enum_values_definition.as_ref().map_or_else(
       || {
-        directives
-          .as_ref()
-          .map_or(start, |directives| directives.span().end())
+        directives.as_ref().map_or_else(
+          || {
+            implements
+              .as_ref()
+              .map_or(start, |implements| implements.span().end())
+          },
+          |directives| directives.span().end(),
+        )
       },
       |values| values.span().end(),
     );
-    let data = match (directives, enum_values_definition) {
-      (directives, Some(enum_values_definition)) => EnumTypeExtensionData::Values {
+    let data = match (implements, directives, enum_values_definition) {
+      (implements, directives, Some(enum_values_definition)) => EnumTypeExtensionData::Values {
+        implements,
         directives,
         enum_values_definition,
       },
-      (Some(directives), None) => EnumTypeExtensionData::Directives(directives),
-      (None, None) => {
+      (implements, Some(directives), None) => EnumTypeExtensionData::Directives {
+        implements,
+        directives,
+      },
+      (Some(implements), None, None) => EnumTypeExtensionData::Implements(implements),
+      (None, None, None) => {
         return expected_definition_phase(
           inp,
-          Expectation::Production("directives or an enum values definition"),
+          Expectation::Production("`implements`, directives or an enum values definition"),
         );
       }
     };
@@ -376,26 +418,38 @@ extension_tail!(
   [contextual],
   |inp, start| {
     let name = extension_name(inp)?;
+    let implements: Option<ImplementInterfaces<GraphqlxSlice<'inp, Src>>> =
+      try_implements(inp)?.into();
     let directives = optional_const_directives(inp)?;
     let fields_definition = constrained_extension_input_fields(inp)?;
     let end = fields_definition.as_ref().map_or_else(
       || {
-        directives
-          .as_ref()
-          .map_or(start, |directives| directives.span().end())
+        directives.as_ref().map_or_else(
+          || {
+            implements
+              .as_ref()
+              .map_or(start, |implements| implements.span().end())
+          },
+          |directives| directives.span().end(),
+        )
       },
       |fields| fields.span().end(),
     );
-    let data = match (directives, fields_definition) {
-      (directives, Some(fields_definition)) => InputObjectTypeExtensionData::Fields {
+    let data = match (implements, directives, fields_definition) {
+      (implements, directives, Some(fields_definition)) => InputObjectTypeExtensionData::Fields {
+        implements,
         directives,
         fields_definition,
       },
-      (Some(directives), None) => InputObjectTypeExtensionData::Directives(directives),
-      (None, None) => {
+      (implements, Some(directives), None) => InputObjectTypeExtensionData::Directives {
+        implements,
+        directives,
+      },
+      (Some(implements), None, None) => InputObjectTypeExtensionData::Implements(implements),
+      (None, None, None) => {
         return expected_definition_phase(
           inp,
-          Expectation::Production("directives or an input fields definition"),
+          Expectation::Production("`implements`, directives or an input fields definition"),
         );
       }
     };

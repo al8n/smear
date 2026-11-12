@@ -1,0 +1,92 @@
+Root@0..108
+  Document@0..108
+    ModDefinition@0..107
+      Name@0..3 "mod"
+      Space@3..4 " "
+      Name@4..9 "outer"
+      Space@9..10 " "
+      LBrace@10..11 "{"
+      Newline@11..12 "\n"
+      Space@12..13 " "
+      Space@13..14 " "
+      UseDefinition@14..31
+        Name@14..17 "use"
+        Space@17..18 " "
+        UseTree@18..31
+          Path@18..31
+            Caret@18..19 "^"
+            PathSeparator@19..21 "::"
+            Name@21..24 "dep"
+            PathSeparator@24..26 "::"
+            Name@26..28 "Id"
+            Newline@28..29 "\n"
+            Space@29..30 " "
+            Space@30..31 " "
+      ModDefinition@31..59
+        Name@31..34 "mod"
+        Space@34..35 " "
+        Name@35..40 "inner"
+        Space@40..41 " "
+        LBrace@41..42 "{"
+        Newline@42..43 "\n"
+        Space@43..44 " "
+        Space@44..45 " "
+        Space@45..46 " "
+        Space@46..47 " "
+        ScalarTypeDefinition@47..58
+          Name@47..53 "scalar"
+          Space@53..54 " "
+          DefinitionName@54..58
+            Name@54..55 "S"
+            Newline@55..56 "\n"
+            Space@56..57 " "
+            Space@57..58 " "
+        RBrace@58..59 "}"
+      Newline@59..60 "\n"
+      Space@60..61 " "
+      Space@61..62 " "
+      ObjectTypeDefinition@62..78
+        Name@62..66 "type"
+        Space@66..67 " "
+        DefinitionName@67..69
+          Name@67..68 "T"
+          Space@68..69 " "
+        FieldsDefinition@69..78
+          LBrace@69..70 "{"
+          Space@70..71 " "
+          FieldDefinition@71..77
+            Name@71..72 "f"
+            Colon@72..73 ":"
+            Space@73..74 " "
+            DefinitionTypePath@74..77
+              Path@74..77
+                Name@74..76 "Id"
+                Space@76..77 " "
+          RBrace@77..78 "}"
+      Newline@78..79 "\n"
+      Space@79..80 " "
+      Space@80..81 " "
+      ObjectTypeExtension@81..105
+        Name@81..87 "extend"
+        Space@87..88 " "
+        Name@88..92 "type"
+        Space@92..93 " "
+        ExtensionName@93..95
+          Path@93..95
+            Name@93..94 "T"
+            Space@94..95 " "
+        FieldsDefinition@95..105
+          LBrace@95..96 "{"
+          Space@96..97 " "
+          FieldDefinition@97..104
+            Name@97..98 "g"
+            Colon@98..99 ":"
+            Space@99..100 " "
+            DefinitionTypePath@100..104
+              Path@100..104
+                Name@100..103 "Int"
+                Space@103..104 " "
+          RBrace@104..105 "}"
+      Newline@105..106 "\n"
+      RBrace@106..107 "}"
+    Newline@107..108 "\n"

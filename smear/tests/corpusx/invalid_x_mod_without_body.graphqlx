@@ -1,0 +1,2 @@
+mod m
+type T { f: Int }

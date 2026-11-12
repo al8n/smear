@@ -105,12 +105,15 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let name = definition_name(inp)?;
+  let implements: Option<ImplementInterfaces<GraphqlxSlice<'inp, Src>>> =
+    try_implements(inp)?.into();
   let directives = optional_const_directives(inp)?;
   let enum_values_definition: Option<EnumValuesDefinition<GraphqlxSlice<'inp, Src>>> =
     try_enum_values_definition(inp)?.into();
   Ok(EnumTypeDefinition::new(
     SimpleSpan::new(start, extent_end(inp)),
     name,
+    implements,
     directives,
     enum_values_definition,
   ))
@@ -119,7 +122,7 @@ where
 definition_parser!(
   /// Parses a GraphQLx enum type definition.
   ///
-  /// GraphQLx adds generic headers, qualified paths, and `where` clauses.
+  /// GraphQLx adds generic headers, qualified paths, and an `implements` clause.
   ///
   /// See the [GraphQL Enum Type Definition specification](https://spec.graphql.org/draft/#EnumTypeDefinition).
   pub enum_type_definition,
@@ -153,7 +156,7 @@ impl_definition_api!(
 impl_definition_api!(
   /// Parses a GraphQLx enum type definition.
   ///
-  /// GraphQLx adds generic headers, qualified paths, and `where` clauses.
+  /// GraphQLx adds generic headers, qualified paths, and an `implements` clause.
   ///
   /// See the [GraphQL Enum Type Definition specification](https://spec.graphql.org/draft/#EnumTypeDefinition).
   S,

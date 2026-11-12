@@ -2,11 +2,23 @@
 //!
 //! GraphQLx extends GraphQL's lexical name and value grammar with `::` paths
 //! under an optional `~::`, `^::` or `..::` root, `set`/`map` collection
-//! constructors, generic type arguments, and `use` items.
+//! constructors, generic type arguments, `use` items and inline `mod`s.
 //! Its parsers are specialized to the concrete GraphQLx syntactic lexer while
 //! retaining source-generic, zero-copy AST slices.
+//!
+//! # What no valid GraphQL document contains
+//!
+//! The following occur in no valid GraphQL document:
+//!
+//! - `~`, `..` and `^`;
+//! - a `use` or `mod` entry;
+//! - `set!` and `map!`;
+//! - `where` or `implements` after a scalar, enum, union or input header.
+//!
+//! So every valid GraphQL document lexes and parses as GraphQL parses it, through all three
+//! document roots and every production entry point.
 
-/// GraphQLx AST aliases and dialect-specific `use` nodes.
+/// GraphQLx AST aliases and dialect-specific `use` and `mod` nodes.
 pub mod ast;
 /// GraphQLx parser errors and Tokora conversion glue.
 pub mod error;

@@ -1,0 +1,30 @@
+Root@0..46
+  Document@0..46
+    InputObjectTypeDefinition@0..45
+      Name@0..5 "input"
+      Space@5..6 " "
+      DefinitionName@6..13
+        Name@6..12 "Filter"
+        Space@12..13 " "
+      ImplementInterfaces@13..29
+        Name@13..23 "implements"
+        Space@23..24 " "
+        TypePath@24..29
+          Path@24..29
+            Name@24..28 "Node"
+            Space@28..29 " "
+      InputFieldsDefinition@29..45
+        LBrace@29..30 "{"
+        Newline@30..31 "\n"
+        Space@31..32 " "
+        Space@32..33 " "
+        InputValueDefinition@33..44
+          Name@33..38 "limit"
+          Colon@38..39 ":"
+          Space@39..40 " "
+          DefinitionTypePath@40..44
+            Path@40..44
+              Name@40..43 "Int"
+              Newline@43..44 "\n"
+        RBrace@44..45 "}"
+    Newline@45..46 "\n"

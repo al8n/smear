@@ -1,0 +1,25 @@
+Root@0..38
+  Document@0..38
+    EnumTypeExtension@0..38
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..11 "enum"
+      Space@11..12 " "
+      ExtensionName@12..19
+        Path@12..19
+          Name@12..18 "Colour"
+          Space@18..19 " "
+      ImplementInterfaces@19..35
+        Name@19..29 "implements"
+        Space@29..30 " "
+        TypePath@30..35
+          Path@30..35
+            Name@30..34 "Node"
+            Space@34..35 " "
+      Directives@35..38
+        Directive@35..38
+          At@35..36 "@"
+          TypePath@36..38
+            Path@36..38
+              Name@36..37 "d"
+              Newline@37..38 "\n"

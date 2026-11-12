@@ -23,8 +23,8 @@
 //! The contract, the error vocabulary, the span rule, the `(tree, source)` verification and the
 //! green traversal are [the substrate](crate::lossless::project)'s, and the entry shapes are the
 //! naming symmetry its header states. **Everything below that is this dialect's**: sixteen of
-//! GraphQLx's seventy-five wrappers are structurally identical to a GraphQL one, thirty-seven
-//! share a name with a different shape, and twenty-two have no GraphQL image at all. Three of those
+//! GraphQLx's seventy-six wrappers are structurally identical to a GraphQL one, thirty-seven
+//! share a name with a different shape, and twenty-three have no GraphQL image at all. Three of those
 //! differences are *mapping* divergences rather than renamings, and each one changes what a walk
 //! has to do rather than what it has to call something:
 //!
@@ -117,10 +117,10 @@
 //! GraphQLx's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
 //! Every one of those shapes reaches this projection looking well-formed, and each needs an
-//! answer. The population is every call that reports without building a hole — **51**
-//! `recover::report_unexpected::<…>` sites and **16** `recover::unclosed_{list,object,parens,angle}::<…>`
+//! answer. The population is every call that reports without building a hole — **54**
+//! `recover::report_unexpected::<…>` sites and **17** `recover::unclosed_{list,object,parens,angle}::<…>`
 //! sites across `graphqlx/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 67 are mapped** in the table below, one probe each: a text that reaches the site with a
+//! **all 71 are mapped** in the table below, one probe each: a text that reaches the site with a
 //! hole-free tree, and what this projection answers for it. The table is executable:
 //! `every_report_and_build_site_has_a_measured_answer` holds the same rows, asserts their count
 //! per file and family against the source's own spelling of each call, and measures every answer.
@@ -133,7 +133,7 @@
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Fifteen project; fifty-two refuse.** The fifteen are the lenient rows a site can leave with a
+//! **Sixteen project; fifty-five refuse.** The sixteen are the lenient rows a site can leave with a
 //! well-formed value. The others refuse either the shape the site built, or — for the unclosed
 //! sites whose definition the parser cannot finish at end of input — the rubble the document is
 //! left holding.
@@ -149,6 +149,10 @@
 //! | `document.rs` | report | `"d" extend scalar S @k` (SDL root) | nothing — a present token is refused | `UnexpectedChild { TypeSystemDocument, InlineString }` |
 //! | `document.rs` | report | the empty document | a constituent with an image | `MissingChild { Document }` |
 //! | `document.rs` | report | the empty document (SDL root) | a constituent with an image | `MissingChild { TypeSystemDocument }` |
+//! | `document.rs` | report | `mod {}` | a constituent with an image | `UnexpectedChild { ModDefinition, LBrace }` |
+//! | `document.rs` | report | `mod m` | a constituent with an image | `MissingChild { ModDefinition }` |
+//! | `document.rs` | unclosed | `mod m {` | `}` of `ModDefinition` — **no image** | **projects** |
+//! | `document.rs` | report | `mod m {}` (executable root) | nothing — a present module is refused | `UnexpectedChild { ExecutableDocument, ModDefinition }` |
 //! | `executable.rs` | report | `query Q() { f }` (executable root) | a constituent with an image | `MissingChild { VariablesDefinition }` |
 //! | `executable.rs` | report | the empty document (executable root) | a constituent with an image | `MissingChild { ExecutableDocument }` |
 //! | `executable.rs` | unclosed | `query Q($a: Int` (executable root) | `)` of `VariablesDefinition` — **no image** | `UnexpectedChild { ExecutableDocument, Name }` |
@@ -220,6 +224,7 @@
 //! | a fragment named `on` | `SemanticRule` | `a_fragment_named_on_refuses` |
 //! | an unknown directive location | `MalformedToken` | `an_unknown_directive_location_refuses` |
 //! | a `where` clause with no block to constrain | `MissingChild` | `a_where_clause_with_nothing_to_constrain_refuses` |
+//! | a `mod` in an executable document | `UnexpectedChild { parent: ExecutableDocument, found: ModDefinition }` | `a_module_in_an_executable_document_refuses` |
 //! | a block string as a `use` source | `UnexpectedChild` | `a_use_source_that_is_a_block_string_refuses` |
 //! | a root or a string source in front of a group's tree | `UnexpectedChild` at the root's sigil or at the string | `a_group_member_with_a_root_or_a_source_refuses` |
 //! | an empty `use` group | `MissingChild` | `a_present_but_empty_required_container_refuses` |
@@ -254,6 +259,7 @@
 //! | [`DirectiveDefinition`](SyntaxKind::DirectiveDefinition) | `on` | `definition.rs` report — `directive @d FIELD` |
 //! | [`ExtensionTypeGenerics`](SyntaxKind::ExtensionTypeGenerics) | `>` | `generic.rs` unclosed — `extend type T<A`; refuses either way, the extension having no tail |
 //! | [`UseTree`](SyntaxKind::UseTree) | `}` | `use_tree.rs` unclosed — `use a::{b` |
+//! | [`ModDefinition`](SyntaxKind::ModDefinition) | `}` | `document.rs` unclosed — `mod m {` |
 //! | [`DefinitionTypeGenerics`](SyntaxKind::DefinitionTypeGenerics) | `>` | `generic.rs` unclosed — `type T<A` |
 //! | [`TypeGenerics`](SyntaxKind::TypeGenerics) | `>` | `ty.rs` unclosed — `type T { f: A<B` |
 //! | [`ListType`](SyntaxKind::ListType) | `]` | `ty.rs` unclosed — `type T { f: [Int` |
@@ -268,8 +274,8 @@
 //! **This table is the criterion's whole extension, derived rather than listed.** A position is
 //! lenient iff its token has no AST image and the lossless parser builds a hole-free tree holding
 //! the node without it; the report-and-build census above enumerates every place the parser leaves
-//! a token out without a hole, and its twenty image-less rows — each witnessed by its own probe's
-//! tree — are these twenty, which the cell asserts. Three of them are witnessed only as
+//! a token out without a hole, and its twenty-one image-less rows — each witnessed by its own
+//! probe's tree — are these twenty-one, which the cell asserts. Three of them are witnessed only as
 //! **orphans**: at end of input the operation, the field or the fragment around the list cannot be
 //! finished, so the root keeps the list as a stray child of the document beside the lost
 //! definition's tokens, and every projection of such a tree refuses at the rubble. Those three,
@@ -532,6 +538,7 @@
 //! | [`DirectiveLocations`](SyntaxKind::DirectiveLocations) | `Name+` separated by `\|` | `MissingChild` | kind-level only |
 //! | [`RootOperationTypesDefinition`](SyntaxKind::RootOperationTypesDefinition) | `Root+` in `{ }` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
 //! | [`Arguments`](SyntaxKind::Arguments), [`ConstArguments`](SyntaxKind::Arguments) | `Argument*` in `( )` | `None`, extent covered | `a_written_down_empty_argument_list_is_none_with_a_span` |
+//! | a [`ModDefinition`](SyntaxKind::ModDefinition)'s body | `ModItem*` in `{ }` | an empty module | `the_projection_equals_the_parse_over_the_shared_corpus` |
 //! | a list, set, map or object **value** | `Value*` in its delimiters | an empty container value | `the_projection_equals_the_parse_over_the_shared_corpus` |
 //!
 //! *kind-level only* means the shape has no cell of its own: the emptiness path is reached by no
@@ -541,8 +548,9 @@
 //! have a cell of their own and nine are kind-level — stated so a later reader does not read the
 //! column as uniform.
 //!
-//! The last row is not a fourth answer to the same question: those four are not optional
-//! constituents at all, they are values, and `[]` is as much a value as `[1]`.
+//! The last two rows are not a fourth answer to the same question: a module's body and those four
+//! values are not optional constituents at all. An empty module is a namespace, and `[]` is as much
+//! a value as `[1]`.
 //!
 //! **Row two, measured rather than asserted.** `Arguments` stays in it only because the syntactic
 //! parser really does answer `None` for a written-down empty list. Over `query Q { f() }` the
@@ -564,17 +572,17 @@
 //!
 //! # No node dispatch below spends a native frame per level
 //!
-//! The grammar is bounded above a value, and **four cycles are not**: `value` ↔
+//! The grammar is bounded above a value, and **five cycles are not**: `value` ↔
 //! `object_field`/`map_entry`, `selection_set` ↔ `field`/`inline_fragment`, `ty` ↔ a list's
-//! element and a path's generic arguments, and a `use` tree ↔ its group's trees. Each is a
-//! **worklist**, as in `graphql/lossless/project.rs`. al8n/smear#201.
+//! element and a path's generic arguments, a `use` tree ↔ its group's trees, and a module ↔ its
+//! body's modules. Each is a **worklist**, as in `graphql/lossless/project.rs`. al8n/smear#201.
 //!
-//! Four cycles where GraphQL has four, and not the same four: the const and non-const value walks
+//! Five cycles where GraphQL has four, and not the same four: the const and non-const value walks
 //! are one machine parameterised by a trait here as they are there, and what GraphQL splits off as
 //! a `NonNullType` wrapper is a `!` token of the type it modifies here, so the type cycle absorbs
 //! it. What the type cycle gains instead is a *branching* level GraphQL's does not have — a path's
-//! generic arguments are types, so `A<B<C<…>>>` nests without a bracket — and the `use` tree is a
-//! cycle GraphQL has no grammar for at all.
+//! generic arguments are types, so `A<B<C<…>>>` nests without a bracket — and the `use` tree and the
+//! module are cycles GraphQL has no grammar for at all.
 //!
 //! `smear-parser/tests/deep_projection_x.rs` reads the flatness off a real projection, one fixture
 //! per cycle plus one per GraphQLx-only carrier.
@@ -598,22 +606,23 @@ use crate::{
       ConstObject, ConstObjectField, ConstSet, DefaultInputValue, DefinitionName,
       DefinitionTypeGenerics, DefinitionTypeParam, DefinitionTypePath, Described,
       DescribedVariableDefinition, Directive, DirectiveExtension, DirectiveLocations, Directives,
-      Document, DocumentItem, EnumTypeDefinition, EnumTypeExtension, EnumValue,
-      EnumValuesDefinition, ExecutableDefinition, ExecutableDefinitionHeader,
+      Document, DocumentItem, EnumTypeDefinition, EnumTypeExtension, EnumTypeExtensionData,
+      EnumValue, EnumValuesDefinition, ExecutableDefinition, ExecutableDefinitionHeader,
       ExecutableDefinitionName, ExecutableDefinitionTypeGenerics, ExecutableDocument,
       ExtensionName, ExtensionTypeGenerics, ExtensionTypeParam, Field, FieldsDefinition,
       FloatValue, FragmentSpread, ImplementInterfaces, InlineFragment, InlineStringValue,
-      InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension, InputValue,
-      IntValue, InterfaceTypeDefinition, InterfaceTypeExtension, List, Map, MapEntry, Name,
-      NamedOperationDefinition, Nest, Nested, NullValue, Object, ObjectField, ObjectTypeDefinition,
-      ObjectTypeExtension, OperationDefinition, OperationType, Path, PathRoot,
-      RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
-      ScalarTypeExtension, SchemaDefinition, SchemaExtension, Selection, SelectionSet, Set,
+      InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension,
+      InputObjectTypeExtensionData, InputValue, IntValue, InterfaceTypeDefinition,
+      InterfaceTypeExtension, List, Map, MapEntry, ModDefinition, Name, NamedOperationDefinition,
+      Nest, Nested, NullValue, Object, ObjectField, ObjectTypeDefinition, ObjectTypeExtension,
+      OperationDefinition, OperationType, Path, PathRoot, RootOperationTypeDefinition,
+      RootOperationTypesDefinition, ScalarTypeDefinition, ScalarTypeExtension,
+      ScalarTypeExtensionData, SchemaDefinition, SchemaExtension, Selection, SelectionSet, Set,
       StringValue, Type, TypeCondition, TypeDefinition, TypeExtension, TypeGenerics, TypePath,
       TypeSystemDefinition, TypeSystemDocument, TypeSystemExtension, TypeSystemItem,
-      UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension, UseDefinition,
-      UseOrExecutableDefinition, UsePrefix, UseTree, UseTreeKind, VariableDefinition,
-      VariableValue, VariablesDefinition, WhereClause, WherePredicate,
+      UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension, UnionTypeExtensionData,
+      UseDefinition, UseOrExecutableDefinition, UsePrefix, UseTree, UseTreeKind,
+      VariableDefinition, VariableValue, VariablesDefinition, WhereClause, WherePredicate,
     },
     kinds::{GraphQLxLang, SyntaxKind},
     lossless::Parse,
@@ -637,12 +646,12 @@ use crate::{
 // All three hold **shared, dialect-free** AST carriers with no spelling under `graphqlx::ast`, and
 // a projection has to construct every one of them.
 
-// The undescribed cores five `Described<…>` aliases wrap, and the six `…Data` enums an extension's
-// alternatives are encoded in.
+// The undescribed cores five `Described<…>` aliases wrap, and the three `…Data` enums the object,
+// interface and schema extensions encode their alternatives in. The scalar, union, enum and input
+// object extensions' four are this dialect's own and come in through `graphqlx::ast` above.
 use crate::type_system::{
-  DirectiveDefinition, EnumTypeExtensionData, EnumValueDefinition, FieldDefinition,
-  InputObjectTypeExtensionData, InputValueDefinition, InterfaceTypeExtensionData,
-  ObjectTypeExtensionData, SchemaExtensionData, UnionTypeExtensionData,
+  DirectiveDefinition, EnumValueDefinition, FieldDefinition, InputValueDefinition,
+  InterfaceTypeExtensionData, ObjectTypeExtensionData, SchemaExtensionData,
 };
 
 // The target six definitions and extensions hold their `where` clause with.
@@ -1597,12 +1606,13 @@ const TYPE_SYSTEM_DEFINITION_KINDS: [SyntaxKind; 8] = [
   K::SchemaDefinition,
 ];
 
-/// What the mixed root's entry run holds: a `use` item, either executable definition, a type-system
-/// definition or an extension.
-const MIXED_ENTRY_KINDS: [SyntaxKind; 19] = entry_kinds::<19>(true, true);
+/// What the mixed root's entry run holds: a `use` item, either executable definition, a module, a
+/// type-system definition or an extension.
+const MIXED_ENTRY_KINDS: [SyntaxKind; 20] = entry_kinds::<20>(true, true);
 
-/// What the SDL root's entry run holds — the mixed run without the two executable kinds.
-const TYPE_SYSTEM_ENTRY_KINDS: [SyntaxKind; 17] = entry_kinds::<17>(false, true);
+/// What the SDL root's entry run holds — the mixed run without the two executable kinds — and what
+/// a module's body holds.
+const TYPE_SYSTEM_ENTRY_KINDS: [SyntaxKind; 18] = entry_kinds::<18>(false, true);
 
 /// What the executable root's entry run holds — a `use` item or one of the two executable kinds.
 const EXECUTABLE_ENTRY_KINDS: [SyntaxKind; 3] = entry_kinds::<3>(true, false);
@@ -1619,6 +1629,8 @@ const fn entry_kinds<const N: usize>(executable: bool, type_system: bool) -> [Sy
     at += 2;
   }
   if type_system {
+    kinds[at] = K::ModDefinition;
+    at += 1;
     let mut i = 0;
     while i < TYPE_SYSTEM_DEFINITION_KINDS.len() {
       kinds[at] = TYPE_SYSTEM_DEFINITION_KINDS[i];
@@ -1669,6 +1681,10 @@ fn document_entry<'src>(
     let (item, extent) = use_definition(node, source)?;
     return Ok((DocumentItem::Use(item), extent));
   }
+  if node.kind() == K::ModDefinition {
+    let (module, extent) = mod_definition(node, source)?;
+    return Ok((DocumentItem::Mod(module), extent));
+  }
   if let Some((extension, extent)) = type_system_extension(node, source)? {
     return Ok((DocumentItem::Extension(extension), extent));
   }
@@ -1699,13 +1715,13 @@ fn type_system_document<'src>(
   ))
 }
 
-/// [`document_entry`]'s SDL-only twin.
+/// [`document_entry`]'s SDL-only twin, and the one item of a module's body that is not a module.
 ///
-/// The `use` and extension arms stay — both are type-system syntax and this root builds them —
-/// and what goes is the executable half: an `OperationDefinition` or a `FragmentDefinition` under
-/// this root has no image in a `TypeSystemDocument`, and the SDL root reports one at the parser's
-/// own position rather than shaping it, so reaching that arm means the tree is not the one this
-/// door was handed.
+/// The `use`, module and extension arms stay — all three are type-system syntax and this root
+/// builds them — and what goes is the executable half: an `OperationDefinition` or a
+/// `FragmentDefinition` under this root has no image in a `TypeSystemDocument`, and the SDL root
+/// reports one at the parser's own position rather than shaping it, so reaching that arm means the
+/// tree is not the one this door was handed.
 fn type_system_entry<'src>(
   node: Node<'_>,
   source: &'src str,
@@ -1713,6 +1729,10 @@ fn type_system_entry<'src>(
   if node.kind() == K::UseDefinition {
     let (item, extent) = use_definition(node, source)?;
     return Ok((TypeSystemItem::Use(item), extent));
+  }
+  if node.kind() == K::ModDefinition {
+    let (module, extent) = mod_definition(node, source)?;
+    return Ok((TypeSystemItem::Mod(module), extent));
   }
   if let Some((extension, extent)) = type_system_extension(node, source)? {
     return Ok((TypeSystemItem::Extension(extension), extent));
@@ -1968,6 +1988,95 @@ fn hoisted_description<'src>(
   match token {
     Some(token) => Ok((Some(string_value(token, source)?), Some(token.text_range()))),
     None => Ok((None, None)),
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// inline modules
+// ---------------------------------------------------------------------------------------------
+
+/// A module whose body is being read: its cursor, past its `{` and the items already read, the
+/// description and name it opened with, and the items already finished.
+struct ModFrame<'g, 'src> {
+  cursor: Cursor<'g>,
+  description: Option<StringValue<&'src str>>,
+  name: Name<&'src str>,
+  items: Vec<TypeSystemItem<&'src str>>,
+}
+
+/// Read a module as far as its body: `Description? mod Name {`.
+///
+/// The description is the module's own, so it is folded into the module's extent rather than held
+/// back — the span starts at it, as the syntactic parser's does.
+fn open_mod<'g, 'src>(node: Node<'g>, source: &'src str) -> Out<ModFrame<'g, 'src>> {
+  let mut cursor = Cursor::new(node);
+  let description_token = cursor.opt_description();
+  if let Some(token) = description_token {
+    cursor.extent.cover(token.text_range());
+  }
+  cursor.keyword(ContextualKeyword::Mod, "the `mod` keyword")?;
+  let name = cursor.name_token(source, "a module's name")?;
+  cursor.token(K::LBrace, "the `{` a module's body opens with")?;
+  let (description, _) = hoisted_description(description_token, source)?;
+  Ok(ModFrame {
+    cursor,
+    description,
+    name,
+    items: Vec::new(),
+  })
+}
+
+/// Close a module whose items have run out: `ModItem*`, so an empty one is a module with nothing in
+/// it, and the `}` is **lenient** — see the module header's missing-token table. Whatever is left
+/// past the items is not in the sequence, and `end` refuses it.
+fn close_mod<'src>(frame: ModFrame<'_, 'src>) -> Out<(ModDefinition<&'src str>, TextRange)> {
+  let ModFrame {
+    mut cursor,
+    description,
+    name,
+    items,
+  } = frame;
+  cursor.opt_token(K::RBrace);
+  let extent = cursor.finish("a token")?;
+  Ok((
+    ModDefinition::new(to_span(extent), description, name, items.into()),
+    extent,
+  ))
+}
+
+/// A module, with the modules nested inside it read on a worklist rather than a stack.
+///
+/// Every module a body opens is suspended on `frames` while its own items are read, so the walk's
+/// native stack does not grow with the nesting however deep it is. An item that is not a module
+/// holds no module, and is projected where it stands.
+fn mod_definition<'src>(
+  node: Node<'_>,
+  source: &'src str,
+) -> Out<(ModDefinition<&'src str>, TextRange)> {
+  let mut frames: Vec<ModFrame<'_, 'src>> = Vec::new();
+  let mut frame = open_mod(node, source)?;
+  loop {
+    match frame.cursor.opt_one_of(&TYPE_SYSTEM_ENTRY_KINDS) {
+      Some(child) if child.kind() == K::ModDefinition => {
+        frames.push(frame);
+        frame = open_mod(child, source)?;
+        continue;
+      }
+      Some(child) => {
+        let item = frame.cursor.keep(type_system_entry(child, source)?);
+        frame.items.push(item);
+        continue;
+      }
+      None => {}
+    }
+    // The body ran out; the module is a finished item of the one waiting on it, if any is.
+    let (module, extent) = close_mod(frame)?;
+    let Some(mut parent) = frames.pop() else {
+      return Ok((module, extent));
+    };
+    parent.cursor.extent.cover(extent);
+    parent.items.push(TypeSystemItem::Mod(module));
+    frame = parent;
   }
 }
 
@@ -4760,22 +4869,28 @@ fn scalar_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, ScalarTypeDefinition<&'src str>>> {
-  // `Description? scalar DefinitionName Directives[Const]?`
+  // `Description? scalar DefinitionName ImplementInterfaces? Directives[Const]? WhereClause?` — the
+  // clause ends the definition and constrains nothing after it, so it is the carrier's own slot
+  // rather than one half of a `Constrained`.
   let mut cursor = Cursor::new(node);
   let description_token = cursor.opt_description();
   cursor.keyword(ContextualKeyword::Scalar, "the `scalar` keyword")?;
   let name_node = cursor.node(K::DefinitionName, "a definition name")?;
+  let implements_node = cursor.opt_node(K::ImplementInterfaces);
   let directives_node = cursor.opt_node(K::Directives);
+  let where_node = cursor.opt_node(K::WhereClause);
   cursor.end()?;
 
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
+  let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
   let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let where_clause = cursor.keep_opt(optional_where_clause(where_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
-    ScalarTypeDefinition::new(to_span(inner), name, directives),
+    ScalarTypeDefinition::new(to_span(inner), name, implements, directives, where_clause),
     outer,
   ))
 }
@@ -4868,12 +4983,13 @@ fn union_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, UnionTypeDefinition<&'src str>>> {
-  // `Description? union DefinitionName Directives[Const]? UnionMemberTypes? WhereClause?` —
-  // divergence 17 puts the clause *after* the members it constrains.
+  // `Description? union DefinitionName ImplementInterfaces? Directives[Const]? UnionMemberTypes?
+  //  WhereClause?` — divergence 17 puts the clause *after* the members it constrains.
   let mut cursor = Cursor::new(node);
   let description_token = cursor.opt_description();
   cursor.keyword(ContextualKeyword::Union, "the `union` keyword")?;
   let name_node = cursor.node(K::DefinitionName, "a definition name")?;
+  let implements_node = cursor.opt_node(K::ImplementInterfaces);
   let directives_node = cursor.opt_node(K::Directives);
   let members_node = cursor.opt_node(K::UnionMemberTypes);
   let where_node = cursor.opt_node(K::WhereClause);
@@ -4881,6 +4997,7 @@ fn union_type_definition<'src>(
 
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
+  let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
   let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
   let members = optional_constrained_after(
     node,
@@ -4893,7 +5010,7 @@ fn union_type_definition<'src>(
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
-    UnionTypeDefinition::new(to_span(inner), name, directives, member_types),
+    UnionTypeDefinition::new(to_span(inner), name, implements, directives, member_types),
     outer,
   ))
 }
@@ -4902,25 +5019,27 @@ fn enum_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, EnumTypeDefinition<&'src str>>> {
-  // `Description? enum DefinitionName Directives[Const]? EnumValuesDefinition?` — the one type
-  // definition with no `where` clause in its grammar at all.
+  // `Description? enum DefinitionName ImplementInterfaces? Directives[Const]?
+  //  EnumValuesDefinition?` — the one type definition with no `where` clause in its grammar at all.
   let mut cursor = Cursor::new(node);
   let description_token = cursor.opt_description();
   cursor.keyword(ContextualKeyword::Enum, "the `enum` keyword")?;
   let name_node = cursor.node(K::DefinitionName, "a definition name")?;
+  let implements_node = cursor.opt_node(K::ImplementInterfaces);
   let directives_node = cursor.opt_node(K::Directives);
   let values_node = cursor.opt_node(K::EnumValuesDefinition);
   cursor.end()?;
 
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
+  let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
   let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
   let values = cursor.keep_opt(optional_enum_values(values_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
-    EnumTypeDefinition::new(to_span(inner), name, directives, values),
+    EnumTypeDefinition::new(to_span(inner), name, implements, directives, values),
     outer,
   ))
 }
@@ -4929,11 +5048,13 @@ fn input_object_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, InputObjectTypeDefinition<&'src str>>> {
-  // `Description? input DefinitionName Directives[Const]? WhereClause? InputFieldsDefinition?`
+  // `Description? input DefinitionName ImplementInterfaces? Directives[Const]? WhereClause?
+  //  InputFieldsDefinition?`
   let mut cursor = Cursor::new(node);
   let description_token = cursor.opt_description();
   cursor.keyword(ContextualKeyword::Input, "the `input` keyword")?;
   let name_node = cursor.node(K::DefinitionName, "a definition name")?;
+  let implements_node = cursor.opt_node(K::ImplementInterfaces);
   let directives_node = cursor.opt_node(K::Directives);
   let where_node = cursor.opt_node(K::WhereClause);
   let input_fields_node = cursor.opt_node(K::InputFieldsDefinition);
@@ -4941,6 +5062,7 @@ fn input_object_type_definition<'src>(
 
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
+  let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
   let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
   let fields = optional_constrained_before(
     node,
@@ -4953,7 +5075,13 @@ fn input_object_type_definition<'src>(
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
-    InputObjectTypeDefinition::new(to_span(inner), name, directives, fields_definition),
+    InputObjectTypeDefinition::new(
+      to_span(inner),
+      name,
+      implements,
+      directives,
+      fields_definition,
+    ),
     outer,
   ))
 }
@@ -5158,16 +5286,19 @@ fn extension_parts<'src>(node: Node<'_>, source: &'src str) -> Out<ExtensionPart
   cursor.keyword(keyword, spelling)?;
   let name_node = cursor.node(K::ExtensionName, "an extended type's name")?;
 
-  let mut implements_node = None;
   let mut where_node = None;
   let mut fields_node = None;
   let mut input_fields_node = None;
   let mut members_node = None;
   let mut values_node = None;
+  let implements_node;
   let directives_node;
   match node.kind() {
-    // `extend scalar ExtensionName Directives[Const]`
-    K::ScalarTypeExtension => directives_node = cursor.opt_node(K::Directives),
+    // `extend scalar ExtensionName ImplementInterfaces? Directives[Const]?`
+    K::ScalarTypeExtension => {
+      implements_node = cursor.opt_node(K::ImplementInterfaces);
+      directives_node = cursor.opt_node(K::Directives);
+    }
     // `extend (type|interface) ExtensionName ImplementInterfaces? Directives[Const]? WhereClause?
     //  FieldsDefinition?`
     K::ObjectTypeExtension | K::InterfaceTypeExtension => {
@@ -5176,20 +5307,25 @@ fn extension_parts<'src>(node: Node<'_>, source: &'src str) -> Out<ExtensionPart
       where_node = cursor.opt_node(K::WhereClause);
       fields_node = cursor.opt_node(K::FieldsDefinition);
     }
-    // `extend union ExtensionName Directives[Const]? UnionMemberTypes? WhereClause?` — the clause
-    // follows what it constrains here, as it does at the definition site.
+    // `extend union ExtensionName ImplementInterfaces? Directives[Const]? UnionMemberTypes?
+    //  WhereClause?` — the clause follows what it constrains here, as it does at the definition
+    //  site.
     K::UnionTypeExtension => {
+      implements_node = cursor.opt_node(K::ImplementInterfaces);
       directives_node = cursor.opt_node(K::Directives);
       members_node = cursor.opt_node(K::UnionMemberTypes);
       where_node = cursor.opt_node(K::WhereClause);
     }
-    // `extend enum ExtensionName Directives[Const]? EnumValuesDefinition?`
+    // `extend enum ExtensionName ImplementInterfaces? Directives[Const]? EnumValuesDefinition?`
     K::EnumTypeExtension => {
+      implements_node = cursor.opt_node(K::ImplementInterfaces);
       directives_node = cursor.opt_node(K::Directives);
       values_node = cursor.opt_node(K::EnumValuesDefinition);
     }
-    // `extend input ExtensionName Directives[Const]? WhereClause? InputFieldsDefinition?`
+    // `extend input ExtensionName ImplementInterfaces? Directives[Const]? WhereClause?
+    //  InputFieldsDefinition?`
     _ => {
+      implements_node = cursor.opt_node(K::ImplementInterfaces);
       directives_node = cursor.opt_node(K::Directives);
       where_node = cursor.opt_node(K::WhereClause);
       input_fields_node = cursor.opt_node(K::InputFieldsDefinition);
@@ -5248,12 +5384,21 @@ fn scalar_type_extension<'src>(
   source: &'src str,
 ) -> Out<(ScalarTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
-  // The one extension whose directives the grammar makes mandatory: it has no other tail.
-  let directives = parts
-    .directives
-    .ok_or_else(|| missing(node, "the directives a scalar extension must add"))?;
+  let data = match (parts.implements, parts.directives) {
+    (implements, Some(directives)) => ScalarTypeExtensionData::Directives {
+      implements,
+      directives,
+    },
+    (Some(implements), None) => ScalarTypeExtensionData::Implements(implements),
+    (None, None) => {
+      return Err(missing(
+        node,
+        "interfaces or directives for the extension to add",
+      ));
+    }
+  };
   Ok((
-    ScalarTypeExtension::new(to_span(parts.extent), parts.name, directives),
+    ScalarTypeExtension::new(to_span(parts.extent), parts.name, data),
     parts.extent,
   ))
 }
@@ -5321,16 +5466,21 @@ fn union_type_extension<'src>(
   source: &'src str,
 ) -> Out<(UnionTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
-  let data = match (parts.directives, parts.members) {
-    (directives, Some(member_types)) => UnionTypeExtensionData::Members {
+  let data = match (parts.implements, parts.directives, parts.members) {
+    (implements, directives, Some(member_types)) => UnionTypeExtensionData::Members {
+      implements,
       directives,
       member_types,
     },
-    (Some(directives), None) => UnionTypeExtensionData::Directives(directives),
-    (None, None) => {
+    (implements, Some(directives), None) => UnionTypeExtensionData::Directives {
+      implements,
+      directives,
+    },
+    (Some(implements), None, None) => UnionTypeExtensionData::Implements(implements),
+    (None, None, None) => {
       return Err(missing(
         node,
-        "directives or members for the extension to add",
+        "interfaces, directives or members for the extension to add",
       ));
     }
   };
@@ -5345,16 +5495,21 @@ fn enum_type_extension<'src>(
   source: &'src str,
 ) -> Out<(EnumTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
-  let data = match (parts.directives, parts.values) {
-    (directives, Some(enum_values_definition)) => EnumTypeExtensionData::Values {
+  let data = match (parts.implements, parts.directives, parts.values) {
+    (implements, directives, Some(enum_values_definition)) => EnumTypeExtensionData::Values {
+      implements,
       directives,
       enum_values_definition,
     },
-    (Some(directives), None) => EnumTypeExtensionData::Directives(directives),
-    (None, None) => {
+    (implements, Some(directives), None) => EnumTypeExtensionData::Directives {
+      implements,
+      directives,
+    },
+    (Some(implements), None, None) => EnumTypeExtensionData::Implements(implements),
+    (None, None, None) => {
       return Err(missing(
         node,
-        "directives or values for the extension to add",
+        "interfaces, directives or values for the extension to add",
       ));
     }
   };
@@ -5369,16 +5524,21 @@ fn input_object_type_extension<'src>(
   source: &'src str,
 ) -> Out<(InputObjectTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
-  let data = match (parts.directives, parts.input_fields) {
-    (directives, Some(fields_definition)) => InputObjectTypeExtensionData::Fields {
+  let data = match (parts.implements, parts.directives, parts.input_fields) {
+    (implements, directives, Some(fields_definition)) => InputObjectTypeExtensionData::Fields {
+      implements,
       directives,
       fields_definition,
     },
-    (Some(directives), None) => InputObjectTypeExtensionData::Directives(directives),
-    (None, None) => {
+    (implements, Some(directives), None) => InputObjectTypeExtensionData::Directives {
+      implements,
+      directives,
+    },
+    (Some(implements), None, None) => InputObjectTypeExtensionData::Implements(implements),
+    (None, None, None) => {
       return Err(missing(
         node,
-        "directives or fields for the extension to add",
+        "interfaces, directives or fields for the extension to add",
       ));
     }
   };

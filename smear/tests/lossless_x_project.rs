@@ -2014,6 +2014,52 @@ fn an_alias_on_a_glob_or_a_group_refuses() {
 }
 
 #[test]
+fn a_module_in_an_executable_document_refuses() {
+  // The executable root has no `mod` entry. The lossless production reports one and still builds
+  // the module whole, so the walk meets a child that root has no place for and refuses it where it
+  // stands; the mixed root, where a module is an entry, projects the same bytes.
+  for src in [
+    "mod m {}",
+    "\"d\" mod m { type T { f: Int } }",
+    "mod m {} query Q { f }",
+  ] {
+    let parse = parse_executable_document(src);
+    assert!(
+      parse.has_errors(),
+      "{src}: the lossless parser must report it"
+    );
+    assert!(
+      executable_oracle(src).is_err(),
+      "{src}: the syntactic parser must refuse it"
+    );
+    assert!(
+      !parse
+        .syntax()
+        .descendants_with_tokens()
+        .any(|element| matches!(element.kind(), K::Error | K::Gap)),
+      "{src}: the module must be built whole, or the preflight refuses it and this pins nothing"
+    );
+    let kind = project_executable_document(&parse, src)
+      .map(|_| ())
+      .expect_err("the projection was expected to refuse")
+      .kind()
+      .clone();
+    assert_eq!(
+      kind,
+      ProjectErrorKind::UnexpectedChild {
+        parent: K::ExecutableDocument,
+        found: K::ModDefinition,
+      },
+      "{src}"
+    );
+    assert!(
+      project(&parse_document(src), src).is_ok(),
+      "{src}: the mixed root takes a module as an entry"
+    );
+  }
+}
+
+#[test]
 fn a_where_clause_with_nothing_to_constrain_refuses() {
   // The AST can only hold a `where` inside a `Constrained`, so a clause whose target the tree does
   // not have is a region with no AST image.
@@ -2921,13 +2967,19 @@ fn a_keyword_slot_a_walk_collects_is_read_by_spelling() {
 /// The child kinds each SDL definition's production spells, **read off the productions here** so
 /// the cross-product below is not derived from the table it is checking.
 ///
-/// `graphqlx/lossless/definition.rs`: scalar is `DefinitionName Directives?`; type and interface
-/// share `DefinitionName ImplementInterfaces? Directives? WhereClause? FieldsDefinition?`; union is
-/// `DefinitionName Directives? UnionMemberTypes? WhereClause?`; enum is
-/// `DefinitionName Directives? EnumValuesDefinition?` and is the one with no clause at all; input
-/// is `DefinitionName Directives? WhereClause? InputFieldsDefinition?`.
+/// `graphqlx/lossless/definition.rs`: scalar is `DefinitionName ImplementInterfaces? Directives?
+/// WhereClause?`, the clause ending it;
+/// type and interface share `DefinitionName ImplementInterfaces? Directives? WhereClause?
+/// FieldsDefinition?`; union is `DefinitionName ImplementInterfaces? Directives? UnionMemberTypes?
+/// WhereClause?`; enum is `DefinitionName ImplementInterfaces? Directives? EnumValuesDefinition?`
+/// and is the one with no clause at all; input is `DefinitionName ImplementInterfaces? Directives?
+/// WhereClause? InputFieldsDefinition?`.
 const DEFINITION_ROWS: &[(K, &str, &[K])] = &[
-  (K::ScalarTypeDefinition, "scalar", &[K::Directives]),
+  (
+    K::ScalarTypeDefinition,
+    "scalar",
+    &[K::ImplementInterfaces, K::Directives, K::WhereClause],
+  ),
   (
     K::ObjectTypeDefinition,
     "type",
@@ -2951,23 +3003,41 @@ const DEFINITION_ROWS: &[(K, &str, &[K])] = &[
   (
     K::UnionTypeDefinition,
     "union",
-    &[K::Directives, K::UnionMemberTypes, K::WhereClause],
+    &[
+      K::ImplementInterfaces,
+      K::Directives,
+      K::UnionMemberTypes,
+      K::WhereClause,
+    ],
   ),
   (
     K::EnumTypeDefinition,
     "enum",
-    &[K::Directives, K::EnumValuesDefinition],
+    &[
+      K::ImplementInterfaces,
+      K::Directives,
+      K::EnumValuesDefinition,
+    ],
   ),
   (
     K::InputObjectTypeDefinition,
     "input",
-    &[K::Directives, K::WhereClause, K::InputFieldsDefinition],
+    &[
+      K::ImplementInterfaces,
+      K::Directives,
+      K::WhereClause,
+      K::InputFieldsDefinition,
+    ],
   ),
 ];
 
 /// [`DEFINITION_ROWS`]' extension twin, from `graphqlx/lossless/extension.rs`.
 const EXTENSION_ROWS: &[(K, &str, &[K])] = &[
-  (K::ScalarTypeExtension, "scalar", &[K::Directives]),
+  (
+    K::ScalarTypeExtension,
+    "scalar",
+    &[K::ImplementInterfaces, K::Directives],
+  ),
   (
     K::ObjectTypeExtension,
     "type",
@@ -2991,17 +3061,31 @@ const EXTENSION_ROWS: &[(K, &str, &[K])] = &[
   (
     K::UnionTypeExtension,
     "union",
-    &[K::Directives, K::UnionMemberTypes, K::WhereClause],
+    &[
+      K::ImplementInterfaces,
+      K::Directives,
+      K::UnionMemberTypes,
+      K::WhereClause,
+    ],
   ),
   (
     K::EnumTypeExtension,
     "enum",
-    &[K::Directives, K::EnumValuesDefinition],
+    &[
+      K::ImplementInterfaces,
+      K::Directives,
+      K::EnumValuesDefinition,
+    ],
   ),
   (
     K::InputObjectTypeExtension,
     "input",
-    &[K::Directives, K::WhereClause, K::InputFieldsDefinition],
+    &[
+      K::ImplementInterfaces,
+      K::Directives,
+      K::WhereClause,
+      K::InputFieldsDefinition,
+    ],
   ),
 ];
 
@@ -3080,7 +3164,7 @@ fn every_definition_kind_refuses_a_foreign_child() {
     }
   }
   assert_eq!(
-    pairs, 25,
+    pairs, 20,
     "six definition kinds against the seven shared tails, minus each row's own: the cross-product \
      is the claim, so its size is asserted rather than trusted"
   );
@@ -3106,7 +3190,7 @@ fn every_extension_kind_refuses_a_foreign_tail() {
       pairs += 1;
     }
   }
-  assert_eq!(pairs, 25);
+  assert_eq!(pairs, 21);
 }
 
 #[test]
@@ -3114,18 +3198,18 @@ fn each_kinds_own_children_still_project() {
   // The control the cross-product needs: the rows are not simply refusing everything. One legal
   // document per definition and extension kind, through the real parser, compared with the oracle.
   for src in [
-    "scalar S @d",
+    "scalar S implements I @d where A: B",
     "type T implements I @d where A: B { f: Int }",
     "interface I implements J @d where A: B { f: Int }",
-    "union U @d = A | B where A: C",
-    "enum E @d { A }",
-    "input I @d where A: B { f: Int }",
-    "extend scalar S @d",
+    "union U implements I @d = A | B where A: C",
+    "enum E implements I @d { A }",
+    "input I implements J @d where A: B { f: Int }",
+    "extend scalar S implements I @d",
     "extend type T implements I @d where A: B { f: Int }",
     "extend interface I implements J @d where A: B { f: Int }",
-    "extend union U @d = A | B where A: C",
-    "extend enum E @d { A }",
-    "extend input I @d where A: B { f: Int }",
+    "extend union U implements I @d = A | B where A: C",
+    "extend enum E implements I @d { A }",
+    "extend input I implements J @d where A: B { f: Int }",
   ] {
     let parse = parse_document(src);
     assert!(!parse.has_errors(), "{src}: the probe must be legal input");
@@ -3483,7 +3567,7 @@ fn a_dangling_separator_refuses_in_every_separated_walk() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// the report-and-build table, 67/67
+// the report-and-build table, 71/71
 // ---------------------------------------------------------------------------------------------
 
 /// Which door a probe goes through.
@@ -3596,6 +3680,38 @@ const SITES: &[Site] = &[
     Root::TypeSystem,
     "MissingChild TypeSystemDocument",
     Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
+    "mod {}",
+    Root::Mixed,
+    "UnexpectedChild ModDefinition LBrace",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
+    "mod m",
+    Root::Mixed,
+    "MissingChild ModDefinition",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "unclosed",
+    "mod m {",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ModDefinition, "}"),
+  ),
+  (
+    "document.rs",
+    "report",
+    "mod m {}",
+    Root::Executable,
+    "UnexpectedChild ExecutableDocument ModDefinition",
+    Absent::Not,
   ),
   (
     "executable.rs",
@@ -4242,7 +4358,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (51, 16),
+    (54, 17),
     "the two families' populations"
   );
 
@@ -4308,7 +4424,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
 }
 
 /// How many of [`SITES`]' probes project.
-const PROJECTING_SITES: usize = 15;
+const PROJECTING_SITES: usize = 16;
 
 /// Image-less tokens a site can leave out whose probe is **not** a witness — none: even the three
 /// closers whose definition is lost at end of input leave their list in the tree, an orphan child
@@ -4822,7 +4938,7 @@ fn every_walk_is_a_transcription() {
     1,
     "the cursor's trivia skip, and nothing else"
   );
-  assert_eq!(count("Cursor::new("), 73, "the walks, one cursor each");
+  assert_eq!(count("Cursor::new("), 74, "the walks, one cursor each");
 }
 
 #[test]

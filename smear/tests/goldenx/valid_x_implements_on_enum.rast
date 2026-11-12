@@ -1,0 +1,25 @@
+Root@0..38
+  Document@0..38
+    EnumTypeDefinition@0..37
+      Name@0..4 "enum"
+      Space@4..5 " "
+      DefinitionName@5..12
+        Name@5..11 "Colour"
+        Space@11..12 " "
+      ImplementInterfaces@12..28
+        Name@12..22 "implements"
+        Space@22..23 " "
+        TypePath@23..28
+          Path@23..28
+            Name@23..27 "Node"
+            Space@27..28 " "
+      EnumValuesDefinition@28..37
+        LBrace@28..29 "{"
+        Newline@29..30 "\n"
+        Space@30..31 " "
+        Space@31..32 " "
+        EnumValueDefinition@32..36
+          Name@32..35 "RED"
+          Newline@35..36 "\n"
+        RBrace@36..37 "}"
+    Newline@37..38 "\n"

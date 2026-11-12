@@ -211,8 +211,12 @@ ast_node!(
     description: tok_any K::InlineString | K::BlockString,
     /// The scalar's name.
     definition_name: opt DefinitionName,
+    /// The scalar's `implements` clause, if it has one.
+    implement_interfaces: opt ImplementInterfaces,
     /// The definition's directives, if it was given any.
     directives: opt Directives,
+    /// The scalar's `where` clause, if it has one — the last thing in the definition.
+    where_clause: opt WhereClause,
   }
 );
 
@@ -272,6 +276,8 @@ ast_node!(
     description: tok_any K::InlineString | K::BlockString,
     /// The union's name, and the generic parameters it declares.
     definition_name: opt DefinitionName,
+    /// The union's `implements` clause, if it has one.
+    implement_interfaces: opt ImplementInterfaces,
     /// The definition's directives, if it was given any.
     directives: opt Directives,
     /// The union's members, if it names any.
@@ -291,6 +297,8 @@ ast_node!(
     description: tok_any K::InlineString | K::BlockString,
     /// The enum's name, and the generic parameters it declares.
     definition_name: opt DefinitionName,
+    /// The enum's `implements` clause, if it has one.
+    implement_interfaces: opt ImplementInterfaces,
     /// The definition's directives, if it was given any.
     directives: opt Directives,
     /// The enum's values, if it declares any.
@@ -306,6 +314,8 @@ ast_node!(
     description: tok_any K::InlineString | K::BlockString,
     /// The input object's name, and the generic parameters it declares.
     definition_name: opt DefinitionName,
+    /// The input object's `implements` clause, if it has one.
+    implement_interfaces: opt ImplementInterfaces,
     /// The definition's directives, if it was given any.
     directives: opt Directives,
     /// The input object's `where` clause, if it has one.
@@ -324,8 +334,8 @@ ast_node!(
   /// is what a consumer wanting it must do. Unlike in GraphQL, its optionality costs nothing else:
   /// the directive's own name is a [`DefinitionName`] node, so no index shifts behind it.
   ///
-  /// This is also the one `where` site the grammar puts at the *end* of a definition, forcing
-  /// nothing after it.
+  /// This and [`ScalarTypeDefinition`] are the two definitions the grammar ends on a `where`
+  /// clause, which forces nothing after it.
   DirectiveDefinition => K::DirectiveDefinition {
     /// The definition's description, if it was given one.
     description: tok_any K::InlineString | K::BlockString,

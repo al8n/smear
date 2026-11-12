@@ -1,0 +1,2 @@
+scalar S<A> where A: Node
+use ^::dep::X

@@ -1,0 +1,2 @@
+"Shared media types."
+mod media {}

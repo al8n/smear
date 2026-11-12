@@ -48,7 +48,8 @@
 //! definition, forcing nothing after it, so `directive @d on FIELD where A: B` followed by
 //! `type X { f: Int }` presents an ordinary `Identifier` that belongs to the next definition. A
 //! one-token test consumes `type` as another predicate's bounded type, fails on the missing `:`,
-//! and costs the whole `ObjectTypeDefinition` — on **valid** input.
+//! and costs the whole `ObjectTypeDefinition` — on **valid** input. A scalar definition's `where`
+//! ends the definition the same way, and the same question decides where it stops.
 //!
 //! So this module's `where_clause` asks the two-token question, through the atom set's
 //! `peek_second_kind` — the one atom GraphQLx adds to the shared set, and the only place in either

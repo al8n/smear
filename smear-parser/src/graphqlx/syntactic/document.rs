@@ -2,8 +2,8 @@
 //!
 //! The document dispatcher classifies every top-level head once, then enters
 //! the selected committed parser tail.  It combines GraphQL executable and
-//! type-system definitions with GraphQLx `use` items, generic headers, rooted
-//! paths, `where` clauses, and type-system extensions.
+//! type-system definitions with GraphQLx `use` items, inline modules, generic
+//! headers, rooted paths, `where` clauses, and type-system extensions.
 
 use std::vec::Vec;
 
@@ -19,7 +19,10 @@ use tokora::{
 
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken,
-  definition::{type_system_definition_after_keyword, type_system_extension_after_extend},
+  definition::{
+    mod_definition_after_keyword, type_system_definition_after_keyword,
+    type_system_extension_after_extend,
+  },
   executable::{ExecutableDefinitionHead, OperationHead, executable_definition_after_head},
   keyword_of, unexpected_here,
   use_tree::use_definition_after_keyword,
@@ -62,6 +65,7 @@ macro_rules! document_parser {
 enum DocumentHead {
   Description,
   Use,
+  Mod,
   Extension,
   TypeSystem(ContextualKeyword),
   Executable(ExecutableDefinitionHead),
@@ -108,6 +112,7 @@ where
         )),
         token => match keyword_of(token) {
           Some(ContextualKeyword::Use) => Some(DocumentHead::Use),
+          Some(ContextualKeyword::Mod) => Some(DocumentHead::Mod),
           Some(ContextualKeyword::Extend) => Some(DocumentHead::Extension),
           Some(keyword) if is_type_system_keyword(keyword) => {
             Some(DocumentHead::TypeSystem(keyword))
@@ -199,12 +204,13 @@ fn described_definition<S>(
   Described::new(SimpleSpan::new(start, end), description, definition)
 }
 
-/// Enters a complete document definition after a leading description.
+/// Enters a complete document entry after a leading description.
 ///
 /// A description can only decorate a *keyworded* executable or type-system
-/// definition; GraphQLx `use` items and extensions deliberately remain undescribed, and
-/// the shorthand `OperationDefinition : SelectionSet` is the one definition
-/// alternative the grammar gives no `Description?` slot.
+/// definition, or a module, whose description is its own; GraphQLx `use` items and
+/// extensions deliberately remain undescribed, and the shorthand
+/// `OperationDefinition : SelectionSet` is the one definition alternative the grammar
+/// gives no `Description?` slot.
 fn entry_after_description<'inp, Src, Ctx>(
   description: StringValue<GraphqlxSlice<'inp, Src>>,
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
@@ -219,6 +225,11 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let definition = match classify_document_head(inp)? {
+    Some(DocumentHead::Mod) => {
+      take_classified_identifier(inp, Expectation::Mod)?;
+      let start = description.span().start();
+      return mod_definition_after_keyword(inp, start, Some(description)).map(DocumentItem::Mod);
+    }
     Some(DocumentHead::TypeSystem(keyword)) => {
       let span =
         take_classified_identifier(inp, Expectation::Production("a type-system definition"))?;
@@ -231,7 +242,7 @@ where
     _ => {
       return unexpected_here(
         inp,
-        Expectation::Production("a definition after a description"),
+        Expectation::Production("a definition or a module after a description"),
       );
     }
   };
@@ -244,9 +255,9 @@ where
 document_parser!(
   /// Parses one complete GraphQLx top-level entry with fused head dispatch.
   ///
-  /// `use` items and type-system extensions are GraphQLx additions. Definitions
-  /// retain the standard GraphQL executable or type-system shape, while a
-  /// leading description may decorate either definition family.
+  /// `use` items, inline modules and type-system extensions are GraphQLx additions.
+  /// Definitions retain the standard GraphQL executable or type-system shape, while a
+  /// leading description may decorate either definition family or a module.
   ///
   /// See [GraphQL Document](https://spec.graphql.org/draft/#Document),
   /// [Executable Definition](https://spec.graphql.org/draft/#ExecutableDefinition),
@@ -257,7 +268,7 @@ document_parser!(
   {
     let mut type_system_keyword = None;
     let mut executable_head = None;
-    let branch: Branch<4> = match classify_document_head(inp)? {
+    let branch: Branch<5> = match classify_document_head(inp)? {
       Some(DocumentHead::Description) => Branch::B0,
       Some(DocumentHead::Use) => Branch::B1,
       Some(DocumentHead::Extension) => Branch::B2,
@@ -269,7 +280,11 @@ document_parser!(
         executable_head = Some(head);
         Branch::B4
       }
-      None => return unexpected_here(inp, Expectation::Production("a use item, a definition or an extension")),
+      Some(DocumentHead::Mod) => Branch::B5,
+      None => return unexpected_here(
+        inp,
+        Expectation::Production("a use item, a module, a definition or an extension"),
+      ),
     };
 
     let mut tails = (
@@ -305,6 +320,10 @@ document_parser!(
           ))
         })
       },
+      |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
+        let span = take_classified_identifier(inp, Expectation::Mod)?;
+        mod_definition_after_keyword(inp, span.start(), None).map(DocumentItem::Mod)
+      },
     );
     tails.parse_choice(inp, &branch)
   }
@@ -331,9 +350,9 @@ where
 document_parser!(
   /// Parses a nonempty complete GraphQLx document.
   ///
-  /// The root accepts `use` items, executable definitions, type-system
-  /// definitions, and type-system extensions in source order. `use` items,
-  /// generic syntax, rooted paths, and `where` clauses are GraphQLx
+  /// The root accepts `use` items, inline modules, executable definitions,
+  /// type-system definitions, and type-system extensions in source order. `use`
+  /// items, modules, generic syntax, rooted paths, and `where` clauses are GraphQLx
   /// extensions; standard definition forms follow GraphQL's document grammar.
   ///
   /// See the [GraphQL Document specification](https://spec.graphql.org/draft/#Document).
@@ -387,8 +406,8 @@ macro_rules! impl_document_api {
 impl_document_api!(
   /// Parses one complete GraphQLx document entry.
   ///
-  /// `use` items and extensions are GraphQLx-only entries; executable and
-  /// type-system definitions retain their corresponding GraphQL grammar.
+  /// `use` items, inline modules and extensions are GraphQLx-only entries; executable
+  /// and type-system definitions retain their corresponding GraphQL grammar.
   ///
   /// See [GraphQL Document](https://spec.graphql.org/draft/#Document),
   /// [Executable Definition](https://spec.graphql.org/draft/#ExecutableDefinition),
@@ -400,9 +419,9 @@ impl_document_api!(
 impl_document_api!(
   /// Parses a nonempty complete GraphQLx document.
   ///
-  /// GraphQLx adds `use` items, type-system extensions, generic syntax, rooted
-  /// paths, and `where` clauses; no separate GraphQL specification anchor
-  /// exists for those extensions.
+  /// GraphQLx adds `use` items, inline modules, type-system extensions, generic
+  /// syntax, rooted paths, and `where` clauses; no separate GraphQL specification
+  /// anchor exists for those extensions.
   ///
   /// See the [GraphQL Document specification](https://spec.graphql.org/draft/#Document).
   S,

@@ -3,6 +3,11 @@
 //! The shared type-system carriers retain standard GraphQL structure. This
 //! module binds their names to GraphQLx paths and generic wrappers, including
 //! the `where` positions supported by the GraphQLx grammar.
+//!
+//! Scalars, enums, unions and input objects may implement interfaces here, where
+//! GraphQL gives them no `implements` clause, so their definitions and extensions
+//! bind carriers of GraphQLx's own with an `implements` slot after the name, and
+//! the payloads of their extensions are GraphQLx's own as well.
 
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use tokora::{
@@ -15,10 +20,13 @@ use super::{
   ExtensionName, Name, OperationType, Type, TypePath, WhereClause,
 };
 
+pub use crate::generic::{
+  EnumTypeExtensionData, InputObjectTypeExtensionData, ScalarTypeExtensionData,
+  UnionTypeExtensionData,
+};
 pub use crate::type_system::{
-  EnumTypeExtensionData, ExecutableDirectiveLocation, InputObjectTypeExtensionData,
-  InterfaceTypeExtensionData, Location, ObjectTypeExtensionData, SchemaExtensionData,
-  TypeSystemDirectiveLocation, UnionTypeExtensionData,
+  ExecutableDirectiveLocation, InterfaceTypeExtensionData, Location, ObjectTypeExtensionData,
+  SchemaExtensionData, TypeSystemDirectiveLocation,
 };
 
 /// A GraphQLx list of directive locations.
@@ -113,11 +121,14 @@ pub type EnumValuesDefinition<
   Container = DefaultVec<EnumValueDefinition<S, Span>>,
 > = crate::type_system::EnumValuesDefinition<EnumValueDefinition<S, Span>, Container, Span>;
 
-/// A GraphQLx scalar type definition with optional generic parameters.
+/// A GraphQLx scalar type definition with optional generic parameters, an
+/// optional `implements` clause, and an optional `where` clause that ends it.
 pub type ScalarTypeDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::type_system::ScalarTypeDefinition<
+  crate::generic::ScalarTypeDefinition<
     DefinitionName<S, Span, Ty>,
+    ImplementInterfaces<S, Span, Ty>,
     ConstDirectives<S, Span>,
+    WhereClause<S, Span, Ty>,
     Span,
   >;
 
@@ -155,11 +166,12 @@ pub type InterfaceTypeDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
 pub type DescribedInterfaceTypeDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
   Described<InterfaceTypeDefinition<S, Span, Ty>, S, Span>;
 
-/// A GraphQLx union type definition with generic declaration and optional
-/// `where` clause before its member paths.
+/// A GraphQLx union type definition with generic declaration, an optional
+/// `implements` clause, and an optional `where` clause after its member paths.
 pub type UnionTypeDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::type_system::UnionTypeDefinition<
+  crate::generic::UnionTypeDefinition<
     DefinitionName<S, Span, Ty>,
+    ImplementInterfaces<S, Span, Ty>,
     ConstDirectives<S, Span>,
     Constrained<UnionMemberTypes<S, Span, Ty>, WhereClause<S, Span, Ty>, Span>,
     Span,
@@ -169,10 +181,12 @@ pub type UnionTypeDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
 pub type DescribedUnionTypeDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
   Described<UnionTypeDefinition<S, Span, Ty>, S, Span>;
 
-/// A GraphQLx enum type definition with optional generic parameters.
+/// A GraphQLx enum type definition with optional generic parameters and an
+/// optional `implements` clause.
 pub type EnumTypeDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::type_system::EnumTypeDefinition<
+  crate::generic::EnumTypeDefinition<
     DefinitionName<S, Span, Ty>,
+    ImplementInterfaces<S, Span, Ty>,
     ConstDirectives<S, Span>,
     EnumValuesDefinition<S, Span>,
     Span,
@@ -182,11 +196,13 @@ pub type EnumTypeDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
 pub type DescribedEnumTypeDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
   Described<EnumTypeDefinition<S, Span, Ty>, S, Span>;
 
-/// A GraphQLx input object type definition with generic declaration and
-/// optional `where` clause before its input fields.
+/// A GraphQLx input object type definition with generic declaration, an
+/// optional `implements` clause, and an optional `where` clause before its input
+/// fields.
 pub type InputObjectTypeDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::type_system::InputObjectTypeDefinition<
+  crate::generic::InputObjectTypeDefinition<
     DefinitionName<S, Span, Ty>,
+    ImplementInterfaces<S, Span, Ty>,
     ConstDirectives<S, Span>,
     ConstrainedInputFieldsDefinition<S, Span, Ty>,
     Span,
@@ -240,9 +256,15 @@ pub type DirectiveDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
 pub type DirectiveExtension<S, Span = SimpleSpan> =
   crate::type_system::DirectiveExtension<ExtensionName<S, Span>, ConstDirectives<S, Span>, Span>;
 
-/// A GraphQLx scalar type extension with a generic-capable extension path.
-pub type ScalarTypeExtension<S, Span = SimpleSpan> =
-  crate::type_system::ScalarTypeExtension<ExtensionName<S, Span>, ConstDirectives<S, Span>, Span>;
+/// A GraphQLx scalar type extension with a generic-capable extension path, adding
+/// interfaces, directives, or both.
+pub type ScalarTypeExtension<S, Span = SimpleSpan, Ty = Type<S, Span>> =
+  crate::generic::ScalarTypeExtension<
+    ExtensionName<S, Span>,
+    ImplementInterfaces<S, Span, Ty>,
+    ConstDirectives<S, Span>,
+    Span,
+  >;
 
 /// A GraphQLx object type extension with generic arguments and an optional
 /// `where` clause before its fields.
@@ -266,29 +288,34 @@ pub type InterfaceTypeExtension<S, Span = SimpleSpan, Ty = Type<S, Span>> =
     Span,
   >;
 
-/// A GraphQLx union type extension with generic arguments and an optional
-/// `where` clause before its member paths.
+/// A GraphQLx union type extension with generic arguments, optional added
+/// interfaces, and an optional `where` clause after its member paths.
 pub type UnionTypeExtension<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::type_system::UnionTypeExtension<
+  crate::generic::UnionTypeExtension<
     ExtensionName<S, Span>,
+    ImplementInterfaces<S, Span, Ty>,
     ConstDirectives<S, Span>,
     Constrained<UnionMemberTypes<S, Span, Ty>, WhereClause<S, Span, Ty>, Span>,
     Span,
   >;
 
-/// A GraphQLx enum type extension with a generic-capable extension path.
-pub type EnumTypeExtension<S, Span = SimpleSpan> = crate::type_system::EnumTypeExtension<
-  ExtensionName<S, Span>,
-  ConstDirectives<S, Span>,
-  EnumValuesDefinition<S, Span>,
-  Span,
->;
-
-/// A GraphQLx input object type extension with generic arguments and an
-/// optional `where` clause before its input fields.
-pub type InputObjectTypeExtension<S, Span = SimpleSpan, Ty = Type<S, Span>> =
-  crate::type_system::InputObjectTypeExtension<
+/// A GraphQLx enum type extension with a generic-capable extension path and
+/// optional added interfaces.
+pub type EnumTypeExtension<S, Span = SimpleSpan, Ty = Type<S, Span>> =
+  crate::generic::EnumTypeExtension<
     ExtensionName<S, Span>,
+    ImplementInterfaces<S, Span, Ty>,
+    ConstDirectives<S, Span>,
+    EnumValuesDefinition<S, Span>,
+    Span,
+  >;
+
+/// A GraphQLx input object type extension with generic arguments, optional added
+/// interfaces, and an optional `where` clause before its input fields.
+pub type InputObjectTypeExtension<S, Span = SimpleSpan, Ty = Type<S, Span>> =
+  crate::generic::InputObjectTypeExtension<
+    ExtensionName<S, Span>,
+    ImplementInterfaces<S, Span, Ty>,
     ConstDirectives<S, Span>,
     ConstrainedInputFieldsDefinition<S, Span, Ty>,
     Span,
@@ -361,11 +388,11 @@ impl<S, Span, Ty> IntoSpan<Span> for TypeDefinition<S, Span, Ty> {
 /// A GraphQLx named type extension.
 pub type TypeExtension<S, Span = SimpleSpan, Ty = Type<S, Span>> =
   crate::type_system::TypeExtension<
-    ScalarTypeExtension<S, Span>,
+    ScalarTypeExtension<S, Span, Ty>,
     ObjectTypeExtension<S, Span, Ty>,
     InterfaceTypeExtension<S, Span, Ty>,
     UnionTypeExtension<S, Span, Ty>,
-    EnumTypeExtension<S, Span>,
+    EnumTypeExtension<S, Span, Ty>,
     InputObjectTypeExtension<S, Span, Ty>,
   >;
 

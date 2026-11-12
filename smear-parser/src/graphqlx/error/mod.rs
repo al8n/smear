@@ -109,6 +109,8 @@ pub enum Expectation {
   NameGlobOrGroup,
   /// The contextual `use` keyword.
   Use,
+  /// The contextual `mod` keyword.
+  Mod,
   /// The contextual `as` keyword.
   As,
   /// An operation type or the `fragment` keyword.
@@ -189,6 +191,7 @@ impl core::fmt::Display for Expectation {
       Self::UseTree => f.write_str("a use tree"),
       Self::NameGlobOrGroup => f.write_str("a name, `*` or `{`"),
       Self::Use => f.write_str("`use`"),
+      Self::Mod => f.write_str("`mod`"),
       Self::As => f.write_str("`as`"),
       Self::OperationTypeOrFragment => f.write_str("an operation type or `fragment`"),
       Self::FragmentName => f.write_str("a fragment name"),

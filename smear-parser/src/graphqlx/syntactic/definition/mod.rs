@@ -192,11 +192,11 @@ pub use extension::{
 };
 
 mod document;
-pub(crate) use document::type_system_definition_after_keyword;
 pub use document::{
-  described_type_system_definition, type_system_definition, type_system_definition_or_extension,
-  type_system_document, type_system_item,
+  described_type_system_definition, mod_definition, type_system_definition,
+  type_system_definition_or_extension, type_system_document, type_system_item,
 };
+pub(crate) use document::{mod_definition_after_keyword, type_system_definition_after_keyword};
 
 #[cfg(test)]
 mod tests;

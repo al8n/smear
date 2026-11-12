@@ -99,7 +99,7 @@
 //! what that costs — an `expect` that skips trivia on its accepting branch as well as before it
 //! moves trailing placement across the whole corpus while round-trip, the gap census, the parity
 //! gate, the injection gate and the projection differential all stay green. So the sentence is now
-//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-six pairings re-derived on every run by
+//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-seven pairings re-derived on every run by
 //! [`only_the_recorded_nodes_close_on_their_trailing_trivia`]. It is nearly twice its GraphQL
 //! twin's length for a reason the constant states: two GraphQLx productions end on a probe for an
 //! optional continuation that is usually not there — `::` for a path, `<` for a definition's name
@@ -172,7 +172,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// Every `parent > node` pairing where a node closes *after* the trivia behind it, so that the
 /// trivia lands inside the node's range instead of beside it.
 ///
-/// **Forty-six entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
+/// **Forty-seven entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
 /// one and its full account is on the GraphQL twin's constant: an atom commits the trivia it
 /// crosses to whichever node is open at that moment, a production about to open a node crosses its
 /// leading trivia at a dispatch peek made *before* the mark, and trailing trivia has no such
@@ -199,7 +199,10 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 ///   consumed into an `Error` inside it and the trailing newline follows it in; `TypeGenerics >
 ///   Error` (`invalid_x_name_adjacent_to_angle_in_generics`) is that shape inside an angle list;
 ///   `Document > UseDefinition` (`invalid_x_use_without_tree`) is a `use` with no tree after it,
-///   whose peek for one crossed the newline from inside the item; and `Document > DefinitionName`
+///   whose peek for one crossed the newline from inside the item; `Document > ModDefinition`
+///   (`invalid_x_mod_without_body`, `invalid_x_mod_unclosed_body`) is the same shape for a module
+///   whose body is missing or never closes, the peek for its `{` or for its next item crossing the
+///   newline from inside it; and `Document > DefinitionName`
 ///   is Task 10's unwound mark — the definition node is never opened, so the name the production
 ///   had already built is left as a bare child of `Document` with the trivia after it. That last
 ///   one is recorded **with the loss in it**, exactly as `shape_lost_object_type_definition` is,
@@ -292,6 +295,7 @@ const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "DirectiveDefinition > DirectiveLocations",
   "Document > DefinitionName",
   "Document > Error",
+  "Document > ModDefinition",
   "Document > ObjectTypeExtension",
   "Document > UseDefinition",
   "EnumTypeDefinition > DefinitionName",

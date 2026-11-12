@@ -384,6 +384,10 @@ jobs:
   clippy:
     name: clippy
     strategy:
+      # `fail-fast: false`, for the reason `test` gives: each leg is its own question. It lints the
+      # workspace as its own host compiles it, code under a platform `cfg` included, so a red
+      # ubuntu leg says nothing about the windows one and must not cancel it.
+      fail-fast: false
       matrix:
         # `macos-latest` is deliberately absent — it lives in
         # `.github/workflows/macos.yml`. See this file's header before adding it back.
@@ -671,6 +675,9 @@ jobs:
   build:
     name: build
     strategy:
+      # `fail-fast: false`, as in `clippy` and `test`: each leg builds every feature row for its own
+      # host, so neither answer stands in for the other, and a red leg must not cancel its sibling.
+      fail-fast: false
       matrix:
         # `macos-latest` is deliberately absent — it lives in
         # `.github/workflows/macos.yml`. See this file's header before adding it back.
@@ -783,6 +790,13 @@ jobs:
   test:
     name: test
     strategy:
+      # `fail-fast: false` because the two legs are two independent questions: does the suite pass
+      # on Linux, and does it pass on Windows. Under the default a red `ubuntu-latest` leg cancels
+      # the `windows-latest` one and the Windows answer is lost — on 2026-11-12 two runs lost the
+      # Windows results of both this job and `clippy` that way. It is the loss `--no-fail-fast` on
+      # `Run test` below prevents one level down, between test binaries rather than between hosts.
+      # `cross` carries the note on why a cancelled leg reads as a failure in `gh pr checks`.
+      fail-fast: false
       matrix:
         # `macos-latest` is deliberately absent — it lives in
         # `.github/workflows/macos.yml`. See this file's header before adding it back.

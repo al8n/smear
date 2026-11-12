@@ -213,10 +213,9 @@ pub(crate) const TYPE_EXTENSION_HEADS: &[Kind] = &[Kind::Identifier];
 
 /// The token kinds an extension's tail may begin with — the "at least one component" report.
 ///
-/// Every one of `syntactic/`'s eight extension tails refuses an empty tail: six through a
-/// `(None, None, …) => Err` arm, and a scalar or a directive extension by requiring its directives
-/// outright. A bare `extend type T` re-prints as valid text, so the verdict is the only witness the
-/// rule has.
+/// Every one of `syntactic/`'s eight extension tails refuses an empty tail: seven through a
+/// `(None, None, …) => Err` arm, and a directive extension by requiring its directives outright. A
+/// bare `extend type T` re-prints as valid text, so the verdict is the only witness the rule has.
 pub(crate) const EXTENSION_TAIL_HEADS: &[Kind] =
   &[Kind::At, Kind::LBrace, Kind::Equal, Kind::Identifier];
 
@@ -248,6 +247,21 @@ pub(crate) const USE_SOURCE_HEADS: &[Kind] = &[Kind::InlineString];
 /// What may follow a `use` item's glob or group: nothing of the item's own. The item ends there,
 /// so an `as` after one is reported against no head at all.
 pub(crate) const USE_ITEM_END_HEADS: &[Kind] = &[];
+
+/// The `{` a module's body must open with, after its name.
+///
+/// Required: an empty body is written `{}`, and a module with no braces at all is a grammar error
+/// in both suites.
+pub(crate) const MOD_BODY_HEADS: &[Kind] = &[Kind::LBrace];
+
+/// The token kinds an item of a module's body may begin with: a description, or the keyword of a
+/// `use` item, a module, a type-system definition or an extension — all `Identifier`s.
+///
+/// The set a type-system document's entry admits, under its own name, because what it names is a
+/// different position: inside a body a `}` ends the run, and an executable definition's keyword
+/// starts no item at all.
+pub(crate) const MOD_ITEM_HEADS: &[Kind] =
+  &[Kind::InlineString, Kind::BlockString, Kind::Identifier];
 
 /// The `=` a union's members must open with — divergence 17's expectation, which is `Equal` and
 /// **not** `LBrace`: a union's `where` requires the members *before* it where an object's requires
@@ -363,9 +377,11 @@ fn is_sync_point(kind: Kind) -> bool {
 /// it would break recovery for the whole generics area rather than merely coarsening it.
 /// Where a document loop is willing to restart after an entry failed: the head of another entry.
 ///
-/// **Fourteen spellings against GraphQL's thirteen** — `use` is the extra one, and its absence
-/// would cost every `use` item after a broken definition. `extend` is in the set for the reason
-/// GraphQL's is: an extension is an entry even though it is not a definition.
+/// **Fifteen spellings against GraphQL's thirteen** — `use` and `mod` are the extra two, and the
+/// absence of either would cost every such entry after a broken definition. `extend` is in the set
+/// for the reason GraphQL's is: an extension is an entry even though it is not a definition. The
+/// set is shared by the three roots, so the executable root restarts at a `mod` too, and reports
+/// it there.
 #[inline]
 fn is_definition_start(kind: Kind, keyword: Option<Keyword>) -> bool {
   match kind {
@@ -387,6 +403,7 @@ fn is_definition_start(kind: Kind, keyword: Option<Keyword>) -> bool {
           | Keyword::Input
           | Keyword::Extend
           | Keyword::Use
+          | Keyword::Mod
       )
     ),
     _ => false,

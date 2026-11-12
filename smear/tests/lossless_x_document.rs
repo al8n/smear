@@ -14,7 +14,7 @@ use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,
   lossless::{
     extension::test_support::{parse_type_system_extension, parse_union_type_extension},
-    parse_document,
+    parse_document, parse_executable_document, parse_type_system_document,
   },
 };
 
@@ -312,6 +312,141 @@ fn a_document_holds_use_items_definitions_and_extensions_side_by_side() {
   );
 }
 
+/// A module's items are its own children, in source order, and its description is inside it.
+///
+/// Its body is no node of its own, so the four item kinds hang off the module directly — and a
+/// description spends the mark the dispatcher minted before it, so the string is the module's first
+/// token rather than rubble beside it, as it is for a `use` item or an extension.
+#[test]
+fn a_module_holds_its_items_and_its_own_description() {
+  let src = "\"doc\" mod m {\n  use a::b\n  mod n {}\n  type T { f: Int }\n  extend type T @d\n}\n";
+  for parse in [parse_document(src), parse_type_system_document(src)] {
+    assert!(
+      !parse.has_errors(),
+      "a module is an entry of this root: {src:?}"
+    );
+    assert_eq!(parse.syntax().text().to_string(), src, "round trip");
+    let module = parse
+      .syntax()
+      .descendants()
+      .find(|n| n.kind() == K::ModDefinition)
+      .expect("the module's node");
+    assert_eq!(
+      module.first_token().map(|t| t.kind()),
+      Some(K::InlineString),
+      "the description is the module's own first token"
+    );
+    assert_eq!(
+      module.children().map(|n| n.kind()).collect::<Vec<K>>(),
+      vec![
+        K::UseDefinition,
+        K::ModDefinition,
+        K::ObjectTypeDefinition,
+        K::ObjectTypeExtension
+      ],
+      "the items are the module's direct children, in source order"
+    );
+  }
+}
+
+/// A module may be empty, and a body is entered only on a `{`: a module without one is reported
+/// and kept, and the entry after it survives.
+#[test]
+fn an_empty_module_parses_and_a_missing_body_is_reported() {
+  assert!(
+    !parse_document("mod x {}").has_errors(),
+    "an empty module is a namespace"
+  );
+  for src in ["mod m\ntype T { f: Int }\n", "mod {}\n", "mod m {\n"] {
+    let parse = parse_document(src);
+    assert!(parse.has_errors(), "{src:?} must report");
+    assert_eq!(
+      parse.syntax().text().to_string(),
+      src,
+      "round trip: {src:?}"
+    );
+    assert!(
+      !parse
+        .syntax()
+        .descendants_with_tokens()
+        .any(|e| matches!(e.kind(), K::Error | K::Gap)),
+      "{src:?} is reported and built, not skipped"
+    );
+    assert!(
+      parse
+        .syntax()
+        .descendants()
+        .any(|n| n.kind() == K::ModDefinition),
+      "{src:?} keeps its module"
+    );
+  }
+  assert!(
+    parse_document("mod m\ntype T { f: Int }\n")
+      .syntax()
+      .descendants()
+      .any(|n| n.kind() == K::ObjectTypeDefinition),
+    "the definition after a body-less module is its own entry"
+  );
+}
+
+/// The executable root takes no module: it reports one and still builds it, where the other two
+/// roots take it as an entry.
+#[test]
+fn the_executable_root_reports_a_module_and_still_builds_it() {
+  let src = "mod m { type T { f: Int } }";
+  let parse = parse_executable_document(src);
+  assert!(parse.has_errors(), "a module is not an executable entry");
+  assert_eq!(parse.syntax().text().to_string(), src, "round trip");
+  assert!(
+    !parse
+      .syntax()
+      .descendants_with_tokens()
+      .any(|e| matches!(e.kind(), K::Error | K::Gap)),
+    "reported and built, not skipped"
+  );
+  let document = parse
+    .syntax()
+    .children()
+    .find(|n| n.kind() == K::ExecutableDocument)
+    .expect("the executable root's document");
+  assert_eq!(
+    document.children().map(|n| n.kind()).collect::<Vec<K>>(),
+    vec![K::ModDefinition]
+  );
+  assert!(!parse_document(src).has_errors());
+  assert!(!parse_type_system_document(src).has_errors());
+}
+
+/// A module's body holds type-system items only: a query or a fragment in it is skipped as a head
+/// that starts no item, at every root.
+#[test]
+fn a_module_body_holds_no_executable_definition() {
+  for src in ["mod m { query Q { f } }", "mod m { fragment F on T { f } }"] {
+    for parse in [
+      parse_document(src),
+      parse_type_system_document(src),
+      parse_executable_document(src),
+    ] {
+      assert!(parse.has_errors(), "{src:?}");
+      assert_eq!(
+        parse.syntax().text().to_string(),
+        src,
+        "round trip: {src:?}"
+      );
+      assert!(
+        !parse
+          .syntax()
+          .descendants()
+          .any(|n| matches!(n.kind(), K::OperationDefinition | K::FragmentDefinition)),
+        "{src:?}: no executable definition is built inside a module"
+      );
+    }
+  }
+  // A schema definition and a schema extension are type-system items, and both parse in a body:
+  // refusing them there is analysis.
+  assert!(!parse_document("mod m { schema { query: Q } extend schema @d }").has_errors());
+}
+
 /// The document node covers **every byte**, leading and trailing trivia included.
 #[test]
 fn a_document_covers_the_whole_file() {
@@ -356,18 +491,22 @@ fn a_broken_entry_costs_itself_and_not_the_rest_of_the_document() {
   );
 }
 
-/// After a broken entry, **every** entry head is a restart point — including `use`.
+/// After a broken entry, **every** entry head is a restart point — including `use` and `mod`.
 ///
-/// `resync_to_definition`'s predicate is a table of fourteen spellings, and a missing row costs the
+/// `resync_to_definition`'s predicate is a table of fifteen spellings, and a missing row costs the
 /// entry after the failure: the skip runs past its head and folds the whole entry into the `Error`
 /// region. The text still round-trips — that is what makes the row invisible — so the witness has
 /// to be the *node* the following entry should have built. No other test in this file restarts at
-/// a `use` item, so dropping `Use` from the table leaves every one of them green, and `use` is the
-/// row GraphQL's own table does not have, so it is the one a port would be missing.
+/// a `use` item or a module, so dropping `Use` or `Mod` from the table leaves every one of them
+/// green, and those are the two rows GraphQL's own table does not have, so they are the ones a port
+/// would be missing.
 #[test]
 fn every_entry_head_is_a_restart_point_after_a_broken_entry() {
   for (tail, expected) in [
     ("use \"x\"::*", K::UseDefinition),
+    // A restart point follows the module's braces: without one the skip would reach end of input,
+    // fall back to one token, and leave the module to the loop whether or not `mod` is a row.
+    ("mod m {} type U { f: Int }", K::ModDefinition),
     ("extend type T @d", K::ObjectTypeExtension),
     ("\"doc\" scalar S", K::ScalarTypeDefinition),
     ("type T { f: Int }", K::ObjectTypeDefinition),

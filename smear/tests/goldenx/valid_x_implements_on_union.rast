@@ -1,0 +1,28 @@
+Root@0..34
+  Document@0..34
+    UnionTypeDefinition@0..34
+      Name@0..5 "union"
+      Space@5..6 " "
+      DefinitionName@6..10
+        Name@6..9 "Any"
+        Space@9..10 " "
+      ImplementInterfaces@10..26
+        Name@10..20 "implements"
+        Space@20..21 " "
+        TypePath@21..26
+          Path@21..26
+            Name@21..25 "Node"
+            Space@25..26 " "
+      UnionMemberTypes@26..34
+        Equal@26..27 "="
+        Space@27..28 " "
+        TypePath@28..30
+          Path@28..30
+            Name@28..29 "A"
+            Space@29..30 " "
+        Pipe@30..31 "|"
+        Space@31..32 " "
+        TypePath@32..34
+          Path@32..34
+            Name@32..33 "B"
+            Newline@33..34 "\n"

@@ -1,0 +1,1 @@
+union Any implements Node = A | B

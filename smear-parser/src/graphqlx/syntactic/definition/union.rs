@@ -81,6 +81,8 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let name = definition_name(inp)?;
+  let implements: Option<ImplementInterfaces<GraphqlxSlice<'inp, Src>>> =
+    try_implements(inp)?.into();
   let directives = optional_const_directives(inp)?;
   let members = try_union_members(inp)?;
   let where_clause = match try_where_clause(inp)? {
@@ -108,6 +110,7 @@ where
   Ok(UnionTypeDefinition::new(
     SimpleSpan::new(start, extent_end(inp)),
     name,
+    implements,
     directives,
     member_types,
   ))
@@ -116,7 +119,8 @@ where
 definition_parser!(
   /// Parses a GraphQLx union type definition.
   ///
-  /// GraphQLx adds generic headers, qualified paths, and `where` clauses.
+  /// GraphQLx adds generic headers, qualified paths, an `implements` clause, and
+  /// `where` clauses.
   ///
   /// See the [GraphQL Union Type Definition specification](https://spec.graphql.org/draft/#UnionTypeDefinition).
   pub union_type_definition,
@@ -143,7 +147,8 @@ impl_definition_api!(
 impl_definition_api!(
   /// Parses a GraphQLx union type definition.
   ///
-  /// GraphQLx adds generic headers, qualified paths, and `where` clauses.
+  /// GraphQLx adds generic headers, qualified paths, an `implements` clause, and
+  /// `where` clauses.
   ///
   /// See the [GraphQL Union Type Definition specification](https://spec.graphql.org/draft/#UnionTypeDefinition).
   S,
