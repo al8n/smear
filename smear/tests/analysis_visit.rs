@@ -8,11 +8,11 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, ApplicationId, Cx, DefId, DefKind, Diagnostic, Diagnostics, Layout, Limits, MemberId,
-    MemberKind, Model, ModuleId, ModuleKind, Origin, PackageId, PackageKind, Packages, PathRoot,
-    Resolution, Root, RootOperation, Site, SourceId, Sym, Tier, TypeExprId, TypeExprKind, ValueId,
-    ValueKind, Visitor,
-    test_support::{ModelBuilder, analysis_of},
+    Analysis, ApplicationId, Contribution, Cx, DefId, DefKind, Diagnostic, Diagnostics, Layout,
+    Limits, MemberId, MemberKind, Model, ModuleId, ModuleKind, Origin, PackageId, PackageKind,
+    Packages, PathRoot, Resolution, Root, RootOperation, Site, SourceId, Sym, Tier, TypeExprId,
+    TypeExprKind, ValueId, ValueKind, Visitor,
+    test_support::{ModelBuilder, analysis_of, conclude},
     visit,
   },
   diagnostic::{Code, Diagnose, Location, Severity},
@@ -21,6 +21,7 @@ use smear::{
 
 // Sources: each package's package source, then its files.
 const CORE_LIB: u32 = 1;
+const APP_SOURCE: u32 = 4;
 const APP_SCHEMA: u32 = 5;
 const APP_INNER: u32 = 6;
 const GEO_POINT: u32 = 8;
@@ -80,6 +81,8 @@ const MISSING: ApplicationId = ApplicationId::new(2);
 const EVERY_DEF: Code = Code::new("test::visit::every-def");
 /// A second code of this file's own.
 const EVERY_MEMBER: Code = Code::new("test::visit::every-member");
+/// A third code of this file's own: a rule that refuses where the marks tests need it to.
+const REFUSED: Code = Code::new("test::visit::refused");
 
 /// The bytes `start..end` of source `source`.
 fn at(source: u32, start: usize, end: usize) -> Location {
@@ -1578,6 +1581,148 @@ fn a_tuple_of_twelve_visitors_composes() {
     ),
   );
   assert_eq!((twelve.len(), twelve.error_count()), (120, 120));
+}
+
+/// Reports an error at each of its locations as the walk begins.
+struct ErrorsAt(Vec<Location>);
+
+impl Visitor for ErrorsAt {
+  fn begin(&mut self, cx: &mut Cx<'_>) {
+    for location in &self.0 {
+      cx.report(Diagnostic::builder(REFUSED, *location).build());
+    }
+  }
+}
+
+/// Warns at its location as the walk begins.
+struct WarnsAt(Location);
+
+impl Visitor for WarnsAt {
+  fn begin(&mut self, cx: &mut Cx<'_>) {
+    cx.report(
+      Diagnostic::builder(REFUSED, self.0)
+        .severity(Severity::Warning)
+        .build(),
+    );
+  }
+}
+
+/// Checks, as the walk ends and so after every other rule has reported, that the model shows the
+/// phases' mark and no mark of a rule's error.
+#[derive(Default)]
+struct SeesThePhasesAlone {
+  checked: bool,
+}
+
+impl Visitor for SeesThePhasesAlone {
+  fn end(&mut self, cx: &mut Cx<'_>) {
+    let model = cx.model();
+    assert!(model.member(FILTER_BAD).has_errors(), "the phases' mark");
+    assert!(!model.member(NODE_ARG).has_errors(), "no rule's mark yet");
+    assert!(!model.member(QUERY_NODE).has_errors(), "no rule's mark yet");
+    assert!(!model.def(QUERY).has_errors(), "no rule's mark yet");
+    self.checked = true;
+  }
+}
+
+/// Where the refusing rule's errors point: inside `node`'s argument `id`, at `app`'s package
+/// source, and between two of `app`'s definitions.
+fn refused_at() -> Vec<Location> {
+  vec![
+    at(APP_SCHEMA, 174, 180),
+    Location::entire(APP_SOURCE),
+    at(APP_SCHEMA, 270, 290),
+  ]
+}
+
+/// The members and the definitions of `analysis` whose `has_errors()` is set, by index.
+fn marked(analysis: &Analysis) -> (Vec<u32>, Vec<u32>) {
+  let model = analysis.model();
+  let members: Vec<u32> = (0..14)
+    .filter(|index: &u32| model.member(MemberId::new(*index)).has_errors())
+    .collect::<Vec<u32>>();
+  let defs: Vec<u32> = model
+    .defs()
+    .into_iter()
+    .filter(|def: &DefId| model.def(*def).has_errors())
+    .map(|def: DefId| def.get())
+    .collect::<Vec<u32>>();
+  (members, defs)
+}
+
+/// Marks: an error one of the analysis's rules reports inside a member marks every member whose
+/// extent holds it, the contribution that holds it and that contribution's definition, and nothing
+/// else; an error at a package source or between two definitions, and a warning, mark nothing. A
+/// rule sees the phases' marks and none of the rules', whichever is composed first.
+#[test]
+fn an_error_a_rule_reports_marks_what_holds_it_once_the_walk_has_ended() {
+  for refusing_first in [true, false] {
+    let mut refuses = (ErrorsAt(refused_at()), WarnsAt(at(APP_INNER, 72, 77)));
+    let mut checks = SeesThePhasesAlone::default();
+    let analysis = if refusing_first {
+      conclude(fixture(), &Limits::new(), &mut (&mut refuses, &mut checks))
+    } else {
+      conclude(fixture(), &Limits::new(), &mut (&mut checks, &mut refuses))
+    };
+    assert!(checks.checked, "the checking rule ran");
+
+    // `node`'s argument and `node` itself, beside the phases' mark on `bad`; then `Query`, whose
+    // one contribution holds both, beside `Filter`.
+    assert_eq!(marked(&analysis), (vec![2, 4, 11], vec![3, 8]));
+    let query: Vec<bool> = analysis
+      .model()
+      .def(QUERY)
+      .contributions()
+      .map(|part: Contribution<'_>| part.has_errors())
+      .collect::<Vec<bool>>();
+    assert_eq!(query, [true]);
+
+    // The analysis's diagnostics are the rules': three errors and a warning.
+    let diagnostics = analysis.diagnostics();
+    assert_eq!((diagnostics.len(), diagnostics.error_count()), (4, 3));
+    assert!(!analysis.is_ok());
+  }
+}
+
+/// An error marks what holds it whether the ceiling keeps it or not: its mark is noted as it is
+/// reported.
+#[test]
+fn an_error_the_ceiling_drops_marks_all_the_same() {
+  let analysis = conclude(
+    fixture(),
+    &Limits::new().with_max_diagnostics(0),
+    &mut ErrorsAt(refused_at()),
+  );
+  let diagnostics = analysis.diagnostics();
+  assert!(diagnostics.is_empty() && diagnostics.truncated());
+  assert_eq!(diagnostics.error_count(), 3);
+  assert_eq!(marked(&analysis), (vec![2, 4, 11], vec![3, 8]));
+}
+
+/// An error that points at no definition marks nothing: one at a package source, and one between
+/// two definitions.
+#[test]
+fn an_error_that_points_at_no_definition_marks_nothing() {
+  let outside = vec![Location::entire(APP_SOURCE), at(APP_SCHEMA, 270, 290)];
+  let analysis = conclude(fixture(), &Limits::new(), &mut ErrorsAt(outside));
+  assert_eq!(analysis.diagnostics().error_count(), 2);
+  assert_eq!(
+    marked(&analysis),
+    (vec![11], vec![8]),
+    "the phases' mark alone"
+  );
+}
+
+/// A consumer's walk marks nothing, whatever it reports: the analysis is not its to change.
+#[test]
+fn a_consumers_walk_marks_nothing() {
+  let analysis = conclude(fixture(), &Limits::new(), &mut ());
+  let before = marked(&analysis);
+  assert_eq!(before, (vec![11], vec![8]), "the phases' mark alone");
+  let diagnostics = visit(&analysis, Packages::All, &mut ErrorsAt(refused_at()));
+  assert_eq!(diagnostics.error_count(), 3);
+  assert_eq!(marked(&analysis), before);
+  assert!(analysis.is_ok(), "the consumer's errors are its own");
 }
 
 // Every type this file's walk adds may cross threads.

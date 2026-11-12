@@ -7,9 +7,11 @@
 mod compose;
 mod walk;
 
+pub(crate) use walk::drive;
+
 use super::{
   analysis::Analysis,
-  diagnostic::{Collector, Diagnostic, Diagnostics},
+  diagnostic::{Diagnostic, Diagnostics, Reporter},
   id::{ApplicationId, DefId, MemberId, ModuleId, PackageId, TypeExprId, ValueId},
   model::{Contribution, Model, PackageKind},
   source::SourceMap,
@@ -204,7 +206,7 @@ pub trait Visitor {
 pub struct Cx<'a> {
   model: &'a Model,
   sources: &'a SourceMap,
-  collector: Collector,
+  reporter: Reporter,
   package: Option<PackageId>,
   module: Option<ModuleId>,
   def: Option<DefId>,
@@ -216,12 +218,12 @@ pub struct Cx<'a> {
 
 impl<'a> Cx<'a> {
   /// The context of a walk over `model`, whose sources `sources` numbers, reporting into
-  /// `collector`: at no entity yet.
-  fn new(model: &'a Model, sources: &'a SourceMap, collector: Collector) -> Self {
+  /// `reporter`: at no entity yet.
+  fn new(model: &'a Model, sources: &'a SourceMap, reporter: Reporter) -> Self {
     Self {
       model,
       sources,
-      collector,
+      reporter,
       package: None,
       module: None,
       def: None,
@@ -315,9 +317,13 @@ impl<'a> Cx<'a> {
   /// The walk's list keeps the least diagnostics, in their one total order, up to the ceiling the
   /// analysis was made with, so which are kept depends on the diagnostics alone. Every error counts
   /// toward [`Diagnostics::error_count`], kept or dropped.
+  ///
+  /// In [`analyze`](super::analyze)'s own walk, an error also marks the contributions and members
+  /// that hold where it points, kept or dropped, once the walk has ended. A consumer's walk marks
+  /// nothing.
   #[inline]
   pub fn report(&mut self, diagnostic: Diagnostic) {
-    self.collector.report(diagnostic);
+    self.reporter.report(diagnostic);
   }
 }
 
@@ -340,7 +346,8 @@ impl core::fmt::Debug for Cx<'_> {
 ///
 /// # The walk
 ///
-/// It reaches each entity it covers exactly once, in id order:
+/// It is the one driver: [`analyze`](super::analyze) runs smear's own rules through it too, over
+/// [`Packages::Supplied`]. It reaches each entity it covers exactly once, in id order:
 ///
 /// 1. [`begin`](Visitor::begin);
 /// 2. each package it enters: [`enter_package`](Visitor::enter_package), the modules it enters,
@@ -389,15 +396,18 @@ pub fn visit<V: Visitor + ?Sized>(
   packages: Packages,
   visitor: &mut V,
 ) -> Diagnostics {
-  let collector = Collector::new(analysis.ceiling());
-  walk::drive(
+  let reporter = Reporter::new(analysis.ceiling());
+  // A consumer's walk marks nothing: the analysis is not its to change, so the marks its errors
+  // would make are dropped.
+  let (diagnostics, _) = drive(
     analysis.model(),
     analysis.sources(),
     packages,
-    collector,
+    reporter,
     visitor,
   )
-  .finish()
+  .finish();
+  diagnostics
 }
 
 // The selection and the occurrence sites may cross threads with the results they describe.

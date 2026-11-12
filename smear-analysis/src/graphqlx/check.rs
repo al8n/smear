@@ -9,7 +9,7 @@ use tokora::diagnostic::Location;
 use super::{
   builtin::is_built_in,
   code::DiagnosticKind,
-  diagnostic::{Collector, Diagnostic},
+  diagnostic::{Diagnostic, Reporter},
   id::{PackageId, dense},
   limits::Limits,
   set::{PackageView, ROOT},
@@ -21,17 +21,17 @@ use super::{
 pub(crate) fn package_set(
   packages: &[PackageView<'_>],
   sources: &SourceMap,
-  collector: &mut Collector,
+  reporter: &mut Reporter,
 ) -> Vec<Vec<PackageId>> {
   let mut resolved: Vec<Vec<PackageId>> = Vec::with_capacity(packages.len());
   for (index, package) in packages.iter().enumerate() {
     let at = Location::entire(sources.package_sources(index).start());
     // The built-ins are smear's own, and nothing about them is the caller's to get wrong.
     if index >= ROOT {
-      check_name(packages, index, at, collector);
-      check_paths(package, at, collector);
+      check_name(packages, index, at, reporter);
+      check_paths(package, at, reporter);
     }
-    resolved.push(dependencies(packages, index, at, collector));
+    resolved.push(dependencies(packages, index, at, reporter));
   }
   resolved
 }
@@ -42,7 +42,7 @@ pub(crate) fn source_bytes(
   packages: &[PackageView<'_>],
   sources: &SourceMap,
   limits: &Limits,
-  collector: &mut Collector,
+  reporter: &mut Reporter,
 ) -> bool {
   let mut total: u64 = 0;
   for package in &packages[ROOT..] {
@@ -55,7 +55,7 @@ pub(crate) fn source_bytes(
     return true;
   }
   report(
-    collector,
+    reporter,
     DiagnosticKind::ResourceLimit,
     Location::entire(sources.package_sources(ROOT).start()),
     format!("the supplied packages hold {total} bytes of source, over the limit of {max}"),
@@ -66,11 +66,11 @@ pub(crate) fn source_bytes(
 
 /// Reports a supplied package's name: one that is a built-in's, one that is not a Name, and one
 /// that an earlier supplied package already has.
-fn check_name(packages: &[PackageView<'_>], index: usize, at: Location, collector: &mut Collector) {
+fn check_name(packages: &[PackageView<'_>], index: usize, at: Location, reporter: &mut Reporter) {
   let name = packages[index].name;
   if is_built_in(name) {
     report(
-      collector,
+      reporter,
       DiagnosticKind::ReservedPackageName,
       at,
       format!(
@@ -81,7 +81,7 @@ fn check_name(packages: &[PackageView<'_>], index: usize, at: Location, collecto
     );
   } else if !is_name(name) {
     report(
-      collector,
+      reporter,
       DiagnosticKind::InvalidPackageName,
       at,
       format!(
@@ -98,7 +98,7 @@ fn check_name(packages: &[PackageView<'_>], index: usize, at: Location, collecto
     && (packages[ROOT].name == name || (index > ROOT + 1 && packages[index - 1].name == name));
   if duplicate {
     report(
-      collector,
+      reporter,
       DiagnosticKind::DuplicatePackageName,
       at,
       format!(
@@ -112,12 +112,12 @@ fn check_name(packages: &[PackageView<'_>], index: usize, at: Location, collecto
 
 /// Reports a package's file paths: each one that breaks the path rule, and each one that an
 /// earlier file of the package already has.
-fn check_paths(package: &PackageView<'_>, at: Location, collector: &mut Collector) {
+fn check_paths(package: &PackageView<'_>, at: Location, reporter: &mut Reporter) {
   let mut previous: Option<&[u8]> = None;
   for file in &package.files {
     if let Some(problem) = path_problem(file.path) {
       report(
-        collector,
+        reporter,
         DiagnosticKind::InvalidFilePath,
         at,
         format!(
@@ -132,7 +132,7 @@ fn check_paths(package: &PackageView<'_>, at: Location, collector: &mut Collecto
     // The files are sorted by path, so files sharing a path sit side by side.
     if previous == Some(file.path) {
       report(
-        collector,
+        reporter,
         DiagnosticKind::DuplicateFilePath,
         at,
         format!(
@@ -194,7 +194,7 @@ fn dependencies(
   packages: &[PackageView<'_>],
   index: usize,
   at: Location,
-  collector: &mut Collector,
+  reporter: &mut Reporter,
 ) -> Vec<PackageId> {
   let package = &packages[index];
   let mut resolved: Vec<PackageId> = Vec::with_capacity(package.dependencies.len());
@@ -203,7 +203,7 @@ fn dependencies(
       resolved.push(PackageId::new(dense(found)));
     } else if name == package.name {
       report(
-        collector,
+        reporter,
         DiagnosticKind::MissingDependency,
         at,
         format!(
@@ -214,7 +214,7 @@ fn dependencies(
       );
     } else {
       report(
-        collector,
+        reporter,
         DiagnosticKind::MissingDependency,
         at,
         format!(
@@ -260,13 +260,13 @@ fn resolve(packages: &[PackageView<'_>], from: usize, name: &[u8]) -> Option<usi
 
 /// Reports one package-level diagnostic of `kind`.
 fn report(
-  collector: &mut Collector,
+  reporter: &mut Reporter,
   kind: DiagnosticKind,
   at: Location,
   message: String,
   help: &'static str,
 ) {
-  collector.report(
+  reporter.report(
     Diagnostic::builder(kind.code(), at)
       .severity(kind.severity())
       .message(message)

@@ -399,23 +399,34 @@ impl ModelBuilder {
   /// Marks every contribution and member whose extent holds the location of an error reported
   /// while the model was written.
   fn apply_marks(&mut self) {
-    if self.marks.is_empty() {
-      return;
-    }
-    let mut marks: Vec<(u32, usize, usize)> = Vec::with_capacity(self.marks.len());
-    for at in &self.marks {
+    self.model.mark(&self.marks);
+  }
+}
+
+impl Model {
+  /// Marks every contribution and member whose extent holds one of `marks`, the locations errors
+  /// were reported at; a definition one of whose contributions is marked has errors.
+  ///
+  /// A location that covers a whole source lies within no extent, and an extent that covers a
+  /// whole source holds nothing: what has no position of its own marks nothing.
+  pub(crate) fn mark(&mut self, marks: &[Location]) {
+    let mut spans: Vec<(u32, usize, usize)> = Vec::with_capacity(marks.len());
+    for at in marks {
       if let Some(span) = at.span() {
-        marks.push((at.source(), span.start(), span.end()));
+        spans.push((at.source(), span.start(), span.end()));
       }
     }
-    marks.sort_unstable();
-    for row in &mut self.model.contributions {
-      if holds_any(&marks, row.extent) {
+    if spans.is_empty() {
+      return;
+    }
+    spans.sort_unstable();
+    for row in &mut self.contributions {
+      if holds_any(&spans, row.extent) {
         row.marked = true;
       }
     }
-    for row in &mut self.model.members {
-      if holds_any(&marks, row.extent) {
+    for row in &mut self.members {
+      if holds_any(&spans, row.extent) {
         row.marked = true;
       }
     }

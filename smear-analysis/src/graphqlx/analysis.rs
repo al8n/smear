@@ -5,16 +5,18 @@ use std::{string::String, vec::Vec};
 
 use super::{
   check,
-  diagnostic::{Collector, Diagnostics},
+  diagnostic::{Diagnostics, Reporter},
   id::PackageId,
   limits::Limits,
   lower,
   model::{Model, ModelBuilder, ModuleKind, PackageKind},
   package::Package,
   parse,
+  rules::Rules,
   set::{self, PackageView, ROOT},
   source::SourceMap,
   text::SourceText,
+  visitor::{Packages, Visitor, drive},
 };
 
 /// What one analysis found: the model, the diagnostics, and the source map.
@@ -32,18 +34,18 @@ pub struct Analysis {
 }
 
 impl Analysis {
-  /// An analysis of the finished `model`, as the test-support door hands it to its tests: no
-  /// diagnostic, a source map of the model's packages' sources, and `limits`' diagnostic ceiling.
+  /// The analysis `analyze` would conclude from the finished `model`, with `rules` run in place of
+  /// smear's own rule set, as the test-support door hands it to its tests: a source map of the
+  /// model's packages' sources, and `limits`' diagnostic ceiling.
   #[cfg(feature = "test-support")]
-  pub(crate) fn of_model(model: Model, limits: &Limits) -> Self {
-    let ceiling = limits.max_diagnostics() as usize;
+  pub(crate) fn of_model<V: Visitor + ?Sized>(
+    model: Model,
+    limits: &Limits,
+    rules: &mut V,
+  ) -> Self {
     let sources = SourceMap::of_model(&model);
-    Self {
-      model,
-      diagnostics: Collector::new(ceiling).finish(),
-      sources,
-      ceiling,
-    }
+    let reporter = Reporter::new(limits.max_diagnostics() as usize);
+    conclude(model, sources, reporter, rules)
   }
 
   /// The diagnostic ceiling the analysis was made with: how many diagnostics a list it answers,
@@ -96,8 +98,20 @@ impl Analysis {
 /// - Parses every file with the GraphQLx syntactic parser. A file's syntax errors are reported at
 ///   that file, with the parser's own code, message, labels and help, and the other files are
 ///   parsed all the same.
+/// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
+///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///
-/// Every supplied package is checked and parsed, whether anything reaches it or not.
+/// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
+///
+/// # What it marks
+///
+/// Each error a phase or one of smear's rules reports marks, whether the ceiling keeps it or not,
+/// the contribution whose extent holds where it points, every member whose extent holds it, and
+/// through the contribution its definition: their `has_errors()` say so. An extent runs from the
+/// description, or the first keyword when there is none, to the last token, and an error that
+/// points at no definition, such as one at a package source, marks nothing. While smear's rules
+/// walk, a rule sees the phases' marks and no rule's: the rules' marks are applied once the walk has
+/// ended, so no rule sees another's, and the order the rules are composed in changes nothing.
 ///
 /// # What it keeps
 ///
@@ -121,15 +135,14 @@ pub fn analyze<S: SourceText>(
 
 /// Everything after the entrance, compiled once whatever the caller's text type.
 fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
-  let ceiling = limits.max_diagnostics() as usize;
-  let mut collector = Collector::new(ceiling);
+  let mut reporter = Reporter::new(limits.max_diagnostics() as usize);
   let sources = SourceMap::of(&packages);
 
-  let dependencies = check::package_set(&packages, &sources, &mut collector);
-  let within = check::source_bytes(&packages, &sources, limits, &mut collector);
+  let dependencies = check::package_set(&packages, &sources, &mut reporter);
+  let within = check::source_bytes(&packages, &sources, limits, &mut reporter);
   let model = model_of(&packages, &sources, dependencies);
 
-  let documents = parse::files(&packages, &sources, within, &mut collector);
+  let documents = parse::files(&packages, &sources, within, &mut reporter);
   debug_assert_eq!(
     documents.len(),
     sources.len() as usize,
@@ -137,9 +150,28 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
   );
   lower::lower(&documents);
 
+  conclude(model, sources, reporter, &mut Rules::default())
+}
+
+/// What every analysis ends with, once its phases have written `model` and reported into
+/// `reporter`: the phases' marks applied, `rules` walked over every supplied package and reporting
+/// into the same list, and the marks of the rules' errors applied once the walk has ended.
+fn conclude<V: Visitor + ?Sized>(
+  mut model: Model,
+  sources: SourceMap,
+  mut reporter: Reporter,
+  rules: &mut V,
+) -> Analysis {
+  let ceiling = reporter.ceiling();
+  // The rules read the phases' marks.
+  model.mark(&reporter.take_marks());
+  // Theirs are kept aside until every rule has walked, so no rule sees another's.
+  let reporter = drive(&model, &sources, Packages::Supplied, reporter, rules);
+  let (diagnostics, marks) = reporter.finish();
+  model.mark(&marks);
   Analysis {
     model,
-    diagnostics: collector.finish(),
+    diagnostics,
     sources,
     ceiling,
   }

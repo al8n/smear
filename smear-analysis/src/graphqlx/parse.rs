@@ -22,7 +22,7 @@ use tokora::{
 };
 
 use super::{
-  diagnostic::{Collector, Diagnostic},
+  diagnostic::{Diagnostic, Reporter},
   id::{SourceId, dense},
   set::{PackageView, ROOT},
   source::SourceMap,
@@ -69,7 +69,7 @@ pub(crate) fn files<'a>(
   packages: &[PackageView<'a>],
   sources: &SourceMap,
   supplied: bool,
-  collector: &mut Collector,
+  reporter: &mut Reporter,
 ) -> Documents<'a> {
   let mut entries: Vec<Option<Parsed<'a>>> = Vec::with_capacity(sources.len() as usize);
   for (index, package) in packages.iter().enumerate() {
@@ -79,7 +79,7 @@ pub(crate) fn files<'a>(
     for (offset, file) in package.files.iter().enumerate() {
       let source = SourceId::new(first + dense(offset));
       let document = if index < ROOT || supplied {
-        parse(file.text, source, collector)
+        parse(file.text, source, reporter)
       } else {
         None
       };
@@ -90,12 +90,12 @@ pub(crate) fn files<'a>(
 }
 
 /// Parses one file, reporting its syntax errors at `source`.
-fn parse<'a>(text: View<'a>, source: SourceId, collector: &mut Collector) -> Option<Parsed<'a>> {
+fn parse<'a>(text: View<'a>, source: SourceId, reporter: &mut Reporter) -> Option<Parsed<'a>> {
   match text {
-    View::Text(text) => parse_text(text, source, collector).map(Parsed::Text),
+    View::Text(text) => parse_text(text, source, reporter).map(Parsed::Text),
     View::Bytes(bytes) => match core::str::from_utf8(bytes) {
-      Ok(text) => parse_text(text, source, collector).map(Parsed::Text),
-      Err(_) => parse_bytes(bytes, source, collector).map(Parsed::Bytes),
+      Ok(text) => parse_text(text, source, reporter).map(Parsed::Text),
+      Err(_) => parse_bytes(bytes, source, reporter).map(Parsed::Bytes),
     },
   }
 }
@@ -104,7 +104,7 @@ fn parse<'a>(text: View<'a>, source: SourceId, collector: &mut Collector) -> Opt
 fn parse_text<'a>(
   text: &'a str,
   source: SourceId,
-  collector: &mut Collector,
+  reporter: &mut Reporter,
 ) -> Option<TypeSystemDocument<&'a str>> {
   let parsed: Result<TypeSystemDocument<&'a str>, GraphqlxErrors<&'a str>> =
     Parser::with_parser::<
@@ -120,7 +120,7 @@ fn parse_text<'a>(
     Ok(document) => Some(document),
     Err(errors) => {
       for error in errors.iter() {
-        collector.report(syntax(error, source));
+        reporter.report(syntax(error, source));
       }
       None
     }
@@ -131,7 +131,7 @@ fn parse_text<'a>(
 fn parse_bytes<'a>(
   bytes: &'a [u8],
   source: SourceId,
-  collector: &mut Collector,
+  reporter: &mut Reporter,
 ) -> Option<TypeSystemDocument<&'a [u8]>> {
   let parsed: Result<TypeSystemDocument<&'a [u8]>, GraphqlxErrors<&'a [u8]>> =
     Parser::with_parser::<
@@ -147,7 +147,7 @@ fn parse_bytes<'a>(
     Ok(document) => Some(document),
     Err(errors) => {
       for error in errors.iter() {
-        collector.report(syntax(error, source));
+        reporter.report(syntax(error, source));
       }
       None
     }

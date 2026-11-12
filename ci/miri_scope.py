@@ -280,8 +280,10 @@ MIRI_IGNORE_BUDGET = sum(MIRI_DECLARED_IGNORES.values())
 # `smear-lexer` declares no `rowan` feature at all; `smear-parser` and `smear-compiler` do declare
 # one but it is not in their `default` and these scripts pass no `--features`, so the resolve
 # leaves it off; `graphql-proto` declares only `std`. `smear-semantics`, added since, declares its
-# two tiers and nothing else and depends on nothing. This file's own feature-set guard prints what
-# actually resolved, so none of that is taken on trust.
+# two tiers and nothing else and depends on nothing. `smear-analysis`, added when its first lib unit
+# tests were, declares no `rowan` feature and takes `smear-parser` with `graphqlx` and without
+# `rowan`. This file's own feature-set guard prints what actually resolved, so none of that is
+# taken on trust.
 #
 # `ci/feature_reachability.py` requires every publishable member to be in this tuple or in
 # `MIRI_NOT_SELECTED` below, so the account grows with the workspace instead of being remembered.
@@ -292,6 +294,7 @@ MIRI_PACKAGES = (
     "smear-schema",
     "smear-compiler",
     "graphql-proto",
+    "smear-analysis",
 )
 
 # ONE MEMBER PER CELL, AND THE FEATURES THAT KEEP THAT A SCHEDULING CHANGE.
@@ -334,9 +337,8 @@ MIRI_SHARD_FEATURES = {"smear-schema": ("build",)}
 # `smear-schema/build` and `smear/validator` disagree. It also has no lib unit tests at any feature
 # set, but that is now the second reason rather than the only one.
 #
-# `smear-analysis` co-selects and builds an empty lib harness, which a cell selecting it would fail
-# on. `--verify-exclusions` builds it beside the selected members, so the day it gains a lib unit
-# test the exclusion fails and it moves into `MIRI_PACKAGES`.
+# `smear-analysis` was here as an "empty" exclusion until its first lib unit tests, which moved it
+# into `MIRI_PACKAGES`, as the exclusion said they would.
 MIRI_NOT_SELECTED = {
     "smear": {
         "outcome": "forbidden",
@@ -344,11 +346,6 @@ MIRI_NOT_SELECTED = {
                "forces `smear-schema/build`, the umbrella at default features has `validator` off, "
                "and `smear/src/lib.rs`'s equivalence assertion refuses that graph. It carries no "
                "lib unit tests at any feature set either",
-    },
-    "smear-analysis": {
-        "outcome": "empty",
-        "why": "its lib target holds no unit test, so a cell selecting it would interpret an "
-               "empty harness, which this file fails a cell for",
     },
 }
 

@@ -6,7 +6,7 @@ use std::vec::Vec;
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  diagnostic::Collector,
+  diagnostic::Reporter,
   id::{ApplicationId, DefId, MemberId, ModuleId, PackageId, TypeExprId, ValueId, dense},
   model::{
     Application, Contribution, Def, Member, Model, Root, RootOperation, Schema, TypeExpr,
@@ -18,17 +18,20 @@ use crate::graphqlx::{
 use super::{Cx, Packages, Site, Visitor};
 
 /// Walks `model`, whose sources `sources` numbers, for `visitor` over what `packages` wrote,
-/// reporting into `collector`, and answers the collector.
-pub(super) fn drive<V: Visitor + ?Sized>(
+/// reporting into `reporter`, and answers the reporter.
+///
+/// The one driver: a consumer's `visit` and `analyze`'s run of smear's own rules both walk through
+/// it.
+pub(crate) fn drive<V: Visitor + ?Sized>(
   model: &Model,
   sources: &SourceMap,
   packages: Packages,
-  collector: Collector,
+  reporter: Reporter,
   visitor: &mut V,
-) -> Collector {
-  let mut walk = Walk::new(model, sources, packages, collector);
+) -> Reporter {
+  let mut walk = Walk::new(model, sources, packages, reporter);
   walk.run(visitor);
-  walk.cx.collector
+  walk.cx.reporter
 }
 
 /// One walk: the context the hooks are handed, which packages' writing it covers, and the
@@ -48,12 +51,7 @@ struct Walk<'a> {
 
 impl<'a> Walk<'a> {
   /// A walk of `model` that covers what `packages` wrote, at no entity yet.
-  fn new(
-    model: &'a Model,
-    sources: &'a SourceMap,
-    packages: Packages,
-    collector: Collector,
-  ) -> Self {
+  fn new(model: &'a Model, sources: &'a SourceMap, packages: Packages, reporter: Reporter) -> Self {
     let count = model.packages().len() as usize;
     let mut covered: Vec<bool> = Vec::with_capacity(count);
     let mut ends: Vec<u32> = Vec::with_capacity(count);
@@ -64,7 +62,7 @@ impl<'a> Walk<'a> {
     }
     Self {
       model,
-      cx: Cx::new(model, sources, collector),
+      cx: Cx::new(model, sources, reporter),
       covered,
       ends,
       types: Vec::new(),

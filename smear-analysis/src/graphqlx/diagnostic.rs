@@ -344,6 +344,51 @@ impl Collector {
   }
 }
 
+/// The one path the analysis reports through: every phase, smear's rules, and a consumer's walk.
+///
+/// It keeps what a `Collector` keeps, and it notes where each error was reported, kept or dropped
+/// by the ceiling, at the moment it is reported: what an error marks (`Model::mark`) can then never
+/// depend on which diagnostics the ceiling keeps.
+pub(crate) struct Reporter {
+  collector: Collector,
+  /// The primary location of every error reported since the marks were last taken.
+  marks: Vec<Location>,
+}
+
+impl Reporter {
+  /// A reporter whose list keeps at most `ceiling` diagnostics.
+  pub(crate) fn new(ceiling: usize) -> Self {
+    Self {
+      collector: Collector::new(ceiling),
+      marks: Vec::new(),
+    }
+  }
+
+  /// Reports `diagnostic`: notes where it points if it is an error, then hands it to the list.
+  pub(crate) fn report(&mut self, diagnostic: Diagnostic) {
+    if diagnostic.severity == Severity::Error {
+      self.marks.push(diagnostic.primary);
+    }
+    self.collector.report(diagnostic);
+  }
+
+  /// How many diagnostics the list keeps.
+  pub(crate) fn ceiling(&self) -> usize {
+    self.collector.ceiling
+  }
+
+  /// Where the errors reported since the marks were last taken point, in the order they were
+  /// reported.
+  pub(crate) fn take_marks(&mut self) -> Vec<Location> {
+    core::mem::take(&mut self.marks)
+  }
+
+  /// The finished list, and where the errors reported since the marks were last taken point.
+  pub(crate) fn finish(self) -> (Diagnostics, Vec<Location>) {
+    (self.collector.finish(), self.marks)
+  }
+}
+
 /// A diagnostic ordered by [`compare`], which is what the heap needs.
 struct Ranked(Diagnostic);
 

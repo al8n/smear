@@ -69,6 +69,7 @@ mod lower;
 mod model;
 mod package;
 mod parse;
+mod rules;
 mod set;
 mod source;
 mod text;
