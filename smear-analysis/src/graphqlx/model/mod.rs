@@ -21,9 +21,13 @@ use std::{string::String, vec::Vec};
 
 pub use application::{ApplicationArgument, Resolution};
 pub use build::ModelBuilder;
-pub use def::{Collection, DefKind, DirectiveLocation, Origin, Primitive, TypeBound};
-pub use member::MemberKind;
-pub use module::ModuleKind;
+pub use def::{
+  Collection, Contribution, Contributions, Def, DefKind, DirectiveLocation, Extern, Externs,
+  Origin, Primitive, TypeBound, TypeParam, TypeParams,
+};
+pub use member::{Member, MemberKind};
+pub use module::{Module, ModuleKind};
+pub use name::Description;
 pub use schema::{Root, RootOperation};
 pub use ty::PathRoot;
 pub use value::{LiteralKind, ObjectEntry};
@@ -275,6 +279,12 @@ impl<'a> PackageInfo<'a> {
     model.integers.get(index as usize)
   }
 
+  /// Its root module: `~::` inside it, and `^::name` from a package that reaches it.
+  #[inline]
+  pub fn root_module(&self) -> ModuleId {
+    self.row().root_module
+  }
+
   /// The model's record of this package.
   fn row(&self) -> &'a PackageRow {
     let model: &'a Model = self.model;
@@ -295,3 +305,22 @@ impl core::fmt::Debug for PackageInfo<'_> {
       .finish()
   }
 }
+
+// What the whole design rests on, checked by the compiler rather than argued: the model and every
+// view over it may cross threads. A `Cell`, an `Rc` or a raw pointer in any table would fail this.
+const _: () = {
+  const fn assert_send_sync<T: Send + Sync>() {}
+  let _ = assert_send_sync::<Model>;
+  let _ = assert_send_sync::<PackageInfo<'static>>;
+  let _ = assert_send_sync::<Module<'static>>;
+  let _ = assert_send_sync::<Def<'static>>;
+  let _ = assert_send_sync::<Contribution<'static>>;
+  let _ = assert_send_sync::<Contributions<'static>>;
+  let _ = assert_send_sync::<TypeParam<'static>>;
+  let _ = assert_send_sync::<TypeParams<'static>>;
+  let _ = assert_send_sync::<Extern<'static>>;
+  let _ = assert_send_sync::<Externs<'static>>;
+  let _ = assert_send_sync::<Member<'static>>;
+  let _ = assert_send_sync::<Description<'static>>;
+  let _ = assert_send_sync::<ModelBuilder>;
+};
