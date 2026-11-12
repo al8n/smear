@@ -1,7 +1,0 @@
-import { User, Post, * as utils } from "./types.graphqlx"
-import * as helpers from "./helpers.graphqlx"
-
-type Query {
-  user: User
-  post: Post
-}

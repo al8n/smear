@@ -70,7 +70,7 @@ pub const TRAIT: &str = "Diagnose";
 ///
 /// It is not in this crate any more: the declaration is `tokora::diagnostic::Diagnose`, which
 /// `smear-schema` re-exports, so nothing here extends the list and it names every method that
-/// declaration carries itself — the nine `Diagnose` requires, as of tokora 0.12. A method tokora
+/// declaration carries itself — the nine `Diagnose` requires, as of tokora 0.13. A method tokora
 /// adds is therefore a line here. `related_label` is named beside them because it is not a trait
 /// method at all: it is the per-kind half of the `related()` implication
 /// `tests/diagnostic_codes.rs` pins.
@@ -922,8 +922,8 @@ fn variant_list(expr: &Expr) -> Option<Vec<(String, String)>> {
 /// The enum `head` names from inside `module`, by the same rule [`resolve_decl`] uses.
 ///
 /// `SyntaxKind` is declared once per dialect and each dialect's `ALL` sits beside its own, so an
-/// answer of "the first one" would compare `graphqlx`'s 112 variants against `graphql`'s 88 and
-/// report twenty-four omissions that are not there.
+/// answer of "the first one" would compare `graphqlx`'s 113 variants against `graphql`'s 88 and
+/// report twenty-five omissions that are not there.
 fn resolve_enum<'a>(
   head: &str,
   module: &[String],

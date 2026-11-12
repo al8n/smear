@@ -26,9 +26,10 @@ forwarded pairs behaved that way. The four features `smear` `#[cfg]`s itself —
 
 An `alloc` pair's EQ-LEAK drops `smear/std`, which implies `smear/alloc`; a `std` pair has none.
 
-EQ is **total over every member feature** — the pair list comes out of `cargo metadata`, so a
-feature added to a member without a leg here is an error rather than a silent gap. It needs no
-consumer code: the assertion lives in `smear`, so the disagreeing graph fails to compile on its own.
+EQ is **total over every member feature** but a pure alias (see `ALIAS_VERSION`) — the pair list
+comes out of `cargo metadata`, so a feature added to a member without a leg here is an error rather
+than a silent gap. It needs no consumer code: the assertion lives in `smear`, so the disagreeing
+graph fails to compile on its own.
 
     CTL(pair)   uses-<pair>, smear/std[, …]                   must FAIL, unresolved path
     POS(pair)   uses-<pair>, smear/std[, …], smear/f          must COMPILE
@@ -42,8 +43,8 @@ naming its path would leave POS compiling vacuously forever, which is pql's R5.
 # What is deliberately NOT derived, and what checks it
 
 THE FENCE'S SCOPE IS MEMBER FEATURES, and several `smear` features also forward to third-party
-ones — `bytes` forwards `tokora/bytes_1`, and the `Source for bytes::Bytes` impl is tokora's rather
-than `smear-lexer`'s. Measured: a consumer with `smear/bytes` off and `tokora/bytes_1` on directly
+ones — `bytes_1` forwards `tokora/bytes_1`, and the `Source for bytes::Bytes` impl is tokora's rather
+than `smear-lexer`'s. Measured: a consumer with `smear/bytes_1` off and `tokora/bytes_1` on directly
 gets that impl and no assertion fires, because tokora publishes no feature witnesses. It is not a
 regression from the split — the same forward is in `origin/feat/proto`'s manifest — but it is the
 boundary of what the equivalence can hold, and it is stated rather than implied by a green run.
@@ -68,6 +69,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -89,10 +91,27 @@ MEMBERS = ("smear-lexer", "smear-parser", "smear-schema", "smear-compiler", "gra
 # was green over the leak.
 #
 # So there is no skip. A pair whose umbrella twin is not its namesake declares the twin here; a pair
-# with neither is a FINDING. `plan()` asserts the table is total in both directions.
+# with neither is a FINDING. `plan()` asserts the table is total in both directions. A pure alias
+# (`ALIAS_VERSION`, below) is not an escape from that: it is not a pair, because it holds no state.
 EQ_TWIN = {
   ("smear-schema", "build"): "validator",
 }
+
+# A PURE ALIAS IS NOT A PAIR. A dependency's feature is versioned — `bytes_1`, `smol-bytes_0_2` —
+# and the unversioned name is a feature that does nothing but turn the versioned one on:
+# `bytes = ["bytes_1"]`. It carries no state of its own, so there is nothing for a witness to say
+# about it: enabling the alias on a member turns its versioned feature on, which is the pair
+# asserted and the pair the legs below put into disagreement. An equivalence ON the alias could not
+# even hold — `smear/bytes` forwards `smear-lexer/bytes_1` and not `smear-lexer/bytes`, so the
+# member's alias reads false under an umbrella alias that reads true.
+#
+# Derived from the manifest and not listed: an alias is a feature whose whole list is one other
+# feature of the same member, spelled as its own name plus a version suffix. The suffix is what keeps
+# `smear-schema`'s `introspection = ["build"]` and `smear-parser`'s `lossless-coverage = ["rowan_0_17"]`
+# out of it: each is a single forward and each is a capability with a witness of its own.
+# `ci/feature_reachability.py` carries the same rule over the same suffix and reads this literal to
+# check that the two agree.
+ALIAS_VERSION = r"_[0-9]+(?:_[0-9]+)*"
 
 # ── BOUND: THE COMPLETENESS OF THIS LIST IS NOT DERIVABLE ───────────────────────────────────
 #
@@ -114,17 +133,17 @@ EQ_TWIN = {
 PROBES = (
   ("lexer-graphql", "smear-lexer", "graphql", (), ()),
   ("lexer-graphqlx", "smear-lexer", "graphqlx", (), ()),
-  ("lexer-bytes", "smear-lexer", "bytes", (), ()),
+  ("lexer-bytes", "smear-lexer", "bytes_1", (), ()),
   ("parser-graphql", "smear-parser", "graphql", ("parser",), ()),
   ("parser-graphqlx", "smear-parser", "graphqlx", ("parser",), ()),
-  ("parser-rowan", "smear-parser", "rowan", ("parser",), ()),
-  ("parser-test-support", "smear-parser", "test-support", ("parser", "graphql", "rowan"), ()),
+  ("parser-rowan", "smear-parser", "rowan_0_17", ("parser",), ()),
+  ("parser-test-support", "smear-parser", "test-support", ("parser", "graphql", "rowan_0_17"), ()),
   # The pair the hand-written exemption removed from the fence, and the reason it matters: it is
   # impl-bearing. Its smear twin is `validator`, not a namesake — `EQ_TWIN` carries that.
   ("schema-build", "smear-schema", "build", ("parser", "graphql"), ()),
   ("schema-introspection", "smear-schema", "introspection",
    ("parser", "graphql", "validator"), ()),
-  ("compiler-rowan", "smear-compiler", "rowan", ("parser", "graphql", "validator"), ()),
+  ("compiler-rowan", "smear-compiler", "rowan_0_17", ("parser", "graphql", "validator"), ()),
   ("compiler-introspection", "smear-compiler", "introspection",
    ("parser", "graphql", "validator"), ()),
 )
@@ -137,6 +156,13 @@ PRESENCE = {
   "smear-compiler": ("parser", "graphql", "validator"),
   "graphql-proto": ("parser", "graphql", "validator", "proto"),
 }
+
+
+def is_alias(features: dict, name: str) -> bool:
+  """Whether `name` is a pure alias in `features`, a member's `[features]` table."""
+  entries = features.get(name, [])
+  return (len(entries) == 1 and entries[0] in features
+          and re.fullmatch(re.escape(name) + ALIAS_VERSION, entries[0]) is not None)
 
 
 def die(message: str) -> None:
@@ -183,6 +209,8 @@ def plan(workspace_manifest: pathlib.Path, fixture_manifest: pathlib.Path) -> in
   used_twin = set()
   for member in MEMBERS:
     for feature in sorted(f for f in pkgs[member]["features"] if f != "default"):
+      if is_alias(pkgs[member]["features"], feature):
+        continue
       twin = EQ_TWIN.get((member, feature))
       if twin is not None:
         used_twin.add((member, feature))

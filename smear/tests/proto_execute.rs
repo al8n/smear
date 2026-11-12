@@ -6858,7 +6858,7 @@ fn the_errors_list_is_never_empty_and_keeps_its_first_entry() {
 struct Planted {
   message: &'static str,
   primary: Location,
-  labels: Vec<Label>,
+  labels: Vec<Label<'static>>,
 }
 
 impl core::fmt::Display for Planted {
@@ -6893,7 +6893,7 @@ impl Diagnose for Planted {
     self.labels.len()
   }
 
-  fn label(&self, index: usize) -> Option<Label> {
+  fn label(&self, index: usize) -> Option<Label<'_>> {
     self.labels.get(index).copied()
   }
 

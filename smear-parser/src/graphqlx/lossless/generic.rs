@@ -37,11 +37,12 @@
 //!
 //! # The `where` continuation test needs **two** significant tokens, and one position proves it
 //!
-//! `graphqlx/syntactic/generic/mod.rs:442-472` decides whether another predicate follows with a
+//! `graphqlx/syntactic/generic/mod.rs:481-507` decides whether another predicate follows with a
 //! two-token window: `(Identifier, Colon | PathSeparator | LAngle)` or
-//! `(PathSeparator, Identifier)`. A one-token test — *does a `TypePath` start here?* — is exact
-//! wherever the clause is followed by a token that cannot start one, which covers divergence 19's
-//! two executable sites and divergence 16's five block sites, because a `{` follows all seven.
+//! `(Tilde | Caret | DotDot, PathSeparator)`. A one-token test — *does a `TypePath` start here?* —
+//! is exact wherever the clause is followed by a token that cannot start one, which covers
+//! divergence 19's two executable sites and divergence 16's five block sites, because a `{` follows
+//! all seven.
 //!
 //! It is **wrong** at the eighth. Divergence 18 puts a `where` at the *end* of a directive
 //! definition, forcing nothing after it, so `directive @d on FIELD where A: B` followed by
@@ -288,7 +289,9 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Colon)?;
         loop {
           match peek_kind::<Src, Ctx>(inp)? {
-            Some(Kind::Identifier | Kind::PathSeparator) => type_path::<Src, Ctx>(inp)?,
+            Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret) => {
+              type_path::<Src, Ctx>(inp)?
+            }
             // A `:` or an `&` with nothing after it. Reported without consuming: whatever is
             // here belongs to the next component, and `type_path` above already made this
             // production's progress.
@@ -321,20 +324,22 @@ lossless_production! {
         // The mandatory first predicate. Guarded rather than required, so a `where` with nothing
         // after it costs one diagnostic instead of the enclosing definition.
         match peek_kind::<Src, Ctx>(inp)? {
-          Some(Kind::Identifier | Kind::PathSeparator) => where_predicate::<Src, Ctx>(inp)?,
+          Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret) => {
+            where_predicate::<Src, Ctx>(inp)?
+          }
           _ => return recover::report_unexpected::<Src, Ctx>(inp, PATH_HEADS),
         }
         // The two-token continuation test, reproduced exactly. Every arm that continues has an
-        // `Identifier` or a `::` at the head, which `where_predicate`'s `type_path` consumes, so
-        // the loop makes progress on every turn it takes.
+        // `Identifier` or a root's sigil at the head, which `where_predicate`'s `type_path`
+        // consumes, so the loop makes progress on every turn it takes.
         loop {
           let another = match peek_kind::<Src, Ctx>(inp)? {
             Some(Kind::Identifier) => matches!(
               peek_second_kind::<Src, Ctx>(inp)?,
               Some(Kind::Colon | Kind::PathSeparator | Kind::LAngle)
             ),
-            Some(Kind::PathSeparator) => {
-              matches!(peek_second_kind::<Src, Ctx>(inp)?, Some(Kind::Identifier))
+            Some(Kind::Tilde | Kind::Caret | Kind::DotDot) => {
+              matches!(peek_second_kind::<Src, Ctx>(inp)?, Some(Kind::PathSeparator))
             }
             _ => false,
           };

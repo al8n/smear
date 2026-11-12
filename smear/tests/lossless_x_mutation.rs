@@ -1,4 +1,4 @@
-#![cfg(all(feature = "graphqlx", feature = "rowan"))]
+#![cfg(all(feature = "graphqlx", feature = "rowan_0_17"))]
 
 //! The mutation law: a falsifier for "a walk represents every non-trivia byte, or it refuses".
 //!
@@ -15,8 +15,8 @@
 //! mutations, rebuild the tree and take its own text as the source. When the mutated tree's
 //! trivia-stripped skeleton differs from the lossless re-parse's, no oracle applies — the
 //! projection is a function of the *tree*, and the syntactic parse of the text is only an oracle
-//! for trees that are parses: deleting `as` from `A as B` leaves a tree whose text `{ A B }`
-//! re-parses to two members, and the projection's answer for the tree it was handed is right while
+//! for trees that are parses: deleting `as` from a group's `A as B` leaves a tree whose text
+//! `{ A B }` re-parses to two members, and the projection's answer for the tree it was handed is right while
 //! the parser's answer for the text is a different sentence. Those carry the no-panic obligation
 //! only. Every **skeleton-faithful** one is held to the parser:
 //!
@@ -81,9 +81,9 @@ const fn is_trivia(kind: K) -> bool {
 /// image-less row is witnessed by its own probe — and the projection's header states them once;
 /// `the_lenient_rows_are_the_headers_table` asserts this table is that one. This law is the second
 /// instrument: its [`STRICT_DELETIONS`] census would name any image-less position the derivation
-/// missed. A token with an image is never lenient: `(NamedSpecifier, Path)` and
+/// missed. A token with an image is never lenient: an alias after its `as` and
 /// `(WherePredicate, TypePath)` are al8n/smear#58 round five's two findings, not rows.
-const LENIENT: [(K, K, &str); 21] = [
+const LENIENT: [(K, K, &str); 20] = [
   // The unclosed-delimiter family — `recover.rs`'s `unclosed_{object,parens}`, which report and
   // build no hole. `the_unclosed_brace_class_projects_although_the_parser_rejects_it` pins the
   // value.
@@ -93,8 +93,6 @@ const LENIENT: [(K, K, &str); 21] = [
   (K::EnumValuesDefinition, K::RBrace, "}"),
   (K::RootOperationTypesDefinition, K::RBrace, "}"),
   (K::Arguments, K::RParen, ")"),
-  // The `from` keyword — corpus `invalid_x_import_without_from`.
-  (K::ImportDefinition, K::Name, "from"),
   // The `on` keyword — `selection.rs`'s `type_condition` reports a missing one and still builds
   // the node around the path it found. Codex round five's first finding; the round-five ruling
   // that it "stays strict" is withdrawn on the issue.
@@ -106,8 +104,9 @@ const LENIENT: [(K, K, &str); 21] = [
   (K::ExtensionTypeGenerics, K::RAngle, ">"),
   // The rest of the `unclosed_*` family, derived from the report-and-build census rather than
   // from corpus deletions (Codex round six's first finding): each closer has no AST image and its
-  // site builds the container hole-free without it.
-  (K::ImportList, K::RBrace, "}"),
+  // site builds the container hole-free without it. A `use` tree is the one container that is not
+  // always a delimited list — only a group has braces — which `restorations` reads.
+  (K::UseTree, K::RBrace, "}"),
   (K::DefinitionTypeGenerics, K::RAngle, ">"),
   (K::TypeGenerics, K::RAngle, ">"),
   (K::ListType, K::RBracket, "]"),
@@ -408,11 +407,13 @@ fn representatives(root: &SyntaxNode) -> BTreeMap<K, SyntaxNode> {
 /// Every lenient token a tree lacks, as `(offset, row)` splices into its text.
 ///
 /// A closer is missing when its container holds no token of that kind, and it is restored
-/// directly after the container's last non-trivia token; a keyword is missing when its node holds
-/// no `Name` of that spelling, and it is restored directly after the last non-trivia token in
-/// front of the constituent it introduces — the source string for `from`, the type path for `on`.
-/// A node without the constituent a restoration would be anchored on is left alone: its
-/// projection refuses on its own.
+/// directly after the container's last non-trivia token. A `use` tree's `}` is missing only when
+/// the tree holds the group's `{`: a tree that binds one item or is a glob has no group, and so no
+/// `}` to be missing. A keyword is missing when its node holds no `Name` of that spelling, and it
+/// is restored directly after the last non-trivia token in front of the constituent it introduces
+/// — the type path for a type condition's `on`, the locations for a directive definition's. A node
+/// without the constituent a restoration would be anchored on is left alone: its projection
+/// refuses on its own.
 fn restorations(root: &SyntaxNode) -> Vec<(usize, usize)> {
   let tokens: Vec<(usize, usize)> = root
     .descendants_with_tokens()
@@ -446,10 +447,15 @@ fn restorations(root: &SyntaxNode) -> Vec<(usize, usize)> {
       if present {
         continue;
       }
+      let opened = node
+        .children_with_tokens()
+        .any(|element| element.kind() == K::LBrace);
+      if *parent == K::UseTree && !opened {
+        continue;
+      }
       let anchor = match *kind {
         K::Name => {
           let before = match *parent {
-            K::ImportDefinition => K::StringValue,
             K::DirectiveDefinition => K::DirectiveLocations,
             _ => K::TypePath,
           };
@@ -570,78 +576,78 @@ fn token_starts(root: &SyntaxNode) -> Vec<usize> {
 /// Round five closed at 64 instances in 14 classes and read them as three families of open work:
 /// a reserved-spelling rule missing at four name positions (45), imports after definitions (6)
 /// and duplicated members (13). Round six measured every one of them and found a single cause
-/// instead: all 64 were mutations of the two corpus trees that are **themselves** lenient —
-/// `invalid_unterminated_brace` (no `}`) and `invalid_x_import_without_from` (no `from`) — whose
-/// text the parser rejects for the missing token whatever the mutation did. `type on { x: Int }`,
-/// `import { A A } from "m"` and an import after an import are all sentences the parser accepts.
-/// The oracle had no restored text to consult; now it does, and the class map is empty. A class
-/// appearing here is a finding: name it rather than ledgering it.
+/// instead: all 64 were mutations of the two corpus trees that were **themselves** lenient —
+/// `invalid_unterminated_brace` (no `}`) and the import entry with no `from` — whose text the
+/// parser rejected for the missing token whatever the mutation did. `type on { x: Int }`, an
+/// import list with a duplicated member and an import after an import were all sentences the
+/// parser accepted. The oracle had no restored text to consult; now it does, and the class map is
+/// empty. A class appearing here is a finding: name it rather than ledgering it.
 const OPEN: &[(&str, usize)] = &[];
 
 /// The `(entry, door)` pairs the law runs over: every hole-free parse of every corpus entry under
 /// each of the three doors that builds that door's container.
-const PAIRS: usize = 259;
+const PAIRS: usize = 306;
 
 /// Of [`PAIRS`], the ones whose unmutated tree already lacks a lenient token — every mutation of
 /// them is compared against a restored text.
-const LENIENT_BASES: usize = 5;
+const LENIENT_BASES: usize = 2;
 
 /// Mutations tried, per door, per operation — the population, cell by cell.
 const TRIED: &[((&str, &str), usize)] = &[
-  (("executable", "delete"), 1324),
-  (("executable", "duplicate"), 1324),
-  (("executable", "retext"), 1479),
-  (("executable", "swap"), 700),
-  (("executable", "transplant"), 14_294),
-  (("mixed", "delete"), 3300),
-  (("mixed", "duplicate"), 3300),
-  (("mixed", "retext"), 4298),
-  (("mixed", "swap"), 1699),
-  (("mixed", "transplant"), 37_022),
-  (("type-system", "delete"), 1946),
-  (("type-system", "duplicate"), 1946),
-  (("type-system", "retext"), 2769),
-  (("type-system", "swap"), 983),
-  (("type-system", "transplant"), 21_346),
+  (("executable", "delete"), 1563),
+  (("executable", "duplicate"), 1563),
+  (("executable", "retext"), 1777),
+  (("executable", "swap"), 832),
+  (("executable", "transplant"), 15_758),
+  (("mixed", "delete"), 3803),
+  (("mixed", "duplicate"), 3803),
+  (("mixed", "retext"), 4966),
+  (("mixed", "swap"), 1965),
+  (("mixed", "transplant"), 41_368),
+  (("type-system", "delete"), 2315),
+  (("type-system", "duplicate"), 2315),
+  (("type-system", "retext"), 3277),
+  (("type-system", "swap"), 1172),
+  (("type-system", "transplant"), 24_402),
 ];
 
 /// Mutations tried in total.
-const TRIED_TOTAL: usize = 97_730;
+const TRIED_TOTAL: usize = 110_879;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 86_732;
+const UNFAITHFUL: usize = 98_165;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 8303;
+const EQUAL: usize = 9774;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 2374;
+const BOTH_REFUSE: usize = 2628;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
-const LENIENT_EQUAL: usize = 253;
+const LENIENT_EQUAL: usize = 241;
 
 /// Skeleton-faithful with a lenient token missing, and both refusing the restored text.
-const LENIENT_BOTH_REFUSE: usize = 68;
+const LENIENT_BOTH_REFUSE: usize = 71;
 
 /// How many restorations each [`LENIENT`] row contributed to [`LENIENT_EQUAL`], in table order —
 /// the value witnesses this law finds.
 ///
-/// The tenth row (an extension's `>`) has none and cannot: the list is hole-free without it only
-/// at end of input, where the extension has no tail. The last eleven — the closers the
-/// report-and-build census added in round seven — have none from this corpus: deleting a closer
-/// mid-document re-parses to a different skeleton, and only end of input keeps it faithful. Their
-/// values are pinned by `every_unclosed_closer_projects_what_the_closed_text_parses_to` and
-/// `nested_missing_closers_restore_innermost_first` instead.
-const LENIENT_HITS: [usize; 21] = [
-  86, 88, 6, 4, 6, 2, 42, 15, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+/// The ninth row (an extension's `>`) has none and cannot: the list is hole-free without it only
+/// at end of input, where the extension has no tail. Deleting a closer mid-document re-parses to a
+/// different skeleton, and only end of input keeps it faithful, so the tenth — a `use` group's
+/// `}` — is reached only by the entries whose last item ends on a group, and the last ten, the
+/// rest of the closers the report-and-build census added in round seven, have none from this
+/// corpus. Their values are pinned by `every_unclosed_closer_projects_what_the_closed_text_parses_to`
+/// and `nested_missing_closers_restore_innermost_first` instead.
+const LENIENT_HITS: [usize; 20] = [
+  95, 92, 6, 4, 6, 2, 15, 12, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
 /// How many restorations each row contributed to [`LENIENT_BOTH_REFUSE`] — restored texts the
 /// parser still rejects for another reason, and the projection refuses too. **Every row is
 /// exercised** in one of the two: a row with neither would be an exemption no mutation reaches.
-const LENIENT_REFUSED_HITS: [usize; 21] = [
-  8, 22, 4, 6, 4, 4, 12, 2, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-];
+const LENIENT_REFUSED_HITS: [usize; 20] =
+  [8, 22, 4, 6, 4, 4, 2, 4, 2, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 /// Every faithful **deletion of a token** the parser and the projection both refuse, as
 /// `(parent token-kind text, count)` — the census that enumerates the leniency criterion.
@@ -649,17 +655,22 @@ const LENIENT_REFUSED_HITS: [usize; 21] = [
 /// A position is lenient iff the token has no AST image and the lossless parser builds the tree
 /// hole-free without it; a faithful deletion is exactly the second half, so any token here with
 /// no image would be a lenient position still strict. Every entry left has an image: a directive
-/// location, a generic parameter or argument name, a path segment. Round six's first run of this
-/// census found two image-less ones — `(DirectiveDefinition, on)` and `(ExtensionTypeGenerics,
-/// >)` — which are the last two [`LENIENT`] rows now.
+/// location, a generic parameter or argument name, a use tree's alias, a glob's `*`. Round six's
+/// first run of this census found two image-less ones — `(DirectiveDefinition, on)` and
+/// `(ExtensionTypeGenerics, >)` — which are the eighth and ninth [`LENIENT`] rows now. Deleting a
+/// relative path's first segment is never faithful: it leaves a path that starts with `::`, which
+/// the parser refuses.
 const STRICT_DELETIONS: &[(&str, usize)] = &[
   ("DirectiveLocations Name ARGUMENT_DEFINITION", 2),
   ("DirectiveLocations Name INPUT_FIELD_DEFINITION", 2),
   ("DirectiveLocations Name OBJECT", 2),
   ("ExecutableDefinitionTypeGenerics Name T", 2),
-  ("ExtensionTypeGenerics Name A", 6),
+  ("ExtensionTypeGenerics Name A", 8),
   ("ExtensionTypeGenerics Name B", 2),
-  ("Path Name ns", 2),
+  ("UseTree Asterisk *", 2),
+  ("UseTree Name b", 3),
+  ("UseTree Name c", 3),
+  ("UseTree Name x", 3),
 ];
 
 #[derive(Default)]
@@ -670,8 +681,8 @@ struct Tally {
   both_refuse: usize,
   lenient_equal: usize,
   lenient_both_refuse: usize,
-  lenient_hits: [usize; 21],
-  lenient_refused_hits: [usize; 21],
+  lenient_hits: [usize; 20],
+  lenient_refused_hits: [usize; 20],
   strict_deletions: BTreeMap<String, usize>,
   violations: Vec<String>,
 }
@@ -873,6 +884,9 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
   );
   for ((door, op), count) in &tally.tried {
     println!("TRIED {door} {op} {count}");
+  }
+  for (deleted, count) in &tally.strict_deletions {
+    println!("STRICT {deleted} {count}");
   }
 
   let mut classes: BTreeMap<String, usize> = BTreeMap::new();

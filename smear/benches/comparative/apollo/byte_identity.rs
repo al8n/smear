@@ -19,8 +19,8 @@
 //! To see which:
 //!
 //! ```text
-//! cargo run -p smear --features rowan,validator --example treedump --release -- <corpus> > /tmp/after.dump
-//! git stash && cargo run -p smear --features rowan,validator --example treedump --release -- <corpus> > /tmp/before.dump
+//! cargo run -p smear --features rowan_0_17,validator --example treedump --release -- <corpus> > /tmp/after.dump
+//! git stash && cargo run -p smear --features rowan_0_17,validator --example treedump --release -- <corpus> > /tmp/before.dump
 //! git stash pop && diff /tmp/before.dump /tmp/after.dump
 //! ```
 //!
@@ -93,7 +93,7 @@ fn cheap() {
 /// runs it in release with `--include-ignored`, and [`every_corpus_is_covered`] fails if a corpus
 /// ever stops being reachable from one of the two lists above.
 ///
-/// Locally: `cargo test -p smear --features rowan,validator --release --test byte_identity -- --include-ignored`.
+/// Locally: `cargo test -p smear --features rowan_0_17,validator --release --test byte_identity -- --include-ignored`.
 #[test]
 #[ignore = "45M lines; run in release, CI covers it via --include-ignored"]
 fn prefixes() {

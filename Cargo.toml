@@ -53,11 +53,11 @@ members = [
 #
 # There is deliberately NO `default-members` narrowing that away. It would pin the Miri
 # selection at the price of silently narrowing every OTHER bare command in the repository:
-# `cargo test --all-features` in `.github/workflows/ci.yml` is meant to cover every member
-# and would quietly have stopped, with no exit code saying so — the same defect class, one turn
-# later. The selection is pinned where it is READ instead: `ci/miri_sb.sh` and `ci/miri_tb.sh`
-# pass `-p smear`, and `ci/miri_scope.py` fails the run if what got interpreted is not what
-# those scripts claim.
+# `cargo test --all-features --no-fail-fast` in `.github/workflows/ci.yml` is meant to cover
+# every member and would quietly have stopped, with no exit code saying so — the same defect
+# class, one turn later. The selection is pinned where it is READ instead: `ci/miri_sb.sh` and
+# `ci/miri_tb.sh` pass `-p smear`, and `ci/miri_scope.py` fails the run if what got interpreted
+# is not what those scripts claim.
 
 # `ci/downstream/` is NOT a member and must never become one. It is a consumer fixture with a
 # dependency edge to `smear`, so a member entry would add its features to the workspace-wide resolve
@@ -78,12 +78,14 @@ license = "Apache-2.0 OR MIT"
 rust-version = "1.95"
 
 [workspace.dependencies]
-bstr = { version = "1", default-features = false }
-bytes = { version = "1", default-features = false }
-smol-bytes = { version = "0.2", default-features = false }
+# The key carries the major, so the crate is named `bytes_1` in code and a second major of the same
+# crate can sit beside it. A member inherits the whole entry, `package` included.
+bstr_1 = { package = "bstr", version = "1", default-features = false }
+bytes_1 = { package = "bytes", version = "1", default-features = false }
+smol-bytes_0_2 = { package = "smol-bytes", version = "0.2", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
 
-tokora = { version = "0.12", default-features = false, features = ["logos", "unstable-raw", "combinators"] }
+tokora = { version = "0.13", default-features = false, features = ["logos", "unstable-raw", "combinators"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }

@@ -146,7 +146,7 @@ where
   Parser::with_parser_and_context(f, ctx).parse_slice(input)
 }
 
-#[cfg(all(feature = "graphql", feature = "bytes"))]
+#[cfg(all(feature = "graphql", feature = "bytes_1"))]
 fn drive_bytes<'inp, O, Em>(
   emitter: Em,
   f: impl for<'c> FnMut(
@@ -157,7 +157,7 @@ fn drive_bytes<'inp, O, Em>(
       ParserContext<'inp, SyntacticLexer<'inp, [u8]>, Em>,
     >,
   ) -> Result<O, TestError>,
-  input: &'inp ::bytes::Bytes,
+  input: &'inp ::bytes_1::Bytes,
 ) -> Result<O, TestError>
 where
   Em: Emitter<'inp, SyntacticLexer<'inp, [u8]>, Error = TestError>,
@@ -173,9 +173,9 @@ macro_rules! drive_all {
   ($emitter:expr, |$inp:ident| $body:expr, $src:expr, $assert:expr) => {{
     $assert(drive_str($emitter, |$inp: &mut _| $body, $src));
     $assert(drive_slice($emitter, |$inp: &mut _| $body, $src.as_bytes()));
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let owned = ::bytes::Bytes::from_static($src.as_bytes());
+      let owned = ::bytes_1::Bytes::from_static($src.as_bytes());
       $assert(drive_bytes($emitter, |$inp: &mut _| $body, &owned));
     }
   }};
@@ -211,13 +211,13 @@ where
   Parser::with_parser_and_context(f, ctx).parse_slice(input)
 }
 
-#[cfg(all(feature = "graphqlx", feature = "bytes"))]
+#[cfg(all(feature = "graphqlx", feature = "bytes_1"))]
 fn drive_bytes_gx<'inp, O, Em>(
   emitter: Em,
   f: impl for<'c> FnMut(
     &mut InputRef<'inp, 'c, GxLexer<'inp, [u8]>, ParserContext<'inp, GxLexer<'inp, [u8]>, Em>>,
   ) -> Result<O, TestError>,
-  input: &'inp ::bytes::Bytes,
+  input: &'inp ::bytes_1::Bytes,
 ) -> Result<O, TestError>
 where
   Em: Emitter<'inp, GxLexer<'inp, [u8]>, Error = TestError>,
@@ -237,9 +237,9 @@ macro_rules! drive_all_gx {
       |$inp: &mut _| $body,
       $src.as_bytes(),
     ));
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let owned = ::bytes::Bytes::from_static($src.as_bytes());
+      let owned = ::bytes_1::Bytes::from_static($src.as_bytes());
       $assert(drive_bytes_gx($emitter, |$inp: &mut _| $body, &owned));
     }
   }};

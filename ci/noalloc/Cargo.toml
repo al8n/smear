@@ -30,4 +30,5 @@ smear = { path = "../../smear", default-features = false, features = [
   "materialized-numbers",
   "test-support",
   "bstr",
+  "bstr_1",
 ] }

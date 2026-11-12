@@ -155,6 +155,12 @@ pub enum LosslessToken<S> {
   Comment(S),
   /// Path separator `::` token
   PathSeparator,
+  /// Tilde `~` token, the sigil of a path's package root `~::`
+  Tilde,
+  /// Dot-dot `..` token, the sigil of a path's parent-module root `..::`
+  DotDot,
+  /// Caret `^` token, the sigil of a path's dependency root `^::`
+  Caret,
   /// Identifier token
   Identifier(S),
   /// Float literal token
@@ -213,6 +219,9 @@ impl<S> LosslessToken<S> {
       Self::Plus => LosslessTokenKind::Plus,
       Self::Minus => LosslessTokenKind::Minus,
       Self::PathSeparator => LosslessTokenKind::PathSeparator,
+      Self::Tilde => LosslessTokenKind::Tilde,
+      Self::DotDot => LosslessTokenKind::DotDot,
+      Self::Caret => LosslessTokenKind::Caret,
       Self::Asterisk => LosslessTokenKind::Asterisk,
       Self::Space => LosslessTokenKind::Space,
       Self::Tab => LosslessTokenKind::Tab,
@@ -293,6 +302,12 @@ pub enum LosslessTokenKind {
   Minus,
   /// Path separator `::` token
   PathSeparator,
+  /// Tilde `~` token
+  Tilde,
+  /// Dot-dot `..` token
+  DotDot,
+  /// Caret `^` token
+  Caret,
   /// Comma `,` token
   Comma,
   /// Space ` ` token
@@ -346,6 +361,9 @@ impl core::fmt::Display for LosslessTokenKind {
       Self::Plus => f.write_str("`+`"),
       Self::Minus => f.write_str("`-`"),
       Self::PathSeparator => f.write_str("`::`"),
+      Self::Tilde => f.write_str("`~`"),
+      Self::DotDot => f.write_str("`..`"),
+      Self::Caret => f.write_str("`^`"),
       Self::Comma => f.write_str("`,`"),
       Self::Space => f.write_str("space"),
       Self::Tab => f.write_str("tab"),
@@ -426,6 +444,9 @@ mod tests {
       Plus => LosslessToken::Plus,
       Minus => LosslessToken::Minus,
       PathSeparator => LosslessToken::PathSeparator,
+      Tilde => LosslessToken::Tilde,
+      DotDot => LosslessToken::DotDot,
+      Caret => LosslessToken::Caret,
       Comma => LosslessToken::Comma,
       Space => LosslessToken::Space,
       Tab => LosslessToken::Tab,

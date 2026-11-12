@@ -55,7 +55,7 @@ default = []
 
 uses-lexer-graphql = []
 uses-lexer-graphqlx = []
-uses-lexer-bytes = ["dep:bytes"]
+uses-lexer-bytes = ["dep:bytes_1"]
 uses-parser-graphql = []
 uses-parser-graphqlx = []
 uses-parser-rowan = []
@@ -87,4 +87,4 @@ graphql-proto = { path = "../../graphql-proto", default-features = false, option
 # The consumer's own copy of a source crate, for the one probe whose capability is a trait impl
 # rather than a path. It carries no smear feature, which is the same omission pql's `tokora` entry
 # is written around.
-bytes = { version = "1", optional = true }
+bytes_1 = { package = "bytes", version = "1", optional = true }

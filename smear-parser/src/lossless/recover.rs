@@ -670,7 +670,7 @@ pub mod scan_allowance {
 
   // The write half is gated where its caller is. `scan_allowance_exhausted` is the only thing
   // that calls either, and it does not exist without a dialect, so without this the `dead_code`
-  // denial simply moves one level down — measured on `--features rowan,test-support`, a cell
+  // denial simply moves one level down — measured on `--features rowan_0_17,test-support`, a cell
   // `cargo hack --each-feature` cannot build because it takes features one at a time. The read
   // half below is `pub` and needs no gate: a reachable `pub` item is never dead.
   #[cfg(any(feature = "graphql", feature = "graphqlx"))]

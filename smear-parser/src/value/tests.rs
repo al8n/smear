@@ -221,9 +221,9 @@ fn literal_sources_borrow_non_copy_carriers() {
   // that its cooked value IS its borrowed source and a conversion free to rewrite the bytes would
   // forge that. `String` is not one of the representations tokora seals in, so `Bytes` is the
   // non-`Copy` carrier these three ride.
-  #[cfg(feature = "bytes")]
+  #[cfg(feature = "bytes_1")]
   {
-    use ::bytes::Bytes;
+    use ::bytes_1::Bytes;
 
     let inline_lit = match LitStr::try_from(b"\"inline\"".as_slice()).unwrap() {
       LitStr::Inline(lit) => lit.into_equivalent::<Bytes>(),

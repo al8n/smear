@@ -19,7 +19,7 @@ use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken,
   argument::committed_arguments,
   directive::{directives, directives_after_at},
-  keyword_of, path_after_first,
+  keyword_of, leading_path_separator, path_after_first,
   ty::try_type_generics,
   unexpected_here,
 };
@@ -132,10 +132,10 @@ where
   }
 }
 
+/// A type path whose first name is consumed: a relative path, the only kind a name can start.
 fn type_path_after_first<'inp, Src, Ctx>(
   start: usize,
   first: Name<GraphqlxSlice<'inp, Src>>,
-  fully_qualified: bool,
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<TypePath<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
@@ -147,7 +147,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let path = path_after_first(start, first, fully_qualified, inp)?;
+  let path = path_after_first(start, first, super::ast::PathRoot::Relative, inp)?;
   let end = path.span().end();
   let generics = try_type_generics(inp)?;
   let end = generics
@@ -345,6 +345,13 @@ where
   ))
 }
 
+/// Finishes an inline fragment once its type condition and directives are read.
+///
+/// The `{` is confirmed before the selection set is entered, for the reason GraphQL's twin
+/// records: under a recovering emitter the brace delimiter reports a wrong opener and then reads
+/// members anyway, so `{ ... on Q ... on Q …` would recurse once per fragment with no brace opened
+/// for the nesting limit to count. The refusal is the delimiter's own fail-fast one, and end of
+/// input is still left to the delimiter.
 fn inline_fragment_after_directives<'inp, Src, Ctx>(
   start: usize,
   type_condition: Option<TypeCondition<GraphqlxSlice<'inp, Src>>>,
@@ -362,6 +369,12 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let directives = (!directives.directives().is_empty()).then_some(directives);
+  if inp
+    .peek_kind()?
+    .is_some_and(|kind| kind != SyntacticTokenKind::LBrace)
+  {
+    return unexpected_here(inp, Expectation::LBrace);
+  }
   let selection_set = selection_set(inp)?;
   Ok(InlineFragment::new(
     SimpleSpan::new(start, selection_set.span().end()),
@@ -408,23 +421,6 @@ where
   inline_fragment_after_directives(start, None, directives, inp)
 }
 
-fn fragment_type_path_after_separator<'inp, Src, Ctx>(
-  start: usize,
-  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
-) -> Result<TypePath<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
-where
-  Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
-  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
-  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
-{
-  let first = take_name(inp)?;
-  type_path_after_first(start, first, true, inp)
-}
-
 fn selection_after_spread<'inp, Src, Ctx>(
   start: usize,
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
@@ -453,24 +449,18 @@ where
         data: GraphqlxToken::<'inp, Src>::Identifier(source),
       },
     )) => {
-      let path = type_path_after_first(span.start(), Name::new(span, source), false, inp)?;
+      let path = type_path_after_first(span.start(), Name::new(span, source), inp)?;
       fragment_spread_after_path(start, path, inp).map(Selection::FragmentSpread)
     }
     Some(_) => unreachable!("identifier selection consumed a non-identifier token"),
     None => match super::peek_kind(inp)? {
-      Some(SyntacticTokenKind::PathSeparator) => match inp.next_or_stop()? {
-        Some(Spanned {
-          span,
-          data: GraphqlxToken::<'inp, Src>::PathSeparator,
-        }) => {
-          let path = fragment_type_path_after_separator(span.start(), inp)?;
-          fragment_spread_after_path(start, path, inp).map(Selection::FragmentSpread)
-        }
-        Some(Spanned { span, data: token }) => {
-          Err(DialectGraphqlxError::unexpected_token(token.kind(), Expectation::Path, span).into())
-        }
-        None => unexpected_here(inp, Expectation::Path),
-      },
+      // A rooted spread target. Only a relative path's first segment can be the `on` that would
+      // open an inline fragment instead, so `...^::on` is a spread.
+      Some(SyntacticTokenKind::Tilde | SyntacticTokenKind::DotDot | SyntacticTokenKind::Caret) => {
+        let path = super::generic::type_path(inp)?;
+        fragment_spread_after_path(start, path, inp).map(Selection::FragmentSpread)
+      }
+      Some(SyntacticTokenKind::PathSeparator) => leading_path_separator(inp),
       Some(SyntacticTokenKind::At | SyntacticTokenKind::LBrace) => {
         untyped_inline_fragment_after_spread(start, inp).map(Selection::InlineFragment)
       }
@@ -557,17 +547,19 @@ where
         span,
         data: GraphqlxToken::<'inp, Src>::Identifier(source),
       },
-    )) => type_path_after_first(span.start(), Name::new(span, source), false, inp),
+    )) => type_path_after_first(span.start(), Name::new(span, source), inp),
     Some(_) => unreachable!("fragment-path identifier probe consumed a non-identifier token"),
-    None => match inp.next_or_stop()? {
-      Some(Spanned {
-        span,
-        data: GraphqlxToken::<'inp, Src>::PathSeparator,
-      }) => fragment_type_path_after_separator(span.start(), inp),
-      Some(Spanned { span, data: token }) => {
-        Err(DialectGraphqlxError::unexpected_token(token.kind(), Expectation::Path, span).into())
+    None => match super::peek_kind(inp)? {
+      Some(SyntacticTokenKind::Tilde | SyntacticTokenKind::DotDot | SyntacticTokenKind::Caret) => {
+        super::generic::type_path(inp)
       }
-      None => unexpected_here(inp, Expectation::Path),
+      Some(SyntacticTokenKind::PathSeparator) => leading_path_separator(inp),
+      _ => match inp.next_or_stop()? {
+        Some(Spanned { span, data: token }) => {
+          Err(DialectGraphqlxError::unexpected_token(token.kind(), Expectation::Path, span).into())
+        }
+        None => unexpected_here(inp, Expectation::Path),
+      },
     },
   }
 }

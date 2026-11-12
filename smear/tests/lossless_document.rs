@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan", feature = "graphql"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphql"))]
 
 //! Task 8's gate, part two: the eight type-system extensions, the two document roots, and the
 //! top-level recovery point — the one place in this suite where a production's `Err` is caught

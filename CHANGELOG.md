@@ -4,6 +4,17 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the six features
+  that enable an optional dependency are versioned, as tokora's are, and the
+  dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`,
+  `smallvec` and `rowan` become `bytes_1`, `bstr_1`, `hipstr_0_8`,
+  `smol-bytes_0_2`, `smallvec_1` and `rowan_0_17`; the unversioned names remain as
+  aliases that float with the current major, each enabling its versioned feature
+  and nothing else, so code gated on them is unaffected. The optional
+  dependencies are keyed by the versioned name too (`bytes_1`, `bstr_1`,
+  `hipstr_0_8`, `smol-bytes_0_2`, `smallvec_1`, `rowan_0_17`), so a downstream
+  crate that named smear's optional dependency by its old key (`smear/dep:bytes`
+  style, or a `[patch]`) must respell it. `default` lists `smallvec_1`.
 - `smear-lexer`: string literals in byte sources (`[u8]`, `Bytes`, `BStr`,
   `HipByt`) must be well-formed UTF-8. Ill-formed content is refused with
   `StringError::UnsupportedCharacter`, carrying each sequence's span.
@@ -17,11 +28,22 @@ All notable changes to Smear are documented in this file.
   (#251).
 - `smear-schema`: `SchemaErrorKind::UnreadableText` is no longer reachable from
   a parsed document. The kind is kept.
-- Builds on tokora 0.12 and smol-bytes 0.2. Paths through the
-  `smear::lexer::tokora` re-export follow tokora 0.12's layout. The `smol-bytes`
-  feature of `smear`, `smear-lexer` and `smear-parser` now enables tokora's
-  `smol-bytes_0_2` integration instead of `smol_bytes_0_1`, so the four
+- Builds on tokora 0.13 and smol-bytes 0.2. Paths through the
+  `smear::lexer::tokora` re-export follow the layout tokora adopted in 0.12. The
+  `smol-bytes` feature of `smear`, `smear-lexer` and `smear-parser` now enables
+  tokora's `smol-bytes_0_2` integration instead of `smol_bytes_0_1`, so the four
   smol-bytes source types are smol-bytes 0.2's. Supersedes #235.
+- **Diagnostics follow tokora 0.13: label and help text is borrowed from the
+  diagnostic.** `Diagnose::label` on every smear error type returns
+  `Option<Label<'_>>`; `primary_label` and `help` are unchanged in what they
+  return, and no smear diagnostic composes a label or help text yet. A caller
+  that named the type `Label` writes `Label<'_>`.
+- `smear-lexer`, `smear-parser` and `smear`: under `smol-bytes`, the four
+  smol-bytes 0.2 types (`Bytes` and `Utf8Bytes`, each shared and compact) are
+  now accepted as sources by both dialects' syntactic lexers and parsers, and as
+  slice types by both dialects' lossless lexers. The two `Bytes` are byte
+  sources and are held to the UTF-8 rule for string literals and comments; the
+  two `Utf8Bytes` are text sources, like `str` and `HipStr`.
 - `smear-compiler`: `Rule::NoSchemaIntrospection`, an opt-in policy rule that
   refuses every `__schema` and `__type` field selection an operation reaches,
   at the field's name. It is the policy graphql-js ships as
@@ -327,6 +349,102 @@ All notable changes to Smear are documented in this file.
   and with them every `set_type`, `map_type`, `set_types` and `map_types`
   getter. `SetValue` and `MapValue` keep their kinds and hold the `!` as a
   token between the keyword and the `{`.
+- `smear-parser`: under a recovering emitter, an inline fragment whose `{` is
+  missing is refused at the token standing in its place, in both GraphQL and
+  GraphQLx, with the expected-`{` error the fail-fast emitter already raised
+  there. The brace delimiter reported the missing opener and then read members,
+  so `{ ... on Q ... on Q … }` recursed once per fragment with one brace open
+  for the nesting limit to count, and a long enough chain overflowed the native
+  stack. Parses under the `Fatal` emitter the shipped entry points use are
+  unchanged.
+- `smear-lexer`! and `smear-parser`!: a GraphQLx path takes a root, and no path
+  starts with `::`. Both GraphQLx lexers gain three punctuators, `~` (`Tilde`),
+  `..` (`DotDot`) and `^` (`Caret`), after `PathSeparator` in the token and
+  token-kind enums, which moves the raw value of every later
+  `LosslessTokenKind` by three. `..` is taken by longest match after `...`, so
+  `....` is `...` then a stray `.`, `.....` is `...` then `..`, and a lone `.`
+  is the only unterminated spread left. A path is `PathRoot? Name (:: Name)*`:
+  `~::` roots it at the own package, `^::` at a dependency its first segment
+  names, and `..::`, once per level, at the parent module, with trivia allowed
+  between a root's tokens. The leading `::` of a fully qualified path is gone:
+  a `::` where a path begins is refused, and the syntactic refusal is the new
+  `ErrorData::LeadingPathSeparator`, of the new
+  `SyntaxErrorKind::LeadingPathSeparator` (`smear::syntax::leading-path-separator`),
+  whose help says that a dependency path starts with `^::`. Every path position
+  — a type, a value, a directive name, an `implements` entry or union member,
+  an extension's target, a root operation type, a `where` predicate and its
+  bounds, a type condition, a spread's target — opens on a name or a root's
+  sigil and no longer on `::`, so `[^::a::B, ^::c::D]` and
+  `IndexMap<string, ^::geo::Point>` hold two members each where a leading `::`
+  joined them into one. A `where` clause continues on a name followed by `:`,
+  `::` or `<`, or on a root's sigil followed by `::`. The AST `Path` trades
+  `fully_qualified: bool` for `root: PathRoot`, an enum of `Relative`,
+  `Package(Span)`, `Dependency(Span)` and `Parent { span, count }` re-exported
+  from `graphqlx::ast`: `Path::new` takes the root before the segments,
+  `root()` replaces `is_fully_qualified()`, `IntoComponents` yields
+  `(Span, PathRoot<Span>, Container)`, and a path's span starts at its root. The
+  reserved first segments — `true`, `false` and `null` of an enum value, `on`
+  of a spread's target — are reserved in a relative path only. In the lossless
+  layer a root's tokens are the leading children of its `Path` node, the typed
+  `Path` gains `tilde_token`, `caret_token` and `dot_dot_tokens`, and
+  `SyntaxKind` gains the images `Tilde`, `DotDot` and `Caret` after
+  `PathSeparator`, which moves the raw value of every later kind by three.
+  `smear_lexer::punctuator` gains `Tilde` and `Caret`, and `smear-parser`'s
+  `combinator` gains `tilde`, `try_tilde`, `caret` and `try_caret`. The
+  syntactic `path`, `try_path`, `Path::graphqlx` and `Path::try_graphqlx`
+  require the dialect error conversion every other path production already
+  required.
+- `smear-lexer`! and `smear-parser`!: GraphQLx's `import … from` becomes `use`,
+  a tree of paths, and `use` and `mod` are its keywords. `ContextualKeyword::Use`
+  and `::Mod` take the places of `Import` and `From`, so the list stays at 45 and
+  only those two discriminants change meaning, and
+  `smear_lexer::keywords::{Import, From}` become `{Use, Mod}`. `mod` has no
+  grammar yet: at an item's head it is what any unknown head is. A `use` item is
+  `use UseTree`, and a tree is a path with an optional `as Name`, or a scope
+  followed by a glob `*` or by a group `{ UseTree+ }`; the scope is a bare root
+  (`~::`, `^::` or `..::`), a path and its `::`, or an inline string source with
+  the names after it and a `::`. One token decides at every step, a tree ends at
+  the first token that cannot continue it, `as` after a complete path is always
+  the keyword, a group's trees start with a name, and no description may
+  precede the item. A `use` item stands anywhere among a document's entries, in
+  all three document kinds, before or after a definition. Every form `import`
+  accepted, and its spelling now:
+
+  | before | after |
+  |---|---|
+  | `import * from "m"` | `use "m"::*` |
+  | `import * as ns from "m"` | `use "m" as ns` |
+  | `import * as a::b from "m"` | `use "m" as b`: an alias is one name |
+  | `import { A } from "m"` | `use "m"::{A}`, or `use "m"::A` |
+  | `import { A, B } from "m"` | `use "m"::{A, B}` |
+  | `import { A as B } from "m"` | `use "m"::{A as B}` |
+  | `import { A as ns::B } from "m"` | `use "m"::{A as B}`: an alias is one name |
+  | `import { * } from "m"` | `use "m"::*` |
+  | `import { * as ns } from "m"` | `use "m" as ns` |
+  | `import { A, * as ns } from "m"` | two items, `use "m"::{A}` and `use "m" as ns`: a bare `*` is no tree |
+
+  In the AST, `UseDefinition { span, tree }` and `UseTree { span, prefix, kind }`
+  replace `ImportDefinition`, `ImportClause`, `ImportList`, `ImportMember`,
+  `NamedSpecifier` and `WildcardSpecifier`. `UsePrefix` is `Root(PathRoot)`,
+  `Path(Path)` or `Source { source, segments }`, and `UseTreeKind` is
+  `Simple { alias }`, `Glob` or `Group(Nested<UseTree>)`; both are
+  `#[non_exhaustive]`, `UseTree::new` takes `Leaf` names and spans, and a tree
+  is released by a loop, as a selection set is. The document entries
+  `ImportOrTypeSystemDefinitionOrExtension`, `ImportOrExecutableDefinition` and
+  `ImportOrDefinitionOrExtension` become `TypeSystemItem` (`#[non_exhaustive]`),
+  `UseOrExecutableDefinition` and `DocumentItem`, each with a `Use` variant, and
+  their dispatchers `type_system_item`, `use_or_executable_definition` and
+  `document_item`; the productions are `syntactic::use_tree::{use_tree,
+  use_definition}`. `Expectation` trades `Import`, `From`, `ImportClause` and
+  `ImportMember` for `Use`, `UseTree`, `NameGlobOrGroup`, `Tilde`, `DotDot` and
+  `Caret`, and `As` now names the alias's keyword. In the lossless layer
+  `SyntaxKind`'s `ImportDefinition` (96) and `ImportList` (97) become
+  `UseDefinition` and `UseTree` in place, and `NamedSpecifier` and
+  `WildcardSpecifier` go, which moves the raw value of every later kind down by
+  two: `DefinitionTypeParam` is 98 where it was 100, and `Root` is 112 where it
+  was 114. The typed `UseDefinition` and `UseTree` replace the four import
+  wrappers, every document root's `import_definitions` is `use_definitions`, and
+  the lossless module is `use_tree`.
 
 ## [0.0.1] - 2026-10-30
 

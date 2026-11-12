@@ -326,40 +326,59 @@ fn a_byte_slice_source_refuses_ill_formed_text() {
   }
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 #[test]
 fn a_bytes_source_refuses_ill_formed_text() {
   for (doc, at) in ILL_FORMED {
-    let owned = bytes::Bytes::copy_from_slice(doc);
+    let owned = bytes_1::Bytes::copy_from_slice(doc);
     assert_refused(
-      SyntacticLexer::<bytes::Bytes>::new(&owned).lex(),
+      SyntacticLexer::<bytes_1::Bytes>::new(&owned).lex(),
       &at,
       "Bytes",
     );
   }
 }
 
-#[cfg(feature = "bstr")]
+#[cfg(feature = "bstr_1")]
 #[test]
 fn a_bstr_source_refuses_ill_formed_text() {
   for (doc, at) in ILL_FORMED {
     assert_refused(
-      SyntacticLexer::<bstr::BStr>::new(bstr::BStr::new(doc)).lex(),
+      SyntacticLexer::<bstr_1::BStr>::new(bstr_1::BStr::new(doc)).lex(),
       &at,
       "BStr",
     );
   }
 }
 
-#[cfg(feature = "hipstr")]
+#[cfg(feature = "hipstr_0_8")]
 #[test]
 fn a_hipbyt_source_refuses_ill_formed_text() {
   for (doc, at) in ILL_FORMED {
-    let owned = hipstr::HipByt::from(doc);
+    let owned = hipstr_0_8::HipByt::from(doc);
     assert_refused(
-      SyntacticLexer::<hipstr::HipByt<'_>>::new(&owned).lex(),
+      SyntacticLexer::<hipstr_0_8::HipByt<'_>>::new(&owned).lex(),
       &at,
       "HipByt",
+    );
+  }
+}
+
+#[cfg(feature = "smol-bytes_0_2")]
+#[test]
+fn a_smol_bytes_source_refuses_ill_formed_text() {
+  for (doc, at) in ILL_FORMED {
+    let owned = smol_bytes_0_2::shared::Bytes::copy_from_slice(doc);
+    assert_refused(
+      SyntacticLexer::<smol_bytes_0_2::shared::Bytes>::new(&owned).lex(),
+      &at,
+      "shared Bytes",
+    );
+    let owned = smol_bytes_0_2::compact::Bytes::copy_from_slice(doc);
+    assert_refused(
+      SyntacticLexer::<smol_bytes_0_2::compact::Bytes>::new(&owned).lex(),
+      &at,
+      "compact Bytes",
     );
   }
 }
@@ -395,12 +414,12 @@ fn a_str_source_accepts_valid_text() {
   }
 }
 
-#[cfg(feature = "hipstr")]
+#[cfg(feature = "hipstr_0_8")]
 #[test]
 fn a_hipstr_source_accepts_valid_text() {
   for doc in valid_text() {
-    let owned = hipstr::HipStr::from(doc.as_str());
-    let mut lexer = SyntacticLexer::<hipstr::HipStr<'_>>::new(&owned);
+    let owned = hipstr_0_8::HipStr::from(doc.as_str());
+    let mut lexer = SyntacticLexer::<hipstr_0_8::HipStr<'_>>::new(&owned);
     match lexer.lex() {
       Some(Ok(SyntacticToken::LitInlineStr(_) | SyntacticToken::LitBlockStr(_))) => {}
       other => panic!("{}: expected a literal, got {other:?}", doc.escape_debug()),
@@ -412,6 +431,37 @@ fn a_hipstr_source_accepts_valid_text() {
       doc.escape_debug()
     );
   }
+}
+
+#[cfg(feature = "smol-bytes_0_2")]
+#[test]
+fn a_smol_utf8_source_accepts_valid_text() {
+  macro_rules! accepts_valid_text {
+    ($source:ty, $label:literal) => {
+      for doc in valid_text() {
+        let owned = <$source>::from(doc.as_str());
+        let mut lexer = SyntacticLexer::<$source>::new(&owned);
+        match lexer.lex() {
+          Some(Ok(SyntacticToken::LitInlineStr(_) | SyntacticToken::LitBlockStr(_))) => {}
+          other => panic!(
+            "{}: {}: expected a literal, got {other:?}",
+            $label,
+            doc.escape_debug()
+          ),
+        }
+        assert_eq!(
+          lexer.span().end(),
+          doc.trim_end().len(),
+          "{}: {}",
+          $label,
+          doc.escape_debug()
+        );
+      }
+    };
+  }
+
+  accepts_valid_text!(smol_bytes_0_2::Utf8Bytes, "shared Utf8Bytes");
+  accepts_valid_text!(smol_bytes_0_2::compact::Utf8Bytes, "compact Utf8Bytes");
 }
 
 /// The lossless byte lexer reaches the same Logos path through `Lexable`, and refuses alike.

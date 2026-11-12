@@ -1,12 +1,12 @@
-Root@0..51
-  Document@0..51
-    ObjectTypeDefinition@0..50
+Root@0..52
+  Document@0..52
+    ObjectTypeDefinition@0..51
       Name@0..4 "type"
       Space@4..5 " "
       DefinitionName@5..7
         Name@5..6 "T"
         Space@6..7 " "
-      ImplementInterfaces@7..40
+      ImplementInterfaces@7..41
         Name@7..17 "implements"
         Space@17..18 " "
         Ampersand@18..19 "&"
@@ -25,23 +25,24 @@ Root@0..51
         Space@30..31 " "
         Ampersand@31..32 "&"
         Space@32..33 " "
-        TypePath@33..40
-          Path@33..40
-            PathSeparator@33..35 "::"
-            Name@35..36 "a"
-            PathSeparator@36..38 "::"
-            Name@38..39 "J"
-            Space@39..40 " "
-      FieldsDefinition@40..50
-        LBrace@40..41 "{"
-        Space@41..42 " "
-        FieldDefinition@42..49
-          Name@42..43 "f"
-          Colon@43..44 ":"
-          Space@44..45 " "
-          DefinitionTypePath@45..49
-            Path@45..49
-              Name@45..48 "Int"
-              Space@48..49 " "
-        RBrace@49..50 "}"
-    Newline@50..51 "\n"
+        TypePath@33..41
+          Path@33..41
+            Caret@33..34 "^"
+            PathSeparator@34..36 "::"
+            Name@36..37 "a"
+            PathSeparator@37..39 "::"
+            Name@39..40 "J"
+            Space@40..41 " "
+      FieldsDefinition@41..51
+        LBrace@41..42 "{"
+        Space@42..43 " "
+        FieldDefinition@43..50
+          Name@43..44 "f"
+          Colon@44..45 ":"
+          Space@45..46 " "
+          DefinitionTypePath@46..50
+            Path@46..50
+              Name@46..49 "Int"
+              Space@49..50 " "
+        RBrace@50..51 "}"
+    Newline@51..52 "\n"

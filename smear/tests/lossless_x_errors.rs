@@ -16,7 +16,7 @@
 //! this task that a reviewer cannot check by symmetry with GraphQL, and it is the line that
 //! decides whether an unterminated generic list reports `Unclosed::Angle` or the catch-all's
 //! `Other("unclosed delimiter")`.
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 use smear::parser::{
   graphqlx::{
@@ -347,7 +347,7 @@ fn a_bare_radix_prefix_reaches_the_lossless_layer_as_an_incomplete_number() {
 /// `false` used to mean "no `::` follows" for a genuine end of input **and** for a scanner stop, so
 /// a type position truncated mid-path closed its `Path` node and the tree said the path was
 /// complete. `A` where the source is `A::B` and the scanner never reached `::` is exactly the
-/// structural form of the AST defect Codex found in `NamedSpecifier` — `Foo as Bar` succeeding as a
+/// structural form of the AST defect Codex found in an alias probe — `Foo as Bar` succeeding as a
 /// bare `Foo`.
 ///
 /// **The node did not merely wrap one name — it swallowed the tail.** Measured at ceiling 10 with

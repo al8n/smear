@@ -1,0 +1,3 @@
+use "m"::{A, B as C, ns::*}
+use "m" as w
+type T { f: A }

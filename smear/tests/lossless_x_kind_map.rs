@@ -13,21 +13,21 @@
 //!
 //! Four properties, each closing a different hole the compiler used to close:
 //!
-//! - [`every_token_maps_to_its_tree_image`] — all thirty-four variants, each asserted by name.
+//! - [`every_token_maps_to_its_tree_image`] — all thirty-seven variants, each asserted by name.
 //!   A *wrong* arm is what a panicking wildcard can never see, and it is also the failure mode
 //!   that survives every downstream gate: a mis-imaged token still round-trips through `text()`,
 //!   still passes the validator, and still prints a plausible golden tree.
-//! - [`the_mapper_covers_the_whole_lexer_vocabulary`] — the case list reaches thirty-four distinct
+//! - [`the_mapper_covers_the_whole_lexer_vocabulary`] — the case list reaches thirty-seven distinct
 //!   lexer kinds and `BlockString` is still the last of them, so a variant *added* to the lexer is
 //!   a failure here rather than a silent widening of the wildcard.
-//! - [`the_only_fold_is_the_line_terminator`] — thirty-four tokens reach exactly thirty-two
+//! - [`the_only_fold_is_the_line_terminator`] — thirty-seven tokens reach exactly thirty-five
 //!   images, all of them inside the image block.
 //! - [`the_mapper_wildcard_arm_panics_rather_than_classifying`] — a source scan, because the shape
 //!   of the wildcard is a property of the text and not of any value. A wildcard that answered
 //!   `K::Error` or `K::Name` instead of panicking would make an unmapped token indistinguishable
 //!   from a mapped one, which is precisely the state `#[non_exhaustive]` forces this file to guard
 //!   against.
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
@@ -43,7 +43,7 @@ use tokora::Lexer as _;
 /// payload constructors are `pub(crate)` to `smear-lexer`, so `LitInlineStr` and `LitBlockStr`
 /// cannot be built from here at all. The broad one is better: a hand-built token proves only that
 /// a variant exists, while a lexed one proves the GraphQLx lexer *emits* it — which is the claim
-/// the image block makes about all thirty-four of them.
+/// the image block makes about all thirty-seven of them.
 ///
 /// Each row names the lexer kind as well as the image, so a snippet that lexes into something
 /// other than what its author intended shows up as a failed case rather than being absorbed by a
@@ -65,7 +65,7 @@ const CASES: &[(&str, LK, X)] = &[
   ("|", LK::Pipe, X::Pipe),
   ("!", LK::Bang, X::Bang),
   ("&", LK::Ampersand, X::Ampersand),
-  // ---- The seven images GraphQL has no counterpart for ----
+  // ---- The ten images GraphQL has no counterpart for ----
   ("*", LK::Asterisk, X::Asterisk),
   ("<", LK::LAngle, X::LAngle),
   (">", LK::RAngle, X::RAngle),
@@ -73,6 +73,9 @@ const CASES: &[(&str, LK, X)] = &[
   ("+", LK::Plus, X::Plus),
   ("-", LK::Minus, X::Minus),
   ("::", LK::PathSeparator, X::PathSeparator),
+  ("~", LK::Tilde, X::Tilde),
+  ("..", LK::DotDot, X::DotDot),
+  ("^", LK::Caret, X::Caret),
   // ---- Trivia ----
   ("\u{FEFF}", LK::Bom, X::Bom),
   (",", LK::Comma, X::Comma),
@@ -140,28 +143,28 @@ fn every_token_maps_to_its_tree_image() {
 /// and a `#[non_exhaustive]` enum gives the compiler no way to notice.
 ///
 /// The second half is the part the compiler cannot do at all. `LosslessTokenKind` is `#[repr(u16)]`
-/// with default discriminants, so `BlockString as u16 == 33` says the enum has exactly thirty-four
+/// with default discriminants, so `BlockString as u16 == 36` says the enum has exactly thirty-seven
 /// variants and that `BlockString` is the last — a variant appended, inserted or removed moves it.
-/// Without this, a thirty-fifth lexer token would simply start falling into the mapper's wildcard.
+/// Without this, a thirty-eighth lexer token would simply start falling into the mapper's wildcard.
 #[test]
 fn the_mapper_covers_the_whole_lexer_vocabulary() {
   let reached: BTreeSet<LK> = CASES.iter().map(|(_, kind, _)| *kind).collect();
   assert_eq!(
     reached.len(),
-    34,
-    "the case list reaches {} lexer kinds; the GraphQLx lossless token has 34 variants",
+    37,
+    "the case list reaches {} lexer kinds; the GraphQLx lossless token has 37 variants",
     reached.len()
   );
 
   assert_eq!(
     LK::BlockString as u16,
-    33,
-    "`LosslessTokenKind` no longer ends at BlockString/33, so the lexer's vocabulary changed and \
+    36,
+    "`LosslessTokenKind` no longer ends at BlockString/36, so the lexer's vocabulary changed and \
      the mapper's wildcard is absorbing whatever was added"
   );
 }
 
-/// Thirty-four tokens reach exactly thirty-two images, the collapse is the line terminators, and
+/// Thirty-seven tokens reach exactly thirty-five images, the collapse is the line terminators, and
 /// every image is inside the image block.
 ///
 /// **Not a bijection, and it must not be made one.** The lexer distinguishes `\r`, `\n` and `\r\n`
@@ -195,8 +198,8 @@ fn the_only_fold_is_the_line_terminator() {
     .collect();
   assert_eq!(
     images.len(),
-    32,
-    "34 tokens must reach exactly 32 distinct images — the line-terminator fold is the only \
+    35,
+    "37 tokens must reach exactly 35 distinct images — the line-terminator fold is the only \
      collapse; reached {}",
     images.len()
   );
@@ -224,7 +227,7 @@ fn the_only_fold_is_the_line_terminator() {
 /// tell the result from a correct parse.
 ///
 /// The named-arm count is the positive control **and** a second completeness pin: a scan that
-/// found no arms at all would pass the wildcard assertion vacuously, and thirty-four is the number
+/// found no arms at all would pass the wildcard assertion vacuously, and thirty-seven is the number
 /// of variants the mapper must name for its wildcard to be genuinely dead.
 #[test]
 fn the_mapper_wildcard_arm_panics_rather_than_classifying() {
@@ -248,8 +251,8 @@ fn the_mapper_wildcard_arm_panics_rather_than_classifying() {
   }
 
   assert_eq!(
-    named, 34,
-    "the mapper names {named} `LosslessToken::` arms; it must name all 34, or its wildcard is \
+    named, 37,
+    "the mapper names {named} `LosslessToken::` arms; it must name all 37, or its wildcard is \
      carrying variants the compiler cannot tell it about"
   );
   assert_eq!(

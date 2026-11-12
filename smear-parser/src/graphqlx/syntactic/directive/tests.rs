@@ -14,9 +14,13 @@ type StrCtx<'inp> =
 type SliceCtx<'inp> =
   FatalContext<'inp, GraphqlxLexer<'inp, [u8]>, GraphqlxErrors<&'inp [u8]>, GraphQLx>;
 
-#[cfg(feature = "bytes")]
-type BytesCtx<'inp> =
-  FatalContext<'inp, GraphqlxLexer<'inp, ::bytes::Bytes>, GraphqlxErrors<::bytes::Bytes>, GraphQLx>;
+#[cfg(feature = "bytes_1")]
+type BytesCtx<'inp> = FatalContext<
+  'inp,
+  GraphqlxLexer<'inp, ::bytes_1::Bytes>,
+  GraphqlxErrors<::bytes_1::Bytes>,
+  GraphQLx,
+>;
 
 fn drive_str<'inp, O>(
   f: impl for<'c> FnMut(
@@ -47,12 +51,12 @@ fn drive_slice<'inp, O>(
   .parse_slice(input)
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 fn drive_bytes_as_slice<'inp, O>(
   f: impl for<'c> FnMut(
     &mut GraphqlxInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlxErrors<&'inp [u8]>>,
-  input: &'inp ::bytes::Bytes,
+  input: &'inp ::bytes_1::Bytes,
 ) -> Result<O, GraphqlxErrors<&'inp [u8]>> {
   Parser::with_parser::<
     'inp,
@@ -65,18 +69,18 @@ fn drive_bytes_as_slice<'inp, O>(
   .parse_bytes(input)
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 fn drive_owned_bytes<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut GraphqlxInput<'inp, 'c, ::bytes::Bytes, BytesCtx<'inp>>,
-  ) -> Result<O, GraphqlxErrors<::bytes::Bytes>>,
-  input: &'inp ::bytes::Bytes,
-) -> Result<O, GraphqlxErrors<::bytes::Bytes>> {
+    &mut GraphqlxInput<'inp, 'c, ::bytes_1::Bytes, BytesCtx<'inp>>,
+  ) -> Result<O, GraphqlxErrors<::bytes_1::Bytes>>,
+  input: &'inp ::bytes_1::Bytes,
+) -> Result<O, GraphqlxErrors<::bytes_1::Bytes>> {
   Parser::with_parser::<
     'inp,
-    GraphqlxLexer<'inp, ::bytes::Bytes>,
+    GraphqlxLexer<'inp, ::bytes_1::Bytes>,
     O,
-    GraphqlxErrors<::bytes::Bytes>,
+    GraphqlxErrors<::bytes_1::Bytes>,
     _,
     GraphQLx,
   >(f)
@@ -87,9 +91,9 @@ macro_rules! accept_all {
   ($parser:expr, $src:expr, $check:path) => {{
     $check(drive_str($parser, $src).expect(concat!("str accept: ", $src)));
     $check(drive_slice($parser, $src.as_bytes()).expect(concat!("slice accept: ", $src)));
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let owned = ::bytes::Bytes::from_static($src.as_bytes());
+      let owned = ::bytes_1::Bytes::from_static($src.as_bytes());
       $check(drive_bytes_as_slice($parser, &owned).expect(concat!("bytes accept: ", $src)));
     }
   }};
@@ -170,7 +174,7 @@ fn direct_directive_apis_accept_standard_graphql_forms_over_every_source() {
 fn directives_use_generic_capable_type_paths_and_store_empty_or_absent_arguments_as_none() {
   fn check_generic_path<S: AsRef<[u8]>>(directive: ast::Directive<S>) {
     let name = directive.name();
-    assert!(name.path().is_fully_qualified());
+    assert!(matches!(name.path().root(), ast::PathRoot::Dependency(_)));
     assert_eq!(name.path().segments().len(), 2);
     assert_eq!(
       name.type_generics().expect("type arguments").params().len(),
@@ -183,7 +187,7 @@ fn directives_use_generic_capable_type_paths_and_store_empty_or_absent_arguments
   }
   accept_all!(
     ast::Directive::graphqlx,
-    "@::tool::cache<Key>(ttl: 1)",
+    "@^::tool::cache<Key>(ttl: 1)",
     check_generic_path
   );
 
@@ -226,16 +230,16 @@ fn directive_collections_are_absent_without_losing_the_following_token() {
   assert_eq!(directives.span(), &SimpleSpan::new(0, 0));
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 #[test]
 fn direct_directive_api_preserves_owned_bytes_payloads() {
-  let source = ::bytes::Bytes::from_static(b"@skip(if: true)");
-  let directive: ast::Directive<::bytes::Bytes> =
+  let source = ::bytes_1::Bytes::from_static(b"@skip(if: true)");
+  let directive: ast::Directive<::bytes_1::Bytes> =
     drive_owned_bytes(ast::Directive::graphqlx, &source)
       .expect("owned Bytes directive should parse");
   assert_eq!(
     directive.name().path().segments()[0].source(),
-    &::bytes::Bytes::from_static(b"skip")
+    &::bytes_1::Bytes::from_static(b"skip")
   );
 }
 
@@ -247,9 +251,18 @@ fn directives_commit_and_report_typed_malformed_or_unclosed_inputs() {
     Expectation::Path,
     None,
   );
+  // A `::` where the name begins roots nothing and is refused as such; a root with no name after
+  // it is a missing path.
+  let error = drive_str(|inp| ast::Directive::graphqlx(inp).map(|_| ()), "@::")
+    .expect_err("a leading `::` is refused")
+    .into_iter()
+    .next()
+    .expect("one error");
+  assert_eq!(error.span(), SimpleSpan::new(1, 3));
+  assert!(matches!(error.into_data(), ErrorData::LeadingPathSeparator));
   assert_unexpected(
     |inp| ast::Directive::graphqlx(inp).map(|_| ()),
-    "@::",
+    "@^::",
     Expectation::Path,
     None,
   );

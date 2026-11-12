@@ -13,7 +13,7 @@
 //! entry both sides handle is timed with ids paired as `tierN/<entry>/smear` and
 //! `tierN/<entry>/apollo` so criterion reports them adjacently.
 //!
-//! Run with `cargo bench -p smear --features rowan,validator --bench apollo_comparison`. A `harness = false`
+//! Run with `cargo bench -p smear --features rowan_0_17,validator --bench apollo_comparison`. A `harness = false`
 //! bench invoked any other way runs its body once with no timing.
 
 // The shared harness. It is a module compiled into this target rather than a library

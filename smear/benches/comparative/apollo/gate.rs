@@ -5,8 +5,8 @@
 //! question "are both parsers doing the same job on this corpus?" and get an exit code:
 //!
 //! ```text
-//! cargo run -p smear --features rowan,validator --example gate --release          # table + verdict
-//! cargo run -p smear --features rowan,validator --example gate --release -- kinds # + node-kind histograms
+//! cargo run -p smear --features rowan_0_17,validator --example gate --release          # table + verdict
+//! cargo run -p smear --features rowan_0_17,validator --example gate --release -- kinds # + node-kind histograms
 //! ```
 //!
 //! **An example rather than a `[[bin]]`, deliberately.** `smear` declares no `[[bin]]`, so its CI

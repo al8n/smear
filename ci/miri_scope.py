@@ -6,7 +6,7 @@ after `cargo miri test`. It exists because of two defects that both cost this re
 time and both presented as a GREEN cell:
 
   #73  Miri built 39 test binaries and meaningfully ran five. Every lossless integration test
-       opens with `#![cfg(feature = "rowan")]` and the scripts passed no `--features`, so 33 of
+       opens with `#![cfg(feature = "rowan_0_17")]` and the scripts passed no `--features`, so 33 of
        them compiled to EMPTY harnesses: the targets were built, they linked, they ran, they
        printed `running 0 tests`, and they passed. Nothing warned, because from cargo's point of
        view nothing was wrong. A silent bound reads as full coverage.
@@ -139,10 +139,14 @@ INNER_CFG = re.compile(r"^#!\[cfg\((.*?)\)\]", re.S | re.M)
 # from this table is unmodelled and stops the guard; see the module header.
 CELL_FLAGS = {"miri": True, "test": True, "docsrs": False, "tarpaulin": False}
 
+# The versioned feature gates the code; the unversioned name is an alias that turns it on. Either one
+# resolving ON is the lossless tower entering a cell, so the guard asks about both.
+ROWAN_FEATURES = {"rowan", "rowan_0_17"}
+
 # Why a target that this cell does not compile is not covered. Keyed by the feature whose absence
 # excludes it; the fallback names the features and says nothing it cannot support.
 ROWAN_REASON = (
-    "gated on `rowan`, which cannot be interpreted: rowan 0.17.0 has undefined behaviour under "
+    "gated on `rowan_0_17`, which cannot be interpreted: rowan 0.17.0 has undefined behaviour under "
     "Stacked Borrows in `src/arc.rs` and under Tree Borrows in `src/cursor.rs`, live in every "
     "published version through 0.17.0 (al8n/smear#77, rust-analyzer/rowan#108 and #192)"
 )
@@ -862,7 +866,7 @@ def partition(
                 f"{path.name}: `{match.group(1)}` evaluates false but names no unsatisfied "
                 "predicate, so this guard cannot say why the target is excluded"
             )
-        if any('"rowan"' in atom for atom in missing):
+        if any('"rowan_0_17"' in atom for atom in missing):
             excluded[path.stem] = ROWAN_REASON
         elif "not(miri)" in missing:
             excluded[path.stem] = MIRI_REASON
@@ -948,7 +952,7 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
               f"compiled ones ({len(excluded)} / {len(compiled)}), so the cases below would not "
               "exercise what they name")
         return 1
-    if "rowan" in features:
+    if ROWAN_FEATURES & features:
         print("::error::miri_scope selftest: `rowan` resolves ON from `smear/Cargo.toml`'s own "
               "defaults, so this guard would let the lossless tower into a Miri cell — the "
               "condition #77 was about, seen before a single test runs")
@@ -1090,7 +1094,7 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
         except CfgError as err:
             print(f"::error::miri_scope selftest: {package}: {err}")
             return 1
-        if "rowan" in s_features:
+        if ROWAN_FEATURES & s_features:
             print(f"::error::miri_scope selftest: `{package}`'s cell resolves `rowan`, so the "
                   "lossless tower would enter a Miri cell — the condition #77 was about")
             return 1
@@ -1198,11 +1202,11 @@ def selftest(tests_dir: pathlib.Path, manifest: pathlib.Path) -> int:
     # the same defect as a guard that cannot fail.
     cfg_cases: list[tuple[str, bool | str]] = [
         ('feature = "parser"', True),
-        ('feature = "rowan"', False),
+        ('feature = "rowan_0_17"', False),
         ('all(feature = "graphql", feature = "parser")', True),
         ('all(feature = "graphql", feature = "parser", not(miri))', False),
-        ('any(feature = "rowan", feature = "graphql")', True),
-        ('any(feature = "rowan", feature = "introspection")', False),
+        ('any(feature = "rowan_0_17", feature = "graphql")', True),
+        ('any(feature = "rowan_0_17", feature = "introspection")', False),
         ('all(feature = "std", any(feature = "graphql", feature = "graphqlx"))', True),
         ("not(miri)", False),
         ('feature = "test-support"', True),

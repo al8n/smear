@@ -30,12 +30,13 @@ rendering and the caller of the §3 build. A name that misdescribes its contents
 |---------|-------------|---------|
 | `alloc` | The validator: the rules, `Scratch` and `Budget`, the sinks and the diagnostics. Off, the crate is `no_std` and re-exports only `smear-schema`'s core items as `schema`. Implied by `std` | via `std` |
 | `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
-| `rowan` | The lossless door — the same rules over a rowan CST, by projection. Implies `std` | |
+| `rowan_0_17` | The lossless door — the same rules over a rowan CST, by projection. Implies `std` | |
 | `introspection` | Re-exports `smear-schema`'s draft §4 construction door and its error type. Needs `alloc`, which it does not imply | |
 
 A capability feature (`introspection`) never switches a tier on, so a `default-features = false`
-consumer names `alloc` itself, or `std`, which implies it. `rowan` is the exception: it needs
-`std`, so it implies it.
+consumer names `alloc` itself, or `std`, which implies it. `rowan_0_17` is the exception: it needs
+`std`, so it implies it. `rowan` is an alias for it, for the current version of the crate: it
+enables `rowan_0_17` and nothing else.
 
 ## Part of the Smear Ecosystem
 

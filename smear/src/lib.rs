@@ -105,8 +105,8 @@ pub use smear_lexer::keyword;
 /// Parsers for GraphQL and GraphQL-like DSLs.
 ///
 /// Atomic parser combinators that build AST nodes from the token streams produced by [`lexer`],
-/// composed with the `tokora` combinator library, plus the lossless CST tower behind the `rowan`
-/// feature.
+/// composed with the `tokora` combinator library, plus the lossless CST tower behind the
+/// `rowan_0_17` feature.
 ///
 /// Available dialects, each link gated on its feature for the reason recorded on [`lexer`]:
 ///
@@ -117,12 +117,12 @@ pub use smear_lexer::keyword;
 #[cfg_attr(all(not(feature = "alloc"), feature = "graphql"), doc = "- `graphql`")]
 #[cfg_attr(
   all(feature = "alloc", feature = "graphqlx"),
-  doc = "- [`graphqlx`](parser::graphqlx) — adds imports, generics, where-clauses, set and map \
-         literals, and namespaced paths on top of GraphQL."
+  doc = "- [`graphqlx`](parser::graphqlx) — adds `use` items, generics, where-clauses, set and \
+         map literals, and namespaced paths on top of GraphQL."
 )]
 #[cfg_attr(
   all(not(feature = "alloc"), feature = "graphqlx"),
-  doc = "- `graphqlx` — adds imports, generics, where-clauses, set and map literals, and \
+  doc = "- `graphqlx` — adds `use` items, generics, where-clauses, set and map literals, and \
          namespaced paths on top of GraphQL."
 )]
 ///
@@ -147,8 +147,8 @@ pub use smear_parser::typed_keyword_atom;
 /// Re-exported for the reason [`keyword!`](keyword) is. Gated on `rowan` rather than on `parser`
 /// because the module that defines it is: a `#[macro_export]` macro exists exactly when the file
 /// holding it is compiled.
-#[cfg(feature = "rowan")]
-#[cfg_attr(docsrs, doc(cfg(feature = "rowan")))]
+#[cfg(feature = "rowan_0_17")]
+#[cfg_attr(docsrs, doc(cfg(feature = "rowan_0_17")))]
 pub use smear_parser::ast_node;
 
 /// GraphQL document validation, and the built-once schema every rule reads.
@@ -284,7 +284,7 @@ pub mod __private {
 //
 // A FACADE CANNOT CLOSE IT. `pub mod parser { #[cfg(feature = "graphqlx")] pub use … }` would fix
 // the root path and reach neither the nested gates (`parser::graphql::lossless` is `rowan`'s,
-// three levels down) nor the trait impls, which are not namespaced at all — `smear/bytes` gates
+// three levels down) nor the trait impls, which are not namespaced at all — `smear/bytes_1` gates
 // `impl Source for Bytes`, and no re-export can hide an impl.
 //
 // So the equivalence is asserted instead, and a graph that violates it does not compile. Each
@@ -300,13 +300,18 @@ pub mod __private {
 //
 // WHAT THIS FENCE DOES NOT COVER, stated because a claim wider than what it holds is the defect it
 // was built against. It covers MEMBER features — the 32 `cargo metadata` reports across the five
-// crates smear re-exports. Several `smear` features ALSO forward to third-party ones: `bytes`
+// crates smear re-exports. Several `smear` features ALSO forward to third-party ones: `bytes_1`
 // forwards `tokora/bytes_1`, and `impl Source for bytes::Bytes` comes from tokora, not from
-// `smear-lexer`. Measured on this tree: a consumer with `smear/bytes` off and `tokora/bytes_1`
+// `smear-lexer`. Measured on this tree: a consumer with `smear/bytes_1` off and `tokora/bytes_1`
 // enabled directly gets that impl, and nothing here fires — tokora publishes no feature witnesses
 // and this repository cannot give it any. That is NOT a regression from the split: `smear/bytes`
 // forwarded `tokora/bytes_1` on `origin/feat/proto` too, so the same graph did the same thing
 // before any crate moved. It is a pre-existing bound of the umbrella, now written down.
+//
+// The unversioned names — `bytes`, `bstr`, `hipstr`, `smol-bytes`, `smallvec`, `rowan` — are pure
+// aliases of the versioned features above and publish no witness of their own: enabling a member's
+// alias turns its versioned feature on, which is the pair asserted, so the alias adds no state for
+// the fence to hold.
 //
 // Derived, not remembered: `ci/feature_reachability.py` reads every member feature out of
 // `cargo metadata`, pairs each with its umbrella twin — the namesake, or an explicit entry in
@@ -320,12 +325,12 @@ const _: () = {
     "`smear-lexer/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/alloc` too, or stop enabling\n     `smear-lexer/alloc`."
   );
   assert!(
-    smear_lexer::__features::BSTR == cfg!(feature = "bstr"),
-    "`smear-lexer/bstr` and `smear/bstr` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bstr` too, or stop enabling\n     `smear-lexer/bstr`."
+    smear_lexer::__features::BSTR_1 == cfg!(feature = "bstr_1"),
+    "`smear-lexer/bstr_1` and `smear/bstr_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bstr_1` too, or stop enabling\n     `smear-lexer/bstr_1`."
   );
   assert!(
-    smear_lexer::__features::BYTES == cfg!(feature = "bytes"),
-    "`smear-lexer/bytes` and `smear/bytes` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bytes` too, or stop enabling\n     `smear-lexer/bytes`."
+    smear_lexer::__features::BYTES_1 == cfg!(feature = "bytes_1"),
+    "`smear-lexer/bytes_1` and `smear/bytes_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bytes_1` too, or stop enabling\n     `smear-lexer/bytes_1`."
   );
   assert!(
     smear_lexer::__features::GRAPHQL == cfg!(feature = "graphql"),
@@ -336,16 +341,16 @@ const _: () = {
     "`smear-lexer/graphqlx` and `smear/graphqlx` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/graphqlx` too, or stop enabling\n     `smear-lexer/graphqlx`."
   );
   assert!(
-    smear_lexer::__features::HIPSTR == cfg!(feature = "hipstr"),
-    "`smear-lexer/hipstr` and `smear/hipstr` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/hipstr` too, or stop enabling\n     `smear-lexer/hipstr`."
+    smear_lexer::__features::HIPSTR_0_8 == cfg!(feature = "hipstr_0_8"),
+    "`smear-lexer/hipstr_0_8` and `smear/hipstr_0_8` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/hipstr_0_8` too, or stop enabling\n     `smear-lexer/hipstr_0_8`."
   );
   assert!(
-    smear_lexer::__features::SMALLVEC == cfg!(feature = "smallvec"),
-    "`smear-lexer/smallvec` and `smear/smallvec` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smallvec` too, or stop enabling\n     `smear-lexer/smallvec`."
+    smear_lexer::__features::SMALLVEC_1 == cfg!(feature = "smallvec_1"),
+    "`smear-lexer/smallvec_1` and `smear/smallvec_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smallvec_1` too, or stop enabling\n     `smear-lexer/smallvec_1`."
   );
   assert!(
-    smear_lexer::__features::SMOL_BYTES == cfg!(feature = "smol-bytes"),
-    "`smear-lexer/smol-bytes` and `smear/smol-bytes` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smol-bytes` too, or stop enabling\n     `smear-lexer/smol-bytes`."
+    smear_lexer::__features::SMOL_BYTES_0_2 == cfg!(feature = "smol-bytes_0_2"),
+    "`smear-lexer/smol-bytes_0_2` and `smear/smol-bytes_0_2` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smol-bytes_0_2` too, or stop enabling\n     `smear-lexer/smol-bytes_0_2`."
   );
   assert!(
     smear_lexer::__features::STD == cfg!(feature = "std"),
@@ -360,12 +365,12 @@ const _: () = {
     "`smear-parser/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/alloc` too, or stop enabling\n     `smear-parser/alloc`."
   );
   assert!(
-    smear_parser::__features::BSTR == cfg!(feature = "bstr"),
-    "`smear-parser/bstr` and `smear/bstr` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bstr` too, or stop enabling\n     `smear-parser/bstr`."
+    smear_parser::__features::BSTR_1 == cfg!(feature = "bstr_1"),
+    "`smear-parser/bstr_1` and `smear/bstr_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bstr_1` too, or stop enabling\n     `smear-parser/bstr_1`."
   );
   assert!(
-    smear_parser::__features::BYTES == cfg!(feature = "bytes"),
-    "`smear-parser/bytes` and `smear/bytes` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bytes` too, or stop enabling\n     `smear-parser/bytes`."
+    smear_parser::__features::BYTES_1 == cfg!(feature = "bytes_1"),
+    "`smear-parser/bytes_1` and `smear/bytes_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bytes_1` too, or stop enabling\n     `smear-parser/bytes_1`."
   );
   assert!(
     smear_parser::__features::GRAPHQL == cfg!(feature = "graphql"),
@@ -376,8 +381,8 @@ const _: () = {
     "`smear-parser/graphqlx` and `smear/graphqlx` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/graphqlx` too, or stop enabling\n     `smear-parser/graphqlx`."
   );
   assert!(
-    smear_parser::__features::HIPSTR == cfg!(feature = "hipstr"),
-    "`smear-parser/hipstr` and `smear/hipstr` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/hipstr` too, or stop enabling\n     `smear-parser/hipstr`."
+    smear_parser::__features::HIPSTR_0_8 == cfg!(feature = "hipstr_0_8"),
+    "`smear-parser/hipstr_0_8` and `smear/hipstr_0_8` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/hipstr_0_8` too, or stop enabling\n     `smear-parser/hipstr_0_8`."
   );
   assert!(
     smear_parser::__features::LOSSLESS_COVERAGE == cfg!(feature = "lossless-coverage"),
@@ -388,16 +393,16 @@ const _: () = {
     "`smear-parser/materialized-numbers` and `smear/materialized-numbers` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/materialized-numbers` too, or stop enabling\n     `smear-parser/materialized-numbers`."
   );
   assert!(
-    smear_parser::__features::ROWAN == cfg!(feature = "rowan"),
-    "`smear-parser/rowan` and `smear/rowan` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/rowan` too, or stop enabling\n     `smear-parser/rowan`."
+    smear_parser::__features::ROWAN_0_17 == cfg!(feature = "rowan_0_17"),
+    "`smear-parser/rowan_0_17` and `smear/rowan_0_17` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/rowan_0_17` too, or stop enabling\n     `smear-parser/rowan_0_17`."
   );
   assert!(
-    smear_parser::__features::SMALLVEC == cfg!(feature = "smallvec"),
-    "`smear-parser/smallvec` and `smear/smallvec` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smallvec` too, or stop enabling\n     `smear-parser/smallvec`."
+    smear_parser::__features::SMALLVEC_1 == cfg!(feature = "smallvec_1"),
+    "`smear-parser/smallvec_1` and `smear/smallvec_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smallvec_1` too, or stop enabling\n     `smear-parser/smallvec_1`."
   );
   assert!(
-    smear_parser::__features::SMOL_BYTES == cfg!(feature = "smol-bytes"),
-    "`smear-parser/smol-bytes` and `smear/smol-bytes` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smol-bytes` too, or stop enabling\n     `smear-parser/smol-bytes`."
+    smear_parser::__features::SMOL_BYTES_0_2 == cfg!(feature = "smol-bytes_0_2"),
+    "`smear-parser/smol-bytes_0_2` and `smear/smol-bytes_0_2` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smol-bytes_0_2` too, or stop enabling\n     `smear-parser/smol-bytes_0_2`."
   );
   assert!(
     smear_parser::__features::STD == cfg!(feature = "std"),
@@ -449,8 +454,8 @@ const _: () = {
     "`smear-compiler/introspection` and `smear/introspection` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/introspection` too, or stop enabling\n     `smear-compiler/introspection`."
   );
   assert!(
-    smear_compiler::__features::ROWAN == cfg!(feature = "rowan"),
-    "`smear-compiler/rowan` and `smear/rowan` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/rowan` too, or stop enabling\n     `smear-compiler/rowan`."
+    smear_compiler::__features::ROWAN_0_17 == cfg!(feature = "rowan_0_17"),
+    "`smear-compiler/rowan_0_17` and `smear/rowan_0_17` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/rowan_0_17` too, or stop enabling\n     `smear-compiler/rowan_0_17`."
   );
   assert!(
     smear_compiler::__features::STD == cfg!(feature = "std"),

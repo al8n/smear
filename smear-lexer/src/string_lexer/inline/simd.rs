@@ -247,11 +247,11 @@ fn handle_braced_unicode(
 ///
 /// # `CHECK_UTF8`
 ///
-/// `false` for a text source (`str`, `HipStr`), whose slices are UTF-8 by type:
-/// the loop is the plain four-needle scan and pays nothing for the rule below.
+/// `false` for a text source (`str`, `HipStr`, smol-bytes' `Utf8Bytes`), whose slices are UTF-8
+/// by type: the loop is the plain four-needle scan and pays nothing for the rule below.
 ///
-/// `true` for a byte source (`[u8]`, `Bytes`, `BStr`, `HipByt`), whose string
-/// literals must be well-formed UTF-8 (smear#246). The scan also stops at every
+/// `true` for a byte source (`[u8]`, `Bytes`, `BStr`, `HipByt`, smol-bytes' `Bytes`), whose
+/// string literals must be well-formed UTF-8 (smear#246). The scan also stops at every
 /// non-ASCII byte, measures the maximal non-ASCII run there and checks it with
 /// [`core::str::from_utf8`]. A run is checked whole and alone: no UTF-8 sequence
 /// contains an ASCII byte and every needle is ASCII, so a valid run holds whole

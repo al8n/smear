@@ -18,9 +18,13 @@ type StrCtx<'inp> =
 type SliceCtx<'inp> =
   FatalContext<'inp, GraphqlxLexer<'inp, [u8]>, GraphqlxErrors<&'inp [u8]>, GraphQLx>;
 
-#[cfg(feature = "bytes")]
-type BytesCtx<'inp> =
-  FatalContext<'inp, GraphqlxLexer<'inp, ::bytes::Bytes>, GraphqlxErrors<::bytes::Bytes>, GraphQLx>;
+#[cfg(feature = "bytes_1")]
+type BytesCtx<'inp> = FatalContext<
+  'inp,
+  GraphqlxLexer<'inp, ::bytes_1::Bytes>,
+  GraphqlxErrors<::bytes_1::Bytes>,
+  GraphQLx,
+>;
 
 fn drive_str<'inp, O>(
   f: impl for<'c> FnMut(
@@ -51,12 +55,12 @@ fn drive_slice<'inp, O>(
   .parse_slice(input)
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 fn drive_bytes_as_slice<'inp, O>(
   f: impl for<'c> FnMut(
     &mut GraphqlxInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlxErrors<&'inp [u8]>>,
-  input: &'inp ::bytes::Bytes,
+  input: &'inp ::bytes_1::Bytes,
 ) -> Result<O, GraphqlxErrors<&'inp [u8]>> {
   Parser::with_parser::<
     'inp,
@@ -69,18 +73,18 @@ fn drive_bytes_as_slice<'inp, O>(
   .parse_bytes(input)
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 fn drive_owned_bytes<'inp, O>(
   f: impl for<'c> FnMut(
-    &mut GraphqlxInput<'inp, 'c, ::bytes::Bytes, BytesCtx<'inp>>,
-  ) -> Result<O, GraphqlxErrors<::bytes::Bytes>>,
-  input: &'inp ::bytes::Bytes,
-) -> Result<O, GraphqlxErrors<::bytes::Bytes>> {
+    &mut GraphqlxInput<'inp, 'c, ::bytes_1::Bytes, BytesCtx<'inp>>,
+  ) -> Result<O, GraphqlxErrors<::bytes_1::Bytes>>,
+  input: &'inp ::bytes_1::Bytes,
+) -> Result<O, GraphqlxErrors<::bytes_1::Bytes>> {
   Parser::with_parser::<
     'inp,
-    GraphqlxLexer<'inp, ::bytes::Bytes>,
+    GraphqlxLexer<'inp, ::bytes_1::Bytes>,
     O,
-    GraphqlxErrors<::bytes::Bytes>,
+    GraphqlxErrors<::bytes_1::Bytes>,
     _,
     GraphQLx,
   >(f)
@@ -91,9 +95,9 @@ macro_rules! accept_all {
   ($parser:expr, $src:expr, $check:path) => {{
     $check(drive_str($parser, $src).expect(concat!("str accepts: ", $src)));
     $check(drive_slice($parser, $src.as_bytes()).expect(concat!("slice accepts: ", $src)));
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let owned = ::bytes::Bytes::from_static($src.as_bytes());
+      let owned = ::bytes_1::Bytes::from_static($src.as_bytes());
       $check(drive_bytes_as_slice($parser, &owned).expect(concat!("bytes accepts: ", $src)));
     }
   }};
@@ -133,7 +137,7 @@ fn variables_support_descriptions_defaults_and_constant_directives() {
   }
   accept_all!(
     ast::DescribedVariableDefinition::graphqlx,
-    "\"page size\" $limit: ::paging::Int = 10 @range(min: 1)",
+    "\"page size\" $limit: ^::paging::Int = 10 @range(min: 1)",
     check_variable
   );
 
@@ -244,7 +248,10 @@ fn fragments_preserve_generic_headers_paths_and_where_constraints() {
         .len(),
       1
     );
-    assert!(fragment.type_condition().name().path().is_fully_qualified());
+    assert!(matches!(
+      fragment.type_condition().name().path().root(),
+      ast::PathRoot::Dependency(_)
+    ));
     assert_eq!(
       fragment
         .directives()
@@ -266,13 +273,13 @@ fn fragments_preserve_generic_headers_paths_and_where_constraints() {
   }
   accept_all!(
     ast::FragmentDefinition::graphqlx,
-    "fragment<T> Item<T> on ::model::Item<T> @cache where T: Node { id }",
+    "fragment<T> Item<T> on ^::model::Item<T> @cache where T: Node { id }",
     check
   );
 }
 
 #[test]
-fn described_executables_and_documents_dispatch_imports_without_reclassifying_heads() {
+fn described_executables_and_documents_dispatch_use_items_without_reclassifying_heads() {
   fn check_definition<S: AsRef<[u8]>>(definition: ast::DescribedExecutableDefinition<S>) {
     assert!(definition.description().is_some());
     assert!(definition.node().is_operation());
@@ -286,7 +293,7 @@ fn described_executables_and_documents_dispatch_imports_without_reclassifying_he
 
   fn check_document<S: AsRef<[u8]>>(document: ast::ExecutableDocument<S>) {
     assert_eq!(document.definitions().len(), 3);
-    assert!(document.definitions()[0].is_import());
+    assert!(document.definitions()[0].is_use());
     assert!(document.definitions()[1].is_definition());
     assert!(document.definitions()[2].is_definition());
     assert!(
@@ -298,17 +305,17 @@ fn described_executables_and_documents_dispatch_imports_without_reclassifying_he
   }
   accept_all!(
     ast::ExecutableDocument::graphqlx,
-    "import { Node } from \"types\" \"query docs\" query Get<T> { items { ... ::Item<T> } } fragment<T> Item<T> on ::model::Item<T> { id }",
+    "use \"./types\"::{Node} \"query docs\" query Get<T> { items { ... ^::Item<T> } } fragment<T> Item<T> on ^::model::Item<T> { id }",
     check_document
   );
 
   assert!(
     drive_str(
       ast::ExecutableDocument::graphqlx,
-      "\"docs\" import { Node } from \"types\""
+      "\"docs\" use \"./types\"::{Node}"
     )
     .is_err(),
-    "a description commits to an executable definition and cannot decorate an import"
+    "a description commits to an executable definition and cannot decorate a `use` item"
   );
 }
 
@@ -341,7 +348,7 @@ fn a_description_reaches_every_position_the_grammar_gives_one() {
   );
   accept_all!(
     ast::DescribedExecutableDefinition::graphqlx,
-    "\"\"\"fragment\"\"\" fragment F on ::model::Item { id }",
+    "\"\"\"fragment\"\"\" fragment F on ^::model::Item { id }",
     described_fragment
   );
   accept_all!(
@@ -417,9 +424,9 @@ fn executable_document_accepts_graphqlx_executable_fixtures() {
       .expect("str accepts executable GraphQLx fixture");
     drive_slice(ast::ExecutableDocument::graphqlx, source.as_bytes())
       .expect("slice accepts executable GraphQLx fixture");
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let owned = ::bytes::Bytes::copy_from_slice(source.as_bytes());
+      let owned = ::bytes_1::Bytes::copy_from_slice(source.as_bytes());
       drive_owned_bytes(ast::ExecutableDocument::graphqlx, &owned)
         .expect("owned Bytes accepts executable GraphQLx fixture");
     }
@@ -477,11 +484,11 @@ fn executable_productions_commit_required_tails_and_keep_delimiter_diagnostics()
   );
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 #[test]
 fn direct_executable_apis_preserve_owned_bytes_payloads() {
-  let source = ::bytes::Bytes::from_static(b"query Owned { id }");
-  let operation: ast::OperationDefinition<::bytes::Bytes> =
+  let source = ::bytes_1::Bytes::from_static(b"query Owned { id }");
+  let operation: ast::OperationDefinition<::bytes_1::Bytes> =
     drive_owned_bytes(ast::OperationDefinition::graphqlx, &source)
       .expect("owned Bytes operation parses without a borrowed fallback");
   assert_eq!(
@@ -491,7 +498,7 @@ fn direct_executable_apis_preserve_owned_bytes_payloads() {
       .expect("name")
       .name()
       .source(),
-    &::bytes::Bytes::from_static(b"Owned")
+    &::bytes_1::Bytes::from_static(b"Owned")
   );
 }
 

@@ -7,7 +7,7 @@
 //! is the estimator that compares two builds rather than two schedulings.
 //!
 //! ```text
-//! cargo run -q -p smear --features rowan,validator --example perfloop --release -- alias
+//! cargo run -q -p smear --features rowan_0_17,validator --example perfloop --release -- alias
 //! ```
 
 // The shared harness. It is a module compiled into this target rather than a library

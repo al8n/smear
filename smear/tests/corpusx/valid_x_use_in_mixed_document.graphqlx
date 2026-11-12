@@ -1,0 +1,3 @@
+use ~::types::{User}
+type Query { user: User }
+query Q { user }

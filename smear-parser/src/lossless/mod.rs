@@ -54,7 +54,7 @@ mod macros;
 // So narrowing any item here to `pub(crate)` is not the local tidy-up it looks like: it arms
 // `dead_code`, on one feature cell, which `-Dwarnings` turns into a build error. Measured by
 // planting exactly that — narrowing every `pub` in this directory at once puts THIRTY items on the
-// error list under `--no-default-features --features rowan`.
+// error list under `--no-default-features --features rowan_0_17`.
 //
 // `depth`'s verdict machinery is the standing example, and it is the second shape rather than the
 // first. `drain_unless_terminal`, `drain_unless_stopped`, `root_turn`, `RootStop` and `RootTurn`

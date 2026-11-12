@@ -1,0 +1,15 @@
+Root@0..17
+  Document@0..17
+    UseDefinition@0..17
+      Name@0..3 "use"
+      Space@3..4 " "
+      UseTree@4..17
+        StringValue@4..11
+          BlockString@4..11 "\"\"\"m\"\"\""
+        PathSeparator@11..13 "::"
+        LBrace@13..14 "{"
+        UseTree@14..15
+          Path@14..15
+            Name@14..15 "A"
+        RBrace@15..16 "}"
+        Newline@16..17 "\n"

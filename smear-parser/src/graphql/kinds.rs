@@ -347,7 +347,7 @@ impl SyntaxKind {
 /// runner, coverage counter and typed layer can be written once over `K: KindSpace` rather than
 /// once per dialect. Gated on `rowan` because that is the only feature under which any of those
 /// three is compiled.
-#[cfg(feature = "rowan")]
+#[cfg(feature = "rowan_0_17")]
 impl crate::lossless::KindSpace for SyntaxKind {
   const NAME: &'static str = "graphql";
   const ERROR: Self = Self::Error;
@@ -371,15 +371,15 @@ impl crate::lossless::KindSpace for SyntaxKind {
 /// Separate from [`GraphQL`](crate::graphql::GraphQL), which is tokora's *grammar brand*
 /// (`Dialect::Lang`, a marker keeping two grammars' vocabularies apart). A `rowan::Language`
 /// is a kind authority; the two roles are deliberately not the same type.
-#[cfg(feature = "rowan")]
+#[cfg(feature = "rowan_0_17")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GraphQLLang;
 
-#[cfg(feature = "rowan")]
-impl rowan::Language for GraphQLLang {
+#[cfg(feature = "rowan_0_17")]
+impl rowan_0_17::Language for GraphQLLang {
   type Kind = SyntaxKind;
 
-  fn kind_from_raw(raw: rowan::SyntaxKind) -> Self::Kind {
+  fn kind_from_raw(raw: rowan_0_17::SyntaxKind) -> Self::Kind {
     // Infallible by contract: every raw value reaching a rowan query came from a kind this
     // crate emitted, and the sink's validator refuses out-of-space kinds at the emit door.
     //
@@ -394,14 +394,14 @@ impl rowan::Language for GraphQLLang {
     })
   }
 
-  fn kind_to_raw(kind: Self::Kind) -> rowan::SyntaxKind {
-    rowan::SyntaxKind(kind.raw())
+  fn kind_to_raw(kind: Self::Kind) -> rowan_0_17::SyntaxKind {
+    rowan_0_17::SyntaxKind(kind.raw())
   }
 }
 
 #[cfg(test)]
 mod tests {
-  #[cfg(feature = "rowan")]
+  #[cfg(feature = "rowan_0_17")]
   #[test]
   fn the_space_satisfies_the_shared_contract() {
     // The three properties this module used to assert by hand — declaration index, tombstone,

@@ -13,7 +13,7 @@
 //!   the sink rather than by calling the mapper directly;
 //! - the profile's validator refuses a kind outside the space, at the emit door;
 //! - a materialization failure names *this* dialect.
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 use smear::parser::graphqlx::{
   kinds::{GraphQLxLang, SyntaxKind as X},
@@ -46,11 +46,11 @@ fn the_graphqlx_sink_builds_at_all() {
 /// Every byte reaches the tree, trivia included.
 ///
 /// The lossless guarantee, and the reason the sink refuses trivia-skipping lexers. The source
-/// exercises the images GraphQL has no counterpart for — `<`, `>`, `::`, `=>`, `*` — because those
-/// are the ones a mapper copied from the other dialect could not have.
+/// exercises the images GraphQL has no counterpart for — `<`, `>`, `::`, `~`, `..`, `^`, `=>`, `*`
+/// — because those are the ones a mapper copied from the other dialect could not have.
 #[test]
 fn every_byte_reaches_the_tree_including_trivia() {
-  let src = "# leading\nimport * from \"a\"\ntype T<A> { f: map<::ns::K => V> }\n";
+  let src = "# leading\nuse \"a\"::*\ntype T<A> { f: map<^::ns::K => ~::V> g: ..::W }\n";
   let parse = parse_document(src);
   assert_eq!(
     parse.syntax().text().to_string(),

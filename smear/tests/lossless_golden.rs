@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan", feature = "graphql"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphql"))]
 
 //! Gate 5: golden trees — the **shape** gate, and the only one that can see a mis-shaped tree.
 //!
@@ -661,7 +661,7 @@ fn gate(cases: &[(String, String)], set: &str) {
     let _ = writeln!(
       report,
       "If every change is intended, bless with `{UPDATE_VAR}=1 cargo test -p smear \
-       --features rowan --test lossless_golden`, which rewrites the files and then fails once more \
+       --features rowan_0_17 --test lossless_golden`, which rewrites the files and then fails once more \
        so the diff gets read."
     );
   }

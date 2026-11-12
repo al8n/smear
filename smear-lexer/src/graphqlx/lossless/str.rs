@@ -5,5 +5,23 @@
 
 super::token!(str_token<'a>(&'a str, char, str, true, "#[^\n\r]*?"));
 
-#[cfg(feature = "hipstr")]
-super::token!(hipstr_token<'a>(hipstr::HipStr<'a>, char, str, true, "#[^\n\r]*?", &'a str));
+#[cfg(feature = "hipstr_0_8")]
+super::token!(hipstr_token<'a>(hipstr_0_8::HipStr<'a>, char, str, true, "#[^\n\r]*?", &'a str));
+
+#[cfg(feature = "smol-bytes_0_2")]
+super::token!(smol_utf8_token(
+  smol_bytes_0_2::Utf8Bytes,
+  char,
+  str,
+  true,
+  "#[^\n\r]*?"
+));
+
+#[cfg(feature = "smol-bytes_0_2")]
+super::token!(smol_compact_utf8_token(
+  smol_bytes_0_2::compact::Utf8Bytes,
+  char,
+  str,
+  true,
+  "#[^\n\r]*?"
+));

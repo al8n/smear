@@ -57,12 +57,12 @@ fn drive_slice<'inp, O>(
   .parse_slice(source)
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 fn drive_bytes<'inp, O>(
   parser: impl for<'c> FnMut(
     &mut GraphqlInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
-  source: &'inp ::bytes::Bytes,
+  source: &'inp ::bytes_1::Bytes,
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
   Parser::with_parser::<'inp, GraphqlLexer<'inp, [u8]>, O, GraphqlErrors<&'inp [u8]>, _, GraphQL>(
     parser,
@@ -74,9 +74,9 @@ macro_rules! accept_all {
   ($parser:expr, $source:expr, $check:path) => {{
     $check(drive_str($parser, $source).expect(concat!("str accepts: ", $source)));
     $check(drive_slice($parser, $source.as_bytes()).expect(concat!("[u8] accepts: ", $source)));
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let bytes = ::bytes::Bytes::from_static($source.as_bytes());
+      let bytes = ::bytes_1::Bytes::from_static($source.as_bytes());
       $check(drive_bytes($parser, &bytes).expect(concat!("Bytes accepts: ", $source)));
     }
   }};
@@ -495,9 +495,9 @@ fn directive_locations_are_exact_and_lossless_at_the_token_level() {
     assert_eq!(location.as_str(), source);
     assert_eq!(*location.span(), SimpleSpan::new(0, source.len()));
 
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let bytes = ::bytes::Bytes::copy_from_slice(source.as_bytes());
+      let bytes = ::bytes_1::Bytes::copy_from_slice(source.as_bytes());
       let location =
         drive_bytes(Location::graphql, &bytes).expect("Bytes accepts directive location");
       assert_eq!(location.as_str(), source);
@@ -535,9 +535,9 @@ fn directive_locations_are_exact_and_lossless_at_the_token_level() {
       drive_slice(|inp| Location::graphql(inp).map(|_| ()), source.as_bytes()).is_err(),
       "[u8] rejects non-location {source:?}",
     );
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let bytes = ::bytes::Bytes::copy_from_slice(source.as_bytes());
+      let bytes = ::bytes_1::Bytes::copy_from_slice(source.as_bytes());
       assert!(
         drive_bytes(|inp| Location::graphql(inp).map(|_| ()), &bytes).is_err(),
         "Bytes rejects non-location {source:?}",
@@ -1096,9 +1096,9 @@ fn source_typed_associated_api_remains_inferred_from_the_input() {
     .expect("byte-slice source is inferred");
   assert_eq!(slice_value.name().source_ref(), &&b"x"[..]);
 
-  #[cfg(feature = "bytes")]
+  #[cfg(feature = "bytes_1")]
   {
-    let bytes = ::bytes::Bytes::from_static(b"x: Int");
+    let bytes = ::bytes_1::Bytes::from_static(b"x: Int");
     let value =
       drive_bytes(InputValueDefinition::<_>::graphql, &bytes).expect("Bytes source is inferred");
     assert_eq!(value.name().source_ref(), &&b"x"[..]);

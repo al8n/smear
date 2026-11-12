@@ -1,1 +1,1 @@
-extend interface ::a::I<B> { f: Int }
+extend interface ^::a::I<B> { f: Int }

@@ -610,7 +610,7 @@ impl<Char, StateError> Diagnose for LexerError<Char, StateError> {
   }
 
   #[inline]
-  fn label(&self, _: usize) -> Option<Label> {
+  fn label(&self, _: usize) -> Option<Label<'_>> {
     None
   }
 
@@ -637,11 +637,11 @@ impl<Char, StateError> From<LexerError<Char, StateError>> for LexerErrorData<Cha
   }
 }
 
-#[cfg(feature = "smallvec")]
+#[cfg(feature = "smallvec_1")]
 type DefaultErrorsContainer<Char = char, StateError = ()> =
-  smallvec::SmallVec<[LexerError<Char, StateError>; 1]>;
+  smallvec_1::SmallVec<[LexerError<Char, StateError>; 1]>;
 
-#[cfg(not(feature = "smallvec"))]
+#[cfg(not(feature = "smallvec_1"))]
 type DefaultErrorsContainer<Char = char, StateError = ()> =
   std::vec::Vec<LexerError<Char, StateError>>;
 

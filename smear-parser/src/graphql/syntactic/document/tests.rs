@@ -39,12 +39,12 @@ fn drive_slice<'inp, O>(
   .parse_slice(source)
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 fn drive_bytes<'inp, O>(
   parser: impl for<'c> FnMut(
     &mut GraphqlInput<'inp, 'c, [u8], SliceCtx<'inp>>,
   ) -> Result<O, GraphqlErrors<&'inp [u8]>>,
-  source: &'inp ::bytes::Bytes,
+  source: &'inp ::bytes_1::Bytes,
 ) -> Result<O, GraphqlErrors<&'inp [u8]>> {
   Parser::with_parser::<'inp, GraphqlLexer<'inp, [u8]>, O, GraphqlErrors<&'inp [u8]>, _, GraphQL>(
     parser,
@@ -56,9 +56,9 @@ macro_rules! accept_all {
   ($parser:expr, $source:expr, $check:path) => {{
     $check(drive_str($parser, $source).expect("str source accepts"));
     $check(drive_slice($parser, $source.as_bytes()).expect("[u8] source accepts"));
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let bytes = ::bytes::Bytes::from_static($source.as_bytes());
+      let bytes = ::bytes_1::Bytes::from_static($source.as_bytes());
       $check(drive_bytes($parser, &bytes).expect("Bytes source accepts"));
     }
   }};
@@ -76,9 +76,9 @@ macro_rules! reject_all {
       "[u8] should reject {:?}",
       $source,
     );
-    #[cfg(feature = "bytes")]
+    #[cfg(feature = "bytes_1")]
     {
-      let bytes = ::bytes::Bytes::from_static($source.as_bytes());
+      let bytes = ::bytes_1::Bytes::from_static($source.as_bytes());
       assert!(
         drive_bytes(|inp| $parser(inp).map(|_| ()), &bytes).is_err(),
         "Bytes should reject {:?}",

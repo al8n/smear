@@ -313,11 +313,11 @@ fn a_byte_source_keeps_well_formed_comments() {
 }
 
 /// The `Bytes` instantiation of the lossless lexer keeps every well-formed comment as before.
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 #[test]
 fn a_lossless_bytes_lexer_keeps_well_formed_comments() {
   for (doc, end, _) in VALID {
-    let mut lexer = LosslessLexer::<bytes::Bytes>::new(doc.as_bytes());
+    let mut lexer = LosslessLexer::<bytes_1::Bytes>::new(doc.as_bytes());
     match lexer.lex() {
       Some(Ok(LosslessToken::Comment(text))) => {
         assert_eq!(&text[..], &doc.as_bytes()[..end], "{}", doc.escape_debug());
@@ -334,11 +334,11 @@ fn a_lossless_bytes_lexer_keeps_well_formed_comments() {
 }
 
 /// The `HipByt` instantiation of the lossless lexer keeps every well-formed comment as before.
-#[cfg(feature = "hipstr")]
+#[cfg(feature = "hipstr_0_8")]
 #[test]
 fn a_lossless_hipbyt_lexer_keeps_well_formed_comments() {
   for (doc, end, _) in VALID {
-    let mut lexer = LosslessLexer::<hipstr::HipByt<'_>>::new(doc.as_bytes());
+    let mut lexer = LosslessLexer::<hipstr_0_8::HipByt<'_>>::new(doc.as_bytes());
     match lexer.lex() {
       Some(Ok(LosslessToken::Comment(text))) => {
         assert_eq!(&text[..], &doc.as_bytes()[..end], "{}", doc.escape_debug());
@@ -352,6 +352,35 @@ fn a_lossless_hipbyt_lexer_keeps_well_formed_comments() {
       doc.escape_debug()
     );
   }
+}
+
+/// Both forms of smol-bytes' `Bytes` in the lossless lexer keep every well-formed comment as
+/// before.
+#[cfg(feature = "smol-bytes_0_2")]
+#[test]
+fn a_lossless_smol_bytes_lexer_keeps_well_formed_comments() {
+  macro_rules! keeps_comments {
+    ($source:ty) => {
+      for (doc, end, _) in VALID {
+        let mut lexer = LosslessLexer::<$source>::new(doc.as_bytes());
+        match lexer.lex() {
+          Some(Ok(LosslessToken::Comment(text))) => {
+            assert_eq!(&text[..], &doc.as_bytes()[..end], "{}", doc.escape_debug());
+          }
+          other => panic!("{}: expected a comment, got {other:?}", doc.escape_debug()),
+        }
+        assert_eq!(
+          lexer.span(),
+          SimpleSpan::new(0, end),
+          "{}",
+          doc.escape_debug()
+        );
+      }
+    };
+  }
+
+  keeps_comments!(smol_bytes_0_2::shared::Bytes);
+  keeps_comments!(smol_bytes_0_2::compact::Bytes);
 }
 
 /// A text source's comments are unchanged, through the lossless `&str` instantiation and the
@@ -381,21 +410,21 @@ fn a_str_source_keeps_its_comments() {
 
 /// A `HipStr` source's comments are unchanged, through the lossless instantiation and the syntactic
 /// lexer.
-#[cfg(feature = "hipstr")]
+#[cfg(feature = "hipstr_0_8")]
 #[test]
 fn a_hipstr_source_keeps_its_comments() {
   for (doc, end, next) in VALID {
     let label = doc.escape_debug();
 
-    let mut lexer = LosslessLexer::<hipstr::HipStr<'_>>::new(doc);
+    let mut lexer = LosslessLexer::<hipstr_0_8::HipStr<'_>>::new(doc);
     match lexer.lex() {
       Some(Ok(LosslessToken::Comment(text))) => assert_eq!(&text[..], &doc[..end], "{label}"),
       other => panic!("{label}: expected a comment, got {other:?}"),
     }
     assert_eq!(lexer.span(), SimpleSpan::new(0, end), "{label}");
 
-    let owned = hipstr::HipStr::from(doc);
-    let mut lexer = SyntacticLexer::<hipstr::HipStr<'_>>::new(&owned);
+    let owned = hipstr_0_8::HipStr::from(doc);
+    let mut lexer = SyntacticLexer::<hipstr_0_8::HipStr<'_>>::new(&owned);
     match (next, lexer.lex()) {
       (None, None) => {}
       (Some(start), Some(Ok(SyntacticToken::Identifier(_)))) => {
@@ -404,6 +433,40 @@ fn a_hipstr_source_keeps_its_comments() {
       (_, other) => panic!("{label}: expected the line after the comment, got {other:?}"),
     }
   }
+}
+
+/// Both forms of smol-bytes' `Utf8Bytes` keep their comments, through the lossless instantiation
+/// and the syntactic lexer.
+#[cfg(feature = "smol-bytes_0_2")]
+#[test]
+fn a_smol_utf8_source_keeps_its_comments() {
+  macro_rules! keeps_comments {
+    ($source:ty) => {
+      for (doc, end, next) in VALID {
+        let label = doc.escape_debug();
+
+        let mut lexer = LosslessLexer::<$source>::new(doc);
+        match lexer.lex() {
+          Some(Ok(LosslessToken::Comment(text))) => assert_eq!(&text[..], &doc[..end], "{label}"),
+          other => panic!("{label}: expected a comment, got {other:?}"),
+        }
+        assert_eq!(lexer.span(), SimpleSpan::new(0, end), "{label}");
+
+        let owned = <$source>::from(doc);
+        let mut lexer = SyntacticLexer::<$source>::new(&owned);
+        match (next, lexer.lex()) {
+          (None, None) => {}
+          (Some(start), Some(Ok(SyntacticToken::Identifier(_)))) => {
+            assert_eq!(lexer.span(), SimpleSpan::new(start, start + 1), "{label}");
+          }
+          (_, other) => panic!("{label}: expected the line after the comment, got {other:?}"),
+        }
+      }
+    };
+  }
+
+  keeps_comments!(smol_bytes_0_2::Utf8Bytes);
+  keeps_comments!(smol_bytes_0_2::compact::Utf8Bytes);
 }
 
 /// The refusal a byte source's lexer must give for [`ILL_FORMED`], as its first item.
@@ -430,39 +493,64 @@ fn a_byte_slice_source_refuses_an_ill_formed_comment() {
 
 /// `Bytes` refuses through both lexers. A source whose `UTF8` were wrongly `true` would skip the
 /// comment unchecked.
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 #[test]
 fn a_bytes_source_refuses_an_ill_formed_comment() {
-  let owned = bytes::Bytes::from_static(ILL_FORMED);
-  assert_refused(SyntacticLexer::<bytes::Bytes>::new(&owned).lex(), "Bytes");
+  let owned = bytes_1::Bytes::from_static(ILL_FORMED);
+  assert_refused(SyntacticLexer::<bytes_1::Bytes>::new(&owned).lex(), "Bytes");
   assert_refused(
-    LosslessLexer::<bytes::Bytes>::new(ILL_FORMED).lex(),
+    LosslessLexer::<bytes_1::Bytes>::new(ILL_FORMED).lex(),
     "lossless Bytes",
   );
 }
 
 /// `BStr` refuses through the syntactic lexer; there is no `BStr` lossless instantiation.
-#[cfg(feature = "bstr")]
+#[cfg(feature = "bstr_1")]
 #[test]
 fn a_bstr_source_refuses_an_ill_formed_comment() {
   assert_refused(
-    SyntacticLexer::<bstr::BStr>::new(bstr::BStr::new(ILL_FORMED)).lex(),
+    SyntacticLexer::<bstr_1::BStr>::new(bstr_1::BStr::new(ILL_FORMED)).lex(),
     "BStr",
   );
 }
 
 /// `HipByt` refuses through both lexers.
-#[cfg(feature = "hipstr")]
+#[cfg(feature = "hipstr_0_8")]
 #[test]
 fn a_hipbyt_source_refuses_an_ill_formed_comment() {
-  let owned = hipstr::HipByt::from(ILL_FORMED);
+  let owned = hipstr_0_8::HipByt::from(ILL_FORMED);
   assert_refused(
-    SyntacticLexer::<hipstr::HipByt<'_>>::new(&owned).lex(),
+    SyntacticLexer::<hipstr_0_8::HipByt<'_>>::new(&owned).lex(),
     "HipByt",
   );
   assert_refused(
-    LosslessLexer::<hipstr::HipByt<'_>>::new(ILL_FORMED).lex(),
+    LosslessLexer::<hipstr_0_8::HipByt<'_>>::new(ILL_FORMED).lex(),
     "lossless HipByt",
+  );
+}
+
+/// Both forms of smol-bytes' `Bytes` refuse through both lexers.
+#[cfg(feature = "smol-bytes_0_2")]
+#[test]
+fn a_smol_bytes_source_refuses_an_ill_formed_comment() {
+  let owned = smol_bytes_0_2::shared::Bytes::copy_from_slice(ILL_FORMED);
+  assert_refused(
+    SyntacticLexer::<smol_bytes_0_2::shared::Bytes>::new(&owned).lex(),
+    "shared Bytes",
+  );
+  assert_refused(
+    LosslessLexer::<smol_bytes_0_2::shared::Bytes>::new(ILL_FORMED).lex(),
+    "lossless shared Bytes",
+  );
+
+  let owned = smol_bytes_0_2::compact::Bytes::copy_from_slice(ILL_FORMED);
+  assert_refused(
+    SyntacticLexer::<smol_bytes_0_2::compact::Bytes>::new(&owned).lex(),
+    "compact Bytes",
+  );
+  assert_refused(
+    LosslessLexer::<smol_bytes_0_2::compact::Bytes>::new(ILL_FORMED).lex(),
+    "lossless compact Bytes",
   );
 }
 
@@ -580,29 +668,58 @@ fn a_spent_token_ceiling_refuses_a_whole_comment() {
     );
   }
 
-  #[cfg(feature = "bytes")]
+  #[cfg(feature = "bytes_1")]
   {
     assert_ceiling_refusal(
-      LosslessLexer::<bytes::Bytes>::with_state(LONG_ILL_FORMED_COMMENT, spent),
+      LosslessLexer::<bytes_1::Bytes>::with_state(LONG_ILL_FORMED_COMMENT, spent),
       0,
       0..line_end(LONG_ILL_FORMED_COMMENT),
       "Bytes ill-formed spent",
     );
   }
 
-  #[cfg(feature = "hipstr")]
+  #[cfg(feature = "hipstr_0_8")]
   {
     assert_ceiling_refusal(
-      LosslessLexer::<hipstr::HipByt<'_>>::with_state(LONG_ILL_FORMED_COMMENT, spent),
+      LosslessLexer::<hipstr_0_8::HipByt<'_>>::with_state(LONG_ILL_FORMED_COMMENT, spent),
       0,
       0..line_end(LONG_ILL_FORMED_COMMENT),
       "HipByt ill-formed spent",
     );
     assert_ceiling_refusal(
-      LosslessLexer::<hipstr::HipStr<'_>>::with_state(text, spent),
+      LosslessLexer::<hipstr_0_8::HipStr<'_>>::with_state(text, spent),
       0,
       0..end,
       "HipStr spent",
+    );
+  }
+
+  #[cfg(feature = "smol-bytes_0_2")]
+  {
+    let ill_formed_end = line_end(LONG_ILL_FORMED_COMMENT);
+    assert_ceiling_refusal(
+      LosslessLexer::<smol_bytes_0_2::shared::Bytes>::with_state(LONG_ILL_FORMED_COMMENT, spent),
+      0,
+      0..ill_formed_end,
+      "shared Bytes ill-formed spent",
+    );
+    assert_ceiling_refusal(
+      LosslessLexer::<smol_bytes_0_2::compact::Bytes>::with_state(LONG_ILL_FORMED_COMMENT, spent),
+      0,
+      0..ill_formed_end,
+      "compact Bytes ill-formed spent",
+    );
+    assert_ceiling_refusal(
+      LosslessLexer::<smol_bytes_0_2::Utf8Bytes>::with_state(text, spent),
+      0,
+      0..end,
+      "shared Utf8Bytes spent",
+    );
+    assert_ceiling_refusal(
+      LosslessLexer::<smol_bytes_0_2::compact::Utf8Bytes>::with_state(text, spent),
+      0,
+      0..end,
+      "compact Utf8Bytes spent",
     );
   }
 }

@@ -72,8 +72,8 @@ impl Diagnostic {
 /// not a newtype: a newtype would need every getter re-written per dialect, which is the
 /// duplication this module exists to remove, and an alias keeps `parse_document(&str) -> Parse`
 /// reading exactly as it did at every call site.
-pub struct Parse<L: rowan::Language> {
-  green: rowan::GreenNode,
+pub struct Parse<L: rowan_0_17::Language> {
+  green: rowan_0_17::GreenNode,
   diagnostics: std::vec::Vec<Diagnostic>,
   // `PhantomData<fn() -> L>`, not `PhantomData<L>`: the covariant function-pointer form keeps
   // `Parse` `Send`/`Sync` regardless of `L` and imposes no `L`-shaped drop obligation. A bare
@@ -81,7 +81,7 @@ pub struct Parse<L: rowan::Language> {
   language: core::marker::PhantomData<fn() -> L>,
 }
 
-impl<L: rowan::Language> Parse<L> {
+impl<L: rowan_0_17::Language> Parse<L> {
   /// The one constructor, and it is **private to this module**.
   ///
   /// Both finishing doors go through it and nothing else can, which is what keeps "a `Parse` is
@@ -89,7 +89,10 @@ impl<L: rowan::Language> Parse<L> {
   /// fields. Narrowed from `pub(crate)` in round 8's fold, along with
   /// [`Diagnostic::error_at`](Diagnostic::error_at): the dialect doors hand this module a span and
   /// get a `Parse` back, so neither the value nor the type is theirs to assemble.
-  const fn from_parts(green: rowan::GreenNode, diagnostics: std::vec::Vec<Diagnostic>) -> Self {
+  const fn from_parts(
+    green: rowan_0_17::GreenNode,
+    diagnostics: std::vec::Vec<Diagnostic>,
+  ) -> Self {
     Self {
       green,
       diagnostics,
@@ -98,8 +101,8 @@ impl<L: rowan::Language> Parse<L> {
   }
 
   /// The raw `rowan` tree. Walk this for generic tooling — formatters, highlighters.
-  pub fn syntax(&self) -> rowan::SyntaxNode<L> {
-    rowan::SyntaxNode::new_root(self.green.clone())
+  pub fn syntax(&self) -> rowan_0_17::SyntaxNode<L> {
+    rowan_0_17::SyntaxNode::new_root(self.green.clone())
   }
 
   /// The tree's green root, borrowed rather than materialised.
@@ -109,7 +112,7 @@ impl<L: rowan::Language> Parse<L> {
   /// root's cursor data. A walk that needs none of that reads the green tree directly, which is
   /// what the projection does and what [`Node`](super::project::Node) is; this is where such a
   /// walk starts, and it costs nothing.
-  pub fn green(&self) -> &rowan::GreenNode {
+  pub fn green(&self) -> &rowan_0_17::GreenNode {
     &self.green
   }
 
@@ -420,7 +423,7 @@ pub fn finish_root<'inp, L, Lx, Em>(
   space: &'static str,
 ) -> Result<Parse<L>, MintError>
 where
-  L: rowan::Language,
+  L: rowan_0_17::Language,
   Lx: Lexer<'inp>,
   // The two clauses the materialization door itself carries. Neither is implied by `Lexer<'inp>`:
   // the sink
@@ -499,7 +502,7 @@ pub(crate) fn finish_parsed_root<'inp, L, Lx, Em>(
   space: &'static str,
 ) -> Parse<L>
 where
-  L: rowan::Language,
+  L: rowan_0_17::Language,
   Lx: Lexer<'inp>,
   Lx::Source: tokora::cst::CstText,
   Lx::Offset: TryInto<u32>,
@@ -591,7 +594,7 @@ pub(crate) fn finish_parsed_root_with<'inp, L, Lx, Em>(
   append_error_at: Option<core::ops::Range<usize>>,
 ) -> Parse<L>
 where
-  L: rowan::Language,
+  L: rowan_0_17::Language,
   Lx: Lexer<'inp>,
   Lx::Source: tokora::cst::CstText,
   Lx::Offset: TryInto<u32>,

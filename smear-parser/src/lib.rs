@@ -51,7 +51,7 @@ pub mod combinator;
 
 /// The dialect-generic lossless substrate: the kind-space contract, the trivia atoms, the
 /// `Parse` surface, the coverage shims and the typed-wrapper macro's helpers.
-#[cfg(feature = "rowan")]
+#[cfg(feature = "rowan_0_17")]
 pub mod lossless;
 
 // -- THE LEXER'S CEILING AGAINST THE SUBSTRATE'S, AND WHY THE COMPARISON IS WRITTEN HERE -------
@@ -79,7 +79,7 @@ pub mod lossless;
 // not widen it. The plant that proves it is live is a `HARD_MAX` of 342: that value passes
 // `HARD_MAX`'s OWN 1.9x margin assertion, so every gate that predates this invariant admits it,
 // and it is exactly the edit that reopens the projection window.
-#[cfg(feature = "rowan")]
+#[cfg(feature = "rowan_0_17")]
 const _: () = assert!(
   smear_lexer::limits::HARD_MAX <= lossless::project::MAX_DOOR_BRACKETS,
   "the lossless doors can accept a document whose green tree is deeper than the projection's walks \
@@ -138,9 +138,9 @@ mod value;
 pub mod graphql;
 
 /// The GraphQLx dialect: namespaced paths, collection values, generic type
-/// references, and imports over the concrete GraphQLx lexer.
+/// references, and `use` items over the concrete GraphQLx lexer.
 #[cfg_attr(
-  all(feature = "graphql", feature = "rowan"),
+  all(feature = "graphql", feature = "rowan_0_17"),
   doc = r#"
 # A GraphQL node may not be cast through a GraphQLx wrapper
 
@@ -216,26 +216,26 @@ pub mod graphqlx;
 pub mod __features {
   /// `alloc`, as this crate resolved it.
   pub const ALLOC: bool = cfg!(feature = "alloc");
-  /// `bstr`, as this crate resolved it.
-  pub const BSTR: bool = cfg!(feature = "bstr");
-  /// `bytes`, as this crate resolved it.
-  pub const BYTES: bool = cfg!(feature = "bytes");
+  /// `bstr_1`, as this crate resolved it.
+  pub const BSTR_1: bool = cfg!(feature = "bstr_1");
+  /// `bytes_1`, as this crate resolved it.
+  pub const BYTES_1: bool = cfg!(feature = "bytes_1");
   /// `graphql`, as this crate resolved it.
   pub const GRAPHQL: bool = cfg!(feature = "graphql");
   /// `graphqlx`, as this crate resolved it.
   pub const GRAPHQLX: bool = cfg!(feature = "graphqlx");
-  /// `hipstr`, as this crate resolved it.
-  pub const HIPSTR: bool = cfg!(feature = "hipstr");
+  /// `hipstr_0_8`, as this crate resolved it.
+  pub const HIPSTR_0_8: bool = cfg!(feature = "hipstr_0_8");
   /// `lossless-coverage`, as this crate resolved it.
   pub const LOSSLESS_COVERAGE: bool = cfg!(feature = "lossless-coverage");
   /// `materialized-numbers`, as this crate resolved it.
   pub const MATERIALIZED_NUMBERS: bool = cfg!(feature = "materialized-numbers");
-  /// `rowan`, as this crate resolved it.
-  pub const ROWAN: bool = cfg!(feature = "rowan");
-  /// `smallvec`, as this crate resolved it.
-  pub const SMALLVEC: bool = cfg!(feature = "smallvec");
-  /// `smol-bytes`, as this crate resolved it.
-  pub const SMOL_BYTES: bool = cfg!(feature = "smol-bytes");
+  /// `rowan_0_17`, as this crate resolved it.
+  pub const ROWAN_0_17: bool = cfg!(feature = "rowan_0_17");
+  /// `smallvec_1`, as this crate resolved it.
+  pub const SMALLVEC_1: bool = cfg!(feature = "smallvec_1");
+  /// `smol-bytes_0_2`, as this crate resolved it.
+  pub const SMOL_BYTES_0_2: bool = cfg!(feature = "smol-bytes_0_2");
   /// `std`, as this crate resolved it.
   pub const STD: bool = cfg!(feature = "std");
   /// `test-support`, as this crate resolved it.

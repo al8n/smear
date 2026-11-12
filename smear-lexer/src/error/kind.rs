@@ -31,7 +31,8 @@ pub enum SyntaxErrorKind {
   /// because the lexer reports it as the character it could not read rather than as a string
   /// literal's [`InvalidUtf8`](Self::InvalidUtf8).
   UnknownCharacter,
-  /// A `.` or `..` that is not the three-dot spread operator.
+  /// A `.` that is not the three-dot spread operator, or a `..` in GraphQL. GraphQLx lexes `..` as
+  /// the parent-module sigil of a path, so there only a lone `.` is one.
   UnterminatedSpread,
 
   // -- the lexer: numbers ---------------------------------------------------------------------
@@ -78,6 +79,11 @@ pub enum SyntaxErrorKind {
   UnexpectedToken,
   /// A document that ends where the grammar needs more.
   UnexpectedEndOfInput,
+  /// A GraphQLx path that starts with `::`, which only ever joins two segments (GraphQLx only).
+  ///
+  /// A path's root is written before its first `::` — `~` for the package, `^` for a dependency,
+  /// `..` for the parent module — so a `::` where a path begins names no root at all.
+  LeadingPathSeparator,
   /// A `(`, `[` or `{` — or, in GraphQLx, a `<` — that is never closed.
   UnclosedDelimiter,
   /// An integer literal that does not fit the width a materialising parse reads it at.
@@ -127,6 +133,7 @@ impl SyntaxErrorKind {
     Self::InvalidUtf8,
     Self::UnexpectedToken,
     Self::UnexpectedEndOfInput,
+    Self::LeadingPathSeparator,
     Self::UnclosedDelimiter,
     Self::IntOverflow,
     Self::FloatOverflow,
@@ -159,6 +166,7 @@ impl SyntaxErrorKind {
       Self::InvalidUtf8 => Code::new("smear::syntax::invalid-utf8"),
       Self::UnexpectedToken => Code::new("smear::syntax::unexpected-token"),
       Self::UnexpectedEndOfInput => Code::new("smear::syntax::unexpected-end-of-input"),
+      Self::LeadingPathSeparator => Code::new("smear::syntax::leading-path-separator"),
       Self::UnclosedDelimiter => Code::new("smear::syntax::unclosed-delimiter"),
       Self::IntOverflow => Code::new("smear::syntax::int-overflow"),
       Self::FloatOverflow => Code::new("smear::syntax::float-overflow"),
@@ -192,6 +200,7 @@ impl SyntaxErrorKind {
       Self::InvalidUtf8 => "invalid UTF-8",
       Self::UnexpectedToken => "unexpected token",
       Self::UnexpectedEndOfInput => "unexpected end of input",
+      Self::LeadingPathSeparator => "a path cannot start with `::`",
       Self::UnclosedDelimiter => "unclosed delimiter",
       Self::IntOverflow => "integer out of range",
       Self::FloatOverflow => "float out of range",
@@ -232,6 +241,7 @@ impl SyntaxErrorKind {
         "a surrogate is valid only as a `\\u` high-low pair, and no code point exceeds `10FFFF`",
       ),
       Self::InvalidUtf8 => Some("encode the document's text as well-formed UTF-8"),
+      Self::LeadingPathSeparator => Some("a dependency path starts with `^::`"),
       Self::UnclosedDelimiter => Some("add the matching closing delimiter"),
       Self::IntOverflow => Some("a larger integer needs a `Float`, a `String` or a custom scalar"),
       Self::FloatOverflow => Some("a `Float` is a finite IEEE 754 double"),
@@ -273,6 +283,7 @@ impl SyntaxErrorKind {
       | Self::InvalidUtf8
       | Self::UnexpectedToken
       | Self::UnexpectedEndOfInput
+      | Self::LeadingPathSeparator
       | Self::UnclosedDelimiter
       | Self::IntOverflow
       | Self::FloatOverflow

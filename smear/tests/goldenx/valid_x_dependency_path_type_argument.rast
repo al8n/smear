@@ -1,0 +1,36 @@
+Root@0..46
+  Document@0..46
+    ObjectTypeDefinition@0..45
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..7
+        Name@5..6 "T"
+        Space@6..7 " "
+      FieldsDefinition@7..45
+        LBrace@7..8 "{"
+        Space@8..9 " "
+        FieldDefinition@9..44
+          Name@9..10 "f"
+          Colon@10..11 ":"
+          Space@11..12 " "
+          DefinitionTypePath@12..44
+            Path@12..20
+              Name@12..20 "IndexMap"
+            TypeGenerics@20..43
+              LAngle@20..21 "<"
+              DefinitionTypePath@21..29
+                Path@21..29
+                  Name@21..27 "string"
+                  Comma@27..28 ","
+                  Space@28..29 " "
+              DefinitionTypePath@29..42
+                Path@29..42
+                  Caret@29..30 "^"
+                  PathSeparator@30..32 "::"
+                  Name@32..35 "geo"
+                  PathSeparator@35..37 "::"
+                  Name@37..42 "Point"
+              RAngle@42..43 ">"
+            Space@43..44 " "
+        RBrace@44..45 "}"
+    Newline@45..46 "\n"

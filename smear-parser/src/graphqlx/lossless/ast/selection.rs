@@ -78,7 +78,7 @@ ast_node!(
   lang = crate::graphqlx::kinds::GraphQLxLang;
   /// A fragment spread, `... F`.
   FragmentSpread => K::FragmentSpread {
-    /// The spread fragment's name — a whole path, so `... ::ns::F` is one spread.
+    /// The spread fragment's name — a whole path, so `... ^::ns::F` is one spread.
     type_path: opt TypePath,
     /// The spread's directives, if it was given any.
     directives: opt Directives,

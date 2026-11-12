@@ -189,12 +189,20 @@ macro_rules! token_impl {
         Minus,
 
         #[token("...", tt_hook)]
-        #[token("..", |lexer| tt_hook_and_then(lexer, |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer))))]
         #[token(".", |lexer| tt_hook_and_then(lexer, |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer))))]
         Spread,
 
         #[token("::", tt_hook)]
         PathSeparator,
+
+        #[token("~", tt_hook)]
+        Tilde,
+
+        #[token("..", tt_hook)]
+        DotDot,
+
+        #[token("^", tt_hook)]
+        Caret,
 
         #[token("=>", tt_hook)]
         FatArrow,
@@ -311,6 +319,9 @@ macro_rules! token_impl {
             Token::Plus => Self::Plus,
             Token::Minus => Self::Minus,
             Token::PathSeparator => Self::PathSeparator,
+            Token::Tilde => Self::Tilde,
+            Token::DotDot => Self::DotDot,
+            Token::Caret => Self::Caret,
             Token::Comma => Self::Comma,
             Token::Space => Self::Space,
             Token::Tab => Self::Tab,
@@ -488,12 +499,20 @@ macro_rules! token_impl {
         Minus,
 
         #[token("...", tt_hook)]
-        #[token("..", |lexer| tt_hook_and_then(lexer, |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer))))]
         #[token(".", |lexer| tt_hook_and_then(lexer, |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer))))]
         Spread,
 
         #[token("::", tt_hook)]
         PathSeparator,
+
+        #[token("~", tt_hook)]
+        Tilde,
+
+        #[token("..", tt_hook)]
+        DotDot,
+
+        #[token("^", tt_hook)]
+        Caret,
 
         #[token("=>", tt_hook)]
         FatArrow,
@@ -610,6 +629,9 @@ macro_rules! token_impl {
             Token::Plus => Self::Plus,
             Token::Minus => Self::Minus,
             Token::PathSeparator => Self::PathSeparator,
+            Token::Tilde => Self::Tilde,
+            Token::DotDot => Self::DotDot,
+            Token::Caret => Self::Caret,
             Token::Comma => Self::Comma,
             Token::Space => Self::Space,
             Token::Tab => Self::Tab,

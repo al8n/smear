@@ -1,0 +1,2 @@
+use "./vision"
+"An image." type Image { id: ID }

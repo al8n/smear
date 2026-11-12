@@ -6,8 +6,9 @@ use std::string::ToString;
 use crate::graphqlx::error::Expectation;
 
 /// Every expectation renders as the object of "expected …", as GraphQL's twin pins it, over this
-/// dialect's own vocabulary: the angle pair, `*`, `+`, `-`, `::` and `=>`, paths, variables, and
-/// the import clause's keywords and parts. The table is copied from the impl row for row.
+/// dialect's own vocabulary: the angle pair, `*`, `+`, `-`, `::`, the three root sigils and `=>`,
+/// paths, variables, and a use tree's keywords and parts. The table is copied from the impl row
+/// for row.
 #[test]
 fn every_expectation_renders_as_the_object_of_expected() {
   for (expectation, text) in [
@@ -30,6 +31,9 @@ fn every_expectation_renders_as_the_object_of_expected() {
     (Expectation::Plus, "`+`"),
     (Expectation::Minus, "`-`"),
     (Expectation::PathSeparator, "`::`"),
+    (Expectation::Tilde, "`~`"),
+    (Expectation::DotDot, "`..`"),
+    (Expectation::Caret, "`^`"),
     (Expectation::FatArrow, "`=>`"),
     (Expectation::Pipe, "`|`"),
     (Expectation::Bang, "`!`"),
@@ -46,10 +50,9 @@ fn every_expectation_renders_as_the_object_of_expected() {
     (Expectation::Type, "a type"),
     (Expectation::InputValue, "a value"),
     (Expectation::ConstInputValue, "a constant value"),
-    (Expectation::ImportClause, "an import clause"),
-    (Expectation::ImportMember, "an import member"),
-    (Expectation::Import, "`import`"),
-    (Expectation::From, "`from`"),
+    (Expectation::UseTree, "a use tree"),
+    (Expectation::NameGlobOrGroup, "a name, `*` or `{`"),
+    (Expectation::Use, "`use`"),
     (Expectation::As, "`as`"),
     (
       Expectation::OperationTypeOrFragment,

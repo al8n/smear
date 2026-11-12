@@ -17,8 +17,8 @@ to run FROM THE MEMBERS, which are the superset, and check against the umbrella.
         assert `smear` declares a feature whose transitive closure reaches M/F,
         or F is in EXEMPT with a written reason
 
-TRANSITIVE, not direct. `smear`'s `lossless-coverage = ["rowan", …]` reaches
-`smear-lexer/std` through `rowan -> std -> smear-lexer/std`, and a check that only read the
+TRANSITIVE, not direct. `smear`'s `lossless-coverage = ["rowan_0_17", …]` reaches
+`smear-lexer/std` through `rowan_0_17 -> std -> smear-lexer/std`, and a check that only read the
 umbrella's direct `member/feature` entries would call that unreachable. What the gate asks is
 whether SOME feature of `smear` turns M/F on, which is the question a dependent asks.
 
@@ -132,6 +132,8 @@ UMBRELLA = "smear"
 #                                                                  never under the selftest
 #   EQ_TWIN                        this pair's umbrella twin is    two-sided: a stale entry, and a
 #     (downstream_pairs)           not its namesake                pair with no twin, both fail
+#   ALIAS_VERSION                  this suffix makes a feature a   audit_equivalence: the two copies
+#     (here, downstream_pairs)     pure alias, which owes no pair  must be the same literal
 #   MEMBERS                        these are the crates the        C4: a workspace member with
 #     (downstream_pairs)           umbrella re-exports             features and no row fails
 #   PRESENCE                       features a member's edge needs  self-verifying ONE WAY: too
@@ -211,12 +213,36 @@ SELECTIONS = ("miri", "census", "cross")
 # is a failure, exactly like a stale feature exemption.
 EXEMPT_SELECTION: dict[tuple[str, str], str] = {}
 
-# The three shapes `--selftest` plants, named once so the verdict and the selftest cannot drift.
+# The shapes `--selftest` plants, named once so the verdict and the selftest cannot drift.
 PLANTS = {
   "unnamed": "a member feature the umbrella never names — #84's actual defect",
   "wrong-dep": "a member feature the umbrella names but forwards to the wrong dependency",
   "renamed": "a member feature forwarded under a renamed umbrella feature, which must PASS",
+  "alias": "a pure alias of a versioned feature, which holds no state and must PASS",
+  "forward": "a single forward that is not an alias, which is a capability and must still FAIL",
 }
+
+# A PURE ALIAS NEEDS NOTHING OF THE UMBRELLA. A dependency's feature is versioned — `bytes_1`,
+# `smol-bytes_0_2` — and the unversioned name only turns it on: `bytes = ["bytes_1"]`. The alias
+# holds no state, so a dependent loses nothing by being unable to ask for it through `smear`, and
+# its versioned target, which IS a member feature, is checked here and asserted equal below. An
+# equivalence on the alias itself could not hold: `smear/bytes` forwards `smear-lexer/bytes_1`,
+# so the member's alias reads false while the umbrella's reads true.
+#
+# Derived from the table, not listed. An alias is a feature whose whole list is one other feature
+# of the same member, spelled as its own name plus a version suffix. The suffix is what keeps
+# `smear-schema`'s `introspection = ["build"]` and `smear-parser`'s
+# `lossless-coverage = ["rowan_0_17"]` out of it: each is a single forward and each is a
+# capability with a witness of its own. `ci/downstream_pairs.py` applies the same rule and
+# `audit_equivalence` checks that the two suffixes agree.
+ALIAS_VERSION = r"_[0-9]+(?:_[0-9]+)*"
+
+
+def is_alias(features: dict[str, list[str]], name: str) -> bool:
+  """Whether `name` is a pure alias in one member's `[features]` table."""
+  entries = features.get(name, [])
+  return (len(entries) == 1 and entries[0] in features
+          and re.fullmatch(re.escape(name) + ALIAS_VERSION, entries[0]) is not None)
 
 
 def metadata() -> dict:
@@ -298,6 +324,10 @@ def check(feature_tables: dict[str, dict[str, list[str]]], verbose: bool = False
       # every member feature explicitly with `default-features = false`, which is what makes its
       # own default reproducible. Forwarding `member/default` would UNDO that.
       if feature == "default":
+        continue
+      if is_alias(feature_tables[member], feature):
+        if verbose:
+          print(f"  alias     {member}/{feature} -> {feature_tables[member][feature][0]}")
         continue
       checked += 1
       edge = f"{member}/{feature}"
@@ -617,6 +647,18 @@ def audit_equivalence(meta: dict, feature_tables: dict[str, dict[str, list[str]]
     return [f"the EQ_TWIN table could not be read ({err}), so this check knows nothing"]
 
   try:
+    planner_suffix = read_constant(REPO_ROOT / "ci" / "downstream_pairs.py", "ALIAS_VERSION")
+  except RuntimeError as err:
+    return [f"ALIAS_VERSION could not be read out of ci/downstream_pairs.py ({err}), so the two "
+            f"gates may disagree about which features are aliases"]
+  if planner_suffix != ALIAS_VERSION:
+    findings.append(
+      f"ci/downstream_pairs.py's ALIAS_VERSION is {planner_suffix!r} and this file's is "
+      f"{ALIAS_VERSION!r}: the planner and this gate would disagree about which member features "
+      f"are pure aliases, and so about which pairs owe an equivalence"
+    )
+
+  try:
     umbrella_src = (REPO_ROOT / "smear" / "src" / "lib.rs").read_text()
   except OSError as err:
     return [f"smear/src/lib.rs is unreadable ({err})"]
@@ -636,6 +678,8 @@ def audit_equivalence(meta: dict, feature_tables: dict[str, dict[str, list[str]]
       continue
     ident = member.replace("-", "_")
     for feature in sorted(f for f in feature_tables[member] if f != "default"):
+      if is_alias(feature_tables[member], feature):
+        continue
       twin = twins.get((member, feature))
       if twin is not None:
         used_twin.add((member, feature))
@@ -1143,23 +1187,23 @@ def selftest() -> int:
 
   # (a) a member feature the umbrella never names. #84's actual defect.
   planted = {k: dict(v) for k, v in _BASE.items()}
-  planted["smear-lexer"]["rowan"] = []
+  planted["smear-lexer"]["rowan_0_17"] = []
   problems.append(_case(f"plant (a) {PLANTS['unnamed']}", planted, want_findings=True))
 
-  # (b) named, but forwarded to the wrong dependency. The umbrella HAS a `rowan` feature and it
+  # (b) named, but forwarded to the wrong dependency. The umbrella HAS a `rowan_0_17` feature and it
   # looks complete from the umbrella's side; it just does not reach the member that declares it.
   planted = {k: dict(v) for k, v in _BASE.items()}
-  planted["smear-lexer"]["rowan"] = []
-  planted[UMBRELLA]["rowan"] = ["smear-parser/rowan"]
+  planted["smear-lexer"]["rowan_0_17"] = []
+  planted[UMBRELLA]["rowan_0_17"] = ["smear-parser/rowan_0_17"]
   problems.append(_case(f"plant (b) {PLANTS['wrong-dep']}", planted, want_findings=True))
 
   # (c) forwarded under a different umbrella name, and reached only transitively. This must PASS:
   # the umbrella may rename, and what the plant proves is that the walk follows the closure rather
   # than matching spellings.
   planted = {k: dict(v) for k, v in _BASE.items()}
-  planted["smear-lexer"]["rowan"] = []
+  planted["smear-lexer"]["rowan_0_17"] = []
   planted[UMBRELLA]["lossless"] = ["cst"]
-  planted[UMBRELLA]["cst"] = ["smear-lexer/rowan"]
+  planted[UMBRELLA]["cst"] = ["smear-lexer/rowan_0_17"]
   problems.append(_case(f"plant (c) {PLANTS['renamed']}", planted, want_findings=False))
 
   # a stale exemption is a finding in its own right
@@ -1169,10 +1213,25 @@ def selftest() -> int:
 
   # and an exemption that DOES match suppresses the finding it is written for
   planted = {k: dict(v) for k, v in _BASE.items()}
-  planted["smear-lexer"]["rowan"] = []
-  EXEMPT[("smear-lexer", "rowan")] = "planted"
+  planted["smear-lexer"]["rowan_0_17"] = []
+  EXEMPT[("smear-lexer", "rowan_0_17")] = "planted"
   problems.append(_case("plant (e) a live exemption suppresses its finding", planted, False))
-  del EXEMPT[("smear-lexer", "rowan")]
+  del EXEMPT[("smear-lexer", "rowan_0_17")]
+
+  # a pure alias holds no state: its versioned target is forwarded and the alias needs nothing
+  planted = {k: dict(v) for k, v in _BASE.items()}
+  planted["smear-lexer"]["rowan_0_17"] = []
+  planted["smear-lexer"]["rowan"] = ["rowan_0_17"]
+  planted[UMBRELLA]["rowan_0_17"] = ["smear-lexer/rowan_0_17"]
+  problems.append(_case(f"plant (j) {PLANTS['alias']}", planted, want_findings=False))
+
+  # and the alias exemption is a name rule, not "any single forward": `introspection = ["build"]`
+  # is a capability, and leaving it unforwarded is the defect this gate exists for
+  planted = {k: dict(v) for k, v in _BASE.items()}
+  planted["smear-lexer"]["build"] = []
+  planted["smear-lexer"]["introspection"] = ["build"]
+  planted[UMBRELLA]["build"] = ["smear-lexer/build"]
+  problems.append(_case(f"plant (k) {PLANTS['forward']}", planted, want_findings=True))
 
   # ── the selection check, planted the same way ─────────────────────────────────────────────
   #
@@ -1222,7 +1281,7 @@ def selftest() -> int:
       print(f"  - {p}")
     return 1
   print(
-    "feature_reachability selftest OK: 11 cases, 6 planted defect shapes across both checks"
+    "feature_reachability selftest OK: 13 cases, 7 planted defect shapes across both checks"
   )
   return 0
 
@@ -1305,12 +1364,19 @@ def main() -> int:
     for m, t in tables.items()
     if m != UMBRELLA and m not in EXEMPT_MEMBERS
     for f in t
-    if f != "default"
+    if f != "default" and not is_alias(t, f)
+  )
+  aliases = sum(
+    1
+    for m, t in tables.items()
+    if m != UMBRELLA and m not in EXEMPT_MEMBERS
+    for f in t
+    if f != "default" and is_alias(t, f)
   )
   print(
     f"feature_reachability OK: {counted} member features, all reachable through `{UMBRELLA}` and "
-    f"all asserted equal to it; {len(publishable)} publishable members, all inside "
-    f"{len(SELECTIONS)} gate selections"
+    f"all asserted equal to it, and {aliases} pure aliases that carry nothing of their own; "
+    f"{len(publishable)} publishable members, all inside {len(SELECTIONS)} gate selections"
   )
   return 0
 

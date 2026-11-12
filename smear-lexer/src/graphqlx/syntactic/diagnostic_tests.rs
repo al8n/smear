@@ -72,7 +72,7 @@ fn every_lexical_refusal_renders_its_own_sentence_under_its_own_code() {
   const CASES: &[(&str, SyntaxErrorKind, &str)] = &[
     ("?", SyntaxErrorKind::UnknownCharacter, "unknown character"),
     (
-      "..x",
+      ".x",
       SyntaxErrorKind::UnterminatedSpread,
       "unterminated spread operator, expected `...`",
     ),
@@ -277,8 +277,9 @@ fn a_whole_slice_door_refuses_what_is_not_exactly_one_token_of_its_kind() {
 }
 
 /// Every token kind renders as a diagnostic names what it found, as GraphQL's twin pins it, over
-/// this dialect's own vocabulary: the angle pair, `=>`, `*`, `+`, `-` and `::` beside GraphQL's
-/// punctuation. Both tables are copied from the impls row for row.
+/// this dialect's own vocabulary: the angle pair, `=>`, `*`, `+`, `-`, `::` and the root sigils
+/// `~`, `..` and `^` beside GraphQL's punctuation. Both tables are copied from the impls row for
+/// row.
 #[test]
 fn every_token_kind_renders_as_a_diagnostic_names_it() {
   use crate::graphqlx::{
@@ -312,6 +313,9 @@ fn every_token_kind_renders_as_a_diagnostic_names_it() {
     (Syntactic::Plus, "`+`"),
     (Syntactic::Minus, "`-`"),
     (Syntactic::PathSeparator, "`::`"),
+    (Syntactic::Tilde, "`~`"),
+    (Syntactic::DotDot, "`..`"),
+    (Syntactic::Caret, "`^`"),
   ] {
     assert_eq!(kind.to_string(), text, "{kind:?}");
   }
@@ -339,6 +343,9 @@ fn every_token_kind_renders_as_a_diagnostic_names_it() {
     (Lossless::Plus, "`+`"),
     (Lossless::Minus, "`-`"),
     (Lossless::PathSeparator, "`::`"),
+    (Lossless::Tilde, "`~`"),
+    (Lossless::DotDot, "`..`"),
+    (Lossless::Caret, "`^`"),
     (Lossless::Comma, "`,`"),
     (Lossless::Space, "space"),
     (Lossless::Tab, "tab"),

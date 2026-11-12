@@ -6,15 +6,15 @@
 //! *not* shared is what they are instantiated over: a different lexer, whose own `is_trivia`
 //! decides what the skip crosses. GraphQLx's ignored set happens to be the same eight forms as
 //! GraphQL's — and "happens to be" is exactly the kind of claim that needs a test rather than a
-//! sentence, because GraphQLx widened the significant vocabulary by seven images and could as
+//! sentence, because GraphQLx widened the significant vocabulary by ten images and could as
 //! easily have widened the ignored one.
 //!
 //! Two atoms are covered here that GraphQL's twin leaves to its productions. `peek_as` is the
-//! door every contextual keyword arrives through — `import`, `from`, `as`, `where`, `set`, `map`
-//! are ordinary identifier tokens to this lexer — and `try_eat` is the retro-wrap probe. GraphQLx
+//! door every contextual keyword arrives through — `use`, `mod`, `as`, `where`, `set`, `map` are
+//! ordinary identifier tokens to this lexer — and `try_eat` is the retro-wrap probe. GraphQLx
 //! has no productions yet, so an atom whose only witness is a production that does not exist has
 //! no witness at all.
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 use smear::parser::graphqlx::lossless::trivia::test_support::{
   self as atoms, Keyword, Kind, eat_if_brace_of, expect_brace_of, peek_keyword_of, peek_kind_of,
@@ -62,8 +62,8 @@ fn eat_if_declines_without_consuming_trivia_twice() {
 /// each pair is the byte-for-byte text the atom left in the tree.
 ///
 /// The comma is the one an outsider is most likely to mistake for punctuation, and GraphQLx makes
-/// that mistake easier to make than GraphQL does: its generic lists, `where` clauses and import
-/// lists all read as comma-separated and are in fact comma-*tolerant*, because the comma never
+/// that mistake easier to make than GraphQL does: its generic lists, `where` clauses and `use`
+/// groups all read as comma-separated and are in fact comma-*tolerant*, because the comma never
 /// reaches a production at all.
 #[test]
 fn is_trivia_covers_every_graphqlx_ignored_token_and_commits_it() {
@@ -84,17 +84,18 @@ fn is_trivia_covers_every_graphqlx_ignored_token_and_commits_it() {
   }
 }
 
-/// And nothing else — including the six images GraphQL has no counterpart for.
+/// And nothing else — including the images GraphQL has no counterpart for.
 ///
 /// A lead the lexer calls significant stops the skip at itself, so the atom never reaches the
-/// brace behind it. The GraphQLx-only leads are the point: `*`, `+`, `-`, `<`, `::` and `=>` are
-/// tokens *no* GraphQLx production consumes in most positions, which is exactly the shape a lexer
-/// change could quietly reclassify as ignorable without any production noticing.
+/// brace behind it. The GraphQLx-only leads are the point: `*`, `+`, `-`, `<`, `::`, `=>` and the
+/// root sigils `~`, `..` and `^` are tokens *no* GraphQLx production consumes in most positions,
+/// which is exactly the shape a lexer change could quietly reclassify as ignorable without any
+/// production noticing.
 #[test]
 fn is_trivia_covers_nothing_significant() {
   for lead in [
     "a", "1", "$", "\"s\"", "...", "@", ":", // shared with GraphQL
-    "*", "+", "-", "<", ">", "::", "=>", // GraphQLx only
+    "*", "+", "-", "<", ">", "::", "=>", "~", "..", "^", // GraphQLx only
   ] {
     let src = format!("{lead}{{");
     assert_ne!(
@@ -171,8 +172,8 @@ fn eat_if_accepts_a_token_behind_trivia() {
 
 /// `peek_as` reads a contextual keyword's **spelling** through the downcast, past trivia.
 ///
-/// The atom GraphQLx leans on hardest. Six of its keywords — `import`, `from`, `as`, `where`,
-/// `set`, `map` — are ordinary names in GraphQL and contextual keywords here, so every dispatch
+/// The atom GraphQLx leans on hardest. Six of its keywords — `use`, `mod`, `as`, `where`, `set`,
+/// `map` — are ordinary names in GraphQL and contextual keywords here, so every dispatch
 /// that turns on one of them is a downcast rather than a kind comparison. `peek_kind` answers
 /// `Identifier` for all of them and can never tell them apart.
 #[test]
@@ -180,8 +181,8 @@ fn peek_as_reads_the_keyword_spelling_behind_trivia() {
   // The keywords this dialect added. Each must project, and `peek_kind` must be blind to the
   // difference — that second half is what makes the downcast load-bearing rather than redundant.
   for (src, keyword) in [
-    ("import", Keyword::Import),
-    ("from", Keyword::From),
+    ("use", Keyword::Use),
+    ("mod", Keyword::Mod),
     ("as", Keyword::As),
     ("where", Keyword::Where),
     ("set", Keyword::Set),

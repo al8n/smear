@@ -52,20 +52,20 @@ exclude = [
 # left to omit. Neither member had ever been published, so nothing on the registry moved.
 
 [features]
-default = ["std", "graphql", "graphqlx", "parser", "smallvec"]
+default = ["std", "graphql", "graphqlx", "parser", "smallvec_1"]
 
 # Element-for-element what the facade's default already resolved to: `std`, `smallvec`, both
 # dialects, and the parser, which a `smear` dependency compiled unconditionally. A default build
 # compiles the same code before and after the merge.
 
-alloc = ["smear-lexer/alloc", "smear-parser?/alloc", "smear-schema/alloc", "smear-compiler?/alloc", "graphql-proto?/alloc", "tokora/alloc", "bstr?/alloc"]
+alloc = ["smear-lexer/alloc", "smear-parser?/alloc", "smear-schema/alloc", "smear-compiler?/alloc", "graphql-proto?/alloc", "tokora/alloc", "bstr_1?/alloc"]
 
 # `thiserror/default` is gone from this list and is NOT a lost forward. The only
 # `#[derive(thiserror::Error)]` in the tree is `smear-lexer`'s `LengthError`, so the crate that
 # derives it is now the crate that owns the forward, and `smear-lexer/std` below is what turns it
 # on. `smear-smoke::std_tier` asserts that exact `impl std::error::Error` across a real dependency
 # edge, so a dropped forward is a compile error in a member rather than a silent tier change.
-std = ["alloc", "smear-lexer/std", "smear-parser?/std", "smear-schema/std", "smear-compiler?/std", "graphql-proto?/std", "tokora/default", "bytes?/default", "bstr?/default", "hipstr?/default", "smol-bytes?/default"]
+std = ["alloc", "smear-lexer/std", "smear-parser?/std", "smear-schema/std", "smear-compiler?/std", "graphql-proto?/std", "tokora/default", "bytes_1?/default", "bstr_1?/default", "hipstr_0_8?/default", "smol-bytes_0_2?/default"]
 
 graphql = ["smear-lexer/graphql", "smear-parser?/graphql"]
 # Tracks a moving dialect spec: the GraphQLx surface is semver-exempt until the dialect
@@ -137,11 +137,19 @@ introspection = ["validator", "smear-compiler/introspection", "smear-schema/intr
 # to `smear-lexer` to supply, because `smear-smoke`'s header records that losing that half is
 # silent — cargo falls back to the implicit feature an optional dependency creates and resolution
 # still succeeds.
-smallvec = ["alloc", "smear-lexer/smallvec", "smear-parser?/smallvec"]
-bytes = ["dep:bytes", "alloc", "smear-lexer/bytes", "smear-parser?/bytes", "tokora/bytes_1"]
-bstr = ["dep:bstr", "smear-lexer/bstr", "smear-parser?/bstr", "tokora/bstr_1"]
-hipstr = ["dep:hipstr", "alloc", "smear-lexer/hipstr", "smear-parser?/hipstr", "tokora/hipstr_0_8"]
-smol-bytes = ["dep:smol-bytes", "alloc", "smear-lexer/smol-bytes", "smear-parser?/smol-bytes", "tokora/smol-bytes_0_2"]
+#
+# The versioned feature is the switch, and the unversioned name is a pure alias for the current
+# major. The dependency key carries the version too, so the crate is `bytes_1` in code.
+smallvec = ["smallvec_1"]
+smallvec_1 = ["alloc", "smear-lexer/smallvec_1", "smear-parser?/smallvec_1"]
+bytes = ["bytes_1"]
+bytes_1 = ["dep:bytes_1", "alloc", "smear-lexer/bytes_1", "smear-parser?/bytes_1", "tokora/bytes_1"]
+bstr = ["bstr_1"]
+bstr_1 = ["dep:bstr_1", "smear-lexer/bstr_1", "smear-parser?/bstr_1", "tokora/bstr_1"]
+hipstr = ["hipstr_0_8"]
+hipstr_0_8 = ["dep:hipstr_0_8", "alloc", "smear-lexer/hipstr_0_8", "smear-parser?/hipstr_0_8", "tokora/hipstr_0_8"]
+smol-bytes = ["smol-bytes_0_2"]
+smol-bytes_0_2 = ["dep:smol-bytes_0_2", "alloc", "smear-lexer/smol-bytes_0_2", "smear-parser?/smol-bytes_0_2", "tokora/smol-bytes_0_2"]
 
 # The umbrella twin of `smear-parser/materialized-numbers` — a second set of GraphQL value
 # productions carrying `i64` and `f64` where the slice parser carries a source slice.
@@ -169,7 +177,8 @@ materialized-numbers = ["parser", "graphql", "smear-parser/materialized-numbers"
 #
 # This says nothing against the feature — it is a headline capability and its 37 integration
 # targets run under `cargo test` like everything else. It is only that ONE tool cannot see it.
-rowan = ["smear-parser/rowan", "smear-compiler?/rowan", "tokora/rowan", "std", "parser"]
+rowan = ["rowan_0_17"]
+rowan_0_17 = ["smear-parser/rowan_0_17", "smear-compiler?/rowan_0_17", "tokora/rowan_0_17", "std", "parser"]
 
 # Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
 # trivia-injection gate can prove its corpus reached every production instead of asserting
@@ -177,7 +186,7 @@ rowan = ["smear-parser/rowan", "smear-compiler?/rowan", "tokora/rowan", "std", "
 # separate lanes keyed by `KindSpace::NAME`, so one gate's reset cannot clear the other's
 # measurement. Test-only: it changes no behaviour, and without it the instrumentation is not
 # compiled at all.
-lossless-coverage = ["rowan", "smear-parser/lossless-coverage"]
+lossless-coverage = ["rowan_0_17", "smear-parser/lossless-coverage"]
 
 # Compiles the lossless suites' `test_support` scaffolding: the substrate's kind-space
 # conformance assertion, the two dialects' sink and trivia probes, and the per-production
@@ -261,12 +270,13 @@ smear-compiler = { workspace = true, optional = true }
 itoa = { version = "1", default-features = false, optional = true }
 zmij = { version = "1", default-features = false, optional = true }
 
-# `hipstr`, `bytes` and `bstr` stay optional dependencies HERE, not only forwards, because this
-# package's own `tests/` name those types directly to build a source of each backing.
-hipstr = { version = "0.8", default-features = false, optional = true }
-bytes = { workspace = true, optional = true }
-bstr = { workspace = true, optional = true }
-smol-bytes = { workspace = true, optional = true }
+# `hipstr_0_8`, `bytes_1`, `bstr_1` and `smol-bytes_0_2` stay optional dependencies HERE, not only
+# forwards, because this package's own `tests/` name those types directly to build a source of each
+# backing. The key carries the major, so the tests spell the crate `bytes_1`.
+hipstr_0_8 = { package = "hipstr", version = "0.8", default-features = false, optional = true }
+bytes_1 = { workspace = true, optional = true }
+bstr_1 = { workspace = true, optional = true }
+smol-bytes_0_2 = { workspace = true, optional = true }
 
 # ── THE BENCHMARK HARNESS, AND WHAT IT COSTS THE INNER LOOP ─────────────────────────────────
 #
@@ -377,7 +387,7 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 # and this edge is a second, independent request for the same package, so without it the
 # library's `default` — `std`, `graphql`, `graphqlx`, `parser`, `smallvec` — was unioned into
 # every test target's resolution and `--no-default-features` on the command line could not
-# subtract it. `cargo test -p smear --no-default-features --features "std,parser,rowan"` still
+# subtract it. `cargo test -p smear --no-default-features --features "std,parser,rowan_0_17"` still
 # compiled both dialects; `cargo tree -e features -i smear` attributed `graphql` and `graphqlx`
 # to `smear feature "default"` beneath the `[dev-dependencies]` edge while marking only the
 # features actually typed `(command-line)`. Every dialect-isolating and `--each-feature` row ran
@@ -405,6 +415,9 @@ smear = { path = ".", default-features = false, features = ["test-support"] }
 # which this entry is what guarantees. It is still the crate whose undefined behaviour is #77 —
 # which is survivable here only because `ci/miri_sb.sh` and `ci/miri_tb.sh` run `-p smear --lib`,
 # and no lib unit test reaches this dependency.
+#
+# A dev-dependency keeps its plain name, so the tests and benches spell `rowan::`; `smear-parser`'s
+# optional dependency is keyed `rowan_0_17`, and the two are the one crate.
 rowan = "0.17"
 # `tokora::conformance` is the lexer-contract test kit; it is test-only, so the
 # feature is pulled in here rather than in the normal dependency.
@@ -573,20 +586,28 @@ harness = false
 name = "apollo_comparison"
 path = "benches/comparative/apollo/apollo_comparison.rs"
 harness = false
-required-features = ["rowan", "validator"]
+required-features = ["rowan_0_17", "validator"]
 
 [[bench]]
 name = "validator_comparison"
 path = "benches/comparative/apollo/validator_comparison.rs"
 harness = false
-required-features = ["rowan", "validator"]
+required-features = ["rowan_0_17", "validator"]
 
 # ── THE TWO PERF GATES, AND WHY THEY ARE `[[bench]]` TARGETS HERE ───────────────────────────
 #
-# `ci/perf/run.sh` builds both of these on this branch and on its merge-base, in one run on one
-# runner, and compares. `benches/solo/perf/mod.rs` carries the corpus and the two-size design;
-# `.github/workflows/perf.yml` carries the jobs. What is decided HERE is where they live, and it
-# was not obvious.
+# `ci/perf/run.sh` builds both of these twice in one run on one runner, and compares: once in this
+# branch's tree, and once in its MERGE-BASE'S OWN TREE, this manifest included, with only the
+# instrument laid over it from the branch — these two targets' sources and every file they read at
+# compile time. Each side therefore measures its own library in its own configuration: its own
+# features, defaults and dependency versions. What that asks of THIS file is that the merge-base
+# declare both targets, under these names and at these paths; where it does not, the script
+# measures nothing and says the two revisions are not comparable, rather than borrowing this
+# manifest to build them. A rename or a move is therefore unmeasured in the pull request that makes
+# it, and measured again from the next one. `run.sh`'s header carries what the comparison can and
+# cannot see, `benches/solo/perf/mod.rs` the corpus and the two-size design, and
+# `.github/workflows/perf.yml` the jobs. What is decided HERE is where they live, and it was not
+# obvious.
 #
 # THE ALTERNATIVE THAT WAS REJECTED. The sibling `tokora` repository keeps its instruction-count
 # instrument as a separate workspace member, and that is right FOR THAT REPOSITORY: its benches are
@@ -649,12 +670,12 @@ required-features = ["validator"]
 [[test]]
 name = "byte_identity"
 path = "benches/comparative/apollo/byte_identity.rs"
-required-features = ["rowan", "validator"]
+required-features = ["rowan_0_17", "validator"]
 
 [[test]]
 name = "validator_oracle"
 path = "benches/comparative/apollo/validator_oracle.rs"
-required-features = ["rowan", "validator"]
+required-features = ["rowan_0_17", "validator"]
 
 # The three tools built on the same harness, for the same reason. `gate` prints the correctness
 # table the bench refuses to time without, `perfloop` is a profiler-friendly loop with no
@@ -663,17 +684,17 @@ required-features = ["rowan", "validator"]
 [[example]]
 name = "gate"
 path = "benches/comparative/apollo/gate.rs"
-required-features = ["rowan", "validator"]
+required-features = ["rowan_0_17", "validator"]
 
 [[example]]
 name = "perfloop"
 path = "benches/comparative/apollo/perfloop.rs"
-required-features = ["rowan", "validator"]
+required-features = ["rowan_0_17", "validator"]
 
 [[example]]
 name = "treedump"
 path = "benches/comparative/apollo/treedump.rs"
-required-features = ["rowan", "validator"]
+required-features = ["rowan_0_17", "validator"]
 
 [lints]
 workspace = true

@@ -663,10 +663,10 @@ impl<Char> EscapedCharacter<Char> {
 pub enum StringError<Char = char> {
   /// A byte sequence in a string literal that is not well-formed UTF-8.
   ///
-  /// Only a byte source (`[u8]`, `Bytes`, `BStr`, `HipByt`) can hold one, and its lexer reports
-  /// each ill-formed sequence in an inline or block literal as one of these. The span is the
-  /// sequence's maximal subpart: the bytes up to where they stop being a prefix of any valid
-  /// sequence, at least one.
+  /// Only a byte source (`[u8]`, `Bytes`, `BStr`, `HipByt`, smol-bytes' `Bytes`) can hold one,
+  /// and its lexer reports each ill-formed sequence in an inline or block literal as one of
+  /// these. The span is the sequence's maximal subpart: the bytes up to where they stop being a
+  /// prefix of any valid sequence, at least one.
   #[from(skip)]
   UnsupportedCharacter(Lexeme<Char>),
   /// An unexpected line terminator in a string literal.
@@ -812,10 +812,10 @@ impl<Char> StringError<Char> {
   }
 }
 
-#[cfg(feature = "smallvec")]
-type DefaultStringErrorsContainer<Char = char> = smallvec::SmallVec<[StringError<Char>; 1]>;
+#[cfg(feature = "smallvec_1")]
+type DefaultStringErrorsContainer<Char = char> = smallvec_1::SmallVec<[StringError<Char>; 1]>;
 
-#[cfg(not(feature = "smallvec"))]
+#[cfg(not(feature = "smallvec_1"))]
 type DefaultStringErrorsContainer<Char = char> = std::vec::Vec<StringError<Char>>;
 
 /// A container for storing multiple string errors.

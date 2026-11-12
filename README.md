@@ -63,7 +63,7 @@ absent, it is absent — not partial.
 
 | Draft section | State |
 |---|---|
-| §2 Language | Parsed in full, by two token streams and into two tree shapes. A document that is not GraphQL is refused with a diagnostic, lexer and parser alike and in both dialects: 23 codes in one `smear::syntax` family — `smear::syntax::unterminated-string`, `smear::syntax::unexpected-token`, `smear::syntax::resource-limit` — whichever layer refused, because draft §2 makes both "the document is not GraphQL" and a client cannot act on the difference |
+| §2 Language | Parsed in full, by two token streams and into two tree shapes. A document that is not GraphQL is refused with a diagnostic, lexer and parser alike and in both dialects: 24 codes in one `smear::syntax` family — `smear::syntax::unterminated-string`, `smear::syntax::unexpected-token`, `smear::syntax::resource-limit` — whichever layer refused, because draft §2 makes both "the document is not GraphQL" and a client cannot act on the difference |
 | §3 Type System | Validated inside `Schema::build`: 76 distinct refusals, each with a schema in the test suite that makes it fire |
 | §4 Introspection | The `__`-prefixed meta-schema is injected into every schema, so an introspection *query* is validated like any other document, and a schema can also be *built* from a server's introspection response. Behind `proto` the executor also **answers** `__schema` and `__type`, from the schema itself and without a resolver — graphql-js's full `getIntrospectionQuery` included — and what it answers builds back, through `Schema::from_introspection`, into the schema it describes. The meta-schema is the draft's: `@deprecated` takes a `String!` reason and stands on directive definitions too, `__Directive` answers `isDeprecated` and `deprecationReason`, `__Schema.directives` takes `includeDeprecated`, and every `includeDeprecated` is `Boolean! = false`. The answer is differential-tested against graphql-js 17.1.0's own `introspectionFromSchema` for the same SDL, directive deprecation included — the agreement fixture, GitHub's and GitLab's schemas, and a fixture of defaults — and every difference has to be one of eight recorded ones: (1) the order of `__schema.types`; (2) the built-in scalars nothing references, which smear lists and graphql-js leaves out — a subset of `Int`, `Float` and `ID`; (3) `defaultValue`'s print form, where both print the literal written, smear as `{a: 1}` and graphql-js 17 as `{ a: 1 }` with a block string kept, so two texts that differ are compared as the constant values they spell, numbers and enum values by spelling; (4) a directive's `locations`, in bit order in smear and in declared order in graphql-js; (5) `__schema.directives`, where smear appends the specified ones as `skip`, `include`, … and graphql-js as `include`, `skip`, …; (6) an interface's `possibleTypes`, compared as a set although, for a schema built from SDL, both sides answer it in document order; (7) `__DirectiveLocation`'s `FRAGMENT_VARIABLE_DEFINITION`, which graphql-js 17 lists and the draft's twenty values do not hold; and (8) `VARIABLE_DEFINITION`'s description, which smear keeps as graphql-js 16 worded it. Introspection can also be refused, by §5's opt-in `Rule::NoSchemaIntrospection` |
 | §5 Validation | All 30 executable-document rules. Introspection can be switched off too, by an opt-in policy rule that is not a draft rule: `Rule::NoSchemaIntrospection`, which `RuleSet::ALL` leaves out |
@@ -109,7 +109,7 @@ run the same complete §5 rule set, and `RuleSet` selects any subset of it.
 Most Rust GraphQL parsers give you one. Smear's lexer has a `syntactic` stream that skips trivia —
 whitespace, commas, comments — for servers and query execution, and a `lossless` stream that keeps
 every byte of it, for formatters, linters and IDEs. The parser mirrors the split: an AST from the
-first, and a rowan CST from the second, behind the `rowan` feature.
+first, and a rowan CST from the second, behind the `rowan_0_17` feature.
 
 ### Zero-copy, and a steady state that allocates nothing
 
@@ -173,8 +173,9 @@ allocation, no dependency smear does not already have, and not behind a feature.
 ### A kit for building GraphQL-like languages
 
 The combinators, the generic AST nodes and the CST substrate are the reusable part, and GraphQLx is
-the proof that they are: **112 syntax kinds against standard GraphQL's 88**, adding generics, `where`
-clauses, type paths, set and map literals, imports and wildcard specifiers. It is a different language
+the proof that they are: **113 syntax kinds against standard GraphQL's 88**, adding generics, `where`
+clauses, type paths with package, dependency and parent-module roots, set and map literals, and
+`use` items with their globs and groups. It is a different language
 built on the same substrate, not GraphQL with a few extras — and it is where you would start in
 building your own.
 
@@ -304,42 +305,47 @@ enumerating the members rather than by reading the umbrella's own table.
 
 ## Feature Flags
 
-Seventeen features. The lexer is not one of them: it is the irreducible base, the parser cannot exist
-without it, and a gate that can only ever be on is not a gate.
+Seventeen features, and six aliases. The lexer is not one of them: it is the irreducible base, the
+parser cannot exist without it, and a gate that can only ever be on is not a gate.
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `alloc` | The allocating API: the dialect lexers and parsers, the validator, the executor and `json`. Off, `smear` is `no_std` and exports only what needs no allocator, as the tiers section below spells out. Implied by `std`, `smallvec`, `bytes`, `hipstr` and `smol-bytes` | via `std` |
+| `alloc` | The allocating API: the dialect lexers and parsers, the validator, the executor and `json`. Off, `smear` is `no_std` and exports only what needs no allocator, as the tiers section below spells out. Implied by `std`, `smallvec_1`, `bytes_1`, `hipstr_0_8` and `smol-bytes_0_2` | via `std` |
 | `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
 | `graphql` | Standard GraphQL, in every layer | ✓ |
 | `graphqlx` | Extended GraphQL, in the lexer and parser. Semver-exempt until the dialect stabilises | ✓ |
 | `parser` | `smear::parser` — the combinators and the ASTs. Off, `smear-parser` is not in the graph at all and the umbrella is the lexer alone | ✓ |
-| `smallvec` | Use `smallvec` for small collections. Implies `alloc` | ✓ |
+| `smallvec_1` | Use `smallvec` 1 for small collections. Implies `alloc` | ✓ |
 | `validator` | `smear::validator` — the draft §5 rules, plus `smear-schema`'s `build` feature for the §3 pass. Implies `parser` and `graphql`. Adds no third-party dependency | |
 | `proto` | `smear::proto` — draft §6 query, serial mutation and subscription execution as a Sans-I/O state machine. It returns a response tree that `smear::json` writes as §7.2.1 JSON. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds no third-party dependency and defines no value type: the driver's own representation reaches it through a trait | |
 | `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator`; needs `alloc`, which it does not imply. Adds no third-party dependency | |
 | `materialized-numbers` | A second set of GraphQL value productions whose `Int` and `Float` leaves carry a number instead of a source slice. One tree, generic over the integer: `Int` is `i32` — the width draft §3.5.1 specifies — or `i64`, the reading that takes §2.9.1's unbounded grammar at its word and accepts literals the specification does not; a refusal names which. `Float` is `f64` at both, because draft §3.5.2 says `Float` **is** IEEE 754 double precision. **Numbers only** — strings keep their slice, because materialisation is required to allocate nothing the slice parser did not already allocate. Implies `parser` and `graphql`; adds no dependency, leaves the slice AST and the slice parser untouched, and keeps the slice parser available for the literals neither width can hold | |
-| `rowan` | The lossless CST tower, and with `validator` the lossless validation doors. Implies `parser` and `std` | |
-| `bytes` | Support the `bytes::Bytes` source type. Implies `alloc` | |
-| `bstr` | Support the `bstr::BStr` source type. Implies no tier | |
-| `hipstr` | Support the `hipstr::{HipStr, HipByt}` source types. Implies `alloc` | |
-| `smol-bytes` | Support the smol-bytes 0.2 `smol_bytes::{Bytes, Utf8Bytes}` and `smol_bytes::compact::{Bytes, Utf8Bytes}` source types. Implies `alloc` | |
-| `lossless-coverage` | Per-node-kind hit counters for the lossless gates. Implies `rowan` | |
+| `rowan_0_17` | The lossless CST tower, over `rowan` 0.17, and with `validator` the lossless validation doors. Implies `parser` and `std` | |
+| `bytes_1` | Support the `bytes::Bytes` source type, from `bytes` 1. Implies `alloc` | |
+| `bstr_1` | Support the `bstr::BStr` source type, from `bstr` 1. Implies no tier | |
+| `hipstr_0_8` | Support the `hipstr::{HipStr, HipByt}` source types, from `hipstr` 0.8. Implies `alloc` | |
+| `smol-bytes_0_2` | Support the smol-bytes 0.2 `smol_bytes::{Bytes, Utf8Bytes}` and `smol_bytes::compact::{Bytes, Utf8Bytes}` source types. Implies `alloc` | |
+| `lossless-coverage` | Per-node-kind hit counters for the lossless gates. Implies `rowan_0_17` | |
 | `test-support` | The lossless suites' `test_support` scaffolding | |
 
 A capability feature (`graphql`, `graphqlx`, `parser`, `validator`, `proto`, `introspection`, …)
 never switches a tier on, so a `default-features = false` consumer names `alloc` itself. The
-features that bring in a dependency which links `alloc` on its own — `smallvec`, `bytes`, `hipstr`
-and `smol-bytes` — imply it, and `rowan` implies `std`.
+features that bring in a dependency which links `alloc` on its own — `smallvec_1`, `bytes_1`,
+`hipstr_0_8` and `smol-bytes_0_2` — imply it, and `rowan_0_17` implies `std`.
+
+The six dependency features carry the major of the crate they enable, and the dependency is named
+the same way, so a second major of one of them can be added beside it. The unversioned names —
+`smallvec`, `bytes`, `bstr`, `hipstr`, `smol-bytes` and `rowan` — are aliases for the current
+version: each enables its versioned feature and nothing else.
 
 A lexer-only consumer — a syntax highlighter, a formatter front-end, token-level tooling — turns the
 parser off, or names the member and skips the umbrella entirely. The two resolve the same code:
 
 ```toml
 [dependencies]
-smear = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec"] }
+smear = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1"] }
 # or
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1"] }
 ```
 
 ### The tiers: core, `alloc` and `std`
@@ -373,8 +379,8 @@ Two limits on that claim, because they are the difference between "compiles" and
 itself does **not** build for `thumbv6m-none-eabi`: its AST offers an `Arc`-backed list spelling that
 needs native atomics, which is why the no-atomic proof is about the schema representation rather than
 the crate. And per [#124], the `not(std)` arm is compile-checked but **executed** by nothing: the one
-row that runs the suite is `cargo test --all-features`, which has `std` on. Until [#136] a test build
-could not even *compile* it — the crate's dev-dependency on itself omitted
+row that runs the suite is `cargo test --all-features --no-fail-fast`, which has `std` on. Until
+[#136] a test build could not even *compile* it — the crate's dev-dependency on itself omitted
 `default-features = false`, so a `--no-default-features` selection resolved `std` back on, and every
 narrowed row was really the default build wearing a narrower name. Treat `no_std` as a supported
 build, not as a tested runtime.
@@ -396,8 +402,8 @@ apollo ones additionally need the features they measure:
 ```sh
 cargo bench -p smear --bench executables -- --quick
 cargo bench -p smear --bench type_system -- --quick
-cargo bench -p smear --features rowan,validator --bench apollo_comparison    -- --quick
-cargo bench -p smear --features rowan,validator --bench validator_comparison -- --quick
+cargo bench -p smear --features rowan_0_17,validator --bench apollo_comparison    -- --quick
+cargo bench -p smear --features rowan_0_17,validator --bench validator_comparison -- --quick
 ```
 
 Those two carry `required-features`, and an unmet `required-features` makes cargo *skip* a target in

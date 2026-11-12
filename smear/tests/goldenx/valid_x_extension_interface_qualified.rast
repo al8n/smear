@@ -1,31 +1,32 @@
-Root@0..38
-  Document@0..38
-    InterfaceTypeExtension@0..37
+Root@0..39
+  Document@0..39
+    InterfaceTypeExtension@0..38
       Name@0..6 "extend"
       Space@6..7 " "
       Name@7..16 "interface"
       Space@16..17 " "
-      ExtensionName@17..26
-        Path@17..23
-          PathSeparator@17..19 "::"
-          Name@19..20 "a"
-          PathSeparator@20..22 "::"
-          Name@22..23 "I"
-        ExtensionTypeGenerics@23..26
-          LAngle@23..24 "<"
-          Name@24..25 "B"
-          RAngle@25..26 ">"
-      Space@26..27 " "
-      FieldsDefinition@27..37
-        LBrace@27..28 "{"
-        Space@28..29 " "
-        FieldDefinition@29..36
-          Name@29..30 "f"
-          Colon@30..31 ":"
-          Space@31..32 " "
-          DefinitionTypePath@32..36
-            Path@32..36
-              Name@32..35 "Int"
-              Space@35..36 " "
-        RBrace@36..37 "}"
-    Newline@37..38 "\n"
+      ExtensionName@17..27
+        Path@17..24
+          Caret@17..18 "^"
+          PathSeparator@18..20 "::"
+          Name@20..21 "a"
+          PathSeparator@21..23 "::"
+          Name@23..24 "I"
+        ExtensionTypeGenerics@24..27
+          LAngle@24..25 "<"
+          Name@25..26 "B"
+          RAngle@26..27 ">"
+      Space@27..28 " "
+      FieldsDefinition@28..38
+        LBrace@28..29 "{"
+        Space@29..30 " "
+        FieldDefinition@30..37
+          Name@30..31 "f"
+          Colon@31..32 ":"
+          Space@32..33 " "
+          DefinitionTypePath@33..37
+            Path@33..37
+              Name@33..36 "Int"
+              Space@36..37 " "
+        RBrace@37..38 "}"
+    Newline@38..39 "\n"

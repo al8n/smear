@@ -290,7 +290,7 @@ impl core::error::Error for LosslessInvalid {}
 /// # Example
 ///
 /// ```
-/// # #[cfg(feature = "rowan")] {
+/// # #[cfg(feature = "rowan_0_17")] {
 /// use smear_compiler::{Budget, First, Rule, Schema, Scratch, validate_executable_lossless};
 /// use smear_parser::{
 ///   graphql::{
@@ -697,7 +697,7 @@ impl core::error::Error for LosslessSchemaErrors {}
 /// # Example
 ///
 /// ```
-/// # #[cfg(feature = "rowan")] {
+/// # #[cfg(feature = "rowan_0_17")] {
 /// use smear_compiler::{SchemaErrorKind, validate_schema_lossless};
 /// use smear_parser::graphql::lossless::parse_type_system_document;
 ///

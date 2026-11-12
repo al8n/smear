@@ -171,9 +171,9 @@ macro_rules! keyword {
 
 // GraphQLx contextual keywords
 keyword! {
-  (Import, "import_KW", "import"),
+  (Use, "use_KW", "use"),
   (As, "as_KW", "as"),
-  (From, "from_KW", "from"),
+  (Mod, "mod_KW", "mod"),
   (Where, "where_KW", "where"),
   (Set, "set_KW", "set"),
   (Map, "map_KW", "map"),

@@ -22,7 +22,7 @@
 //!   [`Sink`] and worked out in the caller's
 //!   [`Scratch`].
 #![cfg_attr(
-  all(feature = "alloc", feature = "rowan"),
+  all(feature = "alloc", feature = "rowan_0_17"),
   doc = "- [`validate_executable_lossless`] — the \
          same rules over a lossless rowan CST, by projecting it to that same AST rather than by \
          being a second validator. The IDE door: it recovers per definition, so a document \
@@ -171,7 +171,7 @@ pub use smear_schema as schema;
 mod diagnostic;
 #[cfg(feature = "alloc")]
 mod executable;
-#[cfg(all(feature = "alloc", feature = "rowan"))]
+#[cfg(all(feature = "alloc", feature = "rowan_0_17"))]
 mod lossless;
 #[cfg(feature = "alloc")]
 mod rule;
@@ -187,8 +187,8 @@ pub use diagnostic::{Context, Diagnostic, DiagnosticDisplay, MergeConflict};
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use executable::{Invalid, Refusal, validate_executable, validate_executable_with};
 
-#[cfg(all(feature = "alloc", feature = "rowan"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "rowan"))))]
+#[cfg(all(feature = "alloc", feature = "rowan_0_17"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "rowan_0_17"))))]
 pub use lossless::{
   LosslessInvalid, LosslessSchemaErrors, Recovery, Verified, validate_executable_lossless,
   validate_executable_lossless_verified_with, validate_executable_lossless_with,
@@ -233,8 +233,8 @@ pub mod __features {
   pub const ALLOC: bool = cfg!(feature = "alloc");
   /// `introspection`, as this crate resolved it.
   pub const INTROSPECTION: bool = cfg!(feature = "introspection");
-  /// `rowan`, as this crate resolved it.
-  pub const ROWAN: bool = cfg!(feature = "rowan");
+  /// `rowan_0_17`, as this crate resolved it.
+  pub const ROWAN_0_17: bool = cfg!(feature = "rowan_0_17");
   /// `std`, as this crate resolved it.
   pub const STD: bool = cfg!(feature = "std");
 }

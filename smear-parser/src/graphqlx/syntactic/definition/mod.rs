@@ -171,7 +171,7 @@ pub use input_object::{
 };
 
 mod directive;
-#[cfg(feature = "rowan")]
+#[cfg(feature = "rowan_0_17")]
 pub(crate) use directive::classify_location;
 pub use directive::{directive_definition, directive_locations, location};
 
@@ -194,8 +194,8 @@ pub use extension::{
 mod document;
 pub(crate) use document::type_system_definition_after_keyword;
 pub use document::{
-  described_type_system_definition, import_or_type_system_definition_or_extension,
-  type_system_definition, type_system_definition_or_extension, type_system_document,
+  described_type_system_definition, type_system_definition, type_system_definition_or_extension,
+  type_system_document, type_system_item,
 };
 
 #[cfg(test)]

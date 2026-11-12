@@ -123,7 +123,7 @@ pub mod punctuator;
 ///   comment with
 ///   [`LexerErrorData::UnknownLexeme`](graphql::error::LexerErrorData::UnknownLexeme), one per
 ///   ill-formed sequence
-/// - `bytes::Bytes`: For shared ownership (requires `bytes` feature); a byte source like `&[u8]`
+/// - `bytes::Bytes`: For shared ownership (requires the `bytes_1` feature); a byte source like `&[u8]`
 ///
 /// # Modules
 ///
@@ -149,7 +149,7 @@ pub mod graphql;
 /// Lexers for GraphQLx (extended GraphQL).
 ///
 /// This module extends the standard GraphQL lexer with additional tokens for GraphQLx
-/// features like generics, imports, set and map literals, and namespacing.
+/// features like generics, `use` items, set and map literals, and namespacing.
 ///
 /// # Token Streams
 ///
@@ -167,10 +167,12 @@ pub mod graphql;
 ///
 /// GraphQLx adds these tokens for advanced features:
 /// - **Path separator**: `::` for namespaced types (`namespace::Type`)
+/// - **Path roots**: `~`, `^` and `..`, each before a `::`, root a path at the package, at a
+///   dependency or at the parent module (`~::geo::Point`, `^::geo::Point`, `..::Point`)
 /// - **Angle brackets**: `<`, `>` for generics (`Container<T>`)
 /// - **Fat arrow**: `=>` for map entries (`map!{ key => value }`)
 /// - **Arithmetic operators**: `+`, `-` for extended type operations
-/// - **Asterisk**: `*` for wildcard imports
+/// - **Asterisk**: `*` for a `use` item's glob (`use ~::geo::*`)
 ///
 /// # Source Types
 ///
@@ -178,7 +180,7 @@ pub mod graphql;
 /// - `&str`: UTF-8 by its type
 /// - `&[u8]`: Byte slices, not validated as UTF-8 wholesale; their string literals and comments
 ///   must be well-formed UTF-8, exactly as in the GraphQL lexer
-/// - `bytes::Bytes`: Shared ownership (requires `bytes` feature); a byte source like `&[u8]`
+/// - `bytes::Bytes`: Shared ownership (requires the `bytes_1` feature); a byte source like `&[u8]`
 ///
 /// # Modules
 ///
@@ -191,7 +193,7 @@ pub mod graphql;
 /// ```rust,ignore
 /// use smear_lexer::graphqlx::syntactic::Lexer;
 ///
-/// let source = "import { User } from \"./types.graphqlx\"";
+/// let source = "use \"./types\"::User";
 /// let tokens = Lexer::new(source);
 /// // Fast tokenization with trivia automatically skipped
 /// ```
@@ -242,20 +244,20 @@ pub(crate) mod simd;
 pub mod __features {
   /// `alloc`, as this crate resolved it.
   pub const ALLOC: bool = cfg!(feature = "alloc");
-  /// `bstr`, as this crate resolved it.
-  pub const BSTR: bool = cfg!(feature = "bstr");
-  /// `bytes`, as this crate resolved it.
-  pub const BYTES: bool = cfg!(feature = "bytes");
+  /// `bstr_1`, as this crate resolved it.
+  pub const BSTR_1: bool = cfg!(feature = "bstr_1");
+  /// `bytes_1`, as this crate resolved it.
+  pub const BYTES_1: bool = cfg!(feature = "bytes_1");
   /// `graphql`, as this crate resolved it.
   pub const GRAPHQL: bool = cfg!(feature = "graphql");
   /// `graphqlx`, as this crate resolved it.
   pub const GRAPHQLX: bool = cfg!(feature = "graphqlx");
-  /// `hipstr`, as this crate resolved it.
-  pub const HIPSTR: bool = cfg!(feature = "hipstr");
-  /// `smallvec`, as this crate resolved it.
-  pub const SMALLVEC: bool = cfg!(feature = "smallvec");
-  /// `smol-bytes`, as this crate resolved it.
-  pub const SMOL_BYTES: bool = cfg!(feature = "smol-bytes");
+  /// `hipstr_0_8`, as this crate resolved it.
+  pub const HIPSTR_0_8: bool = cfg!(feature = "hipstr_0_8");
+  /// `smallvec_1`, as this crate resolved it.
+  pub const SMALLVEC_1: bool = cfg!(feature = "smallvec_1");
+  /// `smol-bytes_0_2`, as this crate resolved it.
+  pub const SMOL_BYTES_0_2: bool = cfg!(feature = "smol-bytes_0_2");
   /// `std`, as this crate resolved it.
   pub const STD: bool = cfg!(feature = "std");
 }

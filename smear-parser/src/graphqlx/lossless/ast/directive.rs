@@ -18,13 +18,13 @@
 //!
 //! The same ruling covers [`Arguments`], `ArgumentsDefinition`, `FieldsDefinition`,
 //! `InputFieldsDefinition`, `EnumValuesDefinition`, `VariablesDefinition`,
-//! `RootOperationTypesDefinition`, `ImplementInterfaces`, `UnionMemberTypes`, `ImportList`,
-//! `WhereClause` and all three generic lists.
+//! `RootOperationTypesDefinition`, `ImplementInterfaces`, `UnionMemberTypes`, `WhereClause` and
+//! all three generic lists.
 //!
 //! # The one divergence, and it is in every tree
 //!
 //! **A directive's name is a [`TypePath`], not a `Name` token.** `@ns::cache<Int>` parses,
-//! `@::ns::d` parses, and even `@deprecated` nests `Directive > TypePath > Path`. A port of
+//! `@^::ns::d` parses, and even `@deprecated` nests `Directive > TypePath > Path`. A port of
 //! GraphQL's `name: tok K::Name` would compile here and answer `None` forever, the `@`'s name
 //! never being a direct token child of the directive at all.
 //!

@@ -1,4 +1,4 @@
-//! Focused GraphQLx SDL and import-document tests.
+//! Focused GraphQLx SDL and type-system document tests.
 
 use smear_lexer::graphqlx::syntactic::SyntacticTokenKind;
 use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::Equivalent};
@@ -14,9 +14,13 @@ type StrCtx<'inp> =
 type SliceCtx<'inp> =
   FatalContext<'inp, GraphqlxLexer<'inp, [u8]>, GraphqlxErrors<&'inp [u8]>, GraphQLx>;
 
-#[cfg(feature = "bytes")]
-type BytesCtx<'inp> =
-  FatalContext<'inp, GraphqlxLexer<'inp, ::bytes::Bytes>, GraphqlxErrors<::bytes::Bytes>, GraphQLx>;
+#[cfg(feature = "bytes_1")]
+type BytesCtx<'inp> = FatalContext<
+  'inp,
+  GraphqlxLexer<'inp, ::bytes_1::Bytes>,
+  GraphqlxErrors<::bytes_1::Bytes>,
+  GraphQLx,
+>;
 
 fn drive_str<'inp, Output>(
   parser: impl for<'ctx> FnMut(
@@ -52,18 +56,18 @@ fn drive_slice<'inp, Output>(
   .parse_slice(source)
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 fn drive_owned_bytes<'inp, Output>(
   parser: impl for<'ctx> FnMut(
-    &mut GraphqlxInput<'inp, 'ctx, ::bytes::Bytes, BytesCtx<'inp>>,
-  ) -> Result<Output, GraphqlxErrors<::bytes::Bytes>>,
-  source: &'inp ::bytes::Bytes,
-) -> Result<Output, GraphqlxErrors<::bytes::Bytes>> {
+    &mut GraphqlxInput<'inp, 'ctx, ::bytes_1::Bytes, BytesCtx<'inp>>,
+  ) -> Result<Output, GraphqlxErrors<::bytes_1::Bytes>>,
+  source: &'inp ::bytes_1::Bytes,
+) -> Result<Output, GraphqlxErrors<::bytes_1::Bytes>> {
   Parser::with_parser::<
     'inp,
-    GraphqlxLexer<'inp, ::bytes::Bytes>,
+    GraphqlxLexer<'inp, ::bytes_1::Bytes>,
     Output,
-    GraphqlxErrors<::bytes::Bytes>,
+    GraphqlxErrors<::bytes_1::Bytes>,
     _,
     GraphQLx,
   >(parser)
@@ -80,11 +84,11 @@ macro_rules! accept_document {
 }
 
 #[test]
-fn type_system_document_accepts_graphqlx_sdl_and_import_fixtures() {
+fn type_system_document_accepts_graphqlx_sdl_and_use_fixtures() {
   const FIXTURES: &[&str] = &[
-    include_str!("../../../../tests/fixtures/parser/graphqlx/ok/0001_import_named.graphqlx"),
-    include_str!("../../../../tests/fixtures/parser/graphqlx/ok/0002_import_wildcard.graphqlx"),
-    include_str!("../../../../tests/fixtures/parser/graphqlx/ok/0003_import_with_alias.graphqlx"),
+    include_str!("../../../../tests/fixtures/parser/graphqlx/ok/0001_use_group.graphqlx"),
+    include_str!("../../../../tests/fixtures/parser/graphqlx/ok/0002_use_glob.graphqlx"),
+    include_str!("../../../../tests/fixtures/parser/graphqlx/ok/0003_use_with_alias.graphqlx"),
     include_str!("../../../../tests/fixtures/parser/graphqlx/ok/0004_generics_simple.graphqlx"),
     include_str!(
       "../../../../tests/fixtures/parser/graphqlx/ok/0005_generics_multiple_params.graphqlx"
@@ -102,7 +106,7 @@ fn type_system_document_accepts_graphqlx_sdl_and_import_fixtures() {
       "../../../../tests/fixtures/parser/graphqlx/ok/0011_interface_with_generics.graphqlx"
     ),
     include_str!("../../../../tests/fixtures/parser/graphqlx/ok/0012_path_type.graphqlx"),
-    include_str!("../../../../tests/fixtures/parser/graphqlx/ok/0013_complex_import.graphqlx"),
+    include_str!("../../../../tests/fixtures/parser/graphqlx/ok/0013_complex_use.graphqlx"),
     include_str!("../../../../tests/fixtures/parser/graphqlx/ok/0014_generics_nested.graphqlx"),
     include_str!(
       "../../../../tests/fixtures/parser/graphqlx/ok/0015_extend_with_generics.graphqlx"
@@ -128,17 +132,15 @@ fn type_system_document_accepts_graphqlx_sdl_and_import_fixtures() {
 }
 
 #[test]
-fn type_system_document_preserves_imports_generic_paths_and_descriptions() {
+fn type_system_document_preserves_use_items_generic_paths_and_descriptions() {
   let document = drive_str(
     ast::TypeSystemDocument::graphqlx,
-    "import { User as DomainUser } from \"domain.graphqlx\"\n\"doc\" type Box<T> where T: Node { value: T }",
+    "use \"./domain\"::{User as DomainUser}\n\"doc\" type Box<T> where T: Node { value: T }",
   )
   .expect("type-system document");
   assert_eq!(document.definitions().len(), 2);
-  assert!(document.definitions()[0].is_import());
-  let ast::ImportOrTypeSystemDefinitionOrExtension::Definition(definition) =
-    &document.definitions()[1]
-  else {
+  assert!(document.definitions()[0].is_use());
+  let ast::TypeSystemItem::Definition(definition) = &document.definitions()[1] else {
     panic!("expected described type definition");
   };
   assert!(definition.description().is_some());
@@ -157,16 +159,16 @@ fn type_system_document_preserves_imports_generic_paths_and_descriptions() {
   );
 }
 
-#[cfg(feature = "bytes")]
+#[cfg(feature = "bytes_1")]
 #[test]
 fn type_system_direct_apis_preserve_owned_bytes() {
-  let source = ::bytes::Bytes::from_static(b"type Box<T> { value: T }");
-  let definition: ast::ObjectTypeDefinition<::bytes::Bytes> =
+  let source = ::bytes_1::Bytes::from_static(b"type Box<T> { value: T }");
+  let definition: ast::ObjectTypeDefinition<::bytes_1::Bytes> =
     drive_owned_bytes(ast::ObjectTypeDefinition::graphqlx, &source)
       .expect("owned Bytes object definition");
   assert_eq!(
     definition.name().name().source(),
-    &::bytes::Bytes::from_static(b"Box")
+    &::bytes_1::Bytes::from_static(b"Box")
   );
 }
 
@@ -246,7 +248,7 @@ fn separator_tails_preserve_leading_spans_and_committed_diagnostics() {
         && unexpected.found().is_none()
   ));
 
-  let object_source = "type User implements & ::pkg::Node & Resource<T> where T: Node { id: ID }";
+  let object_source = "type User implements & ^::pkg::Node & Resource<T> where T: Node { id: ID }";
   let object = drive_str(ast::ObjectTypeDefinition::graphqlx, object_source)
     .expect("leading implements separator and following where clause");
   let implements = object.implements().expect("implements clause");
@@ -264,7 +266,7 @@ fn separator_tails_preserve_leading_spans_and_committed_diagnostics() {
       .is_some()
   );
 
-  let members_source = "= | ::pkg::User | Post<T>";
+  let members_source = "= | ^::pkg::User | Post<T>";
   let members = drive_str(ast::UnionMemberTypes::graphqlx, members_source)
     .expect("leading union-member separator");
   assert_eq!(members.members().len(), 2);

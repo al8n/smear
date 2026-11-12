@@ -1,0 +1,61 @@
+Root@0..57
+  Document@0..57
+    UseDefinition@0..28
+      Name@0..3 "use"
+      Space@3..4 " "
+      UseTree@4..28
+        StringValue@4..7
+          InlineString@4..7 "\"m\""
+        PathSeparator@7..9 "::"
+        LBrace@9..10 "{"
+        UseTree@10..13
+          Path@10..13
+            Name@10..11 "A"
+            Comma@11..12 ","
+            Space@12..13 " "
+        UseTree@13..19
+          Path@13..15
+            Name@13..14 "B"
+            Space@14..15 " "
+          Name@15..17 "as"
+          Space@17..18 " "
+          Name@18..19 "C"
+        Comma@19..20 ","
+        Space@20..21 " "
+        UseTree@21..26
+          Path@21..23
+            Name@21..23 "ns"
+          PathSeparator@23..25 "::"
+          Asterisk@25..26 "*"
+        RBrace@26..27 "}"
+        Newline@27..28 "\n"
+    UseDefinition@28..40
+      Name@28..31 "use"
+      Space@31..32 " "
+      UseTree@32..40
+        StringValue@32..35
+          InlineString@32..35 "\"m\""
+        Space@35..36 " "
+        Name@36..38 "as"
+        Space@38..39 " "
+        Name@39..40 "w"
+    Newline@40..41 "\n"
+    ObjectTypeDefinition@41..56
+      Name@41..45 "type"
+      Space@45..46 " "
+      DefinitionName@46..48
+        Name@46..47 "T"
+        Space@47..48 " "
+      FieldsDefinition@48..56
+        LBrace@48..49 "{"
+        Space@49..50 " "
+        FieldDefinition@50..55
+          Name@50..51 "f"
+          Colon@51..52 ":"
+          Space@52..53 " "
+          DefinitionTypePath@53..55
+            Path@53..55
+              Name@53..54 "A"
+              Space@54..55 " "
+        RBrace@55..56 "}"
+    Newline@56..57 "\n"

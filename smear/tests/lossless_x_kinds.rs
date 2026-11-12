@@ -19,12 +19,12 @@
 //!   names, with exactly one documented many-to-one fold.
 //!
 //! The last one is sharp because of two things measured rather than assumed. Copying GraphQL's
-//! twenty-five-entry image block and appending GraphQLx's seven extras — with the enum reordered
+//! twenty-five-entry image block and appending GraphQLx's extras — with the enum reordered
 //! to match, so the space stays well-formed — passes the other three tests; only the **order**
 //! assertion catches it. And renaming one image to another dialect's word for it, applied
 //! consistently to the space, to [`TOKEN_IMAGES`] and to [`image_of`], passes even that; only the
 //! **name** assertion against [`RENAMED_IMAGES`] catches that one.
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 use std::{
   collections::{BTreeMap, BTreeSet},
@@ -69,6 +69,9 @@ const TOKEN_IMAGES: &[&str] = &[
   "Plus",
   "Minus",
   "PathSeparator",
+  "Tilde",
+  "DotDot",
+  "Caret",
   "Name",
   "Float",
   "Int",
@@ -178,27 +181,37 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
     "ExecutableDefinition",
     "a choice of OperationDefinition | FragmentDefinition",
   ),
-  ("ImportClause", "a choice of ImportList | WildcardSpecifier"),
   (
-    "ImportMember",
-    "a choice of NamedSpecifier | WildcardSpecifier",
+    "UsePrefix",
+    "a choice of a bare PathRoot | Path | string source; a bare root's tokens, the Path node and \
+     the StringValue node are each already children of the UseTree they lead",
   ),
   (
-    "ImportOrDefinitionOrExtension",
+    "UseTreeKind",
+    "a choice of a binding | glob | group; the `as` and its alias, the `*`, and a group's braces \
+     and trees are direct children of the UseTree",
+  ),
+  (
+    "DocumentItem",
     "the `document` entry dispatcher; a choice, and the winner is the child of Document",
   ),
   (
-    "ImportOrExecutableDefinition",
+    "UseOrExecutableDefinition",
     "the same dispatcher for ExecutableDocument",
   ),
   (
-    "ImportOrTypeSystemDefinitionOrExtension",
+    "TypeSystemItem",
     "the same dispatcher for TypeSystemDocument",
   ),
   // ---- one token is not a region: the parent already says what it is ----
   (
     "Name",
     "one identifier token; `Name` is the image kind in the token block, not a node",
+  ),
+  (
+    "PathRoot",
+    "a prefix of `Path`'s own tokens: `~ ::`, `^ ::` or `.. ::` repeated, leading token children \
+     of the Path node it roots",
   ),
   (
     "OperationType",
@@ -282,7 +295,7 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   ),
   (
     "InlineStringValue",
-    "a StringValue node whose token child is InlineString; the import's `from` clause is the \
+    "a StringValue node whose token child is InlineString; a use tree's string source is the \
      only position that narrows to it, and it narrows on the token, not on the node",
   ),
   (
@@ -389,12 +402,12 @@ fn every_kind_is_justified_by_a_graphqlx_source() {
 
 /// The two dialects' spaces diverge inside the token-image block, not after it.
 ///
-/// **The mechanical anti-diff control, and it is derivation-agnostic.** GraphQLx's lexer has seven
-/// token images GraphQL's does not — `<`, `>`, `::`, `=>`, `*`, `+`, `-` — and the bookkeeping
-/// triple owns the tail, so those seven had nowhere to go but *inside* the image block. A space
-/// that still agrees with GraphQL's once GraphQLx's images have run out either appended the seven
-/// after `Root`, which breaks the substrate's invariant, or left them out, in which case the token
-/// mapper cannot be written.
+/// **The mechanical anti-diff control, and it is derivation-agnostic.** GraphQLx's lexer has ten
+/// token images GraphQL's does not — `<`, `>`, `::`, `~`, `..`, `^`, `=>`, `*`, `+`, `-` — and the
+/// bookkeeping triple owns the tail, so those ten had nowhere to go but *inside* the image block. A
+/// space that still agrees with GraphQL's once GraphQLx's images have run out either appended the
+/// ten after `Root`, which breaks the substrate's invariant, or left them out, in which case the
+/// token mapper cannot be written.
 ///
 /// This test does not say the spaces *should* diverge early. It says that a space derived from the
 /// GraphQLx lexer *does*, and that a space that does not was not derived.
@@ -415,7 +428,7 @@ fn the_two_spaces_diverge_inside_the_token_block() {
   assert!(
     first_difference < X::IMAGE_BLOCK,
     "the two kind spaces agree through index {first_difference}; graphqlx's image block is \
-     {} wide and holds seven images graphql has no counterpart for, so agreeing that far means \
+     {} wide and holds ten images graphql has no counterpart for, so agreeing that far means \
      the space was appended to graphql's rather than derived from graphqlx's lexer",
     X::IMAGE_BLOCK
   );
@@ -426,7 +439,7 @@ fn the_two_spaces_diverge_inside_the_token_block() {
 ///
 /// **The sharp anti-diff test.** The two weaker forms — "every image is covered" and "the spaces
 /// differ somewhere" — both pass for a space built by copying another dialect's image block and
-/// appending GraphQLx's seven extras to it. Requiring the block to *be* the lexer's list in the
+/// appending GraphQLx's extras to it. Requiring the block to *be* the lexer's list in the
 /// lexer's order does not.
 ///
 /// The trivia partition is the lexer's answer too: it comes from calling
@@ -464,6 +477,9 @@ fn the_image_block_matches_the_graphqlx_lexer() {
     LosslessTokenKind::Plus,
     LosslessTokenKind::Minus,
     LosslessTokenKind::PathSeparator,
+    LosslessTokenKind::Tilde,
+    LosslessTokenKind::DotDot,
+    LosslessTokenKind::Caret,
     LosslessTokenKind::Comma,
     LosslessTokenKind::Space,
     LosslessTokenKind::Tab,
@@ -616,6 +632,9 @@ fn image_of(kind: LosslessTokenKind) -> X {
     LosslessTokenKind::Plus => X::Plus,
     LosslessTokenKind::Minus => X::Minus,
     LosslessTokenKind::PathSeparator => X::PathSeparator,
+    LosslessTokenKind::Tilde => X::Tilde,
+    LosslessTokenKind::DotDot => X::DotDot,
+    LosslessTokenKind::Caret => X::Caret,
     LosslessTokenKind::Comma => X::Comma,
     LosslessTokenKind::Space => X::Space,
     LosslessTokenKind::Tab => X::Tab,
@@ -641,7 +660,7 @@ fn image_of(kind: LosslessTokenKind) -> X {
 /// string literals' constructors are `pub(crate)`, so they cannot be built from here at all. The
 /// broad one is better: a hand-built token proves only that a variant exists, while a lexed one
 /// proves the GraphQLx lexer *emits* it — which is what the image block claims about all
-/// thirty-four of them. One snippet per image, so a snippet that lexes into something unexpected
+/// thirty-seven of them. One snippet per image, so a snippet that lexes into something unexpected
 /// shows up as a missing kind rather than being absorbed by a neighbour.
 fn lexed_samples() -> BTreeMap<LosslessTokenKind, LosslessToken<&'static str>> {
   use tokora::lexer::Lexer as _;
@@ -669,6 +688,9 @@ fn lexed_samples() -> BTreeMap<LosslessTokenKind, LosslessToken<&'static str>> {
     "+",
     "-",
     "::",
+    "~",
+    "..",
+    "^",
     ",",
     " ",
     "\t",

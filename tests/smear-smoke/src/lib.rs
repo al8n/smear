@@ -32,14 +32,14 @@
 //!   not have that feature*.
 //!
 //! One caveat on the second direction, found while proving it. Six of the thirteen features —
-//! `bytes`, `bstr`, `hipstr`, `smol-bytes`, `smallvec`, `rowan` — share a name with an OPTIONAL
-//! DEPENDENCY, so deleting the explicit `[features]` line does not remove the name: cargo falls
-//! back to the implicit feature an optional dependency creates, resolution succeeds, and only the
-//! `tokora/<backing>` half is silently lost. Those six still red here — the probe below needs the
-//! surface that half enables, so deleting `smol-bytes = [...]` broke compilation of
-//! [`smol_bytes_source`] — but they red as a compile error rather than as a resolution error, and
-//! they red BECAUSE a probe names the surface. That is the case for writing probes rather than
-//! trusting the dependency edge alone.
+//! `bytes_1`, `bstr_1`, `hipstr_0_8`, `smol-bytes_0_2`, `smallvec_1`, `rowan_0_17` — share a name
+//! with an OPTIONAL DEPENDENCY, so deleting the explicit `[features]` line does not remove the
+//! name: cargo falls back to the implicit feature an optional dependency creates, resolution
+//! succeeds, and only the `tokora/<backing>` half is silently lost. Those six still red here — the
+//! probe below needs the surface that half enables, so deleting `smol-bytes_0_2 = [...]` broke
+//! compilation of [`smol_bytes_source`] — but they red as a compile error rather than as a
+//! resolution error, and they red BECAUSE a probe names the surface. That is the case for writing
+//! probes rather than trusting the dependency edge alone.
 //!
 //! [#81]: https://github.com/al8n/smear/issues/81
 
@@ -277,7 +277,7 @@ pub fn error_data_variant_samples() -> [(
 }
 
 /// `graphqlx` + `parser` — the GraphQLx dialect in the parser, which is where the dialect's
-/// imports, generics and namespaced paths actually live.
+/// `use` items, generics and namespaced paths actually live.
 #[allow(clippy::type_complexity)]
 pub fn graphqlx_parser(
   src: &str,
@@ -358,19 +358,19 @@ pub fn validator_source_lattice() {
   assert_lattice_member::<[u8]>();
   assert_lattice_member::<&'static str>();
   assert_lattice_member::<&'static [u8]>();
-  assert_lattice_member::<bstr::BStr>();
-  assert_lattice_member::<&'static bstr::BStr>();
+  assert_lattice_member::<bstr_1::BStr>();
+  assert_lattice_member::<&'static bstr_1::BStr>();
 
   // Refcounted tier: slices own, so a diagnostic may escape the call that produced it.
-  assert_lattice_member::<bytes::Bytes>();
-  assert_lattice_member::<smol_bytes::shared::Bytes>();
-  assert_lattice_member::<smol_bytes::compact::Bytes>();
-  assert_lattice_member::<smol_bytes::Utf8Bytes>();
-  assert_lattice_member::<smol_bytes::compact::Utf8Bytes>();
+  assert_lattice_member::<bytes_1::Bytes>();
+  assert_lattice_member::<smol_bytes_0_2::shared::Bytes>();
+  assert_lattice_member::<smol_bytes_0_2::compact::Bytes>();
+  assert_lattice_member::<smol_bytes_0_2::Utf8Bytes>();
+  assert_lattice_member::<smol_bytes_0_2::compact::Utf8Bytes>();
 
   // Three-way tier: inline, borrowed, or shared, decided at runtime but pinned by `'h`.
-  assert_lattice_member::<hipstr::HipStr<'static>>();
-  assert_lattice_member::<hipstr::HipByt<'static>>();
+  assert_lattice_member::<hipstr_0_8::HipStr<'static>>();
+  assert_lattice_member::<hipstr_0_8::HipByt<'static>>();
 }
 
 /// `introspection` — the second construction door, reached across the dependency edge.
@@ -469,19 +469,19 @@ pub fn validator_executable_source_lattice() {
   assert_lattice_member::<[u8]>();
   assert_lattice_member::<&'static str>();
   assert_lattice_member::<&'static [u8]>();
-  assert_lattice_member::<bstr::BStr>();
-  assert_lattice_member::<&'static bstr::BStr>();
+  assert_lattice_member::<bstr_1::BStr>();
+  assert_lattice_member::<&'static bstr_1::BStr>();
 
   // Refcounted tier: a diagnostic may escape, and cloning its subject is a refcount bump.
-  assert_lattice_member::<bytes::Bytes>();
-  assert_lattice_member::<smol_bytes::shared::Bytes>();
-  assert_lattice_member::<smol_bytes::compact::Bytes>();
-  assert_lattice_member::<smol_bytes::Utf8Bytes>();
-  assert_lattice_member::<smol_bytes::compact::Utf8Bytes>();
+  assert_lattice_member::<bytes_1::Bytes>();
+  assert_lattice_member::<smol_bytes_0_2::shared::Bytes>();
+  assert_lattice_member::<smol_bytes_0_2::compact::Bytes>();
+  assert_lattice_member::<smol_bytes_0_2::Utf8Bytes>();
+  assert_lattice_member::<smol_bytes_0_2::compact::Utf8Bytes>();
 
   // Three-way tier: inline, borrowed, or shared, decided at runtime but pinned by `'h`.
-  assert_lattice_member::<hipstr::HipStr<'static>>();
-  assert_lattice_member::<hipstr::HipByt<'static>>();
+  assert_lattice_member::<hipstr_0_8::HipStr<'static>>();
+  assert_lattice_member::<hipstr_0_8::HipByt<'static>>();
 }
 
 /// `proto` — draft §6 execution, driven end to end across the dependency edge.
@@ -572,16 +572,16 @@ pub fn graphql_execute(sdl: &str, query: &str, value: Option<&str>) -> (Option<S
   (leaf, errors)
 }
 
-/// `smallvec` — the error container is SmallVec-backed rather than `Vec`-backed.
+/// `smallvec_1` — the error container is SmallVec-backed rather than `Vec`-backed.
 ///
 /// The coercion is the probe: with the feature off the deref target is a `Vec` and the binding
 /// does not type-check.
 pub fn smallvec_backed_errors(errors: &smear::lexer::graphql::error::LexerErrors) -> usize {
-  let inline: &smallvec::SmallVec<[smear::lexer::graphql::error::LexerError; 1]> = errors;
+  let inline: &smallvec_1::SmallVec<[smear::lexer::graphql::error::LexerError; 1]> = errors;
   inline.len()
 }
 
-/// `rowan` — the lossless CST tower, reachable through the crate named `smear` for the first time
+/// `rowan_0_17` — the lossless CST tower, reachable through the crate named `smear` for the first time
 /// (#81). A `parse_document` -> [`Parse`] -> `SyntaxNode` round trip.
 ///
 /// [`Parse`]: smear::parser::graphql::lossless::Parse
@@ -1388,24 +1388,24 @@ impl<I> ValueDepth for smear::parser::graphql::ast::materialized::InputValue<&st
   }
 }
 
-/// `bytes` — a `bytes::Bytes`-backed source.
+/// `bytes_1` — a `bytes::Bytes`-backed source.
 pub fn bytes_source() -> Option<smear::lexer::graphql::ContextualKeyword> {
-  keyword_of(bytes::Bytes::from_static(b"query"))
+  keyword_of(bytes_1::Bytes::from_static(b"query"))
 }
 
-/// `bstr` — a `bstr::BStr`-backed source.
+/// `bstr_1` — a `bstr::BStr`-backed source.
 pub fn bstr_source() -> Option<smear::lexer::graphql::ContextualKeyword> {
-  keyword_of(bstr::BStr::new(b"mutation"))
+  keyword_of(bstr_1::BStr::new(b"mutation"))
 }
 
-/// `hipstr` — a `hipstr::HipStr`-backed source.
+/// `hipstr_0_8` — a `hipstr::HipStr`-backed source.
 pub fn hipstr_source() -> Option<smear::lexer::graphql::ContextualKeyword> {
-  keyword_of(hipstr::HipStr::from("subscription"))
+  keyword_of(hipstr_0_8::HipStr::from("subscription"))
 }
 
-/// `smol-bytes` — a `smol_bytes::shared::Bytes`-backed source.
+/// `smol-bytes_0_2` — a `smol_bytes::shared::Bytes`-backed source.
 pub fn smol_bytes_source() -> Option<smear::lexer::graphql::ContextualKeyword> {
-  keyword_of(smol_bytes::shared::Bytes::from_static(b"fragment"))
+  keyword_of(smol_bytes_0_2::shared::Bytes::from_static(b"fragment"))
 }
 
 /// Classify an identifier held in whatever source type `S` is.

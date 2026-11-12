@@ -38,30 +38,36 @@ smear = { path = "../../smear", default-features = false, features = [
   "introspection",
   "proto",
   "smallvec",
+  "smallvec_1",
   "bytes",
+  "bytes_1",
   "bstr",
+  "bstr_1",
   "hipstr",
+  "hipstr_0_8",
   "smol-bytes",
+  "smol-bytes_0_2",
   "rowan",
+  "rowan_0_17",
   "lossless-coverage",
   "test-support",
   "materialized-numbers",
 ] }
 
 # The source-backing crates, named directly so each probe can construct a source of that type.
-# A dependent enabling `smear/bytes` has `bytes` in its own graph too; anything less would test
+# A dependent enabling `smear/bytes_1` has `bytes_1` in its own graph too; anything less would test
 # that the feature resolves, not that the surface it gates is reachable.
-bstr = { workspace = true }
-bytes = { workspace = true }
-hipstr = { version = "0.8", default-features = false }
-smol-bytes = { workspace = true }
-smallvec = { version = "1", default-features = false, features = ["const_new"] }
+bstr_1 = { workspace = true }
+bytes_1 = { workspace = true }
+hipstr_0_8 = { package = "hipstr", version = "0.8", default-features = false }
+smol-bytes_0_2 = { workspace = true }
+smallvec_1 = { package = "smallvec", version = "1", default-features = false, features = ["const_new"] }
 # Must track `smear`'s rowan exactly, and for this crate that is the whole point rather than
 # housekeeping. `smear-smoke` exists to stand where a real dependent stands; a dependent whose own
 # `rowan` disagreed with smear's on the major would get two rowans and `expected rowan::SyntaxNode,
 # found rowan::SyntaxNode` the moment it touched `lossless_round_trip`'s return path. Leaving this
 # at 0.16 would make the smoke crate certify a configuration that does not work.
-rowan = "0.17"
+rowan_0_17 = { package = "rowan", version = "0.17" }
 
 [dev-dependencies]
 toml = "1.1"

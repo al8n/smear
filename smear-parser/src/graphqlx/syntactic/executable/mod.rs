@@ -25,11 +25,11 @@ use super::{
     executable_definition_name, try_definition_name, try_executable_definition_type_generics,
     try_where_clause,
   },
-  import::import_definition_after_keyword,
   keyword_of,
   selection::{selection_set, type_condition},
   ty::ty,
   unexpected_here,
+  use_tree::use_definition_after_keyword,
   value::default_value,
 };
 use crate::{
@@ -41,8 +41,8 @@ use crate::{
     ast::{
       Constrained, DescribedExecutableDefinition, DescribedVariableDefinition,
       ExecutableDefinition, ExecutableDefinitionHeader, ExecutableDocument, FragmentDefinition,
-      ImportOrExecutableDefinition, NamedOperationDefinition, OperationDefinition, OperationType,
-      SelectionSet, StringValue, VariableDefinition, VariableValue, VariablesDefinition,
+      NamedOperationDefinition, OperationDefinition, OperationType, SelectionSet, StringValue,
+      UseOrExecutableDefinition, VariableDefinition, VariableValue, VariablesDefinition,
       WhereClause,
     },
     error::{Expectation, GraphqlxError as DialectGraphqlxError},
@@ -90,8 +90,8 @@ pub(crate) enum ExecutableDefinitionHead {
 
 /// A pre-classified top-level executable-document entry.
 #[derive(Debug, Copy, Clone)]
-enum ImportOrExecutableHead {
-  Import,
+enum UseOrExecutableHead {
+  Use,
   Executable(ExecutableDefinitionHead),
 }
 
@@ -133,15 +133,16 @@ where
   )
 }
 
-/// Classifies an import-aware executable-document entry without consuming it.
+/// Classifies an executable-document entry, `use` item or executable definition, without
+/// consuming it.
 ///
 /// This runs after the caller has tried to consume an optional description, so
-/// imports and every ordinary executable head can enter their already-
+/// `use` items and every ordinary executable head can enter their already-
 /// classified tails directly.
 #[inline]
-fn classify_import_or_executable_head<'inp, Src, Ctx>(
+fn classify_use_or_executable_head<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
-) -> Result<Option<ImportOrExecutableHead>, GraphqlxError<'inp, Src, Ctx>>
+) -> Result<Option<UseOrExecutableHead>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
@@ -156,21 +157,21 @@ where
   Ok(
     inp
       .peek_head_map(|token| match token.data {
-        GraphqlxToken::<'inp, Src>::LBrace => Some(ImportOrExecutableHead::Executable(
+        GraphqlxToken::<'inp, Src>::LBrace => Some(UseOrExecutableHead::Executable(
           ExecutableDefinitionHead::Shorthand,
         )),
         token => match keyword_of(token) {
-          Some(ContextualKeyword::Import) => Some(ImportOrExecutableHead::Import),
-          Some(ContextualKeyword::Query) => Some(ImportOrExecutableHead::Executable(
+          Some(ContextualKeyword::Use) => Some(UseOrExecutableHead::Use),
+          Some(ContextualKeyword::Query) => Some(UseOrExecutableHead::Executable(
             ExecutableDefinitionHead::Operation(OperationHead::Query),
           )),
-          Some(ContextualKeyword::Mutation) => Some(ImportOrExecutableHead::Executable(
+          Some(ContextualKeyword::Mutation) => Some(UseOrExecutableHead::Executable(
             ExecutableDefinitionHead::Operation(OperationHead::Mutation),
           )),
-          Some(ContextualKeyword::Subscription) => Some(ImportOrExecutableHead::Executable(
+          Some(ContextualKeyword::Subscription) => Some(UseOrExecutableHead::Executable(
             ExecutableDefinitionHead::Operation(OperationHead::Subscription),
           )),
-          Some(ContextualKeyword::Fragment) => Some(ImportOrExecutableHead::Executable(
+          Some(ContextualKeyword::Fragment) => Some(UseOrExecutableHead::Executable(
             ExecutableDefinitionHead::Fragment,
           )),
           _ => None,
@@ -767,22 +768,22 @@ executable_parser!(
 );
 
 executable_parser!(
-  /// Parses an executable definition or a GraphQLx import with one head probe.
+  /// Parses an executable definition or a GraphQLx `use` item with one head probe.
   ///
-  /// `import` is a GraphQLx extension; the executable alternative follows the
+  /// `use` is a GraphQLx extension; the executable alternative follows the
   /// GraphQL executable-definition grammar.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
-  pub import_or_executable_definition,
+  pub use_or_executable_definition,
   inp,
-  ImportOrExecutableDefinition<GraphqlxSlice<'inp, Src>>,
+  UseOrExecutableDefinition<GraphqlxSlice<'inp, Src>>,
   [GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
     match try_description(inp)? {
       ParseAttempt::Accept(description) => {
         refuse_described_shorthand(inp, Expectation::OperationTypeOrFragment)?;
         let definition = executable_definition_core(inp)?;
-        Ok(ImportOrExecutableDefinition::Definition(
+        Ok(UseOrExecutableDefinition::Definition(
           DescribedExecutableDefinition::new(
             SimpleSpan::new(description.span().start(), definition.span().end()),
             Some(description),
@@ -790,19 +791,19 @@ executable_parser!(
           ),
         ))
       }
-      ParseAttempt::Decline => match classify_import_or_executable_head(inp)? {
-        Some(ImportOrExecutableHead::Import) => {
-          let (span, _) = take_classified_identifier(inp, Expectation::Import)?;
-          import_definition_after_keyword(inp, span.start()).map(ImportOrExecutableDefinition::Import)
+      ParseAttempt::Decline => match classify_use_or_executable_head(inp)? {
+        Some(UseOrExecutableHead::Use) => {
+          let (span, _) = take_classified_identifier(inp, Expectation::Use)?;
+          use_definition_after_keyword(inp, span.start()).map(UseOrExecutableDefinition::Use)
         }
-        Some(ImportOrExecutableHead::Executable(head)) => {
+        Some(UseOrExecutableHead::Executable(head)) => {
           let definition = executable_definition_after_head(head, inp)?;
           let span = *definition.span();
-          Ok(ImportOrExecutableDefinition::Definition(
+          Ok(UseOrExecutableDefinition::Definition(
             DescribedExecutableDefinition::new(span, None, definition),
           ))
         }
-        None => unexpected_here(inp, Expectation::Production("an import or an executable definition")),
+        None => unexpected_here(inp, Expectation::Production("a use item or an executable definition")),
       }
     }
   }
@@ -829,11 +830,11 @@ where
 executable_parser!(
   /// Parses a nonempty GraphQLx executable document.
   ///
-  /// Each entry may be an import or a described executable definition. The
+  /// Each entry may be a `use` item or a described executable definition. The
   /// document has no enclosing delimiter, so every remaining token continues
   /// into the committed entry parser and receives that parser's local error.
-  /// `import` is the GraphQLx extension; a leading definition description is
-  /// ordinary GraphQL, and never decorates an import or a shorthand operation.
+  /// `use` is the GraphQLx extension; a leading definition description is
+  /// ordinary GraphQL, and never decorates a `use` item or a shorthand operation.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
   pub executable_document,
@@ -842,14 +843,14 @@ executable_parser!(
   [GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
     let Spanned { span, data: definitions }: Spanned<
-      Vec<ImportOrExecutableDefinition<GraphqlxSlice<'inp, Src>>>,
+      Vec<UseOrExecutableDefinition<GraphqlxSlice<'inp, Src>>>,
       SimpleSpan,
-    > = import_or_executable_definition
+    > = use_or_executable_definition
       .repeated_while::<_, U1>(decide_executable_document_tail::<Src, Ctx>)
       .at_least(1)
       .collect_with(Vec::new())
       .map(
-        |definitions: Vec<ImportOrExecutableDefinition<GraphqlxSlice<'inp, Src>>>| definitions,
+        |definitions: Vec<UseOrExecutableDefinition<GraphqlxSlice<'inp, Src>>>| definitions,
       )
       .token_spanned()
       .parse_input(inp)?;
@@ -963,20 +964,20 @@ impl_executable_api!(
   [GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,]
 );
 impl_executable_api!(
-  /// Parses one GraphQLx executable definition or import.
+  /// Parses one GraphQLx executable definition or `use` item.
   ///
-  /// `import` is a GraphQLx extension.
+  /// `use` is a GraphQLx extension.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).
   S,
-  ImportOrExecutableDefinition<S>,
-  import_or_executable_definition,
+  UseOrExecutableDefinition<S>,
+  use_or_executable_definition,
   [GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,]
 );
 impl_executable_api!(
   /// Parses a nonempty GraphQLx executable document.
   ///
-  /// `import` is the GraphQLx extension; a leading definition description is
+  /// `use` is the GraphQLx extension; a leading definition description is
   /// ordinary GraphQL.
   ///
   /// See the [GraphQL Executable Definitions specification](https://spec.graphql.org/draft/#ExecutableDefinition).

@@ -32,7 +32,7 @@
 //! The syntactic door validates an AST; the lossless door projects a CST and validates that. A
 //! description is a **node** in the CST, so the two doors reach the property through different
 //! machinery and the lossless leg is where a description could plausibly shift a span. It runs
-//! behind `feature = "rowan"`, like every other lossless gate.
+//! behind `feature = "rowan_0_17"`, like every other lossless gate.
 //!
 //! # The positive control
 //!
@@ -319,7 +319,7 @@ fn a_description_neither_fires_a_rule_nor_suppresses_one() {
   }
 }
 
-#[cfg(feature = "rowan")]
+#[cfg(feature = "rowan_0_17")]
 mod lossless {
   use super::{BTreeSet, Diagnostic, FIRING_FLOOR, FIXTURES, SCHEMA, Vec, blanked, build};
 

@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 
 //! Gate 1: acceptance parity between the GraphQLx lossless suite and the shipped GraphQLx
 //! `syntactic` one.
@@ -46,7 +46,7 @@
 //!
 //! So this gate has no *language* divergence to prove its comparison can fail. The proof of life
 //! is a **production** divergence instead, which is permanent by construction:
-//! [`the_corpus_can_tell_the_two_suites_apart`] shows forty-three entries on which the lossless
+//! [`the_corpus_can_tell_the_two_suites_apart`] shows forty-nine entries on which the lossless
 //! SDL-only root and the mixed root disagree, and that every one of them is a *clean*
 //! discriminator — the mixed root agreeing with the syntactic suite about it. Closing that
 //! divergence would be a bug, so unlike Phase A's eleven it cannot quietly go away.
@@ -115,7 +115,7 @@ fn syntactic_has_errors<'inp>(src: &'inp str) -> bool {
   .is_err()
 }
 
-/// The syntactic verdict for the **SDL-only** root — imports and type-system entries, no
+/// The syntactic verdict for the **SDL-only** root — `use` items and type-system entries, no
 /// executable definition and no shorthand operation.
 ///
 /// Whole-input for [`syntactic_has_errors`]'s reason: the repetition re-enters the entry
@@ -302,7 +302,7 @@ fn the_inherited_half_is_exactly_the_graphql_corpus() {
   assert!(
     own_invalid >= 8,
     "only {own_invalid} GraphQLx-only invalid entries; the GraphQLx archetypes are unterminated \
-     `<`, a `where` with no block, and an import with no `from`"
+     `<`, a `where` with no block, and a `use` with no tree"
   );
 }
 

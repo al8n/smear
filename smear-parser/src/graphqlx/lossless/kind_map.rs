@@ -8,7 +8,7 @@
 //!
 //! # The mapping is many-to-one, deliberately, and exactly once
 //!
-//! 34 `LosslessToken` variants enter a space of 32 token images. Six differences are pure
+//! 37 `LosslessToken` variants enter a space of 35 token images. Six differences are pure
 //! spelling — `Identifier`/`Name`, `LitInt`/`Int`, `LitFloat`/`Float`, `LitInlineStr`/
 //! `InlineString`, `LitBlockStr`/`BlockString` — and the rest is one genuine fold: the lexer
 //! distinguishes `\r`, `\n` and `\r\n`, while the kind space carries a single `Newline` image.
@@ -49,7 +49,7 @@
 //! 1. **The wildcard panics.** It does not fall back to a filler kind, so a token this mapper does
 //!    not name stops the parse where it is met rather than entering the tree as something else.
 //!    A *deleted* arm therefore fails loudly on the first token of that shape.
-//! 2. **`tests/lossless_x_kind_map.rs` walks all thirty-four lexed tokens** and asserts the image
+//! 2. **`tests/lossless_x_kind_map.rs` walks all thirty-seven lexed tokens** and asserts the image
 //!    of each by name, so a *wrong* arm — the failure mode a panic cannot see — is red there.
 //! 3. **That file also pins the lexer enum's cardinality** through its discriminants, so a variant
 //!    added to `LosslessTokenKind` is a test failure rather than a silent widening of the
@@ -71,8 +71,8 @@ use crate::graphqlx::kinds::SyntaxKind as K;
 /// # Panics
 ///
 /// On a `LosslessToken` variant this mapper does not name. Unreachable for the lexer as it
-/// stands — the case list in `tests/lossless_x_kind_map.rs` covers all thirty-four variants — and
-/// reachable only if `smear-lexer` grows a thirty-fifth, which is exactly the event the
+/// stands — the case list in `tests/lossless_x_kind_map.rs` covers all thirty-seven variants — and
+/// reachable only if `smear-lexer` grows a thirty-eighth, which is exactly the event the
 /// `#[non_exhaustive]` wildcard would otherwise absorb in silence.
 #[inline]
 pub fn token_kind<S>(token: &LosslessToken<S>) -> u16 {
@@ -99,6 +99,9 @@ pub fn token_kind<S>(token: &LosslessToken<S>) -> u16 {
     LosslessToken::Plus => K::Plus,
     LosslessToken::Minus => K::Minus,
     LosslessToken::PathSeparator => K::PathSeparator,
+    LosslessToken::Tilde => K::Tilde,
+    LosslessToken::DotDot => K::DotDot,
+    LosslessToken::Caret => K::Caret,
     LosslessToken::Identifier(_) => K::Name,
     LosslessToken::LitFloat(_) => K::Float,
     LosslessToken::LitInt(_) => K::Int,
@@ -112,7 +115,7 @@ pub fn token_kind<S>(token: &LosslessToken<S>) -> u16 {
     LosslessToken::Tab => K::Tab,
     // The 3 -> 1 fold, and the only one. `K::CarriageReturn` and `K::CarriageReturnAndNewline` do
     // not exist and must not be added: the three forms stay distinguishable through the token's
-    // text, and adding them would break the space's 114-kind pin.
+    // text, and adding them would break the space's 113-kind pin.
     LosslessToken::Newline => K::Newline,
     LosslessToken::CarriageReturn => K::Newline,
     LosslessToken::CarriageReturnAndNewline => K::Newline,

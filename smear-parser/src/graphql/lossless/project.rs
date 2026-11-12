@@ -7,7 +7,7 @@
 //! back end.
 //!
 //! ```
-//! # #[cfg(all(feature = "graphql", feature = "rowan"))] {
+//! # #[cfg(all(feature = "graphql", feature = "rowan_0_17"))] {
 //! use smear_parser::graphql::lossless::{parse_document, project};
 //!
 //! let source = "type Query { field: Int }";
@@ -437,7 +437,7 @@
 
 use std::vec::Vec;
 
-use rowan::{NodeOrToken, TextRange, TextSize};
+use rowan_0_17::{NodeOrToken, TextRange, TextSize};
 use tokora::SimpleSpan;
 
 use smear_lexer::{
@@ -603,7 +603,7 @@ impl super::ast::Document {
 /// the one that reports an SDL definition *at the parser's own position*.
 ///
 /// ```
-/// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
+/// # #[cfg(all(feature = "graphql", feature = "rowan_0_17"))] {
 /// use smear_parser::graphql::lossless::{parse_executable_document, project_executable_document};
 ///
 /// let source = "query Q { hero { name } }";
@@ -651,7 +651,7 @@ pub fn project_executable_document<'src>(
 /// is a legitimate document image and this door's contract is per entry — see [`Recovery`].
 ///
 /// ```
-/// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
+/// # #[cfg(all(feature = "graphql", feature = "rowan_0_17"))] {
 /// use smear_parser::graphql::lossless::{
 ///   parse_executable_document, project_executable_document_recovered,
 /// };
@@ -731,7 +731,7 @@ impl super::ast::ExecutableDocument {
 /// position*.
 ///
 /// ```
-/// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
+/// # #[cfg(all(feature = "graphql", feature = "rowan_0_17"))] {
 /// use smear_parser::graphql::lossless::{
 ///   parse_type_system_document, project_type_system_document,
 /// };
@@ -765,7 +765,7 @@ pub fn project_type_system_document<'src>(
 /// with the same accounting.
 ///
 /// ```
-/// # #[cfg(all(feature = "graphql", feature = "rowan"))] {
+/// # #[cfg(all(feature = "graphql", feature = "rowan_0_17"))] {
 /// use smear_parser::graphql::lossless::{
 ///   parse_type_system_document, project_type_system_document_recovered,
 /// };
@@ -1172,8 +1172,8 @@ fn child_node(parent: Node<'_>, kind: SyntaxKind) -> Option<Node<'_>> {
 }
 
 /// `kind` as the green tree stores it.
-fn raw_of(kind: SyntaxKind) -> rowan::SyntaxKind {
-  <GraphQLLang as rowan::Language>::kind_to_raw(kind)
+fn raw_of(kind: SyntaxKind) -> rowan_0_17::SyntaxKind {
+  <GraphQLLang as rowan_0_17::Language>::kind_to_raw(kind)
 }
 
 // ---------------------------------------------------------------------------------------------

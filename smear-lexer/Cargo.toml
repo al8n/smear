@@ -26,17 +26,17 @@ readme = "README.md"
 # Element-for-element the subset of `smear`'s own default that reaches this layer: `std`, both
 # dialects, and `smallvec`. `smear` names every member feature explicitly with
 # `default-features = false`, so this list governs a DIRECT dependent and nothing else.
-default = ["std", "graphql", "graphqlx", "smallvec"]
-alloc = ["tokora/alloc", "memspan/alloc", "bstr?/alloc"]
+default = ["std", "graphql", "graphqlx", "smallvec_1"]
+alloc = ["tokora/alloc", "memspan/alloc", "bstr_1?/alloc"]
 std = [
   "alloc",
   "tokora/std",
   "memspan/std",
   "thiserror/default",
-  "bytes?/default",
-  "bstr?/default",
-  "hipstr?/default",
-  "smol-bytes?/default",
+  "bytes_1?/default",
+  "bstr_1?/default",
+  "hipstr_0_8?/default",
+  "smol-bytes_0_2?/default",
 ]
 
 # The two dialects. Each is a module only in a build that enables it, which is why every doc link
@@ -49,12 +49,21 @@ graphqlx = []
 # lexer's `Source` implementations line up with the substrate's; enabling the dependency alone
 # would compile the type in and leave the substrate half missing.
 #
-# All but `bstr` imply `alloc`: each links it, `smol-bytes` through tokora's own edge to it.
-smallvec = ["dep:smallvec", "alloc"]
-bytes = ["dep:bytes", "alloc", "tokora/bytes_1"]
-bstr = ["dep:bstr", "tokora/bstr_1"]
-hipstr = ["dep:hipstr", "alloc", "tokora/hipstr_0_8"]
-smol-bytes = ["dep:smol-bytes", "alloc", "tokora/smol-bytes_0_2"]
+# The versioned feature is the switch, named for the major of the crate it enables, and the
+# dependency key carries the same version, so the crate is `bytes_1` in code. The unversioned name
+# is a pure alias for the current major and carries nothing else.
+#
+# All but `bstr_1` imply `alloc`: each links it, `smol-bytes_0_2` through tokora's own edge to it.
+smallvec = ["smallvec_1"]
+smallvec_1 = ["dep:smallvec_1", "alloc"]
+bytes = ["bytes_1"]
+bytes_1 = ["dep:bytes_1", "alloc", "tokora/bytes_1"]
+bstr = ["bstr_1"]
+bstr_1 = ["dep:bstr_1", "tokora/bstr_1"]
+hipstr = ["hipstr_0_8"]
+hipstr_0_8 = ["dep:hipstr_0_8", "alloc", "tokora/hipstr_0_8"]
+smol-bytes = ["smol-bytes_0_2"]
+smol-bytes_0_2 = ["dep:smol-bytes_0_2", "alloc", "tokora/smol-bytes_0_2"]
 
 [dependencies]
 derive_more.workspace = true
@@ -65,11 +74,11 @@ tokora.workspace = true
 # 0.1.3 is the first memspan release with `skip_until_or_non_ascii`.
 memspan = { version = "0.1.3", default-features = false }
 
-hipstr = { version = "0.8", default-features = false, optional = true }
-bytes = { workspace = true, optional = true }
-smol-bytes = { workspace = true, optional = true }
-bstr = { workspace = true, optional = true }
-smallvec = { version = "1", default-features = false, features = ["const_new"], optional = true }
+hipstr_0_8 = { package = "hipstr", version = "0.8", default-features = false, optional = true }
+bytes_1 = { workspace = true, optional = true }
+smol-bytes_0_2 = { workspace = true, optional = true }
+bstr_1 = { workspace = true, optional = true }
+smallvec_1 = { package = "smallvec", version = "1", default-features = false, features = ["const_new"], optional = true }
 
 [lints]
 workspace = true

@@ -6,11 +6,10 @@
 //! `HARD_MAX` the lossless doors produce exactly the tree a recursive node dispatch cannot descend,
 //! no value of `MAX_GREEN_DEPTH` closes that, and the repair is a worklist per cycle
 //! (al8n/smear#201). What is re-derived here is **which cycles this dialect has**, because the two
-//! do not have the same ones and a fixture set ported from the other would leave four of these
+//! do not have the same ones and a fixture set ported from the other would leave five of these
 //! unmeasured.
 //!
-//! GraphQLx has three cycles where the vanilla dialect has four, and the arithmetic is not a
-//! narrowing:
+//! GraphQLx has four cycles where the vanilla dialect has four, and they are not the same four:
 //!
 //! - the **value** cycle absorbs two more containers — `set!{ … }` and `map!{ k => v }` — and a
 //!   map entry is the one place a single child slot yields *two* subtrees, so it nests through its
@@ -18,10 +17,12 @@
 //! - the **type** cycle absorbs what GraphQL splits off as a `NonNullType` wrapper (the `!` is a
 //!   token here) and gains one shape of its own: a path's **generic arguments**, which nest without
 //!   passing through a bracket at all;
-//! - the **selection** cycle is the vanilla dialect's, unchanged.
+//! - the **selection** cycle is the vanilla dialect's, unchanged;
+//! - the **use** cycle is this dialect's own: a `use` tree's group holds trees, and any of them
+//!   may hold a group in turn.
 //!
-//! So there are seven fixtures below rather than four, and each of them is a separate walk over
-//! separate frame types. A shape with no fixture is a shape whose worklist nobody measured.
+//! So there is a fixture below per shape, and each of them is a separate walk over separate frame
+//! types. A shape with no fixture is a shape whose worklist nobody measured.
 //!
 //! # Why the reading is a stack address and not a thread that is too small
 //!
@@ -35,7 +36,7 @@
 //! was made from and an anchor in this frame, taken at two depths. A walk that recursed puts one
 //! frame per level in that difference; a walk that does not puts nothing.
 
-#![cfg(all(feature = "graphqlx", feature = "rowan", feature = "std"))]
+#![cfg(all(feature = "graphqlx", feature = "rowan_0_17", feature = "std"))]
 
 use std::{
   alloc::{GlobalAlloc, Layout, System},
@@ -201,17 +202,17 @@ fn assert_projection_is_flat(what: &str, executable: bool, build: impl Fn(usize)
 }
 
 /// The fixture's green depth, read off the parse rather than derived from the level count.
-fn green_depth(root: &rowan::GreenNode) -> usize {
+fn green_depth(root: &rowan_0_17::GreenNode) -> usize {
   let mut deepest = 1usize;
-  let mut stack: Vec<(usize, rowan::Children<'_>)> = std::vec![(1, root.children())];
+  let mut stack: Vec<(usize, rowan_0_17::Children<'_>)> = std::vec![(1, root.children())];
   while let Some((level, children)) = stack.last_mut() {
     let level = *level;
     match children.next() {
-      Some(rowan::NodeOrToken::Node(child)) => {
+      Some(rowan_0_17::NodeOrToken::Node(child)) => {
         deepest = deepest.max(level + 1);
         stack.push((level + 1, child.children()));
       }
-      Some(rowan::NodeOrToken::Token(_)) => {}
+      Some(rowan_0_17::NodeOrToken::Token(_)) => {}
       None => {
         stack.pop();
       }
@@ -347,6 +348,27 @@ fn a_selection_chain_projects_flat() {
     source.push_str("{ __typename }");
     for _ in 0..depth {
       source.push_str(" }");
+    }
+    source
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// the use cycle — GraphQLx only
+// ---------------------------------------------------------------------------------------------
+
+/// `use a::{a::{… b …}}` — a group's trees are read on a worklist of the groups still open, so a
+/// tree nested however deep is projected from one frame.
+#[test]
+fn a_use_group_chain_projects_flat() {
+  assert_projection_is_flat("use_tree / group", false, |depth| {
+    let mut source = String::from("use ");
+    for _ in 0..depth {
+      source.push_str("a::{");
+    }
+    source.push('b');
+    for _ in 0..depth {
+      source.push('}');
     }
     source
   });

@@ -44,7 +44,7 @@
 //! value in both value grammars, a nested list type without the `NonNullType` wrapper that folds
 //! into the frame, and an inline fragment's set.
 
-#![cfg(all(feature = "graphql", feature = "rowan", feature = "std"))]
+#![cfg(all(feature = "graphql", feature = "rowan_0_17", feature = "std"))]
 
 use std::{
   alloc::{GlobalAlloc, Layout, System},
@@ -225,17 +225,17 @@ fn assert_projection_is_flat(what: &str, executable: bool, build: impl Fn(usize)
 ///
 /// Iterative, so the instrument cannot be what overflows, and read from the real tree so a fixture
 /// whose spelling stops nesting is caught by the assertion above rather than assumed.
-fn green_depth(root: &rowan::GreenNode) -> usize {
+fn green_depth(root: &rowan_0_17::GreenNode) -> usize {
   let mut deepest = 1usize;
-  let mut stack: Vec<(usize, rowan::Children<'_>)> = std::vec![(1, root.children())];
+  let mut stack: Vec<(usize, rowan_0_17::Children<'_>)> = std::vec![(1, root.children())];
   while let Some((level, children)) = stack.last_mut() {
     let level = *level;
     match children.next() {
-      Some(rowan::NodeOrToken::Node(child)) => {
+      Some(rowan_0_17::NodeOrToken::Node(child)) => {
         deepest = deepest.max(level + 1);
         stack.push((level + 1, child.children()));
       }
-      Some(rowan::NodeOrToken::Token(_)) => {}
+      Some(rowan_0_17::NodeOrToken::Token(_)) => {}
       None => {
         stack.pop();
       }

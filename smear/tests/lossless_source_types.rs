@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan", any(feature = "graphql", feature = "graphqlx")))]
+#![cfg(all(feature = "rowan_0_17", any(feature = "graphql", feature = "graphqlx")))]
 
 //! Every lossless door takes the source types the syntactic doors take, and the one boundary that
 //! is UTF-8 answers `Err(Refused)` — no parse at all — rather than a diagnostic or a panic.
@@ -260,46 +260,71 @@ macro_rules! dialect {
         at_every_root!("Cow<str>", &std::borrow::Cow::<str>::Borrowed(DOC));
         at_every_root!("Arc<str>", &std::sync::Arc::<str>::from(DOC));
 
-        #[cfg(feature = "bytes")]
+        #[cfg(feature = "bytes_1")]
         {
           at_every_root!(
             "bytes::Bytes",
-            &bytes::Bytes::copy_from_slice(DOC.as_bytes())
+            &bytes_1::Bytes::copy_from_slice(DOC.as_bytes())
           );
           at_every_root!(
             "bytes::Bytes",
-            &bytes::Bytes::copy_from_slice(SDL.as_bytes()),
+            &bytes_1::Bytes::copy_from_slice(SDL.as_bytes()),
             sdl
           );
           at_every_root!(
             "bytes::Bytes",
-            &bytes::Bytes::copy_from_slice(REQ.as_bytes()),
+            &bytes_1::Bytes::copy_from_slice(REQ.as_bytes()),
             req
           );
         }
 
-        #[cfg(feature = "bstr")]
+        #[cfg(feature = "bstr_1")]
         {
-          at_every_root!("bstr::BStr", bstr::BStr::new(DOC.as_bytes()));
-          at_every_root!("bstr::BStr", bstr::BStr::new(SDL.as_bytes()), sdl);
-          at_every_root!("bstr::BStr", bstr::BStr::new(REQ.as_bytes()), req);
+          at_every_root!("bstr::BStr", bstr_1::BStr::new(DOC.as_bytes()));
+          at_every_root!("bstr::BStr", bstr_1::BStr::new(SDL.as_bytes()), sdl);
+          at_every_root!("bstr::BStr", bstr_1::BStr::new(REQ.as_bytes()), req);
         }
 
-        #[cfg(feature = "hipstr")]
+        #[cfg(feature = "hipstr_0_8")]
         {
-          at_every_root!("hipstr::HipStr", &hipstr::HipStr::from(DOC));
-          at_every_root!("hipstr::HipByt", &hipstr::HipByt::from(DOC.as_bytes()));
-          at_every_root!("hipstr::HipStr", &hipstr::HipStr::from(SDL), sdl);
-          at_every_root!("hipstr::HipByt", &hipstr::HipByt::from(REQ.as_bytes()), req);
+          at_every_root!("hipstr::HipStr", &hipstr_0_8::HipStr::from(DOC));
+          at_every_root!("hipstr::HipByt", &hipstr_0_8::HipByt::from(DOC.as_bytes()));
+          at_every_root!("hipstr::HipStr", &hipstr_0_8::HipStr::from(SDL), sdl);
+          at_every_root!("hipstr::HipByt", &hipstr_0_8::HipByt::from(REQ.as_bytes()), req);
         }
 
-        // NO smol-bytes ROW, and the reason is the manifest rather than the door.
-        // `smear/Cargo.toml` forwards that feature (`smear-lexer/smol-bytes`,
-        // `smear-parser/smol-bytes`, `tokora/smol-bytes_0_2`) and takes no `dep:` on the crate, so
-        // this test — which is compiled against `smear` — cannot name the four types. Their
-        // `LosslessSource` implementations live beside the others in
-        // `smear-parser/src/lossless/source.rs` and are compiled by that crate's own
-        // `--all-features` build.
+        #[cfg(feature = "smol-bytes_0_2")]
+        {
+          at_every_root!(
+            "smol_bytes::shared::Bytes",
+            &smol_bytes_0_2::shared::Bytes::copy_from_slice(DOC.as_bytes())
+          );
+          at_every_root!(
+            "smol_bytes::compact::Bytes",
+            &smol_bytes_0_2::compact::Bytes::copy_from_slice(DOC.as_bytes())
+          );
+          at_every_root!("smol_bytes::Utf8Bytes", &smol_bytes_0_2::Utf8Bytes::from(DOC));
+          at_every_root!(
+            "smol_bytes::compact::Utf8Bytes",
+            &smol_bytes_0_2::compact::Utf8Bytes::from(DOC)
+          );
+          at_every_root!(
+            "smol_bytes::shared::Bytes",
+            &smol_bytes_0_2::shared::Bytes::copy_from_slice(SDL.as_bytes()),
+            sdl
+          );
+          at_every_root!(
+            "smol_bytes::compact::Bytes",
+            &smol_bytes_0_2::compact::Bytes::copy_from_slice(REQ.as_bytes()),
+            req
+          );
+          at_every_root!("smol_bytes::Utf8Bytes", &smol_bytes_0_2::Utf8Bytes::from(SDL), sdl);
+          at_every_root!(
+            "smol_bytes::compact::Utf8Bytes",
+            &smol_bytes_0_2::compact::Utf8Bytes::from(REQ),
+            req
+          );
+        }
 
         // Asserted rather than merely printed: a backing whose feature is off is a smaller number
         // here, not a green run over one row.
@@ -365,12 +390,23 @@ macro_rules! dialect {
           );
 
           at_each_door!("&[u8]", bytes);
-          #[cfg(feature = "bytes")]
-          at_each_door!("bytes::Bytes", &bytes::Bytes::copy_from_slice(bytes));
-          #[cfg(feature = "bstr")]
-          at_each_door!("bstr::BStr", bstr::BStr::new(bytes));
-          #[cfg(feature = "hipstr")]
-          at_each_door!("hipstr::HipByt", &hipstr::HipByt::from(bytes));
+          #[cfg(feature = "bytes_1")]
+          at_each_door!("bytes::Bytes", &bytes_1::Bytes::copy_from_slice(bytes));
+          #[cfg(feature = "bstr_1")]
+          at_each_door!("bstr::BStr", bstr_1::BStr::new(bytes));
+          #[cfg(feature = "hipstr_0_8")]
+          at_each_door!("hipstr::HipByt", &hipstr_0_8::HipByt::from(bytes));
+          #[cfg(feature = "smol-bytes_0_2")]
+          {
+            at_each_door!(
+              "smol_bytes::shared::Bytes",
+              &smol_bytes_0_2::shared::Bytes::copy_from_slice(bytes)
+            );
+            at_each_door!(
+              "smol_bytes::compact::Bytes",
+              &smol_bytes_0_2::compact::Bytes::copy_from_slice(bytes)
+            );
+          }
         }
         println!("  {checked} (document, byte backing) pairs agreed with `&str` at all six doors");
         assert!(checked >= NON_ASCII.len(), "only {checked} pairs were exercised");
@@ -406,20 +442,20 @@ macro_rules! dialect {
               &ok(door::parse_document_from_with_limits(bytes, mk(n))),
               &want,
             );
-            #[cfg(feature = "bytes")]
+            #[cfg(feature = "bytes_1")]
             same(
               &format!("{name}={n}: bytes::Bytes"),
               &ok(door::parse_document_from_with_limits(
-                &bytes::Bytes::copy_from_slice(bytes),
+                &bytes_1::Bytes::copy_from_slice(bytes),
                 mk(n),
               )),
               &want,
             );
-            #[cfg(feature = "bstr")]
+            #[cfg(feature = "bstr_1")]
             same(
               &format!("{name}={n}: bstr::BStr"),
               &ok(door::parse_document_from_with_limits(
-                bstr::BStr::new(bytes),
+                bstr_1::BStr::new(bytes),
                 mk(n),
               )),
               &want,
@@ -481,18 +517,29 @@ macro_rules! dialect {
       fn every_byte_backing_is_refused_the_same_way() {
         refused("&[u8]", door::parse_document_from(BAD));
 
-        #[cfg(feature = "bytes")]
+        #[cfg(feature = "bytes_1")]
         refused(
           "bytes::Bytes",
-          door::parse_document_from(&bytes::Bytes::copy_from_slice(BAD)),
+          door::parse_document_from(&bytes_1::Bytes::copy_from_slice(BAD)),
         );
-        #[cfg(feature = "bstr")]
-        refused("bstr::BStr", door::parse_document_from(bstr::BStr::new(BAD)));
-        #[cfg(feature = "hipstr")]
+        #[cfg(feature = "bstr_1")]
+        refused("bstr::BStr", door::parse_document_from(bstr_1::BStr::new(BAD)));
+        #[cfg(feature = "hipstr_0_8")]
         refused(
           "hipstr::HipByt",
-          door::parse_document_from(&hipstr::HipByt::from(BAD)),
+          door::parse_document_from(&hipstr_0_8::HipByt::from(BAD)),
         );
+        #[cfg(feature = "smol-bytes_0_2")]
+        {
+          refused(
+            "smol_bytes::shared::Bytes",
+            door::parse_document_from(&smol_bytes_0_2::shared::Bytes::copy_from_slice(BAD)),
+          );
+          refused(
+            "smol_bytes::compact::Bytes",
+            door::parse_document_from(&smol_bytes_0_2::compact::Bytes::copy_from_slice(BAD)),
+          );
+        }
 
         // A `Vec<u8>` and a `Box<[u8]>` too: the delegating implementations are the ones a
         // consumer reaches without naming a backing at all, and they must refuse identically.

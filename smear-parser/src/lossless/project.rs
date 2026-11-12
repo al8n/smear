@@ -22,7 +22,7 @@
 //! projection that folds token extents lands on the same numbers the parser does, and the
 //! differential gate compares with plain `==`.
 //!
-//! It is emphatically **not** [`rowan::SyntaxNode::text_range`]. A CST node's range is the
+//! It is emphatically **not** [`rowan_0_17::SyntaxNode::text_range`]. A CST node's range is the
 //! extent of everything committed *inside* it, trivia included: for `"type T  { f : Int }"`
 //! the tree's `FieldDefinition` runs `12..20` — it holds the space after `Int` — where the
 //! AST's is `12..19`. The document node is worse: its range covers the file's leading and
@@ -34,7 +34,7 @@
 //! `&GreenTokenData` paired with where it starts in the source. Two words, [`Copy`], nothing
 //! allocated.
 //!
-//! rowan's [`SyntaxNode`](rowan::SyntaxNode) is the other candidate, and what it buys over the
+//! rowan's [`SyntaxNode`](rowan_0_17::SyntaxNode) is the other candidate, and what it buys over the
 //! green tree is a parent pointer and an absolute offset. A projection needs the second and gets
 //! the first from whatever it descends on: the parent a refusal names is the node whose dispatch
 //! reached the child, which is a call frame where the walk still has one and a worklist entry
@@ -114,7 +114,7 @@
 
 use core::{fmt, iter::FusedIterator, marker::PhantomData, ops::Range};
 
-use rowan::{
+use rowan_0_17::{
   GreenNodeData, GreenTokenData, Language, NodeOrToken, SyntaxToken, TextRange, TextSize,
 };
 use tokora::SimpleSpan;
@@ -675,10 +675,10 @@ impl<'g, L: Language> Node<'g, L> {
   /// The green node under a cursor, at the offset the cursor already knows.
   ///
   /// The bridge from rowan's API into this one, for a caller that holds a
-  /// [`SyntaxNode`](rowan::SyntaxNode) — a typed CST wrapper, say — and wants the walk below it
+  /// [`SyntaxNode`](rowan_0_17::SyntaxNode) — a typed CST wrapper, say — and wants the walk below it
   /// to materialise nothing further.
   #[inline]
-  pub fn of(node: &'g rowan::SyntaxNode<L>) -> Self {
+  pub fn of(node: &'g rowan_0_17::SyntaxNode<L>) -> Self {
     Self::new(node.green(), node.text_range().start())
   }
 
@@ -791,7 +791,7 @@ pub type Element<'g, L> = NodeOrToken<Node<'g, L>, Token<'g, L>>;
 /// there is no [`DoubleEndedIterator`] to be had without a second accumulator running the other
 /// way — and a reversed walk is not something the span fold or the hole scan wants.
 pub struct Children<'g, L> {
-  raw: rowan::Children<'g>,
+  raw: rowan_0_17::Children<'g>,
   offset: TextSize,
   language: PhantomData<fn() -> L>,
 }
@@ -1214,7 +1214,7 @@ pub fn verify_source_counted<K>(
     let Some(left) = left.checked_sub(1) else {
       return Err(Depth::TooDeep);
     };
-    let mut descent: Descent<(), rowan::Children<'_>> = Descent::new();
+    let mut descent: Descent<(), rowan_0_17::Children<'_>> = Descent::new();
     descent.open(left, (), green.children());
     while let Some((left, (), child)) = descent.take() {
       *elements = elements.saturating_add(1);
@@ -1315,7 +1315,7 @@ pub fn verify_source_at<K>(
     let Some(left) = left.checked_sub(1) else {
       return Err(Depth::TooDeep);
     };
-    let mut descent: Descent<(), rowan::Children<'_>> = Descent::new();
+    let mut descent: Descent<(), rowan_0_17::Children<'_>> = Descent::new();
     descent.open(left, (), green.children());
     while let Some((left, (), child)) = descent.take() {
       match child {
@@ -1370,7 +1370,7 @@ where
   L::Kind: super::KindSpace,
 {
   fn checked<K: super::KindSpace>(
-    raw: rowan::SyntaxKind,
+    raw: rowan_0_17::SyntaxKind,
     at: TextRange,
   ) -> Result<K, ProjectError<K>> {
     K::from_raw(raw.0).ok_or_else(|| {
@@ -1501,7 +1501,7 @@ where
 pub(crate) mod walk {
   use std::vec::Vec;
 
-  use rowan::{Language, NodeOrToken, TextRange};
+  use rowan_0_17::{Language, NodeOrToken, TextRange};
 
   use super::{Children, Element, Node, ProjectError, ProjectErrorKind, Token, to_range};
 

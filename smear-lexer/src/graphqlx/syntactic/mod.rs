@@ -6,9 +6,9 @@ use tokora::{
   Lexer, SimpleSpan, Slice, Source, Token,
   lexer::{FromLogos, LogosLexer},
   punct::{
-    Ampersand, Asterisk, At, CloseAngle, CloseBrace, CloseBracket, CloseParen, Colon, Dollar,
-    DoubleColon, Equal, Exclamation, FatArrow, Hyphen, OpenAngle, OpenBrace, OpenBracket,
-    OpenParen, Pipe, Plus, Spread,
+    Ampersand, Asterisk, At, Caret, CloseAngle, CloseBrace, CloseBracket, CloseParen, Colon,
+    Dollar, DoubleColon, Equal, Exclamation, FatArrow, Hyphen, OpenAngle, OpenBrace, OpenBracket,
+    OpenParen, Pipe, Plus, Spread, Tilde,
   },
   state::RecursionLimitExceeded,
   utils::{CharLen, DowncastRef},
@@ -178,6 +178,12 @@ pub enum SyntacticToken<S> {
   Minus,
   /// Path separator `::` token
   PathSeparator,
+  /// Tilde `~` token, the sigil of a path's package root `~::`
+  Tilde,
+  /// Dot-dot `..` token, the sigil of a path's parent-module root `..::`
+  DotDot,
+  /// Caret `^` token, the sigil of a path's dependency root `^::`
+  Caret,
   /// Identifier token
   Identifier(S),
   /// Float literal token
@@ -220,6 +226,9 @@ impl<S> SyntacticToken<S> {
       Self::Plus => SyntacticTokenKind::Plus,
       Self::Minus => SyntacticTokenKind::Minus,
       Self::PathSeparator => SyntacticTokenKind::PathSeparator,
+      Self::Tilde => SyntacticTokenKind::Tilde,
+      Self::DotDot => SyntacticTokenKind::DotDot,
+      Self::Caret => SyntacticTokenKind::Caret,
       Self::Asterisk => SyntacticTokenKind::Asterisk,
     }
   }
@@ -241,7 +250,7 @@ impl<S> From<&SyntacticToken<S>> for SyntacticTokenKind {
 
 // `SyntacticToken`'s public `Token` surface — the SIMD lexer's `Token`
 // associated type, one generic impl over every source flavor. `S: Slice<'a>`
-// supplies the `Char` for the frozen `Error` type (str/HipStr -> char,
+// supplies the `Char` for the frozen `Error` type (str/HipStr/Utf8Bytes -> char,
 // &[u8]/Bytes/HipByt -> u8).
 
 impl<'a, S> tokora::Token<'a> for SyntacticToken<S>
@@ -478,6 +487,16 @@ where
   fn spread() -> Option<Self::Kind> {
     Some(SyntacticTokenKind::Spread)
   }
+
+  #[inline(always)]
+  fn tilde() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Tilde)
+  }
+
+  #[inline(always)]
+  fn caret() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Caret)
+  }
 }
 
 /// The kind of a [`SyntacticToken`], without the associated source data.
@@ -541,6 +560,12 @@ pub enum SyntacticTokenKind {
   Minus,
   /// Path separator `::` token
   PathSeparator,
+  /// Tilde `~` token
+  Tilde,
+  /// Dot-dot `..` token
+  DotDot,
+  /// Caret `^` token
+  Caret,
 }
 
 macro_rules! into_token_kind {
@@ -560,6 +585,7 @@ into_token_kind!(
   Asterisk::Asterisk,
   Ampersand::Ampersand,
   At::At,
+  Caret::Caret,
   OpenAngle::LAngle,
   CloseAngle::RAngle,
   OpenBrace::LBrace,
@@ -578,6 +604,7 @@ into_token_kind!(
   Pipe::Pipe,
   Plus::Plus,
   Spread::Spread,
+  Tilde::Tilde,
 );
 
 /// The kind as a diagnostic names what it found: punctuation in backticks, and every class as a
@@ -611,6 +638,9 @@ impl core::fmt::Display for SyntacticTokenKind {
       Self::Plus => f.write_str("`+`"),
       Self::Minus => f.write_str("`-`"),
       Self::PathSeparator => f.write_str("`::`"),
+      Self::Tilde => f.write_str("`~`"),
+      Self::DotDot => f.write_str("`..`"),
+      Self::Caret => f.write_str("`^`"),
     }
   }
 }
@@ -775,7 +805,7 @@ where
       }};
     }
 
-    // Emit a two-byte punctuation token (`::`, `=>`).
+    // Emit a two-byte punctuation token (`::`, `=>`, `..`).
     macro_rules! emit_punct2 {
       ($this:ident: $token_start:expr, $expr:expr) => {{
         $this.cursor += 2;
@@ -884,6 +914,8 @@ where
         b'!' => return Some(emit_punct!(self: token_start, SyntacticToken::Bang)),
         b'|' => return Some(emit_punct!(self: token_start, SyntacticToken::Pipe)),
         b'+' => return Some(emit_punct!(self: token_start, SyntacticToken::Plus)),
+        b'~' => return Some(emit_punct!(self: token_start, SyntacticToken::Tilde)),
+        b'^' => return Some(emit_punct!(self: token_start, SyntacticToken::Caret)),
         b'(' => return Some(increase_recursion!(self: token_start, SyntacticToken::LParen)),
         b'[' => return Some(increase_recursion!(self: token_start, SyntacticToken::LBracket)),
         b'{' => return Some(increase_recursion!(self: token_start, SyntacticToken::LBrace)),
@@ -906,8 +938,9 @@ where
           }
           return Some(emit_punct!(self: token_start, SyntacticToken::Equal));
         }
-        // Spread / unterminated-spread / `.`-led float: load b1 lazily — only
-        // paid when b0 == b'.'.
+        // Spread / dot-dot / unterminated-spread / `.`-led float: load b1 lazily — only
+        // paid when b0 == b'.'. Longest match: `...` is the spread, `..` the parent-module
+        // sigil, so `....` is `...` then a stray `.` and `.....` is `...` then `..`.
         b'.' => {
           if bytes.starts_with(b"...") {
             self.cursor += 3;
@@ -915,12 +948,7 @@ where
             return Some(finish!(self, SyntacticToken::Spread));
           }
           if bytes.starts_with(b"..") {
-            self.cursor += 2;
-            let span = SimpleSpan::new(token_start, self.cursor);
-            self.last_span = span;
-            self.last_error_span = Some(span);
-            let err = LexerErrors::<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>::unterminated_spread_operator(span);
-            return Some(Err(err));
+            return Some(emit_punct2!(self: token_start, SyntacticToken::DotDot));
           }
           // `.` immediately followed by a digit (e.g. `.5`) is a decimal Float
           // literal missing its integer part, not a spread operator — the

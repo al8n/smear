@@ -19,11 +19,11 @@
 pub use tokora::cst::{CastNode, NodeChildren, cast};
 
 /// A lossless syntax node in `L`'s space.
-pub type SyntaxNode<L> = rowan::SyntaxNode<L>;
+pub type SyntaxNode<L> = rowan_0_17::SyntaxNode<L>;
 /// A lossless syntax token in `L`'s space.
-pub type SyntaxToken<L> = rowan::SyntaxToken<L>;
+pub type SyntaxToken<L> = rowan_0_17::SyntaxToken<L>;
 /// A node-or-token in `L`'s space.
-pub type SyntaxElement<L> = rowan::SyntaxElement<L>;
+pub type SyntaxElement<L> = rowan_0_17::SyntaxElement<L>;
 
 /// Whether `node` is of `kind`, compared **raw** — the typed cast's test.
 ///
@@ -34,7 +34,7 @@ pub type SyntaxElement<L> = rowan::SyntaxElement<L>;
 /// simply not the kind asked for. al8n/smear#218.
 #[doc(hidden)]
 #[inline]
-pub fn is_kind<L: rowan::Language>(node: &SyntaxNode<L>, kind: L::Kind) -> bool {
+pub fn is_kind<L: rowan_0_17::Language>(node: &SyntaxNode<L>, kind: L::Kind) -> bool {
   node.green().kind() == L::kind_to_raw(kind)
 }
 
@@ -51,7 +51,7 @@ pub type AstChildren<N, L> = NodeChildren<N, L>;
 /// wrong token for a node that carried both, which is a difference no caller should have to know
 /// about.
 #[inline]
-pub fn token_any<L: rowan::Language>(
+pub fn token_any<L: rowan_0_17::Language>(
   parent: &SyntaxNode<L>,
   kinds: &[L::Kind],
 ) -> Option<SyntaxToken<L>> {
@@ -68,7 +68,7 @@ pub fn token_any<L: rowan::Language>(
 /// `cast::tokens`, so without this a node carrying several tokens of one kind — a
 /// `DirectiveLocations`, or a definition's keyword and its name — exposes only one of them.
 #[inline]
-pub fn tokens<L: rowan::Language>(parent: &SyntaxNode<L>, kind: L::Kind) -> AstTokens<L> {
+pub fn tokens<L: rowan_0_17::Language>(parent: &SyntaxNode<L>, kind: L::Kind) -> AstTokens<L> {
   AstTokens {
     inner: parent.children_with_tokens(),
     kind,
@@ -80,12 +80,12 @@ pub fn tokens<L: rowan::Language>(parent: &SyntaxNode<L>, kind: L::Kind) -> AstT
 /// [`tokens`] is its only constructor. The token counterpart of [`AstChildren`], and unlike that
 /// one it is not an alias for an upstream type: tokora's `cst` layer has no token iterator.
 #[derive(Debug, Clone)]
-pub struct AstTokens<L: rowan::Language> {
-  inner: rowan::SyntaxElementChildren<L>,
+pub struct AstTokens<L: rowan_0_17::Language> {
+  inner: rowan_0_17::SyntaxElementChildren<L>,
   kind: L::Kind,
 }
 
-impl<L: rowan::Language> Iterator for AstTokens<L> {
+impl<L: rowan_0_17::Language> Iterator for AstTokens<L> {
   type Item = SyntaxToken<L>;
 
   #[inline]

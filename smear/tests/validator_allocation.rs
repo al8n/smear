@@ -456,7 +456,7 @@ fn only_rendering_allocates() {
   // primary label, every secondary label, every response-path segment, help — and write the
   // message out, without touching the allocator. That is what makes `&dyn Diagnose` usable in a
   // request path at all, and it holds only because every vocabulary type is `Copy` and every
-  // label and help string is `&'static`.
+  // label and help string is borrowed from the diagnostic rather than built by the read.
   //
   // Three things about the measurement below, each load-bearing:
   //
@@ -615,7 +615,7 @@ fn read_the_whole_contract(subject: &dyn Diagnose, sink: &mut StackBuffer<512>) 
 /// repository's twelve-level corpus, and not "an ordinary document". The per-element cost this
 /// exists against — one allocation per element walked past — is what the discrimination below still
 /// reads off the red tree.
-#[cfg(all(feature = "graphql", feature = "rowan"))]
+#[cfg(all(feature = "graphql", feature = "rowan_0_17"))]
 #[test]
 fn the_whole_root_check_allocates_nothing() {
   use smear::parser::graphql::lossless::{parse_executable_document, verify_parse};

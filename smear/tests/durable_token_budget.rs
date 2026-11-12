@@ -1,5 +1,5 @@
 #![cfg(all(
-  feature = "rowan",
+  feature = "rowan_0_17",
   feature = "parser",
   feature = "test-support",
   feature = "std",
@@ -336,7 +336,7 @@ fn a_refused_document_reports_one_terminal_diagnostic_and_reads_no_tail() {
     );
 
     for tail in [0usize, 1, 4, 16, 64] {
-      let src = format!("{prefix}{}", "~ ".repeat(tail));
+      let src = format!("{prefix}{}", "? ".repeat(tail));
       let got = door(&src, Some(100), None);
       assert_eq!(
         got.diagnostics, 1,

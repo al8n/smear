@@ -68,3 +68,9 @@ pub type ThinArrow = tokora::punct::Arrow<tokora::SimpleSpan>;
 
 /// The `::` punctuator.
 pub type PathSeparator = tokora::punct::DoubleColon<tokora::SimpleSpan>;
+
+/// The `~` punctuator.
+pub type Tilde = tokora::punct::Tilde<tokora::SimpleSpan>;
+
+/// The `^` punctuator.
+pub type Caret = tokora::punct::Caret<tokora::SimpleSpan>;

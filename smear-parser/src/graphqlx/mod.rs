@@ -1,11 +1,12 @@
 //! The GraphQLx dialect assembly layer.
 //!
-//! GraphQLx extends GraphQL's lexical name and value grammar with `::` paths,
-//! `set`/`map` collection constructors, generic type arguments, and imports.
+//! GraphQLx extends GraphQL's lexical name and value grammar with `::` paths
+//! under an optional `~::`, `^::` or `..::` root, `set`/`map` collection
+//! constructors, generic type arguments, and `use` items.
 //! Its parsers are specialized to the concrete GraphQLx syntactic lexer while
 //! retaining source-generic, zero-copy AST slices.
 
-/// GraphQLx AST aliases and dialect-specific import nodes.
+/// GraphQLx AST aliases and dialect-specific `use` nodes.
 pub mod ast;
 /// GraphQLx parser errors and Tokora conversion glue.
 pub mod error;
@@ -27,7 +28,7 @@ pub mod kinds;
 // is. `kinds` above is *not* gated, which is the asymmetry that keeps the `graphqlx`-without-
 // `rowan` build green: the kind space describes GraphQLx's grammar, while a tree over it needs
 // rowan.
-#[cfg(feature = "rowan")]
+#[cfg(feature = "rowan_0_17")]
 pub mod lossless;
 /// GraphQLx syntactic productions over the concrete lexer.
 pub mod syntactic;
