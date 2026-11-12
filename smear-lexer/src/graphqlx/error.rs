@@ -637,22 +637,14 @@ impl<Char, StateError> From<LexerError<Char, StateError>> for LexerErrorData<Cha
   }
 }
 
-#[cfg(feature = "smallvec_1")]
-type DefaultErrorsContainer<Char = char, StateError = ()> =
-  smallvec_1::SmallVec<[LexerError<Char, StateError>; 1]>;
-
-#[cfg(not(feature = "smallvec_1"))]
-type DefaultErrorsContainer<Char = char, StateError = ()> =
-  std::vec::Vec<LexerError<Char, StateError>>;
-
 /// A container for storing multiple lexer errors.
 #[derive(Debug, Clone, PartialEq, Eq, From, Into, Deref, DerefMut, AsMut, AsRef)]
-pub struct LexerErrors<Char = char, StateError = ()>(DefaultErrorsContainer<Char, StateError>);
+pub struct LexerErrors<Char = char, StateError = ()>(std::vec::Vec<LexerError<Char, StateError>>);
 
 impl<Char, StateError> Default for LexerErrors<Char, StateError> {
   #[inline(always)]
   fn default() -> Self {
-    Self(DefaultErrorsContainer::default())
+    Self(std::vec::Vec::new())
   }
 }
 
@@ -667,7 +659,7 @@ impl<Char, StateError> LexerErrors<Char, StateError> {
   /// Create a new empty errors container with given capacity.
   #[inline]
   pub fn with_capacity(capacity: usize) -> Self {
-    Self(DefaultErrorsContainer::with_capacity(capacity))
+    Self(std::vec::Vec::with_capacity(capacity))
   }
 }
 

@@ -326,7 +326,7 @@ pub mod __private {
 // it was unreachable and after the split it was silent.
 //
 // WHAT THIS FENCE DOES NOT COVER, stated because a claim wider than what it holds is the defect it
-// was built against. It covers MEMBER features — the 40 `cargo metadata` reports across the six
+// was built against. It covers MEMBER features — the 39 `cargo metadata` reports across the six
 // crates smear re-exports and `smear-semantics`, which it asserts without mounting. Several `smear`
 // features ALSO forward to third-party ones: `bytes_1` forwards `tokora/bytes_1`, and
 // `impl Source for bytes::Bytes` comes from tokora, not from `smear-lexer`. Measured on this tree:
@@ -336,7 +336,7 @@ pub mod __private {
 // `origin/feat/proto` too, so the same graph did the same thing before any crate moved. It is a
 // pre-existing bound of the umbrella, now written down.
 //
-// The unversioned names — `bytes`, `bstr`, `hipstr`, `smol-bytes`, `smallvec`, `rowan` — are pure
+// The unversioned names — `bytes`, `bstr`, `hipstr`, `smol-bytes`, `rowan` — are pure
 // aliases of the versioned features above and publish no witness of their own: enabling a member's
 // alias turns its versioned feature on, which is the pair asserted, so the alias adds no state for
 // the fence to hold.
@@ -371,10 +371,6 @@ const _: () = {
   assert!(
     smear_lexer::__features::HIPSTR_0_8 == cfg!(feature = "hipstr_0_8"),
     "`smear-lexer/hipstr_0_8` and `smear/hipstr_0_8` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/hipstr_0_8` too, or stop enabling\n     `smear-lexer/hipstr_0_8`."
-  );
-  assert!(
-    smear_lexer::__features::SMALLVEC_1 == cfg!(feature = "smallvec_1"),
-    "`smear-lexer/smallvec_1` and `smear/smallvec_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smallvec_1` too, or stop enabling\n     `smear-lexer/smallvec_1`."
   );
   assert!(
     smear_lexer::__features::SMOL_BYTES_0_2 == cfg!(feature = "smol-bytes_0_2"),
@@ -423,10 +419,6 @@ const _: () = {
   assert!(
     smear_parser::__features::ROWAN_0_17 == cfg!(feature = "rowan_0_17"),
     "`smear-parser/rowan_0_17` and `smear/rowan_0_17` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/rowan_0_17` too, or stop enabling\n     `smear-parser/rowan_0_17`."
-  );
-  assert!(
-    smear_parser::__features::SMALLVEC_1 == cfg!(feature = "smallvec_1"),
-    "`smear-parser/smallvec_1` and `smear/smallvec_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smallvec_1` too, or stop enabling\n     `smear-parser/smallvec_1`."
   );
   assert!(
     smear_parser::__features::SMOL_BYTES_0_2 == cfg!(feature = "smol-bytes_0_2"),

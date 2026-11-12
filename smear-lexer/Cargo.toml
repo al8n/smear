@@ -23,10 +23,10 @@ readme = "README.md"
 # crate IS, and a gate that can only ever be on is not a gate.
 
 [features]
-# Element-for-element the subset of `smear`'s own default that reaches this layer: `std`, both
-# dialects, and `smallvec`. `smear` names every member feature explicitly with
-# `default-features = false`, so this list governs a DIRECT dependent and nothing else.
-default = ["std", "graphql", "graphqlx", "smallvec_1"]
+# Element-for-element the subset of `smear`'s own default that reaches this layer: `std` and both
+# dialects. `smear` names every member feature explicitly with `default-features = false`, so this
+# list governs a DIRECT dependent and nothing else.
+default = ["std", "graphql", "graphqlx"]
 alloc = ["tokora/alloc", "memspan/alloc", "bstr_1?/alloc", "smol-bytes_0_2?/alloc"]
 std = [
   "tokora/std",
@@ -55,8 +55,6 @@ graphqlx = []
 # None implies a tier, and `std` and `alloc` above reach the dependencies weakly, with `?/`, so a
 # tier never turns one on either. All but `bstr_1` link `alloc` whatever the tier, `smol-bytes_0_2`
 # through tokora's own edge to it, and every item that names one is gated on `std` or `alloc` too.
-smallvec = ["smallvec_1"]
-smallvec_1 = ["dep:smallvec_1"]
 bytes = ["bytes_1"]
 bytes_1 = ["dep:bytes_1", "tokora/bytes_1"]
 bstr = ["bstr_1"]
@@ -79,7 +77,6 @@ hipstr_0_8 = { package = "hipstr", version = "0.8", default-features = false, op
 bytes_1 = { workspace = true, optional = true }
 smol-bytes_0_2 = { workspace = true, optional = true }
 bstr_1 = { workspace = true, optional = true }
-smallvec_1 = { package = "smallvec", version = "1", default-features = false, features = ["const_new"], optional = true }
 
 [lints]
 workspace = true

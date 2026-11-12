@@ -309,7 +309,7 @@ enumerating the members rather than by reading the umbrella's own table.
 
 ## Feature Flags
 
-Eighteen features, and six aliases. The lexer is not one of them: it is the irreducible base, the
+Seventeen features, and five aliases. The lexer is not one of them: it is the irreducible base, the
 parser cannot exist without it, and a gate that can only ever be on is not a gate.
 
 | Feature | Description | Default |
@@ -319,7 +319,6 @@ parser cannot exist without it, and a gate that can only ever be on is not a gat
 | `graphql` | Standard GraphQL, in every layer | ✓ |
 | `graphqlx` | Extended GraphQL, in the lexer and parser. Semver-exempt until the dialect stabilises | ✓ |
 | `parser` | `smear::parser` — the combinators and the ASTs. Off, `smear-parser` is not in the graph at all and the umbrella is the lexer alone | ✓ |
-| `smallvec_1` | Use `smallvec` 1 for small collections. Implies no tier | ✓ |
 | `validator` | `smear::validator` — the draft §5 rules, plus `smear-schema`'s `build` feature for the §3 pass. Implies `parser` and `graphql`. Adds no third-party dependency | |
 | `proto` | `smear::proto` — draft §6 query, serial mutation and subscription execution as a Sans-I/O state machine. It returns a response tree that `smear::json` writes as §7.2.1 JSON. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds no third-party dependency and defines no value type: the driver's own representation reaches it through a trait | |
 | `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator`; needs `std` or `alloc`, which it does not imply. Adds no third-party dependency | |
@@ -335,23 +334,23 @@ parser cannot exist without it, and a gate that can only ever be on is not a gat
 
 No feature but `default` switches a tier on: not a capability (`graphql`, `graphqlx`, `parser`,
 `validator`, `proto`, `introspection`, `analysis`, …), and not a dependency feature, although
-`smallvec_1`, `bytes_1`, `hipstr_0_8` and `smol-bytes_0_2` bring in a crate that links `alloc` on
-its own. So a `default-features = false` consumer names `std` or `alloc` itself, and names `std`
-beside `rowan_0_17`, because the lossless tower is written against the standard library.
+`bytes_1`, `hipstr_0_8` and `smol-bytes_0_2` bring in a crate that links `alloc` on its own. So a
+`default-features = false` consumer names `std` or `alloc` itself, and names `std` beside
+`rowan_0_17`, because the lossless tower is written against the standard library.
 
-The six dependency features carry the major of the crate they enable, and the dependency is named
+The five dependency features carry the major of the crate they enable, and the dependency is named
 the same way, so a second major of one of them can be added beside it. The unversioned names —
-`smallvec`, `bytes`, `bstr`, `hipstr`, `smol-bytes` and `rowan` — are aliases for the current
-version: each enables its versioned feature and nothing else.
+`bytes`, `bstr`, `hipstr`, `smol-bytes` and `rowan` — are aliases for the current version: each
+enables its versioned feature and nothing else.
 
 A lexer-only consumer — a syntax highlighter, a formatter front-end, token-level tooling — turns the
 parser off, or names the member and skips the umbrella entirely. The two resolve the same code:
 
 ```toml
 [dependencies]
-smear = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1"] }
+smear = { version = "0.0.1", default-features = false, features = ["std", "graphql"] }
 # or
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql"] }
 ```
 
 ### The tiers: `std` and `alloc`

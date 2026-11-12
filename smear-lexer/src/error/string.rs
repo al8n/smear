@@ -812,15 +812,9 @@ impl<Char> StringError<Char> {
   }
 }
 
-#[cfg(feature = "smallvec_1")]
-type DefaultStringErrorsContainer<Char = char> = smallvec_1::SmallVec<[StringError<Char>; 1]>;
-
-#[cfg(not(feature = "smallvec_1"))]
-type DefaultStringErrorsContainer<Char = char> = std::vec::Vec<StringError<Char>>;
-
 /// A container for storing multiple string errors.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, From, Into, Deref, DerefMut, AsMut, AsRef)]
-pub struct StringErrors<Char = char>(DefaultStringErrorsContainer<Char>);
+pub struct StringErrors<Char = char>(std::vec::Vec<StringError<Char>>);
 
 impl<Char> From<StringError<Char>> for StringErrors<Char> {
   #[inline]
@@ -833,14 +827,14 @@ impl<Char> StringErrors<Char> {
   /// Create a new empty errors container with given capacity.
   #[inline]
   pub fn with_capacity(capacity: usize) -> Self {
-    Self(DefaultStringErrorsContainer::with_capacity(capacity))
+    Self(std::vec::Vec::with_capacity(capacity))
   }
 }
 
 impl<Char> IntoIterator for StringErrors<Char> {
   type Item = StringError<Char>;
 
-  type IntoIter = <DefaultStringErrorsContainer<Char> as IntoIterator>::IntoIter;
+  type IntoIter = std::vec::IntoIter<StringError<Char>>;
 
   #[inline]
   fn into_iter(self) -> Self::IntoIter {

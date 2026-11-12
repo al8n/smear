@@ -258,8 +258,6 @@ pub mod __features {
   pub const MATERIALIZED_NUMBERS: bool = cfg!(feature = "materialized-numbers");
   /// `rowan_0_17`, as this crate resolved it.
   pub const ROWAN_0_17: bool = cfg!(feature = "rowan_0_17");
-  /// `smallvec_1`, as this crate resolved it.
-  pub const SMALLVEC_1: bool = cfg!(feature = "smallvec_1");
   /// `smol-bytes_0_2`, as this crate resolved it.
   pub const SMOL_BYTES_0_2: bool = cfg!(feature = "smol-bytes_0_2");
   /// `std`, as this crate resolved it.
