@@ -2,9 +2,9 @@
 //! hands the syntax errors it found.
 //!
 //! The syntactic layer stops at a document's first syntax error and keeps nothing beside the
-//! document. The lossless layer recovers, records every syntax error in its tree, and keeps the
-//! tree. Both answer the same AST: a consumer that is handed a document never learns which layer
-//! made it, and a consumer that is handed text takes the layer as a value.
+//! document. The lossless layer recovers, lends every syntax error to the caller's sink, and keeps
+//! the tree. Both answer the same AST: a consumer that is handed a document never learns which
+//! layer made it, and a consumer that is handed text takes the layer as a value.
 //!
 //! Each dialect module declares its own `Layer` trait, implements it for the two values typed by
 //! its dialect, and names them `Syntactic` and `Lossless`. The trait is sealed for each layer and
@@ -104,19 +104,31 @@ where
 /// How much of a document an answer covers: how many items have an AST image, and how many
 /// elements have none.
 ///
-/// The syntactic layer answers a document only for a text it read whole, so its recovery is always
-/// complete, and it counts every item, the items inside inline modules included.
+/// Both layers count by one rule, at every module depth:
+///
+/// - [`projected`](Self::projected) counts every item that has an AST image. An item is what the
+///   AST calls one: in GraphQLx a `use` item, an inline module, a definition or an extension; in
+///   standard GraphQL, which has no modules, a definition or an extension. An inline module counts
+///   one, beside the items inside it, and a `use` item counts one.
+/// - [`skipped`](Self::skipped) counts every element that has none: an item the projection
+///   refused, a recovery hole or gap tile the parser left in an item's place, and each non-trivia
+///   token that stands between items. A module whose header has no image is one skipped element,
+///   and nothing inside it is counted.
+///
+/// Both counts saturate.
+///
+/// The syntactic layer answers a document only for a text it read whole, so its `skipped` is zero
+/// and its recovery is always complete.
 ///
 /// The fail-fast projection answers `Result<Ast, ProjectError>`: one refusal, at the first
 /// obstruction, for a caller that wants the AST or nothing. A recovering projection answers the
 /// question an editor asks instead — *what does the part that is still well-formed say?* — and
-/// this is the honesty half of that answer. A recovering projection counts the top-level elements
-/// of the tree it walks.
+/// this is the honesty half of that answer.
 ///
 /// # What `skipped` says
 ///
-/// `skipped() > 0` means at least one top-level element had no AST image, and nothing in the AST
-/// covers it.
+/// `skipped() > 0` means at least one element, at some module depth, had no AST image, and nothing
+/// in the AST covers it.
 ///
 /// [`is_complete`](Self::is_complete) is the one-call form of that question. It is a statement
 /// about **loss**, not about validity: it is the only state in which the AST covers the whole
@@ -149,29 +161,29 @@ impl Recovery {
     Self { projected, skipped }
   }
 
-  /// Returns how many items had an AST image.
+  /// Returns how many items had an AST image, at every module depth.
   ///
-  /// A recovering projection counts the top-level definitions it projected; the syntactic layer
-  /// counts every item of its document, at every module depth.
+  /// An inline module counts one, beside the items inside it, and a `use` item counts one. The
+  /// count saturates.
   #[inline]
   pub const fn projected(&self) -> u32 {
     self.projected
   }
 
-  /// Returns how many top-level elements had no AST image and were dropped.
+  /// Returns how many elements had no AST image and were dropped, at every module depth.
   ///
-  /// An *element*, not a definition: the count includes a definition the projection refused, a
-  /// recovery hole or gap tile the parser left in the definition's place, and each non-trivia token
-  /// the parser could not attach to a definition. One mistyped keyword can leave several.
+  /// An *element*, not an item: the count includes an item the projection refused, a recovery
+  /// hole or gap tile the parser left in an item's place, and each non-trivia token the parser
+  /// could not attach to an item. One mistyped keyword can leave several. A module whose header
+  /// has no image counts one, and nothing inside it is counted. The count saturates.
   #[inline]
   pub const fn skipped(&self) -> u32 {
     self.skipped
   }
 
-  /// Returns whether every top-level element had an AST image.
+  /// Returns whether every element had an AST image, at every module depth.
   ///
-  /// True exactly when [`skipped`](Self::skipped) is zero: every top-level element had an AST
-  /// image.
+  /// True exactly when [`skipped`](Self::skipped) is zero.
   ///
   /// It does not say the fail-fast projection would have succeeded. That door additionally asserts
   /// the root holds exactly one document container and that the document has a definition, so a
@@ -230,9 +242,13 @@ impl<D, T> Parsed<D, T> {
     self.recovery
   }
 
-  /// How many syntax errors the parse found.
+  /// How many syntax errors the parse found: how many a sink that never breaks is lent.
   ///
   /// It is not how many a sink took: a sink that breaks takes fewer, and the count stays.
+  ///
+  /// It counts errors, where a kept tree counts records: one record of the lossless tree can hold
+  /// several errors. So for the lossless layer the count is never less than the number of the
+  /// tree's error diagnostics, and it is zero exactly when the tree has none.
   #[inline]
   pub const fn error_count(&self) -> usize {
     self.errors
@@ -366,13 +382,22 @@ impl<D: ?Sized> fmt::Debug for Syntactic<D> {
   }
 }
 
-/// The lossless layer of the dialect `D`: recovers, records every syntax error in its tree, and
-/// keeps the tree.
+/// The lossless layer of the dialect `D`: recovers, lends every syntax error to the caller's sink,
+/// and keeps the tree.
 ///
 /// `D` is the dialect's brand, and each dialect names its own instance `Lossless`. The value holds
 /// the lexer's [`LosslessLimits`], which bound how deep a parse descends and how much work a text
 /// may buy. A text is read as `str`: a tree holds text only, so a caller that holds bytes decodes
 /// them first.
+///
+/// # Memory, and untrusted text
+///
+/// An error is lent by reference and never copied, so an answer keeps what its tree keeps and
+/// nothing more. While a parse runs it holds one record for each error it has found, and nothing
+/// bounds their number but the text: a text dense with errors is recorded error for error. For
+/// untrusted text the bound is the caller's own
+/// [`with_max_produce_events`](LosslessLimits::with_max_produce_events): the records a parse
+/// keeps are a bounded multiple of the lexical items it is allowed to produce.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[cfg_attr(docsrs, doc(cfg(all(feature = "rowan_0_17", feature = "std"))))]
 pub struct Lossless<D: ?Sized> {

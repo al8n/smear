@@ -1,8 +1,6 @@
 //! GraphQL's two parser layers, and the trait both implement.
 
 use smear_lexer::{SyntaxErrorKind, graphql::ContextualKeyword, limits::SyntacticLimits};
-#[cfg(all(feature = "rowan_0_17", feature = "std"))]
-use tokora::emitter::Severity;
 use tokora::{
   Lexer, Parse as _, Parser, SimpleSpan, Source, diagnostic::Diagnose, utils::DowncastRef,
 };
@@ -35,8 +33,8 @@ pub type Syntactic = crate::layer::Syntactic<GraphQL>;
 
 /// The lossless layer of GraphQL.
 ///
-/// It recovers, records every syntax error in its tree, and keeps the tree. It reads `str`: a tree
-/// holds text only, so a caller that holds bytes decodes them first.
+/// It recovers, lends every syntax error to the caller's sink, and keeps the tree. It reads `str`:
+/// a tree holds text only, so a caller that holds bytes decodes them first.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[cfg_attr(docsrs, doc(cfg(all(feature = "rowan_0_17", feature = "std"))))]
 pub type Lossless = crate::layer::Lossless<GraphQL>;
@@ -199,23 +197,44 @@ impl<'src> Layer<'src, str> for Lossless {
   type Failure = Refused;
   type Tree = lossless::Parse;
 
-  // The hand-over is the door's to make while its emitter is alive, and the door does not make it
-  // yet: these methods lend nothing, and count the errors the tree records.
+  // The three laws of a sink, from these bodies and the door's.
+  //
+  // 1. The count is of the door's calls, one for each error it lends, and `report` is handed each
+  //    of them until it breaks: a sink that never breaks is called exactly `error_count()` times.
+  // 2. The count does not read what `report` answers, so a sink that breaks changes neither it
+  //    nor the verdict `Parsed` draws from it. A break ends the hand-over and nothing else: the
+  //    parse had ended before the first error was lent.
+  // 3. The door lends at least one error for each error diagnostic of the tree it answers, and
+  //    none beside them: a record it keeps lends each member that is not a budget member, or one
+  //    error made for it when it holds none; a record it drops lends nothing; and its own budget
+  //    refusal is one lent error beside the one diagnostic it appends. So the count is zero
+  //    exactly when the tree's `has_errors()` is false, and it is never less than the number of
+  //    the tree's error diagnostics.
   fn type_system_document<K>(
     &self,
     source: &'src str,
-    _report: &mut K,
+    report: &mut K,
   ) -> Result<Parsed<TypeSystemDocument<&'src str>, lossless::Parse>, Refused>
   where
     K: Report<Self::Error> + ?Sized,
   {
     // Asked before any scan: a text longer than a tree can address has no parse, where the `&str`
-    // door would panic on it.
+    // door would panic on it. Nothing is lent for it.
     if let Some(refused) = Refused::for_source_len(source.len()) {
       return Err(refused);
     }
-    let parse = lossless::parse_type_system_document_with_limits(source, self.limits());
-    let errors = errors_in(&parse);
+    let mut errors = 0usize;
+    let mut taking = true;
+    let parse = lossless::runner::type_system_document_root_lending(
+      source,
+      self.limits(),
+      |error: &lossless::GraphqlLosslessErrorValue<&'src str>| {
+        errors = errors.saturating_add(1);
+        if taking && report.error(error).is_break() {
+          taking = false;
+        }
+      },
+    );
     let (document, recovery) = lossless::project::project_own_type_system_document(&parse, source);
     Ok(Parsed::new(document, recovery, errors, parse))
   }
@@ -223,7 +242,7 @@ impl<'src> Layer<'src, str> for Lossless {
   fn executable_document<K>(
     &self,
     source: &'src str,
-    _report: &mut K,
+    report: &mut K,
   ) -> Result<Parsed<ExecutableDocument<&'src str>, lossless::Parse>, Refused>
   where
     K: Report<Self::Error> + ?Sized,
@@ -231,8 +250,18 @@ impl<'src> Layer<'src, str> for Lossless {
     if let Some(refused) = Refused::for_source_len(source.len()) {
       return Err(refused);
     }
-    let parse = lossless::parse_executable_document_with_limits(source, self.limits());
-    let errors = errors_in(&parse);
+    let mut errors = 0usize;
+    let mut taking = true;
+    let parse = lossless::runner::executable_document_root_lending(
+      source,
+      self.limits(),
+      |error: &lossless::GraphqlLosslessErrorValue<&'src str>| {
+        errors = errors.saturating_add(1);
+        if taking && report.error(error).is_break() {
+          taking = false;
+        }
+      },
+    );
     let (document, recovery) = lossless::project::project_own_executable_document(&parse, source);
     Ok(Parsed::new(document, recovery, errors, parse))
   }
@@ -454,16 +483,4 @@ where
 /// every item is a top-level definition. The count saturates.
 fn count(definitions: usize) -> u32 {
   u32::try_from(definitions).unwrap_or(u32::MAX)
-}
-
-/// How many errors a lossless parse recorded.
-#[cfg(all(feature = "rowan_0_17", feature = "std"))]
-fn errors_in(parse: &lossless::Parse) -> usize {
-  let mut errors = 0usize;
-  for diagnostic in parse.diagnostics() {
-    if diagnostic.severity() == Severity::Error {
-      errors += 1;
-    }
-  }
-  errors
 }

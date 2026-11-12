@@ -110,6 +110,49 @@ crate::lossless::lossless_door! {
   request  = executable::executable_document;
 }
 
+/// The type-system root with the hand-over: the parse [`parse_type_system_document_with_limits`]
+/// answers, and `lend` called once for each typed syntax error of it, by reference, before this
+/// returns: each error the finished parse keeps, in the order the parse recorded them, and then
+/// the door's own token-budget refusal when the durable budget refused an item.
+///
+/// It is what this dialect's lossless layer reads a type-system document through. It has the
+/// `&str` doors' precondition: a text longer than [`Refused::MAX_SOURCE_LEN`] panics at
+/// materialisation, so its caller asks the length first.
+pub(crate) fn type_system_document_root_lending<'inp, Lend>(
+  src: &'inp str,
+  limits: LosslessLimits,
+  lend: Lend,
+) -> Parse
+where
+  Lend: FnMut(&GraphqlLosslessErrorValue<&'inp str>),
+{
+  parse_lossless_document(
+    src,
+    limits,
+    super::document::type_system_document::<str, _>,
+    lend,
+  )
+}
+
+/// The executable root with the hand-over: [`type_system_document_root_lending`]'s contract, for
+/// the parse [`parse_executable_document_with_limits`] answers. It is what this dialect's lossless
+/// layer reads an executable document through.
+pub(crate) fn executable_document_root_lending<'inp, Lend>(
+  src: &'inp str,
+  limits: LosslessLimits,
+  lend: Lend,
+) -> Parse
+where
+  Lend: FnMut(&GraphqlLosslessErrorValue<&'inp str>),
+{
+  parse_lossless_document(
+    src,
+    limits,
+    super::executable::executable_document::<str, _>,
+    lend,
+  )
+}
+
 /// Materialize a probe's `cst` at the root kind and collect its diagnostics.
 ///
 /// **The `test_support` probes' finish, and theirs alone.** The shipped doors and the
