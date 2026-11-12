@@ -207,6 +207,13 @@ fn a_scope_answers_in_its_order_with_package_names_last() {
     test_support::resolve(&root, &dependencies, "^::app", &["U", "T"], "T").as_deref(),
     Some("param T")
   );
+  // The parameters are searched by spelling, a spelling written twice once.
+  for name in ["U", "V"] {
+    assert_eq!(
+      test_support::resolve(&root, &dependencies, "^::app", &["V", "U", "V"], name),
+      Some(format!("param {name}"))
+    );
+  }
   assert_eq!(
     test_support::resolve(&root, &dependencies, "^::app", &["T"], "@T"),
     None
@@ -248,6 +255,45 @@ fn a_scope_answers_in_its_order_with_package_names_last() {
       ("mod nowhere", None),
     ],
   );
+}
+
+/// A generic parameter is a type, in scope wherever the first segment of a path is wanted as a type
+/// or a module: it shadows a module of its name in a directive's path too, where only the last
+/// segment names a directive, and it answers only a lone segment where a type is wanted. A lone
+/// directive name never meets it.
+#[test]
+fn a_parameter_shadows_the_module_prefix_of_a_directive_path() {
+  let root = package(
+    "app",
+    Tier::Std,
+    &[
+      ("schema.graphqlx", "directive @T on FIELD_DEFINITION\n"),
+      (
+        "T/a.graphqlx",
+        "directive @d on FIELD_DEFINITION\nscalar Inner\n",
+      ),
+    ],
+  );
+  assert!(analyze(&root, &[], &Limits::new()).is_ok());
+
+  for (path, with, without) in [
+    ("T", Some("param T"), None),
+    ("@T::d", None, Some("@^::app::T::d")),
+    ("T::Inner", None, Some("^::app::T::Inner")),
+    ("mod T", None, Some("mod ^::app::T")),
+    ("@T", Some("@^::app::T"), Some("@^::app::T")),
+  ] {
+    assert_eq!(
+      test_support::resolve(&root, &[], "^::app", &["T"], path).as_deref(),
+      with,
+      "`{path}` with `T` in scope"
+    );
+    assert_eq!(
+      named(&root, &[], "^::app", path).as_deref(),
+      without,
+      "`{path}`"
+    );
+  }
 }
 
 #[test]

@@ -8,8 +8,9 @@
 //! # Bounds
 //!
 //! - The whole analysis looks at most `Limits::max_near_miss_comparisons` names, every search
-//!   together. A search the budget runs out in suggests nothing, so a suggestion never depends on
-//!   where the budget ran out.
+//!   together, and each module a glob names, whose names a search reads, costs one more, whatever
+//!   it declares. A search the budget runs out in suggests nothing, so a suggestion never depends
+//!   on where the budget ran out.
 //! - A name longer than `MAX_LEN` bytes is not searched for at all.
 //! - A name whose length differs from the misspelt one's by more than the distance allowed is
 //!   looked at but not compared: no name compared is more than a third longer than the misspelt
@@ -62,17 +63,19 @@ impl<'c> Search<'c> {
     self.reach != 0 && !self.starved
   }
 
+  /// Looks into a module, which a glob names, whose names are offered next: spends one of
+  /// `budget`'s comparisons, whatever the module declares.
+  pub(super) fn visit(&mut self, budget: &Cell<u32>) {
+    if self.open() {
+      self.spend(budget);
+    }
+  }
+
   /// Looks at `candidate`, spending one of `budget`'s comparisons.
   pub(super) fn offer(&mut self, budget: &Cell<u32>, candidate: &'c [u8]) {
-    if !self.open() {
+    if !self.open() || !self.spend(budget) {
       return;
     }
-    let left = budget.get();
-    if left == 0 {
-      self.starved = true;
-      return;
-    }
-    budget.set(left - 1);
     let wanted = self.wanted;
     if candidate.is_empty()
       || candidate == wanted
@@ -90,6 +93,17 @@ impl<'c> Search<'c> {
     if nearer {
       self.best = Some((distance, candidate));
     }
+  }
+
+  /// Spends one of `budget`'s comparisons: `false`, and the search starved, when none is left.
+  fn spend(&mut self, budget: &Cell<u32>) -> bool {
+    let left = budget.get();
+    if left == 0 {
+      self.starved = true;
+      return false;
+    }
+    budget.set(left - 1);
+    true
   }
 
   /// The nearest name looked at: `None` when none is within reach, or the budget ran out before

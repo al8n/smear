@@ -17,11 +17,14 @@
 //!    waits is woken when its head's name is first bound, in either namespace.
 //! 3. The glob fixpoint, in rounds. A round looks each waiting head up in the whole scope as it
 //!    stood when the round began, the globs made so far, the prelude and the packages included, and
-//!    resolves every item that finds something, as one step; the next round looks up again only
-//!    the items whose head a name the round bound first, or a module a glob of the round named
-//!    first, can answer. It ends when a round resolves nothing. Needing more rounds than
-//!    `Limits::max_glob_iterations` is `resource-limit`, once for the module, and the items left
-//!    are reported no further.
+//!    resolves every item that finds something, as one step, so no verdict depends on the order the
+//!    items are written in. The first round looks every waiting item up; the next looks up again
+//!    only the items whose head a name the round bound first, or a module a glob of the round named
+//!    first, can answer, which an index of the waiting items by their heads' names finds. It ends
+//!    when a round resolves nothing. Needing more rounds than `Limits::max_glob_iterations` is
+//!    `resource-limit`, once for the module, and the items left are reported no further. A chain of
+//!    renames needs one round a link and no glob: `use A1 as A2` waits in the explicit fixpoint
+//!    until both namespaces have `A1`, so a chain longer than the limit is refused all the same.
 //! 4. Every item with a head is looked up again in the final scope. One that finds something else
 //!    than what it was resolved to, a name a glob, the prelude or a package gave it that a binding
 //!    made after it now shadows, is `use-resolution-changed`, and what its tree failed to find is
@@ -34,27 +37,36 @@
 //!
 //! An item's own bindings and globs never answer its own head.
 //!
+//! A module's globs make one row for each module they name, however many items glob it, and one
+//! row answers the lookups of every item but its only maker's. The first glob that would name a
+//! module past `Limits::max_globs` is `resource-limit`, once for the module, and makes no row, as
+//! no later glob of another module does: which glob that is follows the order the module's items
+//! resolve in, which the program alone decides.
+//!
 //! # Termination and cost
 //!
 //! A step only adds bindings and globs, an item is resolved at most once, and a round that resolves
 //! nothing ends its fixpoint, so both fixpoints end: the explicit one after one look per item and
 //! at most two wakes, one per namespace its head's name is first bound in; the glob one after at
 //! most `Limits::max_glob_iterations` rounds, and after at most one round per item, since every
-//! round but the last resolves one. In a module of `u` items, `b` names bound and `g` distinct
-//! modules its globs name, a lookup costs a logarithm of the tables, and `g` more for its globs; an
-//! item is looked up once by the explicit fixpoint, once by step 4, and by the glob fixpoint once
-//! and again only when a name or a glob of the round before can answer it, which each binding of
-//! its name and each glob of a module holding it does once. So a module costs `O((u + b) · g)`
-//! lookups at worst, and the analysis the sum over its modules, which share nothing but the tables
-//! they read.
+//! round but the last resolves one.
+//!
+//! In a module of `u` items whose globs name `g` modules, at most `Limits::max_globs` however
+//! many globs it has, a lookup costs a logarithm of the tables, and one search in each of the `g`
+//! modules for its globs. A round of the glob fixpoint costs one lookup per item on its worklist,
+//! and the next worklist: for each name it bound first, an index search and the waiting items of
+//! that name; for each module it globbed first, the module's declarations and child modules each
+//! searched for in the index, or the distinct waiting heads each searched for in the module,
+//! whichever are fewer. A round reads no item that nothing of the round before can answer, so its
+//! cost does not grow with the rounds before it. An item is looked up once by the explicit fixpoint
+//! and its at most two wakes, once by step 4, and by the glob fixpoint once in the first round and
+//! again only when woken: at most twice by the first bindings of its head's name, once per
+//! namespace, and at most once by each of the `g` modules. So the glob fixpoint costs at most
+//! `u · (3 + g)` lookups however many rounds it runs, and its wakes `O(g · u)` searches; a module
+//! costs `O(u · g)` lookups of `O(g)` searches each at worst, with `g` at most `Limits::max_globs`,
+//! and the analysis the sum over its modules, which share nothing but the tables they read.
 
-use std::{
-  collections::{BTreeMap, BTreeSet},
-  format,
-  string::String,
-  vec,
-  vec::Vec,
-};
+use std::{collections::BTreeMap, format, string::String, vec, vec::Vec};
 
 use smear_lexer::decode_string_value;
 use smear_parser::graphqlx::ast::{
@@ -72,12 +84,11 @@ use crate::graphqlx::{
   limits::Limits,
   model::{ModelBuilder, ModuleKind, Primitive},
   package::Layout,
-  set::{FileView, compare_paths},
 };
 
 use super::{
-  Bound, ExplicitKey, Failure, Level, Lookup, Position, Query, Scopes, Target, Wanted, Why, Within,
-  quoted,
+  Bound, ExplicitKey, Failure, Glob, Level, Lookup, Position, Query, Scopes, Target, Wanted, Why,
+  Within, quoted,
 };
 
 /// Resolves every `use` item of `declarations` into `scopes`, module by module, and reports what
@@ -117,6 +128,9 @@ pub(super) fn resolve<'x>(
       targets: Vec::new(),
       text: String::new(),
       max_rounds: limits.max_glob_iterations(),
+      globbed: 0,
+      max_globs: limits.max_globs(),
+      globs_full: false,
     };
     run.resolve(declarations);
     start = end;
@@ -228,6 +242,13 @@ struct Run<'r, 'x> {
   text: String,
   /// `Limits::max_glob_iterations`.
   max_rounds: u32,
+  /// How many modules the module's globs name so far: its rows among the globs.
+  globbed: u32,
+  /// `Limits::max_globs`.
+  max_globs: u32,
+  /// Whether a glob of the module would have named a module past `max_globs`, which is reported
+  /// once.
+  globs_full: bool,
 }
 
 impl<'x> Run<'_, 'x> {
@@ -275,23 +296,28 @@ impl<'x> Run<'_, 'x> {
   }
 
   /// The glob fixpoint: rounds that each resolve every waiting item whose head the scope, as it
-  /// stood when the round began, answers.
+  /// stood when the round began, answers, all of them as one step. The first round looks every
+  /// waiting item up; each round after it only the items that the names the round before bound
+  /// first, and the modules it globbed first, can answer, which an index of the waiting items by
+  /// their heads' names finds.
   fn globs(&mut self, declarations: &'x Declarations<'_, '_>) {
+    let mut waiting: BTreeMap<&'x [u8], Vec<usize>> = BTreeMap::new();
+    // The items the round looks up, in their order.
+    let mut worklist: Vec<usize> = Vec::new();
+    for (at, item) in self.items.iter().enumerate() {
+      if let (State::Pending, Some(head)) = (item.state, item.head) {
+        waiting.entry(head.name).or_default().push(at);
+        worklist.push(at);
+      }
+    }
     let mut rounds: u32 = 0;
-    // What the round before bound and globbed first; `None` before the first round, which looks
-    // every waiting item up.
-    let mut woken: Option<(BTreeSet<Sym>, Vec<ModuleId>)> = None;
     loop {
       let mut decided: Vec<(usize, Found)> = Vec::new();
-      for (at, item) in self.items.iter().enumerate() {
+      for &at in &worklist {
+        let item = &self.items[at];
         let (State::Pending, Some(head)) = (item.state, item.head) else {
           continue;
         };
-        if let Some((fresh, targets)) = &woken
-          && !self.wakes(head, fresh, targets)
-        {
-          continue;
-        }
         let found = self.head(head, false, key(item.entry));
         if answered(found, head.whole) {
           decided.push((at, found));
@@ -308,9 +334,12 @@ impl<'x> Run<'_, 'x> {
       for (at, found) in decided {
         self.apply(declarations, at, Some(found));
       }
-      let fresh: BTreeSet<Sym> = core::mem::take(&mut self.fresh).into_iter().collect();
+      let fresh: Vec<Sym> = core::mem::take(&mut self.fresh);
       let targets: Vec<ModuleId> = core::mem::take(&mut self.targets);
-      woken = Some((fresh, targets));
+      worklist.clear();
+      self.woken(&mut waiting, &fresh, &targets, &mut worklist);
+      worklist.sort_unstable();
+      worklist.dedup();
     }
     for item in &mut self.items {
       if matches!(item.state, State::Pending) {
@@ -319,28 +348,98 @@ impl<'x> Run<'_, 'x> {
     }
   }
 
-  /// Whether a round that bound `fresh` first and globbed `targets` first can change what `head`
-  /// finds: by a binding of its name, or by a glob of a module that has it.
-  fn wakes(&self, head: Head<'x>, fresh: &BTreeSet<Sym>, targets: &[ModuleId]) -> bool {
-    let Some(sym) = self.names.find(head.name) else {
-      return false;
+  /// Onto `worklist`, every item of `waiting` that a round which bound `fresh` first and globbed
+  /// `targets` first can answer: one whose head is a name bound first, and one whose head a module
+  /// globbed first declares, in the type namespace or, for a path of the head alone, in the
+  /// directive namespace. A module globbed first is read whichever way looks at fewer names: its
+  /// declarations and child modules, each looked for among the waiting heads, or the distinct
+  /// waiting heads, each looked for in the module.
+  fn woken(
+    &self,
+    waiting: &mut BTreeMap<&'x [u8], Vec<usize>>,
+    fresh: &[Sym],
+    targets: &[ModuleId],
+    worklist: &mut Vec<usize>,
+  ) {
+    for &sym in fresh {
+      self.wake(waiting, self.names.spelling(sym), false, worklist);
+    }
+    for &target in targets {
+      let bindings = self.scopes.bindings_of(target);
+      let children = self.scopes.children_of(target);
+      if bindings.len() + children.len() <= waiting.len() {
+        for binding in bindings {
+          let name = self.names.spelling(binding.name);
+          self.wake(waiting, name, binding.namespace == DIRECTIVE, worklist);
+        }
+        for child in children {
+          self.wake(waiting, self.names.spelling(child.name), false, worklist);
+        }
+      } else {
+        self.wake_declared(waiting, target, worklist);
+      }
+    }
+  }
+
+  /// Onto `worklist`, every item of `waiting` whose head is `name`, but only those of a path of the
+  /// head alone when `whole_only`; forgets the items resolved since they were indexed.
+  fn wake(
+    &self,
+    waiting: &mut BTreeMap<&'x [u8], Vec<usize>>,
+    name: &[u8],
+    whole_only: bool,
+    worklist: &mut Vec<usize>,
+  ) {
+    let Some(list) = waiting.get_mut(name) else {
+      return;
     };
-    fresh.contains(&sym)
-      || targets.iter().any(|&target: &ModuleId| {
-        self
+    list.retain(|&at: &usize| matches!(self.items[at].state, State::Pending));
+    for &at in list.iter() {
+      if !whole_only || self.items[at].head.is_some_and(|head: Head<'x>| head.whole) {
+        worklist.push(at);
+      }
+    }
+    if list.is_empty() {
+      waiting.remove(name);
+    }
+  }
+
+  /// Onto `worklist`, every item of `waiting` whose head `target` declares: in the type
+  /// namespace, or, for a path of the head alone, in the directive namespace; forgets the items
+  /// resolved since they were indexed, of each head it looks at.
+  fn wake_declared(
+    &self,
+    waiting: &mut BTreeMap<&'x [u8], Vec<usize>>,
+    target: ModuleId,
+    worklist: &mut Vec<usize>,
+  ) {
+    waiting.retain(|name: &&'x [u8], list: &mut Vec<usize>| {
+      // A name no declaration has is in no table.
+      let Some(sym) = self.names.find(name) else {
+        return true;
+      };
+      let ty = self.scopes.declared(target, TYPE, sym, false).is_some();
+      if !ty
+        && self
           .scopes
-          .declared(target, TYPE, sym, !head.whole)
-          .is_some()
-          || (head.whole
-            && self
-              .scopes
-              .declared(target, DIRECTIVE, sym, false)
-              .is_some())
-      })
+          .declared(target, DIRECTIVE, sym, false)
+          .is_none()
+      {
+        return true;
+      }
+      list.retain(|&at: &usize| matches!(self.items[at].state, State::Pending));
+      for &at in list.iter() {
+        if ty || self.items[at].head.is_some_and(|head: Head<'x>| head.whole) {
+          worklist.push(at);
+        }
+      }
+      !list.is_empty()
+    });
   }
 
   /// Reports that the module's glob fixpoint would pass its limit, at the head of the item at
-  /// `at`, the first the next round would resolve, and leaves every waiting item unresolved.
+  /// `at`, the first the next round would resolve, and leaves every waiting item unresolved. The
+  /// rounds may wait on renames as well as on globs, so the message counts rounds alone.
   fn stop(&mut self, at: usize) {
     if let Some(head) = self.items[at].head {
       let kind = DiagnosticKind::ResourceLimit;
@@ -348,14 +447,13 @@ impl<'x> Run<'_, 'x> {
         Diagnostic::builder(kind.code(), head.at)
           .severity(kind.severity())
           .message(format!(
-            "resolving the `use` items of this module would take more than {} rounds of the glob \
-             fixpoint",
+            "resolving the `use` items of this module would take more than {} rounds",
             self.max_rounds
           ))
           .primary_label(kind.title())
           .help(
-            "raise `Limits::max_glob_iterations`, or write from a root the paths that wait on \
-             what this module's globs give",
+            "raise `Limits::max_glob_iterations`, or write from a root, `~::`, `^::` or `..::`, \
+             the paths that wait on names other `use` items of this module bind or its globs give",
           )
           .build(),
       );
@@ -1057,19 +1155,53 @@ impl<'x> Run<'_, 'x> {
     }
   }
 
-  /// Makes a glob, written at `at`, of the module `target`, for the item `cursor` names.
+  /// Makes a glob, written at `at`, of the module `target`, for the item `cursor` names: the
+  /// module's row for `target`, or, when it has one, the mark that another item made it too. The
+  /// first glob that would give the module a row past `Limits::max_globs` is reported, once for the
+  /// module, and every glob that would makes no row.
   fn glob(&mut self, cursor: &Cursor, target: ModuleId, at: Location) {
-    let module = self.module;
-    let first = self
-      .scopes
-      .globs
-      .range((module, target, 0)..=(module, target, u32::MAX))
-      .next()
-      .is_none();
-    self.scopes.globs.insert((module, target, cursor.item), at);
-    if first {
-      self.targets.push(target);
+    let key = (self.module, target);
+    if let Some(row) = self.scopes.globs.get_mut(&key) {
+      if row.item != cursor.item {
+        row.shared = true;
+      }
+      return;
     }
+    if self.globbed == self.max_globs {
+      if !self.globs_full {
+        self.globs_full = true;
+        self.past_glob_limit(at);
+      }
+      return;
+    }
+    self.globbed += 1;
+    self.scopes.globs.insert(
+      key,
+      Glob {
+        at,
+        item: cursor.item,
+        shared: false,
+      },
+    );
+    self.targets.push(target);
+  }
+
+  /// Reports the glob written at `at`, the first of the module that would name a module past
+  /// `Limits::max_globs`.
+  fn past_glob_limit(&mut self, at: Location) {
+    let kind = DiagnosticKind::ResourceLimit;
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), at)
+        .severity(kind.severity())
+        .message(format!(
+          "this glob names a module past the limit of {} modules the globs of one module may name, \
+           so it gives nothing, and no glob of another module after it does",
+          self.max_globs
+        ))
+        .primary_label(kind.title())
+        .help("raise `Limits::max_globs`, or name the items with paths or explicit `use` items")
+        .build(),
+    );
   }
 
   /// Keeps `failure` of the item at `at`, to report once every item is checked.
@@ -1079,11 +1211,17 @@ impl<'x> Run<'_, 'x> {
 
   /// The module the string source `raw`, written in the file `source`, names: its directory's.
   ///
-  /// The source is decoded, then read as a path relative to the directory of `source`: it starts
-  /// with `.` or `..`, each `/`-separated segment after that is `.`, `..` or a directory's name, and
-  /// one `/` may end it. It must stay inside its package's root directory, and it names a
-  /// directory that is a module, never a file. A package of the `Flat` layout has no directory
-  /// module, and a URL is not supported.
+  /// The source is decoded, then walked from the directory module of `source`, the module of the
+  /// directory the file is in, whatever `mod` the item is written in: it starts with `.` or `..`,
+  /// each `/`-separated segment after that is `.`, `..` or a name, and one `/` may end it. `.`
+  /// stays, `..` goes up to the parent module, which a root module has none of, and a name goes
+  /// down to the child module of that name; a name that is no child module, but a file of the
+  /// directory reached, names that file. The module reached must be a directory's. A package of the
+  /// `Flat` layout has no directory module, and a URL is not supported.
+  ///
+  /// Each segment costs a lookup of its own spelling, in the child modules and in the files of one
+  /// directory, which `scopes` tabled once: nothing read here is proportional to the length of the
+  /// file's path.
   fn directory(&mut self, source: SourceId, raw: &'x [u8]) -> Result<ModuleId, Why<'x>> {
     if self.scopes.packages[self.package].layout == Layout::Flat {
       return Err(Why::Flat);
@@ -1095,60 +1233,32 @@ impl<'x> Run<'_, 'x> {
     if is_url(&self.text) {
       return Err(Why::Url);
     }
-    let files: &'x [FileView<'x>] = self.scopes.packages[self.package].files;
-    let first = self.scopes.packages[self.package].source.saturating_add(1);
-    let file: &'x [u8] = source
-      .get()
-      .checked_sub(first)
-      .and_then(|index: u32| files.get(index as usize))
-      .map(|file: &FileView<'x>| file.path)
-      .ok_or(Why::NotRelative)?;
-
-    // The directory the file is in, then each segment of the source.
-    let mut path: Vec<&[u8]> = file.split(|byte: &u8| *byte == b'/').collect();
-    path.pop();
+    let mut module = self.scopes.directory_of(source).ok_or(Why::NoDirectory)?;
     let text: &str = self.text.strip_suffix('/').unwrap_or(&self.text);
     for (index, part) in text.split('/').enumerate() {
       match part {
         "." => {}
-        ".." => {
-          if path.pop().is_none() {
-            return Err(Why::Outside);
-          }
-        }
+        ".." => match self.scopes.modules[module.get() as usize].parent {
+          Some(parent) => module = parent,
+          None => return Err(Why::Outside),
+        },
         _ if index == 0 || part.is_empty() => return Err(Why::NotRelative),
-        name => path.push(name.as_bytes()),
-      }
-    }
-
-    if !path.is_empty() {
-      let mut joined: Vec<u8> = Vec::new();
-      for (index, part) in path.iter().enumerate() {
-        if index > 0 {
-          joined.push(b'/');
+        name => {
+          let name = name.as_bytes();
+          let child = self
+            .names
+            .find(name)
+            .and_then(|sym: Sym| self.scopes.child(module, sym));
+          module = match child {
+            Some(child) => child,
+            None => {
+              return Err(match self.scopes.named_file(module, name) {
+                Some(directory) => Why::File { directory },
+                None => Why::NoDirectory,
+              });
+            }
+          };
         }
-        joined.extend_from_slice(part);
-      }
-      let named = files.binary_search_by(|file: &FileView<'x>| compare_paths(file.path, &joined));
-      if let Ok(at) = named {
-        let named: &'x [u8] = files[at].path;
-        let directory: &'x [u8] = match named.iter().rposition(|byte: &u8| *byte == b'/') {
-          Some(cut) => &named[..cut],
-          None => &[],
-        };
-        return Err(Why::File { directory });
-      }
-    }
-
-    let mut module = self.scopes.roots[self.package];
-    for part in &path {
-      let child = self
-        .names
-        .find(part)
-        .and_then(|sym: Sym| self.scopes.child(module, sym));
-      match child {
-        Some(child) => module = child,
-        None => return Err(Why::NoDirectory),
       }
     }
     match self.scopes.modules[module.get() as usize].kind {
