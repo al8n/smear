@@ -17,8 +17,10 @@ packages, modules, definitions, members, type occurrences and types, values, dir
 applications, the schema and the built-ins, with canonical names and lookup; so far `analyze` fills
 in the packages, their modules, one for every directory of a `Directory` package and one for every
 inline `mod`, and every definition's identity: each type and directive a package declares, and each
-intrinsic primitive the program writes. The built-in packages, `core`, `alloc` and `std`, are one
-embedded GraphQLx file each, parsed on every analysis.
+intrinsic primitive the program writes. It resolves every module's `use` items too, globs and
+string sources included, against scopes that end with the prelude and the packages each package
+may reach. The built-in packages, `core`, `alloc` and `std`, are one embedded GraphQLx file each,
+parsed on every analysis.
 
 Rules are visitors. A `graphqlx::Visitor` implements the hooks it needs, one for each entity a walk
 enters, leaves or reaches, and `graphqlx::visit` walks an analysis's model for it over the packages

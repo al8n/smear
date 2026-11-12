@@ -6,12 +6,13 @@
 //! never the caller's own text type. Lowering copies every spelling the model keeps, so the model
 //! it builds borrows nothing, and everything after it is compiled once.
 
-use super::declare::Declarations;
+use super::{declare::Declarations, resolve::Scopes};
 
-/// Lowers what `declarations` holds into the model.
+/// Lowers what `declarations` holds into the model, resolving each path it meets where it stands
+/// through `scopes`.
 ///
 /// Nothing is lowered yet: the definitions' members, types and values, and the phases and rules
 /// that build and read them, arrive with the next parts of the analyzer, which fill this in. Until
 /// then the model holds the packages, their sources, their modules and every definition's
 /// identity.
-pub(crate) fn lower(_declarations: &Declarations<'_, '_>) {}
+pub(crate) fn lower(_declarations: &Declarations<'_, '_>, _scopes: &mut Scopes<'_>) {}

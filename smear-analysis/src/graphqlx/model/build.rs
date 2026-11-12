@@ -230,6 +230,22 @@ impl ModelBuilder {
     self.names.intern(name.as_bytes())
   }
 
+  /// The symbol `name` was interned with, or `None` when no name so spelled was: a query that
+  /// interns nothing.
+  pub(crate) fn find(&self, name: &[u8]) -> Option<Sym> {
+    self.names.lookup(name)
+  }
+
+  /// The spelling `sym` was interned with.
+  pub(crate) fn spelling(&self, sym: Sym) -> &[u8] {
+    self.names.bytes(sym)
+  }
+
+  /// Where the definition `def` is named.
+  pub(crate) fn def_location(&self, def: DefId) -> Location {
+    self.model.defs[def.get() as usize].location
+  }
+
   /// Appends a definition: a `kind` named `name` in `module`, its name written at `location`, of
   /// `origin`.
   ///

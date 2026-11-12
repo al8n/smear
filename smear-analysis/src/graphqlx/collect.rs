@@ -90,10 +90,6 @@ pub(crate) struct Collected<'d, 'a> {
 }
 
 /// One document's items, flattened, of the parser that made the document.
-// Read by name resolution and lowering, the next parts of the analyzer, through the items the
-// declarations address; until they land nothing reads it, and `dead_code` would say so of each
-// variant's field.
-#[allow(dead_code)]
 pub(crate) enum Items<'d, 'a> {
   /// A document of text.
   Text(Vec<&'d TypeSystemItem<&'a str>>),
@@ -248,8 +244,9 @@ pub(crate) fn items<'d, 'a: 'd>(
 }
 
 /// Whether the package set refused the path of the file at `at` of `files`, which are in source
-/// order: a path the path rule refuses, or a path another file of the package has.
-fn refused(files: &[FileView<'_>], at: usize) -> bool {
+/// order: a path the path rule refuses, or a path another file of the package has. Name
+/// resolution asks it too, so that its file table holds the files this walk places and no other.
+pub(crate) fn refused(files: &[FileView<'_>], at: usize) -> bool {
   let path = files[at].path;
   check::path_problem(path).is_some()
     || (at > 0 && files[at - 1].path == path)
