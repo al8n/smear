@@ -1,17 +1,24 @@
-//! The entrance, [`analyze`], and what it answers, [`Analysis`].
+//! The entrances, [`analyze`] and [`analyze_with`], and what they answer, [`Analysis`] and
+//! [`Trees`].
 
-use core::cmp::Ordering;
+use core::{cmp::Ordering, iter::FusedIterator};
 use std::{string::String, vec::Vec};
+
+use smear_parser::{
+  graphqlx::{Layer, Syntactic},
+  layer::SyntaxTree,
+};
+use tokora::diagnostic::Location;
 
 use super::{
   check, collect, declare,
   diagnostic::{Diagnostics, Reporter},
-  id::PackageId,
+  id::{PackageId, SourceId},
   limits::Limits,
   lower,
   model::{Model, ModelBuilder, PackageKind},
   package::Package,
-  parse,
+  parse::{self, Documents},
   rules::Rules,
   set::{self, PackageView, ROOT},
   source::SourceMap,
@@ -143,21 +150,112 @@ pub fn analyze<S: SourceText>(
   dependencies: &[Package<S>],
   limits: &Limits,
 ) -> Analysis {
-  let mut supplied: Vec<PackageView<'_>> = Vec::with_capacity(dependencies.len());
+  let mut prepared = prepare(views(root, dependencies), limits);
+  let documents = parse::files(
+    &Syntactic::new(),
+    &prepared.packages,
+    &prepared.sources,
+    prepared.within,
+    &mut prepared.reporter,
+    None,
+  );
+  finish(prepared, &documents, limits)
+}
+
+/// Analyzes `root` beside `dependencies`, within `limits`, with `parser` reading every supplied
+/// file: [`analyze`], with the parser chosen by the caller, and what the parser kept for each file.
+///
+/// `parser` is a [`Layer`] of GraphQLx. [`Syntactic`] is one: it stops at a file's first syntax
+/// error, keeps nothing, and is what [`analyze`] reads with. The other is `smear-parser`'s lossless
+/// layer, behind its `rowan_0_17` and `std` features: it recovers, so the well-formed rest of a
+/// broken file is analyzed, and it keeps each file's tree. A layer's limits, such as the nesting
+/// depth a parse descends to, are the layer value's, where [`Limits`] bounds the analysis.
+///
+/// Everything [`analyze`] does around the parse is done here, in the same order. Each supplied file
+/// that is text, or bytes that are UTF-8, is read by `parser`, and every syntax error it lends is a
+/// diagnostic at that file, in the analysis's one list. Three kinds of file never reach `parser`
+/// and have no tree: the built-in packages' files, a byte text that is not UTF-8, and a text that
+/// holds nothing but white space, commas and comments. When the supplied sources are over
+/// [`Limits::max_source_bytes`], no supplied file is parsed at all.
+///
+/// The trees borrow nothing of the packages at a concrete call: they are `Trees<()>` for
+/// [`Syntactic`], and a tree of the lossless layer holds no text of the caller's. A consumer generic
+/// over the layer that keeps the trees past the packages bounds `P::Tree: 'static`.
+pub fn analyze_with<'a, P, S>(
+  parser: &P,
+  root: &'a Package<S>,
+  dependencies: &'a [Package<S>],
+  limits: &Limits,
+) -> (Analysis, Trees<P::Tree>)
+where
+  P: Layer<'a>,
+  S: SourceText,
+{
+  let mut prepared = prepare(views(root, dependencies), limits);
+  let mut trees: Vec<(SourceId, P::Tree)> = Vec::new();
+  let documents = parse::files(
+    parser,
+    &prepared.packages,
+    &prepared.sources,
+    prepared.within,
+    &mut prepared.reporter,
+    Some(&mut trees),
+  );
+  (finish(prepared, &documents, limits), Trees { trees })
+}
+
+/// Every package of one analysis, read through its getters, in id order: the built-ins, then
+/// `root`, then `dependencies` by name.
+fn views<'a, S: SourceText>(
+  root: &'a Package<S>,
+  dependencies: &'a [Package<S>],
+) -> Vec<PackageView<'a>> {
+  let mut supplied: Vec<PackageView<'a>> = Vec::with_capacity(dependencies.len());
   for package in dependencies {
     supplied.push(PackageView::supplied(package));
   }
-  run(set::order(PackageView::supplied(root), supplied), limits)
+  set::order(PackageView::supplied(root), supplied)
 }
 
-/// Everything after the entrance, compiled once whatever the caller's text type.
-fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
+/// What an analysis has settled before any file is parsed.
+struct Prepared<'a> {
+  packages: Vec<PackageView<'a>>,
+  reporter: Reporter,
+  sources: SourceMap,
+  /// Each package's resolved dependencies, one list per package.
+  dependencies: Vec<Vec<PackageId>>,
+  /// Whether the supplied sources are within their size limit, so that their files are parsed.
+  within: bool,
+}
+
+/// Everything after the entrance and before the parse, compiled once whatever the caller's text
+/// type and whatever the parser: the source map, and the checks of the package set and of the
+/// supplied sources' size.
+fn prepare<'a>(packages: Vec<PackageView<'a>>, limits: &Limits) -> Prepared<'a> {
   let mut reporter = Reporter::new(limits.max_diagnostics() as usize);
   let sources = SourceMap::of(&packages);
 
   let dependencies = check::package_set(&packages, &sources, &mut reporter);
   let within = check::source_bytes(&packages, &sources, limits, &mut reporter);
-  let documents = parse::files(&packages, &sources, within, &mut reporter);
+  Prepared {
+    packages,
+    reporter,
+    sources,
+    dependencies,
+    within,
+  }
+}
+
+/// Everything after the parse, compiled once whatever the caller's text type and whatever the
+/// parser: the phases that read the documents, and the rules.
+fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits) -> Analysis {
+  let Prepared {
+    packages,
+    mut reporter,
+    sources,
+    dependencies,
+    within: _,
+  } = prepared;
   debug_assert_eq!(
     documents.len(),
     sources.len() as usize,
@@ -165,12 +263,139 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
   );
 
   let mut builder = builder_of(&packages, &sources, dependencies);
-  let collected = collect::items(&packages, &sources, &documents, limits, &mut reporter);
+  let collected = collect::items(&packages, &sources, documents, limits, &mut reporter);
   let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
   lower::lower(&declarations);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }
+
+/// What a parser layer kept beside an analysis: one entry for each supplied file the layer read, in
+/// source id order.
+///
+/// [`analyze_with`] answers it. A file the layer refused, a file that never reached the layer, and
+/// every package source have no entry.
+#[derive(Debug, Clone)]
+pub struct Trees<T> {
+  trees: Vec<(SourceId, T)>,
+}
+
+impl<T> Trees<T> {
+  /// What the layer kept for `source`, or `None` when it kept nothing for it.
+  pub fn get(&self, source: SourceId) -> Option<&T> {
+    let at = self
+      .trees
+      .binary_search_by_key(&source, |entry: &(SourceId, T)| entry.0)
+      .ok()?;
+    Some(&self.trees[at].1)
+  }
+
+  /// Every entry with its source, in source id order.
+  #[inline]
+  pub fn iter(&self) -> TreesIter<'_, T> {
+    TreesIter {
+      inner: self.trees.iter(),
+    }
+  }
+
+  /// How many sources have an entry.
+  #[inline]
+  pub fn len(&self) -> usize {
+    self.trees.len()
+  }
+
+  /// Whether no source has an entry.
+  #[inline]
+  pub fn is_empty(&self) -> bool {
+    self.trees.is_empty()
+  }
+
+  /// The node an extent belongs to: [`SyntaxTree::covering_node`], in the tree of the extent's
+  /// source.
+  ///
+  /// `None` for a location with no span, for a source with no tree, and for a span that does not
+  /// lie inside its tree's text. An extent the analysis answers always has a span.
+  pub fn node(&self, at: Location) -> Option<T::Node>
+  where
+    T: SyntaxTree,
+  {
+    let span = at.span()?;
+    self.get(SourceId::new(at.source()))?.covering_node(span)
+  }
+}
+
+impl<T> IntoIterator for Trees<T> {
+  type Item = (SourceId, T);
+  type IntoIter = TreesIntoIter<T>;
+
+  #[inline]
+  fn into_iter(self) -> Self::IntoIter {
+    TreesIntoIter {
+      inner: self.trees.into_iter(),
+    }
+  }
+}
+
+impl<'a, T> IntoIterator for &'a Trees<T> {
+  type Item = (SourceId, &'a T);
+  type IntoIter = TreesIter<'a, T>;
+
+  #[inline]
+  fn into_iter(self) -> Self::IntoIter {
+    self.iter()
+  }
+}
+
+/// [`Trees`]' entries by reference, in source id order: what [`Trees::iter`] answers.
+#[derive(Debug, Clone)]
+pub struct TreesIter<'a, T> {
+  inner: core::slice::Iter<'a, (SourceId, T)>,
+}
+
+impl<'a, T> Iterator for TreesIter<'a, T> {
+  type Item = (SourceId, &'a T);
+
+  #[inline]
+  fn next(&mut self) -> Option<Self::Item> {
+    self
+      .inner
+      .next()
+      .map(|entry: &'a (SourceId, T)| (entry.0, &entry.1))
+  }
+
+  #[inline]
+  fn size_hint(&self) -> (usize, Option<usize>) {
+    self.inner.size_hint()
+  }
+}
+
+impl<T> ExactSizeIterator for TreesIter<'_, T> {}
+
+impl<T> FusedIterator for TreesIter<'_, T> {}
+
+/// [`Trees`]' entries by value, in source id order: what [`Trees`]' `into_iter` answers.
+#[derive(Debug, Clone)]
+pub struct TreesIntoIter<T> {
+  inner: std::vec::IntoIter<(SourceId, T)>,
+}
+
+impl<T> Iterator for TreesIntoIter<T> {
+  type Item = (SourceId, T);
+
+  #[inline]
+  fn next(&mut self) -> Option<Self::Item> {
+    self.inner.next()
+  }
+
+  #[inline]
+  fn size_hint(&self) -> (usize, Option<usize>) {
+    self.inner.size_hint()
+  }
+}
+
+impl<T> ExactSizeIterator for TreesIntoIter<T> {}
+
+impl<T> FusedIterator for TreesIntoIter<T> {}
 
 /// What every analysis ends with, once its phases have written `model` and reported into
 /// `reporter`: the phases' marks applied, `rules` walked over every supplied package and reporting

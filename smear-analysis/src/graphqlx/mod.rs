@@ -23,6 +23,9 @@
 //! program writes included, with canonical names and lookup. The phases that write the rest of it
 //! are still to come.
 //!
+//! [`analyze_with`] answers the same analysis with the parser the caller chose, a GraphQLx parser
+//! layer, and the [`Trees`] that layer kept beside it, one for each file it read.
+//!
 //! ```
 //! use smear_analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};
 //!
@@ -99,7 +102,7 @@ mod widths;
 #[doc(hidden)]
 pub mod test_support;
 
-pub use analysis::{Analysis, analyze};
+pub use analysis::{Analysis, Trees, TreesIntoIter, TreesIter, analyze, analyze_with};
 pub use code::DiagnosticKind;
 pub use diagnostic::{Diagnostic, DiagnosticBuilder, Diagnostics};
 pub use id::{
