@@ -107,6 +107,15 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let directives = optional_const_directives(inp)?;
+  // The `{` is confirmed before the root operations are entered, and its absence is refused as an
+  // expected `{` where it belongs: a delimiter entered without its opener can consume a closer that
+  // belongs to an enclosing production, such as the `}` of a module this definition sits in.
+  if !matches!(
+    super::super::peek_kind(inp)?,
+    Some(SyntacticTokenKind::LBrace)
+  ) {
+    return expected_definition_phase(inp, Expectation::LBrace);
+  }
   let root_operation_types_definition = root_operation_types_definition(inp)?;
   Ok(SchemaDefinition::new(
     SimpleSpan::new(start, root_operation_types_definition.span().end()),

@@ -839,6 +839,33 @@ fn a_module_is_refused_where_no_module_stands_and_without_its_parts() {
 }
 
 #[test]
+fn a_schema_definition_is_refused_where_its_brace_belongs() {
+  // The `{` is confirmed before the root operations are entered, so a missing one is refused as an
+  // expected `{`, at the token standing in its place…
+  for (src, at) in [
+    ("schema query: Query", SimpleSpan::new(7, 12)),
+    ("schema @d query: Query", SimpleSpan::new(10, 15)),
+  ] {
+    let span = assert_unexpected(
+      |inp| ast::Document::graphqlx(inp).map(|_| ()),
+      src,
+      Expectation::LBrace,
+      Some(SyntacticTokenKind::Identifier),
+    );
+    assert_eq!(span, at, "{src:?}");
+  }
+  // …or where the source ends.
+  for src in ["schema", "schema @d"] {
+    assert_unexpected(
+      |inp| ast::Document::graphqlx(inp).map(|_| ()),
+      src,
+      Expectation::LBrace,
+      None,
+    );
+  }
+}
+
+#[test]
 fn scalars_enums_unions_and_input_objects_implement_interfaces() {
   // `implements` follows the name and generics and precedes the directives, on all four kinds.
   fn check_scalar<S: AsRef<[u8]>>(scalar: ast::ScalarTypeDefinition<S>) {

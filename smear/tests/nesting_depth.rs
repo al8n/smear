@@ -2012,6 +2012,117 @@ fn a_mod_chain_under_a_recovering_emitter_nests_no_deeper_than_the_ceiling() {
   }
 }
 
+/// `mod m { schema query: T } mod m { schema query: T } … mod leaf {} } … }`: `count` modules, each
+/// holding a schema definition whose root operations have no `{`, then the next module; a
+/// `mod leaf {}` and `count` closing braces end it.
+///
+/// The `}` after each `query: T` is its module's. Root operations entered without their `{` would
+/// close on it, the module's body would read on, and the next module would nest inside it: a native
+/// frame a level, while the lexer's tally, which each of those `}` brings back to 0, never reads
+/// more than 1.
+#[cfg(feature = "graphqlx")]
+fn braceless_schema_mods(count: usize) -> String {
+  let mut src = String::with_capacity(count * 28 + 11);
+  for _ in 0..count {
+    src.push_str("mod m { schema query: T } ");
+  }
+  src.push_str("mod leaf {}");
+  for _ in 0..count {
+    src.push_str(" }");
+  }
+  src
+}
+
+/// A schema missing its `{` inside a module is refused there under a **recovering** emitter, so a
+/// [`braceless_schema_mods`] chain stops at its first `query` however long it is.
+///
+/// Left to the brace delimiter, a recording emitter takes the missing opener as a report and the
+/// delimiter reads on: the modules nest a level per module in the source, past the ceiling, and at
+/// [`BRACELESS_CHAIN`] modules that is a `SIGABRT` rather than a red test. The schema's refusal is
+/// returned, so an `Err` holding that one error is the parse stopping in the first module.
+///
+/// # Why the first count is the ordering guard
+///
+/// [`MAX_NESTING_DEPTH`] modules overflow nothing, so the assertion is reachable whatever the parser
+/// does, and a parser that reads on returns a tree a level past the ceiling there. Only once it
+/// holds is the [`BRACELESS_CHAIN`] chain handed over.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn a_schema_missing_its_brace_in_a_module_chain_is_refused_in_the_first_module() {
+  use smear::{
+    lexer::{
+      graphqlx::syntactic::SyntacticTokenKind,
+      tokora::{
+        Parse as _, Parser, ParserContext, SimpleSpan, cache::DefaultCache, emitter::Verbose,
+      },
+    },
+    parser::graphqlx::{
+      GraphQLx,
+      ast::Document,
+      error::{ErrorData, Expectation, GraphqlxErrors},
+      syntactic::{GraphqlxLexer, document},
+    },
+  };
+
+  type RecoveringEmitter<'inp> = Verbose<GraphqlxErrors<&'inp str>, SimpleSpan, GraphQLx>;
+  type RecoveringCtx<'inp> = ParserContext<
+    'inp,
+    GraphqlxLexer<'inp, str>,
+    RecoveringEmitter<'inp>,
+    DefaultCache<'inp, GraphqlxLexer<'inp, str>>,
+    GraphQLx,
+  >;
+
+  // THE GUARD, AND IT MUST STAY FIRST — see this function's docs.
+  for count in [MAX_NESTING_DEPTH, MAX_NESTING_DEPTH + 1, BRACELESS_CHAIN] {
+    let src = braceless_schema_mods(count);
+    let query = src.find("query").expect("the chain holds a schema");
+    let parsed = Parser::with_parser_and_context::<
+      '_,
+      GraphqlxLexer<'_, str>,
+      Document<&str>,
+      RecoveringCtx<'_>,
+      _,
+      GraphQLx,
+    >(document, ParserContext::of(RecoveringEmitter::default()))
+    .parse_str(&src);
+    let errors = match parsed {
+      Err(errors) => errors,
+      Ok(parsed) => panic!(
+        "{count} modules: the recovering parse returned a tree whose modules nest {} deep under a \
+         ceiling of {MAX_NESTING_DEPTH}",
+        syntactic_mod_depth(&parsed)
+      ),
+    };
+    assert_eq!(
+      errors.len(),
+      1,
+      "{count} modules: a refusal is one error: {errors:?}"
+    );
+    let error = &errors[0];
+    let ErrorData::UnexpectedToken(token) = error.data() else {
+      panic!(
+        "{count} modules: refused with {:?} where an unexpected token belongs",
+        error.data()
+      );
+    };
+    let span = error.span();
+    assert_eq!(
+      (
+        span.start()..span.end(),
+        token.found().copied(),
+        *token.expected()
+      ),
+      (
+        query..query + "query".len(),
+        Some(SyntacticTokenKind::Identifier),
+        Expectation::LBrace
+      ),
+      "{count} modules: the first schema must refuse `query` where its `{{` belongs"
+    );
+  }
+}
+
 /// The lossless door holds the same chains, and its bound is the parse's own.
 ///
 /// A body opens through `depth::descend` before it reads its `{`, so the bypass — which the lexer's

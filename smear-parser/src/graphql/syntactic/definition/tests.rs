@@ -661,6 +661,30 @@ fn enum_values_and_root_operations_are_checked_in_their_grammar_positions() {
   reject_all!(RootOperationTypesDefinition::<_>::graphql, "{}");
 }
 
+/// A schema definition confirms its `{` before it enters its root operations, so a missing one is
+/// refused as an expected `{`, at the token standing in its place or where the source ends.
+#[test]
+fn a_schema_definition_is_refused_where_its_brace_belongs() {
+  for (source, found) in [
+    ("schema query: Query", Some(SyntacticTokenKind::Identifier)),
+    (
+      "schema @d query: Query",
+      Some(SyntacticTokenKind::Identifier),
+    ),
+    ("schema", None),
+    ("schema @d", None),
+  ] {
+    assert_unexpected(
+      drive_str(
+        |inp| SchemaDefinition::<_>::graphql(inp).map(|_| ()),
+        source,
+      ),
+      Expectation::LBrace,
+      found,
+    );
+  }
+}
+
 #[test]
 fn concrete_type_definition_apis_cover_each_sdl_head() {
   fn scalar<S: AsRef<[u8]>>(value: ScalarTypeDefinition<S>) {
