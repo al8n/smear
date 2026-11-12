@@ -123,7 +123,15 @@ All notable changes to Smear are documented in this file.
   extension by position, in scope; one that names nothing is reported with the code of its place
   and stays unresolved. A `where` predicate bounds one of its definition's own type parameters;
   any other left side, and any `where` clause on an extension, is the new
-  `smear::graphqlx::invalid-bound`. The schema has a contribution for every schema item any package writes, its
+  `smear::graphqlx::invalid-bound`. Every directive application, on a definition, an extension, a
+  member or an argument, is numbered in the walk's order too, with its directive's path as
+  written and resolved where it is written; one whose directive names nothing keeps no type
+  argument and no argument. The others keep their type arguments, each an occurrence, and the
+  arguments their directive declares, in the directive's order, an argument written twice
+  twice; one the directive does not declare is `smear::schema::undefined-directive-argument`,
+  with the nearest name it does declare in its help. A written value, a default or an
+  argument's, is one `Literal` that keeps its syntactic kind and its text as written, and a
+  value that is a path keeps its path. The schema has a contribution for every schema item any package writes, its
   definitions first and then its extensions, each by source and position and named at its
   `schema` or its `extend`; the root package's first schema definition gives it its description,
   and every other schema item is a contribution alone. Names and texts past what the model's

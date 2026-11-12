@@ -19,9 +19,10 @@ in the packages, their modules, one for every directory of a `Directory` package
 inline `mod`, and every definition: each type and directive a package declares, and each intrinsic
 primitive the program writes, with its identity, its contributions, its own and then each
 extension's, its type parameters with their defaults and its bounds, its `implements` entries and
-union members, a directive definition's locations, and its members with their descriptions and
-their types, every written type an occurrence with its path and arguments as written and what it
-resolves to; and the schema's
+union members, its directive applications, a directive definition's locations, and its members
+with their descriptions, types, defaults and applications, every written type an occurrence with
+its path and arguments as written and what it resolves to, every application with its type
+arguments and its arguments, and every value as written; and the schema's
 contributions, one for each schema item, with its description. It resolves every module's `use`
 items too, globs and string sources included, against scopes that end with the prelude and the
 packages each package may reach. The built-in packages, `core`, `alloc` and `std`, are one

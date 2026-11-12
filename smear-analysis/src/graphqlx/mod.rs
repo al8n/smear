@@ -22,9 +22,10 @@
 //! primitives the program writes included, with canonical names and lookup: its kind, name,
 //! module, location, origin and description, its contributions, its own and then its extensions',
 //! its type parameters with their defaults and its bounds, its `implements` entries and union
-//! members, a directive definition's locations, and its members with their descriptions and their
-//! types, every written type an occurrence with its path and arguments as written and what it
-//! resolves to; and the schema's
+//! members, its directive applications, a directive definition's locations, and its members with
+//! their descriptions, types, defaults and applications, every written type an occurrence with
+//! its path and arguments as written and what it resolves to, every application with its type
+//! arguments and its arguments, and every value as written; and the schema's
 //! contributions, one for each schema item, and its description. The phases that write the rest of
 //! it are still to come.
 //!

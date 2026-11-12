@@ -258,9 +258,9 @@ impl<'a> Value<'a> {
 
   /// What it is.
   //
-  // Coercion gives a value its coerced shape. Until coercion lands, a value keeps its written
-  // shape; one whose written shape cannot be read without its expected type (a custom scalar's
-  // literal, an enum value, a `TypeRef`) is the `Literal` that keeps its text.
+  // Coercion gives a value its coerced shape. Until coercion lands, every written value is the one
+  // `Literal` lowering makes of it, its syntactic kind and its text as written, whatever it holds:
+  // nothing nested in it is a value of its own.
   pub fn kind(&self) -> ValueKind<'a> {
     let model: &'a Model = self.model;
     let row = self.row();

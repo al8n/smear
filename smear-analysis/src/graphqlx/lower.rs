@@ -42,11 +42,13 @@
 //!
 //! # The occurrences
 //!
-//! A second walk over the definitions, in `DefId` order, appends every type occurrence in the order
-//! the model's walk reaches it: each type parameter's default, then each bound; the `implements`
-//! entries, then the union members, each over every contribution in turn; then each direct
-//! member's type, and right after a field's, each of its arguments' types. The first walk has
-//! appended every member by then, so each one's id is known.
+//! A second walk over the definitions, in `DefId` order, appends every type occurrence, directive
+//! application and value in the order the model's walk reaches it: each type parameter's default,
+//! then each bound; the `implements` entries, then the union members, then the applications, each
+//! over every contribution in turn; then each direct member's type, default and applications, and
+//! right after a field's, each of its arguments' the same way. The first walk has appended every
+//! member by then, the arguments of every directive definition among them, so each one's id is
+//! known, whichever definition comes first.
 //!
 //! A written type is one occurrence, appended before what it nests: its arguments in order, each
 //! with everything it nests before the next, or its element, walked with an explicit stack. It
@@ -65,6 +67,20 @@
 //! type parameters, written with no argument, gives each interface it names as a bound of that
 //! parameter, located at the predicate. Any other left side, and any `where` clause on an
 //! extension, is `invalid-bound`, and nothing of it is lowered.
+//!
+//! An application keeps its directive's path as written, and its directive is resolved where it
+//! is written, as a type is. One whose directive names nothing stays, unresolved, with no type
+//! argument and no argument: nothing inside it is lowered. Otherwise its type arguments follow,
+//! each an occurrence, then its arguments: each written argument is looked up by its name among
+//! the directive definition's, one lookup each; one the definition does not declare is
+//! `undefined-directive-argument`, with the nearest name it does declare in its help, and is not
+//! kept; the rest are kept in the definition's order, an argument written twice twice, and their
+//! values follow in that order. No default fills an argument that is not written.
+//!
+//! A written value, a member's default or an argument's, is one literal: its syntactic kind and
+//! its text as written, quotes, brackets and all, each sequence that is not UTF-8 replaced by
+//! U+FFFD; a value that is a path keeps its path too. Nothing it holds is a value of its own, and
+//! no path in it is resolved: coercion, which knows the type expected, gives a value its shape.
 //!
 //! # The schema
 //!
@@ -104,11 +120,11 @@ use std::{
 
 use smear_lexer::decode_string_value;
 use smear_parser::graphqlx::ast::{
-  self, DefinitionName, DescribedTypeSystemDefinition, EnumValueDefinition,
-  ExecutableDirectiveLocation, ExtensionName, FieldDefinition, ImplementInterfaces,
-  InputValueDefinition, Name, Path, StringValue, Type, TypeDefinition, TypeExtension, TypePath,
-  TypeSystemDefinition, TypeSystemDirectiveLocation, TypeSystemExtension, TypeSystemItem,
-  WhereClause,
+  self, ConstArgument, ConstDirective, ConstDirectives, ConstInputValue, DefinitionName,
+  DescribedTypeSystemDefinition, EnumValueDefinition, ExecutableDirectiveLocation, ExtensionName,
+  FieldDefinition, ImplementInterfaces, InputValueDefinition, Name, Path, StringValue, Type,
+  TypeDefinition, TypeExtension, TypePath, TypeSystemDefinition, TypeSystemDirectiveLocation,
+  TypeSystemExtension, TypeSystemItem, WhereClause,
 };
 use tokora::{SimpleSpan, diagnostic::Location, span::AsSpan};
 
@@ -117,10 +133,12 @@ use super::{
   collect::{Items, unknown_item},
   declare::{Declaration, Declarations, Entry, Item},
   diagnostic::{Diagnostic, Excerpt, Reporter},
-  id::{DefId, IdRange, MemberId, ModuleId, SourceId, Sym, TypeExprId, dense},
-  model::{DefKind, DirectiveLocation, MemberKind, ModelBuilder, PathRoot},
+  id::{
+    ApplicationId, DefId, IdRange, MemberId, ModuleId, SourceId, Sym, TypeExprId, ValueId, dense,
+  },
+  model::{DefKind, DirectiveLocation, LiteralKind, MemberKind, ModelBuilder, PathRoot},
   resolve::{self, Position, Request, Resolved, Scopes, Wanted},
-  set::ROOT,
+  set::{PackageView, ROOT},
   source::SourceMap,
 };
 
@@ -129,18 +147,29 @@ const KEYWORD: usize = 6;
 
 /// Lowers what `declarations` holds into `builder`, which holds every package, module and
 /// definition already, resolving each path through `scopes` and reporting into `reporter`;
-/// `sources` numbers the packages' sources.
+/// `sources` numbers the sources of `packages`, whose texts the values are read from.
 pub(crate) fn lower(
+  packages: &[PackageView<'_>],
   declarations: &Declarations<'_, '_>,
   scopes: &Scopes<'_>,
   sources: &SourceMap,
   builder: &mut ModelBuilder,
   reporter: &mut Reporter,
 ) {
+  // Each source's text, by `SourceId`, numbered as `sources` numbers them: a package source has
+  // none.
+  let mut texts: Vec<&[u8]> = Vec::with_capacity(sources.len() as usize);
+  for package in packages {
+    texts.push(&[]);
+    for file in &package.files {
+      texts.push(file.text.bytes());
+    }
+  }
   let mut lowering = Lowering {
     builder,
     reporter,
     scopes,
+    texts,
     text: String::new(),
     field_ids: Vec::new(),
     next_field: 0,
@@ -182,6 +211,8 @@ struct Lowering<'l, 'x> {
   reporter: &'l mut Reporter,
   /// Every module's scope: what a path means where it is written.
   scopes: &'l Scopes<'x>,
+  /// Each source's text, by `SourceId`, which a value's text is read from.
+  texts: Vec<&'l [u8]>,
   /// The description being cooked: one buffer for every description.
   text: String,
   /// The fields of the definition being lowered, in id order, whose arguments follow every one of
@@ -191,9 +222,6 @@ struct Lowering<'l, 'x> {
   next_field: usize,
   /// Each directive definition's arguments, by the directive and the argument's name, the first of
   /// each name kept: the key is what a written argument of an application is looked up by.
-  // Read by the lowering of directive applications, which needs name resolution; until then
-  // nothing reads what it holds.
-  #[allow(dead_code)]
   arguments: BTreeMap<(DefId, Sym), MemberId>,
   /// The sources an item of a kind lowering does not know was reported in, each once.
   reported_unknown: BTreeSet<u32>,
@@ -262,7 +290,9 @@ enum Occurrences {
   Implements,
   /// A union's members.
   UnionMembers,
-  /// The types of the members, each direct member's and then its arguments'.
+  /// The applications.
+  Applications,
+  /// What each member holds, each direct member's and then its arguments'.
   Members,
 }
 
@@ -304,10 +334,14 @@ struct Shape<'d, S> {
   implements: Option<&'d ImplementInterfaces<S>>,
   /// A union's members.
   union_members: &'d [TypePath<S>],
+  /// Its applications.
+  directives: Option<&'d ConstDirectives<S>>,
   /// An object's or an interface's fields.
   fields: &'d [FieldDefinition<S>],
   /// An input object's fields, or a directive definition's arguments.
   input_values: &'d [InputValueDefinition<S>],
+  /// An enum's values.
+  enum_values: &'d [EnumValueDefinition<S>],
 }
 
 /// What the walk of one written type has still to do.
@@ -858,8 +892,8 @@ impl Lowering<'_, '_> {
 
   /// The occurrences of the definition `def`, declared as `declaration` and extended by
   /// `attached`, in the walk's order: its parameters' defaults and its bounds; its `implements`
-  /// entries and then its union members, each over every contribution in turn; then its members'
-  /// types.
+  /// entries, then its union members, then its applications, each over every contribution in
+  /// turn; then what its members hold.
   fn occurrences(
     &mut self,
     declarations: &Declarations<'_, '_>,
@@ -897,6 +931,7 @@ impl Lowering<'_, '_> {
       Occurrences::Generics,
       Occurrences::Implements,
       Occurrences::UnionMembers,
+      Occurrences::Applications,
       Occurrences::Members,
     ] {
       for (&(item, module, contribution), table) in written.iter().zip(&tables) {
@@ -1006,7 +1041,17 @@ impl Lowering<'_, '_> {
             .push_union_member(part.def, part.contribution, entry);
         }
       }
-      Occurrences::Members => self.member_types(part.site, &shape),
+      Occurrences::Applications => {
+        if let Some(directives) = shape.directives {
+          for directive in directives.directives() {
+            let application = self.application(part.site, directive);
+            self
+              .builder
+              .push_def_application(part.def, part.contribution, application);
+          }
+        }
+      }
+      Occurrences::Members => self.member_occurrences(part.site, &shape),
     }
   }
 
@@ -1022,12 +1067,22 @@ impl Lowering<'_, '_> {
       TypeSystemItem::Definition(described) => match described.node() {
         TypeSystemDefinition::Type(definition) => match definition {
           TypeDefinition::Scalar(scalar) => {
-            let mut shape = shape_of(Some(scalar.name()), None, scalar.implements());
+            let mut shape = shape_of(
+              Some(scalar.name()),
+              None,
+              scalar.implements(),
+              scalar.directives(),
+            );
             shape.clause = scalar.where_clause();
             Some(shape)
           }
           TypeDefinition::Object(object) => {
-            let mut shape = shape_of(Some(object.name()), None, object.implements());
+            let mut shape = shape_of(
+              Some(object.name()),
+              None,
+              object.implements(),
+              object.directives(),
+            );
             if let Some(fields) = object.fields_definition() {
               shape.clause = fields.where_clause();
               shape.fields = fields.target().field_definitions();
@@ -1035,7 +1090,12 @@ impl Lowering<'_, '_> {
             Some(shape)
           }
           TypeDefinition::Interface(interface) => {
-            let mut shape = shape_of(Some(interface.name()), None, interface.implements());
+            let mut shape = shape_of(
+              Some(interface.name()),
+              None,
+              interface.implements(),
+              interface.directives(),
+            );
             if let Some(fields) = interface.fields_definition() {
               shape.clause = fields.where_clause();
               shape.fields = fields.target().field_definitions();
@@ -1043,20 +1103,37 @@ impl Lowering<'_, '_> {
             Some(shape)
           }
           TypeDefinition::Union(union) => {
-            let mut shape = shape_of(Some(union.name()), None, union.implements());
+            let mut shape = shape_of(
+              Some(union.name()),
+              None,
+              union.implements(),
+              union.directives(),
+            );
             if let Some(members) = union.member_types() {
               shape.clause = members.where_clause();
               shape.union_members = members.target().members();
             }
             Some(shape)
           }
-          TypeDefinition::Enum(enumeration) => Some(shape_of(
-            Some(enumeration.name()),
-            None,
-            enumeration.implements(),
-          )),
+          TypeDefinition::Enum(enumeration) => {
+            let mut shape = shape_of(
+              Some(enumeration.name()),
+              None,
+              enumeration.implements(),
+              enumeration.directives(),
+            );
+            if let Some(values) = enumeration.enum_values_definition() {
+              shape.enum_values = values.enum_value_definitions();
+            }
+            Some(shape)
+          }
           TypeDefinition::InputObject(input) => {
-            let mut shape = shape_of(Some(input.name()), None, input.implements());
+            let mut shape = shape_of(
+              Some(input.name()),
+              None,
+              input.implements(),
+              input.directives(),
+            );
             if let Some(fields) = input.fields_definition() {
               shape.clause = fields.where_clause();
               shape.input_values = fields.target().input_value_definitions();
@@ -1071,7 +1148,7 @@ impl Lowering<'_, '_> {
           }
         },
         TypeSystemDefinition::Directive(directive) => {
-          let mut shape = shape_of(Some(directive.name()), None, None);
+          let mut shape = shape_of(Some(directive.name()), None, None, directive.directives());
           shape.clause = directive.locations().where_clause();
           if let Some(arguments) = directive.arguments_definition() {
             shape.input_values = arguments.input_value_definitions();
@@ -1083,11 +1160,19 @@ impl Lowering<'_, '_> {
       },
       TypeSystemItem::Extension(extension) => match extension {
         TypeSystemExtension::Type(ty) => match ty {
-          TypeExtension::Scalar(scalar) => {
-            Some(shape_of(None, Some(scalar.name()), scalar.implements()))
-          }
+          TypeExtension::Scalar(scalar) => Some(shape_of(
+            None,
+            Some(scalar.name()),
+            scalar.implements(),
+            scalar.directives(),
+          )),
           TypeExtension::Object(object) => {
-            let mut shape = shape_of(None, Some(object.name()), object.implements());
+            let mut shape = shape_of(
+              None,
+              Some(object.name()),
+              object.implements(),
+              object.directives(),
+            );
             if let Some(fields) = object.fields_definition() {
               shape.clause = fields.where_clause();
               shape.fields = fields.target().field_definitions();
@@ -1095,7 +1180,12 @@ impl Lowering<'_, '_> {
             Some(shape)
           }
           TypeExtension::Interface(interface) => {
-            let mut shape = shape_of(None, Some(interface.name()), interface.implements());
+            let mut shape = shape_of(
+              None,
+              Some(interface.name()),
+              interface.implements(),
+              interface.directives(),
+            );
             if let Some(fields) = interface.fields_definition() {
               shape.clause = fields.where_clause();
               shape.fields = fields.target().field_definitions();
@@ -1103,20 +1193,37 @@ impl Lowering<'_, '_> {
             Some(shape)
           }
           TypeExtension::Union(union) => {
-            let mut shape = shape_of(None, Some(union.name()), union.implements());
+            let mut shape = shape_of(
+              None,
+              Some(union.name()),
+              union.implements(),
+              union.directives(),
+            );
             if let Some(members) = union.member_types() {
               shape.clause = members.where_clause();
               shape.union_members = members.target().members();
             }
             Some(shape)
           }
-          TypeExtension::Enum(enumeration) => Some(shape_of(
-            None,
-            Some(enumeration.name()),
-            enumeration.implements(),
-          )),
+          TypeExtension::Enum(enumeration) => {
+            let mut shape = shape_of(
+              None,
+              Some(enumeration.name()),
+              enumeration.implements(),
+              enumeration.directives(),
+            );
+            if let Some(values) = enumeration.enum_values_definition() {
+              shape.enum_values = values.enum_value_definitions();
+            }
+            Some(shape)
+          }
           TypeExtension::InputObject(input) => {
-            let mut shape = shape_of(None, Some(input.name()), input.implements());
+            let mut shape = shape_of(
+              None,
+              Some(input.name()),
+              input.implements(),
+              input.directives(),
+            );
             if let Some(fields) = input.fields_definition() {
               shape.clause = fields.where_clause();
               shape.input_values = fields.target().input_value_definitions();
@@ -1124,9 +1231,13 @@ impl Lowering<'_, '_> {
             Some(shape)
           }
         },
-        TypeSystemExtension::Directive(directive) => {
-          Some(shape_of(None, Some(directive.name()), None))
-        }
+        // A directive extension's applications are required.
+        TypeSystemExtension::Directive(directive) => Some(shape_of(
+          None,
+          Some(directive.name()),
+          None,
+          Some(directive.directives()),
+        )),
         // A schema extension is the schema's.
         TypeSystemExtension::Schema(_) => None,
       },
@@ -1211,13 +1322,14 @@ impl Lowering<'_, '_> {
     }
   }
 
-  /// The types of the members `shape` writes, where `site` says, in `MemberId` order: each direct
-  /// member's, and right after a field's, each of its arguments'.
-  fn member_types<S: AsRef<[u8]>>(&mut self, site: Site<'_>, shape: &Shape<'_, S>) {
+  /// What the members `shape` writes hold, where `site` says, in `MemberId` order: each direct
+  /// member's type, default and applications, and right after a field's, each of its arguments'.
+  fn member_occurrences<S: AsRef<[u8]>>(&mut self, site: Site<'_>, shape: &Shape<'_, S>) {
     for field in shape.fields {
       let member = self.next_direct();
       let ty = self.ty(site, field.ty(), Position::Type);
       self.builder.set_member_type(member, ty);
+      self.member_applications(site, member, field.directives());
       if let Some(arguments) = field.arguments_definition() {
         for argument in arguments.input_value_definitions() {
           let member = self.next_argument();
@@ -1229,9 +1341,14 @@ impl Lowering<'_, '_> {
       let member = self.next_direct();
       self.input_value(site, member, value);
     }
+    for value in shape.enum_values {
+      let member = self.next_direct();
+      self.member_applications(site, member, value.directives());
+    }
   }
 
-  /// The type of `member`, the input value `value` writes where `site` says.
+  /// What `member`, the input value `value` writes where `site` says, holds: its type, its default
+  /// and its applications.
   fn input_value<S: AsRef<[u8]>>(
     &mut self,
     site: Site<'_>,
@@ -1240,6 +1357,200 @@ impl Lowering<'_, '_> {
   ) {
     let ty = self.ty(site, value.ty(), Position::Type);
     self.builder.set_member_type(member, ty);
+    if let Some(default) = value.default_value() {
+      let lowered = self.value(site.source.get(), default.value());
+      self.builder.set_member_default(member, lowered);
+    }
+    self.member_applications(site, member, value.directives());
+  }
+
+  /// The applications `directives` of `member`, written where `site` says.
+  fn member_applications<S: AsRef<[u8]>>(
+    &mut self,
+    site: Site<'_>,
+    member: MemberId,
+    directives: Option<&ConstDirectives<S>>,
+  ) {
+    let Some(directives) = directives else {
+      return;
+    };
+    for directive in directives.directives() {
+      let application = self.application(site, directive);
+      self.builder.push_member_application(member, application);
+    }
+  }
+
+  /// Lowers the application `directive`, written where `site` says: itself, and, once its
+  /// directive resolves, its type arguments, then its arguments. One whose directive names nothing
+  /// keeps its path, and nothing written inside it is lowered. Answers its id.
+  fn application<S: AsRef<[u8]>>(
+    &mut self,
+    site: Site<'_>,
+    directive: &ConstDirective<S>,
+  ) -> ApplicationId {
+    let source = site.source.get();
+    let name = directive.name();
+    let path = name.path();
+    // A root of a kind lowering does not know is recorded as none: name resolution reports it,
+    // as `unknown-item`, and leaves the application unresolved.
+    let root = self.written_path(path).unwrap_or(PathRoot::Relative);
+    let application = self.builder.push_application(
+      Location::new(source, *directive.span()),
+      root,
+      &self.segments,
+      Location::new(source, *path.span()),
+    );
+    let request = Request {
+      module: site.module,
+      source: site.source,
+      wanted: Wanted::Directive,
+      position: Position::Directive,
+      params: site.params,
+    };
+    let def = match self
+      .scopes
+      .resolve(&*self.builder, self.reporter, &request, path)
+    {
+      Resolved::Def(def) => def,
+      // Name resolution has reported a path that names nothing; a directive is wanted, which no
+      // type, module or parameter is.
+      Resolved::NonZero { .. }
+      | Resolved::Module(_)
+      | Resolved::Param(_)
+      | Resolved::Unresolved => return application,
+    };
+    self.builder.resolve_application(application, def);
+    if let Some(generics) = name.type_generics() {
+      let from = self.type_args.len();
+      for argument in generics.params() {
+        let argument = self.ty(site, argument, Position::Type);
+        self.type_args.push(argument);
+      }
+      self
+        .builder
+        .set_application_type_args(application, self.type_args.get(from..).unwrap_or_default());
+      self.type_args.truncate(from);
+    }
+    if let Some(arguments) = directive.arguments() {
+      self.application_arguments(source, application, def, path, arguments.arguments());
+    }
+    application
+  }
+
+  /// The arguments `written`, in the source `source`, of `application`, whose directive is
+  /// `directive`, named by `path`: each one the directive declares, found by its name, is kept, in
+  /// the order of the directive's arguments, and its value lowered in that order; each one it does
+  /// not declare is reported and dropped. One written twice is kept twice, in written order.
+  fn application_arguments<S: AsRef<[u8]>>(
+    &mut self,
+    source: u32,
+    application: ApplicationId,
+    directive: DefId,
+    path: &Path<S>,
+    written: &[ConstArgument<S>],
+  ) {
+    let mut kept: Vec<(MemberId, Location, &ConstInputValue<S>)> =
+      Vec::with_capacity(written.len());
+    for argument in written {
+      let name = argument.name();
+      let at = Location::new(source, *name.as_span());
+      // An argument's name is interned as a member's is, so a name never interned is no
+      // argument's.
+      let spelled = String::from_utf8_lossy(name.source().as_ref());
+      let declared = self
+        .builder
+        .find(spelled.as_bytes())
+        .and_then(|sym: Sym| self.arguments.get(&(directive, sym)).copied());
+      match declared {
+        Some(member) => kept.push((member, at, argument.value())),
+        None => self.unknown_argument(directive, path, spelled.as_bytes(), at),
+      }
+    }
+    // A stable sort: two of one name keep their written order.
+    kept.sort_by_key(|&(member, _, _): &(MemberId, Location, &ConstInputValue<S>)| member);
+    for (member, at, value) in kept {
+      let lowered = self.value(source, value);
+      self
+        .builder
+        .push_application_argument(application, member, Some(at), lowered);
+    }
+  }
+
+  /// Reports the argument `written`, written at `at`, of an application of `directive`, named by
+  /// `path`, which declares no argument of that name: with the nearest name it does declare in the
+  /// help, when one is within reach and the analysis's budget for near misses lasts.
+  fn unknown_argument<S: AsRef<[u8]>>(
+    &mut self,
+    directive: DefId,
+    path: &Path<S>,
+    written: &[u8],
+    at: Location,
+  ) {
+    let builder: &ModelBuilder = &*self.builder;
+    let first = (directive, Sym::new(0));
+    let last = (directive, Sym::new(u32::MAX));
+    let mut candidates = self
+      .arguments
+      .range(first..=last)
+      .map(|(&(_, sym), _): (&(DefId, Sym), &MemberId)| builder.spelling(sym));
+    let near: Option<String> = self
+      .scopes
+      .nearest(written, &mut candidates)
+      .map(|spelled: &[u8]| format!("did you mean `{}`?", Excerpt(spelled)));
+    let shown: &[u8] = match path.segments().last() {
+      Some(last) => last.source().as_ref(),
+      None => &[],
+    };
+    let mut report = Diagnostic::builder(schema::UNDEFINED_DIRECTIVE_ARGUMENT, at)
+      .message(format!(
+        "the directive `@{}` declares no argument named `{}`",
+        Excerpt(shown),
+        Excerpt(written)
+      ))
+      .primary_label("undefined directive argument");
+    if let Some(near) = near {
+      report = report.help(near);
+    }
+    self.reporter.report(report.build());
+  }
+
+  /// Lowers the written value `value`, written in the source `source`, as one literal: its
+  /// syntactic kind and its text as written, quotes, brackets and all; a value that is a path keeps
+  /// its path too. Nothing it holds is a value of its own, and nothing in it is resolved. Answers
+  /// its id.
+  //
+  // Coercion gives this function the type expected where the value stands and replaces its body:
+  // it then appends the rows the value's shape needs, and a default's copies, in this same order.
+  fn value<S: AsRef<[u8]>>(&mut self, source: u32, value: &ConstInputValue<S>) -> ValueId {
+    let span = *value.as_span();
+    let id = self.builder.push_value(Location::new(source, span), true);
+    let kind = match value {
+      ConstInputValue::Boolean(_) => LiteralKind::Boolean,
+      ConstInputValue::String(_) => LiteralKind::String,
+      ConstInputValue::Float(_) => LiteralKind::Float,
+      ConstInputValue::Int(_) => LiteralKind::Int,
+      ConstInputValue::Enum(_) => LiteralKind::Enum,
+      ConstInputValue::Null(_) => LiteralKind::Null,
+      ConstInputValue::List(_) => LiteralKind::List,
+      ConstInputValue::Set(_) => LiteralKind::Set,
+      ConstInputValue::Map(_) => LiteralKind::Map,
+      ConstInputValue::Object(_) => LiteralKind::Object,
+    };
+    // A span that does not fit its source's text, which the parser never makes, keeps no text.
+    let file: &[u8] = self.texts.get(source as usize).copied().unwrap_or_default();
+    let written = file.get(span.start()..span.end()).unwrap_or_default();
+    self
+      .builder
+      .set_literal(id, kind, &String::from_utf8_lossy(written));
+    if let ConstInputValue::Enum(path) = value {
+      match self.written_path(path.source()) {
+        Some(root) => self.builder.set_value_path(id, root, &self.segments),
+        // `PathRoot` is `#[non_exhaustive]`: a root of a kind lowering does not know is reported,
+        // and the value keeps its text alone.
+        None => self.unknown(source, span),
+      }
+    }
+    id
   }
 
   /// The id of the next direct member of the definition the second walk is in.
@@ -1534,11 +1845,12 @@ fn run_end(attached: &[Attached], next: usize, def: DefId) -> usize {
 }
 
 /// What the second walk reads of an item named `name`, as a definition, or `extension`, as an
-/// extension, that writes `implements`, and nothing else yet.
+/// extension, that writes `implements` and `directives`, and nothing else yet.
 fn shape_of<'d, S>(
   name: Option<&'d DefinitionName<S>>,
   extension: Option<&'d ExtensionName<S>>,
   implements: Option<&'d ImplementInterfaces<S>>,
+  directives: Option<&'d ConstDirectives<S>>,
 ) -> Shape<'d, S> {
   Shape {
     name,
@@ -1546,8 +1858,10 @@ fn shape_of<'d, S>(
     clause: None,
     implements,
     union_members: &[],
+    directives,
     fields: &[],
     input_values: &[],
+    enum_values: &[],
   }
 }
 

@@ -1,6 +1,6 @@
-//! What the phases after lowering's type occurrences write: each definition's applications, its
-//! built-in meaning and its externs, its instantiations and satisfactions; each member's default
-//! and applications; types, values, applications, the schema's roots and applications, and marks.
+//! What the phases after lowering's definitions write: each definition's built-in meaning and its
+//! externs, its instantiations and satisfactions; types, the shapes and types coercion gives values,
+//! the schema's roots and applications, and marks.
 //!
 //! GATED ON HAVING A CALLER. Lowering, instantiation, coercion and the tier phase are this
 //! module's callers, and until each lands the test-support door is its only one: a method that no
@@ -10,19 +10,16 @@
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{ApplicationId, DefId, MemberId, Sym, TyId, TypeExprId, ValueId, dense},
+  id::{ApplicationId, DefId, MemberId, TyId, TypeExprId, ValueId, dense},
   model::{
-    application::{ApplicationArgument, Resolution},
     def::Collection,
     schema::{Root, RootOperation},
     table::{
-      ApplicationRow, ExternRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM, LiteralRow,
-      NO_DEF, PathRow, Run, TyRow, UNSET_TY, VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT,
-      VALUE_LIST, VALUE_LITERAL, VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET, VALUE_STRING,
-      VALUE_TYPE, VALUE_UNRESOLVED, ValueRow,
+      ExternRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM, NO_DEF, Run, TyRow,
+      VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST, VALUE_MAP, VALUE_NULL,
+      VALUE_OBJECT, VALUE_SET, VALUE_STRING, VALUE_TYPE,
     },
-    ty::PathRoot,
-    value::{LiteralKind, ObjectEntry},
+    value::ObjectEntry,
   },
   package::Tier,
 };
@@ -30,22 +27,6 @@ use crate::graphqlx::{
 use super::{ModelBuilder, append, extend, grow, push_text, slot, unresolved_ty};
 
 impl ModelBuilder {
-  /// Adds `application` to the applications of `def`'s contribution `contribution`, after those it
-  /// has.
-  pub fn push_def_application(
-    &mut self,
-    def: DefId,
-    contribution: u32,
-    application: ApplicationId,
-  ) {
-    let index = dense(self.model.listed_applications.len());
-    let row = &mut self.model.defs[def.get() as usize];
-    extend(&mut row.applications, index);
-    let part = slot(row.contributions, contribution);
-    extend(&mut self.model.contributions[part].applications, index);
-    self.model.listed_applications.push(application);
-  }
-
   /// Makes `def` a marker.
   pub fn set_marker(&mut self, def: DefId) {
     self.model.defs[def.get() as usize].marker = true;
@@ -79,21 +60,6 @@ impl ModelBuilder {
   /// any order, and each is kept once.
   pub fn push_satisfaction(&mut self, ty: TyId, interface: DefId) {
     self.model.satisfactions.push((ty, interface));
-  }
-
-  /// Gives `member` its default value.
-  pub fn set_member_default(&mut self, member: MemberId, value: ValueId) {
-    self.model.members[member.get() as usize].default = Some(value);
-  }
-
-  /// Adds `application` to `member`'s applications, after those it has.
-  pub fn push_member_application(&mut self, member: MemberId, application: ApplicationId) {
-    let row = &mut self.model.members[member.get() as usize];
-    grow(
-      &mut self.model.member_applications,
-      &mut row.applications,
-      application,
-    );
   }
 
   /// Gives `type_expr` its type.
@@ -162,26 +128,6 @@ impl ModelBuilder {
   /// Gives `ty` the tier it requires.
   pub fn set_ty_tier(&mut self, ty: TyId, tier: Tier) {
     self.model.tys[ty.get() as usize].tier = tier;
-  }
-
-  /// Appends a value written at `location`, or filled from a default when `written` is false.
-  ///
-  /// Values are appended in the walk's order, a list, set, map or object before what it holds.
-  /// One starts unresolved, with no type; the methods below give it its shape and its type.
-  pub fn push_value(&mut self, location: Location, written: bool) -> ValueId {
-    let id = ValueId::new(dense(self.model.values.len()));
-    self.model.values.push(ValueRow {
-      shape: VALUE_UNRESOLVED,
-      def: NO_DEF,
-      member: MemberId::new(0),
-      payload: 0,
-      run: Run::default(),
-      location,
-      ty: UNSET_TY,
-      written,
-      path: None,
-    });
-    id
   }
 
   /// Makes `value` `null`.
@@ -295,27 +241,6 @@ impl ModelBuilder {
     };
   }
 
-  /// Makes `value` a literal of `kind`, kept as written: `text`.
-  pub fn set_literal(&mut self, value: ValueId, kind: LiteralKind, text: &str) {
-    let text = push_text(&mut self.model.text, text);
-    let payload = dense(self.model.literals.len());
-    self.model.literals.push(LiteralRow { kind, text });
-    let row = self.value_row(value);
-    row.shape = VALUE_LITERAL;
-    row.payload = payload;
-  }
-
-  /// Records the path an enum or type value writes: from `root`, through `segments`.
-  pub fn set_value_path(&mut self, value: ValueId, root: PathRoot, segments: &[Sym]) {
-    let segments = append(&mut self.model.paths, segments);
-    let row = self.value_row(value);
-    row.path = Some(PathRow {
-      root,
-      segments,
-      location: row.location,
-    });
-  }
-
   /// Gives `value` the type it was coerced against.
   pub fn set_value_ty(&mut self, value: ValueId, ty: TyId) {
     debug_assert!(
@@ -323,66 +248,6 @@ impl ModelBuilder {
       "a type is interned before a value is given it"
     );
     self.value_row(value).ty = ty;
-  }
-
-  /// Appends an application written at `location`, its directive's path written from `root`
-  /// through `segments` at `path_location`.
-  ///
-  /// Applications are appended in the walk's order. One starts unresolved, with no type argument
-  /// and no argument; the methods below give it them.
-  pub fn push_application(
-    &mut self,
-    location: Location,
-    root: PathRoot,
-    segments: &[Sym],
-    path_location: Location,
-  ) -> ApplicationId {
-    let id = ApplicationId::new(dense(self.model.applications.len()));
-    let segments = append(&mut self.model.paths, segments);
-    self.model.applications.push(ApplicationRow {
-      directive: Resolution::Unresolved,
-      type_args: Run::default(),
-      location,
-      path: PathRow {
-        root,
-        segments,
-        location: path_location,
-      },
-      arguments: Run::default(),
-    });
-    id
-  }
-
-  /// Resolves `application`'s directive to `directive`.
-  pub fn resolve_application(&mut self, application: ApplicationId, directive: DefId) {
-    self.model.applications[application.get() as usize].directive = Resolution::Resolved(directive);
-  }
-
-  /// Records the type arguments `application` writes, in order.
-  pub fn set_application_type_args(&mut self, application: ApplicationId, args: &[TypeExprId]) {
-    let args = append(&mut self.model.application_type_args, args);
-    self.model.applications[application.get() as usize].type_args = args;
-  }
-
-  /// Adds an argument to `application`, after those it has: the directive definition's
-  /// `argument`, where its name is written (`None` when a default filled it), and its value.
-  pub fn push_application_argument(
-    &mut self,
-    application: ApplicationId,
-    argument: MemberId,
-    name: Option<Location>,
-    value: ValueId,
-  ) {
-    let row = &mut self.model.applications[application.get() as usize];
-    grow(
-      &mut self.model.arguments,
-      &mut row.arguments,
-      ApplicationArgument {
-        argument,
-        name,
-        value,
-      },
-    );
   }
 
   /// Gives the schema `root` as its root for `operation`.
@@ -404,11 +269,6 @@ impl ModelBuilder {
   /// `at`. Marks are applied when the model is finished.
   pub fn mark(&mut self, at: Location) {
     self.marks.push(at);
-  }
-
-  /// The row of `value`.
-  fn value_row(&mut self, value: ValueId) -> &mut ValueRow {
-    &mut self.model.values[value.get() as usize]
   }
 
   /// Makes `value` a list or a set, `shape`, of `elements`, each appended after it.

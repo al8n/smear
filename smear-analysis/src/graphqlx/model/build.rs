@@ -45,23 +45,28 @@ use smear_semantics::interner::{Interner, Symbol};
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{DefId, IdRange, MemberId, ModuleId, PackageId, Sym, TyId, TypeExprId, dense},
+  id::{
+    ApplicationId, DefId, IdRange, MemberId, ModuleId, PackageId, Sym, TyId, TypeExprId, ValueId,
+    dense,
+  },
   package::{IntegerProvider, Layout, Tier},
 };
 
 use super::{
   Model, Namespace, PackageKind,
+  application::{ApplicationArgument, Resolution},
   def::{DefKind, DirectiveLocation, Origin, Primitive, TypeBound},
   member::MemberKind,
   module::ModuleKind,
   order,
   table::{
-    AliasRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, ContributionRow, DefRow,
-    DescriptionRow, KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED, MemberRow, ModuleRow,
-    NO_DEF, PackageRow, PathRow, Run, TyRow, TypeExprRow, TypeParamRow, UNSET_MODULE, UNSET_TY,
-    ValueRow,
+    AliasRow, ApplicationRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, ContributionRow,
+    DefRow, DescriptionRow, KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED, LiteralRow,
+    MemberRow, ModuleRow, NO_DEF, PackageRow, PathRow, Run, TyRow, TypeExprRow, TypeParamRow,
+    UNSET_MODULE, UNSET_TY, VALUE_LITERAL, VALUE_UNRESOLVED, ValueRow,
   },
   ty::PathRoot,
+  value::LiteralKind,
 };
 
 impl Symbol for Sym {
@@ -578,6 +583,138 @@ impl ModelBuilder {
     row.index = index;
   }
 
+  /// Adds `application` to the applications of `def`'s contribution `contribution`, after those it
+  /// has.
+  pub fn push_def_application(
+    &mut self,
+    def: DefId,
+    contribution: u32,
+    application: ApplicationId,
+  ) {
+    let index = dense(self.model.listed_applications.len());
+    let row = &mut self.model.defs[def.get() as usize];
+    extend(&mut row.applications, index);
+    let part = slot(row.contributions, contribution);
+    extend(&mut self.model.contributions[part].applications, index);
+    self.model.listed_applications.push(application);
+  }
+
+  /// Gives `member` its default value.
+  pub fn set_member_default(&mut self, member: MemberId, value: ValueId) {
+    self.model.members[member.get() as usize].default = Some(value);
+  }
+
+  /// Adds `application` to `member`'s applications, after those it has.
+  pub fn push_member_application(&mut self, member: MemberId, application: ApplicationId) {
+    let row = &mut self.model.members[member.get() as usize];
+    grow(
+      &mut self.model.member_applications,
+      &mut row.applications,
+      application,
+    );
+  }
+
+  /// Appends a value written at `location`, or filled from a default when `written` is false.
+  ///
+  /// Values are appended in the walk's order, a list, set, map or object before what it holds.
+  /// One starts unresolved, with no type; the methods below give it its shape and its type.
+  pub fn push_value(&mut self, location: Location, written: bool) -> ValueId {
+    let id = ValueId::new(dense(self.model.values.len()));
+    self.model.values.push(ValueRow {
+      shape: VALUE_UNRESOLVED,
+      def: NO_DEF,
+      member: MemberId::new(0),
+      payload: 0,
+      run: Run::default(),
+      location,
+      ty: UNSET_TY,
+      written,
+      path: None,
+    });
+    id
+  }
+
+  /// Makes `value` a literal of `kind`, kept as written: `text`.
+  pub fn set_literal(&mut self, value: ValueId, kind: LiteralKind, text: &str) {
+    let text = push_text(&mut self.model.text, text);
+    let payload = dense(self.model.literals.len());
+    self.model.literals.push(LiteralRow { kind, text });
+    let row = self.value_row(value);
+    row.shape = VALUE_LITERAL;
+    row.payload = payload;
+  }
+
+  /// Records the path an enum or type value writes: from `root`, through `segments`.
+  pub fn set_value_path(&mut self, value: ValueId, root: PathRoot, segments: &[Sym]) {
+    let segments = append(&mut self.model.paths, segments);
+    let row = self.value_row(value);
+    row.path = Some(PathRow {
+      root,
+      segments,
+      location: row.location,
+    });
+  }
+
+  /// Appends an application written at `location`, its directive's path written from `root`
+  /// through `segments` at `path_location`.
+  ///
+  /// Applications are appended in the walk's order. One starts unresolved, with no type argument
+  /// and no argument; the methods below give it them.
+  pub fn push_application(
+    &mut self,
+    location: Location,
+    root: PathRoot,
+    segments: &[Sym],
+    path_location: Location,
+  ) -> ApplicationId {
+    let id = ApplicationId::new(dense(self.model.applications.len()));
+    let segments = append(&mut self.model.paths, segments);
+    self.model.applications.push(ApplicationRow {
+      directive: Resolution::Unresolved,
+      type_args: Run::default(),
+      location,
+      path: PathRow {
+        root,
+        segments,
+        location: path_location,
+      },
+      arguments: Run::default(),
+    });
+    id
+  }
+
+  /// Resolves `application`'s directive to `directive`.
+  pub fn resolve_application(&mut self, application: ApplicationId, directive: DefId) {
+    self.model.applications[application.get() as usize].directive = Resolution::Resolved(directive);
+  }
+
+  /// Records the type arguments `application` writes, in order.
+  pub fn set_application_type_args(&mut self, application: ApplicationId, args: &[TypeExprId]) {
+    let args = append(&mut self.model.application_type_args, args);
+    self.model.applications[application.get() as usize].type_args = args;
+  }
+
+  /// Adds an argument to `application`, after those it has: the directive definition's
+  /// `argument`, where its name is written (`None` when a default filled it), and its value.
+  pub fn push_application_argument(
+    &mut self,
+    application: ApplicationId,
+    argument: MemberId,
+    name: Option<Location>,
+    value: ValueId,
+  ) {
+    let row = &mut self.model.applications[application.get() as usize];
+    grow(
+      &mut self.model.arguments,
+      &mut row.arguments,
+      ApplicationArgument {
+        argument,
+        name,
+        value,
+      },
+    );
+  }
+
   /// Appends a schema definition to the schema's contributions: at `location`, its `schema`, and
   /// spanning `extent`, from its description or its `schema` to its last token. Answers its index
   /// among the schema's contributions.
@@ -651,6 +788,11 @@ impl ModelBuilder {
       order::check(&model);
     }
     model
+  }
+
+  /// The row of `value`.
+  fn value_row(&mut self, value: ValueId) -> &mut ValueRow {
+    &mut self.model.values[value.get() as usize]
   }
 
   /// A description of `text`, appended to the text arena, written at `location`.

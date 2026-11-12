@@ -260,4 +260,9 @@ pub(crate) mod schema {
   /// `ExtensionKindMismatch`.
   pub(crate) const EXTENSION_KIND_MISMATCH: Code =
     Code::new("smear::schema::extension-kind-mismatch");
+
+  /// An application names an argument its directive does not declare: `smear-schema`'s
+  /// `UndefinedDirectiveArgument`.
+  pub(crate) const UNDEFINED_DIRECTIVE_ARGUMENT: Code =
+    Code::new("smear::schema::undefined-directive-argument");
 }

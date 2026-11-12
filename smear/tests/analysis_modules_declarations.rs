@@ -529,7 +529,8 @@ fn the_shared_codes_are_smear_schemas() {
   use smear::validator::SchemaErrorKind;
 
   let text = "scalar X\nscalar X\ndirective @d on FIELD\ndirective @d on FIELD\n\
-              scalar __Y\ndirective @__y on FIELD\nextend type X {\n  f: Int\n}\n";
+              scalar __Y\ndirective @__y on FIELD\nextend type X {\n  f: Int\n}\n\
+              scalar Z @d(nope: 1)\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
   let analysis = analyze(&root, &[], &Limits::new());
   let mut codes: Vec<&str> = analysis
@@ -544,6 +545,7 @@ fn the_shared_codes_are_smear_schemas() {
     SchemaErrorKind::ReservedTypeName,
     SchemaErrorKind::ReservedDirectiveName,
     SchemaErrorKind::ExtensionKindMismatch,
+    SchemaErrorKind::UndefinedDirectiveArgument,
   ]
   .iter()
   .map(|kind: &SchemaErrorKind| kind.code().as_str())

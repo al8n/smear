@@ -141,15 +141,20 @@ impl Analysis {
 ///   whether it is `repeatable`; and its members, the direct members of each contribution in turn
 ///   as written and then each field's arguments, each with its description. A replaced built-in
 ///   holds what the root package's definition writes, and smear's own definition of it
-///   contributes nothing. Every type written is then a type occurrence, appended in the order the
-///   model's walk reaches it, one for each type and each before the types it nests: a type
-///   parameter's default, a bound, an `implements` entry, a union member, a member's type. Each
+///   contributes nothing. Every type written is then a type occurrence, and every directive
+///   application and every value written is one too, appended in the order the model's walk
+///   reaches it, each before what it nests: a type parameter's default, a bound, an `implements`
+///   entry, a union member, an application, a member's type, default and applications. Each
 ///   keeps its path as written and the arguments written for it, and its path is resolved where
 ///   its contribution is written, with the contribution's generic parameters in scope, an
 ///   extension's own names naming its target's by position; one that names nothing is reported,
 ///   with the code of its place, and stays unresolved. A bound is a definition's own type
 ///   parameter's: any other left side of a `where` predicate, and any `where` clause on an
-///   extension, is `invalid-bound`. Then the schema's
+///   extension, is `invalid-bound`. An application whose directive resolves keeps its type
+///   arguments and the arguments its directive declares, in the directive's order, an argument
+///   written twice twice; one it does not declare is `undefined-directive-argument`, with the
+///   nearest name it does declare in its help. A value is kept as written, its syntactic kind and
+///   its text. Then the schema's
 ///   contributions: every package's schema definitions, then its schema extensions, each by source
 ///   and position and each marked as what it is; the root package's first schema definition gives
 ///   the schema its description. Names and texts past what the model's `u32` offsets address,
@@ -217,6 +222,7 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
     &mut reporter,
   );
   lower::lower(
+    &packages,
     &declarations,
     &scopes,
     &sources,
