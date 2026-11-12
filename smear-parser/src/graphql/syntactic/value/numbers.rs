@@ -643,7 +643,7 @@ pub(crate) fn overflows(bytes: &[u8], width: IntWidth) -> bool {
 /// `IntOverflow::checked` accepts arbitrary `AsRef<[u8]>`, so a caller validating an untrusted
 /// payload can hand this function anything. Asking the *general* lexer means the first byte
 /// chooses a sub-lexer, and the inline-string sub-lexer appends one diagnostic per malformed
-/// escape to a `SmallVec` before this function drops every one of them: refusing `"\q\q\q…"`
+/// escape to a `Vec` before this function drops every one of them: refusing `"\q\q\q…"`
 /// cost heap proportional to the input, ~184 MB for a 1 MiB slice that was never going to be an
 /// integer. The gate makes a refusal O(1) in heap for every byte that cannot start an `IntValue`,
 /// and `a_refusal_costs_the_same_heap_at_a_kilobyte_and_at_a_megabyte` measures the constant

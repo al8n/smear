@@ -314,10 +314,9 @@ MIRI_PACKAGES = (
 #
 # What this does NOT restore is a DEPENDENCY's features. Selected alone, the `smear-schema`,
 # `smear-compiler` and `graphql-proto` cells resolve `smear-lexer` and `smear-parser` without
-# `graphqlx` and `smallvec` (and without the `default` label, which no cfg reads): `graphqlx` is a
-# dialect none of the three calls, and `smallvec` swaps the lexer's error container from
-# `SmallVec<[_; 1]>` to `Vec`. Each member's OWN code is compiled exactly as the five compiled it,
-# and the lexer's and the parser's cells still interpret their default set.
+# `graphqlx`, a dialect none of the three calls (and without the `default` label, which no cfg
+# reads). Each member's OWN code is compiled exactly as the five compiled it, and the lexer's and
+# the parser's cells still interpret their default set.
 MIRI_SHARD_FEATURES = {"smear-schema": ("build",)}
 
 # The publishable members deliberately NOT selected, each with the behaviour that keeps it out.

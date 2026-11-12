@@ -52,11 +52,11 @@ exclude = [
 # left to omit. Neither member had ever been published, so nothing on the registry moved.
 
 [features]
-default = ["std", "graphql", "graphqlx", "parser", "smallvec_1"]
+default = ["std", "graphql", "graphqlx", "parser"]
 
-# Element-for-element what the facade's default already resolved to: `std`, `smallvec`, both
-# dialects, and the parser, which a `smear` dependency compiled unconditionally. A default build
-# compiles the same code before and after the merge.
+# Element-for-element what the facade's default already resolved to, `smallvec` aside, which this
+# workspace no longer has: `std`, both dialects, and the parser, which a `smear` dependency
+# compiled unconditionally. A default build compiled the same code before and after the merge.
 
 alloc = ["smear-lexer/alloc", "smear-parser?/alloc", "smear-schema/alloc", "smear-semantics?/alloc", "smear-compiler?/alloc", "graphql-proto?/alloc", "smear-analysis?/alloc", "tokora/alloc", "bstr_1?/alloc", "smol-bytes_0_2?/alloc"]
 
@@ -139,7 +139,7 @@ introspection = ["validator", "smear-compiler/introspection", "smear-schema/intr
 # the edge the feature fence in `src/lib.rs` reads that crate's witnesses through.
 analysis = ["parser", "graphqlx", "dep:smear-analysis", "dep:smear-semantics"]
 
-# The five source backings. Each forwards to `smear-lexer`, which is where the `Source`
+# The four source backings. Each forwards to `smear-lexer`, which is where the `Source`
 # implementations live; the `dep:` half survives only for the three this package's own test
 # targets still name by type, and the `tokora/<backing>` half is kept beside it rather than left
 # to `smear-lexer` to supply, because `smear-smoke`'s header records that losing that half is
@@ -148,8 +148,6 @@ analysis = ["parser", "graphqlx", "dep:smear-analysis", "dep:smear-semantics"]
 #
 # The versioned feature is the switch, and the unversioned name is a pure alias for the current
 # major. The dependency key carries the version too, so the crate is `bytes_1` in code.
-smallvec = ["smallvec_1"]
-smallvec_1 = ["smear-lexer/smallvec_1", "smear-parser?/smallvec_1"]
 bytes = ["bytes_1"]
 bytes_1 = ["dep:bytes_1", "smear-lexer/bytes_1", "smear-parser?/bytes_1", "smear-analysis?/bytes_1", "tokora/bytes_1"]
 bstr = ["bstr_1"]
@@ -162,7 +160,7 @@ smol-bytes_0_2 = ["dep:smol-bytes_0_2", "smear-lexer/smol-bytes_0_2", "smear-par
 # The umbrella twin of `smear-parser/materialized-numbers` — a second set of GraphQL value
 # productions carrying `i64` and `f64` where the slice parser carries a source slice.
 #
-# It names the member STRONGLY and pulls `parser` and `graphql` in, where the five backings above
+# It names the member STRONGLY and pulls `parser` and `graphql` in, where the four backings above
 # forward weakly. The difference is that those features mean something to `smear-lexer` with no
 # parser in the graph, and this one means nothing at all: every item it compiles is inside
 # `smear-parser`'s `graphql` modules. A weak forward would let `smear/materialized-numbers`
@@ -235,9 +233,9 @@ test-support = ["smear-parser?/test-support", "smear-analysis?/test-support"]
 tokora.workspace = true
 
 # The lexer, unconditional and with no feature of its own to gate it: it is the base of the stack
-# and a `smear` with it switched off would be an empty crate. `smear-lexer` also carries the four
-# dependencies this manifest used to hold for it and no longer does — `thiserror`, `memspan`,
-# `smallvec` and `smol-bytes` — each removed because nothing outside `smear-lexer/src` names it.
+# and a `smear` with it switched off would be an empty crate. `smear-lexer` also carries the
+# dependencies this manifest used to hold for it and no longer does — `thiserror`, `memspan` and
+# `smol-bytes` — each removed because nothing outside `smear-lexer/src` names it.
 smear-lexer.workspace = true
 
 # The parser tower, optional because `smear`'s `parser` feature is the gate a lexer-only consumer
@@ -559,7 +557,7 @@ harness = false
 # ── THE TWO GATED TARGET FAMILIES, AND THE HOLE `required-features` OPENS ───────────────────
 #
 # The four benches above measure this crate's DEFAULT feature set — `std`, `graphql`, `graphqlx`,
-# `parser`, `smallvec` — which is the configuration `cargo add smear` gives a consumer, and they
+# `parser` — which is the configuration `cargo add smear` gives a consumer, and they
 # get it for free now that they are targets of the package they measure. Nothing below is
 # reachable in that configuration: the apollo family drives the lossless CST tower and the draft
 # §5 rule engine, so `rowan` and `validator` have to be on, and cargo's only per-target lever is
@@ -599,11 +597,13 @@ harness = false
 # WHAT THE MOVE CHANGED ABOUT WHAT THESE TWO MEASURE, recorded because a benchmark whose subject
 # moves quietly is worse than one that is absent. In `smear-apollo-bench` they resolved exactly
 # `std, graphql, rowan, validator`. Here they resolve `default` plus those two, which adds
-# `graphqlx` — inert, a second dialect neither bench enters — and `smallvec`, which is NOT inert:
-# it changes the collection backing on the syntactic AST that `validator_comparison`'s smear side
-# projects and validates. The direction is towards the consumer's configuration rather than away
-# from it, which is the same argument the four benches above are written on, so it is taken
-# deliberately; a `validator_comparison` number is not comparable across this commit.
+# `graphqlx` — inert, a second dialect neither bench enters. At the move the default also added
+# `smallvec`, which was NOT inert: it backed the lexers' error containers, the error type of every
+# token the smear side of `validator_comparison` lexes. The direction was towards the
+# consumer's configuration rather than away from it, which is the same argument the four benches
+# above are written on, so it was taken deliberately; a `validator_comparison` number is not
+# comparable across that commit, nor across the one that made those containers a `Vec` in every
+# configuration.
 
 [[bench]]
 name = "apollo_comparison"

@@ -24,10 +24,10 @@ The dialects (`graphql`, `graphqlx`) and the other features are the ones `smear`
 describes. No feature but `default` switches a tier on, so a `default-features = false` consumer
 names `std` or `alloc` itself, and names `std` beside `rowan_0_17`.
 
-The dependency features (`smallvec_1`, `bytes_1`, `bstr_1`, `hipstr_0_8`, `smol-bytes_0_2` and
-`rowan_0_17`) carry the major of the crate they enable. The unversioned names — `smallvec`, `bytes`,
-`bstr`, `hipstr`, `smol-bytes` and `rowan` — are aliases for the current version: each enables its
-versioned feature and nothing else.
+The dependency features (`bytes_1`, `bstr_1`, `hipstr_0_8`, `smol-bytes_0_2` and `rowan_0_17`)
+carry the major of the crate they enable. The unversioned names — `bytes`, `bstr`, `hipstr`,
+`smol-bytes` and `rowan` — are aliases for the current version: each enables its versioned
+feature and nothing else.
 
 ## Part of the Smear Ecosystem
 

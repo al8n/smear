@@ -50,8 +50,8 @@ status=0
 # `alloc`. No other feature implies a tier, so a dependency feature's row is a core row too: it
 # compiles the dependency in and exposes nothing that needs `std` or `alloc`.
 #
-# THE UNVERSIONED DEPENDENCY NAMES ARE NOT ROWS. `bytes`, `bstr`, `hipstr`, `smol-bytes`,
-# `smallvec` and `rowan` are pure aliases of the versioned features (`bytes = ["bytes_1"]`), so
+# THE UNVERSIONED DEPENDENCY NAMES ARE NOT ROWS. `bytes`, `bstr`, `hipstr`, `smol-bytes` and
+# `rowan` are pure aliases of the versioned features (`bytes = ["bytes_1"]`), so
 # each of their rows would build what the versioned row builds and double the matrix. They are
 # excluded here and in every pass below. `--exclude-features` also drops cargo-hack's
 # `--all-features` row, so the second command asks for it by name.
@@ -74,7 +74,7 @@ status=0
 echo "== pass 1: the core tier, cargo hack clippy --each-feature --tests =="
 # shellcheck disable=SC2086
 $CARGO $TOOLCHAIN hack clippy --each-feature --tests --keep-going \
-  --exclude-features bytes,bstr,hipstr,smol-bytes,smallvec,rowan || status=1
+  --exclude-features bytes,bstr,hipstr,smol-bytes,rowan || status=1
 $CARGO $TOOLCHAIN hack clippy --all-features --tests --keep-going || status=1
 
 # Pass 2 — the alloc tier: every feature, one at a time, on top of `alloc`.
@@ -88,7 +88,7 @@ $CARGO $TOOLCHAIN hack clippy --all-features --tests --keep-going || status=1
 echo "== pass 2: the alloc tier =="
 # shellcheck disable=SC2086
 $CARGO $TOOLCHAIN hack clippy --each-feature --features alloc --ignore-unknown-features --tests \
-  --keep-going --exclude-features std,default,rowan,bytes,bstr,hipstr,smol-bytes,smallvec \
+  --keep-going --exclude-features std,default,rowan,bytes,bstr,hipstr,smol-bytes \
   --exclude-all-features || status=1
 
 # Pass 2b — `rowan_0_17` on `alloc` and without `std`, with each dialect and with the validator:
@@ -131,7 +131,7 @@ $CARGO $TOOLCHAIN hack clippy -p smear-parser --each-feature --features alloc,ro
 # `parser` and `alloc` are NOT in the exclude list: cargo-hack rejects a feature named by both
 # `--features` and `--exclude-features` (verified against 0.6.43, "specified by both"), and it
 # does not need them there — it already skips the `parser,parser` and `alloc,alloc` cells on its
-# own. Nine cells, one per remaining feature, and a feature added to the manifest later joins
+# own. Eight cells, one per remaining feature, and a feature added to the manifest later joins
 # them without anyone editing this file.
 #
 # `--tests` here for the reason pass 1 gives: these are the cells whose test targets no other row
@@ -140,7 +140,7 @@ echo "== pass 3: the parser x feature pairs, on the alloc tier =="
 # shellcheck disable=SC2086
 $CARGO $TOOLCHAIN hack clippy -p smear --each-feature --features parser,alloc --tests --keep-going \
   --exclude-features \
-  rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,analysis,default,std,bytes,bstr,hipstr,smol-bytes,smallvec \
+  rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,analysis,default,std,bytes,bstr,hipstr,smol-bytes \
   --exclude-no-default-features --exclude-all-features || status=1
 
 # Pass 4 — the std tier, without alloc: `std,alloc` and every dependency feature on `std`.
@@ -160,7 +160,7 @@ echo "== pass 4: the std tier, without alloc =="
 # shellcheck disable=SC2086
 $CARGO $TOOLCHAIN hack clippy --each-feature --features std --ignore-unknown-features --tests \
   --keep-going --exclude-features \
-  default,bytes,bstr,hipstr,smol-bytes,smallvec,rowan,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,build \
+  default,bytes,bstr,hipstr,smol-bytes,rowan,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,build \
   --exclude-no-default-features --exclude-all-features || status=1
 
 exit "$status"

@@ -12,7 +12,7 @@ on:
     # entry has to be removed in, and the note on why a literal name is unavoidable in an `on:`
     # block; `ci/check_workflow_triggers.sh` enforces the identity.
     #
-    # The `paths-ignore` list below is deliberately NOT the one the other three carry. This
+    # The `paths-ignore` list below is deliberately NOT the one its siblings carry. This
     # workflow counts lines of Rust, so markdown genuinely cannot change its result, whereas in
     # `ci.yml` a blanket `**.md` suppressed the one job that catches a broken README link. Only
     # the push-branch list is required to match.
@@ -35,13 +35,12 @@ on:
       - 'art'
   workflow_dispatch:
 
-# Every `run:` here is bash — the same block the other three workflows carry, and `ci.yml`'s
-# has the full account. This is the weakest of the four instances: one ubuntu job, and its
-# three `run:` blocks are plain command sequences that any shell would take. It is stated
-# anyway so that "every workflow in this repository declares bash" is a property somebody can
-# check by reading the four files, rather than a rule with one silent exception in the file
-# nobody looks at. This repository has twice shipped a workflow fix into `ci.yml` and left the
-# siblings behind.
+# Every `run:` here is bash — the same block every other workflow here carries, and `ci.yml`'s
+# has the full account. This is the weakest instance: one ubuntu job, and its three `run:`
+# blocks are plain command sequences that any shell would take. It is stated anyway so that
+# "every workflow in this repository declares bash" is a property somebody can check by reading
+# the files, rather than a rule with one silent exception in the file nobody looks at. This
+# repository has twice shipped a workflow fix into `ci.yml` and left the siblings behind.
 defaults:
   run:
     shell: bash

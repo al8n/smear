@@ -262,7 +262,7 @@ impl<'a> LosslessView<'a> {
 ///
 /// # Why the doors take this rather than `&str`
 ///
-/// The crate ships five source-representation integrations so a consumer can pick one, and this
+/// The crate ships four source-representation integrations so a consumer can pick one, and this
 /// is what makes the lossless half honour them: a caller holding `bytes::Bytes` reaches a `_from`
 /// door with it. The bound asks for one borrow rather than for a conversion — a byte backing hands
 /// over the bytes it already has.
@@ -380,7 +380,7 @@ viewed_as!(
 
 // ── THE SHIPPED BACKINGS ──────────────────────────────────────────────────────────────────────
 //
-// The five source integrations this crate ships, each gated with its own feature and each viewed
+// The four source integrations this crate ships, each gated with its own feature and each viewed
 // as the half it already is. A byte one is **not** scanned as bytes — see the module header for
 // the measurement that rules that out — it is validated once and scanned as text, exactly as a
 // `&str` is.

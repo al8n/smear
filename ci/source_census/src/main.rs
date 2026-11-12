@@ -1,7 +1,7 @@
 //! Fails a build when a public entry takes source text at a concrete type, or when a public error
 //! type does not answer the diagnostic contract.
 //!
-//! `smear` ships five source-representation integrations so a consumer can pick one. §3, syntactic
+//! `smear` ships four source-representation integrations so a consumer can pick one. §3, syntactic
 //! §5 and §6/§7 honour that with `S: AsRef<[u8]>`. Nothing fails when a new public entry spells the
 //! same parameter `&str` instead: it compiles, it passes every test, it reads naturally, and the
 //! narrowing is discovered by a consumer at a call site. That is al8n/smear#122, and this is the

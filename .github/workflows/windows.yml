@@ -1,0 +1,276 @@
+name: Windows
+
+# ── THE WINDOWS LANE ────────────────────────────────────────────────────────────────────────
+#
+# These four legs were the `windows-latest` row of `CI`'s `rustfmt`, `clippy`, `build` and `test`
+# matrices. They are a workflow of their own so that Windows can be paused and resumed alone, as
+# `macOS` and `Miri` can, while `CI` keeps every Linux job and its verdict. That makes this a
+# scheduling change and not a coverage change: every step below is the step `CI` ran on
+# `windows-latest`, unchanged, and the single-entry `os` matrices keep the job names —
+# `rustfmt (windows-latest)` and its three siblings. `ci.yml`'s header and `macos.yml`'s carry the
+# measurements behind splitting a lane out.
+#
+# `build`'s `Run build` is a COPY of `ci.yml`'s, as `macos.yml`'s is, and nothing compares the
+# copies: an edit to one is an edit to all three. `clippy` needs no such care, because every lane
+# runs the one string in `ci/hack.sh`.
+
+# The triggers, `paths-ignore` and the weekly `schedule` are `ci.yml`'s, for the reasons its
+# comments give: these jobs ran on exactly those events while they were `CI`'s.
+# `ci/check_workflow_triggers.sh` keeps `on.push.branches` identical across every workflow.
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'COPYRIGHT'
+      - 'LICENSE-*'
+      - 'docs/**.md'
+      - '**.txt'
+  pull_request:
+    paths-ignore:
+      - 'COPYRIGHT'
+      - 'LICENSE-*'
+      - 'docs/**.md'
+      - '**.txt'
+  workflow_dispatch:
+  schedule: [cron: "0 1 */7 * *"]
+
+concurrency:
+  # `CI`'s expression. `${{ github.workflow }}` leading it keeps this lane's groups apart from
+  # `CI`'s, so neither can cancel the other's run.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') && github.sha || '' }}
+  cancel-in-progress: ${{ !(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
+
+# Every `run:` is bash, as in `ci.yml`, whose comment tells how a `\` continuation in these very
+# steps once failed to parse under PowerShell (#84). The one PowerShell step, `Use lld-link
+# (Windows)`, says `shell: pwsh` itself.
+defaults:
+  run:
+    shell: bash
+
+# `CI`'s environment verbatim, `nightly` and `stable` included although no step reads them: it is
+# the environment these jobs ran in.
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings -C debuginfo=0 -C codegen-units=16
+  RUST_BACKTRACE: 1
+  nightly: nightly
+  stable: stable
+
+jobs:
+  # Check formatting
+  rustfmt:
+    name: rustfmt
+    strategy:
+      matrix:
+        os:
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install Rust
+      # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+  # Apply clippy lints
+  clippy:
+    name: clippy
+    strategy:
+      # `fail-fast: false` as in `CI`, so that this is the same job; with one entry it decides
+      # nothing.
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install Rust
+      # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Install cargo-hack
+      run: cargo install cargo-hack
+    # The one string every lane runs; `ci/hack.sh` carries the flags, the passes and the reasoning.
+    - name: ci/hack.sh
+      run: bash ci/hack.sh
+
+  build:
+    name: build
+    strategy:
+      # As in `clippy`.
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v7
+    - name: Cache cargo build and registry
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-build-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-build-
+    - name: Install Rust
+      # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Install cargo-hack
+      run: cargo install cargo-hack
+    - name: Cache ~/.cargo
+      uses: actions/cache@v6
+      with:
+        path: ~/.cargo
+        key: ${{ runner.os }}-coverage-dotcargo
+    # A copy of `ci.yml`'s `Run build`; see this file's header.
+    - name: Run build
+      run: |
+        # Pass 1 — the core tier: no tier feature, so no allocator. The rows that name a tier
+        # (`alloc`, `std`, `default`, `--all-features`) are above it; no other feature implies one.
+        #
+        # `bytes`, `bstr`, `hipstr`, `smol-bytes` and `rowan` are pure aliases of the
+        # versioned features, so their rows would build what the versioned rows build and double
+        # the matrix: they are excluded here and in every pass below. `--exclude-features` also
+        # drops cargo-hack's `--all-features` row, so that row is asked for by name.
+        cargo hack build --each-feature --exclude-features bytes,bstr,hipstr,smol-bytes,rowan
+        cargo hack build --all-features
+        # Pass 2 — the alloc tier, which is what pass 1 covered until `alloc` became a feature.
+        # `alloc` is not in the exclude list: cargo-hack refuses a feature named by both flags.
+        # `rowan_0_17` and `lossless-coverage` imply no tier, so with `alloc` each is a row of its
+        # own: the rowan crate built, and the tower, whose tier is `std`, compiled out.
+        cargo hack build --each-feature --features alloc --ignore-unknown-features \
+          --exclude-features std,default,rowan,bytes,bstr,hipstr,smol-bytes \
+          --exclude-all-features
+        # Pass 3 — the pairwise isolation cells the crate split used to provide by accident.
+        # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its
+        # build always contained the parser; a single-crate `--each-feature` never builds `parser`
+        # together with exactly one other feature. This restores those pairs deliberately, and the
+        # two that matter are `parser` x `bytes_1` (60 parser cfg sites) and `parser` x dialect.
+        # They are alloc-tier cells, because the parser needs an allocator.
+        #
+        # `smear-lexer` needs no pass of its own, and that is measured rather than assumed: not one
+        # of its features implies another capability — every entry in its `[features]` table is a
+        # tier, an empty capability or a forward to a dependency — so pass 2 already builds each of
+        # them in the only combination the old single-crate run gave them.
+        #
+        # `rowan_0_17`, `lossless-coverage`, `validator`, `introspection`, `proto` and
+        # `analysis` are excluded because they already imply `parser`, so their pass-2 cells ARE
+        # pairs; `default`, `std` and `--all-features` are excluded because the `std` tier is pass
+        # 1's and pass 4's, and `--no-default-features` because `parser,alloc` is already pass 2's
+        # `parser` row. The aliases (`rowan` among them) are excluded as in pass 1.
+        #
+        # `parser` and `alloc` are NOT in the exclude list: cargo-hack rejects a feature named by
+        # both `--features` and `--exclude-features` (verified against 0.6.43, "specified by
+        # both"), and it already skips the `parser,parser` and `alloc,alloc` cells on its own.
+        # Eight cells, one per remaining feature, and a feature added to the manifest later joins
+        # them without anyone editing this file.
+        cargo hack build -p smear --each-feature --features parser,alloc \
+          --exclude-features rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,analysis,default,std,bytes,bstr,hipstr,smol-bytes \
+          --exclude-no-default-features --exclude-all-features
+        # Pass 4 — the std tier, without alloc: `std,alloc` and every dependency feature on `std`,
+        # as `ci/hack.sh` has it and for its reasons. `rowan_0_17` and `lossless-coverage` are NOT
+        # excluded: theirs are the rows that build the tower on its own, with only the tier it needs.
+        cargo hack build --each-feature --features std --ignore-unknown-features \
+          --exclude-features default,bytes,bstr,hipstr,smol-bytes,rowan,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,build \
+          --exclude-no-default-features --exclude-all-features
+        # Pass 5 — the six criterion benches, which NOTHING ELSE IN CI COMPILES.
+        #
+        # Measured on this tree: `cargo test`'s default target selection is lib + bins + tests +
+        # examples; a `[[bench]]` target is not in it, and neither `cargo build --workspace
+        # --all-features` (the `msrv` job) nor `cargo hack build --each-feature` above builds
+        # one. A bench is a target that exists and that nothing else here ever proves builds —
+        # `#73`'s family exactly — so this pass is the only gate over all six.
+        #
+        # The first line covers the four that measure `smear`'s DEFAULT feature set. `-p smear`
+        # names the package, which is the loud spelling: a target FILTER that matches nothing
+        # warns and exits 0, a named `-p` that cannot be built fails.
+        #
+        # THE SECOND LINE IS NOT A SECOND HELPING OF THE FIRST. `apollo_comparison` and
+        # `validator_comparison` carry `required-features = ["rowan_0_17", "validator"]`, and an unmet
+        # `required-features` makes cargo SKIP the target in silence — no output, exit code 0.
+        # Measured: `cargo bench --no-run -p smear` builds four of the six and says nothing about
+        # the other two. A workspace-wide `cargo bench` does build all six, but only because
+        # `smear-smoke` names every one of `smear`'s features and cargo unifies across the
+        # selected packages — coverage by resolution, which is what #70 and #84 both were, and
+        # which would disappear the day that member narrowed. So the two are NAMED, `--bench` by
+        # `--bench`, with their features passed: a named target that cannot be built is a hard
+        # error, and a renamed one takes this step red on the commit that renamed it.
+        # `validator_comparison` in particular carries G5's acceptance criterion (issue #85).
+        #
+        # `--no-run`, not a run: criterion sampling is minutes per target and this is a compile
+        # gate.
+        cargo bench --no-run -p smear
+        cargo bench --no-run -p smear --features rowan_0_17,validator \
+          --bench apollo_comparison --bench validator_comparison
+
+  test:
+    name: test
+    strategy:
+      # As in `clippy`.
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v7
+    - name: Cache cargo build and registry
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-test-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-test-
+    - name: Install Rust
+      # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Install cargo-hack
+      run: cargo install cargo-hack
+    - name: Cache ~/.cargo
+      uses: actions/cache@v6
+      with:
+        path: ~/.cargo
+        key: ${{ runner.os }}-coverage-dotcargo
+    # Its `if:` can only be true here; it is kept so that the step is the step `CI` ran.
+    - name: Use lld-link (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        # lld already comes with Chocolatey llvm on GH runners; install/upgrade if needed
+        choco upgrade -y llvm
+
+        # Ensure LLVM bin is on PATH (where lld-link.exe lives)
+        $llvmBin = 'C:\Program Files\LLVM\bin'
+        if (-not (Test-Path $llvmBin)) {
+          Write-Error "LLVM bin not found at $llvmBin"
+          exit 1
+        }
+        echo "PATH=$llvmBin;$env:PATH" >> $env:GITHUB_ENV
+
+        # Verify
+        & "$llvmBin\lld-link.exe" --version
+
+        # Tell Cargo to use lld-link for MSVC target
+        echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=lld-link.exe" >> $env:GITHUB_ENV
+
+        # Make PDB generation lighter & avoid incremental weirdness in CI
+        echo "RUSTFLAGS=$env:RUSTFLAGS -C link-arg=/DEBUG:FASTLINK -C link-arg=/INCREMENTAL:NO" >> $env:GITHUB_ENV
+
+    # The three compile-only rows and `Run test` are `ci.yml`'s; its comments say what each one
+    # catches that nothing else does.
+    - name: cargo test -p smear --no-run (default features)
+      run: cargo test -p smear --no-run
+    - name: cargo test -p smear --no-run (rowan + graphql only)
+      run: cargo test -p smear --no-run --no-default-features --features "std,parser,rowan_0_17,graphql"
+    - name: cargo test -p smear --no-run (rowan + graphqlx only)
+      run: cargo test -p smear --no-run --no-default-features --features "std,parser,rowan_0_17,graphqlx"
+    - name: Run test
+      run: cargo test --all-features --no-fail-fast -- --quiet

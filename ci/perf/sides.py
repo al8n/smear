@@ -2,11 +2,12 @@
 """What each side of a perf comparison is, apart from what it measures.
 
 `ci/perf/run.sh` builds two trees: the head's, and the merge-base's own with the head's instrument
-laid over it. This answers the four questions about them that come before and beside a reading:
+laid over it. This answers the five questions about them that come before and beside a reading:
 
   instrument  which files the base side takes from the head
   profile     whether the two trees declare a build-profile setting the script's pin cannot override
   lock        which packages the two sides resolved differently
+  compiled    whether a side's build compiled its own packages, or took any of them for fresh
   features    which features each side compiled its own packages with
 
 Usage:
@@ -14,14 +15,16 @@ Usage:
                         <target>...
     sides.py profile <base-root> <head-root> <pinned-key>...
     sides.py lock <base-lock> <head-lock>
+    sides.py compiled <side> <root> <build.json> <bench-target>...
     sides.py features <base-root> <base-build.json> <head-root> <head-build.json>
 
 `<*-metadata>` is the output of `cargo metadata --no-deps --format-version 1` in that tree, and
 `<*-build.json>` the `--message-format=json` stream of that side's build. Every diagnostic goes to
 stdout; `instrument` prints its file list there too, one path per line, and only when it succeeds.
 
-Exit status 3 means the two revisions are not comparable by this instrument and the reason has been
-printed; 1 is any other refusal; 2 is a usage error. Python 3.9, like the rest of `ci/perf/`.
+Exit status 3 means the two revisions are not comparable by this instrument, or for `compiled` that
+the side was not compiled, and the reason has been printed; 1 is any other refusal; 2 is a usage
+error. Python 3.9, like the rest of `ci/perf/`.
 """
 
 import json
@@ -327,6 +330,8 @@ def cmd_instrument(args):
 # trees' profile declarations are compared, wherever cargo reads one inside a tree, and a difference
 # outside the pinned keys of `bench` and the `release` it inherits from is refused rather than
 # measured. Identical declarations, overrides included, are the same build on both sides and pass.
+# So does a difference in `panic`, which is not pinned because cargo ignores it for benchmarks: no
+# bench build reads it, whatever either tree says.
 #
 # The reading is a line scanner, not a TOML parser: Python 3.9 has none. Anything it cannot place —
 # an inline table, a multi-line value, a key spelled oddly — comes out as a key the pin does not
@@ -369,6 +374,8 @@ def profile_settings(root):
 def _reach(full, pinned):
   parts = full.split(".")
   if len(parts) >= 2 and parts[1] not in ("bench", "release"):
+    return "unused"
+  if len(parts) == 3 and parts[2] == "panic":
     return "unused"
   if len(parts) == 3 and parts[2] in pinned:
     return "pinned"
@@ -473,10 +480,9 @@ def _package_name(message):
   return package_id.split(" ", 1)[0]
 
 
-def compiled_features(root, stream):
-  """`{package: {features: {target kinds}}}` for every package inside `root` the build compiled."""
+def _artifacts(root, stream):
+  """The `compiler-artifact` messages in a build's JSON stream of the packages inside `root`."""
   root = os.path.realpath(root) + os.sep
-  found = {}
   with open(stream, encoding="utf-8") as handle:
     for line in handle:
       line = line.strip()
@@ -488,11 +494,17 @@ def compiled_features(root, stream):
         continue
       if message.get("reason") != "compiler-artifact":
         continue
-      if not os.path.realpath(message.get("manifest_path", "")).startswith(root):
-        continue
-      features = tuple(sorted(message.get("features", [])))
-      kinds = "/".join(message.get("target", {}).get("kind", []))
-      found.setdefault(_package_name(message), {}).setdefault(features, set()).add(kinds)
+      if os.path.realpath(message.get("manifest_path", "")).startswith(root):
+        yield message
+
+
+def compiled_features(root, stream):
+  """`{package: {features: {target kinds}}}` for every package inside `root` the build compiled."""
+  found = {}
+  for message in _artifacts(root, stream):
+    features = tuple(sorted(message.get("features", [])))
+    kinds = "/".join(message.get("target", {}).get("kind", []))
+    found.setdefault(_package_name(message), {}).setdefault(features, set()).add(kinds)
   return found
 
 
@@ -532,10 +544,61 @@ def cmd_features(args):
   return 0
 
 
+# ── compiled ─────────────────────────────────────────────────────────────────────────────────
+#
+# A side measures its own sources only if cargo compiled them in the run that measures it. Cargo
+# takes a path package for fresh when its artifacts are newer than its sources, which a target
+# directory restored from a later build of another revision can be, and the executable measured is
+# then that build's. `run.sh` extracts with `tar -m` so that it cannot happen; this makes it loud if
+# it does. Every `compiler-artifact` of a package inside the side's tree, and each bench target
+# named, must say `"fresh": false`; a message without the flag counts as fresh.
+
+
+def _unit(message):
+  target = message.get("target", {})
+  kind = "/".join(target.get("kind", [])) or "?"
+  return "lib" if kind == "lib" else f"{kind} {target.get('name', '?')}"
+
+
+def cmd_compiled(args):
+  side, root, stream, targets = args[0], args[1], args[2], args[3:]
+  compiled, stale, built = set(), {}, set()
+  for message in _artifacts(root, stream):
+    name, target = _package_name(message), message.get("target", {})
+    if message.get("fresh") is False:
+      compiled.add(name)
+      if "bench" in target.get("kind", []):
+        built.add(target.get("name"))
+    else:
+      stale.setdefault(name, set()).add(_unit(message))
+  listed = set().union(*stale.values())
+  unseen = [t for t in targets if t not in built and f"bench {t}" not in listed]
+  if not stale and not unseen:
+    print(
+      f"perf: the {side} side compiled its own packages in this run "
+      f"({', '.join(sorted(compiled))}), the bench targets {', '.join(targets)} included"
+    )
+    return 0
+  print(
+    f"::error::the {side} side did not compile its own packages: cargo took these for fresh and "
+    "reused what its target directory already held instead of compiling the extracted sources"
+  )
+  for name in sorted(stale):
+    print(f"::error::  not compiled: {name} ({', '.join(sorted(stale[name]))})")
+  for target in unseen:
+    print(f"::error::  no artifact at all: bench target `{target}`")
+  print(
+    f"::error::so the {side} side's executables are not built from its sources, and nothing was "
+    "measured"
+  )
+  return NOT_COMPARABLE
+
+
 COMMANDS = {
   "instrument": (cmd_instrument, 6, None),
   "profile": (cmd_profile, 2, None),
   "lock": (cmd_lock, 2, 2),
+  "compiled": (cmd_compiled, 4, None),
   "features": (cmd_features, 4, 4),
 }
 

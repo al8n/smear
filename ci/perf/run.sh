@@ -29,7 +29,8 @@
 # of reaching a file it does not follow. A list would go stale silently: a fixture added to the
 # corpus and missing from the list would be read from the merge-base's tree on one side and from the
 # head's on the other, and the difference would be reported as the library's. The log names every
-# file laid over and whether the merge-base's own copy differed from it.
+# file laid over and whether the merge-base's own copy differed from it. With `--against` (see
+# USAGE) the base side is the named revision's own tree instead, built the same way.
 #
 # So the instrument is the constant and the REVISION is the variable — sources, manifests, features
 # and dependencies together, which is what a pull request is. Until #272 the base side was the
@@ -37,7 +38,7 @@
 # compiled under the HEAD'S manifests. That measured a library the base branch never shipped
 # whenever the head changed a manifest in a way the old sources could still satisfy, and #272 was
 # the case that showed it. It renamed the feature `smallvec` to `smallvec_1`; the merge-base's
-# lexers test `cfg(feature = "smallvec")`, so on the base side that cfg went off, silently — the
+# lexers tested `cfg(feature = "smallvec")`, so on the base side that cfg went off, silently — the
 # build was green and the two locks were identical — and the parse family read 10 to 22% slower
 # than a base built in a configuration nobody ships. The same arrangement could not build the base
 # side at all once the head added a workspace member (#273: the member's manifest stayed and its
@@ -62,6 +63,11 @@
 # not compile against the merge-base's library. Each is a statement about the two revisions and the
 # instrument, not a performance finding.
 #
+# A side must also compile its own packages in the run that measures it, because a side that cargo
+# takes for fresh is measured from whatever its target directory held before, so `sides.py
+# compiled` stops the run the same way, with nothing measured, when any of a side's own artifacts or
+# either bench target comes back fresh.
+#
 # ── THE TWO GATES, AND WHY BOTH ─────────────────────────────────────────────────────────────
 #
 # **Peak allocation is the sharp one and the one this repository needs.** Every allocation defect
@@ -79,8 +85,13 @@
 #
 # ── USAGE ───────────────────────────────────────────────────────────────────────────────────
 #
-#     ci/perf/run.sh <base-ref>   # compare HEAD against its merge-base with <base-ref>
-#     ci/perf/run.sh --self       # compare HEAD against ITSELF: the gates' own noise floor
+#     ci/perf/run.sh <base-ref>         # compare HEAD against its merge-base with <base-ref>
+#     ci/perf/run.sh --against <rev>    # compare HEAD against <rev> ITSELF, not a merge-base
+#     ci/perf/run.sh --self             # compare HEAD against ITSELF: the gates' own noise floor
+#
+# `--against` asks what no pull request asks: this tree against a revision as it is. CI runs it
+# for a dispatch of `perf.yml` with the input `base`, `gh workflow run perf.yml --ref <branch> -f
+# base=<rev>`; <rev> is a hash, a tag or a branch, tried as given and then as `origin/<rev>`.
 #
 # `--self` is the thing to run first on a new host. It says what that machine's floor is before any
 # number from it is trusted, and for the allocation gate it is also the reproducibility check: two
@@ -236,14 +247,17 @@ perf_targets=(peak_alloc wall_clock)
 # number this job reports. Whether the gate should compile another way — one codegen unit, say, for
 # a narrower floor — is a separate decision, and one that needs its own `perf-floor` runs.
 #
-# Pinned: every key that can change the code rustc generates — optimisation, codegen partitioning,
-# LTO, debug info, the two runtime checks, unwinding, incremental compilation. Not pinned: `strip`,
-# `split-debuginfo` and `rpath`, which change only what is written into the executable beside that
-# code, and whose defaults depend on the platform and the cargo release, so a guessed value could
-# change today's binary. What the environment cannot pin at all is a per-package table,
-# `[profile.<name>.package.<pkg>]`, for which cargo reads no variable. Both gaps are closed the same
-# way: `sides.py profile` compares the two trees' declarations before anything is built, prints any
-# difference, and stops the run as not comparable when the difference is not in a pinned key.
+# Pinned: every key that can change the code rustc generates for a bench — optimisation, codegen
+# partitioning, LTO, debug info, the two runtime checks, incremental compilation. Not pinned:
+# `panic`, which cargo ignores for benchmarks ("Tests, benchmarks, build scripts, and proc macros
+# ignore the panic setting"), so a bench always unwinds and pinning the key pinned nothing; and
+# `strip`, `split-debuginfo` and `rpath`, which change only what is written into the executable
+# beside that code, and whose defaults depend on the platform and the cargo release, so a guessed
+# value could change today's binary. What the environment cannot pin at all is a per-package
+# table, `[profile.<name>.package.<pkg>]`, for which cargo reads no variable. Both gaps are closed
+# the same way: `sides.py profile` compares the two trees' declarations before anything is built,
+# prints any difference, and stops the run as not comparable when the difference is neither in a
+# pinned key nor in `panic`, which no bench build reads.
 profile_pin=(
   opt-level=3
   codegen-units=16
@@ -251,7 +265,6 @@ profile_pin=(
   debug=false
   debug-assertions=false
   overflow-checks=false
-  panic=unwind
   incremental=false
 )
 
@@ -315,10 +328,10 @@ stop() {
 
 # ── THE TWO TREES ───────────────────────────────────────────────────────────────────────────
 #
-# `materialise <head-sha> <base-sha>` puts the head's tree in `$PERF_WORK/head` and the
-# merge-base's in `$PERF_WORK/base`, checks that one instrument can read both, and lays the head's
-# instrument over the base. Nothing in it compiles, which is what lets a harness source this file
-# and call it.
+# `materialise <head-sha> <base-sha>` puts the head's tree in `$PERF_WORK/head` and the base's —
+# the merge-base, or the revision `--against` names — in `$PERF_WORK/base`, checks that one
+# instrument can read both, and lays the head's instrument over the base. Nothing in it compiles,
+# which is what lets a harness source this file and call it.
 materialise() {
   local head_sha="$1" base_sha="$2" side file note status=0
 
@@ -328,8 +341,16 @@ materialise() {
   # `git archive` rather than `git worktree add`: it materialises a tree with no `.git`, no
   # `target/` and no bookkeeping to clean up, and it takes the tree from the OBJECT rather than
   # from the working directory — so an uncommitted edit cannot leak into a side.
-  git archive "$head_sha" | tar -x -C "$PERF_WORK/head"
-  git archive "$base_sha" | tar -x -C "$PERF_WORK/base"
+  #
+  # `tar -m`, so every file carries the time it was extracted. The archive of a COMMIT stamps each
+  # file with the commit's time, and cargo takes a path package for fresh when its artifacts are
+  # newer than its sources: a cache restored from a later build of another revision with the same
+  # manifests would stand in for this side unseen. With `-m` the sources are newer than anything
+  # cached, so both sides' members are compiled on every run, as in every sound run so far, and only
+  # the registry dependencies come from the cache. GNU tar (`--touch`) and bsdtar both read `-m` as
+  # "do not extract the modification time".
+  git archive "$head_sha" | tar -x -m -C "$PERF_WORK/head"
+  git archive "$base_sha" | tar -x -m -C "$PERF_WORK/base"
 
   # What each side's manifests declare, as cargo reads them. `--no-deps` resolves nothing.
   for side in head base; do
@@ -463,13 +484,49 @@ build_side() {
          > "$PERF_WORK/$1.build.json" )
 }
 
+# `compiled head|base`, after that side's build: the run goes on only if the build compiled the
+# side's own packages and both bench targets (see the header). `sides.py compiled` reads the
+# messages `build_side` saved and names every artifact cargo took for fresh.
+compiled() {
+  local status=0
+  python3 "$perf_dir/sides.py" compiled "$1" "$PERF_WORK/$1" "$PERF_WORK/$1.build.json" \
+    "${perf_targets[@]}" || status=$?
+  if [ "$status" -eq 3 ]; then
+    stop "the $1 side did not compile its own packages, so nothing was measured"
+  elif [ "$status" -ne 0 ]; then
+    stop "the $1 side's build messages could not be read"
+  fi
+}
+
+# `resolve_against <rev>` sets `base` to the commit <rev> names, once: as given (a hash, a tag, a
+# local branch), then as `origin/<rev>`, which is where a CI checkout keeps every other branch. It
+# stops the run with a plain error when neither names a commit. An argument not spelled like a
+# revision is refused before git reads it, and is not echoed.
+resolve_against() {
+  case "$1" in
+    '' | -* | *[!A-Za-z0-9._/@^~{}+-]*)
+      stop "--against takes a revision, a hash, a tag or a branch, and this is not spelled like one"
+      ;;
+  esac
+  base="$(git rev-parse --verify --quiet "$1^{commit}" \
+    || git rev-parse --verify --quiet "refs/remotes/origin/$1^{commit}" || true)"
+  if [ -z "$base" ]; then
+    stop "\`$1\` names no commit in this checkout, as given or as origin/$1"
+  fi
+}
+
 # Sourced rather than run — by a harness that wants the two trees, the profile check and the locks
 # without a build — the file stops here, having defined its stages and run none of them.
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then
   return 0
 fi
 
-if [ "$#" -ne 1 ]; then
+if [ "${1:-}" = "--against" ]; then
+  arguments=2
+else
+  arguments=1
+fi
+if [ "$#" -ne "$arguments" ]; then
   # Both patterns are anchored at `^# ` so that THIS line — which contains the start pattern as
   # data — cannot re-open the range and print the rest of the script.
   sed -n '/^# ── USAGE/,/^# PERF_ROUNDS/p' "$0" | sed 's/^# \{0,1\}//'
@@ -483,6 +540,9 @@ trap headline EXIT
 if [ "$1" = "--self" ]; then
   base="$(git rev-parse HEAD)"
   mode="self-comparison"
+elif [ "$1" = "--against" ]; then
+  resolve_against "$2"
+  mode="against $2 itself, not a merge-base"
 else
   base="$(git merge-base HEAD "$(git rev-parse "$1")")"
   mode="vs merge-base"
@@ -511,6 +571,7 @@ build_side head || {
   echo "::error::\`PERF_LOCK\` pins it."
   exit 1
 }
+compiled head
 
 outcome="NOT MEASURED: the base side did not build"
 outcome="$outcome, so the two revisions are not comparable by this instrument"
@@ -523,6 +584,7 @@ build_side base || {
   echo "::error::instrument, not here."
   exit 1
 }
+compiled base
 
 python3 "$perf_dir/sides.py" features \
   "$PERF_WORK/base" "$PERF_WORK/base.build.json" "$PERF_WORK/head" "$PERF_WORK/head.build.json"

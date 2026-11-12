@@ -2,7 +2,7 @@
 //!
 //! # The property
 //!
-//! `smear` ships `bstr`, `bytes`, `hipstr`, `smallvec` and `smol-bytes` integrations so that a
+//! `smear` ships `bstr`, `bytes`, `hipstr` and `smol-bytes` integrations so that a
 //! consumer picks its own source representation. §3, syntactic §5 and §6/§7 honour that with
 //! `S: AsRef<[u8]>`. A public entry that spells a source parameter `&str` instead takes that
 //! choice away: a caller holding `bytes::Bytes` must validate UTF-8 and re-borrow before it can
