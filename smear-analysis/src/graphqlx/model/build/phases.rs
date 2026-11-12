@@ -1,10 +1,10 @@
 //! What the phases after the package set write: definitions and their contributions, members,
 //! type occurrences and types, values, applications, the schema, second names and marks.
 //!
-//! GATED ON HAVING A CALLER. The module tree, item collection, lowering, resolution, instantiation,
-//! coercion and the tier phase are this module's callers, and until they land the test-support
-//! door is its only one: a method that no shipped build calls is dead code. A phase that lands
-//! calling these methods takes the gate off.
+//! GATED ON HAVING A CALLER. Item collection, lowering, resolution, instantiation, coercion and
+//! the tier phase are this module's callers, and until they land the test-support door is its only
+//! one: a method that no shipped build calls is dead code. A phase that lands moves the methods it
+//! calls out of this module, as the module tree moved the module's own.
 
 use tokora::diagnostic::Location;
 
@@ -16,11 +16,11 @@ use crate::graphqlx::{
     member::MemberKind,
     schema::{Root, RootOperation},
     table::{
-      AliasRow, ApplicationRow, ContributionRow, DefRow, DescriptionRow, ExternRow, FloatRow,
-      IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED, LiteralRow, MemberRow, NO_DEF,
-      PathRow, Run, TyRow, TypeExprRow, TypeParamRow, UNSET_TY, VALUE_BOOL, VALUE_ENUM,
-      VALUE_FLOAT, VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_MAP, VALUE_NULL, VALUE_OBJECT,
-      VALUE_SET, VALUE_STRING, VALUE_TYPE, VALUE_UNRESOLVED, ValueRow,
+      AliasRow, ApplicationRow, ContributionRow, DefRow, ExternRow, FloatRow, IntRow, KIND_LIST,
+      KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED, LiteralRow, MemberRow, NO_DEF, PathRow, Run, TyRow,
+      TypeExprRow, TypeParamRow, UNSET_TY, VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT,
+      VALUE_LIST, VALUE_LITERAL, VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET, VALUE_STRING,
+      VALUE_TYPE, VALUE_UNRESOLVED, ValueRow,
     },
     ty::PathRoot,
     value::{LiteralKind, ObjectEntry},
@@ -37,18 +37,6 @@ impl ModelBuilder {
   /// analyzer makes itself is interned when it is made.
   pub fn intern(&mut self, name: &str) -> Sym {
     self.names.intern(name.as_bytes())
-  }
-
-  /// Records where the inline `mod` that declares `module` is written.
-  pub fn set_module_location(&mut self, module: ModuleId, location: Location) {
-    self.model.modules[module.get() as usize].location = Some(location);
-  }
-
-  /// Gives `module` the description `text`, cooked, written at `location`. An empty `text` is an
-  /// empty description, which is not an absent one.
-  pub fn set_module_description(&mut self, module: ModuleId, text: &str, location: Location) {
-    let description = self.description(text, location);
-    self.model.modules[module.get() as usize].description = Some(description);
   }
 
   /// Appends a definition: a `kind` named `name` in `module`, its name written at `location`, of
@@ -749,14 +737,6 @@ impl ModelBuilder {
   /// `at`. Marks are applied when the model is finished.
   pub fn mark(&mut self, at: Location) {
     self.marks.push(at);
-  }
-
-  /// A description of `text`, appended to the text arena, written at `location`.
-  fn description(&mut self, text: &str, location: Location) -> DescriptionRow {
-    DescriptionRow {
-      text: push_text(&mut self.model.text, text),
-      location,
-    }
   }
 
   /// The row of `value`.

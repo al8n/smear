@@ -13,10 +13,12 @@ pub enum ModuleKind {
   /// A package's root module: `~::` inside the package, and `^::name` from a package that reaches
   /// it.
   Root,
-  /// A module a file of a `Directory` package is, by its path: `media/vision.graphqlx` is the
-  /// module `~::media::vision`.
+  /// A directory of a `Directory` package, by its path: the files of `media/vision/` are the
+  /// module `~::media::vision`, and a directory that holds no file of its own, only directories, is
+  /// an empty module on the way to them. Every file of one directory is one module.
   Directory,
-  /// A module an inline `mod name { … }` declares.
+  /// A module only an inline `mod name { … }` declares. A `mod` of a directory module's path
+  /// declares that directory module again, which is refused, and leaves it a `Directory`.
   Inline,
 }
 
@@ -94,14 +96,21 @@ impl<'a> Module<'a> {
     self.row().kind
   }
 
-  /// Where the inline `mod` that declares it is written, or `None` for a module no `mod`
-  /// declares.
+  /// Where the inline `mod` that declares it names it: the first in source order, when two
+  /// declare it. `None` for a root module and for a directory module.
   #[inline]
   pub fn location(&self) -> Option<Location> {
     self.row().location
   }
 
-  /// The description of the inline `mod` that declares it, if one is written.
+  /// The extent of the inline `mod` that declares it, from its description, or its `mod`, to its
+  /// `}`; `None` exactly when its location is.
+  #[cfg(feature = "test-support")]
+  pub(crate) fn extent(&self) -> Option<Location> {
+    self.row().extent
+  }
+
+  /// The description of the inline `mod` that declares it, if that `mod` writes one.
   #[inline]
   pub fn description(&self) -> Option<Description<'a>> {
     Description::of(self.model, self.row().description)

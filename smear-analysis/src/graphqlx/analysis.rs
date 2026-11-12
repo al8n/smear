@@ -4,12 +4,12 @@ use core::cmp::Ordering;
 use std::{string::String, vec::Vec};
 
 use super::{
-  check,
+  check, collect,
   diagnostic::{Diagnostics, Reporter},
   id::PackageId,
   limits::Limits,
   lower,
-  model::{Model, ModelBuilder, ModuleKind, PackageKind},
+  model::{Model, ModelBuilder, PackageKind},
   package::Package,
   parse,
   rules::Rules,
@@ -98,6 +98,13 @@ impl Analysis {
 /// - Parses every file with the GraphQLx syntactic parser. A file's syntax errors are reported at
 ///   that file, with the parser's own code, message, labels and help, and the other files are
 ///   parsed all the same.
+/// - Builds each package's module tree: its root module; in the
+///   [`Directory`](super::Layout::Directory) layout a module for every directory that holds a file
+///   and for every directory on the way to one, each directory's files sharing its module, and in
+///   the [`Flat`](super::Layout::Flat) layout every file in the root module; and a module for every
+///   inline `mod`, inside the module it is written in. A directory whose name is not a Name, a
+///   directory or a `mod` nested deeper than [`Limits::max_module_depth`], and a `mod` of a module
+///   the package already has are reported.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///
@@ -140,17 +147,19 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
 
   let dependencies = check::package_set(&packages, &sources, &mut reporter);
   let within = check::source_bytes(&packages, &sources, limits, &mut reporter);
-  let model = model_of(&packages, &sources, dependencies);
-
   let documents = parse::files(&packages, &sources, within, &mut reporter);
   debug_assert_eq!(
     documents.len(),
     sources.len() as usize,
     "one document entry per source"
   );
+
+  let mut builder = builder_of(&packages, &sources, dependencies);
+  let tree = collect::modules(&packages, &sources, &documents, limits, &mut reporter);
+  tree.push(&mut builder);
   lower::lower(&documents);
 
-  conclude(model, sources, reporter, &mut Rules::default())
+  conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }
 
 /// What every analysis ends with, once its phases have written `model` and reported into
@@ -177,13 +186,13 @@ fn conclude<V: Visitor + ?Sized>(
   }
 }
 
-/// The model of `packages`, which are in id order and numbered by `sources`, with `dependencies`
-/// resolved, one list per package: every package, and each package's root module.
-fn model_of(
+/// A model builder holding every package of `packages`, which are in id order and numbered by
+/// `sources`, with its resolved `dependencies`, one list per package, and its integer provider.
+fn builder_of(
   packages: &[PackageView<'_>],
   sources: &SourceMap,
   dependencies: Vec<Vec<PackageId>>,
-) -> Model {
+) -> ModelBuilder {
   let mut builder = ModelBuilder::default();
   for ((index, view), resolved) in packages.iter().enumerate().zip(dependencies) {
     let kind = match index.cmp(&ROOT) {
@@ -205,7 +214,6 @@ fn model_of(
     if let Some(integers) = view.integers {
       builder.set_integers(package, integers.clone());
     }
-    builder.push_module(package, None, None, ModuleKind::Root);
   }
-  builder.finish()
+  builder
 }

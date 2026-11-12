@@ -15,7 +15,7 @@ use smear::{
     Package, PackageId, PackageInfo, PackageKind, Path, PathRoot, Primitive, Resolution, Root,
     RootOperation, Schema, SourceId, Sym, Tier, Ty, TyId, TyKind, TypeBound, TypeExpr, TypeExprId,
     TypeExprKind, TypeParam, TypeParams, Value, ValueId, ValueKind, analyze,
-    test_support::ModelBuilder,
+    test_support::{self, ModelBuilder},
   },
   diagnostic::Location,
   lexer::tokora::SimpleSpan,
@@ -323,7 +323,7 @@ fn fixture() -> Model {
     VISION
   );
   assert_eq!(b.push_module(GEO, None, None, ModuleKind::Root), GEO_ROOT);
-  b.set_module_location(VISION, at(APP_MEDIA, 100, 106));
+  b.set_module_declaration(VISION, at(APP_MEDIA, 100, 106), at(APP_MEDIA, 90, 140));
   b.set_module_description(VISION, "Vision.", at(APP_MEDIA, 90, 99));
 
   // Definitions, by module, then source, then position: `core`'s materialised `i32` first.
@@ -1274,6 +1274,11 @@ fn modules_answer_their_package_path_parent_children_kind_location_description_a
   assert!(vision.children().is_empty());
   assert_eq!(vision.kind(), ModuleKind::Inline);
   assert_eq!(vision.location(), Some(at(APP_MEDIA, 100, 106)));
+  assert_eq!(
+    test_support::module_extent(&model, VISION),
+    Some(at(APP_MEDIA, 90, 140))
+  );
+  assert_eq!(test_support::module_extent(&model, MEDIA), None);
   let description = vision.description().expect("the inline `mod` is described");
   assert_eq!(description.text(), "Vision.");
   assert_eq!(description.location(), at(APP_MEDIA, 90, 99));

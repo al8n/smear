@@ -51,8 +51,9 @@ use super::{
   module::ModuleKind,
   order,
   table::{
-    AliasRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, DefRow, KIND_UNRESOLVED, ModuleRow,
-    NO_DEF, PackageRow, Run, TyRow, TypeExprRow, UNSET_MODULE, UNSET_TY, ValueRow,
+    AliasRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, DefRow, DescriptionRow,
+    KIND_UNRESOLVED, ModuleRow, NO_DEF, PackageRow, Run, TyRow, TypeExprRow, UNSET_MODULE,
+    UNSET_TY, ValueRow,
   },
 };
 
@@ -198,11 +199,27 @@ impl ModelBuilder {
       path,
       kind,
       location: None,
+      extent: None,
       description: None,
       defs: IdRange::new(0, 0),
       children: Run::default(),
     });
     id
+  }
+
+  /// Records the inline `mod` that declares `module`: where it names the module, `location`, and
+  /// its extent, from its description, or its `mod`, to its `}`.
+  pub fn set_module_declaration(&mut self, module: ModuleId, location: Location, extent: Location) {
+    let row = &mut self.model.modules[module.get() as usize];
+    row.location = Some(location);
+    row.extent = Some(extent);
+  }
+
+  /// Gives `module` the description `text`, cooked, written at `location`. An empty `text` is an
+  /// empty description, which is not an absent one.
+  pub fn set_module_description(&mut self, module: ModuleId, text: &str, location: Location) {
+    let description = self.description(text, location);
+    self.model.modules[module.get() as usize].description = Some(description);
   }
 
   /// The finished model.
@@ -232,6 +249,14 @@ impl ModelBuilder {
       order::check(&model);
     }
     model
+  }
+
+  /// A description of `text`, appended to the text arena, written at `location`.
+  fn description(&mut self, text: &str, location: Location) -> DescriptionRow {
+    DescriptionRow {
+      text: push_text(&mut self.model.text, text),
+      location,
+    }
   }
 
   /// The type `row` describes, whose arguments are `args`: the one already interned with the same

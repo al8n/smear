@@ -45,8 +45,15 @@ All notable changes to Smear are documented in this file.
   `analyze` runs smear's own rule set, which holds no rule yet, through the same walk over the
   supplied packages, and an error that a phase or a rule reports marks the contributions,
   members and definitions that hold where it points, as their `has_errors()` says, whether the
-  ceiling keeps the diagnostic or not. So far `analyze` fills in only the packages and their
-  root modules. A new `test-support` feature, which `smear/test-support` forwards, compiles a
+  ceiling keeps the diagnostic or not. Every analysis parses the built-in library too:
+  `core`, `alloc` and `std`, one GraphQLx file each, embedded in smear. So far `analyze` fills
+  in the packages and their modules: a module for every directory of a `Directory` package
+  that holds a file or a directory that does, every file of a `Flat` package in its root
+  module, and a module for every inline `mod`. A directory that is not a name is
+  `invalid-directory-name`, a second declaration of one module is `module-defined-twice`, and
+  a module nested past `Limits::max_module_depth` is `resource-limit`; the files under a refused
+  directory, and a file whose path the package set refused, are parsed but place nothing in any
+  module. A new `test-support` feature, which `smear/test-support` forwards, compiles a
   hidden door to the crate-private model builder, and to analyses of the models it builds, for
   `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the six features

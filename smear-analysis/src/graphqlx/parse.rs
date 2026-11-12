@@ -29,14 +29,11 @@ use super::{
   text::View,
 };
 
-/// One file's document: the hand-over from parsing to lowering.
+/// One file's document: the hand-over from parsing to the phases that read documents.
 ///
-/// It borrows the caller's text, so it lives inside one analysis and no longer. Lowering reads it
-/// and copies into the model every spelling the model keeps; once the model is built, nothing of
-/// the caller's text type remains.
-// Read by the lowering that builds the model's modules and definitions; until it lands, nothing
-// reads a document, and `dead_code` would say so of each variant's field.
-#[allow(dead_code)]
+/// It borrows the caller's text, so it lives inside one analysis and no longer. The phases read it
+/// and copy into the model every spelling the model keeps; once the model is built, nothing of the
+/// caller's text type remains.
 pub(crate) enum Parsed<'a> {
   /// A text, or a byte text that is UTF-8.
   Text(TypeSystemDocument<&'a str>),
@@ -53,10 +50,16 @@ pub(crate) struct Documents<'a> {
   entries: Vec<Option<Parsed<'a>>>,
 }
 
-impl Documents<'_> {
+impl<'a> Documents<'a> {
   /// How many sources the documents cover: every source of the analysis.
   pub(crate) fn len(&self) -> usize {
     self.entries.len()
+  }
+
+  /// The document of `source`: `None` for a package source, a file the parser refused, and a
+  /// supplied file past the size limit.
+  pub(crate) fn get(&self, source: SourceId) -> Option<&Parsed<'a>> {
+    self.entries.get(source.get() as usize)?.as_ref()
   }
 }
 

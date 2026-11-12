@@ -100,7 +100,12 @@ impl Limits {
   }
 
   /// How deep a module may sit below its package's root module, each directory and each inline
-  /// `mod` counting one level: the module of `media/vision.graphqlx` is two deep.
+  /// `mod` counting one level: the files of `media/vision/` are a module two deep, and a `mod`
+  /// written in one of them declares a module three deep.
+  ///
+  /// A directory deeper than this is reported once, at its package's package source, and the
+  /// files under it are parsed but place nothing in any module; a `mod` deeper than this is
+  /// reported where it names its module, and nothing inside it is collected.
   ///
   /// The default is 64. A source tree is rarely ten directories deep; the module tree is walked
   /// with an explicit stack, so the bound limits that stack's growth rather than protecting the

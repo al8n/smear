@@ -102,10 +102,22 @@ fn packages(model: &Model) {
 }
 
 /// Modules: by package, then by path, segment by segment, each segment bytewise; a root module
-/// first in each package, and every other module inside an earlier one of its package.
+/// first in each package, and every other module inside an earlier one of its package. Only an
+/// inline module has the location, extent and description of a declaration.
 fn modules(model: &Model) {
   let mut previous: Option<&ModuleRow> = None;
   for (index, row) in model.modules.iter().enumerate() {
+    if row.kind == ModuleKind::Inline {
+      assert!(
+        row.location.is_some() && row.extent.is_some(),
+        "module {index}, an inline module, has its declaration's location and extent"
+      );
+    } else {
+      assert!(
+        row.location.is_none() && row.extent.is_none() && row.description.is_none(),
+        "module {index}, which no `mod` declares, has no location, extent or description"
+      );
+    }
     match row.parent {
       None => {
         assert_eq!(

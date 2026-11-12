@@ -27,6 +27,16 @@ pub enum DiagnosticKind {
   /// A package declares a dependency that is not supplied.
   MissingDependency,
 
+  // -- The module tree ---------------------------------------------------------------------------
+  /// A directory of a `Directory` package is not a GraphQLx Name, so it cannot be a module.
+  /// Reported once per directory, at the whole of its package's package source; the files under
+  /// it are parsed, and what they declare is not collected.
+  InvalidDirectoryName,
+  /// An inline `mod` declares a module its package already has: through a directory, or through
+  /// an earlier `mod`. Reported at the later declaration, with a label at the first; the two are
+  /// one module.
+  ModuleDefinedTwice,
+
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
   ResourceLimit,
@@ -41,6 +51,8 @@ impl DiagnosticKind {
     Self::ReservedPackageName,
     Self::DuplicatePackageName,
     Self::MissingDependency,
+    Self::InvalidDirectoryName,
+    Self::ModuleDefinedTwice,
     Self::ResourceLimit,
   ];
 
@@ -54,6 +66,8 @@ impl DiagnosticKind {
       Self::ReservedPackageName => Code::new("smear::graphqlx::reserved-package-name"),
       Self::DuplicatePackageName => Code::new("smear::graphqlx::duplicate-package-name"),
       Self::MissingDependency => Code::new("smear::graphqlx::missing-dependency"),
+      Self::InvalidDirectoryName => Code::new("smear::graphqlx::invalid-directory-name"),
+      Self::ModuleDefinedTwice => Code::new("smear::graphqlx::module-defined-twice"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -67,6 +81,8 @@ impl DiagnosticKind {
       Self::ReservedPackageName => "reserved package name",
       Self::DuplicatePackageName => "duplicate package name",
       Self::MissingDependency => "dependency not supplied",
+      Self::InvalidDirectoryName => "invalid directory name",
+      Self::ModuleDefinedTwice => "module defined twice",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -81,6 +97,8 @@ impl DiagnosticKind {
       | Self::ReservedPackageName
       | Self::DuplicatePackageName
       | Self::MissingDependency
+      | Self::InvalidDirectoryName
+      | Self::ModuleDefinedTwice
       | Self::ResourceLimit => Severity::Error,
     }
   }

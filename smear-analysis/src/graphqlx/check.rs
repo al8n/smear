@@ -144,8 +144,9 @@ fn check_paths(package: &PackageView<'_>, at: Location, reporter: &mut Reporter)
   }
 }
 
-/// What is wrong with `path` as a file path, if anything.
-fn path_problem(path: &[u8]) -> Option<&'static str> {
+/// What is wrong with `path` as a file path, if anything. The module tree places no file whose
+/// path this refuses.
+pub(crate) fn path_problem(path: &[u8]) -> Option<&'static str> {
   if core::str::from_utf8(path).is_err() {
     return Some("is not UTF-8");
   }
@@ -172,8 +173,9 @@ fn has_drive(path: &[u8]) -> bool {
   matches!(path, [letter, b':', ..] if letter.is_ascii_alphabetic())
 }
 
-/// Whether `name` is a GraphQLx Name: a letter or `_`, then letters, digits or `_`.
-fn is_name(name: &[u8]) -> bool {
+/// Whether `name` is a GraphQLx Name: a letter or `_`, then letters, digits or `_`. A package's
+/// name, and a directory that is a module, must be one.
+pub(crate) fn is_name(name: &[u8]) -> bool {
   match name.split_first() {
     Some((first, rest)) => {
       (first.is_ascii_alphabetic() || *first == b'_')
