@@ -2,8 +2,9 @@
 //! [`visit`], the one driver that walks a model for a visitor.
 //!
 //! The walk reads the finished model and writes nothing: a visitor sees the model through its
-//! views, and reports through the context.
+//! views, and reports through the context. Visitors compose at compile time.
 
+mod compose;
 mod walk;
 
 use super::{
@@ -84,8 +85,23 @@ pub enum Site {
 /// serves many walks. Hooks return nothing: a visitor reports through [`Cx::report`], and the walk
 /// always reaches everything it covers.
 ///
-/// The trait is object-safe and stays so: [`visit`] walks a `&mut dyn Visitor` as it walks any
-/// visitor, and a hook added later arrives with a default body, so it breaks no implementation.
+/// The trait is object-safe and stays so, and a hook added later arrives with a default body, so it
+/// breaks no implementation.
+///
+/// # Composition
+///
+/// Visitors compose by their types, at compile time:
+///
+/// - a tuple of up to twelve visitors is a visitor whose every hook calls each element's, first to
+///   last;
+/// - `Option<V>` is a visitor switched at run time, and `None` does no work;
+/// - `&mut V` and `Box<V>` are visitors, `&mut dyn Visitor` and `Box<dyn Visitor>` included, so a
+///   rule unknown at compile time is one element of a composition;
+/// - `()` is the visitor that does nothing.
+///
+/// A rule's parameters are its fields, and a choice between two sets of rules is a branch between
+/// two values. Rules do not see one another and their diagnostics are sorted, so the order of
+/// composition never changes what a walk answers.
 ///
 /// # Examples
 ///
@@ -119,6 +135,11 @@ pub enum Site {
 /// let analysis = analyze(&root, &[], &Limits::new());
 /// let diagnostics = visit(&analysis, Packages::Root, &mut NoLegacy);
 /// assert!(diagnostics.is_empty());
+///
+/// // The same rule, composed with one switched off and one chosen at run time.
+/// let chosen: Box<dyn Visitor> = Box::new(NoLegacy);
+/// let mut rules = (NoLegacy, None::<NoLegacy>, chosen);
+/// assert!(visit(&analysis, Packages::Root, &mut rules).is_empty());
 /// ```
 pub trait Visitor {
   /// The walk begins: nothing has been reached, and every position [`Cx`] answers is `None`.

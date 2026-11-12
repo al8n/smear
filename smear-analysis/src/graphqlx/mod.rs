@@ -54,7 +54,9 @@
 //!
 //! A rule is a [`Visitor`]: it implements the hooks it needs, and [`visit`] walks the model for
 //! it, reaching every entity the chosen [`Packages`] wrote in id order and handing each hook a
-//! [`Cx`] that says where the walk is and takes what the rule reports.
+//! [`Cx`] that says where the walk is and takes what the rule reports. Rules compose at compile
+//! time: a tuple of visitors is a visitor, and so are an `Option` of one and a borrowed or boxed
+//! one.
 
 mod analysis;
 mod builtin;

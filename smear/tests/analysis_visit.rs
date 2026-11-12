@@ -8,14 +8,14 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, ApplicationId, Cx, DefId, DefKind, Diagnostic, Layout, Limits, MemberId, MemberKind,
-    Model, ModuleId, ModuleKind, Origin, PackageId, PackageKind, Packages, PathRoot, Resolution,
-    Root, RootOperation, Site, SourceId, Sym, Tier, TypeExprId, TypeExprKind, ValueId, ValueKind,
-    Visitor,
+    Analysis, ApplicationId, Cx, DefId, DefKind, Diagnostic, Diagnostics, Layout, Limits, MemberId,
+    MemberKind, Model, ModuleId, ModuleKind, Origin, PackageId, PackageKind, Packages, PathRoot,
+    Resolution, Root, RootOperation, Site, SourceId, Sym, Tier, TypeExprId, TypeExprKind, ValueId,
+    ValueKind, Visitor,
     test_support::{ModelBuilder, analysis_of},
     visit,
   },
-  diagnostic::{Code, Diagnose, Location},
+  diagnostic::{Code, Diagnose, Location, Severity},
   lexer::tokora::SimpleSpan,
 };
 
@@ -78,6 +78,8 @@ const MISSING: ApplicationId = ApplicationId::new(2);
 
 /// A code of this file's own, as a consumer's rule has.
 const EVERY_DEF: Code = Code::new("test::visit::every-def");
+/// A second code of this file's own.
+const EVERY_MEMBER: Code = Code::new("test::visit::every-member");
 
 /// The bytes `start..end` of source `source`.
 fn at(source: u32, start: usize, end: usize) -> Location {
@@ -1486,6 +1488,96 @@ fn a_walk_reaches_every_unresolved_shape_and_every_marked_entity() {
     assert!(census.members.contains(&FILTER_BAD.get()), "{packages:?}");
     assert!(census.defs.contains(&FILTER.get()), "{packages:?}");
   }
+}
+
+/// Warns at every member it enters.
+struct EveryMember;
+
+impl Visitor for EveryMember {
+  fn enter_member(&mut self, cx: &mut Cx<'_>, member: MemberId) {
+    let at = cx.model().member(member).location();
+    cx.report(
+      Diagnostic::builder(EVERY_MEMBER, at)
+        .severity(Severity::Warning)
+        .build(),
+    );
+  }
+}
+
+/// The diagnostics a walk over every package answers for `visitor`.
+fn reported<V: Visitor + ?Sized>(analysis: &Analysis, visitor: &mut V) -> Diagnostics {
+  visit(analysis, Packages::All, visitor)
+}
+
+/// A composition reports what its elements report each alone, in either order: one list in the
+/// one order, with every error counted.
+#[test]
+fn a_composition_reports_what_its_elements_report_alone_in_either_order() {
+  let analysis = analysis_of(fixture(), &Limits::new());
+  let forward = reported(&analysis, &mut (EveryDef, EveryMember));
+  let backward = reported(&analysis, &mut (EveryMember, EveryDef));
+  let mut separate = reported(&analysis, &mut EveryDef);
+  separate.merge(reported(&analysis, &mut EveryMember));
+  assert_eq!(forward, backward);
+  assert_eq!(forward, separate);
+  assert_eq!(forward.len(), 24, "ten definitions and fourteen members");
+  assert_eq!(forward.error_count(), 10, "the members' are warnings");
+}
+
+/// `None` does no work: a composition with a `None` element reports exactly what the composition
+/// without it reports, and `Some` reports what its visitor does. `()` and a one-element tuple are
+/// visitors too.
+#[test]
+fn a_none_element_does_no_work_and_a_some_element_is_its_visitor() {
+  let analysis = analysis_of(fixture(), &Limits::new());
+  let alone = reported(&analysis, &mut EveryDef);
+  let off: Option<EveryMember> = None;
+  assert_eq!(reported(&analysis, &mut (EveryDef, off)), alone);
+  assert_eq!(reported(&analysis, &mut (EveryDef,)), alone);
+  assert_eq!(
+    reported(&analysis, &mut (EveryDef, Some(EveryMember))),
+    reported(&analysis, &mut (EveryDef, EveryMember))
+  );
+  assert!(reported(&analysis, &mut None::<EveryDef>).is_empty());
+  assert!(reported(&analysis, &mut ()).is_empty());
+}
+
+/// A borrowed element and a boxed one, each trait objects included, behave as their visitors do.
+#[test]
+fn borrowed_and_boxed_elements_behave_as_their_visitors_do() {
+  let analysis = analysis_of(fixture(), &Limits::new());
+  let by_value = reported(&analysis, &mut (EveryDef, EveryMember));
+
+  let mut defs = EveryDef;
+  let mut members = EveryMember;
+  assert_eq!(
+    reported(&analysis, &mut (&mut defs, &mut members)),
+    by_value
+  );
+  let borrowed: &mut dyn Visitor = &mut defs;
+  assert_eq!(reported(&analysis, &mut (borrowed, EveryMember)), by_value);
+
+  let boxed: Box<dyn Visitor> = Box::new(EveryMember);
+  assert_eq!(
+    reported(&analysis, &mut (Box::new(EveryDef), boxed)),
+    by_value
+  );
+  let mut erased: Box<dyn Visitor> = Box::new((EveryDef, EveryMember));
+  assert_eq!(reported(&analysis, &mut erased), by_value);
+}
+
+/// The widest tuple composes, and each element reports for itself: the list keeps every copy.
+#[test]
+fn a_tuple_of_twelve_visitors_composes() {
+  let analysis = analysis_of(fixture(), &Limits::new());
+  let twelve = reported(
+    &analysis,
+    &mut (
+      EveryDef, EveryDef, EveryDef, EveryDef, EveryDef, EveryDef, EveryDef, EveryDef, EveryDef,
+      EveryDef, EveryDef, EveryDef,
+    ),
+  );
+  assert_eq!((twelve.len(), twelve.error_count()), (120, 120));
 }
 
 // Every type this file's walk adds may cross threads.
