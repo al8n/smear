@@ -99,7 +99,10 @@ All notable changes to Smear are documented in this file.
   `file-path-use` when it names a file and `url-unsupported` when it is a URL. A `use` item that
   names one thing while its module's items resolve and another once all have is
   `use-resolution-changed`, a `use` of a name its module declares is `use-declaration-collision`,
-  and two that give one name two items are `use-name-collision`. A new `test-support` feature, which `smear/test-support` forwards, compiles a
+  and two that give one name two items are `use-name-collision`. A name that does not resolve
+  gets a "did you mean" in its help: the nearest name visible where it is written, of the
+  namespace wanted, within `Limits::max_near_miss_comparisons` names looked at over the whole
+  analysis. A new `test-support` feature, which `smear/test-support` forwards, compiles a
   hidden door to the crate-private model builder, and to analyses of the models it builds, for
   `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features

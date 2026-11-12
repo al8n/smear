@@ -547,6 +547,7 @@ impl<'x> Run<'_, 'x> {
       &mut *self.reporter,
       self.module,
       Position::Other,
+      &[],
       failure,
     );
   }

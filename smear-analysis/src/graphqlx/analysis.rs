@@ -127,7 +127,9 @@ impl Analysis {
 ///   a name two globs give two items where an item meets it, and a group nested past
 ///   [`Limits::max_use_depth`]. An item that names one thing while the module's items are being
 ///   resolved and another once all are, a `use` of a name its module declares, and two `use` items
-///   that give one name two items are reported too.
+///   that give one name two items are reported too. A name that does not resolve gets, in its
+///   help, the nearest name visible where it is written, of the namespace wanted, while the
+///   analysis has [`Limits::max_near_miss_comparisons`] left to spend.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///

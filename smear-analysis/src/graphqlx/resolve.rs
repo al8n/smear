@@ -45,9 +45,17 @@
 //! grows with how deep it sits or what its parent holds. A lookup costs a logarithm of those
 //! tables, but for the globs, which cost one search in each distinct module the module's globs
 //! name; a path costs one lookup per segment.
+//!
+//! # Near misses
+//!
+//! A name that does not resolve gets the nearest name visible where it is written, of the
+//! namespace wanted, as a "did you mean" in its help, within one budget for the whole analysis:
+//! see [`near`].
 
+mod near;
 mod uses;
 
+use core::cell::Cell;
 use std::{collections::BTreeMap, format, string::String, vec::Vec};
 
 use smear_parser::graphqlx::ast::{Path, PathRoot};
@@ -98,6 +106,9 @@ pub(crate) struct Scopes<'x> {
   max_segments: u32,
   /// `Limits::max_use_depth`.
   max_use_depth: u32,
+  /// The near-miss comparisons the analysis may still spend, of
+  /// `Limits::max_near_miss_comparisons`: spent by every search, the `use` items' and lowering's.
+  near: Cell<u32>,
 }
 
 /// What orders the explicit `use` bindings: module, namespace, name, `use` item, and the order the
@@ -458,6 +469,7 @@ pub(crate) fn scopes<'x>(
     globs: BTreeMap::new(),
     max_segments: limits.max_path_segments(),
     max_use_depth: limits.max_use_depth(),
+    near: Cell::new(limits.max_near_miss_comparisons()),
   };
   let non_zero: Option<DefId> = builder
     .find(b"NonZero")
@@ -501,7 +513,14 @@ impl Scopes<'_> {
     match self.walk(names, request, root, segments) {
       Ok(resolved) => resolved,
       Err(failure) => {
-        self.report(names, reporter, request.module, request.position, &failure);
+        self.report(
+          names,
+          reporter,
+          request.module,
+          request.position,
+          request.params,
+          &failure,
+        );
         Resolved::Unresolved
       }
     }
@@ -916,13 +935,16 @@ impl Scopes<'_> {
     Some(self.primitives[at].1)
   }
 
-  /// Reports `failure`, a path written in `module` at `position` that does not resolve.
+  /// Reports `failure`, a path written in `module` at `position`, where `params` are the generic
+  /// parameters in scope, that does not resolve: with the nearest name visible there, of the
+  /// namespace wanted, in its help, when one is within reach and the budget lasts.
   fn report(
     &self,
     names: &ModelBuilder,
     reporter: &mut Reporter,
     module: ModuleId,
     position: Position,
+    params: &[&[u8]],
     failure: &Failure<'_>,
   ) {
     let (code, title): (Code, &'static str) = match failure.why {
@@ -938,6 +960,10 @@ impl Scopes<'_> {
       _ => titled(DiagnosticKind::UnresolvedPath),
     };
     let (message, help) = self.explain(names, module, position, failure);
+    let help = match self.suggest(names, module, failure, params) {
+      Some(suggestion) => format!("did you mean {suggestion}? {help}"),
+      None => help,
+    };
     let mut builder = Diagnostic::builder(code, failure.at)
       .message(message)
       .primary_label(title)
@@ -1264,6 +1290,166 @@ impl Scopes<'_> {
         ),
         String::from("supply the package, and declare it among this package's dependencies"),
       )
+    }
+  }
+
+  /// The near miss of `failure`'s name, written in `module` where `params` are the generic
+  /// parameters in scope, quoted as a message quotes it: the nearest name visible there, of the
+  /// namespace wanted, when one is within reach and the budget lasts.
+  ///
+  /// A first segment's candidates are its scope's names: the generic parameters where a type or a
+  /// module is wanted, the module's declarations, child modules, explicit `use` bindings and
+  /// globs, the prelude, and the packages its package may reach where a module is wanted. A later
+  /// segment's are the declarations and the child modules of the module before it; a package's
+  /// after `^::`, the packages its package may reach. Once the budget is spent, nothing is looked
+  /// at.
+  fn suggest(
+    &self,
+    names: &ModelBuilder,
+    module: ModuleId,
+    failure: &Failure<'_>,
+    params: &[&[u8]],
+  ) -> Option<String> {
+    if self.near.get() == 0 {
+      return None;
+    }
+    let mut search = near::Search::new(failure.name);
+    if !search.open() {
+      return None;
+    }
+    // What the suggestion is quoted as, as `explain` quotes the name: with `@` only where a
+    // directive alone is wanted, and bare in a `use` item's path, which names either namespace.
+    let quoting = match failure.why {
+      Why::NotInScope { module, wanted } => {
+        if wanted != Wanted::Directive {
+          for &param in params {
+            search.offer(&self.near, param);
+          }
+        }
+        let packages = wanted == Wanted::Module;
+        self.offer_scope(&mut search, names, module, wanted.namespace(), packages);
+        wanted
+      }
+      Why::NothingInScope { module } => {
+        self.offer_scope(&mut search, names, module, TYPE, true);
+        self.offer_scope(&mut search, names, module, DIRECTIVE, false);
+        Wanted::Module
+      }
+      Why::NotIn { module, wanted, .. } => {
+        self.offer_declared(&mut search, names, module, wanted.namespace());
+        wanted
+      }
+      Why::NotDeclared { module, .. } => {
+        self.offer_declared(&mut search, names, module, TYPE);
+        self.offer_declared(&mut search, names, module, DIRECTIVE);
+        Wanted::Module
+      }
+      Why::UnknownPackage => {
+        self.offer_packages(&mut search, self.package_of(module));
+        Wanted::Module
+      }
+      _ => return None,
+    };
+    search
+      .found()
+      .map(|spelled: &[u8]| quoted(quoting, spelled))
+  }
+
+  /// Offers `search` the names the scope of `module` has in `namespace`, the packages its package
+  /// may reach last when `packages`.
+  fn offer_scope<'c>(
+    &'c self,
+    search: &mut near::Search<'c>,
+    names: &'c ModelBuilder,
+    module: ModuleId,
+    namespace: u8,
+    packages: bool,
+  ) {
+    self.offer_declared(search, names, module, namespace);
+    let from: ExplicitKey = (module, namespace, Sym::new(0), 0, 0);
+    let to: ExplicitKey = (module, namespace, Sym::new(u32::MAX), u32::MAX, u32::MAX);
+    for (key, _) in self.explicit.range(from..=to) {
+      if !search.open() {
+        return;
+      }
+      search.offer(&self.near, names.spelling(key.2));
+    }
+    let mut last: Option<ModuleId> = None;
+    let first = (module, ModuleId::new(0), 0);
+    let end = (module, ModuleId::new(u32::MAX), u32::MAX);
+    for (&(_, target, _), _) in self.globs.range(first..=end) {
+      if !search.open() {
+        return;
+      }
+      if last != Some(target) {
+        last = Some(target);
+        self.offer_declared(search, names, target, namespace);
+      }
+    }
+    for &root in self.roots.iter().take(ROOT) {
+      self.offer_bindings(search, names, root, namespace);
+    }
+    if packages && namespace == TYPE {
+      self.offer_packages(search, self.package_of(module));
+    }
+  }
+
+  /// Offers `search` what `module` declares in `namespace`, its child modules included in the type
+  /// namespace.
+  fn offer_declared<'c>(
+    &'c self,
+    search: &mut near::Search<'c>,
+    names: &'c ModelBuilder,
+    module: ModuleId,
+    namespace: u8,
+  ) {
+    self.offer_bindings(search, names, module, namespace);
+    if namespace != TYPE {
+      return;
+    }
+    let from = self
+      .children
+      .partition_point(|child: &Child| child.parent < module);
+    for child in self.children[from..]
+      .iter()
+      .take_while(|child: &&Child| child.parent == module)
+    {
+      if !search.open() {
+        return;
+      }
+      search.offer(&self.near, names.spelling(child.name));
+    }
+  }
+
+  /// Offers `search` the definitions `module` declares in `namespace`.
+  fn offer_bindings<'c>(
+    &'c self,
+    search: &mut near::Search<'c>,
+    names: &'c ModelBuilder,
+    module: ModuleId,
+    namespace: u8,
+  ) {
+    let from = self.bindings.partition_point(|binding: &Binding| {
+      (binding.module, binding.namespace) < (module, namespace)
+    });
+    for binding in self.bindings[from..]
+      .iter()
+      .take_while(|binding: &&Binding| binding.module == module && binding.namespace == namespace)
+    {
+      if !search.open() {
+        return;
+      }
+      search.offer(&self.near, names.spelling(binding.name));
+    }
+  }
+
+  /// Offers `search` the names of the packages the package at `package` may reach.
+  fn offer_packages<'c>(&'c self, search: &mut near::Search<'c>, package: usize) {
+    for built in self.packages.iter().take(ROOT) {
+      search.offer(&self.near, built.name);
+    }
+    for &(name, _) in &self.packages[package].dependencies {
+      search.offer(&self.near, name);
     }
   }
 
