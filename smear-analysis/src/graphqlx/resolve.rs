@@ -4,7 +4,10 @@
 //!
 //! The first segment of a path with no root is looked up in this order, and the first hit decides:
 //!
-//! 1. the generic parameters of the definition the path stands in, which the caller passes;
+//! 1. the generic parameters of the definition the path stands in, which the caller passes, where
+//!    the segment is wanted as a type or a module, never alone as a directive's name: a parameter
+//!    is a type, so it answers a lone segment where a type is wanted, and refuses one where a
+//!    module is wanted or segments follow it, a directive's path included;
 //! 2. the module's own declarations and its child modules;
 //! 3. the module's explicit `use` bindings: named items and aliases;
 //! 4. the module's glob `use` bindings: each glob gives the declarations and the child modules of
@@ -418,6 +421,8 @@ enum Why<'p> {
   WrongKind { found: Target, wanted: Wanted },
   /// The name is a generic parameter, and segments follow it.
   ParamNotModule,
+  /// The name is a generic parameter, alone where a module is wanted.
+  ParamAsModule,
   /// `..::` above a root module.
   AboveRoot,
   /// `^::name`, or a first segment where a module is wanted, names no package the path's package
@@ -689,20 +694,26 @@ impl Scopes<'_> {
     let rest = &segments[1..];
     let (start, after, within): (ModuleId, &[Segment<'p>], Within<'p>) = match root {
       Root::Relative => {
-        if request.wanted != Wanted::Directive
-          && let Some(index) = param(request.params, first.name)
-        {
-          return if rest.is_empty() {
-            Ok(Resolved::Param(index))
-          } else {
-            Err(failure(first, Why::ParamNotModule, false))
-          };
-        }
+        // What the first segment is wanted as: what the request wants when it is the only one,
+        // and a module when segments follow it, whatever the last of them is wanted as.
         let wanted = if rest.is_empty() {
           request.wanted
         } else {
           Wanted::Module
         };
+        // A generic parameter is a type: in scope where a type or a module is wanted, and never
+        // for a lone directive's name.
+        if wanted != Wanted::Directive
+          && let Some(index) = param(request.params, first.name)
+        {
+          return if !rest.is_empty() {
+            Err(failure(first, Why::ParamNotModule, false))
+          } else if wanted == Wanted::Type {
+            Ok(Resolved::Param(index))
+          } else {
+            Err(failure(first, Why::ParamAsModule, false))
+          };
+        }
         let query = Query::wanting(request.module, first.name, names.find(first.name), wanted);
         match self.lookup(query) {
           Lookup::Found(target, _) if rest.is_empty() => {
@@ -1210,6 +1221,16 @@ impl Scopes<'_> {
       Why::ParamNotModule => (
         format!(
           "`{}` names a type parameter here, and nothing is named through a type parameter",
+          Excerpt(name)
+        ),
+        String::from(
+          "a definition's type parameters shadow every name of its module within it: rename the \
+           parameter, or write the path from a root",
+        ),
+      ),
+      Why::ParamAsModule => (
+        format!(
+          "`{}` names a type parameter here, where a module is wanted",
           Excerpt(name)
         ),
         String::from(
