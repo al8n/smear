@@ -402,7 +402,7 @@ jobs:
     # `cargo hack clippy --each-feature` typed by hand is a different question: this file sets
     # `RUSTFLAGS: -Dwarnings` for every job, so a rustc lint is an error here and a warning there.
     # That gap cleared this branch twice on the same construct, and the second time a stacked
-    # branch found it. `ci/hack.sh` carries the flags, all three passes and the reasoning.
+    # branch found it. `ci/hack.sh` carries the flags, every pass and the reasoning.
     - name: ci/hack.sh
       run: bash ci/hack.sh
 
@@ -611,7 +611,11 @@ jobs:
   # Here a crate that links `std` does not build. `thumbv7em-none-eabihf` has compare-and-swap, so
   # `Arc` is not the question being asked; `thumbv6m` stays with `noatomic`, for the representation.
   #
-  #   * alloc tier: every feature that implies no `std`, built on top of `alloc`.
+  #   * alloc tier: every feature whose dependencies build without `std`, on top of `alloc`. No
+  #     feature implies `std`; `rowan_0_17` and `lossless-coverage` stay out because tokora's own
+  #     `rowan_0_17` turns `std` on, and rowan is a `std` crate. Before the build, `cargo tree`
+  #     asserts that no package in that graph has its `std` feature on, and its control asserts
+  #     that the same reader sees `std` when it is asked for.
   #   * core tier: `ci/noalloc.sh` builds a `staticlib` with every capability and no tier feature.
   #     rustc refuses a non-rlib artifact whose graph links `alloc` unless a global allocator
   #     exists, so a green build proves that nothing in the graph links it, and the script's
@@ -635,6 +639,26 @@ jobs:
         run: rustup update stable && rustup default stable
       - name: rustup target add thumbv7em-none-eabihf
         run: rustup target add thumbv7em-none-eabihf
+      # `--format '{p} [{f}]'` and not `-e features`: the features edge view does not draw a feature
+      # the root's own `[features]` table forwards, so it would read nothing on exactly the leak
+      # this step is for. Normal edges and no proc-macros, because a dev-dependency or a macro
+      # running at build time may link `std`; the claim is about the library's graph.
+      - name: no package in the alloc-tier graph has `std` on
+        run: |
+          set -euo pipefail
+          F=alloc,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,bstr_1,smol-bytes_0_2,smallvec_1,bytes_1,hipstr_0_8
+          graph() {
+            cargo tree -p smear --no-default-features --features "$1" --target thumbv7em-none-eabihf \
+              -e normal,no-proc-macro --prefix none --format '{p} [{f}]'
+          }
+          LEAK="$(graph "$F" | grep -E '\[([^]]*,)?std(,[^]]*)?\]' || true)"
+          if [ -n "$LEAK" ]; then
+            echo "::error::a package in the alloc-tier graph has its std feature on:"; echo "$LEAK"; exit 1
+          fi
+          # The control: the same reader must see `std` when it is on, or the check above read nothing.
+          if ! graph "$F,std" | grep -qE '^smear v[^ ]+ \([^)]*\) \[([^]]*,)?std(,[^]]*)?\]'; then
+            echo "::error::the graph reader did not see smear's own std when it was asked for"; exit 1
+          fi
       - name: the alloc tier builds on thumbv7em-none-eabihf
         run: >-
           cargo build -p smear --no-default-features
@@ -677,8 +701,8 @@ jobs:
         key: ${{ runner.os }}-coverage-dotcargo
     - name: Run build
       run: |
-        # Pass 1 — the core tier: no tier feature, so no allocator. Rows whose feature implies
-        # `alloc` or `std` (`bytes_1`, `smallvec_1`, `default`, `--all-features`, …) are above it.
+        # Pass 1 — the core tier: no tier feature, so no allocator. The rows that name a tier
+        # (`alloc`, `std`, `default`, `--all-features`) are above it; no other feature implies one.
         #
         # `bytes`, `bstr`, `hipstr`, `smol-bytes`, `smallvec` and `rowan` are pure aliases of the
         # versioned features, so their rows would build what the versioned rows build and double
@@ -688,9 +712,10 @@ jobs:
         cargo hack build --all-features
         # Pass 2 — the alloc tier, which is what pass 1 covered until `alloc` became a feature.
         # `alloc` is not in the exclude list: cargo-hack refuses a feature named by both flags.
-        # `rowan_0_17` and `lossless-coverage` imply `std`, so their rows would repeat pass 1.
+        # `rowan_0_17` and `lossless-coverage` imply no tier, so with `alloc` each is a row of its
+        # own: the rowan crate built, and the tower, whose tier is `std`, compiled out.
         cargo hack build --each-feature --features alloc --ignore-unknown-features \
-          --exclude-features std,default,rowan,rowan_0_17,lossless-coverage,bytes,bstr,hipstr,smol-bytes,smallvec \
+          --exclude-features std,default,rowan,bytes,bstr,hipstr,smol-bytes,smallvec \
           --exclude-all-features
         # Pass 3 — the pairwise isolation cells the crate split used to provide by accident.
         # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its
@@ -707,8 +732,8 @@ jobs:
         # `rowan_0_17`, `lossless-coverage`, `validator`, `introspection`, `proto` and
         # `analysis` are excluded because they already imply `parser`, so their pass-2 cells ARE
         # pairs; `default`, `std` and `--all-features` are excluded because the `std` tier is pass
-        # 1's, and `--no-default-features` because `parser,alloc` is already pass 2's `parser` row.
-        # The aliases (`rowan` among them) are excluded as in pass 1.
+        # 1's and pass 4's, and `--no-default-features` because `parser,alloc` is already pass 2's
+        # `parser` row. The aliases (`rowan` among them) are excluded as in pass 1.
         #
         # `parser` and `alloc` are NOT in the exclude list: cargo-hack rejects a feature named by
         # both `--features` and `--exclude-features` (verified against 0.6.43, "specified by
@@ -718,7 +743,13 @@ jobs:
         cargo hack build -p smear --each-feature --features parser,alloc \
           --exclude-features rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,analysis,default,std,bytes,bstr,hipstr,smol-bytes,smallvec \
           --exclude-no-default-features --exclude-all-features
-        # Pass 4 — the six criterion benches, which NOTHING ELSE IN CI COMPILES.
+        # Pass 4 — the std tier, without alloc: `std,alloc` and every dependency feature on `std`,
+        # as `ci/hack.sh` has it and for its reasons. `rowan_0_17` and `lossless-coverage` are NOT
+        # excluded: theirs are the rows that build the tower on its own, with only the tier it needs.
+        cargo hack build --each-feature --features std --ignore-unknown-features \
+          --exclude-features default,bytes,bstr,hipstr,smol-bytes,smallvec,rowan,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,build \
+          --exclude-no-default-features --exclude-all-features
+        # Pass 5 — the six criterion benches, which NOTHING ELSE IN CI COMPILES.
         #
         # Measured on this tree: `cargo test`'s default target selection is lib + bins + tests +
         # examples; a `[[bench]]` target is not in it, and neither `cargo build --workspace
@@ -918,16 +949,17 @@ jobs:
         # `rowan` rides along on the parser-side legs because the lossless tree —
         # where Phase B found the first such link — is compiled out without it, and
         # `rowan` implies `parser`, so those two legs document the tower while the
-        # bare-dialect legs document the crate as the lexer alone. Six legs became
-        # four with the merge: the facade's own pair tested resolution forwarding
-        # through a layer that no longer exists. The bare-dialect legs carry `alloc` because the
-        # dialect modules exist only with it.
+        # bare-dialect legs document the crate as the lexer alone. The tower's legs name `std`,
+        # its tier, which `rowan` does not imply, and they are the only legs with `std` and
+        # without `alloc`. Six legs became four with the merge: the facade's own pair tested
+        # resolution forwarding through a layer that no longer exists. The bare-dialect legs carry
+        # `alloc` because the dialect modules exist only with `std` or `alloc`.
         #
         # The last leg is the core tier, every capability and no tier feature: a conditional doc
-        # that names a path existing only with `alloc` fails there.
+        # that names a path existing only with `std` or `alloc` fails there.
         legs=(
-          "smear|rowan_0_17,graphql|smear"
-          "smear|rowan_0_17,graphqlx|smear"
+          "smear|std,rowan_0_17,graphql|smear"
+          "smear|std,rowan_0_17,graphqlx|smear"
           "smear|alloc,graphql|smear"
           "smear|alloc,graphqlx|smear"
           "smear|graphql,graphqlx,parser,validator,proto,introspection,analysis|smear"
@@ -1491,8 +1523,8 @@ jobs:
         # already runs the default set (lib unit tests + `tests/*`) in addition to doc tests,
         # which is the full equivalent of the old lib+tests+doctests selection.
         #
-        # `graphqlx`, `rowan` and `materialized-numbers` are named for the reason the `parser`
-        # paragraph gives, and NOT because the leg would otherwise resolve without them.
+        # `std`, `graphqlx`, `rowan` and `materialized-numbers` are named for the reason the
+        # `parser` paragraph gives, and NOT because the leg would otherwise resolve without them.
         # `--workspace` selects `smear-smoke`, whose `smear` dependency names every declared
         # feature, and cargo unifies that across the selected packages, so the unit graph is
         # identical with these names and without them. What changes is who decided. Until they were
@@ -1507,8 +1539,8 @@ jobs:
         # nowhere, and this is the one leg that enforces all of them. There is no second nightly
         # doctest step because none is needed: the audit of al8n/smear#173 found no coded fence
         # whose item needs a feature this feature set lacks, and none whose point is that a feature
-        # is OFF. The gates, by what the fence's item needs; the `alloc` tier is on here, through
-        # `rowan` and `std`, and every item but `keyword!` needs it:
+        # is OFF. The gates, by what the fence's item needs; the heap is on through `std`, named
+        # here, and every item but `keyword!` needs it:
         #   - no capability: `graphql-proto` (2); `smear-lexer`'s `keyword!` (1), the string
         #     carriers under `string_lexer` (11)
         #   - `graphql`: `smear-lexer`'s `LosslessLexer` accessors (3); `smear-parser`'s
@@ -1517,8 +1549,8 @@ jobs:
         #   - `graphqlx`: `smear-lexer`'s `LosslessLexer` accessors (3); `smear-parser`'s
         #     `graphqlx::ast::OperationType` (1) and `value::nesting`'s `cfg_attr(graphqlx, doc)`
         #     fences (3)
-        #   - `graphql` and `rowan`: the crate-root cross-dialect cast fence (1), a
-        #     `cfg_attr(all(graphql, rowan), doc)`
+        #   - `graphql`, `rowan` and `std`: the crate-root cross-dialect cast fence (1), a
+        #     `cfg_attr(all(graphql, rowan, std), doc)`
         #   - `materialized-numbers`: `IntOverflow::checked`, `MaterializedInt` and the last
         #     `value::nesting` fence (3), all behind `#[cfg(feature = "materialized-numbers")]` or
         #     a `cfg_attr` on it
@@ -1527,7 +1559,7 @@ jobs:
         # smoke member's edge to carry it.
         run: |
           cargo llvm-cov --no-default-features \
-            --features graphql,graphqlx,rowan_0_17,parser,materialized-numbers \
+            --features std,graphql,graphqlx,rowan_0_17,parser,materialized-numbers \
             --doctests --workspace \
             --cobertura --output-path cobertura.xml
       - name: Upload to codecov.io

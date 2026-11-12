@@ -14,10 +14,10 @@ readme = "README.md"
 [features]
 default = ["std"]
 
-# The three kernels allocate, so without `alloc` this crate is empty. `std` flips the crate
-# attribute and nothing else.
+# The three kernels allocate, so with neither `std` nor `alloc` this crate is empty. Either tier
+# compiles them, and `std` also flips the crate attribute.
 alloc = []
-std = ["alloc"]
+std = []
 
 [lints]
 workspace = true

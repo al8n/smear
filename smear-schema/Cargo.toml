@@ -31,10 +31,11 @@ readme = "README.md"
 # names this crate.
 default = ["std"]
 
-# `alloc` is the reader tier: the representation is `core` + `alloc`, and without it this crate is
-# `diagnostic` and `builtin` alone. `std` flips the crate attribute and nothing else at that tier.
+# The reader tier is `std` or `alloc`: the representation is `core` + `alloc`, and with neither this
+# crate is `diagnostic` and `builtin` alone. `std` also flips the crate attribute. Neither tier
+# implies the other.
 alloc = ["tokora/alloc", "smear-parser?/alloc", "smear-semantics?/alloc"]
-std = ["alloc", "tokora/std", "smear-parser?/std", "smear-semantics?/std"]
+std = ["tokora/std", "smear-parser?/std", "smear-semantics?/std"]
 
 # Draft §3 "Type Validation" and the SDL door: `Schema::build`, `SchemaBuilder`, `SchemaError` and
 # the literal-shape table. This is the edge that pulls `smear-parser`, because the builder consumes

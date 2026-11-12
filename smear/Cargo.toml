@@ -58,14 +58,14 @@ default = ["std", "graphql", "graphqlx", "parser", "smallvec_1"]
 # dialects, and the parser, which a `smear` dependency compiled unconditionally. A default build
 # compiles the same code before and after the merge.
 
-alloc = ["smear-lexer/alloc", "smear-parser?/alloc", "smear-schema/alloc", "smear-semantics?/alloc", "smear-compiler?/alloc", "graphql-proto?/alloc", "smear-analysis?/alloc", "tokora/alloc", "bstr_1?/alloc"]
+alloc = ["smear-lexer/alloc", "smear-parser?/alloc", "smear-schema/alloc", "smear-semantics?/alloc", "smear-compiler?/alloc", "graphql-proto?/alloc", "smear-analysis?/alloc", "tokora/alloc", "bstr_1?/alloc", "smol-bytes_0_2?/alloc"]
 
 # `thiserror/default` is gone from this list and is NOT a lost forward. The only
 # `#[derive(thiserror::Error)]` in the tree is `smear-lexer`'s `LengthError`, so the crate that
 # derives it is now the crate that owns the forward, and `smear-lexer/std` below is what turns it
 # on. `smear-smoke::std_tier` asserts that exact `impl std::error::Error` across a real dependency
 # edge, so a dropped forward is a compile error in a member rather than a silent tier change.
-std = ["alloc", "smear-lexer/std", "smear-parser?/std", "smear-schema/std", "smear-semantics?/std", "smear-compiler?/std", "graphql-proto?/std", "smear-analysis?/std", "tokora/default", "bytes_1?/default", "bstr_1?/default", "hipstr_0_8?/default", "smol-bytes_0_2?/default"]
+std = ["smear-lexer/std", "smear-parser?/std", "smear-schema/std", "smear-semantics?/std", "smear-compiler?/std", "graphql-proto?/std", "smear-analysis?/std", "tokora/std", "bytes_1?/std", "bstr_1?/std", "hipstr_0_8?/std", "smol-bytes_0_2?/std"]
 
 graphql = ["smear-lexer/graphql", "smear-parser?/graphql"]
 # Tracks a moving dialect spec: the GraphQLx surface is semver-exempt until the dialect
@@ -149,15 +149,15 @@ analysis = ["parser", "graphqlx", "dep:smear-analysis", "dep:smear-semantics"]
 # The versioned feature is the switch, and the unversioned name is a pure alias for the current
 # major. The dependency key carries the version too, so the crate is `bytes_1` in code.
 smallvec = ["smallvec_1"]
-smallvec_1 = ["alloc", "smear-lexer/smallvec_1", "smear-parser?/smallvec_1"]
+smallvec_1 = ["smear-lexer/smallvec_1", "smear-parser?/smallvec_1"]
 bytes = ["bytes_1"]
-bytes_1 = ["dep:bytes_1", "alloc", "smear-lexer/bytes_1", "smear-parser?/bytes_1", "smear-analysis?/bytes_1", "tokora/bytes_1"]
+bytes_1 = ["dep:bytes_1", "smear-lexer/bytes_1", "smear-parser?/bytes_1", "smear-analysis?/bytes_1", "tokora/bytes_1"]
 bstr = ["bstr_1"]
 bstr_1 = ["dep:bstr_1", "smear-lexer/bstr_1", "smear-parser?/bstr_1", "smear-analysis?/bstr_1", "tokora/bstr_1"]
 hipstr = ["hipstr_0_8"]
-hipstr_0_8 = ["dep:hipstr_0_8", "alloc", "smear-lexer/hipstr_0_8", "smear-parser?/hipstr_0_8", "smear-analysis?/hipstr_0_8", "tokora/hipstr_0_8"]
+hipstr_0_8 = ["dep:hipstr_0_8", "smear-lexer/hipstr_0_8", "smear-parser?/hipstr_0_8", "smear-analysis?/hipstr_0_8", "tokora/hipstr_0_8"]
 smol-bytes = ["smol-bytes_0_2"]
-smol-bytes_0_2 = ["dep:smol-bytes_0_2", "alloc", "smear-lexer/smol-bytes_0_2", "smear-parser?/smol-bytes_0_2", "smear-analysis?/smol-bytes_0_2", "tokora/smol-bytes_0_2"]
+smol-bytes_0_2 = ["dep:smol-bytes_0_2", "smear-lexer/smol-bytes_0_2", "smear-parser?/smol-bytes_0_2", "smear-analysis?/smol-bytes_0_2", "tokora/smol-bytes_0_2"]
 
 # The umbrella twin of `smear-parser/materialized-numbers` — a second set of GraphQL value
 # productions carrying `i64` and `f64` where the slice parser carries a source slice.
@@ -172,7 +172,9 @@ smol-bytes_0_2 = ["dep:smol-bytes_0_2", "alloc", "smear-lexer/smol-bytes_0_2", "
 materialized-numbers = ["parser", "graphql", "smear-parser/materialized-numbers"]
 
 # The lossless CST tower. Reachable through the crate named `smear` for the first time here (#81).
-# `parser` because the tower lives in that module; `std` because the runner needs it.
+# `parser` because the tower lives in that module. It names no tier: the tower is gated on `std`,
+# the standard library it is written against, so a dependent without default features names `std`
+# beside it.
 #
 # EVERYTHING THIS FEATURE COMPILES IS OUTSIDE MIRI'S REACH, and will stay outside it until
 # `rowan` is fixed upstream. `rowan 0.17.0` executes undefined behaviour on the ordinary path —
@@ -186,7 +188,7 @@ materialized-numbers = ["parser", "graphql", "smear-parser/materialized-numbers"
 # This says nothing against the feature — it is a headline capability and its 37 integration
 # targets run under `cargo test` like everything else. It is only that ONE tool cannot see it.
 rowan = ["rowan_0_17"]
-rowan_0_17 = ["smear-parser/rowan_0_17", "smear-compiler?/rowan_0_17", "tokora/rowan_0_17", "std", "parser"]
+rowan_0_17 = ["smear-parser/rowan_0_17", "smear-compiler?/rowan_0_17", "tokora/rowan_0_17", "parser"]
 
 # Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
 # trivia-injection gate can prove its corpus reached every production instead of asserting

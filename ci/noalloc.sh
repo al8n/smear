@@ -11,7 +11,8 @@ set -euo pipefail
 #
 # ## The steps
 #
-#   (a) the fixture lists exactly the `smear` features that imply no tier — derived, not remembered
+#   (a) the fixture lists exactly the `smear` features that reach no tier — derived, not remembered:
+#       neither tier in the feature's closure, and no dependency in it that links one regardless
 #   (b) the fixture builds for TARGET                                    must COMPILE
 #   (c) the same build with the fixture's `alloc` feature                must FAIL, on the missing
 #       allocator. This is the control: it is what stops (b) being vacuous, because a build that
@@ -32,7 +33,7 @@ cd "$REPO_ROOT"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-echo "== (a) the fixture asks smear for exactly the features that imply no tier =="
+echo "== (a) the fixture asks smear for exactly the features that reach no tier =="
 $CARGO metadata --no-deps --format-version 1 > "$tmp/workspace.json"
 $CARGO metadata --manifest-path "$FIXTURE" --no-deps --format-version 1 > "$tmp/fixture.json"
 python3 - "$tmp/workspace.json" "$tmp/fixture.json" <<'PY'
@@ -59,7 +60,22 @@ def closure(name):
     return seen
 
 
-expected = {f for f in table if f != "default" and not {"alloc", "std"} & closure(f)}
+# A dependency that links a tier whatever smear's own features say: the no-allocator proof cannot
+# take its feature although that feature's closure names no tier. Each must exist.
+LINKS_A_TIER = {
+    "bytes_1": "bytes 1 declares `extern crate alloc;` unconditionally",
+    "hipstr_0_8": "hipstr 0.8 declares `extern crate alloc;` unconditionally",
+    "smallvec_1": "smallvec 1 declares `pub extern crate alloc;` unconditionally",
+    "smol-bytes_0_2": "tokora declares its smol-bytes 0.2 edge with features = [\"alloc\"], which pulls bytes",
+    "rowan_0_17": "rowan 0.17 is a std crate, and tokora's rowan_0_17 turns tokora's std on",
+}
+stale = sorted(f for f in LINKS_A_TIER if f not in table)
+if stale:
+    sys.exit(f"FAIL: LINKS_A_TIER names features smear does not declare: {stale}")
+expected = {
+    f for f in table
+    if f != "default" and not ({"alloc", "std"} | set(LINKS_A_TIER)) & closure(f)
+}
 asked = set(next(
     d for p in fixture["packages"] for d in p["dependencies"] if d["name"] == "smear"
 )["features"])
@@ -67,8 +83,8 @@ asked = set(next(
 if asked != expected:
     sys.exit(
         "FAIL: ci/noalloc/Cargo.toml asks smear for the wrong features.\n"
-        f"  missing (imply no tier, not asked for): {sorted(expected - asked)}\n"
-        f"  extra (imply `alloc` or `std`, or are not features): {sorted(asked - expected)}"
+        f"  missing (reach no tier, not asked for): {sorted(expected - asked)}\n"
+        f"  extra (reach `alloc` or `std`, or are not features): {sorted(asked - expected)}"
     )
 print(f"ok: {len(expected)} features: {', '.join(sorted(expected))}")
 PY
