@@ -1495,7 +1495,9 @@ impl Scopes<'_> {
   /// The near miss of `wanted` among `candidates`, under the analysis's one near-miss budget and
   /// the rules every search keeps: the nearest within reach, or `None` when none is, when `wanted`
   /// is not searched for, or when the budget runs out before the candidates do. Each candidate
-  /// looked at spends one of the budget's comparisons, and none is looked at once it is spent.
+  /// looked at spends one of the budget's comparisons. The search is asked whether it goes on
+  /// before each candidate is read, so `candidates` is read no further once it is closed, and not
+  /// at all for a name that is not searched for.
   ///
   /// Lowering asks it what an unknown argument of a directive application may have meant, among
   /// the directive's arguments.
@@ -1510,10 +1512,9 @@ impl Scopes<'_> {
       return None;
     }
     let mut search = near::Search::new(wanted);
-    for candidate in candidates {
-      if !search.open() {
-        break;
-      }
+    while search.open()
+      && let Some(candidate) = candidates.next()
+    {
       search.offer(&self.near, candidate);
     }
     search.found()
@@ -1549,6 +1550,9 @@ impl Scopes<'_> {
       Why::NotInScope { module, wanted } => {
         if wanted != Wanted::Directive {
           for &(spelling, _) in params {
+            if !search.open() {
+              break;
+            }
             search.offer(&self.near, spelling);
           }
         }
@@ -1670,9 +1674,15 @@ impl Scopes<'_> {
   /// Offers `search` the names of the packages the package at `package` may reach.
   fn offer_packages<'c>(&'c self, search: &mut near::Search<'c>, package: usize) {
     for built in self.packages.iter().take(ROOT) {
+      if !search.open() {
+        return;
+      }
       search.offer(&self.near, built.name);
     }
     for &(name, _) in &self.packages[package].dependencies {
+      if !search.open() {
+        return;
+      }
       search.offer(&self.near, name);
     }
   }

@@ -136,3 +136,34 @@ fn a_near_miss_among_given_candidates_spends_the_one_budget() {
   let mut arguments = [b"weight".as_slice()].into_iter();
   assert_eq!(scopes.nearest(b"weigth", &mut arguments), None);
 }
+
+/// A closed search reads no further candidate from the caller's iterator: none at all for a name
+/// that is not searched for, and none after the one the budget ran out at.
+#[test]
+fn a_closed_near_miss_search_reads_no_further_candidate() {
+  let modules = [root_module()];
+  let arguments = [
+    b"colour".as_slice(),
+    b"color".as_slice(),
+    b"size".as_slice(),
+  ];
+  let read = Cell::new(0_u32);
+
+  // A name longer than any searched for is not searched for, so no candidate is read.
+  let scopes = bare(&modules, 5);
+  let long = [b'N'; 65];
+  let mut counted = arguments
+    .into_iter()
+    .inspect(|_: &&[u8]| read.set(read.get() + 1));
+  assert_eq!(scopes.nearest(&long, &mut counted), None);
+  assert_eq!(read.get(), 0);
+
+  // A budget of one: `colour` spends it, `color` finds it spent and closes the search, and `size`
+  // is never read.
+  let scopes = bare(&modules, 1);
+  let mut counted = arguments
+    .into_iter()
+    .inspect(|_: &&[u8]| read.set(read.get() + 1));
+  assert_eq!(scopes.nearest(b"colr", &mut counted), None);
+  assert_eq!(read.get(), 2);
+}
