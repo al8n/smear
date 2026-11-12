@@ -1,5 +1,5 @@
 //! The resolver's own tables, asked directly: the generic parameters a request carries, found by
-//! search.
+//! search, and the near miss of a name among the candidates lowering gives.
 
 use core::cell::Cell;
 use std::{collections::BTreeMap, format, string::String, vec::Vec};
@@ -102,4 +102,37 @@ fn a_parameter_is_found_by_search_among_many() {
       scopes.resolve_segments(&names, &mut reporter, &request, Root::Relative, &[segment]);
     assert!(resolved == Resolved::Param(dense(index)), "{index}");
   }
+}
+
+/// The near miss among given candidates keeps every search's rules and spends the analysis's one
+/// budget: each candidate looked at costs a comparison, compared or not, and a search the budget
+/// runs out in suggests nothing.
+#[test]
+fn a_near_miss_among_given_candidates_spends_the_one_budget() {
+  let modules = [root_module()];
+  let scopes = bare(&modules, 5);
+
+  // `colour` is looked at but not compared, `color` is one insertion away, `size` four.
+  let mut arguments = [
+    b"colour".as_slice(),
+    b"color".as_slice(),
+    b"size".as_slice(),
+  ]
+  .into_iter();
+  assert_eq!(
+    scopes.nearest(b"colr", &mut arguments),
+    Some(b"color".as_slice())
+  );
+
+  // Two comparisons are left: `weight` is one swap away, but the budget runs out at `height`.
+  let mut arguments = [
+    b"weight".as_slice(),
+    b"wieght".as_slice(),
+    b"height".as_slice(),
+  ]
+  .into_iter();
+  assert_eq!(scopes.nearest(b"weigth", &mut arguments), None);
+
+  let mut arguments = [b"weight".as_slice()].into_iter();
+  assert_eq!(scopes.nearest(b"weigth", &mut arguments), None);
 }

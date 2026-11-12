@@ -53,7 +53,8 @@
 //!
 //! A name that does not resolve gets the nearest name visible where it is written, of the
 //! namespace wanted, as a "did you mean" in its help, within one budget for the whole analysis:
-//! see [`near`].
+//! see [`near`]. [`Scopes::nearest`] answers lowering the near miss of a name among candidates it
+//! holds, under the same budget and the same rules.
 
 mod near;
 mod uses;
@@ -1478,6 +1479,33 @@ impl Scopes<'_> {
       || self.packages[ROOT + 1..]
         .binary_search_by(|scope: &PackageScope<'_>| scope.name.cmp(name))
         .is_ok()
+  }
+
+  /// The near miss of `wanted` among `candidates`, under the analysis's one near-miss budget and
+  /// the rules every search keeps: the nearest within reach, or `None` when none is, when `wanted`
+  /// is not searched for, or when the budget runs out before the candidates do. Each candidate
+  /// looked at spends one of the budget's comparisons, and none is looked at once it is spent.
+  ///
+  /// Lowering asks it what an unknown argument of a directive application may have meant, among
+  /// the directive's arguments.
+  // Lowering, the next part of the analyzer, calls this; until it lands only the tests do.
+  #[allow(dead_code)]
+  pub(crate) fn nearest<'c>(
+    &self,
+    wanted: &'c [u8],
+    candidates: &mut dyn Iterator<Item = &'c [u8]>,
+  ) -> Option<&'c [u8]> {
+    if self.near.get() == 0 {
+      return None;
+    }
+    let mut search = near::Search::new(wanted);
+    for candidate in candidates {
+      if !search.open() {
+        break;
+      }
+      search.offer(&self.near, candidate);
+    }
+    search.found()
   }
 
   /// The near miss of `failure`'s name, written in `module` where `params` are the generic
