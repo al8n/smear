@@ -294,6 +294,14 @@ jobs:
   # beyond `cargo metadata`, so it is a separate job from the census above rather than a step in it
   # — a gate that waits on a two-minute probe build is a gate people stop running locally.
   #
+  # The same job runs `ci/tier_gates.py`, selftest first. No compile row can refuse a heap gate
+  # spelled `feature = "alloc"` alone: it compiles in every configuration, and in a build with
+  # `std` and without `alloc` its item is simply absent. So the spelling is checked over the
+  # tracked sources instead. The same script refuses a `compile_error!` fence over the two tiers,
+  # which respelled would be one that can never fire, and a tower target whose `required-features`
+  # omit `std`, which cargo would skip in silence. It reads what the check above reads, the tree and
+  # `cargo metadata`, and needs nothing else.
+  #
   # In no `needs:` chain, so it blocks nothing.
   feature-reachability:
     name: feature-reachability
@@ -306,6 +314,10 @@ jobs:
       run: python3 ci/feature_reachability.py --selftest
     - name: feature_reachability
       run: python3 ci/feature_reachability.py --verbose
+    - name: tier_gates --selftest
+      run: python3 ci/tier_gates.py --selftest
+    - name: tier_gates
+      run: python3 ci/tier_gates.py
 
   # The one property no job above can see, because every one of them builds THIS workspace.
   #

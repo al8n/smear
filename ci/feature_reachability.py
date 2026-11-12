@@ -157,6 +157,8 @@ UMBRELLA = "smear"
 #     (miri_scope)                 declared total
 #   CELL_FLAGS                     value of each bare cfg in a     self-verifying: an unmodelled
 #     (miri_scope)                 Miri cell                       cfg raises rather than guesses
+#   EXEMPT (paths)                 this file may spell `alloc`     an entry matching nothing is a
+#     (tier_gates)                 outside the heap gate           finding; empty today
 #   EXEMPTIONS (40 entries)        this error type is outside      an entry matching nothing is a
 #     (source_census, Rust)        the diagnostic contract         hard error
 #
