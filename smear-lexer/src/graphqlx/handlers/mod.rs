@@ -27,6 +27,16 @@ where
 }
 
 #[inline(always)]
+pub(super) fn open_brace<'a, C, T>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<(), error::LexerError<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = LosslessLimits>,
+{
+  handlers::open_brace(lexer)
+}
+
+#[inline(always)]
 pub(super) fn tt_hook_and_then<'a, C, T, O>(
   lexer: &mut Lexer<'a, T>,
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerError<C, LimitExceeded>>,

@@ -37,6 +37,21 @@ where
     .map_err(|e| E::bad_state(lexer.span().into(), e))
 }
 
+/// The `{` rule's handler: one more brace is open, and then everything an opener does.
+///
+/// It charges nothing and checks nothing of its own. The token charge, the bracket tally and the
+/// one check stay in [`increase_recursion_depth_and_token`], so a `{` the ceiling refuses is
+/// counted exactly as that tally counts it: before the check.
+#[inline(always)]
+pub(super) fn open_brace<'a, T, E>(lexer: &mut Lexer<'a, T>) -> Result<(), E>
+where
+  T: Logos<'a, Extras = LosslessLimits>,
+  E: BadStateError<StateError = LimitExceeded>,
+{
+  lexer.extras.increase_brace_depth();
+  increase_recursion_depth_and_token(lexer)
+}
+
 #[inline(always)]
 pub(super) fn tt_hook_and_then<'a, T, E, O>(
   lexer: &mut Lexer<'a, T>,
@@ -131,6 +146,19 @@ where
   lexer.extras.decrease_recursion();
   // right punctuation also increases the token count
   lexer.extras.increase_token();
+}
+
+/// The `}` rule's handler: one brace fewer is open, and then everything a closer does.
+///
+/// [`open_brace`]'s twin. The charge stays in [`decrease_recursion_depth_and_increase_token`], so
+/// this is no charge route of its own.
+#[inline(always)]
+pub(super) fn close_brace<'a, T>(lexer: &mut Lexer<'a, T>)
+where
+  T: Logos<'a, Extras = LosslessLimits>,
+{
+  lexer.extras.decrease_brace_depth();
+  decrease_recursion_depth_and_increase_token(lexer);
 }
 
 /// The lossless `error(TokenErrors, …)` callback, charge included.

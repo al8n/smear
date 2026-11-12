@@ -383,7 +383,8 @@ impl core::fmt::Display for LosslessTokenKind {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::{LitPlainBlockStr, LitPlainInlineStr};
+  use crate::{LitPlainBlockStr, LitPlainInlineStr, limits::LosslessLimits};
+  use tokora::Lexer;
 
   /// Census: every declared [`LosslessTokenKind`] variant must be producible by some
   /// [`LosslessToken`], i.e. by some arm of [`LosslessToken::kind`].
@@ -460,5 +461,128 @@ mod tests {
       InlineString => LosslessToken::LitInlineStr(LitInlineStr::Plain(LitPlainInlineStr::new("\"s\""))),
       BlockString => LosslessToken::LitBlockStr(LitBlockStr::Plain(LitPlainBlockStr::new("\"\"\"b\"\"\""))),
     }
+  }
+
+  /// Holds the brace count after each item `lexer` produces to `expected`, as it goes.
+  fn assert_brace_counts<'a, L>(mut lexer: L, expected: &[usize], what: &str)
+  where
+    L: Lexer<'a, State = LosslessLimits>,
+  {
+    let mut items = 0usize;
+    while lexer.lex().is_some() {
+      assert_eq!(
+        Some(lexer.state().brace_depth()),
+        expected.get(items).copied(),
+        "{what}: the count after item {items}"
+      );
+      items += 1;
+    }
+    assert_eq!(items, expected.len(), "{what}: the number of items");
+  }
+
+  /// [`assert_brace_counts`] over a `&str`, a `&[u8]` and, with its feature, an owned byte source.
+  ///
+  /// The token enum is written by two arms of one macro, one for borrowed slices and one for owned
+  /// ones, and each arm spells the brace rules itself: a rule changed in one arm only fails here.
+  fn assert_brace_counts_over_each_arm(text: &'static str, expected: &[usize]) {
+    assert_brace_counts(LosslessLexer::<&str>::new(text), expected, "&str");
+    assert_brace_counts(
+      LosslessLexer::<&[u8]>::new(text.as_bytes()),
+      expected,
+      "&[u8]",
+    );
+    #[cfg(feature = "bytes_1")]
+    assert_brace_counts(
+      LosslessLexer::<bytes_1::Bytes>::new(text.as_bytes()),
+      expected,
+      "bytes::Bytes",
+    );
+  }
+
+  /// The state `lexer` is left in after its last item.
+  fn final_state<'a, L>(mut lexer: L) -> LosslessLimits
+  where
+    L: Lexer<'a, State = LosslessLimits>,
+  {
+    while lexer.lex().is_some() {}
+    *lexer.state()
+  }
+
+  #[test]
+  fn the_brace_count_follows_the_braces_of_a_balanced_text() {
+    assert_brace_counts_over_each_arm(
+      "{a{(b)[c]<d>}e}",
+      &[1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 0],
+    );
+  }
+
+  #[test]
+  fn only_braces_move_the_brace_count() {
+    // Openers of the other three pairs, never closed: the bracket tally counts all six and no
+    // brace is open.
+    assert_brace_counts_over_each_arm("(([[<<", &[0; 6]);
+    let opened = final_state(LosslessLexer::<&str>::new("(([[<<"));
+    assert_eq!((opened.brace_depth(), opened.depth()), (0, 6));
+
+    // Their closers with nothing open.
+    assert_brace_counts_over_each_arm("))]]>>", &[0; 6]);
+
+    // And a closer of another pair behind an open brace: the tally is pair-blind and comes back
+    // to zero, while the brace is still open.
+    let crossed = final_state(LosslessLexer::<&str>::new("{)"));
+    assert_eq!((crossed.brace_depth(), crossed.depth()), (1, 0));
+  }
+
+  #[test]
+  fn an_unclosed_brace_stays_counted_and_a_stray_one_stops_at_zero() {
+    assert_brace_counts_over_each_arm("{{", &[1, 2]);
+    assert_brace_counts_over_each_arm("}}{", &[0, 0, 1]);
+  }
+
+  #[test]
+  fn a_brace_inside_a_string_or_a_comment_is_not_counted() {
+    // One real `{`, then a `}` in a string, a `{` in a block string and both in a comment: seven
+    // items, and the count is the one real brace's after every one of them.
+    assert_brace_counts(
+      LosslessLexer::<&str>::new("{ \"}\" \"\"\"{\"\"\" # } {"),
+      &[1; 7],
+      "&str",
+    );
+    assert_brace_counts(
+      LosslessLexer::<&[u8]>::new(b"{ \"}\" \"\"\"{\"\"\" # } {"),
+      &[1; 7],
+      "&[u8]",
+    );
+  }
+
+  #[test]
+  fn a_refused_opener_is_counted_as_the_tally_counts_it() {
+    let mut lexer =
+      LosslessLexer::<&str>::with_state("{{", LosslessLimits::with_max_nesting_depth(1));
+    assert!(matches!(lexer.lex(), Some(Ok(_))));
+    assert_eq!((lexer.state().brace_depth(), lexer.state().depth()), (1, 1));
+
+    // The second brace is past the ceiling. Both counts step before the check that refuses it.
+    assert!(matches!(lexer.lex(), Some(Err(_))));
+    assert_eq!((lexer.state().brace_depth(), lexer.state().depth()), (2, 2));
+    assert!(lexer.lex().is_none(), "a refusal latches the lexer");
+  }
+
+  #[test]
+  fn restoring_a_saved_state_restores_the_brace_count() {
+    const TEXT: &str = "{a{b}c{{d}";
+
+    let mut whole = LosslessLexer::<&str>::new(TEXT);
+    for _ in 0..4 {
+      assert!(matches!(whole.lex(), Some(Ok(_))));
+    }
+    let (saved, at) = (*whole.state(), whole.span().end());
+    assert_eq!((saved.brace_depth(), at), (2, 4));
+    let through = final_state(whole);
+
+    // What a rewind does: a second lexer over the rest of the text, seeded with the saved state.
+    let resumed = final_state(LosslessLexer::<&str>::with_state(&TEXT[at..], saved));
+    assert_eq!(resumed.brace_depth(), through.brace_depth());
+    assert_eq!(through.brace_depth(), 2, "four openers and two closers");
   }
 }

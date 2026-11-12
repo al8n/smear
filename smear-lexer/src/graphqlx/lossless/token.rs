@@ -54,11 +54,15 @@ macro_rules! token_impl {
           handlers::{
             self,
             tt_hook, tt_hook_and_then, tt_hook_map, tt_hook_and_then_into_errors, increase_recursion_depth_and_token,
+            open_brace,
           },
           lossless::{LosslessToken, LosslessTokenKind},
           LitInt, LitFloat,
         },
-        handlers::{decrease_recursion_depth_and_increase_token, unterminated_spread_operator_error},
+        handlers::{
+          close_brace, decrease_recursion_depth_and_increase_token,
+          unterminated_spread_operator_error,
+        },
         LitBlockStr, LitInlineStr, SealedWrapper,
       };
 
@@ -146,7 +150,7 @@ macro_rules! token_impl {
         #[token(">", decrease_recursion_depth_and_increase_token)]
         RAngle,
 
-        #[token("}", decrease_recursion_depth_and_increase_token)]
+        #[token("}", close_brace)]
         RBrace,
 
         #[token("]", decrease_recursion_depth_and_increase_token)]
@@ -170,7 +174,7 @@ macro_rules! token_impl {
         #[token("<", increase_recursion_depth_and_token)]
         LAngle,
 
-        #[token("{", increase_recursion_depth_and_token)]
+        #[token("{", open_brace)]
         LBrace,
 
         #[token("[", increase_recursion_depth_and_token)]
@@ -364,11 +368,15 @@ macro_rules! token_impl {
           handlers::{
             self,
             tt_hook, tt_hook_and_then, tt_hook_map, tt_hook_and_then_into_errors, increase_recursion_depth_and_token,
+            open_brace,
           },
           lossless::{LosslessToken, LosslessTokenKind},
           LitInt, LitFloat,
         },
-        handlers::{decrease_recursion_depth_and_increase_token, unterminated_spread_operator_error},
+        handlers::{
+          close_brace, decrease_recursion_depth_and_increase_token,
+          unterminated_spread_operator_error,
+        },
         LitBlockStr, LitInlineStr, SealedWrapper,
       };
 
@@ -456,7 +464,7 @@ macro_rules! token_impl {
         #[token(">", decrease_recursion_depth_and_increase_token)]
         RAngle,
 
-        #[token("}", decrease_recursion_depth_and_increase_token)]
+        #[token("}", close_brace)]
         RBrace,
 
         #[token("]", decrease_recursion_depth_and_increase_token)]
@@ -480,7 +488,7 @@ macro_rules! token_impl {
         #[token("<", increase_recursion_depth_and_token)]
         LAngle,
 
-        #[token("{", increase_recursion_depth_and_token)]
+        #[token("{", open_brace)]
         LBrace,
 
         #[token("[", increase_recursion_depth_and_token)]

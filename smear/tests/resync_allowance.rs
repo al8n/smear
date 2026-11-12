@@ -1304,9 +1304,10 @@ fn max_tokens_does_not_bound_the_work_the_scan_allowance_does() {
 ///   the GraphQL `&str` parser, so what it reaches is **that** callback and no other; the charge
 ///   is one shared line now and the four `the_graphql{,x}_{str,slice}_error_callback_charges_…`
 ///   cells below are the pin on each copy of it.
-/// - `decrease_recursion_depth_and_increase_token` — the closing-bracket handler, `}`, `]`, `)`
-///   and GraphQLx's `>`. `]` is the row. Unlike the callback this route was already covered
-///   incidentally: planting its charge away also reds
+/// - `decrease_recursion_depth_and_increase_token` — the closing-bracket handler: `]`, `)` and
+///   GraphQLx's `>` name it in their rules, and `}` reaches it through `close_brace`, which
+///   counts the brace and then calls it. `]` and `}` are the rows, one for each way in. Unlike the
+///   callback this route was already covered incidentally: planting its charge away also reds
 ///   `max_tokens_does_not_bound_the_work_the_scan_allowance_does` on `committed + SETTLE >= items`
 ///   (committed 9 999 against 12 000 lexemes) and `every_refusal_commits_at_least_one_item` on a
 ///   zero gap. Both messages are about where a recovery call sat, and neither names a charge. The
@@ -1356,6 +1357,14 @@ fn a_token_ceiling_stops_the_lex_one_lexeme_past_itself() {
        runs no `check()` of its own, which is also why this row reading the same 101 as `-` is \
        what says the refusal is tokora's post-scan check rather than `smear-lexer`'s pre-charge \
        one",
+    ),
+    (
+      "}",
+      CEILING + 1,
+      4_000,
+      "a `}` has stopped being charged. Its rule names `close_brace`, which counts the brace and \
+       then calls `decrease_recursion_depth_and_increase_token` for the charge: either \
+       `close_brace` has stopped calling it, or the `}` rule names a handler that charges nothing",
     ),
   ] {
     let src = atom.repeat(4_000);
