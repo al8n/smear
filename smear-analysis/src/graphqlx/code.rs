@@ -265,4 +265,9 @@ pub(crate) mod schema {
   /// `UndefinedDirectiveArgument`.
   pub(crate) const UNDEFINED_DIRECTIVE_ARGUMENT: Code =
     Code::new("smear::schema::undefined-directive-argument");
+
+  /// The schema is given a second root for one operation: `smear-schema`'s
+  /// `DuplicateRootOperationType`.
+  pub(crate) const DUPLICATE_ROOT_OPERATION_TYPE: Code =
+    Code::new("smear::schema::duplicate-root-operation-type");
 }

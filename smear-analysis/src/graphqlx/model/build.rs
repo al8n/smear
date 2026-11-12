@@ -59,6 +59,7 @@ use super::{
   member::MemberKind,
   module::ModuleKind,
   order,
+  schema::{Root, RootOperation},
   table::{
     AliasRow, ApplicationRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, ContributionRow,
     DefRow, DescriptionRow, KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED, LiteralRow,
@@ -751,6 +752,21 @@ impl ModelBuilder {
   pub fn set_schema_description(&mut self, text: &str, location: Location) {
     let description = self.description(text, location);
     self.model.schema.description = Some(description);
+  }
+
+  /// Gives the schema `root` as its root for `operation`.
+  pub fn set_schema_root(&mut self, operation: RootOperation, root: Root) {
+    self.model.schema.roots[operation.index()] = Some(root);
+  }
+
+  /// Adds `application` to the applications of the schema's contribution `contribution`, after
+  /// those it has.
+  pub fn push_schema_application(&mut self, contribution: u32, application: ApplicationId) {
+    let index = dense(self.model.listed_applications.len());
+    extend(&mut self.model.schema.applications, index);
+    let part = slot(self.model.schema.contributions, contribution);
+    extend(&mut self.model.contributions[part].applications, index);
+    self.model.listed_applications.push(application);
   }
 
   /// Whether a spelling the model keeps was lost: the name arena refused one, as it does past the

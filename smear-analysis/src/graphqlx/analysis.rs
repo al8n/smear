@@ -156,8 +156,13 @@ impl Analysis {
 ///   nearest name it does declare in its help. A value is kept as written, its syntactic kind and
 ///   its text. Then the schema's
 ///   contributions: every package's schema definitions, then its schema extensions, each by source
-///   and position and each marked as what it is; the root package's first schema definition gives
-///   the schema its description. Names and texts past what the model's `u32` offsets address,
+///   and position and each marked as what it is. The root package's first schema definition gives
+///   the schema its description, its roots and its applications, and each schema extension the
+///   root package writes its roots and its applications; any other schema item is a contribution
+///   alone. The first root written for an operation is the schema's, and a second one is
+///   `duplicate-root-operation-type`; with no schema definition of the root package's, an object
+///   type its root module declares named `Query`, `Mutation` or `Subscription` is presumed that
+///   operation's root. Names and texts past what the model's `u32` offsets address,
 ///   which only a [`Limits::max_source_bytes`] far above its default admits, are reported at the
 ///   root package's package source.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package

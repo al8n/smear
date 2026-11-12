@@ -1,6 +1,5 @@
-//! What the phases after lowering's definitions write: each definition's built-in meaning and its
-//! externs, its instantiations and satisfactions; types, the shapes and types coercion gives values,
-//! the schema's roots and applications, and marks.
+//! What the phases after lowering write: each definition's built-in meaning and its externs, its
+//! instantiations and satisfactions; types; the shapes and types coercion gives values; and marks.
 //!
 //! GATED ON HAVING A CALLER. Lowering, instantiation, coercion and the tier phase are this
 //! module's callers, and until each lands the test-support door is its only one: a method that no
@@ -10,10 +9,9 @@
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{ApplicationId, DefId, MemberId, TyId, TypeExprId, ValueId, dense},
+  id::{DefId, MemberId, TyId, TypeExprId, ValueId, dense},
   model::{
     def::Collection,
-    schema::{Root, RootOperation},
     table::{
       ExternRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM, NO_DEF, Run, TyRow,
       VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST, VALUE_MAP, VALUE_NULL,
@@ -24,7 +22,7 @@ use crate::graphqlx::{
   package::Tier,
 };
 
-use super::{ModelBuilder, append, extend, grow, push_text, slot, unresolved_ty};
+use super::{ModelBuilder, append, grow, push_text, unresolved_ty};
 
 impl ModelBuilder {
   /// Makes `def` a marker.
@@ -248,21 +246,6 @@ impl ModelBuilder {
       "a type is interned before a value is given it"
     );
     self.value_row(value).ty = ty;
-  }
-
-  /// Gives the schema `root` as its root for `operation`.
-  pub fn set_schema_root(&mut self, operation: RootOperation, root: Root) {
-    self.model.schema.roots[operation.index()] = Some(root);
-  }
-
-  /// Adds `application` to the applications of the schema's contribution `contribution`, after
-  /// those it has.
-  pub fn push_schema_application(&mut self, contribution: u32, application: ApplicationId) {
-    let index = dense(self.model.listed_applications.len());
-    extend(&mut self.model.schema.applications, index);
-    let part = slot(self.model.schema.contributions, contribution);
-    extend(&mut self.model.contributions[part].applications, index);
-    self.model.listed_applications.push(application);
   }
 
   /// Marks, as an error reported at `at` does, every contribution and member whose extent holds

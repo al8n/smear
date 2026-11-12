@@ -25,9 +25,9 @@
 //! members, its directive applications, a directive definition's locations, and its members with
 //! their descriptions, types, defaults and applications, every written type an occurrence with
 //! its path and arguments as written and what it resolves to, every application with its type
-//! arguments and its arguments, and every value as written; and the schema's
-//! contributions, one for each schema item, and its description. The phases that write the rest of
-//! it are still to come.
+//! arguments and its arguments, and every value as written; and the schema, with its
+//! contributions, one for each schema item, its description, its roots, written or presumed, and
+//! its applications. The phases that write the rest of it are still to come.
 //!
 //! ```
 //! use smear_analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};

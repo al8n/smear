@@ -131,11 +131,16 @@ All notable changes to Smear are documented in this file.
   twice; one the directive does not declare is `smear::schema::undefined-directive-argument`,
   with the nearest name it does declare in its help. A written value, a default or an
   argument's, is one `Literal` that keeps its syntactic kind and its text as written, and a
-  value that is a path keeps its path. The schema has a contribution for every schema item any package writes, its
-  definitions first and then its extensions, each by source and position and named at its
-  `schema` or its `extend`; the root package's first schema definition gives it its description,
-  and every other schema item is a contribution alone. Names and texts past what the model's
-  `u32` offsets address are `resource-limit`. A new `test-support` feature, which
+  value that is a path keeps its path. The schema has a contribution for every schema item any
+  package writes, its definitions first and then its extensions, each by source and position
+  and named at its `schema` or its `extend`. The root package's first schema definition gives it
+  its description, its roots and its applications, the root package's schema extensions give it
+  their roots and their applications, and every other schema item is a contribution alone. The
+  first root written for an operation is the schema's, a type occurrence, and a second one is
+  `smear::schema::duplicate-root-operation-type`; with no schema definition of the root
+  package's, an object type the root package's root module declares named `Query`, `Mutation` or
+  `Subscription` is presumed that operation's root. Names and texts past what the model's `u32`
+  offsets address are `resource-limit`. A new `test-support` feature, which
   `smear/test-support` forwards, compiles a hidden door to the crate-private model builder, and
   to analyses of the models it builds, for `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features

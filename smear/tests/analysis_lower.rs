@@ -5,16 +5,17 @@
 //! type an occurrence, numbered outer first, with its path and arguments as written and what it
 //! resolves to where it is written; bounds; directive applications, their type arguments and their
 //! arguments in the definition's order; values kept as written; what the built-in library holds;
-//! the schema's contributions and its description; and none of it moved by the order files and
-//! dependencies are passed in.
+//! the schema's contributions, its description, its roots, written or presumed, and its
+//! applications; and none of it moved by the order files and dependencies are passed in.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationArgument, ApplicationId, Contribution, Cx, DefId, Description, Diagnostic,
     DirectiveLocation, IdRange, Layout, Limits, MemberId, MemberKind, Model, Namespace, Origin,
-    Package, PackageId, Packages, Path, PathRoot, Primitive, Resolution, SourceFile, SourceId, Sym,
-    Tier, TypeExprId, TypeExprKind, ValueId, ValueKind, Visitor, analyze, visit,
+    Package, PackageId, Packages, Path, PathRoot, Primitive, Resolution, Root, RootOperation,
+    SourceFile, SourceId, Sym, Tier, TypeExprId, TypeExprKind, ValueId, ValueKind, Visitor,
+    analyze, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -1985,18 +1986,38 @@ fn the_schemas_contributions_are_its_definitions_then_its_extensions_each_marked
     assert!(!part.has_errors());
   }
 
-  // The schema definition's description is the schema's.
+  // The schema definition's description is the schema's; its roots are the definition's and each
+  // extension's, each resolved in the module its item is written in; the application is the
+  // extension's.
   assert_eq!(
     described(model.schema().description()),
     Some(("The schema.", at(b, SCHEMA_B, "\"The schema.\"", 0)))
   );
+  assert_eq!(
+    roots(model),
+    [
+      Some(format!(
+        "written Query=Query {:?}",
+        named(b, SCHEMA_B, "query: ", "Query", 0)
+      )),
+      Some(format!(
+        "written Mutation=Mutation {:?}",
+        named(c, SCHEMA_C, "mutation: ", "Mutation", 0)
+      )),
+      Some(format!(
+        "written Tick=Tick {:?}",
+        named(a, SCHEMA_A, "subscription: ", "Tick", 0)
+      )),
+    ]
+  );
+  assert_eq!(applications(model, model.schema().applications()), ["@x=x"]);
 }
 
 #[test]
 fn a_second_schema_definition_and_a_dependencys_are_contributions_and_nothing_else() {
   let one = "\"First.\"\nschema {\n  query: Query\n}\ntype Query {\n  ok: Int\n}\n";
-  let two = "\"Second.\"\nschema {\n  query: Query\n}\n";
-  let theirs = "\"Theirs.\"\nschema {\n  query: Point\n}\nextend schema {\n  mutation: Point\n}\n\
+  let two = "\"Second.\"\nschema @missing {\n  query: Nowhere\n}\n";
+  let theirs = "\"Theirs.\"\nschema {\n  query: Point\n}\nextend schema @gone {\n  mutation: Elsewhere\n}\n\
                 type Point {\n  x: Int\n}\n";
   let root = package(
     "app",
@@ -2022,11 +2043,29 @@ fn a_second_schema_definition_and_a_dependencys_are_contributions_and_nothing_el
       (named(geo_file, theirs, "\n", "extend", 0), true),
     ]
   );
-  // And nothing else: only the root package's first schema definition describes the schema.
+  // And nothing else: only the root package's first schema definition describes the schema and
+  // gives it a root, and nothing written in another schema item is looked for.
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
   assert_eq!(
     described(model.schema().description()),
     Some(("First.", at(one_file, one, "\"First.\"", 0)))
   );
+  assert_eq!(
+    roots(model),
+    [
+      Some(format!(
+        "written Query=Query {:?}",
+        named(one_file, one, "query: ", "Query", 0)
+      )),
+      None,
+      None
+    ]
+  );
+  assert!(model.schema().applications().is_empty());
 
   // With no schema definition of the root package's, a dependency's describes nothing either.
   let root = package(
@@ -2047,6 +2086,15 @@ fn a_second_schema_definition_and_a_dependencys_are_contributions_and_nothing_el
     ]
   );
   assert_eq!(model.schema().description(), None);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    roots(model),
+    [Some(String::from("presumed Query")), None, None]
+  );
 
   // And a program that writes no schema item has no contribution to it.
   let analysis = analyze_one("type Query {\n  ok: Int\n}\n");
@@ -2081,6 +2129,259 @@ fn typed(model: &Model, id: MemberId) -> Held {
     .map(|application: &ApplicationId| (application.get(), applied(model, *application)))
     .collect();
   (ty, default, applications)
+}
+
+/// Each root of the schema: written out, with where its type is written, or the definition it
+/// presumes.
+fn roots(model: &Model) -> Vec<Option<String>> {
+  [
+    RootOperation::Query,
+    RootOperation::Mutation,
+    RootOperation::Subscription,
+  ]
+  .into_iter()
+  .map(|operation: RootOperation| {
+    model.schema().root(operation).map(|root: Root| match root {
+      Root::Written(id) => format!(
+        "written {} {:?}",
+        written(model, id),
+        model.type_expr(id).location()
+      ),
+      Root::Presumed(def) => format!("presumed {}", model.def(def).name()),
+      other => format!("{other:?}"),
+    })
+  })
+  .collect()
+}
+
+/// A described schema definition with two roots and an application, beside an object type named
+/// as the third root's default, which no schema definition presumes.
+const SCHEMA: &str = "\"The schema.\"\nschema @tag(name: \"s\") {\n  query: Query\n  mutation: Change\n}\n\
+                      directive @tag(name: String) repeatable on SCHEMA\n\
+                      type Query {\n  ok: Int\n}\ntype Change {\n  done: Int\n}\n\
+                      type Subscription {\n  tick: Int\n}\n";
+
+#[test]
+fn a_schema_definition_gives_the_description_the_roots_and_the_applications() {
+  let analysis = analyze_one(SCHEMA);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    described(model.schema().description()),
+    Some(("The schema.", at(schema, SCHEMA, "\"The schema.\"", 0)))
+  );
+  assert_eq!(
+    roots(model),
+    [
+      Some(format!(
+        "written Query=Query {:?}",
+        named(schema, SCHEMA, "query: ", "Query", 0)
+      )),
+      Some(format!(
+        "written Change=Change {:?}",
+        named(schema, SCHEMA, "mutation: ", "Change", 0)
+      )),
+      None,
+    ]
+  );
+  assert_eq!(
+    applications(model, model.schema().applications()),
+    ["@tag=tag(name: String \"s\")"]
+  );
+  let parts: Vec<Vec<String>> = model
+    .schema()
+    .contributions()
+    .map(|part: Contribution<'_>| applications(model, part.applications()))
+    .collect();
+  assert_eq!(parts, [vec![String::from("@tag=tag(name: String \"s\")")]]);
+}
+
+#[test]
+fn roots_are_numbered_query_mutation_subscription_however_written() {
+  let text = "schema {\n  subscription: Tick\n  mutation: Change\n  query: Query\n}\n\
+              type Query {\n  ok: Int\n}\ntype Change {\n  done: Int\n}\ntype Tick {\n  at: Int\n}\n";
+  let analysis = analyze_one(text);
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let ids: Vec<TypeExprId> = [
+    RootOperation::Query,
+    RootOperation::Mutation,
+    RootOperation::Subscription,
+  ]
+  .into_iter()
+  .map(
+    |operation: RootOperation| match model.schema().root(operation) {
+      Some(Root::Written(id)) => id,
+      other => panic!("{operation:?}: {other:?}"),
+    },
+  )
+  .collect();
+  assert_eq!(ids[1].get(), ids[0].get() + 1);
+  assert_eq!(ids[2].get(), ids[1].get() + 1);
+  // The walk reaches them last, in that order.
+  let types = reached(&analysis).types;
+  assert_eq!(&types[types.len() - 3..], ids.as_slice());
+  assert_eq!(
+    ids
+      .iter()
+      .map(|id: &TypeExprId| written(model, *id))
+      .collect::<Vec<String>>(),
+    ["Query=Query", "Change=Change", "Tick=Tick"]
+  );
+}
+
+#[test]
+fn default_roots_are_presumed_only_with_no_schema_definition() {
+  // An object type of the root package's root module, for each operation it names.
+  let analysis = analyze_one("type Query {\n  ok: Int\n}\ntype Mutation {\n  run: Int\n}\n");
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert_eq!(
+    roots(analysis.model()),
+    [
+      Some(String::from("presumed Query")),
+      Some(String::from("presumed Mutation")),
+      None
+    ]
+  );
+
+  // Not an interface named so.
+  let analysis = analyze_one("interface Query {\n  ok: Int\n}\n");
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert_eq!(roots(analysis.model()), [None::<String>, None, None]);
+
+  // Not a type of a submodule, even one a `use` item names in the root module, nor a
+  // dependency's.
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[
+      (
+        "schema.graphqlx",
+        "use ~::sub::Query\ntype Other {\n  q: Query\n}\n",
+      ),
+      ("sub/x.graphqlx", "type Query {\n  ok: Int\n}\n"),
+    ],
+  )
+  .with_dependencies(["geo"]);
+  let geo = package(
+    "geo",
+    Layout::Flat,
+    &[("g.graphqlx", "type Mutation {\n  run: Int\n}\n")],
+  );
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert_eq!(roots(analysis.model()), [None::<String>, None, None]);
+
+  // With a schema definition, nothing is presumed.
+  let analysis = analyze_one(
+    "schema {\n  query: Root\n}\ntype Root {\n  ok: Int\n}\ntype Mutation {\n  run: Int\n}\n",
+  );
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let presumed = roots(analysis.model());
+  assert!(presumed[0].is_some());
+  assert_eq!(&presumed[1..], [None::<String>, None]);
+}
+
+#[test]
+fn a_second_root_for_an_operation_is_reported() {
+  // In one schema definition: the second is not lowered, so the type it names is not looked for.
+  let text = "schema {\n  query: Query\n  query: Missing\n}\ntype Query {\n  ok: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::schema::duplicate-root-operation-type",
+      named(schema, text, "query: ", "Missing", 0),
+      Some(named(schema, text, "query: ", "Query", 0))
+    )]
+  );
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    diagnostic.label(0).map(|label| label.text()),
+    Some("first named here")
+  );
+  assert_eq!(
+    roots(analysis.model())[0],
+    Some(format!(
+      "written Query=Query {:?}",
+      named(schema, text, "query: ", "Query", 0)
+    ))
+  );
+
+  // In an extension, which gives the schema the roots it does not repeat.
+  let text = "schema {\n  query: Query\n}\nextend schema {\n  query: Other\n  mutation: Change\n}\n\
+              type Query {\n  ok: Int\n}\ntype Other {\n  ok: Int\n}\ntype Change {\n  done: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::schema::duplicate-root-operation-type",
+      named(schema, text, "query: ", "Other", 0),
+      Some(named(schema, text, "query: ", "Query", 0))
+    )]
+  );
+  let written_roots = roots(analysis.model());
+  assert!(
+    written_roots[0]
+      .as_deref()
+      .is_some_and(|root: &str| root.starts_with("written Query"))
+  );
+  assert!(
+    written_roots[1]
+      .as_deref()
+      .is_some_and(|root: &str| root.starts_with("written Change"))
+  );
+
+  // Against a presumed root, labelled at the definition it presumes.
+  let text =
+    "type Query {\n  ok: Int\n}\ntype Other {\n  ok: Int\n}\nextend schema {\n  query: Other\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::schema::duplicate-root-operation-type",
+      named(schema, text, "query: ", "Other", 0),
+      Some(named(schema, text, "type ", "Query", 0))
+    )]
+  );
+  assert_eq!(
+    roots(analysis.model())[0],
+    Some(String::from("presumed Query"))
+  );
+}
+
+#[test]
+fn a_root_that_names_nothing_keeps_graphqls_code() {
+  let text = "schema {\n  query: Missing\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::schema::undefined-root-operation-type",
+      named(schema, text, "query: ", "Missing", 0),
+      None
+    )]
+  );
+  assert_eq!(
+    roots(analysis.model())[0],
+    Some(format!(
+      "written Missing=? {:?}",
+      named(schema, text, "query: ", "Missing", 0)
+    ))
+  );
 }
 
 /// Everything lowering writes, read through the public model, and every diagnostic: what no order
@@ -2180,6 +2481,17 @@ fn render(analysis: &Analysis) -> Vec<String> {
     "schema description {:?}",
     described(model.schema().description())
   ));
+  for root in roots(model) {
+    lines.push(format!("schema root {root:?}"));
+  }
+  for application in model.schema().applications() {
+    lines.push(format!(
+      "schema application {} {} {:?}",
+      application.get(),
+      applied(model, *application),
+      model.application(*application).location()
+    ));
+  }
   for diagnostic in analysis.diagnostics() {
     lines.push(format!("{diagnostic:?}"));
   }

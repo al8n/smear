@@ -89,10 +89,20 @@
 //! it is. A schema item's contribution is named where its first keyword is written, `schema` or
 //! `extend`: the six bytes the item's node starts with, as the parser spans a schema definition
 //! from its `schema` and a schema extension from its `extend`. It spans the whole item, a
-//! description included. The schema is the root package's, and the first schema definition the
-//! root package writes gives it its description; every other schema item writes nothing into it
-//! and is a contribution alone, which is what the rules that refuse a second schema definition, or
-//! a dependency's schema item, read.
+//! description included. The schema is the root package's: the first schema definition the root
+//! package writes gives it its description, its roots and its applications, and each schema
+//! extension the root package writes gives it its roots and its applications. Every other schema
+//! item writes nothing into it, and nothing in it is lowered: it is a contribution alone, which is
+//! what the rules that refuse a second schema definition, or a dependency's schema item, read.
+//!
+//! The roots are read item by item, in contribution order, and each item's as written: the first
+//! for an operation is the schema's, and each later one is `duplicate-root-operation-type`, with a
+//! label at the first, and is not lowered. With no schema definition of the root package's, an
+//! object type its root module itself declares named `Query`, `Mutation` or `Subscription` is that
+//! operation's root, presumed before any extension's is read; a name a `use` item or the prelude
+//! gives is none. The roots written are then lowered, query, mutation and then subscription,
+//! however they were written, each a type occurrence resolved where its item is written, with no
+//! generic parameter in scope; then the schema's applications, item by item.
 //!
 //! # The arenas
 //!
@@ -122,21 +132,26 @@ use smear_lexer::decode_string_value;
 use smear_parser::graphqlx::ast::{
   self, ConstArgument, ConstDirective, ConstDirectives, ConstInputValue, DefinitionName,
   DescribedTypeSystemDefinition, EnumValueDefinition, ExecutableDirectiveLocation, ExtensionName,
-  FieldDefinition, ImplementInterfaces, InputValueDefinition, Name, Path, StringValue, Type,
-  TypeDefinition, TypeExtension, TypePath, TypeSystemDefinition, TypeSystemDirectiveLocation,
-  TypeSystemExtension, TypeSystemItem, WhereClause,
+  FieldDefinition, ImplementInterfaces, InputValueDefinition, Name, Path,
+  RootOperationTypeDefinition, StringValue, Type, TypeDefinition, TypeExtension, TypePath,
+  TypeSystemDefinition, TypeSystemDirectiveLocation, TypeSystemExtension, TypeSystemItem,
+  WhereClause,
 };
 use tokora::{SimpleSpan, diagnostic::Location, span::AsSpan};
 
 use super::{
+  builtin::TYPE,
   code::{DiagnosticKind, schema},
   collect::{Items, unknown_item},
-  declare::{Declaration, Declarations, Entry, Item},
+  declare::{Binding, Declaration, Declarations, Entry, Item},
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{
     ApplicationId, DefId, IdRange, MemberId, ModuleId, SourceId, Sym, TypeExprId, ValueId, dense,
   },
-  model::{DefKind, DirectiveLocation, LiteralKind, MemberKind, ModelBuilder, PathRoot},
+  model::{
+    DefKind, DirectiveLocation, LiteralKind, MemberKind, ModelBuilder, PathRoot, Root,
+    RootOperation,
+  },
   resolve::{self, Position, Request, Resolved, Scopes, Wanted},
   set::{PackageView, ROOT},
   source::SourceMap,
@@ -280,6 +295,36 @@ enum Step {
   Arguments,
 }
 
+/// What a schema item gives the schema: its applications and its root operations.
+struct SchemaShape<'d, S> {
+  directives: Option<&'d ConstDirectives<S>>,
+  roots: &'d [RootOperationTypeDefinition<S>],
+}
+
+/// The root of one operation, as the schema's roots are read: the first one each operation is
+/// given.
+#[derive(Clone, Copy)]
+enum Kept {
+  /// Written: the root operation `index` of the schema's contribution `part`, its type written at
+  /// `at`.
+  Written {
+    part: usize,
+    index: usize,
+    at: Location,
+  },
+  /// Presumed, with no schema definition: the definition `def`, named at `at`.
+  Presumed { def: DefId, at: Location },
+}
+
+impl Kept {
+  /// Where the root's type is named.
+  fn at(self) -> Location {
+    match self {
+      Self::Written { at, .. } | Self::Presumed { at, .. } => at,
+    }
+  }
+}
+
 /// What one walk of the second pass appends of each contribution, in the walk's order.
 #[derive(Clone, Copy)]
 enum Occurrences {
@@ -360,6 +405,8 @@ enum Pending<'t, S> {
 struct SchemaPart<'d> {
   /// Where it is.
   entry: Entry,
+  /// Its index among the schema's contributions, once it is one.
+  contribution: u32,
   /// Whether it is an extension: the schema's definitions come first.
   extension: bool,
   /// Its first keyword, `schema` or `extend`.
@@ -1715,9 +1762,10 @@ impl Lowering<'_, '_> {
     );
   }
 
-  /// The schema's contributions, after every definition's: each schema definition by source id and
-  /// position, then each schema extension likewise; then its description, the first schema
-  /// definition's of the root package, whose sources are `root`.
+  /// The schema: its contributions, after every definition's, each schema definition by source id
+  /// and position, then each schema extension likewise; then what the root package's first schema
+  /// definition and its schema extensions give it, the root package's sources being `root`: the
+  /// description, the roots, query, mutation and then subscription, and the applications.
   fn schema(&mut self, declarations: &Declarations<'_, '_>, root: IdRange<SourceId>) {
     let mut parts: Vec<SchemaPart<'_>> = Vec::with_capacity(declarations.schemas.len());
     for entry in &declarations.schemas {
@@ -1739,22 +1787,24 @@ impl Lowering<'_, '_> {
         part.entry.item.index,
       )
     });
-    for part in &parts {
-      if part.extension {
+    for part in &mut parts {
+      part.contribution = if part.extension {
         self
           .builder
-          .push_schema_extension(part.location, part.extent);
+          .push_schema_extension(part.location, part.extent)
       } else {
         self
           .builder
-          .push_schema_contribution(part.location, part.extent);
-      }
+          .push_schema_contribution(part.location, part.extent)
+      };
     }
 
+    // The root package's first schema definition, which gives the schema its description.
     let first = parts
       .iter()
-      .find(|part: &&SchemaPart<'_>| !part.extension && root.contains(part.entry.item.source));
-    if let Some(part) = first
+      .position(|part: &SchemaPart<'_>| !part.extension && root.contains(part.entry.item.source));
+    if let Some(at) = first
+      && let Some(part) = parts.get(at)
       && let Some((spelling, location)) = part.description
     {
       self.text.clear();
@@ -1765,6 +1815,275 @@ impl Lowering<'_, '_> {
           .set_schema_description(self.text.as_str(), location);
       }
     }
+
+    // The roots: presumed, with no schema definition, and then as each item writes them.
+    let mut kept: [Option<Kept>; 3] = [None; 3];
+    if first.is_none() {
+      self.presume(declarations, &mut kept);
+    }
+    for (index, part) in parts.iter().enumerate() {
+      if gives(part, index, first, root) {
+        self.schema_roots(declarations, index, part.entry, &mut kept);
+      }
+    }
+    let operations = [
+      RootOperation::Query,
+      RootOperation::Mutation,
+      RootOperation::Subscription,
+    ];
+    for (operation, slot) in operations.into_iter().zip(kept) {
+      match slot {
+        Some(Kept::Written { part, index, .. }) => {
+          if let Some(written) = parts.get(part)
+            && let Some(ty) = self.schema_root(declarations, written.entry, index)
+          {
+            self.builder.set_schema_root(operation, Root::Written(ty));
+          }
+        }
+        Some(Kept::Presumed { def, .. }) => {
+          self.builder.set_schema_root(operation, Root::Presumed(def));
+        }
+        None => {}
+      }
+    }
+
+    for (index, part) in parts.iter().enumerate() {
+      if gives(part, index, first, root) {
+        self.schema_applications(declarations, part.entry, part.contribution);
+      }
+    }
+  }
+
+  /// Gives `kept` the roots GraphQL presumes with no schema definition: for each operation, the
+  /// object type named as its default root among the root package's root module's own
+  /// declarations, which a `use` item and the prelude give none of.
+  fn presume(&mut self, declarations: &Declarations<'_, '_>, kept: &mut [Option<Kept>; 3]) {
+    let Some(&module) = declarations.roots.get(ROOT) else {
+      return;
+    };
+    let defaults: [&[u8]; 3] = [b"Query", b"Mutation", b"Subscription"];
+    for (slot, name) in kept.iter_mut().zip(defaults) {
+      // A name never interned is declared nowhere.
+      let Some(sym) = self.builder.find(name) else {
+        continue;
+      };
+      let key = (module, TYPE, sym);
+      let Ok(at) = declarations.names.binary_search_by(|binding: &Binding| {
+        (binding.module, binding.namespace, binding.name).cmp(&key)
+      }) else {
+        continue;
+      };
+      let Some(def) = declarations
+        .names
+        .get(at)
+        .map(|binding: &Binding| binding.def)
+      else {
+        continue;
+      };
+      if declarations
+        .defs
+        .get(def.get() as usize)
+        .is_some_and(|declared: &Declaration| declared.kind == DefKind::Object)
+      {
+        *slot = Some(Kept::Presumed {
+          def,
+          at: self.builder.def_location(def),
+        });
+      }
+    }
+  }
+
+  /// Gives `kept` the roots the schema item `entry`, the schema's contribution `part`, writes, as
+  /// written: the first for an operation is kept, and each later one reported.
+  fn schema_roots(
+    &mut self,
+    declarations: &Declarations<'_, '_>,
+    part: usize,
+    entry: Entry,
+    kept: &mut [Option<Kept>; 3],
+  ) {
+    match declarations.items.get(entry.item.source.get() as usize) {
+      Some(Some(Items::Text(items))) => self.roots_in(items, part, entry, kept),
+      Some(Some(Items::Bytes(items))) => self.roots_in(items, part, entry, kept),
+      // A schema item is one of a source the walk read.
+      Some(None) | None => {}
+    }
+  }
+
+  /// Gives `kept` the roots the schema item `entry` addresses among `items`, the items of its
+  /// source, writes: it is the schema's contribution `part`.
+  fn roots_in<S: AsRef<[u8]>>(
+    &mut self,
+    items: &[&TypeSystemItem<S>],
+    part: usize,
+    entry: Entry,
+    kept: &mut [Option<Kept>; 3],
+  ) {
+    let Some(&item) = items.get(entry.item.index as usize) else {
+      return;
+    };
+    let source = entry.item.source.get();
+    let Some(shape) = self.schema_shape(item, source) else {
+      return;
+    };
+    for (index, root) in shape.roots.iter().enumerate() {
+      let operation = root.operation_type();
+      let slot = match operation {
+        ast::OperationType::Query(_) => 0,
+        ast::OperationType::Mutation(_) => 1,
+        ast::OperationType::Subscription(_) => 2,
+        // `OperationType` is `#[non_exhaustive]`: a root of an operation lowering does not know
+        // is reported, and dropped.
+        _ => {
+          self.unknown(source, *root.span());
+          continue;
+        }
+      };
+      let at = Location::new(source, *root.name().span());
+      let Some(held) = kept.get_mut(slot) else {
+        continue;
+      };
+      match held {
+        Some(first) => {
+          let first = first.at();
+          self.duplicate_root(operation.as_str(), at, first);
+        }
+        None => *held = Some(Kept::Written { part, index, at }),
+      }
+    }
+  }
+
+  /// Lowers the type of the root operation `index` the schema item `entry` writes.
+  fn schema_root(
+    &mut self,
+    declarations: &Declarations<'_, '_>,
+    entry: Entry,
+    index: usize,
+  ) -> Option<TypeExprId> {
+    match declarations.items.get(entry.item.source.get() as usize) {
+      Some(Some(Items::Text(items))) => self.root_in(items, entry, index),
+      Some(Some(Items::Bytes(items))) => self.root_in(items, entry, index),
+      // A schema item is one of a source the walk read.
+      Some(None) | None => None,
+    }
+  }
+
+  /// Lowers the type of the root operation `index` the schema item `entry` addresses among
+  /// `items`, the items of its source, writes: resolved where the item is written, with no
+  /// generic parameter in scope.
+  fn root_in<S: AsRef<[u8]>>(
+    &mut self,
+    items: &[&TypeSystemItem<S>],
+    entry: Entry,
+    index: usize,
+  ) -> Option<TypeExprId> {
+    let &item = items.get(entry.item.index as usize)?;
+    let shape = self.schema_shape(item, entry.item.source.get())?;
+    let root = shape.roots.get(index)?;
+    let site = Site {
+      owner: None,
+      module: entry.module,
+      source: entry.item.source,
+      params: &[],
+    };
+    Some(self.type_path(site, root.name(), Position::RootOperation))
+  }
+
+  /// Lowers the applications the schema item `entry`, the schema's contribution `contribution`,
+  /// writes.
+  fn schema_applications(
+    &mut self,
+    declarations: &Declarations<'_, '_>,
+    entry: Entry,
+    contribution: u32,
+  ) {
+    match declarations.items.get(entry.item.source.get() as usize) {
+      Some(Some(Items::Text(items))) => self.applications_in(items, entry, contribution),
+      Some(Some(Items::Bytes(items))) => self.applications_in(items, entry, contribution),
+      // A schema item is one of a source the walk read.
+      Some(None) | None => {}
+    }
+  }
+
+  /// Lowers the applications the schema item `entry` addresses among `items`, the items of its
+  /// source, writes, as the schema's contribution `contribution`'s.
+  fn applications_in<S: AsRef<[u8]>>(
+    &mut self,
+    items: &[&TypeSystemItem<S>],
+    entry: Entry,
+    contribution: u32,
+  ) {
+    let Some(&item) = items.get(entry.item.index as usize) else {
+      return;
+    };
+    let Some(shape) = self.schema_shape(item, entry.item.source.get()) else {
+      return;
+    };
+    let Some(directives) = shape.directives else {
+      return;
+    };
+    let site = Site {
+      owner: None,
+      module: entry.module,
+      source: entry.item.source,
+      params: &[],
+    };
+    for directive in directives.directives() {
+      let application = self.application(site, directive);
+      self
+        .builder
+        .push_schema_application(contribution, application);
+    }
+  }
+
+  /// What the schema item `item`, written in the source `source`, gives the schema: `None` for an
+  /// item that is no schema item, and for one of a kind lowering does not know, which is reported.
+  fn schema_shape<'d, S: AsRef<[u8]>>(
+    &mut self,
+    item: &'d TypeSystemItem<S>,
+    source: u32,
+  ) -> Option<SchemaShape<'d, S>> {
+    match item {
+      TypeSystemItem::Definition(described) => match described.node() {
+        TypeSystemDefinition::Schema(schema) => Some(SchemaShape {
+          directives: schema.directives(),
+          roots: schema
+            .root_operation_types_definition()
+            .root_operation_type_definitions(),
+        }),
+        TypeSystemDefinition::Type(_) | TypeSystemDefinition::Directive(_) => None,
+      },
+      TypeSystemItem::Extension(extension) => match extension {
+        TypeSystemExtension::Schema(schema) => Some(SchemaShape {
+          directives: schema.directives(),
+          roots: match schema.root_operation_types_definition() {
+            Some(roots) => roots.root_operation_type_definitions(),
+            None => &[],
+          },
+        }),
+        TypeSystemExtension::Type(_) | TypeSystemExtension::Directive(_) => None,
+      },
+      TypeSystemItem::Use(_) | TypeSystemItem::Mod(_) => None,
+      // `TypeSystemItem` is `#[non_exhaustive]`: an item of a kind lowering does not know is
+      // reported, and nothing of it is lowered.
+      _ => {
+        self.unknown(source, *item.span());
+        None
+      }
+    }
+  }
+
+  /// Reports a second root for `operation`, its type written at `at`, the first named at `first`.
+  fn duplicate_root(&mut self, operation: &str, at: Location, first: Location) {
+    self.reporter.report(
+      Diagnostic::builder(schema::DUPLICATE_ROOT_OPERATION_TYPE, at)
+        .message(format!(
+          "the schema is given a second `{operation}` root operation type"
+        ))
+        .primary_label("duplicate root operation type")
+        .label(first, "first named here")
+        .build(),
+    );
   }
 
   /// The schema item `entry` addresses among `items`, the items of its source, as the schema's
@@ -1782,6 +2101,7 @@ impl Lowering<'_, '_> {
       TypeSystemItem::Definition(described) => match described.node() {
         TypeSystemDefinition::Schema(schema) => Some(SchemaPart {
           entry,
+          contribution: 0,
           extension: false,
           location: keyword(source, *schema.span()),
           extent,
@@ -1797,6 +2117,7 @@ impl Lowering<'_, '_> {
       TypeSystemItem::Extension(extension) => match extension {
         TypeSystemExtension::Schema(schema) => Some(SchemaPart {
           entry,
+          contribution: 0,
           extension: true,
           location: keyword(source, *schema.span()),
           extent,
@@ -1831,6 +2152,22 @@ impl Lowering<'_, '_> {
         .help("lower `Limits::max_source_bytes`, or supply less source")
         .build(),
     );
+  }
+}
+
+/// Whether the schema item `part`, the schema's contribution `index`, gives the schema anything: it
+/// does when it is the root package's first schema definition, `first`, or a schema extension of
+/// the root package, whose sources are `root`.
+fn gives(
+  part: &SchemaPart<'_>,
+  index: usize,
+  first: Option<usize>,
+  root: IdRange<SourceId>,
+) -> bool {
+  if part.extension {
+    root.contains(part.entry.item.source)
+  } else {
+    first == Some(index)
   }
 }
 
