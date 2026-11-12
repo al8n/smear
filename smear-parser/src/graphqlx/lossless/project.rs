@@ -606,22 +606,23 @@ use crate::{
       ConstObject, ConstObjectField, ConstSet, DefaultInputValue, DefinitionName,
       DefinitionTypeGenerics, DefinitionTypeParam, DefinitionTypePath, Described,
       DescribedVariableDefinition, Directive, DirectiveExtension, DirectiveLocations, Directives,
-      Document, DocumentItem, EnumTypeDefinition, EnumTypeExtension, EnumValue,
-      EnumValuesDefinition, ExecutableDefinition, ExecutableDefinitionHeader,
+      Document, DocumentItem, EnumTypeDefinition, EnumTypeExtension, EnumTypeExtensionData,
+      EnumValue, EnumValuesDefinition, ExecutableDefinition, ExecutableDefinitionHeader,
       ExecutableDefinitionName, ExecutableDefinitionTypeGenerics, ExecutableDocument,
       ExtensionName, ExtensionTypeGenerics, ExtensionTypeParam, Field, FieldsDefinition,
       FloatValue, FragmentSpread, ImplementInterfaces, InlineFragment, InlineStringValue,
-      InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension, InputValue,
-      IntValue, InterfaceTypeDefinition, InterfaceTypeExtension, List, Map, MapEntry,
-      ModDefinition, Name, NamedOperationDefinition, Nest, Nested, NullValue, Object, ObjectField,
-      ObjectTypeDefinition, ObjectTypeExtension, OperationDefinition, OperationType, Path,
-      PathRoot, RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
-      ScalarTypeExtension, SchemaDefinition, SchemaExtension, Selection, SelectionSet, Set,
+      InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension,
+      InputObjectTypeExtensionData, InputValue, IntValue, InterfaceTypeDefinition,
+      InterfaceTypeExtension, List, Map, MapEntry, ModDefinition, Name, NamedOperationDefinition,
+      Nest, Nested, NullValue, Object, ObjectField, ObjectTypeDefinition, ObjectTypeExtension,
+      OperationDefinition, OperationType, Path, PathRoot, RootOperationTypeDefinition,
+      RootOperationTypesDefinition, ScalarTypeDefinition, ScalarTypeExtension,
+      ScalarTypeExtensionData, SchemaDefinition, SchemaExtension, Selection, SelectionSet, Set,
       StringValue, Type, TypeCondition, TypeDefinition, TypeExtension, TypeGenerics, TypePath,
       TypeSystemDefinition, TypeSystemDocument, TypeSystemExtension, TypeSystemItem,
-      UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension, UseDefinition,
-      UseOrExecutableDefinition, UsePrefix, UseTree, UseTreeKind, VariableDefinition,
-      VariableValue, VariablesDefinition, WhereClause, WherePredicate,
+      UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension, UnionTypeExtensionData,
+      UseDefinition, UseOrExecutableDefinition, UsePrefix, UseTree, UseTreeKind,
+      VariableDefinition, VariableValue, VariablesDefinition, WhereClause, WherePredicate,
     },
     kinds::{GraphQLxLang, SyntaxKind},
     lossless::Parse,
@@ -645,12 +646,12 @@ use crate::{
 // All three hold **shared, dialect-free** AST carriers with no spelling under `graphqlx::ast`, and
 // a projection has to construct every one of them.
 
-// The undescribed cores five `Described<…>` aliases wrap, and the six `…Data` enums an extension's
-// alternatives are encoded in.
+// The undescribed cores five `Described<…>` aliases wrap, and the three `…Data` enums the object,
+// interface and schema extensions encode their alternatives in. The scalar, union, enum and input
+// object extensions' four are this dialect's own and come in through `graphqlx::ast` above.
 use crate::type_system::{
-  DirectiveDefinition, EnumTypeExtensionData, EnumValueDefinition, FieldDefinition,
-  InputObjectTypeExtensionData, InputValueDefinition, InterfaceTypeExtensionData,
-  ObjectTypeExtensionData, SchemaExtensionData, UnionTypeExtensionData,
+  DirectiveDefinition, EnumValueDefinition, FieldDefinition, InputValueDefinition,
+  InterfaceTypeExtensionData, ObjectTypeExtensionData, SchemaExtensionData,
 };
 
 // The target six definitions and extensions hold their `where` clause with.
@@ -4868,22 +4869,24 @@ fn scalar_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, ScalarTypeDefinition<&'src str>>> {
-  // `Description? scalar DefinitionName Directives[Const]?`
+  // `Description? scalar DefinitionName ImplementInterfaces? Directives[Const]?`
   let mut cursor = Cursor::new(node);
   let description_token = cursor.opt_description();
   cursor.keyword(ContextualKeyword::Scalar, "the `scalar` keyword")?;
   let name_node = cursor.node(K::DefinitionName, "a definition name")?;
+  let implements_node = cursor.opt_node(K::ImplementInterfaces);
   let directives_node = cursor.opt_node(K::Directives);
   cursor.end()?;
 
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
+  let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
   let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
-    ScalarTypeDefinition::new(to_span(inner), name, directives),
+    ScalarTypeDefinition::new(to_span(inner), name, implements, directives),
     outer,
   ))
 }
@@ -4976,12 +4979,13 @@ fn union_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, UnionTypeDefinition<&'src str>>> {
-  // `Description? union DefinitionName Directives[Const]? UnionMemberTypes? WhereClause?` —
-  // divergence 17 puts the clause *after* the members it constrains.
+  // `Description? union DefinitionName ImplementInterfaces? Directives[Const]? UnionMemberTypes?
+  //  WhereClause?` — divergence 17 puts the clause *after* the members it constrains.
   let mut cursor = Cursor::new(node);
   let description_token = cursor.opt_description();
   cursor.keyword(ContextualKeyword::Union, "the `union` keyword")?;
   let name_node = cursor.node(K::DefinitionName, "a definition name")?;
+  let implements_node = cursor.opt_node(K::ImplementInterfaces);
   let directives_node = cursor.opt_node(K::Directives);
   let members_node = cursor.opt_node(K::UnionMemberTypes);
   let where_node = cursor.opt_node(K::WhereClause);
@@ -4989,6 +4993,7 @@ fn union_type_definition<'src>(
 
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
+  let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
   let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
   let members = optional_constrained_after(
     node,
@@ -5001,7 +5006,7 @@ fn union_type_definition<'src>(
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
-    UnionTypeDefinition::new(to_span(inner), name, directives, member_types),
+    UnionTypeDefinition::new(to_span(inner), name, implements, directives, member_types),
     outer,
   ))
 }
@@ -5010,25 +5015,27 @@ fn enum_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, EnumTypeDefinition<&'src str>>> {
-  // `Description? enum DefinitionName Directives[Const]? EnumValuesDefinition?` — the one type
-  // definition with no `where` clause in its grammar at all.
+  // `Description? enum DefinitionName ImplementInterfaces? Directives[Const]?
+  //  EnumValuesDefinition?` — the one type definition with no `where` clause in its grammar at all.
   let mut cursor = Cursor::new(node);
   let description_token = cursor.opt_description();
   cursor.keyword(ContextualKeyword::Enum, "the `enum` keyword")?;
   let name_node = cursor.node(K::DefinitionName, "a definition name")?;
+  let implements_node = cursor.opt_node(K::ImplementInterfaces);
   let directives_node = cursor.opt_node(K::Directives);
   let values_node = cursor.opt_node(K::EnumValuesDefinition);
   cursor.end()?;
 
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
+  let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
   let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
   let values = cursor.keep_opt(optional_enum_values(values_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
-    EnumTypeDefinition::new(to_span(inner), name, directives, values),
+    EnumTypeDefinition::new(to_span(inner), name, implements, directives, values),
     outer,
   ))
 }
@@ -5037,11 +5044,13 @@ fn input_object_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, InputObjectTypeDefinition<&'src str>>> {
-  // `Description? input DefinitionName Directives[Const]? WhereClause? InputFieldsDefinition?`
+  // `Description? input DefinitionName ImplementInterfaces? Directives[Const]? WhereClause?
+  //  InputFieldsDefinition?`
   let mut cursor = Cursor::new(node);
   let description_token = cursor.opt_description();
   cursor.keyword(ContextualKeyword::Input, "the `input` keyword")?;
   let name_node = cursor.node(K::DefinitionName, "a definition name")?;
+  let implements_node = cursor.opt_node(K::ImplementInterfaces);
   let directives_node = cursor.opt_node(K::Directives);
   let where_node = cursor.opt_node(K::WhereClause);
   let input_fields_node = cursor.opt_node(K::InputFieldsDefinition);
@@ -5049,6 +5058,7 @@ fn input_object_type_definition<'src>(
 
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
+  let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
   let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
   let fields = optional_constrained_before(
     node,
@@ -5061,7 +5071,13 @@ fn input_object_type_definition<'src>(
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
-    InputObjectTypeDefinition::new(to_span(inner), name, directives, fields_definition),
+    InputObjectTypeDefinition::new(
+      to_span(inner),
+      name,
+      implements,
+      directives,
+      fields_definition,
+    ),
     outer,
   ))
 }
@@ -5274,8 +5290,11 @@ fn extension_parts<'src>(node: Node<'_>, source: &'src str) -> Out<ExtensionPart
   let mut values_node = None;
   let directives_node;
   match node.kind() {
-    // `extend scalar ExtensionName Directives[Const]`
-    K::ScalarTypeExtension => directives_node = cursor.opt_node(K::Directives),
+    // `extend scalar ExtensionName ImplementInterfaces? Directives[Const]?`
+    K::ScalarTypeExtension => {
+      implements_node = cursor.opt_node(K::ImplementInterfaces);
+      directives_node = cursor.opt_node(K::Directives);
+    }
     // `extend (type|interface) ExtensionName ImplementInterfaces? Directives[Const]? WhereClause?
     //  FieldsDefinition?`
     K::ObjectTypeExtension | K::InterfaceTypeExtension => {
@@ -5284,20 +5303,25 @@ fn extension_parts<'src>(node: Node<'_>, source: &'src str) -> Out<ExtensionPart
       where_node = cursor.opt_node(K::WhereClause);
       fields_node = cursor.opt_node(K::FieldsDefinition);
     }
-    // `extend union ExtensionName Directives[Const]? UnionMemberTypes? WhereClause?` — the clause
-    // follows what it constrains here, as it does at the definition site.
+    // `extend union ExtensionName ImplementInterfaces? Directives[Const]? UnionMemberTypes?
+    //  WhereClause?` — the clause follows what it constrains here, as it does at the definition
+    //  site.
     K::UnionTypeExtension => {
+      implements_node = cursor.opt_node(K::ImplementInterfaces);
       directives_node = cursor.opt_node(K::Directives);
       members_node = cursor.opt_node(K::UnionMemberTypes);
       where_node = cursor.opt_node(K::WhereClause);
     }
-    // `extend enum ExtensionName Directives[Const]? EnumValuesDefinition?`
+    // `extend enum ExtensionName ImplementInterfaces? Directives[Const]? EnumValuesDefinition?`
     K::EnumTypeExtension => {
+      implements_node = cursor.opt_node(K::ImplementInterfaces);
       directives_node = cursor.opt_node(K::Directives);
       values_node = cursor.opt_node(K::EnumValuesDefinition);
     }
-    // `extend input ExtensionName Directives[Const]? WhereClause? InputFieldsDefinition?`
+    // `extend input ExtensionName ImplementInterfaces? Directives[Const]? WhereClause?
+    //  InputFieldsDefinition?`
     _ => {
+      implements_node = cursor.opt_node(K::ImplementInterfaces);
       directives_node = cursor.opt_node(K::Directives);
       where_node = cursor.opt_node(K::WhereClause);
       input_fields_node = cursor.opt_node(K::InputFieldsDefinition);
@@ -5356,12 +5380,21 @@ fn scalar_type_extension<'src>(
   source: &'src str,
 ) -> Out<(ScalarTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
-  // The one extension whose directives the grammar makes mandatory: it has no other tail.
-  let directives = parts
-    .directives
-    .ok_or_else(|| missing(node, "the directives a scalar extension must add"))?;
+  let data = match (parts.implements, parts.directives) {
+    (implements, Some(directives)) => ScalarTypeExtensionData::Directives {
+      implements,
+      directives,
+    },
+    (Some(implements), None) => ScalarTypeExtensionData::Implements(implements),
+    (None, None) => {
+      return Err(missing(
+        node,
+        "interfaces or directives for the extension to add",
+      ));
+    }
+  };
   Ok((
-    ScalarTypeExtension::new(to_span(parts.extent), parts.name, directives),
+    ScalarTypeExtension::new(to_span(parts.extent), parts.name, data),
     parts.extent,
   ))
 }
@@ -5429,16 +5462,21 @@ fn union_type_extension<'src>(
   source: &'src str,
 ) -> Out<(UnionTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
-  let data = match (parts.directives, parts.members) {
-    (directives, Some(member_types)) => UnionTypeExtensionData::Members {
+  let data = match (parts.implements, parts.directives, parts.members) {
+    (implements, directives, Some(member_types)) => UnionTypeExtensionData::Members {
+      implements,
       directives,
       member_types,
     },
-    (Some(directives), None) => UnionTypeExtensionData::Directives(directives),
-    (None, None) => {
+    (implements, Some(directives), None) => UnionTypeExtensionData::Directives {
+      implements,
+      directives,
+    },
+    (Some(implements), None, None) => UnionTypeExtensionData::Implements(implements),
+    (None, None, None) => {
       return Err(missing(
         node,
-        "directives or members for the extension to add",
+        "interfaces, directives or members for the extension to add",
       ));
     }
   };
@@ -5453,16 +5491,21 @@ fn enum_type_extension<'src>(
   source: &'src str,
 ) -> Out<(EnumTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
-  let data = match (parts.directives, parts.values) {
-    (directives, Some(enum_values_definition)) => EnumTypeExtensionData::Values {
+  let data = match (parts.implements, parts.directives, parts.values) {
+    (implements, directives, Some(enum_values_definition)) => EnumTypeExtensionData::Values {
+      implements,
       directives,
       enum_values_definition,
     },
-    (Some(directives), None) => EnumTypeExtensionData::Directives(directives),
-    (None, None) => {
+    (implements, Some(directives), None) => EnumTypeExtensionData::Directives {
+      implements,
+      directives,
+    },
+    (Some(implements), None, None) => EnumTypeExtensionData::Implements(implements),
+    (None, None, None) => {
       return Err(missing(
         node,
-        "directives or values for the extension to add",
+        "interfaces, directives or values for the extension to add",
       ));
     }
   };
@@ -5477,16 +5520,21 @@ fn input_object_type_extension<'src>(
   source: &'src str,
 ) -> Out<(InputObjectTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
-  let data = match (parts.directives, parts.input_fields) {
-    (directives, Some(fields_definition)) => InputObjectTypeExtensionData::Fields {
+  let data = match (parts.implements, parts.directives, parts.input_fields) {
+    (implements, directives, Some(fields_definition)) => InputObjectTypeExtensionData::Fields {
+      implements,
       directives,
       fields_definition,
     },
-    (Some(directives), None) => InputObjectTypeExtensionData::Directives(directives),
-    (None, None) => {
+    (implements, Some(directives), None) => InputObjectTypeExtensionData::Directives {
+      implements,
+      directives,
+    },
+    (Some(implements), None, None) => InputObjectTypeExtensionData::Implements(implements),
+    (None, None, None) => {
       return Err(missing(
         node,
-        "directives or fields for the extension to add",
+        "interfaces, directives or fields for the extension to add",
       ));
     }
   };

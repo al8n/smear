@@ -3,7 +3,7 @@
 //! Two halves. The **shaped** half, first, is one test per grammar area, each walking a real tree
 //! through the wrappers rather than through
 //! [`SyntaxNode`](smear::parser::graphqlx::lossless::SyntaxNode). The **totality** half, from
-//! [`the_probe_table_is_exactly_the_shipped_inventory`] on, sweeps all 76 wrappers and all 310
+//! [`the_probe_table_is_exactly_the_shipped_inventory`] on, sweeps all 76 wrappers and all 318
 //! getters over the shared corpus and answers five questions the shaped half cannot: whether the
 //! probe table still matches what the crate ships, whether every getter ever *projected* anything,
 //! whether every getter's name states the kind it projects, whether each node kind casts to exactly
@@ -472,16 +472,60 @@ fn an_extensions_target_is_a_path_where_a_definitions_name_is_not() {
     Some("<A>".to_string())
   );
 
-  // The one extension whose directives the grammar makes mandatory, and which therefore has no
-  // other tail to confuse the getter with.
-  let scalar_parse = parse_document("extend scalar S @d");
+  // A scalar extension's two tails, an `implements` clause and directives, each found by its kind
+  // with the other beside it.
+  let scalar_parse = parse_document("extend scalar S implements I @d");
   assert!(
     !scalar_parse.has_errors(),
     "the scalar fixture must parse clean"
   );
   let scalar: ScalarTypeExtension = first(&scalar_parse.syntax());
   assert_eq!(node_text!(scalar.extension_name()), Some("S ".to_string()));
+  assert_eq!(
+    node_text!(scalar.implement_interfaces()),
+    Some("implements I ".to_string())
+  );
   assert_eq!(node_text!(scalar.directives()), Some("@d".to_string()));
+}
+
+#[test]
+fn a_scalar_an_enum_a_union_and_an_input_object_reach_their_implements_clause() {
+  // The four kinds GraphQL gives no `implements` clause. Each takes it after its name and before
+  // its directives, so the getter must answer the clause rather than the name before it or the
+  // directives after it.
+  let parse = parse_document(
+    "scalar S implements I @d\nunion U implements I @d = A\nenum E implements I @d { V }\n\
+     input In implements I @d { a: Int }",
+  );
+  assert!(!parse.has_errors(), "the fixture must parse clean");
+  let root = parse.syntax();
+  let scalar: ScalarTypeDefinition = first(&root);
+  assert_eq!(
+    node_text!(scalar.implement_interfaces()),
+    Some("implements I ".to_string())
+  );
+  assert_eq!(node_text!(scalar.directives()), Some("@d\n".to_string()));
+  let union_type: UnionTypeDefinition = first(&root);
+  assert_eq!(
+    node_text!(union_type.implement_interfaces()),
+    Some("implements I ".to_string())
+  );
+  assert_eq!(node_text!(union_type.directives()), Some("@d ".to_string()));
+  let enumeration: EnumTypeDefinition = first(&root);
+  assert_eq!(
+    node_text!(enumeration.implement_interfaces()),
+    Some("implements I ".to_string())
+  );
+  assert_eq!(
+    node_text!(enumeration.directives()),
+    Some("@d ".to_string())
+  );
+  let input: InputObjectTypeDefinition = first(&root);
+  assert_eq!(
+    node_text!(input.implement_interfaces()),
+    Some("implements I ".to_string())
+  );
+  assert_eq!(node_text!(input.directives()), Some("@d ".to_string()));
 }
 
 #[test]
@@ -954,7 +998,9 @@ wrapper_table! {
   EnumValuesDefinition { many enum_value_definitions }
   RootOperationTypeDefinition { tok operation_type, opt type_path }
   RootOperationTypesDefinition { many root_operation_type_definitions }
-  ScalarTypeDefinition { tok_any description, opt definition_name, opt directives }
+  ScalarTypeDefinition {
+    tok_any description, opt definition_name, opt implement_interfaces, opt directives,
+  }
   ObjectTypeDefinition {
     tok_any description, opt definition_name, opt implement_interfaces, opt directives,
     opt where_clause, opt fields_definition,
@@ -964,22 +1010,23 @@ wrapper_table! {
     opt where_clause, opt fields_definition,
   }
   UnionTypeDefinition {
-    tok_any description, opt definition_name, opt directives, opt union_member_types,
-    opt where_clause,
+    tok_any description, opt definition_name, opt implement_interfaces, opt directives,
+    opt union_member_types, opt where_clause,
   }
   EnumTypeDefinition {
-    tok_any description, opt definition_name, opt directives, opt enum_values_definition,
+    tok_any description, opt definition_name, opt implement_interfaces, opt directives,
+    opt enum_values_definition,
   }
   InputObjectTypeDefinition {
-    tok_any description, opt definition_name, opt directives, opt where_clause,
-    opt input_fields_definition,
+    tok_any description, opt definition_name, opt implement_interfaces, opt directives,
+    opt where_clause, opt input_fields_definition,
   }
   DirectiveDefinition {
     tok_any description, opt definition_name, opt arguments_definition, opt directives,
     opt directive_locations, opt where_clause,
   }
   SchemaDefinition { tok_any description, opt directives, opt root_operation_types_definition }
-  ScalarTypeExtension { opt extension_name, opt directives }
+  ScalarTypeExtension { opt extension_name, opt implement_interfaces, opt directives }
   ObjectTypeExtension {
     opt extension_name, opt implement_interfaces, opt directives, opt where_clause,
     opt fields_definition,
@@ -989,11 +1036,15 @@ wrapper_table! {
     opt fields_definition,
   }
   UnionTypeExtension {
-    opt extension_name, opt directives, opt union_member_types, opt where_clause,
+    opt extension_name, opt implement_interfaces, opt directives, opt union_member_types,
+    opt where_clause,
   }
-  EnumTypeExtension { opt extension_name, opt directives, opt enum_values_definition }
+  EnumTypeExtension {
+    opt extension_name, opt implement_interfaces, opt directives, opt enum_values_definition,
+  }
   InputObjectTypeExtension {
-    opt extension_name, opt directives, opt where_clause, opt input_fields_definition,
+    opt extension_name, opt implement_interfaces, opt directives, opt where_clause,
+    opt input_fields_definition,
   }
   SchemaExtension { opt directives, opt root_operation_types_definition }
   DirectiveExtension { opt extension_name, opt directives }
@@ -1185,7 +1236,7 @@ fn corpus() -> Vec<(String, String)> {
 
 /// Sources this gate adds on top of the corpus, and what each one is for.
 ///
-/// The corpus reaches **every one of the 76 wrappers** on its own and calls all 310 getters, but 61
+/// The corpus reaches **every one of the 76 wrappers** on its own and calls all 318 getters, but 61
 /// of those getters had nothing to project from it: a getter is only exercised by a document that
 /// writes the shape it reaches for, and no corpus entry writes a float inside a set, a map on both
 /// halves of a map entry, a description on a scalar, a `where` on an extension, a directive
@@ -1550,7 +1601,7 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 
 /// Getters whose name is not the plain snake of the kind they project, with that projection pinned.
 ///
-/// Twenty-one of 310, in two classes.
+/// Twenty-one of 318, in two classes.
 ///
 /// **Role-named, twenty.** Each names a position the grammar has and the kind space does not.
 /// Fifteen are `description`: divergence 12 removed GraphQL's `Description` node, so a description
@@ -1565,7 +1616,7 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 /// **Receiver-elided, one.** `Path::separators` projects `K::PathSeparator` and drops the word the
 /// receiver already says; `Path::path_separators` would stutter. It is here rather than in a rule
 /// because a rule that let any getter drop its wrapper's name as a prefix would be a rule invented
-/// for one getter, and it would weaken the check for the other 309.
+/// for one getter, and it would weaken the check for the other 317.
 ///
 /// Every entry carries its projection, so a getter re-aimed at another kind reds here rather than
 /// slipping through as a pinned exception.
@@ -1622,12 +1673,12 @@ fn the_probe_table_is_exactly_the_shipped_inventory() {
   // every comparison below vacuous, so the counts are pinned before they are used.
   assert_eq!(
     shipped.len(),
-    310,
-    "the wrapper sources should declare 310 getters"
+    318,
+    "the wrapper sources should declare 318 getters"
   );
   let shipped_wrappers: BTreeSet<&str> = shipped.iter().map(|g| g.wrapper.as_str()).collect();
   assert_eq!(shipped_wrappers.len(), 76, "…over 76 wrappers");
-  assert_eq!(DECLARED.len(), 310, "the table declares 310 getters");
+  assert_eq!(DECLARED.len(), 318, "the table declares 318 getters");
   assert_eq!(TABLE_WRAPPERS.len(), 76, "…over 76 wrappers");
 
   let table: BTreeSet<(&str, &str, &str)> = DECLARED.iter().copied().collect();
@@ -1660,7 +1711,7 @@ fn every_getter_is_named_for_what_it_projects() {
   // The defect this catches is the one no other gate can see: a getter aimed at a **plausible
   // neighbour** — `interface_type_definitions: many ObjectTypeDefinition` — which compiles,
   // navigates, answers `Some`, round-trips and keeps every byte. Only the name disagrees with the
-  // kind, so the name is what has to be checked, for all 310 rather than for the handful a fixture
+  // kind, so the name is what has to be checked, for all 318 rather than for the handful a fixture
   // happens to count.
   let mut pinned: BTreeSet<(String, String, String, String)> = NAME_EXCEPTIONS
     .iter()
@@ -1844,7 +1895,7 @@ fn every_getter_is_called_and_projects_something() {
      from a getter pointed at a kind that cannot occur:{}",
     listed(reg.unanswered())
   );
-  assert_eq!(reg.getters.len(), 310);
+  assert_eq!(reg.getters.len(), 318);
 }
 
 #[test]
@@ -1904,7 +1955,7 @@ fn each_node_kind_casts_to_exactly_the_wrapper_that_names_it() {
 /// write a set of floats would make one fixture redundant, and nothing would say so —
 /// [`every_added_source_earns_its_place`] is the other half of that guard.
 ///
-/// Note what is *not* here. The corpus reaches all 76 wrappers and calls all 310 getters on its
+/// Note what is *not* here. The corpus reaches all 76 wrappers and calls all 318 getters on its
 /// own; every entry below is a getter with a node to run on and nothing in it to find, which is a
 /// statement about what GraphQLx the corpus writes rather than about what the typed layer can
 /// reach.
@@ -2180,7 +2231,7 @@ fn every_recovery_fixture_really_is_malformed() {
 
 /// The getters no tree this gate sweeps ever separates from a kind-blind rival, and why.
 ///
-/// 46 of 310. Every other getter is **measured** to answer differently, at least once, from a
+/// 46 of 318. Every other getter is **measured** to answer differently, at least once, from a
 /// getter of the same arity that ignored kinds entirely — the property that makes this sweep's
 /// fixtures worth anything: over `"{ a }"` a `cast::child` is indistinguishable from "take the
 /// first child", and a suite built out of fixtures like that reports full coverage of a layer it
@@ -2204,7 +2255,7 @@ fn every_recovery_fixture_really_is_malformed() {
 /// # The finding: this census is **larger** than the GraphQL twin's, and the design predicted the
 /// opposite
 ///
-/// GraphQL pins 24 of 210, 11.4%. This pins 46 of 310, 14.8% — more, absolutely and
+/// GraphQL pins 24 of 210, 11.4%. This pins 46 of 318, 14.5% — more, absolutely and
 /// proportionally. The design expected fewer, on the reasoning that divergences 1, 2, 10 and 11
 /// replace single-token positions with paths and generics lists, so nodes that held exactly one
 /// child over there hold structure here. **That reasoning has the direction backwards**, and the
@@ -2296,7 +2347,7 @@ fn every_getter_but_these_answers_differently_from_a_kind_blind_rival() {
   );
   assert_eq!(
     DECLARED.len() - undiscriminated.len(),
-    264,
-    "264 of the 310 getters are proved to beat a kind-blind rival"
+    272,
+    "272 of the 318 getters are proved to beat a kind-blind rival"
   );
 }

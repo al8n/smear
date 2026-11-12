@@ -835,6 +835,120 @@ fn a_module_is_refused_where_no_module_stands_and_without_its_parts() {
 }
 
 #[test]
+fn scalars_enums_unions_and_input_objects_implement_interfaces() {
+  // `implements` follows the name and generics and precedes the directives, on all four kinds.
+  fn check_scalar<S: AsRef<[u8]>>(scalar: ast::ScalarTypeDefinition<S>) {
+    let implements = scalar.implements().expect("the scalar's clause");
+    assert_eq!(implements.interfaces().len(), 2);
+    assert_eq!(implements.span(), &SimpleSpan::new(9, 29));
+    assert!(scalar.directives().is_some());
+    assert_eq!(scalar.span(), &SimpleSpan::new(0, 32));
+  }
+  accept_all!(
+    ast::ScalarTypeDefinition::graphqlx,
+    "scalar S implements I & ns::J @d",
+    check_scalar
+  );
+
+  fn check_enum<S: AsRef<[u8]>>(definition: ast::EnumTypeDefinition<S>) {
+    assert!(definition.implements().is_some());
+    assert!(definition.directives().is_none());
+    assert!(definition.enum_values_definition().is_some());
+  }
+  accept_all!(
+    ast::EnumTypeDefinition::graphqlx,
+    "enum E<T> implements I { A }",
+    check_enum
+  );
+
+  fn check_union<S: AsRef<[u8]>>(definition: ast::UnionTypeDefinition<S>) {
+    assert!(definition.implements().is_some());
+    assert!(definition.member_types().is_some());
+  }
+  accept_all!(
+    ast::UnionTypeDefinition::graphqlx,
+    "union U implements I = A | B",
+    check_union
+  );
+
+  fn check_input<S: AsRef<[u8]>>(definition: ast::InputObjectTypeDefinition<S>) {
+    assert!(definition.implements().is_some());
+    let fields = definition.fields_definition().expect("the input's fields");
+    assert!(fields.where_clause().is_some());
+  }
+  accept_all!(
+    ast::InputObjectTypeDefinition::graphqlx,
+    "input In<T> implements I where T: B { a: Int }",
+    check_input
+  );
+
+  // An extension adds at least one thing, and an `implements` clause counts.
+  fn check_bare_scalar_extension<S: AsRef<[u8]>>(extension: ast::ScalarTypeExtension<S>) {
+    assert!(extension.data().is_implements());
+    assert!(extension.directives().is_none());
+    assert_eq!(extension.span(), &SimpleSpan::new(0, 28));
+  }
+  accept_all!(
+    ast::ScalarTypeExtension::graphqlx,
+    "extend scalar S implements I",
+    check_bare_scalar_extension
+  );
+
+  fn check_scalar_extension<S: AsRef<[u8]>>(extension: ast::ScalarTypeExtension<S>) {
+    assert!(extension.data().is_directives());
+    assert!(extension.implements().is_some());
+    assert_eq!(extension.span(), &SimpleSpan::new(0, 31));
+  }
+  accept_all!(
+    ast::ScalarTypeExtension::graphqlx,
+    "extend scalar S implements I @d",
+    check_scalar_extension
+  );
+
+  fn check_union_extension<S: AsRef<[u8]>>(extension: ast::UnionTypeExtension<S>) {
+    assert!(extension.data().is_implements());
+    assert!(extension.member_types().is_none());
+    assert_eq!(extension.span(), &SimpleSpan::new(0, 27));
+  }
+  accept_all!(
+    ast::UnionTypeExtension::graphqlx,
+    "extend union U implements I",
+    check_union_extension
+  );
+
+  fn check_enum_extension<S: AsRef<[u8]>>(extension: ast::EnumTypeExtension<S>) {
+    assert!(extension.data().is_values());
+    assert!(extension.implements().is_some());
+    assert!(extension.directives().is_some());
+  }
+  accept_all!(
+    ast::EnumTypeExtension::graphqlx,
+    "extend enum E implements I @d { A }",
+    check_enum_extension
+  );
+
+  fn check_input_extension<S: AsRef<[u8]>>(extension: ast::InputObjectTypeExtension<S>) {
+    assert!(extension.data().is_fields());
+    assert!(extension.implements().is_some());
+    assert!(extension.directives().is_none());
+  }
+  accept_all!(
+    ast::InputObjectTypeExtension::graphqlx,
+    "extend input In implements I { a: Int }",
+    check_input_extension
+  );
+
+  // After the directives, `implements` is no longer the definition's: the scalar ends there and
+  // the clause is an entry head of nothing.
+  assert_unexpected(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "scalar S @d implements I",
+    Expectation::Production("a use item, a module, a definition or an extension"),
+    Some(SyntacticTokenKind::Identifier),
+  );
+}
+
+#[test]
 fn failures_keep_typed_expectations_and_unclosed_kinds() {
   let error = drive_str(|inp| ast::Type::graphqlx(inp).map(|_| ()), "42")
     .expect_err("an integer cannot begin a GraphQLx type")

@@ -443,13 +443,13 @@ fn a_rejected_phase_names_the_production_it_expected() {
         "extend union U",
       )),
       end,
-      "unexpected end of input, expected directives or union member types",
+      "unexpected end of input, expected `implements`, directives or union member types",
     ),
     (
       "an enum extension that adds nothing",
       refusal(drive_str(ast::EnumTypeExtension::graphqlx, "extend enum E")),
       end,
-      "unexpected end of input, expected directives or an enum values definition",
+      "unexpected end of input, expected `implements`, directives or an enum values definition",
     ),
     (
       "an input extension that adds nothing",
@@ -458,7 +458,16 @@ fn a_rejected_phase_names_the_production_it_expected() {
         "extend input I",
       )),
       end,
-      "unexpected end of input, expected directives or an input fields definition",
+      "unexpected end of input, expected `implements`, directives or an input fields definition",
+    ),
+    (
+      "a scalar extension that adds nothing",
+      refusal(drive_str(
+        ast::ScalarTypeExtension::graphqlx,
+        "extend scalar S",
+      )),
+      end,
+      "unexpected end of input, expected `implements` or directives",
     ),
     (
       "a schema extension that adds nothing",

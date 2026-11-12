@@ -263,21 +263,21 @@ pub enum SyntaxKind {
   RootOperationTypesDefinition,
   /// `OperationType : TypePath`.
   RootOperationTypeDefinition,
-  /// `scalar DefinitionName Directives?`.
+  /// `scalar DefinitionName ImplementInterfaces? Directives?`.
   ScalarTypeDefinition,
   /// `type DefinitionName ImplementInterfaces? Directives? WhereClause? FieldsDefinition?`.
   ObjectTypeDefinition,
   /// The `interface` form of the same shape.
   InterfaceTypeDefinition,
-  /// `union DefinitionName Directives? UnionMemberTypes? WhereClause?`.
+  /// `union DefinitionName ImplementInterfaces? Directives? UnionMemberTypes? WhereClause?`.
   ///
   /// The clause comes **after** the members and requires them —
   /// `graphqlx/syntactic/definition/union.rs:87-95` parses `try_union_members` and then
   /// `try_where_clause`, which is the reverse of every other `where` site.
   UnionTypeDefinition,
-  /// `enum DefinitionName Directives? EnumValuesDefinition?`.
+  /// `enum DefinitionName ImplementInterfaces? Directives? EnumValuesDefinition?`.
   EnumTypeDefinition,
-  /// `input DefinitionName Directives? WhereClause? InputFieldsDefinition?`.
+  /// `input DefinitionName ImplementInterfaces? Directives? WhereClause? InputFieldsDefinition?`.
   InputObjectTypeDefinition,
   /// `directive @ DefinitionName ArgumentsDefinition? Directives? repeatable? on
   /// DirectiveLocations WhereClause?`.
@@ -313,18 +313,19 @@ pub enum SyntaxKind {
   // ---- SDL extensions ----
   /// `extend schema Directives? RootOperationTypesDefinition?`.
   SchemaExtension,
-  /// `extend scalar ExtensionName Directives`.
+  /// `extend scalar ExtensionName ImplementInterfaces? Directives?`, at least one of the two.
   ScalarTypeExtension,
   /// `extend type ExtensionName ImplementInterfaces? Directives? WhereClause? FieldsDefinition?`.
   ObjectTypeExtension,
   /// The `extend interface` form of the same shape.
   InterfaceTypeExtension,
-  /// `extend union ExtensionName Directives? UnionMemberTypes? WhereClause?`, for the reason
-  /// [`UnionTypeDefinition`](Self::UnionTypeDefinition) records.
+  /// `extend union ExtensionName ImplementInterfaces? Directives? UnionMemberTypes? WhereClause?`,
+  /// for the reason [`UnionTypeDefinition`](Self::UnionTypeDefinition) records.
   UnionTypeExtension,
-  /// `extend enum ExtensionName Directives? EnumValuesDefinition?`.
+  /// `extend enum ExtensionName ImplementInterfaces? Directives? EnumValuesDefinition?`.
   EnumTypeExtension,
-  /// `extend input ExtensionName Directives? WhereClause? InputFieldsDefinition?`.
+  /// `extend input ExtensionName ImplementInterfaces? Directives? WhereClause?
+  /// InputFieldsDefinition?`.
   InputObjectTypeExtension,
   /// `extend directive @ ExtensionName Directives`.
   DirectiveExtension,

@@ -2967,13 +2967,18 @@ fn a_keyword_slot_a_walk_collects_is_read_by_spelling() {
 /// The child kinds each SDL definition's production spells, **read off the productions here** so
 /// the cross-product below is not derived from the table it is checking.
 ///
-/// `graphqlx/lossless/definition.rs`: scalar is `DefinitionName Directives?`; type and interface
-/// share `DefinitionName ImplementInterfaces? Directives? WhereClause? FieldsDefinition?`; union is
-/// `DefinitionName Directives? UnionMemberTypes? WhereClause?`; enum is
-/// `DefinitionName Directives? EnumValuesDefinition?` and is the one with no clause at all; input
-/// is `DefinitionName Directives? WhereClause? InputFieldsDefinition?`.
+/// `graphqlx/lossless/definition.rs`: scalar is `DefinitionName ImplementInterfaces? Directives?`;
+/// type and interface share `DefinitionName ImplementInterfaces? Directives? WhereClause?
+/// FieldsDefinition?`; union is `DefinitionName ImplementInterfaces? Directives? UnionMemberTypes?
+/// WhereClause?`; enum is `DefinitionName ImplementInterfaces? Directives? EnumValuesDefinition?`
+/// and is the one with no clause at all; input is `DefinitionName ImplementInterfaces? Directives?
+/// WhereClause? InputFieldsDefinition?`.
 const DEFINITION_ROWS: &[(K, &str, &[K])] = &[
-  (K::ScalarTypeDefinition, "scalar", &[K::Directives]),
+  (
+    K::ScalarTypeDefinition,
+    "scalar",
+    &[K::ImplementInterfaces, K::Directives],
+  ),
   (
     K::ObjectTypeDefinition,
     "type",
@@ -2997,23 +3002,41 @@ const DEFINITION_ROWS: &[(K, &str, &[K])] = &[
   (
     K::UnionTypeDefinition,
     "union",
-    &[K::Directives, K::UnionMemberTypes, K::WhereClause],
+    &[
+      K::ImplementInterfaces,
+      K::Directives,
+      K::UnionMemberTypes,
+      K::WhereClause,
+    ],
   ),
   (
     K::EnumTypeDefinition,
     "enum",
-    &[K::Directives, K::EnumValuesDefinition],
+    &[
+      K::ImplementInterfaces,
+      K::Directives,
+      K::EnumValuesDefinition,
+    ],
   ),
   (
     K::InputObjectTypeDefinition,
     "input",
-    &[K::Directives, K::WhereClause, K::InputFieldsDefinition],
+    &[
+      K::ImplementInterfaces,
+      K::Directives,
+      K::WhereClause,
+      K::InputFieldsDefinition,
+    ],
   ),
 ];
 
 /// [`DEFINITION_ROWS`]' extension twin, from `graphqlx/lossless/extension.rs`.
 const EXTENSION_ROWS: &[(K, &str, &[K])] = &[
-  (K::ScalarTypeExtension, "scalar", &[K::Directives]),
+  (
+    K::ScalarTypeExtension,
+    "scalar",
+    &[K::ImplementInterfaces, K::Directives],
+  ),
   (
     K::ObjectTypeExtension,
     "type",
@@ -3037,17 +3060,31 @@ const EXTENSION_ROWS: &[(K, &str, &[K])] = &[
   (
     K::UnionTypeExtension,
     "union",
-    &[K::Directives, K::UnionMemberTypes, K::WhereClause],
+    &[
+      K::ImplementInterfaces,
+      K::Directives,
+      K::UnionMemberTypes,
+      K::WhereClause,
+    ],
   ),
   (
     K::EnumTypeExtension,
     "enum",
-    &[K::Directives, K::EnumValuesDefinition],
+    &[
+      K::ImplementInterfaces,
+      K::Directives,
+      K::EnumValuesDefinition,
+    ],
   ),
   (
     K::InputObjectTypeExtension,
     "input",
-    &[K::Directives, K::WhereClause, K::InputFieldsDefinition],
+    &[
+      K::ImplementInterfaces,
+      K::Directives,
+      K::WhereClause,
+      K::InputFieldsDefinition,
+    ],
   ),
 ];
 
@@ -3126,7 +3163,7 @@ fn every_definition_kind_refuses_a_foreign_child() {
     }
   }
   assert_eq!(
-    pairs, 25,
+    pairs, 21,
     "six definition kinds against the seven shared tails, minus each row's own: the cross-product \
      is the claim, so its size is asserted rather than trusted"
   );
@@ -3152,7 +3189,7 @@ fn every_extension_kind_refuses_a_foreign_tail() {
       pairs += 1;
     }
   }
-  assert_eq!(pairs, 25);
+  assert_eq!(pairs, 21);
 }
 
 #[test]
@@ -3160,18 +3197,18 @@ fn each_kinds_own_children_still_project() {
   // The control the cross-product needs: the rows are not simply refusing everything. One legal
   // document per definition and extension kind, through the real parser, compared with the oracle.
   for src in [
-    "scalar S @d",
+    "scalar S implements I @d",
     "type T implements I @d where A: B { f: Int }",
     "interface I implements J @d where A: B { f: Int }",
-    "union U @d = A | B where A: C",
-    "enum E @d { A }",
-    "input I @d where A: B { f: Int }",
-    "extend scalar S @d",
+    "union U implements I @d = A | B where A: C",
+    "enum E implements I @d { A }",
+    "input I implements J @d where A: B { f: Int }",
+    "extend scalar S implements I @d",
     "extend type T implements I @d where A: B { f: Int }",
     "extend interface I implements J @d where A: B { f: Int }",
-    "extend union U @d = A | B where A: C",
-    "extend enum E @d { A }",
-    "extend input I @d where A: B { f: Int }",
+    "extend union U implements I @d = A | B where A: C",
+    "extend enum E implements I @d { A }",
+    "extend input I implements J @d where A: B { f: Int }",
   ] {
     let parse = parse_document(src);
     assert!(!parse.has_errors(), "{src}: the probe must be legal input");

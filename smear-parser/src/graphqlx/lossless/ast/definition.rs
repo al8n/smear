@@ -211,6 +211,8 @@ ast_node!(
     description: tok_any K::InlineString | K::BlockString,
     /// The scalar's name.
     definition_name: opt DefinitionName,
+    /// The scalar's `implements` clause, if it has one.
+    implement_interfaces: opt ImplementInterfaces,
     /// The definition's directives, if it was given any.
     directives: opt Directives,
   }
@@ -272,6 +274,8 @@ ast_node!(
     description: tok_any K::InlineString | K::BlockString,
     /// The union's name, and the generic parameters it declares.
     definition_name: opt DefinitionName,
+    /// The union's `implements` clause, if it has one.
+    implement_interfaces: opt ImplementInterfaces,
     /// The definition's directives, if it was given any.
     directives: opt Directives,
     /// The union's members, if it names any.
@@ -291,6 +295,8 @@ ast_node!(
     description: tok_any K::InlineString | K::BlockString,
     /// The enum's name, and the generic parameters it declares.
     definition_name: opt DefinitionName,
+    /// The enum's `implements` clause, if it has one.
+    implement_interfaces: opt ImplementInterfaces,
     /// The definition's directives, if it was given any.
     directives: opt Directives,
     /// The enum's values, if it declares any.
@@ -306,6 +312,8 @@ ast_node!(
     description: tok_any K::InlineString | K::BlockString,
     /// The input object's name, and the generic parameters it declares.
     definition_name: opt DefinitionName,
+    /// The input object's `implements` clause, if it has one.
+    implement_interfaces: opt ImplementInterfaces,
     /// The definition's directives, if it was given any.
     directives: opt Directives,
     /// The input object's `where` clause, if it has one.

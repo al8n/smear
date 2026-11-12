@@ -16,16 +16,21 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let name = definition_name(inp)?;
+  let implements: Option<ImplementInterfaces<GraphqlxSlice<'inp, Src>>> =
+    try_implements(inp)?.into();
   let directives = optional_const_directives(inp)?;
   Ok(ScalarTypeDefinition::new(
     SimpleSpan::new(start, extent_end(inp)),
     name,
+    implements,
     directives,
   ))
 }
 
 definition_parser!(
   /// Parses a GraphQLx scalar type definition.
+  ///
+  /// An `implements` clause after the name is a GraphQLx extension.
   ///
   /// See the [GraphQL Scalar Type Definition specification](https://spec.graphql.org/draft/#ScalarTypeDefinition).
   pub scalar_type_definition,
@@ -40,6 +45,8 @@ definition_parser!(
 
 impl_definition_api!(
   /// Parses a GraphQLx scalar type definition.
+  ///
+  /// An `implements` clause after the name is a GraphQLx extension.
   ///
   /// See the [GraphQL Scalar Type Definition specification](https://spec.graphql.org/draft/#ScalarTypeDefinition).
   S,

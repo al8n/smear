@@ -847,5 +847,8 @@ impl<Target, WhereClause, Span> IntoComponents for Constrained<Target, WhereClau
   }
 }
 
+mod type_system;
+pub use type_system::*;
+
 #[cfg(test)]
 mod tests;
