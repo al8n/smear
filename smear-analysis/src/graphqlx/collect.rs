@@ -244,8 +244,9 @@ pub(crate) fn items<'d, 'a: 'd>(
 }
 
 /// Whether the package set refused the path of the file at `at` of `files`, which are in source
-/// order: a path the path rule refuses, or a path another file of the package has.
-fn refused(files: &[FileView<'_>], at: usize) -> bool {
+/// order: a path the path rule refuses, or a path another file of the package has. Name
+/// resolution asks it too, so that its file table holds the files this walk places and no other.
+pub(crate) fn refused(files: &[FileView<'_>], at: usize) -> bool {
   let path = files[at].path;
   check::path_problem(path).is_some()
     || (at > 0 && files[at - 1].path == path)

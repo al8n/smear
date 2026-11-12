@@ -87,18 +87,20 @@ All notable changes to Smear are documented in this file.
   package's directory or `mod` would add past it is `resource-limit`, and no module is added
   after it. A file holding an item of a kind the analyzer does not know, which only a newer
   parser can make, is `unknown-item`, once per file. Every module has a scope: its own
-  declarations and child modules, then the prelude, the root modules of `core`, `alloc` and
-  `std` whatever the package's tier, and last, where a module is wanted, the names of the
-  packages it may reach, which are `core`, `alloc`, `std` and its declared dependencies; types
-  and modules share one namespace and directives have their own. A type that a supplied package
-  names as a primitive of the prelude (`bool`, `f32`, `f64`, `iN`, `uN`, `string`, `bytes`,
-  `NonZeroIN`, `NonZeroUN`) shadows it in its module and is the warning `shadowed-primitive`; a
-  path that does not resolve is `unresolved-path`, or `unknown-package` for a package it may not
-  reach, and a name of one segment in a place GraphQL has keeps GraphQL's own code. Every `use`
-  item is resolved, each module's to a fixpoint, with a module's explicit `use` bindings before
-  its globs, which give the declarations and child modules of the modules they name; `use`
-  cycles are legal. A name two globs give two items is `ambiguous-glob` where a path meets it; a
-  string source names its directory's module, relative to the file it is written in, and is
+  declarations and child modules, then the prelude, the root modules of `core`, `alloc` and `std`
+  whatever the package's tier, and last, where a module is wanted, the names of the packages it
+  may reach, which are `core`, `alloc`, `std` and its declared dependencies; types and modules
+  share one namespace and directives have their own. A type that a supplied package names as a
+  primitive of the prelude (`bool`, `f32`, `f64`, `iN`, `uN`, `string`, `bytes`, `NonZeroIN`,
+  `NonZeroUN`) shadows it in its module and is the warning `shadowed-primitive`; a path that does
+  not resolve is `unresolved-path`, or `unknown-package` for a package it may not reach, and a
+  name of one segment in a place GraphQL has keeps GraphQL's own code. Every `use` item is
+  resolved, each module's to a fixpoint, with a module's explicit `use` bindings before its
+  globs, which give the declarations and child modules of the modules they name; `use` cycles are
+  legal. A new `Limits::max_globs`, 64 by default, bounds the modules the globs of one module may
+  name, and so what one lookup searches: the first glob past it is `resource-limit`, once for its
+  module. A name two globs give two items is `ambiguous-glob` where a path meets it; a string
+  source names its directory's module, relative to the file it is written in, and is
   `file-path-use` when it names a file and `url-unsupported` when it is a URL. A `use` item that
   names one thing while its module's items resolve and another once all have is
   `use-resolution-changed`, a `use` of a name its module declares is

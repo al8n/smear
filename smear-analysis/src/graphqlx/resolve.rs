@@ -4,7 +4,10 @@
 //!
 //! The first segment of a path with no root is looked up in this order, and the first hit decides:
 //!
-//! 1. the generic parameters of the definition the path stands in, which the caller passes;
+//! 1. the generic parameters of the definition the path stands in, which the caller passes, where
+//!    the segment is wanted as a type or a module, never alone as a directive's name: a parameter
+//!    is a type, so it answers a lone segment where a type is wanted, and refuses one where a
+//!    module is wanted or segments follow it, a directive's path included;
 //! 2. the module's own declarations and its child modules;
 //! 3. the module's explicit `use` bindings: named items and aliases;
 //! 4. the module's glob `use` bindings: each glob gives the declarations and the child modules of
@@ -41,22 +44,23 @@
 //! found by binary search in the tables the declarations hand on; its explicit `use` bindings and
 //! its globs, found by range in two ordered maps keyed by the module first; and the prelude's and
 //! the packages' tables, which every module shares. So a module costs its entry and its row among
-//! its parent's children, each name a `use` binds one row, each glob one row, and nothing about it
-//! grows with how deep it sits or what its parent holds. A lookup costs a logarithm of those
-//! tables, but for the globs, which cost one search in each distinct module the module's globs
-//! name; a path costs one lookup per segment.
+//! its parent's children, each name a `use` binds one row, each module its globs name one row,
+//! however many globs name it, and nothing about it grows with how deep it sits or what its parent
+//! holds. A lookup costs a logarithm of those tables, and for the globs one search in each module
+//! the module's globs name, which `Limits::max_globs` bounds; a path costs one lookup per segment.
 //!
 //! # Near misses
 //!
 //! A name that does not resolve gets the nearest name visible where it is written, of the
 //! namespace wanted, as a "did you mean" in its help, within one budget for the whole analysis:
-//! see [`near`].
+//! see [`near`]. [`Scopes::nearest`] answers lowering the near miss of a name among candidates it
+//! holds, under the same budget and the same rules.
 
 mod near;
 mod uses;
 
 use core::cell::Cell;
-use std::{collections::BTreeMap, format, string::String, vec::Vec};
+use std::{boxed::Box, collections::BTreeMap, format, string::String, vec, vec::Vec};
 
 use smear_parser::graphqlx::ast::{Path, PathRoot};
 use tokora::{
@@ -68,13 +72,14 @@ use tokora::{
 use super::{
   builtin::{CORE, DIRECTIVE, TYPE, available, intrinsic, spelled, written},
   code::{DiagnosticKind, schema},
+  collect::refused,
   declare::{Binding, Child, Declarations, ModuleEntry},
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{DefId, ModuleId, PackageId, SourceId, Sym, dense},
   limits::Limits,
-  model::{ModelBuilder, Primitive},
+  model::{ModelBuilder, ModuleKind, Primitive},
   package::{IntegerProvider, Layout},
-  set::{FileView, PackageView, ROOT},
+  set::{PackageView, ROOT},
   source::SourceMap,
 };
 
@@ -99,9 +104,17 @@ pub(crate) struct Scopes<'x> {
   /// item, in the declarations' order, and the order the item binds its names in. The first of a
   /// key's run is the one a lookup answers.
   explicit: BTreeMap<ExplicitKey, Bound>,
-  /// Every glob: by module, the module the glob names, and the `use` item, each with where the
-  /// glob is written.
-  globs: BTreeMap<(ModuleId, ModuleId, u32), Location>,
+  /// Every glob, one row for each module and module its globs name, however many globs name it:
+  /// at most `Limits::max_globs` rows a module.
+  globs: BTreeMap<(ModuleId, ModuleId), Glob>,
+  /// The directory module of each file the module tree placed in a `Directory` package, by source
+  /// id: where a string source written in the file starts. `None` for a package source, a file of
+  /// a `Flat` package, a file the package set refused, and a file placed in no module.
+  directories: Vec<Option<ModuleId>>,
+  /// Each file the module tree placed in a directory module of a `Directory` package, sorted by
+  /// that module, then by the file's name: what tells a string source that names a file from one
+  /// that names nothing.
+  files: Vec<FileName<'x>>,
   /// `Limits::max_path_segments`.
   max_segments: u32,
   /// `Limits::max_use_depth`.
@@ -122,6 +135,16 @@ struct Bound {
   at: Location,
 }
 
+/// The globs of one module that name one module: where the first of them is written, the `use`
+/// item that made it, and whether another item made one too. The row answers every lookup but
+/// those of an item that is its only maker, whose own globs never answer its own head.
+#[derive(Clone, Copy)]
+struct Glob {
+  at: Location,
+  item: u32,
+  shared: bool,
+}
+
 /// One package, as name resolution reads it.
 struct PackageScope<'x> {
   /// Its name, as given.
@@ -134,10 +157,18 @@ struct PackageScope<'x> {
   /// The supplied packages it declares and may reach, by name, each with its root module. The
   /// built-in packages it reaches without declaring them.
   dependencies: Vec<(&'x [u8], ModuleId)>,
-  /// Its files, in source order: what a string source's path is checked against.
-  files: &'x [FileView<'x>],
   /// Its package source's id, which its files' ids follow.
   source: u32,
+}
+
+/// A file of a `Directory` package, as a string source that names it is told by: the module of
+/// its directory, its name, the bytes after its path's last `/`, and its directory's path, the
+/// bytes before that `/`, which the help quotes. Both are slices of the file's own path.
+#[derive(Clone, Copy)]
+struct FileName<'x> {
+  module: ModuleId,
+  name: &'x [u8],
+  directory: &'x [u8],
 }
 
 /// What a path is wanted to name.
@@ -206,9 +237,28 @@ pub(crate) struct Request<'r> {
   pub(crate) source: SourceId,
   pub(crate) wanted: Wanted,
   pub(crate) position: Position,
-  /// The generic parameters in scope where the path stands, by spelling and in order: its
-  /// definition's, or the names an extension gives them.
-  pub(crate) params: &'r [&'r [u8]],
+  /// The generic parameters in scope where the path stands, its definition's or the names an
+  /// extension gives them, as [`params`] tables them: each spelling with its index, sorted by
+  /// spelling, one row a spelling.
+  pub(crate) params: &'r [(&'r [u8], u32)],
+}
+
+/// The generic parameters spelled `written`, in order, as a [`Request`] carries them: each
+/// spelling with its index, sorted by spelling, one row a spelling, the lowest index of a spelling
+/// written twice. Lowering builds it once for each definition or extension, and the resolver finds
+/// a path's first segment in it by binary search.
+// Lowering, the next part of the analyzer, calls this for each definition and extension; until it
+// lands only the test-support door does.
+#[allow(dead_code)]
+pub(crate) fn params<'r>(written: &[&'r [u8]]) -> Vec<(&'r [u8], u32)> {
+  let mut table: Vec<(&'r [u8], u32)> = written
+    .iter()
+    .enumerate()
+    .map(|(index, &spelling): (usize, &&'r [u8])| (spelling, dense(index)))
+    .collect();
+  table.sort_unstable();
+  table.dedup_by_key(|row: &mut (&'r [u8], u32)| row.0);
+  table
 }
 
 /// What a path names.
@@ -374,6 +424,8 @@ enum Why<'p> {
   WrongKind { found: Target, wanted: Wanted },
   /// The name is a generic parameter, and segments follow it.
   ParamNotModule,
+  /// The name is a generic parameter, alone where a module is wanted.
+  ParamAsModule,
   /// `..::` above a root module.
   AboveRoot,
   /// `^::name`, or a first segment where a module is wanted, names no package the path's package
@@ -452,7 +504,6 @@ pub(crate) fn scopes<'x>(
       layout: view.layout,
       integers: view.integers,
       dependencies: reached,
-      files: view.files.as_slice(),
       source: sources.package_sources(index).start(),
     });
   }
@@ -467,6 +518,8 @@ pub(crate) fn scopes<'x>(
     non_zero: None,
     explicit: BTreeMap::new(),
     globs: BTreeMap::new(),
+    directories: Vec::new(),
+    files: Vec::new(),
     max_segments: limits.max_path_segments(),
     max_use_depth: limits.max_use_depth(),
     near: Cell::new(limits.max_near_miss_comparisons()),
@@ -475,9 +528,108 @@ pub(crate) fn scopes<'x>(
     .find(b"NonZero")
     .and_then(|sym: Sym| scopes.def(roots[CORE], TYPE, sym));
   scopes.non_zero = non_zero;
+  let (directories, files) = scopes.file_tables(packages, sources, builder);
+  scopes.directories = directories;
+  scopes.files = files;
   scopes.shadowed(builder, reporter);
   uses::resolve(&mut scopes, declarations, limits, builder, reporter);
   scopes
+}
+
+impl<'x> Scopes<'x> {
+  /// The directory module of every file the module tree placed in a `Directory` package, by source
+  /// id, and those files by module and name: the tables a string source is resolved against.
+  ///
+  /// A file the package set refused, by the predicate item collection places files by, is in
+  /// neither table, nor is a file whose directory is no module: such a file is no start of a
+  /// string source and no file one can name. Every other file's path is read once, split at its
+  /// last `/`, and its directories are walked down from its package's root module, one child
+  /// module per name, as the module tree placed the file. The rows are then sorted by module and
+  /// name, an order that rests on nothing else. The sort reads names, a comparison no more of two
+  /// than the shorter holds, so it reads at most a logarithm of the file count times the names'
+  /// total length, and building the tables costs at most that logarithm times the paths' total
+  /// length.
+  fn file_tables(
+    &self,
+    packages: &'x [PackageView<'_>],
+    sources: &SourceMap,
+    names: &ModelBuilder,
+  ) -> (Vec<Option<ModuleId>>, Vec<FileName<'x>>) {
+    let mut directories: Vec<Option<ModuleId>> = vec![None; sources.len() as usize];
+    let mut files: Vec<FileName<'x>> = Vec::new();
+    for (index, view) in packages.iter().enumerate() {
+      if view.layout != Layout::Directory {
+        continue;
+      }
+      let first = sources.package_sources(index).start() as usize + 1;
+      for (offset, file) in view.files.iter().enumerate() {
+        if refused(&view.files, offset) {
+          continue;
+        }
+        let path: &'x [u8] = file.path;
+        let (directory, name) = match path.iter().rposition(|byte: &u8| *byte == b'/') {
+          Some(cut) => (&path[..cut], &path[cut + 1..]),
+          None => (&path[..0], path),
+        };
+        let Some(module) = self.directory_module(names, index, directory) else {
+          continue;
+        };
+        if let Some(slot) = directories.get_mut(first + offset) {
+          *slot = Some(module);
+        }
+        files.push(FileName {
+          module,
+          name,
+          directory,
+        });
+      }
+    }
+    files.sort_unstable_by(|a: &FileName<'x>, b: &FileName<'x>| {
+      a.module.cmp(&b.module).then_with(|| a.name.cmp(b.name))
+    });
+    (directories, files)
+  }
+
+  /// The path, relative to its package's root, of the directory of the file named `name` in the
+  /// directory whose module is `module`: `None` when no file of that directory is named so.
+  fn named_file(&self, module: ModuleId, name: &[u8]) -> Option<&'x [u8]> {
+    let at = self
+      .files
+      .binary_search_by(|file: &FileName<'x>| {
+        file.module.cmp(&module).then_with(|| file.name.cmp(name))
+      })
+      .ok()?;
+    Some(self.files[at].directory)
+  }
+
+  /// The module of `directory`, a directory of the package at `package`: its names joined by `/`,
+  /// none for the package's root directory, walked down from its root module. `None` when a name
+  /// names no child module, or one that only an inline `mod` declares, where no file is placed.
+  fn directory_module(
+    &self,
+    names: &ModelBuilder,
+    package: usize,
+    directory: &[u8],
+  ) -> Option<ModuleId> {
+    let mut module = self.roots[package];
+    if directory.is_empty() {
+      return Some(module);
+    }
+    for name in directory.split(|byte: &u8| *byte == b'/') {
+      module = self.child(module, names.find(name)?)?;
+    }
+    (self.modules[module.get() as usize].kind == ModuleKind::Directory).then_some(module)
+  }
+
+  /// The directory module of the file `source`, when it is a file of a `Directory` package placed
+  /// in one.
+  fn directory_of(&self, source: SourceId) -> Option<ModuleId> {
+    self
+      .directories
+      .get(source.get() as usize)
+      .copied()
+      .flatten()
+  }
 }
 
 impl Scopes<'_> {
@@ -527,13 +679,16 @@ impl Scopes<'_> {
   }
 
   /// What the path `root` and `segments` spell names where `request` says, or why it names nothing.
+  ///
+  /// A failure travels boxed, so a path that resolves moves no more than its answer and one that
+  /// does not costs one allocation.
   fn walk<'p>(
     &self,
     names: &ModelBuilder,
     request: &Request<'_>,
     root: Root,
     segments: &[Segment<'p>],
-  ) -> Result<Resolved, Failure<'p>> {
+  ) -> Result<Resolved, Box<Failure<'p>>> {
     let package = self.package_of(request.module);
     let (Some(&first), Some(&last)) = (segments.first(), segments.last()) else {
       // A parsed path holds a segment at least, so a path of none is never asked about.
@@ -541,33 +696,36 @@ impl Scopes<'_> {
     };
     if segments.len() > self.max_segments as usize {
       let at = joined(first.at, last.at);
-      return Err(Failure {
+      return Err(Box::new(Failure {
         at,
         name: first.name,
         why: Why::TooLong(segments.len()),
         single: false,
-      });
+      }));
     }
     let rest = &segments[1..];
     let (start, after, within): (ModuleId, &[Segment<'p>], Within<'p>) = match root {
       Root::Relative => {
-        if request.wanted != Wanted::Directive
-          && let Some(index) = request
-            .params
-            .iter()
-            .position(|param: &&[u8]| *param == first.name)
-        {
-          return if rest.is_empty() {
-            Ok(Resolved::Param(dense(index)))
-          } else {
-            Err(failure(first, Why::ParamNotModule, false))
-          };
-        }
+        // What the first segment is wanted as: what the request wants when it is the only one,
+        // and a module when segments follow it, whatever the last of them is wanted as.
         let wanted = if rest.is_empty() {
           request.wanted
         } else {
           Wanted::Module
         };
+        // A generic parameter is a type: in scope where a type or a module is wanted, and never
+        // for a lone directive's name.
+        if wanted != Wanted::Directive
+          && let Some(index) = param(request.params, first.name)
+        {
+          return if !rest.is_empty() {
+            Err(failure(first, Why::ParamNotModule, false))
+          } else if wanted == Wanted::Type {
+            Ok(Resolved::Param(index))
+          } else {
+            Err(failure(first, Why::ParamAsModule, false))
+          };
+        }
         let query = Query::wanting(request.module, first.name, names.find(first.name), wanted);
         match self.lookup(query) {
           Lookup::Found(target, _) if rest.is_empty() => {
@@ -614,21 +772,21 @@ impl Scopes<'_> {
       Root::Parent(count, at) => match self.up(request.module, count) {
         Some(module) => (module, segments, Within::Parent),
         None => {
-          return Err(Failure {
+          return Err(Box::new(Failure {
             at,
             name: b"..",
             why: Why::AboveRoot,
             single: false,
-          });
+          }));
         }
       },
       Root::Unknown(at) => {
-        return Err(Failure {
+        return Err(Box::new(Failure {
           at,
           name: first.name,
           why: Why::Unknown,
           single: false,
-        });
+        }));
       }
     };
     self.later(names, request.wanted, package, start, after, within)
@@ -636,7 +794,8 @@ impl Scopes<'_> {
 
   /// What the segments `after` name below `module`, which the path names `within`: each but the
   /// last a child module of the one before, and the last what `wanted` asks for, among the
-  /// declarations and the child modules of the module before it.
+  /// declarations and the child modules of the module before it. A failure travels boxed, as
+  /// [`walk`](Self::walk)'s does.
   fn later<'p>(
     &self,
     names: &ModelBuilder,
@@ -645,7 +804,7 @@ impl Scopes<'_> {
     mut module: ModuleId,
     after: &[Segment<'p>],
     mut within: Within<'p>,
-  ) -> Result<Resolved, Failure<'p>> {
+  ) -> Result<Resolved, Box<Failure<'p>>> {
     for (offset, &segment) in after.iter().enumerate() {
       let sym = names.find(segment.name);
       if offset + 1 == after.len() {
@@ -790,8 +949,10 @@ impl Scopes<'_> {
       .map(|(_, bound): (&ExplicitKey, &Bound)| *bound)
   }
 
-  /// What the globs of `module`, but those of the `use` item `exclude`, give `sym` in `namespace`:
-  /// what each distinct module they name declares so, as `declared` answers it.
+  /// What the globs of `module`, but those only the `use` item `exclude` made, give `sym` in
+  /// `namespace`: what each module they name declares so, as `declared` answers it. A module has
+  /// one row for each module its globs name, at most `Limits::max_globs`, so a lookup searches at
+  /// most that many modules.
   fn globbed(
     &self,
     module: ModuleId,
@@ -801,22 +962,19 @@ impl Scopes<'_> {
     exclude: Option<u32>,
   ) -> Lookup {
     let mut first: Option<(Target, Location)> = None;
-    let mut last: Option<ModuleId> = None;
-    let from = (module, ModuleId::new(0), 0);
-    let to = (module, ModuleId::new(u32::MAX), u32::MAX);
-    for (&(_, target, item), &at) in self.globs.range(from..=to) {
-      // Two globs of one module are one: the first is the one asked.
-      if Some(item) == exclude || last == Some(target) {
+    let from = (module, ModuleId::new(0));
+    let to = (module, ModuleId::new(u32::MAX));
+    for (&(_, target), glob) in self.globs.range(from..=to) {
+      if !glob.shared && Some(glob.item) == exclude {
         continue;
       }
-      last = Some(target);
       let Some(found) = self.declared(target, namespace, sym, module_first) else {
         continue;
       };
       match first {
-        None => first = Some((found, at)),
+        None => first = Some((found, glob.at)),
         Some((seen, seen_at)) if seen != found => {
-          return Lookup::Ambiguous((seen, seen_at), (found, at));
+          return Lookup::Ambiguous((seen, seen_at), (found, glob.at));
         }
         Some(_) => {}
       }
@@ -866,6 +1024,29 @@ impl Scopes<'_> {
       .binary_search_by_key(&(parent, sym), |child: &Child| (child.parent, child.name))
       .ok()?;
     Some(self.children[at].module)
+  }
+
+  /// What `module` itself declares, in both namespaces: its run of the bindings, found by two
+  /// binary searches.
+  fn bindings_of(&self, module: ModuleId) -> &[Binding] {
+    let from = self
+      .bindings
+      .partition_point(|binding: &Binding| binding.module < module);
+    let to = self
+      .bindings
+      .partition_point(|binding: &Binding| binding.module <= module);
+    &self.bindings[from..to]
+  }
+
+  /// The child modules of `module`: its run of the children, found by two binary searches.
+  fn children_of(&self, module: ModuleId) -> &[Child] {
+    let from = self
+      .children
+      .partition_point(|child: &Child| child.parent < module);
+    let to = self
+      .children
+      .partition_point(|child: &Child| child.parent <= module);
+    &self.children[from..to]
   }
 
   /// What the prelude names `name`, whose symbol is `sym`, in `namespace`: a declaration of the
@@ -936,15 +1117,16 @@ impl Scopes<'_> {
   }
 
   /// Reports `failure`, a path written in `module` at `position`, where `params` are the generic
-  /// parameters in scope, that does not resolve: with the nearest name visible there, of the
-  /// namespace wanted, in its help, when one is within reach and the budget lasts.
+  /// parameters in scope, as [`params`] tables them, that does not resolve: with the nearest name
+  /// visible there, of the namespace wanted, in its help, when one is within reach and the budget
+  /// lasts.
   fn report(
     &self,
     names: &ModelBuilder,
     reporter: &mut Reporter,
     module: ModuleId,
     position: Position,
-    params: &[&[u8]],
+    params: &[(&[u8], u32)],
     failure: &Failure<'_>,
   ) {
     let (code, title): (Code, &'static str) = match failure.why {
@@ -1051,6 +1233,16 @@ impl Scopes<'_> {
       Why::ParamNotModule => (
         format!(
           "`{}` names a type parameter here, and nothing is named through a type parameter",
+          Excerpt(name)
+        ),
+        String::from(
+          "a definition's type parameters shadow every name of its module within it: rename the \
+           parameter, or write the path from a root",
+        ),
+      ),
+      Why::ParamAsModule => (
+        format!(
+          "`{}` names a type parameter here, where a module is wanted",
           Excerpt(name)
         ),
         String::from(
@@ -1265,12 +1457,7 @@ impl Scopes<'_> {
         String::from("a package reaches its own items through `~::`"),
       );
     }
-    let supplied = self
-      .packages
-      .iter()
-      .skip(ROOT)
-      .any(|scope: &PackageScope<'_>| scope.name == name);
-    if supplied {
+    if self.supplied(name) {
       (
         format!(
           "package `{}` does not declare the dependency `{}`, so it cannot reach it",
@@ -1293,6 +1480,46 @@ impl Scopes<'_> {
     }
   }
 
+  /// Whether a supplied package is named `name`: the root package, or one of the dependencies
+  /// after it, which the package set numbers in name order, so a binary search finds it.
+  fn supplied(&self, name: &[u8]) -> bool {
+    let Some(root) = self.packages.get(ROOT) else {
+      return false;
+    };
+    root.name == name
+      || self.packages[ROOT + 1..]
+        .binary_search_by(|scope: &PackageScope<'_>| scope.name.cmp(name))
+        .is_ok()
+  }
+
+  /// The near miss of `wanted` among `candidates`, under the analysis's one near-miss budget and
+  /// the rules every search keeps: the nearest within reach, or `None` when none is, when `wanted`
+  /// is not searched for, or when the budget runs out before the candidates do. Each candidate
+  /// looked at spends one of the budget's comparisons. The search is asked whether it goes on
+  /// before each candidate is read, so `candidates` is read no further once it is closed, and not
+  /// at all for a name that is not searched for.
+  ///
+  /// Lowering asks it what an unknown argument of a directive application may have meant, among
+  /// the directive's arguments.
+  // Lowering, the next part of the analyzer, calls this; until it lands only the tests do.
+  #[allow(dead_code)]
+  pub(crate) fn nearest<'c>(
+    &self,
+    wanted: &'c [u8],
+    candidates: &mut dyn Iterator<Item = &'c [u8]>,
+  ) -> Option<&'c [u8]> {
+    if self.near.get() == 0 {
+      return None;
+    }
+    let mut search = near::Search::new(wanted);
+    while search.open()
+      && let Some(candidate) = candidates.next()
+    {
+      search.offer(&self.near, candidate);
+    }
+    search.found()
+  }
+
   /// The near miss of `failure`'s name, written in `module` where `params` are the generic
   /// parameters in scope, quoted as a message quotes it: the nearest name visible there, of the
   /// namespace wanted, when one is within reach and the budget lasts.
@@ -1308,7 +1535,7 @@ impl Scopes<'_> {
     names: &ModelBuilder,
     module: ModuleId,
     failure: &Failure<'_>,
-    params: &[&[u8]],
+    params: &[(&[u8], u32)],
   ) -> Option<String> {
     if self.near.get() == 0 {
       return None;
@@ -1322,8 +1549,11 @@ impl Scopes<'_> {
     let quoting = match failure.why {
       Why::NotInScope { module, wanted } => {
         if wanted != Wanted::Directive {
-          for &param in params {
-            search.offer(&self.near, param);
+          for &(spelling, _) in params {
+            if !search.open() {
+              break;
+            }
+            search.offer(&self.near, spelling);
           }
         }
         let packages = wanted == Wanted::Module;
@@ -1374,17 +1604,15 @@ impl Scopes<'_> {
       }
       search.offer(&self.near, names.spelling(key.2));
     }
-    let mut last: Option<ModuleId> = None;
-    let first = (module, ModuleId::new(0), 0);
-    let end = (module, ModuleId::new(u32::MAX), u32::MAX);
-    for (&(_, target, _), _) in self.globs.range(first..=end) {
+    let first = (module, ModuleId::new(0));
+    let end = (module, ModuleId::new(u32::MAX));
+    for (&(_, target), _) in self.globs.range(first..=end) {
+      // A module a glob names costs a comparison of its own, whatever it declares.
+      search.visit(&self.near);
       if !search.open() {
         return;
       }
-      if last != Some(target) {
-        last = Some(target);
-        self.offer_declared(search, names, target, namespace);
-      }
+      self.offer_declared(search, names, target, namespace);
     }
     for &root in self.roots.iter().take(ROOT) {
       self.offer_bindings(search, names, root, namespace);
@@ -1446,9 +1674,15 @@ impl Scopes<'_> {
   /// Offers `search` the names of the packages the package at `package` may reach.
   fn offer_packages<'c>(&'c self, search: &mut near::Search<'c>, package: usize) {
     for built in self.packages.iter().take(ROOT) {
+      if !search.open() {
+        return;
+      }
       search.offer(&self.near, built.name);
     }
     for &(name, _) in &self.packages[package].dependencies {
+      if !search.open() {
+        return;
+      }
       search.offer(&self.near, name);
     }
   }
@@ -1498,16 +1732,16 @@ impl Scopes<'_> {
     Some(module)
   }
 
-  /// What `path` names in `module`, where `params` are the generic parameters in scope: the
-  /// test-support door's one call. `path` is spelled as written, `~::`, `^::` and `..::` included;
-  /// `@` before it asks for a directive, and `mod ` before it for a module. What it does not
-  /// resolve to is reported nowhere.
+  /// What `path` names in `module`, where the generic parameters spelled `written`, in order, are
+  /// in scope: the test-support door's one call, which tables them as lowering does. `path` is
+  /// spelled as written, `~::`, `^::` and `..::` included; `@` before it asks for a directive, and
+  /// `mod ` before it for a module. What it does not resolve to is reported nowhere.
   #[cfg(feature = "test-support")]
   pub(crate) fn door(
     &self,
     names: &ModelBuilder,
     module: ModuleId,
-    params: &[&[u8]],
+    written: &[&[u8]],
     path: &str,
   ) -> Resolved {
     let (wanted, path) = match (path.strip_prefix('@'), path.strip_prefix("mod ")) {
@@ -1540,12 +1774,13 @@ impl Scopes<'_> {
         at,
       })
       .collect();
+    let table = params(written);
     let request = Request {
       module,
       source: SourceId::new(0),
       wanted,
       position: Position::Other,
-      params,
+      params: &table,
     };
     let mut reporter = Reporter::without_marks(0);
     self.resolve_segments(names, &mut reporter, &request, root, &segments)
@@ -1577,14 +1812,23 @@ fn digest<'p, S: AsRef<[u8]>>(
   }
 }
 
-/// A failure at `segment`.
-fn failure<'p>(segment: Segment<'p>, why: Why<'p>, single: bool) -> Failure<'p> {
-  Failure {
+/// The index of the generic parameter spelled `name` in `params`, a table [`params`] built: a
+/// binary search.
+fn param(params: &[(&[u8], u32)], name: &[u8]) -> Option<u32> {
+  let at = params
+    .binary_search_by(|(spelling, _): &(&[u8], u32)| (*spelling).cmp(name))
+    .ok()?;
+  Some(params[at].1)
+}
+
+/// A failure at `segment`, boxed as a resolution's `Err` carries it.
+fn failure<'p>(segment: Segment<'p>, why: Why<'p>, single: bool) -> Box<Failure<'p>> {
+  Box::new(Failure {
     at: segment.at,
     name: segment.name,
     why,
     single,
-  }
+  })
 }
 
 /// From the start of `first` to the end of `last`, both in one source.
@@ -1689,3 +1933,6 @@ fn shadowing(name: &[u8]) -> Option<String> {
      primitive; rename the type to leave the name to the primitive"
   ))
 }
+
+#[cfg(test)]
+mod tests;

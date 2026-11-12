@@ -79,6 +79,18 @@ fn at(source: SourceId, text: &str, needle: &str, nth: usize) -> Location {
   inside(source, text, needle, nth, needle)
 }
 
+/// The whole package source of the package at `package`, where the package set reports.
+fn package_source(analysis: &Analysis, package: u32) -> Location {
+  let id = analysis
+    .model()
+    .package(PackageId::new(package))
+    .sources()
+    .into_iter()
+    .next()
+    .expect("every package has a package source");
+  Location::entire(id.get())
+}
+
 /// Each diagnostic's code and primary location, in the list's order.
 fn found(analysis: &Analysis) -> Vec<(&'static str, Location)> {
   analysis
@@ -423,6 +435,247 @@ fn a_glob_fixpoint_past_its_limit_is_a_resource_limit() {
   );
 }
 
+/// The first glob that would name a module past `Limits::max_globs` is reported once, where it is
+/// written, with the limit, and gives nothing; a later glob of yet another module gives nothing
+/// either, unreported; and another glob of a module already globbed names no module more.
+#[test]
+fn a_glob_past_the_glob_limit_is_refused_and_reported_once() {
+  let text = "use a::*\nuse b::*\nuse a::*\nuse c::*\nuse d::*\nuse B as GotB\nuse C as GotC\n\
+              use D as GotD\n";
+  let root = directory(
+    "app",
+    &[
+      ("lib.graphqlx", text),
+      ("a/x.graphqlx", "scalar A\n"),
+      ("b/x.graphqlx", "scalar B\n"),
+      ("c/x.graphqlx", "scalar C\n"),
+      ("d/x.graphqlx", "scalar D\n"),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new().with_max_globs(2));
+  let lib = file(&analysis, 3, "lib.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        code(DiagnosticKind::ResourceLimit),
+        at(lib, text, "c::*", 0)
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        inside(lib, text, "use C as GotC", 0, "C")
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        inside(lib, text, "use D as GotD", 0, "D")
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let diagnostic = analysis.diagnostics().iter().next().expect("a diagnostic");
+  let message = diagnostic.to_string();
+  assert!(message.contains("limit of 2 modules"), "{message}");
+  assert!(
+    diagnostic
+      .help()
+      .is_some_and(|help: &str| help.contains("`Limits::max_globs`")),
+    "{:?}",
+    diagnostic.help()
+  );
+}
+
+/// Globs that name as many modules as `Limits::max_globs` allows are no error, however many globs
+/// name them; at a limit of 0 the first glob is refused.
+#[test]
+fn the_glob_limit_met_exactly_is_no_error() {
+  let text = "use a::*\nuse b::*\nuse a::*\nuse B as GotB\n";
+  let root = directory(
+    "app",
+    &[
+      ("lib.graphqlx", text),
+      ("a/x.graphqlx", "scalar A\n"),
+      ("b/x.graphqlx", "scalar B\n"),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new().with_max_globs(2));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+
+  let analysis = analyze(&root, &[], &Limits::new().with_max_globs(0));
+  let lib = file(&analysis, 3, "lib.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        code(DiagnosticKind::ResourceLimit),
+        at(lib, text, "a::*", 0)
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        inside(lib, text, "use B as GotB", 0, "B")
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// Which glob the glob limit refuses depends on the program alone: a module's `use` items resolve
+/// in the order of its files' paths and of their places in them, so the files and the dependencies
+/// given in reverse change no diagnostic.
+#[test]
+fn the_glob_limit_refuses_the_same_glob_whatever_the_order_given() {
+  let second = "use ~::b::*\nuse ^::other::*\nuse ~::a::*\n";
+  let files: [(&'static str, &'static str); 4] = [
+    ("m/1.graphqlx", "use ~::a::*\nuse ^::geo::*\n"),
+    ("m/2.graphqlx", second),
+    ("a/x.graphqlx", "scalar A\n"),
+    ("b/x.graphqlx", "scalar B\n"),
+  ];
+  let dependencies = [
+    directory("geo", &[("lib.graphqlx", "scalar Point\n")]),
+    directory("other", &[("lib.graphqlx", "scalar Far\n")]),
+  ];
+  let limits = Limits::new().with_max_globs(2);
+  let forward = analyze(
+    &directory("app", &files).with_dependencies(["geo", "other"]),
+    &dependencies,
+    &limits,
+  );
+  let mut reversed_files = files;
+  reversed_files.reverse();
+  let reversed_dependencies = [dependencies[1].clone(), dependencies[0].clone()];
+  let backward = analyze(
+    &directory("app", &reversed_files).with_dependencies(["other", "geo"]),
+    &reversed_dependencies,
+    &limits,
+  );
+
+  let source = file(&forward, 3, "m/2.graphqlx");
+  assert_eq!(
+    found(&forward),
+    [(
+      code(DiagnosticKind::ResourceLimit),
+      at(source, second, "~::b::*", 0)
+    )],
+    "{:#?}",
+    forward.diagnostics()
+  );
+  assert_eq!(forward.diagnostics(), backward.diagnostics());
+}
+
+/// Many globs of one module are one row, and a search for a near miss pays for each module a glob
+/// names.
+///
+/// A module's globs were kept one row per glob, and a lookup read every row, which skipped a
+/// repeated module but read it all the same; the search for a near miss read them again, and spent
+/// nothing on a module that declares nothing. So G globs of one empty module beside N names that do
+/// not resolve cost G × N rows read by the names' lookups, and G more for each search while the
+/// budget lasted. Now a module's globs make one row per module they name, at most
+/// `Limits::max_globs`, and a search spends a comparison on each module a glob names.
+///
+/// Nothing here can count that work, so the sizes tell the two costs apart: 2^20 globs of one
+/// empty module beside 2^20 items whose head names nothing, about 24 MiB of text. Read row by row,
+/// the lookups alone cost about 10^12 row reads, which is minutes; with one row, they cost about
+/// what parsing the items costs.
+#[test]
+fn many_globs_of_one_module_are_one_row_and_a_near_miss_search_pays_for_each() {
+  const GLOBS: usize = 1 << 20;
+  const MISSING: usize = 1 << 20;
+  let mut text = String::with_capacity(9 * GLOBS + 16 * MISSING + 16);
+  text.push_str("mod e {}\n");
+  for _ in 0..GLOBS {
+    text.push_str("use e::*\n");
+  }
+  for index in 0..MISSING {
+    text.push_str(&format!("use m{index}::T\n"));
+  }
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("lib.graphqlx", text.as_str())]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(analysis.diagnostics().error_count(), MISSING);
+  let unresolved = code(DiagnosticKind::UnresolvedPath);
+  assert!(
+    analysis
+      .diagnostics()
+      .iter()
+      .all(|diagnostic: &Diagnostic| diagnostic.code().as_str() == unresolved)
+  );
+}
+
+/// A chain of renames needs a round a link and no glob: `use A1 as A2` waits in the explicit
+/// fixpoint until both namespaces have `A1`. So a chain longer than the round limit is refused as
+/// a chain of globs is, at the head the next round would resolve, and the message says rounds.
+#[test]
+fn a_chain_of_renames_past_the_round_limit_is_a_resource_limit() {
+  let text = "scalar Seed\nuse Seed as A1\nuse A1 as A2\nuse A2 as A3\nuse A3 as A4\n";
+  let root = directory("app", &[("lib.graphqlx", text)]);
+  // Four rounds, one a link.
+  let analysis = analyze(&root, &[], &Limits::new().with_max_glob_iterations(4));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+
+  let analysis = analyze(&root, &[], &Limits::new().with_max_glob_iterations(3));
+  let source = file(&analysis, 3, "lib.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(
+      code(DiagnosticKind::ResourceLimit),
+      inside(source, text, "use A3 as A4", 0, "A3")
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  let message = diagnostic.to_string();
+  assert!(message.contains("more than 3 rounds"), "{message}");
+  assert!(!message.contains("glob"), "{message}");
+  assert!(
+    diagnostic
+      .help()
+      .is_some_and(|help: &str| help.contains("`Limits::max_glob_iterations`")),
+    "{:?}",
+    diagnostic.help()
+  );
+}
+
+/// A round of `use` resolution looks up only the items that what the round before bound or globbed
+/// can answer.
+///
+/// Every round used to read every item of its module, and to ask of each waiting one whether the
+/// round before could have answered it: a module of U waiting items that needs R rounds cost U × R
+/// questions, a name lookup each, and the default limit allows 1 024 rounds. Now the waiting items
+/// are indexed by their heads' names, and a round looks up only the items that the names it bound
+/// first, and the modules it globbed first, can answer.
+///
+/// Nothing here can count that work, so the sizes tell the two costs apart. A chain of 1 000
+/// renames needs 1 000 rounds, and beside it 2^20 items wait for a name nothing binds, about 16
+/// MiB of text. Asked every round, the waiting items cost about 10^9 questions, which is minutes;
+/// looked up once, they cost about what parsing them costs.
+#[test]
+fn a_round_of_use_resolution_reads_only_the_items_it_can_answer() {
+  const CHAIN: usize = 1_000;
+  const WAITING: usize = 1 << 20;
+  let mut text = String::with_capacity(16 * WAITING + 24 * CHAIN);
+  text.push_str("scalar Seed\nuse Seed as A1\n");
+  for link in 1..CHAIN {
+    text.push_str(&format!("use A{link} as A{}\n", link + 1));
+  }
+  for index in 0..WAITING {
+    text.push_str(&format!("use w{index}::T\n"));
+  }
+  let root: Package<&str> = Package::new("app", Layout::Directory, Tier::Std)
+    .with_files([SourceFile::new("lib.graphqlx", text.as_str())]);
+  let last = format!("A{CHAIN}");
+  assert_eq!(
+    test_support::resolve(&root, &[], "^::app", &[], &last).as_deref(),
+    Some("^::app::Seed")
+  );
+}
+
 #[test]
 fn binding_fives_errors_are_reported_and_one_item_bound_twice_is_not() {
   let changed = "use ~::lib::*\nuse a::X\nuse n::a\n";
@@ -601,6 +854,80 @@ fn each_root_of_a_use_starts_where_it_says() {
   );
 }
 
+/// `^::name` that names no package its package may reach says what `name` is: a supplied package
+/// it does not declare, the root package or a dependency alike; the package itself; or nothing
+/// supplied.
+#[test]
+fn an_unknown_package_says_what_its_name_names() {
+  let text = "use ^::app::Top\nuse ^::zed::Z\nuse ^::nope::N\nuse ^::geo::P\n";
+  let root = directory("app", &[("lib.graphqlx", "scalar Top\n")]).with_dependencies(["geo"]);
+  let dependencies = [
+    directory("geo", &[("lib.graphqlx", text)]),
+    directory("zed", &[("lib.graphqlx", "scalar Z\n")]),
+  ];
+  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let source = file(&analysis, 4, "lib.graphqlx");
+  let unknown = code(DiagnosticKind::UnknownPackage);
+  assert_eq!(
+    found(&analysis),
+    [
+      (unknown, at(source, text, "app", 0)),
+      (unknown, at(source, text, "zed", 0)),
+      (unknown, at(source, text, "nope", 0)),
+      (unknown, inside(source, text, "^::geo::P", 0, "geo")),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let messages: Vec<String> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.to_string())
+    .collect();
+  assert_eq!(
+    messages,
+    [
+      "package `geo` does not declare the dependency `app`, so it cannot reach it",
+      "package `geo` does not declare the dependency `zed`, so it cannot reach it",
+      "no package named `nope` is supplied, and it is not `core`, `alloc` or `std`",
+      "package `geo` is the package this path is written in, which `^::` does not name",
+    ]
+  );
+}
+
+/// Whether a package name names a supplied package is a binary search.
+///
+/// The help of `^::name` that names no package its package may reach says whether `name` is
+/// supplied, and that was asked of every supplied package in turn, for every such path, before the
+/// diagnostic ceiling could drop any: P supplied packages and U such paths cost P × U comparisons.
+/// Now the root package's name is compared, and the dependencies after it, which the package set
+/// numbers in name order, are searched.
+///
+/// Nothing here can count that work, so the sizes tell the two costs apart: 2^17 supplied
+/// packages beside 2^20 items `use ^::missing::T`, about 18 MiB of text. Asked of every package,
+/// the items cost about 1.4 × 10^11 comparisons, which is minutes; searched for, about 2 × 10^7.
+#[test]
+fn a_package_name_is_searched_for_among_the_supplied_packages() {
+  const PACKAGES: usize = 1 << 17;
+  const PATHS: usize = 1 << 20;
+  let text = "use ^::missing::T\n".repeat(PATHS);
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("lib.graphqlx", text.as_str())]);
+  let dependencies: Vec<Package<&str>> = (0..PACKAGES)
+    .map(|index: usize| Package::new(format!("p{index}"), Layout::Flat, Tier::Std))
+    .collect();
+  let analysis = analyze(&root, &dependencies, &Limits::new());
+  assert_eq!(analysis.diagnostics().error_count(), PATHS);
+  let first = analysis.diagnostics().iter().next().expect("a diagnostic");
+  assert_eq!(first.code().as_str(), code(DiagnosticKind::UnknownPackage));
+  assert!(
+    first
+      .to_string()
+      .starts_with("no package named `missing` is supplied"),
+    "{first}"
+  );
+}
+
 #[test]
 fn a_package_name_answers_a_use_of_it_alone_and_last() {
   let geo = directory("geo", &[("lib.graphqlx", "scalar Point\n")]);
@@ -756,6 +1083,237 @@ fn a_string_source_is_refused_where_it_names_no_directory_module() {
   );
 }
 
+/// A string source starts at the directory of the file it is written in, whatever `mod` it is
+/// written in: a `mod` of a directory module is refused as a module declared twice, but its items
+/// are collected into that module, whose directory is not the file's. Each name a source walks
+/// through must be a module, so `..` does not undo a name that names nothing.
+#[test]
+fn a_string_source_starts_at_its_files_directory_whatever_mod_it_is_in() {
+  let text = "mod a {\n  use \"./b\" as near\n  use \"./a/b\" as far\n  \
+              use \"./nowhere/../b\" as gone\n}\n";
+  let root = directory(
+    "app",
+    &[
+      ("lib.graphqlx", text),
+      ("a/x.graphqlx", "scalar InA\n"),
+      ("a/b/y.graphqlx", "scalar InAB\n"),
+      ("b/z.graphqlx", "scalar InB\n"),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  let lib = file(&analysis, 3, "lib.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        code(DiagnosticKind::ModuleDefinedTwice),
+        inside(lib, text, "mod a", 0, "a")
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        at(lib, text, "\"./nowhere/../b\"", 0)
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  all(
+    &root,
+    &[],
+    "^::app::a",
+    &[
+      ("near::InB", Some("^::app::b::InB")),
+      ("far::InAB", Some("^::app::a::b::InAB")),
+      ("mod gone", None),
+    ],
+  );
+}
+
+/// The help a string source that names a file has, in `analysis`.
+fn file_help(analysis: &Analysis) -> Option<String> {
+  analysis
+    .diagnostics()
+    .iter()
+    .find(|diagnostic: &&Diagnostic| {
+      diagnostic.code().as_str() == code(DiagnosticKind::FilePathUse)
+    })
+    .and_then(|diagnostic: &Diagnostic| diagnostic.help())
+    .map(String::from)
+}
+
+/// A file the package set refused is no file a string source names. The files a source is told
+/// from are the placed ones, sorted by name whatever paths sort before them in source order, as
+/// `/` does: so `./a.graphqlx` names a file beside a refused `/z`, with the help it has with no
+/// `/z`, and the set's own diagnostic is the only other one. Three refused paths before the two
+/// placed files are where a table in source order hid `a.graphqlx` from its binary search. The
+/// files given in reverse change nothing.
+#[test]
+fn a_refused_file_hides_no_file_from_a_string_source() {
+  let main = "use \"./a.graphqlx\"::*\n";
+  let placed: [(&'static str, &'static str); 2] =
+    [("a.graphqlx", "scalar A\n"), ("main.graphqlx", main)];
+  let help = file_help(&analyze(&directory("app", &placed), &[], &Limits::new()));
+  assert!(
+    help
+      .as_deref()
+      .is_some_and(|help: &str| help.contains("root directory")),
+    "{help:?}"
+  );
+
+  for refused in [&["/z"][..], &["/x", "/y", "/z"][..]] {
+    let mut files: Vec<(&'static str, &'static str)> = refused
+      .iter()
+      .map(|&path: &&'static str| (path, "scalar R\n"))
+      .collect();
+    files.extend(placed);
+    let analysis = analyze(&directory("app", &files), &[], &Limits::new());
+    let source = file(&analysis, 3, "main.graphqlx");
+    let mut expected: Vec<(&'static str, Location)> = refused
+      .iter()
+      .map(|_: &&'static str| {
+        (
+          code(DiagnosticKind::InvalidFilePath),
+          package_source(&analysis, 3),
+        )
+      })
+      .collect();
+    expected.push((
+      code(DiagnosticKind::FilePathUse),
+      at(source, main, "\"./a.graphqlx\"", 0),
+    ));
+    assert_eq!(
+      found(&analysis),
+      expected,
+      "{refused:?}: {:#?}",
+      analysis.diagnostics()
+    );
+    assert_eq!(file_help(&analysis), help, "{refused:?}");
+
+    files.reverse();
+    let backward = analyze(&directory("app", &files), &[], &Limits::new());
+    assert_eq!(
+      analysis.diagnostics(),
+      backward.diagnostics(),
+      "{refused:?}"
+    );
+  }
+}
+
+/// A refused file is no file a string source names, so a source of its path names a directory
+/// that is no module: `unresolved-path`, not `file-path-use`, whether the root directory holds
+/// placed files beside it or none.
+#[test]
+fn a_string_source_of_a_refused_files_path_names_no_file() {
+  let main = "use \"./z\" as z\n";
+  let beside = [
+    ("/z", "scalar R\n"),
+    ("a.graphqlx", "scalar A\n"),
+    ("main.graphqlx", main),
+  ];
+  let analysis = analyze(&directory("app", &beside), &[], &Limits::new());
+  let source = file(&analysis, 3, "main.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        code(DiagnosticKind::InvalidFilePath),
+        package_source(&analysis, 3)
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        at(source, main, "\"./z\"", 0)
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  let nested = "use \"../z\" as z\n";
+  let alone = [("/z", "scalar R\n"), ("sub/main.graphqlx", nested)];
+  let analysis = analyze(&directory("app", &alone), &[], &Limits::new());
+  let source = file(&analysis, 3, "sub/main.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        code(DiagnosticKind::InvalidFilePath),
+        package_source(&analysis, 3)
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        at(source, nested, "\"../z\"", 0)
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// Two files at one path are both refused, so neither is a file a string source names: a `use`
+/// of that path names a directory that is no module, `unresolved-path`, beside the package set's
+/// `duplicate-file-path`; the files given in reverse change nothing.
+#[test]
+fn two_files_at_one_path_are_no_file_a_string_source_names() {
+  let main = "use \"./dup.graphqlx\" as d\n";
+  let files = [
+    ("dup.graphqlx", "scalar One\n"),
+    ("dup.graphqlx", "scalar Two\n"),
+    ("main.graphqlx", main),
+  ];
+  let analysis = analyze(&directory("app", &files), &[], &Limits::new());
+  let source = file(&analysis, 3, "main.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        code(DiagnosticKind::DuplicateFilePath),
+        package_source(&analysis, 3)
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        at(source, main, "\"./dup.graphqlx\"", 0)
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  let mut reversed = files;
+  reversed.reverse();
+  let backward = analyze(&directory("app", &reversed), &[], &Limits::new());
+  assert_eq!(analysis.diagnostics(), backward.diagnostics());
+}
+
+/// A long file path is not read again for each string source written in the file.
+///
+/// A string source names a directory relative to the file it is written in, and the file's
+/// directory was found by splitting the file's path, then the directory reached was joined into a
+/// path and searched for among the package's files, for every string source: a file whose path is
+/// L bytes and that holds U string sources cost L × U, and a path is not source text, which
+/// `Limits::max_source_bytes` counts. Now each file's directory module, and the files of each
+/// directory by name, are tabled once, and a string source walks from its file's directory module
+/// by its own segments.
+///
+/// Nothing here can count that work, so the sizes tell the two costs apart. A file named with 32
+/// MiB of `N` holds 60 000 items `use "./" as here`, about 1 MiB of text. Read for each item, the
+/// path costs about 2 × 10^12 bytes in all, which is minutes at memory speed; read once, it costs
+/// about what reading the file's text costs.
+#[test]
+fn a_long_file_path_is_not_read_again_for_each_string_source() {
+  const LONG: usize = 1 << 25;
+  const SOURCES: usize = 60_000;
+  let path = format!("{}.graphqlx", "N".repeat(LONG));
+  let text = "use \"./\" as here\n".repeat(SOURCES);
+  let root: Package<&str> = Package::new("app", Layout::Directory, Tier::Std)
+    .with_files([SourceFile::new(path.as_str(), text.as_str())]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert_eq!(
+    test_support::resolve(&root, &[], "^::app", &[], "mod here").as_deref(),
+    Some("mod ^::app")
+  );
+}
+
 #[test]
 fn a_use_binds_in_each_namespace_and_types_and_modules_share_one() {
   let root = directory(
@@ -798,6 +1356,43 @@ fn a_use_binds_in_each_namespace_and_types_and_modules_share_one() {
       ("@both", Some("@^::app::lib::both")),
       ("onlyType", Some("^::app::lib::justType")),
       ("@onlyType", None),
+    ],
+  );
+}
+
+/// A package's root module and a directive of the package's name stand in one scope: `use
+/// ^::ingraph` binds the module in the namespace types and modules share, and
+/// `use ^::ingraph::ingraph` the directive `@ingraph` in the directive namespace.
+#[test]
+fn a_package_and_its_directive_of_one_name_stand_in_one_scope() {
+  let ingraph = directory(
+    "ingraph",
+    &[(
+      "lib.graphqlx",
+      "directive @ingraph on FIELD_DEFINITION\nscalar Node\n",
+    )],
+  );
+  let root = directory(
+    "app",
+    &[(
+      "schema.graphqlx",
+      "use ^::ingraph\nuse ^::ingraph::ingraph\n",
+    )],
+  )
+  .with_dependencies(["ingraph"]);
+  let dependencies = [ingraph];
+  let analysis = analyze(&root, &dependencies, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+
+  all(
+    &root,
+    &dependencies,
+    "^::app",
+    &[
+      ("mod ingraph", Some("mod ^::ingraph")),
+      ("@ingraph", Some("@^::ingraph::ingraph")),
+      ("ingraph::Node", Some("^::ingraph::Node")),
+      ("ingraph", None),
     ],
   );
 }
