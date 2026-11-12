@@ -2014,6 +2014,52 @@ fn an_alias_on_a_glob_or_a_group_refuses() {
 }
 
 #[test]
+fn a_module_in_an_executable_document_refuses() {
+  // The executable root has no `mod` entry. The lossless production reports one and still builds
+  // the module whole, so the walk meets a child that root has no place for and refuses it where it
+  // stands; the mixed root, where a module is an entry, projects the same bytes.
+  for src in [
+    "mod m {}",
+    "\"d\" mod m { type T { f: Int } }",
+    "mod m {} query Q { f }",
+  ] {
+    let parse = parse_executable_document(src);
+    assert!(
+      parse.has_errors(),
+      "{src}: the lossless parser must report it"
+    );
+    assert!(
+      executable_oracle(src).is_err(),
+      "{src}: the syntactic parser must refuse it"
+    );
+    assert!(
+      !parse
+        .syntax()
+        .descendants_with_tokens()
+        .any(|element| matches!(element.kind(), K::Error | K::Gap)),
+      "{src}: the module must be built whole, or the preflight refuses it and this pins nothing"
+    );
+    let kind = project_executable_document(&parse, src)
+      .map(|_| ())
+      .expect_err("the projection was expected to refuse")
+      .kind()
+      .clone();
+    assert_eq!(
+      kind,
+      ProjectErrorKind::UnexpectedChild {
+        parent: K::ExecutableDocument,
+        found: K::ModDefinition,
+      },
+      "{src}"
+    );
+    assert!(
+      project(&parse_document(src), src).is_ok(),
+      "{src}: the mixed root takes a module as an entry"
+    );
+  }
+}
+
+#[test]
 fn a_where_clause_with_nothing_to_constrain_refuses() {
   // The AST can only hold a `where` inside a `Constrained`, so a clause whose target the tree does
   // not have is a region with no AST image.
@@ -3483,7 +3529,7 @@ fn a_dangling_separator_refuses_in_every_separated_walk() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// the report-and-build table, 67/67
+// the report-and-build table, 71/71
 // ---------------------------------------------------------------------------------------------
 
 /// Which door a probe goes through.
@@ -3596,6 +3642,38 @@ const SITES: &[Site] = &[
     Root::TypeSystem,
     "MissingChild TypeSystemDocument",
     Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
+    "mod {}",
+    Root::Mixed,
+    "UnexpectedChild ModDefinition LBrace",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "report",
+    "mod m",
+    Root::Mixed,
+    "MissingChild ModDefinition",
+    Absent::Imaged,
+  ),
+  (
+    "document.rs",
+    "unclosed",
+    "mod m {",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ModDefinition, "}"),
+  ),
+  (
+    "document.rs",
+    "report",
+    "mod m {}",
+    Root::Executable,
+    "UnexpectedChild ExecutableDocument ModDefinition",
+    Absent::Not,
   ),
   (
     "executable.rs",
@@ -4242,7 +4320,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (51, 16),
+    (54, 17),
     "the two families' populations"
   );
 
@@ -4308,7 +4386,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
 }
 
 /// How many of [`SITES`]' probes project.
-const PROJECTING_SITES: usize = 15;
+const PROJECTING_SITES: usize = 16;
 
 /// Image-less tokens a site can leave out whose probe is **not** a witness — none: even the three
 /// closers whose definition is lost at end of input leave their list in the tree, an orphan child
@@ -4822,7 +4900,7 @@ fn every_walk_is_a_transcription() {
     1,
     "the cursor's trivia skip, and nothing else"
   );
-  assert_eq!(count("Cursor::new("), 73, "the walks, one cursor each");
+  assert_eq!(count("Cursor::new("), 74, "the walks, one cursor each");
 }
 
 #[test]

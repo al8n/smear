@@ -16,7 +16,7 @@ use crate::{graphqlx::GraphQLx, value::Sealed};
 pub mod argument;
 /// GraphQLx directive AST aliases.
 pub mod directive;
-/// GraphQLx document AST aliases and top-level variants.
+/// GraphQLx document AST aliases, top-level variants and inline modules.
 pub mod document;
 /// GraphQLx executable-definition AST aliases and enums.
 pub mod executable;
@@ -46,13 +46,13 @@ pub type DefaultVec<T> = Vec<T>;
 ///
 /// Re-exported here because both reach a consumer's signatures whether or not they name them.
 /// [`Nested`] is the default `Container` argument of every value alias below, of
-/// [`SelectionSet`] and of [`DefinitionTypePath`]'s type arguments, and the container a
-/// [`UseTreeKind::Group`] holds its trees in;
+/// [`SelectionSet`] and of [`DefinitionTypePath`]'s type arguments, the container a
+/// [`UseTreeKind::Group`] holds its trees in, and the one a [`ModDefinition`] holds its items in;
 /// [`Nest`] is the payload type of a public [`Type`] variant, so it reaches a consumer's
 /// `match` as well. [`Nested`] is a `Vec` in every respect a consumer can observe and [`Nest`]
 /// answers as the pointer it wraps does; what each adds is the iterative release that keeps a
-/// value, a selection, a type or a use tree nested through these carriers from aborting the
-/// process on the way out, however deep it is. That ranges over every recursive position the
+/// value, a selection, a type, a use tree or a module nested through these carriers from aborting
+/// the process on the way out, however deep it is. That ranges over every recursive position the
 /// grammar forms, and over
 /// a node a caller stored in `S` or in `Span` as well, because both are [`Leaf`] — see
 /// [`Nested`]'s own documentation, which states the scope. [`Nestable`], [`NestPtr`] and

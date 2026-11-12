@@ -1,0 +1,62 @@
+Root@0..59
+  Document@0..59
+    ModDefinition@0..29
+      Name@0..3 "mod"
+      Space@3..4 " "
+      Name@4..5 "m"
+      Space@5..6 " "
+      LBrace@6..7 "{"
+      Newline@7..8 "\n"
+      Space@8..9 " "
+      Space@9..10 " "
+      ObjectTypeDefinition@10..27
+        Name@10..14 "type"
+        Space@14..15 " "
+        DefinitionName@15..17
+          Name@15..16 "T"
+          Space@16..17 " "
+        FieldsDefinition@17..27
+          LBrace@17..18 "{"
+          Space@18..19 " "
+          FieldDefinition@19..26
+            Name@19..20 "f"
+            Colon@20..21 ":"
+            Space@21..22 " "
+            DefinitionTypePath@22..26
+              Path@22..26
+                Name@22..25 "Int"
+                Space@25..26 " "
+          RBrace@26..27 "}"
+      Newline@27..28 "\n"
+      RBrace@28..29 "}"
+    Newline@29..30 "\n"
+    ObjectTypeDefinition@30..52
+      Name@30..34 "type"
+      Space@34..35 " "
+      DefinitionName@35..41
+        Name@35..40 "Query"
+        Space@40..41 " "
+      FieldsDefinition@41..52
+        LBrace@41..42 "{"
+        Space@42..43 " "
+        FieldDefinition@43..51
+          Name@43..44 "t"
+          Colon@44..45 ":"
+          Space@45..46 " "
+          DefinitionTypePath@46..51
+            Path@46..51
+              Name@46..47 "m"
+              PathSeparator@47..49 "::"
+              Name@49..50 "T"
+              Space@50..51 " "
+        RBrace@51..52 "}"
+    Newline@52..53 "\n"
+    OperationDefinition@53..58
+      SelectionSet@53..58
+        LBrace@53..54 "{"
+        Space@54..55 " "
+        Field@55..57
+          Name@55..56 "t"
+          Space@56..57 " "
+        RBrace@57..58 "}"
+    Newline@58..59 "\n"

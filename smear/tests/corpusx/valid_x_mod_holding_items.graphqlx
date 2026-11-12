@@ -1,0 +1,8 @@
+mod outer {
+  use ^::dep::Id
+  mod inner {
+    scalar S
+  }
+  type T { f: Id }
+  extend type T { g: Int }
+}

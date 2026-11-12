@@ -17,6 +17,26 @@
 //! diagnostic at, and the alternative — refusing the entry — would cost the rest of the document to
 //! a resync.
 //!
+//! **A module's description is its own**, as a definition's is: the mark the dispatcher minted
+//! before the string is spent on the [`ModDefinition`](K::ModDefinition), so the string lands
+//! inside it.
+//!
+//! # A module is an entry of two roots, and the third reports it
+//!
+//! The mixed and the SDL-only roots take a `mod` as an entry, and a module's body takes the SDL
+//! root's entries. The executable root does not: there a `mod` is reported and the module is still
+//! built, for the reason above, and the projection refuses it as a child that root has no place
+//! for.
+//!
+//! # What bounds a module's nesting, and what bounds its body
+//!
+//! A body is the one recursive position here. It opens through `descend` before it reads its `{`,
+//! so the parse's own nesting budget counts every level whatever the lexer's tally reads, and it
+//! is entered only once its `{` has been peeked. Each turn of the body's loop runs an item, whose
+//! head the item's own production consumes, or skips a head that starts no item through
+//! `recover::unexpected`, which consumes at least one token; an item that returns `Err` unwinds to
+//! the document root, which stays the only place a resync happens.
+//!
 //! # One mark, two branches, and that is what forces the ordering
 //!
 //! An entry's dispatcher mints its mark **before** anything is committed, because the same mark has
@@ -45,7 +65,7 @@ use tokora::{ParseInput as _, cst::EventMark};
 
 use crate::graphqlx::kinds::SyntaxKind as K;
 
-use super::coverage::node;
+use super::coverage::{node, node_at};
 
 use super::{
   GraphqlxLosslessInput, Keyword,
@@ -54,10 +74,10 @@ use super::{
   extension::type_system_extension,
   recover,
   recover::{
-    DEFINITION_HEADS, DESCRIBED_DEFINITION_HEADS, EXECUTABLE_ENTRY_HEADS, TYPE_SYSTEM_ENTRY_HEADS,
-    starts_description,
+    DEFINITION_HEADS, DESCRIBED_DEFINITION_HEADS, EXECUTABLE_ENTRY_HEADS, MOD_BODY_HEADS,
+    MOD_ITEM_HEADS, NAME_HEADS, TYPE_SYSTEM_ENTRY_HEADS, opener_span, starts_description,
   },
-  trivia::{peek_as, peek_kind},
+  trivia::{eat_if, expect, peek_as, peek_kind},
   use_tree::use_definition,
 };
 
@@ -65,10 +85,98 @@ use crate::lossless::depth::{self, RootTurn};
 
 use crate::lossless::lossless_production;
 
+/// Whether `keyword` opens an item of a module's body: a `use` item, a module, a type-system
+/// definition or an extension.
+///
+/// The SDL root's entries, which is what a body holds. An executable definition's keyword is not
+/// among them, so a query or a fragment in a body is skipped as a head that starts no item.
+#[inline]
+const fn starts_mod_item(keyword: Option<Keyword>) -> bool {
+  matches!(
+    keyword,
+    Some(
+      Keyword::Use
+        | Keyword::Mod
+        | Keyword::Extend
+        | Keyword::Schema
+        | Keyword::Directive
+        | Keyword::Scalar
+        | Keyword::Type
+        | Keyword::Interface
+        | Keyword::Union
+        | Keyword::Enum
+        | Keyword::Input
+    )
+  )
+}
+
 lossless_production! {
   dialect = graphqlx::lossless;
 
-  /// One entry of a mixed [`document`]: a `use` item, an extension, or a described definition.
+  /// `Description? mod Name { ModItem* }`
+  ///
+  /// **Precondition: `mark` was minted before the description, which is already committed, and the
+  /// head is an `Identifier` spelled `mod`.** The entry dispatchers establish both, and spending the
+  /// mark here is what puts the description inside the module it belongs to.
+  ///
+  /// A missing name and a missing body are each reported without consuming, so whatever stands
+  /// there is still the next entry's.
+  fn mod_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+    node_at(
+      mark,
+      K::ModDefinition.raw(),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Identifier) {
+          expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        } else {
+          recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?;
+        }
+        // The `{` is confirmed here, before the body is entered.
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
+          return mod_body::<Src, Ctx>(inp);
+        }
+        recover::report_unexpected::<Src, Ctx>(inp, MOD_BODY_HEADS)
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// `{ ModItem* }` — a module's body. Opens no node: the braces and the items are children of the
+  /// module that holds them.
+  ///
+  /// **Precondition: the head is a `{` its caller has peeked.** The frame is taken first, so the
+  /// nesting budget counts every body before its `{` is read. An empty body is legal — a module
+  /// with nothing in it is a namespace — so nothing is reported for one.
+  fn mod_body<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
+    expect::<Src, Ctx>(inp, Kind::LBrace)?;
+    let open = opener_span(inp.span().end());
+    loop {
+      if eat_if::<Src, Ctx>(inp, Kind::RBrace)? {
+        return Ok(());
+      }
+      match peek_kind::<Src, Ctx>(inp)? {
+        None => return recover::unclosed_object::<Src, Ctx>(inp, open),
+        Some(Kind::InlineString | Kind::BlockString) => type_system_item::<Src, Ctx>(inp)?,
+        Some(Kind::Identifier) => {
+          if starts_mod_item(peek_as::<Src, Ctx, Keyword>(inp)?) {
+            type_system_item::<Src, Ctx>(inp)?
+          } else {
+            // An executable definition's keyword, or any other name. Consumes at least one token,
+            // which is this loop's termination argument.
+            recover::unexpected::<Src, Ctx>(inp, MOD_ITEM_HEADS)?
+          }
+        }
+        // A punctuator no item starts with. Consumes at least one token, as above.
+        Some(_) => recover::unexpected::<Src, Ctx>(inp, MOD_ITEM_HEADS)?,
+      }
+    }
+  }
+
+  /// One entry of a mixed [`document`]: a `use` item, a module, an extension, or a described
+  /// definition.
   ///
   /// The `described` flag is what carries divergence 22 into the two arms that must refuse it. It
   /// is computed before the description is committed, because afterwards the head peek answers
@@ -89,6 +197,8 @@ lossless_production! {
         // to wrap, and an unspent mark materializes into nothing.
         use_definition::<Src, Ctx>(inp)
       }
+      // A module may be described, and the description is its own.
+      Some(Keyword::Mod) => mod_definition::<Src, Ctx>(inp, mark),
       Some(Keyword::Extend) => {
         if described {
           recover::report_unexpected::<Src, Ctx>(inp, DEFINITION_HEADS)?;
@@ -132,6 +242,9 @@ lossless_production! {
 
   /// One entry of an [`executable_document`](super::executable::executable_document): a `use` item
   /// or a described executable definition.
+  ///
+  /// A `mod` is not an entry of this root, and it is reported here and still built — see the
+  /// module docs.
   fn use_or_executable_definition<'inp, Src, Ctx>(inp) {
     let head = peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
@@ -139,11 +252,18 @@ lossless_production! {
     if described {
       super::executable::description::<Src, Ctx>(inp)?;
     }
-    if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Use) {
-      if described {
-        recover::report_unexpected::<Src, Ctx>(inp, EXECUTABLE_ENTRY_HEADS)?;
+    match peek_as::<Src, Ctx, Keyword>(inp)? {
+      Some(Keyword::Use) => {
+        if described {
+          recover::report_unexpected::<Src, Ctx>(inp, EXECUTABLE_ENTRY_HEADS)?;
+        }
+        return use_definition::<Src, Ctx>(inp);
       }
-      return use_definition::<Src, Ctx>(inp);
+      Some(Keyword::Mod) => {
+        recover::report_unexpected::<Src, Ctx>(inp, EXECUTABLE_ENTRY_HEADS)?;
+        return mod_definition::<Src, Ctx>(inp, mark);
+      }
+      _ => {}
     }
     // The shorthand operation carries no `Description?` slot — see
     // [`definition_after_description`], which refuses the same pair from the mixed root.
@@ -153,8 +273,8 @@ lossless_production! {
     executable_definition_at::<Src, Ctx>(inp, mark)
   }
 
-  /// One entry of a [`type_system_document`]: a `use` item, an extension, or a described
-  /// type-system definition.
+  /// One entry of a [`type_system_document`], and one item of a module's body: a `use` item, a
+  /// module, an extension, or a described type-system definition.
   fn type_system_item<'inp, Src, Ctx>(inp) {
     let head = peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
@@ -169,6 +289,7 @@ lossless_production! {
         }
         use_definition::<Src, Ctx>(inp)
       }
+      Some(Keyword::Mod) => mod_definition::<Src, Ctx>(inp, mark),
       Some(Keyword::Extend) => {
         if described {
           recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS)?;

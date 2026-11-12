@@ -36,7 +36,7 @@
 //! # What GraphQLx has that a GraphQL-shaped space would not predict
 //!
 //! Ten images (`<`, `>`, `::`, `~`, `..`, `^`, `=>`, `*`, `+`, `-`) and, among the nodes, the whole
-//! `use` and generic families,
+//! `use`, module and generic families,
 //! [`SetValue`](SyntaxKind::SetValue)/[`MapValue`](SyntaxKind::MapValue)/
 //! [`MapEntry`](SyntaxKind::MapEntry), [`Path`](SyntaxKind::Path),
 //! [`TypePath`](SyntaxKind::TypePath) and [`TypeGenerics`](SyntaxKind::TypeGenerics).
@@ -71,7 +71,7 @@ use crate::lossless::KindSpace;
 ///
 /// # Layout
 ///
-/// The discriminants are the default `0..113` and [`ALL`](Self::ALL) is in declaration order, so
+/// The discriminants are the default `0..114` and [`ALL`](Self::ALL) is in declaration order, so
 /// [`raw`](Self::raw) is an index and [`from_raw`](Self::from_raw) is a bounds check. Four blocks,
 /// in this order:
 ///
@@ -79,8 +79,8 @@ use crate::lossless::KindSpace;
 /// |---|---|
 /// | `0..29` | the twenty-nine non-trivia images, in `LosslessTokenKind`'s declaration order |
 /// | `29..35` | the six trivia images, in the same order, with the line terminators folded |
-/// | `35..110` | the seventy-five node kinds |
-/// | `110..113` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
+/// | `35..111` | the seventy-six node kinds |
+/// | `111..114` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
 ///
 /// **Nothing may be appended after [`Root`](Self::Root)** — the shared runner is parameterised over
 /// the last three positions, and the ten images GraphQL lacks therefore live *inside* the image
@@ -336,6 +336,11 @@ pub enum SyntaxKind {
   /// or `:: { UseTree+ }`. A group's trees are its direct children.
   UseTree,
 
+  // ---- inline modules: GraphQLx only, no GraphQL counterpart at all ----
+  /// `Description? mod Name { ModItem* }`. The description, the keyword, the name and the braces
+  /// are its own tokens and its items are its direct children: the body has no node of its own.
+  ModDefinition,
+
   // ---- generics: GraphQLx only, no GraphQL counterpart at all ----
   /// `Name (= Type)?` inside a [`DefinitionTypeGenerics`](Self::DefinitionTypeGenerics).
   DefinitionTypeParam,
@@ -357,12 +362,12 @@ pub enum SyntaxKind {
   WhereClause,
 
   // ---- documents ----
-  /// A complete document: `use` items, executable definitions, type-system definitions and
-  /// extensions.
+  /// A complete document: `use` items, modules, executable definitions, type-system definitions
+  /// and extensions.
   Document,
   /// An executable document: `use` items and executable definitions only.
   ExecutableDocument,
-  /// A type-system document: `use` items, type-system definitions and extensions only.
+  /// A type-system document: `use` items, modules, type-system definitions and extensions only.
   TypeSystemDocument,
 
   // ---- bookkeeping: last three, in this order, and nothing after ----
@@ -483,7 +488,9 @@ impl SyntaxKind {
     // `use` items (96..98)
     Self::UseDefinition,
     Self::UseTree,
-    // generics (98..107)
+    // inline modules (98..99)
+    Self::ModDefinition,
+    // generics (99..108)
     Self::DefinitionTypeParam,
     Self::DefinitionTypeGenerics,
     Self::ExtensionTypeGenerics,
@@ -493,11 +500,11 @@ impl SyntaxKind {
     Self::ExecutableDefinitionName,
     Self::WherePredicate,
     Self::WhereClause,
-    // documents (107..110)
+    // documents (108..111)
     Self::Document,
     Self::ExecutableDocument,
     Self::TypeSystemDocument,
-    // bookkeeping (110..113)
+    // bookkeeping (111..114)
     Self::Error,
     Self::Gap,
     Self::Root,

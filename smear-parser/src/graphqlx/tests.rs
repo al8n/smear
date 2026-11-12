@@ -720,6 +720,121 @@ fn use_trees_cover_roots_paths_sources_globs_groups_and_aliases() {
 }
 
 #[test]
+fn inline_modules_hold_type_system_items_and_their_own_description() {
+  fn check_module<S: AsRef<[u8]>>(document: ast::TypeSystemDocument<S>) {
+    let [ast::TypeSystemItem::Mod(module)] = document.definitions() else {
+      panic!("expected one module");
+    };
+    // The description is the module's own, and the span starts at it.
+    assert!(module.description().is_some());
+    assert_eq!(module.span(), &SimpleSpan::new(0, 76));
+    assert!("media".equivalent(module.name().source()));
+    let items = module.items();
+    assert_eq!(items.len(), 4);
+    assert!(items[0].is_use());
+    let ast::TypeSystemItem::Mod(nested) = &items[1] else {
+      panic!("expected a nested module");
+    };
+    // An empty module is a namespace.
+    assert!(nested.items().is_empty());
+    assert!(nested.description().is_none());
+    assert_eq!(nested.span(), &SimpleSpan::new(27, 39));
+    assert!(items[2].is_definition());
+    assert!(items[3].is_extension());
+  }
+  accept_all!(
+    ast::TypeSystemDocument::graphqlx,
+    "\"doc\" mod media { use a::b mod empty {} type T { f: Int } extend type T @d }",
+    check_module
+  );
+
+  // A mixed document holds a module beside a type and a shorthand query.
+  fn check_mixed<S: AsRef<[u8]>>(document: ast::Document<S>) {
+    let definitions = document.definitions();
+    assert_eq!(definitions.len(), 3);
+    let ast::DocumentItem::Mod(module) = &definitions[0] else {
+      panic!("expected a module first");
+    };
+    assert_eq!(module.span(), &SimpleSpan::new(0, 33));
+    assert!(definitions[1].is_definition());
+    assert!(definitions[2].is_definition());
+  }
+  accept_all!(
+    ast::Document::graphqlx,
+    "mod geo { type Point { x: Int } }\ntype Query { origin: geo::Point }\n{ origin { x } }",
+    check_mixed
+  );
+
+  fn check_standalone<S: AsRef<[u8]>>(module: ast::ModDefinition<S>) {
+    assert!("x".equivalent(module.name().source()));
+    assert!(module.items().is_empty());
+  }
+  accept_all!(ast::ModDefinition::graphqlx, "mod x {}", check_standalone);
+}
+
+#[test]
+fn a_module_is_refused_where_no_module_stands_and_without_its_parts() {
+  // The executable root does not recognise `mod`: it is an unexpected head there.
+  assert_unexpected(
+    |inp| ast::ExecutableDocument::graphqlx(inp).map(|_| ()),
+    "mod m {}",
+    Expectation::Production("a use item or an executable definition"),
+    Some(SyntacticTokenKind::Identifier),
+  );
+  // A module's body holds type-system items only.
+  for src in ["mod m { query Q { f } }", "mod m { fragment F on T { f } }"] {
+    assert_unexpected(
+      |inp| ast::Document::graphqlx(inp).map(|_| ()),
+      src,
+      Expectation::Production("a use item, a module, a type-system definition or an extension"),
+      Some(SyntacticTokenKind::Identifier),
+    );
+  }
+  assert_unexpected(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "mod {}",
+    Expectation::Name,
+    Some(SyntacticTokenKind::LBrace),
+  );
+  // The `{` is confirmed before the body is entered, so its absence is the brace delimiter's own
+  // report, at the token standing where the `{` belongs.
+  let at = assert_unexpected(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "mod m type T { f: Int }",
+    Expectation::LBrace,
+    Some(SyntacticTokenKind::Identifier),
+  );
+  assert_eq!(at, SimpleSpan::new(6, 10));
+  assert_unexpected(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "mod m",
+    Expectation::LBrace,
+    None,
+  );
+  let unclosed = drive_str(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "mod m { type T { f: Int }",
+  )
+  .expect_err("an unclosed body should fail")
+  .into_iter()
+  .next()
+  .expect("an unclosed body should emit an error");
+  assert!(matches!(
+    unclosed.into_data(),
+    ErrorData::Unclosed(Unclosed::Object)
+  ));
+  // A description before `mod` is the module's own at the mixed root too.
+  fn check_described<S: AsRef<[u8]>>(document: ast::Document<S>) {
+    let [ast::DocumentItem::Mod(module)] = document.definitions() else {
+      panic!("expected one module");
+    };
+    assert!(module.description().is_some());
+    assert_eq!(module.span(), &SimpleSpan::new(0, 14));
+  }
+  accept_all!(ast::Document::graphqlx, "\"doc\" mod m {}", check_described);
+}
+
+#[test]
 fn failures_keep_typed_expectations_and_unclosed_kinds() {
   let error = drive_str(|inp| ast::Type::graphqlx(inp).map(|_| ()), "42")
     .expect_err("an integer cannot begin a GraphQLx type")
@@ -939,13 +1054,13 @@ fn complete_document_rejects_descriptions_before_use_items_and_extensions() {
   assert_unexpected(
     |inp| ast::DocumentItem::graphqlx(inp).map(|_| ()),
     "\"description\" use \"./types\"::{User}",
-    Expectation::Production("a definition after a description"),
+    Expectation::Production("a definition or a module after a description"),
     Some(SyntacticTokenKind::Identifier),
   );
   assert_unexpected(
     |inp| ast::DocumentItem::graphqlx(inp).map(|_| ()),
     "\"description\" extend type User { id: ID }",
-    Expectation::Production("a definition after a description"),
+    Expectation::Production("a definition or a module after a description"),
     Some(SyntacticTokenKind::Identifier),
   );
 }

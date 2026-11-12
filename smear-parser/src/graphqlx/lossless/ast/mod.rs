@@ -36,7 +36,8 @@
 //!   [`Name`](crate::graphqlx::kinds::SyntaxKind::Name) tokens, its `::`s as bare
 //!   [`PathSeparator`](crate::graphqlx::kinds::SyntaxKind::PathSeparator) tokens, and a
 //!   parent-module root's `..`s as bare [`DotDot`](crate::graphqlx::kinds::SyntaxKind::DotDot)
-//!   tokens; a [`UseTree`] holds its `as` and the alias after it as two bare `Name` tokens;
+//!   tokens; a [`UseTree`] holds its `as` and the alias after it as two bare `Name` tokens, and a
+//!   [`ModDefinition`] its `mod` and its name;
 //!   [`DirectiveLocations`], [`ExtensionTypeGenerics`] and
 //!   [`ExecutableDefinitionTypeGenerics`] each hold a whole list of bare `Name` tokens, their
 //!   members having no node kind of their own.
@@ -56,6 +57,7 @@
 //! [`StringValue`]: value::StringValue
 //! [`Path`]: ty::Path
 //! [`UseTree`]: use_tree::UseTree
+//! [`ModDefinition`]: document::ModDefinition
 
 pub use crate::lossless::ast::{CastNode, NodeChildren, cast};
 

@@ -1691,6 +1691,422 @@ fn a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
   );
 }
 
+/// `mod a { mod a { … } }`: `depth` modules, one `{` each — the one recursive position a module
+/// has.
+#[cfg(feature = "graphqlx")]
+fn mod_chain(depth: usize) -> String {
+  let mut src = String::with_capacity(depth * 9);
+  for _ in 0..depth {
+    src.push_str("mod a { ");
+  }
+  for _ in 0..depth {
+    src.push('}');
+  }
+  src
+}
+
+/// `mod a { ) mod a { ) … }`: the recovery bypass aimed at a module's body — every `)` undoes the
+/// `{` in front of it on the lexer's pair-blind tally, so the tally reads 1 however deep the bodies
+/// go.
+#[cfg(feature = "graphqlx")]
+fn mod_bypass(depth: usize) -> String {
+  let mut src = String::with_capacity(depth * 11);
+  for _ in 0..depth {
+    src.push_str("mod a { ) ");
+  }
+  for _ in 0..depth {
+    src.push('}');
+  }
+  src
+}
+
+/// `mod a mod a mod a …`: `count` modules and no body at all — each `{` stands where the next
+/// `mod` is, so a body entered without its `{` would read the next module as its item.
+#[cfg(feature = "graphqlx")]
+fn braceless_mods(count: usize) -> String {
+  "mod a ".repeat(count)
+}
+
+/// How deep a syntactic document's modules nest, counting the outermost as one: the tree's own
+/// record of how far the parse recursed. Walked with a stack, so a deep tree costs this no native
+/// frame.
+#[cfg(feature = "graphqlx")]
+fn syntactic_mod_depth(document: &smear::parser::graphqlx::ast::Document<&str>) -> usize {
+  use smear::parser::graphqlx::ast::{DocumentItem, ModDefinition, TypeSystemItem};
+
+  let mut pending: Vec<(&ModDefinition<&str>, usize)> = document
+    .definitions()
+    .iter()
+    .filter_map(|item| match item {
+      DocumentItem::Mod(module) => Some((module, 1)),
+      _ => None,
+    })
+    .collect();
+  let mut deepest = 0;
+  while let Some((module, depth)) = pending.pop() {
+    deepest = deepest.max(depth);
+    pending.extend(module.items().iter().filter_map(|item| match item {
+      TypeSystemItem::Mod(inner) => Some((inner, depth + 1)),
+      _ => None,
+    }));
+  }
+  deepest
+}
+
+/// A module chain is held by the same ceiling, and a chain far past it returns.
+///
+/// A body is entered only on a `{` its module has already peeked, so every level spends one bracket
+/// of the lexer's tally exactly as a selection set does. The guard comes first, for the reason
+/// [`deep_input_returns_rather_than_aborting`] gives: a regressed ceiling must be a red test, not a
+/// dead runner.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn a_mod_chain_is_refused_at_the_ceiling_and_returns() {
+  use smear::{
+    lexer::tokora::{Parse as _, Parser},
+    parser::graphqlx::{
+      GraphQLx,
+      ast::Document,
+      error::GraphqlxErrors,
+      syntactic::{GraphqlxLexer, document},
+    },
+  };
+
+  fn parse(src: &str) -> bool {
+    Parser::with_parser::<GraphqlxLexer<'_, str>, Document<&str>, GraphqlxErrors<&str>, _, GraphQLx>(
+      document,
+    )
+    .parse_str(src)
+    .is_ok()
+  }
+
+  // THE GUARD, AND IT MUST STAY FIRST.
+  assert!(
+    parse(&mod_chain(MAX_NESTING_DEPTH)),
+    "{MAX_NESTING_DEPTH} nested modules are inside the budget and must parse"
+  );
+  assert!(
+    !parse(&mod_chain(MAX_NESTING_DEPTH + 1)),
+    "{} nested modules must be refused before anything deep is handed to the parser",
+    MAX_NESTING_DEPTH + 1
+  );
+
+  for depth in [1_000, 100_000] {
+    assert!(
+      !parse(&mod_chain(depth)),
+      "{depth} nested modules must return a refusal rather than overflow the native stack"
+    );
+  }
+  // The bypass is refused at its first `)`, which starts no item, however long the chain.
+  for depth in [3, BRACELESS_CHAIN] {
+    assert!(
+      !parse(&mod_bypass(depth)),
+      "{depth} bypass levels must be refused"
+    );
+  }
+  // And a chain of modules with no body is refused at its second `mod`, where the first one's `{`
+  // belongs.
+  assert!(
+    !parse(&braceless_mods(BRACELESS_CHAIN)),
+    "{BRACELESS_CHAIN} body-less modules must be refused"
+  );
+}
+
+/// The same chains under a **recovering** emitter, where the brace delimiter would read items after
+/// a missing opener.
+///
+/// It never gets the chance: a body is entered only on a `{` the module has already peeked, and a
+/// `{` past the ceiling reaches the parser as the lexer's error rather than as a bracket. So the
+/// modules stop nesting at the ceiling whatever the emitter records; the bypass — whose tally reads
+/// 1 the whole way — is refused at its first `)`, because an item starts with a keyword or a string
+/// and a refusal there is an `Err`, not a report; and a module with no `{` is refused at the token
+/// standing in its place, so `mod a mod a …` stops at its sixth byte however long it is.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn a_mod_chain_under_a_recovering_emitter_nests_no_deeper_than_the_ceiling() {
+  use smear::{
+    lexer::{
+      graphqlx::syntactic::SyntacticTokenKind,
+      tokora::{
+        Parse as _, Parser, ParserContext, SimpleSpan, cache::DefaultCache, emitter::Verbose,
+      },
+    },
+    parser::graphqlx::{
+      GraphQLx,
+      ast::Document,
+      error::{Expectation, GraphqlxErrors},
+      syntactic::{GraphqlxLexer, document},
+    },
+  };
+
+  type RecoveringEmitter<'inp> = Verbose<GraphqlxErrors<&'inp str>, SimpleSpan, GraphQLx>;
+  type RecoveringCtx<'inp> = ParserContext<
+    'inp,
+    GraphqlxLexer<'inp, str>,
+    RecoveringEmitter<'inp>,
+    DefaultCache<'inp, GraphqlxLexer<'inp, str>>,
+    GraphQLx,
+  >;
+
+  fn recovering(src: &str) -> Result<Document<&str>, GraphqlxErrors<&str>> {
+    Parser::with_parser_and_context::<
+      '_,
+      GraphqlxLexer<'_, str>,
+      Document<&str>,
+      RecoveringCtx<'_>,
+      _,
+      GraphQLx,
+    >(document, ParserContext::of(RecoveringEmitter::default()))
+    .parse_str(src)
+  }
+
+  /// A refusal, or a tree whose modules stop at the ceiling.
+  fn bounded(src: &str, what: &str) {
+    match recovering(src) {
+      Err(errors) => assert!(
+        errors.first().is_some(),
+        "{what}: the parse returned a refusal holding no error"
+      ),
+      Ok(parsed) => {
+        let depth = syntactic_mod_depth(&parsed);
+        assert!(
+          depth <= MAX_NESTING_DEPTH,
+          "{what}: the modules nested {depth} deep under a ceiling of {MAX_NESTING_DEPTH}"
+        );
+      }
+    }
+  }
+
+  // THE GUARD, AND IT MUST STAY FIRST: inside the ceiling the chain is a clean parse, and one past
+  // it — too shallow to overflow anything — is held at the ceiling.
+  let inside = mod_chain(MAX_NESTING_DEPTH);
+  let parsed = recovering(&inside).expect("inside the ceiling it parses");
+  assert_eq!(syntactic_mod_depth(&parsed), MAX_NESTING_DEPTH);
+  bounded(&mod_chain(MAX_NESTING_DEPTH + 1), "one past the ceiling");
+
+  for depth in [1_000, 100_000] {
+    bounded(&mod_chain(depth), &format!("{depth} nested modules"));
+  }
+
+  // The bypass: refused at the first `)`, where a body's first item must start.
+  for depth in [3, BRACELESS_CHAIN] {
+    let src = mod_bypass(depth);
+    let at = src.find(')').expect("the chain holds a `)`");
+    assert_eq!(
+      graphqlx_recovering_refusal(&src, &format!("{depth} bypass levels")),
+      (
+        at..at + 1,
+        Some(SyntacticTokenKind::RParen),
+        Expectation::Production("a use item, a module, a type-system definition or an extension")
+      ),
+      "{depth} bypass levels: the first body must refuse its `)` rather than read past it"
+    );
+  }
+
+  // No braces at all: refused at the second `mod`, which stands where the first module's `{`
+  // belongs, and nothing after it is read.
+  for count in [2, BRACELESS_CHAIN] {
+    let src = braceless_mods(count);
+    assert_eq!(
+      graphqlx_recovering_refusal(&src, &format!("{count} body-less modules")),
+      (
+        6..9,
+        Some(SyntacticTokenKind::Identifier),
+        Expectation::LBrace
+      ),
+      "{count} body-less modules: the first must refuse the token standing where its `{{` belongs"
+    );
+  }
+}
+
+/// The lossless door holds the same chains, and its bound is the parse's own.
+///
+/// A body opens through `depth::descend` before it reads its `{`, so the bypass — which the lexer's
+/// tally cannot see — still spends a frame a level and is refused at the ceiling, where the
+/// syntactic door refuses it at its first `)`. A module with no `{` is reported and closed without a
+/// body, so the braceless chain is a run of sibling modules rather than a nest. Every door returns,
+/// and the tree keeps every byte.
+#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[test]
+fn the_lossless_door_refuses_a_mod_chain_at_the_ceiling_and_returns() {
+  use smear::parser::graphqlx::{
+    kinds::SyntaxKind as K,
+    lossless::{Parse, parse_document},
+  };
+
+  /// How many modules enclose the deepest module, counting itself: the tree's record of how far
+  /// the parse recursed.
+  fn deepest(parse: &Parse) -> usize {
+    parse
+      .syntax()
+      .descendants()
+      .filter(|node| node.kind() == K::ModDefinition)
+      .map(|node| {
+        node
+          .ancestors()
+          .filter(|ancestor| ancestor.kind() == K::ModDefinition)
+          .count()
+      })
+      .max()
+      .unwrap_or(0)
+  }
+
+  // THE GUARD, AND IT MUST STAY FIRST.
+  let inside = parse_document(&mod_chain(MAX_NESTING_DEPTH));
+  assert!(
+    inside.diagnostics().is_empty(),
+    "inside the budget the ceiling must be silent"
+  );
+  assert_eq!(deepest(&inside), MAX_NESTING_DEPTH);
+  let over = mod_chain(MAX_NESTING_DEPTH + 1);
+  let parse = parse_document(&over);
+  assert!(parse.has_errors(), "one past the ceiling must be refused");
+  assert!(
+    deepest(&parse) <= MAX_NESTING_DEPTH,
+    "the refusal must come before the parse descends past the ceiling"
+  );
+  let shallow = parse_document(&mod_bypass(MAX_NESTING_DEPTH + 8));
+  assert!(
+    deepest(&shallow) <= MAX_NESTING_DEPTH,
+    "the bypass nested {} modules under a ceiling of {MAX_NESTING_DEPTH}",
+    deepest(&shallow)
+  );
+
+  for src in [
+    mod_chain(1_000),
+    mod_chain(100_000),
+    mod_bypass(BRACELESS_CHAIN),
+  ] {
+    let parse = parse_document(&src);
+    assert!(
+      parse.has_errors(),
+      "{} bytes of nested modules must be refused",
+      src.len()
+    );
+    assert_eq!(
+      parse.syntax().text().to_string(),
+      src,
+      "the lossless guarantee survives the refusal"
+    );
+  }
+
+  let braceless = braceless_mods(BRACELESS_CHAIN);
+  let parse = parse_document(&braceless);
+  assert!(parse.has_errors(), "body-less modules must be reported");
+  assert_eq!(parse.syntax().text().to_string(), braceless);
+  assert_eq!(
+    deepest(&parse),
+    1,
+    "a module with no `{{` holds nothing, so the chain does not nest"
+  );
+}
+
+/// Width costs nothing: a module of a hundred thousand items is read in a loop, and both doors
+/// accept it.
+///
+/// A body's items are a repetition, so they spend no level of either budget. An item that recursed
+/// instead would refuse this at the ceiling, which no depth gate above can tell from a correct
+/// parse.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn a_flat_mod_body_costs_no_depth() {
+  use smear::{
+    lexer::tokora::{Parse as _, Parser},
+    parser::graphqlx::{
+      GraphQLx,
+      ast::Document,
+      error::GraphqlxErrors,
+      syntactic::{GraphqlxLexer, document},
+    },
+  };
+
+  const WIDTH: usize = 100_000;
+  let wide = format!(
+    "mod a {{ {} }}",
+    (0..WIDTH)
+      .map(|i| format!("scalar S{i}"))
+      .collect::<Vec<_>>()
+      .join(" ")
+  );
+
+  assert!(
+    Parser::with_parser::<GraphqlxLexer<'_, str>, Document<&str>, GraphqlxErrors<&str>, _, GraphQLx>(
+      document,
+    )
+    .parse_str(&wide)
+    .is_ok(),
+    "the syntactic door must accept {} bytes of width",
+    wide.len()
+  );
+  #[cfg(feature = "rowan_0_17")]
+  {
+    let parse = smear::parser::graphqlx::lossless::parse_document(&wide);
+    assert!(
+      parse.diagnostics().is_empty(),
+      "the lossless door must accept {} bytes of width",
+      wide.len()
+    );
+    assert_eq!(parse.syntax().text().to_string(), wide);
+  }
+}
+
+/// A module chain at **twice** the default ceiling returns on the default test thread, in both
+/// layers — the lower bound `smear-lexer/src/limits.rs` records for the cycle.
+///
+/// The ceiling is raised for this cell only, through the two doors' own knobs, and the guard comes
+/// first: at the default ceiling one level past it is refused in both layers, so the raised parses
+/// below are the only deep ones this test makes. Nothing bisects the cycle; what this proves is
+/// that 48 levels return on the 2 MiB thread libtest hands every test, and nothing above it.
+#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[test]
+fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
+  use smear::{
+    lexer::{
+      limits::{LosslessLimits, SyntacticLimits},
+      tokora::{Parse as _, Parser},
+    },
+    parser::graphqlx::{
+      GraphQLx,
+      ast::Document,
+      error::GraphqlxErrors,
+      lossless::{parse_document, parse_document_with_limits},
+      syntactic::{GraphqlxLexer, document},
+    },
+  };
+
+  const TWICE: usize = MAX_NESTING_DEPTH * 2;
+
+  fn syntactic(src: &str, limits: SyntacticLimits) -> bool {
+    Parser::with_parser::<GraphqlxLexer<'_, str>, Document<&str>, GraphqlxErrors<&str>, _, GraphQLx>(
+      document,
+    )
+    .parse_str_with_state(src, limits)
+    .is_ok()
+  }
+
+  // THE GUARD, AND IT MUST STAY FIRST.
+  let over = mod_chain(MAX_NESTING_DEPTH + 1);
+  assert!(
+    !syntactic(&over, SyntacticLimits::default()),
+    "the syntactic ceiling must hold at its default before anything deeper is parsed"
+  );
+  assert!(
+    parse_document(&over).has_errors(),
+    "the lossless ceiling must hold at its default before anything deeper is parsed"
+  );
+
+  let src = mod_chain(TWICE);
+  let parse = parse_document_with_limits(&src, LosslessLimits::with_max_nesting_depth(TWICE));
+  assert!(
+    parse.diagnostics().is_empty(),
+    "{TWICE} nested modules must parse in the lossless layer under a ceiling of {TWICE}"
+  );
+  assert!(
+    syntactic(&src, SyntacticLimits::with_max_nesting_depth(TWICE)),
+    "{TWICE} nested modules must parse in the syntactic layer under a ceiling of {TWICE}"
+  );
+}
+
 /// A nesting refusal is **one** diagnostic, at every recursive cycle in both dialects — smear
 /// issue #169.
 ///
@@ -1726,7 +2142,8 @@ fn a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
 /// connected components of the lossless call graph over the productions that descend: GraphQL has
 /// three (`selection_set`; `list_value` ↔ `object_value`; `list_type`), GraphQLx has the same
 /// three widened (`collection_body` joins the value cycle, `type_generics` joins the type cycle)
-/// and a fourth of its own, a `use` tree's `group` ↔ `use_tree`. The remaining descending
+/// and two of its own, a `use` tree's `group` ↔ `use_tree` and a module's `mod_body` ↔
+/// `type_system_item`. The remaining descending
 /// productions — every member block, both argument lists, the variables definition, GraphQLx's
 /// `angle_name_list` — are in no cycle and cannot reach the ceiling on their own.
 ///
@@ -1802,6 +2219,7 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
       nest("set!{", "}", DEPTH, "{ f(a: ", ") }"),
     ),
     ("use_group", nest("a::{", "}", DEPTH, "use ", "")),
+    ("mod_body", nest("mod a { ", "}", DEPTH, "", "")),
   ];
 
   let mut cells = 0usize;
@@ -1848,8 +2266,8 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
   }
 
   // A filtered run that selects nothing exits `ok`, and so does a loop whose `continue` swallowed
-  // every cell. 11 dialect-cycle pairs (4 shared x 2 dialects, plus 3 GraphQLx-only) x 4 tails.
-  assert_eq!(cells, 11 * TAILS.len(), "the cell set collapsed");
+  // every cell. 12 dialect-cycle pairs (4 shared x 2 dialects, plus 4 GraphQLx-only) x 4 tails.
+  assert_eq!(cells, 12 * TAILS.len(), "the cell set collapsed");
 }
 
 /// A refusal ends the document at **every** document root, not only the mixed one — smear issue

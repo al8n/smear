@@ -6,10 +6,10 @@
 //! `HARD_MAX` the lossless doors produce exactly the tree a recursive node dispatch cannot descend,
 //! no value of `MAX_GREEN_DEPTH` closes that, and the repair is a worklist per cycle
 //! (al8n/smear#201). What is re-derived here is **which cycles this dialect has**, because the two
-//! do not have the same ones and a fixture set ported from the other would leave five of these
+//! do not have the same ones and a fixture set ported from the other would leave six of these
 //! unmeasured.
 //!
-//! GraphQLx has four cycles where the vanilla dialect has four, and they are not the same four:
+//! GraphQLx has five cycles where the vanilla dialect has four, and they are not the same four:
 //!
 //! - the **value** cycle absorbs two more containers — `set!{ … }` and `map!{ k => v }` — and a
 //!   map entry is the one place a single child slot yields *two* subtrees, so it nests through its
@@ -19,7 +19,9 @@
 //!   passing through a bracket at all;
 //! - the **selection** cycle is the vanilla dialect's, unchanged;
 //! - the **use** cycle is this dialect's own: a `use` tree's group holds trees, and any of them
-//!   may hold a group in turn.
+//!   may hold a group in turn;
+//! - the **module** cycle is this dialect's own too: a module's body holds items, and any of them
+//!   may be a module in turn.
 //!
 //! So there is a fixture below per shape, and each of them is a separate walk over separate frame
 //! types. A shape with no fixture is a shape whose worklist nobody measured.
@@ -369,6 +371,27 @@ fn a_use_group_chain_projects_flat() {
     source.push('b');
     for _ in 0..depth {
       source.push('}');
+    }
+    source
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// the module cycle — GraphQLx only
+// ---------------------------------------------------------------------------------------------
+
+/// `mod a { mod a { … scalar S … } }` — a body's items are read on a worklist of the modules still
+/// open, so a module nested however deep is projected from one frame.
+#[test]
+fn a_mod_chain_projects_flat() {
+  assert_projection_is_flat("mod_definition / body", false, |depth| {
+    let mut source = String::new();
+    for _ in 0..depth {
+      source.push_str("mod a { ");
+    }
+    source.push_str("scalar S");
+    for _ in 0..depth {
+      source.push_str(" }");
     }
     source
   });
