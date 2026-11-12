@@ -19,7 +19,7 @@ mod value;
 
 use std::{string::String, vec::Vec};
 
-pub use application::{ApplicationArgument, Resolution};
+pub use application::{Application, ApplicationArgument, Resolution};
 pub use build::ModelBuilder;
 pub use def::{
   Collection, Contribution, Contributions, Def, DefKind, DirectiveLocation, Extern, Externs,
@@ -28,9 +28,9 @@ pub use def::{
 pub use member::{Member, MemberKind};
 pub use module::{Module, ModuleKind};
 pub use name::Description;
-pub use schema::{Root, RootOperation};
-pub use ty::PathRoot;
-pub use value::{LiteralKind, ObjectEntry};
+pub use schema::{Builtins, Root, RootOperation, Schema};
+pub use ty::{Path, PathRoot, Ty, TyKind, TypeExpr, TypeExprKind};
+pub use value::{FloatValue, IntValue, Literal, LiteralKind, ObjectEntry, Value, ValueKind};
 
 use super::{
   id::{
@@ -322,5 +322,18 @@ const _: () = {
   let _ = assert_send_sync::<Externs<'static>>;
   let _ = assert_send_sync::<Member<'static>>;
   let _ = assert_send_sync::<Description<'static>>;
+  let _ = assert_send_sync::<TypeExpr<'static>>;
+  let _ = assert_send_sync::<TypeExprKind<'static>>;
+  let _ = assert_send_sync::<Ty<'static>>;
+  let _ = assert_send_sync::<TyKind<'static>>;
+  let _ = assert_send_sync::<Path<'static>>;
+  let _ = assert_send_sync::<Value<'static>>;
+  let _ = assert_send_sync::<ValueKind<'static>>;
+  let _ = assert_send_sync::<IntValue<'static>>;
+  let _ = assert_send_sync::<FloatValue<'static>>;
+  let _ = assert_send_sync::<Literal<'static>>;
+  let _ = assert_send_sync::<Application<'static>>;
+  let _ = assert_send_sync::<Schema<'static>>;
+  let _ = assert_send_sync::<Builtins<'static>>;
   let _ = assert_send_sync::<ModelBuilder>;
 };

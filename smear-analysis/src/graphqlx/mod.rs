@@ -80,10 +80,11 @@ pub use id::{
 };
 pub use limits::Limits;
 pub use model::{
-  ApplicationArgument, Collection, Contribution, Contributions, Def, DefKind, Description,
-  DirectiveLocation, Extern, Externs, LiteralKind, Member, MemberKind, Model, Module, ModuleKind,
-  ObjectEntry, Origin, PackageInfo, PackageKind, PathRoot, Primitive, Resolution, Root,
-  RootOperation, TypeBound, TypeParam, TypeParams,
+  Application, ApplicationArgument, Builtins, Collection, Contribution, Contributions, Def,
+  DefKind, Description, DirectiveLocation, Extern, Externs, FloatValue, IntValue, Literal,
+  LiteralKind, Member, MemberKind, Model, Module, ModuleKind, ObjectEntry, Origin, PackageInfo,
+  PackageKind, Path, PathRoot, Primitive, Resolution, Root, RootOperation, Schema, Ty, TyKind,
+  TypeBound, TypeExpr, TypeExprKind, TypeParam, TypeParams, Value, ValueKind,
 };
 pub use package::{IntegerProvider, Layout, Package, SourceFile, Tier};
 pub use source::{Bound, Source, SourceMap};

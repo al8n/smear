@@ -8,11 +8,13 @@
 
 use smear::{
   analysis::graphqlx::{
-    ApplicationId, Collection, Contribution, Contributions, Def, DefId, DefKind, Description,
-    DirectiveLocation, Extern, Externs, IntegerProvider, Layout, Limits, LiteralKind, Member,
-    MemberId, MemberKind, Model, Module, ModuleId, ModuleKind, Origin, Package, PackageId,
-    PackageInfo, PackageKind, PathRoot, Primitive, Root, RootOperation, SourceId, Sym, Tier, TyId,
-    TypeBound, TypeExprId, TypeParam, TypeParams, ValueId, analyze, test_support::ModelBuilder,
+    Application, ApplicationArgument, ApplicationId, Builtins, Collection, Contribution,
+    Contributions, Def, DefId, DefKind, Description, DirectiveLocation, Extern, Externs,
+    FloatValue, IntValue, IntegerProvider, Layout, Limits, Literal, LiteralKind, Member, MemberId,
+    MemberKind, Model, Module, ModuleId, ModuleKind, ObjectEntry, Origin, Package, PackageId,
+    PackageInfo, PackageKind, Path, PathRoot, Primitive, Resolution, Root, RootOperation, Schema,
+    SourceId, Sym, Tier, Ty, TyId, TyKind, TypeBound, TypeExpr, TypeExprId, TypeExprKind,
+    TypeParam, TypeParams, Value, ValueId, ValueKind, analyze, test_support::ModelBuilder,
   },
   diagnostic::Location,
   lexer::tokora::SimpleSpan,
@@ -1651,6 +1653,458 @@ fn every_enum_is_built_as_the_design_says() {
   ]));
 }
 
+/// The spelling of each of `path`'s segments.
+fn spelled<'m>(model: &'m Model, path: Path<'_>) -> Vec<&'m str> {
+  path
+    .segments()
+    .iter()
+    .map(|segment: &Sym| model.name(*segment))
+    .collect::<Vec<&'m str>>()
+}
+
+#[test]
+fn a_type_occurrence_answers_its_kind_path_location_and_type() {
+  let model = fixture();
+
+  let implements: TypeExpr<'_> = model.type_expr(QUERY_IMPLEMENTS);
+  assert_eq!(implements.id(), QUERY_IMPLEMENTS);
+  match implements.kind() {
+    TypeExprKind::Named { def, args, .. } => {
+      assert_eq!(def, NODE);
+      assert!(args.is_empty());
+    }
+    other => panic!("{other:?} is not a named type"),
+  }
+  assert!(!implements.non_null());
+  assert_eq!(implements.location(), at(APP_SCHEMA, 225, 229));
+  assert_eq!(implements.ty(), NODE_TY);
+  let path: Path<'_> = implements.path().expect("a named type has a path");
+  assert_eq!(path.root(), PathRoot::Relative);
+  assert_eq!(spelled(&model, path), vec!["Node"]);
+  assert_eq!(implements.path_location(), Some(at(APP_SCHEMA, 225, 229)));
+
+  let id: TypeExpr<'_> = model.type_expr(NODE_ID_TYPE);
+  assert!(id.non_null());
+  assert_eq!(id.ty(), I32_NON_NULL_TY);
+
+  // `[string]`: a list has an element and no path.
+  let tags: TypeExpr<'_> = model.type_expr(TAGS_TYPE);
+  match tags.kind() {
+    TypeExprKind::List { element, .. } => assert_eq!(element, TAGS_ELEMENT),
+    other => panic!("{other:?} is not a list"),
+  }
+  assert_eq!(tags.path(), None);
+  assert_eq!(tags.path_location(), None);
+  assert_eq!(tags.ty(), STRINGS_TY);
+
+  // `T!` inside `Page`: a parameter, which belongs to its definition.
+  let element: TypeExpr<'_> = model.type_expr(ITEMS_ELEMENT);
+  match element.kind() {
+    TypeExprKind::Param { def, index, .. } => assert_eq!((def, index), (PAGE, 0)),
+    other => panic!("{other:?} is not a type parameter"),
+  }
+  assert!(element.non_null());
+  let path: Path<'_> = element.path().expect("a parameter is written as a path");
+  assert_eq!(spelled(&model, path), vec!["T"]);
+  assert_eq!(element.ty(), T_TY);
+
+  // `Page<Query>`: the written arguments, and the complete instantiation as its type.
+  match model.type_expr(SEARCH_PAGE).kind() {
+    TypeExprKind::Named { def, args, .. } => {
+      assert_eq!(def, PAGE);
+      assert_eq!(args, &[SEARCH_PAGE_ARG]);
+    }
+    other => panic!("{other:?} is not a named type"),
+  }
+  assert_eq!(model.type_expr(SEARCH_PAGE).ty(), PAGE_QUERY_TY);
+
+  // Every occurrence of one type shares its id.
+  for occurrence in [QUERY_IMPLEMENTS, NODE_TYPE, T_BOUND] {
+    assert_eq!(model.type_expr(occurrence).ty(), NODE_TY);
+  }
+  for occurrence in [
+    REASON_TYPE,
+    VERSION_TYPE,
+    TAGS_ELEMENT,
+    T_DEFAULT,
+    CACHE_TAGS_ELEMENT,
+  ] {
+    assert_eq!(model.type_expr(occurrence).ty(), STRING_TY);
+  }
+  for occurrence in [NODE_ARG_TYPE, TTL_TYPE, CACHE_TYPE_ARG] {
+    assert_eq!(model.type_expr(occurrence).ty(), I32_TY);
+  }
+  for occurrence in [SEARCH_QUERY, SEARCH_PAGE_ARG, QUERY_ROOT] {
+    assert_eq!(model.type_expr(occurrence).ty(), QUERY_TY);
+  }
+  assert_eq!(model.type_expr(CACHE_TAGS_TYPE).ty(), STRINGS_TY);
+  assert_eq!(model.type_expr(COLOR_TYPE).ty(), COLOR_TY);
+  assert_eq!(model.type_expr(ITEMS_TYPE).ty(), TS_TY);
+}
+
+#[test]
+fn a_type_answers_its_kind_nullness_tier_and_closedness() {
+  let model = fixture();
+
+  let string: Ty<'_> = model.ty(STRING_TY);
+  assert_eq!(string.id(), STRING_TY);
+  match string.kind() {
+    TyKind::Named { def, args, .. } => {
+      assert_eq!(def, STRING);
+      assert!(args.is_empty());
+    }
+    other => panic!("{other:?} is not a named type"),
+  }
+  assert!(!string.non_null());
+  assert_eq!(string.tier(), Tier::Core);
+  assert!(string.is_closed());
+  assert!(model.ty(I32_NON_NULL_TY).non_null());
+
+  let param: Ty<'_> = model.ty(T_TY);
+  match param.kind() {
+    TyKind::Param { def, index, .. } => assert_eq!((def, index), (PAGE, 0)),
+    other => panic!("{other:?} is not a type parameter"),
+  }
+  assert!(param.non_null());
+  assert!(!param.is_closed());
+
+  match model.ty(TS_TY).kind() {
+    TyKind::List { element, .. } => assert_eq!(element, T_TY),
+    other => panic!("{other:?} is not a list"),
+  }
+  assert!(
+    !model.ty(TS_TY).is_closed(),
+    "a list of a parameter names it"
+  );
+  match model.ty(STRINGS_TY).kind() {
+    TyKind::List { element, .. } => assert_eq!(element, STRING_TY),
+    other => panic!("{other:?} is not a list"),
+  }
+  assert!(model.ty(STRINGS_TY).is_closed());
+
+  match model.ty(PAGE_QUERY_TY).kind() {
+    TyKind::Named { def, args, .. } => {
+      assert_eq!(def, PAGE);
+      assert_eq!(args, &[QUERY_TY]);
+    }
+    other => panic!("{other:?} is not a named type"),
+  }
+  assert!(model.ty(PAGE_QUERY_TY).is_closed());
+
+  // Each closed instantiation once; none for a definition the program never instantiates.
+  assert_eq!(model.instantiations(PAGE), &[PAGE_QUERY_TY]);
+  assert!(model.instantiations(QUERY).is_empty());
+
+  // Each satisfaction recorded, whether added once or twice, and nothing else.
+  assert!(model.satisfies(QUERY_TY, NODE));
+  assert!(model.satisfies(I32_TY, MAP_KEY));
+  assert!(!model.satisfies(STRING_TY, MAP_KEY));
+  assert!(!model.satisfies(QUERY_TY, MAP_KEY));
+}
+
+#[test]
+fn a_value_answers_every_kind_its_location_type_writtenness_and_path() {
+  let model = fixture();
+
+  let everything: Value<'_> = model.value(EVERYTHING);
+  assert_eq!(everything.id(), EVERYTHING);
+  assert_eq!(
+    everything.kind(),
+    ValueKind::List(&[
+      V_NULL,
+      V_BOOL,
+      V_NEGATIVE,
+      V_FLOAT,
+      V_STRING,
+      V_ENUM,
+      V_TYPE,
+      V_LIST,
+      V_SET,
+      V_MAP,
+      V_OBJECT,
+      V_LITERAL,
+      V_UNRESOLVED,
+      V_WIDE,
+      V_MIN
+    ])
+  );
+  assert_eq!(everything.location(), at(APP_SCHEMA, 1047, 1094));
+  assert!(everything.written());
+  assert_eq!(everything.path(), None);
+
+  assert_eq!(model.value(V_NULL).kind(), ValueKind::Null);
+  assert_eq!(model.value(V_BOOL).kind(), ValueKind::Bool(true));
+  assert_eq!(model.value(V_SET_ITEM).kind(), ValueKind::Bool(false));
+  assert_eq!(model.value(V_STRING).kind(), ValueKind::String("hi"));
+  assert_eq!(model.value(V_LIST).kind(), ValueKind::List(&[V_LIST_ITEM]));
+  assert_eq!(model.value(V_SET).kind(), ValueKind::Set(&[V_SET_ITEM]));
+  assert_eq!(
+    model.value(V_MAP).kind(),
+    ValueKind::Map(&[(V_MAP_KEY, V_MAP_VALUE)])
+  );
+  assert_eq!(model.value(V_OBJECT_TAGS).kind(), ValueKind::List(&[]));
+  assert_eq!(model.value(V_UNRESOLVED).kind(), ValueKind::Unresolved);
+
+  let ValueKind::Float(float) = model.value(V_FLOAT).kind() else {
+    panic!("not a float");
+  };
+  assert_eq!(float.to_f64().to_bits(), 1.5f64.to_bits());
+  assert_eq!(float.text(), "1.5");
+
+  let ValueKind::Enum { def, value, .. } = model.value(V_ENUM).kind() else {
+    panic!("not an enum value");
+  };
+  assert_eq!((def, value), (COLOR, GREEN));
+  let path: Path<'_> = model
+    .value(V_ENUM)
+    .path()
+    .expect("an enum value writes a path");
+  assert_eq!(path.root(), PathRoot::Relative);
+  assert_eq!(spelled(&model, path), vec!["GREEN"]);
+
+  let ValueKind::Type { def, .. } = model.value(V_TYPE).kind() else {
+    panic!("not a type value");
+  };
+  assert_eq!(def, POINT);
+  let path: Path<'_> = model
+    .value(V_TYPE)
+    .path()
+    .expect("a type value writes a path");
+  assert_eq!(path.root(), PathRoot::Dependency);
+  assert_eq!(spelled(&model, path), vec!["geo", "Point"]);
+
+  // An object holds what was written and what a default filled, and the filled one has no name.
+  let ValueKind::Object(entries) = model.value(V_OBJECT).kind() else {
+    panic!("not an object");
+  };
+  assert_eq!(entries.len(), 2);
+  assert_eq!(entries[0].field(), FILTER_TAGS);
+  assert_eq!(entries[0].name(), Some(at(APP_SCHEMA, 1086, 1087)));
+  assert_eq!(entries[0].value(), V_OBJECT_TAGS);
+  assert_eq!(entries[1].field(), FILTER_COLOR);
+  assert_eq!(entries[1].name(), None);
+  assert_eq!(entries[1].value(), V_OBJECT_COLOR);
+  assert!(!model.value(V_OBJECT_COLOR).written());
+  assert_eq!(
+    model.value(V_OBJECT_COLOR).location(),
+    at(APP_SCHEMA, 545, 548)
+  );
+
+  let ValueKind::Literal(literal) = model.value(V_LITERAL).kind() else {
+    panic!("not a literal");
+  };
+  assert_eq!(literal.kind(), LiteralKind::Int);
+  assert_eq!(literal.text(), "0xFF");
+  assert_eq!(literal.location(), at(APP_SCHEMA, 1088, 1092));
+
+  // The type a value was coerced against, and the one unresolved type where nothing coerced it.
+  assert_eq!(model.value(TTL_VALUE).ty(), I32_TY);
+  assert_eq!(model.value(V_NULL).ty(), UNRESOLVED_TY);
+
+  // A default's copy, and everything inside it, is not written.
+  assert!(!model.value(TAGS_COPY).written());
+  assert!(!model.value(TAGS_COPY_ITEM).written());
+  assert_eq!(model.value(TAGS_COPY).location(), at(APP_SCHEMA, 833, 838));
+  assert!(model.value(CACHE_TAGS_DEFAULT).written());
+  assert_eq!(
+    model.value(CACHE_TAGS_DEFAULT).kind(),
+    ValueKind::List(&[CACHE_TAGS_DEFAULT_ITEM])
+  );
+  assert_eq!(
+    model.value(CACHE_TAGS_DEFAULT_ITEM).kind(),
+    ValueKind::String("a")
+  );
+  assert_eq!(
+    model.value(REASON_DEFAULT).kind(),
+    ValueKind::String("No longer supported")
+  );
+  let ValueKind::Enum { def, value, .. } = model.value(COLOR_DEFAULT).kind() else {
+    panic!("not an enum value");
+  };
+  assert_eq!((def, value), (COLOR, RED));
+}
+
+/// The integer value `id` holds.
+fn int_value(model: &Model, id: ValueId) -> IntValue<'_> {
+  match model.value(id).kind() {
+    ValueKind::Int(int) => int,
+    other => panic!("{other:?} is not an integer"),
+  }
+}
+
+#[test]
+fn an_integer_answers_its_sign_magnitude_text_and_value_in_any_width() {
+  let model = fixture();
+
+  let negative = int_value(&model, V_NEGATIVE);
+  assert!(negative.is_negative());
+  assert_eq!(negative.magnitude(), &[42]);
+  assert_eq!(negative.text(), "-42");
+  assert_eq!(negative.to_i128(), Some(-42));
+  assert_eq!(negative.to_u128(), None);
+
+  let one = int_value(&model, V_LIST_ITEM);
+  assert!(!one.is_negative());
+  assert_eq!(one.to_i128(), Some(1));
+  assert_eq!(one.to_u128(), Some(1));
+
+  // Trailing zero bytes are not kept: `2` is one byte however it was given.
+  let two = int_value(&model, V_MAP_VALUE);
+  assert_eq!(two.magnitude(), &[2]);
+  assert_eq!(two.to_u128(), Some(2));
+
+  // `2^128`: wider than both, and read through its magnitude.
+  let wide = int_value(&model, V_WIDE);
+  assert_eq!(wide.magnitude().len(), 17);
+  assert_eq!(wide.magnitude()[16], 1);
+  assert_eq!(wide.to_u128(), None);
+  assert_eq!(wide.to_i128(), None);
+  assert_eq!(wide.text(), "340282366920938463463374607431768211456");
+
+  // `-2^127` is `i128::MIN`, which only the negative side reaches.
+  let min = int_value(&model, V_MIN);
+  assert!(min.is_negative());
+  assert_eq!(min.to_i128(), Some(i128::MIN));
+  assert_eq!(min.to_u128(), None);
+
+  assert_eq!(int_value(&model, TTL_VALUE).to_i128(), Some(60));
+  assert_eq!(int_value(&model, NODE_ARG_DEFAULT).to_u128(), Some(1));
+}
+
+#[test]
+fn an_application_answers_its_directive_type_arguments_locations_path_and_arguments() {
+  let model = fixture();
+
+  let cache: Application<'_> = model.application(QUERY_CACHE);
+  assert_eq!(cache.id(), QUERY_CACHE);
+  assert_eq!(cache.directive(), Resolution::Resolved(CACHE));
+  assert!(cache.type_args().is_empty());
+  assert_eq!(cache.location(), at(APP_SCHEMA, 230, 245));
+  assert_eq!(cache.path_location(), at(APP_SCHEMA, 231, 236));
+  assert_eq!(cache.path().root(), PathRoot::Relative);
+  assert_eq!(spelled(&model, cache.path()), vec!["cache"]);
+  // Every argument written or defaulted, in the definition's order.
+  let arguments: &[ApplicationArgument] = cache.arguments();
+  assert_eq!(arguments.len(), 2);
+  assert_eq!(arguments[0].argument(), CACHE_TTL);
+  assert_eq!(arguments[0].name_location(), Some(at(APP_SCHEMA, 237, 240)));
+  assert_eq!(arguments[0].value(), TTL_VALUE);
+  assert!(arguments[0].written());
+  assert_eq!(arguments[1].argument(), CACHE_TAGS);
+  assert_eq!(arguments[1].name_location(), None);
+  assert_eq!(arguments[1].value(), TAGS_COPY);
+  assert!(!arguments[1].written());
+
+  let deprecated: Application<'_> = model.application(VERSION_DEPRECATED);
+  assert_eq!(deprecated.directive(), Resolution::Resolved(DEPRECATED));
+  assert_eq!(deprecated.arguments().len(), 1);
+  assert_eq!(deprecated.arguments()[0].argument(), REASON);
+  assert_eq!(deprecated.arguments()[0].value(), REASON_COPY);
+  assert!(!deprecated.arguments()[0].written());
+
+  let schema_cache: Application<'_> = model.application(SCHEMA_CACHE);
+  assert_eq!(schema_cache.type_args(), &[CACHE_TYPE_ARG]);
+  assert_eq!(schema_cache.arguments().len(), 1);
+  assert_eq!(schema_cache.arguments()[0].value(), EVERYTHING);
+}
+
+#[test]
+fn the_schema_answers_its_roots_applications_description_and_contributions() {
+  let model = fixture();
+  let schema: Schema<'_> = model.schema();
+  assert_eq!(
+    schema.root(RootOperation::Query),
+    Some(Root::Written(QUERY_ROOT))
+  );
+  assert_eq!(
+    schema.root(RootOperation::Mutation),
+    Some(Root::Presumed(POINT))
+  );
+  assert_eq!(schema.root(RootOperation::Subscription), None);
+  assert_eq!(schema.applications(), &[SCHEMA_CACHE]);
+  let description = schema.description().expect("the schema is described");
+  assert_eq!(description.text(), "The schema.");
+  assert_eq!(description.location(), at(APP_SCHEMA, 990, 999));
+  let mut parts: Contributions<'_> = schema.contributions();
+  assert_eq!(parts.len(), 1);
+  let part: Contribution<'_> = parts.next().expect("the schema has its definition");
+  assert_eq!(part.location(), at(APP_SCHEMA, 1000, 1006));
+  assert!(part.members().is_empty());
+  assert!(part.implements().is_empty());
+  assert_eq!(part.applications(), &[SCHEMA_CACHE]);
+  assert!(!part.has_errors());
+}
+
+#[test]
+fn the_builtins_are_found_by_name_in_the_built_in_packages() {
+  let model = fixture();
+  let builtins: Builtins<'_> = model.builtins();
+  assert_eq!(builtins.deprecated(), Some(DEPRECATED));
+  assert_eq!(builtins.string(), Some(STRING));
+  assert_eq!(builtins.map_key(), Some(MAP_KEY));
+  // `core` here defines none of the others.
+  for missing in [
+    builtins.marker(),
+    builtins.set(),
+    builtins.map(),
+    builtins.r#extern(),
+    builtins.repr(),
+    builtins.heap(),
+    builtins.specified_by(),
+    builtins.one_of(),
+    builtins.skip(),
+    builtins.include(),
+    builtins.type_ref(),
+    builtins.non_zero(),
+    builtins.bytes(),
+    builtins.id(),
+  ] {
+    assert_eq!(missing, None);
+  }
+  assert_eq!(builtins.primitive(Primitive::signed(32)), Some(I32));
+  assert_eq!(builtins.primitive(Primitive::unsigned(32)), None);
+  assert_eq!(builtins.primitive(Primitive::Bool), None);
+
+  // A model whose built-in packages define nothing has no built-in at all.
+  let analysis = analyze(
+    &Package::<&str>::new("app", Layout::Flat, Tier::Std),
+    &[],
+    &Limits::new(),
+  );
+  let empty: Builtins<'_> = analysis.model().builtins();
+  assert_eq!(empty.deprecated(), None);
+  assert_eq!(empty.primitive(Primitive::signed(32)), None);
+}
+
+#[test]
+fn every_unresolved_shape_and_the_one_type_unresolved_occurrences_share() {
+  let model = fixture();
+
+  // Two misspelt types: each occurrence stays, unresolved, with its written path.
+  for (occurrence, spelling) in [(X_TYPE, "Adress"), (Y_TYPE, "Strng")] {
+    let ty: TypeExpr<'_> = model.type_expr(occurrence);
+    assert_eq!(ty.kind(), TypeExprKind::Unresolved);
+    let path: Path<'_> = ty.path().expect("an unresolved type keeps its path");
+    assert_eq!(spelled(&model, path), vec![spelling]);
+    // One was given the unresolved type and one was given none: they share one type.
+    assert_eq!(ty.ty(), UNRESOLVED_TY);
+  }
+  assert_eq!(model.ty(UNRESOLVED_TY).kind(), TyKind::Unresolved);
+  assert!(!model.ty(UNRESOLVED_TY).non_null());
+  assert!(model.ty(UNRESOLVED_TY).is_closed());
+
+  // A value that did not coerce, and an application whose directive did not resolve: it stays,
+  // with its locations and its path, and with no type argument and no argument.
+  assert_eq!(model.value(V_UNRESOLVED).kind(), ValueKind::Unresolved);
+  assert_eq!(model.value(V_UNRESOLVED).ty(), UNRESOLVED_TY);
+  let missing: Application<'_> = model.application(POINT_MISSING);
+  assert_eq!(missing.directive(), Resolution::Unresolved);
+  assert!(missing.type_args().is_empty());
+  assert!(missing.arguments().is_empty());
+  assert_eq!(missing.location(), at(GEO_POINT, 16, 24));
+  assert_eq!(spelled(&model, missing.path()), vec!["missing"]);
+}
+
 // Every result type and every view may cross threads.
 const _: () = {
   const fn assert_send_sync<T: Send + Sync>() {}
@@ -1667,4 +2121,20 @@ const _: () = {
   let _ = assert_send_sync::<Externs<'static>>;
   let _ = assert_send_sync::<Member<'static>>;
   let _ = assert_send_sync::<Description<'static>>;
+  let _ = assert_send_sync::<TypeExpr<'static>>;
+  let _ = assert_send_sync::<TypeExprKind<'static>>;
+  let _ = assert_send_sync::<Ty<'static>>;
+  let _ = assert_send_sync::<TyKind<'static>>;
+  let _ = assert_send_sync::<Path<'static>>;
+  let _ = assert_send_sync::<Value<'static>>;
+  let _ = assert_send_sync::<ValueKind<'static>>;
+  let _ = assert_send_sync::<IntValue<'static>>;
+  let _ = assert_send_sync::<FloatValue<'static>>;
+  let _ = assert_send_sync::<Literal<'static>>;
+  let _ = assert_send_sync::<ObjectEntry>;
+  let _ = assert_send_sync::<Application<'static>>;
+  let _ = assert_send_sync::<ApplicationArgument>;
+  let _ = assert_send_sync::<Resolution<DefId>>;
+  let _ = assert_send_sync::<Schema<'static>>;
+  let _ = assert_send_sync::<Builtins<'static>>;
 };
