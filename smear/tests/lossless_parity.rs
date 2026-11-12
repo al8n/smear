@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan_0_17", feature = "graphql"))]
+#![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphql"))]
 
 //! Gate 1: acceptance parity between the lossless suite and the shipped `syntactic` one.
 //!

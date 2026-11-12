@@ -12,7 +12,10 @@
 // `graphqlx` dialect lexers; with both features off there is nothing left to
 // test, and leaving the file ungated would turn every helper into dead code
 // under that build.
-#![cfg(all(feature = "alloc", any(feature = "graphql", feature = "graphqlx")))]
+#![cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
 
 use std::{fs, path::PathBuf};
 

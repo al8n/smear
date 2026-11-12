@@ -22,7 +22,7 @@
 //! is worse than one that raises: it asks the driver about a variable the document does not
 //! contain, hands the resolver that invented name, and prints it in a diagnostic.
 
-#![cfg(feature = "alloc")]
+#![cfg(any(feature = "std", feature = "alloc"))]
 
 use graphql_proto::{ArgumentSource, Executor, Kind, Leaf, Node, Segment, Values, variable_key};
 use smear_parser::{

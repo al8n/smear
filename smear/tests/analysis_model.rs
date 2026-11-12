@@ -4,7 +4,7 @@
 //! The analyzer does not lower documents into models yet, so these tests write one through the
 //! builder the analysis writes its own with. The fixture asserts every id the builder hands back,
 //! so the constants below are the model's numbering, and a change to it fails here first.
-#![cfg(all(feature = "alloc", feature = "analysis"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{

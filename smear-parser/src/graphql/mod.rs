@@ -24,7 +24,7 @@ pub mod ast;
 pub mod error;
 pub mod keyword;
 pub mod kinds;
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 pub mod lossless;
 pub mod syntactic;
 

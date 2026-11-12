@@ -11,7 +11,7 @@
 //!   Validation" pass that runs while building it. A server rejects a malformed SDL exactly once,
 //!   at startup, and never rediscovers it per request.
 #![cfg_attr(
-  all(feature = "alloc", feature = "introspection"),
+  all(any(feature = "std", feature = "alloc"), feature = "introspection"),
   doc = "- [`schema::introspection`] — the second \
          construction door, building that same schema out of a server's draft §4 introspection \
          response. It renders the response as SDL and hands it to the same builder, so draft §3 \
@@ -22,7 +22,7 @@
 //!   [`Sink`] and worked out in the caller's
 //!   [`Scratch`].
 #![cfg_attr(
-  all(feature = "alloc", feature = "rowan_0_17"),
+  all(feature = "rowan_0_17", feature = "std"),
   doc = "- [`validate_executable_lossless`] — the \
          same rules over a lossless rowan CST, by projecting it to that same AST rather than by \
          being a second validator. The IDE door: it recovers per definition, so a document \
@@ -122,12 +122,8 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, allow(unused_attributes))]
 #![deny(missing_docs)]
-
-// Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
-// compile them all out and still build green.
-#[cfg(all(feature = "std", not(feature = "alloc")))]
-compile_error!("the `std` feature must enable `alloc`: check this crate's [features] table");
 
 // The alloc-as-std alias: the crate's files spell their allocations `std::boxed::Box`, which
 // resolves to `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build.
@@ -149,7 +145,7 @@ compile_error!("the `std` feature must enable `alloc`: check this crate's [featu
 // locally, with no `RUSTFLAGS` needed. That deny is the repair for the gate, not for the code:
 // this construct reddened CI twice, and both times the local run that cleared it was narrower
 // than CI's.
-#[cfg(all(feature = "alloc", not(feature = "std")))]
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
 #[allow(unused_extern_crates)]
 extern crate alloc as std;
 
@@ -167,48 +163,51 @@ extern crate std;
 #[doc(inline)]
 pub use smear_schema as schema;
 
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 mod diagnostic;
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 mod executable;
-#[cfg(all(feature = "alloc", feature = "rowan_0_17"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 mod lossless;
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 mod rule;
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 mod scratch;
-#[cfg(feature = "alloc")]
+#[cfg(any(feature = "std", feature = "alloc"))]
 mod sink;
 
-#[cfg(feature = "alloc")]
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use diagnostic::{Context, Diagnostic, DiagnosticDisplay, MergeConflict};
-#[cfg(feature = "alloc")]
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use executable::{Invalid, Refusal, validate_executable, validate_executable_with};
 
-#[cfg(all(feature = "alloc", feature = "rowan_0_17"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "rowan_0_17"))))]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "rowan_0_17", feature = "std"))))]
 pub use lossless::{
   LosslessInvalid, LosslessSchemaErrors, Recovery, Verified, validate_executable_lossless,
   validate_executable_lossless_verified_with, validate_executable_lossless_with,
   validate_schema_lossless,
 };
-#[cfg(feature = "alloc")]
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use rule::{Rule, RuleSet};
-#[cfg(feature = "alloc")]
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use schema::{Schema, SchemaBuilder, SchemaError, SchemaErrorKind, SchemaErrors};
 
-#[cfg(all(feature = "alloc", feature = "introspection"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "introspection"))))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "introspection"))]
+#[cfg_attr(
+  docsrs,
+  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "introspection")))
+)]
 pub use schema::IntrospectionError;
-#[cfg(feature = "alloc")]
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use scratch::{Budget, Scratch};
-#[cfg(feature = "alloc")]
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use sink::{Collect, Count, First, Ignore, Sink};
 
 /// The features this crate was compiled with, as constants the umbrella asserts against.

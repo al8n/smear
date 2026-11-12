@@ -1,12 +1,8 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, allow(unused_attributes))]
 #![deny(missing_docs)]
-
-// Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
-// compile them all out and still build green.
-#[cfg(all(feature = "std", not(feature = "alloc")))]
-compile_error!("the `std` feature must enable `alloc`: check this crate's [features] table");
 
 // THE ALIAS IS BACK, AND `json` IS WHY. It left when this crate lost its last module — every
 // member carries its own, and an umbrella that forwards a `no_std` stack must not itself link
@@ -23,7 +19,7 @@ compile_error!("the `std` feature must enable `alloc`: check this crate's [featu
 // alias the same way and for the same reason, and the `#[allow]` is the workspace-wide exception
 // `unused_extern_crates = "deny"` requires: the users are feature-gated, so a configuration that
 // compiles none of them would otherwise fail on the item itself.
-#[cfg(all(feature = "alloc", feature = "proto", not(feature = "std")))]
+#[cfg(all(not(feature = "std"), feature = "alloc", feature = "proto"))]
 #[allow(unused_extern_crates)]
 extern crate alloc as std;
 
@@ -77,16 +73,19 @@ pub use smear_schema::diagnostic;
 /// Available dialects:
 ///
 #[cfg_attr(
-  all(feature = "alloc", feature = "graphql"),
+  all(any(feature = "std", feature = "alloc"), feature = "graphql"),
   doc = "- [`graphql`](lexer::graphql)"
 )]
-#[cfg_attr(all(not(feature = "alloc"), feature = "graphql"), doc = "- `graphql`")]
 #[cfg_attr(
-  all(feature = "alloc", feature = "graphqlx"),
+  all(not(any(feature = "std", feature = "alloc")), feature = "graphql"),
+  doc = "- `graphql`"
+)]
+#[cfg_attr(
+  all(any(feature = "std", feature = "alloc"), feature = "graphqlx"),
   doc = "- [`graphqlx`](lexer::graphqlx)"
 )]
 #[cfg_attr(
-  all(not(feature = "alloc"), feature = "graphqlx"),
+  all(not(any(feature = "std", feature = "alloc")), feature = "graphqlx"),
   doc = "- `graphqlx`"
 )]
 ///
@@ -111,17 +110,20 @@ pub use smear_lexer::keyword;
 /// Available dialects, each link gated on its feature for the reason recorded on [`lexer`]:
 ///
 #[cfg_attr(
-  all(feature = "alloc", feature = "graphql"),
+  all(any(feature = "std", feature = "alloc"), feature = "graphql"),
   doc = "- [`graphql`](parser::graphql)"
 )]
-#[cfg_attr(all(not(feature = "alloc"), feature = "graphql"), doc = "- `graphql`")]
 #[cfg_attr(
-  all(feature = "alloc", feature = "graphqlx"),
+  all(not(any(feature = "std", feature = "alloc")), feature = "graphql"),
+  doc = "- `graphql`"
+)]
+#[cfg_attr(
+  all(any(feature = "std", feature = "alloc"), feature = "graphqlx"),
   doc = "- [`graphqlx`](parser::graphqlx) — adds `use` items, generics, where-clauses, set and \
          map literals, and namespaced paths on top of GraphQL."
 )]
 #[cfg_attr(
-  all(not(feature = "alloc"), feature = "graphqlx"),
+  all(not(any(feature = "std", feature = "alloc")), feature = "graphqlx"),
   doc = "- `graphqlx` — adds `use` items, generics, where-clauses, set and map literals, and \
          namespaced paths on top of GraphQL."
 )]
@@ -147,25 +149,25 @@ pub use smear_parser::typed_keyword_atom;
 /// Re-exported for the reason [`keyword!`](keyword) is. Gated on `rowan` rather than on `parser`
 /// because the module that defines it is: a `#[macro_export]` macro exists exactly when the file
 /// holding it is compiled.
-#[cfg(feature = "rowan_0_17")]
-#[cfg_attr(docsrs, doc(cfg(feature = "rowan_0_17")))]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "rowan_0_17", feature = "std"))))]
 pub use smear_parser::ast_node;
 
 /// GraphQL document validation, and the built-once schema every rule reads.
 ///
 #[cfg_attr(
-  feature = "alloc",
+  any(feature = "std", feature = "alloc"),
   doc = "Draft §3 \"Type Validation\" runs inside [`Schema::build`](validator::Schema::build), so \
          a malformed SDL is refused once at startup rather than rediscovered per request."
 )]
 #[cfg_attr(
-  not(feature = "alloc"),
+  not(any(feature = "std", feature = "alloc")),
   doc = "Draft §3 \"Type Validation\" runs inside `Schema::build`, so a malformed SDL is refused \
          once at startup rather than rediscovered per request."
 )]
 ///
 #[cfg_attr(
-  all(feature = "alloc", feature = "introspection"),
+  all(any(feature = "std", feature = "alloc"), feature = "introspection"),
   doc = "A schema can also be built from a server's draft §4 introspection response — \
          [`Schema::from_introspection`](validator::Schema::from_introspection), behind the \
          `introspection` feature. It is a second entrance to the same value: it renders the \
@@ -173,20 +175,20 @@ pub use smear_parser::ast_node;
          two doors cannot drift apart."
 )]
 #[cfg_attr(
-  not(all(feature = "alloc", feature = "introspection")),
+  not(all(any(feature = "std", feature = "alloc"), feature = "introspection")),
   doc = "The `introspection` feature adds a second construction door, building the same schema \
          out of a server's draft §4 introspection response instead of out of SDL."
 )]
 ///
 /// Standard GraphQL only —
 #[cfg_attr(
-  all(feature = "alloc", feature = "graphqlx"),
+  all(any(feature = "std", feature = "alloc"), feature = "graphqlx"),
   doc = "[`graphqlx`](parser::graphqlx) has no validator, deliberately: its generics, \
          `where` constraints, set and map literals and namespaced paths have no specification \
          semantics, so validating them would be language design rather than conformance."
 )]
 #[cfg_attr(
-  not(all(feature = "alloc", feature = "graphqlx")),
+  not(all(any(feature = "std", feature = "alloc"), feature = "graphqlx")),
   doc = "the GraphQLx dialect has no validator, deliberately: its extensions have no \
          specification semantics to validate against."
 )]
@@ -201,13 +203,13 @@ pub use smear_compiler as validator;
 /// Draft §6 execution, as a Sans-I/O state machine.
 ///
 #[cfg_attr(
-  feature = "alloc",
+  any(feature = "std", feature = "alloc"),
   doc = "Runs a validated query against a built [`Schema`](validator::Schema) and produces a \
          draft §7.1 response, performing no I/O and calling no resolver: it says which field it \
          needs and waits to be told the answer."
 )]
 #[cfg_attr(
-  not(feature = "alloc"),
+  not(any(feature = "std", feature = "alloc")),
   doc = "Runs a validated query against a built `Schema` and produces a draft §7.1 response, \
          performing no I/O and calling no resolver: it says which field it needs and waits to be \
          told the answer."
@@ -215,14 +217,14 @@ pub use smear_compiler as validator;
 ///
 /// It defines no value type.
 #[cfg_attr(
-  feature = "alloc",
+  any(feature = "std", feature = "alloc"),
   doc = "The driver keeps values in its own representation and answers structural questions \
          about them through [`Values`](proto::Values) — the same choice [`lexer`] makes about its \
          source, made for the same reason: an owned enum would force an allocation per leaf and \
          would make a wasm or FFI handle second-class."
 )]
 #[cfg_attr(
-  not(feature = "alloc"),
+  not(any(feature = "std", feature = "alloc")),
   doc = "The driver keeps values in its own representation and answers structural questions \
          about them through `Values` — the same choice `lexer` makes about its source, made for \
          the same reason: an owned enum would force an allocation per leaf and would make a wasm \
@@ -242,12 +244,12 @@ pub use graphql_proto as proto;
 /// GraphQLx schema analysis.
 ///
 #[cfg_attr(
-  feature = "alloc",
+  any(feature = "std", feature = "alloc"),
   doc = "[`graphqlx`](analysis::graphqlx) is the analyzer: GraphQLx packages in, a resolved model \
          and its diagnostics out."
 )]
 #[cfg_attr(
-  not(feature = "alloc"),
+  not(any(feature = "std", feature = "alloc")),
   doc = "`graphqlx` is the analyzer: GraphQLx packages in, a resolved model and its diagnostics \
          out. It needs `alloc`."
 )]
@@ -276,8 +278,11 @@ pub use smear_analysis as analysis;
 // under `--all-features`. NO NEW FEATURE: a `json` feature would be one more cell in each of
 // `ci/hack.sh`'s passes and a pair `ci/feature_reachability.py` would have to be told about, to
 // gate a module that is already exactly as reachable as the crate it writes.
-#[cfg(all(feature = "alloc", feature = "proto"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "alloc", feature = "proto"))))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "proto"))]
+#[cfg_attr(
+  docsrs,
+  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "proto")))
+)]
 pub mod json;
 
 #[doc(hidden)]

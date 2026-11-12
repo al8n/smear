@@ -1,7 +1,7 @@
 //! The GraphQLx analyzer's sources: every file parsed with the GraphQLx syntactic parser, its
 //! syntax errors reported at that file, the same analysis whatever text type the files were
 //! supplied in, and `SourceMap::bind` pairing the result with the texts again.
-#![cfg(all(feature = "alloc", feature = "analysis"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{

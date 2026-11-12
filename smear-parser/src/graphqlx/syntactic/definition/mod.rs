@@ -171,7 +171,7 @@ pub use input_object::{
 };
 
 mod directive;
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 pub(crate) use directive::classify_location;
 pub use directive::{directive_definition, directive_locations, location};
 

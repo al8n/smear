@@ -84,7 +84,7 @@
 // it was a hard `E0432`/`E0433` under any feature selection that excludes `introspection`,
 // including plain `--features validator`. `cargo test -p smear --no-run` in CI now compiles the
 // default-feature selection that always excludes it.
-#![cfg(all(feature = "alloc", feature = "introspection"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "introspection"))]
 #![allow(missing_docs)]
 
 use std::collections::BTreeMap;

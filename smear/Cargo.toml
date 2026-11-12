@@ -607,13 +607,13 @@ harness = false
 name = "apollo_comparison"
 path = "benches/comparative/apollo/apollo_comparison.rs"
 harness = false
-required-features = ["rowan_0_17", "validator"]
+required-features = ["rowan_0_17", "std", "validator"]
 
 [[bench]]
 name = "validator_comparison"
 path = "benches/comparative/apollo/validator_comparison.rs"
 harness = false
-required-features = ["rowan_0_17", "validator"]
+required-features = ["rowan_0_17", "std", "validator"]
 
 # ── THE TWO PERF GATES, AND WHY THEY ARE `[[bench]]` TARGETS HERE ───────────────────────────
 #
@@ -683,12 +683,12 @@ required-features = ["validator"]
 [[test]]
 name = "byte_identity"
 path = "benches/comparative/apollo/byte_identity.rs"
-required-features = ["rowan_0_17", "validator"]
+required-features = ["rowan_0_17", "std", "validator"]
 
 [[test]]
 name = "validator_oracle"
 path = "benches/comparative/apollo/validator_oracle.rs"
-required-features = ["rowan_0_17", "validator"]
+required-features = ["rowan_0_17", "std", "validator"]
 
 # The three tools built on the same harness, for the same reason. `gate` prints the correctness
 # table the bench refuses to time without, `perfloop` is a profiler-friendly loop with no
@@ -697,17 +697,17 @@ required-features = ["rowan_0_17", "validator"]
 [[example]]
 name = "gate"
 path = "benches/comparative/apollo/gate.rs"
-required-features = ["rowan_0_17", "validator"]
+required-features = ["rowan_0_17", "std", "validator"]
 
 [[example]]
 name = "perfloop"
 path = "benches/comparative/apollo/perfloop.rs"
-required-features = ["rowan_0_17", "validator"]
+required-features = ["rowan_0_17", "std", "validator"]
 
 [[example]]
 name = "treedump"
 path = "benches/comparative/apollo/treedump.rs"
-required-features = ["rowan_0_17", "validator"]
+required-features = ["rowan_0_17", "std", "validator"]
 
 [lints]
 workspace = true

@@ -24,7 +24,7 @@
 //! assertion catches it. And renaming one image to another dialect's word for it, applied
 //! consistently to the space, to [`TOKEN_IMAGES`] and to [`image_of`], passes even that; only the
 //! **name** assertion against [`RENAMED_IMAGES`] catches that one.
-#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 
 use std::{
   collections::{BTreeMap, BTreeSet},

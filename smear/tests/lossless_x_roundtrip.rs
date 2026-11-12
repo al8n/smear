@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 
 //! Gate 3: `tree.text() == source`, byte-exact, over every corpus entry and all three GraphQLx
 //! roots — **including the invalid ones**, which are the point. A parser that drops a byte it

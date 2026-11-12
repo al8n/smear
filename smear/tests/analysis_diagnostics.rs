@@ -5,7 +5,7 @@
 //! Each test collects its two diagnostics in both orders: the order a list keeps is a property of
 //! the diagnostics, never of the order they arrived in. The ceiling is driven through `analyze`,
 //! which is where a list gets one.
-#![cfg(all(feature = "alloc", feature = "analysis"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{

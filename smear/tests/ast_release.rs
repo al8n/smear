@@ -67,7 +67,7 @@
 //! single-dialect row is a build in which that item does not exist. Its own documentation says
 //! why it needs both.
 
-#![cfg(all(feature = "alloc", feature = "parser"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "parser"))]
 #![allow(missing_docs)]
 
 // The helpers and imports below are gated on `any(graphql, graphqlx)`, which is the union of the

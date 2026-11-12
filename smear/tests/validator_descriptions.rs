@@ -1,4 +1,4 @@
-#![cfg(all(feature = "alloc", feature = "validator"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "validator"))]
 
 //! Draft §5: a description is documentation, and nothing a validation rule can see.
 //!
@@ -319,7 +319,7 @@ fn a_description_neither_fires_a_rule_nor_suppresses_one() {
   }
 }
 
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 mod lossless {
   use super::{BTreeSet, Diagnostic, FIRING_FLOOR, FIXTURES, SCHEMA, Vec, blanked, build};
 

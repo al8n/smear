@@ -1,4 +1,4 @@
-#![cfg(all(feature = "alloc", feature = "parser"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "parser"))]
 
 //! The nesting ceiling, and the `SIGABRT` it exists to stop — smear issue #61.
 //!
@@ -135,7 +135,7 @@ fn the_graphqlx_syntactic_door_reports_at_the_same_ceiling() {
 }
 
 /// The lossless door reports the trip on the diagnostic channel and still covers every byte.
-#[cfg(all(feature = "rowan_0_17", feature = "graphql"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphql"))]
 #[test]
 fn the_lossless_door_reports_at_the_same_ceiling() {
   use smear::parser::graphql::lossless::parse_document;
@@ -164,7 +164,7 @@ fn the_lossless_door_reports_at_the_same_ceiling() {
 /// server on an 8 MiB main thread can afford roughly four times the default, and a worker
 /// deliberately spawned smaller can afford less. Both directions are asserted because a knob that
 /// only loosens is not a knob.
-#[cfg(all(feature = "rowan_0_17", feature = "graphql"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphql"))]
 #[test]
 fn the_ceiling_is_configurable_in_both_directions() {
   use smear::{
@@ -218,7 +218,12 @@ fn the_ceiling_is_configurable_in_both_directions() {
 /// compile time beside the constant, so a `HARD_MAX` raised past what the bisection supports fails
 /// to *build* rather than killing this runner. The depth here cannot outrun the constant, and the
 /// constant cannot outrun the measurement.
-#[cfg(all(feature = "rowan_0_17", feature = "graphql", feature = "graphqlx"))]
+#[cfg(all(
+  feature = "rowan_0_17",
+  feature = "std",
+  feature = "graphql",
+  feature = "graphqlx"
+))]
 #[test]
 fn a_raised_ceiling_is_honoured_to_hard_max_and_clamped_above_it() {
   use smear::lexer::limits::{HARD_MAX, LosslessLimits};
@@ -486,7 +491,7 @@ fn no_fixture_in_the_tree_comes_near_the_ceiling() {
 /// *recursed*, and the tree records exactly that — one `SelectionSet` node per live frame. The
 /// shallow probe below asserts the tree stops nesting at the ceiling; only then is anything deep
 /// handed to the parser.
-#[cfg(all(feature = "rowan_0_17", feature = "graphql"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphql"))]
 #[test]
 fn the_recovery_bypass_returns_rather_than_aborting() {
   use smear::parser::graphql::{kinds::SyntaxKind as K, lossless::parse_document};
@@ -547,7 +552,7 @@ fn the_recovery_bypass_returns_rather_than_aborting() {
 /// — and it is a sync point in its recovery, so it is consumed and the loop continues exactly as
 /// `)` is. Measured at `6f39cb9`: both families abort a 2 MiB thread at 700 levels. A gate on `)`
 /// alone would have proved the dialect and missed the pair that is only GraphQLx's.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 #[test]
 fn the_graphqlx_recovery_bypass_returns_with_both_closer_families() {
   use smear::parser::graphqlx::{kinds::SyntaxKind as K, lossless::parse_document};
@@ -891,7 +896,7 @@ fn a_graphqlx_braceless_fragment_chain_returns_rather_than_aborting() {
 /// fragment unwinds to the document root and recovery resumes at the document level. What the cell
 /// holds is that the two doors agree: the first diagnostic is an error on the second `...`, the
 /// token the syntactic refusal names, and the tree still covers every byte.
-#[cfg(all(feature = "rowan_0_17", feature = "graphql"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphql"))]
 #[test]
 fn the_lossless_door_refuses_the_braceless_chain_at_the_same_token() {
   use smear::parser::graphql::{kinds::SyntaxKind as K, lossless::parse_document};
@@ -936,7 +941,7 @@ fn the_lossless_door_refuses_the_braceless_chain_at_the_same_token() {
 }
 
 /// The GraphQLx lossless door agrees with its syntactic one the same way.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 #[test]
 fn the_graphqlx_lossless_door_refuses_the_braceless_chain_at_the_same_token() {
   use smear::parser::graphqlx::{kinds::SyntaxKind as K, lossless::parse_document};
@@ -990,7 +995,7 @@ fn the_graphqlx_lossless_door_refuses_the_braceless_chain_at_the_same_token() {
 ///
 /// Both axes are exercised: siblings at the top level, and siblings *inside* a subtree that is
 /// itself near the ceiling, which is where a leaked level would show first.
-#[cfg(all(feature = "rowan_0_17", feature = "graphql"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphql"))]
 #[test]
 fn width_costs_nothing_because_the_budget_is_a_depth() {
   use smear::parser::graphql::lossless::parse_document;
@@ -1043,7 +1048,7 @@ fn width_costs_nothing_because_the_budget_is_a_depth() {
 /// which is why the budget is taken at *every* production that commits a nesting delimiter rather
 /// than at the one shape the finding named. Deriving the fix from the exemplar would have left
 /// two live cycles behind it.
-#[cfg(all(feature = "rowan_0_17", feature = "graphql"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphql"))]
 #[test]
 fn the_value_cycles_have_the_same_bypass_and_the_same_bound() {
   use smear::parser::graphql::{kinds::SyntaxKind as K, lossless::parse_document};
@@ -1256,7 +1261,7 @@ fn the_recovering_syntactic_door_refuses_a_bang_chain_at_its_first_brace() {
 /// severity are what this door can be held to. The deep cells are the same [`BANG_CHAIN`]
 /// prefixes, so the recovery over their tail is part of what has to return, and the tree has to
 /// keep every byte of it.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 #[test]
 fn the_lossless_door_refuses_a_bang_chain_on_the_same_token() {
   use smear::parser::graphqlx::lossless::parse_document;
@@ -1510,7 +1515,7 @@ fn a_use_group_chain_under_a_recovering_emitter_nests_no_deeper_than_the_ceiling
 /// A group opens through `depth::descend` before it reads its `{`, so the bypass — which the
 /// lexer's tally cannot see — still spends a frame a level and is refused at the ceiling, where the
 /// syntactic door refuses it at its first `)`. Both doors return, and the tree keeps every byte.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 #[test]
 fn the_lossless_door_refuses_a_use_group_chain_at_the_ceiling_and_returns() {
   use smear::parser::graphqlx::{
@@ -1621,7 +1626,7 @@ fn a_flat_use_chain_costs_no_depth() {
       "the syntactic door must accept {} bytes of width",
       src.len()
     );
-    #[cfg(feature = "rowan_0_17")]
+    #[cfg(all(feature = "rowan_0_17", feature = "std"))]
     {
       let parse = smear::parser::graphqlx::lossless::parse_document(src);
       assert!(
@@ -1641,7 +1646,7 @@ fn a_flat_use_chain_costs_no_depth() {
 /// first: at the default ceiling one level past it is refused in both layers, so the raised parses
 /// below are the only deep ones this test makes. Nothing bisects the cycle; what this proves is
 /// that 48 levels return on the 2 MiB thread libtest hands every test, and nothing above it.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 #[test]
 fn a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
   use smear::{
@@ -1757,7 +1762,12 @@ fn a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
 ///   the six document roots, and a production added later that does would need its own cell —
 ///   `depth::descend`'s note records that as the residual.
 /// * **Partial (`Sans-I/O`) input.** Both doors here are `Complete`.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx", feature = "graphql"))]
+#[cfg(all(
+  feature = "rowan_0_17",
+  feature = "std",
+  feature = "graphqlx",
+  feature = "graphql"
+))]
 #[test]
 fn a_refusal_is_one_diagnostic_at_every_cycle() {
   use smear::lexer::limits::LosslessLimits;
@@ -1867,7 +1877,12 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
 ///
 /// So the axis here is the entry point, and the shape is whatever reaches the ceiling from it. The
 /// cycle coverage stays where it is; this asks only that each root stops.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx", feature = "graphql"))]
+#[cfg(all(
+  feature = "rowan_0_17",
+  feature = "std",
+  feature = "graphqlx",
+  feature = "graphql"
+))]
 #[test]
 fn a_refusal_ends_every_document_root() {
   use smear::lexer::limits::LosslessLimits;
@@ -2021,7 +2036,12 @@ fn a_refusal_ends_every_document_root() {
 /// Reverting the conversion body to `Other(Cow::Borrowed("nesting limit exceeded"))` reddens all
 /// four cells here: the two `is_terminal()` reads, because `Other`'s arm is `false`, and the two
 /// `is_nesting_limit_exceeded()` reads, because the value is on the wrong variant.
-#[cfg(all(feature = "rowan_0_17", feature = "graphql", feature = "graphqlx"))]
+#[cfg(all(
+  feature = "rowan_0_17",
+  feature = "std",
+  feature = "graphql",
+  feature = "graphqlx"
+))]
 #[test]
 fn tokoras_own_descent_trip_lands_terminal_in_both_dialects() {
   use smear::parser::{

@@ -8,7 +8,7 @@
 //! leaving the text byte-identical: a `where` clause nested under the block it constrains instead
 //! of beside it, a description outside the definition it describes, an SDL enum value wrapped in
 //! the `EnumValue` node a *value* position builds. No round-trip gate can see any of those.
-#![cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 
 use smear::parser::graphqlx::{
   kinds::SyntaxKind as K,

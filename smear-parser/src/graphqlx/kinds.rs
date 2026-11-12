@@ -64,7 +64,7 @@
 //!   and a non-constant position, so `ConstList` and `List` are one
 //!   [`ListValue`](SyntaxKind::ListValue).
 
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 use crate::lossless::KindSpace;
 
 /// A GraphQLx concrete-syntax-tree kind: one token image, one node, or one bookkeeping tile.
@@ -527,7 +527,7 @@ impl SyntaxKind {
   }
 }
 
-#[cfg(feature = "rowan_0_17")]
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
 impl KindSpace for SyntaxKind {
   const NAME: &'static str = "graphqlx";
   const ERROR: Self = Self::Error;

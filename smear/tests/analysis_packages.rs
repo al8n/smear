@@ -1,7 +1,7 @@
 //! The GraphQLx analyzer's package set: how packages and sources are numbered, what the model
 //! answers about each package, and each package-level diagnostic, which points at the whole of the
 //! offending package's package source.
-#![cfg(all(feature = "alloc", feature = "analysis"))]
+#![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{

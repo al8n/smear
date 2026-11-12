@@ -1,4 +1,4 @@
-#![cfg(all(feature = "rowan_0_17", feature = "parser"))]
+#![cfg(all(feature = "rowan_0_17", feature = "std", feature = "parser"))]
 
 //! The cost curve of lossless recovery — smear issue #168.
 //!

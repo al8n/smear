@@ -4,19 +4,15 @@
 //! diagnostics on them, back. It needs `alloc`, and without it the module is absent.
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, allow(unused_attributes))]
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
-
-// Every allocating item is gated on `alloc` alone, so a `std` that stopped implying `alloc` would
-// compile them all out and still build green.
-#[cfg(all(feature = "std", not(feature = "alloc")))]
-compile_error!("the `std` feature must enable `alloc`: check this crate's [features] table");
 
 // The alloc-as-std alias: the crate's files spell their allocations `std::vec::Vec`, which resolves
 // to `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build. The `#[allow]`
 // is the exception the workspace's `unused_extern_crates = "deny"` records: the alias's users are
 // gated, and the lint fires in any configuration that compiles none of them.
-#[cfg(all(feature = "alloc", not(feature = "std")))]
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
 #[allow(unused_extern_crates)]
 extern crate alloc as std;
 
@@ -26,8 +22,8 @@ extern crate std;
 
 // No outer doc comment: the module's own header is its one doc fragment, so a link in it resolves
 // in the module where it is written.
-#[cfg(feature = "alloc")]
-#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub mod graphqlx;
 
 /// The features this crate was compiled with, as constants the umbrella asserts against.

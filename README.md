@@ -201,7 +201,7 @@ smear = { version = "0.0.1", features = ["validator"] }
 ### Parsing
 
 ```rust
-# #[cfg(all(feature = "alloc", feature = "parser", feature = "graphql"))] {
+# #[cfg(all(any(feature = "std", feature = "alloc"), feature = "parser", feature = "graphql"))] {
 use smear::{
   lexer::tokora::{Parse as _, Parser},
   parser::graphql::{
@@ -232,7 +232,7 @@ Build the schema once, then validate each request against it. The `Scratch` and 
 to the caller and are reused across requests — that is what makes the steady state allocation-free.
 
 ```rust
-# #[cfg(all(feature = "alloc", feature = "validator"))] {
+# #[cfg(all(any(feature = "std", feature = "alloc"), feature = "validator"))] {
 use smear::{
   lexer::tokora::{Parse as _, Parser},
   parser::graphql::{
