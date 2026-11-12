@@ -596,10 +596,18 @@ required-features = ["rowan_0_17", "validator"]
 
 # ── THE TWO PERF GATES, AND WHY THEY ARE `[[bench]]` TARGETS HERE ───────────────────────────
 #
-# `ci/perf/run.sh` builds both of these on this branch and on its merge-base, in one run on one
-# runner, and compares. `benches/solo/perf/mod.rs` carries the corpus and the two-size design;
-# `.github/workflows/perf.yml` carries the jobs. What is decided HERE is where they live, and it
-# was not obvious.
+# `ci/perf/run.sh` builds both of these twice in one run on one runner, and compares: once in this
+# branch's tree, and once in its MERGE-BASE'S OWN TREE, this manifest included, with only the
+# instrument laid over it from the branch — these two targets' sources and every file they read at
+# compile time. Each side therefore measures its own library in its own configuration: its own
+# features, defaults and dependency versions. What that asks of THIS file is that the merge-base
+# declare both targets, under these names and at these paths; where it does not, the script
+# measures nothing and says the two revisions are not comparable, rather than borrowing this
+# manifest to build them. A rename or a move is therefore unmeasured in the pull request that makes
+# it, and measured again from the next one. `run.sh`'s header carries what the comparison can and
+# cannot see, `benches/solo/perf/mod.rs` the corpus and the two-size design, and
+# `.github/workflows/perf.yml` the jobs. What is decided HERE is where they live, and it was not
+# obvious.
 #
 # THE ALTERNATIVE THAT WAS REJECTED. The sibling `tokora` repository keeps its instruction-count
 # instrument as a separate workspace member, and that is right FOR THAT REPOSITORY: its benches are
