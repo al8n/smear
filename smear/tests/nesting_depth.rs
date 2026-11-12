@@ -2150,6 +2150,10 @@ fn a_flat_mod_body_costs_no_depth() {
 /// first: at the default ceiling one level past it is refused in both layers, so the raised parses
 /// below are the only deep ones this test makes. Nothing bisects the cycle; what this proves is
 /// that 48 levels return on the 2 MiB thread libtest hands every test, and nothing above it.
+///
+/// The syntactic parse at twice the ceiling runs in a child process, as the `use`-group twin's
+/// does and for the same reason: through `run_child`, on the thread libtest spawns for the child's
+/// one test, which std sizes as it sized this one. The guard and the lossless parse stay here.
 #[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 #[test]
 fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
@@ -2168,6 +2172,7 @@ fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
   };
 
   const TWICE: usize = MAX_NESTING_DEPTH * 2;
+  const CELL: &str = "a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread";
 
   fn syntactic(src: &str, limits: SyntacticLimits) -> bool {
     Parser::with_parser::<GraphqlxLexer<'_, str>, Document<&str>, GraphqlxErrors<&str>, _, GraphQLx>(
@@ -2175,6 +2180,17 @@ fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
     )
     .parse_str_with_state(src, limits)
     .is_ok()
+  }
+
+  // THE CHILD: this cell re-executed by `run_child`, after the parent's guard has passed. It runs
+  // the one syntactic parse at twice the ceiling, on the thread libtest gave it, and answers through
+  // its exit status.
+  if std::env::var_os(CHILD).is_some() {
+    let parsed = syntactic(
+      &mod_chain(TWICE),
+      SyntacticLimits::with_max_nesting_depth(TWICE),
+    );
+    std::process::exit(if parsed { PARSED } else { REFUSED });
   }
 
   // THE GUARD, AND IT MUST STAY FIRST.
@@ -2195,7 +2211,7 @@ fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
     "{TWICE} nested modules must parse in the lossless layer under a ceiling of {TWICE}"
   );
   assert!(
-    syntactic(&src, SyntacticLimits::with_max_nesting_depth(TWICE)),
+    the_child_parsed(&run_child(CELL), TWICE, "nested modules"),
     "{TWICE} nested modules must parse in the syntactic layer under a ceiling of {TWICE}"
   );
 }
