@@ -64,7 +64,10 @@ All notable changes to Smear are documented in this file.
   module (`smear::schema::duplicate-type-name`, `duplicate-directive-definition`), a supplied name
   that begins with `__` (`reserved-type-name`, `reserved-directive-name`), and a type named as a
   child module (`module-type-collision`) are reported. A file that holds only white space,
-  commas and comments is accepted and declares nothing. A new `test-support` feature, which `smear/test-support` forwards, compiles a
+  commas and comments is accepted and declares nothing. `Limits::max_definitions` bounds every
+  definition the model would hold, the built-in library's and the primitives included: the first
+  one a supplied package would add past it is `resource-limit`, and nothing after it is
+  collected. A new `test-support` feature, which `smear/test-support` forwards, compiles a
   hidden door to the crate-private model builder, and to analyses of the models it builds, for
   `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the six features

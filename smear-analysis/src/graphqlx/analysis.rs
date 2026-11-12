@@ -113,7 +113,8 @@ impl Analysis {
 ///   (`Int`, `Float`, `String`, `Boolean`, `ID`) and a directive named as a GraphQL specified
 ///   directive replace the built-in of that name, which keeps its id. Two definitions of one name
 ///   in one namespace of one module, a supplied definition named with `__`, and a type named as a
-///   child module of its module are reported.
+///   child module of its module are reported. The first definition a supplied package would add
+///   past [`Limits::max_definitions`] is reported, and nothing after it is collected.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///

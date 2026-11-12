@@ -15,11 +15,22 @@
 //! a Name, and when a directory on its way sits deeper than `Limits::max_module_depth`. Such a file
 //! is parsed all the same, so its syntax errors are reported, but nothing it declares is collected.
 //!
+//! The walk counts every definition the model will hold as it meets it, against
+//! `Limits::max_definitions`: each type and directive definition but one that takes a GraphQL
+//! built-in's place, and each primitive the first time a package writes it, or a root package's
+//! definition makes it. The built-in library counts, and is always collected whole. The first
+//! definition a supplied package would add past the limit is reported, and the walk collects
+//! nothing after it: no item of the rest of its file, nor of any file after it.
+//!
 //! The walk is written once, generic over the slice type of a parsed document, and called alike
 //! for a document of text and a document of bytes: nothing it does depends on which parser made a
 //! document.
 
-use std::{collections::BTreeMap, format, vec::Vec};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  format,
+  vec::Vec,
+};
 
 use smear_parser::graphqlx::ast::{
   DescribedTypeSystemDefinition, ModDefinition, Name, StringValue, TypeDefinition,
@@ -28,6 +39,7 @@ use smear_parser::graphqlx::ast::{
 use tokora::{diagnostic::Location, span::AsSpan};
 
 use super::{
+  builtin::{Replaced, namespace, replaceable, replaced, spelled},
   check,
   code::DiagnosticKind,
   diagnostic::{Diagnostic, Excerpt, Reporter},
@@ -36,7 +48,7 @@ use super::{
   model::{DefKind, Primitive},
   package::Layout,
   parse::{Documents, Parsed},
-  set::{FileView, PackageView},
+  set::{FileView, PackageView, ROOT},
   source::SourceMap,
   tree::{Declared, Tree},
   widths::Widths,
@@ -60,8 +72,8 @@ pub(crate) struct Collected<'d, 'a> {
   pub(crate) extensions: Vec<Placed>,
   /// Every schema definition and extension, in the same order.
   pub(crate) schemas: Vec<Placed>,
-  /// Every primitive a placed file writes where its package may have it, keyed by its place among
-  /// `core`'s materialised definitions.
+  /// Every primitive a placed file writes where its package may have it, or a root package's
+  /// definition makes, keyed by its place among `core`'s materialised definitions.
   pub(crate) written: BTreeMap<(u8, u32), Primitive>,
 }
 
@@ -101,6 +113,18 @@ pub(crate) struct Found<'d> {
   pub(crate) extent: Location,
   /// Its description, as written, quotes included, and where it is written.
   pub(crate) description: Option<(&'d [u8], Location)>,
+  /// The GraphQL built-in whose place it takes, when it is the root package's definition of that
+  /// built-in's kind and name, the first of its name in its namespace in the root package's root
+  /// module.
+  pub(crate) replaces: Option<Replaced>,
+}
+
+/// A definition the definition limit counts.
+enum Counted<'n> {
+  /// A type or a directive, of its kind, spelled so.
+  Definition(DefKind, &'n [u8]),
+  /// A primitive's, which `core` makes.
+  Primitive(Primitive),
 }
 
 /// Finds every module of `packages`, which are in id order and numbered by `sources`, and
@@ -118,8 +142,14 @@ pub(crate) fn items<'d, 'a: 'd>(
     tree: Tree::new(),
     reporter,
     max_depth: limits.max_module_depth(),
+    package: 0,
     package_name: b"",
     package_source: Location::entire(0),
+    root: 0,
+    graphql_names: BTreeSet::new(),
+    defined: 0,
+    max_definitions: limits.max_definitions(),
+    full: false,
     widths: Widths::new(),
     definitions: Vec::new(),
     uses: Vec::new(),
@@ -131,10 +161,12 @@ pub(crate) fn items<'d, 'a: 'd>(
   items.resize_with(sources.len() as usize, || None);
   for (index, package) in packages.iter().enumerate() {
     let range = sources.package_sources(index);
+    let root = walk.tree.root(index);
+    walk.package = index;
     walk.package_name = package.name;
     walk.package_source = Location::entire(range.start());
+    walk.root = root;
     walk.widths.package(package.integers);
-    let root = walk.tree.root(index);
 
     // Every file is placed before any is walked, so that a `mod` meets every directory module of
     // its package, wherever the directory's files are in source order.
@@ -155,6 +187,10 @@ pub(crate) fn items<'d, 'a: 'd>(
     }
 
     for (source, module) in placed {
+      // Past the definition limit nothing more is collected.
+      if walk.full {
+        break;
+      }
       let slot = source.get() as usize;
       match documents.get(source) {
         Some(Parsed::Text(document)) => {
@@ -204,17 +240,30 @@ struct Frame<'d, S> {
   module: u32,
 }
 
-/// What the walk keeps: the tree it grows, where it reports, the package it is in, and what it has
-/// found.
+/// What the walk keeps: the tree it grows, where it reports, the package it is in, what it counts
+/// against the definition limit, and what it has found.
 struct Walk<'d, 'r> {
   tree: Tree<'d>,
   reporter: &'r mut Reporter,
   /// `Limits::max_module_depth`.
   max_depth: u32,
+  /// The index of the package being walked.
+  package: usize,
   /// The name of the package being walked, which messages quote.
   package_name: &'d [u8],
   /// The whole of that package's package source, where its directories are reported.
   package_source: Location,
+  /// That package's root module's node.
+  root: u32,
+  /// The names of GraphQL's built-ins that the root package's root module has defined so far, each
+  /// in its namespace: only the first definition of each such name replaces a built-in.
+  graphql_names: BTreeSet<(u8, &'d [u8])>,
+  /// How many definitions the model will hold so far.
+  defined: u32,
+  /// `Limits::max_definitions`.
+  max_definitions: u32,
+  /// Whether the walk refused a definition past the limit, after which it collects nothing.
+  full: bool,
   /// The widths the walked items write.
   widths: Widths<'d>,
   definitions: Vec<Found<'d>>,
@@ -273,6 +322,7 @@ impl<'d> Walk<'d, '_> {
     source: SourceId,
     module: u32,
   ) -> Vec<&'d TypeSystemItem<S>> {
+    self.widths.source(source.get());
     let mut walked: Vec<&'d TypeSystemItem<S>> = Vec::new();
     let mut stack: Vec<Frame<'d, S>> = Vec::new();
     stack.push(Frame {
@@ -281,6 +331,10 @@ impl<'d> Walk<'d, '_> {
       module,
     });
     while let Some(frame) = stack.last_mut() {
+      // Past the definition limit nothing more is collected.
+      if self.full {
+        break;
+      }
       let items: &'d [TypeSystemItem<S>] = frame.items;
       let next: usize = frame.next;
       let module: u32 = frame.module;
@@ -308,6 +362,7 @@ impl<'d> Walk<'d, '_> {
         TypeSystemItem::Definition(described) => self.definition(described, placed),
         TypeSystemItem::Extension(extension) => {
           self.widths.extension(extension);
+          self.admit_written();
           match extension {
             TypeSystemExtension::Schema(_) => self.schemas.push(placed),
             TypeSystemExtension::Type(_) | TypeSystemExtension::Directive(_) => {
@@ -317,6 +372,7 @@ impl<'d> Walk<'d, '_> {
         }
         TypeSystemItem::Use(declaration) => {
           self.widths.use_item(declaration);
+          self.admit_written();
           self.uses.push(placed);
         }
         // `TypeSystemItem` is `#[non_exhaustive]`, and an item of a kind this walk does not know
@@ -329,13 +385,13 @@ impl<'d> Walk<'d, '_> {
     walked
   }
 
-  /// Keeps the definition `described`, at `placed`: a type or a directive, or the schema.
+  /// Keeps the definition `described`, at `placed`: a type or a directive, when the model may hold
+  /// it, or the schema.
   fn definition<S: AsRef<[u8]>>(
     &mut self,
     described: &'d DescribedTypeSystemDefinition<S>,
     placed: Placed,
   ) {
-    self.widths.definition(described.node());
     let (kind, name): (DefKind, &'d Name<S>) = match described.node() {
       TypeSystemDefinition::Type(definition) => match definition {
         TypeDefinition::Scalar(scalar) => (DefKind::Scalar, scalar.name().name()),
@@ -353,11 +409,21 @@ impl<'d> Walk<'d, '_> {
       },
       TypeSystemDefinition::Directive(directive) => (DefKind::Directive, directive.name().name()),
       TypeSystemDefinition::Schema(_) => {
+        self.widths.definition(described.node());
+        self.admit_written();
         self.schemas.push(placed);
         return;
       }
     };
     let source = placed.source.get();
+    let spelling: &'d [u8] = name.source().as_ref();
+    let location = Location::new(source, *name.as_span());
+    let replaces = self.replaces(kind, spelling, placed.module);
+    if !self.admit(kind, spelling, location, replaces) {
+      return;
+    }
+    self.widths.definition(described.node());
+    self.admit_written();
     let description: Option<(&'d [u8], Location)> =
       described
         .description()
@@ -367,11 +433,81 @@ impl<'d> Walk<'d, '_> {
     self.definitions.push(Found {
       placed,
       kind,
-      name: name.source().as_ref(),
-      location: Location::new(source, *name.as_span()),
+      name: spelling,
+      location,
       extent: Location::new(source, *described.span()),
       description,
+      replaces,
     });
+  }
+
+  /// What the definition `spelling` of `kind`, in the module `module`, replaces: a GraphQL
+  /// built-in, when it is the first definition of its name in its namespace in the root package's
+  /// root module, and of the built-in's kind.
+  fn replaces(&mut self, kind: DefKind, spelling: &'d [u8], module: u32) -> Option<Replaced> {
+    let space = namespace(kind);
+    if self.package != ROOT
+      || module != self.root
+      || !replaceable(space, spelling)
+      || !self.graphql_names.insert((space, spelling))
+    {
+      return None;
+    }
+    replaced(kind, spelling)
+  }
+
+  /// Counts the definition `spelling` of `kind`, named at `location`, which replaces `replaces`:
+  /// `true` when the model may hold it. A definition that takes a built-in's place adds no
+  /// definition to the model, unless the built-in is a primitive no package has written yet, which
+  /// it makes.
+  fn admit(
+    &mut self,
+    kind: DefKind,
+    spelling: &[u8],
+    location: Location,
+    replaces: Option<Replaced>,
+  ) -> bool {
+    match replaces {
+      Some(Replaced::Built(..)) => true,
+      Some(Replaced::Primitive(primitive)) => {
+        if self.widths.wrote(primitive) {
+          return true;
+        }
+        let made = self.room(location, Counted::Definition(kind, spelling));
+        if made {
+          self.widths.make(primitive);
+        }
+        made
+      }
+      None => self.room(location, Counted::Definition(kind, spelling)),
+    }
+  }
+
+  /// Counts each primitive the item just read wrote first, in the order it wrote them, as the
+  /// definition `core` makes for it; one the model may not hold is taken back.
+  fn admit_written(&mut self) {
+    for (primitive, location) in self.widths.fresh() {
+      if !self.room(location, Counted::Primitive(primitive)) {
+        self.widths.unwrite(primitive);
+      }
+    }
+  }
+
+  /// Counts one more definition the model will hold, named at `location`: `true` when the model may
+  /// hold it. A built-in package's definitions always may, as the built-in library is collected
+  /// whole; a supplied package's may while the model holds fewer than the limit. The first that may
+  /// not is reported, and after it the walk collects nothing.
+  fn room(&mut self, location: Location, counted: Counted<'_>) -> bool {
+    if self.full {
+      return false;
+    }
+    if self.package >= ROOT && self.defined >= self.max_definitions {
+      self.full = true;
+      self.past_limit(location, counted);
+      return false;
+    }
+    self.defined = self.defined.saturating_add(1);
+    true
   }
 
   /// The module the inline `mod` `declaration`, written in the file `source` inside the module
@@ -451,6 +587,32 @@ impl<'d> Walk<'d, '_> {
         ))
         .primary_label(kind.title())
         .help("raise `Limits::max_module_depth`, or nest the directories less deeply")
+        .build(),
+    );
+  }
+
+  /// Reports `counted`, named at `at`, the first definition past the definition limit.
+  fn past_limit(&mut self, at: Location, counted: Counted<'_>) {
+    let kind = DiagnosticKind::ResourceLimit;
+    let max = self.max_definitions;
+    let what = match counted {
+      Counted::Definition(DefKind::Directive, name) => {
+        format!("the directive `@{}`", Excerpt(name))
+      }
+      Counted::Definition(_, name) => format!("the type `{}`", Excerpt(name)),
+      Counted::Primitive(primitive) => {
+        format!("the primitive `{}` written here", spelled(primitive))
+      }
+    };
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), at)
+        .severity(kind.severity())
+        .message(format!(
+          "{what} would pass the limit of {max} definitions the model may hold, so neither it nor \
+           anything after it is declared"
+        ))
+        .primary_label(kind.title())
+        .help("raise `Limits::max_definitions`, or declare fewer definitions")
         .build(),
     );
   }

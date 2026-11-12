@@ -29,8 +29,10 @@
 //! Each built-in definition requires its package's tier: the tier is a tag of the definition,
 //! whatever its arguments name, and the library is analysed as one, at tier `Std`.
 
+use std::{format, string::String};
+
 use super::{
-  model::Primitive,
+  model::{DefKind, Primitive},
   package::{IntegerProvider, Tier},
 };
 
@@ -371,6 +373,80 @@ pub(crate) const META_TYPES: [&str; 8] = [
   "__Directive",
   "__DirectiveLocation",
 ];
+
+/// The rank of the type namespace, in which every definition but a directive is named.
+pub(crate) const TYPE: u8 = 0;
+
+/// The rank of the directive namespace.
+pub(crate) const DIRECTIVE: u8 = 1;
+
+/// The namespace a definition of `kind` is named in: `TYPE` or `DIRECTIVE`.
+pub(crate) fn namespace(kind: DefKind) -> u8 {
+  if kind == DefKind::Directive {
+    DIRECTIVE
+  } else {
+    TYPE
+  }
+}
+
+/// What a root package's definition replaces: a GraphQL built-in, whose definition it takes.
+#[derive(Clone, Copy)]
+pub(crate) enum Replaced {
+  /// A primitive `core` materialises: `i32`, `f64` or `bool`.
+  Primitive(Primitive),
+  /// The definition with this name, in the namespace of this rank, in the root module of the
+  /// built-in package at this index.
+  Built(usize, u8, &'static [u8]),
+}
+
+/// Whether `name`, in the namespace of rank `namespace`, is a name of a GraphQL built-in a root
+/// package may replace: one of GraphQL's five scalars' in the type namespace, or one of its five
+/// specified directives' in the directive namespace.
+pub(crate) fn replaceable(namespace: u8, name: &[u8]) -> bool {
+  if namespace == DIRECTIVE {
+    SPECIFIED_DIRECTIVES
+      .iter()
+      .any(|directive: &&str| directive.as_bytes() == name)
+  } else {
+    ALIASES
+      .iter()
+      .any(|row: &(usize, &str, Target)| row.1.as_bytes() == name)
+  }
+}
+
+/// What a definition of `kind` named `name` replaces, when it is the first of its name in its
+/// namespace in the root package's root module: GraphQL's scalar of its name, when it is a scalar,
+/// or GraphQL's specified directive of its name, when it is a directive.
+pub(crate) fn replaced(kind: DefKind, name: &[u8]) -> Option<Replaced> {
+  match kind {
+    DefKind::Scalar => {
+      for (_, alias, target) in ALIASES {
+        if alias.as_bytes() == name {
+          return Some(match target {
+            Target::Primitive(primitive) => Replaced::Primitive(primitive),
+            Target::Named(package, named) => Replaced::Built(package, TYPE, named.as_bytes()),
+          });
+        }
+      }
+      None
+    }
+    DefKind::Directive => SPECIFIED_DIRECTIVES
+      .into_iter()
+      .find(|directive: &&str| directive.as_bytes() == name)
+      .map(|directive: &'static str| Replaced::Built(CORE, DIRECTIVE, directive.as_bytes())),
+    _ => None,
+  }
+}
+
+/// The spelling of `primitive`'s definition: `bool`, `f32`, `f64`, `iN` or `uN`.
+pub(crate) fn spelled(primitive: Primitive) -> String {
+  match primitive {
+    Primitive::Bool => String::from("bool"),
+    Primitive::F32 => String::from("f32"),
+    Primitive::F64 => String::from("f64"),
+    Primitive::Int { signed, width } => format!("{}{width}", if signed { 'i' } else { 'u' }),
+  }
+}
 
 /// The intrinsic primitive `spelling` names, recognised by pattern: `bool`, `f32`, `f64`, and
 /// `iN` or `uN` whose width `N` is written in decimal with no leading zero, `0` itself included,

@@ -10,16 +10,26 @@
 //! than a second rule for ordering ids. A width the writing package may not have is not written
 //! by it: name resolution reports such a spelling where it is used.
 //!
+//! Each primitive a package writes first is also noted with where it is written, in the order
+//! written, so that the walk counts its definition against `Limits::max_definitions` when it is
+//! made, and takes it back when the limit refuses it.
+//!
 //! Every walk here is written once, generic over a document's slice type, and nested types,
 //! values and `use` groups are walked with explicit stacks.
 
-use std::{collections::BTreeMap, vec, vec::Vec};
+use std::{
+  collections::{BTreeMap, btree_map::Entry},
+  vec,
+  vec::Vec,
+};
 
 use smear_parser::graphqlx::ast::{
   ConstDirectives, ConstInputValue, DefinitionName, FieldDefinition, ImplementInterfaces,
-  InputValueDefinition, Path, Type, TypeDefinition, TypeExtension, TypePath, TypeSystemDefinition,
-  TypeSystemExtension, UseDefinition, UsePrefix, UseTree, UseTreeKind, WhereClause,
+  InputValueDefinition, Name, Path, Type, TypeDefinition, TypeExtension, TypePath,
+  TypeSystemDefinition, TypeSystemExtension, UseDefinition, UsePrefix, UseTree, UseTreeKind,
+  WhereClause,
 };
+use tokora::{diagnostic::Location, span::AsSpan};
 
 use super::{
   builtin::{available, written},
@@ -27,14 +37,19 @@ use super::{
   package::IntegerProvider,
 };
 
-/// What the pre-pass has found so far, and the package it is reading.
+/// What the pre-pass has found so far, and the package and the source it is reading.
 pub(crate) struct Widths<'p> {
   /// The integer provider of the package being read.
   integers: Option<&'p IntegerProvider>,
+  /// The source being read, where what it writes is written.
+  source: u32,
   /// Every primitive written where it is available, keyed by its place among `core`'s
   /// materialised definitions: the key is the order the ids take, and two primitives share it
   /// only when they are one.
   written: BTreeMap<(u8, u32), Primitive>,
+  /// The primitives written first since the walk last took them, in the order written, each with
+  /// where it is written.
+  fresh: Vec<(Primitive, Location)>,
   /// How many nodes of a kind it does not know the pass met.
   unknown: u32,
 }
@@ -44,7 +59,9 @@ impl<'p> Widths<'p> {
   pub(crate) fn new() -> Self {
     Self {
       integers: None,
+      source: 0,
       written: BTreeMap::new(),
+      fresh: Vec::new(),
       unknown: 0,
     }
   }
@@ -52,6 +69,34 @@ impl<'p> Widths<'p> {
   /// Reads the next items as the package whose integer provider is `integers` writes them.
   pub(crate) fn package(&mut self, integers: Option<&'p IntegerProvider>) {
     self.integers = integers;
+  }
+
+  /// Reads the next items as the source `source` writes them.
+  pub(crate) fn source(&mut self, source: u32) {
+    self.source = source;
+  }
+
+  /// The primitives written first since the last call, in the order written, each with where it is
+  /// written: the definitions `core` is to make for them.
+  pub(crate) fn fresh(&mut self) -> Vec<(Primitive, Location)> {
+    core::mem::take(&mut self.fresh)
+  }
+
+  /// Takes back `primitive`, written first where the model may hold no more definitions: `core`
+  /// makes no definition for it.
+  pub(crate) fn unwrite(&mut self, primitive: Primitive) {
+    self.written.remove(&primitive.rank());
+  }
+
+  /// Whether `primitive` is written, or made, already.
+  pub(crate) fn wrote(&self, primitive: Primitive) -> bool {
+    self.written.contains_key(&primitive.rank())
+  }
+
+  /// Makes `primitive`, which a root package's definition replaces whether or not a package writes
+  /// it.
+  pub(crate) fn make(&mut self, primitive: Primitive) {
+    self.written.insert(primitive.rank(), primitive);
   }
 
   /// Every primitive written, keyed by its place among `core`'s materialised definitions, and how
@@ -224,7 +269,7 @@ impl<'p> Widths<'p> {
           UsePrefix::Path(path) => self.path(path),
           UsePrefix::Source { segments, .. } => {
             if let Some(last) = segments.last() {
-              self.spelling(last.source().as_ref());
+              self.spelling(last);
             }
           }
           // A bare root binds no item of its own.
@@ -241,19 +286,23 @@ impl<'p> Widths<'p> {
     }
   }
 
-  /// Notes the primitive `spelling` writes, when the package being read may have it.
-  fn spelling(&mut self, spelling: &[u8]) {
-    if let Some(primitive) = written(spelling)
+  /// Notes the primitive `name` writes, when the package being read may have it; and, when no item
+  /// wrote it before, where it is written first.
+  fn spelling<S: AsRef<[u8]>>(&mut self, name: &Name<S>) {
+    if let Some(primitive) = written(name.source().as_ref())
       && available(primitive, self.integers)
+      && let Entry::Vacant(slot) = self.written.entry(primitive.rank())
     {
-      self.written.insert(primitive.rank(), primitive);
+      slot.insert(primitive);
+      let at = Location::new(self.source, *name.as_span());
+      self.fresh.push((primitive, at));
     }
   }
 
   /// Reads a path: its last name is the item it names.
   fn path<S: AsRef<[u8]>>(&mut self, path: &Path<S>) {
     if let Some(last) = path.segments().last() {
-      self.spelling(last.source().as_ref());
+      self.spelling(last);
     }
   }
 

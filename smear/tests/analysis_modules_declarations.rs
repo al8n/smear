@@ -545,3 +545,144 @@ fn the_shared_codes_are_smear_schemas() {
   expected.sort_unstable();
   assert_eq!(codes, expected);
 }
+
+/// How many definitions the built-in library alone gives a model: its own, and `bool`, which it
+/// writes.
+fn library_definitions() -> u32 {
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
+  analyze(&root, &[], &Limits::new()).model().defs().len()
+}
+
+/// The definition limit counts every definition the model would hold, the built-in library's
+/// included: the first a supplied package would add past it is reported where it is named, with
+/// the limit, and nothing after it is collected.
+#[test]
+fn the_first_definition_past_the_limit_is_reported_and_nothing_after_it_is_declared() {
+  let library = library_definitions();
+  let resource = DiagnosticKind::ResourceLimit.code().as_str();
+  let text = "scalar A\nscalar B\ntype C {\n  b: B\n}\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
+  let max = library + 1;
+  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(max));
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(resource, named(schema, text, "scalar ", "B", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert!(!analysis.is_ok());
+  let message = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic")
+    .to_string();
+  assert!(message.contains("the type `B`"), "{message}");
+  assert!(message.contains(&format!("limit of {max}")), "{message}");
+  let model = analysis.model();
+  assert_eq!(declared(model), ["A"]);
+  assert_eq!(model.defs().len(), max);
+
+  // A limit below the built-in library's own count admits no supplied definition, and the library
+  // is declared whole all the same.
+  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(0));
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(resource, named(schema, text, "scalar ", "A", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert_eq!(model.defs().len(), library);
+  assert_eq!(
+    model.def(model.builtins().deprecated()).name(),
+    "deprecated"
+  );
+}
+
+/// A program whose definitions fill the limit exactly is no error.
+#[test]
+fn the_definition_limit_met_exactly_is_no_error() {
+  let library = library_definitions();
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[("schema.graphqlx", "scalar A\nscalar B\n")],
+  );
+  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library + 2));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert_eq!(declared(analysis.model()), ["A", "B"]);
+  assert_eq!(analysis.model().defs().len(), library + 2);
+}
+
+/// A primitive a package writes first is a definition `core` makes, and it counts where it is
+/// written: `i32` here takes the last place the limit leaves, so the scalar after it is past the
+/// limit; and with one place fewer, `i32` itself is, reported where it is written.
+#[test]
+fn a_written_primitive_counts_toward_the_definition_limit() {
+  let library = library_definitions();
+  let resource = DiagnosticKind::ResourceLimit.code().as_str();
+  let text = "type Query {\n  a: i32\n}\nscalar Real\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
+
+  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library + 2));
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(resource, named(schema, text, "scalar ", "Real", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert_eq!(declared(model), ["Query"]);
+  assert!(model.lookup(Namespace::Type, "^::core::i32").is_some());
+  assert_eq!(model.defs().len(), library + 2);
+
+  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library + 1));
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(resource, named(schema, text, "a: ", "i32", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let message = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic")
+    .to_string();
+  assert!(message.contains("the primitive `i32`"), "{message}");
+  let model = analysis.model();
+  assert_eq!(declared(model), ["Query"]);
+  assert_eq!(model.lookup(Namespace::Type, "^::core::i32"), None);
+  assert_eq!(model.defs().len(), library + 1);
+}
+
+/// A root package's definition that replaces a GraphQL built-in takes the built-in's definition
+/// and adds none to the count, unless it makes a primitive no package writes.
+#[test]
+fn a_replacing_definition_counts_only_the_primitive_it_makes() {
+  let library = library_definitions();
+  let resource = DiagnosticKind::ResourceLimit.code().as_str();
+  let text = "scalar String\ndirective @deprecated(reason: String) on FIELD_DEFINITION\n\
+              scalar Int\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
+
+  // `String` and `@deprecated` take their built-ins' places, and `Int` makes `i32`.
+  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library + 1));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert_eq!(analysis.model().defs().len(), library + 1);
+
+  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library));
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(resource, named(schema, text, "scalar ", "Int", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(analysis.model().defs().len(), library);
+}

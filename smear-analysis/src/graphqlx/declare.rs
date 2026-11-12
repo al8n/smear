@@ -32,35 +32,23 @@
 //! reserves, is reported with `smear-schema`'s code too. A type that a module names as one of its
 //! child modules is `smear::graphqlx::module-type-collision`.
 
-use std::{
-  collections::{BTreeMap, BTreeSet},
-  format,
-  string::String,
-  vec,
-  vec::Vec,
-};
+use std::{collections::BTreeMap, format, string::String, vec, vec::Vec};
 
 use smear_lexer::decode_string_value;
 use smear_semantics::duplicates::Duplicates;
 use tokora::diagnostic::Location;
 
 use super::{
-  builtin::{ALIASES, BUILT_INS, CORE, META_TYPES, SPECIFIED_DIRECTIVES, Target},
+  builtin::{ALIASES, BUILT_INS, CORE, META_TYPES, Replaced, TYPE, Target, namespace, spelled},
   code::{DiagnosticKind, schema},
   collect::{Collected, Found, Items, Placed},
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{DefId, ModuleId, SourceId, Sym},
-  model::{DefKind, ModelBuilder, Origin, Primitive},
+  model::{DefKind, ModelBuilder, Origin},
   set::ROOT,
   source::SourceMap,
   tree::Node,
 };
-
-/// The namespace rank of the type namespace: every definition but a directive's.
-const TYPE: u8 = 0;
-
-/// The namespace rank of the directive namespace.
-const DIRECTIVE: u8 = 1;
 
 /// What item collection hands the phases after it: every item they read, already found and
 /// placed, so that none of them walks a document's items again.
@@ -120,16 +108,6 @@ pub(crate) struct Binding {
   pub(crate) replaces: bool,
 }
 
-/// What a root package's definition replaces.
-#[derive(Clone, Copy)]
-enum Replaced<'d> {
-  /// A primitive `core` materialises.
-  Primitive(Primitive),
-  /// The definition with this namespace and name in the root module of the built-in package at
-  /// this index.
-  Built(usize, u8, &'d [u8]),
-}
-
 /// Numbers every module of `collected`'s tree and every definition it found, appending them to
 /// `builder`, which holds every package and nothing else yet, and checks each module's names,
 /// reporting into `reporter`; answers what the later phases read.
@@ -164,20 +142,13 @@ pub(crate) fn declarations<'d, 'a>(
     }
   }
 
-  // What the root package's root module replaces: for each, the definition that replaces it.
-  let root = modules[tree.root_of(ROOT) as usize];
+  // What the root package's root module replaces: for each, the definition that replaces it. The
+  // walk found which definitions those are, the first of each name in the root module.
   let mut replacing: Vec<bool> = vec![false; definitions.len()];
   let mut primitives: BTreeMap<(u8, u32), usize> = BTreeMap::new();
   let mut named: BTreeMap<(usize, u8, &'d [u8]), usize> = BTreeMap::new();
-  let mut seen: BTreeSet<(u8, &'d [u8])> = BTreeSet::new();
   for (at, found) in definitions.iter().enumerate() {
-    if modules[found.placed.module as usize] != root
-      || !seen.insert((namespace(found.kind), found.name))
-    {
-      // A later definition of one name never replaces: it is a second declaration of the name.
-      continue;
-    }
-    match replaced(found) {
+    match found.replaces {
       Some(Replaced::Primitive(primitive)) => {
         written.insert(primitive.rank(), primitive);
         primitives.insert(primitive.rank(), at);
@@ -382,52 +353,10 @@ fn order(modules: &[ModuleId], found: &Found<'_>) -> (ModuleId, SourceId, usize)
   )
 }
 
-/// The namespace a definition of `kind` is named in.
-fn namespace(kind: DefKind) -> u8 {
-  if kind == DefKind::Directive {
-    DIRECTIVE
-  } else {
-    TYPE
-  }
-}
-
 /// What a definition is named by in its module: its namespace and its name. Two definitions with
 /// one key are two declarations of one name, whatever their kinds.
 fn key<'d>(found: &Found<'d>) -> (u8, &'d [u8]) {
   (namespace(found.kind), found.name)
-}
-
-/// What the definition `found`, the first of its name in the root package's root module, replaces:
-/// a GraphQL scalar of its name, when it is a scalar, or a GraphQL specified directive of its name.
-fn replaced<'d>(found: &Found<'d>) -> Option<Replaced<'d>> {
-  match found.kind {
-    DefKind::Scalar => {
-      for (_, alias, target) in ALIASES {
-        if alias.as_bytes() == found.name {
-          return Some(match target {
-            Target::Primitive(primitive) => Replaced::Primitive(primitive),
-            Target::Named(package, name) => Replaced::Built(package, TYPE, name.as_bytes()),
-          });
-        }
-      }
-      None
-    }
-    DefKind::Directive => SPECIFIED_DIRECTIVES
-      .iter()
-      .find(|name: &&&str| name.as_bytes() == found.name)
-      .map(|name: &&str| Replaced::Built(CORE, DIRECTIVE, name.as_bytes())),
-    _ => None,
-  }
-}
-
-/// The spelling of `primitive`'s definition: `bool`, `f32`, `f64`, `iN` or `uN`.
-fn spelled(primitive: Primitive) -> String {
-  match primitive {
-    Primitive::Bool => String::from("bool"),
-    Primitive::F32 => String::from("f32"),
-    Primitive::F64 => String::from("f64"),
-    Primitive::Int { signed, width } => format!("{}{width}", if signed { 'i' } else { 'u' }),
-  }
 }
 
 /// Gives `def` the description written as `description`, decoded into `text`.

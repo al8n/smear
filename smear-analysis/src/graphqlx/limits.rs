@@ -31,7 +31,8 @@ const DEFAULT_NEAR_MISS_COMPARISONS: u32 = 1 << 20;
 /// the diagnostic ceiling and the near-miss budget limit what the analysis says, not what it
 /// accepts.
 ///
-/// Every bound is a count, and `0` admits none of what it counts.
+/// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
+/// is always declared whole: see [`Limits::max_definitions`].
 ///
 /// # Building one
 ///
@@ -88,8 +89,16 @@ impl Limits {
     }
   }
 
-  /// How many definitions the model may hold, over every package: the types and directives the
-  /// files declare, and the primitives the analysis materializes for the widths they name.
+  /// How many definitions the model may hold, over every package. Every definition the model would
+  /// hold counts, the built-in library's own included: each type and directive a file declares, and
+  /// each primitive `core` makes for a width a package writes. A root package's definition that
+  /// replaces one of GraphQL's built-ins takes that built-in's definition and adds none, unless the
+  /// built-in is a primitive that no package writes, which it makes.
+  ///
+  /// The built-in library is always declared whole, so a limit below its own count admits no
+  /// supplied definition at all. The first definition a supplied package would add past the limit,
+  /// a type, a directive or a primitive it writes, is reported once, where it is named, and nothing
+  /// after it is collected: no item of the rest of its file, nor of any file after it.
   ///
   /// The default is 2^20. A hand-written schema declares thousands of definitions, not a million,
   /// and the bound is what stops a generated or hostile package set from growing the model's
