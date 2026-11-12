@@ -5,8 +5,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, DiagnosticKind, Layout, Limits, Model, Module, ModuleId, ModuleKind,
-    Package, PackageId, SourceFile, SourceId, Sym, Tier, analyze, test_support,
+    Analysis, DefId, Diagnostic, DiagnosticKind, Layout, Limits, Model, Module, ModuleId,
+    ModuleKind, Package, PackageId, SourceFile, SourceId, Sym, Tier, analyze, test_support,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -646,4 +646,282 @@ fn a_modules_descendants_come_before_its_next_sibling() {
       ]
     );
   }
+}
+
+/// The modules every analysis of a root package with no dependency holds before the package adds
+/// one: the three built-in packages' root modules and the root package's.
+const ROOTS: u32 = 4;
+
+/// The names of the definitions `module` holds, in id order.
+fn defined(model: &Model, module: ModuleId) -> Vec<&str> {
+  model
+    .module(module)
+    .defs()
+    .into_iter()
+    .map(|id: DefId| model.def(id).name())
+    .collect()
+}
+
+/// The first module a supplied package's `mod` would add past the module limit is reported where
+/// the `mod` names it, with the limit; nothing inside it is collected, and no module is added after
+/// it, unreported; what sits in a module already held is still collected.
+#[test]
+fn a_mod_past_the_module_limit_is_refused_and_no_module_after_it() {
+  let text = "mod a {\n  scalar A\n}\nmod b {\n  mod c {}\n  scalar B\n}\nmod d {}\nscalar C\n";
+  let root = package("app", Layout::Flat, &[("lib.graphqlx", text)]);
+  let max = ROOTS + 1;
+  let analysis = analyze(&root, &[], &Limits::new().with_max_modules(max));
+  let lib = file(&analysis, 3, "lib.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(
+      code(DiagnosticKind::ResourceLimit),
+      mod_name(lib, text, "b", 0)
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  let message = diagnostic.to_string();
+  assert_eq!(quoted(&message), ["mod b"], "{message}");
+  assert!(
+    message.contains(&format!("limit of {max} modules")),
+    "{message}"
+  );
+  assert!(
+    diagnostic
+      .help()
+      .is_some_and(|help: &str| help.contains("`Limits::max_modules`")),
+    "{:?}",
+    diagnostic.help()
+  );
+
+  let model = analysis.model();
+  assert_eq!(model.modules().len(), max);
+  assert_eq!(
+    tree(model),
+    [
+      (3, vec![], ModuleKind::Root),
+      (3, vec!["a"], ModuleKind::Inline),
+    ]
+  );
+  assert_eq!(defined(model, module(model, "^::app::a")), ["A"]);
+  assert_eq!(defined(model, module(model, "^::app")), ["C"]);
+}
+
+/// The first module a supplied package's directory would add past the module limit is reported at
+/// the package source, quoting the directory, with the limit: the files under it are parsed but
+/// placed in no module, and no module is added after it, by a directory or by a `mod`.
+#[test]
+fn a_directory_past_the_module_limit_is_refused_and_no_module_after_it() {
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[
+      ("a/1.graphqlx", "scalar A\nmod m {}\n"),
+      ("b/2.graphqlx", "scalar B\n"),
+      ("c/3.graphqlx", "scalar C\n"),
+      ("4.graphqlx", "scalar D\n"),
+    ],
+  );
+  let max = ROOTS + 1;
+  let analysis = analyze(&root, &[], &Limits::new().with_max_modules(max));
+  assert_eq!(
+    found(&analysis),
+    [(
+      code(DiagnosticKind::ResourceLimit),
+      package_source(&analysis, 3)
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let message = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic")
+    .to_string();
+  assert_eq!(quoted(&message), ["app", "b"], "{message}");
+  assert!(
+    message.contains(&format!("limit of {max} modules")),
+    "{message}"
+  );
+
+  let model = analysis.model();
+  assert_eq!(model.modules().len(), max);
+  assert_eq!(
+    tree(model),
+    [
+      (3, vec![], ModuleKind::Root),
+      (3, vec!["a"], ModuleKind::Directory),
+    ]
+  );
+  assert_eq!(defined(model, module(model, "^::app::a")), ["A"]);
+  assert_eq!(defined(model, module(model, "^::app")), ["D"]);
+}
+
+/// A program whose modules fill the module limit exactly is no error; one fewer refuses the last
+/// module the walk adds.
+#[test]
+fn the_module_limit_met_exactly_is_no_error() {
+  let text = "mod a {}\nmod b {\n  mod c {}\n}\n";
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[("lib.graphqlx", text), ("d/1.graphqlx", "scalar D\n")],
+  );
+  // The four root modules, then `d`, `a`, `b` and `b::c`.
+  let analysis = analyze(&root, &[], &Limits::new().with_max_modules(ROOTS + 4));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert_eq!(analysis.model().modules().len(), ROOTS + 4);
+
+  let analysis = analyze(&root, &[], &Limits::new().with_max_modules(ROOTS + 3));
+  let lib = file(&analysis, 3, "lib.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(
+      code(DiagnosticKind::ResourceLimit),
+      mod_name(lib, text, "c", 0)
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(analysis.model().modules().len(), ROOTS + 3);
+}
+
+/// Every package's root module counts toward the module limit and is always held, the built-in
+/// packages' and a dependency's included, although the dependency is numbered after the root
+/// package: here they leave no room for the root package's `mod`, and none for the dependency's
+/// directory; and a limit below their count holds them all the same.
+#[test]
+fn every_root_module_counts_toward_the_module_limit_and_is_always_held() {
+  let text = "mod a {}\n";
+  let root = package("app", Layout::Flat, &[("lib.graphqlx", text)]).with_dependencies(["geo"]);
+  let dependencies = [package(
+    "geo",
+    Layout::Directory,
+    &[("m/1.graphqlx", "scalar M\n")],
+  )];
+  for max in [ROOTS + 1, 0] {
+    let analysis = analyze(&root, &dependencies, &Limits::new().with_max_modules(max));
+    let lib = file(&analysis, 3, "lib.graphqlx");
+    assert_eq!(
+      found(&analysis),
+      [(
+        code(DiagnosticKind::ResourceLimit),
+        mod_name(lib, text, "a", 0)
+      )],
+      "{max}: {:#?}",
+      analysis.diagnostics()
+    );
+    let model = analysis.model();
+    assert_eq!(model.modules().len(), ROOTS + 1, "{max}");
+    assert_eq!(
+      tree(model),
+      [(3, vec![], ModuleKind::Root), (4, vec![], ModuleKind::Root)],
+      "{max}"
+    );
+    // The dependency's file sat in the refused directory `m`, so it declares nothing.
+    assert!(defined(model, module(model, "^::geo")).is_empty(), "{max}");
+  }
+}
+
+/// A `mod` of a module the package already has adds no module, so at the module limit it is not
+/// refused: it is a module declared twice, and its items are collected into that module, whether
+/// a `mod` or a directory declared the module first.
+#[test]
+fn a_mod_of_a_module_the_package_has_is_not_refused_at_the_limit() {
+  let limits = Limits::new().with_max_modules(ROOTS + 1);
+  let twice = code(DiagnosticKind::ModuleDefinedTwice);
+
+  let text = "mod a {\n  scalar A\n}\nmod a {\n  scalar B\n}\n";
+  let root = package("app", Layout::Flat, &[("lib.graphqlx", text)]);
+  let analysis = analyze(&root, &[], &limits);
+  let lib = file(&analysis, 3, "lib.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(twice, mod_name(lib, text, "a", 1))],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert_eq!(model.modules().len(), ROOTS + 1);
+  assert_eq!(defined(model, module(model, "^::app::a")), ["A", "B"]);
+
+  let text = "mod a {\n  scalar B\n}\n";
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[("a/1.graphqlx", "scalar A\n"), ("lib.graphqlx", text)],
+  );
+  let analysis = analyze(&root, &[], &limits);
+  let lib = file(&analysis, 3, "lib.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(twice, mod_name(lib, text, "a", 0))],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert_eq!(model.modules().len(), ROOTS + 1);
+  assert_eq!(defined(model, module(model, "^::app::a")), ["A", "B"]);
+}
+
+/// Which modules the module limit refuses, and what it reports, depend on the package set alone:
+/// the files and the dependencies given in reverse change no module and no diagnostic. Every
+/// directory is a module before any `mod` is walked, so the directories take the room first.
+#[test]
+fn the_module_limit_refuses_the_same_modules_whatever_the_order_given() {
+  let app = [
+    ("0.graphqlx", "mod z {}\n"),
+    ("a/1.graphqlx", "mod m {}\n"),
+    ("b/2.graphqlx", "mod n {}\n"),
+    ("c/3.graphqlx", "scalar C\n"),
+  ];
+  let geo = [("g/1.graphqlx", "scalar G\n")];
+  let build = |reversed: bool| -> (Package<&'static str>, Vec<Package<&'static str>>) {
+    let order = |files: &[(&'static str, &'static str)]| -> Vec<(&'static str, &'static str)> {
+      let mut files = files.to_vec();
+      if reversed {
+        files.reverse();
+      }
+      files
+    };
+    let root = package("app", Layout::Directory, &order(&app[..])).with_dependencies(["geo"]);
+    let dependencies = vec![package("geo", Layout::Directory, &order(&geo[..]))];
+    (root, dependencies)
+  };
+  // The five root modules, then `a`, `b` and `c`.
+  let limits = Limits::new().with_max_modules(ROOTS + 4);
+
+  let (root, dependencies) = build(false);
+  let forward = analyze(&root, &dependencies, &limits);
+  let (root, dependencies) = build(true);
+  let backward = analyze(&root, &dependencies, &limits);
+
+  let zero = file(&forward, 3, "0.graphqlx");
+  assert_eq!(
+    found(&forward),
+    [(
+      code(DiagnosticKind::ResourceLimit),
+      mod_name(zero, "mod z {}\n", "z", 0)
+    )],
+    "{:#?}",
+    forward.diagnostics()
+  );
+  assert_eq!(
+    tree(forward.model()),
+    [
+      (3, vec![], ModuleKind::Root),
+      (3, vec!["a"], ModuleKind::Directory),
+      (3, vec!["b"], ModuleKind::Directory),
+      (3, vec!["c"], ModuleKind::Directory),
+      (4, vec![], ModuleKind::Root),
+    ]
+  );
+  assert_eq!(numbered(&forward), numbered(&backward));
 }

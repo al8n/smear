@@ -104,7 +104,9 @@ impl Analysis {
 ///   the [`Flat`](super::Layout::Flat) layout every file in the root module; and a module for every
 ///   inline `mod`, inside the module it is written in. A directory whose name is not a Name, a
 ///   directory or a `mod` nested deeper than [`Limits::max_module_depth`], and a `mod` of a module
-///   the package already has are reported.
+///   the package already has are reported. Every package's root module is held; the first module a
+///   supplied package's directory or `mod` would add past [`Limits::max_modules`] is reported, and
+///   no module is added after it.
 /// - Collects every module's declarations and numbers them: each type and directive definition a
 ///   placed file declares is a definition of the model, the built-in packages' included, and so is
 ///   every intrinsic primitive the packages write where they may have it, which `core` holds first
