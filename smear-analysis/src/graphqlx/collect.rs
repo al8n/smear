@@ -1,9 +1,14 @@
-//! Item collection: one walk over the parsed documents, which finds every package's modules.
+//! Item collection: one walk over the parsed documents, which finds every package's modules and
+//! everything each module declares, and hands both on, so that no later phase walks a document's
+//! items again.
 //!
 //! Each file is placed in a module first: its package's root module in the `Flat` layout, and its
 //! directory's module in the `Directory` layout. Then each placed file's items are walked in
 //! source order, the items of an inline `mod` in the module it declares, with an explicit stack,
-//! so that modules nested however deep cost no native stack.
+//! so that modules nested however deep cost no native stack. Each item is kept, by its index among
+//! its source's items in that order: each definition with its kind, name, location, extent and
+//! description; each extension, `use` item, and schema definition or extension with its module.
+//! The same walk reads every item's type positions for the widths it writes ([`Widths`]).
 //!
 //! A file is placed nowhere when the package set refused its path (an invalid path, or one that
 //! two files share, which nothing but their texts tells apart), when a directory on its way is not
@@ -14,9 +19,12 @@
 //! for a document of text and a document of bytes: nothing it does depends on which parser made a
 //! document.
 
-use std::{format, vec::Vec};
+use std::{collections::BTreeMap, format, vec::Vec};
 
-use smear_parser::graphqlx::ast::{ModDefinition, StringValue, TypeSystemDocument, TypeSystemItem};
+use smear_parser::graphqlx::ast::{
+  DescribedTypeSystemDefinition, ModDefinition, Name, StringValue, TypeDefinition,
+  TypeSystemDefinition, TypeSystemDocument, TypeSystemExtension, TypeSystemItem,
+};
 use tokora::{diagnostic::Location, span::AsSpan};
 
 use super::{
@@ -25,35 +33,107 @@ use super::{
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{SourceId, dense},
   limits::Limits,
+  model::{DefKind, Primitive},
   package::Layout,
   parse::{Documents, Parsed},
   set::{FileView, PackageView},
   source::SourceMap,
   tree::{Declared, Tree},
+  widths::Widths,
 };
 
-/// Finds every module of `packages`, which are in id order and numbered by `sources`: each
-/// package's root module, its directory modules, and the modules its files' inline `mod`s declare,
-/// reporting what is refused on the way.
-pub(crate) fn modules<'d, 'a: 'd>(
+/// What the walk found: every module, everything each module declares, and every primitive the
+/// program writes. The declarations number what it found ([`declarations`](super::declare)).
+pub(crate) struct Collected<'d, 'a> {
+  /// Every module, before it is numbered.
+  pub(crate) tree: Tree<'d>,
+  /// Each source's items, flattened in the order the walk reads them, which is source order with a
+  /// `mod`'s items right after it: what [`Placed::item`] indexes. `None` for a source the walk did
+  /// not read.
+  pub(crate) items: Vec<Option<Items<'d, 'a>>>,
+  /// Every type and directive definition, in the order the walk met them: by package, then
+  /// source, then position.
+  pub(crate) definitions: Vec<Found<'d>>,
+  /// Every `use` item, in the same order.
+  pub(crate) uses: Vec<Placed>,
+  /// Every type and directive extension, in the same order.
+  pub(crate) extensions: Vec<Placed>,
+  /// Every schema definition and extension, in the same order.
+  pub(crate) schemas: Vec<Placed>,
+  /// Every primitive a placed file writes where its package may have it, keyed by its place among
+  /// `core`'s materialised definitions.
+  pub(crate) written: BTreeMap<(u8, u32), Primitive>,
+}
+
+/// One document's items, flattened, of the parser that made the document.
+// Read by name resolution and lowering, the next parts of the analyzer, through the items the
+// declarations address; until they land nothing reads it, and `dead_code` would say so of each
+// variant's field.
+#[allow(dead_code)]
+pub(crate) enum Items<'d, 'a> {
+  /// A document of text.
+  Text(Vec<&'d TypeSystemItem<&'a str>>),
+  /// A document of bytes that are not UTF-8.
+  Bytes(Vec<&'d TypeSystemItem<&'a [u8]>>),
+}
+
+/// An item the walk kept: the module it is in, its source, and its index among that source's
+/// items.
+#[derive(Clone, Copy)]
+pub(crate) struct Placed {
+  /// The module's node in the tree.
+  pub(crate) module: u32,
+  pub(crate) source: SourceId,
+  /// Its index among its source's items, in [`Collected::items`].
+  pub(crate) item: u32,
+}
+
+/// A type or directive definition the walk found.
+pub(crate) struct Found<'d> {
+  /// Where it is.
+  pub(crate) placed: Placed,
+  pub(crate) kind: DefKind,
+  /// Its name, as written.
+  pub(crate) name: &'d [u8],
+  /// Where its name is written.
+  pub(crate) location: Location,
+  /// From its description, or its first keyword, to its last token.
+  pub(crate) extent: Location,
+  /// Its description, as written, quotes included, and where it is written.
+  pub(crate) description: Option<(&'d [u8], Location)>,
+}
+
+/// Finds every module of `packages`, which are in id order and numbered by `sources`, and
+/// everything each declares: each package's root module, its directory modules and the modules
+/// its files' inline `mod`s declare, reporting what is refused on the way, and each module's
+/// items.
+pub(crate) fn items<'d, 'a: 'd>(
   packages: &'d [PackageView<'a>],
   sources: &SourceMap,
   documents: &'d Documents<'a>,
   limits: &Limits,
   reporter: &mut Reporter,
-) -> Tree<'d> {
+) -> Collected<'d, 'a> {
   let mut walk = Walk {
     tree: Tree::new(),
     reporter,
     max_depth: limits.max_module_depth(),
     package_name: b"",
     package_source: Location::entire(0),
+    widths: Widths::new(),
+    definitions: Vec::new(),
+    uses: Vec::new(),
+    extensions: Vec::new(),
+    schemas: Vec::new(),
     unknown: 0,
   };
+  let mut items: Vec<Option<Items<'d, 'a>>> = Vec::new();
+  items.resize_with(sources.len() as usize, || None);
   for (index, package) in packages.iter().enumerate() {
     let range = sources.package_sources(index);
     walk.package_name = package.name;
     walk.package_source = Location::entire(range.start());
+    walk.widths.package(package.integers);
     let root = walk.tree.root(index);
 
     // Every file is placed before any is walked, so that a `mod` meets every directory module of
@@ -75,18 +155,33 @@ pub(crate) fn modules<'d, 'a: 'd>(
     }
 
     for (source, module) in placed {
+      let slot = source.get() as usize;
       match documents.get(source) {
-        Some(Parsed::Text(document)) => walk.document(document, source, module),
-        Some(Parsed::Bytes(document)) => walk.document(document, source, module),
+        Some(Parsed::Text(document)) => {
+          items[slot] = Some(Items::Text(walk.document(document, source, module)));
+        }
+        Some(Parsed::Bytes(document)) => {
+          items[slot] = Some(Items::Bytes(walk.document(document, source, module)));
+        }
         None => {}
       }
     }
   }
+  let (written, unknown) = walk.widths.finish();
   debug_assert_eq!(
-    walk.unknown, 0,
+    walk.unknown.saturating_add(unknown),
+    0,
     "a parsed document holds an item of a kind the walk does not know, so what it declares is lost"
   );
-  walk.tree
+  Collected {
+    tree: walk.tree,
+    items,
+    definitions: walk.definitions,
+    uses: walk.uses,
+    extensions: walk.extensions,
+    schemas: walk.schemas,
+    written,
+  }
 }
 
 /// Whether the package set refused the path of the file at `at` of `files`, which are in source
@@ -109,7 +204,8 @@ struct Frame<'d, S> {
   module: u32,
 }
 
-/// What the walk keeps: the tree it grows, where it reports, and the package it is in.
+/// What the walk keeps: the tree it grows, where it reports, the package it is in, and what it has
+/// found.
 struct Walk<'d, 'r> {
   tree: Tree<'d>,
   reporter: &'r mut Reporter,
@@ -119,6 +215,12 @@ struct Walk<'d, 'r> {
   package_name: &'d [u8],
   /// The whole of that package's package source, where its directories are reported.
   package_source: Location,
+  /// The widths the walked items write.
+  widths: Widths<'d>,
+  definitions: Vec<Found<'d>>,
+  uses: Vec<Placed>,
+  extensions: Vec<Placed>,
+  schemas: Vec<Placed>,
   /// How many items of a kind it does not know the walk met.
   unknown: u32,
 }
@@ -163,13 +265,15 @@ impl<'d> Walk<'d, '_> {
     Some(module)
   }
 
-  /// Walks the items of `document`, the file `source`, which is placed in the module `module`.
+  /// Walks the items of `document`, the file `source`, which is placed in the module `module`;
+  /// answers them, flattened in the order walked.
   fn document<S: AsRef<[u8]>>(
     &mut self,
     document: &'d TypeSystemDocument<S>,
     source: SourceId,
     module: u32,
-  ) {
+  ) -> Vec<&'d TypeSystemItem<S>> {
+    let mut walked: Vec<&'d TypeSystemItem<S>> = Vec::new();
     let mut stack: Vec<Frame<'d, S>> = Vec::new();
     stack.push(Frame {
       items: document.definitions(),
@@ -188,6 +292,12 @@ impl<'d> Walk<'d, '_> {
         continue;
       };
       frame.next = next + 1;
+      let placed = Placed {
+        module,
+        source,
+        item: dense(walked.len()),
+      };
+      walked.push(item);
       match item {
         TypeSystemItem::Mod(declaration) => {
           if let Some(child) = self.declare(declaration, source, module) {
@@ -198,7 +308,20 @@ impl<'d> Walk<'d, '_> {
             });
           }
         }
-        TypeSystemItem::Use(_) | TypeSystemItem::Definition(_) | TypeSystemItem::Extension(_) => {}
+        TypeSystemItem::Definition(described) => self.definition(described, placed),
+        TypeSystemItem::Extension(extension) => {
+          self.widths.extension(extension);
+          match extension {
+            TypeSystemExtension::Schema(_) => self.schemas.push(placed),
+            TypeSystemExtension::Type(_) | TypeSystemExtension::Directive(_) => {
+              self.extensions.push(placed);
+            }
+          }
+        }
+        TypeSystemItem::Use(declaration) => {
+          self.widths.use_item(declaration);
+          self.uses.push(placed);
+        }
         // `TypeSystemItem` is `#[non_exhaustive]`, and an item of a kind this walk does not know
         // may declare what it cannot place. It is counted, and a debug build refuses the count once
         // the walk ends, so a parser that grows a kind fails every analysis test until the walk
@@ -206,6 +329,52 @@ impl<'d> Walk<'d, '_> {
         _ => self.unknown = self.unknown.saturating_add(1),
       }
     }
+    walked
+  }
+
+  /// Keeps the definition `described`, at `placed`: a type or a directive, or the schema.
+  fn definition<S: AsRef<[u8]>>(
+    &mut self,
+    described: &'d DescribedTypeSystemDefinition<S>,
+    placed: Placed,
+  ) {
+    self.widths.definition(described.node());
+    let (kind, name): (DefKind, &'d Name<S>) = match described.node() {
+      TypeSystemDefinition::Type(definition) => match definition {
+        TypeDefinition::Scalar(scalar) => (DefKind::Scalar, scalar.name().name()),
+        TypeDefinition::Object(object) => (DefKind::Object, object.name().name()),
+        TypeDefinition::Interface(interface) => (DefKind::Interface, interface.name().name()),
+        TypeDefinition::Union(union) => (DefKind::Union, union.name().name()),
+        TypeDefinition::Enum(enumeration) => (DefKind::Enum, enumeration.name().name()),
+        TypeDefinition::InputObject(input) => (DefKind::InputObject, input.name().name()),
+        // `TypeDefinition` is `#[non_exhaustive]`: a kind of definition this walk does not know is
+        // counted, as an unknown item is, and a debug build refuses the count.
+        _ => {
+          self.unknown = self.unknown.saturating_add(1);
+          return;
+        }
+      },
+      TypeSystemDefinition::Directive(directive) => (DefKind::Directive, directive.name().name()),
+      TypeSystemDefinition::Schema(_) => {
+        self.schemas.push(placed);
+        return;
+      }
+    };
+    let source = placed.source.get();
+    let description: Option<(&'d [u8], Location)> =
+      described
+        .description()
+        .map(|text: &'d StringValue<S>| -> (&'d [u8], Location) {
+          (text.source().as_ref(), Location::new(source, *text.span()))
+        });
+    self.definitions.push(Found {
+      placed,
+      kind,
+      name: name.source().as_ref(),
+      location: Location::new(source, *name.as_span()),
+      extent: Location::new(source, *described.span()),
+      description,
+    });
   }
 
   /// The module the inline `mod` `declaration`, written in the file `source` inside the module

@@ -47,13 +47,13 @@ use crate::graphqlx::{
 
 use super::{
   Model, Namespace, PackageKind,
-  def::DefKind,
+  def::{DefKind, Origin, Primitive},
   module::ModuleKind,
   order,
   table::{
-    AliasRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, DefRow, DescriptionRow,
-    KIND_UNRESOLVED, ModuleRow, NO_DEF, PackageRow, Run, TyRow, TypeExprRow, UNSET_MODULE,
-    UNSET_TY, ValueRow,
+    AliasRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, ContributionRow, DefRow,
+    DescriptionRow, KIND_UNRESOLVED, ModuleRow, NO_DEF, PackageRow, Run, TyRow, TypeExprRow,
+    UNSET_MODULE, UNSET_TY, ValueRow,
   },
 };
 
@@ -220,6 +220,99 @@ impl ModelBuilder {
   pub fn set_module_description(&mut self, module: ModuleId, text: &str, location: Location) {
     let description = self.description(text, location);
     self.model.modules[module.get() as usize].description = Some(description);
+  }
+
+  /// Interns `name`: the symbol it already has, or a new one.
+  ///
+  /// Names are interned by first occurrence, in source-id order, then position. A name the
+  /// analyzer makes itself is interned when it is made.
+  pub fn intern(&mut self, name: &str) -> Sym {
+    self.names.intern(name.as_bytes())
+  }
+
+  /// Appends a definition: a `kind` named `name` in `module`, its name written at `location`, of
+  /// `origin`.
+  ///
+  /// Definitions are appended in id order: by package, then module path, then source id, then
+  /// position. A definition starts with no contribution, no list, no description, the tier `Core`
+  /// and no built-in meaning; the methods below give it them.
+  pub fn push_def(
+    &mut self,
+    module: ModuleId,
+    kind: DefKind,
+    name: Sym,
+    location: Location,
+    origin: Origin,
+  ) -> DefId {
+    debug_assert!(
+      (module.get() as usize) < self.model.modules.len(),
+      "a definition's module is appended before it"
+    );
+    let id = DefId::new(dense(self.model.defs.len()));
+    self.model.defs.push(DefRow {
+      kind,
+      name,
+      module,
+      location,
+      origin,
+      description: None,
+      contributions: Run::default(),
+      type_params: Run::default(),
+      bounds: Run::default(),
+      implements: Run::default(),
+      union_members: Run::default(),
+      applications: Run::default(),
+      members: IdRange::new(0, 0),
+      locations: Run::default(),
+      repeatable: false,
+      tier: Tier::Core,
+      intrinsic: None,
+      marker: false,
+      collection: None,
+      externs: Run::default(),
+      instantiations: Run::default(),
+    });
+    id
+  }
+
+  /// Appends a contribution to `def`: its definition, or one of its extensions, named at
+  /// `location` and spanning `extent`, from its description or first keyword to its last token.
+  /// Answers its index among `def`'s contributions.
+  ///
+  /// A definition's contributions are appended together, the definition first, then each
+  /// extension by source id and position, before the next definition's.
+  pub fn push_contribution(&mut self, def: DefId, location: Location, extent: Location) -> u32 {
+    let row = &mut self.model.defs[def.get() as usize];
+    let index = row.contributions.len;
+    grow(
+      &mut self.model.contributions,
+      &mut row.contributions,
+      contribution_row(location, extent),
+    );
+    index
+  }
+
+  /// Gives `def` the description `text`, cooked, written at `location`.
+  pub fn set_def_description(&mut self, def: DefId, text: &str, location: Location) {
+    let description = self.description(text, location);
+    self.model.defs[def.get() as usize].description = Some(description);
+  }
+
+  /// Makes `def` the intrinsic primitive `primitive`.
+  pub fn set_intrinsic(&mut self, def: DefId, primitive: Primitive) {
+    self.model.defs[def.get() as usize].intrinsic = Some(primitive);
+  }
+
+  /// Gives `def` the tier it requires.
+  pub fn set_def_tier(&mut self, def: DefId, tier: Tier) {
+    self.model.defs[def.get() as usize].tier = tier;
+  }
+
+  /// Makes `name` in `module` a second name of `def`, as `Int` is of `i32`. Second names are added
+  /// in any order. A module may give one name to a type and to a directive, which are named in two
+  /// namespaces; when it gives one name twice in one namespace, the first added is kept.
+  pub fn push_alias(&mut self, module: ModuleId, name: Sym, def: DefId) {
+    self.model.aliases.push(AliasRow { module, name, def });
   }
 
   /// The finished model.
@@ -496,6 +589,19 @@ fn holds_any(marks: &[(u32, usize, usize)], extent: Location) -> bool {
     .iter()
     .take_while(|mark: &&(u32, usize, usize)| mark.0 == source && mark.1 <= end)
     .any(|mark: &(u32, usize, usize)| mark.2 <= end)
+}
+
+/// A contribution at `location`, spanning `extent`, that has contributed nothing yet.
+fn contribution_row(location: Location, extent: Location) -> ContributionRow {
+  ContributionRow {
+    location,
+    extent,
+    members: IdRange::new(0, 0),
+    implements: Run::default(),
+    union_members: Run::default(),
+    applications: Run::default(),
+    marked: false,
+  }
 }
 
 /// Appends `text` to `arena`: the run it fills.

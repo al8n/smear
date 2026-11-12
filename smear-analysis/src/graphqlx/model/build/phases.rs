@@ -1,26 +1,26 @@
-//! What the phases after the package set write: definitions and their contributions, members,
-//! type occurrences and types, values, applications, the schema, second names and marks.
+//! What the phases after item collection write: what definitions hold beyond their identity,
+//! members, type occurrences and types, values, applications, the schema and marks.
 //!
-//! GATED ON HAVING A CALLER. Item collection, lowering, resolution, instantiation, coercion and
-//! the tier phase are this module's callers, and until they land the test-support door is its only
-//! one: a method that no shipped build calls is dead code. A phase that lands moves the methods it
-//! calls out of this module, as the module tree moved the module's own.
+//! GATED ON HAVING A CALLER. Lowering, resolution, instantiation, coercion and the tier phase are
+//! this module's callers, and until they land the test-support door is its only one: a method that
+//! no shipped build calls is dead code. A phase that lands moves the methods it calls out of this
+//! module, as the module tree and item collection moved theirs.
 
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{ApplicationId, DefId, IdRange, MemberId, ModuleId, Sym, TyId, TypeExprId, ValueId, dense},
+  id::{ApplicationId, DefId, IdRange, MemberId, Sym, TyId, TypeExprId, ValueId, dense},
   model::{
     application::{ApplicationArgument, Resolution},
-    def::{Collection, DefKind, DirectiveLocation, Origin, Primitive, TypeBound},
+    def::{Collection, DirectiveLocation, TypeBound},
     member::MemberKind,
     schema::{Root, RootOperation},
     table::{
-      AliasRow, ApplicationRow, ContributionRow, DefRow, ExternRow, FloatRow, IntRow, KIND_LIST,
-      KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED, LiteralRow, MemberRow, NO_DEF, PathRow, Run, TyRow,
-      TypeExprRow, TypeParamRow, UNSET_TY, VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT,
-      VALUE_LIST, VALUE_LITERAL, VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET, VALUE_STRING,
-      VALUE_TYPE, VALUE_UNRESOLVED, ValueRow,
+      ApplicationRow, ExternRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM,
+      KIND_UNRESOLVED, LiteralRow, MemberRow, NO_DEF, PathRow, Run, TyRow, TypeExprRow,
+      TypeParamRow, UNSET_TY, VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST,
+      VALUE_LITERAL, VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET, VALUE_STRING, VALUE_TYPE,
+      VALUE_UNRESOLVED, ValueRow,
     },
     ty::PathRoot,
     value::{LiteralKind, ObjectEntry},
@@ -28,85 +28,9 @@ use crate::graphqlx::{
   package::Tier,
 };
 
-use super::{ModelBuilder, append, extend, grow, push_text, unresolved_ty};
+use super::{ModelBuilder, append, contribution_row, extend, grow, push_text, unresolved_ty};
 
 impl ModelBuilder {
-  /// Interns `name`: the symbol it already has, or a new one.
-  ///
-  /// Names are interned by first occurrence, in source-id order, then position. A name the
-  /// analyzer makes itself is interned when it is made.
-  pub fn intern(&mut self, name: &str) -> Sym {
-    self.names.intern(name.as_bytes())
-  }
-
-  /// Appends a definition: a `kind` named `name` in `module`, its name written at `location`, of
-  /// `origin`.
-  ///
-  /// Definitions are appended in id order: by package, then module path, then source id, then
-  /// position. A definition starts with no contribution, no list, no description, the tier `Core`
-  /// and no built-in meaning; the methods below give it them.
-  pub fn push_def(
-    &mut self,
-    module: ModuleId,
-    kind: DefKind,
-    name: Sym,
-    location: Location,
-    origin: Origin,
-  ) -> DefId {
-    debug_assert!(
-      (module.get() as usize) < self.model.modules.len(),
-      "a definition's module is appended before it"
-    );
-    let id = DefId::new(dense(self.model.defs.len()));
-    self.model.defs.push(DefRow {
-      kind,
-      name,
-      module,
-      location,
-      origin,
-      description: None,
-      contributions: Run::default(),
-      type_params: Run::default(),
-      bounds: Run::default(),
-      implements: Run::default(),
-      union_members: Run::default(),
-      applications: Run::default(),
-      members: IdRange::new(0, 0),
-      locations: Run::default(),
-      repeatable: false,
-      tier: Tier::Core,
-      intrinsic: None,
-      marker: false,
-      collection: None,
-      externs: Run::default(),
-      instantiations: Run::default(),
-    });
-    id
-  }
-
-  /// Appends a contribution to `def`: its definition, or one of its extensions, named at
-  /// `location` and spanning `extent`, from its description or first keyword to its last token.
-  /// Answers its index among `def`'s contributions.
-  ///
-  /// A definition's contributions are appended together, the definition first, then each
-  /// extension by source id and position, before the next definition's.
-  pub fn push_contribution(&mut self, def: DefId, location: Location, extent: Location) -> u32 {
-    let row = &mut self.model.defs[def.get() as usize];
-    let index = row.contributions.len;
-    grow(
-      &mut self.model.contributions,
-      &mut row.contributions,
-      contribution_row(location, extent),
-    );
-    index
-  }
-
-  /// Gives `def` the description `text`, cooked, written at `location`.
-  pub fn set_def_description(&mut self, def: DefId, text: &str, location: Location) {
-    let description = self.description(text, location);
-    self.model.defs[def.get() as usize].description = Some(description);
-  }
-
   /// Appends a type parameter named `name`, written at `location`, to `def`. Answers its index.
   pub fn push_type_param(&mut self, def: DefId, name: Sym, location: Location) -> u32 {
     let row = &mut self.model.defs[def.get() as usize];
@@ -203,11 +127,6 @@ impl ModelBuilder {
     self.model.defs[def.get() as usize].repeatable = true;
   }
 
-  /// Makes `def` the intrinsic primitive `primitive`.
-  pub fn set_intrinsic(&mut self, def: DefId, primitive: Primitive) {
-    self.model.defs[def.get() as usize].intrinsic = Some(primitive);
-  }
-
   /// Makes `def` a marker.
   pub fn set_marker(&mut self, def: DefId) {
     self.model.defs[def.get() as usize].marker = true;
@@ -216,11 +135,6 @@ impl ModelBuilder {
   /// Makes `def` stand for `collection`.
   pub fn set_collection(&mut self, def: DefId, collection: Collection) {
     self.model.defs[def.get() as usize].collection = Some(collection);
-  }
-
-  /// Gives `def` the tier it requires.
-  pub fn set_def_tier(&mut self, def: DefId, tier: Tier) {
-    self.model.defs[def.get() as usize].tier = tier;
   }
 
   /// Adds an `@extern` to `def`, after those it has: its `lang` and `type`, and its effective
@@ -246,13 +160,6 @@ impl ModelBuilder {
   /// any order, and each is kept once.
   pub fn push_satisfaction(&mut self, ty: TyId, interface: DefId) {
     self.model.satisfactions.push((ty, interface));
-  }
-
-  /// Makes `name` in `module` a second name of `def`, as `Int` is of `i32`. Second names are added
-  /// in any order. A module may give one name to a type and to a directive, which are named in two
-  /// namespaces; when it gives one name twice in one namespace, the first added is kept.
-  pub fn push_alias(&mut self, module: ModuleId, name: Sym, def: DefId) {
-    self.model.aliases.push(AliasRow { module, name, def });
   }
 
   /// Appends a direct member of `owner`, contributed by its contribution `contribution`: a `kind`
@@ -776,19 +683,6 @@ fn extend_range<Id>(range: IdRange<Id>, index: u32) -> IdRange<Id> {
     "a run of members grows only at the end of the member table"
   );
   IdRange::new(range.start(), next)
-}
-
-/// A contribution at `location`, spanning `extent`, that has contributed nothing yet.
-fn contribution_row(location: Location, extent: Location) -> ContributionRow {
-  ContributionRow {
-    location,
-    extent,
-    members: IdRange::new(0, 0),
-    implements: Run::default(),
-    union_members: Run::default(),
-    applications: Run::default(),
-    marked: false,
-  }
 }
 
 /// A member with no description, type, default, argument or application yet.

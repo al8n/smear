@@ -53,7 +53,18 @@ All notable changes to Smear are documented in this file.
   `invalid-directory-name`, a second declaration of one module is `module-defined-twice`, and
   a module nested past `Limits::max_module_depth` is `resource-limit`; the files under a refused
   directory, and a file whose path the package set refused, are parsed but place nothing in any
-  module. A new `test-support` feature, which `smear/test-support` forwards, compiles a
+  module. Every type and directive definition that parses is a definition of the model, with its
+  kind, name, module, location, origin and description, numbered by package, module path, source
+  and position, and so is every intrinsic primitive (`bool`, `f32`, `f64`, `iN`, `uN`) a program
+  writes where its package may have it: `core`'s own widths 8 to 128, or a width its
+  `IntegerProvider` gives. `Int`, `Float`, `Boolean`, `String` and `ID` are second names of
+  `i32`, `f64`, `bool`, `string` and `id`; a root package's own scalar of one of those names, or
+  directive named as one of GraphQL's five, in its root module, replaces the built-in, which keeps
+  its id. `Builtins`' accessors answer a `DefId`. Two definitions of one name in one namespace of a
+  module (`smear::schema::duplicate-type-name`, `duplicate-directive-definition`), a supplied name
+  that begins with `__` (`reserved-type-name`, `reserved-directive-name`), and a type named as a
+  child module (`module-type-collision`) are reported. A file that holds only white space,
+  commas and comments is accepted and declares nothing. A new `test-support` feature, which `smear/test-support` forwards, compiles a
   hidden door to the crate-private model builder, and to analyses of the models it builds, for
   `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the six features

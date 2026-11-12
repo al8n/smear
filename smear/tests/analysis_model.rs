@@ -1222,9 +1222,14 @@ fn analyze_gives_every_package_its_root_module() {
     assert!(module.path().is_empty());
     assert_eq!(module.parent(), None);
     assert!(module.children().is_empty());
-    assert!(module.defs().is_empty());
+    // The built-in packages' root modules hold the built-in library; the root's file-less package
+    // holds nothing.
+    assert_eq!(
+      module.defs().is_empty(),
+      package == model.root_package(),
+      "{module:?}"
+    );
   }
-  assert!(model.defs().is_empty());
 }
 
 #[test]
@@ -2043,43 +2048,16 @@ fn the_schema_answers_its_roots_applications_description_and_contributions() {
 
 #[test]
 fn the_builtins_are_found_by_name_in_the_built_in_packages() {
+  // `core` here defines three of them, and `analysis_modules_builtins.rs` asks an analysis's model,
+  // which has every one, for the rest.
   let model = fixture();
   let builtins: Builtins<'_> = model.builtins();
-  assert_eq!(builtins.deprecated(), Some(DEPRECATED));
-  assert_eq!(builtins.string(), Some(STRING));
-  assert_eq!(builtins.map_key(), Some(MAP_KEY));
-  // `core` here defines none of the others.
-  for missing in [
-    builtins.marker(),
-    builtins.set(),
-    builtins.map(),
-    builtins.r#extern(),
-    builtins.repr(),
-    builtins.heap(),
-    builtins.specified_by(),
-    builtins.one_of(),
-    builtins.skip(),
-    builtins.include(),
-    builtins.type_ref(),
-    builtins.non_zero(),
-    builtins.bytes(),
-    builtins.id(),
-  ] {
-    assert_eq!(missing, None);
-  }
+  assert_eq!(builtins.deprecated(), DEPRECATED);
+  assert_eq!(builtins.string(), STRING);
+  assert_eq!(builtins.map_key(), MAP_KEY);
   assert_eq!(builtins.primitive(Primitive::signed(32)), Some(I32));
   assert_eq!(builtins.primitive(Primitive::unsigned(32)), None);
   assert_eq!(builtins.primitive(Primitive::Bool), None);
-
-  // A model whose built-in packages define nothing has no built-in at all.
-  let analysis = analyze(
-    &Package::<&str>::new("app", Layout::Flat, Tier::Std),
-    &[],
-    &Limits::new(),
-  );
-  let empty: Builtins<'_> = analysis.model().builtins();
-  assert_eq!(empty.deprecated(), None);
-  assert_eq!(empty.primitive(Primitive::signed(32)), None);
 }
 
 #[test]

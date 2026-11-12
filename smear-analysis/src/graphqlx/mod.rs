@@ -17,9 +17,11 @@
 //!
 //! [`analyze`] answers an [`Analysis`]: the [`Model`], its [`Diagnostics`] and its [`SourceMap`].
 //! None of the three has a type parameter or a lifetime, whatever text type went in, and
-//! [`Analysis::is_ok`] is the verdict. So far the model holds the packages and their modules,
-//! from their directories and their inline `mod`s: the phases that write the rest of it are still
-//! to come.
+//! [`Analysis::is_ok`] is the verdict. So far the model holds the packages, their modules, from
+//! their directories and their inline `mod`s, and every definition's identity: its kind, name,
+//! module, location, origin and description, the built-in library's and the primitives the
+//! program writes included, with canonical names and lookup. The phases that write the rest of it
+//! are still to come.
 //!
 //! ```
 //! use smear_analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};
@@ -75,6 +77,7 @@ mod builtin;
 mod check;
 mod code;
 mod collect;
+mod declare;
 mod diagnostic;
 mod id;
 mod limits;
@@ -88,6 +91,7 @@ mod source;
 mod text;
 mod tree;
 mod visitor;
+mod widths;
 
 // The model's builder, and analyses of the models it builds, for `smear`'s integration tests.
 // Hidden, and compiled only with the feature: the builder is crate-private API.

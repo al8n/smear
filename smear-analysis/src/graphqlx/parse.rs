@@ -4,6 +4,11 @@
 //! The caller's text type is gone before this module is reached: a file is a `View`, text or
 //! bytes. A byte text that is UTF-8 is parsed as text, so only two parsers are compiled, one over
 //! `str` and one over `[u8]`, and the second only ever reads bytes that are not UTF-8.
+//!
+//! A file that holds nothing but what the lexer skips, white space, commas, byte order marks and
+//! comments, is accepted here as a document with no item, before the parser sees it: the
+//! type-system document production wants one item at least, and a directory may hold a file that
+//! only documents it.
 
 use std::{
   string::{String, ToString},
@@ -17,7 +22,7 @@ use smear_parser::graphqlx::{
   syntactic::{GraphqlxLexer, type_system_document},
 };
 use tokora::{
-  Parse as _, Parser,
+  Parse as _, Parser, SimpleSpan,
   diagnostic::{Diagnose, DiagnoseExt, Location},
 };
 
@@ -103,12 +108,19 @@ fn parse<'a>(text: View<'a>, source: SourceId, reporter: &mut Reporter) -> Optio
   }
 }
 
-/// The type-system document `text` holds, or `None` once its syntax errors are reported.
+/// The type-system document `text` holds, or `None` once its syntax errors are reported. A blank
+/// text holds a document with no item.
 fn parse_text<'a>(
   text: &'a str,
   source: SourceId,
   reporter: &mut Reporter,
 ) -> Option<TypeSystemDocument<&'a str>> {
+  if blank(text.as_bytes()) {
+    return Some(TypeSystemDocument::<&'a str>::new(
+      SimpleSpan::new(0, text.len()),
+      Vec::new(),
+    ));
+  }
   let parsed: Result<TypeSystemDocument<&'a str>, GraphqlxErrors<&'a str>> =
     Parser::with_parser::<
       '_,
@@ -153,6 +165,30 @@ fn parse_bytes<'a>(
         reporter.report(syntax(error, source));
       }
       None
+    }
+  }
+}
+
+/// Whether `text` holds nothing but what the lexer skips: spaces, tabs, line terminators, commas,
+/// byte order marks, and comments, each from its `#` to the end of its line.
+///
+/// It accepts only those bytes, so a text it calls blank is one the lexer reads as no token at
+/// all; anything else, whatever it is, goes to the parser.
+fn blank(text: &[u8]) -> bool {
+  let mut rest = text;
+  loop {
+    match rest {
+      [] => return true,
+      [b' ' | b'\t' | b'\r' | b'\n' | b',', tail @ ..] => rest = tail,
+      [0xEF, 0xBB, 0xBF, tail @ ..] => rest = tail,
+      [b'#', tail @ ..] => {
+        let end = tail
+          .iter()
+          .position(|byte: &u8| *byte == b'\n' || *byte == b'\r')
+          .unwrap_or(tail.len());
+        rest = &tail[end..];
+      }
+      _ => return false,
     }
   }
 }

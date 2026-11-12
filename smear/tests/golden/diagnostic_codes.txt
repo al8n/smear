@@ -12,6 +12,7 @@ DiagnosticKind::InvalidFilePath = smear::graphqlx::invalid-file-path
 DiagnosticKind::InvalidPackageName = smear::graphqlx::invalid-package-name
 DiagnosticKind::MissingDependency = smear::graphqlx::missing-dependency
 DiagnosticKind::ModuleDefinedTwice = smear::graphqlx::module-defined-twice
+DiagnosticKind::ModuleTypeCollision = smear::graphqlx::module-type-collision
 DiagnosticKind::ReservedPackageName = smear::graphqlx::reserved-package-name
 DiagnosticKind::ResourceLimit = smear::graphqlx::resource-limit
 ResponseErrorKind::DoubleNonNull = smear::introspection::double-non-null

@@ -4,7 +4,7 @@ use core::cmp::Ordering;
 use std::{string::String, vec::Vec};
 
 use super::{
-  check, collect,
+  check, collect, declare,
   diagnostic::{Diagnostics, Reporter},
   id::PackageId,
   limits::Limits,
@@ -105,6 +105,15 @@ impl Analysis {
 ///   inline `mod`, inside the module it is written in. A directory whose name is not a Name, a
 ///   directory or a `mod` nested deeper than [`Limits::max_module_depth`], and a `mod` of a module
 ///   the package already has are reported.
+/// - Collects every module's declarations and numbers them: each type and directive definition a
+///   placed file declares is a definition of the model, the built-in packages' included, and so is
+///   every intrinsic primitive the packages write where they may have it, which `core` holds first
+///   in its root module. A file holding only white space, commas and comments declares nothing,
+///   and is no syntax error. In the root package's root module, a scalar named as a GraphQL scalar
+///   (`Int`, `Float`, `String`, `Boolean`, `ID`) and a directive named as a GraphQL specified
+///   directive replace the built-in of that name, which keeps its id. Two definitions of one name
+///   in one namespace of one module, a supplied definition named with `__`, and a type named as a
+///   child module of its module are reported.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///
@@ -155,9 +164,9 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
   );
 
   let mut builder = builder_of(&packages, &sources, dependencies);
-  let tree = collect::modules(&packages, &sources, &documents, limits, &mut reporter);
-  tree.push(&mut builder);
-  lower::lower(&documents);
+  let collected = collect::items(&packages, &sources, &documents, limits, &mut reporter);
+  let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
+  lower::lower(&declarations);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }

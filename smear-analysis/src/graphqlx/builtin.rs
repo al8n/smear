@@ -14,8 +14,25 @@
 //!   introspection meta-types, `__Schema` to `__DirectiveLocation`.
 //! - `alloc` needs an allocator. It holds `string`, `bytes`, `id`, `BTreeMap` and `BTreeSet`.
 //! - `std` needs the standard library. It holds `HashMap` and `HashSet`.
+//!
+//! What source cannot say is a table here, keyed by what the model answers:
+//!
+//! - the intrinsic families, `bool`, `f32`, `f64`, `iN` and `uN`, recognised by pattern, of which
+//!   the analysis materialises in `core` each one a program writes and may have (`intrinsic`,
+//!   `written`, `available`), with `NonZeroIN` and `NonZeroUN` as names of `NonZero<iN>` and
+//!   `NonZero<uN>`;
+//! - GraphQL's five scalar names, each a second name of one definition (`ALIASES`);
+//! - GraphQL's five scalars and five specified directives, which a root package's own definition
+//!   replaces (`ALIASES` and `SPECIFIED_DIRECTIVES`);
+//! - GraphQL's introspection meta-types, whose origin is `Compat` (`META_TYPES`).
+//!
+//! Each built-in definition requires its package's tier: the tier is a tag of the definition,
+//! whatever its arguments name, and the library is analysed as one, at tier `Std`.
 
-use super::package::Tier;
+use super::{
+  model::Primitive,
+  package::{IntegerProvider, Tier},
+};
 
 /// One built-in package.
 pub(crate) struct BuiltIn {
@@ -33,28 +50,34 @@ pub(crate) const BUILT_INS: [BuiltIn; 3] = [
   BuiltIn {
     name: "core",
     tier: Tier::Core,
-    files: CORE,
+    files: CORE_FILES,
   },
   BuiltIn {
     name: "alloc",
     tier: Tier::Alloc,
-    files: ALLOC,
+    files: ALLOC_FILES,
   },
   BuiltIn {
     name: "std",
     tier: Tier::Std,
-    files: STD,
+    files: STD_FILES,
   },
 ];
 
+/// The index of `core` among the packages.
+pub(crate) const CORE: usize = 0;
+
+/// The index of `alloc` among the packages.
+pub(crate) const ALLOC: usize = 1;
+
 /// `core`'s embedded files.
-const CORE: &[(&str, &str)] = &[("lib.graphqlx", CORE_LIB)];
+const CORE_FILES: &[(&str, &str)] = &[("lib.graphqlx", CORE_LIB)];
 
 /// `alloc`'s embedded files.
-const ALLOC: &[(&str, &str)] = &[("lib.graphqlx", ALLOC_LIB)];
+const ALLOC_FILES: &[(&str, &str)] = &[("lib.graphqlx", ALLOC_LIB)];
 
 /// `std`'s embedded files.
-const STD: &[(&str, &str)] = &[("lib.graphqlx", STD_LIB)];
+const STD_FILES: &[(&str, &str)] = &[("lib.graphqlx", STD_LIB)];
 
 /// `core`'s `lib.graphqlx`.
 const CORE_LIB: &str = r#"# GraphQLx's own definitions that need no allocator.
@@ -305,4 +328,126 @@ pub(crate) fn is_built_in(name: &[u8]) -> bool {
   BUILT_INS
     .iter()
     .any(|package: &BuiltIn| package.name.as_bytes() == name)
+}
+
+/// The integer widths `core` provides itself, signed and unsigned. Every other width needs the
+/// writing package's integer provider.
+pub(crate) const CORE_WIDTHS: [u32; 5] = [8, 16, 32, 64, 128];
+
+/// What a compatibility alias is a second name of.
+#[derive(Clone, Copy)]
+pub(crate) enum Target {
+  /// An intrinsic primitive, which `core` materialises.
+  Primitive(Primitive),
+  /// The definition of this name in the root module of the built-in package at this index.
+  Named(usize, &'static str),
+}
+
+/// GraphQL's built-in scalar names, each with the built-in package whose root module gives it as
+/// a second name, and the one definition it names. A root package's own scalar of one of these
+/// names, in its root module, replaces that definition.
+pub(crate) const ALIASES: [(usize, &str, Target); 5] = [
+  (CORE, "Int", Target::Primitive(Primitive::signed(32))),
+  (CORE, "Float", Target::Primitive(Primitive::F64)),
+  (CORE, "Boolean", Target::Primitive(Primitive::Bool)),
+  (ALLOC, "String", Target::Named(ALLOC, "string")),
+  (ALLOC, "ID", Target::Named(ALLOC, "id")),
+];
+
+/// GraphQL's specified directives, which `core` defines. A root package's own directive of one of
+/// these names, in its root module, replaces `core`'s.
+pub(crate) const SPECIFIED_DIRECTIVES: [&str; 5] =
+  ["deprecated", "specifiedBy", "oneOf", "skip", "include"];
+
+/// GraphQL's introspection meta-types, which `core` defines for GraphQL's sake alone: their origin
+/// is `Compat`, and a consumer may skip them.
+pub(crate) const META_TYPES: [&str; 8] = [
+  "__Schema",
+  "__Type",
+  "__Field",
+  "__InputValue",
+  "__EnumValue",
+  "__TypeKind",
+  "__Directive",
+  "__DirectiveLocation",
+];
+
+/// The intrinsic primitive `spelling` names, recognised by pattern: `bool`, `f32`, `f64`, and
+/// `iN` or `uN` whose width `N` is written in decimal with no leading zero, `0` itself included,
+/// and fits a `u32`. Whether a package may have the width is [`available`]'s question.
+pub(crate) fn intrinsic(spelling: &[u8]) -> Option<Primitive> {
+  match spelling {
+    b"bool" => Some(Primitive::Bool),
+    b"f32" => Some(Primitive::F32),
+    b"f64" => Some(Primitive::F64),
+    [b'i', digits @ ..] => width(digits).map(Primitive::signed),
+    [b'u', digits @ ..] => width(digits).map(Primitive::unsigned),
+    _ => None,
+  }
+}
+
+/// The primitive whose definition a spelling in a type position, or in a `use`, needs: an
+/// intrinsic primitive's own name; `Int`, `Float` or `Boolean`, which are second names of `i32`,
+/// `f64` and `bool`; or `NonZeroIN` or `NonZeroUN`, `N` at least 1, which name `NonZero<iN>` and
+/// `NonZero<uN>` and so write the width `N`.
+pub(crate) fn written(spelling: &[u8]) -> Option<Primitive> {
+  if let Some(primitive) = intrinsic(spelling) {
+    return Some(primitive);
+  }
+  for (_, alias, target) in ALIASES {
+    if let Target::Primitive(primitive) = target
+      && alias.as_bytes() == spelling
+    {
+      return Some(primitive);
+    }
+  }
+  let (signed, digits) = match spelling.strip_prefix(b"NonZero".as_slice())? {
+    [b'I', digits @ ..] => (true, digits),
+    [b'U', digits @ ..] => (false, digits),
+    _ => return None,
+  };
+  match width(digits)? {
+    0 => None,
+    width if signed => Some(Primitive::signed(width)),
+    width => Some(Primitive::unsigned(width)),
+  }
+}
+
+/// Whether a package whose integer provider is `integers` may have `primitive`: `bool`, `f32`,
+/// `f64` and `core`'s own widths always, and any other width only inside the range the provider
+/// gives that signedness.
+pub(crate) fn available(primitive: Primitive, integers: Option<&IntegerProvider>) -> bool {
+  match primitive {
+    Primitive::Int { signed, width } => {
+      CORE_WIDTHS.contains(&width)
+        || integers.is_some_and(|provider: &IntegerProvider| {
+          let range = if signed {
+            provider.signed()
+          } else {
+            provider.unsigned()
+          };
+          range.contains(&width)
+        })
+    }
+    Primitive::Bool | Primitive::F32 | Primitive::F64 => true,
+  }
+}
+
+/// The width `digits` write: decimal digits with no leading zero, or `0` alone, within a `u32`.
+fn width(digits: &[u8]) -> Option<u32> {
+  match digits {
+    [] | [b'0', _, ..] => None,
+    _ => {
+      let mut width: u32 = 0;
+      for &digit in digits {
+        if !digit.is_ascii_digit() {
+          return None;
+        }
+        width = width
+          .checked_mul(10)?
+          .checked_add(u32::from(digit - b'0'))?;
+      }
+      Some(width)
+    }
+  }
 }

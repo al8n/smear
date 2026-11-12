@@ -36,6 +36,9 @@ pub enum DiagnosticKind {
   /// an earlier `mod`. Reported at the later declaration, with a label at the first; the two are
   /// one module.
   ModuleDefinedTwice,
+  /// A module declares a type with the name of one of its child modules, so that one name in its
+  /// scope would be two things. Reported at the type, with a label at the child module.
+  ModuleTypeCollision,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -53,6 +56,7 @@ impl DiagnosticKind {
     Self::MissingDependency,
     Self::InvalidDirectoryName,
     Self::ModuleDefinedTwice,
+    Self::ModuleTypeCollision,
     Self::ResourceLimit,
   ];
 
@@ -68,6 +72,7 @@ impl DiagnosticKind {
       Self::MissingDependency => Code::new("smear::graphqlx::missing-dependency"),
       Self::InvalidDirectoryName => Code::new("smear::graphqlx::invalid-directory-name"),
       Self::ModuleDefinedTwice => Code::new("smear::graphqlx::module-defined-twice"),
+      Self::ModuleTypeCollision => Code::new("smear::graphqlx::module-type-collision"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -83,6 +88,7 @@ impl DiagnosticKind {
       Self::MissingDependency => "dependency not supplied",
       Self::InvalidDirectoryName => "invalid directory name",
       Self::ModuleDefinedTwice => "module defined twice",
+      Self::ModuleTypeCollision => "module and type of one name",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -99,7 +105,30 @@ impl DiagnosticKind {
       | Self::MissingDependency
       | Self::InvalidDirectoryName
       | Self::ModuleDefinedTwice
+      | Self::ModuleTypeCollision
       | Self::ResourceLimit => Severity::Error,
     }
   }
+}
+
+/// The codes of GraphQL's own rules that the analysis reports under `smear-schema`'s codes, since
+/// the rule is the same rule in both dialects (K17).
+pub(crate) mod schema {
+  use tokora::diagnostic::Code;
+
+  /// Two definitions in one module give a type one name: `smear-schema`'s `DuplicateTypeName`.
+  pub(crate) const DUPLICATE_TYPE_NAME: Code = Code::new("smear::schema::duplicate-type-name");
+
+  /// Two definitions in one module give a directive one name: `smear-schema`'s
+  /// `DuplicateDirectiveDefinition`.
+  pub(crate) const DUPLICATE_DIRECTIVE_DEFINITION: Code =
+    Code::new("smear::schema::duplicate-directive-definition");
+
+  /// A supplied package's type name begins with `__`: `smear-schema`'s `ReservedTypeName`.
+  pub(crate) const RESERVED_TYPE_NAME: Code = Code::new("smear::schema::reserved-type-name");
+
+  /// A supplied package's directive name begins with `__`: `smear-schema`'s
+  /// `ReservedDirectiveName`.
+  pub(crate) const RESERVED_DIRECTIVE_NAME: Code =
+    Code::new("smear::schema::reserved-directive-name");
 }

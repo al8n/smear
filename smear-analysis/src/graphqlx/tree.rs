@@ -55,6 +55,8 @@ pub(crate) struct Tree<'d> {
   /// Each module's package and path, mapped to its node. The key is what the `ModuleId` order
   /// compares, and what two declarations of one module share.
   keys: BTreeMap<(usize, Vec<&'d [u8]>), u32>,
+  /// Each package's root module, by the package's index.
+  roots: Vec<u32>,
 }
 
 impl<'d> Tree<'d> {
@@ -63,19 +65,28 @@ impl<'d> Tree<'d> {
     Self {
       nodes: Vec::new(),
       keys: BTreeMap::new(),
+      roots: Vec::new(),
     }
   }
 
-  /// Adds the root module of the package at `package`; answers its node.
+  /// Adds the root module of the package at `package`, the next package in id order; answers its
+  /// node.
   pub(crate) fn root(&mut self, package: usize) -> u32 {
-    self.insert(Node {
+    let node = self.insert(Node {
       package,
       path: Vec::new(),
       parent: None,
       kind: ModuleKind::Root,
       directory: None,
       declared: None,
-    })
+    });
+    self.roots.push(node);
+    node
+  }
+
+  /// The root module of the package at `package`.
+  pub(crate) fn root_of(&self, package: usize) -> u32 {
+    self.roots[package]
   }
 
   /// The directory module `name` inside `parent`, which the file paths spell `directory`: the one
@@ -130,9 +141,14 @@ impl<'d> Tree<'d> {
     &self.nodes[node as usize]
   }
 
+  /// Every module, by node.
+  pub(crate) fn nodes(&self) -> &[Node<'d>] {
+    &self.nodes
+  }
+
   /// Appends every module to `builder` in `ModuleId` order: package by package, and within one by
-  /// path. The builder must hold every package already, and no module yet.
-  pub(crate) fn push(&self, builder: &mut ModelBuilder) {
+  /// path; answers each node's id. The builder must hold every package already, and no module yet.
+  pub(crate) fn push(&self, builder: &mut ModelBuilder) -> Vec<ModuleId> {
     let mut ids: Vec<ModuleId> = vec![ModuleId::new(0); self.nodes.len()];
     let mut text = String::new();
     for &node in self.keys.values() {
@@ -153,6 +169,7 @@ impl<'d> Tree<'d> {
         }
       }
     }
+    ids
   }
 
   /// Adds `node`, under its key; answers its index.

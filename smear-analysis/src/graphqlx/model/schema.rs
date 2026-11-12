@@ -6,6 +6,7 @@ use super::{
   Model,
   def::{Contributions, Primitive},
   name::Description,
+  table::{BUILTIN_DIRECTIVES, BUILTIN_TYPES},
 };
 
 /// One of the three root operations a schema has a type for.
@@ -105,9 +106,15 @@ impl core::fmt::Debug for Schema<'_> {
 
 /// The built-in definitions of the model that a consumer keys on instead of matching spellings.
 ///
-/// Each is found among the definitions of `core`, `alloc` and `std`, and answers `None` when those
-/// packages define no such definition. A GraphQL built-in the root package replaces keeps its
-/// built-in's id, so it is still found here.
+/// Each is a definition of `core`, `alloc` or `std`, found once, when the model is built, so that
+/// nothing after it matches a spelling. A GraphQL built-in the root package replaces keeps its
+/// built-in's id, so it is still the one answered here.
+///
+/// # Panics
+///
+/// Each accessor but [`primitive`](Self::primitive) panics when the model holds no such
+/// definition, which no model an analysis answers does: smear's built-in library defines every one,
+/// and every analysis reads it.
 ///
 /// `Copy`: it holds the model.
 #[derive(Clone, Copy)]
@@ -118,108 +125,109 @@ pub struct Builtins<'a> {
 impl Builtins<'_> {
   /// `@marker`.
   #[inline]
-  pub fn marker(&self) -> Option<DefId> {
+  pub fn marker(&self) -> DefId {
     self.directive(0)
   }
 
   /// `@set`.
   #[inline]
-  pub fn set(&self) -> Option<DefId> {
+  pub fn set(&self) -> DefId {
     self.directive(1)
   }
 
   /// `@map`.
   #[inline]
-  pub fn map(&self) -> Option<DefId> {
+  pub fn map(&self) -> DefId {
     self.directive(2)
   }
 
   /// `@extern`.
   #[inline]
-  pub fn r#extern(&self) -> Option<DefId> {
+  pub fn r#extern(&self) -> DefId {
     self.directive(3)
   }
 
   /// `@repr`.
   #[inline]
-  pub fn repr(&self) -> Option<DefId> {
+  pub fn repr(&self) -> DefId {
     self.directive(4)
   }
 
   /// `@heap`.
   #[inline]
-  pub fn heap(&self) -> Option<DefId> {
+  pub fn heap(&self) -> DefId {
     self.directive(5)
   }
 
   /// `@deprecated`.
   #[inline]
-  pub fn deprecated(&self) -> Option<DefId> {
+  pub fn deprecated(&self) -> DefId {
     self.directive(6)
   }
 
   /// `@specifiedBy`.
   #[inline]
-  pub fn specified_by(&self) -> Option<DefId> {
+  pub fn specified_by(&self) -> DefId {
     self.directive(7)
   }
 
   /// `@oneOf`.
   #[inline]
-  pub fn one_of(&self) -> Option<DefId> {
+  pub fn one_of(&self) -> DefId {
     self.directive(8)
   }
 
   /// `@skip`.
   #[inline]
-  pub fn skip(&self) -> Option<DefId> {
+  pub fn skip(&self) -> DefId {
     self.directive(9)
   }
 
   /// `@include`.
   #[inline]
-  pub fn include(&self) -> Option<DefId> {
+  pub fn include(&self) -> DefId {
     self.directive(10)
   }
 
   /// `TypeRef`, the type of a value that names a definition.
   #[inline]
-  pub fn type_ref(&self) -> Option<DefId> {
+  pub fn type_ref(&self) -> DefId {
     self.ty(0)
   }
 
   /// `MapKey`, the marker a map's key type must satisfy.
   #[inline]
-  pub fn map_key(&self) -> Option<DefId> {
+  pub fn map_key(&self) -> DefId {
     self.ty(1)
   }
 
   /// `NonZero`.
   #[inline]
-  pub fn non_zero(&self) -> Option<DefId> {
+  pub fn non_zero(&self) -> DefId {
     self.ty(2)
   }
 
   /// `string`, GraphQL's `String`.
   #[inline]
-  pub fn string(&self) -> Option<DefId> {
+  pub fn string(&self) -> DefId {
     self.ty(3)
   }
 
   /// `bytes`.
   #[inline]
-  pub fn bytes(&self) -> Option<DefId> {
+  pub fn bytes(&self) -> DefId {
     self.ty(4)
   }
 
   /// `id`, GraphQL's `ID`.
   #[inline]
-  pub fn id(&self) -> Option<DefId> {
+  pub fn id(&self) -> DefId {
     self.ty(5)
   }
 
-  /// The definition `core` materialises for `primitive`, or `None` when the program never names
-  /// that primitive.
+  /// The definition `core` materialises for `primitive`, or `None` when no package writes it
+  /// where it may have it: `core` holds a primitive's definition only when a program names it, and
+  /// a width beyond `core`'s own only when a package whose integer provider gives it names it.
   #[inline]
   pub fn primitive(&self, primitive: Primitive) -> Option<DefId> {
     self
@@ -231,13 +239,22 @@ impl Builtins<'_> {
   }
 
   /// The built-in directive in `slot` of the model's built-in table.
-  fn directive(&self, slot: usize) -> Option<DefId> {
-    self.model.builtins.directives[slot]
+  fn directive(&self, slot: usize) -> DefId {
+    match self.model.builtins.directives[slot] {
+      Some(found) => found,
+      None => panic!(
+        "the model holds no built-in directive `@{}`",
+        BUILTIN_DIRECTIVES[slot]
+      ),
+    }
   }
 
   /// The built-in type in `slot` of the model's built-in table.
-  fn ty(&self, slot: usize) -> Option<DefId> {
-    self.model.builtins.types[slot]
+  fn ty(&self, slot: usize) -> DefId {
+    match self.model.builtins.types[slot] {
+      Some(found) => found,
+      None => panic!("the model holds no built-in type `{}`", BUILTIN_TYPES[slot]),
+    }
   }
 }
 
