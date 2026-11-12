@@ -65,7 +65,6 @@ def closure(name):
 LINKS_A_TIER = {
     "bytes_1": "bytes 1 declares `extern crate alloc;` unconditionally",
     "hipstr_0_8": "hipstr 0.8 declares `extern crate alloc;` unconditionally",
-    "smallvec_1": "smallvec 1 declares `pub extern crate alloc;` unconditionally",
     "smol-bytes_0_2": "tokora declares its smol-bytes 0.2 edge with features = [\"alloc\"], which pulls bytes",
     "rowan_0_17": "rowan 0.17 is a std crate, and tokora's rowan_0_17 turns tokora's std on",
 }

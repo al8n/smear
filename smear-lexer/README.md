@@ -26,7 +26,7 @@ Add to your `Cargo.toml`:
 [dependencies]
 # The lexer alone. For the parser tower, the validator or the protocol machine on top of it,
 # depend on `smear` and enable the matching feature there.
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql"] }
 ```
 
 ### Basic Usage
@@ -116,7 +116,7 @@ Enable the `bytes_1` feature for cheap cloning with Arc-backed storage:
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1", "bytes_1"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "bytes_1"] }
 ```
 
 ```rust,ignore
@@ -134,7 +134,7 @@ Enable the `hipstr_0_8` feature for inline-optimized strings:
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1", "hipstr_0_8"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "hipstr_0_8"] }
 ```
 
 ```rust,ignore
@@ -151,7 +151,7 @@ Enable the `smol-bytes_0_2` feature for smol-bytes 0.2's inline-optimized buffer
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smallvec_1", "smol-bytes_0_2"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphql", "smol-bytes_0_2"] }
 ```
 
 ```rust,ignore
@@ -183,7 +183,7 @@ Enable the `graphqlx` feature for extended tokens:
 
 ```toml
 [dependencies]
-smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphqlx", "smallvec_1"] }
+smear-lexer = { version = "0.0.1", default-features = false, features = ["std", "graphqlx"] }
 ```
 
 GraphQLx is a **superset of GraphQL**, meaning it includes all standard GraphQL tokens plus additional extensions:
@@ -246,7 +246,6 @@ belong to the layers above (`parser`, `validator`, `proto`, `rowan_0_17`, …).
 | `std` | Standard library support, and with it the allocating API; it does not turn `alloc` on. Off, the crate is `no_std` | ✓ |
 | `graphql` | Standard GraphQL lexer. Needs `std` or `alloc` | ✓ |
 | `graphqlx` | Extended GraphQL lexer; semver-exempt while the dialect moves. Needs `std` or `alloc` | ✓ |
-| `smallvec_1` | Use `smallvec` 1 for small collections. Implies no tier | ✓ |
 | `bytes_1` | Support `bytes::Bytes` source type, from `bytes` 1. Implies no tier | |
 | `bstr_1` | Support `bstr::BStr` source type, from `bstr` 1. Implies no tier | |
 | `hipstr_0_8` | Support `hipstr::{HipStr, HipByt}` source type, from `hipstr` 0.8. Implies no tier | |
@@ -255,10 +254,10 @@ belong to the layers above (`parser`, `validator`, `proto`, `rowan_0_17`, …).
 No feature but `default` switches a tier on, neither a capability (`graphql`, `graphqlx`) nor a
 dependency feature, so a `default-features = false` consumer names `std` or `alloc` itself.
 
-The five dependency features carry the major of the crate they enable, and the dependency is named
+The four dependency features carry the major of the crate they enable, and the dependency is named
 the same way, so a second major of one of them can be added beside it. The unversioned names —
-`smallvec`, `bytes`, `bstr`, `hipstr` and `smol-bytes` — are aliases for the current version: each
-enables its versioned feature and nothing else.
+`bytes`, `bstr`, `hipstr` and `smol-bytes` — are aliases for the current version: each enables
+its versioned feature and nothing else.
 
 ## Performance Characteristics
 

@@ -13,6 +13,12 @@ All notable changes to Smear are documented in this file.
   `Into`, `Deref`, `DerefMut`, `AsRef` and `AsMut` over its storage, so its deref target and
   its conversions are now `Vec`'s, and `StringErrors`' `IntoIterator::IntoIter` is
   `vec::IntoIter`.
+- `smear`!, `smear-lexer`! and `smear-parser`!: the `smallvec` integration is removed. Each of
+  the three loses its `smallvec_1` feature, the `smallvec` alias and their place in its
+  `default`, and `smear-lexer` its optional `smallvec` dependency. The feature switched only the
+  lexers' error containers, which are a `Vec` in every configuration now. 0.0.1 released the
+  `smallvec` feature, in each crate's `default`, and no alias is left in its place: a dependent
+  that names it drops it from its feature list.
 - `smear-semantics` and `smear-analysis`: two new crates. `smear-semantics` holds the
   algorithms smear's two semantic layers share: the byte-spelling interner, duplicate-name
   detection and the graph-cycle kernel. `smear` does not re-export it. `smear-analysis` is
@@ -58,17 +64,16 @@ All notable changes to Smear are documented in this file.
   root modules. A new `test-support` feature, which `smear/test-support` forwards, compiles a
   hidden door to the crate-private model builder, and to analyses of the models it builds, for
   `smear`'s own tests; it is not API.
-- `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the six features
+- `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features
   that enable an optional dependency are versioned, as tokora's are, and the
-  dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`,
-  `smallvec` and `rowan` become `bytes_1`, `bstr_1`, `hipstr_0_8`,
-  `smol-bytes_0_2`, `smallvec_1` and `rowan_0_17`; the unversioned names remain as
-  aliases that float with the current major, each enabling its versioned feature
-  and nothing else, so code gated on them is unaffected. The optional
-  dependencies are keyed by the versioned name too (`bytes_1`, `bstr_1`,
-  `hipstr_0_8`, `smol-bytes_0_2`, `smallvec_1`, `rowan_0_17`), so a downstream
-  crate that named smear's optional dependency by its old key (`smear/dep:bytes`
-  style, or a `[patch]`) must respell it. `default` lists `smallvec_1`.
+  dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`
+  and `rowan` become `bytes_1`, `bstr_1`, `hipstr_0_8`, `smol-bytes_0_2` and
+  `rowan_0_17`; the unversioned names remain as aliases that float with the
+  current major, each enabling its versioned feature and nothing else, so code
+  gated on them is unaffected. The optional dependencies are keyed by the
+  versioned name too (`bytes_1`, `bstr_1`, `hipstr_0_8`, `smol-bytes_0_2`,
+  `rowan_0_17`), so a downstream crate that named smear's optional dependency by
+  its old key (`smear/dep:bytes` style, or a `[patch]`) must respell it.
 - `smear-lexer`: string literals in byte sources (`[u8]`, `Bytes`, `BStr`,
   `HipByt`) must be well-formed UTF-8. Ill-formed content is refused with
   `StringError::UnsupportedCharacter`, carrying each sequence's span.
@@ -378,12 +383,11 @@ All notable changes to Smear are documented in this file.
   `introspection`, …) never switches a tier on, so such a consumer names `std`
   or `alloc` itself; with neither the build compiles and lacks those items.
 - `smear`!, `smear-lexer`, `smear-parser`! and `smear-compiler`!: a feature
-  that enables an optional dependency implies no tier. `bytes_1`, `hipstr_0_8`,
-  `smallvec_1` and `smol-bytes_0_2` do not imply `alloc`, although each of
-  those crates links `alloc` itself, and `rowan_0_17` no longer implies `std`.
-  So a `default-features = false` consumer names `std` or `alloc` beside a
-  source feature, and `std` beside `rowan_0_17`: the lossless tower is gated on
-  `std`.
+  that enables an optional dependency implies no tier. `bytes_1`, `hipstr_0_8`
+  and `smol-bytes_0_2` do not imply `alloc`, although each of those crates
+  links `alloc` itself, and `rowan_0_17` no longer implies `std`. So a
+  `default-features = false` consumer names `std` or `alloc` beside a source
+  feature, and `std` beside `rowan_0_17`: the lossless tower is gated on `std`.
 - `smear`! and `smear-compiler`!: the `introspection` feature no longer implies
   `std`. The draft §4 reader is `core` and `alloc` only, so it needs `std` or
   `alloc`, neither of which `introspection` implies.

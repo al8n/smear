@@ -23,7 +23,7 @@ readme = "README.md"
 [features]
 # The subset of `smear`'s own default that reaches this layer. `smear` names every member feature
 # explicitly with `default-features = false`, so this list governs a DIRECT dependent only.
-default = ["std", "graphql", "graphqlx", "smallvec_1"]
+default = ["std", "graphql", "graphqlx"]
 
 alloc = ["smear-lexer/alloc", "tokora/alloc", "bstr_1?/alloc", "smol-bytes_0_2?/alloc"]
 std = ["smear-lexer/std", "tokora/std", "bytes_1?/std", "bstr_1?/std", "hipstr_0_8?/std", "smol-bytes_0_2?/std"]
@@ -98,8 +98,6 @@ materialized-numbers = ["graphql"]
 # Each is the versioned feature, which is the switch; the unversioned name below it is a pure alias
 # for the current major. The dependency key carries the version too, so the crate is `bytes_1` in
 # code.
-smallvec = ["smallvec_1"]
-smallvec_1 = ["smear-lexer/smallvec_1"]
 bytes = ["bytes_1"]
 bytes_1 = ["dep:bytes_1", "smear-lexer/bytes_1", "tokora/bytes_1"]
 bstr = ["bstr_1"]

@@ -31,11 +31,11 @@
 //!   *package `smear-smoke` depends on `smear` with feature `lossless-coverage` but `smear` does
 //!   not have that feature*.
 //!
-//! One caveat on the second direction, found while proving it. Six of the thirteen features —
-//! `bytes_1`, `bstr_1`, `hipstr_0_8`, `smol-bytes_0_2`, `smallvec_1`, `rowan_0_17` — share a name
-//! with an OPTIONAL DEPENDENCY, so deleting the explicit `[features]` line does not remove the
+//! One caveat on the second direction, found while proving it. Four of the seventeen features —
+//! `bytes_1`, `bstr_1`, `hipstr_0_8` and `smol-bytes_0_2` — share a name with an OPTIONAL
+//! DEPENDENCY, so deleting the explicit `[features]` line does not remove the
 //! name: cargo falls back to the implicit feature an optional dependency creates, resolution
-//! succeeds, and only the `tokora/<backing>` half is silently lost. Those six still red here — the
+//! succeeds, and only the `tokora/<backing>` half is silently lost. Those four still red here — the
 //! probe below needs the surface that half enables, so deleting `smol-bytes_0_2 = [...]` broke
 //! compilation of [`smol_bytes_source`] — but they red as a compile error rather than as a
 //! resolution error, and they red BECAUSE a probe names the surface. That is the case for writing

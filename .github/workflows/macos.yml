@@ -168,18 +168,18 @@ jobs:
         # Pass 1 — the core tier: no tier feature, so no allocator. The rows that name a tier
         # (`alloc`, `std`, `default`, `--all-features`) are above it; no other feature implies one.
         #
-        # `bytes`, `bstr`, `hipstr`, `smol-bytes`, `smallvec` and `rowan` are pure aliases of the
+        # `bytes`, `bstr`, `hipstr`, `smol-bytes` and `rowan` are pure aliases of the
         # versioned features, so their rows would build what the versioned rows build and double
         # the matrix: they are excluded here and in every pass below. `--exclude-features` also
         # drops cargo-hack's `--all-features` row, so that row is asked for by name.
-        cargo hack build --each-feature --exclude-features bytes,bstr,hipstr,smol-bytes,smallvec,rowan
+        cargo hack build --each-feature --exclude-features bytes,bstr,hipstr,smol-bytes,rowan
         cargo hack build --all-features
         # Pass 2 — the alloc tier, which is what pass 1 covered until `alloc` became a feature.
         # `alloc` is not in the exclude list: cargo-hack refuses a feature named by both flags.
         # `rowan_0_17` and `lossless-coverage` imply no tier, so with `alloc` each is a row of its
         # own: the rowan crate built, and the tower, whose tier is `std`, compiled out.
         cargo hack build --each-feature --features alloc --ignore-unknown-features \
-          --exclude-features std,default,rowan,bytes,bstr,hipstr,smol-bytes,smallvec \
+          --exclude-features std,default,rowan,bytes,bstr,hipstr,smol-bytes \
           --exclude-all-features
         # Pass 3 — the pairwise isolation cells the crate split used to provide by accident.
         # `smear-parser`'s own `--each-feature` run was implicitly "parser x feature", because its
@@ -197,16 +197,16 @@ jobs:
         # `parser` and `alloc` are NOT in the exclude list: cargo-hack rejects a feature named by
         # both `--features` and `--exclude-features` (verified against 0.6.43, "specified by
         # both"), and it already skips the `parser,parser` and `alloc,alloc` cells on its own.
-        # Nine cells, one per remaining feature, and a feature added to the manifest later joins
+        # Eight cells, one per remaining feature, and a feature added to the manifest later joins
         # them without anyone editing this file.
         cargo hack build -p smear --each-feature --features parser,alloc \
-          --exclude-features rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,analysis,default,std,bytes,bstr,hipstr,smol-bytes,smallvec \
+          --exclude-features rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,analysis,default,std,bytes,bstr,hipstr,smol-bytes \
           --exclude-no-default-features --exclude-all-features
         # Pass 4 — the std tier, without alloc: `std,alloc` and every dependency feature on `std`,
         # as `ci/hack.sh` has it and for its reasons. `rowan_0_17` and `lossless-coverage` are NOT
         # excluded: theirs are the rows that build the tower on its own, with only the tier it needs.
         cargo hack build --each-feature --features std --ignore-unknown-features \
-          --exclude-features default,bytes,bstr,hipstr,smol-bytes,smallvec,rowan,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,build \
+          --exclude-features default,bytes,bstr,hipstr,smol-bytes,rowan,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,build \
           --exclude-no-default-features --exclude-all-features
 
   test:

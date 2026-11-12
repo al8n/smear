@@ -37,7 +37,7 @@
 # compiled under the HEAD'S manifests. That measured a library the base branch never shipped
 # whenever the head changed a manifest in a way the old sources could still satisfy, and #272 was
 # the case that showed it. It renamed the feature `smallvec` to `smallvec_1`; the merge-base's
-# lexers test `cfg(feature = "smallvec")`, so on the base side that cfg went off, silently — the
+# lexers tested `cfg(feature = "smallvec")`, so on the base side that cfg went off, silently — the
 # build was green and the two locks were identical — and the parse family read 10 to 22% slower
 # than a base built in a configuration nobody ships. The same arrangement could not build the base
 # side at all once the head added a workspace member (#273: the member's manifest stayed and its
