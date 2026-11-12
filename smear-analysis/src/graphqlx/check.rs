@@ -1,6 +1,6 @@
 //! The package set's own rules: names, file paths, dependencies and the total source size. Each
 //! violation is reported at the whole of the offending package's package source, since none of
-//! them has a position in any text.
+//! them has a position in any text, and its message quotes each name and path as an `Excerpt`.
 
 use std::{format, string::String, vec::Vec};
 
@@ -9,7 +9,7 @@ use tokora::diagnostic::Location;
 use super::{
   builtin::is_built_in,
   code::DiagnosticKind,
-  diagnostic::{Diagnostic, Reporter},
+  diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{PackageId, dense},
   limits::Limits,
   set::{PackageView, ROOT},
@@ -75,7 +75,7 @@ fn check_name(packages: &[PackageView<'_>], index: usize, at: Location, reporter
       at,
       format!(
         "`{}` is a built-in package's name, so no supplied package can take it",
-        String::from_utf8_lossy(name)
+        Excerpt(name)
       ),
       "`core`, `alloc` and `std` are smear's own packages; choose another name",
     );
@@ -86,7 +86,7 @@ fn check_name(packages: &[PackageView<'_>], index: usize, at: Location, reporter
       at,
       format!(
         "`{}` is not a GraphQLx name, so it cannot name a package",
-        String::from_utf8_lossy(name)
+        Excerpt(name)
       ),
       "a package name is a letter or `_`, then letters, digits or `_`",
     );
@@ -101,10 +101,7 @@ fn check_name(packages: &[PackageView<'_>], index: usize, at: Location, reporter
       reporter,
       DiagnosticKind::DuplicatePackageName,
       at,
-      format!(
-        "two supplied packages are named `{}`",
-        String::from_utf8_lossy(name)
-      ),
+      format!("two supplied packages are named `{}`", Excerpt(name)),
       "supply each package once",
     );
   }
@@ -122,8 +119,8 @@ fn check_paths(package: &PackageView<'_>, at: Location, reporter: &mut Reporter)
         at,
         format!(
           "package `{}` holds the file path `{}`, which {problem}",
-          String::from_utf8_lossy(package.name),
-          String::from_utf8_lossy(file.path)
+          Excerpt(package.name),
+          Excerpt(file.path)
         ),
         "a file path is relative to its package and `/`-separated, with no empty, `.` or `..` \
          segment",
@@ -137,8 +134,8 @@ fn check_paths(package: &PackageView<'_>, at: Location, reporter: &mut Reporter)
         at,
         format!(
           "package `{}` holds two files at `{}`",
-          String::from_utf8_lossy(package.name),
-          String::from_utf8_lossy(file.path)
+          Excerpt(package.name),
+          Excerpt(file.path)
         ),
         "a package holds each path once; remove or rename one of the files",
       );
@@ -208,7 +205,7 @@ fn dependencies(
         at,
         format!(
           "package `{}` declares itself as a dependency",
-          String::from_utf8_lossy(name)
+          Excerpt(name)
         ),
         "a package reaches its own items through `~::`; remove the declaration",
       );
@@ -219,8 +216,8 @@ fn dependencies(
         at,
         format!(
           "package `{}` declares the dependency `{}`, which is not supplied",
-          String::from_utf8_lossy(package.name),
-          String::from_utf8_lossy(name)
+          Excerpt(package.name),
+          Excerpt(name)
         ),
         "supply the package, or remove the declaration",
       );

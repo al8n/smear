@@ -380,6 +380,164 @@ fn a_declared_dependency_must_be_supplied() {
   );
 }
 
+/// The most bytes of one spelling a message quotes: `2 * 64 + 3` of the spelling's own bytes, each
+/// written as at most the three bytes of a U+FFFD, and the three of the `…` between its two ends.
+const EXCERPT_BOUND: usize = 396;
+
+/// The spellings `message` quotes, each between a pair of backticks, in order.
+fn quoted(message: &str) -> Vec<&str> {
+  message.split('`').skip(1).step_by(2).collect()
+}
+
+/// The message of `analysis`'s first diagnostic.
+fn first_message(analysis: &Analysis) -> String {
+  analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .map(|diagnostic: &Diagnostic| diagnostic.to_string())
+    .unwrap_or_default()
+}
+
+/// A root package named `name` that holds three files at one path and one at an absolute path, and
+/// declares a dependency nobody supplies: four diagnostics, each quoting the name.
+fn quoting(name: &str, limits: &Limits) -> Analysis {
+  let root = package(
+    name,
+    &[
+      ("a.graphqlx", OK),
+      ("a.graphqlx", OK),
+      ("a.graphqlx", OK),
+      ("/absolute.graphqlx", OK),
+    ],
+  )
+  .with_dependencies(["geo"]);
+  analyze(&root, &[], limits)
+}
+
+/// A message quotes a long name by its first and its last 64 bytes, so it holds a fixed number of
+/// bytes of the name however long the name is and however many diagnostics quote it. Under a
+/// ceiling of 0 every error is still counted.
+#[test]
+fn a_long_name_is_quoted_by_its_two_ends_and_counted_under_any_ceiling() {
+  let head = "H".repeat(64);
+  let tail = "T".repeat(64);
+  let name = format!("{head}{}{tail}", "M".repeat(4096 - 128));
+  let analysis = quoting(&name, &Limits::new());
+
+  let at = package_source(&analysis, 3);
+  assert_eq!(
+    found(&analysis),
+    [
+      (code(DiagnosticKind::DuplicateFilePath), at),
+      (code(DiagnosticKind::DuplicateFilePath), at),
+      (code(DiagnosticKind::InvalidFilePath), at),
+      (code(DiagnosticKind::MissingDependency), at),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let excerpt = format!("{head}…{tail}");
+  for diagnostic in analysis.diagnostics() {
+    let message = diagnostic.to_string();
+    let spellings = quoted(&message);
+    assert_eq!(
+      spellings.first().copied(),
+      Some(excerpt.as_str()),
+      "{message}"
+    );
+    for spelling in spellings {
+      assert!(spelling.len() <= EXCERPT_BOUND, "{message}");
+    }
+  }
+
+  let none = quoting(&name, &Limits::new().with_max_diagnostics(0));
+  assert!(none.diagnostics().is_empty());
+  assert!(none.diagnostics().truncated());
+  assert_eq!(none.diagnostics().error_count(), 4);
+  assert_eq!(
+    none.diagnostics().error_count(),
+    analysis.diagnostics().error_count()
+  );
+}
+
+/// A long name of two-byte characters is cut between characters at both ends, so it is quoted with
+/// no U+FFFD; one that is not UTF-8 is quoted with a U+FFFD for each byte it keeps, within the
+/// bound.
+#[test]
+fn a_long_name_is_cut_between_characters_and_bounded_when_it_is_not_utf8() {
+  // Each cut falls inside an `é` and moves back to its first byte.
+  let accented = format!("a{}b", "é".repeat(100));
+  let analysis = analyze(
+    &package(&accented, &[("a.graphqlx", OK)]),
+    &[],
+    &Limits::new(),
+  );
+  only(
+    &analysis,
+    DiagnosticKind::InvalidPackageName,
+    package_source(&analysis, 3),
+    1,
+  );
+  let message = first_message(&analysis);
+  assert!(!message.contains('\u{FFFD}'), "{message}");
+  let expected = format!("a{}…{}b", "é".repeat(31), "é".repeat(32));
+  assert_eq!(
+    quoted(&message).first().copied(),
+    Some(expected.as_str()),
+    "{message}"
+  );
+
+  let invalid = [0xFF_u8; 300];
+  let root = Package::new(&invalid[..], Layout::Directory, Tier::Std)
+    .with_files([SourceFile::new("a.graphqlx", OK)]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  only(
+    &analysis,
+    DiagnosticKind::InvalidPackageName,
+    package_source(&analysis, 3),
+    1,
+  );
+  let message = first_message(&analysis);
+  let spelling = quoted(&message).first().copied().unwrap_or_default();
+  assert!(
+    spelling.len() <= EXCERPT_BOUND,
+    "{} bytes: {message}",
+    spelling.len()
+  );
+  assert_eq!(
+    spelling,
+    format!("{}…{}", "\u{FFFD}".repeat(64), "\u{FFFD}".repeat(64))
+  );
+}
+
+/// A name of 128 bytes is quoted whole, and one of 129 by its first and its last 64.
+#[test]
+fn a_name_of_128_bytes_is_quoted_whole_and_one_of_129_by_its_two_ends() {
+  let head = "H".repeat(64);
+  let tail = "T".repeat(64);
+  for (name, expected) in [
+    (format!("{head}{tail}"), format!("{head}{tail}")),
+    (format!("{head}M{tail}"), format!("{head}…{tail}")),
+  ] {
+    let root = package(&name, &[("a.graphqlx", OK)]).with_dependencies(["geo"]);
+    let analysis = analyze(&root, &[], &Limits::new());
+    only(
+      &analysis,
+      DiagnosticKind::MissingDependency,
+      package_source(&analysis, 3),
+      1,
+    );
+    let message = first_message(&analysis);
+    assert_eq!(
+      quoted(&message).first().copied(),
+      Some(expected.as_str()),
+      "{} bytes: {message}",
+      name.len()
+    );
+  }
+}
+
 #[test]
 fn the_supplied_sources_have_a_size_limit() {
   let files = [("a.graphqlx", OK), ("b.graphqlx", "type B {\n")];

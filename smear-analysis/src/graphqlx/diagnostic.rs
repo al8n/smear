@@ -117,6 +117,73 @@ impl DiagnosticBuilder {
   }
 }
 
+/// How many bytes of a spelling an `Excerpt` keeps from each end.
+const EXCERPT_END: usize = 64;
+
+/// A spelling taken from the input, as one of smear's diagnostics quotes it.
+///
+/// It is the one way a message, a label or a help line quotes what the input spelled, so that no
+/// diagnostic holds more than a fixed number of bytes of any one spelling, and composing one reads
+/// no more than that, however long the spelling and however many diagnostics quote it.
+///
+/// Its `Display` writes the whole spelling when it is at most `2 * EXCERPT_END` bytes long, and
+/// otherwise its first `EXCERPT_END` bytes, `…`, and its last `EXCERPT_END` bytes. A cut that falls
+/// inside a character moves back to the character's first byte, over three continuation bytes at
+/// most, since a character is at most four bytes long; it never walks further, so a spelling of
+/// nothing but continuation bytes costs the same. Bytes that are not UTF-8 are written as U+FFFD,
+/// as `String::from_utf8_lossy` writes them, and only the bytes written are decoded.
+///
+/// An excerpt therefore holds at most `2 * 64 + 3` of the spelling's bytes, 131: at most 64 before
+/// the `…` and at most 67 after it. Each is written as at most the three bytes of a U+FFFD, and the
+/// `…` is three more, so an excerpt writes at most 396 bytes.
+pub(crate) struct Excerpt<'a>(pub(crate) &'a [u8]);
+
+impl core::fmt::Display for Excerpt<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let bytes = self.0;
+    if bytes.len() <= 2 * EXCERPT_END {
+      return write_lossy(f, bytes);
+    }
+    let head = boundary(bytes, EXCERPT_END);
+    let tail = boundary(bytes, bytes.len() - EXCERPT_END);
+    write_lossy(f, &bytes[..head])?;
+    f.write_str("…")?;
+    write_lossy(f, &bytes[tail..])
+  }
+}
+
+/// The offset `at` into `bytes`, moved back to the first byte of the character it falls inside:
+/// over three continuation bytes at most, and never further.
+fn boundary(bytes: &[u8], at: usize) -> usize {
+  let mut cut = at;
+  while at - cut < 3
+    && cut > 0
+    && bytes
+      .get(cut)
+      .is_some_and(|byte: &u8| is_continuation(*byte))
+  {
+    cut -= 1;
+  }
+  cut
+}
+
+/// Whether `byte` continues a character, as `10xxxxxx` does, rather than beginning one.
+fn is_continuation(byte: u8) -> bool {
+  (byte & 0b1100_0000) == 0b1000_0000
+}
+
+/// Writes `bytes` as `String::from_utf8_lossy` writes them: each sequence that is not UTF-8 as one
+/// U+FFFD.
+fn write_lossy(f: &mut core::fmt::Formatter<'_>, bytes: &[u8]) -> core::fmt::Result {
+  for chunk in bytes.utf8_chunks() {
+    f.write_str(chunk.valid())?;
+    if !chunk.invalid().is_empty() {
+      f.write_str("\u{FFFD}")?;
+    }
+  }
+  Ok(())
+}
+
 /// A diagnostic read as structure: its code, severity and primary location by value, and its
 /// primary label, labels and help lent from the diagnostic.
 ///
@@ -460,3 +527,6 @@ fn severity_rank(severity: Severity) -> u8 {
     _ => 3,
   }
 }
+
+#[cfg(test)]
+mod tests;

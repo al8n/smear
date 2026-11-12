@@ -20,8 +20,10 @@ All notable changes to Smear are documented in this file.
   a `Model` of the packages, the `Diagnostics` and a `SourceMap`. Packages and sources are
   numbered deterministically, whatever order they are passed in. The package set's file
   paths, package names, dependencies and total size are checked, under the new
-  `smear::graphqlx` codes `DiagnosticKind` lists, and every file is parsed with the GraphQLx
-  syntactic parser, its syntax errors reported at that file. `Diagnostic::builder` is
+  `smear::graphqlx` codes `DiagnosticKind` lists; a message quotes a name or a path whole
+  when it is at most 128 bytes, and otherwise as its first and last 64 bytes around `…`, so
+  no message grows with what it quotes. Every file is parsed with the GraphQLx syntactic
+  parser, its syntax errors reported at that file. `Diagnostic::builder` is
   public, so a consumer's findings join smear's in one ordered list, and `SourceMap::bind`
   pairs an analysis with the texts it was made from. The `Model` is dense tables read through
   `Copy` views, each numbered by its own id: packages, modules, definitions and their
