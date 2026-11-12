@@ -207,6 +207,13 @@ fn a_scope_answers_in_its_order_with_package_names_last() {
     test_support::resolve(&root, &dependencies, "^::app", &["U", "T"], "T").as_deref(),
     Some("param T")
   );
+  // The parameters are searched by spelling, a spelling written twice once.
+  for name in ["U", "V"] {
+    assert_eq!(
+      test_support::resolve(&root, &dependencies, "^::app", &["V", "U", "V"], name),
+      Some(format!("param {name}"))
+    );
+  }
   assert_eq!(
     test_support::resolve(&root, &dependencies, "^::app", &["T"], "@T"),
     None

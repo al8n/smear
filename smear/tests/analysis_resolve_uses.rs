@@ -842,6 +842,80 @@ fn each_root_of_a_use_starts_where_it_says() {
   );
 }
 
+/// `^::name` that names no package its package may reach says what `name` is: a supplied package
+/// it does not declare, the root package or a dependency alike; the package itself; or nothing
+/// supplied.
+#[test]
+fn an_unknown_package_says_what_its_name_names() {
+  let text = "use ^::app::Top\nuse ^::zed::Z\nuse ^::nope::N\nuse ^::geo::P\n";
+  let root = directory("app", &[("lib.graphqlx", "scalar Top\n")]).with_dependencies(["geo"]);
+  let dependencies = [
+    directory("geo", &[("lib.graphqlx", text)]),
+    directory("zed", &[("lib.graphqlx", "scalar Z\n")]),
+  ];
+  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let source = file(&analysis, 4, "lib.graphqlx");
+  let unknown = code(DiagnosticKind::UnknownPackage);
+  assert_eq!(
+    found(&analysis),
+    [
+      (unknown, at(source, text, "app", 0)),
+      (unknown, at(source, text, "zed", 0)),
+      (unknown, at(source, text, "nope", 0)),
+      (unknown, inside(source, text, "^::geo::P", 0, "geo")),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let messages: Vec<String> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.to_string())
+    .collect();
+  assert_eq!(
+    messages,
+    [
+      "package `geo` does not declare the dependency `app`, so it cannot reach it",
+      "package `geo` does not declare the dependency `zed`, so it cannot reach it",
+      "no package named `nope` is supplied, and it is not `core`, `alloc` or `std`",
+      "package `geo` is the package this path is written in, which `^::` does not name",
+    ]
+  );
+}
+
+/// Whether a package name names a supplied package is a binary search.
+///
+/// The help of `^::name` that names no package its package may reach says whether `name` is
+/// supplied, and that was asked of every supplied package in turn, for every such path, before the
+/// diagnostic ceiling could drop any: P supplied packages and U such paths cost P × U comparisons.
+/// Now the root package's name is compared, and the dependencies after it, which the package set
+/// numbers in name order, are searched.
+///
+/// Nothing here can count that work, so the sizes tell the two costs apart: 2^17 supplied
+/// packages beside 2^20 items `use ^::missing::T`, about 18 MiB of text. Asked of every package,
+/// the items cost about 1.4 × 10^11 comparisons, which is minutes; searched for, about 2 × 10^7.
+#[test]
+fn a_package_name_is_searched_for_among_the_supplied_packages() {
+  const PACKAGES: usize = 1 << 17;
+  const PATHS: usize = 1 << 20;
+  let text = "use ^::missing::T\n".repeat(PATHS);
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("lib.graphqlx", text.as_str())]);
+  let dependencies: Vec<Package<&str>> = (0..PACKAGES)
+    .map(|index: usize| Package::new(format!("p{index}"), Layout::Flat, Tier::Std))
+    .collect();
+  let analysis = analyze(&root, &dependencies, &Limits::new());
+  assert_eq!(analysis.diagnostics().error_count(), PATHS);
+  let first = analysis.diagnostics().iter().next().expect("a diagnostic");
+  assert_eq!(first.code().as_str(), code(DiagnosticKind::UnknownPackage));
+  assert!(
+    first
+      .to_string()
+      .starts_with("no package named `missing` is supplied"),
+    "{first}"
+  );
+}
+
 #[test]
 fn a_package_name_answers_a_use_of_it_alone_and_last() {
   let geo = directory("geo", &[("lib.graphqlx", "scalar Point\n")]);

@@ -231,9 +231,28 @@ pub(crate) struct Request<'r> {
   pub(crate) source: SourceId,
   pub(crate) wanted: Wanted,
   pub(crate) position: Position,
-  /// The generic parameters in scope where the path stands, by spelling and in order: its
-  /// definition's, or the names an extension gives them.
-  pub(crate) params: &'r [&'r [u8]],
+  /// The generic parameters in scope where the path stands, its definition's or the names an
+  /// extension gives them, as [`params`] tables them: each spelling with its index, sorted by
+  /// spelling, one row a spelling.
+  pub(crate) params: &'r [(&'r [u8], u32)],
+}
+
+/// The generic parameters spelled `written`, in order, as a [`Request`] carries them: each
+/// spelling with its index, sorted by spelling, one row a spelling, the lowest index of a spelling
+/// written twice. Lowering builds it once for each definition or extension, and the resolver finds
+/// a path's first segment in it by binary search.
+// Lowering, the next part of the analyzer, calls this for each definition and extension; until it
+// lands only the test-support door does.
+#[allow(dead_code)]
+pub(crate) fn params<'r>(written: &[&'r [u8]]) -> Vec<(&'r [u8], u32)> {
+  let mut table: Vec<(&'r [u8], u32)> = written
+    .iter()
+    .enumerate()
+    .map(|(index, &spelling): (usize, &&'r [u8])| (spelling, dense(index)))
+    .collect();
+  table.sort_unstable();
+  table.dedup_by_key(|row: &mut (&'r [u8], u32)| row.0);
+  table
 }
 
 /// What a path names.
@@ -671,13 +690,10 @@ impl Scopes<'_> {
     let (start, after, within): (ModuleId, &[Segment<'p>], Within<'p>) = match root {
       Root::Relative => {
         if request.wanted != Wanted::Directive
-          && let Some(index) = request
-            .params
-            .iter()
-            .position(|param: &&[u8]| *param == first.name)
+          && let Some(index) = param(request.params, first.name)
         {
           return if rest.is_empty() {
-            Ok(Resolved::Param(dense(index)))
+            Ok(Resolved::Param(index))
           } else {
             Err(failure(first, Why::ParamNotModule, false))
           };
@@ -1078,15 +1094,16 @@ impl Scopes<'_> {
   }
 
   /// Reports `failure`, a path written in `module` at `position`, where `params` are the generic
-  /// parameters in scope, that does not resolve: with the nearest name visible there, of the
-  /// namespace wanted, in its help, when one is within reach and the budget lasts.
+  /// parameters in scope, as [`params`] tables them, that does not resolve: with the nearest name
+  /// visible there, of the namespace wanted, in its help, when one is within reach and the budget
+  /// lasts.
   fn report(
     &self,
     names: &ModelBuilder,
     reporter: &mut Reporter,
     module: ModuleId,
     position: Position,
-    params: &[&[u8]],
+    params: &[(&[u8], u32)],
     failure: &Failure<'_>,
   ) {
     let (code, title): (Code, &'static str) = match failure.why {
@@ -1407,12 +1424,7 @@ impl Scopes<'_> {
         String::from("a package reaches its own items through `~::`"),
       );
     }
-    let supplied = self
-      .packages
-      .iter()
-      .skip(ROOT)
-      .any(|scope: &PackageScope<'_>| scope.name == name);
-    if supplied {
+    if self.supplied(name) {
       (
         format!(
           "package `{}` does not declare the dependency `{}`, so it cannot reach it",
@@ -1435,6 +1447,18 @@ impl Scopes<'_> {
     }
   }
 
+  /// Whether a supplied package is named `name`: the root package, or one of the dependencies
+  /// after it, which the package set numbers in name order, so a binary search finds it.
+  fn supplied(&self, name: &[u8]) -> bool {
+    let Some(root) = self.packages.get(ROOT) else {
+      return false;
+    };
+    root.name == name
+      || self.packages[ROOT + 1..]
+        .binary_search_by(|scope: &PackageScope<'_>| scope.name.cmp(name))
+        .is_ok()
+  }
+
   /// The near miss of `failure`'s name, written in `module` where `params` are the generic
   /// parameters in scope, quoted as a message quotes it: the nearest name visible there, of the
   /// namespace wanted, when one is within reach and the budget lasts.
@@ -1450,7 +1474,7 @@ impl Scopes<'_> {
     names: &ModelBuilder,
     module: ModuleId,
     failure: &Failure<'_>,
-    params: &[&[u8]],
+    params: &[(&[u8], u32)],
   ) -> Option<String> {
     if self.near.get() == 0 {
       return None;
@@ -1464,8 +1488,8 @@ impl Scopes<'_> {
     let quoting = match failure.why {
       Why::NotInScope { module, wanted } => {
         if wanted != Wanted::Directive {
-          for &param in params {
-            search.offer(&self.near, param);
+          for &(spelling, _) in params {
+            search.offer(&self.near, spelling);
           }
         }
         let packages = wanted == Wanted::Module;
@@ -1638,16 +1662,16 @@ impl Scopes<'_> {
     Some(module)
   }
 
-  /// What `path` names in `module`, where `params` are the generic parameters in scope: the
-  /// test-support door's one call. `path` is spelled as written, `~::`, `^::` and `..::` included;
-  /// `@` before it asks for a directive, and `mod ` before it for a module. What it does not
-  /// resolve to is reported nowhere.
+  /// What `path` names in `module`, where the generic parameters spelled `written`, in order, are
+  /// in scope: the test-support door's one call, which tables them as lowering does. `path` is
+  /// spelled as written, `~::`, `^::` and `..::` included; `@` before it asks for a directive, and
+  /// `mod ` before it for a module. What it does not resolve to is reported nowhere.
   #[cfg(feature = "test-support")]
   pub(crate) fn door(
     &self,
     names: &ModelBuilder,
     module: ModuleId,
-    params: &[&[u8]],
+    written: &[&[u8]],
     path: &str,
   ) -> Resolved {
     let (wanted, path) = match (path.strip_prefix('@'), path.strip_prefix("mod ")) {
@@ -1680,12 +1704,13 @@ impl Scopes<'_> {
         at,
       })
       .collect();
+    let table = params(written);
     let request = Request {
       module,
       source: SourceId::new(0),
       wanted,
       position: Position::Other,
-      params,
+      params: &table,
     };
     let mut reporter = Reporter::without_marks(0);
     self.resolve_segments(names, &mut reporter, &request, root, &segments)
@@ -1715,6 +1740,15 @@ fn digest<'p, S: AsRef<[u8]>>(
     // module it can find, and is reported as an item of an unknown kind is.
     _ => Root::Unknown(Location::new(source.get(), *path.span())),
   }
+}
+
+/// The index of the generic parameter spelled `name` in `params`, a table [`params`] built: a
+/// binary search.
+fn param(params: &[(&[u8], u32)], name: &[u8]) -> Option<u32> {
+  let at = params
+    .binary_search_by(|(spelling, _): &(&[u8], u32)| (*spelling).cmp(name))
+    .ok()?;
+  Some(params[at].1)
 }
 
 /// A failure at `segment`, boxed as a resolution's `Err` carries it.
@@ -1829,3 +1863,6 @@ fn shadowing(name: &[u8]) -> Option<String> {
      primitive; rename the type to leave the name to the primitive"
   ))
 }
+
+#[cfg(test)]
+mod tests;
