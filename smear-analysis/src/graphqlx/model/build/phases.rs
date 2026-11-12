@@ -261,7 +261,8 @@ impl ModelBuilder {
   }
 
   /// Makes `name` in `module` a second name of `def`, as `Int` is of `i32`. Second names are added
-  /// in any order; when a module gives one name twice, the first added is kept.
+  /// in any order. A module may give one name to a type and to a directive, which are named in two
+  /// namespaces; when it gives one name twice in one namespace, the first added is kept.
   pub fn push_alias(&mut self, module: ModuleId, name: Sym, def: DefId) {
     self.model.aliases.push(AliasRow { module, name, def });
   }

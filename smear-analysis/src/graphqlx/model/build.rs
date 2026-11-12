@@ -46,13 +46,13 @@ use crate::graphqlx::{
 };
 
 use super::{
-  Model, PackageKind,
+  Model, Namespace, PackageKind,
   def::DefKind,
   module::ModuleKind,
   order,
   table::{
-    AliasRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, KIND_UNRESOLVED, ModuleRow, NO_DEF,
-    PackageRow, Run, TyRow, TypeExprRow, UNSET_MODULE, UNSET_TY, ValueRow,
+    AliasRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, DefRow, KIND_UNRESOLVED, ModuleRow,
+    NO_DEF, PackageRow, Run, TyRow, TypeExprRow, UNSET_MODULE, UNSET_TY, ValueRow,
   },
 };
 
@@ -350,19 +350,17 @@ impl ModelBuilder {
     }
   }
 
-  /// The sorted tables a lookup searches: the satisfactions, each once, and the aliases, by module
-  /// and name, the first added kept when a module gives one name twice.
+  /// The sorted tables a lookup searches: the satisfactions, each once, and the aliases, by module,
+  /// then the namespace of the definition each names, then name, the first added kept when a
+  /// module gives one name twice in one namespace.
   fn derive_lookups(&mut self) {
     self.model.satisfactions.sort_unstable();
     self.model.satisfactions.dedup();
-    self
-      .model
-      .aliases
-      .sort_by_key(|row: &AliasRow| (row.module, row.name));
-    self
-      .model
-      .aliases
-      .dedup_by_key(|row: &mut AliasRow| (row.module, row.name));
+    let defs: &[DefRow] = &self.model.defs;
+    let aliases: &mut Vec<AliasRow> = &mut self.model.aliases;
+    // The sort is stable, so among aliases with one key the first added stays first, and is kept.
+    aliases.sort_by_key(|row: &AliasRow| alias_key(defs, row));
+    aliases.dedup_by_key(|row: &mut AliasRow| alias_key(defs, row));
   }
 
   /// The built-in definitions a consumer keys on, found by name among the built-in packages'
@@ -431,6 +429,17 @@ impl Model {
       }
     }
   }
+}
+
+/// What the aliases are sorted and kept once by: the module, the namespace of the definition the
+/// alias names, then the name. A module's second names for types come before its second names for
+/// directives.
+fn alias_key(defs: &[DefRow], row: &AliasRow) -> (ModuleId, u8, Sym) {
+  let namespace = match Namespace::of(defs[row.def.get() as usize].kind) {
+    Namespace::Type => 0,
+    Namespace::Directive => 1,
+  };
+  (row.module, namespace, row.name)
 }
 
 /// The one type every unresolved occurrence has.

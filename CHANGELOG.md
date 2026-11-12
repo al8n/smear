@@ -32,9 +32,10 @@ All notable changes to Smear are documented in this file.
   `Copy` views, each numbered by its own id: packages, modules, definitions and their
   contributions, members, type occurrences and interned types, values, directive
   applications, the schema and the built-ins, with `canonical_name`, `lookup` and
-  `module_by_path`; so far `analyze` fills in only the packages and their root modules. A new
-  `test-support` feature, which `smear/test-support` forwards, compiles a hidden door to the
-  crate-private model builder for `smear`'s own tests; it is not API.
+  `module_by_path`; `lookup` keeps a type's and a directive's names apart, the second names a
+  module gives included. So far `analyze` fills in only the packages and their root modules.
+  A new `test-support` feature, which `smear/test-support` forwards, compiles a hidden door to
+  the crate-private model builder for `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the six features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`,

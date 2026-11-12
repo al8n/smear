@@ -82,7 +82,8 @@ pub struct Model {
   instantiations: Vec<TyId>,
   /// Every `(type, interface)` pair the type satisfies, sorted.
   satisfactions: Vec<(TyId, DefId)>,
-  /// Every second name, sorted by module, then name.
+  /// Every second name, sorted by module, then the namespace of the definition it names, then
+  /// name.
   aliases: Vec<AliasRow>,
 
   members: Vec<MemberRow>,

@@ -26,7 +26,7 @@ pub enum Namespace {
 
 impl Namespace {
   /// The namespace a definition of `kind` is named in.
-  const fn of(kind: DefKind) -> Self {
+  pub(super) const fn of(kind: DefKind) -> Self {
     match kind {
       DefKind::Directive => Self::Directive,
       _ => Self::Type,
@@ -78,8 +78,11 @@ impl Model {
   ///
   /// `name` is spelled as [`canonical_name`](Self::canonical_name) writes it, the `@` included
   /// for a directive, or as a second name a module gives a definition: `^::core::Int` finds
-  /// `i32`. A name that is not UTF-8, or not a dependency path, finds nothing. When a module gives
-  /// one name twice, which is an error, the first definition in id order is found.
+  /// `i32`. A name that is not UTF-8, or not a dependency path, finds nothing. A module may give
+  /// one name to a type and to a directive, and each is found in its own namespace. When a module
+  /// gives one name twice in `namespace`, which is an error, a definition it holds is found before
+  /// a second name it gives: the first in id order among its definitions, and the first added
+  /// among its second names.
   pub fn lookup(&self, namespace: Namespace, name: impl AsRef<[u8]>) -> Option<DefId> {
     let text = core::str::from_utf8(name.as_ref()).ok()?;
     let path = match namespace {

@@ -2195,6 +2195,82 @@ fn lookup_reads_a_second_name_and_finds_nothing_for_what_names_nothing() {
   assert_eq!(model.lookup(Namespace::Type, b"^::app::\xffQuery"), None);
 }
 
+// The definitions of the model `second_names` builds, in `app`'s root module.
+const SHAPE: DefId = DefId::new(0);
+const FORM: DefId = DefId::new(1);
+const SHAPE_DIRECTIVE: DefId = DefId::new(2);
+
+/// A model of `core`, `alloc`, `std` and the root `app`, whose root module holds the objects
+/// `Shape` and `Form` and the directive `shape`, and gives the second names `aliases`, each a name
+/// and the definition it names, added in order.
+fn second_names(aliases: &[(&str, DefId)]) -> Model {
+  let mut b = ModelBuilder::default();
+  for (name, kind, tier, sources) in [
+    ("core", PackageKind::BuiltIn, Tier::Core, 1),
+    ("alloc", PackageKind::BuiltIn, Tier::Alloc, 1),
+    ("std", PackageKind::BuiltIn, Tier::Std, 1),
+    ("app", PackageKind::Root, Tier::Std, 2),
+  ] {
+    let package = b.push_package(name, kind, tier, Layout::Directory, sources);
+    b.push_module(package, None, None, ModuleKind::Root);
+  }
+  // `app`'s root module and its one file, numbered after the built-ins' as in the fixture.
+  let (module, file) = (APP_ROOT, 4);
+  for (kind, name, start, expected) in [
+    (DefKind::Object, "Shape", 0, SHAPE),
+    (DefKind::Object, "Form", 10, FORM),
+    (DefKind::Directive, "shape", 20, SHAPE_DIRECTIVE),
+  ] {
+    let location = at(file, start, start + name.len());
+    assert_eq!(
+      def(&mut b, module, kind, name, location, Origin::User),
+      expected
+    );
+  }
+  for &(name, target) in aliases {
+    let name = b.intern(name);
+    b.push_alias(module, name, target);
+  }
+  b.finish()
+}
+
+/// A module may give one name to a type and to a directive, which are named in two namespaces:
+/// each lookup finds its own, whichever was added first.
+#[test]
+fn a_second_name_may_name_a_type_and_a_directive_whichever_is_added_first() {
+  for aliases in [
+    [("Both", SHAPE), ("Both", SHAPE_DIRECTIVE)],
+    [("Both", SHAPE_DIRECTIVE), ("Both", SHAPE)],
+  ] {
+    let model = second_names(&aliases);
+    assert_eq!(
+      model.lookup(Namespace::Type, "^::app::Both"),
+      Some(SHAPE),
+      "{aliases:?}"
+    );
+    assert_eq!(
+      model.lookup(Namespace::Directive, "@^::app::Both"),
+      Some(SHAPE_DIRECTIVE),
+      "{aliases:?}"
+    );
+  }
+}
+
+/// Of two second names a module gives in one namespace, which is an error, the first added is
+/// kept, and a second name in the other namespace added between them changes nothing.
+#[test]
+fn of_one_second_name_given_twice_in_a_namespace_the_first_added_is_kept() {
+  let model = second_names(&[("Both", SHAPE), ("Both", SHAPE_DIRECTIVE), ("Both", FORM)]);
+  assert_eq!(model.lookup(Namespace::Type, "^::app::Both"), Some(SHAPE));
+  assert_eq!(
+    model.lookup(Namespace::Directive, "@^::app::Both"),
+    Some(SHAPE_DIRECTIVE)
+  );
+
+  let model = second_names(&[("Both", FORM), ("Both", SHAPE)]);
+  assert_eq!(model.lookup(Namespace::Type, "^::app::Both"), Some(FORM));
+}
+
 #[test]
 fn module_by_path_finds_every_module_by_its_dependency_path() {
   let model = fixture();
