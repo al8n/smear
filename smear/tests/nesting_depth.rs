@@ -17,7 +17,7 @@
 //! # How this suite can hold that without killing the runner
 //!
 //! It is the same hazard: a regression here is a process abort, and an abort does not fail a test,
-//! it kills the harness. Two things keep this file out of that, and the first is not in this file
+//! it kills the harness. Three things keep this file out of that, and the first is not in this file
 //! at all:
 //!
 //! 1. **`MAX_NESTING_DEPTH` cannot be raised past its own derivation, at compile time.** A `const`
@@ -31,6 +31,11 @@
 //!    past it — a few dozen brackets, which no stack notices — and
 //!    [`deep_input_returns_rather_than_aborting`] re-checks the boundary as its own first
 //!    statement before handing the parser anything deep.
+//! 3. **A syntactic parse that goes past the ceiling on purpose runs in a child process.** A cell
+//!    that proves a lower bound by parsing a chain at twice the ceiling hands that one parse to this
+//!    binary re-executed on the one test, as `leaf_obligation.rs` runs its payloads, and reads the
+//!    child's exit. An overflow there fails that cell with the child's status and the end of its
+//!    stderr, and every other cell still reports.
 //!
 //! # The reproduction proper
 //!
@@ -1634,6 +1639,74 @@ fn a_flat_use_chain_costs_no_depth() {
   }
 }
 
+/// Selects a cell's deep syntactic parse in the re-executed child. Absent in the parent.
+#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+const CHILD: &str = "SMEAR_NESTING_DEPTH_CHILD";
+
+/// The child's exit code when its parse returned and accepted the chain.
+#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+const PARSED: i32 = 70;
+
+/// The child's exit code when its parse returned and refused the chain.
+#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+const REFUSED: i32 = 71;
+
+/// How many lines of a dead child's stderr a failure shows: the overflow's own report and the lines
+/// in front of it.
+#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+const STDERR_TAIL: usize = 20;
+
+/// Runs one cell's deep parse in a child process and returns what the child's exit looked like.
+///
+/// The child is this test binary re-executed on that one test, with [`CHILD`] set — the mechanism
+/// `leaf_obligation.rs` runs its payloads by. A stack overflow aborts the process it happens in,
+/// and an abort in this one would end the binary rather than fail a test; in the child it ends only
+/// the child.
+#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+fn run_child(test: &str) -> std::process::Output {
+  std::process::Command::new(std::env::current_exe().expect("current_exe"))
+    .args(["--exact", test, "--nocapture", "--test-threads=1"])
+    .env(CHILD, "deep parse")
+    .output()
+    .expect("spawn the child test binary")
+}
+
+/// What the child's parse answered, read off its exit: [`PARSED`] or [`REFUSED`] when the parse
+/// returned, and a failure of the calling cell otherwise.
+///
+/// A stack overflow is the child dying before its parse returned — `signal: 6 (SIGABRT)` on Unix,
+/// `0xc00000fd` on Windows — and the failure names the depth, the child's status and the end of its
+/// stderr. A clean exit is a filter that selected no test, and libtest's 101 is a panic in it; each
+/// is told apart rather than read as a parse.
+#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+fn the_child_parsed(output: &std::process::Output, depth: usize, chain: &str) -> bool {
+  let tail = || {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let lines: Vec<&str> = stderr.lines().collect();
+    lines[lines.len().saturating_sub(STDERR_TAIL)..].join("\n")
+  };
+  match output.status.code() {
+    Some(PARSED) => true,
+    Some(REFUSED) => false,
+    Some(0) => panic!(
+      "the child exited 0 without reaching its parse, so its `--exact` filter selected no test; \
+       its stderr ends:\n{}",
+      tail()
+    ),
+    Some(101) => panic!(
+      "the syntactic parse of {depth} {chain} panicked in the child that runs it, which exited \
+       101; its stderr ends:\n{}",
+      tail()
+    ),
+    _ => panic!(
+      "the syntactic parse of {depth} {chain} overflowed the stack libtest gives a test: the \
+       child that runs it exited with {}, and its stderr ends:\n{}",
+      output.status,
+      tail()
+    ),
+  }
+}
+
 /// A `use`-group chain at **twice** the default ceiling returns on the default test thread, in
 /// both layers — the lower bound `smear-lexer/src/limits.rs` records for the syntactic cycle. For
 /// the lossless one it records a deeper bound, from the `use_group` cell of
@@ -1643,6 +1716,12 @@ fn a_flat_use_chain_costs_no_depth() {
 /// first: at the default ceiling one level past it is refused in both layers, so the raised parses
 /// below are the only deep ones this test makes. Nothing bisects the cycle; what this proves is
 /// that 48 levels return on the 2 MiB thread libtest hands every test, and nothing above it.
+///
+/// The syntactic parse at twice the ceiling runs in a child process, through `run_child`, on the
+/// thread libtest spawns for the child's one test. std sizes that thread by the rule it sized this
+/// one by — `RUST_MIN_STACK`, which the child inherits, or else the platform default of 2 MiB — so
+/// the child measures the stack this cell's name means. An overflow there fails this cell instead
+/// of aborting the binary. The guard and the lossless parse stay here.
 #[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
 #[test]
 fn a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
@@ -1661,6 +1740,7 @@ fn a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
   };
 
   const TWICE: usize = MAX_NESTING_DEPTH * 2;
+  const CELL: &str = "a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread";
 
   fn syntactic(src: &str, limits: SyntacticLimits) -> bool {
     Parser::with_parser::<GraphqlxLexer<'_, str>, Document<&str>, GraphqlxErrors<&str>, _, GraphQLx>(
@@ -1668,6 +1748,17 @@ fn a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
     )
     .parse_str_with_state(src, limits)
     .is_ok()
+  }
+
+  // THE CHILD: this cell re-executed by `run_child`, after the parent's guard has passed. It runs
+  // the one syntactic parse at twice the ceiling, on the thread libtest gave it, and answers through
+  // its exit status.
+  if std::env::var_os(CHILD).is_some() {
+    let parsed = syntactic(
+      &use_groups(TWICE),
+      SyntacticLimits::with_max_nesting_depth(TWICE),
+    );
+    std::process::exit(if parsed { PARSED } else { REFUSED });
   }
 
   // THE GUARD, AND IT MUST STAY FIRST.
@@ -1688,7 +1779,7 @@ fn a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
     "{TWICE} nested groups must parse in the lossless layer under a ceiling of {TWICE}"
   );
   assert!(
-    syntactic(&src, SyntacticLimits::with_max_nesting_depth(TWICE)),
+    the_child_parsed(&run_child(CELL), TWICE, "nested groups"),
     "{TWICE} nested groups must parse in the syntactic layer under a ceiling of {TWICE}"
   );
 }
