@@ -117,13 +117,13 @@ pub use smear_lexer::keyword;
 #[cfg_attr(all(not(feature = "alloc"), feature = "graphql"), doc = "- `graphql`")]
 #[cfg_attr(
   all(feature = "alloc", feature = "graphqlx"),
-  doc = "- [`graphqlx`](parser::graphqlx) — adds `use` items, generics, where-clauses, set and \
-         map literals, and namespaced paths on top of GraphQL."
+  doc = "- [`graphqlx`](parser::graphqlx) — adds `use` items, inline modules, generics, \
+         where-clauses, set and map literals, and namespaced paths on top of GraphQL."
 )]
 #[cfg_attr(
   all(not(feature = "alloc"), feature = "graphqlx"),
-  doc = "- `graphqlx` — adds `use` items, generics, where-clauses, set and map literals, and \
-         namespaced paths on top of GraphQL."
+  doc = "- `graphqlx` — adds `use` items, inline modules, generics, where-clauses, set and map \
+         literals, and namespaced paths on top of GraphQL."
 )]
 ///
 /// The layer is the `smear-parser` crate; this is the name it has always had inside `smear` and

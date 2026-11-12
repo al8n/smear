@@ -1,0 +1,17 @@
+Root@0..19
+  Document@0..19
+    ModDefinition@0..18
+      Name@0..3 "mod"
+      Space@3..4 " "
+      LBrace@4..5 "{"
+      Newline@5..6 "\n"
+      Space@6..7 " "
+      Space@7..8 " "
+      ScalarTypeDefinition@8..17
+        Name@8..14 "scalar"
+        Space@14..15 " "
+        DefinitionName@15..17
+          Name@15..16 "S"
+          Newline@16..17 "\n"
+      RBrace@17..18 "}"
+    Newline@18..19 "\n"

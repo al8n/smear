@@ -1,0 +1,40 @@
+Root@0..41
+  Document@0..41
+    ScalarTypeDefinition@0..41
+      Name@0..6 "scalar"
+      Space@6..7 " "
+      DefinitionName@7..16
+        Name@7..8 "S"
+        DefinitionTypeGenerics@8..16
+          LAngle@8..9 "<"
+          DefinitionTypeParam@9..12
+            Name@9..10 "A"
+            Comma@10..11 ","
+            Space@11..12 " "
+          DefinitionTypeParam@12..15
+            Name@12..15 "use"
+          RAngle@15..16 ">"
+      Space@16..17 " "
+      WhereClause@17..41
+        Name@17..22 "where"
+        Space@22..23 " "
+        WherePredicate@23..31
+          TypePath@23..24
+            Path@23..24
+              Name@23..24 "A"
+          Colon@24..25 ":"
+          Space@25..26 " "
+          TypePath@26..31
+            Path@26..31
+              Name@26..30 "Node"
+              Space@30..31 " "
+        WherePredicate@31..41
+          TypePath@31..34
+            Path@31..34
+              Name@31..34 "use"
+          Colon@34..35 ":"
+          Space@35..36 " "
+          TypePath@36..41
+            Path@36..41
+              Name@36..40 "Node"
+              Newline@40..41 "\n"

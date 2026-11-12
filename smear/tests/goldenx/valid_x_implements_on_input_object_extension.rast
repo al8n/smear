@@ -1,0 +1,33 @@
+Root@0..54
+  Document@0..54
+    InputObjectTypeExtension@0..53
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..12 "input"
+      Space@12..13 " "
+      ExtensionName@13..20
+        Path@13..20
+          Name@13..19 "Filter"
+          Space@19..20 " "
+      ImplementInterfaces@20..36
+        Name@20..30 "implements"
+        Space@30..31 " "
+        TypePath@31..36
+          Path@31..36
+            Name@31..35 "Node"
+            Space@35..36 " "
+      InputFieldsDefinition@36..53
+        LBrace@36..37 "{"
+        Newline@37..38 "\n"
+        Space@38..39 " "
+        Space@39..40 " "
+        InputValueDefinition@40..52
+          Name@40..46 "offset"
+          Colon@46..47 ":"
+          Space@47..48 " "
+          DefinitionTypePath@48..52
+            Path@48..52
+              Name@48..51 "Int"
+              Newline@51..52 "\n"
+        RBrace@52..53 "}"
+    Newline@53..54 "\n"

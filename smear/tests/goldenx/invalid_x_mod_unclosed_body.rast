@@ -1,0 +1,30 @@
+Root@0..28
+  Document@0..28
+    ModDefinition@0..28
+      Name@0..3 "mod"
+      Space@3..4 " "
+      Name@4..5 "m"
+      Space@5..6 " "
+      LBrace@6..7 "{"
+      Newline@7..8 "\n"
+      Space@8..9 " "
+      Space@9..10 " "
+      ObjectTypeDefinition@10..27
+        Name@10..14 "type"
+        Space@14..15 " "
+        DefinitionName@15..17
+          Name@15..16 "T"
+          Space@16..17 " "
+        FieldsDefinition@17..27
+          LBrace@17..18 "{"
+          Space@18..19 " "
+          FieldDefinition@19..26
+            Name@19..20 "f"
+            Colon@20..21 ":"
+            Space@21..22 " "
+            DefinitionTypePath@22..26
+              Path@22..26
+                Name@22..25 "Int"
+                Space@25..26 " "
+          RBrace@26..27 "}"
+      Newline@27..28 "\n"

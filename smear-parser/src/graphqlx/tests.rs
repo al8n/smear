@@ -724,6 +724,383 @@ fn use_trees_cover_roots_paths_sources_globs_groups_and_aliases() {
 }
 
 #[test]
+fn inline_modules_hold_type_system_items_and_their_own_description() {
+  fn check_module<S: AsRef<[u8]>>(document: ast::TypeSystemDocument<S>) {
+    let [ast::TypeSystemItem::Mod(module)] = document.definitions() else {
+      panic!("expected one module");
+    };
+    // The description is the module's own, and the span starts at it.
+    assert!(module.description().is_some());
+    assert_eq!(module.span(), &SimpleSpan::new(0, 76));
+    assert!("media".equivalent(module.name().source()));
+    let items = module.items();
+    assert_eq!(items.len(), 4);
+    assert!(items[0].is_use());
+    let ast::TypeSystemItem::Mod(nested) = &items[1] else {
+      panic!("expected a nested module");
+    };
+    // An empty module is a namespace.
+    assert!(nested.items().is_empty());
+    assert!(nested.description().is_none());
+    assert_eq!(nested.span(), &SimpleSpan::new(27, 39));
+    assert!(items[2].is_definition());
+    assert!(items[3].is_extension());
+  }
+  accept_all!(
+    ast::TypeSystemDocument::graphqlx,
+    "\"doc\" mod media { use a::b mod empty {} type T { f: Int } extend type T @d }",
+    check_module
+  );
+
+  // A mixed document holds a module beside a type and a shorthand query.
+  fn check_mixed<S: AsRef<[u8]>>(document: ast::Document<S>) {
+    let definitions = document.definitions();
+    assert_eq!(definitions.len(), 3);
+    let ast::DocumentItem::Mod(module) = &definitions[0] else {
+      panic!("expected a module first");
+    };
+    assert_eq!(module.span(), &SimpleSpan::new(0, 33));
+    assert!(definitions[1].is_definition());
+    assert!(definitions[2].is_definition());
+  }
+  accept_all!(
+    ast::Document::graphqlx,
+    "mod geo { type Point { x: Int } }\ntype Query { origin: geo::Point }\n{ origin { x } }",
+    check_mixed
+  );
+
+  fn check_standalone<S: AsRef<[u8]>>(module: ast::ModDefinition<S>) {
+    assert!("x".equivalent(module.name().source()));
+    assert!(module.items().is_empty());
+  }
+  accept_all!(ast::ModDefinition::graphqlx, "mod x {}", check_standalone);
+}
+
+#[test]
+fn a_module_is_refused_where_no_module_stands_and_without_its_parts() {
+  // The executable root does not recognise `mod`: it is an unexpected head there.
+  assert_unexpected(
+    |inp| ast::ExecutableDocument::graphqlx(inp).map(|_| ()),
+    "mod m {}",
+    Expectation::Production("a use item or an executable definition"),
+    Some(SyntacticTokenKind::Identifier),
+  );
+  // A module's body holds type-system items only.
+  for src in ["mod m { query Q { f } }", "mod m { fragment F on T { f } }"] {
+    assert_unexpected(
+      |inp| ast::Document::graphqlx(inp).map(|_| ()),
+      src,
+      Expectation::Production("a use item, a module, a type-system definition or an extension"),
+      Some(SyntacticTokenKind::Identifier),
+    );
+  }
+  assert_unexpected(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "mod {}",
+    Expectation::Name,
+    Some(SyntacticTokenKind::LBrace),
+  );
+  // The `{` is confirmed before the body is entered, so its absence is the brace delimiter's own
+  // report, at the token standing where the `{` belongs.
+  let at = assert_unexpected(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "mod m type T { f: Int }",
+    Expectation::LBrace,
+    Some(SyntacticTokenKind::Identifier),
+  );
+  assert_eq!(at, SimpleSpan::new(6, 10));
+  assert_unexpected(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "mod m",
+    Expectation::LBrace,
+    None,
+  );
+  let unclosed = drive_str(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "mod m { type T { f: Int }",
+  )
+  .expect_err("an unclosed body should fail")
+  .into_iter()
+  .next()
+  .expect("an unclosed body should emit an error");
+  assert!(matches!(
+    unclosed.into_data(),
+    ErrorData::Unclosed(Unclosed::Object)
+  ));
+  // A description before `mod` is the module's own at the mixed root too.
+  fn check_described<S: AsRef<[u8]>>(document: ast::Document<S>) {
+    let [ast::DocumentItem::Mod(module)] = document.definitions() else {
+      panic!("expected one module");
+    };
+    assert!(module.description().is_some());
+    assert_eq!(module.span(), &SimpleSpan::new(0, 14));
+  }
+  accept_all!(ast::Document::graphqlx, "\"doc\" mod m {}", check_described);
+}
+
+#[test]
+fn a_schema_definition_is_refused_where_its_brace_belongs() {
+  // The `{` is confirmed before the root operations are entered, so a missing one is refused as an
+  // expected `{`, at the token standing in its place…
+  for (src, at) in [
+    ("schema query: Query", SimpleSpan::new(7, 12)),
+    ("schema @d query: Query", SimpleSpan::new(10, 15)),
+  ] {
+    let span = assert_unexpected(
+      |inp| ast::Document::graphqlx(inp).map(|_| ()),
+      src,
+      Expectation::LBrace,
+      Some(SyntacticTokenKind::Identifier),
+    );
+    assert_eq!(span, at, "{src:?}");
+  }
+  // …or where the source ends.
+  for src in ["schema", "schema @d"] {
+    assert_unexpected(
+      |inp| ast::Document::graphqlx(inp).map(|_| ()),
+      src,
+      Expectation::LBrace,
+      None,
+    );
+  }
+}
+
+#[test]
+fn scalars_enums_unions_and_input_objects_implement_interfaces() {
+  // `implements` follows the name and generics and precedes the directives, on all four kinds.
+  fn check_scalar<S: AsRef<[u8]>>(scalar: ast::ScalarTypeDefinition<S>) {
+    let implements = scalar.implements().expect("the scalar's clause");
+    assert_eq!(implements.interfaces().len(), 2);
+    assert_eq!(implements.span(), &SimpleSpan::new(9, 29));
+    assert!(scalar.directives().is_some());
+    assert_eq!(scalar.span(), &SimpleSpan::new(0, 32));
+  }
+  accept_all!(
+    ast::ScalarTypeDefinition::graphqlx,
+    "scalar S implements I & ns::J @d",
+    check_scalar
+  );
+
+  fn check_enum<S: AsRef<[u8]>>(definition: ast::EnumTypeDefinition<S>) {
+    assert!(definition.implements().is_some());
+    assert!(definition.directives().is_none());
+    assert!(definition.enum_values_definition().is_some());
+  }
+  accept_all!(
+    ast::EnumTypeDefinition::graphqlx,
+    "enum E<T> implements I { A }",
+    check_enum
+  );
+
+  fn check_union<S: AsRef<[u8]>>(definition: ast::UnionTypeDefinition<S>) {
+    assert!(definition.implements().is_some());
+    assert!(definition.member_types().is_some());
+  }
+  accept_all!(
+    ast::UnionTypeDefinition::graphqlx,
+    "union U implements I = A | B",
+    check_union
+  );
+
+  fn check_input<S: AsRef<[u8]>>(definition: ast::InputObjectTypeDefinition<S>) {
+    assert!(definition.implements().is_some());
+    let fields = definition.fields_definition().expect("the input's fields");
+    assert!(fields.where_clause().is_some());
+  }
+  accept_all!(
+    ast::InputObjectTypeDefinition::graphqlx,
+    "input In<T> implements I where T: B { a: Int }",
+    check_input
+  );
+
+  // An extension adds at least one thing, and an `implements` clause counts.
+  fn check_bare_scalar_extension<S: AsRef<[u8]>>(extension: ast::ScalarTypeExtension<S>) {
+    assert!(extension.data().is_implements());
+    assert!(extension.directives().is_none());
+    assert_eq!(extension.span(), &SimpleSpan::new(0, 28));
+  }
+  accept_all!(
+    ast::ScalarTypeExtension::graphqlx,
+    "extend scalar S implements I",
+    check_bare_scalar_extension
+  );
+
+  fn check_scalar_extension<S: AsRef<[u8]>>(extension: ast::ScalarTypeExtension<S>) {
+    assert!(extension.data().is_directives());
+    assert!(extension.implements().is_some());
+    assert_eq!(extension.span(), &SimpleSpan::new(0, 31));
+  }
+  accept_all!(
+    ast::ScalarTypeExtension::graphqlx,
+    "extend scalar S implements I @d",
+    check_scalar_extension
+  );
+
+  fn check_union_extension<S: AsRef<[u8]>>(extension: ast::UnionTypeExtension<S>) {
+    assert!(extension.data().is_implements());
+    assert!(extension.member_types().is_none());
+    assert_eq!(extension.span(), &SimpleSpan::new(0, 27));
+  }
+  accept_all!(
+    ast::UnionTypeExtension::graphqlx,
+    "extend union U implements I",
+    check_union_extension
+  );
+
+  fn check_enum_extension<S: AsRef<[u8]>>(extension: ast::EnumTypeExtension<S>) {
+    assert!(extension.data().is_values());
+    assert!(extension.implements().is_some());
+    assert!(extension.directives().is_some());
+  }
+  accept_all!(
+    ast::EnumTypeExtension::graphqlx,
+    "extend enum E implements I @d { A }",
+    check_enum_extension
+  );
+
+  fn check_input_extension<S: AsRef<[u8]>>(extension: ast::InputObjectTypeExtension<S>) {
+    assert!(extension.data().is_fields());
+    assert!(extension.implements().is_some());
+    assert!(extension.directives().is_none());
+  }
+  accept_all!(
+    ast::InputObjectTypeExtension::graphqlx,
+    "extend input In implements I { a: Int }",
+    check_input_extension
+  );
+
+  // After the directives, `implements` is no longer the definition's: the scalar ends there and
+  // the clause is an entry head of nothing.
+  assert_unexpected(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "scalar S @d implements I",
+    Expectation::Production("a use item, a module, a definition or an extension"),
+    Some(SyntacticTokenKind::Identifier),
+  );
+}
+
+#[test]
+fn a_scalar_ends_on_its_where_clause_and_the_next_entry_is_its_own() {
+  // The clause has no terminator and forces nothing after the scalar, so a `use` item rooted at a
+  // dependency must start a new entry rather than continue the clause.
+  fn check_regression<S: AsRef<[u8]>>(document: ast::TypeSystemDocument<S>) {
+    let definitions = document.definitions();
+    assert_eq!(definitions.len(), 2);
+    let ast::TypeSystemItem::Definition(described) = &definitions[0] else {
+      panic!("expected the scalar first");
+    };
+    let ast::TypeSystemDefinition::Type(ast::TypeDefinition::Scalar(scalar)) = described.node()
+    else {
+      panic!("expected a scalar type definition");
+    };
+    let clause = scalar.where_clause().expect("the scalar's clause");
+    assert_eq!(clause.predicates().len(), 1);
+    assert_eq!(scalar.span(), &SimpleSpan::new(0, 25));
+    assert!(definitions[1].is_use());
+  }
+  accept_all!(
+    ast::TypeSystemDocument::graphqlx,
+    "scalar S<A> where A: Node\nuse ^::dep::X",
+    check_regression
+  );
+
+  // The control: a second predicate whose bounded parameter is named `use` continues the clause,
+  // because a name followed by `:` opens a predicate whatever it spells.
+  fn check_control<S: AsRef<[u8]>>(scalar: ast::ScalarTypeDefinition<S>) {
+    let clause = scalar.where_clause().expect("the scalar's clause");
+    assert_eq!(clause.predicates().len(), 2);
+    assert!(scalar.implements().is_none());
+  }
+  accept_all!(
+    ast::ScalarTypeDefinition::graphqlx,
+    "scalar S<A, use> where A: Node use: Node",
+    check_control
+  );
+
+  // All three clauses together, in their one order.
+  fn check_all<S: AsRef<[u8]>>(scalar: ast::ScalarTypeDefinition<S>) {
+    assert!(scalar.implements().is_some());
+    assert!(scalar.directives().is_some());
+    assert!(scalar.where_clause().is_some());
+  }
+  accept_all!(
+    ast::ScalarTypeDefinition::graphqlx,
+    "scalar Id<T> implements Node @d where T: Key",
+    check_all
+  );
+
+  // A scalar extension takes no `where`: it ends at its directives, and the clause is an entry
+  // head of nothing.
+  assert_unexpected(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "extend scalar S @d where T: I",
+    Expectation::Production("a use item, a module, a definition or an extension"),
+    Some(SyntacticTokenKind::Identifier),
+  );
+}
+
+#[test]
+fn a_path_missing_its_head_or_a_segment_is_refused_by_what_it_takes() {
+  // Every position that takes a path refuses a missing first name as a missing path, at the token
+  // standing in its place, whether the path has a root or not: an interface after `implements` or
+  // `&`, each type a `where` predicate names, a union member, a type condition, a root operation
+  // type, an extension's name, and a rooted spread, type or enum value.
+  for (src, found) in [
+    ("scalar S implements 5", Some(SyntacticTokenKind::Int)),
+    (
+      "union U implements I & = A",
+      Some(SyntacticTokenKind::Equal),
+    ),
+    (
+      "enum E implements ^:: { A }",
+      Some(SyntacticTokenKind::LBrace),
+    ),
+    ("scalar S implements", None),
+    ("scalar S where 5", Some(SyntacticTokenKind::Int)),
+    ("scalar S<A> where A: 5", Some(SyntacticTokenKind::Int)),
+    ("scalar S<A> where A: B & 5", Some(SyntacticTokenKind::Int)),
+    ("union U = 5", Some(SyntacticTokenKind::Int)),
+    ("union U = A | 5", Some(SyntacticTokenKind::Int)),
+    ("fragment F on 5 { f }", Some(SyntacticTokenKind::Int)),
+    ("{ ... on 5 { f } }", Some(SyntacticTokenKind::Int)),
+    ("schema { query: 5 }", Some(SyntacticTokenKind::Int)),
+    ("extend type 5 @d", Some(SyntacticTokenKind::Int)),
+    ("{ ...^:: }", Some(SyntacticTokenKind::RBrace)),
+    ("type T { f: ^::5 }", Some(SyntacticTokenKind::Int)),
+    ("{ f(a: ^::5) }", Some(SyntacticTokenKind::Int)),
+  ] {
+    assert_unexpected(
+      |inp| ast::Document::graphqlx(inp).map(|_| ()),
+      src,
+      Expectation::Path,
+      found,
+    );
+  }
+
+  // And a `::` with no name after it is refused as a missing name, in every kind of path.
+  for (src, found) in [
+    ("union U = A::", None),
+    (
+      "type T implements a::5 { f: Int }",
+      Some(SyntacticTokenKind::Int),
+    ),
+    ("type T { f: a::5 }", Some(SyntacticTokenKind::Int)),
+    ("{ f(a: A::5) }", Some(SyntacticTokenKind::Int)),
+    ("type T @a::5 { f: Int }", Some(SyntacticTokenKind::Int)),
+    ("{ ...a::5 }", Some(SyntacticTokenKind::Int)),
+    ("scalar S<A> where A: b::5", Some(SyntacticTokenKind::Int)),
+    ("scalar S implements ^::a::5", Some(SyntacticTokenKind::Int)),
+  ] {
+    assert_unexpected(
+      |inp| ast::Document::graphqlx(inp).map(|_| ()),
+      src,
+      Expectation::Name,
+      found,
+    );
+  }
+}
+
+#[test]
 fn failures_keep_typed_expectations_and_unclosed_kinds() {
   let error = drive_str(|inp| ast::Type::graphqlx(inp).map(|_| ()), "42")
     .expect_err("an integer cannot begin a GraphQLx type")
@@ -943,13 +1320,13 @@ fn complete_document_rejects_descriptions_before_use_items_and_extensions() {
   assert_unexpected(
     |inp| ast::DocumentItem::graphqlx(inp).map(|_| ()),
     "\"description\" use \"./types\"::{User}",
-    Expectation::Production("a definition after a description"),
+    Expectation::Production("a definition or a module after a description"),
     Some(SyntacticTokenKind::Identifier),
   );
   assert_unexpected(
     |inp| ast::DocumentItem::graphqlx(inp).map(|_| ()),
     "\"description\" extend type User { id: ID }",
-    Expectation::Production("a definition after a description"),
+    Expectation::Production("a definition or a module after a description"),
     Some(SyntacticTokenKind::Identifier),
   );
 }

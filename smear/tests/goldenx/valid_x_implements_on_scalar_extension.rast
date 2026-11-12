@@ -1,0 +1,18 @@
+Root@0..34
+  Document@0..34
+    ScalarTypeExtension@0..34
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..13 "scalar"
+      Space@13..14 " "
+      ExtensionName@14..18
+        Path@14..18
+          Name@14..17 "Url"
+          Space@17..18 " "
+      ImplementInterfaces@18..34
+        Name@18..28 "implements"
+        Space@28..29 " "
+        TypePath@29..34
+          Path@29..34
+            Name@29..33 "Node"
+            Newline@33..34 "\n"

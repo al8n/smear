@@ -16,11 +16,12 @@
 //!
 //! # Every extension needs at least one component, and each one says so differently
 //!
-//! `syntactic/`'s six tails each end in a `(None, None, …) => Err` arm naming its own expectation,
-//! and a scalar or a directive extension goes further: its directives are **mandatory**, not
-//! merely one of several alternatives (`extension.rs:48-51`). A bare `extend type T` re-prints as
-//! perfectly valid text, so the verdict is the only witness — which is why the emptiness check is
-//! written out at every site rather than left to the components' own optionality.
+//! `syntactic/`'s seven tails each end in a `(None, None, …) => Err` arm naming its own
+//! expectation, and a directive extension goes further: its directives are **mandatory**, not
+//! merely one of several alternatives. A scalar extension's are one of two, beside an `implements`
+//! clause. A bare `extend type T` re-prints as perfectly valid text, so the verdict is the only
+//! witness — which is why the emptiness check is written out at every site rather than left to the
+//! components' own optionality.
 //!
 //! # Divergences 16 and 17 have their extension twins here
 //!
@@ -40,7 +41,7 @@ use super::coverage::node_at;
 use super::{
   GraphqlxLosslessInput, Keyword,
   definition::{
-    constrained_fields, constrained_union_members, enum_values_definition, implements_interfaces,
+    constrained_fields, constrained_union_members, enum_values_definition, optional_implements,
     root_operation_types_definition,
   },
   directive::directives,
@@ -56,13 +57,11 @@ use crate::lossless::{lossless_drivers, lossless_production};
 lossless_production! {
   dialect = graphqlx::lossless;
 
-  /// `extend scalar ExtensionName Directives[Const]`
+  /// `extend scalar ExtensionName ImplementInterfaces? Directives[Const]?`, at least one of them
+  /// present.
   ///
   /// **Precondition: `mark` was minted before the `extend`, which is already committed, and the
   /// head is an `Identifier` spelled `scalar`.** [`type_system_extension`] establishes both.
-  ///
-  /// The directives are **required**, which is the one extension whose single component is not
-  /// merely one alternative among several.
   fn scalar_type_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
     node_at(
       mark,
@@ -70,10 +69,14 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         extension_name::<Src, Ctx>(inp)?;
-        if peek_kind::<Src, Ctx>(inp)? != Some(Kind::At) {
-          return recover::report_unexpected::<Src, Ctx>(inp, EXTENSION_TAIL_HEADS);
+        let implements = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
+        optional_implements::<Src, Ctx>(inp)?;
+        let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
+        directives::<Src, Ctx>(inp, Constness::Const)?;
+        if implements || has_directives {
+          return Ok(());
         }
-        directives::<Src, Ctx>(inp, Constness::Const)
+        recover::report_unexpected::<Src, Ctx>(inp, EXTENSION_TAIL_HEADS)
       },
     )
     .parse_input(inp)
@@ -84,8 +87,8 @@ lossless_production! {
   /// **Precondition: `mark` was minted before the `extend`, which is already committed, and the
   /// head is an `Identifier` spelled `directive`.** [`type_system_extension`] establishes both.
   ///
-  /// [`scalar_type_extension`]'s single, **required** tail, behind the `@` a directive's name is
-  /// written after. The `@` is required too, as in a directive definition.
+  /// The one extension whose single tail, its directives, is **required**, behind the `@` a
+  /// directive's name is written after. The `@` is required too, as in a directive definition.
   fn directive_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
     node_at(
       mark,
@@ -132,10 +135,10 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `extend input ExtensionName Directives[Const]? WhereClause? InputFieldsDefinition?`
+  /// `extend input ExtensionName ImplementInterfaces? Directives[Const]? WhereClause?
+  /// InputFieldsDefinition?`
   ///
-  /// [`object_type_extension`]'s body without the `implements` clause, which the input-object
-  /// grammar does not have.
+  /// [`object_type_extension`]'s body with the input-object block.
   fn input_object_type_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
     node_at(
       mark,
@@ -160,11 +163,8 @@ lossless_production! {
   /// each component may legitimately be absent and only their *conjunction* is an error, which is
   /// the same cross-component shape as the `where` rule and is invisible to the text.
   fn object_extension_body<'inp, Src, Ctx>(inp, input_object: bool) {
-    let implements = !input_object
-      && peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
-    if implements {
-      implements_interfaces::<Src, Ctx>(inp)?;
-    }
+    let implements = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
+    optional_implements::<Src, Ctx>(inp)?;
     let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
     directives::<Src, Ctx>(inp, Constness::Const)?;
     let constrained = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Where);
@@ -176,7 +176,8 @@ lossless_production! {
     recover::report_unexpected::<Src, Ctx>(inp, EXTENSION_TAIL_HEADS)
   }
 
-  /// `extend union ExtensionName Directives[Const]? UnionMemberTypes? WhereClause?`
+  /// `extend union ExtensionName ImplementInterfaces? Directives[Const]? UnionMemberTypes?
+  /// WhereClause?`
   ///
   /// Divergence 17's extension twin, reached through the same helper the definition uses.
   fn union_type_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
@@ -186,11 +187,13 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         extension_name::<Src, Ctx>(inp)?;
+        let implements = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
+        optional_implements::<Src, Ctx>(inp)?;
         let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
         directives::<Src, Ctx>(inp, Constness::Const)?;
         let has_members = peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal);
         constrained_union_members::<Src, Ctx>(inp)?;
-        if has_directives || has_members {
+        if implements || has_directives || has_members {
           return Ok(());
         }
         recover::report_unexpected::<Src, Ctx>(inp, EXTENSION_TAIL_HEADS)
@@ -199,7 +202,7 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `extend enum ExtensionName Directives[Const]? EnumValuesDefinition?`
+  /// `extend enum ExtensionName ImplementInterfaces? Directives[Const]? EnumValuesDefinition?`
   ///
   /// No `where` clause, exactly as the enum *definition* has none.
   fn enum_type_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
@@ -209,13 +212,15 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         extension_name::<Src, Ctx>(inp)?;
+        let implements = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
+        optional_implements::<Src, Ctx>(inp)?;
         let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
         directives::<Src, Ctx>(inp, Constness::Const)?;
         let has_values = peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace);
         if has_values {
           enum_values_definition::<Src, Ctx>(inp)?;
         }
-        if has_directives || has_values {
+        if implements || has_directives || has_values {
           return Ok(());
         }
         recover::report_unexpected::<Src, Ctx>(inp, EXTENSION_TAIL_HEADS)

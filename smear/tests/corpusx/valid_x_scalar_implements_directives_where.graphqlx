@@ -1,0 +1,1 @@
+scalar Id<T> implements Node @d where T: Key

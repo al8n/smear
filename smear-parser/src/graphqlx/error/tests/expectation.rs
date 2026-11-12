@@ -53,6 +53,7 @@ fn every_expectation_renders_as_the_object_of_expected() {
     (Expectation::UseTree, "a use tree"),
     (Expectation::NameGlobOrGroup, "a name, `*` or `{`"),
     (Expectation::Use, "`use`"),
+    (Expectation::Mod, "`mod`"),
     (Expectation::As, "`as`"),
     (
       Expectation::OperationTypeOrFragment,

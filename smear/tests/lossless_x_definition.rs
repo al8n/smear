@@ -479,6 +479,82 @@ fn each_definition_reaches_its_own_block_and_clause_productions() {
   }
 }
 
+/// A scalar, a union, an enum and an input object take an `implements` clause after their name,
+/// where GraphQL gives these kinds none, and the clause is a child of the definition in front of its
+/// directives and its body.
+#[test]
+fn the_four_kinds_take_an_implements_clause_after_their_name() {
+  for (src, expected) in [
+    (
+      "scalar S implements A @d",
+      vec![
+        K::ScalarTypeDefinition,
+        K::DefinitionName,
+        K::ImplementInterfaces,
+        K::TypePath,
+        K::Path,
+        K::Directives,
+        K::Directive,
+        K::TypePath,
+        K::Path,
+      ],
+    ),
+    (
+      "union U implements A = B",
+      vec![
+        K::UnionTypeDefinition,
+        K::DefinitionName,
+        K::ImplementInterfaces,
+        K::TypePath,
+        K::Path,
+        K::UnionMemberTypes,
+        K::TypePath,
+        K::Path,
+      ],
+    ),
+    (
+      "enum E implements A { RED }",
+      vec![
+        K::EnumTypeDefinition,
+        K::DefinitionName,
+        K::ImplementInterfaces,
+        K::TypePath,
+        K::Path,
+        K::EnumValuesDefinition,
+        K::EnumValueDefinition,
+      ],
+    ),
+    (
+      "input In implements A { f: Int }",
+      vec![
+        K::InputObjectTypeDefinition,
+        K::DefinitionName,
+        K::ImplementInterfaces,
+        K::TypePath,
+        K::Path,
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+        K::DefinitionTypePath,
+        K::Path,
+      ],
+    ),
+  ] {
+    let parse = parse_type_system_definition(src);
+    assert!(!parse.has_errors(), "{src} must parse clean");
+    let mut want = vec![K::Root];
+    want.extend(expected);
+    assert_eq!(
+      parse
+        .syntax()
+        .descendants()
+        .map(|n| n.kind())
+        .collect::<Vec<K>>(),
+      want,
+      "{src}"
+    );
+  }
+}
+
 /// Every SDL directive position is **const**, and each one is a separate literal in the source.
 ///
 /// The flavour is invisible to a node-kind pre-order and to the text — a `VariableValue` node is
@@ -750,6 +826,36 @@ fn a_directive_definition_carries_its_own_directives_before_repeatable() {
 /// is why the trivia-laden spelling is asserted beside the compact one.
 #[test]
 fn a_trailing_where_clause_stops_before_the_next_definition() {
+  // A scalar definition ends on its clause the same way.
+  for tail in [
+    " type X { f: Int }",
+    "\n\ntype X { f: Int }",
+    "\n# a comment\n\ntype X { f: Int }",
+  ] {
+    let src = format!("scalar S where T: Node{tail}");
+    let parse = parse_type_system_definition(&src);
+    assert!(
+      !parse.has_errors(),
+      "the clause must end at `Node`, leaving `type X` to the next definition: {src:?}"
+    );
+    let kinds: Vec<K> = parse.syntax().descendants().map(|n| n.kind()).collect();
+    assert_eq!(
+      kinds,
+      vec![
+        K::Root,
+        K::ScalarTypeDefinition,
+        K::DefinitionName,
+        K::WhereClause,
+        K::WherePredicate,
+        K::TypePath,
+        K::Path,
+        K::TypePath,
+        K::Path
+      ],
+      "and `type` must not have been swallowed as a bounded type: {src:?}"
+    );
+    assert_eq!(parse.syntax().text().to_string(), src);
+  }
   for tail in [
     " type X { f: Int }",
     "\n\ntype X { f: Int }",

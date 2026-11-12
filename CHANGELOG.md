@@ -398,8 +398,8 @@ All notable changes to Smear are documented in this file.
   a tree of paths, and `use` and `mod` are its keywords. `ContextualKeyword::Use`
   and `::Mod` take the places of `Import` and `From`, so the list stays at 45 and
   only those two discriminants change meaning, and
-  `smear_lexer::keywords::{Import, From}` become `{Use, Mod}`. `mod` has no
-  grammar yet: at an item's head it is what any unknown head is. A `use` item is
+  `smear_lexer::keywords::{Import, From}` become `{Use, Mod}`. `mod` opens an
+  inline module, in the entry below. A `use` item is
   `use UseTree`, and a tree is a path with an optional `as Name`, or a scope
   followed by a glob `*` or by a group `{ UseTree+ }`; the scope is a bare root
   (`~::`, `^::` or `..::`), a path and its `::`, or an inline string source with
@@ -445,6 +445,56 @@ All notable changes to Smear are documented in this file.
   was 114. The typed `UseDefinition` and `UseTree` replace the four import
   wrappers, every document root's `import_definitions` is `use_definitions`, and
   the lossless module is `use_tree`.
+- `smear-parser`!: GraphQLx gains inline modules, `implements` on scalars,
+  enums, unions and input objects, and `where` on a scalar definition.
+  `Description? mod Name
+  { ModItem* }` is an entry of a type-system document and of a mixed document,
+  and an item of another module's body. A body holds `use` items, modules,
+  type-system definitions and extensions, and may be empty; an operation or a
+  fragment in one is a syntax error. An executable document has no `mod`
+  entry: the syntactic parser refuses one, and the lossless parser reports one
+  and still builds it, which its projection refuses. Every body's `{` is a
+  counted delimiter, so the nesting limit bounds how deep modules nest. In the
+  AST, `ModDefinition { span, description, name, items }` is new in
+  `graphqlx::ast`, with a public `ModDefinition::new`, and a deep module is
+  released by a loop, as a selection set is. `TypeSystemItem` and
+  `DocumentItem` gain a `Mod` variant, and `ModDefinition::items` holds
+  `TypeSystemItem`s, so a consumer whose wildcard arm stood for "nothing else"
+  now receives modules there and adds a `Mod` arm to read them;
+  `UseOrExecutableDefinition` is unchanged. `syntactic::definition::mod_definition`
+  and `ModDefinition::graphqlx` parse one module, and `Expectation` gains `Mod`.
+  In the lossless layer `SyntaxKind` gains `ModDefinition` (98) after
+  `UseTree`, which moves the raw value of every later kind up by one:
+  `DefinitionTypeParam` is 99 and `Root` is 113. A module's description,
+  braces and items are its own children, the typed `ModDefinition` reads its
+  description, its `mod` and name tokens and one iterator per item kind, and
+  the typed `Document` and `TypeSystemDocument` gain `mod_definitions`.
+  A scalar, enum, union or input object definition or extension takes an
+  `implements` clause after its name and generics and before its directives,
+  and an extension of one must still add something, an `implements` clause
+  counting; an empty one's refusal names `implements` among what it expected.
+  In the AST the eight `graphqlx::ast` aliases keep their names and stand for
+  carriers of GraphQLx's own, each with an `implements` slot after the name and
+  an `implements()` accessor, so each `new` takes the clause after the name;
+  the carriers the GraphQL dialect binds do not change. The four
+  extensions' payloads are GraphQLx's own too, under the names they had:
+  `UnionTypeExtensionData`, `EnumTypeExtensionData` and
+  `InputObjectTypeExtensionData` gain an `Implements(_)` variant, their
+  `Directives` variant becomes `Directives { implements, directives }`, and
+  their remaining variant gains `implements`. The scalar extension's payload is
+  the new `ScalarTypeExtensionData`, `Implements(_)` or
+  `Directives { implements, directives }`, so `ScalarTypeExtension::new` takes
+  it in place of the directives and `directives()` answers an `Option`; a
+  `match` on any of the four payloads needs the new arms. `ScalarTypeExtension`
+  and `EnumTypeExtension` gain the `Ty` parameter the other aliases carry. In
+  the lossless layer each of the eight nodes may hold an `ImplementInterfaces`
+  child after its name, and their typed wrappers gain `implement_interfaces`.
+  A scalar definition ends on an optional `where` clause after its directives,
+  which forces nothing after it, as a directive definition's does; a scalar
+  extension takes none. Its carrier gains a `where_clause` slot after the
+  directives and a `where_clause()` accessor, so `ScalarTypeDefinition::new`
+  takes the clause last, and the lossless node may hold a `WhereClause` child,
+  read by the typed wrapper's `where_clause`.
 
 ## [0.0.1] - 2026-10-30
 

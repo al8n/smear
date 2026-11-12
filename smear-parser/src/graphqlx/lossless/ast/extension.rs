@@ -42,11 +42,13 @@ ast_node!(
   lang = crate::graphqlx::kinds::GraphQLxLang;
   /// A scalar type extension, `extend scalar S @d`.
   ///
-  /// The one extension whose directives the grammar makes mandatory — it has no other tail.
+  /// Its two tails are an `implements` clause and directives, and it adds at least one of them.
   ScalarTypeExtension => K::ScalarTypeExtension {
     /// The extended scalar's name.
     extension_name: opt ExtensionName,
-    /// The directives the extension adds.
+    /// The interfaces the extension adds, if any.
+    implement_interfaces: opt ImplementInterfaces,
+    /// The directives the extension adds, if any.
     directives: opt Directives,
   }
 );
@@ -94,6 +96,8 @@ ast_node!(
   UnionTypeExtension => K::UnionTypeExtension {
     /// The extended union's name, and the generic arguments the extension applies.
     extension_name: opt ExtensionName,
+    /// The interfaces the extension adds, if any.
+    implement_interfaces: opt ImplementInterfaces,
     /// The directives the extension adds, if any.
     directives: opt Directives,
     /// The members the extension adds, if any.
@@ -109,6 +113,8 @@ ast_node!(
   EnumTypeExtension => K::EnumTypeExtension {
     /// The extended enum's name, and the generic arguments the extension applies.
     extension_name: opt ExtensionName,
+    /// The interfaces the extension adds, if any.
+    implement_interfaces: opt ImplementInterfaces,
     /// The directives the extension adds, if any.
     directives: opt Directives,
     /// The values the extension adds, if any.
@@ -122,6 +128,8 @@ ast_node!(
   InputObjectTypeExtension => K::InputObjectTypeExtension {
     /// The extended input object's name, and the generic arguments the extension applies.
     extension_name: opt ExtensionName,
+    /// The interfaces the extension adds, if any.
+    implement_interfaces: opt ImplementInterfaces,
     /// The directives the extension adds, if any.
     directives: opt Directives,
     /// The `where` clause the extension adds, if any.
@@ -135,7 +143,7 @@ ast_node!(
   lang = crate::graphqlx::kinds::GraphQLxLang;
   /// A directive extension, `extend directive @d @k`.
   ///
-  /// Like [`ScalarTypeExtension`], it has one tail, and its directives are mandatory.
+  /// It has one tail, and its directives are mandatory.
   DirectiveExtension => K::DirectiveExtension {
     /// The extended directive's name, and the generic arguments the extension applies.
     extension_name: opt ExtensionName,

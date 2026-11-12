@@ -4,9 +4,12 @@ use tokora::{
 };
 
 use super::{
-  Constrained, DefinitionName, DefinitionTypeGenerics, DefinitionTypeParam,
-  ExecutableDefinitionHeader, ExecutableDefinitionName, ExecutableDefinitionTypeGenerics,
-  ExtensionName, ExtensionTypeGenerics, ExtensionTypeParam, TypePath, WhereClause, WherePredicate,
+  Constrained, DefinitionName, DefinitionTypeGenerics, DefinitionTypeParam, EnumTypeExtension,
+  EnumTypeExtensionData, ExecutableDefinitionHeader, ExecutableDefinitionName,
+  ExecutableDefinitionTypeGenerics, ExtensionName, ExtensionTypeGenerics, ExtensionTypeParam,
+  InputObjectTypeDefinition, InputObjectTypeExtensionData, ScalarTypeDefinition,
+  ScalarTypeExtension, ScalarTypeExtensionData, TypePath, UnionTypeExtensionData, WhereClause,
+  WherePredicate,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -78,4 +81,75 @@ fn type_paths_where_clauses_and_constraints_are_composable() {
       "{ value }"
     )
   );
+}
+
+#[test]
+fn the_four_kinds_carry_their_interfaces_beside_their_directives() {
+  let scalar = ScalarTypeDefinition::new(
+    CustomSpan(1),
+    "Url",
+    Some("Node"),
+    None::<&str>,
+    Some("where T: Key"),
+  );
+  assert_eq!(scalar.implements(), Some(&"Node"));
+  assert!(scalar.directives().is_none());
+  assert_eq!(scalar.where_clause(), Some(&"where T: Key"));
+  assert_eq!(
+    scalar.into_components(),
+    (
+      CustomSpan(1),
+      "Url",
+      Some("Node"),
+      None,
+      Some("where T: Key")
+    )
+  );
+
+  let input = InputObjectTypeDefinition::new(
+    CustomSpan(2),
+    "Filter",
+    None::<&str>,
+    Some("@d"),
+    Some("{ limit: Int }"),
+  );
+  assert!(input.implements().is_none());
+  assert_eq!(input.fields_definition(), Some(&"{ limit: Int }"));
+
+  // An extension's payload names its nonempty form: interfaces alone, or a later part with the
+  // interfaces in front of it.
+  let only = ScalarTypeExtensionData::<&str, &str>::Implements("Node");
+  assert_eq!(only.implements(), Some(&"Node"));
+  assert!(only.directives().is_none());
+  let extension = ScalarTypeExtension::new(
+    CustomSpan(3),
+    "Url",
+    ScalarTypeExtensionData::Directives {
+      implements: Some("Node"),
+      directives: "@d",
+    },
+  );
+  assert_eq!(extension.implements(), Some(&"Node"));
+  assert_eq!(extension.directives(), Some(&"@d"));
+
+  let values = EnumTypeExtension::new(
+    CustomSpan(4),
+    "Colour",
+    EnumTypeExtensionData::<&str, &str, &str>::Values {
+      implements: None,
+      directives: Some("@d"),
+      enum_values_definition: "{ RED }",
+    },
+  );
+  assert!(values.implements().is_none());
+  assert_eq!(values.enum_values_definition(), Some(&"{ RED }"));
+
+  let members = UnionTypeExtensionData::<&str, &str, &str>::Implements("Node");
+  assert!(members.member_types().is_none());
+  let fields = InputObjectTypeExtensionData::<&str, &str, &str>::Directives {
+    implements: Some("Node"),
+    directives: "@d",
+  };
+  assert!(fields.fields_definition().is_none());
+  assert_eq!(fields.implements(), Some(&"Node"));
 }

@@ -51,6 +51,8 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let name = definition_name(inp)?;
+  let implements: Option<ImplementInterfaces<GraphqlxSlice<'inp, Src>>> =
+    try_implements(inp)?.into();
   let directives = optional_const_directives(inp)?;
   let where_clause = match try_where_clause(inp)? {
     ParseAttempt::Accept(where_clause) => Some(where_clause),
@@ -74,6 +76,7 @@ where
   Ok(InputObjectTypeDefinition::new(
     SimpleSpan::new(start, extent_end(inp)),
     name,
+    implements,
     directives,
     fields_definition,
   ))
@@ -82,7 +85,8 @@ where
 definition_parser!(
   /// Parses a GraphQLx input object type definition.
   ///
-  /// GraphQLx adds generic headers, qualified paths, and `where` clauses.
+  /// GraphQLx adds generic headers, qualified paths, an `implements` clause, and
+  /// `where` clauses.
   ///
   /// See the [GraphQL Input Object Type Definition specification](https://spec.graphql.org/draft/#InputObjectTypeDefinition).
   pub input_object_type_definition,
@@ -107,7 +111,8 @@ impl_definition_api!(
 impl_definition_api!(
   /// Parses a GraphQLx input object type definition.
   ///
-  /// GraphQLx adds generic headers, qualified paths, and `where` clauses.
+  /// GraphQLx adds generic headers, qualified paths, an `implements` clause, and
+  /// `where` clauses.
   ///
   /// See the [GraphQL Input Object Type Definition specification](https://spec.graphql.org/draft/#InputObjectTypeDefinition).
   S,

@@ -1,0 +1,21 @@
+Root@0..30
+  Document@0..30
+    ScalarTypeDefinition@0..14
+      Name@0..6 "scalar"
+      Space@6..7 " "
+      DefinitionName@7..11
+        Name@7..10 "Url"
+        Space@10..11 " "
+      Directives@11..14
+        Directive@11..14
+          At@11..12 "@"
+          TypePath@12..14
+            Path@12..14
+              Name@12..13 "d"
+              Space@13..14 " "
+    Error@14..24
+      Name@14..24 "implements"
+    Space@24..25 " "
+    Error@25..29
+      Name@25..29 "Node"
+    Newline@29..30 "\n"

@@ -30,7 +30,7 @@
 //! closer stays the loop's — the consuming form eats it, and the only witness is an extra `Error`
 //! child that the text cannot show.
 //!
-//! # The three cross-component constraints, which no per-component port can express
+//! # What a `where` clause forces at each site, which no per-component port can express
 //!
 //! Each half is individually optional and the *combination* is not, so a production that parses
 //! both and stops is wrong on a verdict rather than on a shape:
@@ -40,6 +40,7 @@
 //! | object, interface, input object | a present `where` makes the **following** block mandatory | `LBrace` | `object.rs:33-34`, `interface.rs:33-34`, `input_object.rs:66-67` |
 //! | union | a present `where` requires the **preceding** `= members` | `Equal` | `union.rs:87-95` |
 //! | directive definition | a trailing `where` forces **nothing** | — | `definition/directive.rs:133-147` |
+//! | scalar definition | a trailing `where` forces **nothing** | — | `definition/scalar.rs` |
 //!
 //! Two more of the first kind live on extensions and are Task 14's
 //! (`extension.rs:88`, `extension.rs:342`); the union rule has an extension twin there too
@@ -487,10 +488,13 @@ lossless_production! {
     Ok(())
   }
 
-  /// `Description? scalar DefinitionName Directives[Const]?`
+  /// `Description? scalar DefinitionName ImplementInterfaces? Directives[Const]? WhereClause?`
   ///
   /// **Precondition: `mark` was minted before the description, which is already committed, and the
   /// head is an `Identifier` spelled `scalar`.** [`type_system_definition`] establishes both.
+  ///
+  /// The `where` ends the definition and forces nothing after it, as a directive definition's
+  /// does, so the next entry's head is what the clause's continuation test must decline on.
   fn scalar_type_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
     node_at(
       mark,
@@ -498,7 +502,9 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         definition_name::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp, Constness::Const)
+        optional_implements::<Src, Ctx>(inp)?;
+        directives::<Src, Ctx>(inp, Constness::Const)?;
+        optional_where_clause::<Src, Ctx>(inp)
       },
     )
     .parse_input(inp)
@@ -536,18 +542,26 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `ImplementInterfaces? Directives[Const]? WhereClause? FieldsDefinition?` — the tail an object
-  /// type and an interface type share, verbatim. Opens no node of its own.
-  fn object_body<'inp, Src, Ctx>(inp) {
+  /// `ImplementInterfaces?` — the clause every type definition and every type extension may write
+  /// after its name and generics. Opens no node when the clause is absent.
+  fn optional_implements<'inp, Src, Ctx>(inp) {
     // `implements` is contextual, so the head kind cannot decide this and the spelling must.
     if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements) {
       implements_interfaces::<Src, Ctx>(inp)?;
     }
+    Ok(())
+  }
+
+  /// `ImplementInterfaces? Directives[Const]? WhereClause? FieldsDefinition?` — the tail an object
+  /// type and an interface type share, verbatim. Opens no node of its own.
+  fn object_body<'inp, Src, Ctx>(inp) {
+    optional_implements::<Src, Ctx>(inp)?;
     directives::<Src, Ctx>(inp, Constness::Const)?;
     constrained_fields::<Src, Ctx>(inp, false)
   }
 
-  /// `Description? union DefinitionName Directives[Const]? UnionMemberTypes? WhereClause?`
+  /// `Description? union DefinitionName ImplementInterfaces? Directives[Const]? UnionMemberTypes?
+  /// WhereClause?`
   ///
   /// # Divergence 17: the clause **follows** the members and requires them
   ///
@@ -564,6 +578,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         definition_name::<Src, Ctx>(inp)?;
+        optional_implements::<Src, Ctx>(inp)?;
         directives::<Src, Ctx>(inp, Constness::Const)?;
         constrained_union_members::<Src, Ctx>(inp)
       },
@@ -595,7 +610,7 @@ lossless_production! {
     Ok(())
   }
 
-  /// `Description? enum DefinitionName Directives[Const]? EnumValuesDefinition?`
+  /// `Description? enum DefinitionName ImplementInterfaces? Directives[Const]? EnumValuesDefinition?`
   ///
   /// The one type definition with **no** `where` clause at all — `enum_after_keyword` does not call
   /// `try_where_clause` (`definition/enum_type.rs:96-121`).
@@ -606,6 +621,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         definition_name::<Src, Ctx>(inp)?;
+        optional_implements::<Src, Ctx>(inp)?;
         directives::<Src, Ctx>(inp, Constness::Const)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
           enum_values_definition::<Src, Ctx>(inp)?;
@@ -616,7 +632,8 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `Description? input DefinitionName Directives[Const]? WhereClause? InputFieldsDefinition?`
+  /// `Description? input DefinitionName ImplementInterfaces? Directives[Const]? WhereClause?
+  /// InputFieldsDefinition?`
   ///
   /// The third of divergence 16's five sites; the constraint is [`constrained_fields`]'s, with the
   /// input-object block.
@@ -627,6 +644,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         definition_name::<Src, Ctx>(inp)?;
+        optional_implements::<Src, Ctx>(inp)?;
         directives::<Src, Ctx>(inp, Constness::Const)?;
         constrained_fields::<Src, Ctx>(inp, true)
       },

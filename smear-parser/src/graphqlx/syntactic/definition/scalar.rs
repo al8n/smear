@@ -16,16 +16,28 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let name = definition_name(inp)?;
+  let implements: Option<ImplementInterfaces<GraphqlxSlice<'inp, Src>>> =
+    try_implements(inp)?.into();
   let directives = optional_const_directives(inp)?;
+  // The clause ends the definition and forces nothing after it, as a directive definition's does.
+  let where_clause = match try_where_clause(inp)? {
+    ParseAttempt::Accept(where_clause) => Some(where_clause),
+    ParseAttempt::Decline => None,
+  };
   Ok(ScalarTypeDefinition::new(
     SimpleSpan::new(start, extent_end(inp)),
     name,
+    implements,
     directives,
+    where_clause,
   ))
 }
 
 definition_parser!(
   /// Parses a GraphQLx scalar type definition.
+  ///
+  /// An `implements` clause after the name and a `where` clause at the end are GraphQLx
+  /// extensions.
   ///
   /// See the [GraphQL Scalar Type Definition specification](https://spec.graphql.org/draft/#ScalarTypeDefinition).
   pub scalar_type_definition,
@@ -40,6 +52,9 @@ definition_parser!(
 
 impl_definition_api!(
   /// Parses a GraphQLx scalar type definition.
+  ///
+  /// An `implements` clause after the name and a `where` clause at the end are GraphQLx
+  /// extensions.
   ///
   /// See the [GraphQL Scalar Type Definition specification](https://spec.graphql.org/draft/#ScalarTypeDefinition).
   S,

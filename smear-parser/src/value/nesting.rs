@@ -192,13 +192,13 @@
 //! guarantee ends on is complete: every recursive position the grammar produces, and every leaf,
 //! because a leaf is a type that has said it is one.
 //!
-//! ## The other three trees, and why the set is derived rather than listed
+//! ## The other four trees, and why the set is derived rather than listed
 //!
-//! **There are four trees, and the value one is not special.** The set is exactly the types
-//! implementing [`Nestable`] — that is what "released iteratively" means here — and it is four
+//! **There are five trees, and the value one is not special.** The set is exactly the types
+//! implementing [`Nestable`] — that is what "released iteratively" means here — and it is five
 //! families: the six **value** enums, both dialects' **type** references, both dialects'
-//! **selections**, and GraphQLx's **use trees**. Every one of them releases its payload positions
-//! as leaves, so every one needs the same promise about them.
+//! **selections**, GraphQLx's **use trees**, and GraphQLx's **module items**. Every one of them
+//! releases its payload positions as leaves, so every one needs the same promise about them.
 //!
 //! This was learned the expensive way. Three consecutive rounds each closed one door — the value
 //! `S`, then the value `Span` and `I`, then the type `Span` — and each time an adversarial review
@@ -217,6 +217,16 @@
 //!   do.
 //! * **Use tree, `S` and `Span`** — `UseTree::new`, the one door that seats either: a group holds
 //!   trees, and every name, path and string source a tree holds is dropped in place. Bounded.
+//! * **Module item tree, `S` and `Span`** — `ModDefinition::new`, the door that seats a module's
+//!   own name, description and span and puts its items where the walk reaches them. Bounded, and
+//!   every item in a module shares the module's `S` and `Span`, so the bound reaches each of them.
+//!   **This tree has a residual the other four do not**, and it is stated rather than closed: the
+//!   definitions and extensions an item holds are carriers, shared with GraphQL or GraphQLx's own,
+//!   whose constructors take no bound, so a caller who builds a `Nested` of items directly, without
+//!   a module, can seat a `Span` of its own in them, and the `Ty` parameter is bounded nowhere —
+//!   the default is the type tree's own node, which no bound can tell from a payload. A caller who
+//!   instantiates either with a type that owns a module builds a recursion this release does not
+//!   see, which is `al8n/smear#176`'s shape at a door this tree does not own.
 //!
 //! Each list is closed on the same evidence as `Name`'s four: private fields, and only `AsSpan`,
 //! `IntoSpan` and `IntoComponents` — which read out and never put back. No `From`, no
@@ -246,6 +256,8 @@
 //!   so neither is a payload; `Span` is dropped in place and takes the bound.
 //! * the six value enums, both `Type` families, both `Selection`s and `UseTree` — their
 //!   parameters are `S`, `Span` and `I`, bounded at the doors that seat them.
+//! * `TypeSystemItem` — `S` and `Span` are bounded where a module seats them, and its residual is
+//!   the bullet above.
 //! * `Absent<N>` is uninhabited.
 //!
 //! A carrier that is **not** `Nestable` — `Alias`, `TypeCondition`, `FragmentSpread`,
@@ -480,12 +492,12 @@ pub(crate) use sealed::Sealed;
 /// its own, may be arbitrarily large. What it may not own, at any depth, is one of this crate's
 /// nodes.
 ///
-/// **"Any tree" is three of them and the list is derived rather than remembered.** The trees with
+/// **"Any tree" is five of them and the list is derived rather than remembered.** The trees with
 /// an iterative release are exactly the types implementing [`Nestable`]: the six **value** enums,
-/// both dialects' **type** references, and both dialects' **selections**. Each releases its
-/// payload positions as leaves, so each needs the same promise about them, and a payload that
-/// reaches a `Type` node or a `Selection` node breaks the release exactly as one reaching an
-/// `InputValue` does.
+/// both dialects' **type** references, both dialects' **selections**, GraphQLx's **use trees** and
+/// GraphQLx's **module items**. Each releases its payload positions as leaves, so each needs the
+/// same promise about them, and a payload that reaches a `Type` node or a `Selection` node breaks
+/// the release exactly as one reaching an `InputValue` does.
 ///
 /// **A `Leaf` reaches no node of this crate's trees; it says nothing about the payload's own
 /// stack use, which is the holder's.** Nothing here bounds the depth of the implementor's *own*
@@ -1221,7 +1233,9 @@ pub trait Nestable: Sized + Sealed {
   /// GraphQLx **use** trees are rank 1: none of them can hold a node of another, and none can hold
   /// a selection.
   /// The **selection** tree is rank 2, because a selection holds arguments and directives whose
-  /// payloads are values, and in GraphQLx a type condition whose payload is a type.
+  /// payloads are values, and in GraphQLx a type condition whose payload is a type. GraphQLx's
+  /// **module item** tree is rank 2 as well: an item holds definitions whose payloads are values
+  /// and types, and `use` items whose payloads are use trees, and no selection.
   ///
   /// A carrier that merely wraps a node — an object field, a map entry, the uninhabited
   /// [`Absent`] — takes the rank of the node it wraps rather than one of its own.
@@ -1294,12 +1308,15 @@ pub trait Nestable: Sized + Sealed {
   /// Selection ──→ Value ──→ Leaf
   ///     └───────→ Type  ──→ Leaf
   ///             UseTree ──→ Leaf
+  /// ModItem ──→ Value, Type, UseTree
   /// ```
   ///
   /// A selection holds arguments and directives whose payloads are values, and in GraphQLx a type
   /// condition whose payload is a type; it drops all of them in place. Value and type are
   /// siblings — neither holds a node of the other — a use tree holds names, paths and strings and
-  /// no node of another tree, and a leaf holds nothing at all.
+  /// no node of another tree, and a leaf holds nothing at all. A module item drops its
+  /// definitions' values and types and its `use` items' trees in place, and is a sibling of a
+  /// selection: neither holds the other.
   ///
   /// **The reverse edges cannot be written, and that is a fact about the payload bounds rather
   /// than a convention.** A value's or a type's payload parameters are bounded [`Leaf`], and a
@@ -1311,7 +1328,7 @@ pub trait Nestable: Sized + Sealed {
   /// place sits beside a `const _: () = assert!(…)` comparing the two ranks, so an edge added in
   /// the wrong direction stops compiling.
   ///
-  /// "Leaf" means **holds no node of this crate's own** — of *any* of the four trees. A node of a
+  /// "Leaf" means **holds no node of this crate's own** — of *any* of the five trees. A node of a
   /// lower-ranked tree is not a leaf and does not have to be; it is admitted by the second bullet
   /// above, on the strength of its own iterative release. An arm an implementation treats as a leaf
   /// still releases whatever its payload parameters were instantiated with, and a caller who put a
