@@ -330,6 +330,8 @@ def cmd_instrument(args):
 # trees' profile declarations are compared, wherever cargo reads one inside a tree, and a difference
 # outside the pinned keys of `bench` and the `release` it inherits from is refused rather than
 # measured. Identical declarations, overrides included, are the same build on both sides and pass.
+# So does a difference in `panic`, which is not pinned because cargo ignores it for benchmarks: no
+# bench build reads it, whatever either tree says.
 #
 # The reading is a line scanner, not a TOML parser: Python 3.9 has none. Anything it cannot place —
 # an inline table, a multi-line value, a key spelled oddly — comes out as a key the pin does not
@@ -372,6 +374,8 @@ def profile_settings(root):
 def _reach(full, pinned):
   parts = full.split(".")
   if len(parts) >= 2 and parts[1] not in ("bench", "release"):
+    return "unused"
+  if len(parts) == 3 and parts[2] == "panic":
     return "unused"
   if len(parts) == 3 and parts[2] in pinned:
     return "pinned"

@@ -247,14 +247,17 @@ perf_targets=(peak_alloc wall_clock)
 # number this job reports. Whether the gate should compile another way — one codegen unit, say, for
 # a narrower floor — is a separate decision, and one that needs its own `perf-floor` runs.
 #
-# Pinned: every key that can change the code rustc generates — optimisation, codegen partitioning,
-# LTO, debug info, the two runtime checks, unwinding, incremental compilation. Not pinned: `strip`,
-# `split-debuginfo` and `rpath`, which change only what is written into the executable beside that
-# code, and whose defaults depend on the platform and the cargo release, so a guessed value could
-# change today's binary. What the environment cannot pin at all is a per-package table,
-# `[profile.<name>.package.<pkg>]`, for which cargo reads no variable. Both gaps are closed the same
-# way: `sides.py profile` compares the two trees' declarations before anything is built, prints any
-# difference, and stops the run as not comparable when the difference is not in a pinned key.
+# Pinned: every key that can change the code rustc generates for a bench — optimisation, codegen
+# partitioning, LTO, debug info, the two runtime checks, incremental compilation. Not pinned:
+# `panic`, which cargo ignores for benchmarks ("Tests, benchmarks, build scripts, and proc macros
+# ignore the panic setting"), so a bench always unwinds and pinning the key pinned nothing; and
+# `strip`, `split-debuginfo` and `rpath`, which change only what is written into the executable
+# beside that code, and whose defaults depend on the platform and the cargo release, so a guessed
+# value could change today's binary. What the environment cannot pin at all is a per-package
+# table, `[profile.<name>.package.<pkg>]`, for which cargo reads no variable. Both gaps are closed
+# the same way: `sides.py profile` compares the two trees' declarations before anything is built,
+# prints any difference, and stops the run as not comparable when the difference is neither in a
+# pinned key nor in `panic`, which no bench build reads.
 profile_pin=(
   opt-level=3
   codegen-units=16
@@ -262,7 +265,6 @@ profile_pin=(
   debug=false
   debug-assertions=false
   overflow-checks=false
-  panic=unwind
   incremental=false
 )
 
