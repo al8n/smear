@@ -413,27 +413,46 @@ impl Collector {
 
 /// The one path the analysis reports through: every phase, smear's rules, and a consumer's walk.
 ///
-/// It keeps what a `Collector` keeps, and it notes where each error was reported, kept or dropped
-/// by the ceiling, at the moment it is reported: what an error marks (`Model::mark`) can then never
-/// depend on which diagnostics the ceiling keeps.
+/// It keeps what a `Collector` keeps. One made with `new`, for `analyze`'s own run, also notes
+/// where each error was reported, kept or dropped by the ceiling, at the moment it is reported:
+/// what an error marks (`Model::mark`) can then never depend on which diagnostics the ceiling
+/// keeps. One made with `without_marks`, for a consumer's walk, which marks nothing, notes nothing
+/// beside the list, so it runs in memory bounded by the ceiling however much is reported.
 pub(crate) struct Reporter {
   collector: Collector,
-  /// The primary location of every error reported since the marks were last taken.
+  /// Whether it notes where each error points.
+  marking: bool,
+  /// The primary location of every error reported since the marks were last taken; always empty
+  /// when it is not marking.
   marks: Vec<Location>,
 }
 
 impl Reporter {
-  /// A reporter whose list keeps at most `ceiling` diagnostics.
+  /// A reporter whose list keeps at most `ceiling` diagnostics, and which notes where each error
+  /// points: the one `analyze` runs its phases and smear's rules through, whose errors mark the
+  /// model.
   pub(crate) fn new(ceiling: usize) -> Self {
     Self {
       collector: Collector::new(ceiling),
+      marking: true,
       marks: Vec::new(),
     }
   }
 
-  /// Reports `diagnostic`: notes where it points if it is an error, then hands it to the list.
+  /// A reporter whose list keeps at most `ceiling` diagnostics, and which notes nothing beside it:
+  /// the one a consumer's walk reports through, which marks nothing.
+  pub(crate) fn without_marks(ceiling: usize) -> Self {
+    Self {
+      collector: Collector::new(ceiling),
+      marking: false,
+      marks: Vec::new(),
+    }
+  }
+
+  /// Reports `diagnostic`: notes where it points if it is an error and the reporter is marking,
+  /// then hands it to the list.
   pub(crate) fn report(&mut self, diagnostic: Diagnostic) {
-    if diagnostic.severity == Severity::Error {
+    if self.marking && diagnostic.severity == Severity::Error {
       self.marks.push(diagnostic.primary);
     }
     self.collector.report(diagnostic);
@@ -445,12 +464,13 @@ impl Reporter {
   }
 
   /// Where the errors reported since the marks were last taken point, in the order they were
-  /// reported.
+  /// reported: none, when the reporter is not marking.
   pub(crate) fn take_marks(&mut self) -> Vec<Location> {
     core::mem::take(&mut self.marks)
   }
 
-  /// The finished list, and where the errors reported since the marks were last taken point.
+  /// The finished list, and where the errors reported since the marks were last taken point: none,
+  /// when the reporter is not marking.
   pub(crate) fn finish(self) -> (Diagnostics, Vec<Location>) {
     (self.collector.finish(), self.marks)
   }

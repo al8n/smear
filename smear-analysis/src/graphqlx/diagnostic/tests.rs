@@ -1,5 +1,6 @@
 //! The excerpt through which smear's diagnostics quote a spelling: where it cuts, what it writes
-//! for bytes that are not UTF-8, and the most it writes.
+//! for bytes that are not UTF-8, and the most it writes. And the reporters: which of them notes
+//! where errors point.
 
 use std::{
   format,
@@ -7,7 +8,12 @@ use std::{
   vec::Vec,
 };
 
-use super::{EXCERPT_END, Excerpt};
+use tokora::{
+  SimpleSpan,
+  diagnostic::{Code, Location, Severity},
+};
+
+use super::{Diagnostic, EXCERPT_END, Excerpt, Reporter};
 
 /// The most bytes one excerpt writes, as `Excerpt` documents it: 64 of the spelling's bytes before
 /// the `…` and 67 after it, each written as at most the three bytes of a U+FFFD, and the `…`'s
@@ -150,4 +156,46 @@ fn an_excerpt_writes_at_most_396_bytes_and_can_write_that_many() {
       );
     }
   }
+}
+
+/// The code the reporters' test reports under.
+const CODE: Code = Code::new("smear::graphqlx::test-mark");
+
+/// An error at `at`.
+fn error(at: Location) -> Diagnostic {
+  Diagnostic::builder(CODE, at).build()
+}
+
+/// A reporter made for `analyze`'s own run notes where each error points, in the order they were
+/// reported, whether the ceiling keeps them or not, and never where a warning points. One made for
+/// a consumer's walk notes none, however many errors it is handed.
+#[test]
+fn the_analysis_reporter_notes_each_error_and_a_consumer_walk_reporter_notes_none() {
+  let first = Location::new(4, SimpleSpan::new(2, 5));
+  let second = Location::entire(6);
+  let warning = Diagnostic::builder(CODE, Location::entire(5))
+    .severity(Severity::Warning)
+    .build();
+
+  let mut marking = Reporter::new(1);
+  let mut consumer = Reporter::without_marks(1);
+  for reporter in [&mut marking, &mut consumer] {
+    reporter.report(error(first));
+    reporter.report(warning.clone());
+    reporter.report(error(second));
+  }
+
+  assert_eq!(marking.take_marks(), [first, second]);
+  assert!(marking.take_marks().is_empty(), "the marks are taken once");
+  marking.report(error(first));
+  let (diagnostics, marks) = marking.finish();
+  assert_eq!(marks, [first]);
+  assert_eq!(diagnostics.error_count(), 3);
+
+  assert!(consumer.take_marks().is_empty());
+  let (diagnostics, marks) = consumer.finish();
+  assert!(marks.is_empty());
+  assert_eq!(diagnostics.error_count(), 2);
+  assert_eq!(diagnostics.len(), 1);
+  assert!(diagnostics.truncated());
 }

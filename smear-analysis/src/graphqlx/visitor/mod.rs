@@ -320,7 +320,8 @@ impl<'a> Cx<'a> {
   ///
   /// In [`analyze`](super::analyze)'s own walk, an error also marks the contributions and members
   /// that hold where it points, kept or dropped, once the walk has ended. A consumer's walk marks
-  /// nothing.
+  /// nothing and keeps nothing beside its list, so it holds memory bounded by the ceiling however
+  /// many diagnostics its visitor reports.
   #[inline]
   pub fn report(&mut self, diagnostic: Diagnostic) {
     self.reporter.report(diagnostic);
@@ -388,17 +389,18 @@ impl core::fmt::Debug for Cx<'_> {
 /// are not in it, and [`Diagnostics::merge`] makes one list of the two.
 ///
 /// The analysis is not changed: a consumer's walk marks nothing, so every `has_errors()` answers
-/// what [`analyze`](super::analyze) found. A visitor may walk an analysis that is not ok. It then
-/// meets the `Unresolved` shapes and entities whose `has_errors()` is set, which the walk reaches as
-/// it reaches everything else.
+/// what [`analyze`](super::analyze) found. Nor does the walk keep anything per diagnostic beside the
+/// list, so it holds memory bounded by the ceiling however many diagnostics the visitor reports. A
+/// visitor may walk an analysis that is not ok. It then meets the `Unresolved` shapes and entities
+/// whose `has_errors()` is set, which the walk reaches as it reaches everything else.
 pub fn visit<V: Visitor + ?Sized>(
   analysis: &Analysis,
   packages: Packages,
   visitor: &mut V,
 ) -> Diagnostics {
-  let reporter = Reporter::new(analysis.ceiling());
-  // A consumer's walk marks nothing: the analysis is not its to change, so the marks its errors
-  // would make are dropped.
+  // A consumer's walk marks nothing, since the analysis is not its to change, so its reporter notes
+  // no mark either.
+  let reporter = Reporter::without_marks(analysis.ceiling());
   let (diagnostics, _) = drive(
     analysis.model(),
     analysis.sources(),
