@@ -925,3 +925,51 @@ fn the_module_limit_refuses_the_same_modules_whatever_the_order_given() {
   );
   assert_eq!(numbered(&forward), numbered(&backward));
 }
+
+/// A long module name is not read again for each module under it.
+///
+/// Every model is checked when it is finished, in a build with debug assertions, and the check
+/// compares each module's path with the one before it. Two neighbouring modules share their
+/// ancestors' names, so a comparison that read every segment's spelling read a long ancestor's
+/// name once for every module under it; comparing the interned names first reads spellings only
+/// where two names differ.
+///
+/// Nothing here can count that work: the check allocates nothing and reports nothing. So the sizes
+/// tell the two costs apart. One module named with 32 MiB of `N` holds 60 000 child modules: a file
+/// of about 33 MiB, and 60 005 modules with the four root modules, within the default limits' 64
+/// MiB of source and 65 536 modules. Read segment by segment, the 60 000 neighbouring pairs read
+/// the long name about 2 × 10^12 bytes in all, which is minutes at memory speed; compared by symbol
+/// they read only the children's short names, and the test costs about what parsing the file costs.
+/// In a build without debug assertions the check does not run, and the test asserts only what the
+/// analysis answers.
+#[test]
+fn a_long_module_name_is_not_read_again_for_each_module_under_it() {
+  const LONG: usize = 1 << 25;
+  const CHILDREN: u32 = 60_000;
+  let mut text = String::with_capacity(LONG + 20 * CHILDREN as usize);
+  text.push_str("mod ");
+  text.push_str(&"N".repeat(LONG));
+  text.push_str(" {\n");
+  for index in 0..CHILDREN {
+    text.push_str(&format!("  mod m{index} {{}}\n"));
+  }
+  text.push_str("}\n");
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("lib.graphqlx", text.as_str())]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+
+  let model = analysis.model();
+  assert_eq!(model.modules().len(), ROOTS + 1 + CHILDREN);
+  let app = model.package(model.root_package()).root_module();
+  let long = model.module(app).children()[0];
+  let path: Vec<&str> = model
+    .module(long)
+    .path()
+    .iter()
+    .map(|segment: &Sym| model.name(*segment))
+    .collect();
+  assert_eq!(path.len(), 1);
+  assert_eq!(path[0].len(), LONG);
+  assert_eq!(model.module(long).children().len(), CHILDREN as usize);
+}
