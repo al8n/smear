@@ -2,8 +2,9 @@
 //! unions and input objects — as definitions and as extensions.
 //!
 //! Each carrier is the shared type-system carrier of the same name with an `implements` slot after
-//! its name. GraphQL gives none of these kinds an `implements` clause, so the shared carriers keep
-//! their shape and the GraphQLx aliases bind these instead. An extension's payload names each
+//! its name, and a scalar definition carries a `where` clause after its directives as well. GraphQL
+//! gives none of these kinds an `implements` clause, so the shared carriers keep their shape and the
+//! GraphQLx aliases bind these instead. An extension's payload names each
 //! nonempty form the grammar allows, as the object extension's does: interfaces alone, or
 //! directives or the kind's own body with optional interfaces before them.
 
@@ -41,22 +42,32 @@ macro_rules! impl_node_traits {
   };
 }
 
-/// A scalar type definition, with the interfaces it implements.
+/// A scalar type definition, with the interfaces it implements and the `where` clause that ends
+/// it.
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
-pub struct ScalarTypeDefinition<Name, Implements, Directives, Span = SimpleSpan> {
+pub struct ScalarTypeDefinition<Name, Implements, Directives, WhereClause, Span = SimpleSpan> {
   span: Span,
   name: Name,
   implements: Option<Implements>,
   directives: Option<Directives>,
+  where_clause: Option<WhereClause>,
 }
 
 impl_node_traits!(
-  ScalarTypeDefinition<Name, Implements, Directives, Span>,
-  (Span, Name, Option<Implements>, Option<Directives>),
-  (span, name, implements, directives)
+  ScalarTypeDefinition<Name, Implements, Directives, WhereClause, Span>,
+  (
+    Span,
+    Name,
+    Option<Implements>,
+    Option<Directives>,
+    Option<WhereClause>
+  ),
+  (span, name, implements, directives, where_clause)
 );
 
-impl<Name, Implements, Directives, Span> ScalarTypeDefinition<Name, Implements, Directives, Span> {
+impl<Name, Implements, Directives, WhereClause, Span>
+  ScalarTypeDefinition<Name, Implements, Directives, WhereClause, Span>
+{
   /// Creates a scalar type definition in source order.
   #[inline]
   pub const fn new(
@@ -64,12 +75,14 @@ impl<Name, Implements, Directives, Span> ScalarTypeDefinition<Name, Implements, 
     name: Name,
     implements: Option<Implements>,
     directives: Option<Directives>,
+    where_clause: Option<WhereClause>,
   ) -> Self {
     Self {
       span,
       name,
       implements,
       directives,
+      where_clause,
     }
   }
 
@@ -95,6 +108,12 @@ impl<Name, Implements, Directives, Span> ScalarTypeDefinition<Name, Implements, 
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     self.directives.as_ref()
+  }
+
+  /// Returns the optional `where` clause, which ends the definition.
+  #[inline]
+  pub const fn where_clause(&self) -> Option<&WhereClause> {
+    self.where_clause.as_ref()
   }
 }
 

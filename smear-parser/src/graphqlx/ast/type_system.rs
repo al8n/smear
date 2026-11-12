@@ -121,13 +121,14 @@ pub type EnumValuesDefinition<
   Container = DefaultVec<EnumValueDefinition<S, Span>>,
 > = crate::type_system::EnumValuesDefinition<EnumValueDefinition<S, Span>, Container, Span>;
 
-/// A GraphQLx scalar type definition with optional generic parameters and an
-/// optional `implements` clause.
+/// A GraphQLx scalar type definition with optional generic parameters, an
+/// optional `implements` clause, and an optional `where` clause that ends it.
 pub type ScalarTypeDefinition<S, Span = SimpleSpan, Ty = Type<S, Span>> =
   crate::generic::ScalarTypeDefinition<
     DefinitionName<S, Span, Ty>,
     ImplementInterfaces<S, Span, Ty>,
     ConstDirectives<S, Span>,
+    WhereClause<S, Span, Ty>,
     Span,
   >;
 

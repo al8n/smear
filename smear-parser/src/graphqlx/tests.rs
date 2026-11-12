@@ -949,6 +949,66 @@ fn scalars_enums_unions_and_input_objects_implement_interfaces() {
 }
 
 #[test]
+fn a_scalar_ends_on_its_where_clause_and_the_next_entry_is_its_own() {
+  // The clause has no terminator and forces nothing after the scalar, so a `use` item rooted at a
+  // dependency must start a new entry rather than continue the clause.
+  fn check_regression<S: AsRef<[u8]>>(document: ast::TypeSystemDocument<S>) {
+    let definitions = document.definitions();
+    assert_eq!(definitions.len(), 2);
+    let ast::TypeSystemItem::Definition(described) = &definitions[0] else {
+      panic!("expected the scalar first");
+    };
+    let ast::TypeSystemDefinition::Type(ast::TypeDefinition::Scalar(scalar)) = described.node()
+    else {
+      panic!("expected a scalar type definition");
+    };
+    let clause = scalar.where_clause().expect("the scalar's clause");
+    assert_eq!(clause.predicates().len(), 1);
+    assert_eq!(scalar.span(), &SimpleSpan::new(0, 25));
+    assert!(definitions[1].is_use());
+  }
+  accept_all!(
+    ast::TypeSystemDocument::graphqlx,
+    "scalar S<A> where A: Node\nuse ^::dep::X",
+    check_regression
+  );
+
+  // The control: a second predicate whose bounded parameter is named `use` continues the clause,
+  // because a name followed by `:` opens a predicate whatever it spells.
+  fn check_control<S: AsRef<[u8]>>(scalar: ast::ScalarTypeDefinition<S>) {
+    let clause = scalar.where_clause().expect("the scalar's clause");
+    assert_eq!(clause.predicates().len(), 2);
+    assert!(scalar.implements().is_none());
+  }
+  accept_all!(
+    ast::ScalarTypeDefinition::graphqlx,
+    "scalar S<A, use> where A: Node use: Node",
+    check_control
+  );
+
+  // All three clauses together, in their one order.
+  fn check_all<S: AsRef<[u8]>>(scalar: ast::ScalarTypeDefinition<S>) {
+    assert!(scalar.implements().is_some());
+    assert!(scalar.directives().is_some());
+    assert!(scalar.where_clause().is_some());
+  }
+  accept_all!(
+    ast::ScalarTypeDefinition::graphqlx,
+    "scalar Id<T> implements Node @d where T: Key",
+    check_all
+  );
+
+  // A scalar extension takes no `where`: it ends at its directives, and the clause is an entry
+  // head of nothing.
+  assert_unexpected(
+    |inp| ast::Document::graphqlx(inp).map(|_| ()),
+    "extend scalar S @d where T: I",
+    Expectation::Production("a use item, a module, a definition or an extension"),
+    Some(SyntacticTokenKind::Identifier),
+  );
+}
+
+#[test]
 fn failures_keep_typed_expectations_and_unclosed_kinds() {
   let error = drive_str(|inp| ast::Type::graphqlx(inp).map(|_| ()), "42")
     .expect_err("an integer cannot begin a GraphQLx type")

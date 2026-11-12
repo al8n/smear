@@ -826,6 +826,36 @@ fn a_directive_definition_carries_its_own_directives_before_repeatable() {
 /// is why the trivia-laden spelling is asserted beside the compact one.
 #[test]
 fn a_trailing_where_clause_stops_before_the_next_definition() {
+  // A scalar definition ends on its clause the same way.
+  for tail in [
+    " type X { f: Int }",
+    "\n\ntype X { f: Int }",
+    "\n# a comment\n\ntype X { f: Int }",
+  ] {
+    let src = format!("scalar S where T: Node{tail}");
+    let parse = parse_type_system_definition(&src);
+    assert!(
+      !parse.has_errors(),
+      "the clause must end at `Node`, leaving `type X` to the next definition: {src:?}"
+    );
+    let kinds: Vec<K> = parse.syntax().descendants().map(|n| n.kind()).collect();
+    assert_eq!(
+      kinds,
+      vec![
+        K::Root,
+        K::ScalarTypeDefinition,
+        K::DefinitionName,
+        K::WhereClause,
+        K::WherePredicate,
+        K::TypePath,
+        K::Path,
+        K::TypePath,
+        K::Path
+      ],
+      "and `type` must not have been swallowed as a bounded type: {src:?}"
+    );
+    assert_eq!(parse.syntax().text().to_string(), src);
+  }
   for tail in [
     " type X { f: Int }",
     "\n\ntype X { f: Int }",

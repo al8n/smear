@@ -215,6 +215,8 @@ ast_node!(
     implement_interfaces: opt ImplementInterfaces,
     /// The definition's directives, if it was given any.
     directives: opt Directives,
+    /// The scalar's `where` clause, if it has one — the last thing in the definition.
+    where_clause: opt WhereClause,
   }
 );
 
@@ -332,8 +334,8 @@ ast_node!(
   /// is what a consumer wanting it must do. Unlike in GraphQL, its optionality costs nothing else:
   /// the directive's own name is a [`DefinitionName`] node, so no index shifts behind it.
   ///
-  /// This is also the one `where` site the grammar puts at the *end* of a definition, forcing
-  /// nothing after it.
+  /// This and [`ScalarTypeDefinition`] are the two definitions the grammar ends on a `where`
+  /// clause, which forces nothing after it.
   DirectiveDefinition => K::DirectiveDefinition {
     /// The definition's description, if it was given one.
     description: tok_any K::InlineString | K::BlockString,

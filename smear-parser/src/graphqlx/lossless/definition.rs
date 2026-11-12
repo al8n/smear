@@ -30,7 +30,7 @@
 //! closer stays the loop's — the consuming form eats it, and the only witness is an extra `Error`
 //! child that the text cannot show.
 //!
-//! # The three cross-component constraints, which no per-component port can express
+//! # What a `where` clause forces at each site, which no per-component port can express
 //!
 //! Each half is individually optional and the *combination* is not, so a production that parses
 //! both and stops is wrong on a verdict rather than on a shape:
@@ -40,6 +40,7 @@
 //! | object, interface, input object | a present `where` makes the **following** block mandatory | `LBrace` | `object.rs:33-34`, `interface.rs:33-34`, `input_object.rs:66-67` |
 //! | union | a present `where` requires the **preceding** `= members` | `Equal` | `union.rs:87-95` |
 //! | directive definition | a trailing `where` forces **nothing** | — | `definition/directive.rs:133-147` |
+//! | scalar definition | a trailing `where` forces **nothing** | — | `definition/scalar.rs` |
 //!
 //! Two more of the first kind live on extensions and are Task 14's
 //! (`extension.rs:88`, `extension.rs:342`); the union rule has an extension twin there too
@@ -487,10 +488,13 @@ lossless_production! {
     Ok(())
   }
 
-  /// `Description? scalar DefinitionName ImplementInterfaces? Directives[Const]?`
+  /// `Description? scalar DefinitionName ImplementInterfaces? Directives[Const]? WhereClause?`
   ///
   /// **Precondition: `mark` was minted before the description, which is already committed, and the
   /// head is an `Identifier` spelled `scalar`.** [`type_system_definition`] establishes both.
+  ///
+  /// The `where` ends the definition and forces nothing after it, as a directive definition's
+  /// does, so the next entry's head is what the clause's continuation test must decline on.
   fn scalar_type_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
     node_at(
       mark,
@@ -499,7 +503,8 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         definition_name::<Src, Ctx>(inp)?;
         optional_implements::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp, Constness::Const)
+        directives::<Src, Ctx>(inp, Constness::Const)?;
+        optional_where_clause::<Src, Ctx>(inp)
       },
     )
     .parse_input(inp)

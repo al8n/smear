@@ -4869,24 +4869,28 @@ fn scalar_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<Definition<'src, ScalarTypeDefinition<&'src str>>> {
-  // `Description? scalar DefinitionName ImplementInterfaces? Directives[Const]?`
+  // `Description? scalar DefinitionName ImplementInterfaces? Directives[Const]? WhereClause?` — the
+  // clause ends the definition and constrains nothing after it, so it is the carrier's own slot
+  // rather than one half of a `Constrained`.
   let mut cursor = Cursor::new(node);
   let description_token = cursor.opt_description();
   cursor.keyword(ContextualKeyword::Scalar, "the `scalar` keyword")?;
   let name_node = cursor.node(K::DefinitionName, "a definition name")?;
   let implements_node = cursor.opt_node(K::ImplementInterfaces);
   let directives_node = cursor.opt_node(K::Directives);
+  let where_node = cursor.opt_node(K::WhereClause);
   cursor.end()?;
 
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
   let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let where_clause = cursor.keep_opt(optional_where_clause(where_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
   Ok((
     description,
-    ScalarTypeDefinition::new(to_span(inner), name, implements, directives),
+    ScalarTypeDefinition::new(to_span(inner), name, implements, directives, where_clause),
     outer,
   ))
 }

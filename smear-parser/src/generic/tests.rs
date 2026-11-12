@@ -85,12 +85,25 @@ fn type_paths_where_clauses_and_constraints_are_composable() {
 
 #[test]
 fn the_four_kinds_carry_their_interfaces_beside_their_directives() {
-  let scalar = ScalarTypeDefinition::new(CustomSpan(1), "Url", Some("Node"), None::<&str>);
+  let scalar = ScalarTypeDefinition::new(
+    CustomSpan(1),
+    "Url",
+    Some("Node"),
+    None::<&str>,
+    Some("where T: Key"),
+  );
   assert_eq!(scalar.implements(), Some(&"Node"));
   assert!(scalar.directives().is_none());
+  assert_eq!(scalar.where_clause(), Some(&"where T: Key"));
   assert_eq!(
     scalar.into_components(),
-    (CustomSpan(1), "Url", Some("Node"), None)
+    (
+      CustomSpan(1),
+      "Url",
+      Some("Node"),
+      None,
+      Some("where T: Key")
+    )
   );
 
   let input = InputObjectTypeDefinition::new(

@@ -445,8 +445,9 @@ All notable changes to Smear are documented in this file.
   was 114. The typed `UseDefinition` and `UseTree` replace the four import
   wrappers, every document root's `import_definitions` is `use_definitions`, and
   the lossless module is `use_tree`.
-- `smear-parser`!: GraphQLx gains inline modules, and `implements` on scalars,
-  enums, unions and input objects. `Description? mod Name
+- `smear-parser`!: GraphQLx gains inline modules, `implements` on scalars,
+  enums, unions and input objects, and `where` on a scalar definition.
+  `Description? mod Name
   { ModItem* }` is an entry of a type-system document and of a mixed document,
   and an item of another module's body. A body holds `use` items, modules,
   type-system definitions and extensions, and may be empty; an operation or a
@@ -488,6 +489,12 @@ All notable changes to Smear are documented in this file.
   and `EnumTypeExtension` gain the `Ty` parameter the other aliases carry. In
   the lossless layer each of the eight nodes may hold an `ImplementInterfaces`
   child after its name, and their typed wrappers gain `implement_interfaces`.
+  A scalar definition ends on an optional `where` clause after its directives,
+  which forces nothing after it, as a directive definition's does; a scalar
+  extension takes none. Its carrier gains a `where_clause` slot after the
+  directives and a `where_clause()` accessor, so `ScalarTypeDefinition::new`
+  takes the clause last, and the lossless node may hold a `WhereClause` child,
+  read by the typed wrapper's `where_clause`.
 
 ## [0.0.1] - 2026-10-30
 

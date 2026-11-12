@@ -1,0 +1,40 @@
+Root@0..45
+  Document@0..45
+    ScalarTypeDefinition@0..45
+      Name@0..6 "scalar"
+      Space@6..7 " "
+      DefinitionName@7..12
+        Name@7..9 "Id"
+        DefinitionTypeGenerics@9..12
+          LAngle@9..10 "<"
+          DefinitionTypeParam@10..11
+            Name@10..11 "T"
+          RAngle@11..12 ">"
+      Space@12..13 " "
+      ImplementInterfaces@13..29
+        Name@13..23 "implements"
+        Space@23..24 " "
+        TypePath@24..29
+          Path@24..29
+            Name@24..28 "Node"
+            Space@28..29 " "
+      Directives@29..32
+        Directive@29..32
+          At@29..30 "@"
+          TypePath@30..32
+            Path@30..32
+              Name@30..31 "d"
+              Space@31..32 " "
+      WhereClause@32..45
+        Name@32..37 "where"
+        Space@37..38 " "
+        WherePredicate@38..45
+          TypePath@38..39
+            Path@38..39
+              Name@38..39 "T"
+          Colon@39..40 ":"
+          Space@40..41 " "
+          TypePath@41..45
+            Path@41..45
+              Name@41..44 "Key"
+              Newline@44..45 "\n"

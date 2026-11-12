@@ -263,7 +263,7 @@ pub enum SyntaxKind {
   RootOperationTypesDefinition,
   /// `OperationType : TypePath`.
   RootOperationTypeDefinition,
-  /// `scalar DefinitionName ImplementInterfaces? Directives?`.
+  /// `scalar DefinitionName ImplementInterfaces? Directives? WhereClause?`.
   ScalarTypeDefinition,
   /// `type DefinitionName ImplementInterfaces? Directives? WhereClause? FieldsDefinition?`.
   ObjectTypeDefinition,
