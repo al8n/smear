@@ -596,15 +596,6 @@ pub fn graphql_execute(sdl: &str, query: &str, value: Option<&str>) -> (Option<S
   (leaf, errors)
 }
 
-/// `smallvec_1` — the error container is SmallVec-backed rather than `Vec`-backed.
-///
-/// The coercion is the probe: with the feature off the deref target is a `Vec` and the binding
-/// does not type-check.
-pub fn smallvec_backed_errors(errors: &smear::lexer::graphql::error::LexerErrors) -> usize {
-  let inline: &smallvec_1::SmallVec<[smear::lexer::graphql::error::LexerError; 1]> = errors;
-  inline.len()
-}
-
 /// `rowan_0_17` — the lossless CST tower, reachable through the crate named `smear` for the first time
 /// (#81). A `parse_document` -> [`Parse`] -> `SyntaxNode` round trip.
 ///

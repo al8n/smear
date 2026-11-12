@@ -4,6 +4,15 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-lexer`!: both dialects' `LexerErrors` and `StringErrors` keep their errors in a `Vec`
+  in every configuration, where they held them in a one-slot `SmallVec` while the `smallvec`
+  feature was on, as it was by default. A token's `Result` no longer carries room for a whole
+  error when it holds none. Measured against the `SmallVec` containers, the three parse
+  workloads ran in 14 % to 15.5 % less time, the six schema and validation workloads moved by
+  no more than 0.81 %, and peak allocation was unchanged. Each container derives `From`,
+  `Into`, `Deref`, `DerefMut`, `AsRef` and `AsMut` over its storage, so its deref target and
+  its conversions are now `Vec`'s, and `StringErrors`' `IntoIterator::IntoIter` is
+  `vec::IntoIter`.
 - `smear-semantics` and `smear-analysis`: two new crates. `smear-semantics` holds the
   algorithms smear's two semantic layers share: the byte-spelling interner, duplicate-name
   detection and the graph-cycle kernel. `smear` does not re-export it. `smear-analysis` is
