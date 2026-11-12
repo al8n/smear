@@ -613,6 +613,16 @@ where
 /// constructors it needs are private to this file now, so there is no `Diagnostic` any other module
 /// can build and none it can put anywhere.
 ///
+/// # The hand-over
+///
+/// `visit` is lent the span and the typed payload of each **error** record the finished parse
+/// keeps, in emission order, while the emitter that owns the payloads is alive: this function is
+/// the only place it is, between `finish_partial` and the projection that drops every payload. It
+/// is called by the same pass that projects, for a record `retains` has just kept, so a payload is
+/// lent exactly when the `Parse` gets an error-severity diagnostic for it. A warning's payload and
+/// a recovery hole, which has none, are never lent. `visit` reads and cannot change what the
+/// `Parse` says: it is handed shared borrows, after every root has run.
+///
 /// It is `pub(crate)` and cannot be less, because its one caller is a macro expansion that lands in
 /// a dialect module. What that costs is bounded by the fold above it: the dialect door finishes its
 /// own `Cst` and returns a [`Parse`], so no `Cst` of a shipped parse is ever in a caller's hands to
@@ -627,6 +637,7 @@ pub(crate) fn finish_parsed_root_with<'inp, L, Lx, Em>(
   root: u16,
   space: &'static str,
   retains: impl Fn(&Em::Payload) -> bool,
+  visit: impl FnMut(SimpleSpan, &Em::Payload),
   append_error_at: Option<core::ops::Range<usize>>,
 ) -> Parse<L>
 where
@@ -646,7 +657,7 @@ where
     )
   });
 
-  let mut diagnostics = emitter.collect_diagnostics_retaining(retains);
+  let mut diagnostics = emitter.collect_diagnostics_retaining(retains, visit);
   diagnostics.extend(append_error_at.map(Diagnostic::error_at));
 
   Parse::from_parts(green, diagnostics)
@@ -666,8 +677,8 @@ where
 /// could not use the shared runner at all.
 ///
 /// Two methods, and both are the projection `Parse` needs — one of them filtered by a classifier
-/// the caller supplies. The blanket impl below covers `Verbose` for every error and brand, so no
-/// dialect writes an impl.
+/// the caller supplies, and lending each error payload it keeps to a visitor on the way. The
+/// blanket impl below covers `Verbose` for every error and brand, so no dialect writes an impl.
 pub trait DiagnosticSource {
   /// The **typed** payload this emitter records, before the projection below throws it away.
   ///
@@ -676,14 +687,23 @@ pub trait DiagnosticSource {
   /// emitter has one payload type and that a caller who knows which dialect it is standing in may
   /// ask about it. [`collect_diagnostics_retaining`](Self::collect_diagnostics_retaining) is the
   /// one caller, and it exists because the **door** — not the grammar — decides what a finished
-  /// parse says about the token budget.
+  /// parse says about the token budget, and because the door is where a payload can still be lent.
   type Payload;
 
   /// Project every recorded diagnostic into the owned, source-independent form.
   fn collect_diagnostics(&self) -> std::vec::Vec<Diagnostic>;
 
   /// The same projection, minus every diagnostic whose payload has nothing left to say once the
-  /// door's own variant is taken out of it.
+  /// door's own variant is taken out of it; and, on the way, the hand-over: `visit` is lent the
+  /// span and the payload of each record that is kept at error severity, in emission order.
+  ///
+  /// # One classification, read once
+  ///
+  /// `visit` is called by the pass that projects, for a record `retains` has just kept, and for no
+  /// other. So "this error is in the finished parse" and "this error was lent" are one decision
+  /// and cannot come apart: a payload is lent exactly when a [`Diagnostic`] of
+  /// [`Severity::Error`] is projected from it. A record the classifier drops is not lent. A
+  /// warning's payload is projected and not lent, and a recovery hole has no payload to lend.
   ///
   /// `retains` is the dialect's, because the variant it recognises is the dialect's: it answers
   /// *does this payload hold any member that is not the door's*. What the substrate contributes is
@@ -730,6 +750,7 @@ pub trait DiagnosticSource {
   fn collect_diagnostics_retaining(
     &self,
     retains: impl Fn(&Self::Payload) -> bool,
+    visit: impl FnMut(SimpleSpan, &Self::Payload),
   ) -> std::vec::Vec<Diagnostic>;
 }
 
@@ -739,12 +760,13 @@ impl<Err, Brand: ?Sized> DiagnosticSource
   type Payload = Err;
 
   fn collect_diagnostics(&self) -> std::vec::Vec<Diagnostic> {
-    self.collect_diagnostics_retaining(|_| true)
+    self.collect_diagnostics_retaining(|_| true, |_, _| {})
   }
 
   fn collect_diagnostics_retaining(
     &self,
     retains: impl Fn(&Self::Payload) -> bool,
+    mut visit: impl FnMut(SimpleSpan, &Self::Payload),
   ) -> std::vec::Vec<Diagnostic> {
     // `Verbose` exposes `diagnostics()` and nothing else — there is no `errors()` and no
     // `warnings()`. Each item carries `span()`, `labels()`, `kind()`, `severity()`, `payload()`.
@@ -753,9 +775,18 @@ impl<Err, Brand: ?Sized> DiagnosticSource
     // `SkippedRegion`, and `is_none_or` keeps it. That is the right answer and not an accident of
     // the combinator — a hole is the sink's own record of skipped tokens, not something a grammar
     // could have forged into the channel this filter is about.
+    //
+    // THE HAND-OVER SITS BEHIND THE FILTER, so it sees the records the projection below sees and
+    // no other; and it matches on the ERROR channel alone, which is what leaves a warning's payload
+    // and a hole unlent.
     self
       .diagnostics()
       .filter(|d| d.payload().is_none_or(&retains))
+      .inspect(|d| {
+        if let tokora::emitter::DiagnosticKind::Error(payload) = d.kind() {
+          visit(*d.span(), payload);
+        }
+      })
       .map(|d| Diagnostic {
         span: d.span().start()..d.span().end(),
         severity: d.severity(),

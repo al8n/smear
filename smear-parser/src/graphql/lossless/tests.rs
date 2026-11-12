@@ -1361,6 +1361,7 @@ fn a_budget_refusal_is_reported_once_however_many_drains_are_stacked() {
       src,
       limits.with_max_produce_events(ceiling),
       root,
+      |_| {},
     );
     budget_reports(&parse)
   }
@@ -1565,6 +1566,7 @@ fn a_refusal_first_taken_inside_the_drain_is_reported_on_both_draining_arms() {
       src,
       limits.with_max_produce_events(ceiling),
       root,
+      |_| {},
     );
     budget_reports(&parse)
   }
@@ -2150,6 +2152,7 @@ fn the_report_has_an_owner_and_terminality_is_not_it() {
       src,
       limits.with_max_produce_events(ceiling),
       root,
+      |_| {},
     );
     let spans = parse
       .diagnostics()
@@ -2182,6 +2185,7 @@ fn the_report_has_an_owner_and_terminality_is_not_it() {
       src,
       limits.with_max_produce_events(ceiling),
       root,
+      |_| {},
     );
     (
       budget_reports(&parse),
@@ -2426,6 +2430,7 @@ fn a_nested_door_reports_into_its_own_parse_and_not_the_enclosing_one() {
       "a b c d e f g h i j ",
       limits.with_max_produce_events(2),
       reads_everything,
+      |_| {},
     );
     NESTED_REPORTS.with(|n| n.set(budget_reports(&parse)));
     // And then the outer parse's own root does its own reading, so the outer budget refuses too.
@@ -2439,6 +2444,7 @@ fn a_nested_door_reports_into_its_own_parse_and_not_the_enclosing_one() {
     &src,
     limits.with_max_produce_events(4),
     nests_a_door,
+    |_| {},
   );
   let outer = budget_reports(&parse);
   let nested = NESTED_REPORTS.with(StdCell::get);
@@ -2539,6 +2545,7 @@ fn the_doors_own_refusals_answer_their_own_codes() {
     &src,
     LosslessLimits::default().with_max_produce_events(4),
     budget_root,
+    |_| {},
   );
   assert_eq!(
     HANDED_UP.with(StdCell::get),
@@ -2551,6 +2558,7 @@ fn the_doors_own_refusals_answer_their_own_codes() {
     "{ a { b } }",
     LosslessLimits::with_max_nesting_depth(0),
     descent_root,
+    |_| {},
   );
   assert_eq!(
     HANDED_UP.with(StdCell::get),

@@ -22,7 +22,9 @@ use tokora::cst::{Cst, Sink};
 
 #[cfg(feature = "test-support")]
 use super::GraphqlxLosslessLexer;
-use super::{GraphqlxLosslessErrors, GraphqlxLosslessSlice, GraphqlxLosslessToken};
+use super::{
+  GraphqlxLosslessErrorValue, GraphqlxLosslessErrors, GraphqlxLosslessSlice, GraphqlxLosslessToken,
+};
 #[cfg(feature = "test-support")]
 use crate::lossless::KindSpace;
 use crate::{
@@ -102,6 +104,7 @@ pub(crate) type LosslessCst<'inp> =
 crate::lossless::lossless_door! {
   dialect  = graphqlx::lossless;
   errors   = GraphqlxLosslessErrors;
+  value    = GraphqlxLosslessErrorValue;
   document = document::document;
   schema   = document::type_system_document;
   request  = executable::executable_document;
