@@ -46,6 +46,23 @@ pub enum DiagnosticKind {
   /// model. Reported once per file, at the first such item.
   UnknownItem,
 
+  // -- Name resolution ---------------------------------------------------------------------------
+  /// A path names a package, after `^::` or as its first segment where a module is wanted, that
+  /// the package it is written in cannot reach: neither one of its declared dependencies nor
+  /// `core`, `alloc` or `std`. Reported at that segment.
+  UnknownPackage,
+  /// A path with a root, or with more than one segment, or a path a `use` item writes, names
+  /// nothing, or names something of another kind than its place wants. Reported at the segment
+  /// that does not resolve, or at the root that cannot be followed. A single segment with no root,
+  /// in a place GraphQL has, keeps GraphQL's own code instead.
+  UnresolvedPath,
+  /// A supplied package declares a type with the name of a primitive of the prelude: `bool`,
+  /// `f32`, `f64`, `iN`, `uN`, `string`, `bytes`, `NonZeroIN` or `NonZeroUN`. Within its module
+  /// the name then names the declaration. A warning: GraphQL schemas declare such names freely. A
+  /// root package's definition that replaces a GraphQL built-in shadows nothing, and is not
+  /// reported.
+  ShadowedPrimitive,
+
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
   ResourceLimit,
@@ -64,6 +81,9 @@ impl DiagnosticKind {
     Self::ModuleDefinedTwice,
     Self::ModuleTypeCollision,
     Self::UnknownItem,
+    Self::UnknownPackage,
+    Self::UnresolvedPath,
+    Self::ShadowedPrimitive,
     Self::ResourceLimit,
   ];
 
@@ -81,6 +101,9 @@ impl DiagnosticKind {
       Self::ModuleDefinedTwice => Code::new("smear::graphqlx::module-defined-twice"),
       Self::ModuleTypeCollision => Code::new("smear::graphqlx::module-type-collision"),
       Self::UnknownItem => Code::new("smear::graphqlx::unknown-item"),
+      Self::UnknownPackage => Code::new("smear::graphqlx::unknown-package"),
+      Self::UnresolvedPath => Code::new("smear::graphqlx::unresolved-path"),
+      Self::ShadowedPrimitive => Code::new("smear::graphqlx::shadowed-primitive"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -98,6 +121,9 @@ impl DiagnosticKind {
       Self::ModuleDefinedTwice => "module defined twice",
       Self::ModuleTypeCollision => "module and type of one name",
       Self::UnknownItem => "item of an unknown kind",
+      Self::UnknownPackage => "unknown package",
+      Self::UnresolvedPath => "unresolved path",
+      Self::ShadowedPrimitive => "declaration shadows a primitive",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -116,7 +142,10 @@ impl DiagnosticKind {
       | Self::ModuleDefinedTwice
       | Self::ModuleTypeCollision
       | Self::UnknownItem
+      | Self::UnknownPackage
+      | Self::UnresolvedPath
       | Self::ResourceLimit => Severity::Error,
+      Self::ShadowedPrimitive => Severity::Warning,
     }
   }
 }
@@ -141,4 +170,32 @@ pub(crate) mod schema {
   /// `ReservedDirectiveName`.
   pub(crate) const RESERVED_DIRECTIVE_NAME: Code =
     Code::new("smear::schema::reserved-directive-name");
+
+  /// A type position names, with one segment and no root, no type: `smear-schema`'s
+  /// `UndefinedType`.
+  pub(crate) const UNDEFINED_TYPE: Code = Code::new("smear::schema::undefined-type");
+
+  /// A directive application names, with one segment and no root, no directive: `smear-schema`'s
+  /// `UndefinedDirective`.
+  pub(crate) const UNDEFINED_DIRECTIVE: Code = Code::new("smear::schema::undefined-directive");
+
+  /// An extension's target names, with one segment and no root, nothing to extend:
+  /// `smear-schema`'s `UndefinedExtensionTarget`.
+  pub(crate) const UNDEFINED_EXTENSION_TARGET: Code =
+    Code::new("smear::schema::undefined-extension-target");
+
+  /// An `implements` entry names, with one segment and no root, no interface: `smear-schema`'s
+  /// `UndefinedImplementsInterface`.
+  pub(crate) const UNDEFINED_IMPLEMENTS_INTERFACE: Code =
+    Code::new("smear::schema::undefined-implements-interface");
+
+  /// A union member names, with one segment and no root, no type: `smear-schema`'s
+  /// `UndefinedUnionMember`.
+  pub(crate) const UNDEFINED_UNION_MEMBER: Code =
+    Code::new("smear::schema::undefined-union-member");
+
+  /// A root operation names, with one segment and no root, no type: `smear-schema`'s
+  /// `UndefinedRootOperationType`.
+  pub(crate) const UNDEFINED_ROOT_OPERATION_TYPE: Code =
+    Code::new("smear::schema::undefined-root-operation-type");
 }

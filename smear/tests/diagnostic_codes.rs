@@ -16,7 +16,9 @@
 //!
 //! - Codes are unique across families and spelled `smear::<family>::<kebab-case>`, because a
 //!   renderer sees all five families in one pass and cannot disambiguate by enum.
-//! - Every current variant is [`Severity::Error`]. The severity axis exists for a deprecation-lint
+//! - Every current variant is [`Severity::Error`] but one: the GraphQLx analyzer's
+//!   `shadowed-primitive`, which design L makes a warning because GraphQL schemas name their own
+//!   scalars `bool` or `string` freely. The severity axis otherwise exists for a deprecation-lint
 //!   class that does not exist yet, and saying so here stops anyone inventing a warning to justify
 //!   the field.
 //! - An error carrying a related span always has a phrase for it — checked over the two corpora
@@ -373,11 +375,14 @@ fn codes_are_unique_and_well_formed() {
   );
 }
 
-/// Every diagnostic this crate can emit today is an error.
+/// Every diagnostic this crate can emit today is an error, but the GraphQLx analyzer's
+/// `shadowed-primitive`.
 ///
-/// The axis exists for the deprecation-lint class — a selected field that is `@deprecated`, which
-/// changes no verdict — and until one of those ships, a `Warning` anywhere means somebody invented
-/// one to justify the field.
+/// That one is a warning by design: a type named as a primitive of the prelude is legal, as
+/// GraphQL schemas declare `scalar bool` and its kin freely, and the warning says only that the
+/// name now means the type in its module. Otherwise the axis exists for the deprecation-lint class
+/// — a selected field that is `@deprecated`, which changes no verdict — and until one of those
+/// ships, a `Warning` anywhere else means somebody invented one to justify the field.
 #[test]
 fn every_current_variant_is_an_error() {
   for kind in SchemaErrorKind::ALL {
@@ -391,7 +396,12 @@ fn every_current_variant_is_an_error() {
   }
   #[cfg(feature = "analysis")]
   for kind in smear::analysis::graphqlx::DiagnosticKind::ALL {
-    assert_eq!(kind.severity(), Severity::Error, "{kind:?}");
+    let expected = if *kind == smear::analysis::graphqlx::DiagnosticKind::ShadowedPrimitive {
+      Severity::Warning
+    } else {
+      Severity::Error
+    };
+    assert_eq!(kind.severity(), expected, "{kind:?}");
   }
   assert!(
     SchemaErrorKind::ALL.len() >= 66 && Rule::ALL.len() >= 31 && SyntaxErrorKind::ALL.len() >= 23,

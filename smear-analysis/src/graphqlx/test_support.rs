@@ -7,10 +7,24 @@
 
 pub use super::model::ModelBuilder;
 
+use std::{
+  format,
+  string::{String, ToString},
+  vec::Vec,
+};
+
 use tokora::diagnostic::{Code, Location};
 
 use super::{
-  Visitor, analysis::Analysis, id::ModuleId, limits::Limits, model::Model, rules::Rules,
+  Visitor,
+  analysis::{Analysis, resolve_door},
+  id::ModuleId,
+  limits::Limits,
+  model::Model,
+  package::Package,
+  resolve::Resolved,
+  rules::Rules,
+  text::SourceText,
 };
 
 /// An analysis of the finished `model`: what [`conclude`] answers when no rule runs.
@@ -41,4 +55,51 @@ pub const RULES: &[(&str, &[Code])] = Rules::TABLE;
 /// what the module tree records.
 pub fn module_extent(model: &Model, module: ModuleId) -> Option<Location> {
   model.module(module).extent()
+}
+
+/// What `path` names, written in the module `module` of `root` beside `dependencies`, where
+/// `params` are the generic parameters in scope: the one door to the resolver the analysis builds,
+/// asked as lowering asks it.
+///
+/// `module` is spelled as `Model::module_by_path` takes it, `^::package` then the names of the
+/// modules down from its root. `path` is spelled as written, `~::`, `^::` and `..::` included; `@`
+/// before it asks for a directive, `mod ` before it for a module, and anything else for a type.
+///
+/// The answer is a definition's canonical name, `^::core::NonZero<^::core::u32>` for a `NonZero`
+/// alias, `mod ` and the module's path for a module, `param ` and its name for a generic
+/// parameter, or `None` when `module` names no module or `path` resolves to nothing. Why it does
+/// not resolve is reported nowhere: the analysis's diagnostics say that.
+pub fn resolve<S: SourceText>(
+  root: &Package<S>,
+  dependencies: &[Package<S>],
+  module: &str,
+  params: &[&str],
+  path: &str,
+) -> Option<String> {
+  let spelled: Vec<&[u8]> = params.iter().map(|param: &&str| param.as_bytes()).collect();
+  let (model, answer) = resolve_door(root, dependencies, module, &spelled, path)?;
+  match answer {
+    Resolved::Def(def) => Some(model.canonical_name(def).to_string()),
+    Resolved::NonZero {
+      non_zero,
+      primitive,
+    } => Some(format!(
+      "{}<{}>",
+      model.canonical_name(non_zero),
+      model.canonical_name(primitive)
+    )),
+    Resolved::Module(id) => {
+      let module = model.module(id);
+      let mut text = format!("mod ^::{}", model.package(module.package()).name());
+      for segment in module.path() {
+        text.push_str("::");
+        text.push_str(model.name(*segment));
+      }
+      Some(text)
+    }
+    Resolved::Param(index) => params
+      .get(index as usize)
+      .map(|param: &&str| format!("param {param}")),
+    Resolved::Unresolved => None,
+  }
 }

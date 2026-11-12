@@ -11,7 +11,7 @@ use super::{
   lower,
   model::{Model, ModelBuilder, PackageKind},
   package::Package,
-  parse,
+  parse, resolve,
   rules::Rules,
   set::{self, PackageView, ROOT},
   source::SourceMap,
@@ -115,6 +115,11 @@ impl Analysis {
 ///   in one namespace of one module, a supplied definition named with `__`, and a type named as a
 ///   child module of its module are reported. The first definition a supplied package would add
 ///   past [`Limits::max_definitions`] is reported, and nothing after it is collected.
+/// - Builds every module's scope: its own declarations and child modules, then the prelude, the
+///   root modules of `core`, `alloc` and `std` whatever the package's tier, then, where a module
+///   is wanted, the packages its package may reach. A type a supplied package declares with the
+///   name of a primitive of the prelude, `bool`, `f32`, `f64`, `iN`, `uN`, `string`, `bytes`,
+///   `NonZeroIN` or `NonZeroUN`, shadows it in its module, and is a warning.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///
@@ -164,12 +169,59 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
     "one document entry per source"
   );
 
-  let mut builder = builder_of(&packages, &sources, dependencies);
+  let mut builder = builder_of(&packages, &sources, &dependencies);
   let collected = collect::items(&packages, &sources, &documents, limits, &mut reporter);
   let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
-  lower::lower(&declarations);
+  let mut scopes = resolve::scopes(
+    &packages,
+    &dependencies,
+    &declarations,
+    limits,
+    &builder,
+    &mut reporter,
+  );
+  lower::lower(&declarations, &mut scopes);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
+}
+
+/// The model of `root` beside `dependencies`, as far as [`analyze`] builds it, and what `path`
+/// names in the module `module` of those packages, where `params` are the generic parameters in
+/// scope: the test-support door to the resolver. `None` when `module` names no module. See
+/// `Scopes::module_at` and `Scopes::door` for how `module` and `path` are spelled.
+#[cfg(feature = "test-support")]
+pub(crate) fn resolve_door<S: SourceText>(
+  root: &Package<S>,
+  dependencies: &[Package<S>],
+  module: &str,
+  params: &[&[u8]],
+  path: &str,
+) -> Option<(Model, resolve::Resolved)> {
+  let mut supplied: Vec<PackageView<'_>> = Vec::with_capacity(dependencies.len());
+  for package in dependencies {
+    supplied.push(PackageView::supplied(package));
+  }
+  let packages = set::order(PackageView::supplied(root), supplied);
+  let limits = Limits::new();
+  let mut reporter = Reporter::new(limits.max_diagnostics() as usize);
+  let sources = SourceMap::of(&packages);
+  let resolved = check::package_set(&packages, &sources, &mut reporter);
+  let within = check::source_bytes(&packages, &sources, &limits, &mut reporter);
+  let documents = parse::files(&packages, &sources, within, &mut reporter);
+  let mut builder = builder_of(&packages, &sources, &resolved);
+  let collected = collect::items(&packages, &sources, &documents, &limits, &mut reporter);
+  let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
+  let scopes = resolve::scopes(
+    &packages,
+    &resolved,
+    &declarations,
+    &limits,
+    &builder,
+    &mut reporter,
+  );
+  let at = scopes.module_at(&builder, module)?;
+  let answer = scopes.door(&builder, at, params, path);
+  Some((builder.finish(), answer))
 }
 
 /// What every analysis ends with, once its phases have written `model` and reported into
@@ -201,7 +253,7 @@ fn conclude<V: Visitor + ?Sized>(
 fn builder_of(
   packages: &[PackageView<'_>],
   sources: &SourceMap,
-  dependencies: Vec<Vec<PackageId>>,
+  dependencies: &[Vec<PackageId>],
 ) -> ModelBuilder {
   let mut builder = ModelBuilder::default();
   for ((index, view), resolved) in packages.iter().enumerate().zip(dependencies) {
@@ -218,7 +270,7 @@ fn builder_of(
       view.layout,
       sources.package_sources(index).len(),
     );
-    for dependency in resolved {
+    for &dependency in resolved {
       builder.push_dependency(package, dependency);
     }
     if let Some(integers) = view.integers {
