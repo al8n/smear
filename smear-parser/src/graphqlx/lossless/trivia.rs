@@ -82,7 +82,8 @@ where
 }
 
 /// Commit any leading trivia, then report the kind of the **second significant** token — the one
-/// after the head — without consuming either.
+/// after the head — without consuming either, unless the scan stops at the second (see *A stop two
+/// tokens ahead is met twice*).
 ///
 /// # The one atom that is GraphQLx's and not the substrate's, and why it has to exist
 ///
@@ -105,13 +106,28 @@ where
 /// **own** rollback ([`InputRef::attempt`](tokora::InputRef::attempt), which captures the cursor,
 /// the lexer state and the emitter's emission mark, and on a decline truncates the sink's event
 /// log back to it, `tokora/src/cst/sink.rs:944-1010`). Nothing is buffered anywhere else, and on
-/// return the input is byte-for-byte where it was.
+/// an `Ok` return the input is byte-for-byte where it was.
 ///
 /// The closure **always declines**, so the rollback is unconditional; the answer leaves through a
 /// `&mut` binding rather than through the return value, which is what lets a rewinding attempt
 /// still report something. The inner peek's own error is carried out the same way rather than
 /// swallowed — a lexer limit hit two tokens ahead is a real failure, and folding it into `None`
 /// would let it pass for end of input.
+///
+/// # A stop two tokens ahead is met twice
+///
+/// Carried out alone, that error would arrive unreported. The rollback that undoes the step also
+/// truncates the emitter's log and unlatches the poison boundary, so under a recording emitter the
+/// stop's own diagnostic is gone, and a terminal error with nothing on record ends the document
+/// with no diagnostic: the parse reads as clean. It is reachable — every group of a `use` path has
+/// its `{` lexed here first, so a group one past the nesting ceiling trips the lexer's tally inside
+/// this attempt.
+///
+/// So on that path the step is taken again, outside the attempt. The lexer state and the dedup
+/// watermark are the ones the rollback restored, so the second token stops the scan again and is
+/// reported again, and this time the report stays; a rejecting emitter's error, which *is* its
+/// report, is the one returned. Consuming the head is moot there: the error ends the parse, and the
+/// nodes it unwinds through are demoted.
 #[inline]
 pub(crate) fn peek_second_kind<'inp, Src, Ctx>(
   inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>,
@@ -147,6 +163,12 @@ where
     // Always. The whole point is that nothing here survives.
     None::<()>
   });
+  if answer.is_err() {
+    // The stop again, for real; see "A stop two tokens ahead is met twice" above. The original
+    // error is what is answered only if this read somehow does not stop.
+    inp.try_expect_or_stop(|_| true)?;
+    peek_kind::<Src, Ctx>(inp)?;
+  }
   answer
 }
 

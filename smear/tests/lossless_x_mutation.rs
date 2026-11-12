@@ -615,16 +615,16 @@ const TRIED: &[((&str, &str), usize)] = &[
 const TRIED_TOTAL: usize = 110_879;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 98_342;
+const UNFAITHFUL: usize = 98_165;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 9657;
+const EQUAL: usize = 9774;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 2574;
+const BOTH_REFUSE: usize = 2628;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
-const LENIENT_EQUAL: usize = 235;
+const LENIENT_EQUAL: usize = 241;
 
 /// Skeleton-faithful with a lenient token missing, and both refusing the restored text.
 const LENIENT_BOTH_REFUSE: usize = 71;
@@ -655,10 +655,11 @@ const LENIENT_REFUSED_HITS: [usize; 20] =
 /// A position is lenient iff the token has no AST image and the lossless parser builds the tree
 /// hole-free without it; a faithful deletion is exactly the second half, so any token here with
 /// no image would be a lenient position still strict. Every entry left has an image: a directive
-/// location, a generic parameter or argument name, a path segment. Round six's first run of this
-/// census found two image-less ones — `(DirectiveDefinition, on)` and `(ExtensionTypeGenerics,
-/// >)` — which are the last two [`LENIENT`] rows now. Deleting a relative path's first segment
-/// is never faithful: it leaves a path that starts with `::`, which the parser refuses.
+/// location, a generic parameter or argument name, a use tree's alias, a glob's `*`. Round six's
+/// first run of this census found two image-less ones — `(DirectiveDefinition, on)` and
+/// `(ExtensionTypeGenerics, >)` — which are the eighth and ninth [`LENIENT`] rows now. Deleting a
+/// relative path's first segment is never faithful: it leaves a path that starts with `::`, which
+/// the parser refuses.
 const STRICT_DELETIONS: &[(&str, usize)] = &[
   ("DirectiveLocations Name ARGUMENT_DEFINITION", 2),
   ("DirectiveLocations Name INPUT_FIELD_DEFINITION", 2),
@@ -666,6 +667,7 @@ const STRICT_DELETIONS: &[(&str, usize)] = &[
   ("ExecutableDefinitionTypeGenerics Name T", 2),
   ("ExtensionTypeGenerics Name A", 8),
   ("ExtensionTypeGenerics Name B", 2),
+  ("UseTree Asterisk *", 2),
   ("UseTree Name b", 3),
   ("UseTree Name c", 3),
   ("UseTree Name x", 3),

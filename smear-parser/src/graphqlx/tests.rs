@@ -143,11 +143,15 @@ fn assert_unexpected<'inp>(
     .next()
     .expect("parser error collection should contain one error");
   let span = error.span();
-  assert!(matches!(
-    error.into_data(),
-    ErrorData::UnexpectedToken(unexpected)
-      if unexpected.expected() == &expected && unexpected.found().copied() == found
-  ));
+  let data = error.into_data();
+  assert!(
+    matches!(
+      &data,
+      ErrorData::UnexpectedToken(unexpected)
+        if unexpected.expected() == &expected && unexpected.found().copied() == found
+    ),
+    "{input:?}: expected {expected:?} with {found:?} found, the parser reported {data:?}"
+  );
   span
 }
 
