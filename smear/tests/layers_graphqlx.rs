@@ -4,12 +4,14 @@
   feature = "parser"
 ))]
 
-//! GraphQLx's parser layers at each call site design Y shows: every source the syntactic layer
-//! reads, the lossless layer over text, every sink, and the consumers written once over the layer,
-//! for every lifetime, and over the analyzer.
+//! GraphQLx's parser layers at each call site: every source the syntactic layer reads, the
+//! lossless layer over text, every sink, and the consumers written once over the layer, for every
+//! lifetime, and over the analyzer.
 //!
-//! Each `#[test]` is one call site. What it pins first is that the call compiles as written, in
-//! every feature row that compiles this file; what it asserts is what the call site promises.
+//! Each `#[test]` is one call site. What it holds first is that the call compiles as written, in
+//! every feature row that compiles this file; what it asserts is what the call site promises. The
+//! two layers are held to one reading over the valid corpus here, and the hand-over's laws over
+//! the whole corpus in `layers_handover_graphqlx.rs`.
 
 use core::ops::ControlFlow;
 
@@ -17,8 +19,9 @@ use core::ops::ControlFlow;
 use smear::parser::graphqlx::Lossless;
 use smear::{
   diagnostic::Diagnose,
+  lexer::tokora::SimpleSpan,
   parser::{
-    graphqlx::{Layer, Recovery, Report, Syntactic, error::GraphqlxError},
+    graphqlx::{Layer, Recovery, Report, Syntactic, ast::TypeSystemDocument, error::GraphqlxError},
     layer::from_fn,
   },
 };
@@ -31,9 +34,14 @@ const BROKEN: &str = "type Query { hero: }";
 
 // ── The sources the syntactic layer reads ────────────────────────────────────────────────────
 
-/// What the syntactic layer answers for one source, through its inherent method and through the
-/// trait, which must agree: the document's top-level item count and its recovery.
-macro_rules! syntactic_reads {
+/// What a document looks like from outside its slices: its span, its top-level item count, its
+/// recovery, its verdict and its error count. The slices differ from source to source, so this is
+/// what one source's answer is held to another's by.
+type Outline = (SimpleSpan, usize, Recovery, bool, usize);
+
+/// The outline the syntactic layer answers for one source, through its inherent method and
+/// through the trait, which must agree.
+macro_rules! outline {
   ($source:expr) => {{
     let syntactic = Syntactic::new();
     let inherent = syntactic
@@ -41,92 +49,114 @@ macro_rules! syntactic_reads {
       .expect("the syntactic layer reads the document");
     let through = Layer::type_system_document(&syntactic, $source, &mut ())
       .expect("the syntactic layer reads the document");
-    assert!(inherent.is_valid() && through.is_valid());
-    assert_eq!((inherent.error_count(), through.error_count()), (0, 0));
-    assert_eq!(inherent.recovery(), through.recovery());
-    assert_eq!(
+    let outline: Outline = (
+      *inherent.document().span(),
       inherent.document().definitions().len(),
-      through.document().definitions().len()
+      inherent.recovery(),
+      inherent.is_valid(),
+      inherent.error_count(),
     );
-    (inherent.document().definitions().len(), inherent.recovery())
+    let through: Outline = (
+      *through.document().span(),
+      through.document().definitions().len(),
+      through.recovery(),
+      through.is_valid(),
+      through.error_count(),
+    );
+    assert_eq!(
+      outline, through,
+      "the inherent method and the trait's method answer one outline"
+    );
+    outline
   }};
 }
 
 /// What `DOC` answers as `&str`, which every other source is held to.
-fn over_str() -> (usize, Recovery) {
-  syntactic_reads!(DOC)
+fn over_str() -> Outline {
+  outline!(DOC)
+}
+
+/// The syntactic layer over each source its lexer reads, each under the feature that brings its
+/// type: the answer has the outline the same bytes give as `str`.
+mod every_source_gives_the_outline_str_gives {
+  use super::{DOC, Layer, Outline, Recovery, SimpleSpan, Syntactic, over_str};
+
+  #[test]
+  fn text() {
+    // Every item at every module depth: the type, the module, and the type inside the module.
+    let expected: Outline = (
+      SimpleSpan::new(0, DOC.len()),
+      2,
+      Recovery::new(3, 0),
+      true,
+      0,
+    );
+    assert_eq!(over_str(), expected);
+  }
+
+  #[test]
+  fn a_byte_slice() {
+    assert_eq!(outline!(DOC.as_bytes()), over_str());
+  }
+
+  #[cfg(feature = "bstr_1")]
+  #[test]
+  fn bstr() {
+    assert_eq!(outline!(bstr_1::BStr::new(DOC)), over_str());
+  }
+
+  #[cfg(feature = "bytes_1")]
+  #[test]
+  fn bytes() {
+    let body = bytes_1::Bytes::from_static(DOC.as_bytes());
+    assert_eq!(outline!(&body), over_str());
+  }
+
+  #[cfg(feature = "hipstr_0_8")]
+  #[test]
+  fn hipstr() {
+    let text = hipstr_0_8::HipStr::from(DOC);
+    assert_eq!(outline!(&text), over_str());
+  }
+
+  #[cfg(feature = "hipstr_0_8")]
+  #[test]
+  fn hipbyt() {
+    let bytes = hipstr_0_8::HipByt::from(DOC.as_bytes());
+    assert_eq!(outline!(&bytes), over_str());
+  }
+
+  #[cfg(feature = "smol-bytes_0_2")]
+  #[test]
+  fn shared_bytes() {
+    let source = smol_bytes_0_2::shared::Bytes::from(DOC);
+    assert_eq!(outline!(&source), over_str());
+  }
+
+  #[cfg(feature = "smol-bytes_0_2")]
+  #[test]
+  fn compact_bytes() {
+    let source = smol_bytes_0_2::compact::Bytes::from(DOC);
+    assert_eq!(outline!(&source), over_str());
+  }
+
+  #[cfg(feature = "smol-bytes_0_2")]
+  #[test]
+  fn shared_utf8_bytes() {
+    let source = smol_bytes_0_2::Utf8Bytes::from(DOC);
+    assert_eq!(outline!(&source), over_str());
+  }
+
+  #[cfg(feature = "smol-bytes_0_2")]
+  #[test]
+  fn compact_utf8_bytes() {
+    let source = smol_bytes_0_2::compact::Utf8Bytes::from(DOC);
+    assert_eq!(outline!(&source), over_str());
+  }
 }
 
 #[test]
-fn the_syntactic_layer_reads_str() {
-  let (items, recovery) = over_str();
-  assert_eq!(items, 2);
-  // Every item at every module depth: the type, the module, and the type inside the module.
-  assert_eq!(recovery, Recovery::new(3, 0));
-}
-
-#[test]
-fn the_syntactic_layer_reads_a_byte_slice() {
-  assert_eq!(syntactic_reads!(DOC.as_bytes()), over_str());
-}
-
-#[cfg(feature = "bstr_1")]
-#[test]
-fn the_syntactic_layer_reads_bstr() {
-  assert_eq!(syntactic_reads!(bstr_1::BStr::new(DOC)), over_str());
-}
-
-#[cfg(feature = "bytes_1")]
-#[test]
-fn the_syntactic_layer_reads_bytes() {
-  let body = bytes_1::Bytes::from_static(DOC.as_bytes());
-  assert_eq!(syntactic_reads!(&body), over_str());
-}
-
-#[cfg(feature = "hipstr_0_8")]
-#[test]
-fn the_syntactic_layer_reads_hipstr() {
-  let text = hipstr_0_8::HipStr::from(DOC);
-  assert_eq!(syntactic_reads!(&text), over_str());
-}
-
-#[cfg(feature = "hipstr_0_8")]
-#[test]
-fn the_syntactic_layer_reads_hipbyt() {
-  let bytes = hipstr_0_8::HipByt::from(DOC.as_bytes());
-  assert_eq!(syntactic_reads!(&bytes), over_str());
-}
-
-#[cfg(feature = "smol-bytes_0_2")]
-#[test]
-fn the_syntactic_layer_reads_shared_bytes() {
-  let source = smol_bytes_0_2::shared::Bytes::from(DOC);
-  assert_eq!(syntactic_reads!(&source), over_str());
-}
-
-#[cfg(feature = "smol-bytes_0_2")]
-#[test]
-fn the_syntactic_layer_reads_compact_bytes() {
-  let source = smol_bytes_0_2::compact::Bytes::from(DOC);
-  assert_eq!(syntactic_reads!(&source), over_str());
-}
-
-#[cfg(feature = "smol-bytes_0_2")]
-#[test]
-fn the_syntactic_layer_reads_shared_utf8_bytes() {
-  let source = smol_bytes_0_2::Utf8Bytes::from(DOC);
-  assert_eq!(syntactic_reads!(&source), over_str());
-}
-
-#[cfg(feature = "smol-bytes_0_2")]
-#[test]
-fn the_syntactic_layer_reads_compact_utf8_bytes() {
-  let source = smol_bytes_0_2::compact::Utf8Bytes::from(DOC);
-  assert_eq!(syntactic_reads!(&source), over_str());
-}
-
-#[test]
-fn bytes_that_are_not_utf8_are_rejected_by_the_syntactic_layer() {
+fn bytes_that_are_not_utf8_are_rejected_with_an_error_lent() {
   let bad: &[u8] = b"type Query { hero: String }\xFF";
   let mut lent = Vec::new();
   let Err(rejected) = Syntactic::new().type_system_document(bad, &mut lent) else {
@@ -260,39 +290,45 @@ fn a_sink_that_breaks_stops_the_hand_over_and_nothing_else() {
 
 // ── Consumers ────────────────────────────────────────────────────────────────────────────────
 
-/// One reading, written once over the layer: the top-level item count, the recovery, the verdict,
-/// the error count, and how many errors the layer lent.
-fn read<'s, P: Layer<'s>>(
-  parser: &P,
-  text: &'s str,
-) -> Option<(usize, Recovery, bool, usize, usize)> {
+/// What one reading of a text answers: the document, the recovery, the verdict, the error count,
+/// and how many errors the layer lent.
+#[derive(Debug, PartialEq)]
+struct Reading<'s> {
+  document: TypeSystemDocument<&'s str>,
+  recovery: Recovery,
+  valid: bool,
+  errors: usize,
+  lent: usize,
+}
+
+/// One reading, written once over the layer; `None` when the layer answers no document.
+fn read<'s, P: Layer<'s>>(parser: &P, text: &'s str) -> Option<Reading<'s>> {
   let mut lent = 0usize;
   let mut sink = from_fn(|_: &P::Error| {
     lent += 1;
     ControlFlow::Continue(())
   });
   let parsed = parser.type_system_document(text, &mut sink).ok()?;
-  Some((
-    parsed.document().definitions().len(),
-    parsed.recovery(),
-    parsed.is_valid(),
-    parsed.error_count(),
+  Some(Reading {
+    document: parsed.document().clone(),
+    recovery: parsed.recovery(),
+    valid: parsed.is_valid(),
+    errors: parsed.error_count(),
     lent,
-  ))
+  })
 }
 
 #[test]
 fn one_reading_serves_both_layers() {
-  let (items, recovery, valid, errors, lent) =
-    read(&Syntactic::new(), DOC).expect("the syntactic layer reads the document");
-  assert_eq!((items, valid, errors, lent), (2, true, 0, 0));
-  assert!(recovery.is_complete());
+  let syntactic = read(&Syntactic::new(), DOC).expect("the syntactic layer reads the document");
+  assert_eq!(syntactic.document.definitions().len(), 2);
+  assert_eq!(syntactic.recovery, Recovery::new(3, 0));
+  assert!(syntactic.valid);
+  assert_eq!((syntactic.errors, syntactic.lent), (0, 0));
   #[cfg(all(feature = "rowan_0_17", feature = "std"))]
   {
-    let (items, recovery, valid, errors, lent) =
-      read(&Lossless::new(), DOC).expect("the lossless layer reads the document");
-    assert_eq!((items, valid, errors, lent), (2, true, 0, 0));
-    assert!(recovery.is_complete());
+    let lossless = read(&Lossless::new(), DOC).expect("the lossless layer reads the document");
+    assert_eq!(lossless, syntactic);
   }
 }
 
@@ -336,9 +372,15 @@ fn one_layer_for_every_lifetime() {
 
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 mod lossless {
-  use smear::parser::graphqlx::{Layer, Lossless};
+  use core::ops::ControlFlow;
+  use std::path::PathBuf;
 
-  use super::DOC;
+  use smear::parser::{
+    graphqlx::{Layer, Lossless, Syntactic},
+    layer::from_fn,
+  };
+
+  use super::{DOC, read};
 
   #[test]
   fn the_lossless_layer_reads_a_str() {
@@ -396,25 +438,127 @@ mod lossless {
   }
 
   #[test]
-  fn bytes_reach_the_lossless_layer_decoded() {
-    let text = core::str::from_utf8(DOC.as_bytes()).expect("the bytes are UTF-8");
-    let parsed = Lossless::new()
+  fn decoded_bytes_reach_the_lossless_layer_as_the_same_text() {
+    let bytes: &[u8] = DOC.as_bytes();
+    let text = core::str::from_utf8(bytes).expect("the bytes are UTF-8");
+    let decoded = Lossless::new()
       .type_system_document(text, &mut ())
       .expect("short enough for a tree");
-    assert!(parsed.is_valid());
+    let direct = Lossless::new()
+      .type_system_document(DOC, &mut ())
+      .expect("short enough for a tree");
+    assert_eq!(decoded.document(), direct.document());
+    assert_eq!(decoded.recovery(), direct.recovery());
+    assert_eq!(decoded.error_count(), direct.error_count());
+    assert_eq!(decoded.tree().green(), direct.tree().green());
+    assert_eq!(decoded.tree().syntax().text().to_string(), DOC);
   }
 
   #[test]
-  fn a_broken_text_answers_its_well_formed_part() {
+  fn a_broken_text_answers_its_well_formed_part_and_lends_its_errors() {
     let text = "type Query { hero: String }\ntype Half { f: }";
+    let mut lent = 0usize;
+    let mut sink = from_fn(|_| {
+      lent += 1;
+      ControlFlow::Continue(())
+    });
     let parsed = Lossless::new()
-      .type_system_document(text, &mut ())
+      .type_system_document(text, &mut sink)
       .expect("short enough for a tree");
     assert!(!parsed.is_valid());
     assert!(parsed.error_count() >= 1);
+    assert_eq!(lent, parsed.error_count());
     assert!(parsed.tree().has_errors());
     assert_eq!(parsed.document().definitions().len(), 1);
     assert!(!parsed.recovery().is_complete());
+  }
+
+  /// Every corpus entry named `valid_*`, as `(name, text)`, in name order.
+  fn valid_corpus() -> Vec<(String, String)> {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+      .join("tests")
+      .join("corpusx");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+      .unwrap_or_else(|error| panic!("the corpus at {} is unreadable: {error}", dir.display()))
+      .map(|entry| entry.expect("a corpus directory entry").path())
+      .filter(|path: &PathBuf| path.extension().is_some_and(|ext| ext == "graphqlx"))
+      .collect();
+    files.sort();
+    let mut entries = Vec::new();
+    for path in files {
+      let name = path
+        .file_name()
+        .expect("a corpus entry has a file name")
+        .to_string_lossy()
+        .to_string();
+      if name.starts_with("valid_") {
+        let text = std::fs::read_to_string(&path)
+          .unwrap_or_else(|error| panic!("{name} is unreadable: {error}"));
+        entries.push((name, text));
+      }
+    }
+    entries
+  }
+
+  /// Where nothing is broken the two layers answer one reading: equal documents, complete and
+  /// equal recoveries, both valid, no error counted and none lent.
+  ///
+  /// The valid corpus is valid for the mixed root, and the layers read the type-system one, so an
+  /// entry that holds an operation or a fragment is no document here: the syntactic layer rejects
+  /// it, and the lossless layer must then say so too.
+  #[test]
+  fn the_two_layers_answer_one_reading_over_the_valid_corpus() {
+    let mut documents = 0usize;
+    let mut others = 0usize;
+    for (name, text) in valid_corpus() {
+      let lossless = read(&Lossless::new(), &text)
+        .unwrap_or_else(|| panic!("{name}: a corpus text is short enough for a tree"));
+      match read(&Syntactic::new(), &text) {
+        Some(syntactic) => {
+          assert!(syntactic.valid && lossless.valid, "{name}: both are valid");
+          assert_eq!(
+            (
+              syntactic.errors,
+              syntactic.lent,
+              lossless.errors,
+              lossless.lent
+            ),
+            (0, 0, 0, 0),
+            "{name}: no error is counted and none is lent"
+          );
+          assert!(
+            syntactic.recovery.is_complete() && lossless.recovery.is_complete(),
+            "{name}: both recoveries are complete"
+          );
+          assert_eq!(
+            lossless.recovery, syntactic.recovery,
+            "{name}: the two layers count one recovery"
+          );
+          assert_eq!(
+            lossless.document, syntactic.document,
+            "{name}: the two layers answer one document"
+          );
+          documents += 1;
+        }
+        None => {
+          assert!(
+            !lossless.valid,
+            "{name}: the syntactic layer rejects it and the lossless layer calls it valid"
+          );
+          assert_eq!(lossless.lent, lossless.errors, "{name}");
+          others += 1;
+        }
+      }
+    }
+    assert!(
+      documents >= 20,
+      "only {documents} valid entries are type-system documents; the reading is held over too few"
+    );
+    assert!(
+      others >= 10,
+      "only {others} valid entries are no type-system document; the two layers' verdicts are \
+       never seen to agree on a rejection"
+    );
   }
 }
 
@@ -469,6 +613,25 @@ mod analysis {
       analyze_with(&Syntactic::new(), &root, &[], &Limits::new());
     assert!(answer.is_ok());
     assert_eq!(trees.len(), 1);
+  }
+
+  /// A broken file read by the lossless layer is refused by the analysis, which holds the syntax
+  /// errors the layer lent, and its tree is kept all the same.
+  #[cfg(all(feature = "rowan_0_17", feature = "std"))]
+  #[test]
+  fn a_broken_file_reports_what_the_lossless_layer_lent() {
+    let root = package("type Query { hero: String }\ntype Half { f: }");
+    let (answer, trees) = analyze_with(
+      &smear::parser::graphqlx::Lossless::new(),
+      &root,
+      &[],
+      &Limits::new(),
+    );
+    assert!(!answer.is_ok());
+    assert!(answer.diagnostics().error_count() >= 1);
+    assert_eq!(trees.len(), 1);
+    let (_, tree) = trees.iter().next().expect("the one file has a tree");
+    assert!(tree.has_errors());
   }
 
   /// The trees of an analysis over packages this function builds and drops: they borrow nothing

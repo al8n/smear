@@ -484,3 +484,6 @@ where
 fn count(definitions: usize) -> u32 {
   u32::try_from(definitions).unwrap_or(u32::MAX)
 }
+
+#[cfg(all(test, feature = "rowan_0_17", feature = "std"))]
+mod tests;
