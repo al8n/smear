@@ -79,8 +79,6 @@ pub(crate) struct Declarations<'d, 'a> {
   #[allow(dead_code)]
   pub(crate) extensions: Vec<Entry>,
   /// Every schema definition and extension, by module, then source, then position.
-  // Read by lowering when it appends the schema's contributions; until then nothing reads it.
-  #[allow(dead_code)]
   pub(crate) schemas: Vec<Entry>,
 }
 

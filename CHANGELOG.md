@@ -92,8 +92,11 @@ All notable changes to Smear are documented in this file.
   members, its direct members as written and then each field's arguments, field by field, each
   with its description. A GraphQL built-in the root package replaces holds what the root
   package's definition writes. `Contribution::is_extension()` says whether a contribution is a
-  definition or one of its extensions. Names and texts past what the model's `u32` offsets
-  address are `resource-limit`. A new `test-support` feature, which `smear/test-support`
+  definition or one of its extensions. The schema has a contribution for every schema item any
+  package writes, its definitions first and then its extensions, each by source and position
+  and named at its `schema` or its `extend`; the root package's first schema definition gives
+  it its description, and every other schema item is a contribution alone. Names and texts past
+  what the model's `u32` offsets address are `resource-limit`. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the
   models it builds, for `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features

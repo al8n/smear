@@ -21,8 +21,9 @@
 //! their directories and their inline `mod`s, and every definition, the built-in library's and the
 //! primitives the program writes included, with canonical names and lookup: its kind, name,
 //! module, location, origin and description, its own contribution, its type parameters, a
-//! directive definition's locations, and its members with their descriptions. The phases that
-//! write the rest of it are still to come.
+//! directive definition's locations, and its members with their descriptions; and the schema's
+//! contributions, one for each schema item, and its description. The phases that write the rest of
+//! it are still to come.
 //!
 //! ```
 //! use smear_analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};

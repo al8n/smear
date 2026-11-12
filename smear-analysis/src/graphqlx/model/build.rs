@@ -409,6 +409,44 @@ impl ModelBuilder {
     self.model.members[member.get() as usize].description = Some(description);
   }
 
+  /// Appends a schema definition to the schema's contributions: at `location`, its `schema`, and
+  /// spanning `extent`, from its description or its `schema` to its last token. Answers its index
+  /// among the schema's contributions.
+  ///
+  /// The schema's contributions are appended after every definition's, its definitions before its
+  /// extensions ([`push_schema_extension`](Self::push_schema_extension)).
+  pub fn push_schema_contribution(&mut self, location: Location, extent: Location) -> u32 {
+    let index = self.model.schema.contributions.len;
+    grow(
+      &mut self.model.contributions,
+      &mut self.model.schema.contributions,
+      contribution_row(location, extent, false),
+    );
+    index
+  }
+
+  /// Appends a schema extension to the schema's contributions: at `location`, its `extend`, and
+  /// spanning `extent`, from its `extend` to its last token. Answers its index among the schema's
+  /// contributions.
+  ///
+  /// It follows every schema definition, and every schema extension before it by source id and
+  /// position.
+  pub fn push_schema_extension(&mut self, location: Location, extent: Location) -> u32 {
+    let index = self.model.schema.contributions.len;
+    grow(
+      &mut self.model.contributions,
+      &mut self.model.schema.contributions,
+      contribution_row(location, extent, true),
+    );
+    index
+  }
+
+  /// Gives the schema the description `text`, cooked, written at `location`.
+  pub fn set_schema_description(&mut self, text: &str, location: Location) {
+    let description = self.description(text, location);
+    self.model.schema.description = Some(description);
+  }
+
   /// Whether a spelling the model keeps was lost: the name arena refused one, as it does past the
   /// four gigabytes its `u32` offsets address, answering one shared placeholder for it; or the
   /// text arena holds more bytes than a `u32` addresses, so that a run of it saturates. Either way

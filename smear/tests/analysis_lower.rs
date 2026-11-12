@@ -1,7 +1,8 @@
 //! The GraphQLx analyzer's lowering: what each definition holds beyond its identity. Its own
 //! contribution, its type parameters, a directive definition's locations, and its members, its
 //! direct members before every argument of its fields, each with its description; what the
-//! built-in library holds; and none of it moved by the order files and dependencies are passed in.
+//! built-in library holds; the schema's contributions and its description; and none of it moved by
+//! the order files and dependencies are passed in.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -742,6 +743,135 @@ fn the_built_in_library_lowers_with_no_diagnostic() {
   );
 }
 
+/// Each contribution of the schema: where it is, and whether it is an extension.
+fn schema_contributions(model: &Model) -> Vec<(Location, bool)> {
+  model
+    .schema()
+    .contributions()
+    .map(|part: Contribution<'_>| (part.location(), part.is_extension()))
+    .collect()
+}
+
+/// A schema extension in the directory module `a`, whose file numbers before the root module's
+/// files although the module comes after the root module.
+const SCHEMA_A: &str = "extend schema {\n  subscription: Tick\n}\ntype Tick {\n  at: Int\n}\n";
+
+/// A schema extension written before the schema definition, which is described.
+const SCHEMA_B: &str = "extend schema @x\n\"The schema.\"\nschema {\n  query: Query\n}\n\
+                        type Query {\n  ok: Int\n}\ndirective @x repeatable on SCHEMA\n";
+
+/// A schema extension in the file that numbers last.
+const SCHEMA_C: &str = "extend schema {\n  mutation: Mutation\n}\ntype Mutation {\n  run: Int\n}\n";
+
+#[test]
+fn the_schemas_contributions_are_its_definitions_then_its_extensions_each_marked() {
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[
+      ("c.graphqlx", SCHEMA_C),
+      ("b.graphqlx", SCHEMA_B),
+      ("a/x.graphqlx", SCHEMA_A),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  let a = file(&analysis, 3, "a/x.graphqlx");
+  let b = file(&analysis, 3, "b.graphqlx");
+  let c = file(&analysis, 3, "c.graphqlx");
+  assert!(a < b && b < c, "the files number by path");
+
+  // The definition first, wherever it is written; then each extension by source and position,
+  // although the module of `a/x.graphqlx` comes after the root module that holds the others. Each
+  // is named at its first keyword, six bytes.
+  assert_eq!(
+    schema_contributions(model),
+    [
+      (named(b, SCHEMA_B, "\n", "schema", 0), false),
+      (named(a, SCHEMA_A, "", "extend", 0), true),
+      (named(b, SCHEMA_B, "", "extend", 0), true),
+      (named(c, SCHEMA_C, "", "extend", 0), true),
+    ]
+  );
+  for part in model.schema().contributions() {
+    assert!(part.members().is_empty());
+    assert!(!part.has_errors());
+  }
+
+  // The schema definition's description is the schema's.
+  assert_eq!(
+    described(model.schema().description()),
+    Some(("The schema.", at(b, SCHEMA_B, "\"The schema.\"", 0)))
+  );
+}
+
+#[test]
+fn a_second_schema_definition_and_a_dependencys_are_contributions_and_nothing_else() {
+  let one = "\"First.\"\nschema {\n  query: Query\n}\ntype Query {\n  ok: Int\n}\n";
+  let two = "\"Second.\"\nschema {\n  query: Query\n}\n";
+  let theirs = "\"Theirs.\"\nschema {\n  query: Point\n}\nextend schema {\n  mutation: Point\n}\n\
+                type Point {\n  x: Int\n}\n";
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[("two.graphqlx", two), ("one.graphqlx", one)],
+  )
+  .with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("g.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let model = analysis.model();
+  let one_file = file(&analysis, 3, "one.graphqlx");
+  let two_file = file(&analysis, 3, "two.graphqlx");
+  let geo_file = file(&analysis, 4, "g.graphqlx");
+
+  // Every schema item is a contribution: the definitions by source, the root package's and then
+  // the dependency's, then the dependency's extension.
+  assert_eq!(
+    schema_contributions(model),
+    [
+      (named(one_file, one, "\n", "schema", 0), false),
+      (named(two_file, two, "\n", "schema", 0), false),
+      (named(geo_file, theirs, "\n", "schema", 0), false),
+      (named(geo_file, theirs, "\n", "extend", 0), true),
+    ]
+  );
+  // And nothing else: only the root package's first schema definition describes the schema.
+  assert_eq!(
+    described(model.schema().description()),
+    Some(("First.", at(one_file, one, "\"First.\"", 0)))
+  );
+
+  // With no schema definition of the root package's, a dependency's describes nothing either.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[("one.graphqlx", "type Query {\n  ok: Int\n}\n")],
+  )
+  .with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("g.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let model = analysis.model();
+  let geo_file = file(&analysis, 4, "g.graphqlx");
+  assert_eq!(
+    schema_contributions(model),
+    [
+      (named(geo_file, theirs, "\n", "schema", 0), false),
+      (named(geo_file, theirs, "\n", "extend", 0), true),
+    ]
+  );
+  assert_eq!(model.schema().description(), None);
+
+  // And a program that writes no schema item has no contribution to it.
+  let analysis = analyze_one("type Query {\n  ok: Int\n}\n");
+  assert!(schema_contributions(analysis.model()).is_empty());
+  assert_eq!(analysis.model().schema().description(), None);
+}
+
 /// Everything lowering writes, read through the public model, and every diagnostic: what no order
 /// of the files or of the dependencies may change.
 fn render(analysis: &Analysis) -> Vec<String> {
@@ -795,29 +925,41 @@ fn render(analysis: &Analysis) -> Vec<String> {
       }
     }
   }
+  for (location, extension) in schema_contributions(model) {
+    lines.push(format!(
+      "schema contribution {location:?} extension {extension}"
+    ));
+  }
+  lines.push(format!(
+    "schema description {:?}",
+    described(model.schema().description())
+  ));
   for diagnostic in analysis.diagnostics() {
     lines.push(format!("{diagnostic:?}"));
   }
   lines
 }
 
-/// A root package of three files in two modules, with extensions in two of them, and two
-/// dependencies of two files and one.
+/// A root package of three files in two modules, with extensions of definitions and of the schema
+/// in each, and two dependencies of two files and one.
 const APP: [(&str, &str); 3] = [
   (
     "b.graphqlx",
     "\"The root.\"\ntype Query {\n  node(id: ID, depth: Int = 1): Node\n  \"Listed.\"\n  \
-     nodes: [Node!]!\n}\ninterface Node {\n  id: ID\n}\n",
+     nodes: [Node!]!\n}\ninterface Node {\n  id: ID\n}\n\"The schema.\"\nschema {\n  \
+     query: Query\n}\n",
   ),
   (
     "a/inner.graphqlx",
     "enum Color {\n  RED\n  GREEN\n}\nextend enum Color {\n  BLUE\n}\n\
      input Filter<T> {\n  color: Color\n  value: T\n}\n\
-     directive @mark(level: Int) repeatable on FIELD_DEFINITION | OBJECT\n",
+     directive @mark(level: Int) repeatable on FIELD_DEFINITION | OBJECT\n\
+     type Change {\n  done: Int\n}\nextend schema {\n  mutation: Change\n}\n",
   ),
   (
     "z.graphqlx",
-    "extend type Query {\n  more(first: Int): Int\n}\nscalar Late\n",
+    "extend type Query {\n  more(first: Int): Int\n}\nscalar Late\n\
+     extend schema {\n  subscription: Query\n}\n",
   ),
 ];
 
@@ -846,10 +988,11 @@ fn program(reversed: bool) -> (Package<&'static str>, Vec<Package<&'static str>>
     }
     files
   };
-  let root = package("app", Layout::Directory, &order(&APP)).with_dependencies(["geo", "astro"]);
+  let root =
+    package("app", Layout::Directory, &order(&APP[..])).with_dependencies(["geo", "astro"]);
   let mut dependencies = vec![
-    package("geo", Layout::Flat, &order(&GEO)),
-    package("astro", Layout::Flat, &order(&ASTRO)),
+    package("geo", Layout::Flat, &order(&GEO[..])),
+    package("astro", Layout::Flat, &order(&ASTRO[..])),
   ];
   if reversed {
     dependencies.reverse();
@@ -866,8 +1009,8 @@ fn reversing_files_and_dependencies_changes_no_id_and_no_diagnostic() {
   let backward = analyze(&root, &dependencies, &Limits::new());
   assert_eq!(render(&forward), render(&backward));
 
-  // What the render compares is what lowering wrote: `Query`'s members and arguments, among the
-  // rest.
+  // What the render compares is what lowering wrote: `Query`'s members and arguments, and the
+  // schema's three contributions, among the rest.
   let model = forward.model();
   let query = def(model, Namespace::Type, "^::app::Query");
   assert_eq!(
@@ -879,4 +1022,9 @@ fn reversing_files_and_dependencies_changes_no_id_and_no_diagnostic() {
     member_names(model, model.member(node).arguments()),
     ["id", "depth"]
   );
+  let extensions: Vec<bool> = schema_contributions(model)
+    .into_iter()
+    .map(|(_, extension): (Location, bool)| extension)
+    .collect();
+  assert_eq!(extensions, [false, true, true]);
 }

@@ -25,6 +25,18 @@
 //! A kind of definition this lowering does not know, which only a parser newer than the analyzer
 //! makes, is reported as `unknown-item`, once per file, and nothing of it is lowered.
 //!
+//! # The schema
+//!
+//! After every definition's contributions come the schema's: every schema definition any package
+//! writes, by source id and position, then every schema extension, likewise, each marked as what
+//! it is. A schema item's contribution is named where its first keyword is written, `schema` or
+//! `extend`: the six bytes the item's node starts with, as the parser spans a schema definition
+//! from its `schema` and a schema extension from its `extend`. It spans the whole item, a
+//! description included. The schema is the root package's, and the first schema definition the
+//! root package writes gives it its description; every other schema item writes nothing into it
+//! and is a contribution alone, which is what the rules that refuse a second schema definition, or
+//! a dependency's schema item, read.
+//!
 //! # The arenas
 //!
 //! The model addresses its names and its texts with `u32` offsets. When lowering ends, a spelling
@@ -51,20 +63,23 @@ use smear_lexer::decode_string_value;
 use smear_parser::graphqlx::ast::{
   self, DefinitionName, DescribedTypeSystemDefinition, ExecutableDirectiveLocation,
   FieldDefinition, InputValueDefinition, Name, StringValue, TypeDefinition, TypeSystemDefinition,
-  TypeSystemDirectiveLocation, TypeSystemItem,
+  TypeSystemDirectiveLocation, TypeSystemExtension, TypeSystemItem,
 };
 use tokora::{SimpleSpan, diagnostic::Location, span::AsSpan};
 
 use super::{
   code::DiagnosticKind,
   collect::{Items, unknown_item},
-  declare::{Declaration, Declarations, Item},
+  declare::{Declaration, Declarations, Entry, Item},
   diagnostic::{Diagnostic, Reporter},
-  id::{DefId, MemberId, Sym, dense},
+  id::{DefId, IdRange, MemberId, SourceId, Sym, dense},
   model::{DirectiveLocation, MemberKind, ModelBuilder},
   set::ROOT,
   source::SourceMap,
 };
+
+/// The length of a schema item's first keyword, `schema` or `extend`.
+const KEYWORD: usize = 6;
 
 /// Lowers what `declarations` holds into `builder`, which holds every package, module and
 /// definition already, reporting into `reporter`; `sources` numbers the packages' sources.
@@ -86,7 +101,9 @@ pub(crate) fn lower(
   for (index, declaration) in declarations.defs.iter().enumerate() {
     lowering.definition(declarations, DefId::new(dense(index)), declaration);
   }
-  lowering.arenas(Location::entire(sources.package_sources(ROOT).start()));
+  let root = sources.package_sources(ROOT);
+  lowering.schema(declarations, root);
+  lowering.arenas(Location::entire(root.start()));
 }
 
 /// What lowering keeps while it writes: the builder and the reporter it writes into, and what it
@@ -128,6 +145,20 @@ enum Step {
   Members,
   /// The arguments of the item's fields, which follow every contribution's direct members.
   Arguments,
+}
+
+/// A schema definition or extension, as the schema's contributions take it.
+struct SchemaPart<'d> {
+  /// Where it is.
+  entry: Entry,
+  /// Whether it is an extension: the schema's definitions come first.
+  extension: bool,
+  /// Its first keyword, `schema` or `extend`.
+  location: Location,
+  /// The whole item, a description included.
+  extent: Location,
+  /// A schema definition's description, as written, and where it is written.
+  description: Option<(&'d [u8], Location)>,
 }
 
 impl Lowering<'_> {
@@ -415,6 +446,105 @@ impl Lowering<'_> {
     }
   }
 
+  /// The schema's contributions, after every definition's: each schema definition by source id and
+  /// position, then each schema extension likewise; then its description, the first schema
+  /// definition's of the root package, whose sources are `root`.
+  fn schema(&mut self, declarations: &Declarations<'_, '_>, root: IdRange<SourceId>) {
+    let mut parts: Vec<SchemaPart<'_>> = Vec::with_capacity(declarations.schemas.len());
+    for entry in &declarations.schemas {
+      let part = match declarations.items.get(entry.item.source.get() as usize) {
+        Some(Some(Items::Text(items))) => self.schema_part(items, *entry),
+        Some(Some(Items::Bytes(items))) => self.schema_part(items, *entry),
+        // A schema item is one of a source the walk read.
+        Some(None) | None => None,
+      };
+      if let Some(part) = part {
+        parts.push(part);
+      }
+    }
+    // A source's items are flattened in source order, so an item's index is its position.
+    parts.sort_by_key(|part: &SchemaPart<'_>| {
+      (
+        part.extension,
+        part.entry.item.source,
+        part.entry.item.index,
+      )
+    });
+    for part in &parts {
+      if part.extension {
+        self
+          .builder
+          .push_schema_extension(part.location, part.extent);
+      } else {
+        self
+          .builder
+          .push_schema_contribution(part.location, part.extent);
+      }
+    }
+
+    let first = parts
+      .iter()
+      .find(|part: &&SchemaPart<'_>| !part.extension && root.contains(part.entry.item.source));
+    if let Some(part) = first
+      && let Some((spelling, location)) = part.description
+    {
+      self.text.clear();
+      // A description the lexer read always decodes; one that did not is left absent.
+      if decode_string_value(spelling, &mut self.text).is_ok() {
+        self
+          .builder
+          .set_schema_description(self.text.as_str(), location);
+      }
+    }
+  }
+
+  /// The schema item `entry` addresses among `items`, the items of its source, as the schema's
+  /// contributions take it; `None` for an item of a kind lowering does not know, which is
+  /// reported.
+  fn schema_part<'d, S: AsRef<[u8]>>(
+    &mut self,
+    items: &[&'d TypeSystemItem<S>],
+    entry: Entry,
+  ) -> Option<SchemaPart<'d>> {
+    let &item = items.get(entry.item.index as usize)?;
+    let source = entry.item.source.get();
+    let extent = Location::new(source, *item.span());
+    match item {
+      TypeSystemItem::Definition(described) => match described.node() {
+        TypeSystemDefinition::Schema(schema) => Some(SchemaPart {
+          entry,
+          extension: false,
+          location: keyword(source, *schema.span()),
+          extent,
+          description: described.description().map(
+            |text: &'d StringValue<S>| -> (&'d [u8], Location) {
+              (text.source().as_ref(), Location::new(source, *text.span()))
+            },
+          ),
+        }),
+        // An entry of the schema's is a schema definition or extension.
+        TypeSystemDefinition::Type(_) | TypeSystemDefinition::Directive(_) => None,
+      },
+      TypeSystemItem::Extension(extension) => match extension {
+        TypeSystemExtension::Schema(schema) => Some(SchemaPart {
+          entry,
+          extension: true,
+          location: keyword(source, *schema.span()),
+          extent,
+          description: None,
+        }),
+        TypeSystemExtension::Type(_) | TypeSystemExtension::Directive(_) => None,
+      },
+      TypeSystemItem::Use(_) | TypeSystemItem::Mod(_) => None,
+      // `TypeSystemItem` is `#[non_exhaustive]`: an item of a kind lowering does not know is
+      // reported, and nothing of it is lowered.
+      _ => {
+        self.unknown(source, *item.span());
+        None
+      }
+    }
+  }
+
   /// Reports, once and at `at`, a spelling the model's arenas could not keep.
   fn arenas(&mut self, at: Location) {
     if !self.builder.arenas_overflowed() {
@@ -433,6 +563,17 @@ impl Lowering<'_> {
         .build(),
     );
   }
+}
+
+/// Where the schema item whose node spans `node`, in the source `source`, writes its first keyword:
+/// the parser starts a schema definition's node at its `schema` and a schema extension's at its
+/// `extend`, and each is six bytes.
+fn keyword(source: u32, node: SimpleSpan) -> Location {
+  let start = node.start();
+  Location::new(
+    source,
+    SimpleSpan::new(start, start.saturating_add(KEYWORD).min(node.end())),
+  )
 }
 
 /// The model's directive location for `location`, as a directive definition writes it.

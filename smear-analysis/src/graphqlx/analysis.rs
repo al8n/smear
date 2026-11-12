@@ -121,9 +121,12 @@ impl Analysis {
 ///   is written; its type parameters; a directive definition's locations and whether it is
 ///   `repeatable`; and its members, its direct members as written and then each field's
 ///   arguments, each with its description. A replaced built-in holds what the root package's
-///   definition writes, and smear's own definition of it contributes nothing. Names and texts past
-///   what the model's `u32` offsets address, which only a [`Limits::max_source_bytes`] far above
-///   its default admits, are reported at the root package's package source.
+///   definition writes, and smear's own definition of it contributes nothing. Then the schema's
+///   contributions: every package's schema definitions, then its schema extensions, each by source
+///   and position and each marked as what it is; the root package's first schema definition gives
+///   the schema its description. Names and texts past what the model's `u32` offsets address,
+///   which only a [`Limits::max_source_bytes`] far above its default admits, are reported at the
+///   root package's package source.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///

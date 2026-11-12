@@ -500,7 +500,9 @@ pub struct Contribution<'a> {
 }
 
 impl<'a> Contribution<'a> {
-  /// Where it names what it contributes to, or, for the schema's, where its `schema` is written.
+  /// Where it names what it contributes to: a definition's name, or an extension's path to its
+  /// target. For one of the schema's, where its first keyword is written: `schema` for a schema
+  /// definition, `extend` for a schema extension.
   #[inline]
   pub const fn location(&self) -> Location {
     self.location

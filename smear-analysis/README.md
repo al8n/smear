@@ -18,8 +18,9 @@ applications, the schema and the built-ins, with canonical names and lookup; so 
 in the packages, their modules, one for every directory of a `Directory` package and one for every
 inline `mod`, and every definition: each type and directive a package declares, and each intrinsic
 primitive the program writes, with its identity, its own contribution, its type parameters, a
-directive definition's locations, and its members with their descriptions. The built-in packages,
-`core`, `alloc` and `std`, are one embedded GraphQLx file each, parsed on every analysis.
+directive definition's locations, and its members with their descriptions; and the schema's
+contributions, one for each schema item, with its description. The built-in packages, `core`,
+`alloc` and `std`, are one embedded GraphQLx file each, parsed on every analysis.
 
 Rules are visitors. A `graphqlx::Visitor` implements the hooks it needs, one for each entity a walk
 enters, leaves or reaches, and `graphqlx::visit` walks an analysis's model for it over the packages

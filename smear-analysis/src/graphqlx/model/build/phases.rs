@@ -1,8 +1,8 @@
 //! What the phases after lowering's first pass write: each definition's extensions, its type
 //! parameters' defaults and its bounds, its `implements` entries, union members and applications,
 //! its built-in meaning and its externs, its instantiations and satisfactions; each member's type,
-//! default and applications; type occurrences and types, values, applications, the schema, and
-//! marks.
+//! default and applications; type occurrences and types, values, applications, the schema's roots
+//! and applications, and marks.
 //!
 //! GATED ON HAVING A CALLER. Lowering, instantiation, coercion and the tier phase are this
 //! module's callers, and until each lands the test-support door is its only one: a method that no
@@ -530,44 +530,6 @@ impl ModelBuilder {
         value,
       },
     );
-  }
-
-  /// Appends a schema definition to the schema's contributions: at `location`, its `schema`, and
-  /// spanning `extent`, from its description or its `schema` to its last token. Answers its index
-  /// among the schema's contributions.
-  ///
-  /// The schema's contributions are appended after every definition's, its definitions before its
-  /// extensions (`push_schema_extension`).
-  pub fn push_schema_contribution(&mut self, location: Location, extent: Location) -> u32 {
-    let index = self.model.schema.contributions.len;
-    grow(
-      &mut self.model.contributions,
-      &mut self.model.schema.contributions,
-      contribution_row(location, extent, false),
-    );
-    index
-  }
-
-  /// Appends a schema extension to the schema's contributions: at `location`, its `extend`, and
-  /// spanning `extent`, from its `extend` to its last token. Answers its index among the schema's
-  /// contributions.
-  ///
-  /// It follows every schema definition, and every schema extension before it by source id and
-  /// position.
-  pub fn push_schema_extension(&mut self, location: Location, extent: Location) -> u32 {
-    let index = self.model.schema.contributions.len;
-    grow(
-      &mut self.model.contributions,
-      &mut self.model.schema.contributions,
-      contribution_row(location, extent, true),
-    );
-    index
-  }
-
-  /// Gives the schema the description `text`, cooked, written at `location`.
-  pub fn set_schema_description(&mut self, text: &str, location: Location) {
-    let description = self.description(text, location);
-    self.model.schema.description = Some(description);
   }
 
   /// Gives the schema `root` as its root for `operation`.

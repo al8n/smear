@@ -79,14 +79,18 @@ impl<'a> Schema<'a> {
     model.schema.applications.of(&model.listed_applications)
   }
 
-  /// Its description, if its schema definition writes one.
+  /// Its description: the one the root package's first schema definition writes, if it writes one.
   #[inline]
   pub fn description(&self) -> Option<Description<'a>> {
     Description::of(self.model, self.model.schema.description)
   }
 
-  /// What each written item contributed to it: its schema definition, then each extension. None
-  /// when no schema definition is written.
+  /// What each schema item any package writes contributed to it: every schema definition, by
+  /// source id and position, then every schema extension, likewise; none when no package writes
+  /// one. Each says whether it is an extension. The root package's first schema definition gives
+  /// the schema its description, roots and applications, and the root package's schema extensions
+  /// give it roots and applications; any other schema item is a contribution and nothing else,
+  /// there for the rules that refuse it.
   #[inline]
   pub fn contributions(&self) -> Contributions<'a> {
     Contributions::of(self.model, self.model.schema.contributions)
