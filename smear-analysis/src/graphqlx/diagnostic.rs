@@ -126,16 +126,21 @@ const EXCERPT_END: usize = 64;
 /// diagnostic holds more than a fixed number of bytes of any one spelling, and composing one reads
 /// no more than that, however long the spelling and however many diagnostics quote it.
 ///
-/// Its `Display` writes the whole spelling when it is at most `2 * EXCERPT_END` bytes long, and
-/// otherwise its first `EXCERPT_END` bytes, `…`, and its last `EXCERPT_END` bytes. A cut that falls
-/// inside a character moves back to the character's first byte, over three continuation bytes at
-/// most, since a character is at most four bytes long; it never walks further, so a spelling of
-/// nothing but continuation bytes costs the same. Bytes that are not UTF-8 are written as U+FFFD,
-/// as `String::from_utf8_lossy` writes them, and only the bytes written are decoded.
+/// Its `Display` cuts a spelling of more than `2 * EXCERPT_END` bytes after its first
+/// `EXCERPT_END` bytes and before its last `EXCERPT_END`, and writes what lies before the first
+/// cut, `…`, and what lies after the second. A cut that falls inside a character moves back to the
+/// character's first byte, over three continuation bytes at most, since a character is at most
+/// four bytes long; it never walks further, so a spelling of nothing but continuation bytes costs
+/// the same. Moving back never takes the second cut before the first, but the two meet where one
+/// character holds both, which only a spelling of at most `2 * EXCERPT_END + 3` bytes allows: then
+/// nothing lies between them to elide. So the whole spelling is written when it is at most
+/// `2 * EXCERPT_END` bytes long, and when the two cuts meet. Bytes that are not UTF-8 are written
+/// as U+FFFD, as `String::from_utf8_lossy` writes them, and only the bytes written are decoded.
 ///
-/// An excerpt therefore holds at most `2 * 64 + 3` of the spelling's bytes, 131: at most 64 before
-/// the `…` and at most 67 after it. Each is written as at most the three bytes of a U+FFFD, and the
-/// `…` is three more, so an excerpt writes at most 396 bytes.
+/// An excerpt therefore holds at most `2 * 64 + 3` of the spelling's bytes, 131: when elided, at
+/// most 64 before the `…` and at most 67 after it, and when whole, at most 131. Each is written as
+/// at most the three bytes of a U+FFFD, and the `…` is three more, so an elided spelling writes at
+/// most 396 bytes and a whole one at most 393: an excerpt writes at most 396 bytes.
 pub(crate) struct Excerpt<'a>(pub(crate) &'a [u8]);
 
 impl core::fmt::Display for Excerpt<'_> {
@@ -146,6 +151,10 @@ impl core::fmt::Display for Excerpt<'_> {
     }
     let head = boundary(bytes, EXCERPT_END);
     let tail = boundary(bytes, bytes.len() - EXCERPT_END);
+    if head >= tail {
+      // The two cuts met, so nothing lies between them to elide.
+      return write_lossy(f, bytes);
+    }
     write_lossy(f, &bytes[..head])?;
     f.write_str("…")?;
     write_lossy(f, &bytes[tail..])

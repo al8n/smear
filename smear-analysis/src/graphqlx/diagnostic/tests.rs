@@ -38,8 +38,8 @@ fn a_spelling_of_at_most_128_bytes_is_written_whole() {
   assert_eq!(written(accented.as_bytes()), accented);
 }
 
-/// Past `2 * EXCERPT_END` bytes, a spelling is written as its first and its last `EXCERPT_END`
-/// bytes around `…`, whatever its length.
+/// Past `2 * EXCERPT_END` bytes, a spelling of one-byte characters is written as its first and its
+/// last `EXCERPT_END` bytes around `…`, whatever its length.
 #[test]
 fn a_longer_spelling_is_written_as_its_two_ends() {
   let head = "h".repeat(EXCERPT_END);
@@ -82,6 +82,68 @@ fn a_cut_inside_a_character_moves_back_to_its_first_byte() {
       );
     }
   }
+}
+
+/// `before` bytes of `a`, then `character`, then `after` bytes of `z`.
+fn around(before: usize, character: &str, after: usize) -> String {
+  format!("{}{character}{}", "a".repeat(before), "z".repeat(after))
+}
+
+/// Asserts that each spelling of `character` between `a`s and `z`s that `places` lists, as
+/// `(before, after)`, is written whole and with no `…`: one character holds both cuts there, so
+/// nothing lies between them to elide. And that one byte past the longest of them, with
+/// `EXCERPT_END` bytes on each side of the character, the cuts no longer meet and the character is
+/// elided.
+fn written_whole_where_the_cuts_meet(character: &str, places: &[(usize, usize)]) {
+  for &(before, after) in places {
+    let spelling = around(before, character, after);
+    assert_eq!(
+      written(spelling.as_bytes()),
+      spelling,
+      "{} bytes, {before} of them before {character:?}",
+      spelling.len()
+    );
+  }
+  let past = around(EXCERPT_END, character, EXCERPT_END);
+  assert_eq!(
+    written(past.as_bytes()),
+    format!("{}…{}", "a".repeat(EXCERPT_END), "z".repeat(EXCERPT_END)),
+    "{} bytes",
+    past.len()
+  );
+}
+
+/// A four-byte character holds both cuts in six places, in spellings of 129, 130 and 131 bytes;
+/// the first is 62 `a`s, the character and 63 `z`s.
+#[test]
+fn a_four_byte_character_holding_both_cuts_is_written_whole() {
+  written_whole_where_the_cuts_meet(
+    "😀",
+    &[(62, 63), (63, 62), (64, 61), (63, 63), (64, 62), (64, 63)],
+  );
+}
+
+/// A three-byte character holds both cuts in three places, in spellings of 129 and 130 bytes.
+#[test]
+fn a_three_byte_character_holding_both_cuts_is_written_whole() {
+  written_whole_where_the_cuts_meet("€", &[(63, 63), (64, 62), (64, 63)]);
+}
+
+/// A two-byte character holds both cuts in one place, in a spelling of 129 bytes.
+#[test]
+fn a_two_byte_character_holding_both_cuts_is_written_whole() {
+  written_whole_where_the_cuts_meet("é", &[(64, 63)]);
+}
+
+/// Where the two cuts meet in bytes that are not UTF-8, the spelling is written whole too, each
+/// byte as a U+FFFD: 131 of them, 393 bytes, the most a spelling written whole can take.
+#[test]
+fn where_the_cuts_meet_in_bytes_that_are_not_utf8_the_spelling_is_written_whole() {
+  let mut spelling = [0xFF_u8; 2 * EXCERPT_END + 3];
+  spelling[EXCERPT_END + 1..=EXCERPT_END + 3].fill(0x80);
+  let whole = written(&spelling);
+  assert_eq!(whole, "\u{FFFD}".repeat(2 * EXCERPT_END + 3));
+  assert_eq!(whole.len(), 393);
 }
 
 /// Continuation bytes alone move each cut back three bytes and no further, and each is written as
