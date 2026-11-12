@@ -1193,6 +1193,43 @@ fn a_use_binds_in_each_namespace_and_types_and_modules_share_one() {
   );
 }
 
+/// A package's root module and a directive of the package's name stand in one scope: `use
+/// ^::ingraph` binds the module in the namespace types and modules share, and
+/// `use ^::ingraph::ingraph` the directive `@ingraph` in the directive namespace.
+#[test]
+fn a_package_and_its_directive_of_one_name_stand_in_one_scope() {
+  let ingraph = directory(
+    "ingraph",
+    &[(
+      "lib.graphqlx",
+      "directive @ingraph on FIELD_DEFINITION\nscalar Node\n",
+    )],
+  );
+  let root = directory(
+    "app",
+    &[(
+      "schema.graphqlx",
+      "use ^::ingraph\nuse ^::ingraph::ingraph\n",
+    )],
+  )
+  .with_dependencies(["ingraph"]);
+  let dependencies = [ingraph];
+  let analysis = analyze(&root, &dependencies, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+
+  all(
+    &root,
+    &dependencies,
+    "^::app",
+    &[
+      ("mod ingraph", Some("mod ^::ingraph")),
+      ("@ingraph", Some("@^::ingraph::ingraph")),
+      ("ingraph::Node", Some("^::ingraph::Node")),
+      ("ingraph", None),
+    ],
+  );
+}
+
 #[test]
 fn reversing_files_and_dependencies_changes_no_diagnostic() {
   let files: [(&'static str, &'static str); 5] = [
