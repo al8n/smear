@@ -79,7 +79,8 @@ pub(crate) struct Declarations<'d, 'a> {
   /// `core` materialises. A built-in the root package replaces has the root package's item.
   pub(crate) defs: Vec<Option<Item>>,
   /// The names each module declares, sorted by module, then namespace, then name: one binding per
-  /// name, the first declaration's.
+  /// name, the first declaration's. A built-in package's second names, `Int` to `ID`, are bindings
+  /// of its root module, each to the definition it names.
   pub(crate) names: Vec<Binding>,
   /// Every `use` item, by module, then source, then position.
   pub(crate) uses: Vec<Entry>,
@@ -295,6 +296,13 @@ pub(crate) fn declarations<'d, 'a>(
       let module = modules[tree.root_of(package) as usize];
       let name = builder.intern(alias);
       builder.push_alias(module, name, def);
+      names.push(Binding {
+        module,
+        namespace: TYPE,
+        name,
+        def,
+        replaces: false,
+      });
     }
   }
 
@@ -334,7 +342,8 @@ pub(crate) fn declarations<'d, 'a>(
     }
     start += len;
   }
-  // The primitives were pushed first, so a name both bind keeps the primitive's binding.
+  // The primitives were pushed first and the second names next, so a name one of them and a
+  // definition both bind keeps the earlier binding.
   names.sort_by_key(|binding: &Binding| (binding.module, binding.namespace, binding.name));
   names.dedup_by_key(|binding: &mut Binding| (binding.module, binding.namespace, binding.name));
 
