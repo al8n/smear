@@ -425,8 +425,10 @@ impl Collector {
 /// It keeps what a `Collector` keeps. One made with `new`, for `analyze`'s own run, also notes
 /// where each error was reported, kept or dropped by the ceiling, at the moment it is reported:
 /// what an error marks (`Model::mark`) can then never depend on which diagnostics the ceiling
-/// keeps. One made with `without_marks`, for a consumer's walk, which marks nothing, notes nothing
-/// beside the list, so it runs in memory bounded by the ceiling however much is reported.
+/// keeps. A parser's syntax error is the one error it notes nothing for: the parse step reports
+/// those through `report_syntax`. One made with `without_marks`, for a consumer's walk, which
+/// marks nothing, notes nothing beside the list, so it runs in memory bounded by the ceiling
+/// however much is reported.
 pub(crate) struct Reporter {
   collector: Collector,
   /// Whether it notes where each error points.
@@ -464,6 +466,17 @@ impl Reporter {
     if self.marking && diagnostic.severity == Severity::Error {
       self.marks.push(diagnostic.primary);
     }
+    self.collector.report(diagnostic);
+  }
+
+  /// Reports a parser's syntax error: hands it to the list and notes nothing, whether the reporter
+  /// is marking or not.
+  ///
+  /// A syntax error marks nothing in the model: an item that holds one has no image in the
+  /// document its file answers, so no extent holds where the error points. And the marks are a
+  /// list the diagnostic ceiling does not bound, while a parser that recovers lends an error for
+  /// every mistake of a file: noted, a file's syntax errors would grow it with the file.
+  pub(crate) fn report_syntax(&mut self, diagnostic: Diagnostic) {
     self.collector.report(diagnostic);
   }
 

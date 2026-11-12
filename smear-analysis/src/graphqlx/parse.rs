@@ -175,7 +175,7 @@ fn parse_bytes<'a>(
 }
 
 /// Where a layer lends a file's syntax errors: each one becomes a diagnostic at the file, in the
-/// analysis's one list.
+/// analysis's one list, and marks nothing.
 struct Syntax<'r> {
   reporter: &'r mut Reporter,
   source: SourceId,
@@ -217,7 +217,7 @@ impl<'r> Syntax<'r> {
 impl<E: Diagnose> Report<E> for Syntax<'_> {
   fn error(&mut self, error: &E) -> ControlFlow<()> {
     self.lent = self.lent.saturating_add(1);
-    self.reporter.report(syntax(error, self.source));
+    self.reporter.report_syntax(syntax(error, self.source));
     ControlFlow::Continue(())
   }
 }

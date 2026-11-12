@@ -135,9 +135,11 @@ impl Analysis {
 /// the contribution whose extent holds where it points, every member whose extent holds it, and
 /// through the contribution its definition: their `has_errors()` say so. An extent runs from the
 /// description, or the first keyword when there is none, to the last token, and an error that
-/// points at no definition, such as one at a package source, marks nothing. While smear's rules
-/// walk, a rule sees the phases' marks and no rule's: the rules' marks are applied once the walk has
-/// ended, so no rule sees another's, and the order the rules are composed in changes nothing.
+/// points at no definition, such as one at a package source, marks nothing. A syntax error marks
+/// nothing either: an item that holds one has no image in its file's document, so no extent holds
+/// where it points. While smear's rules walk, a rule sees the phases' marks and no rule's: the
+/// rules' marks are applied once the walk has ended, so no rule sees another's, and the order the
+/// rules are composed in changes nothing.
 ///
 /// # What it keeps
 ///
@@ -277,6 +279,12 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
 ///
 /// [`analyze_with`] answers it. A file the layer refused, a file that never reached the layer, and
 /// every package source have no entry.
+///
+/// A file that holds nothing but white space, commas, byte order marks and comments never reaches
+/// the layer: the analysis accepts it as a document with no item, so it has no entry here. A tool
+/// that wants a tree for such a file parses its text with `smear-parser`'s lossless layer itself.
+/// That parse reports a syntax error, because for the parser a text with no item is not a
+/// document.
 #[derive(Debug, Clone)]
 pub struct Trees<T> {
   trees: Vec<(SourceId, T)>,
