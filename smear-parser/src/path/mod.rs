@@ -8,7 +8,8 @@ use tokora::{
   utils::{DisplayHuman, IntoComponents},
 };
 
-/// Where a [`Path`] starts resolving: the module it is written in, or a root its first tokens name.
+/// Where a [`Path`](crate::graphqlx::ast::Path) starts resolving: the module it is written in, or a
+/// root its first tokens name.
 ///
 /// ```text
 /// PathRoot ::= "~" "::"          -- the own package's root module
