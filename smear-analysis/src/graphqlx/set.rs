@@ -115,19 +115,35 @@ pub(crate) fn order<'a>(
   views
 }
 
-/// Two paths, segment by segment on `/`, each segment bytewise.
+/// Two paths, segment by segment on `/`, each segment bytewise, and a path before every path whose
+/// segments it begins.
 ///
 /// So `a/b` comes before `a.b`, which a bytewise comparison of the whole paths would reverse: a
-/// directory's files stay together.
+/// directory's files stay together. The two paths are read once, and no further than they agree:
+/// a comparison costs at most the shorter path's length and one byte more of each, wherever either
+/// path's first `/` is.
 pub(crate) fn compare_paths(a: &[u8], b: &[u8]) -> Ordering {
-  let mut left = a.split(is_separator);
-  let mut right = b.split(is_separator);
+  compare_path_bytes(a.iter().copied(), b.iter().copied())
+}
+
+/// The order of `compare_paths`, over the bytes of two paths, each read up to and including the
+/// first byte that decides.
+///
+/// The segment-wise order is the bytewise order in which `/` sorts before every other byte and the
+/// end of a path before `/`. Where the paths first differ at two bytes of one segment, those bytes
+/// decide the segments, and so the paths. Where one path has `/` and the other another byte, the
+/// first's segment ends where the second's goes on, so it begins the second's and comes first.
+/// Where one path ends and the other has `/`, the first's segments begin the second's; where it
+/// ends and the other has another byte, its last segment begins the other's: it comes first either
+/// way.
+fn compare_path_bytes(
+  mut a: impl Iterator<Item = u8>,
+  mut b: impl Iterator<Item = u8>,
+) -> Ordering {
   loop {
-    match (left.next(), right.next()) {
-      (Some(x), Some(y)) => match x.cmp(y) {
-        Ordering::Equal => {}
-        unequal => return unequal,
-      },
+    match (a.next(), b.next()) {
+      (Some(x), Some(y)) if x == y => {}
+      (Some(x), Some(y)) => return path_rank(x).cmp(&path_rank(y)),
       (None, Some(_)) => return Ordering::Less,
       (Some(_), None) => return Ordering::Greater,
       (None, None) => return Ordering::Equal,
@@ -135,9 +151,18 @@ pub(crate) fn compare_paths(a: &[u8], b: &[u8]) -> Ordering {
   }
 }
 
+/// A byte's place in the order of paths: `/` before every other byte, and the others bytewise.
+fn path_rank(byte: u8) -> u16 {
+  if is_separator(byte) {
+    0
+  } else {
+    u16::from(byte) + 1
+  }
+}
+
 /// Whether `byte` separates two path segments.
-fn is_separator(byte: &u8) -> bool {
-  *byte == b'/'
+fn is_separator(byte: u8) -> bool {
+  byte == b'/'
 }
 
 /// Two files of one package: by path, then by text, so that two files with one path still have
@@ -185,3 +210,6 @@ fn compare_file_lists(a: &[FileView<'_>], b: &[FileView<'_>]) -> Ordering {
   }
   a.len().cmp(&b.len())
 }
+
+#[cfg(test)]
+mod tests;
