@@ -280,10 +280,7 @@ impl<'d> Walk<'d, '_> {
       next: 0,
       module,
     });
-    loop {
-      let Some(frame) = stack.last_mut() else {
-        break;
-      };
+    while let Some(frame) = stack.last_mut() {
       let items: &'d [TypeSystemItem<S>] = frame.items;
       let next: usize = frame.next;
       let module: u32 = frame.module;
