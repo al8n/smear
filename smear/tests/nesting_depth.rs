@@ -1480,8 +1480,9 @@ fn a_use_group_chain_under_a_recovering_emitter_nests_no_deeper_than_the_ceiling
 
   // THE GUARD, AND IT MUST STAY FIRST: inside the ceiling the chain is a clean parse, and one past
   // it — too shallow to overflow anything — is held at the ceiling.
-  let inside = recovering(&use_groups(MAX_NESTING_DEPTH)).expect("inside the ceiling it parses");
-  assert_eq!(syntactic_group_depth(&inside), MAX_NESTING_DEPTH);
+  let inside = use_groups(MAX_NESTING_DEPTH);
+  let parsed = recovering(&inside).expect("inside the ceiling it parses");
+  assert_eq!(syntactic_group_depth(&parsed), MAX_NESTING_DEPTH);
   bounded(&use_groups(MAX_NESTING_DEPTH + 1), "one past the ceiling");
 
   for depth in [1_000, 100_000] {
