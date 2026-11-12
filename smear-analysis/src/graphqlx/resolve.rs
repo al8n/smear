@@ -56,7 +56,7 @@ mod near;
 mod uses;
 
 use core::cell::Cell;
-use std::{collections::BTreeMap, format, string::String, vec, vec::Vec};
+use std::{boxed::Box, collections::BTreeMap, format, string::String, vec, vec::Vec};
 
 use smear_parser::graphqlx::ast::{Path, PathRoot};
 use tokora::{
@@ -633,13 +633,16 @@ impl Scopes<'_> {
   }
 
   /// What the path `root` and `segments` spell names where `request` says, or why it names nothing.
+  ///
+  /// A failure travels boxed, so a path that resolves moves no more than its answer and one that
+  /// does not costs one allocation.
   fn walk<'p>(
     &self,
     names: &ModelBuilder,
     request: &Request<'_>,
     root: Root,
     segments: &[Segment<'p>],
-  ) -> Result<Resolved, Failure<'p>> {
+  ) -> Result<Resolved, Box<Failure<'p>>> {
     let package = self.package_of(request.module);
     let (Some(&first), Some(&last)) = (segments.first(), segments.last()) else {
       // A parsed path holds a segment at least, so a path of none is never asked about.
@@ -647,12 +650,12 @@ impl Scopes<'_> {
     };
     if segments.len() > self.max_segments as usize {
       let at = joined(first.at, last.at);
-      return Err(Failure {
+      return Err(Box::new(Failure {
         at,
         name: first.name,
         why: Why::TooLong(segments.len()),
         single: false,
-      });
+      }));
     }
     let rest = &segments[1..];
     let (start, after, within): (ModuleId, &[Segment<'p>], Within<'p>) = match root {
@@ -720,21 +723,21 @@ impl Scopes<'_> {
       Root::Parent(count, at) => match self.up(request.module, count) {
         Some(module) => (module, segments, Within::Parent),
         None => {
-          return Err(Failure {
+          return Err(Box::new(Failure {
             at,
             name: b"..",
             why: Why::AboveRoot,
             single: false,
-          });
+          }));
         }
       },
       Root::Unknown(at) => {
-        return Err(Failure {
+        return Err(Box::new(Failure {
           at,
           name: first.name,
           why: Why::Unknown,
           single: false,
-        });
+        }));
       }
     };
     self.later(names, request.wanted, package, start, after, within)
@@ -742,7 +745,8 @@ impl Scopes<'_> {
 
   /// What the segments `after` name below `module`, which the path names `within`: each but the
   /// last a child module of the one before, and the last what `wanted` asks for, among the
-  /// declarations and the child modules of the module before it.
+  /// declarations and the child modules of the module before it. A failure travels boxed, as
+  /// [`walk`](Self::walk)'s does.
   fn later<'p>(
     &self,
     names: &ModelBuilder,
@@ -751,7 +755,7 @@ impl Scopes<'_> {
     mut module: ModuleId,
     after: &[Segment<'p>],
     mut within: Within<'p>,
-  ) -> Result<Resolved, Failure<'p>> {
+  ) -> Result<Resolved, Box<Failure<'p>>> {
     for (offset, &segment) in after.iter().enumerate() {
       let sym = names.find(segment.name);
       if offset + 1 == after.len() {
@@ -1683,14 +1687,14 @@ fn digest<'p, S: AsRef<[u8]>>(
   }
 }
 
-/// A failure at `segment`.
-fn failure<'p>(segment: Segment<'p>, why: Why<'p>, single: bool) -> Failure<'p> {
-  Failure {
+/// A failure at `segment`, boxed as a resolution's `Err` carries it.
+fn failure<'p>(segment: Segment<'p>, why: Why<'p>, single: bool) -> Box<Failure<'p>> {
+  Box::new(Failure {
     at: segment.at,
     name: segment.name,
     why,
     single,
-  }
+  })
 }
 
 /// From the start of `first` to the end of `last`, both in one source.
