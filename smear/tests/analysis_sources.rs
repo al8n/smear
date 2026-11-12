@@ -130,8 +130,10 @@ fn bind_finds_each_dependency_by_name_whatever_order_it_is_given_in() {
   let analysis = analyze(&root, &[geo.clone(), zeta.clone()], &Limits::new());
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
 
-  let given = analysis.sources().bind(&root, &[geo.clone(), zeta.clone()]);
-  let swapped = analysis.sources().bind(&root, &[zeta, geo]);
+  let given_order = [geo.clone(), zeta.clone()];
+  let given = analysis.sources().bind(&root, &given_order);
+  let swapped_order = [zeta, geo];
+  let swapped = analysis.sources().bind(&root, &swapped_order);
   for id in analysis.sources().sources() {
     assert!(given.text(id).is_some(), "{id:?}");
     assert_eq!(given.text(id), swapped.text(id), "{id:?}");
