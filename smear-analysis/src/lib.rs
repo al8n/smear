@@ -1,7 +1,8 @@
 //! The GraphQLx schema analyzer.
 //!
 //! Its `graphqlx` module takes GraphQLx packages in and gives a resolved model of them, and the
-//! diagnostics on them, back. It needs `std` or `alloc`, and with neither the module is absent.
+//! diagnostics on them, back, and walks that model for rules: smear's own, and a consumer's. It
+//! needs `std` or `alloc`, and with neither the module is absent.
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, allow(unused_attributes))]

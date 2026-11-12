@@ -14,28 +14,40 @@ All notable changes to Smear are documented in this file.
   `smear-parser`'s and imply no tier, and `smear`'s features of the same names forward to them.
   `smear-schema`'s builder now takes those three kernels from `smear-semantics`, behind
   `build`, with no change in behaviour.
-- `smear-analysis`: the analyzer's entrance and exits. `graphqlx::analyze` takes a root
-  `Package` and its dependencies, each file's text any `SourceText` (`&str`, `&[u8]`, or a
-  source feature's type), within `Limits`, and answers an `Analysis` with no type parameter:
-  a `Model` of the packages, the `Diagnostics` and a `SourceMap`. Packages and sources are
-  numbered deterministically, whatever order they are passed in. The package set's file
-  paths, package names, dependencies and total size are checked, under the new
-  `smear::graphqlx` codes `DiagnosticKind` lists; a message quotes a name or a path whole
-  when it is at most 128 bytes, and otherwise as its first and last 64 bytes around `…`, so
-  no message grows with what it quotes. Every file is parsed with the GraphQLx syntactic
-  parser, its syntax errors reported at that file. `Diagnostic::builder` is
-  public, so a consumer's findings join smear's in one ordered list, and `SourceMap::bind`
-  pairs an analysis with the texts it was made from, finding each file again by its package
-  and its path alone: it answers no text for a file whose path another file of its package
-  has, for the files of a dependency whose name another dependency has, or for the root's
-  files when the root is given under another name. The `Model` is dense tables read through
-  `Copy` views, each numbered by its own id: packages, modules, definitions and their
-  contributions, members, type occurrences and interned types, values, directive
-  applications, the schema and the built-ins, with `canonical_name`, `lookup` and
-  `module_by_path`; `lookup` keeps a type's and a directive's names apart, the second names a
-  module gives included. So far `analyze` fills in only the packages and their root modules.
-  A new `test-support` feature, which `smear/test-support` forwards, compiles a hidden door to
-  the crate-private model builder for `smear`'s own tests; it is not API.
+- `smear-analysis`: the analyzer's entrance, its exits and its rules. `graphqlx::analyze`
+  takes a root `Package` and its dependencies, each file's text any `SourceText` (`&str`,
+  `&[u8]`, or a source feature's type), within `Limits`, and answers an `Analysis` with no
+  type parameter: a `Model` of the packages, the `Diagnostics` and a `SourceMap`. Packages and
+  sources are numbered deterministically, whatever order they are passed in. The package
+  set's file paths, package names, dependencies and total size are checked, under the new
+  `smear::graphqlx` codes `DiagnosticKind` lists; a message quotes a name or a path whole when
+  it is at most 128 bytes, and otherwise as its first and last 64 bytes around `…`, so no
+  message grows with what it quotes. Every file is parsed with the GraphQLx syntactic parser,
+  its syntax errors reported at that file. `Diagnostic::builder` is public, so a consumer's
+  findings join smear's in one ordered list, and `SourceMap::bind` pairs an analysis with the
+  texts it was made from, finding each file again by its package and its path alone: it
+  answers no text for a file whose path another file of its package has, for the files of a
+  dependency whose name another dependency has, or for the root's files when the root is
+  given under another name. The `Model` is dense tables read through `Copy` views, each
+  numbered by its own id: packages, modules, definitions and their contributions, members,
+  type occurrences and interned types, values, directive applications, the schema and the
+  built-ins, with `canonical_name`, `lookup` and `module_by_path`; `lookup` keeps a type's and
+  a directive's names apart, the second names a module gives included. Rules are visitors: a
+  `Visitor` implements the hooks it needs, each with an empty default body, from `begin`
+  through entering and leaving packages, modules, definitions and members and reaching type
+  occurrences, values, directive applications and the schema, to `end`; `visit` walks an
+  analysis's model for one over the packages `Packages` selects, hands each hook a `Cx` that
+  says where the walk is (its `Site` says where an occurrence sits) and takes what the visitor
+  reports, and answers those diagnostics under the analysis's ceiling. A consumer's walk marks
+  nothing and holds memory bounded by that ceiling. Visitors compose at compile time: a tuple
+  of up to twelve, an `Option` of one, a `&mut V`, a `Box<V>` and `()` are each a visitor.
+  `analyze` runs smear's own rule set, which holds no rule yet, through the same walk over the
+  supplied packages, and an error that a phase or a rule reports marks the contributions,
+  members and definitions that hold where it points, as their `has_errors()` says, whether the
+  ceiling keeps the diagnostic or not. So far `analyze` fills in only the packages and their
+  root modules. A new `test-support` feature, which `smear/test-support` forwards, compiles a
+  hidden door to the crate-private model builder, and to analyses of the models it builds, for
+  `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the six features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`,

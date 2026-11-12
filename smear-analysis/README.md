@@ -10,11 +10,22 @@ GraphQLx only. Standard GraphQL is validated against the draft specification by 
 the dialect's modules, imports, generics and packages are what this crate resolves.
 
 `graphqlx::analyze` takes a root package and its dependencies, numbers their sources, checks the
-package set and parses every file. It answers an `Analysis`: the model, the diagnostics in one
-total order, and the source map that pairs the analysis with the caller's texts again. The model is
-dense tables read through `Copy` views over packages, modules, definitions, members, type
-occurrences and types, values, directive applications, the schema and the built-ins, with
-canonical names and lookup; so far `analyze` fills in only the packages and their root modules.
+package set, parses every file and runs smear's own rules over the supplied packages. It answers an
+`Analysis`: the model, the diagnostics in one total order, and the source map that pairs the
+analysis with the caller's texts again. The model is dense tables read through `Copy` views over
+packages, modules, definitions, members, type occurrences and types, values, directive
+applications, the schema and the built-ins, with canonical names and lookup; so far `analyze` fills
+in only the packages and their root modules.
+
+Rules are visitors. A `graphqlx::Visitor` implements the hooks it needs, one for each entity a walk
+enters, leaves or reaches, and `graphqlx::visit` walks an analysis's model for it over the packages
+`Packages` selects, handing each hook a `Cx` that says where the walk is and takes what the visitor
+reports. Visitors compose at compile time: a tuple of up to twelve, an `Option` of one, a `&mut` or
+a `Box` of one, and `()`. `analyze` runs smear's own rule set, which holds no rule yet, through the
+same walk, and an error that a phase or a rule reports marks the contributions, members and
+definitions that hold it, as their `has_errors()` says, whether the diagnostic ceiling keeps it or
+not. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and holds
+memory bounded by it.
 
 ## Feature flags
 
@@ -26,7 +37,7 @@ canonical names and lookup; so far `analyze` fills in only the packages and thei
 | `bstr_1` | Read `bstr::BStr` sources, from `bstr` 1. Implies no tier | |
 | `hipstr_0_8` | Read the `hipstr::{HipStr, HipByt}` sources, from `hipstr` 0.8. Implies no tier | |
 | `smol-bytes_0_2` | Read the smol-bytes 0.2 sources. Implies no tier | |
-| `test-support` | `graphqlx::test_support`: a hidden door to the crate-private model builder, for `smear`'s own tests. Not API; `smear`'s `test-support` forwards it | |
+| `test-support` | `graphqlx::test_support`: a hidden door to the crate-private model builder, and to analyses of the models it builds, for `smear`'s own tests. Not API; `smear`'s `test-support` forwards it | |
 
 Each source feature forwards `smear-parser`'s of the same name and implies no tier, so a
 `default-features = false` consumer names `std` or `alloc` beside it. `bytes`, `bstr`, `hipstr` and

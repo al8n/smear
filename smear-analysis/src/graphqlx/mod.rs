@@ -17,7 +17,8 @@
 //!
 //! [`analyze`] answers an [`Analysis`]: the [`Model`], its [`Diagnostics`] and its [`SourceMap`].
 //! None of the three has a type parameter or a lifetime, whatever text type went in, and
-//! [`Analysis::is_ok`] is the verdict.
+//! [`Analysis::is_ok`] is the verdict. So far the model holds only the packages and their root
+//! modules: the phases that write the rest of it are still to come.
 //!
 //! ```
 //! use smear_analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};
@@ -39,8 +40,9 @@
 //! Every package has a package source, numbered before its files, and every file is a source. A
 //! [`SourceId`] numbers them densely, and the [`SourceMap`] records each one's package, path and
 //! length, never its text: the texts stay with the caller, and [`SourceMap::bind`] pairs the map
-//! with them again for a renderer. The built-in packages `core`, `alloc` and `std` have
-//! [`PackageId`]s and sources like any other, and smear supplies their texts itself.
+//! with them again for a renderer, finding each file by its package and its path. The built-in
+//! packages `core`, `alloc` and `std` have [`PackageId`]s and sources like any other, and smear
+//! supplies their texts itself.
 //!
 //! # Diagnostics
 //!
@@ -48,15 +50,24 @@
 //! consumer reports its own findings with its own codes, at the analysis's sources or at source
 //! ids of its own, and they render exactly as smear's do. [`Diagnostics`] keeps them in one total
 //! order, under a ceiling that keeps the least of them. [`DiagnosticKind`] lists the
-//! `smear::graphqlx` codes smear reports.
+//! `smear::graphqlx` codes smear reports, and a message of smear's quotes a name or a path from the
+//! input only by a bounded excerpt of it.
 //!
 //! # Rules
 //!
 //! A rule is a [`Visitor`]: it implements the hooks it needs, and [`visit`] walks the model for
 //! it, reaching every entity the chosen [`Packages`] wrote in id order and handing each hook a
-//! [`Cx`] that says where the walk is and takes what the rule reports. Rules compose at compile
-//! time: a tuple of visitors is a visitor, and so are an `Option` of one and a borrowed or boxed
-//! one.
+//! [`Cx`] that says where the walk is, an occurrence's [`Site`] included, and takes what the rule
+//! reports. Rules compose at compile time: a tuple of up to twelve visitors is a visitor, and so
+//! are an `Option` of one, a borrowed or boxed one, and `()`.
+//!
+//! [`analyze`] runs smear's own rule set, which holds no rule yet, through the same walk over the
+//! supplied packages, once its phases have written the model. An error that a phase or one of those
+//! rules reports marks the contributions, members and definitions that hold where it points,
+//! whether the ceiling keeps the diagnostic or not, and their `has_errors()` says so. A consumer's
+//! walk marks nothing: it answers its own [`Diagnostics`] under the analysis's ceiling, which
+//! [`Diagnostics::merge`] joins with the analysis's, and holds memory bounded by that ceiling
+//! however much its visitor reports.
 
 mod analysis;
 mod builtin;
@@ -75,8 +86,8 @@ mod source;
 mod text;
 mod visitor;
 
-// The model's builder, for `smear`'s integration tests. Hidden, and compiled only with the
-// feature: the builder is crate-private API.
+// The model's builder, and analyses of the models it builds, for `smear`'s integration tests.
+// Hidden, and compiled only with the feature: the builder is crate-private API.
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
 pub mod test_support;

@@ -1,8 +1,9 @@
 //! smear's own rules: what `analyze` runs, after its phases, through the one driver.
 //!
 //! A rule is one type in one file, implementing the public `Visitor` and nothing else, and the set
-//! is a named struct of them that `rule_set!` declares. The rule types are private. The macro also emits the set's table of each rule and the codes it reports, which
-//! the liveness test reads: every code a rule lists must fire on at least one fixture.
+//! is a named struct of them that `rule_set!` declares. The rule types are private. The macro also
+//! emits the set's table of each rule and the codes it reports, which the liveness test reads:
+//! every code a rule lists must fire on at least one fixture.
 
 /// Declares a rule set: a struct with one field per rule, its `Visitor` impl, whose every hook
 /// calls each rule's in field order, and its table of each rule with the codes it reports.
