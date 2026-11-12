@@ -1866,7 +1866,7 @@ fn a_mod_chain_under_a_recovering_emitter_nests_no_deeper_than_the_ceiling() {
   fn bounded(src: &str, what: &str) {
     match recovering(src) {
       Err(errors) => assert!(
-        errors.first().is_some(),
+        !errors.is_empty(),
         "{what}: the parse returned a refusal holding no error"
       ),
       Ok(parsed) => {
