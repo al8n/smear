@@ -17,11 +17,14 @@
 //!    waits is woken when its head's name is first bound, in either namespace.
 //! 3. The glob fixpoint, in rounds. A round looks each waiting head up in the whole scope as it
 //!    stood when the round began, the globs made so far, the prelude and the packages included, and
-//!    resolves every item that finds something, as one step; the next round looks up again only
-//!    the items whose head a name the round bound first, or a module a glob of the round named
-//!    first, can answer. It ends when a round resolves nothing. Needing more rounds than
-//!    `Limits::max_glob_iterations` is `resource-limit`, once for the module, and the items left
-//!    are reported no further.
+//!    resolves every item that finds something, as one step, so no verdict depends on the order the
+//!    items are written in. The first round looks every waiting item up; the next looks up again
+//!    only the items whose head a name the round bound first, or a module a glob of the round named
+//!    first, can answer, which an index of the waiting items by their heads' names finds. It ends
+//!    when a round resolves nothing. Needing more rounds than `Limits::max_glob_iterations` is
+//!    `resource-limit`, once for the module, and the items left are reported no further. A chain of
+//!    renames needs one round a link and no glob: `use A1 as A2` waits in the explicit fixpoint
+//!    until both namespaces have `A1`, so a chain longer than the limit is refused all the same.
 //! 4. Every item with a head is looked up again in the final scope. One that finds something else
 //!    than what it was resolved to, a name a glob, the prelude or a package gave it that a binding
 //!    made after it now shadows, is `use-resolution-changed`, and what its tree failed to find is
@@ -40,21 +43,23 @@
 //! nothing ends its fixpoint, so both fixpoints end: the explicit one after one look per item and
 //! at most two wakes, one per namespace its head's name is first bound in; the glob one after at
 //! most `Limits::max_glob_iterations` rounds, and after at most one round per item, since every
-//! round but the last resolves one. In a module of `u` items, `b` names bound and `g` distinct
-//! modules its globs name, a lookup costs a logarithm of the tables, and `g` more for its globs; an
-//! item is looked up once by the explicit fixpoint, once by step 4, and by the glob fixpoint once
-//! and again only when a name or a glob of the round before can answer it, which each binding of
-//! its name and each glob of a module holding it does once. So a module costs `O((u + b) · g)`
-//! lookups at worst, and the analysis the sum over its modules, which share nothing but the tables
-//! they read.
+//! round but the last resolves one.
+//!
+//! In a module of `u` items and `g` distinct modules its globs name, a lookup costs a logarithm of
+//! the tables, and one search in each of the `g` modules for its globs. A round of the glob
+//! fixpoint costs one lookup per item on its worklist, and the next worklist: for each name it
+//! bound first, an index search and the waiting items of that name; for each module it globbed
+//! first, the module's declarations and child modules each searched for in the index, or the
+//! distinct waiting heads each searched for in the module, whichever are fewer. A round reads no
+//! item nothing of the round before can answer, so its cost does not grow with the rounds before
+//! it. An item is looked up once by the explicit fixpoint and its at most two wakes, once by step
+//! 4, and by the glob fixpoint once in the first round and again only when woken: at most twice by
+//! the first bindings of its head's name, once per namespace, and at most once by each of the `g`
+//! modules. So the glob fixpoint costs at most `u · (3 + g)` lookups however many rounds it runs,
+//! and its wakes `O(g · u)` searches; a module costs `O(u · g)` lookups at worst, and the analysis
+//! the sum over its modules, which share nothing but the tables they read.
 
-use std::{
-  collections::{BTreeMap, BTreeSet},
-  format,
-  string::String,
-  vec,
-  vec::Vec,
-};
+use std::{collections::BTreeMap, format, string::String, vec, vec::Vec};
 
 use smear_lexer::decode_string_value;
 use smear_parser::graphqlx::ast::{
@@ -274,23 +279,28 @@ impl<'x> Run<'_, 'x> {
   }
 
   /// The glob fixpoint: rounds that each resolve every waiting item whose head the scope, as it
-  /// stood when the round began, answers.
+  /// stood when the round began, answers, all of them as one step. The first round looks every
+  /// waiting item up; each round after it only the items that the names the round before bound
+  /// first, and the modules it globbed first, can answer, which an index of the waiting items by
+  /// their heads' names finds.
   fn globs(&mut self, declarations: &'x Declarations<'_, '_>) {
+    let mut waiting: BTreeMap<&'x [u8], Vec<usize>> = BTreeMap::new();
+    // The items the round looks up, in their order.
+    let mut worklist: Vec<usize> = Vec::new();
+    for (at, item) in self.items.iter().enumerate() {
+      if let (State::Pending, Some(head)) = (item.state, item.head) {
+        waiting.entry(head.name).or_default().push(at);
+        worklist.push(at);
+      }
+    }
     let mut rounds: u32 = 0;
-    // What the round before bound and globbed first; `None` before the first round, which looks
-    // every waiting item up.
-    let mut woken: Option<(BTreeSet<Sym>, Vec<ModuleId>)> = None;
     loop {
       let mut decided: Vec<(usize, Found)> = Vec::new();
-      for (at, item) in self.items.iter().enumerate() {
+      for &at in &worklist {
+        let item = &self.items[at];
         let (State::Pending, Some(head)) = (item.state, item.head) else {
           continue;
         };
-        if let Some((fresh, targets)) = &woken
-          && !self.wakes(head, fresh, targets)
-        {
-          continue;
-        }
         let found = self.head(head, false, key(item.entry));
         if answered(found, head.whole) {
           decided.push((at, found));
@@ -307,9 +317,12 @@ impl<'x> Run<'_, 'x> {
       for (at, found) in decided {
         self.apply(declarations, at, Some(found));
       }
-      let fresh: BTreeSet<Sym> = core::mem::take(&mut self.fresh).into_iter().collect();
+      let fresh: Vec<Sym> = core::mem::take(&mut self.fresh);
       let targets: Vec<ModuleId> = core::mem::take(&mut self.targets);
-      woken = Some((fresh, targets));
+      worklist.clear();
+      self.woken(&mut waiting, &fresh, &targets, &mut worklist);
+      worklist.sort_unstable();
+      worklist.dedup();
     }
     for item in &mut self.items {
       if matches!(item.state, State::Pending) {
@@ -318,28 +331,98 @@ impl<'x> Run<'_, 'x> {
     }
   }
 
-  /// Whether a round that bound `fresh` first and globbed `targets` first can change what `head`
-  /// finds: by a binding of its name, or by a glob of a module that has it.
-  fn wakes(&self, head: Head<'x>, fresh: &BTreeSet<Sym>, targets: &[ModuleId]) -> bool {
-    let Some(sym) = self.names.find(head.name) else {
-      return false;
+  /// Onto `worklist`, every item of `waiting` that a round which bound `fresh` first and globbed
+  /// `targets` first can answer: one whose head is a name bound first, and one whose head a module
+  /// globbed first declares, in the type namespace or, for a path of the head alone, in the
+  /// directive namespace. A module globbed first is read whichever way looks at fewer names: its
+  /// declarations and child modules, each looked for among the waiting heads, or the distinct
+  /// waiting heads, each looked for in the module.
+  fn woken(
+    &self,
+    waiting: &mut BTreeMap<&'x [u8], Vec<usize>>,
+    fresh: &[Sym],
+    targets: &[ModuleId],
+    worklist: &mut Vec<usize>,
+  ) {
+    for &sym in fresh {
+      self.wake(waiting, self.names.spelling(sym), false, worklist);
+    }
+    for &target in targets {
+      let bindings = self.scopes.bindings_of(target);
+      let children = self.scopes.children_of(target);
+      if bindings.len() + children.len() <= waiting.len() {
+        for binding in bindings {
+          let name = self.names.spelling(binding.name);
+          self.wake(waiting, name, binding.namespace == DIRECTIVE, worklist);
+        }
+        for child in children {
+          self.wake(waiting, self.names.spelling(child.name), false, worklist);
+        }
+      } else {
+        self.wake_declared(waiting, target, worklist);
+      }
+    }
+  }
+
+  /// Onto `worklist`, every item of `waiting` whose head is `name`, but only those of a path of the
+  /// head alone when `whole_only`; forgets the items resolved since they were indexed.
+  fn wake(
+    &self,
+    waiting: &mut BTreeMap<&'x [u8], Vec<usize>>,
+    name: &[u8],
+    whole_only: bool,
+    worklist: &mut Vec<usize>,
+  ) {
+    let Some(list) = waiting.get_mut(name) else {
+      return;
     };
-    fresh.contains(&sym)
-      || targets.iter().any(|&target: &ModuleId| {
-        self
+    list.retain(|&at: &usize| matches!(self.items[at].state, State::Pending));
+    for &at in list.iter() {
+      if !whole_only || self.items[at].head.is_some_and(|head: Head<'x>| head.whole) {
+        worklist.push(at);
+      }
+    }
+    if list.is_empty() {
+      waiting.remove(name);
+    }
+  }
+
+  /// Onto `worklist`, every item of `waiting` whose head `target` declares: in the type
+  /// namespace, or, for a path of the head alone, in the directive namespace; forgets the items
+  /// resolved since they were indexed, of each head it looks at.
+  fn wake_declared(
+    &self,
+    waiting: &mut BTreeMap<&'x [u8], Vec<usize>>,
+    target: ModuleId,
+    worklist: &mut Vec<usize>,
+  ) {
+    waiting.retain(|name: &&'x [u8], list: &mut Vec<usize>| {
+      // A name no declaration has is in no table.
+      let Some(sym) = self.names.find(name) else {
+        return true;
+      };
+      let ty = self.scopes.declared(target, TYPE, sym, false).is_some();
+      if !ty
+        && self
           .scopes
-          .declared(target, TYPE, sym, !head.whole)
-          .is_some()
-          || (head.whole
-            && self
-              .scopes
-              .declared(target, DIRECTIVE, sym, false)
-              .is_some())
-      })
+          .declared(target, DIRECTIVE, sym, false)
+          .is_none()
+      {
+        return true;
+      }
+      list.retain(|&at: &usize| matches!(self.items[at].state, State::Pending));
+      for &at in list.iter() {
+        if ty || self.items[at].head.is_some_and(|head: Head<'x>| head.whole) {
+          worklist.push(at);
+        }
+      }
+      !list.is_empty()
+    });
   }
 
   /// Reports that the module's glob fixpoint would pass its limit, at the head of the item at
-  /// `at`, the first the next round would resolve, and leaves every waiting item unresolved.
+  /// `at`, the first the next round would resolve, and leaves every waiting item unresolved. The
+  /// rounds may wait on renames as well as on globs, so the message counts rounds alone.
   fn stop(&mut self, at: usize) {
     if let Some(head) = self.items[at].head {
       let kind = DiagnosticKind::ResourceLimit;
@@ -347,14 +430,13 @@ impl<'x> Run<'_, 'x> {
         Diagnostic::builder(kind.code(), head.at)
           .severity(kind.severity())
           .message(format!(
-            "resolving the `use` items of this module would take more than {} rounds of the glob \
-             fixpoint",
+            "resolving the `use` items of this module would take more than {} rounds",
             self.max_rounds
           ))
           .primary_label(kind.title())
           .help(
-            "raise `Limits::max_glob_iterations`, or write from a root the paths that wait on \
-             what this module's globs give",
+            "raise `Limits::max_glob_iterations`, or write from a root, `~::`, `^::` or `..::`, \
+             the paths that wait on names other `use` items of this module bind or its globs give",
           )
           .build(),
       );

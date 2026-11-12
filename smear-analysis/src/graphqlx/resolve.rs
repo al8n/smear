@@ -978,6 +978,29 @@ impl Scopes<'_> {
     Some(self.children[at].module)
   }
 
+  /// What `module` itself declares, in both namespaces: its run of the bindings, found by two
+  /// binary searches.
+  fn bindings_of(&self, module: ModuleId) -> &[Binding] {
+    let from = self
+      .bindings
+      .partition_point(|binding: &Binding| binding.module < module);
+    let to = self
+      .bindings
+      .partition_point(|binding: &Binding| binding.module <= module);
+    &self.bindings[from..to]
+  }
+
+  /// The child modules of `module`: its run of the children, found by two binary searches.
+  fn children_of(&self, module: ModuleId) -> &[Child] {
+    let from = self
+      .children
+      .partition_point(|child: &Child| child.parent < module);
+    let to = self
+      .children
+      .partition_point(|child: &Child| child.parent <= module);
+    &self.children[from..to]
+  }
+
   /// What the prelude names `name`, whose symbol is `sym`, in `namespace`: a declaration of the
   /// root module of `core`, `alloc` or `std`, in that order, or `NonZeroIN` or `NonZeroUN`, which
   /// name `core`'s `NonZero` of a materialised primitive.

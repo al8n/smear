@@ -168,12 +168,18 @@ impl Limits {
     self.max_use_depth
   }
 
-  /// How many rounds the glob fixpoint may run, each round resolving the `use` items the previous
-  /// round's globs made resolvable.
+  /// How many rounds the glob fixpoint of one module's `use` items may run, each round resolving
+  /// the items that the names and the globs of the round before made resolvable. A round looks up
+  /// only those items, so the bound limits how many rounds there are, not what one costs.
+  ///
+  /// A chain needs a round a link, with or without a glob in it: a module that globs a module that
+  /// globs the next, or `use` items that each rename the one before by a path of its head alone,
+  /// `use A1 as A2`, which waits until both namespaces have its name. Either chain longer than the
+  /// bound is reported once for its module, at the head the next round would resolve, and the items
+  /// left are reported no further.
   ///
   /// The default is 2^10. The fixpoint needs at most one round per `use` item that waits on
-  /// another, and a real program needs a handful; a chain of a thousand modules each globbing the
-  /// next is a generated one, and stopping it bounds the fixpoint's work.
+  /// another, and a real program needs a handful; a chain a thousand long is a generated one.
   #[inline]
   pub const fn max_glob_iterations(&self) -> u32 {
     self.max_glob_iterations

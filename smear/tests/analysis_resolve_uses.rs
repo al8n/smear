@@ -423,6 +423,79 @@ fn a_glob_fixpoint_past_its_limit_is_a_resource_limit() {
   );
 }
 
+/// A chain of renames needs a round a link and no glob: `use A1 as A2` waits in the explicit
+/// fixpoint until both namespaces have `A1`. So a chain longer than the round limit is refused as
+/// a chain of globs is, at the head the next round would resolve, and the message says rounds.
+#[test]
+fn a_chain_of_renames_past_the_round_limit_is_a_resource_limit() {
+  let text = "scalar Seed\nuse Seed as A1\nuse A1 as A2\nuse A2 as A3\nuse A3 as A4\n";
+  let root = directory("app", &[("lib.graphqlx", text)]);
+  // Four rounds, one a link.
+  let analysis = analyze(&root, &[], &Limits::new().with_max_glob_iterations(4));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+
+  let analysis = analyze(&root, &[], &Limits::new().with_max_glob_iterations(3));
+  let source = file(&analysis, 3, "lib.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(
+      code(DiagnosticKind::ResourceLimit),
+      inside(source, text, "use A3 as A4", 0, "A3")
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  let message = diagnostic.to_string();
+  assert!(message.contains("more than 3 rounds"), "{message}");
+  assert!(!message.contains("glob"), "{message}");
+  assert!(
+    diagnostic
+      .help()
+      .is_some_and(|help: &str| help.contains("`Limits::max_glob_iterations`")),
+    "{:?}",
+    diagnostic.help()
+  );
+}
+
+/// A round of `use` resolution looks up only the items that what the round before bound or globbed
+/// can answer.
+///
+/// Every round used to read every item of its module, and to ask of each waiting one whether the
+/// round before could have answered it: a module of U waiting items that needs R rounds cost U × R
+/// questions, a name lookup each, and the default limit allows 1 024 rounds. Now the waiting items
+/// are indexed by their heads' names, and a round looks up only the items that the names it bound
+/// first, and the modules it globbed first, can answer.
+///
+/// Nothing here can count that work, so the sizes tell the two costs apart. A chain of 1 000
+/// renames needs 1 000 rounds, and beside it 2^20 items wait for a name nothing binds, about 16
+/// MiB of text. Asked every round, the waiting items cost about 10^9 questions, which is minutes;
+/// looked up once, they cost about what parsing them costs.
+#[test]
+fn a_round_of_use_resolution_reads_only_the_items_it_can_answer() {
+  const CHAIN: usize = 1_000;
+  const WAITING: usize = 1 << 20;
+  let mut text = String::with_capacity(16 * WAITING + 24 * CHAIN);
+  text.push_str("scalar Seed\nuse Seed as A1\n");
+  for link in 1..CHAIN {
+    text.push_str(&format!("use A{link} as A{}\n", link + 1));
+  }
+  for index in 0..WAITING {
+    text.push_str(&format!("use w{index}::T\n"));
+  }
+  let root: Package<&str> = Package::new("app", Layout::Directory, Tier::Std)
+    .with_files([SourceFile::new("lib.graphqlx", text.as_str())]);
+  let last = format!("A{CHAIN}");
+  assert_eq!(
+    test_support::resolve(&root, &[], "^::app", &[], &last).as_deref(),
+    Some("^::app::Seed")
+  );
+}
+
 #[test]
 fn binding_fives_errors_are_reported_and_one_item_bound_twice_is_not() {
   let changed = "use ~::lib::*\nuse a::X\nuse n::a\n";
