@@ -79,6 +79,18 @@ fn at(source: SourceId, text: &str, needle: &str, nth: usize) -> Location {
   inside(source, text, needle, nth, needle)
 }
 
+/// The whole package source of the package at `package`, where the package set reports.
+fn package_source(analysis: &Analysis, package: u32) -> Location {
+  let id = analysis
+    .model()
+    .package(PackageId::new(package))
+    .sources()
+    .into_iter()
+    .next()
+    .expect("every package has a package source");
+  Location::entire(id.get())
+}
+
 /// Each diagnostic's code and primary location, in the list's order.
 fn found(analysis: &Analysis) -> Vec<(&'static str, Location)> {
   analysis
@@ -1115,6 +1127,161 @@ fn a_string_source_starts_at_its_files_directory_whatever_mod_it_is_in() {
       ("mod gone", None),
     ],
   );
+}
+
+/// The help a string source that names a file has, in `analysis`.
+fn file_help(analysis: &Analysis) -> Option<String> {
+  analysis
+    .diagnostics()
+    .iter()
+    .find(|diagnostic: &&Diagnostic| {
+      diagnostic.code().as_str() == code(DiagnosticKind::FilePathUse)
+    })
+    .and_then(|diagnostic: &Diagnostic| diagnostic.help())
+    .map(String::from)
+}
+
+/// A file the package set refused is no file a string source names. The files a source is told
+/// from are the placed ones, sorted by name whatever paths sort before them in source order, as
+/// `/` does: so `./a.graphqlx` names a file beside a refused `/z`, with the help it has with no
+/// `/z`, and the set's own diagnostic is the only other one. Three refused paths before the two
+/// placed files are where a table in source order hid `a.graphqlx` from its binary search. The
+/// files given in reverse change nothing.
+#[test]
+fn a_refused_file_hides_no_file_from_a_string_source() {
+  let main = "use \"./a.graphqlx\"::*\n";
+  let placed: [(&'static str, &'static str); 2] =
+    [("a.graphqlx", "scalar A\n"), ("main.graphqlx", main)];
+  let help = file_help(&analyze(&directory("app", &placed), &[], &Limits::new()));
+  assert!(
+    help
+      .as_deref()
+      .is_some_and(|help: &str| help.contains("root directory")),
+    "{help:?}"
+  );
+
+  for refused in [&["/z"][..], &["/x", "/y", "/z"][..]] {
+    let mut files: Vec<(&'static str, &'static str)> = refused
+      .iter()
+      .map(|&path: &&'static str| (path, "scalar R\n"))
+      .collect();
+    files.extend(placed);
+    let analysis = analyze(&directory("app", &files), &[], &Limits::new());
+    let source = file(&analysis, 3, "main.graphqlx");
+    let mut expected: Vec<(&'static str, Location)> = refused
+      .iter()
+      .map(|_: &&'static str| {
+        (
+          code(DiagnosticKind::InvalidFilePath),
+          package_source(&analysis, 3),
+        )
+      })
+      .collect();
+    expected.push((
+      code(DiagnosticKind::FilePathUse),
+      at(source, main, "\"./a.graphqlx\"", 0),
+    ));
+    assert_eq!(
+      found(&analysis),
+      expected,
+      "{refused:?}: {:#?}",
+      analysis.diagnostics()
+    );
+    assert_eq!(file_help(&analysis), help, "{refused:?}");
+
+    files.reverse();
+    let backward = analyze(&directory("app", &files), &[], &Limits::new());
+    assert_eq!(
+      analysis.diagnostics(),
+      backward.diagnostics(),
+      "{refused:?}"
+    );
+  }
+}
+
+/// A refused file is no file a string source names, so a source of its path names a directory
+/// that is no module: `unresolved-path`, not `file-path-use`, whether the root directory holds
+/// placed files beside it or none.
+#[test]
+fn a_string_source_of_a_refused_files_path_names_no_file() {
+  let main = "use \"./z\" as z\n";
+  let beside = [
+    ("/z", "scalar R\n"),
+    ("a.graphqlx", "scalar A\n"),
+    ("main.graphqlx", main),
+  ];
+  let analysis = analyze(&directory("app", &beside), &[], &Limits::new());
+  let source = file(&analysis, 3, "main.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        code(DiagnosticKind::InvalidFilePath),
+        package_source(&analysis, 3)
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        at(source, main, "\"./z\"", 0)
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  let nested = "use \"../z\" as z\n";
+  let alone = [("/z", "scalar R\n"), ("sub/main.graphqlx", nested)];
+  let analysis = analyze(&directory("app", &alone), &[], &Limits::new());
+  let source = file(&analysis, 3, "sub/main.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        code(DiagnosticKind::InvalidFilePath),
+        package_source(&analysis, 3)
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        at(source, nested, "\"../z\"", 0)
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// Two files at one path are both refused, so neither is a file a string source names: a `use`
+/// of that path names a directory that is no module, `unresolved-path`, beside the package set's
+/// `duplicate-file-path`; the files given in reverse change nothing.
+#[test]
+fn two_files_at_one_path_are_no_file_a_string_source_names() {
+  let main = "use \"./dup.graphqlx\" as d\n";
+  let files = [
+    ("dup.graphqlx", "scalar One\n"),
+    ("dup.graphqlx", "scalar Two\n"),
+    ("main.graphqlx", main),
+  ];
+  let analysis = analyze(&directory("app", &files), &[], &Limits::new());
+  let source = file(&analysis, 3, "main.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        code(DiagnosticKind::DuplicateFilePath),
+        package_source(&analysis, 3)
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        at(source, main, "\"./dup.graphqlx\"", 0)
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  let mut reversed = files;
+  reversed.reverse();
+  let backward = analyze(&directory("app", &reversed), &[], &Limits::new());
+  assert_eq!(analysis.diagnostics(), backward.diagnostics());
 }
 
 /// A long file path is not read again for each string source written in the file.

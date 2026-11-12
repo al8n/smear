@@ -72,6 +72,7 @@ use tokora::{
 use super::{
   builtin::{CORE, DIRECTIVE, TYPE, available, intrinsic, spelled, written},
   code::{DiagnosticKind, schema},
+  collect::refused,
   declare::{Binding, Child, Declarations, ModuleEntry},
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{DefId, ModuleId, PackageId, SourceId, Sym, dense},
@@ -106,12 +107,13 @@ pub(crate) struct Scopes<'x> {
   /// Every glob, one row for each module and module its globs name, however many globs name it:
   /// at most `Limits::max_globs` rows a module.
   globs: BTreeMap<(ModuleId, ModuleId), Glob>,
-  /// The directory module of each file of a `Directory` package, by source id: where a string
-  /// source written in the file starts. `None` for a package source, a file of a `Flat` package,
-  /// and a file placed in no module.
+  /// The directory module of each file the module tree placed in a `Directory` package, by source
+  /// id: where a string source written in the file starts. `None` for a package source, a file of
+  /// a `Flat` package, a file the package set refused, and a file placed in no module.
   directories: Vec<Option<ModuleId>>,
-  /// Each file of a `Directory` package that sits in a directory module, by that module, then by
-  /// the file's name: what tells a string source that names a file from one that names nothing.
+  /// Each file the module tree placed in a directory module of a `Directory` package, sorted by
+  /// that module, then by the file's name: what tells a string source that names a file from one
+  /// that names nothing.
   files: Vec<FileName<'x>>,
   /// `Limits::max_path_segments`.
   max_segments: u32,
@@ -535,14 +537,18 @@ pub(crate) fn scopes<'x>(
 }
 
 impl<'x> Scopes<'x> {
-  /// The directory module of every file of a `Directory` package, by source id, and those files by
-  /// module and name: the tables a string source is resolved against. Each file's path is read
-  /// once, split at its last `/`, and its directories are walked down from its package's root
-  /// module, one child module per name, as the module tree placed the file.
+  /// The directory module of every file the module tree placed in a `Directory` package, by source
+  /// id, and those files by module and name: the tables a string source is resolved against.
   ///
-  /// A package's files are in source order, which keeps the files of one directory in the bytewise
-  /// order of their names. So a stable sort by module alone leaves the rows in module, then name
-  /// order, and reads no name.
+  /// A file the package set refused, by the predicate item collection places files by, is in
+  /// neither table, nor is a file whose directory is no module: such a file is no start of a
+  /// string source and no file one can name. Every other file's path is read once, split at its
+  /// last `/`, and its directories are walked down from its package's root module, one child
+  /// module per name, as the module tree placed the file. The rows are then sorted by module and
+  /// name, an order that rests on nothing else. The sort reads names, a comparison no more of two
+  /// than the shorter holds, so it reads at most a logarithm of the file count times the names'
+  /// total length, and building the tables costs at most that logarithm times the paths' total
+  /// length.
   fn file_tables(
     &self,
     packages: &'x [PackageView<'_>],
@@ -557,6 +563,9 @@ impl<'x> Scopes<'x> {
       }
       let first = sources.package_sources(index).start() as usize + 1;
       for (offset, file) in view.files.iter().enumerate() {
+        if refused(&view.files, offset) {
+          continue;
+        }
         let path: &'x [u8] = file.path;
         let (directory, name) = match path.iter().rposition(|byte: &u8| *byte == b'/') {
           Some(cut) => (&path[..cut], &path[cut + 1..]),
@@ -575,7 +584,9 @@ impl<'x> Scopes<'x> {
         });
       }
     }
-    files.sort_by_key(|file: &FileName<'x>| file.module);
+    files.sort_unstable_by(|a: &FileName<'x>, b: &FileName<'x>| {
+      a.module.cmp(&b.module).then_with(|| a.name.cmp(b.name))
+    });
     (directories, files)
   }
 
