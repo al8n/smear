@@ -6,19 +6,25 @@
 //!
 //! 1. the generic parameters of the definition the path stands in, which the caller passes;
 //! 2. the module's own declarations and its child modules;
-//! 3. the prelude: the declarations of the root modules of `core`, `alloc` and `std`, whatever the
+//! 3. the module's explicit `use` bindings: named items and aliases;
+//! 4. the module's glob `use` bindings: each glob gives the declarations and the child modules of
+//!    the module it names, and a name two globs give to two different items is an error at the
+//!    path that meets it;
+//! 5. the prelude: the declarations of the root modules of `core`, `alloc` and `std`, whatever the
 //!    package's tier, which hold the primitives the program writes and the second names `Int`,
 //!    `Float`, `Boolean`, `String` and `ID`; and `NonZeroIN` and `NonZeroUN`, recognised by
 //!    pattern, which name `core`'s `NonZero` of that primitive whatever `NonZero` names where they
 //!    are written;
-//! 4. last, and only where a module is wanted, which is where more segments follow, the names of
-//!    the packages the module's package may reach: `core`, `alloc` and `std`, and its declared
-//!    dependencies, never a dependency's own dependency and never its own name.
+//! 6. last, and only where a module is wanted, which is where more segments follow or where the
+//!    path is the whole of a `use` item, the names of the packages the module's package may reach:
+//!    `core`, `alloc` and `std`, and its declared dependencies, never a dependency's own dependency
+//!    and never its own name.
 //!
 //! Types and modules share one namespace, and directives have their own: a type parameter, a type
 //! and a module of one name stand in each other's way, and a directive stands in none's. A later
 //! segment is looked up among the declarations and the child modules of the module the segments
-//! before it name, and nowhere else.
+//! before it name, and nowhere else: what a module's `use` items bind is the module's own, and is
+//! never re-exported. How the `use` items are resolved is [`uses`]'s.
 //!
 //! A primitive resolves only in a package that may have its width, `core`'s widths 8 to 128 or a
 //! width its integer provider gives, however the path reaches it.
@@ -32,12 +38,17 @@
 //! # What resolution costs
 //!
 //! Nothing of a scope is copied. A module's scope is its own declarations and child modules,
-//! found by binary search in the tables the declarations hand on, and the prelude's and the
-//! packages' tables, which every module shares. So a module costs its entry and its row among its
-//! parent's children, and nothing about it grows with how deep it sits or what its parent holds. A
-//! lookup costs a logarithm of those tables, and a path one lookup per segment.
+//! found by binary search in the tables the declarations hand on; its explicit `use` bindings and
+//! its globs, found by range in two ordered maps keyed by the module first; and the prelude's and
+//! the packages' tables, which every module shares. So a module costs its entry and its row among
+//! its parent's children, each name a `use` binds one row, each glob one row, and nothing about it
+//! grows with how deep it sits or what its parent holds. A lookup costs a logarithm of those
+//! tables, but for the globs, which cost one search in each distinct module the module's globs
+//! name; a path costs one lookup per segment.
 
-use std::{format, string::String, vec::Vec};
+mod uses;
+
+use std::{collections::BTreeMap, format, string::String, vec::Vec};
 
 use smear_parser::graphqlx::ast::{Path, PathRoot};
 use tokora::{
@@ -54,8 +65,9 @@ use super::{
   id::{DefId, ModuleId, PackageId, SourceId, Sym, dense},
   limits::Limits,
   model::{ModelBuilder, Primitive},
-  package::IntegerProvider,
-  set::{PackageView, ROOT},
+  package::{IntegerProvider, Layout},
+  set::{FileView, PackageView, ROOT},
+  source::SourceMap,
 };
 
 /// Every module's scope, and what resolves a path written in one.
@@ -75,25 +87,49 @@ pub(crate) struct Scopes<'x> {
   packages: Vec<PackageScope<'x>>,
   /// `core`'s `NonZero`, which `NonZeroIN` and `NonZeroUN` name.
   non_zero: Option<DefId>,
+  /// Every name an explicit `use` binding binds: by module, namespace and name, then by the `use`
+  /// item, in the declarations' order, and the order the item binds its names in. The first of a
+  /// key's run is the one a lookup answers.
+  explicit: BTreeMap<ExplicitKey, Bound>,
+  /// Every glob: by module, the module the glob names, and the `use` item, each with where the
+  /// glob is written.
+  globs: BTreeMap<(ModuleId, ModuleId, u32), Location>,
   /// `Limits::max_path_segments`.
   max_segments: u32,
+  /// `Limits::max_use_depth`.
+  max_use_depth: u32,
+}
+
+/// What orders the explicit `use` bindings: module, namespace, name, `use` item, and the order the
+/// item binds its names in.
+type ExplicitKey = (ModuleId, u8, Sym, u32, u32);
+
+/// What an explicit `use` binding binds, and where the name it binds is written.
+#[derive(Clone, Copy)]
+struct Bound {
+  target: Target,
+  at: Location,
 }
 
 /// One package, as name resolution reads it.
 struct PackageScope<'x> {
   /// Its name, as given.
   name: &'x [u8],
+  /// How its files become modules: a string source names a directory only in the `Directory`
+  /// layout.
+  layout: Layout,
   /// Its integer provider, which decides the widths beyond `core`'s it may have.
   integers: Option<&'x IntegerProvider>,
   /// The supplied packages it declares and may reach, by name, each with its root module. The
   /// built-in packages it reaches without declaring them.
   dependencies: Vec<(&'x [u8], ModuleId)>,
+  /// Its files, in source order: what a string source's path is checked against.
+  files: &'x [FileView<'x>],
+  /// Its package source's id, which its files' ids follow.
+  source: u32,
 }
 
 /// What a path is wanted to name.
-// Lowering, the next part of the analyzer, asks for a type or a directive at each path it lowers;
-// until it lands only the test-support door does.
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Wanted {
   /// A type: a field's, an argument's or an input field's type, a type argument, a union member,
@@ -195,6 +231,81 @@ enum Target {
   NonZero(DefId),
 }
 
+/// Which level of a module's scope answered a lookup.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Level {
+  /// The module's own declarations and child modules.
+  Declared,
+  /// Its explicit `use` bindings.
+  Explicit,
+  /// Its globs.
+  Glob,
+  /// The prelude.
+  Prelude,
+  /// The packages its package may reach.
+  Package,
+}
+
+/// What a lookup of a first segment in a module's scope found.
+#[derive(Clone, Copy)]
+enum Lookup {
+  /// One item, at one level.
+  Found(Target, Level),
+  /// Two different items two globs give, each with where its glob is written.
+  Ambiguous((Target, Location), (Target, Location)),
+  /// Nothing.
+  Missing,
+}
+
+impl Lookup {
+  /// Whether `self` and `other` found the same thing, at whatever level.
+  fn same(self, other: Self) -> bool {
+    match (self, other) {
+      (Self::Found(a, _), Self::Found(b, _)) => a == b,
+      (Self::Ambiguous(a, b), Self::Ambiguous(c, d)) => a.0 == c.0 && b.0 == d.0,
+      (Self::Missing, Self::Missing) => true,
+      _ => false,
+    }
+  }
+}
+
+/// One lookup of a first segment in a module's scope.
+#[derive(Clone, Copy)]
+struct Query<'q> {
+  module: ModuleId,
+  name: &'q [u8],
+  /// `name`'s symbol, if it has one: a name no declaration, module or `use` has is in no table.
+  sym: Option<Sym>,
+  namespace: u8,
+  /// Whether a child module answers before a type of its name, which only an error leaves beside
+  /// each other.
+  module_first: bool,
+  /// Whether the packages the module's package may reach answer, last.
+  packages: bool,
+  /// Whether only the module's declarations, its child modules and its explicit `use` bindings
+  /// answer: the explicit fixpoint's lookups, which nothing resolved later can change.
+  explicit_only: bool,
+  /// The `use` item whose own bindings and globs do not answer: the one whose path is looked up.
+  exclude: Option<u32>,
+}
+
+impl<'q> Query<'q> {
+  /// A lookup of `name`, whose symbol is `sym`, in the scope of `module`, wanting `wanted`, as a
+  /// path that is not a `use` item's asks it.
+  fn wanting(module: ModuleId, name: &'q [u8], sym: Option<Sym>, wanted: Wanted) -> Self {
+    Self {
+      module,
+      name,
+      sym,
+      namespace: wanted.namespace(),
+      module_first: wanted == Wanted::Module,
+      packages: wanted == Wanted::Module,
+      explicit_only: false,
+      exclude: None,
+    }
+  }
+}
+
 /// Where a path starts, as resolution reads it.
 #[derive(Clone, Copy)]
 pub(crate) enum Root {
@@ -233,11 +344,20 @@ enum Within<'p> {
 enum Why<'p> {
   /// Nothing of the name is in the scope of `module`, where the path stands.
   NotInScope { module: ModuleId, wanted: Wanted },
+  /// Nothing of the name, in either namespace, is in the scope of `module`, nor is a package it
+  /// may reach named so: a `use` item's path of one segment.
+  NothingInScope { module: ModuleId },
   /// `module`, which the path names `within`, declares nothing of the name.
   NotIn {
     module: ModuleId,
     within: Within<'p>,
     wanted: Wanted,
+  },
+  /// `module`, which the path names `within`, declares nothing of the name in either namespace:
+  /// the last segment of a `use` item's path.
+  NotDeclared {
+    module: ModuleId,
+    within: Within<'p>,
   },
   /// The name names `found`, which is not what is wanted.
   WrongKind { found: Target, wanted: Wanted },
@@ -250,9 +370,33 @@ enum Why<'p> {
   UnknownPackage,
   /// A primitive whose width the path's package may not have.
   Unavailable(Primitive),
+  /// Two globs give the name two different items, each with where its glob is written.
+  Ambiguous {
+    first: (Target, Location),
+    second: (Target, Location),
+  },
   /// More segments than `Limits::max_path_segments`: this many.
   TooLong(usize),
-  /// A root of a kind this analyzer does not know.
+  /// A `use` item's groups nested deeper than `Limits::max_use_depth`: this deep.
+  TooDeep(u32),
+  /// `^::*`, which names no module.
+  PackageGlob,
+  /// A string source that is a URL.
+  Url,
+  /// A string source in a package of the `Flat` layout, whose one module is its root.
+  Flat,
+  /// A string source that neither starts with `./` or `../` nor is a URL.
+  NotRelative,
+  /// A string source that climbs out of its package's root directory.
+  Outside,
+  /// A string source that names no directory of its package that is a module.
+  NoDirectory,
+  /// A string source that names a file of its package, which is in this directory, relative to
+  /// the package's root.
+  File { directory: &'p [u8] },
+  /// A string source that names its package's root module and binds no name with `as`.
+  Unnamed,
+  /// A root, a prefix or a tree of a kind this analyzer does not know.
   Unknown,
 }
 
@@ -266,15 +410,18 @@ struct Failure<'p> {
   single: bool,
 }
 
-/// The scopes of every module of `declarations`, whose packages are `packages`, in id order, with
-/// each package's resolved `dependencies`; reports, as a warning, every type a supplied package
-/// declares with the name of a primitive of the prelude.
+/// The scopes of every module of `declarations`, whose packages are `packages`, in id order and
+/// numbered by `sources`, with each package's resolved `dependencies`: every module's declarations
+/// and child modules, and every `use` item resolved, reporting what does not resolve and what
+/// collides. Reports too, as a warning, every type a supplied package declares with the name of a
+/// primitive of the prelude.
 pub(crate) fn scopes<'x>(
   packages: &'x [PackageView<'_>],
+  sources: &SourceMap,
   dependencies: &[Vec<PackageId>],
   declarations: &'x Declarations<'_, '_>,
   limits: &Limits,
-  builder: &ModelBuilder,
+  builder: &mut ModelBuilder,
   reporter: &mut Reporter,
 ) -> Scopes<'x> {
   let roots: &'x [ModuleId] = declarations.roots.as_slice();
@@ -291,8 +438,11 @@ pub(crate) fn scopes<'x>(
     reached.sort_unstable_by(|a: &(&[u8], ModuleId), b: &(&[u8], ModuleId)| a.0.cmp(b.0));
     scoped.push(PackageScope {
       name: view.name,
+      layout: view.layout,
       integers: view.integers,
       dependencies: reached,
+      files: view.files.as_slice(),
+      source: sources.package_sources(index).start(),
     });
   }
 
@@ -304,13 +454,17 @@ pub(crate) fn scopes<'x>(
     primitives: declarations.primitives.as_slice(),
     packages: scoped,
     non_zero: None,
+    explicit: BTreeMap::new(),
+    globs: BTreeMap::new(),
     max_segments: limits.max_path_segments(),
+    max_use_depth: limits.max_use_depth(),
   };
   let non_zero: Option<DefId> = builder
     .find(b"NonZero")
     .and_then(|sym: Sym| scopes.def(roots[CORE], TYPE, sym));
   scopes.non_zero = non_zero;
   scopes.shadowed(builder, reporter);
+  uses::resolve(&mut scopes, declarations, limits, builder, reporter);
   scopes
 }
 
@@ -395,21 +549,29 @@ impl Scopes<'_> {
         } else {
           Wanted::Module
         };
-        match self.lookup(names, request.module, wanted, first.name) {
-          Some(target) if rest.is_empty() => {
+        let query = Query::wanting(request.module, first.name, names.find(first.name), wanted);
+        match self.lookup(query) {
+          Lookup::Found(target, _) if rest.is_empty() => {
             return self
               .finish(target, wanted, package)
               .map_err(|why: Why<'static>| failure(first, why, true));
           }
-          Some(Target::Module(module)) => (module, rest, Within::After(first.name)),
-          Some(found) => {
+          Lookup::Found(Target::Module(module), _) => (module, rest, Within::After(first.name)),
+          Lookup::Found(found, _) => {
             let why = Why::WrongKind {
               found,
               wanted: Wanted::Module,
             };
             return Err(failure(first, why, false));
           }
-          None => {
+          Lookup::Ambiguous(one, other) => {
+            let why = Why::Ambiguous {
+              first: one,
+              second: other,
+            };
+            return Err(failure(first, why, rest.is_empty()));
+          }
+          Lookup::Missing => {
             let why = Why::NotInScope {
               module: request.module,
               wanted,
@@ -554,32 +716,96 @@ impl Scopes<'_> {
     }
   }
 
-  /// What `name` names in the scope of `module`, where `wanted` is wanted: the module's own
-  /// declarations and child modules, then the prelude, then, where a module is wanted, the
-  /// packages its package may reach.
-  fn lookup(
-    &self,
-    names: &ModelBuilder,
-    module: ModuleId,
-    wanted: Wanted,
-    name: &[u8],
-  ) -> Option<Target> {
-    let namespace = wanted.namespace();
-    let sym = names.find(name);
-    if let Some(sym) = sym
-      && let Some(target) = self.declared(module, namespace, sym, wanted == Wanted::Module)
+  /// What `query`'s name names in its module's scope, level by level, the first that has it
+  /// deciding: the module's own declarations and child modules, its explicit `use` bindings, its
+  /// globs, the prelude, and, where the query asks, the packages its package may reach.
+  fn lookup(&self, query: Query<'_>) -> Lookup {
+    if let Some(sym) = query.sym {
+      if let Some(target) = self.declared(query.module, query.namespace, sym, query.module_first) {
+        return Lookup::Found(target, Level::Declared);
+      }
+      if let Some(bound) = self.bound(query.module, query.namespace, sym, query.exclude) {
+        return Lookup::Found(bound.target, Level::Explicit);
+      }
+    }
+    if query.explicit_only {
+      return Lookup::Missing;
+    }
+    if let Some(sym) = query.sym {
+      let globbed = self.globbed(
+        query.module,
+        query.namespace,
+        sym,
+        query.module_first,
+        query.exclude,
+      );
+      if !matches!(globbed, Lookup::Missing) {
+        return globbed;
+      }
+    }
+    if let Some(target) = self.prelude(query.namespace, query.sym, query.name) {
+      return Lookup::Found(target, Level::Prelude);
+    }
+    if query.packages
+      && query.namespace == TYPE
+      && let Some(root) = self.package_root(self.package_of(query.module), query.name)
     {
-      return Some(target);
+      return Lookup::Found(Target::Module(root), Level::Package);
     }
-    if let Some(target) = self.prelude(namespace, sym, name) {
-      return Some(target);
+    Lookup::Missing
+  }
+
+  /// The first explicit `use` binding of `module` that binds `sym` in `namespace`, but those of the
+  /// `use` item `exclude`.
+  fn bound(
+    &self,
+    module: ModuleId,
+    namespace: u8,
+    sym: Sym,
+    exclude: Option<u32>,
+  ) -> Option<Bound> {
+    self
+      .explicit
+      .range((module, namespace, sym, 0, 0)..=(module, namespace, sym, u32::MAX, u32::MAX))
+      .find(|(key, _): &(&ExplicitKey, &Bound)| Some(key.3) != exclude)
+      .map(|(_, bound): (&ExplicitKey, &Bound)| *bound)
+  }
+
+  /// What the globs of `module`, but those of the `use` item `exclude`, give `sym` in `namespace`:
+  /// what each distinct module they name declares so, as `declared` answers it.
+  fn globbed(
+    &self,
+    module: ModuleId,
+    namespace: u8,
+    sym: Sym,
+    module_first: bool,
+    exclude: Option<u32>,
+  ) -> Lookup {
+    let mut first: Option<(Target, Location)> = None;
+    let mut last: Option<ModuleId> = None;
+    let from = (module, ModuleId::new(0), 0);
+    let to = (module, ModuleId::new(u32::MAX), u32::MAX);
+    for (&(_, target, item), &at) in self.globs.range(from..=to) {
+      // Two globs of one module are one: the first is the one asked.
+      if Some(item) == exclude || last == Some(target) {
+        continue;
+      }
+      last = Some(target);
+      let Some(found) = self.declared(target, namespace, sym, module_first) else {
+        continue;
+      };
+      match first {
+        None => first = Some((found, at)),
+        Some((seen, seen_at)) if seen != found => {
+          return Lookup::Ambiguous((seen, seen_at), (found, at));
+        }
+        Some(_) => {}
+      }
     }
-    if wanted == Wanted::Module {
-      return self
-        .package_root(self.package_of(module), name)
-        .map(Target::Module);
+    match first {
+      Some((target, _)) => Lookup::Found(target, Level::Glob),
+      None => Lookup::Missing,
     }
-    None
   }
 
   /// What `module` itself declares as `sym` in `namespace`: a definition, or, in the type
@@ -700,22 +926,28 @@ impl Scopes<'_> {
     failure: &Failure<'_>,
   ) {
     let (code, title): (Code, &'static str) = match failure.why {
-      Why::TooLong(_) => titled(DiagnosticKind::ResourceLimit),
+      Why::TooLong(_) | Why::TooDeep(_) => titled(DiagnosticKind::ResourceLimit),
       Why::Unknown => titled(DiagnosticKind::UnknownItem),
       Why::UnknownPackage => titled(DiagnosticKind::UnknownPackage),
+      Why::Ambiguous { .. } => titled(DiagnosticKind::AmbiguousGlob),
+      Why::Url => titled(DiagnosticKind::UrlUnsupported),
+      Why::File { .. } => titled(DiagnosticKind::FilePathUse),
       Why::NotInScope { .. } | Why::WrongKind { .. } | Why::Unavailable(_) if failure.single => {
         graphql(position).unwrap_or_else(|| titled(DiagnosticKind::UnresolvedPath))
       }
       _ => titled(DiagnosticKind::UnresolvedPath),
     };
     let (message, help) = self.explain(names, module, position, failure);
-    reporter.report(
-      Diagnostic::builder(code, failure.at)
-        .message(message)
-        .primary_label(title)
-        .help(help)
-        .build(),
-    );
+    let mut builder = Diagnostic::builder(code, failure.at)
+      .message(message)
+      .primary_label(title)
+      .help(help);
+    if let Why::Ambiguous { first, second } = failure.why {
+      builder = builder
+        .label(first.1, "one glob gives it here")
+        .label(second.1, "another gives it here");
+    }
+    reporter.report(builder.build());
   }
 
   /// The message and the help of `failure`, a path written in `module` at `position`.
@@ -747,6 +979,13 @@ impl Scopes<'_> {
         ),
         self.hint(names, Some(module), None, wanted, name, position),
       ),
+      Why::NothingInScope { module } => (
+        format!(
+          "nothing named `{}` is in scope here, and no package this one reaches is named so",
+          Excerpt(name)
+        ),
+        self.hint(names, Some(module), None, Wanted::Module, name, position),
+      ),
       Why::NotIn {
         module: holder,
         within,
@@ -759,6 +998,17 @@ impl Scopes<'_> {
           quoted(wanted, name)
         ),
         self.hint(names, None, Some(holder), wanted, name, position),
+      ),
+      Why::NotDeclared {
+        module: holder,
+        within,
+      } => (
+        format!(
+          "{} declares nothing named `{}`",
+          place(within),
+          Excerpt(name)
+        ),
+        self.hint(names, None, Some(holder), Wanted::Module, name, position),
       ),
       Why::WrongKind { found, wanted } => (
         format!(
@@ -798,6 +1048,16 @@ impl Scopes<'_> {
         ),
         unavailable(primitive),
       ),
+      Why::Ambiguous { .. } => (
+        format!(
+          "`{}` is brought into scope by two globs, as two different items",
+          Excerpt(name)
+        ),
+        String::from(
+          "name the item with a path, or bind it with an explicit `use`, which goes before every \
+           glob",
+        ),
+      ),
       Why::TooLong(count) => (
         format!(
           "this path has {count} segments, past the limit of {}",
@@ -805,14 +1065,103 @@ impl Scopes<'_> {
         ),
         String::from("raise `Limits::max_path_segments`, or write a shorter path"),
       ),
+      Why::TooDeep(depth) => (
+        format!(
+          "this `use` item nests its groups {depth} deep, past the limit of {}",
+          self.max_use_depth
+        ),
+        String::from("raise `Limits::max_use_depth`, or nest the groups less deeply"),
+      ),
+      Why::PackageGlob => (
+        String::from("`^::*` names no module: `^::` is followed by the name of a package"),
+        String::from("glob a package's root module with `^::name::*`"),
+      ),
+      Why::Url => (
+        format!(
+          "the string source `{}` is a URL, and a URL source is parsed but not supported",
+          Excerpt(name)
+        ),
+        String::from(
+          "declare the package in the manifest under a name, supply it to the analysis, and \
+           reach it through `^::name`",
+        ),
+      ),
+      Why::Flat => (
+        format!(
+          "the string source `{}` names a directory, and package `{}` has the `Flat` layout, \
+           whose files are all its root module",
+          Excerpt(name),
+          Excerpt(self.packages[package].name)
+        ),
+        String::from("name the items with paths: in a `Flat` package `~::` reaches every one"),
+      ),
+      Why::NotRelative => (
+        format!(
+          "the string source `{}` names neither a directory relative to its file, starting with \
+           `./` or `../`, nor a URL",
+          Excerpt(name)
+        ),
+        String::from(
+          "write the directory relative to the file the `use` item is written in, as \
+           `\"./vision\"` or `\"../shared\"`",
+        ),
+      ),
+      Why::Outside => (
+        format!(
+          "the string source `{}` climbs out of the root directory of package `{}`",
+          Excerpt(name),
+          Excerpt(self.packages[package].name)
+        ),
+        String::from(
+          "a string source stays inside its package; reach another package through `^::name`",
+        ),
+      ),
+      Why::NoDirectory => (
+        format!(
+          "the string source `{}` names no directory of package `{}` that is a module",
+          Excerpt(name),
+          Excerpt(self.packages[package].name)
+        ),
+        String::from(
+          "a directory is a module when it or a directory below it holds a file of the package, \
+           and its name is a GraphQLx name",
+        ),
+      ),
+      Why::File { directory } => (
+        format!(
+          "the string source `{}` names a file, and a string source names a directory, whose \
+           files are one module",
+          Excerpt(name)
+        ),
+        if directory.is_empty() {
+          String::from(
+            "name the directory the file is in, the package's root directory, whose module `~::` \
+             names",
+          )
+        } else {
+          format!(
+            "name the directory the file is in, `{}`, whose files are its module",
+            Excerpt(directory)
+          )
+        },
+      ),
+      Why::Unnamed => (
+        format!(
+          "the string source `{}` names the root module of package `{}`, which has no name to \
+           bind",
+          Excerpt(name),
+          Excerpt(self.packages[package].name)
+        ),
+        String::from("bind it under a name with `as`, or name its items with `~::`"),
+      ),
       Why::Unknown => (
         String::from(
-          "this path starts at a root of a kind this analyzer does not know, so what it names is \
-           not in the model",
+          "this path, or the `use` item it is part of, is of a kind this analyzer does not know, \
+           so what it names is not in the model",
         ),
         String::from(
           "the parser that read this file is newer than this analyzer; analyze it with a release \
-           of the analyzer that knows every kind of root the parser reads",
+           of the analyzer that knows every kind the parser reads",
         ),
       ),
     }
@@ -845,7 +1194,10 @@ impl Scopes<'_> {
     };
     if let Some(other) = other {
       let held = match (scope, holder) {
-        (Some(scope), _) => self.lookup(names, scope, other, name).is_some(),
+        (Some(scope), _) => {
+          let query = Query::wanting(scope, name, names.find(name), other);
+          !matches!(self.lookup(query), Lookup::Missing)
+        }
         (None, Some(holder)) => names
           .find(name)
           .and_then(|sym: Sym| self.declared(holder, other.namespace(), sym, false))

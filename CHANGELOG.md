@@ -91,7 +91,15 @@ All notable changes to Smear are documented in this file.
   primitive of the prelude (`bool`, `f32`, `f64`, `iN`, `uN`, `string`, `bytes`, `NonZeroIN`,
   `NonZeroUN`) shadows it in its module and is the warning `shadowed-primitive`; a path that does
   not resolve is `unresolved-path`, or `unknown-package` for a package it may not reach, and a
-  name of one segment in a place GraphQL has keeps GraphQL's own code. A new `test-support` feature, which `smear/test-support` forwards, compiles a
+  name of one segment in a place GraphQL has keeps GraphQL's own code. Every `use` item is
+  resolved, each module's to a fixpoint, with a module's explicit `use` bindings before its
+  globs, which give the declarations and child modules of the modules they name; `use` cycles are
+  legal. A name two globs give two items is `ambiguous-glob` where a path meets it; a string
+  source names its directory's module, relative to the file it is written in, and is
+  `file-path-use` when it names a file and `url-unsupported` when it is a URL. A `use` item that
+  names one thing while its module's items resolve and another once all have is
+  `use-resolution-changed`, a `use` of a name its module declares is `use-declaration-collision`,
+  and two that give one name two items are `use-name-collision`. A new `test-support` feature, which `smear/test-support` forwards, compiles a
   hidden door to the crate-private model builder, and to analyses of the models it builds, for
   `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features

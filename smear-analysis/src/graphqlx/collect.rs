@@ -82,10 +82,6 @@ pub(crate) struct Collected<'d, 'a> {
 }
 
 /// One document's items, flattened, of the parser that made the document.
-// Read by name resolution and lowering, the next parts of the analyzer, through the items the
-// declarations address; until they land nothing reads it, and `dead_code` would say so of each
-// variant's field.
-#[allow(dead_code)]
 pub(crate) enum Items<'d, 'a> {
   /// A document of text.
   Text(Vec<&'d TypeSystemItem<&'a str>>),

@@ -115,11 +115,19 @@ impl Analysis {
 ///   in one namespace of one module, a supplied definition named with `__`, and a type named as a
 ///   child module of its module are reported. The first definition a supplied package would add
 ///   past [`Limits::max_definitions`] is reported, and nothing after it is collected.
-/// - Builds every module's scope: its own declarations and child modules, then the prelude, the
-///   root modules of `core`, `alloc` and `std` whatever the package's tier, then, where a module
-///   is wanted, the packages its package may reach. A type a supplied package declares with the
-///   name of a primitive of the prelude, `bool`, `f32`, `f64`, `iN`, `uN`, `string`, `bytes`,
-///   `NonZeroIN` or `NonZeroUN`, shadows it in its module, and is a warning.
+/// - Builds every module's scope: its own declarations and child modules, then its explicit `use`
+///   bindings, then its globs, then the prelude, the root modules of `core`, `alloc` and `std`
+///   whatever the package's tier, then, where a module is wanted, the packages its package may
+///   reach. A type a supplied package declares with the name of a primitive of the prelude, `bool`,
+///   `f32`, `f64`, `iN`, `uN`, `string`, `bytes`, `NonZeroIN` or `NonZeroUN`, shadows it in its
+///   module, and is a warning.
+/// - Resolves every `use` item, each module's to a fixpoint, which `use` cycles do not disturb. A
+///   path that names nothing is reported once, as is a package the item's package may not reach, a
+///   string source that is a URL, names a file, leaves its package or stands in a `Flat` package,
+///   a name two globs give two items where an item meets it, and a group nested past
+///   [`Limits::max_use_depth`]. An item that names one thing while the module's items are being
+///   resolved and another once all are, a `use` of a name its module declares, and two `use` items
+///   that give one name two items are reported too.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///
@@ -174,10 +182,11 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
   let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
   let mut scopes = resolve::scopes(
     &packages,
+    &sources,
     &dependencies,
     &declarations,
     limits,
-    &builder,
+    &mut builder,
     &mut reporter,
   );
   lower::lower(&declarations, &mut scopes);
@@ -213,10 +222,11 @@ pub(crate) fn resolve_door<S: SourceText>(
   let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
   let scopes = resolve::scopes(
     &packages,
+    &sources,
     &resolved,
     &declarations,
     &limits,
-    &builder,
+    &mut builder,
     &mut reporter,
   );
   let at = scopes.module_at(&builder, module)?;

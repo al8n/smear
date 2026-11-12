@@ -44,10 +44,10 @@ use super::{
   collect::{Collected, Found, Items, Placed},
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{DefId, ModuleId, SourceId, Sym},
-  model::{DefKind, ModelBuilder, Origin, Primitive},
+  model::{DefKind, ModelBuilder, ModuleKind, Origin, Primitive},
   set::ROOT,
   source::SourceMap,
-  tree::{Node, Tree},
+  tree::{Declared, Node, Tree},
 };
 
 /// What item collection hands the phases after it: every item they read, already found and
@@ -60,8 +60,6 @@ use super::{
 /// whichever parser made its document.
 pub(crate) struct Declarations<'d, 'a> {
   /// Each source's items, in the order the walk read them; `None` for a source it did not read.
-  // Read once name resolution resolves `use` items; until it does nothing reads it.
-  #[allow(dead_code)]
   pub(crate) items: Vec<Option<Items<'d, 'a>>>,
   /// Each definition's declaration, by `DefId`: the item that declares it, `None` for a primitive
   /// `core` materialises. A built-in the root package replaces has the root package's item.
@@ -83,8 +81,6 @@ pub(crate) struct Declarations<'d, 'a> {
   /// definitions of all, so the primitive at index `i` is the definition `i`.
   pub(crate) primitives: Vec<(Primitive, DefId)>,
   /// Every `use` item, by module, then source, then position.
-  // Read once name resolution resolves `use` items; until it does nothing reads it.
-  #[allow(dead_code)]
   pub(crate) uses: Vec<Entry>,
   /// Every type and directive extension, by module, then source, then position.
   // Read by lowering, the next part of the analyzer; until it lands nothing reads it.
@@ -103,6 +99,14 @@ pub(crate) struct ModuleEntry {
   pub(crate) package: usize,
   /// The module it is inside; `None` for a root module.
   pub(crate) parent: Option<ModuleId>,
+  /// Its name, the last segment of its path; `None` for a root module.
+  pub(crate) name: Option<Sym>,
+  /// Whether it is a root module, a directory's, or one only an inline `mod` declares: a string
+  /// source names only a directory's.
+  pub(crate) kind: ModuleKind,
+  /// Where the first inline `mod` that declares it names it; `None` for a root module and a
+  /// directory module.
+  pub(crate) declared: Option<Location>,
 }
 
 /// A module that is not a root module, found by its parent and its name.
@@ -392,6 +396,9 @@ fn module_tables(
   let unset = ModuleEntry {
     package: 0,
     parent: None,
+    name: None,
+    kind: ModuleKind::Root,
+    declared: None,
   };
   let mut entries: Vec<ModuleEntry> = vec![unset; ids.len()];
   let mut children: Vec<Child> = Vec::with_capacity(ids.len());
@@ -401,17 +408,22 @@ fn module_tables(
   for (node, row) in tree.nodes().iter().enumerate() {
     let id = ids[node];
     let parent: Option<ModuleId> = row.parent.map(|up: u32| ids[up as usize]);
+    let name: Option<Sym> =
+      parent.map(|_: ModuleId| builder.intern(&String::from_utf8_lossy(row.name)));
     entries[id.get() as usize] = ModuleEntry {
       package: row.package,
       parent,
+      name,
+      kind: row.kind,
+      declared: row.declared.map(|declared: Declared<'_>| declared.location),
     };
-    match parent {
-      Some(parent) => children.push(Child {
+    match (parent, name) {
+      (Some(parent), Some(name)) => children.push(Child {
         parent,
-        name: builder.intern(&String::from_utf8_lossy(row.name)),
+        name,
         module: id,
       }),
-      None => roots.push(id),
+      _ => roots.push(id),
     }
   }
   children.sort_by_key(|child: &Child| (child.parent, child.name));

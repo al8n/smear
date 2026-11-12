@@ -56,6 +56,28 @@ pub enum DiagnosticKind {
   /// that does not resolve, or at the root that cannot be followed. A single segment with no root,
   /// in a place GraphQL has, keeps GraphQL's own code instead.
   UnresolvedPath,
+  /// A name two glob `use` items of one module give to two different items, met where it is used:
+  /// at the path that names it. Two globs that give one name to one item, and a name no path
+  /// names, are no error.
+  AmbiguousGlob,
+  /// A `use` item's string source is a URL. The syntax is parsed, and nothing is fetched: a
+  /// package reached through a URL is supplied by the caller and reached through `^::name`.
+  UrlUnsupported,
+  /// A `use` item's string source names a file of its package, where a string source names a
+  /// directory, whose files are one module. The help names the file's directory.
+  FilePathUse,
+  /// A `use` item resolved to one thing while the module's `use` items were being resolved, and
+  /// to another once all of them were: a name a glob, the prelude or a package gave it was
+  /// bound otherwise by a `use` item resolved after it. Reported at the path's first segment.
+  UseResolutionChanged,
+  /// A `use` item binds a name its module declares in the same namespace, as a definition or, in
+  /// the type namespace, as a child module. Reported at the name the `use` binds, with a label at
+  /// the declaration.
+  UseDeclarationCollision,
+  /// Two `use` items, or two names of one, bind one name in one namespace of one module to two
+  /// different items. Reported at the later in source order, with a label at the first; one item
+  /// bound twice is no error.
+  UseNameCollision,
   /// A supplied package declares a type with the name of a primitive of the prelude: `bool`,
   /// `f32`, `f64`, `iN`, `uN`, `string`, `bytes`, `NonZeroIN` or `NonZeroUN`. Within its module
   /// the name then names the declaration. A warning: GraphQL schemas declare such names freely. A
@@ -83,6 +105,12 @@ impl DiagnosticKind {
     Self::UnknownItem,
     Self::UnknownPackage,
     Self::UnresolvedPath,
+    Self::AmbiguousGlob,
+    Self::UrlUnsupported,
+    Self::FilePathUse,
+    Self::UseResolutionChanged,
+    Self::UseDeclarationCollision,
+    Self::UseNameCollision,
     Self::ShadowedPrimitive,
     Self::ResourceLimit,
   ];
@@ -103,6 +131,12 @@ impl DiagnosticKind {
       Self::UnknownItem => Code::new("smear::graphqlx::unknown-item"),
       Self::UnknownPackage => Code::new("smear::graphqlx::unknown-package"),
       Self::UnresolvedPath => Code::new("smear::graphqlx::unresolved-path"),
+      Self::AmbiguousGlob => Code::new("smear::graphqlx::ambiguous-glob"),
+      Self::UrlUnsupported => Code::new("smear::graphqlx::url-unsupported"),
+      Self::FilePathUse => Code::new("smear::graphqlx::file-path-use"),
+      Self::UseResolutionChanged => Code::new("smear::graphqlx::use-resolution-changed"),
+      Self::UseDeclarationCollision => Code::new("smear::graphqlx::use-declaration-collision"),
+      Self::UseNameCollision => Code::new("smear::graphqlx::use-name-collision"),
       Self::ShadowedPrimitive => Code::new("smear::graphqlx::shadowed-primitive"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
@@ -123,6 +157,12 @@ impl DiagnosticKind {
       Self::UnknownItem => "item of an unknown kind",
       Self::UnknownPackage => "unknown package",
       Self::UnresolvedPath => "unresolved path",
+      Self::AmbiguousGlob => "name two globs give",
+      Self::UrlUnsupported => "URL source not supported",
+      Self::FilePathUse => "string source names a file",
+      Self::UseResolutionChanged => "use resolved otherwise",
+      Self::UseDeclarationCollision => "use and declaration of one name",
+      Self::UseNameCollision => "two uses of one name",
       Self::ShadowedPrimitive => "declaration shadows a primitive",
       Self::ResourceLimit => "resource limit exceeded",
     }
@@ -144,6 +184,12 @@ impl DiagnosticKind {
       | Self::UnknownItem
       | Self::UnknownPackage
       | Self::UnresolvedPath
+      | Self::AmbiguousGlob
+      | Self::UrlUnsupported
+      | Self::FilePathUse
+      | Self::UseResolutionChanged
+      | Self::UseDeclarationCollision
+      | Self::UseNameCollision
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }
