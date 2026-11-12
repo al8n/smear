@@ -18,7 +18,7 @@ use tokora::{
 
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken,
-  generic::{definition_name, extension_name, try_where_clause, type_path},
+  generic::{definition_name, extension_name, take_type_path, try_where_clause, type_path},
   keyword_of,
   ty::ty,
   unexpected_here,

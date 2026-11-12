@@ -17,9 +17,9 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let _leading = try_ampersand(inp)?;
-  let first = type_path(inp)?;
+  let first = take_type_path(inp)?;
   let interfaces: Vec<TypePath<GraphqlxSlice<'inp, Src>>> = ampersand
-    .ignore_then(type_path)
+    .ignore_then(take_type_path)
     .repeated_while::<_, U1>(decide_ampersand_tail::<Src, Ctx>)
     .collect_with(Vec::from([first]))
     .parse_input(inp)?;

@@ -1013,6 +1013,35 @@ fn a_scalar_ends_on_its_where_clause_and_the_next_entry_is_its_own() {
 }
 
 #[test]
+fn a_missing_interface_or_bound_is_refused_as_a_missing_path() {
+  // Each of these positions takes a type path, so each refusal names one, at the token standing in
+  // its place: an interface after `implements` or `&`, a root with no name after it, and each type
+  // a `where` predicate names.
+  for (src, found) in [
+    ("scalar S implements 5", Some(SyntacticTokenKind::Int)),
+    (
+      "union U implements I & = A",
+      Some(SyntacticTokenKind::Equal),
+    ),
+    (
+      "enum E implements ^:: { A }",
+      Some(SyntacticTokenKind::LBrace),
+    ),
+    ("scalar S implements", None),
+    ("scalar S where 5", Some(SyntacticTokenKind::Int)),
+    ("scalar S<A> where A: 5", Some(SyntacticTokenKind::Int)),
+    ("scalar S<A> where A: B & 5", Some(SyntacticTokenKind::Int)),
+  ] {
+    assert_unexpected(
+      |inp| ast::Document::graphqlx(inp).map(|_| ()),
+      src,
+      Expectation::Path,
+      found,
+    );
+  }
+}
+
+#[test]
 fn failures_keep_typed_expectations_and_unclosed_kinds() {
   let error = drive_str(|inp| ast::Type::graphqlx(inp).map(|_| ()), "42")
     .expect_err("an integer cannot begin a GraphQLx type")
