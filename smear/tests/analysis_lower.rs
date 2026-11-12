@@ -966,7 +966,7 @@ fn contributions_order_members_by_source_then_position() {
   assert_eq!(
     locations,
     [
-      (named(b_file, b, "type ", "Shape", 0), false, 1),
+      (named(b_file, b, "\ntype ", "Shape", 0), false, 1),
       (named(a_file, a, "extend type ", "Shape", 0), true, 1),
       (named(b_file, b, "extend type ", "Shape", 0), true, 1),
       (named(b_file, b, "extend type ", "Shape", 1), true, 1),
