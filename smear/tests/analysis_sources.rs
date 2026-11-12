@@ -211,7 +211,7 @@ fn a_file_is_answered_no_text_once_another_shares_its_path() {
 fn the_root_given_under_another_name_is_answered_no_text() {
   let root = package("app", &[("a.graphqlx", OK)]).with_dependencies(["geo"]);
   let geo = package("geo", &[("p.graphqlx", "scalar P\n")]);
-  let analysis = analyze(&root, &[geo.clone()], &Limits::new());
+  let analysis = analyze(&root, core::slice::from_ref(&geo), &Limits::new());
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
 
   let other = package("other", &[("a.graphqlx", OK)]).with_dependencies(["geo"]);
