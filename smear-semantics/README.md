@@ -19,8 +19,8 @@ Each is generic over its caller's symbol type and names nothing of either layer.
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `alloc` | The three kernels. Off, the crate is `no_std` and empty. Implied by `std` | via `std` |
-| `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
+| `alloc` | The three kernels, without the standard library. `std` gives the same API; with neither, the crate is `no_std` and empty. Implied by no feature | |
+| `std` | Standard library support, and with it the three kernels; it does not turn `alloc` on. Off, the crate is `no_std` | ✓ |
 
 ## Part of the Smear Ecosystem
 

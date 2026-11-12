@@ -345,8 +345,8 @@ impl SyntaxKind {
 ///
 /// Every member forwards to the inherent item of the same name; the trait exists so the shared
 /// runner, coverage counter and typed layer can be written once over `K: KindSpace` rather than
-/// once per dialect. Gated on `rowan` because that is the only feature under which any of those
-/// three is compiled.
+/// once per dialect. Gated on `rowan` and `std` because that is the only configuration under which
+/// any of those three is compiled.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 impl crate::lossless::KindSpace for SyntaxKind {
   const NAME: &'static str = "graphql";

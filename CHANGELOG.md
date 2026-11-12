@@ -9,10 +9,11 @@ All notable changes to Smear are documented in this file.
   detection and the graph-cycle kernel. `smear` does not re-export it. `smear-analysis` is
   the GraphQLx schema analyzer, reached as `smear::analysis` behind the new `analysis`
   capability feature, which implies `parser` and `graphqlx` and no tier; the analyzer itself
-  needs `alloc`. Its source features `bytes_1`, `bstr_1`, `hipstr_0_8` and `smol-bytes_0_2`,
-  with the aliases `bytes`, `bstr`, `hipstr` and `smol-bytes`, forward `smear-parser`'s, and
-  `smear`'s features of the same names forward to them. `smear-schema`'s builder now takes
-  those three kernels from `smear-semantics`, behind `build`, with no change in behaviour.
+  needs `std` or `alloc`. Its source features `bytes_1`, `bstr_1`, `hipstr_0_8` and
+  `smol-bytes_0_2`, with the aliases `bytes`, `bstr`, `hipstr` and `smol-bytes`, forward
+  `smear-parser`'s and imply no tier, and `smear`'s features of the same names forward to them.
+  `smear-schema`'s builder now takes those three kernels from `smear-semantics`, behind
+  `build`, with no change in behaviour.
 - `smear-analysis`: the analyzer's entrance and exits. `graphqlx::analyze` takes a root
   `Package` and its dependencies, each file's text any `SourceText` (`&str`, `&[u8]`, or a
   source feature's type), within `Limits`, and answers an `Analysis` with no type parameter:
@@ -328,9 +329,11 @@ All notable changes to Smear are documented in this file.
 - The introspection parity oracle compares the executor's answers with graphql-js
   17.1.0's instead of 16.11.0's, directive deprecation included, and its eight
   recorded differences are redrawn for that release.
-- All six crates gain an `alloc` feature, and `std` implies it: three tiers,
-  core (neither), `alloc` and `std`, each including the one below. With neither,
-  a crate compiles in every feature combination and exports only what needs no
+- All six crates gain an `alloc` feature beside `std`, and the two are
+  independent tiers: `std` does not imply `alloc`, and the allocating API exists
+  when either is on. Every combination is a valid build: neither, the core tier;
+  `alloc` alone; `std` alone, the default; and both. With neither, a crate
+  compiles in every feature combination and exports only what needs no
   allocation: in `smear-lexer`, `hints`, `keywords` (with `keyword!`), `limits`
   and `punctuator`; in `smear-parser`, `combinator` (with
   `typed_keyword_atom!`); in `smear-schema`, `diagnostic` and `builtin`;
@@ -344,15 +347,18 @@ All notable changes to Smear are documented in this file.
   the allocating API: the dialect lexers and parsers, the schema
   representation and builder, the validator, the executor and `smear::json`. A
   capability feature (`graphql`, `graphqlx`, `parser`, `validator`, `proto`,
-  `introspection`, …) never switches a tier on, so such a consumer adds `alloc`
-  (or `std`, which implies it) itself; without it the build compiles and lacks
-  those items.
-- `smear`, `smear-lexer` and `smear-parser`: the `bytes`, `hipstr`, `smallvec`
-  and `smol-bytes` features imply `alloc`, because each of those crates links
-  `alloc` itself. `bstr` implies no tier, and `rowan` still implies `std`.
+  `introspection`, …) never switches a tier on, so such a consumer names `std`
+  or `alloc` itself; with neither the build compiles and lacks those items.
+- `smear`!, `smear-lexer`, `smear-parser`! and `smear-compiler`!: a feature
+  that enables an optional dependency implies no tier. `bytes_1`, `hipstr_0_8`,
+  `smallvec_1` and `smol-bytes_0_2` do not imply `alloc`, although each of
+  those crates links `alloc` itself, and `rowan_0_17` no longer implies `std`.
+  So a `default-features = false` consumer names `std` or `alloc` beside a
+  source feature, and `std` beside `rowan_0_17`: the lossless tower is gated on
+  `std`.
 - `smear`! and `smear-compiler`!: the `introspection` feature no longer implies
-  `std`. The draft §4 reader is `core` and `alloc` only, so it needs `alloc`,
-  which `introspection` does not imply.
+  `std`. The draft §4 reader is `core` and `alloc` only, so it needs `std` or
+  `alloc`, neither of which `introspection` implies.
 - `graphql-proto` and `smear`: `StartError`, `SetExtensionsError`,
   `UnattachedExtensions`, `Full`, `TooLarge`, `RequestErrorCeiling`,
   `RefusedEntry`, `SourceEventError` and `json::Error` implement

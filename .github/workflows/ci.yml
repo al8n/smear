@@ -556,10 +556,11 @@ jobs:
         run: rustup update stable && rustup default stable
       # The same tier claim from the crate's own side, and it is a CELL rather than a sentence.
       # `smear-schema`'s reader tier is `core` + `alloc` with `tokora` as its only dependency, and
-      # it needs the `alloc` feature: with no tier feature the crate keeps only `diagnostic` and
-      # `builtin`. `build` and `introspection` are what raise it further, and neither is in
-      # `default`. `cargo hack --each-feature` reaches this configuration too, but only as one row
-      # of a matrix — naming it here means a regression says which claim broke.
+      # it needs `std` or `alloc`: with no tier feature the crate keeps only `diagnostic` and
+      # `builtin`. This cell is the reader tier without the standard library, `alloc` alone.
+      # `build` and `introspection` are what raise it further, and neither is in `default`.
+      # `cargo hack --each-feature` reaches this configuration too, but only as one row of a
+      # matrix — naming it here means a regression says which claim broke.
       - name: cargo check -p smear-schema --no-default-features --features alloc
         run: cargo check -p smear-schema --no-default-features --features alloc
       # ASSERT THE GRAPH, not only that the code compiles. `cargo check` passing says nothing about

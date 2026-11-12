@@ -22,11 +22,11 @@ does not put the front end in the graph.
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `alloc` | The executor, the response tree, the request errors and the `Values` trait. Off, the crate is `no_std` and exports nothing. Implied by `std` | via `std` |
-| `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
+| `alloc` | The executor, the response tree, the request errors and the `Values` trait, without the standard library. `std` gives the same API; with neither, the crate is `no_std` and exports nothing. Implied by no feature | |
+| `std` | Standard library support, and with it the executor; it does not turn `alloc` on. Off, the crate is `no_std` | ✓ |
 
-The crate has no capability feature, so a `default-features = false` consumer names `alloc` itself,
-or `std`, which implies it.
+The crate has no capability feature, so a `default-features = false` consumer names `std` or
+`alloc` itself.
 
 ## Part of the Smear Ecosystem
 

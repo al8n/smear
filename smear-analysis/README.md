@@ -20,15 +20,16 @@ canonical names and lookup; so far `analyze` fills in only the packages and thei
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `alloc` | The analyzer, the `graphqlx` module. Off, the crate is `no_std` and exports nothing. Implied by `std` and by every source feature but `bstr_1` | via `std` |
-| `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
-| `bytes_1` | Read `bytes::Bytes` sources, from `bytes` 1. Implies `alloc` | |
+| `alloc` | The analyzer, the `graphqlx` module, without the standard library. `std` gives the same API; with neither, the crate is `no_std` and exports nothing. Implied by no feature | |
+| `std` | Standard library support, and with it the analyzer; it does not turn `alloc` on. Off, the crate is `no_std` | ✓ |
+| `bytes_1` | Read `bytes::Bytes` sources, from `bytes` 1. Implies no tier | |
 | `bstr_1` | Read `bstr::BStr` sources, from `bstr` 1. Implies no tier | |
-| `hipstr_0_8` | Read the `hipstr::{HipStr, HipByt}` sources, from `hipstr` 0.8. Implies `alloc` | |
-| `smol-bytes_0_2` | Read the smol-bytes 0.2 sources. Implies `alloc` | |
+| `hipstr_0_8` | Read the `hipstr::{HipStr, HipByt}` sources, from `hipstr` 0.8. Implies no tier | |
+| `smol-bytes_0_2` | Read the smol-bytes 0.2 sources. Implies no tier | |
 | `test-support` | `graphqlx::test_support`: a hidden door to the crate-private model builder, for `smear`'s own tests. Not API; `smear`'s `test-support` forwards it | |
 
-Each source feature forwards `smear-parser`'s of the same name. `bytes`, `bstr`, `hipstr` and
+Each source feature forwards `smear-parser`'s of the same name and implies no tier, so a
+`default-features = false` consumer names `std` or `alloc` beside it. `bytes`, `bstr`, `hipstr` and
 `smol-bytes` are aliases for the current version: each enables its versioned feature and nothing
 else.
 

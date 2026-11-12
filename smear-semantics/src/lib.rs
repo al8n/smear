@@ -3,7 +3,7 @@
 //!
 //! [`interner`] turns byte spellings into dense symbols, [`duplicates`] finds the earlier position
 //! of a name list that wrote a given name, and [`scc`] finds which nodes of a directed graph lie on
-//! a cycle. Each is generic over its caller's symbol type, and all three need `alloc`.
+//! a cycle. Each is generic over its caller's symbol type, and all three need `std` or `alloc`.
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, allow(unused_attributes))]

@@ -135,8 +135,8 @@ introspection = ["validator", "smear-compiler/introspection", "smear-schema/intr
 # GraphQLx schema analysis (`smear::analysis`): GraphQLx packages in, a resolved model and its
 # diagnostics out. It implies `parser` and `graphqlx`, because the analyzer reads the GraphQLx
 # parser's tree, and no tier: like every capability here it compiles nothing that allocates until
-# `alloc` is on as well. It turns on `smear-semantics` beside `smear-analysis`, which is the edge the
-# feature fence in `src/lib.rs` reads that crate's witnesses through.
+# `std` or `alloc` is on as well. It turns on `smear-semantics` beside `smear-analysis`, which is
+# the edge the feature fence in `src/lib.rs` reads that crate's witnesses through.
 analysis = ["parser", "graphqlx", "dep:smear-analysis", "dep:smear-semantics"]
 
 # The five source backings. Each forwards to `smear-lexer`, which is where the `Source`
@@ -249,8 +249,8 @@ smear-parser = { workspace = true, optional = true }
 # public module today and the vocabulary behind it moved into `smear-schema`, so an optional edge
 # would make that path appear and disappear with a feature — an API change this split is not
 # allowed. What it costs a `--no-default-features` build is this crate's ungated half, `builtin`
-# and `diagnostic`; `alloc` adds the representation. The builder and the introspection door are
-# behind `smear-schema/build`, which `validator` above turns on.
+# and `diagnostic`; `std` or `alloc` adds the representation. The builder and the introspection
+# door are behind `smear-schema/build`, which `validator` above turns on.
 smear-schema.workspace = true
 
 # The protocol machine, behind `proto`. It brings `smear-schema` with DEFAULT FEATURES OFF of its

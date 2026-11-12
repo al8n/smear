@@ -13,7 +13,8 @@
 // is two `Vec`s and the reason for each is in `json::response`. The claim it replaces is in
 // `json`'s own header, restated as what the two allocations cost rather than deleted.
 //
-// Gated on `alloc` and `proto`, the two features that compile the module: `#[cfg]`d rather than
+// Gated on `alloc` and `proto` without `std`: with `std` the module's `std::` paths are the
+// standard library's, and without `proto` there is no module to need it. `#[cfg]`d rather than
 // unconditional so that a lexer-only or parser-only build — neither of which has anything to
 // allocate — still links neither `alloc` nor `std` through this file. Every member spells the
 // alias the same way and for the same reason, and the `#[allow]` is the workspace-wide exception
@@ -55,10 +56,10 @@ pub use smear_schema::diagnostic;
 /// - `lossless` — preserves every byte of trivia. For formatters, linters, IDEs and
 ///   syntax highlighters, where the source must round-trip exactly.
 ///
-/// A dialect is a module only in a build that enables its feature and `alloc`, so each link below
-/// is gated to the build that has something to link to. Ungated, they are `unresolved link`
-/// errors under `RUSTDOCFLAGS="-D warnings"` in every single-dialect configuration — the failure
-/// the `docs` CI job's dialect-alone legs exist to catch.
+/// A dialect is a module only in a build that enables its feature and `std` or `alloc`, so each
+/// link below is gated to the build that has something to link to. Ungated, they are
+/// `unresolved link` errors under `RUSTDOCFLAGS="-D warnings"` in every single-dialect
+/// configuration — the failure the `docs` CI job's dialect-alone legs exist to catch.
 ///
 /// This module is the crate's irreducible base and carries no feature of its own: the parser
 /// cannot exist without it, and a build with both switched off would be an empty crate. The
@@ -105,7 +106,7 @@ pub use smear_lexer::keyword;
 ///
 /// Atomic parser combinators that build AST nodes from the token streams produced by [`lexer`],
 /// composed with the `tokora` combinator library, plus the lossless CST tower behind the
-/// `rowan_0_17` feature.
+/// `rowan_0_17` feature and `std`.
 ///
 /// Available dialects, each link gated on its feature for the reason recorded on [`lexer`]:
 ///
@@ -251,7 +252,7 @@ pub use graphql_proto as proto;
 #[cfg_attr(
   not(any(feature = "std", feature = "alloc")),
   doc = "`graphqlx` is the analyzer: GraphQLx packages in, a resolved model and its diagnostics \
-         out. It needs `alloc`."
+         out. It needs `std` or `alloc`."
 )]
 ///
 /// GraphQLx only: standard GraphQL is validated against the draft specification by `validator`.
@@ -271,9 +272,9 @@ pub use smear_analysis as analysis;
 // the values — which is this crate and no other. Neither layer grows a question it should not
 // have.
 //
-// Gated on `proto` and `alloc` alone. The materialised implementations inside it need
-// `materialized-numbers` too and carry their own `#[cfg]`, so the module and the number formatters
-// are in an `alloc` + `proto` build whether or not the value trees are, and
+// Gated on `proto` and a tier, `std` or `alloc`, alone. The materialised implementations inside it
+// need `materialized-numbers` too and carry their own `#[cfg]`, so the module and the number
+// formatters are in every `proto` build with a tier whether or not the value trees are, and
 // `cargo hack --each-feature --features alloc` compiles it in the `proto` cell rather than only
 // under `--all-features`. NO NEW FEATURE: a `json` feature would be one more cell in each of
 // `ci/hack.sh`'s passes and a pair `ci/feature_reachability.py` would have to be told about, to

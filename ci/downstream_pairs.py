@@ -24,7 +24,8 @@ forwarded pairs behaved that way. The four features `smear` `#[cfg]`s itself —
     EQ-POS(member, f)   smear/std, smear/f, member/f          must COMPILE
     EQ-LEAK(member, f)  smear/std,           member/f         must FAIL, on the equivalence assert
 
-An `alloc` pair's EQ-LEAK drops `smear/std`, which implies `smear/alloc`; a `std` pair has none.
+An `alloc` pair's EQ-LEAK drops `smear/std` too, so its `smear` has no tier at all; a `std` pair
+has none, because every base carries `smear/std`.
 
 EQ is **total over every member feature** but a pure alias (see `ALIAS_VERSION`) — the pair list
 comes out of `cargo metadata`, so a feature added to a member without a leg here is an error rather
@@ -304,8 +305,9 @@ def plan(workspace_manifest: pathlib.Path, fixture_manifest: pathlib.Path) -> in
     # Recorded rather than skipped in silence.
     if twin in PRESENCE[member] or twin == "std":
       legs.append(("EQ-LEAK-NA", f"{member}/{feature}", ",".join(base)))
-    # `smear/std` implies `smear/alloc` as well, so an `alloc` pair leaks on the base without it:
-    # the presence features alone, the one graph where the member has `alloc` and `smear` does not.
+    # An `alloc` pair leaks on the base without `smear/std`: the presence features alone, the one
+    # graph where the member has `alloc` and `smear` has no tier at all. `smear/std` does not imply
+    # `smear/alloc`, so the full base would disagree too; the narrower graph is the one built.
     elif twin == "alloc":
       leak_base = [f for f in base if f != "smear/std"]
       legs.append(("EQ-LEAK", f"{member}/{feature}",

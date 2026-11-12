@@ -7,21 +7,22 @@
 Atomic parser-combinators for GraphQL-family dialects.
 
 Builds AST nodes from the token streams `smear-lexer` produces, composed with the `tokora`
-combinator library, plus the lossless CST tower behind the `rowan_0_17` feature.
+combinator library, plus the lossless CST tower behind the `rowan_0_17` feature and `std`.
 
 ## Feature flags
 
-Every crate in the stack has three tiers, each including the one below: core, `alloc` and `std`.
+Every crate in the stack has two independent tier features, `std` and `alloc`: the allocating API
+exists when either is on, and with neither the crate is the core tier.
 
 | Feature | Description | Default |
 |---------|-------------|---------|
-| `alloc` | The parsers and ASTs of both dialects. Off, the crate is `no_std` and keeps only `combinator` (with `typed_keyword_atom!`) and the `lexer` re-export. Implied by `std`, `smallvec_1`, `bytes_1`, `hipstr_0_8` and `smol-bytes_0_2` | via `std` |
-| `std` | Standard library support. Implies `alloc`; off, the crate is `no_std` | ✓ |
-| `rowan_0_17` | The lossless CST tower, over `rowan` 0.17. Implies `std` | |
+| `alloc` | The parsers and ASTs of both dialects, without the standard library. `std` gives the same API; with neither, the crate is `no_std` and keeps only `combinator` (with `typed_keyword_atom!`) and the `lexer` re-export. Implied by no feature | |
+| `std` | Standard library support, and with it the parsers and ASTs; it does not turn `alloc` on. Off, the crate is `no_std` | ✓ |
+| `rowan_0_17` | The lossless CST tower, over `rowan` 0.17. Implies no tier; the tower needs `std` | |
 
 The dialects (`graphql`, `graphqlx`) and the other features are the ones `smear`'s own table
-describes. A capability feature never switches a tier on, so a `default-features = false` consumer
-names `alloc` itself, or `std`, which implies it.
+describes. No feature but `default` switches a tier on, so a `default-features = false` consumer
+names `std` or `alloc` itself, and names `std` beside `rowan_0_17`.
 
 The dependency features (`smallvec_1`, `bytes_1`, `bstr_1`, `hipstr_0_8`, `smol-bytes_0_2` and
 `rowan_0_17`) carry the major of the crate they enable. The unversioned names — `smallvec`, `bytes`,
