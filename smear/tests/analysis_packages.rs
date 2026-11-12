@@ -188,35 +188,42 @@ fn each_package_has_a_package_source_then_its_files_by_path_segment_by_segment()
       source.is_package_source(),
     ));
   }
+  // Each built-in package is its package source, then the one file smear embeds for it.
+  for (package, rows) in described[..6].chunks(2).enumerate() {
+    let package = u32::try_from(package).expect("three built-in packages");
+    assert_eq!(rows[0], (package, "", 0, true));
+    assert_eq!(
+      (rows[1].0, rows[1].1, rows[1].3),
+      (package, "lib.graphqlx", false)
+    );
+    assert!(rows[1].2 > 0, "{rows:?}");
+  }
   assert_eq!(
-    described,
+    described[6..],
     [
-      (0, "", 0, true),
-      (1, "", 0, true),
-      (2, "", 0, true),
       (3, "", 0, true),
       (3, "media/vision.graphqlx", "scalar Image\n".len(), false),
       (3, "media.graphqlx", "scalar Media\n".len(), false),
       (3, "schema.graphqlx", OK.len(), false),
     ]
   );
-  assert_eq!(sources.len(), 7);
+  assert_eq!(sources.len(), 10);
   assert!(!sources.is_empty());
 
   let range = model.package(model.root_package()).sources();
   assert_eq!(range.len(), 4);
   assert!(!range.is_empty());
-  assert!(range.contains(SourceId::new(3)));
   assert!(range.contains(SourceId::new(6)));
-  assert!(!range.contains(SourceId::new(2)));
-  assert!(!range.contains(SourceId::new(7)));
+  assert!(range.contains(SourceId::new(9)));
+  assert!(!range.contains(SourceId::new(5)));
+  assert!(!range.contains(SourceId::new(10)));
   assert_eq!(
     range.into_iter().collect::<Vec<SourceId>>(),
-    [3, 4, 5, 6].map(SourceId::new)
+    [6, 7, 8, 9].map(SourceId::new)
   );
   assert_eq!(
     range.into_iter().rev().collect::<Vec<SourceId>>(),
-    [6, 5, 4, 3].map(SourceId::new)
+    [9, 8, 7, 6].map(SourceId::new)
   );
   assert_eq!(range.into_iter().len(), 4);
 }
