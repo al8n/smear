@@ -8,8 +8,11 @@
 //! in either layout. One path is one module: a directory module, or else the first `mod` in source
 //! order, declares it, and the walk reports every later declaration.
 //!
-//! A module costs the same at any depth: it holds its parent, its own name and its depth, never its
-//! path, and it is found by its parent and its name.
+//! A module costs the tree the same at any depth: it holds its parent, its own name and its depth,
+//! never its path, and it is found by its parent and its name. The model it is numbered into keeps
+//! each module's path whole, one name per segment, because `Module::path` answers a slice; so
+//! `Limits::max_modules`, which bounds how many modules there are, and `Limits::max_module_depth`,
+//! which bounds how long a path is, together bound the model's path table.
 //!
 //! # Numbering
 //!
@@ -83,6 +86,11 @@ impl<'d> Tree<'d> {
     }
   }
 
+  /// How many modules the tree holds.
+  pub(crate) fn count(&self) -> u32 {
+    dense(self.nodes.len())
+  }
+
   /// Adds the root module of the package at `package`, the next package in id order; answers its
   /// node.
   pub(crate) fn root(&mut self, package: usize) -> u32 {
@@ -105,15 +113,9 @@ impl<'d> Tree<'d> {
     self.roots[package]
   }
 
-  /// The directory module `name` inside `parent`, which the file paths spell `directory`: the one
-  /// the tree has, or a new one.
-  ///
-  /// Every directory module is added before any `mod` is walked, so a child the tree already has
-  /// here is a directory module too.
+  /// Adds the directory module `name` inside `parent`, which the file paths spell `directory`, and
+  /// which the tree must not have yet; answers its node.
   pub(crate) fn directory(&mut self, parent: u32, name: &'d [u8], directory: &'d [u8]) -> u32 {
-    if let Some(found) = self.child(parent, name) {
-      return found;
-    }
     self.insert(parent, name, ModuleKind::Directory, Some(directory), None)
   }
 

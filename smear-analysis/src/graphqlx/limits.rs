@@ -2,6 +2,8 @@
 
 /// See [`Limits::max_definitions`].
 const DEFAULT_DEFINITIONS: u32 = 1 << 20;
+/// See [`Limits::max_modules`].
+const DEFAULT_MODULES: u32 = 1 << 16;
 /// See [`Limits::max_module_depth`].
 const DEFAULT_MODULE_DEPTH: u32 = 64;
 /// See [`Limits::max_path_segments`].
@@ -24,15 +26,16 @@ const DEFAULT_NEAR_MISS_COMPARISONS: u32 = 1 << 20;
 /// The bounds one analysis runs under.
 ///
 /// A package set is untrusted input, and the analysis bounds every resource such input could
-/// otherwise grow without limit: the number of definitions, how deep modules, `use` trees and type
-/// arguments nest, how long a path is, how many rounds the glob fixpoint runs, how many
-/// instantiations it records, and how many bytes of source it reads. A bound that is passed is
+/// otherwise grow without limit: the number of definitions and of modules, how deep modules, `use`
+/// trees and type arguments nest, how long a path is, how many rounds the glob fixpoint runs, how
+/// many instantiations it records, and how many bytes of source it reads. A bound that is passed is
 /// reported as `smear::graphqlx::resource-limit`, never as a panic. Two bounds are not refusals:
 /// the diagnostic ceiling and the near-miss budget limit what the analysis says, not what it
 /// accepts.
 ///
 /// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
-/// is always declared whole: see [`Limits::max_definitions`].
+/// is always declared whole and every package has its root module: see
+/// [`Limits::max_definitions`] and [`Limits::max_modules`].
 ///
 /// # Building one
 ///
@@ -51,6 +54,7 @@ const DEFAULT_NEAR_MISS_COMPARISONS: u32 = 1 << 20;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Limits {
   max_definitions: u32,
+  max_modules: u32,
   max_module_depth: u32,
   max_path_segments: u32,
   max_use_depth: u32,
@@ -77,6 +81,7 @@ impl Limits {
   pub const fn new() -> Self {
     Self {
       max_definitions: DEFAULT_DEFINITIONS,
+      max_modules: DEFAULT_MODULES,
       max_module_depth: DEFAULT_MODULE_DEPTH,
       max_path_segments: DEFAULT_PATH_SEGMENTS,
       max_use_depth: DEFAULT_USE_DEPTH,
@@ -106,6 +111,27 @@ impl Limits {
   #[inline]
   pub const fn max_definitions(&self) -> u32 {
     self.max_definitions
+  }
+
+  /// How many modules the model may hold, over every package. Every module the model would hold
+  /// counts: each package's root module, each directory module of a `Directory` package, and the
+  /// module of each inline `mod` that declares one its package does not have yet. A `mod` of a
+  /// module the package already has adds none.
+  ///
+  /// The built-in packages' modules and every package's root module are always held, so a limit
+  /// below their count admits no other module. The first module a supplied package's directory or
+  /// `mod` would add past the limit is reported once: a `mod` where it names its module, a directory
+  /// at its package's package source. No module is added after it: the files under a refused
+  /// directory are parsed but placed in no module, and nothing inside a refused `mod` is collected,
+  /// as past [`max_module_depth`](Self::max_module_depth). What sits in a module already held is
+  /// still collected.
+  ///
+  /// The default is 2^16. The model keeps each module's path, one name per segment, so this bound
+  /// and [`max_module_depth`](Self::max_module_depth) together bound the model's path table: it
+  /// holds at most their product of names.
+  #[inline]
+  pub const fn max_modules(&self) -> u32 {
+    self.max_modules
   }
 
   /// How deep a module may sit below its package's root module, each directory and each inline
@@ -220,6 +246,14 @@ impl Limits {
   #[must_use]
   pub const fn with_max_definitions(mut self, max: u32) -> Self {
     self.max_definitions = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_modules`](Self::max_modules) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_modules(mut self, max: u32) -> Self {
+    self.max_modules = max;
     self
   }
 
