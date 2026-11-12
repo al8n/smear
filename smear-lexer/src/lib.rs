@@ -149,7 +149,7 @@ pub mod graphql;
 /// Lexers for GraphQLx (extended GraphQL).
 ///
 /// This module extends the standard GraphQL lexer with additional tokens for GraphQLx
-/// features like generics, imports, set and map literals, and namespacing.
+/// features like generics, `use` items, set and map literals, and namespacing.
 ///
 /// # Token Streams
 ///
@@ -172,7 +172,7 @@ pub mod graphql;
 /// - **Angle brackets**: `<`, `>` for generics (`Container<T>`)
 /// - **Fat arrow**: `=>` for map entries (`map!{ key => value }`)
 /// - **Arithmetic operators**: `+`, `-` for extended type operations
-/// - **Asterisk**: `*` for wildcard imports
+/// - **Asterisk**: `*` for a `use` item's glob (`use ~::geo::*`)
 ///
 /// # Source Types
 ///
@@ -193,7 +193,7 @@ pub mod graphql;
 /// ```rust,ignore
 /// use smear_lexer::graphqlx::syntactic::Lexer;
 ///
-/// let source = "import { User } from \"./types.graphqlx\"";
+/// let source = "use \"./types\"::User";
 /// let tokens = Lexer::new(source);
 /// // Fast tokenization with trivia automatically skipped
 /// ```

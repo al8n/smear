@@ -138,7 +138,7 @@ mod value;
 pub mod graphql;
 
 /// The GraphQLx dialect: namespaced paths, collection values, generic type
-/// references, and imports over the concrete GraphQLx lexer.
+/// references, and `use` items over the concrete GraphQLx lexer.
 #[cfg_attr(
   all(feature = "graphql", feature = "rowan_0_17"),
   doc = r#"

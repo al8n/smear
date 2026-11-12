@@ -205,7 +205,7 @@ impl<S, Ty> IntoSpan<Span> for OperationDefinition<S, Ty> {
 /// something that is not GraphQL. `#[non_exhaustive]` here would advertise an evolution freedom
 /// this type structurally does not have and charge for it where it costs most — the exhaustiveness
 /// `smear-compiler`'s draft §5 rules depend on. Smear's extension mechanism is a separate dialect:
-/// `graphqlx`'s own `ImportOrExecutableDefinition` keeps the attribute, correctly.
+/// `graphqlx`'s own `UseOrExecutableDefinition` keeps the attribute, correctly.
 #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]

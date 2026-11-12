@@ -1,7 +1,7 @@
-//! GraphQLx type-system definition and import-aware document productions.
+//! GraphQLx type-system definition and type-system document productions.
 
 use super::*;
-use crate::graphqlx::ast::ImportOrTypeSystemDefinitionOrExtension;
+use crate::graphqlx::ast::TypeSystemItem;
 
 /// Enters a type-system-definition tail after its leading keyword was consumed
 /// and classified by fused dispatch.
@@ -212,19 +212,16 @@ definition_parser!(
   }
 );
 
-/// Parses one import-aware GraphQLx type-system document entry by fused head
-/// dispatch. Descriptions can only precede definitions, never imports or
-/// extensions.
+/// Parses one GraphQLx type-system document entry — a `use` item, a type-system definition or an
+/// extension — by fused head dispatch. Descriptions can only precede definitions, never `use`
+/// items or extensions.
 ///
-/// Imports are a GraphQLx extension. See the
+/// `use` items are a GraphQLx extension. See the
 /// [GraphQL Type System Definition specification](https://spec.graphql.org/draft/#TypeSystemDefinition)
 /// and [Type System Extension specification](https://spec.graphql.org/draft/#TypeSystemExtension).
-pub fn import_or_type_system_definition_or_extension<'inp, Src, Ctx>(
+pub fn type_system_item<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
-) -> Result<
-  ImportOrTypeSystemDefinitionOrExtension<GraphqlxSlice<'inp, Src>>,
-  GraphqlxError<'inp, Src, Ctx>,
->
+) -> Result<TypeSystemItem<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
@@ -239,7 +236,7 @@ where
      inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| match token {
       GraphqlxToken::<'inp, Src>::LitInlineStr(value) => {
         described_after_string(inp, StringValue::new(span, value.into()))
-          .map(ImportOrTypeSystemDefinitionOrExtension::Definition)
+          .map(TypeSystemItem::Definition)
       }
       _ => unreachable!("fused GraphQLx type-system-document arm received a non-inline string"),
     };
@@ -248,7 +245,7 @@ where
      inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| match token {
       GraphqlxToken::<'inp, Src>::LitBlockStr(value) => {
         described_after_string(inp, StringValue::new(span, value.into()))
-          .map(ImportOrTypeSystemDefinitionOrExtension::Definition)
+          .map(TypeSystemItem::Definition)
       }
       _ => unreachable!("fused GraphQLx type-system-document arm received a non-block string"),
     };
@@ -261,13 +258,13 @@ where
     let keyword = keyword_of(&token);
     match token {
       GraphqlxToken::<'inp, Src>::Identifier(_) => match keyword {
-        Some(ContextualKeyword::Import) => {
-          super::super::import::import_definition_after_keyword(inp, span.start())
-            .map(ImportOrTypeSystemDefinitionOrExtension::Import)
+        Some(ContextualKeyword::Use) => {
+          super::super::use_tree::use_definition_after_keyword(inp, span.start())
+            .map(TypeSystemItem::Use)
         }
         Some(ContextualKeyword::Extend) => {
           super::extension::type_system_extension_after_extend(inp, span.start())
-            .map(ImportOrTypeSystemDefinitionOrExtension::Extension)
+            .map(TypeSystemItem::Extension)
         }
         Some(
           keyword @ (ContextualKeyword::Schema
@@ -280,14 +277,12 @@ where
           | ContextualKeyword::Input),
         ) => type_system_definition_after_keyword(inp, keyword, span.start()).map(|definition| {
           let span = *definition.span();
-          ImportOrTypeSystemDefinitionOrExtension::Definition(Described::new(
-            span, None, definition,
-          ))
+          TypeSystemItem::Definition(Described::new(span, None, definition))
         }),
         _ => Err(
           DialectGraphqlxError::unexpected_token(
             kind,
-            Expectation::Production("an import, a type-system definition or an extension"),
+            Expectation::Production("a use item, a type-system definition or an extension"),
             span,
           )
           .into(),
@@ -307,7 +302,7 @@ where
     ParseAttempt::Accept(entry) => Ok(entry),
     ParseAttempt::Decline => expected_definition_phase(
       inp,
-      Expectation::Production("an import, a type-system definition or an extension"),
+      Expectation::Production("a use item, a type-system definition or an extension"),
     ),
   }
 }
@@ -330,9 +325,9 @@ where
 }
 
 definition_parser!(
-  /// Parses a nonempty import-aware GraphQLx type-system document.
+  /// Parses a nonempty GraphQLx type-system document.
   ///
-  /// Imports, generic headers, qualified paths, and `where` clauses are
+  /// `use` items, generic headers, rooted paths, and `where` clauses are
   /// GraphQLx extensions.
   ///
   /// See the [GraphQL Document specification](https://spec.graphql.org/draft/#Document).
@@ -341,13 +336,11 @@ definition_parser!(
   TypeSystemDocument<GraphqlxSlice<'inp, Src>>,
   [contextual],
   {
-    let Spanned { span, data: entries } = import_or_type_system_definition_or_extension
+    let Spanned { span, data: entries } = type_system_item
       .repeated_while::<_, U1>(decide_document_head::<Src, Ctx>)
       .at_least(1)
       .collect_with(Vec::new())
-      .map(
-        |entries: Vec<ImportOrTypeSystemDefinitionOrExtension<GraphqlxSlice<'inp, Src>>>| entries,
-      )
+      .map(|entries: Vec<TypeSystemItem<GraphqlxSlice<'inp, Src>>>| entries)
       .token_spanned()
       .parse_input(inp)?;
     Ok(TypeSystemDocument::new(span, entries))
@@ -386,9 +379,9 @@ impl_definition_api!(
   [contextual]
 );
 impl_definition_api!(
-  /// Parses a nonempty import-aware GraphQLx type-system document.
+  /// Parses a nonempty GraphQLx type-system document.
   ///
-  /// Imports, generic headers, qualified paths, and `where` clauses are
+  /// `use` items, generic headers, rooted paths, and `where` clauses are
   /// GraphQLx extensions.
   ///
   /// See the [GraphQL Document specification](https://spec.graphql.org/draft/#Document).
@@ -398,13 +391,14 @@ impl_definition_api!(
   [contextual]
 );
 impl_definition_api!(
-  /// Parses one import-aware GraphQLx type-system document entry.
+  /// Parses one GraphQLx type-system document entry: a `use` item, a type-system definition or an
+  /// extension.
   ///
-  /// Imports are a GraphQLx extension.
+  /// `use` items are a GraphQLx extension.
   ///
   /// See the [GraphQL Document specification](https://spec.graphql.org/draft/#Document).
   S,
-  ImportOrTypeSystemDefinitionOrExtension<S>,
-  import_or_type_system_definition_or_extension,
+  TypeSystemItem<S>,
+  type_system_item,
   [contextual]
 );

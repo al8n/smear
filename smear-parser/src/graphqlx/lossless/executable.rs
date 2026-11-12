@@ -55,9 +55,9 @@
 //!
 //! # `executable_document` loops over `document.rs`'s entry, not over `executable_definition`
 //!
-//! `graphqlx/syntactic/executable/mod.rs`'s document admits an import at every position, and
-//! divergence 22 says that import may not be described. Both facts live in
-//! `document.rs`'s `import_or_executable_definition`, which is where the *other* two roots make
+//! `graphqlx/syntactic/executable/mod.rs`'s document admits a `use` item at every position, and
+//! divergence 22 says that item may not be described. Both facts live in
+//! `document.rs`'s `use_or_executable_definition`, which is where the *other* two roots make
 //! the same decision; this document's loop reaches it rather than repeating either half.
 
 use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
@@ -362,7 +362,7 @@ lossless_production! {
           match depth::root_turn(
             inp,
             stop,
-            super::document::import_or_executable_definition::<Src, Ctx>,
+            super::document::use_or_executable_definition::<Src, Ctx>,
           ) {
             RootTurn::Parsed { .. } => {}
             RootTurn::EndsTheDocument { error } => return Err(error),

@@ -198,7 +198,7 @@ mod graphqlx {
   /// A document with every entry kind, and non-ASCII where a source type's text rule matters: a
   /// comment and a block-string description.
   const DOC: &str = r#"# café — a comment
-import { User } from "types.graphqlx"
+use "./types"::{User}
 """A documented type — and 中文.""" type User<T> where T: Node { id: ID }
 query GetUser { user { id } }
 extend type User<String> { displayName: String }
@@ -310,7 +310,7 @@ extend type User<String> { displayName: String }
         parsed.span().end(),
         parsed.definitions().len(),
       );
-      assert_eq!(want.2, 4, "an import, a type, a query and an extension");
+      assert_eq!(want.2, 4, "a `use` item, a type, a query and an extension");
 
       assert_eq!(
         outline!(smol_bytes_0_2::shared::Bytes),

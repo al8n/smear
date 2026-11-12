@@ -394,6 +394,57 @@ All notable changes to Smear are documented in this file.
   syntactic `path`, `try_path`, `Path::graphqlx` and `Path::try_graphqlx`
   require the dialect error conversion every other path production already
   required.
+- `smear-lexer`! and `smear-parser`!: GraphQLx's `import … from` becomes `use`,
+  a tree of paths, and `use` and `mod` are its keywords. `ContextualKeyword::Use`
+  and `::Mod` take the places of `Import` and `From`, so the list stays at 45 and
+  only those two discriminants change meaning, and
+  `smear_lexer::keywords::{Import, From}` become `{Use, Mod}`. `mod` has no
+  grammar yet: at an item's head it is what any unknown head is. A `use` item is
+  `use UseTree`, and a tree is a path with an optional `as Name`, or a scope
+  followed by a glob `*` or by a group `{ UseTree+ }`; the scope is a bare root
+  (`~::`, `^::` or `..::`), a path and its `::`, or an inline string source with
+  the names after it and a `::`. One token decides at every step, a tree ends at
+  the first token that cannot continue it, `as` after a complete path is always
+  the keyword, a group's trees start with a name, and no description may
+  precede the item. A `use` item stands anywhere among a document's entries, in
+  all three document kinds, before or after a definition. Every form `import`
+  accepted, and its spelling now:
+
+  | before | after |
+  |---|---|
+  | `import * from "m"` | `use "m"::*` |
+  | `import * as ns from "m"` | `use "m" as ns` |
+  | `import * as a::b from "m"` | `use "m" as b`: an alias is one name |
+  | `import { A } from "m"` | `use "m"::{A}`, or `use "m"::A` |
+  | `import { A, B } from "m"` | `use "m"::{A, B}` |
+  | `import { A as B } from "m"` | `use "m"::{A as B}` |
+  | `import { A as ns::B } from "m"` | `use "m"::{A as B}`: an alias is one name |
+  | `import { * } from "m"` | `use "m"::*` |
+  | `import { * as ns } from "m"` | `use "m" as ns` |
+  | `import { A, * as ns } from "m"` | two items, `use "m"::{A}` and `use "m" as ns`: a bare `*` is no tree |
+
+  In the AST, `UseDefinition { span, tree }` and `UseTree { span, prefix, kind }`
+  replace `ImportDefinition`, `ImportClause`, `ImportList`, `ImportMember`,
+  `NamedSpecifier` and `WildcardSpecifier`. `UsePrefix` is `Root(PathRoot)`,
+  `Path(Path)` or `Source { source, segments }`, and `UseTreeKind` is
+  `Simple { alias }`, `Glob` or `Group(Nested<UseTree>)`; both are
+  `#[non_exhaustive]`, `UseTree::new` takes `Leaf` names and spans, and a tree
+  is released by a loop, as a selection set is. The document entries
+  `ImportOrTypeSystemDefinitionOrExtension`, `ImportOrExecutableDefinition` and
+  `ImportOrDefinitionOrExtension` become `TypeSystemItem` (`#[non_exhaustive]`),
+  `UseOrExecutableDefinition` and `DocumentItem`, each with a `Use` variant, and
+  their dispatchers `type_system_item`, `use_or_executable_definition` and
+  `document_item`; the productions are `syntactic::use_tree::{use_tree,
+  use_definition}`. `Expectation` trades `Import`, `From`, `ImportClause` and
+  `ImportMember` for `Use`, `UseTree`, `NameGlobOrGroup`, `Tilde`, `DotDot` and
+  `Caret`, and `As` now names the alias's keyword. In the lossless layer
+  `SyntaxKind`'s `ImportDefinition` (96) and `ImportList` (97) become
+  `UseDefinition` and `UseTree` in place, and `NamedSpecifier` and
+  `WildcardSpecifier` go, which moves the raw value of every later kind down by
+  two: `DefinitionTypeParam` is 98 where it was 100, and `Root` is 112 where it
+  was 114. The typed `UseDefinition` and `UseTree` replace the four import
+  wrappers, every document root's `import_definitions` is `use_definitions`, and
+  the lossless module is `use_tree`.
 
 ## [0.0.1] - 2026-10-30
 

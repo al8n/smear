@@ -1,0 +1,52 @@
+Root@0..54
+  Document@0..54
+    UnionTypeExtension@0..40
+      Name@0..6 "extend"
+      Space@6..7 " "
+      Name@7..12 "union"
+      Space@12..13 " "
+      ExtensionName@13..17
+        Path@13..14
+          Name@13..14 "U"
+        ExtensionTypeGenerics@14..17
+          LAngle@14..15 "<"
+          Name@15..16 "A"
+          RAngle@16..17 ">"
+      Space@17..18 " "
+      UnionMemberTypes@18..26
+        Equal@18..19 "="
+        Space@19..20 " "
+        TypePath@20..22
+          Path@20..22
+            Name@20..21 "X"
+            Space@21..22 " "
+        Pipe@22..23 "|"
+        Space@23..24 " "
+        TypePath@24..26
+          Path@24..26
+            Name@24..25 "Y"
+            Space@25..26 " "
+      WhereClause@26..40
+        Name@26..31 "where"
+        Space@31..32 " "
+        WherePredicate@32..40
+          TypePath@32..33
+            Path@32..33
+              Name@32..33 "A"
+          Colon@33..34 ":"
+          Space@34..35 " "
+          TypePath@35..40
+            Path@35..40
+              Name@35..39 "Node"
+              Newline@39..40 "\n"
+    UseDefinition@40..54
+      Name@40..43 "use"
+      Space@43..44 " "
+      UseTree@44..54
+        Path@44..54
+          Caret@44..45 "^"
+          PathSeparator@45..47 "::"
+          Name@47..50 "dep"
+          PathSeparator@50..52 "::"
+          Name@52..53 "X"
+          Newline@53..54 "\n"

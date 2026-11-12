@@ -19,7 +19,7 @@ pub mod keyword;
 /// - Minimal memory footprint
 /// - Maximum parsing speed
 /// - Zero-copy token references
-/// - Supports GraphQLx extensions (generics, imports, type paths, etc.)
+/// - Supports GraphQLx extensions (generics, `use` items, type paths, etc.)
 ///
 /// See [`SyntacticToken`](syntactic::SyntacticToken) for detailed documentation.
 pub mod syntactic;
@@ -37,7 +37,7 @@ pub mod syntactic;
 /// - Complete source fidelity
 /// - Access to all comments and formatting
 /// - Build Concrete Syntax Trees (CST)
-/// - Supports GraphQLx extensions (generics, imports, type paths, etc.)
+/// - Supports GraphQLx extensions (generics, `use` items, type paths, etc.)
 ///
 /// See [`LosslessToken`](lossless::LosslessToken) for detailed documentation.
 pub mod lossless;

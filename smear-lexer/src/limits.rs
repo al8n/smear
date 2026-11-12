@@ -129,6 +129,17 @@ use tokora::state::{
 /// | GraphQL lossless, inline fragments, `str`, aarch64 | 722 (12.7x cheaper per level) |
 /// | GraphQL lossless, **the recovery bypass** `{ ) f {`, `str`, aarch64 | **673** |
 /// | GraphQLx lossless, the same with `)` and with `>` alike, `str`, aarch64 | **671** |
+/// | GraphQLx syntactic, `use` groups `a::{ … }`, `str` | **48 or deeper** — a lower bound |
+/// | GraphQLx lossless, `use` groups `a::{ … }`, `str` | **48 or deeper** — a lower bound |
+///
+/// **The two `use`-group rows are not bisections.** A `use` item's group is a recursive position
+/// the dialect gained after the rest of the table was measured, and its rows were never bisected:
+/// one cell in `smear/tests/nesting_depth.rs`,
+/// `a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread`, parses a chain of 48
+/// groups — twice this ceiling, raised for that cell only — on the 2 MiB thread libtest hands every
+/// test, in both layers, and asserts that it returns. CI running that cell is what proves 48, and
+/// nothing proves more, so the rows cannot stand in for the boundary: they hold this number's
+/// margin only at 48 / 24 = 2.0x, the least the cell can show.
 ///
 /// The last two rows are the shape that walked past the first fix, and they are why the count
 /// moved to the parse. They cost about the same per level as the row above them — a `field` frame
@@ -278,6 +289,11 @@ const _: () = assert!(
 /// | input objects `{k: … }` | 886 | 884 |
 /// | list types `[ … ]Int` | 1083 | 1384 |
 /// | list values `[ … ]` | 1303 | 1299 |
+/// | `use` groups `a::{ … }` | — | **48 or deeper**, a lower bound |
+///
+/// **The `use`-group row is the lower bound [`MAX_NESTING_DEPTH`]'s table records, not a
+/// bisection,** so this wall's 1.9x margin is not re-proved for that cycle: 256 keeps it only if
+/// the cycle returns at 487 levels or deeper, which nothing in this tree shows.
 ///
 /// **The shape list is the suite's own, not a guess.** It is the strongly-connected components of
 /// each dialect's lossless call graph — the enumeration `smear/tests/nesting_depth.rs`'s

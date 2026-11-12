@@ -11,14 +11,18 @@
 //! * `graphql::ast::SelectionSet` — and GraphQLx's — through an inline fragment's required nested
 //!   set and a field's optional one, a container of children.
 //!
-//! Neither needs a parse. `Type: From<ListType<Self>>` and every selection carrier's `new` are
-//! public, so **the chain is built with a loop and no recursion at all**, exactly as the fixtures
-//! below build it, and the parser's own nesting ceiling never sees it. Nothing measured the depth
-//! on the way in, so nothing could refuse on the way out: releasing a node is not fallible, there
-//! is no diagnostic to return, and the process aborts. Measured at `9f584d6` on
-//! `aarch64-apple-darwin`, unoptimised, on the main thread's 8 MiB: a `Type` chain released 73 437
-//! levels and aborted at 74 843; a `SelectionSet` chain released 22 812 and aborted at 24 218. A
-//! 2 MiB test thread reaches both at about a quarter of that.
+//! A GraphQLx `use` tree owns itself the same way, through its group's trees, and was built on the
+//! repair from the start: a group holds its trees in the same `Nested` container a selection set
+//! holds its selections in.
+//!
+//! None needs a parse. `Type: From<ListType<Self>>`, every selection carrier's `new` and
+//! `UseTree::new` are public, so **the chain is built with a loop and no recursion at all**,
+//! exactly as the fixtures below build it, and the parser's own nesting ceiling never sees it.
+//! Nothing measured the depth on the way in, so nothing could refuse on the way out: releasing a
+//! node is not fallible, there is no diagnostic to return, and the process aborts. Measured at
+//! `9f584d6` on `aarch64-apple-darwin`, unoptimised, on the main thread's 8 MiB: a `Type` chain
+//! released 73 437 levels and aborted at 74 843; a `SelectionSet` chain released 22 812 and
+//! aborted at 24 218. A 2 MiB test thread reaches both at about a quarter of that.
 //!
 //! # How this file can hold that without killing the runner
 //!
@@ -57,8 +61,8 @@
 //! dialect's `ast` module does not exist. A `#![cfg(all(feature = "graphql", feature =
 //! "graphqlx"))]` header would satisfy both of those rows — by compiling a test binary holding
 //! **zero** tests, which exits 0 and pins nothing. So the file's own gate stays at `parser` and
-//! each fixture carries the dialect it actually names: seven run under `graphql` alone, two under
-//! `graphqlx` alone, and ten with both. The tenth is `a_deep_graphqlx_list_type_is_released`,
+//! each fixture carries the dialect it actually names: seven run under `graphql` alone, three under
+//! `graphqlx` alone, and eleven with both. The eleventh is `a_deep_graphqlx_list_type_is_released`,
 //! which is the one fixture that genuinely needs the pair — and it is not linked here, because a
 //! single-dialect row is a build in which that item does not exist. Its own documentation says
 //! why it needs both.
@@ -230,6 +234,35 @@ fn graphqlx_leaf() -> x::Type<&'static str> {
     None,
     false,
   ))
+}
+
+/// A `use` tree's group holds trees, and `UseTree::new` is public, so a caller nests one however
+/// deep with a loop and no parser in sight.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn a_deep_use_tree_is_released() {
+  on_a_small_stack(|| {
+    let segment = || {
+      x::Path::new(
+        span(),
+        x::PathRoot::Relative,
+        Vec::from([x::Name::new(span(), "a")]),
+      )
+    };
+    let mut tree = x::UseTree::new(
+      span(),
+      x::UsePrefix::Path(segment()),
+      x::UseTreeKind::Simple { alias: None },
+    );
+    for _ in 0..DEPTH {
+      tree = x::UseTree::new(
+        span(),
+        x::UsePrefix::Path(segment()),
+        x::UseTreeKind::Group(Vec::from([tree]).into()),
+      );
+    }
+    release(x::UseDefinition::new(span(), tree));
+  });
 }
 
 /// A field's optional nested set, which is how a query nests.

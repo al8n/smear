@@ -181,21 +181,26 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
     "ExecutableDefinition",
     "a choice of OperationDefinition | FragmentDefinition",
   ),
-  ("ImportClause", "a choice of ImportList | WildcardSpecifier"),
   (
-    "ImportMember",
-    "a choice of NamedSpecifier | WildcardSpecifier",
+    "UsePrefix",
+    "a choice of a bare PathRoot | Path | string source; a bare root's tokens, the Path node and \
+     the StringValue node are each already children of the UseTree they lead",
   ),
   (
-    "ImportOrDefinitionOrExtension",
+    "UseTreeKind",
+    "a choice of a binding | glob | group; the `as` and its alias, the `*`, and a group's braces \
+     and trees are direct children of the UseTree",
+  ),
+  (
+    "DocumentItem",
     "the `document` entry dispatcher; a choice, and the winner is the child of Document",
   ),
   (
-    "ImportOrExecutableDefinition",
+    "UseOrExecutableDefinition",
     "the same dispatcher for ExecutableDocument",
   ),
   (
-    "ImportOrTypeSystemDefinitionOrExtension",
+    "TypeSystemItem",
     "the same dispatcher for TypeSystemDocument",
   ),
   // ---- one token is not a region: the parent already says what it is ----
@@ -290,7 +295,7 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   ),
   (
     "InlineStringValue",
-    "a StringValue node whose token child is InlineString; the import's `from` clause is the \
+    "a StringValue node whose token child is InlineString; a use tree's string source is the \
      only position that narrows to it, and it narrows on the token, not on the node",
   ),
   (

@@ -14,7 +14,7 @@ Blazing fast, zero-copy lexer for GraphQL and GraphQL-like DSLs.
 - **Dual Token Streams**: Choose `SyntacticToken` (fast, skips trivia) for servers or `LosslessToken` (complete, preserves formatting) for tooling
 - **Generic Over Source Types**: Works with `&str`, `&[u8]`, `bytes::Bytes`, `hipstr::{HipStr, HipByt}`, smol-bytes 0.2's `Bytes` and `Utf8Bytes`, and custom types
 - **Draft Spec Compliant**: Fully implements GraphQL draft specification lexical grammar
-- **GraphQLx Support**: Extended tokens for generics, imports, namespacing, and more
+- **GraphQLx Support**: Extended tokens for generics, `use` items, namespacing, and more
 - **`no_std` Compatible**: Three tiers — core, `alloc` and `std`. With no allocator the crate still compiles and keeps `hints`, `keywords`, `limits` and `punctuator`; the lexers need `alloc`
 - **Comprehensive Error Reporting**: Detailed, actionable error messages with source location tracking
 
@@ -202,7 +202,7 @@ GraphQLx is a **superset of GraphQL**, meaning it includes all standard GraphQL 
     ```rust,ignore
     use smear_lexer::graphqlx::syntactic::Lexer;
 
-    let source = r#"import { User } from "./types.graphqlx""#;
+    let source = r#"use "./types"::User"#;
     let tokens = Lexer::<&str>::new(source);
     ```
 

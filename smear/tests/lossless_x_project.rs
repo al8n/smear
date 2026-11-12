@@ -138,7 +138,7 @@ const TYPE_SYSTEM_ENTRY_FLOOR: usize = 47;
 /// The smallest number of distinct AST node types the compared documents reach.
 ///
 /// Read off the syntactic parse's `Debug` rendering — the same total projection
-/// `tests/support/span_extent.rs` walks — so a corpus that stopped reaching the imports, the
+/// `tests/support/span_extent.rs` walks — so a corpus that stopped reaching the `use` items, the
 /// generics or the set/map families is a floor failure rather than a silent narrowing.
 const OWNER_FLOOR: usize = 91;
 
@@ -1322,7 +1322,7 @@ fn every_integer_radix_and_both_float_radices_survive_the_projection() {
 #[test]
 fn a_present_but_empty_required_container_refuses() {
   for (src, parent, wanted) in [
-    ("import {} from \"m\"", K::ImportList, "an import member"),
+    ("use a::{}", K::UseTree, "a use tree"),
     (
       "type T<> { f: Int }",
       K::DefinitionTypeGenerics,
@@ -1925,10 +1925,10 @@ fn an_unknown_directive_location_refuses() {
 }
 
 #[test]
-fn a_described_import_refuses_as_rubble() {
-  // A description may precede only a definition, so the string in front of an `import` stays
+fn a_described_use_item_refuses_as_rubble() {
+  // A description may precede only a definition, so the string in front of a `use` item stays
   // outside the node it precedes and lands as a bare token under the document.
-  let kind = refuse(&entry("invalid_x_described_import.graphqlx"));
+  let kind = refuse(&entry("invalid_x_described_use.graphqlx"));
   assert_eq!(
     kind,
     ProjectErrorKind::UnexpectedChild {
@@ -1939,10 +1939,10 @@ fn a_described_import_refuses_as_rubble() {
 }
 
 #[test]
-fn an_import_source_that_is_a_block_string_refuses() {
-  // `ImportDefinition` holds an `InlineStringValue`, so a block string here is a shape the AST
+fn a_use_source_that_is_a_block_string_refuses() {
+  // `UsePrefix::Source` holds an `InlineStringValue`, so a block string here is a shape the AST
   // cannot store — the lossless production reports it and builds the node anyway.
-  let kind = refuse(&entry("invalid_x_import_block_string_source.graphqlx"));
+  let kind = refuse(&entry("invalid_x_use_block_string_source.graphqlx"));
   assert_eq!(
     kind,
     ProjectErrorKind::UnexpectedChild {
@@ -1950,6 +1950,67 @@ fn an_import_source_that_is_a_block_string_refuses() {
       found: K::BlockString,
     }
   );
+}
+
+#[test]
+fn a_group_member_with_a_root_or_a_source_refuses() {
+  // A group's trees are relative to the group's prefix, so the grammar starts each with a name.
+  // The lossless production reports a root or a string source there and still builds the member,
+  // so the walk meets it whole and refuses it where it stands: a rooted path at its sigil, inside
+  // the `Path` the root leads, and a bare root or a source at the member's own first child.
+  for (src, parent, found) in [
+    ("use a::{~::b}", K::Path, K::Tilde),
+    ("use a::{..::*}", K::UseTree, K::DotDot),
+    ("use a::{\"x\"::b}", K::UseTree, K::StringValue),
+  ] {
+    let parse = parse_document(src);
+    assert!(
+      parse.has_errors(),
+      "{src}: the lossless parser must report it"
+    );
+    assert!(
+      oracle(src).is_err(),
+      "{src}: the syntactic parser must refuse it"
+    );
+    assert!(
+      !parse
+        .syntax()
+        .descendants_with_tokens()
+        .any(|element| matches!(element.kind(), K::Error | K::Gap)),
+      "{src}: the member must be built whole, or the preflight refuses it and this pins nothing"
+    );
+    assert_eq!(
+      refuse(src),
+      ProjectErrorKind::UnexpectedChild { parent, found },
+      "{src}"
+    );
+  }
+}
+
+#[test]
+fn an_alias_on_a_glob_or_a_group_refuses() {
+  // The grammar gives a glob and a group no alias. The lossless production reports the `as` and
+  // still builds it and its name into the item's tree, after the `*` or the `}` — where the walk's
+  // sequence has ended, so `end` refuses the `as`.
+  for src in ["use a::* as b", "use a::{b} as c"] {
+    let parse = parse_document(src);
+    assert!(
+      parse.has_errors(),
+      "{src}: the lossless parser must report it"
+    );
+    assert!(
+      oracle(src).is_err(),
+      "{src}: the syntactic parser must refuse it"
+    );
+    assert_eq!(
+      refuse(src),
+      ProjectErrorKind::UnexpectedChild {
+        parent: K::UseTree,
+        found: K::Name,
+      },
+      "{src}"
+    );
+  }
 }
 
 #[test]
@@ -2806,30 +2867,25 @@ fn a_keyword_slot_a_walk_collects_is_read_by_spelling() {
     "the word in the slot is read, not counted"
   );
 
-  // The import specifier's second slot, the other shape that collects more than one name.
+  // A use tree's alias slot, the other shape whose own tokens hold more than one name: the `as`
+  // and the alias after it.
   let mut tree = Tree::new();
   tree.open(K::Document);
-  tree.open(K::ImportDefinition);
-  tree.token(K::Name, "import").token(K::Space, " ");
-  tree.open(K::ImportList);
-  tree.token(K::LBrace, "{").token(K::Space, " ");
-  tree.open(K::NamedSpecifier);
-  tree.token(K::Name, "a").token(K::Space, " ");
-  tree.token(K::Name, "b").token(K::Space, " ");
-  tree.open(K::Path).token(K::Name, "ns").close();
-  tree.close();
-  tree.token(K::Space, " ").token(K::RBrace, "}");
-  tree.close();
-  tree.token(K::Space, " ").token(K::Name, "from");
-  tree.token(K::Space, " ");
+  tree.open(K::UseDefinition);
+  tree.token(K::Name, "use").token(K::Space, " ");
+  tree.open(K::UseTree);
   tree
-    .open(K::StringValue)
-    .token(K::InlineString, "\"m\"")
+    .open(K::Path)
+    .token(K::Name, "a")
+    .token(K::Space, " ")
     .close();
+  tree.token(K::Name, "b").token(K::Space, " ");
+  tree.token(K::Name, "c");
+  tree.close();
   tree.close();
   tree.close();
   let node = tree.finish();
-  let text = "import { a b ns } from \"m\"";
+  let text = "use a b c";
   assert_eq!(
     node.text().to_string(),
     text,
@@ -2838,7 +2894,7 @@ fn a_keyword_slot_a_walk_collects_is_read_by_spelling() {
   assert_eq!(
     refuse_tree(node, text),
     ProjectErrorKind::UnexpectedChild {
-      parent: K::NamedSpecifier,
+      parent: K::UseTree,
       found: K::Name,
     },
     "`b` is not `as`, and the slot it sits in reaches no AST field"
@@ -2848,7 +2904,7 @@ fn a_keyword_slot_a_walk_collects_is_read_by_spelling() {
   for src in [
     "directive @d repeatable on FIELD",
     "directive @d on FIELD",
-    "import { a as b } from \"m\"",
+    "use a as b",
   ] {
     assert_eq!(
       project(&parse_document(src), src).expect("projects"),
@@ -3086,7 +3142,7 @@ fn a_described_shorthand_refuses_and_its_recovery_is_not_complete() {
   // **The parser builds this one.** `document.rs`'s `definition_after_description` reports the
   // pair and still parses the operation, and because the description was committed before the mark
   // the node opens at, the string ends up *inside* the `OperationDefinition` — unlike a described
-  // import or extension, where it stays outside and the document level refuses it as rubble.
+  // `use` item or extension, where it stays outside and the document level refuses it as rubble.
   let src = "\"docs\" { id }";
   let parse = parse_executable_document(src);
   assert!(
@@ -3174,40 +3230,31 @@ fn a_described_shorthand_refuses_and_its_recovery_is_not_complete() {
 }
 
 #[test]
-fn an_import_with_both_clause_alternatives_refuses_in_either_order() {
-  // `ImportList | WildcardSpecifier` is a choice, and reading it as `(Some(list), _)` selected the
-  // list while the wildcard's subtree vanished with its bytes still inside the import's extent.
-  // Exclusivity is at the walk now, so the *second* alternative is what refuses — in either order.
-  for (first, second) in [
-    (K::ImportList, K::WildcardSpecifier),
-    (K::WildcardSpecifier, K::ImportList),
-  ] {
+fn a_use_tree_with_both_a_glob_and_a_group_refuses_in_either_order() {
+  // `* | { UseTree+ }` is a choice, and a walk that read it as two optional slots would select one
+  // and let the other's subtree vanish with its bytes still inside the tree's extent. Exclusivity
+  // is at the walk: a glob finishes the tree and a group's `}` closes it, so the *second*
+  // alternative is left for `end`, which refuses it — in either order.
+  for (first, second) in [(K::Asterisk, K::LBrace), (K::LBrace, K::Asterisk)] {
     let mut tree = Tree::new();
     tree.open(K::Document);
-    tree.open(K::ImportDefinition);
-    tree.token(K::Name, "import").token(K::Space, " ");
+    tree.open(K::UseDefinition);
+    tree.token(K::Name, "use").token(K::Space, " ");
+    tree.open(K::UseTree);
+    tree.open(K::Path).token(K::Name, "a").close();
+    tree.token(K::PathSeparator, "::");
     for kind in [first, second] {
-      match kind {
-        K::ImportList => {
-          tree.open(K::ImportList);
-          tree.token(K::LBrace, "{");
-          tree.open(K::NamedSpecifier).token(K::Name, "A").close();
-          tree.token(K::RBrace, "}");
-          tree.close();
-        }
-        _ => {
-          tree.open(K::WildcardSpecifier);
-          tree.token(K::Asterisk, "*");
-          tree.close();
-        }
+      if kind == K::Asterisk {
+        tree.token(K::Asterisk, "*");
+      } else {
+        tree.token(K::LBrace, "{");
+        tree.open(K::UseTree);
+        tree.open(K::Path).token(K::Name, "b").close();
+        tree.close();
+        tree.token(K::RBrace, "}");
       }
-      tree.token(K::Space, " ");
     }
-    tree.token(K::Name, "from").token(K::Space, " ");
-    tree
-      .open(K::StringValue)
-      .token(K::InlineString, "\"m\"")
-      .close();
+    tree.close();
     tree.close();
     tree.close();
     let node = tree.finish();
@@ -3215,7 +3262,7 @@ fn an_import_with_both_clause_alternatives_refuses_in_either_order() {
     assert_eq!(
       refuse_tree(node, &text),
       ProjectErrorKind::UnexpectedChild {
-        parent: K::ImportDefinition,
+        parent: K::UseTree,
         found: second,
       },
       "{first:?} then {second:?}: whichever arrives second is the one with no place"
@@ -3223,7 +3270,7 @@ fn an_import_with_both_clause_alternatives_refuses_in_either_order() {
   }
 
   // Both single-alternative spellings still project, so this is exclusivity and not a ban.
-  for src in ["import { A } from \"m\"", "import * as N from \"m\""] {
+  for src in ["use a::*", "use a::{b}"] {
     let parse = parse_document(src);
     assert!(!parse.has_errors(), "{src}");
     assert_eq!(
@@ -3304,16 +3351,16 @@ fn a_one_of_slot_group_refuses_its_second_member() {
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn an_as_without_its_path_refuses_and_its_recovery_is_not_complete() {
-  // **The parser builds this one.** `graphqlx/lossless/import.rs`'s `optional_alias` consumes the
-  // `as`, reports when no path follows, and closes the specifier with no hole — so the walk saw a
-  // `NamedSpecifier` whose `Path` slot was simply empty and answered an *unaliased* import with
-  // `as` inside its extent. A committing prefix commits: `if opt(as) then require(Path)`.
-  let src = "import { A as } from \"m\"";
+fn an_as_without_its_name_refuses_and_its_recovery_is_not_complete() {
+  // **The parser builds this one.** `graphqlx/lossless/use_tree.rs`'s `alias` consumes the `as`,
+  // reports when no name follows, and closes the tree with no hole — so a walk that read the alias
+  // as optional would see a tree whose alias slot was simply empty and answer an *unaliased* tree
+  // with `as` inside its extent. A committing prefix commits: `if opt(as) then require(Name)`.
+  let src = "use a as";
   let parse = parse_executable_document(src);
   assert!(
     parse.has_errors(),
-    "the production reports the missing target"
+    "the production reports the missing name"
   );
   assert!(
     !parse
@@ -3324,7 +3371,7 @@ fn an_as_without_its_path_refuses_and_its_recovery_is_not_complete() {
   );
   assert!(
     executable_oracle(src).is_err(),
-    "the syntactic parser rejects a committed alias with no target"
+    "the syntactic parser rejects a committed alias with no name"
   );
   assert!(
     project_executable_document(&parse, src).is_err(),
@@ -3337,39 +3384,18 @@ fn an_as_without_its_path_refuses_and_its_recovery_is_not_complete() {
   assert_eq!(recovery.skipped(), 1, "the entry is counted as lost");
   assert!(!recovery.is_complete(), "and the recovery is not complete");
 
-  // The wildcard twin, caller-built. It has to be: `import * as from "m"` is **not** this shape —
-  // `optional_alias` peeks an identifier head, so `from` becomes the alias path and the import
-  // then has no `from` keyword at all, which is the lenient missing-token class and projects.
-  let text = "import * as from \"m\"";
-  let mut tree = Tree::new();
-  tree.open(K::Document);
-  tree.open(K::ImportDefinition);
-  tree.token(K::Name, "import").token(K::Space, " ");
-  tree.open(K::WildcardSpecifier);
-  tree.token(K::Asterisk, "*").token(K::Space, " ");
-  tree.token(K::Name, "as");
-  tree.close();
-  tree.token(K::Space, " ").token(K::Name, "from");
-  tree.token(K::Space, " ");
-  tree
-    .open(K::StringValue)
-    .token(K::InlineString, "\"m\"")
-    .close();
-  tree.close();
-  tree.close();
-  let node = tree.finish();
-  assert_eq!(node.text().to_string(), text);
+  // The string-source twin: the same `alias` production after a source, and the same coupling.
   assert_eq!(
-    refuse_tree(node, text),
+    refuse("use \"m\" as"),
     ProjectErrorKind::MissingChild {
-      parent: K::WildcardSpecifier,
-      wanted: "the path an `as` renames to",
+      parent: K::UseTree,
+      wanted: "the name an `as` gives",
     },
-    "the same coupling on the other specifier"
+    "the same coupling after a string source"
   );
 
   // Both legal spellings still project, so this is a coupling and not a ban on `as`.
-  for src in ["import { A as B } from \"m\"", "import * as N from \"m\""] {
+  for src in ["use a as b", "use \"m\" as n"] {
     let parse = parse_document(src);
     assert!(!parse.has_errors(), "{src}");
     assert_eq!(
@@ -3457,7 +3483,7 @@ fn a_dangling_separator_refuses_in_every_separated_walk() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// the report-and-build table, 65/65
+// the report-and-build table, 67/67
 // ---------------------------------------------------------------------------------------------
 
 /// Which door a probe goes through.
@@ -3502,7 +3528,7 @@ const SITES: &[Site] = &[
   (
     "document.rs",
     "report",
-    "\"d\" import { A } from \"m\"",
+    "\"d\" use \"m\"::{A}",
     Root::Mixed,
     "UnexpectedChild Document InlineString",
     Absent::Not,
@@ -3526,7 +3552,7 @@ const SITES: &[Site] = &[
   (
     "document.rs",
     "report",
-    "\"d\" import { A } from \"m\"",
+    "\"d\" use \"m\"::{A}",
     Root::Executable,
     "UnexpectedChild ExecutableDocument InlineString",
     Absent::Not,
@@ -3542,7 +3568,7 @@ const SITES: &[Site] = &[
   (
     "document.rs",
     "report",
-    "\"d\" import { A } from \"m\"",
+    "\"d\" use \"m\"::{A}",
     Root::TypeSystem,
     "UnexpectedChild TypeSystemDocument InlineString",
     Absent::Not,
@@ -3596,52 +3622,68 @@ const SITES: &[Site] = &[
     Absent::Token(K::VariablesDefinition, ")"),
   ),
   (
-    "import.rs",
+    "use_tree.rs",
     "report",
-    "import { A as } from \"m\"",
+    "use a as",
     Root::Mixed,
-    "MissingChild NamedSpecifier",
+    "MissingChild UseTree",
     Absent::Imaged,
   ),
   (
-    "import.rs",
+    "use_tree.rs",
     "report",
-    "import { } from \"m\"",
+    "use a::* as b",
     Root::Mixed,
-    "MissingChild ImportList",
+    "UnexpectedChild UseTree Name",
+    Absent::Not,
+  ),
+  (
+    "use_tree.rs",
+    "report",
+    "use a::{}",
+    Root::Mixed,
+    "MissingChild UseTree",
     Absent::Imaged,
   ),
   (
-    "import.rs",
+    "use_tree.rs",
     "report",
-    "import { A } \"m\"",
+    "use a::{~::b}",
+    Root::Mixed,
+    "UnexpectedChild Path Tilde",
+    Absent::Not,
+  ),
+  (
+    "use_tree.rs",
+    "unclosed",
+    "use a::{b",
     Root::Mixed,
     "Ok",
-    Absent::Token(K::ImportDefinition, "from"),
+    Absent::Token(K::UseTree, "}"),
   ),
   (
-    "import.rs",
+    "use_tree.rs",
     "report",
-    "import { A } from \"\"\"m\"\"\"",
+    "use a::",
+    Root::Mixed,
+    "MissingChild UseTree",
+    Absent::Imaged,
+  ),
+  (
+    "use_tree.rs",
+    "report",
+    "use \"\"\"m\"\"\"",
     Root::Mixed,
     "UnexpectedChild StringValue BlockString",
     Absent::Not,
   ),
   (
-    "import.rs",
+    "use_tree.rs",
     "report",
-    "import { A } from",
+    "use",
     Root::Mixed,
-    "MissingChild ImportDefinition",
+    "MissingChild UseDefinition",
     Absent::Imaged,
-  ),
-  (
-    "import.rs",
-    "unclosed",
-    "import { A",
-    Root::Mixed,
-    "MissingChild ImportDefinition",
-    Absent::Token(K::ImportList, "}"),
   ),
   (
     "generic.rs",
@@ -4200,7 +4242,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (49, 16),
+    (51, 16),
     "the two families' populations"
   );
 
@@ -4627,7 +4669,7 @@ fn the_separated_atoms_refuse_at_the_obstruction() {
 
 #[test]
 fn a_type_condition_without_its_on_projects_what_the_text_with_it_parses_to() {
-  // `(TypeCondition, on)` meets the leniency criterion exactly as `(ImportDefinition, from)` does:
+  // `(TypeCondition, on)` meets the leniency criterion exactly as `(DirectiveDefinition, on)` does:
   // the keyword has no AST image — the condition stores only its path — and the lossless
   // production reports a missing one and still builds the node, hole-free, around the path. Codex
   // round five's first finding: a required `on` atom refused the present path and cost the whole
@@ -4689,8 +4731,8 @@ fn a_contextual_keyword_is_a_name_at_every_name_position() {
   // except at the two positions that make a rule of it, a fragment's name and an enum value's
   // declaring name, which `a_fragment_named_on_refuses` and `an_enum_value_named_true_refuses`
   // pin. Round five read 45 mutation-law violations as a reserved-spelling rule missing at four
-  // name positions; every one was a mutation of a corpus tree already missing its `}` or its
-  // `from`, and each of these texts is accepted and projects to the parse.
+  // name positions; every one was a mutation of a corpus tree already missing a lenient token, and
+  // each of these texts is accepted and projects to the parse.
   for src in [
     "type on { x: Int }",
     "type true { x: Int }",
@@ -4701,8 +4743,8 @@ fn a_contextual_keyword_is_a_name_at_every_name_position() {
     "type T { x: on }",
     "type T { x: null }",
     "type T { x: ns::true }",
-    "import { on } from \"m\"",
-    "import { true as null } from \"m\"",
+    "use a::{on}",
+    "use a::{true as null}",
     "extend type on @k",
     "query on($on: Int) { on: true(on: $on) }",
     "fragment F on on { f }",
@@ -4780,7 +4822,7 @@ fn every_walk_is_a_transcription() {
     1,
     "the cursor's trivia skip, and nothing else"
   );
-  assert_eq!(count("Cursor::new("), 74, "the walks, one cursor each");
+  assert_eq!(count("Cursor::new("), 73, "the walks, one cursor each");
 }
 
 #[test]
@@ -4889,6 +4931,8 @@ fn every_unclosed_closer_projects_what_the_closed_text_parses_to() {
     ("type T { f: A<B", ">}"),
     ("type T { f: [Int", "]}"),
     ("type T<A", ">"),
+    ("use a::{b", "}"),
+    ("use a::{b::{c", "}}"),
   ] {
     let parse = parse_document(open);
     assert!(parse.has_errors(), "{open}");
@@ -4915,9 +4959,8 @@ fn every_unclosed_closer_projects_what_the_closed_text_parses_to() {
     }
   }
 
-  // The four whose closed text the parser still refuses. An import list without its `}` is
-  // reachable only at end of input, where the import has no source either; the other three are
-  // lists whose definition is lost at end of input, left as orphans beside its rubble.
+  // The three whose closed text the parser still refuses: lists whose definition is lost at end of
+  // input, left as orphans beside its rubble.
   for (src, found) in [
     ("query Q($a: Int", K::Name),
     ("type T { f(a: Int", K::Name),
@@ -4938,17 +4981,6 @@ fn every_unclosed_closer_projects_what_the_closed_text_parses_to() {
         found,
       },
       "{src}: the refusal is the rubble's, not the list's"
-    );
-  }
-  for src in ["import { A", "import { A }"] {
-    assert!(oracle(src).is_err(), "{src}");
-    assert_eq!(
-      project(&parse_document(src), src).expect_err(src).kind(),
-      &ProjectErrorKind::MissingChild {
-        parent: K::ImportDefinition,
-        wanted: "a module to import from",
-      },
-      "{src}: the refusal is the source's, not the list's"
     );
   }
 }

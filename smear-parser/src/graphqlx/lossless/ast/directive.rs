@@ -18,8 +18,8 @@
 //!
 //! The same ruling covers [`Arguments`], `ArgumentsDefinition`, `FieldsDefinition`,
 //! `InputFieldsDefinition`, `EnumValuesDefinition`, `VariablesDefinition`,
-//! `RootOperationTypesDefinition`, `ImplementInterfaces`, `UnionMemberTypes`, `ImportList`,
-//! `WhereClause` and all three generic lists.
+//! `RootOperationTypesDefinition`, `ImplementInterfaces`, `UnionMemberTypes`, `WhereClause` and
+//! all three generic lists.
 //!
 //! # The one divergence, and it is in every tree
 //!

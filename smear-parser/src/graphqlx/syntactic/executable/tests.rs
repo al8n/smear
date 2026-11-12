@@ -279,7 +279,7 @@ fn fragments_preserve_generic_headers_paths_and_where_constraints() {
 }
 
 #[test]
-fn described_executables_and_documents_dispatch_imports_without_reclassifying_heads() {
+fn described_executables_and_documents_dispatch_use_items_without_reclassifying_heads() {
   fn check_definition<S: AsRef<[u8]>>(definition: ast::DescribedExecutableDefinition<S>) {
     assert!(definition.description().is_some());
     assert!(definition.node().is_operation());
@@ -293,7 +293,7 @@ fn described_executables_and_documents_dispatch_imports_without_reclassifying_he
 
   fn check_document<S: AsRef<[u8]>>(document: ast::ExecutableDocument<S>) {
     assert_eq!(document.definitions().len(), 3);
-    assert!(document.definitions()[0].is_import());
+    assert!(document.definitions()[0].is_use());
     assert!(document.definitions()[1].is_definition());
     assert!(document.definitions()[2].is_definition());
     assert!(
@@ -305,17 +305,17 @@ fn described_executables_and_documents_dispatch_imports_without_reclassifying_he
   }
   accept_all!(
     ast::ExecutableDocument::graphqlx,
-    "import { Node } from \"types\" \"query docs\" query Get<T> { items { ... ^::Item<T> } } fragment<T> Item<T> on ^::model::Item<T> { id }",
+    "use \"./types\"::{Node} \"query docs\" query Get<T> { items { ... ^::Item<T> } } fragment<T> Item<T> on ^::model::Item<T> { id }",
     check_document
   );
 
   assert!(
     drive_str(
       ast::ExecutableDocument::graphqlx,
-      "\"docs\" import { Node } from \"types\""
+      "\"docs\" use \"./types\"::{Node}"
     )
     .is_err(),
-    "a description commits to an executable definition and cannot decorate an import"
+    "a description commits to an executable definition and cannot decorate a `use` item"
   );
 }
 

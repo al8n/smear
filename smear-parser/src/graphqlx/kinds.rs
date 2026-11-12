@@ -8,8 +8,8 @@
 //! 1. **The images** are [`smear_lexer::graphqlx::lossless::LosslessTokenKind`]'s thirty-seven
 //!    variants, in that enum's declaration order. The block is the *lexer's*, not the grammar's,
 //!    because recovery commits every skipped token into an [`Error`](SyntaxKind::Error) node — an
-//!    image no production expects (`+`, `-`, `*` outside an import) still has to be nameable when
-//!    it lands in the tree.
+//!    image no production expects (`+`, `-`, `*` outside a `use` glob) still has to be nameable
+//!    when it lands in the tree.
 //! 2. **The nodes** are GraphQLx's productions in `graphqlx/syntactic/**` and the AST carriers they
 //!    build in `graphqlx/ast/**`. `tests/lossless_x_kinds.rs` re-extracts both sets from those
 //!    directories and compares them against [`SyntaxKind::ALL`], so a kind that names nothing in
@@ -23,7 +23,7 @@
 //!
 //! - **`Identifier` becomes [`Name`](SyntaxKind::Name).** GraphQLx's grammar calls this token a
 //!   name — `graphqlx::syntactic::name` builds `graphqlx::ast::Name` — and every contextual
-//!   keyword (`query`, `on`, `import`, `where`, `set`, `map`, `true`, …, forty-five of them) is
+//!   keyword (`query`, `on`, `use`, `where`, `set`, `map`, `true`, …, forty-five of them) is
 //!   *also* this image, told apart on its spelling and never on its kind.
 //! - **The three line terminators fold onto one [`Newline`](SyntaxKind::Newline).** `\n`, `\r` and
 //!   `\r\n` are three spellings of one lexical concept; the lexer splits them because it must match
@@ -36,7 +36,7 @@
 //! # What GraphQLx has that a GraphQL-shaped space would not predict
 //!
 //! Ten images (`<`, `>`, `::`, `~`, `..`, `^`, `=>`, `*`, `+`, `-`) and, among the nodes, the whole
-//! import and generic families,
+//! `use` and generic families,
 //! [`SetValue`](SyntaxKind::SetValue)/[`MapValue`](SyntaxKind::MapValue)/
 //! [`MapEntry`](SyntaxKind::MapEntry), [`Path`](SyntaxKind::Path),
 //! [`TypePath`](SyntaxKind::TypePath) and [`TypeGenerics`](SyntaxKind::TypeGenerics).
@@ -56,7 +56,7 @@
 //! reason:
 //!
 //! - **A choice is not a region.** `Type`, `Selection`, `InputValue`, `TypeDefinition`,
-//!   `ImportClause` and the rest dispatch to alternatives that are each already a node; the tree
+//!   `UsePrefix` and the rest dispatch to alternatives that are each already a node; the tree
 //!   records the alternative that won, so the choice itself would wrap exactly one child.
 //! - **One token is not a region.** `Name`, `OperationType`, `Location`, `ExtensionTypeParam` and
 //!   `Description` each cover exactly one token whose parent already says what it is.
@@ -71,7 +71,7 @@ use crate::lossless::KindSpace;
 ///
 /// # Layout
 ///
-/// The discriminants are the default `0..115` and [`ALL`](Self::ALL) is in declaration order, so
+/// The discriminants are the default `0..113` and [`ALL`](Self::ALL) is in declaration order, so
 /// [`raw`](Self::raw) is an index and [`from_raw`](Self::from_raw) is a bounds check. Four blocks,
 /// in this order:
 ///
@@ -79,8 +79,8 @@ use crate::lossless::KindSpace;
 /// |---|---|
 /// | `0..29` | the twenty-nine non-trivia images, in `LosslessTokenKind`'s declaration order |
 /// | `29..35` | the six trivia images, in the same order, with the line terminators folded |
-/// | `35..112` | the seventy-seven node kinds |
-/// | `112..115` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
+/// | `35..110` | the seventy-five node kinds |
+/// | `110..113` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
 ///
 /// **Nothing may be appended after [`Root`](Self::Root)** — the shared runner is parameterised over
 /// the last three positions, and the ten images GraphQL lacks therefore live *inside* the image
@@ -89,7 +89,7 @@ use crate::lossless::KindSpace;
 #[repr(u16)]
 pub enum SyntaxKind {
   // ---- token images, non-trivia: `LosslessTokenKind` in declaration order ----
-  /// `*` — an import wildcard.
+  /// `*` — a `use` glob.
   Asterisk,
   /// `@` — a directive marker.
   At,
@@ -115,7 +115,7 @@ pub enum SyntaxKind {
   LBracket,
   /// `]` — a list value's and a list type's closer.
   RBracket,
-  /// `{` — a selection set's, object value's, braced definition's and import list's opener.
+  /// `{` — a selection set's, object value's, braced definition's and `use` group's opener.
   LBrace,
   /// `}` — the matching closer.
   RBrace,
@@ -329,15 +329,12 @@ pub enum SyntaxKind {
   /// `extend directive @ ExtensionName Directives`.
   DirectiveExtension,
 
-  // ---- imports: GraphQLx only, no GraphQL counterpart at all ----
-  /// `import ImportClause from "file"`.
-  ImportDefinition,
-  /// `{ ImportMember+ }`.
-  ImportList,
-  /// `Name (as Path)?`.
-  NamedSpecifier,
-  /// `* (as Path)?`.
-  WildcardSpecifier,
+  // ---- `use` items: GraphQLx only, no GraphQL counterpart at all ----
+  /// `use UseTree`.
+  UseDefinition,
+  /// One use tree: a bare root, a [`Path`](Self::Path) or a string source, then `as Name`, `:: *`
+  /// or `:: { UseTree+ }`. A group's trees are its direct children.
+  UseTree,
 
   // ---- generics: GraphQLx only, no GraphQL counterpart at all ----
   /// `Name (= Type)?` inside a [`DefinitionTypeGenerics`](Self::DefinitionTypeGenerics).
@@ -360,11 +357,12 @@ pub enum SyntaxKind {
   WhereClause,
 
   // ---- documents ----
-  /// A complete document: imports, executable definitions, type-system definitions and extensions.
+  /// A complete document: `use` items, executable definitions, type-system definitions and
+  /// extensions.
   Document,
-  /// An executable document: imports and executable definitions only.
+  /// An executable document: `use` items and executable definitions only.
   ExecutableDocument,
-  /// A type-system document: imports, type-system definitions and extensions only.
+  /// A type-system document: `use` items, type-system definitions and extensions only.
   TypeSystemDocument,
 
   // ---- bookkeeping: last three, in this order, and nothing after ----
@@ -482,12 +480,10 @@ impl SyntaxKind {
     Self::EnumTypeExtension,
     Self::InputObjectTypeExtension,
     Self::DirectiveExtension,
-    // imports (96..100)
-    Self::ImportDefinition,
-    Self::ImportList,
-    Self::NamedSpecifier,
-    Self::WildcardSpecifier,
-    // generics (100..109)
+    // `use` items (96..98)
+    Self::UseDefinition,
+    Self::UseTree,
+    // generics (98..107)
     Self::DefinitionTypeParam,
     Self::DefinitionTypeGenerics,
     Self::ExtensionTypeGenerics,
@@ -497,11 +493,11 @@ impl SyntaxKind {
     Self::ExecutableDefinitionName,
     Self::WherePredicate,
     Self::WhereClause,
-    // documents (109..112)
+    // documents (107..110)
     Self::Document,
     Self::ExecutableDocument,
     Self::TypeSystemDocument,
-    // bookkeeping (112..115)
+    // bookkeeping (110..113)
     Self::Error,
     Self::Gap,
     Self::Root,

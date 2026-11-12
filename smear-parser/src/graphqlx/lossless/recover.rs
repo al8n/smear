@@ -186,8 +186,8 @@ pub(crate) const ROOT_OPERATION_TYPES_HEADS: &[Kind] = &[Kind::LBrace];
 /// three definition sites where a present `where` makes the block mandatory.
 pub(crate) const FIELDS_BLOCK_HEADS: &[Kind] = &[Kind::LBrace];
 
-/// The token kinds a mixed document entry may begin with: a description, an import, an extension,
-/// a definition keyword, or the shorthand operation's `{`.
+/// The token kinds a mixed document entry may begin with: a description, a `use` item, an
+/// extension, a definition keyword, or the shorthand operation's `{`.
 pub(crate) const DEFINITION_HEADS: &[Kind] = &[
   Kind::InlineString,
   Kind::BlockString,
@@ -220,17 +220,34 @@ pub(crate) const TYPE_EXTENSION_HEADS: &[Kind] = &[Kind::Identifier];
 pub(crate) const EXTENSION_TAIL_HEADS: &[Kind] =
   &[Kind::At, Kind::LBrace, Kind::Equal, Kind::Identifier];
 
-/// The token kinds an import member may begin with — divergence 21: a name, or the wildcard `*`.
-pub(crate) const IMPORT_MEMBER_HEADS: &[Kind] = &[Kind::Identifier, Kind::Asterisk];
+/// The token kinds that may follow `use`: a path's name, a root's sigil, or the inline string a
+/// source is.
+pub(crate) const USE_TREE_HEADS: &[Kind] = &[
+  Kind::Identifier,
+  Kind::Tilde,
+  Kind::DotDot,
+  Kind::Caret,
+  Kind::InlineString,
+];
 
-/// The token kinds an import clause may begin with: the wildcard, or a braced list.
-pub(crate) const IMPORT_CLAUSE_HEADS: &[Kind] = &[Kind::Asterisk, Kind::LBrace];
+/// The token kinds a use tree's `::`, or a bare root, continues into: a name, the glob `*`, or a
+/// group's `{`.
+pub(crate) const USE_SCOPE_HEADS: &[Kind] = &[Kind::Identifier, Kind::Asterisk, Kind::LBrace];
 
-/// The one token kind an import's `from` source may be.
+/// The token kinds a tree inside a group may begin with: a name, and nothing else — no root and no
+/// string source.
+pub(crate) const USE_MEMBER_HEADS: &[Kind] = &[Kind::Identifier];
+
+/// The one token kind a string source may be.
 ///
-/// **Inline only.** `import_definition_after_keyword` calls `inline_string_value`, so a block
-/// string is a grammar error there even though the node above it is a `StringValue` either way.
-pub(crate) const IMPORT_SOURCE_HEADS: &[Kind] = &[Kind::InlineString];
+/// **Inline only.** `graphqlx/syntactic/use_tree.rs` reads a source through `inline_string_value`,
+/// so a block string is a grammar error there even though the node above it is a `StringValue`
+/// either way.
+pub(crate) const USE_SOURCE_HEADS: &[Kind] = &[Kind::InlineString];
+
+/// What may follow a `use` item's glob or group: nothing of the item's own. The item ends there,
+/// so an `as` after one is reported against no head at all.
+pub(crate) const USE_ITEM_END_HEADS: &[Kind] = &[];
 
 /// The `=` a union's members must open with — divergence 17's expectation, which is `Equal` and
 /// **not** `LBrace`: a union's `where` requires the members *before* it where an object's requires
@@ -346,8 +363,8 @@ fn is_sync_point(kind: Kind) -> bool {
 /// it would break recovery for the whole generics area rather than merely coarsening it.
 /// Where a document loop is willing to restart after an entry failed: the head of another entry.
 ///
-/// **Fourteen spellings against GraphQL's thirteen** — `import` is the extra one, and its absence
-/// would cost every import after a broken definition. `extend` is in the set for the reason
+/// **Fourteen spellings against GraphQL's thirteen** — `use` is the extra one, and its absence
+/// would cost every `use` item after a broken definition. `extend` is in the set for the reason
 /// GraphQL's is: an extension is an entry even though it is not a definition.
 #[inline]
 fn is_definition_start(kind: Kind, keyword: Option<Keyword>) -> bool {
@@ -369,7 +386,7 @@ fn is_definition_start(kind: Kind, keyword: Option<Keyword>) -> bool {
           | Keyword::Enum
           | Keyword::Input
           | Keyword::Extend
-          | Keyword::Import
+          | Keyword::Use
       )
     ),
     _ => false,

@@ -167,7 +167,8 @@ lossless_production! {
   /// The block/inline distinction is the *token*'s, and it survives on the token in the tree; the
   /// node above it is `StringValue` either way. GraphQLx's AST names `InlineStringValue` and
   /// `BlockStringValue` aliases, and the kind space deliberately gives neither its own kind — the
-  /// one position that narrows (an import's `from "…"`) narrows on the token, not on the node.
+  /// one position that narrows (a `use` tree's string source) narrows on the token, not on the
+  /// node.
   fn string_value<'inp, Src, Ctx>(inp) {
     node(
       K::StringValue.raw(),

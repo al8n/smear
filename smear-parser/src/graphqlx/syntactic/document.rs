@@ -2,7 +2,7 @@
 //!
 //! The document dispatcher classifies every top-level head once, then enters
 //! the selected committed parser tail.  It combines GraphQL executable and
-//! type-system definitions with GraphQLx imports, generic headers, qualified
+//! type-system definitions with GraphQLx `use` items, generic headers, rooted
 //! paths, `where` clauses, and type-system extensions.
 
 use std::vec::Vec;
@@ -21,14 +21,14 @@ use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken,
   definition::{type_system_definition_after_keyword, type_system_extension_after_extend},
   executable::{ExecutableDefinitionHead, OperationHead, executable_definition_after_head},
-  import::import_definition_after_keyword,
   keyword_of, unexpected_here,
+  use_tree::use_definition_after_keyword,
 };
 use crate::{
   combinator::{ParseCtx, TokenSpannedExt},
   graphqlx::{
     GraphQLx,
-    ast::{Definition, Described, Document, ImportOrDefinitionOrExtension, StringValue},
+    ast::{Definition, Described, Document, DocumentItem, StringValue},
     error::{Expectation, GraphqlxError as DialectGraphqlxError},
   },
 };
@@ -61,7 +61,7 @@ macro_rules! document_parser {
 #[derive(Debug, Copy, Clone)]
 enum DocumentHead {
   Description,
-  Import,
+  Use,
   Extension,
   TypeSystem(ContextualKeyword),
   Executable(ExecutableDefinitionHead),
@@ -107,7 +107,7 @@ where
           ExecutableDefinitionHead::Shorthand,
         )),
         token => match keyword_of(token) {
-          Some(ContextualKeyword::Import) => Some(DocumentHead::Import),
+          Some(ContextualKeyword::Use) => Some(DocumentHead::Use),
           Some(ContextualKeyword::Extend) => Some(DocumentHead::Extension),
           Some(keyword) if is_type_system_keyword(keyword) => {
             Some(DocumentHead::TypeSystem(keyword))
@@ -202,13 +202,13 @@ fn described_definition<S>(
 /// Enters a complete document definition after a leading description.
 ///
 /// A description can only decorate a *keyworded* executable or type-system
-/// definition; GraphQLx imports and extensions deliberately remain undescribed, and
+/// definition; GraphQLx `use` items and extensions deliberately remain undescribed, and
 /// the shorthand `OperationDefinition : SelectionSet` is the one definition
 /// alternative the grammar gives no `Description?` slot.
 fn entry_after_description<'inp, Src, Ctx>(
   description: StringValue<GraphqlxSlice<'inp, Src>>,
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
-) -> Result<ImportOrDefinitionOrExtension<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+) -> Result<DocumentItem<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
@@ -235,30 +235,31 @@ where
       );
     }
   };
-  Ok(ImportOrDefinitionOrExtension::Definition(
-    described_definition(Some(description), definition),
-  ))
+  Ok(DocumentItem::Definition(described_definition(
+    Some(description),
+    definition,
+  )))
 }
 
 document_parser!(
   /// Parses one complete GraphQLx top-level entry with fused head dispatch.
   ///
-  /// Imports and type-system extensions are GraphQLx additions. Definitions
+  /// `use` items and type-system extensions are GraphQLx additions. Definitions
   /// retain the standard GraphQL executable or type-system shape, while a
   /// leading description may decorate either definition family.
   ///
   /// See [GraphQL Document](https://spec.graphql.org/draft/#Document),
   /// [Executable Definition](https://spec.graphql.org/draft/#ExecutableDefinition),
   /// and [Type System Definition](https://spec.graphql.org/draft/#TypeSystemDefinition).
-  pub import_or_definition_or_extension,
+  pub document_item,
   inp,
-  ImportOrDefinitionOrExtension<GraphqlxSlice<'inp, Src>>,
+  DocumentItem<GraphqlxSlice<'inp, Src>>,
   {
     let mut type_system_keyword = None;
     let mut executable_head = None;
     let branch: Branch<4> = match classify_document_head(inp)? {
       Some(DocumentHead::Description) => Branch::B0,
-      Some(DocumentHead::Import) => Branch::B1,
+      Some(DocumentHead::Use) => Branch::B1,
       Some(DocumentHead::Extension) => Branch::B2,
       Some(DocumentHead::TypeSystem(keyword)) => {
         type_system_keyword = Some(keyword);
@@ -268,7 +269,7 @@ document_parser!(
         executable_head = Some(head);
         Branch::B4
       }
-      None => return unexpected_here(inp, Expectation::Production("an import, a definition or an extension")),
+      None => return unexpected_here(inp, Expectation::Production("a use item, a definition or an extension")),
     };
 
     let mut tails = (
@@ -276,20 +277,20 @@ document_parser!(
         take_classified_description(inp).and_then(|description| entry_after_description(description, inp))
       },
       |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
-        let span = take_classified_identifier(inp, Expectation::Import)?;
-        import_definition_after_keyword(inp, span.start()).map(ImportOrDefinitionOrExtension::Import)
+        let span = take_classified_identifier(inp, Expectation::Use)?;
+        use_definition_after_keyword(inp, span.start()).map(DocumentItem::Use)
       },
       |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
         let span = take_classified_identifier(inp, Expectation::Keyword("extend"))?;
         type_system_extension_after_extend(inp, span.start())
-          .map(ImportOrDefinitionOrExtension::Extension)
+          .map(DocumentItem::Extension)
       },
       |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
         let keyword = type_system_keyword
           .expect("type-system document branch retains its classified keyword");
         let span = take_classified_identifier(inp, Expectation::Production("a type-system definition"))?;
         type_system_definition_after_keyword(inp, keyword, span.start()).map(|definition| {
-          ImportOrDefinitionOrExtension::Definition(described_definition(
+          DocumentItem::Definition(described_definition(
             None,
             Definition::TypeSystem(definition),
           ))
@@ -298,7 +299,7 @@ document_parser!(
       |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
         let head = executable_head.expect("executable document branch retains its classified head");
         executable_definition_after_head(head, inp).map(|definition| {
-          ImportOrDefinitionOrExtension::Definition(described_definition(
+          DocumentItem::Definition(described_definition(
             None,
             Definition::Executable(definition),
           ))
@@ -330,9 +331,9 @@ where
 document_parser!(
   /// Parses a nonempty complete GraphQLx document.
   ///
-  /// The root accepts imports, executable definitions, type-system
-  /// definitions, and type-system extensions in source order. Imports,
-  /// generic syntax, qualified paths, and `where` clauses are GraphQLx
+  /// The root accepts `use` items, executable definitions, type-system
+  /// definitions, and type-system extensions in source order. `use` items,
+  /// generic syntax, rooted paths, and `where` clauses are GraphQLx
   /// extensions; standard definition forms follow GraphQL's document grammar.
   ///
   /// See the [GraphQL Document specification](https://spec.graphql.org/draft/#Document).
@@ -341,13 +342,13 @@ document_parser!(
   Document<GraphqlxSlice<'inp, Src>>,
   {
     let Spanned { span, data: entries }: Spanned<
-      Vec<ImportOrDefinitionOrExtension<GraphqlxSlice<'inp, Src>>>,
+      Vec<DocumentItem<GraphqlxSlice<'inp, Src>>>,
       SimpleSpan,
-    > = import_or_definition_or_extension
+    > = document_item
       .repeated_while::<_, U1>(decide_document_tail::<Src, Ctx>)
       .at_least(1)
       .collect_with(Vec::new())
-      .map(|entries: Vec<ImportOrDefinitionOrExtension<GraphqlxSlice<'inp, Src>>>| entries)
+      .map(|entries: Vec<DocumentItem<GraphqlxSlice<'inp, Src>>>| entries)
       .token_spanned()
       .parse_input(inp)?;
     Ok(Document::new(span, entries))
@@ -386,20 +387,20 @@ macro_rules! impl_document_api {
 impl_document_api!(
   /// Parses one complete GraphQLx document entry.
   ///
-  /// Imports and extensions are GraphQLx-only entries; executable and
+  /// `use` items and extensions are GraphQLx-only entries; executable and
   /// type-system definitions retain their corresponding GraphQL grammar.
   ///
   /// See [GraphQL Document](https://spec.graphql.org/draft/#Document),
   /// [Executable Definition](https://spec.graphql.org/draft/#ExecutableDefinition),
   /// and [Type System Definition](https://spec.graphql.org/draft/#TypeSystemDefinition).
   S,
-  ImportOrDefinitionOrExtension<S>,
-  import_or_definition_or_extension
+  DocumentItem<S>,
+  document_item
 );
 impl_document_api!(
   /// Parses a nonempty complete GraphQLx document.
   ///
-  /// GraphQLx adds imports, type-system extensions, generic syntax, qualified
+  /// GraphQLx adds `use` items, type-system extensions, generic syntax, rooted
   /// paths, and `where` clauses; no separate GraphQL specification anchor
   /// exists for those extensions.
   ///

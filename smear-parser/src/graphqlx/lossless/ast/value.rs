@@ -81,8 +81,8 @@ ast_node!(
   /// One node kind over two token kinds: the block/inline distinction is the *token*'s and
   /// survives on it, so a consumer that cares reads
   /// [`string_token`](StringValue::string_token)`().kind()` and one that does not is spared
-  /// matching two node kinds for one grammar production. The one position that narrows — an
-  /// import's `from "…"` — narrows on the token, so it is the same node either way.
+  /// matching two node kinds for one grammar production. The one position that narrows — a use
+  /// tree's string source — narrows on the token, so it is the same node either way.
   StringValue => K::StringValue {
     /// The literal token — [`InlineString`](K::InlineString) for `"s"`,
     /// [`BlockString`](K::BlockString) for `"""s"""`.

@@ -63,12 +63,12 @@ pub mod directive;
 pub mod document;
 pub mod executable;
 pub mod generic;
-pub mod import;
 pub mod selection;
 pub mod ty;
+pub mod use_tree;
 pub mod value;
 
-pub use document::{document, import_or_definition_or_extension};
+pub use document::{document, document_item};
 
 // The suite's three document roots, side by side, for the reason GraphQL's `syntactic/mod.rs`
 // records: each alternate was already `pub` where it is defined, but only the mixed one was

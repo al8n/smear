@@ -1,0 +1,1 @@
+union U<A, use> = X | Y where A: Node use: Node

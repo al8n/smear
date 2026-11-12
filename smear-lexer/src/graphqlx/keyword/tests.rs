@@ -43,7 +43,7 @@ fn rejects_ordinary_identifiers_and_punctuators() {
 
 #[test]
 fn classifies_byte_slices() {
-  assert_contextual_keyword::<&[u8]>(b"import", ContextualKeyword::Import);
+  assert_contextual_keyword::<&[u8]>(b"use", ContextualKeyword::Use);
   assert_contextual_keyword::<&[u8]>(b"FIELD", ContextualKeyword::FieldLocation);
 }
 

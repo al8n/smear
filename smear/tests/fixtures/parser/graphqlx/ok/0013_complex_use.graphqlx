@@ -1,0 +1,8 @@
+use "./types"::{User, Post}
+use "./types" as utils
+use "./helpers" as helpers
+
+type Query {
+  user: User
+  post: Post
+}

@@ -277,7 +277,7 @@ pub fn error_data_variant_samples() -> [(
 }
 
 /// `graphqlx` + `parser` — the GraphQLx dialect in the parser, which is where the dialect's
-/// imports, generics and namespaced paths actually live.
+/// `use` items, generics and namespaced paths actually live.
 #[allow(clippy::type_complexity)]
 pub fn graphqlx_parser(
   src: &str,

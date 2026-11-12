@@ -65,6 +65,12 @@ pub enum Expectation {
   Minus,
   /// A path separator (`::`).
   PathSeparator,
+  /// A tilde (`~`), the package root's sigil.
+  Tilde,
+  /// A double dot (`..`), the parent-module root's sigil.
+  DotDot,
+  /// A caret (`^`), the dependency root's sigil.
+  Caret,
   /// A fat arrow (`=>`).
   FatArrow,
   /// A pipe (`|`).
@@ -97,14 +103,12 @@ pub enum Expectation {
   InputValue,
   /// A constant GraphQLx input value.
   ConstInputValue,
-  /// A GraphQLx import clause.
-  ImportClause,
-  /// An import member.
-  ImportMember,
-  /// The contextual `import` keyword.
-  Import,
-  /// The contextual `from` keyword.
-  From,
+  /// A use tree: a root, a name or an inline string.
+  UseTree,
+  /// What a use tree's `::` continues into: a name, the glob `*`, or a group's `{`.
+  NameGlobOrGroup,
+  /// The contextual `use` keyword.
+  Use,
   /// The contextual `as` keyword.
   As,
   /// An operation type or the `fragment` keyword.
@@ -163,6 +167,9 @@ impl core::fmt::Display for Expectation {
       Self::Plus => f.write_str("`+`"),
       Self::Minus => f.write_str("`-`"),
       Self::PathSeparator => f.write_str("`::`"),
+      Self::Tilde => f.write_str("`~`"),
+      Self::DotDot => f.write_str("`..`"),
+      Self::Caret => f.write_str("`^`"),
       Self::FatArrow => f.write_str("`=>`"),
       Self::Pipe => f.write_str("`|`"),
       Self::Bang => f.write_str("`!`"),
@@ -179,10 +186,9 @@ impl core::fmt::Display for Expectation {
       Self::Type => f.write_str("a type"),
       Self::InputValue => f.write_str("a value"),
       Self::ConstInputValue => f.write_str("a constant value"),
-      Self::ImportClause => f.write_str("an import clause"),
-      Self::ImportMember => f.write_str("an import member"),
-      Self::Import => f.write_str("`import`"),
-      Self::From => f.write_str("`from`"),
+      Self::UseTree => f.write_str("a use tree"),
+      Self::NameGlobOrGroup => f.write_str("a name, `*` or `{`"),
+      Self::Use => f.write_str("`use`"),
       Self::As => f.write_str("`as`"),
       Self::OperationTypeOrFragment => f.write_str("an operation type or `fragment`"),
       Self::FragmentName => f.write_str("a fragment name"),
@@ -240,7 +246,7 @@ pub enum Unclosed {
   Parentheses,
   /// A list, missing `]`.
   List,
-  /// A brace-delimited object, set, map, or import list, missing `}`.
+  /// A brace-delimited object, set, map, or `use` group, missing `}`.
   Object,
   /// An angle-delimited type-argument list, missing `>`.
   Angle,
@@ -809,9 +815,9 @@ fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
     SyntacticTokenKind::Plus => Expectation::Plus,
     SyntacticTokenKind::Minus => Expectation::Minus,
     SyntacticTokenKind::PathSeparator => Expectation::PathSeparator,
-    // The root sigils `~`, `..` and `^` have no row and land here: no production demands one,
-    // each being taken only after a peek has seen it.
-    //
+    SyntacticTokenKind::Tilde => Expectation::Tilde,
+    SyntacticTokenKind::DotDot => Expectation::DotDot,
+    SyntacticTokenKind::Caret => Expectation::Caret,
     // `#[allow]` and not a deletion. `SyntacticTokenKind` is `#[non_exhaustive]`, which forced this
     // arm while the lexer was a separate crate; with the crates merged (#83) the compiler can see
     // every variant from here and calls the arm unreachable whenever every kind has a row. The arm

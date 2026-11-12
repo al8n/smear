@@ -1,0 +1,27 @@
+Root@0..32
+  Document@0..32
+    UseDefinition@0..18
+      Name@0..3 "use"
+      Space@3..4 " "
+      UseTree@4..18
+        Path@4..14
+          Caret@4..5 "^"
+          PathSeparator@5..7 "::"
+          Name@7..14 "queries"
+        PathSeparator@14..16 "::"
+        Asterisk@16..17 "*"
+        Newline@17..18 "\n"
+    OperationDefinition@18..31
+      Name@18..23 "query"
+      Space@23..24 " "
+      DefinitionName@24..26
+        Name@24..25 "Q"
+        Space@25..26 " "
+      SelectionSet@26..31
+        LBrace@26..27 "{"
+        Space@27..28 " "
+        Field@28..30
+          Name@28..29 "f"
+          Space@29..30 " "
+        RBrace@30..31 "}"
+    Newline@31..32 "\n"

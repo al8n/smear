@@ -124,7 +124,7 @@ pub type TokenKind = LosslessTokenKind;
 /// This dialect's contextual-keyword projection — the door a production reads a keyword's
 /// *spelling* through, since every one of them arrives as an ordinary identifier token.
 ///
-/// GraphQLx has forty-five of them against GraphQL's thirty-nine: `import`, `from`, `as`, `where`,
+/// GraphQLx has forty-five of them against GraphQL's thirty-nine: `use`, `mod`, `as`, `where`,
 /// `set` and `map` are keywords here and ordinary names there.
 pub type Keyword = smear_lexer::graphqlx::ContextualKeyword;
 
@@ -253,10 +253,8 @@ crate::lossless::lossless_error_impls! {
 /// *syntactic* suite this one is compared against. `IntValue` and `FloatValue` exist in the enum
 /// and are reached from productions that name a value shape directly.
 ///
-/// The seven rows GraphQL has no counterpart for — `<`, `>`, `*`, `+`, `-`, `::`, `=>` — are seven
-/// of the ten images that widened the kind space. The other three, the root sigils `~`, `..` and
-/// `^`, have no row and fall back with the trivia: no production demands one, each being taken only
-/// after a peek has seen it.
+/// The ten rows GraphQL has no counterpart for — `<`, `>`, `*`, `+`, `-`, `::`, `~`, `..`, `^`,
+/// `=>` — are the ten images that widened the kind space.
 fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectation {
   match expected {
     Some(Expected::One(kind)) => match kind {
@@ -286,6 +284,9 @@ fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectat
       LosslessTokenKind::Plus => Expectation::Plus,
       LosslessTokenKind::Minus => Expectation::Minus,
       LosslessTokenKind::PathSeparator => Expectation::PathSeparator,
+      LosslessTokenKind::Tilde => Expectation::Tilde,
+      LosslessTokenKind::DotDot => Expectation::DotDot,
+      LosslessTokenKind::Caret => Expectation::Caret,
       _ => Expectation::Unspecified,
     },
     _ => Expectation::Unspecified,
@@ -300,7 +301,6 @@ pub mod document;
 pub mod executable;
 pub mod extension;
 pub mod generic;
-pub mod import;
 pub mod kind_map;
 pub mod project;
 pub mod recover;
@@ -308,6 +308,7 @@ pub mod runner;
 pub mod selection;
 pub mod trivia;
 pub mod ty;
+pub mod use_tree;
 pub mod value;
 
 // The three document roots this suite parses, all at the same module level: the mixed one

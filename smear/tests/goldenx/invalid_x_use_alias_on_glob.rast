@@ -1,0 +1,15 @@
+Root@0..14
+  Document@0..14
+    UseDefinition@0..13
+      Name@0..3 "use"
+      Space@3..4 " "
+      UseTree@4..13
+        Path@4..5
+          Name@4..5 "a"
+        PathSeparator@5..7 "::"
+        Asterisk@7..8 "*"
+        Space@8..9 " "
+        Name@9..11 "as"
+        Space@11..12 " "
+        Name@12..13 "b"
+    Newline@13..14 "\n"

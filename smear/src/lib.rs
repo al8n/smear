@@ -117,12 +117,12 @@ pub use smear_lexer::keyword;
 #[cfg_attr(all(not(feature = "alloc"), feature = "graphql"), doc = "- `graphql`")]
 #[cfg_attr(
   all(feature = "alloc", feature = "graphqlx"),
-  doc = "- [`graphqlx`](parser::graphqlx) — adds imports, generics, where-clauses, set and map \
-         literals, and namespaced paths on top of GraphQL."
+  doc = "- [`graphqlx`](parser::graphqlx) — adds `use` items, generics, where-clauses, set and \
+         map literals, and namespaced paths on top of GraphQL."
 )]
 #[cfg_attr(
   all(not(feature = "alloc"), feature = "graphqlx"),
-  doc = "- `graphqlx` — adds imports, generics, where-clauses, set and map literals, and \
+  doc = "- `graphqlx` — adds `use` items, generics, where-clauses, set and map literals, and \
          namespaced paths on top of GraphQL."
 )]
 ///

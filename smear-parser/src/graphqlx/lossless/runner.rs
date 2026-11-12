@@ -148,9 +148,9 @@ pub type Parse = crate::lossless::runner::Parse<crate::graphqlx::kinds::GraphQLx
 /// Parse a source as a GraphQLx document, losslessly.
 ///
 /// The production is `document.rs`'s `document` under the door's drain — the mixed
-/// root, which admits imports, executable definitions, type-system definitions and extensions in
-/// any order, followed by a drain. The door discards the production's result, so an `Err` escaping
-/// it leaves the rest of the source with no committed token. Materialisation is
+/// root, which admits `use` items, executable definitions, type-system definitions and extensions
+/// in any order, followed by a drain. The door discards the production's result, so an `Err`
+/// escaping it leaves the rest of the source with no committed token. Materialisation is
 /// `Cst::finish_partial`, which would tile that tail as one `gap_kind` token carrying its original
 /// text: the tree would still cover every byte, and any lexer error a lookahead already raised over
 /// the tail stays recorded, but nothing past that lookahead is lexed, so the parse would
@@ -313,10 +313,10 @@ pub fn parse_document_from_with_limits<Src: LosslessSource + ?Sized>(
 /// Parse a source as a GraphQLx **type-system** (SDL-only) document, losslessly.
 ///
 /// [`parse_document`]'s root without the executable half:
-/// `ImportOrTypeSystemDefinitionOrExtension+`, the tree
-/// [`ast::TypeSystemDocument`](super::ast::TypeSystemDocument) wraps. Imports stay in — a
-/// GraphQLx schema is the thing that imports — but an `operation`, a shorthand `{ … }` or a
-/// `fragment` is **reported here**, with the span the parser was standing on, rather than
+/// `TypeSystemItem+`, the tree
+/// [`ast::TypeSystemDocument`](super::ast::TypeSystemDocument) wraps. `use` items stay in — a
+/// GraphQLx schema is the thing that uses other modules — but an `operation`, a shorthand `{ … }`
+/// or a `fragment` is **reported here**, with the span the parser was standing on, rather than
 /// accepted into a mixed tree for the caller to find and reject with a position it has to
 /// reconstruct.
 ///
@@ -370,8 +370,8 @@ pub fn parse_type_system_document_from_with_limits<Src: LosslessSource + ?Sized>
 
 /// Parse a source as a GraphQLx **executable** document, losslessly.
 ///
-/// [`parse_type_system_document`]'s mirror: `ImportOrExecutableDefinition+`, the tree
-/// [`ast::ExecutableDocument`](super::ast::ExecutableDocument) wraps. Imports stay in here too;
+/// [`parse_type_system_document`]'s mirror: `UseOrExecutableDefinition+`, the tree
+/// [`ast::ExecutableDocument`](super::ast::ExecutableDocument) wraps. `use` items stay in here too;
 /// every type-system definition and every `extend` is reported, at the parser's own position.
 ///
 /// ```

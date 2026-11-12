@@ -384,9 +384,8 @@ fn public_value_composition_parsers_and_direct_apis_are_source_generic() {
     drive_str(ast::IntValue::graphqlx, "0x2A").expect("int API witness");
   assert!(matches!(int.source(), LitInt::Hex(_)));
   let _: ast::Type<&str> = drive_str(ast::Type::graphqlx, "Item").expect("type API witness");
-  let _: ast::ImportDefinition<&str> =
-    drive_str(ast::ImportDefinition::graphqlx, "import * from \"module\"")
-      .expect("import API witness");
+  let _: ast::UseDefinition<&str> =
+    drive_str(ast::UseDefinition::graphqlx, "use ~::module::*").expect("use API witness");
 }
 
 #[cfg(feature = "bytes_1")]
@@ -638,49 +637,85 @@ fn graphqlx_types_cover_paths_and_generics() {
 }
 
 #[test]
-fn imports_cover_named_wildcard_aliases_and_module_strings() {
-  fn check_list_import<S: AsRef<[u8]>>(definition: ast::ImportDefinition<S>) {
-    let list = match definition.clause() {
-      ast::ImportClause::List(list) => list,
-      _ => panic!("expected import list"),
+fn use_trees_cover_roots_paths_sources_globs_groups_and_aliases() {
+  fn check_group<S: AsRef<[u8]>>(definition: ast::UseDefinition<S>) {
+    let tree = definition.tree();
+    let ast::UsePrefix::Path(prefix) = tree.prefix() else {
+      panic!("expected a path prefix");
     };
-    assert_eq!(list.members().len(), 2);
-    match &list.members()[0] {
-      ast::ImportMember::Named(named) => {
-        assert!("Thing".equivalent(named.name().source()));
-        assert_eq!(named.alias().expect("alias").segments().len(), 2);
-      }
-      _ => panic!("expected named import"),
-    }
-    match &list.members()[1] {
-      ast::ImportMember::Wildcard(wildcard) => {
-        assert_eq!(wildcard.alias().expect("alias").segments().len(), 1);
-      }
-      _ => panic!("expected wildcard import"),
-    }
-    assert!(
-      b"\"module\""
-        .as_slice()
-        .equivalent(definition.file().source())
-    );
+    assert!(matches!(prefix.root(), ast::PathRoot::Dependency(_)));
+    assert_eq!(prefix.segments().len(), 1);
+    let ast::UseTreeKind::Group(trees) = tree.kind() else {
+      panic!("expected a group");
+    };
+    assert_eq!(trees.len(), 3);
+    let ast::UsePrefix::Path(first) = trees[0].prefix() else {
+      panic!("a group member's prefix is a path");
+    };
+    assert!(first.root().is_relative());
+    assert!("Thing".equivalent(first.segments()[0].source()));
+    let ast::UseTreeKind::Simple { alias: Some(alias) } = trees[0].kind() else {
+      panic!("expected an alias");
+    };
+    assert!("Local".equivalent(alias.source()));
+    assert!(trees[1].kind().is_glob());
+    // A member named `as` is read as a name where a tree starts.
+    let ast::UsePrefix::Path(named_as) = trees[2].prefix() else {
+      panic!("a group member's prefix is a path");
+    };
+    assert!("as".equivalent(named_as.segments()[0].source()));
+    assert!(matches!(
+      trees[2].kind(),
+      ast::UseTreeKind::Simple { alias: None }
+    ));
   }
   accept_all!(
-    ast::ImportDefinition::graphqlx,
-    "import { Thing as Local::Thing * as Everything } from \"module\"",
-    check_list_import
+    ast::UseDefinition::graphqlx,
+    "use ^::module::{Thing as Local, nested::* as}",
+    check_group
   );
 
-  fn check_wildcard_import<S: AsRef<[u8]>>(definition: ast::ImportDefinition<S>) {
-    let wildcard = match definition.clause() {
-      ast::ImportClause::Wildcard(wildcard) => wildcard,
-      _ => panic!("expected wildcard import"),
+  fn check_source<S: AsRef<[u8]>>(definition: ast::UseDefinition<S>) {
+    let ast::UsePrefix::Source { source, segments } = definition.tree().prefix() else {
+      panic!("expected a string source");
     };
-    assert!(wildcard.alias().is_none());
+    assert!(b"\"./media\"".as_slice().equivalent(source.source()));
+    assert_eq!(segments.len(), 2);
+    let ast::UseTreeKind::Simple { alias: Some(alias) } = definition.tree().kind() else {
+      panic!("expected an alias");
+    };
+    assert!("Img".equivalent(alias.source()));
   }
   accept_all!(
-    syntactic::import::import_definition,
-    "import * from \"module\"",
-    check_wildcard_import
+    ast::UseDefinition::graphqlx,
+    "use \"./media\"::vision::Image as Img",
+    check_source
+  );
+
+  fn check_root_glob<S: AsRef<[u8]>>(definition: ast::UseDefinition<S>) {
+    assert!(matches!(
+      definition.tree().prefix(),
+      ast::UsePrefix::Root(ast::PathRoot::Package(_))
+    ));
+    assert!(definition.tree().kind().is_glob());
+    assert_eq!(definition.span(), &SimpleSpan::new(0, 8));
+  }
+  accept_all!(ast::UseDefinition::graphqlx, "use ~::*", check_root_glob);
+
+  fn check_parent_group<S: AsRef<[u8]>>(tree: ast::UseTree<S>) {
+    let ast::UsePrefix::Root(ast::PathRoot::Parent { count, .. }) = tree.prefix() else {
+      panic!("expected a parent root");
+    };
+    assert_eq!(count.get(), 2);
+    let ast::UseTreeKind::Group(trees) = tree.kind() else {
+      panic!("expected a group");
+    };
+    assert_eq!(trees.len(), 1);
+  }
+  accept_all!(
+    syntactic::use_tree::use_tree,
+    "..::..::{A}",
+    check_parent_group
   );
 }
 
@@ -718,32 +753,58 @@ fn failures_keep_typed_expectations_and_unclosed_kinds() {
     ErrorData::Unclosed(Unclosed::Angle)
   ));
 
-  reject_all!(
-    ast::ImportDefinition::graphqlx,
-    "import Thing from \"module\""
+  reject_all!(ast::UseDefinition::graphqlx, "use");
+  reject_all!(ast::UseDefinition::graphqlx, "use a::{}");
+  reject_all!(ast::UseDefinition::graphqlx, "use a::{*}");
+  reject_all!(ast::UseDefinition::graphqlx, "use a as");
+  reject_all!(ast::UseDefinition::graphqlx, "use a::");
+  reject_all!(ast::UseDefinition::graphqlx, "use ::a");
+  reject_all!(ast::UseDefinition::graphqlx, "use ~::");
+  reject_all!(ast::UseDefinition::graphqlx, "use \"\"\"module\"\"\"");
+  reject_all!(ast::UseDefinition::graphqlx, "use a::{\"m\"}");
+
+  // Each refusal names what the grammar takes at its position.
+  assert_unexpected(
+    |inp| ast::UseDefinition::graphqlx(inp).map(|_| ()),
+    "use 5",
+    Expectation::UseTree,
+    Some(SyntacticTokenKind::Int),
   );
-  reject_all!(ast::ImportDefinition::graphqlx, "import {} from \"module\"");
-  reject_all!(
-    ast::ImportDefinition::graphqlx,
-    "import { Thing as } from \"module\""
+  assert_unexpected(
+    |inp| ast::UseDefinition::graphqlx(inp).map(|_| ()),
+    "use a::5",
+    Expectation::NameGlobOrGroup,
+    Some(SyntacticTokenKind::Int),
   );
-  reject_all!(ast::ImportDefinition::graphqlx, "import * \"module\"");
-  reject_all!(ast::ImportDefinition::graphqlx, "import * from 1");
-  reject_all!(
-    ast::ImportDefinition::graphqlx,
-    "import * from \"\"\"module\"\"\""
+  assert_unexpected(
+    |inp| ast::UseDefinition::graphqlx(inp).map(|_| ()),
+    "use a::{~::b}",
+    Expectation::Name,
+    Some(SyntacticTokenKind::Tilde),
+  );
+  assert_unexpected(
+    |inp| ast::UseDefinition::graphqlx(inp).map(|_| ()),
+    "use a as 5",
+    Expectation::Name,
+    Some(SyntacticTokenKind::Int),
+  );
+  assert_unexpected(
+    |inp| ast::UseDefinition::graphqlx(inp).map(|_| ()),
+    "import a",
+    Expectation::Use,
+    Some(SyntacticTokenKind::Identifier),
   );
 
-  let import_brace_error = drive_str(
-    |inp| ast::ImportDefinition::graphqlx(inp).map(|_| ()),
-    "import { Thing",
+  let group_brace_error = drive_str(
+    |inp| ast::UseDefinition::graphqlx(inp).map(|_| ()),
+    "use a::{Thing",
   )
-  .expect_err("unterminated import list should fail")
+  .expect_err("an unterminated group should fail")
   .into_iter()
   .next()
-  .expect("unterminated import list should emit an error");
+  .expect("an unterminated group should emit an error");
   assert!(matches!(
-    import_brace_error.into_data(),
+    group_brace_error.into_data(),
     ErrorData::Unclosed(Unclosed::Object)
   ));
 }
@@ -780,9 +841,9 @@ fn a_bare_radix_prefix_in_an_argument_is_an_incomplete_number() {
 #[test]
 fn complete_document_accepts_every_graphqlx_fixture_over_all_borrowed_sources() {
   const FIXTURES: &[&str] = &[
-    include_str!("../../tests/fixtures/parser/graphqlx/ok/0001_import_named.graphqlx"),
-    include_str!("../../tests/fixtures/parser/graphqlx/ok/0002_import_wildcard.graphqlx"),
-    include_str!("../../tests/fixtures/parser/graphqlx/ok/0003_import_with_alias.graphqlx"),
+    include_str!("../../tests/fixtures/parser/graphqlx/ok/0001_use_group.graphqlx"),
+    include_str!("../../tests/fixtures/parser/graphqlx/ok/0002_use_glob.graphqlx"),
+    include_str!("../../tests/fixtures/parser/graphqlx/ok/0003_use_with_alias.graphqlx"),
     include_str!("../../tests/fixtures/parser/graphqlx/ok/0004_generics_simple.graphqlx"),
     include_str!("../../tests/fixtures/parser/graphqlx/ok/0005_generics_multiple_params.graphqlx"),
     include_str!("../../tests/fixtures/parser/graphqlx/ok/0006_where_clause_simple.graphqlx"),
@@ -794,7 +855,7 @@ fn complete_document_accepts_every_graphqlx_fixture_over_all_borrowed_sources() 
     include_str!("../../tests/fixtures/parser/graphqlx/ok/0010_generics_with_default.graphqlx"),
     include_str!("../../tests/fixtures/parser/graphqlx/ok/0011_interface_with_generics.graphqlx"),
     include_str!("../../tests/fixtures/parser/graphqlx/ok/0012_path_type.graphqlx"),
-    include_str!("../../tests/fixtures/parser/graphqlx/ok/0013_complex_import.graphqlx"),
+    include_str!("../../tests/fixtures/parser/graphqlx/ok/0013_complex_use.graphqlx"),
     include_str!("../../tests/fixtures/parser/graphqlx/ok/0014_generics_nested.graphqlx"),
     include_str!("../../tests/fixtures/parser/graphqlx/ok/0015_extend_with_generics.graphqlx"),
     include_str!("../../tests/fixtures/parser/graphqlx/ok/0016_operation_with_generics.graphqlx"),
@@ -835,16 +896,15 @@ fn complete_document_accepts_every_graphqlx_fixture_over_all_borrowed_sources() 
 fn complete_document_preserves_mixed_entries_and_definition_descriptions() {
   let document = drive_str(
     ast::Document::graphqlx,
-    "import { User } from \"types.graphqlx\"\n\"a documented type\" type User<T> where T: Node { id: ID }\nquery GetUser { user { id } }\nextend type User<String> { displayName: String }",
+    "use \"./types\"::{User}\n\"a documented type\" type User<T> where T: Node { id: ID }\nquery GetUser { user { id } }\nextend type User<String> { displayName: String }",
   )
   .expect("mixed GraphQLx document");
 
   assert_eq!(document.definitions().len(), 4);
-  assert!(document.definitions()[0].is_import());
+  assert!(document.definitions()[0].is_use());
   assert!(document.definitions()[3].is_extension());
 
-  let ast::ImportOrDefinitionOrExtension::Definition(type_definition) = &document.definitions()[1]
-  else {
+  let ast::DocumentItem::Definition(type_definition) = &document.definitions()[1] else {
     panic!("expected a described type-system definition");
   };
   assert!(type_definition.description().is_some());
@@ -853,9 +913,7 @@ fn complete_document_preserves_mixed_entries_and_definition_descriptions() {
     ast::Definition::TypeSystem(ast::TypeSystemDefinition::Type(_))
   ));
 
-  let ast::ImportOrDefinitionOrExtension::Definition(executable_definition) =
-    &document.definitions()[2]
-  else {
+  let ast::DocumentItem::Definition(executable_definition) = &document.definitions()[2] else {
     panic!("expected an executable definition");
   };
   assert!(executable_definition.description().is_none());
@@ -869,7 +927,7 @@ fn complete_document_preserves_mixed_entries_and_definition_descriptions() {
 #[test]
 fn complete_document_direct_api_preserves_owned_bytes() {
   let source = ::bytes_1::Bytes::from_static(
-    b"import { User } from \"types.graphqlx\"\ntype User { id: ID }\nquery Users { users { id } }",
+    b"use \"./types\"::{User}\ntype User { id: ID }\nquery Users { users { id } }",
   );
   let document: ast::Document<::bytes_1::Bytes> =
     drive_owned_bytes(ast::Document::graphqlx, &source).expect("owned Bytes document");
@@ -877,15 +935,15 @@ fn complete_document_direct_api_preserves_owned_bytes() {
 }
 
 #[test]
-fn complete_document_rejects_descriptions_before_imports_and_extensions() {
+fn complete_document_rejects_descriptions_before_use_items_and_extensions() {
   assert_unexpected(
-    |inp| ast::ImportOrDefinitionOrExtension::graphqlx(inp).map(|_| ()),
-    "\"description\" import { User } from \"types.graphqlx\"",
+    |inp| ast::DocumentItem::graphqlx(inp).map(|_| ()),
+    "\"description\" use \"./types\"::{User}",
     Expectation::Production("a definition after a description"),
     Some(SyntacticTokenKind::Identifier),
   );
   assert_unexpected(
-    |inp| ast::ImportOrDefinitionOrExtension::graphqlx(inp).map(|_| ()),
+    |inp| ast::DocumentItem::graphqlx(inp).map(|_| ()),
     "\"description\" extend type User { id: ID }",
     Expectation::Production("a definition after a description"),
     Some(SyntacticTokenKind::Identifier),

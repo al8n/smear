@@ -1,0 +1,2 @@
+directive @d<A>(x: A) on FIELD where A: Node
+use ^::dep::X

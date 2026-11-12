@@ -297,7 +297,7 @@ macro_rules! lossless_production {
 /// It was `#[doc(hidden)] pub` and nothing else, which hides a module from rustdoc and ships it
 /// anyway: sixteen modules and sixty-eight `fn(&str) -> Parse` entry points, public, callable and
 /// semver-relevant in every `rowan` build. The gate is written here, once, rather than at each
-/// call site. Fourteen modules and sixty-three drivers remain. Smear issue #67 promoted the four
+/// call site. Fourteen modules and sixty-one drivers remain. Smear issue #67 promoted the four
 /// document roots to real entry points on each dialect's `lossless` module, which retired their
 /// drivers and emptied GraphQL's `document::test_support` altogether; GraphQLx's own
 /// `document::test_support` carried one more that no test ever called,

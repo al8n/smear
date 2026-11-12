@@ -99,7 +99,7 @@
 //! what that costs — an `expect` that skips trivia on its accepting branch as well as before it
 //! moves trailing placement across the whole corpus while round-trip, the gap census, the parity
 //! gate, the injection gate and the projection differential all stay green. So the sentence is now
-//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-seven pairings re-derived on every run by
+//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-six pairings re-derived on every run by
 //! [`only_the_recorded_nodes_close_on_their_trailing_trivia`]. It is nearly twice its GraphQL
 //! twin's length for a reason the constant states: two GraphQLx productions end on a probe for an
 //! optional continuation that is usually not there — `::` for a path, `<` for a definition's name
@@ -172,7 +172,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// Every `parent > node` pairing where a node closes *after* the trivia behind it, so that the
 /// trivia lands inside the node's range instead of beside it.
 ///
-/// **Forty-seven entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
+/// **Forty-six entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
 /// one and its full account is on the GraphQL twin's constant: an atom commits the trivia it
 /// crosses to whichever node is open at that moment, a production about to open a node crosses its
 /// leading trivia at a dispatch peek made *before* the mark, and trailing trivia has no such
@@ -189,8 +189,8 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 ///   `VariablesDefinition > VariableDefinition`, and at document level
 ///   `Document > ObjectTypeExtension`, the one shape here whose own last probe, rather than a list
 ///   inside it, is what crossed the trivia.
-///   `DefinitionTypeGenerics > DefinitionTypeParam`, `WhereClause > WherePredicate` and
-///   `ImportList > NamedSpecifier` are GraphQLx lists of the same shape.
+///   `DefinitionTypeGenerics > DefinitionTypeParam` and `WhereClause > WherePredicate` are
+///   GraphQLx lists of the same shape.
 /// - **A list after its last element**, the same probe one level up: every `> Directives` pairing,
 ///   plus `DirectiveDefinition > DirectiveLocations`.
 /// - **Recovery geometry**, where the node open at the peek is open because a recovery put it
@@ -198,10 +198,12 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 ///   (`invalid_unterminated_bracket`) is a list that never gets its `]`, so the enclosing `}` is
 ///   consumed into an `Error` inside it and the trailing newline follows it in; `TypeGenerics >
 ///   Error` (`invalid_x_name_adjacent_to_angle_in_generics`) is that shape inside an angle list;
-///   and `Document > DefinitionName` is Task 10's unwound mark — the definition node is never
-///   opened, so the name the production had already built is left as a bare child of `Document`
-///   with the trivia after it. That last one is recorded **with the loss in it**, exactly as
-///   `shape_lost_object_type_definition` is, and it moves the day the loss is fixed.
+///   `Document > UseDefinition` (`invalid_x_use_without_tree`) is a `use` with no tree after it,
+///   whose peek for one crossed the newline from inside the item; and `Document > DefinitionName`
+///   is Task 10's unwound mark — the definition node is never opened, so the name the production
+///   had already built is left as a bare child of `Document` with the trivia after it. That last
+///   one is recorded **with the loss in it**, exactly as `shape_lost_object_type_definition` is,
+///   and it moves the day the loss is fixed.
 ///
 /// # GraphQLx's own, and it is most of the difference
 ///
@@ -212,11 +214,16 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 ///
 /// **A [`Path`](K::Path) probes for `::`.** `path` is `PathRoot? Name (:: Name)*`, and `path_tail` in
 /// `graphqlx/lossless/ty.rs` is a `while eat_if(PathSeparator)`, so its last act on every path in
-/// the corpus is a probe for a separator that is not there. `TypePath > Path` (77 witnesses) and
-/// `DefinitionTypePath > Path` (70) are the two commonest pairings in this list after
-/// `Root > Document`; `EnumValue > Path`, `NamedSpecifier > Path`, `WildcardSpecifier > Path` and
-/// `ExtensionName > Path` are the same node in four other positions. So in `type T { f: Int }` the
-/// `Path` under `f`'s type spans `"Int "`.
+/// the corpus is a probe for a separator that is not there. `TypePath > Path` (88 witnesses) and
+/// `DefinitionTypePath > Path` (73) are the two commonest pairings in this list after
+/// `Root > Document`; `EnumValue > Path` and `ExtensionName > Path` are the same node in two other
+/// positions, and `UseTree > Path` is the same probe made two tokens deep — a `use` tree's path
+/// continues only on a `::` with a name after it. So in `type T { f: Int }` the `Path` under
+/// `f`'s type spans `"Int "`.
+///
+/// **A `use` item's tree probes for what may still follow it.** After a glob or a group it peeks
+/// for the `as` the grammar refuses there, and after a bare string source for a `::`, so
+/// `UseDefinition > UseTree` holds the newline that ends the item.
 ///
 /// **A name wrapper probes for `<`, and two of the three hold no path at all.**
 /// [`DefinitionName`](K::DefinitionName) and
@@ -227,7 +234,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// `graphqlx/lossless/generic.rs` states the divergence beside the production: "**A `Path`, where
 /// `definition_name` takes a bare `Name`**" — `extend type ns::T` names a qualified target and
 /// `type ns::T` does not. So in `type T { f: Int }` the `DefinitionName` spans `"T "`;
-/// `ObjectTypeDefinition > DefinitionName` (46) is the third commonest pairing here, and
+/// `ObjectTypeDefinition > DefinitionName` (49) is the third commonest pairing here, and
 /// `FragmentDefinition > ExecutableDefinitionName` plus the eight remaining `> DefinitionName`
 /// pairings are the same shape in other positions.
 ///
@@ -286,6 +293,7 @@ const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "Document > DefinitionName",
   "Document > Error",
   "Document > ObjectTypeExtension",
+  "Document > UseDefinition",
   "EnumTypeDefinition > DefinitionName",
   "EnumValue > Path",
   "EnumValueDefinition > Directives",
@@ -299,13 +307,10 @@ const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "FragmentDefinition > Directives",
   "FragmentDefinition > ExecutableDefinitionName",
   "FragmentSpread > Directives",
-  "ImportDefinition > WildcardSpecifier",
-  "ImportList > NamedSpecifier",
   "InlineFragment > Directives",
   "InputFieldsDefinition > InputValueDefinition",
   "InputObjectTypeDefinition > DefinitionName",
   "InterfaceTypeDefinition > DefinitionName",
-  "NamedSpecifier > Path",
   "ObjectTypeDefinition > DefinitionName",
   "ObjectTypeDefinition > Directives",
   "ObjectTypeExtension > Directives",
@@ -320,9 +325,10 @@ const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "TypeGenerics > ListType",
   "TypePath > Path",
   "UnionTypeDefinition > DefinitionName",
+  "UseDefinition > UseTree",
+  "UseTree > Path",
   "VariablesDefinition > VariableDefinition",
   "WhereClause > WherePredicate",
-  "WildcardSpecifier > Path",
 ];
 
 /// Fixtures the corpus does not carry, each one a tree whose *shape* is its whole content.
@@ -409,11 +415,12 @@ const SHAPE_CASES: &[(&str, &str)] = &[
     "generic_default_and_where",
     "type T<A = Int> where A: B { f: A }",
   ),
-  // Divergence 21: an import list mixing an alias, a qualified alias and a wildcard, which is three
-  // specifier shapes under one `ImportList`.
+  // Divergence 21: a `use` group mixing an alias, a qualified alias and a glob under a string
+  // source, which is three tree shapes under one group — and a group opens no node, so all three
+  // are children of the tree that holds them.
   (
-    "import_alias_and_wildcard",
-    "import { a as b, c as ns::d, * as w } from \"m\"\n",
+    "use_alias_and_glob",
+    "use \"m\"::{a as b, c::d as e, f::*}\n",
   ),
   // Divergence 7, the contextual `set`, and this gate's sharpest instance: both documents are valid,
   // both round-trip, and the two readings differ **only** in the tree. See
@@ -1181,7 +1188,7 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
 /// appeared where a production began holding its node open across a peek, and list pairings
 /// vanished, because trivia eaten by the `expect` that ends an element never reaches the loop peek
 /// that used to leave it inside the preceding sibling. So the failure is reported as the two
-/// differences rather than as two forty-seven-element vectors: which half moved is what tells a
+/// differences rather than as two forty-six-element vectors: which half moved is what tells a
 /// reader whether a production gained a probe or lost one.
 #[test]
 fn only_the_recorded_nodes_close_on_their_trailing_trivia() {
