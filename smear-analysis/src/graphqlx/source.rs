@@ -133,6 +133,35 @@ impl SourceMap {
     }
   }
 
+  /// The source map of a model the test-support door built, which no text was read for: each
+  /// package's sources as the model numbers them, its package source first and every other one a
+  /// file with no path and no length.
+  #[cfg(feature = "test-support")]
+  pub(crate) fn of_model(model: &super::model::Model) -> Self {
+    let mut packages: Vec<PackageSlot> = Vec::with_capacity(model.packages().len() as usize);
+    let mut sources: Vec<SourceSlot> = Vec::new();
+    for id in model.packages() {
+      let package = model.package(id);
+      let range = package.sources();
+      for source in range {
+        sources.push(SourceSlot {
+          package: id,
+          path: Box::from(""),
+          raw: None,
+          len: 0,
+          ordinal: 0,
+          package_source: source.get() == range.start(),
+        });
+      }
+      packages.push(PackageSlot {
+        name: Box::from(package.name().as_bytes()),
+        ordinal: 0,
+        sources: range,
+      });
+    }
+    Self { packages, sources }
+  }
+
   /// The sources of the package at `index`: its package source, then its files.
   pub(crate) fn package_sources(&self, index: usize) -> IdRange<SourceId> {
     self.packages[index].sources

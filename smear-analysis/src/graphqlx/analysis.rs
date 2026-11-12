@@ -27,9 +27,32 @@ pub struct Analysis {
   model: Model,
   diagnostics: Diagnostics,
   sources: SourceMap,
+  /// The diagnostic ceiling it was made with, which a consumer's walk keeps to as well.
+  ceiling: usize,
 }
 
 impl Analysis {
+  /// An analysis of the finished `model`, as the test-support door hands it to its tests: no
+  /// diagnostic, a source map of the model's packages' sources, and `limits`' diagnostic ceiling.
+  #[cfg(feature = "test-support")]
+  pub(crate) fn of_model(model: Model, limits: &Limits) -> Self {
+    let ceiling = limits.max_diagnostics() as usize;
+    let sources = SourceMap::of_model(&model);
+    Self {
+      model,
+      diagnostics: Collector::new(ceiling).finish(),
+      sources,
+      ceiling,
+    }
+  }
+
+  /// The diagnostic ceiling the analysis was made with: how many diagnostics a list it answers,
+  /// or a walk over it answers, keeps.
+  #[inline]
+  pub(crate) fn ceiling(&self) -> usize {
+    self.ceiling
+  }
+
   /// The model of what the packages declare.
   #[inline]
   pub fn model(&self) -> &Model {
@@ -98,7 +121,8 @@ pub fn analyze<S: SourceText>(
 
 /// Everything after the entrance, compiled once whatever the caller's text type.
 fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
-  let mut collector = Collector::new(limits.max_diagnostics() as usize);
+  let ceiling = limits.max_diagnostics() as usize;
+  let mut collector = Collector::new(ceiling);
   let sources = SourceMap::of(&packages);
 
   let dependencies = check::package_set(&packages, &sources, &mut collector);
@@ -117,6 +141,7 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
     model,
     diagnostics: collector.finish(),
     sources,
+    ceiling,
   }
 }
 

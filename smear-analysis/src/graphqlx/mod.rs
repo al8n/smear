@@ -49,6 +49,12 @@
 //! ids of its own, and they render exactly as smear's do. [`Diagnostics`] keeps them in one total
 //! order, under a ceiling that keeps the least of them. [`DiagnosticKind`] lists the
 //! `smear::graphqlx` codes smear reports.
+//!
+//! # Rules
+//!
+//! A rule is a [`Visitor`]: it implements the hooks it needs, and [`visit`] walks the model for
+//! it, reaching every entity the chosen [`Packages`] wrote in id order and handing each hook a
+//! [`Cx`] that says where the walk is and takes what the rule reports.
 
 mod analysis;
 mod builtin;
@@ -64,6 +70,7 @@ mod parse;
 mod set;
 mod source;
 mod text;
+mod visitor;
 
 // The model's builder, for `smear`'s integration tests. Hidden, and compiled only with the
 // feature: the builder is crate-private API.
@@ -90,3 +97,4 @@ pub use model::{
 pub use package::{IntegerProvider, Layout, Package, SourceFile, Tier};
 pub use source::{Bound, Source, SourceMap};
 pub use text::SourceText;
+pub use visitor::{Cx, Packages, Site, Visitor, visit};
