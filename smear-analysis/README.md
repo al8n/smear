@@ -9,6 +9,13 @@ The GraphQLx schema analyzer: GraphQLx packages in, a resolved model and its dia
 GraphQLx only. Standard GraphQL is validated against the draft specification by `smear-compiler`;
 the dialect's modules, imports, generics and packages are what this crate resolves.
 
+`graphqlx::analyze` takes a root package and its dependencies, numbers their sources, checks the
+package set and parses every file. It answers an `Analysis`: the model, the diagnostics in one
+total order, and the source map that pairs the analysis with the caller's texts again. The model is
+dense tables read through `Copy` views over packages, modules, definitions, members, type
+occurrences and types, values, directive applications, the schema and the built-ins, with
+canonical names and lookup; so far `analyze` fills in only the packages and their root modules.
+
 ## Feature flags
 
 | Feature | Description | Default |
@@ -19,6 +26,7 @@ the dialect's modules, imports, generics and packages are what this crate resolv
 | `bstr_1` | Read `bstr::BStr` sources, from `bstr` 1. Implies no tier | |
 | `hipstr_0_8` | Read the `hipstr::{HipStr, HipByt}` sources, from `hipstr` 0.8. Implies `alloc` | |
 | `smol-bytes_0_2` | Read the smol-bytes 0.2 sources. Implies `alloc` | |
+| `test-support` | `graphqlx::test_support`: a hidden door to the crate-private model builder, for `smear`'s own tests. Not API; `smear`'s `test-support` forwards it | |
 
 Each source feature forwards `smear-parser`'s of the same name. `bytes`, `bstr`, `hipstr` and
 `smol-bytes` are aliases for the current version: each enables its versioned feature and nothing

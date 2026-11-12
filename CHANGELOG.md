@@ -22,8 +22,13 @@ All notable changes to Smear are documented in this file.
   `smear::graphqlx` codes `DiagnosticKind` lists, and every file is parsed with the GraphQLx
   syntactic parser, its syntax errors reported at that file. `Diagnostic::builder` is
   public, so a consumer's findings join smear's in one ordered list, and `SourceMap::bind`
-  pairs an analysis with the texts it was made from. The model's modules and definitions are
-  not resolved yet.
+  pairs an analysis with the texts it was made from. The `Model` is dense tables read through
+  `Copy` views, each numbered by its own id: packages, modules, definitions and their
+  contributions, members, type occurrences and interned types, values, directive
+  applications, the schema and the built-ins, with `canonical_name`, `lookup` and
+  `module_by_path`; so far `analyze` fills in only the packages and their root modules. A new
+  `test-support` feature, which `smear/test-support` forwards, compiles a hidden door to the
+  crate-private model builder for `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the six features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`,

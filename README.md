@@ -330,7 +330,7 @@ parser cannot exist without it, and a gate that can only ever be on is not a gat
 | `hipstr_0_8` | Support the `hipstr::{HipStr, HipByt}` source types, from `hipstr` 0.8. Implies `alloc` | |
 | `smol-bytes_0_2` | Support the smol-bytes 0.2 `smol_bytes::{Bytes, Utf8Bytes}` and `smol_bytes::compact::{Bytes, Utf8Bytes}` source types. Implies `alloc` | |
 | `lossless-coverage` | Per-node-kind hit counters for the lossless gates. Implies `rowan_0_17` | |
-| `test-support` | The lossless suites' `test_support` scaffolding | |
+| `test-support` | The lossless suites' `test_support` scaffolding, and with `analysis` the analyzer's `test_support`, a hidden door to its model builder for `smear`'s own tests. Not API | |
 
 A capability feature (`graphql`, `graphqlx`, `parser`, `validator`, `proto`, `introspection`,
 `analysis`, …) never switches a tier on, so a `default-features = false` consumer names `alloc`
