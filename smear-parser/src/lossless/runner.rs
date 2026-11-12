@@ -6,7 +6,7 @@
 //! own `runner`, because every one of them has to spell a dialect type to exist at all. What is
 //! here is the shape of the answer, which does not.
 
-use tokora::{Lexer, cst::Cst, emitter::Severity};
+use tokora::{Lexer, SimpleSpan, cst::Cst, emitter::Severity};
 
 /// One diagnostic a lossless parse recorded, owned and source-independent.
 ///
@@ -142,6 +142,42 @@ impl<L: rowan_0_17::Language> Parse<L> {
       .diagnostics
       .iter()
       .any(|d| d.severity == Severity::Error)
+  }
+
+  /// The node an extent belongs to: the smallest node whose range covers `span`, or the parent of
+  /// the token that covers it.
+  ///
+  /// `None` for a span that does not lie inside the tree's text, which a span of this parse's own
+  /// AST always does.
+  pub fn covering_node(&self, span: SimpleSpan) -> Option<rowan_0_17::SyntaxNode<L>> {
+    let start = rowan_0_17::TextSize::try_from(span.start()).ok()?;
+    let end = rowan_0_17::TextSize::try_from(span.end()).ok()?;
+    if start > end {
+      return None;
+    }
+    let range = rowan_0_17::TextRange::new(start, end);
+    let root = self.syntax();
+    // `covering_element` asserts its precondition rather than answering `None` for it.
+    if !root.text_range().contains_range(range) {
+      return None;
+    }
+    match root.covering_element(range) {
+      rowan_0_17::NodeOrToken::Node(node) => Some(node),
+      rowan_0_17::NodeOrToken::Token(token) => token.parent(),
+    }
+  }
+}
+
+impl<L: rowan_0_17::Language> crate::layer::sealed::Sealed for Parse<L> {}
+
+/// The lookup a consumer that names no tree type offers through
+/// [`SyntaxTree`](crate::layer::SyntaxTree): [`Parse::covering_node`].
+impl<L: rowan_0_17::Language> crate::layer::SyntaxTree for Parse<L> {
+  type Node = rowan_0_17::SyntaxNode<L>;
+
+  #[inline]
+  fn covering_node(&self, span: SimpleSpan) -> Option<Self::Node> {
+    Parse::covering_node(self, span)
   }
 }
 

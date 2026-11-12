@@ -936,6 +936,22 @@ pub fn project_type_system_document_verified<'src>(
   (TypeSystemDocument::new(span, definitions), recovery)
 }
 
+/// [`project_type_system_document_recovered`] over the tree a door has just built from `source`
+/// itself, which needs no pair check: the tree is that very text's parse. It is what this
+/// dialect's lossless layer answers a document with.
+pub(crate) fn project_own_type_system_document<'src>(
+  parse: &Parse,
+  source: &'src str,
+) -> (TypeSystemDocument<&'src str>, Recovery) {
+  let (span, definitions, recovery) = recovered_top_level_verified(
+    parse,
+    K::TypeSystemDocument,
+    recoverable_type_system_entry,
+    source,
+  );
+  (TypeSystemDocument::new(span, definitions), recovery)
+}
+
 impl super::ast::TypeSystemDocument {
   /// Project this type-system-document node to the AST the syntactic parser produces for `source`.
   ///

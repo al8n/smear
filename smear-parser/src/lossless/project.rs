@@ -410,86 +410,9 @@ impl<K: fmt::Debug> fmt::Display for ProjectError<K> {
 
 impl<K: fmt::Debug> core::error::Error for ProjectError<K> {}
 
-/// How much of a tree a **recovering** projection could see.
-///
-/// The fail-fast projection answers `Result<Ast, ProjectError>`: one refusal, at the first
-/// obstruction, for a caller that wants the AST or nothing. A recovering projection answers the
-/// question an editor asks instead — *what does the part that is still well-formed say?* — and
-/// this is the honesty half of that answer.
-///
-/// # What `skipped` says
-///
-/// `skipped() > 0` means at least one top-level element had no AST image, and nothing in the AST
-/// covers it.
-///
-/// [`is_complete`](Self::is_complete) is the one-call form of that question. It is a statement
-/// about **loss**, not about validity: it is the only state in which the AST covers the whole
-/// document, and it does not imply that a fail-fast projection of the same parse succeeds.
-///
-/// # Complete here, refused fail-fast — deliberately
-///
-/// The two door families answer different contracts. A recovering door steps through **every**
-/// document container under the root and answers per entry; a fail-fast door asserts the root holds
-/// **exactly one** container plus trivia, and that the document has a definition. So two shapes are
-/// complete here and refused there:
-///
-/// - a caller-minted root holding two valid containers: every definition of both is projected,
-///   `skipped` is zero, and the fail-fast door answers `UnexpectedChild { parent: Root, .. }` at
-///   the second container. This is kept, not closed: **each container is a legitimate document
-///   image, and the recovering door's contract is per entry** — it reports what had an AST image
-///   and what did not, and every definition of the second container has one; and
-/// - an empty or trivia-only parse: nothing is lost and nothing is projected, and the fail-fast
-///   door refuses a document with no definition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct Recovery {
-  projected: u32,
-  skipped: u32,
-}
-
-impl Recovery {
-  /// Builds a recovery tally.
-  #[inline]
-  pub const fn new(projected: u32, skipped: u32) -> Self {
-    Self { projected, skipped }
-  }
-
-  /// Returns how many top-level definitions were projected into the AST.
-  #[inline]
-  pub const fn projected(&self) -> u32 {
-    self.projected
-  }
-
-  /// Returns how many top-level elements had no AST image and were dropped.
-  ///
-  /// An *element*, not a definition: the count includes a definition the projection refused, a
-  /// recovery hole or gap tile the parser left in the definition's place, and each non-trivia token
-  /// the parser could not attach to a definition. One mistyped keyword can leave several.
-  #[inline]
-  pub const fn skipped(&self) -> u32 {
-    self.skipped
-  }
-
-  /// Returns whether every top-level element had an AST image.
-  ///
-  /// True exactly when [`skipped`](Self::skipped) is zero: every top-level element had an AST
-  /// image.
-  ///
-  /// It does not say the fail-fast projection would have succeeded. That door additionally asserts
-  /// the root holds exactly one document container and that the document has a definition, so a
-  /// caller-minted root with two valid containers and an empty or trivia-only parse are both
-  /// complete here and refused there — see the type's documentation for why.
-  #[inline]
-  pub const fn is_complete(&self) -> bool {
-    self.skipped == 0
-  }
-}
-
-impl fmt::Display for Recovery {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let Self { projected, skipped } = self;
-    write!(f, "{projected} projected, {skipped} skipped")
-  }
-}
+// How much of a tree a recovering projection could see. The type is the parser layers' answer
+// too, so it lives in `crate::layer`, and this module goes on naming it where it always has.
+pub use crate::layer::Recovery;
 
 /// The `(parse, source)` pair handed to a recovering projection does not describe one document.
 ///

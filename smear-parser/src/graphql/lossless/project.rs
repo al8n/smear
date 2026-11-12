@@ -701,6 +701,18 @@ pub fn project_executable_document_verified<'src>(
   (ExecutableDocument::new(span, definitions), recovery)
 }
 
+/// [`project_executable_document_recovered`] over the tree a door has just built from `source`
+/// itself, which needs no pair check: the tree is that very text's parse. It is what this
+/// dialect's lossless layer answers an executable document with.
+pub(crate) fn project_own_executable_document<'src>(
+  parse: &Parse,
+  source: &'src str,
+) -> (ExecutableDocument<&'src str>, Recovery) {
+  let (span, definitions, recovery) =
+    recovered_top_level_verified(parse, K::ExecutableDocument, recoverable_entry, source);
+  (ExecutableDocument::new(span, definitions), recovery)
+}
+
 impl super::ast::ExecutableDocument {
   /// Project this executable-document node to the AST the syntactic parser produces for `source`.
   ///
@@ -811,6 +823,22 @@ pub fn project_type_system_document_verified<'src>(
     K::TypeSystemDocument,
     recoverable_type_system_entry,
     pair.source(),
+  );
+  (TypeSystemDocument::new(span, definitions), recovery)
+}
+
+/// [`project_type_system_document_recovered`] over the tree a door has just built from `source`
+/// itself, which needs no pair check: the tree is that very text's parse. It is what this
+/// dialect's lossless layer answers a type-system document with.
+pub(crate) fn project_own_type_system_document<'src>(
+  parse: &Parse,
+  source: &'src str,
+) -> (TypeSystemDocument<&'src str>, Recovery) {
+  let (span, definitions, recovery) = recovered_top_level_verified(
+    parse,
+    K::TypeSystemDocument,
+    recoverable_type_system_entry,
+    source,
   );
   (TypeSystemDocument::new(span, definitions), recovery)
 }

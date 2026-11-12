@@ -28,6 +28,14 @@ pub mod kinds;
 pub mod lossless;
 pub mod syntactic;
 
+mod layer;
+
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
+pub use layer::Lossless;
+pub use layer::{Layer, Syntactic};
+
+pub use crate::layer::{Parsed, Recovery, Rejected, Report};
+
 /// The GraphQL dialect marker.
 ///
 /// Marks GraphQL parser inputs, contexts, and errors.
