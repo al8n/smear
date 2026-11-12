@@ -25,7 +25,10 @@ All notable changes to Smear are documented in this file.
   no message grows with what it quotes. Every file is parsed with the GraphQLx syntactic
   parser, its syntax errors reported at that file. `Diagnostic::builder` is
   public, so a consumer's findings join smear's in one ordered list, and `SourceMap::bind`
-  pairs an analysis with the texts it was made from. The `Model` is dense tables read through
+  pairs an analysis with the texts it was made from, finding each file again by its package
+  and its path alone: it answers no text for a file whose path another file of its package
+  has, for the files of a dependency whose name another dependency has, or for the root's
+  files when the root is given under another name. The `Model` is dense tables read through
   `Copy` views, each numbered by its own id: packages, modules, definitions and their
   contributions, members, type occurrences and interned types, values, directive
   applications, the schema and the built-ins, with `canonical_name`, `lookup` and

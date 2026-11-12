@@ -122,6 +122,159 @@ fn bind_answers_none_for_a_file_that_is_missing_or_changed() {
   assert_eq!(texts.path(b), Some("b.graphqlx"));
 }
 
+/// The ids of the files at `path` in package `package`, in id order.
+fn files_at(analysis: &Analysis, package: u32, path: &str) -> Vec<SourceId> {
+  let sources = analysis.sources();
+  analysis
+    .model()
+    .package(PackageId::new(package))
+    .sources()
+    .into_iter()
+    .filter(|id: &SourceId| sources.source(*id).path() == path)
+    .collect()
+}
+
+/// Two files at one path are refused, and nothing but their texts tells them apart, so `bind`
+/// answers neither a text: not after one is edited, which reorders the two, and not unchanged. A
+/// file with a path of its own is answered all the same.
+#[test]
+fn files_that_share_a_path_are_answered_no_text() {
+  let root = package(
+    "app",
+    &[
+      ("a.graphqlx", "scalar A"),
+      ("a.graphqlx", "scalar B"),
+      ("c.graphqlx", "scalar C"),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  // Files are numbered by path, then by text.
+  let shared = files_at(&analysis, 3, "a.graphqlx");
+  assert_eq!(shared.len(), 2);
+  let c = file(&analysis, 3, "c.graphqlx");
+  let read = [
+    (shared[0], "scalar A"),
+    (shared[1], "scalar B"),
+    (c, "scalar C"),
+  ];
+
+  // `scalar A` becomes `scalar ZZ`, which sorts after `scalar B`.
+  let edited = package(
+    "app",
+    &[
+      ("a.graphqlx", "scalar ZZ"),
+      ("a.graphqlx", "scalar B"),
+      ("c.graphqlx", "scalar C"),
+    ],
+  );
+  let texts = analysis.sources().bind(&edited, &[]);
+  for (id, text) in read {
+    assert!(
+      texts.text(id).is_none_or(|bound: &str| bound == text),
+      "{id:?} read {text:?} and is answered {:?}",
+      texts.text(id)
+    );
+  }
+  assert_eq!(texts.text(shared[0]), None);
+  assert_eq!(texts.text(shared[1]), None);
+
+  let texts = analysis.sources().bind(&root, &[]);
+  assert_eq!(texts.text(shared[0]), None);
+  assert_eq!(texts.text(shared[1]), None);
+  assert_eq!(texts.text(c), Some("scalar C"));
+}
+
+/// A file alone at its path when analyzed is answered no text once the package given holds a
+/// second file at that path, though the second is as long as the text the analysis read.
+#[test]
+fn a_file_is_answered_no_text_once_another_shares_its_path() {
+  let root = package("app", &[("a.graphqlx", "scalar A")]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  let a = file(&analysis, 3, "a.graphqlx");
+  assert_eq!(
+    analysis.sources().bind(&root, &[]).text(a),
+    Some("scalar A")
+  );
+
+  // `scalar 0` sorts before `scalar A`.
+  let crowded = package(
+    "app",
+    &[("a.graphqlx", "scalar A"), ("a.graphqlx", "scalar 0")],
+  );
+  assert_eq!(analysis.sources().bind(&crowded, &[]).text(a), None);
+}
+
+/// The root is found by its place and its name, so a root given under another name is answered no
+/// text for its files, though they are the same; the built-ins' files, every package source and a
+/// dependency's files are answered all the same.
+#[test]
+fn the_root_given_under_another_name_is_answered_no_text() {
+  let root = package("app", &[("a.graphqlx", OK)]).with_dependencies(["geo"]);
+  let geo = package("geo", &[("p.graphqlx", "scalar P\n")]);
+  let analysis = analyze(&root, &[geo.clone()], &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+
+  let other = package("other", &[("a.graphqlx", OK)]).with_dependencies(["geo"]);
+  let dependencies = [geo];
+  let texts = analysis.sources().bind(&other, &dependencies);
+  let sources = analysis.sources();
+  for id in sources.sources() {
+    let source = sources.source(id);
+    if source.is_package_source() {
+      assert_eq!(texts.text(id), Some(""), "{id:?}");
+    } else if source.package() == analysis.model().root_package() {
+      assert_eq!(texts.text(id), None, "{id:?}");
+    } else {
+      assert!(texts.text(id).is_some(), "{id:?}");
+    }
+  }
+  assert_eq!(texts.text(file(&analysis, 3, "a.graphqlx")), None);
+  assert_eq!(
+    texts.text(file(&analysis, 4, "p.graphqlx")),
+    Some("scalar P\n")
+  );
+}
+
+/// Two dependencies with one name are refused, and nothing but what they hold tells them apart, so
+/// none of their files is answered a text: unchanged, or after an edit that would exchange the two.
+/// A third dependency's files are answered, and so are those of a dependency named as the root,
+/// which is the only dependency with its name.
+#[test]
+fn dependencies_that_share_a_name_are_answered_no_text() {
+  let root = package("app", &[("a.graphqlx", OK)]).with_dependencies(["geo", "zeta"]);
+  let first = package("geo", &[("p.graphqlx", "scalar A\n")]);
+  let second = package("geo", &[("p.graphqlx", "scalar B\n")]);
+  let zeta = package("zeta", &[("z.graphqlx", "scalar Z\n")]);
+  let named_as_root = package("app", &[("r.graphqlx", "scalar R\n")]);
+  let unchanged = [first, second.clone(), zeta.clone(), named_as_root.clone()];
+  let analysis = analyze(&root, &unchanged, &Limits::new());
+
+  // Dependencies are numbered by name, then by what they hold: the `app` is 4, the `geo` holding
+  // `scalar A` is 5 and the one holding `scalar B` is 6, and `zeta` is 7.
+  let geo = [
+    file(&analysis, 5, "p.graphqlx"),
+    file(&analysis, 6, "p.graphqlx"),
+  ];
+  let z = file(&analysis, 7, "z.graphqlx");
+  let r = file(&analysis, 4, "r.graphqlx");
+
+  // `scalar A` becomes `scalar C`, which sorts after `scalar B`: the two `geo`s trade places.
+  let edited = [
+    package("geo", &[("p.graphqlx", "scalar C\n")]),
+    second,
+    zeta,
+    named_as_root,
+  ];
+  for given in [&unchanged, &edited] {
+    let texts = analysis.sources().bind(&root, given);
+    for id in geo {
+      assert_eq!(texts.text(id), None, "{id:?}");
+    }
+    assert_eq!(texts.text(z), Some("scalar Z\n"));
+    assert_eq!(texts.text(r), Some("scalar R\n"));
+  }
+}
+
 #[test]
 fn bind_finds_each_dependency_by_name_whatever_order_it_is_given_in() {
   let root = package("app", &[("a.graphqlx", OK)]).with_dependencies(["geo", "zeta"]);

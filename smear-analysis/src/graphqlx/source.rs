@@ -31,11 +31,12 @@ pub struct SourceMap {
 /// One package, as the map records it.
 #[derive(Debug, Clone)]
 struct PackageSlot {
-  /// The name, as given, which `bind` finds a dependency by.
+  /// The name, as given, which `bind` finds a dependency by and holds the root to.
   name: Box<[u8]>,
-  /// For a dependency, how many dependencies before it in id order share its name; otherwise 0.
-  /// Two supplied packages with one name are refused, and `bind` still tells them apart.
-  ordinal: u32,
+  /// Whether another dependency has this name, which leaves `bind` no way to tell the two apart.
+  /// Never for the root or a built-in: a dependency named as the root is still the only dependency
+  /// with that name.
+  shared: bool,
   /// The package source and the files.
   sources: IdRange<SourceId>,
 }
@@ -52,9 +53,9 @@ struct SourceSlot {
   raw: Option<Box<[u8]>>,
   /// The text's length in bytes; 0 for a package source.
   len: usize,
-  /// How many files before this one in its package have its path; 0 for a package source. Two
-  /// files with one path are refused, and `bind` still tells them apart.
-  ordinal: u32,
+  /// Whether another file of its package has its path, which leaves `bind` no way to tell the two
+  /// apart. Never for a package source.
+  shared: bool,
   /// Whether this is its package's package source.
   package_source: bool,
 }
@@ -90,52 +91,42 @@ impl SourceMap {
         path: Box::from(""),
         raw: None,
         len: 0,
-        ordinal: 0,
+        shared: false,
         package_source: true,
       });
-
-      // A package's files are sorted by path, so files sharing a path sit side by side.
-      let mut previous: Option<&[u8]> = None;
-      let mut file_ordinal: u32 = 0;
       for file in &view.files {
-        file_ordinal = match previous {
-          Some(path) if path == file.path => file_ordinal.saturating_add(1),
-          _ => 0,
-        };
-        previous = Some(file.path);
         let (path, raw) = spell(file.path);
         sources.push(SourceSlot {
           package,
           path,
           raw,
           len: file.text.bytes().len(),
-          ordinal: file_ordinal,
+          shared: false,
           package_source: false,
         });
       }
-
-      // Dependencies follow the root sorted by name, so those sharing a name sit side by side.
-      let package_ordinal = match slots.last() {
-        Some(last) if index > ROOT + 1 && *last.name == *view.name => {
-          last.ordinal.saturating_add(1)
-        }
-        _ => 0,
-      };
       slots.push(PackageSlot {
         name: Box::from(view.name),
-        ordinal: package_ordinal,
+        shared: false,
         sources: IdRange::new(start, dense(sources.len())),
       });
     }
-    Self {
+    let mut map = Self {
       packages: slots,
       sources,
-    }
+    };
+    map.share();
+    map
   }
 
   /// The source map of a model the test-support door built, which no text was read for: each
   /// package's sources as the model numbers them, its package source first and every other one a
   /// file with no path and no length.
+  ///
+  /// What is shared is decided as for any map. Every file has the empty path, so every file of a
+  /// package with two or more is shared, and `bind` answers none of them a text. A package's only
+  /// file is answered a text only when the package given for it holds one file at the empty path,
+  /// and that file is empty.
   #[cfg(feature = "test-support")]
   pub(crate) fn of_model(model: &super::model::Model) -> Self {
     let mut packages: Vec<PackageSlot> = Vec::with_capacity(model.packages().len() as usize);
@@ -149,17 +140,45 @@ impl SourceMap {
           path: Box::from(""),
           raw: None,
           len: 0,
-          ordinal: 0,
+          shared: false,
           package_source: source.get() == range.start(),
         });
       }
       packages.push(PackageSlot {
         name: Box::from(package.name().as_bytes()),
-        ordinal: 0,
+        shared: false,
         sources: range,
       });
     }
-    Self { packages, sources }
+    let mut map = Self { packages, sources };
+    map.share();
+    map
+  }
+
+  /// Marks what `bind` cannot tell apart: both of every two dependencies with one name, and both
+  /// of every two files of one package with one path.
+  ///
+  /// The dependencies follow the root sorted by name, and each package's files follow its package
+  /// source sorted by path, so each such pair is a pair of neighbours. The root is compared with no
+  /// dependency.
+  fn share(&mut self) {
+    for index in ROOT + 2..self.packages.len() {
+      if self.packages[index - 1].name == self.packages[index].name {
+        self.packages[index - 1].shared = true;
+        self.packages[index].shared = true;
+      }
+    }
+    for index in 1..self.sources.len() {
+      let (before, here) = (&self.sources[index - 1], &self.sources[index]);
+      if !before.package_source
+        && !here.package_source
+        && before.package == here.package
+        && before.key() == here.key()
+      {
+        self.sources[index - 1].shared = true;
+        self.sources[index].shared = true;
+      }
+    }
   }
 
   /// The sources of the package at `index`: its package source, then its files.
@@ -206,8 +225,11 @@ impl SourceMap {
   /// The texts of every source, read from the packages the analysis was made from.
   ///
   /// Pass the same `root` and `dependencies` the analysis was given, in any order. Each source is
-  /// found again by its package's name, its own path and its length; see [`Bound`] for what is
-  /// answered when one is not.
+  /// found again by structure alone: by its package, a built-in by its place, the root by its
+  /// place and its name, and a dependency by its name; then by its own path. A file found is
+  /// answered its text when that text is as long as the one the analysis read and is UTF-8, so a
+  /// file changed to a text of the same length is answered the new text. See [`Bound`] for what is
+  /// answered when a source is not found.
   pub fn bind<'a, S: SourceText>(
     &'a self,
     root: &'a Package<S>,
@@ -222,59 +244,67 @@ impl SourceMap {
 
     let mut texts: Vec<Option<&'a str>> = vec![None; self.sources.len()];
     for (index, package) in self.packages.iter().enumerate() {
-      // The built-ins and the root are where they are; a dependency is found by name.
-      let found = if index <= ROOT {
-        Some(index)
-      } else {
-        given.dependency(&package.name, package.ordinal)
-      };
+      let found = given.counterpart(index, package);
       for id in package.sources {
         let slot = &self.sources[id.get() as usize];
         texts[id.get() as usize] = if slot.package_source {
           Some("")
+        } else if slot.shared {
+          None
         } else {
-          found.and_then(|at: usize| given.file_text(at, slot, &packages[at]))
+          found.and_then(|at: usize| given.file_text(at, slot, &packages))
         };
       }
     }
     Bound { map: self, texts }
   }
 
-  /// The index of the dependency named `name` that `ordinal` dependencies with that name precede.
-  fn dependency(&self, name: &[u8], ordinal: u32) -> Option<usize> {
-    let dependencies: &[PackageSlot] = self.packages.get(ROOT + 1..)?;
-    let first = dependencies.partition_point(|slot: &PackageSlot| *slot.name < *name);
-    let at = first.checked_add(ordinal as usize)?;
-    let slot = dependencies.get(at)?;
-    if *slot.name == *name {
-      Some(ROOT + 1 + at)
-    } else {
-      None
+  /// The index in this map, made from the packages given to `bind`, of the package the analysis's
+  /// map records as `recorded` at `index`: a built-in at its place; the root at its place, when it
+  /// has the recorded name; a dependency by its name, when neither map has two with that name.
+  fn counterpart(&self, index: usize, recorded: &PackageSlot) -> Option<usize> {
+    match index.cmp(&ROOT) {
+      Ordering::Less => Some(index),
+      Ordering::Equal => {
+        let root = self.packages.get(ROOT)?;
+        (root.name == recorded.name).then_some(ROOT)
+      }
+      Ordering::Greater if recorded.shared => None,
+      Ordering::Greater => self.dependency(&recorded.name),
     }
   }
 
-  /// The text of the file of package `index` that has `wanted`'s path and ordinal, if it is as long
-  /// as `wanted` recorded and is UTF-8. `package` is that package's view, whose files are in the
-  /// order this map numbered them.
+  /// The index of the one dependency named `name`: `None` when no dependency has that name, or two
+  /// do.
+  fn dependency(&self, name: &[u8]) -> Option<usize> {
+    let dependencies: &[PackageSlot] = self.packages.get(ROOT + 1..)?;
+    let at = dependencies.partition_point(|slot: &PackageSlot| *slot.name < *name);
+    let slot = dependencies.get(at)?;
+    (*slot.name == *name && !slot.shared).then_some(ROOT + 1 + at)
+  }
+
+  /// The text of the one file of the package at `index` with `wanted`'s path, if it is as long as
+  /// `wanted` recorded and is UTF-8: `None` when no file of the package has that path, or two do.
+  /// `packages` are the views this map was made from, whose files are in the order it numbered
+  /// them.
   fn file_text<'a>(
     &self,
     index: usize,
     wanted: &SourceSlot,
-    package: &PackageView<'a>,
+    packages: &[PackageView<'a>],
   ) -> Option<&'a str> {
     let slot = self.packages.get(index)?;
     let files: &[SourceSlot] = self
       .sources
       .get(slot.sources.start() as usize + 1..slot.sources.end() as usize)?;
     let key = wanted.key();
-    let first = files
+    let at = files
       .partition_point(|file: &SourceSlot| set::compare_paths(file.key(), key) == Ordering::Less);
-    let at = first.checked_add(wanted.ordinal as usize)?;
     let found = files.get(at)?;
-    if set::compare_paths(found.key(), key) != Ordering::Equal || found.len != wanted.len {
+    if found.shared || found.key() != key || found.len != wanted.len {
       return None;
     }
-    package.files.get(at)?.text.text()
+    packages.get(index)?.files.get(at)?.text.text()
   }
 }
 
@@ -351,13 +381,18 @@ impl core::fmt::Debug for Source<'_> {
 ///
 /// - smear's own text, for a file of a built-in package;
 /// - `""`, for a package source;
-/// - a supplied file's text, when that file is in the packages given to [`SourceMap::bind`] with
-///   the recorded path and the recorded length, and is UTF-8.
+/// - a supplied file's text, when the packages given to [`SourceMap::bind`] hold the file, found by
+///   its package and its path, and its text is as long as the one the analysis read and is UTF-8.
 ///
 /// And `None`:
 ///
-/// - for a supplied file that is missing, changed, or not UTF-8. A byte text that is not UTF-8
-///   always carries a syntax diagnostic of its own, and is rendered without a snippet;
+/// - for a supplied file that is missing, of another length, or not UTF-8. A byte text that is not
+///   UTF-8 always carries a syntax diagnostic of its own, and is rendered without a snippet;
+/// - for a file whose path another file of its package has, and for every file of a dependency
+///   whose name another dependency has, in the analysis or in the packages given. Two such files,
+///   or two such dependencies, are refused inputs: nothing but their contents tells them apart,
+///   and contents are exactly what `bind` cannot trust;
+/// - for every file of the root, when the root given has another name than the analysis's;
 /// - for an id at or past the map's [`len`](SourceMap::len), which is the consumer's.
 ///
 /// A renderer's input list is these texts in id order, followed by the consumer's own.
