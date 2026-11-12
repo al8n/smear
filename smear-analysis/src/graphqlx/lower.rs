@@ -74,6 +74,7 @@ use super::{
   diagnostic::{Diagnostic, Reporter},
   id::{DefId, IdRange, MemberId, SourceId, Sym, dense},
   model::{DirectiveLocation, MemberKind, ModelBuilder},
+  resolve::Scopes,
   set::ROOT,
   source::SourceMap,
 };
@@ -85,6 +86,7 @@ const KEYWORD: usize = 6;
 /// definition already, reporting into `reporter`; `sources` numbers the packages' sources.
 pub(crate) fn lower(
   declarations: &Declarations<'_, '_>,
+  _scopes: &Scopes<'_>,
   sources: &SourceMap,
   builder: &mut ModelBuilder,
   reporter: &mut Reporter,

@@ -87,6 +87,7 @@ mod lower;
 mod model;
 mod package;
 mod parse;
+mod resolve;
 mod rules;
 mod set;
 mod source;

@@ -11,7 +11,7 @@ use super::{
   lower,
   model::{Model, ModelBuilder, PackageKind},
   package::Package,
-  parse,
+  parse, resolve,
   rules::Rules,
   set::{self, PackageView, ROOT},
   source::SourceMap,
@@ -117,6 +117,21 @@ impl Analysis {
 ///   in one namespace of one module, a supplied definition named with `__`, and a type named as a
 ///   child module of its module are reported. The first definition a supplied package would add
 ///   past [`Limits::max_definitions`] is reported, and nothing after it is collected.
+/// - Builds every module's scope: its own declarations and child modules, then its explicit `use`
+///   bindings, then its globs, then the prelude, the root modules of `core`, `alloc` and `std`
+///   whatever the package's tier, then, where a module is wanted, the packages its package may
+///   reach. A type a supplied package declares with the name of a primitive of the prelude, `bool`,
+///   `f32`, `f64`, `iN`, `uN`, `string`, `bytes`, `NonZeroIN` or `NonZeroUN`, shadows it in its
+///   module, and is a warning.
+/// - Resolves every `use` item, each module's to a fixpoint, which `use` cycles do not disturb. A
+///   path that names nothing is reported once, as is a package the item's package may not reach, a
+///   string source that is a URL, names a file, leaves its package or stands in a `Flat` package,
+///   a name two globs give two items where an item meets it, and a group nested past
+///   [`Limits::max_use_depth`]. An item that names one thing while the module's items are being
+///   resolved and another once all are, a `use` of a name its module declares, and two `use` items
+///   that give one name two items are reported too. A name that does not resolve gets, in its
+///   help, the nearest name visible where it is written, of the namespace wanted, while the
+///   analysis has [`Limits::max_near_miss_comparisons`] left to spend.
 /// - Lowers what each definition holds beyond its identity: its own contribution, where its name
 ///   is written; its type parameters; a directive definition's locations and whether it is
 ///   `repeatable`; and its members, its direct members as written and then each field's
@@ -176,12 +191,67 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
     "one document entry per source"
   );
 
-  let mut builder = builder_of(&packages, &sources, dependencies);
+  let mut builder = builder_of(&packages, &sources, &dependencies);
   let collected = collect::items(&packages, &sources, &documents, limits, &mut reporter);
   let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
-  lower::lower(&declarations, &sources, &mut builder, &mut reporter);
+  let scopes = resolve::scopes(
+    &packages,
+    &sources,
+    &dependencies,
+    &declarations,
+    limits,
+    &mut builder,
+    &mut reporter,
+  );
+  lower::lower(
+    &declarations,
+    &scopes,
+    &sources,
+    &mut builder,
+    &mut reporter,
+  );
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
+}
+
+/// The model of `root` beside `dependencies`, as far as [`analyze`] builds it, and what `path`
+/// names in the module `module` of those packages, where `params` are the generic parameters in
+/// scope: the test-support door to the resolver. `None` when `module` names no module. See
+/// `Scopes::module_at` and `Scopes::door` for how `module` and `path` are spelled.
+#[cfg(feature = "test-support")]
+pub(crate) fn resolve_door<S: SourceText>(
+  root: &Package<S>,
+  dependencies: &[Package<S>],
+  module: &str,
+  params: &[&[u8]],
+  path: &str,
+) -> Option<(Model, resolve::Resolved)> {
+  let mut supplied: Vec<PackageView<'_>> = Vec::with_capacity(dependencies.len());
+  for package in dependencies {
+    supplied.push(PackageView::supplied(package));
+  }
+  let packages = set::order(PackageView::supplied(root), supplied);
+  let limits = Limits::new();
+  let mut reporter = Reporter::new(limits.max_diagnostics() as usize);
+  let sources = SourceMap::of(&packages);
+  let resolved = check::package_set(&packages, &sources, &mut reporter);
+  let within = check::source_bytes(&packages, &sources, &limits, &mut reporter);
+  let documents = parse::files(&packages, &sources, within, &mut reporter);
+  let mut builder = builder_of(&packages, &sources, &resolved);
+  let collected = collect::items(&packages, &sources, &documents, &limits, &mut reporter);
+  let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
+  let scopes = resolve::scopes(
+    &packages,
+    &sources,
+    &resolved,
+    &declarations,
+    &limits,
+    &mut builder,
+    &mut reporter,
+  );
+  let at = scopes.module_at(&builder, module)?;
+  let answer = scopes.door(&builder, at, params, path);
+  Some((builder.finish(), answer))
 }
 
 /// What every analysis ends with, once its phases have written `model` and reported into
@@ -213,7 +283,7 @@ fn conclude<V: Visitor + ?Sized>(
 fn builder_of(
   packages: &[PackageView<'_>],
   sources: &SourceMap,
-  dependencies: Vec<Vec<PackageId>>,
+  dependencies: &[Vec<PackageId>],
 ) -> ModelBuilder {
   let mut builder = ModelBuilder::default();
   for ((index, view), resolved) in packages.iter().enumerate().zip(dependencies) {
@@ -230,7 +300,7 @@ fn builder_of(
       view.layout,
       sources.package_sources(index).len(),
     );
-    for dependency in resolved {
+    for &dependency in resolved {
       builder.push_dependency(package, dependency);
     }
     if let Some(integers) = view.integers {

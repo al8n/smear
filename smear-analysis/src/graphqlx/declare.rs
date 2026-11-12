@@ -44,19 +44,20 @@ use super::{
   collect::{Collected, Found, Items, Placed},
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{DefId, ModuleId, SourceId, Sym},
-  model::{DefKind, ModelBuilder, Origin},
+  model::{DefKind, ModelBuilder, ModuleKind, Origin, Primitive},
   set::ROOT,
   source::SourceMap,
-  tree::Node,
+  tree::{Declared, Node, Tree},
 };
 
 /// What item collection hands the phases after it: every item they read, already found and
-/// placed, so that none of them walks a document's items again.
+/// placed, so that none of them walks a document's items again, and the module tree they resolve
+/// names in.
 ///
-/// Name resolution reads the `use` items and the names each module declares; lowering reads the
-/// definitions, the extensions and the schema's items. An item is addressed by its source and its
-/// index among the source's items, which `items` holds for each source, of whichever parser made
-/// its document.
+/// Name resolution reads the modules, the names each module declares and the `use` items; lowering
+/// reads the definitions, the extensions and the schema's items. An item is addressed by its
+/// source and its index among the source's items, which `items` holds for each source, of
+/// whichever parser made its document.
 pub(crate) struct Declarations<'d, 'a> {
   /// Each source's items, in the order the walk read them; `None` for a source it did not read.
   pub(crate) items: Vec<Option<Items<'d, 'a>>>,
@@ -66,16 +67,21 @@ pub(crate) struct Declarations<'d, 'a> {
   /// The names each module declares, sorted by module, then namespace, then name: one binding per
   /// name, the first declaration's. A built-in package's second names, `Int` to `ID`, are bindings
   /// of its root module, each to the definition it names.
-  // Read by name resolution, the next part of the analyzer; until it lands nothing reads it.
-  #[allow(dead_code)]
   pub(crate) names: Vec<Binding>,
+  /// Every module, by `ModuleId`.
+  pub(crate) modules: Vec<ModuleEntry>,
+  /// Every module but a root module, sorted by its parent, then its name: what a path's later
+  /// segments are looked up in.
+  pub(crate) children: Vec<Child>,
+  /// Each package's root module, by the package's index.
+  pub(crate) roots: Vec<ModuleId>,
+  /// Each primitive `core` materialises, with its definition, in `DefId` order: they are the first
+  /// definitions of all, so the primitive at index `i` is the definition `i`.
+  pub(crate) primitives: Vec<(Primitive, DefId)>,
   /// Every `use` item, by module, then source, then position.
-  // Read by name resolution, the next part of the analyzer; until it lands nothing reads it.
-  #[allow(dead_code)]
   pub(crate) uses: Vec<Entry>,
   /// Every type and directive extension, by module, then source, then position.
-  // Read by lowering when each extension joins its target, which needs name resolution; until
-  // then nothing reads it.
+  // Read by lowering when each extension joins its target; until then nothing reads it.
   #[allow(dead_code)]
   pub(crate) extensions: Vec<Entry>,
   /// Every schema definition and extension, by module, then source, then position.
@@ -92,13 +98,12 @@ pub(crate) struct Declaration {
   /// The module its declaration is written in, where the paths it writes resolve: its own module,
   /// but the root package's root module for a built-in the root package replaces, and `core`'s
   /// root module for a materialised primitive.
-  // Read by lowering when it resolves the paths a contribution writes, which needs name
-  // resolution; until then nothing reads it.
+  // Read by lowering when it resolves the paths a contribution writes; until then nothing reads it.
   #[allow(dead_code)]
   pub(crate) module: ModuleId,
   /// Its kind: `Scalar` for a materialised primitive.
-  // Read by lowering when an extension of it is checked against its kind, which needs name
-  // resolution; until then nothing reads it.
+  // Read by lowering when an extension of it is checked against its kind; until then nothing
+  // reads it.
   #[allow(dead_code)]
   pub(crate) kind: DefKind,
   /// Where its name is written; the whole of `core`'s package source for a materialised
@@ -107,6 +112,31 @@ pub(crate) struct Declaration {
   /// From its description, or its first keyword, to its last token; the whole of `core`'s
   /// package source for a materialised primitive.
   pub(crate) extent: Location,
+}
+
+/// A module, as name resolution reads it.
+#[derive(Clone, Copy)]
+pub(crate) struct ModuleEntry {
+  /// The index of its package, in id order.
+  pub(crate) package: usize,
+  /// The module it is inside; `None` for a root module.
+  pub(crate) parent: Option<ModuleId>,
+  /// Its name, the last segment of its path; `None` for a root module.
+  pub(crate) name: Option<Sym>,
+  /// Whether it is a root module, a directory's, or one only an inline `mod` declares: a string
+  /// source names only a directory's.
+  pub(crate) kind: ModuleKind,
+  /// Where the first inline `mod` that declares it names it; `None` for a root module and a
+  /// directory module.
+  pub(crate) declared: Option<Location>,
+}
+
+/// A module that is not a root module, found by its parent and its name.
+#[derive(Clone, Copy)]
+pub(crate) struct Child {
+  pub(crate) parent: ModuleId,
+  pub(crate) name: Sym,
+  pub(crate) module: ModuleId,
 }
 
 /// An item a later phase reads: its source, and its index among that source's items.
@@ -124,9 +154,6 @@ pub(crate) struct Entry {
 }
 
 /// A name one module declares in one namespace, and the definition it binds.
-// Its definition and its flag are read by name resolution, the next part of the analyzer; until it
-// lands nothing reads them, and `dead_code` would say so of each.
-#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub(crate) struct Binding {
   pub(crate) module: ModuleId,
@@ -158,6 +185,7 @@ pub(crate) fn declarations<'d, 'a>(
     mut written,
   } = collected;
   let modules: Vec<ModuleId> = tree.push(builder);
+  let (entries, children, roots) = module_tables(&tree, &modules, builder);
   definitions.sort_by_key(|found: &Found<'d>| order(&modules, found));
 
   // The built-in packages' root modules' definitions, by package, namespace and name, the first
@@ -205,6 +233,7 @@ pub(crate) fn declarations<'d, 'a>(
   let core = modules[tree.root_of(CORE) as usize];
   let whole = Location::entire(sources.package_sources(CORE).start());
   let mut materialised: BTreeMap<(u8, u32), DefId> = BTreeMap::new();
+  let mut primitive_defs: Vec<(Primitive, DefId)> = Vec::with_capacity(written.len());
   for (&rank, &primitive) in &written {
     let name = builder.intern(&spelled(primitive));
     let def = match primitives.get(&rank) {
@@ -236,6 +265,7 @@ pub(crate) fn declarations<'d, 'a>(
     };
     builder.set_intrinsic(def, primitive);
     materialised.insert(rank, def);
+    primitive_defs.push((primitive, def));
     names.push(Binding {
       module: core,
       namespace: TYPE,
@@ -381,10 +411,62 @@ pub(crate) fn declarations<'d, 'a>(
     items,
     defs,
     names,
-    uses: entries(&modules, uses),
-    extensions: entries(&modules, extensions),
-    schemas: entries(&modules, schemas),
+    modules: entries,
+    children,
+    roots,
+    primitives: primitive_defs,
+    uses: placed_entries(&modules, uses),
+    extensions: placed_entries(&modules, extensions),
+    schemas: placed_entries(&modules, schemas),
   }
+}
+
+/// Every module of `tree`, whose nodes `ids` numbers, by id, as name resolution reads it; every
+/// module but a root module, sorted by its parent and its name; and each package's root module,
+/// by the package's index.
+///
+/// A module's name was interned when it was numbered, so interning it again finds its symbol and
+/// adds none.
+fn module_tables(
+  tree: &Tree<'_>,
+  ids: &[ModuleId],
+  builder: &mut ModelBuilder,
+) -> (Vec<ModuleEntry>, Vec<Child>, Vec<ModuleId>) {
+  let unset = ModuleEntry {
+    package: 0,
+    parent: None,
+    name: None,
+    kind: ModuleKind::Root,
+    declared: None,
+  };
+  let mut entries: Vec<ModuleEntry> = vec![unset; ids.len()];
+  let mut children: Vec<Child> = Vec::with_capacity(ids.len());
+  let mut roots: Vec<ModuleId> = Vec::new();
+  // The tree adds each package's root module before anything of the package, packages in id
+  // order, so the root modules are met in package order.
+  for (node, row) in tree.nodes().iter().enumerate() {
+    let id = ids[node];
+    let parent: Option<ModuleId> = row.parent.map(|up: u32| ids[up as usize]);
+    let name: Option<Sym> =
+      parent.map(|_: ModuleId| builder.intern(&String::from_utf8_lossy(row.name)));
+    entries[id.get() as usize] = ModuleEntry {
+      package: row.package,
+      parent,
+      name,
+      kind: row.kind,
+      declared: row.declared.map(|declared: Declared<'_>| declared.location),
+    };
+    match (parent, name) {
+      (Some(parent), Some(name)) => children.push(Child {
+        parent,
+        name,
+        module: id,
+      }),
+      _ => roots.push(id),
+    }
+  }
+  children.sort_by_key(|child: &Child| (child.parent, child.name));
+  (entries, children, roots)
 }
 
 /// A definition's place in the `DefId` order: its module, its source, then its position, which its
@@ -437,7 +519,7 @@ fn declaration(modules: &[ModuleId], found: &Found<'_>) -> Declaration {
 }
 
 /// `placed`, each with its module's id, by module, then source, then position.
-fn entries(modules: &[ModuleId], placed: Vec<Placed>) -> Vec<Entry> {
+fn placed_entries(modules: &[ModuleId], placed: Vec<Placed>) -> Vec<Entry> {
   let mut entries: Vec<Entry> = Vec::with_capacity(placed.len());
   for placed in placed {
     entries.push(Entry {
