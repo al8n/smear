@@ -1645,20 +1645,20 @@ fn a_flat_use_chain_costs_no_depth() {
 }
 
 /// Selects a cell's deep syntactic parse in the re-executed child. Absent in the parent.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 const CHILD: &str = "SMEAR_NESTING_DEPTH_CHILD";
 
 /// The child's exit code when its parse returned and accepted the chain.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 const PARSED: i32 = 70;
 
 /// The child's exit code when its parse returned and refused the chain.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 const REFUSED: i32 = 71;
 
 /// How many lines of a dead child's stderr a failure shows: the overflow's own report and the lines
 /// in front of it.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 const STDERR_TAIL: usize = 20;
 
 /// Runs one cell's deep parse in a child process and returns what the child's exit looked like.
@@ -1667,7 +1667,7 @@ const STDERR_TAIL: usize = 20;
 /// `leaf_obligation.rs` runs its payloads by. A stack overflow aborts the process it happens in,
 /// and an abort in this one would end the binary rather than fail a test; in the child it ends only
 /// the child.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 fn run_child(test: &str) -> std::process::Output {
   std::process::Command::new(std::env::current_exe().expect("current_exe"))
     .args(["--exact", test, "--nocapture", "--test-threads=1"])
@@ -1683,7 +1683,7 @@ fn run_child(test: &str) -> std::process::Output {
 /// `0xc00000fd` on Windows — and the failure names the depth, the child's status and the end of its
 /// stderr. A clean exit is a filter that selected no test, and libtest's 101 is a panic in it; each
 /// is told apart rather than read as a parse.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 fn the_child_parsed(output: &std::process::Output, depth: usize, chain: &str) -> bool {
   let tail = || {
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2135,7 +2135,7 @@ fn a_schema_missing_its_brace_in_a_module_chain_is_refused_in_the_first_module()
 /// syntactic door refuses it at its first `)`. A module with no `{` is reported and closed without a
 /// body, so the braceless chain is a run of sibling modules rather than a nest. Every door returns,
 /// and the tree keeps every byte.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 #[test]
 fn the_lossless_door_refuses_a_mod_chain_at_the_ceiling_and_returns() {
   use smear::parser::graphqlx::{
@@ -2247,7 +2247,7 @@ fn a_flat_mod_body_costs_no_depth() {
     "the syntactic door must accept {} bytes of width",
     wide.len()
   );
-  #[cfg(feature = "rowan_0_17")]
+  #[cfg(all(feature = "rowan_0_17", feature = "std"))]
   {
     let parse = smear::parser::graphqlx::lossless::parse_document(&wide);
     assert!(
@@ -2270,7 +2270,7 @@ fn a_flat_mod_body_costs_no_depth() {
 /// The syntactic parse at twice the ceiling runs in a child process, as the `use`-group twin's
 /// does and for the same reason: through `run_child`, on the thread libtest spawns for the child's
 /// one test, which std sizes as it sized this one. The guard and the lossless parse stay here.
-#[cfg(all(feature = "rowan_0_17", feature = "graphqlx"))]
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 #[test]
 fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
   use smear::{
