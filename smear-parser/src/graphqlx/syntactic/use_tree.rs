@@ -33,7 +33,7 @@ use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, keyword_of,
-  leading_path_separator, name, path_root, peek_kind, unexpected_here,
+  leading_path_separator, name, path_root, peek_kind, try_name, unexpected_here,
 };
 use crate::{
   combinator::{ParseCtx, TokenSpannedExt, asterisk, try_double_colon},
@@ -128,7 +128,12 @@ where
     return Ok(None);
   }
   contextual_keyword(inp, ContextualKeyword::As, Expectation::As)?;
-  name(inp).map(Some)
+  // `try_name`, not `name`: the committed atom refuses with no expectation, and this refusal names
+  // the name that `as` takes.
+  match try_name(inp)? {
+    ParseAttempt::Accept(alias) => Ok(Some(alias)),
+    ParseAttempt::Decline => unexpected_here(inp, Expectation::Name),
+  }
 }
 
 /// Reads `:: Name` pairs onto `segments` for as long as each `::` is followed by a name, and
