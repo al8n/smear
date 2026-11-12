@@ -6,9 +6,9 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Builtins, DefId, DefKind, IntegerProvider, Layout, Limits, Model, ModuleId,
-    Namespace, Origin, Package, PackageId, PackageKind, Primitive, SourceFile, SourceId, Tier,
-    analyze,
+    Analysis, Builtins, DefId, DefKind, Diagnostic, IntegerProvider, Layout, Limits, Model,
+    ModuleId, Namespace, Origin, Package, PackageId, PackageKind, Primitive, SourceFile, SourceId,
+    Tier, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -100,6 +100,52 @@ fn the_built_in_library_analyzes_with_no_diagnostic() {
     let text = texts.text(sources[1]).expect("smear's own text");
     assert_eq!(text.len(), file.len());
     assert!(!text.is_empty());
+  }
+}
+
+/// The three shapes the built-in library writes that no parser test holds exactly, each alone in a
+/// file of a root package, so that a failure names its shape: a bare generic scalar before a
+/// described definition; enum values spelled as GraphQL's directive locations and type kinds; and
+/// an interface with a directive and no fields before a described definition.
+#[test]
+fn each_shape_the_library_relies_on_parses_alone() {
+  let shapes: [(&str, &str, &[&str]); 3] = [
+    (
+      "generic.graphqlx",
+      "\"\"\"\nNever zero.\n\"\"\"\nscalar NonZero<T>\n\n\"Names a definition.\"\n\
+       scalar TypeRef\n",
+      &["NonZero", "TypeRef"],
+    ),
+    (
+      "keywords.graphqlx",
+      "\"Kinds.\"\nenum Kind {\n  \"A scalar.\"\n  SCALAR\n  OBJECT\n  INTERFACE\n  UNION\n  \
+       ENUM\n  INPUT_OBJECT\n  LIST\n  NON_NULL\n  QUERY\n  MUTATION\n  SUBSCRIPTION\n  FIELD\n  \
+       FRAGMENT_DEFINITION\n  FRAGMENT_SPREAD\n  INLINE_FRAGMENT\n  VARIABLE_DEFINITION\n  \
+       SCHEMA\n  FIELD_DEFINITION\n  ARGUMENT_DEFINITION\n  ENUM_VALUE\n  \
+       INPUT_FIELD_DEFINITION\n  DIRECTIVE_DEFINITION\n}\n",
+      &["Kind"],
+    ),
+    (
+      "bodiless.graphqlx",
+      "\"\"\"\nA marker.\n\"\"\"\ninterface MapKey @marker\n\n\"Tiers.\"\nenum Tier {\n  \
+       \"No allocator.\"\n  CORE\n}\n\n\"Marks.\"\ndirective @marker on INTERFACE\n",
+      &["MapKey", "Tier", "marker"],
+    ),
+  ];
+  for (path, text, declared) in shapes {
+    let root = package("app", Layout::Flat, &[(path, text)]);
+    let analysis = analyze(&root, &[], &Limits::new());
+    let source = file(&analysis, 3, path);
+    let here: Vec<String> = analysis
+      .diagnostics()
+      .iter()
+      .filter(|diagnostic: &&Diagnostic| diagnostic.primary().source() == source.get())
+      .map(|diagnostic: &Diagnostic| diagnostic.to_string())
+      .collect();
+    assert!(here.is_empty(), "{path}: {here:#?}");
+    let model = analysis.model();
+    let root_module = model.package(model.root_package()).root_module();
+    assert_eq!(names(model, root_module), declared, "{path}");
   }
 }
 
