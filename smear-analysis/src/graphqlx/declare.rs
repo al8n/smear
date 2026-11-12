@@ -96,8 +96,6 @@ pub(crate) struct Declaration {
   /// The module its declaration is written in, where the paths it writes resolve: its own module,
   /// but the root package's root module for a built-in the root package replaces, and `core`'s
   /// root module for a materialised primitive.
-  // Read by lowering when it resolves the paths a contribution writes; until then nothing reads it.
-  #[allow(dead_code)]
   pub(crate) module: ModuleId,
   /// Its kind, which an extension of it is checked against: `Scalar` for a materialised
   /// primitive.

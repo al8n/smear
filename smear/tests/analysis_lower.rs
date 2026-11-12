@@ -1,16 +1,19 @@
 //! The GraphQLx analyzer's lowering: what each definition holds beyond its identity. Its
 //! contributions, its own and its extensions', its type parameters, a directive definition's
 //! locations, and its members, its direct members before every argument of its fields, each with
-//! its description; extensions that name nothing or a definition of another kind; what the
-//! built-in library holds; the schema's contributions and its description; and none of it moved by
-//! the order files and dependencies are passed in.
+//! its description; extensions that name nothing or a definition of another kind; every written
+//! type an occurrence, numbered outer first, with its path and arguments as written and what it
+//! resolves to where it is written; bounds; what the built-in library holds; the schema's
+//! contributions and its description; and none of it moved by the order files and dependencies
+//! are passed in.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Contribution, DefId, Description, Diagnostic, DirectiveLocation, IdRange, Layout,
-    Limits, MemberId, MemberKind, Model, Namespace, Origin, Package, PackageId, Primitive,
-    SourceFile, SourceId, Tier, analyze,
+    Analysis, Contribution, Cx, DefId, Description, Diagnostic, DirectiveLocation, IdRange, Layout,
+    Limits, MemberId, MemberKind, Model, Namespace, Origin, Package, PackageId, Packages, Path,
+    PathRoot, Primitive, SourceFile, SourceId, Sym, Tier, TypeExprId, TypeExprKind, Visitor,
+    analyze, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -133,6 +136,86 @@ fn names_of<'a>(model: &'a Model, members: &[MemberId]) -> Vec<&'a str> {
     .iter()
     .map(|member: &MemberId| model.member(*member).name())
     .collect()
+}
+
+/// The type occurrence `id`, written out: its path as written, then `=` and the name of the
+/// definition it names, `#` and the index of the parameter it names, or `?` when it names nothing;
+/// a definition's arguments in `<>`; a list in `[]`; `!` when it is non-null.
+fn written(model: &Model, id: TypeExprId) -> String {
+  let occurrence = model.type_expr(id);
+  let mut text = match occurrence.kind() {
+    TypeExprKind::List { element, .. } => format!("[{}]", written(model, element)),
+    TypeExprKind::Named { def, args, .. } => {
+      let path = spelled(model, occurrence.path());
+      if args.is_empty() {
+        format!("{path}={}", model.def(def).name())
+      } else {
+        let args: Vec<String> = args
+          .iter()
+          .map(|arg: &TypeExprId| written(model, *arg))
+          .collect();
+        format!("{path}={}<{}>", model.def(def).name(), args.join(", "))
+      }
+    }
+    TypeExprKind::Param { index, .. } => format!("{}=#{index}", spelled(model, occurrence.path())),
+    _ => format!("{}=?", spelled(model, occurrence.path())),
+  };
+  if occurrence.non_null() {
+    text.push('!');
+  }
+  text
+}
+
+/// `path` as written, its root and its segments; nothing for no path.
+fn spelled(model: &Model, path: Option<Path<'_>>) -> String {
+  let Some(path) = path else {
+    return String::new();
+  };
+  let root = match path.root() {
+    PathRoot::Relative => String::new(),
+    PathRoot::Package => String::from("~::"),
+    PathRoot::Dependency => String::from("^::"),
+    PathRoot::Parent(levels) => "..::".repeat(levels.get() as usize),
+    _ => String::from("?::"),
+  };
+  let segments: Vec<&str> = path
+    .segments()
+    .iter()
+    .map(|segment: &Sym| model.name(*segment))
+    .collect();
+  format!("{root}{}", segments.join("::"))
+}
+
+/// The type of the member `id`, written out.
+fn member_type(model: &Model, id: MemberId) -> String {
+  written(model, model.member(id).ty().expect("the member has a type"))
+}
+
+/// The types of the members `range` holds, written out, in order.
+fn member_types(model: &Model, range: IdRange<MemberId>) -> Vec<String> {
+  range
+    .into_iter()
+    .map(|id: MemberId| member_type(model, id))
+    .collect()
+}
+
+/// What a walk of the root package reaches, in its order.
+#[derive(Default)]
+struct Reached {
+  types: Vec<TypeExprId>,
+}
+
+impl Visitor for Reached {
+  fn type_expr(&mut self, _cx: &mut Cx<'_>, ty: TypeExprId) {
+    self.types.push(ty);
+  }
+}
+
+/// What a walk of `analysis`'s root package reaches.
+fn reached(analysis: &Analysis) -> Reached {
+  let mut reached = Reached::default();
+  let _ = visit(analysis, Packages::Root, &mut reached);
+  reached
 }
 
 /// A description's text and where it is written.
@@ -971,6 +1054,377 @@ fn a_mismatched_extension_of_a_long_name_quotes_an_excerpt() {
   assert_eq!(messages[0], expected);
 }
 
+/// Types of every shape, in the root module: a list of a non-null of a list, a dependency's type,
+/// a type from the package's root, a generic type with as many arguments as it has parameters, and
+/// with too few and too many.
+const TYPES: &str = "type Shapes {\n  grid: [[Int!]]!\n  point: ^::geo::Point\n  own: ~::Local\n  \
+                     map: BTreeMap<string, Int>\n  few: BTreeMap<string>\n  many: Local<Int, Int>\n}\n\
+                     scalar Local\n";
+
+/// A type from the parent module.
+const UP: &str = "type Up {\n  back: ..::Local\n}\n";
+
+#[test]
+fn a_type_keeps_its_written_path_arguments_and_nullness() {
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[("schema.graphqlx", TYPES), ("inner/up.graphqlx", UP)],
+  )
+  .with_dependencies(["geo"]);
+  let geo = package(
+    "geo",
+    Layout::Flat,
+    &[("p.graphqlx", "type Point {\n  x: Int\n}\n")],
+  );
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let schema = file(&analysis, 3, "schema.graphqlx");
+
+  // `Int` stays `Int` and names `i32`; arguments are recorded however many the definition has
+  // parameters.
+  let shapes = def(model, Namespace::Type, "^::app::Shapes");
+  assert_eq!(
+    member_types(model, model.def(shapes).fields()),
+    [
+      "[[Int=i32!]]!",
+      "^::geo::Point=Point",
+      "~::Local=Local",
+      "BTreeMap=BTreeMap<string=string, Int=i32>",
+      "BTreeMap=BTreeMap<string=string>",
+      "Local=Local<Int=i32, Int=i32>",
+    ]
+  );
+  let up = def(model, Namespace::Type, "^::app::inner::Up");
+  assert_eq!(
+    member_types(model, model.def(up).fields()),
+    ["..::Local=Local"]
+  );
+
+  // Each occurrence is where it is written, its `!` included, and its path where the path is.
+  let grid = model
+    .member(ids(model.def(shapes).fields())[0])
+    .ty()
+    .expect("typed");
+  let TypeExprKind::List { element: inner, .. } = model.type_expr(grid).kind() else {
+    panic!("a list");
+  };
+  let TypeExprKind::List { element: int, .. } = model.type_expr(inner).kind() else {
+    panic!("a list");
+  };
+  assert_eq!(
+    model.type_expr(grid).location(),
+    at(schema, TYPES, "[[Int!]]!", 0)
+  );
+  assert_eq!(
+    model.type_expr(inner).location(),
+    at(schema, TYPES, "[Int!]", 0)
+  );
+  assert_eq!(
+    model.type_expr(int).location(),
+    at(schema, TYPES, "Int!", 0)
+  );
+  assert_eq!(
+    model.type_expr(int).path_location(),
+    Some(at(schema, TYPES, "Int", 0))
+  );
+  assert_eq!(model.type_expr(grid).path_location(), None);
+}
+
+#[test]
+fn type_occurrences_are_numbered_outer_first() {
+  let text = "scalar A<X, Y>\nscalar B<Z>\nscalar C\nscalar D\n\
+              type T {\n  f: A<B<C>, D>\n  g: Int\n}\n";
+  let analysis = analyze_one(text);
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let t = def(model, Namespace::Type, "^::app::T");
+  let fields = ids(model.def(t).fields());
+  let f = model.member(fields[0]).ty().expect("typed");
+  assert_eq!(written(model, f), "A=A<B=B<C=C>, D=D>");
+
+  // `A`, then `B` and what it nests, then `D`; then the next field's type.
+  let first = f.get();
+  let TypeExprKind::Named { args, .. } = model.type_expr(f).kind() else {
+    panic!("`A` resolves");
+  };
+  assert_eq!(
+    args,
+    [TypeExprId::new(first + 1), TypeExprId::new(first + 3)]
+  );
+  assert_eq!(
+    model.member(fields[1]).ty(),
+    Some(TypeExprId::new(first + 4))
+  );
+  let walked: Vec<u32> = reached(&analysis)
+    .types
+    .iter()
+    .map(|id: &TypeExprId| id.get())
+    .collect();
+  assert_eq!(walked, [first, first + 1, first + 2, first + 3, first + 4]);
+}
+
+#[test]
+fn a_parameter_shadows_a_type_of_its_module() {
+  let text = "scalar T\ntype Box<T> {\n  value: T\n  wrapped: Box<T>\n}\n\
+              type Plain {\n  value: T\n}\n";
+  let analysis = analyze_one(text);
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let boxed = def(model, Namespace::Type, "^::app::Box");
+  assert_eq!(
+    member_types(model, model.def(boxed).fields()),
+    ["T=#0", "Box=Box<T=#0>"]
+  );
+  let value = model.member(ids(model.def(boxed).fields())[0]).ty();
+  let Some(TypeExprKind::Param { def: owner, .. }) = value.map(|id| model.type_expr(id).kind())
+  else {
+    panic!("a parameter");
+  };
+  assert_eq!(owner, boxed);
+  let plain = def(model, Namespace::Type, "^::app::Plain");
+  assert_eq!(member_types(model, model.def(plain).fields()), ["T=T"]);
+}
+
+#[test]
+fn an_extension_names_parameters_by_position() {
+  // Each extension names the parameters its own way; one names one more than `Pair` has, which
+  // is recorded and not counted.
+  let text = "type Pair<A, B> {\n  first: A\n}\n\
+              extend type Pair<X, Y> {\n  second: Y\n  both: Pair<Y, X>\n}\n\
+              extend type Pair<P, Q, R> {\n  third: R\n}\n";
+  let analysis = analyze_one(text);
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let pair = def(model, Namespace::Type, "^::app::Pair");
+  assert_eq!(
+    member_types(model, model.def(pair).fields()),
+    ["A=#0", "Y=#1", "Pair=Pair<Y=#1, X=#0>", "R=#2"]
+  );
+  for field in model.def(pair).fields() {
+    if let Some(TypeExprKind::Param { def: owner, .. }) = model
+      .member(field)
+      .ty()
+      .map(|id| model.type_expr(id).kind())
+    {
+      assert_eq!(owner, pair);
+    }
+  }
+}
+
+#[test]
+fn an_unresolved_type_stays_with_its_arguments_and_marks_what_holds_it() {
+  let text = "type T {\n  bad: Missing<Int>\n  good: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::schema::undefined-type",
+      named(schema, text, "  bad: ", "Missing", 0),
+      None
+    )]
+  );
+  let model = analysis.model();
+  let t = def(model, Namespace::Type, "^::app::T");
+  let fields = ids(model.def(t).fields());
+  let bad = model.member(fields[0]).ty().expect("typed");
+  assert_eq!(
+    member_types(model, model.def(t).fields()),
+    ["Missing=?", "Int=i32"]
+  );
+
+  // Its argument is an occurrence of its own, which the walk reaches.
+  let argument = TypeExprId::new(bad.get() + 1);
+  assert_eq!(written(model, argument), "Int=i32");
+  assert_eq!(
+    reached(&analysis).types,
+    [bad, argument, TypeExprId::new(bad.get() + 2)]
+  );
+
+  // The field, its contribution and its definition hold the error; the other field does not.
+  assert!(model.member(fields[0]).has_errors());
+  assert!(!model.member(fields[1]).has_errors());
+  assert!(contributions(model, t)[0].3);
+  assert!(model.def(t).has_errors());
+}
+
+#[test]
+fn each_place_keeps_graphqls_code_for_a_name_that_names_nothing() {
+  let text = "type T implements Nope {\n  f: Gone\n  g: BTreeMap<Lost, Int>\n  h: ~::Nowhere\n  \
+              i: ^::geo::Thing\n}\nunion U = Absent\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let codes: Vec<(&str, Location)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
+    .collect();
+  assert_eq!(
+    codes,
+    [
+      (
+        "smear::schema::undefined-implements-interface",
+        at(schema, text, "Nope", 0)
+      ),
+      ("smear::schema::undefined-type", at(schema, text, "Gone", 0)),
+      ("smear::schema::undefined-type", at(schema, text, "Lost", 0)),
+      (
+        "smear::graphqlx::unresolved-path",
+        at(schema, text, "Nowhere", 0)
+      ),
+      (
+        "smear::graphqlx::unknown-package",
+        at(schema, text, "geo", 0)
+      ),
+      (
+        "smear::schema::undefined-union-member",
+        at(schema, text, "Absent", 0)
+      ),
+    ]
+  );
+  // Each stays an occurrence, as written.
+  let model = analysis.model();
+  let t = def(model, Namespace::Type, "^::app::T");
+  assert_eq!(
+    model
+      .def(t)
+      .implements()
+      .iter()
+      .map(|id: &TypeExprId| written(model, *id))
+      .collect::<Vec<String>>(),
+    ["Nope=?"]
+  );
+  assert_eq!(
+    member_types(model, model.def(t).fields()),
+    [
+      "Gone=?",
+      "BTreeMap=BTreeMap<Lost=?, Int=i32>",
+      "~::Nowhere=?",
+      "^::geo::Thing=?"
+    ]
+  );
+  let u = def(model, Namespace::Type, "^::app::U");
+  assert_eq!(
+    model
+      .def(u)
+      .union_members()
+      .iter()
+      .map(|id: &TypeExprId| written(model, *id))
+      .collect::<Vec<String>>(),
+    ["Absent=?"]
+  );
+}
+
+/// Each bound of `def`: its parameter, its interface written out, and where it is.
+fn bounds(model: &Model, def: DefId) -> Vec<(u32, String, Location)> {
+  model
+    .def(def)
+    .bounds()
+    .iter()
+    .map(|bound| {
+      (
+        bound.parameter(),
+        written(model, bound.interface()),
+        bound.location(),
+      )
+    })
+    .collect()
+}
+
+#[test]
+fn a_where_clause_is_recorded_parameter_by_parameter() {
+  let text = "interface Ord @marker\ninterface Hash @marker\n\
+              scalar Table<K, V> where K: Ord & Hash V: Hash\n\
+              type Pair<A, B> where B: Ord {\n  a: A\n}\n";
+  let analysis = analyze_one(text);
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let schema = schema_file(&analysis);
+  // Predicate by predicate and bound by bound, each at its predicate.
+  let table = def(model, Namespace::Type, "^::app::Table");
+  let k = at(schema, text, "K: Ord & Hash", 0);
+  assert_eq!(
+    bounds(model, table),
+    [
+      (0, String::from("Ord=Ord"), k),
+      (0, String::from("Hash=Hash"), k),
+      (1, String::from("Hash=Hash"), at(schema, text, "V: Hash", 0)),
+    ]
+  );
+  let pair = def(model, Namespace::Type, "^::app::Pair");
+  assert_eq!(
+    bounds(model, pair),
+    [(1, String::from("Ord=Ord"), at(schema, text, "B: Ord", 0))]
+  );
+}
+
+#[test]
+fn a_bound_on_something_that_is_no_parameter_is_refused() {
+  let text = "interface Ord @marker\nscalar Plain\n\
+              scalar Table<K> where Plain: Ord K<Int>: Ord K: Ord\n\
+              scalar Other<K> where Missing: Ord\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  // A type and a parameter with an argument are refused; a name that names nothing is name
+  // resolution's to report.
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        "smear::graphqlx::invalid-bound",
+        at(schema, text, "Plain", 1),
+        None
+      ),
+      (
+        "smear::graphqlx::invalid-bound",
+        at(schema, text, "K<Int>", 0),
+        None
+      ),
+      (
+        "smear::schema::undefined-type",
+        at(schema, text, "Missing", 0),
+        None
+      ),
+    ]
+  );
+  let model = analysis.model();
+  let table = def(model, Namespace::Type, "^::app::Table");
+  assert_eq!(
+    bounds(model, table),
+    [(0, String::from("Ord=Ord"), at(schema, text, "K: Ord", 0))]
+  );
+  assert!(model.def(table).has_errors());
+  let other = def(model, Namespace::Type, "^::app::Other");
+  assert!(bounds(model, other).is_empty());
+}
+
+#[test]
+fn a_where_clause_on_an_extension_is_refused() {
+  let text = "interface Ord @marker\ntype Pair<A> {\n  a: A\n}\n\
+              extend type Pair<X> where X: Ord {\n  b: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::graphqlx::invalid-bound",
+      at(schema, text, "where X: Ord", 0),
+      None
+    )]
+  );
+  // The extension still contributes its field; the definition has no bound.
+  let model = analysis.model();
+  let pair = def(model, Namespace::Type, "^::app::Pair");
+  assert!(model.def(pair).bounds().is_empty());
+  assert_eq!(member_names(model, model.def(pair).fields()), ["a", "b"]);
+  assert_eq!(
+    member_types(model, model.def(pair).fields()),
+    ["A=#0", "Int=i32"]
+  );
+}
+
 /// The text of `@deprecated`'s `reason` argument's description in the built-in library, cooked.
 const REASON: &str = "Explains why this element was deprecated, usually also including a \
                       suggestion for how to access supported similar data. Formatted using the \
@@ -1000,6 +1454,10 @@ fn the_built_in_library_lowers_with_no_diagnostic() {
     assert_eq!(member.owner(), builtins.r#extern());
     assert_eq!(member.parent(), None);
   }
+  assert_eq!(
+    member_types(model, ext.arguments()),
+    ["string=string!", "string=string!", "Tier=Tier"]
+  );
   assert!(ext.is_repeatable());
   assert_eq!(ext.locations(), [DirectiveLocation::Scalar]);
 
@@ -1030,6 +1488,12 @@ fn the_built_in_library_lowers_with_no_diagnostic() {
     .map(|param| (param.name(), param.index()))
     .collect();
   assert_eq!(params, [("K", 0), ("V", 1)]);
+  let bound: Vec<(u32, String)> = map
+    .bounds()
+    .iter()
+    .map(|bound| (bound.parameter(), written(model, bound.interface())))
+    .collect();
+  assert_eq!(bound, [(0, String::from("MapKey=MapKey"))]);
 
   // `@deprecated`'s argument, its block string cooked; `@skip`'s, described inline.
   let deprecated = model.def(builtins.deprecated());
@@ -1214,6 +1678,12 @@ fn a_second_schema_definition_and_a_dependencys_are_contributions_and_nothing_el
   assert_eq!(analysis.model().schema().description(), None);
 }
 
+/// The type of the member `id`, if it has one: its id, written out, and where it is.
+fn typed(model: &Model, id: MemberId) -> Option<(u32, String, Location)> {
+  let ty = model.member(id).ty()?;
+  Some((ty.get(), written(model, ty), model.type_expr(ty).location()))
+}
+
 /// Everything lowering writes, read through the public model, and every diagnostic: what no order
 /// of the files or of the dependencies may change.
 fn render(analysis: &Analysis) -> Vec<String> {
@@ -1235,11 +1705,36 @@ fn render(analysis: &Analysis) -> Vec<String> {
     }
     for param in definition.type_params() {
       lines.push(format!(
-        "  parameter {} {} {:?}",
+        "  parameter {} {} {:?} {:?}",
         param.index(),
         param.name(),
-        param.location()
+        param.location(),
+        param
+          .default()
+          .map(|id: TypeExprId| (id.get(), written(model, id)))
       ));
+    }
+    for bound in definition.bounds() {
+      lines.push(format!(
+        "  bound {} {} {} {:?}",
+        bound.parameter(),
+        bound.interface().get(),
+        written(model, bound.interface()),
+        bound.location()
+      ));
+    }
+    for (what, list) in [
+      ("implements", definition.implements()),
+      ("union member", definition.union_members()),
+    ] {
+      for id in list {
+        lines.push(format!(
+          "  {what} {} {} {:?}",
+          id.get(),
+          written(model, *id),
+          model.type_expr(*id).location()
+        ));
+      }
     }
     lines.push(format!(
       "  locations {:?} repeatable {}",
@@ -1254,15 +1749,17 @@ fn render(analysis: &Analysis) -> Vec<String> {
       .chain(definition.arguments());
     for member in direct {
       lines.push(format!(
-        "  member {} {:?}",
+        "  member {} {:?} {:?}",
         member.get(),
-        lowered(model, member)
+        lowered(model, member),
+        typed(model, member)
       ));
       for argument in model.member(member).arguments() {
         lines.push(format!(
-          "    argument {} {:?}",
+          "    argument {} {:?} {:?}",
           argument.get(),
-          lowered(model, argument)
+          lowered(model, argument),
+          typed(model, argument)
         ));
       }
     }

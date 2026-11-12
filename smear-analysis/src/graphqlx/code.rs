@@ -85,6 +85,13 @@ pub enum DiagnosticKind {
   /// reported.
   ShadowedPrimitive,
 
+  // -- Lowering ----------------------------------------------------------------------------------
+  /// A `where` predicate whose left side is not one of its definition's own type parameters,
+  /// written with no type argument, or any `where` clause on an extension: the model holds a bound
+  /// only on a definition's own parameter, under the definition. Reported at the predicate's left
+  /// side, or at the extension's clause, and nothing of it is in the model.
+  InvalidBound,
+
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
   ResourceLimit,
@@ -112,6 +119,7 @@ impl DiagnosticKind {
     Self::UseDeclarationCollision,
     Self::UseNameCollision,
     Self::ShadowedPrimitive,
+    Self::InvalidBound,
     Self::ResourceLimit,
   ];
 
@@ -138,6 +146,7 @@ impl DiagnosticKind {
       Self::UseDeclarationCollision => Code::new("smear::graphqlx::use-declaration-collision"),
       Self::UseNameCollision => Code::new("smear::graphqlx::use-name-collision"),
       Self::ShadowedPrimitive => Code::new("smear::graphqlx::shadowed-primitive"),
+      Self::InvalidBound => Code::new("smear::graphqlx::invalid-bound"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -164,6 +173,7 @@ impl DiagnosticKind {
       Self::UseDeclarationCollision => "use and declaration of one name",
       Self::UseNameCollision => "two uses of one name",
       Self::ShadowedPrimitive => "declaration shadows a primitive",
+      Self::InvalidBound => "invalid bound",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -190,6 +200,7 @@ impl DiagnosticKind {
       | Self::UseResolutionChanged
       | Self::UseDeclarationCollision
       | Self::UseNameCollision
+      | Self::InvalidBound
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }

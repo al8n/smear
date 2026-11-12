@@ -646,11 +646,16 @@ fn a_written_primitive_counts_toward_the_definition_limit() {
   assert!(model.lookup(Namespace::Type, "^::core::i32").is_some());
   assert_eq!(model.defs().len(), library + 2);
 
+  // `i32`, refused, is no definition, so the field that names it names nothing either.
   let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library + 1));
   let schema = file(&analysis, 3, "schema.graphqlx");
+  let i32_at = named(schema, text, "a: ", "i32", 0);
   assert_eq!(
     found(&analysis),
-    [(resource, named(schema, text, "a: ", "i32", 0), None)],
+    [
+      (resource, i32_at, None),
+      ("smear::schema::undefined-type", i32_at, None)
+    ],
     "{:#?}",
     analysis.diagnostics()
   );

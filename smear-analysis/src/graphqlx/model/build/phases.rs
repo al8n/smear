@@ -1,8 +1,6 @@
-//! What the phases after lowering's first pass write: each definition's type parameters'
-//! defaults and its bounds, its `implements` entries, union members and applications,
-//! its built-in meaning and its externs, its instantiations and satisfactions; each member's type,
-//! default and applications; type occurrences and types, values, applications, the schema's roots
-//! and applications, and marks.
+//! What the phases after lowering's type occurrences write: each definition's applications, its
+//! built-in meaning and its externs, its instantiations and satisfactions; each member's default
+//! and applications; types, values, applications, the schema's roots and applications, and marks.
 //!
 //! GATED ON HAVING A CALLER. Lowering, instantiation, coercion and the tier phase are this
 //! module's callers, and until each lands the test-support door is its only one: a method that no
@@ -15,13 +13,13 @@ use crate::graphqlx::{
   id::{ApplicationId, DefId, MemberId, Sym, TyId, TypeExprId, ValueId, dense},
   model::{
     application::{ApplicationArgument, Resolution},
-    def::{Collection, TypeBound},
+    def::Collection,
     schema::{Root, RootOperation},
     table::{
-      ApplicationRow, ExternRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM,
-      KIND_UNRESOLVED, LiteralRow, NO_DEF, PathRow, Run, TyRow, TypeExprRow, UNSET_TY, VALUE_BOOL,
-      VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_MAP, VALUE_NULL,
-      VALUE_OBJECT, VALUE_SET, VALUE_STRING, VALUE_TYPE, VALUE_UNRESOLVED, ValueRow,
+      ApplicationRow, ExternRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM, LiteralRow,
+      NO_DEF, PathRow, Run, TyRow, UNSET_TY, VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT,
+      VALUE_LIST, VALUE_LITERAL, VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET, VALUE_STRING,
+      VALUE_TYPE, VALUE_UNRESOLVED, ValueRow,
     },
     ty::PathRoot,
     value::{LiteralKind, ObjectEntry},
@@ -32,59 +30,6 @@ use crate::graphqlx::{
 use super::{ModelBuilder, append, extend, grow, push_text, slot, unresolved_ty};
 
 impl ModelBuilder {
-  /// Gives `def`'s type parameter `index` the default `default`.
-  pub fn set_type_param_default(&mut self, def: DefId, index: u32, default: TypeExprId) {
-    let at = slot(self.model.defs[def.get() as usize].type_params, index);
-    self.model.type_params[at].default = Some(default);
-  }
-
-  /// Adds a bound to `def`, after those it has: its type parameter `parameter` must satisfy
-  /// `interface`, and the bound is written at `location`.
-  pub fn push_bound(
-    &mut self,
-    def: DefId,
-    parameter: u32,
-    interface: TypeExprId,
-    location: Location,
-  ) {
-    let row = &mut self.model.defs[def.get() as usize];
-    debug_assert!(
-      parameter < row.type_params.len,
-      "a bound bounds one of its definition's type parameters"
-    );
-    grow(
-      &mut self.model.bounds,
-      &mut row.bounds,
-      TypeBound {
-        parameter,
-        interface,
-        location,
-      },
-    );
-  }
-
-  /// Adds `interface` to the `implements` entries of `def`'s contribution `contribution`, after
-  /// those it has.
-  pub fn push_implements(&mut self, def: DefId, contribution: u32, interface: TypeExprId) {
-    let index = dense(self.model.implements.len());
-    let row = &mut self.model.defs[def.get() as usize];
-    extend(&mut row.implements, index);
-    let part = slot(row.contributions, contribution);
-    extend(&mut self.model.contributions[part].implements, index);
-    self.model.implements.push(interface);
-  }
-
-  /// Adds `member` to the union members of `def`'s contribution `contribution`, after those it
-  /// has.
-  pub fn push_union_member(&mut self, def: DefId, contribution: u32, member: TypeExprId) {
-    let index = dense(self.model.union_members.len());
-    let row = &mut self.model.defs[def.get() as usize];
-    extend(&mut row.union_members, index);
-    let part = slot(row.contributions, contribution);
-    extend(&mut self.model.contributions[part].union_members, index);
-    self.model.union_members.push(member);
-  }
-
   /// Adds `application` to the applications of `def`'s contribution `contribution`, after those it
   /// has.
   pub fn push_def_application(
@@ -136,11 +81,6 @@ impl ModelBuilder {
     self.model.satisfactions.push((ty, interface));
   }
 
-  /// Gives `member` its type, as written.
-  pub fn set_member_type(&mut self, member: MemberId, ty: TypeExprId) {
-    self.model.members[member.get() as usize].ty = Some(ty);
-  }
-
   /// Gives `member` its default value.
   pub fn set_member_default(&mut self, member: MemberId, value: ValueId) {
     self.model.members[member.get() as usize].default = Some(value);
@@ -154,76 +94,6 @@ impl ModelBuilder {
       &mut row.applications,
       application,
     );
-  }
-
-  /// Appends a type occurrence written at `location`, non-null when `non_null`.
-  ///
-  /// Type occurrences are appended in the walk's order, an occurrence before its arguments and
-  /// its element. One starts unresolved, with no path, no arguments and no type; the methods
-  /// below give it them.
-  pub fn push_type_expr(&mut self, location: Location, non_null: bool) -> TypeExprId {
-    let id = TypeExprId::new(dense(self.model.type_exprs.len()));
-    self.model.type_exprs.push(TypeExprRow {
-      shape: KIND_UNRESOLVED,
-      def: NO_DEF,
-      index: 0,
-      element: TypeExprId::new(0),
-      args: Run::default(),
-      non_null,
-      location,
-      path: None,
-      ty: UNSET_TY,
-    });
-    id
-  }
-
-  /// Records the path `type_expr` writes: from `root`, through `segments`, written at `location`.
-  pub fn set_type_expr_path(
-    &mut self,
-    type_expr: TypeExprId,
-    root: PathRoot,
-    segments: &[Sym],
-    location: Location,
-  ) {
-    let segments = append(&mut self.model.paths, segments);
-    self.model.type_exprs[type_expr.get() as usize].path = Some(PathRow {
-      root,
-      segments,
-      location,
-    });
-  }
-
-  /// Records the arguments `type_expr` writes, in order, each appended after it.
-  pub fn set_type_expr_args(&mut self, type_expr: TypeExprId, args: &[TypeExprId]) {
-    debug_assert!(
-      args.iter().all(|arg: &TypeExprId| *arg > type_expr),
-      "an occurrence's arguments are appended after it"
-    );
-    let args = append(&mut self.model.type_expr_args, args);
-    self.model.type_exprs[type_expr.get() as usize].args = args;
-  }
-
-  /// Makes `type_expr` the list of `element`, appended after it.
-  pub fn set_type_expr_list(&mut self, type_expr: TypeExprId, element: TypeExprId) {
-    debug_assert!(element > type_expr, "a list's element is appended after it");
-    let row = &mut self.model.type_exprs[type_expr.get() as usize];
-    row.shape = KIND_LIST;
-    row.element = element;
-  }
-
-  /// Resolves `type_expr` to the definition `def`.
-  pub fn resolve_named(&mut self, type_expr: TypeExprId, def: DefId) {
-    let row = &mut self.model.type_exprs[type_expr.get() as usize];
-    row.shape = KIND_NAMED;
-    row.def = def;
-  }
-
-  /// Resolves `type_expr` to `def`'s type parameter `index`.
-  pub fn resolve_param(&mut self, type_expr: TypeExprId, def: DefId, index: u32) {
-    let row = &mut self.model.type_exprs[type_expr.get() as usize];
-    row.shape = KIND_PARAM;
-    row.def = def;
-    row.index = index;
   }
 
   /// Gives `type_expr` its type.

@@ -115,7 +115,15 @@ All notable changes to Smear are documented in this file.
   and then each field's arguments, field by field, each with its description. A GraphQL built-in
   the root package replaces holds what the root package's definition writes, and the root may
   extend a built-in. `Contribution::is_extension()` says whether a contribution is a definition
-  or one of its extensions. The schema has a contribution for every schema item any package writes, its
+  or one of its extensions. Every written type is a type occurrence, numbered in the order the
+  model's walk reaches it, each before the types it nests: a type parameter's default, a bound,
+  an `implements` entry, a union member, a member's type. It keeps its path as written, `Int`
+  staying `Int`, and its written arguments, however many its definition has parameters, and its
+  path is resolved where it is written, with the generic parameters of its definition, or of its
+  extension by position, in scope; one that names nothing is reported with the code of its place
+  and stays unresolved. A `where` predicate bounds one of its definition's own type parameters;
+  any other left side, and any `where` clause on an extension, is the new
+  `smear::graphqlx::invalid-bound`. The schema has a contribution for every schema item any package writes, its
   definitions first and then its extensions, each by source and position and named at its
   `schema` or its `extend`; the root package's first schema definition gives it its description,
   and every other schema item is a contribution alone. Names and texts past what the model's

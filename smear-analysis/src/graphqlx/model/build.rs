@@ -45,21 +45,23 @@ use smear_semantics::interner::{Interner, Symbol};
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{DefId, IdRange, MemberId, ModuleId, PackageId, Sym, TyId, dense},
+  id::{DefId, IdRange, MemberId, ModuleId, PackageId, Sym, TyId, TypeExprId, dense},
   package::{IntegerProvider, Layout, Tier},
 };
 
 use super::{
   Model, Namespace, PackageKind,
-  def::{DefKind, DirectiveLocation, Origin, Primitive},
+  def::{DefKind, DirectiveLocation, Origin, Primitive, TypeBound},
   member::MemberKind,
   module::ModuleKind,
   order,
   table::{
     AliasRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, ContributionRow, DefRow,
-    DescriptionRow, KIND_UNRESOLVED, MemberRow, ModuleRow, NO_DEF, PackageRow, Run, TyRow,
-    TypeExprRow, TypeParamRow, UNSET_MODULE, UNSET_TY, ValueRow,
+    DescriptionRow, KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED, MemberRow, ModuleRow,
+    NO_DEF, PackageRow, PathRow, Run, TyRow, TypeExprRow, TypeParamRow, UNSET_MODULE, UNSET_TY,
+    ValueRow,
   },
+  ty::PathRoot,
 };
 
 impl Symbol for Sym {
@@ -446,6 +448,134 @@ impl ModelBuilder {
   pub fn set_member_description(&mut self, member: MemberId, text: &str, location: Location) {
     let description = self.description(text, location);
     self.model.members[member.get() as usize].description = Some(description);
+  }
+
+  /// Gives `def`'s type parameter `index` the default `default`.
+  pub fn set_type_param_default(&mut self, def: DefId, index: u32, default: TypeExprId) {
+    let at = slot(self.model.defs[def.get() as usize].type_params, index);
+    self.model.type_params[at].default = Some(default);
+  }
+
+  /// Adds a bound to `def`, after those it has: its type parameter `parameter` must satisfy
+  /// `interface`, and the bound is written at `location`.
+  pub fn push_bound(
+    &mut self,
+    def: DefId,
+    parameter: u32,
+    interface: TypeExprId,
+    location: Location,
+  ) {
+    let row = &mut self.model.defs[def.get() as usize];
+    debug_assert!(
+      parameter < row.type_params.len,
+      "a bound bounds one of its definition's type parameters"
+    );
+    grow(
+      &mut self.model.bounds,
+      &mut row.bounds,
+      TypeBound {
+        parameter,
+        interface,
+        location,
+      },
+    );
+  }
+
+  /// Adds `interface` to the `implements` entries of `def`'s contribution `contribution`, after
+  /// those it has.
+  pub fn push_implements(&mut self, def: DefId, contribution: u32, interface: TypeExprId) {
+    let index = dense(self.model.implements.len());
+    let row = &mut self.model.defs[def.get() as usize];
+    extend(&mut row.implements, index);
+    let part = slot(row.contributions, contribution);
+    extend(&mut self.model.contributions[part].implements, index);
+    self.model.implements.push(interface);
+  }
+
+  /// Adds `member` to the union members of `def`'s contribution `contribution`, after those it
+  /// has.
+  pub fn push_union_member(&mut self, def: DefId, contribution: u32, member: TypeExprId) {
+    let index = dense(self.model.union_members.len());
+    let row = &mut self.model.defs[def.get() as usize];
+    extend(&mut row.union_members, index);
+    let part = slot(row.contributions, contribution);
+    extend(&mut self.model.contributions[part].union_members, index);
+    self.model.union_members.push(member);
+  }
+
+  /// Gives `member` its type, as written.
+  pub fn set_member_type(&mut self, member: MemberId, ty: TypeExprId) {
+    self.model.members[member.get() as usize].ty = Some(ty);
+  }
+
+  /// Appends a type occurrence written at `location`, non-null when `non_null`.
+  ///
+  /// Type occurrences are appended in the walk's order, an occurrence before its arguments and
+  /// its element. One starts unresolved, with no path, no arguments and no type; the methods
+  /// below give it them.
+  pub fn push_type_expr(&mut self, location: Location, non_null: bool) -> TypeExprId {
+    let id = TypeExprId::new(dense(self.model.type_exprs.len()));
+    self.model.type_exprs.push(TypeExprRow {
+      shape: KIND_UNRESOLVED,
+      def: NO_DEF,
+      index: 0,
+      element: TypeExprId::new(0),
+      args: Run::default(),
+      non_null,
+      location,
+      path: None,
+      ty: UNSET_TY,
+    });
+    id
+  }
+
+  /// Records the path `type_expr` writes: from `root`, through `segments`, written at `location`.
+  pub fn set_type_expr_path(
+    &mut self,
+    type_expr: TypeExprId,
+    root: PathRoot,
+    segments: &[Sym],
+    location: Location,
+  ) {
+    let segments = append(&mut self.model.paths, segments);
+    self.model.type_exprs[type_expr.get() as usize].path = Some(PathRow {
+      root,
+      segments,
+      location,
+    });
+  }
+
+  /// Records the arguments `type_expr` writes, in order, each appended after it.
+  pub fn set_type_expr_args(&mut self, type_expr: TypeExprId, args: &[TypeExprId]) {
+    debug_assert!(
+      args.iter().all(|arg: &TypeExprId| *arg > type_expr),
+      "an occurrence's arguments are appended after it"
+    );
+    let args = append(&mut self.model.type_expr_args, args);
+    self.model.type_exprs[type_expr.get() as usize].args = args;
+  }
+
+  /// Makes `type_expr` the list of `element`, appended after it.
+  pub fn set_type_expr_list(&mut self, type_expr: TypeExprId, element: TypeExprId) {
+    debug_assert!(element > type_expr, "a list's element is appended after it");
+    let row = &mut self.model.type_exprs[type_expr.get() as usize];
+    row.shape = KIND_LIST;
+    row.element = element;
+  }
+
+  /// Resolves `type_expr` to the definition `def`.
+  pub fn resolve_named(&mut self, type_expr: TypeExprId, def: DefId) {
+    let row = &mut self.model.type_exprs[type_expr.get() as usize];
+    row.shape = KIND_NAMED;
+    row.def = def;
+  }
+
+  /// Resolves `type_expr` to `def`'s type parameter `index`.
+  pub fn resolve_param(&mut self, type_expr: TypeExprId, def: DefId, index: u32) {
+    let row = &mut self.model.type_exprs[type_expr.get() as usize];
+    row.shape = KIND_PARAM;
+    row.def = def;
+    row.index = index;
   }
 
   /// Appends a schema definition to the schema's contributions: at `location`, its `schema`, and

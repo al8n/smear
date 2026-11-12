@@ -55,6 +55,22 @@ fn at(source: SourceId, text: &str, needle: &str, nth: usize) -> Location {
   Location::new(source.get(), SimpleSpan::new(start, start + needle.len()))
 }
 
+/// Where each diagnostic points, every one of them `smear::schema::undefined-type`.
+fn undefined(analysis: &Analysis) -> Vec<Location> {
+  analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| {
+      assert_eq!(
+        diagnostic.code().as_str(),
+        "smear::schema::undefined-type",
+        "{diagnostic:?}"
+      );
+      diagnostic.primary()
+    })
+    .collect()
+}
+
 /// The definition the canonical name `name` names in `namespace`.
 fn def(model: &Model, namespace: Namespace, name: &str) -> DefId {
   model
@@ -356,11 +372,15 @@ fn core_materialises_the_written_primitives_first_in_their_order() {
 #[test]
 fn a_width_beyond_cores_own_is_materialised_only_for_a_package_with_a_provider() {
   let wide = "type Wide { a: i256, b: u24, c: NonZeroU7 }\n";
-  // Without a provider, the program writes widths it may not have, and none is materialised:
-  // reporting the spelling where it is used is name resolution's.
+  // Without a provider, the program writes widths it may not have, and none is materialised: each
+  // spelling is reported where it is used, as a type the field's place cannot name.
   let root = package("app", Layout::Flat, &[("schema.graphqlx", wide)]);
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    undefined(&analysis),
+    ["i256", "u24", "NonZeroU7"].map(|name: &str| at(schema, wide, name, 0))
+  );
   let builtins = analysis.model().builtins();
   for width in [
     Primitive::signed(256),
@@ -384,13 +404,11 @@ fn a_width_beyond_cores_own_is_materialised_only_for_a_package_with_a_provider()
   }
 
   // A width is materialised when one package that may have it writes it, whoever else writes it
-  // too; `geo` has `numo`, and the root, which has none, writes another width alone.
-  let root = package(
-    "app",
-    Layout::Flat,
-    &[("schema.graphqlx", "type Q { a: i256, b: u40 }\n")],
-  )
-  .with_dependencies(["geo"]);
+  // too; `geo` has `numo`, and the root, which has none, writes another width alone. The root may
+  // name neither: only `geo`'s field resolves.
+  let narrow = "type Q { a: i256, b: u40 }\n";
+  let root =
+    package("app", Layout::Flat, &[("schema.graphqlx", narrow)]).with_dependencies(["geo"]);
   let geo = package(
     "geo",
     Layout::Flat,
@@ -398,7 +416,11 @@ fn a_width_beyond_cores_own_is_materialised_only_for_a_package_with_a_provider()
   )
   .with_integers(IntegerProvider::numo());
   let analysis = analyze(&root, &[geo], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    undefined(&analysis),
+    [at(schema, narrow, "i256", 0), at(schema, narrow, "u40", 0)]
+  );
   let builtins = analysis.model().builtins();
   assert!(builtins.primitive(Primitive::signed(256)).is_some());
   assert_eq!(builtins.primitive(Primitive::unsigned(40)), None);
