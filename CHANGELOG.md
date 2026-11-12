@@ -82,7 +82,10 @@ All notable changes to Smear are documented in this file.
   commas and comments is accepted and declares nothing. `Limits::max_definitions` bounds every
   definition the model would hold, the built-in library's and the primitives included: the first
   one a supplied package would add past it is `resource-limit`, and nothing after it is
-  collected. A file holding an item of a kind the analyzer does not know, which only a newer
+  collected. A new `Limits::max_modules`, 2^16 by default, bounds every module the model would
+  hold, every package's root module included, which is always held: the first module a supplied
+  package's directory or `mod` would add past it is `resource-limit`, and no module is added
+  after it. A file holding an item of a kind the analyzer does not know, which only a newer
   parser can make, is `unknown-item`, once per file. Every module has a scope: its own
   declarations and child modules, then the prelude, the root modules of `core`, `alloc` and `std`
   whatever the package's tier, and last, where a module is wanted, the names of the packages it

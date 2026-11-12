@@ -12,8 +12,16 @@
 //!
 //! A file is placed nowhere when the package set refused its path (an invalid path, or one that
 //! two files share, which nothing but their texts tells apart), when a directory on its way is not
-//! a Name, and when a directory on its way sits deeper than `Limits::max_module_depth`. Such a file
-//! is parsed all the same, so its syntax errors are reported, but nothing it declares is collected.
+//! a Name, and when a directory on its way sits deeper than `Limits::max_module_depth` or would
+//! add a module past `Limits::max_modules`. Such a file is parsed all the same, so its syntax
+//! errors are reported, but nothing it declares is collected.
+//!
+//! Every module the model will hold counts against `Limits::max_modules`: every package's root
+//! module, all of which are in the tree before the walk starts and are held whatever the limit, and
+//! each directory module and each `mod`'s module as the walk adds it. The first module a supplied
+//! package's directory or `mod` would add past the limit is reported, and the walk adds no module
+//! after it, refusing it as it refuses one past the depth limit; what sits in a module already held
+//! is still collected. A `mod` of a module the package already has adds none.
 //!
 //! The walk counts every definition the model will hold as it meets it, against
 //! `Limits::max_definitions`: each type and directive definition but one that takes a GraphQL
@@ -127,6 +135,14 @@ enum Counted<'n> {
   Primitive(Primitive),
 }
 
+/// What would add a module the module limit refuses.
+enum Adding<'n> {
+  /// A directory of the package being walked, as the file paths spell it.
+  Directory(&'n [u8]),
+  /// A `mod` named so, naming its module at the location.
+  Mod(Location, &'n [u8]),
+}
+
 /// Finds every module of `packages`, which are in id order and numbered by `sources`, and
 /// everything each declares: each package's root module, its directory modules and the modules
 /// its files' inline `mod`s declare, reporting what is refused on the way, and each module's
@@ -142,6 +158,8 @@ pub(crate) fn items<'d, 'a: 'd>(
     tree: Tree::new(),
     reporter,
     max_depth: limits.max_module_depth(),
+    max_modules: limits.max_modules(),
+    modules_full: false,
     package: 0,
     package_name: b"",
     package_source: Location::entire(0),
@@ -159,9 +177,14 @@ pub(crate) fn items<'d, 'a: 'd>(
   };
   let mut items: Vec<Option<Items<'d, 'a>>> = Vec::new();
   items.resize_with(sources.len() as usize, || None);
+  // Every package's root module is held whatever the module limit, so all of them are in the tree,
+  // and counted, before the first module the limit may refuse.
+  for index in 0..packages.len() {
+    walk.tree.root(index);
+  }
   for (index, package) in packages.iter().enumerate() {
     let range = sources.package_sources(index);
-    let root = walk.tree.root(index);
+    let root = walk.tree.root_of(index);
     walk.package = index;
     walk.package_name = package.name;
     walk.package_source = Location::entire(range.start());
@@ -247,6 +270,10 @@ struct Walk<'d, 'r> {
   reporter: &'r mut Reporter,
   /// `Limits::max_module_depth`.
   max_depth: u32,
+  /// `Limits::max_modules`.
+  max_modules: u32,
+  /// Whether the walk refused a module past the module limit, after which it adds none.
+  modules_full: bool,
   /// The index of the package being walked.
   package: usize,
   /// The name of the package being walked, which messages quote.
@@ -281,6 +308,10 @@ impl<'d> Walk<'d, '_> {
   /// `None`, and reported at the package source, when a directory on the way is not a Name or sits
   /// deeper than the limit. The package's files are in source order, which keeps the files under one
   /// directory together, so `reported`, the directory reported last, is what reports each once.
+  /// `None` too when a directory on the way would add a module past the module limit.
+  ///
+  /// Every directory module is added before any `mod` is walked, so a child the tree already has
+  /// here is a directory module too.
   fn directory(
     &mut self,
     root: u32,
@@ -308,10 +339,36 @@ impl<'d> Walk<'d, '_> {
         }
         return None;
       }
-      module = self.tree.directory(module, name, directory);
+      module = match self.tree.child(module, name) {
+        Some(found) => found,
+        None => {
+          if !self.module_room(Adding::Directory(directory)) {
+            return None;
+          }
+          self.tree.directory(module, name, directory)
+        }
+      };
       start = end + 1;
     }
     Some(module)
+  }
+
+  /// Whether the tree may take one more module, which the package being walked would add: always
+  /// for a built-in package, and for a supplied package while the tree holds fewer modules than the
+  /// limit and none was refused before. The first module refused is reported, at what would have
+  /// added it, and every module after it is refused unreported.
+  fn module_room(&mut self, adding: Adding<'_>) -> bool {
+    if self.package < ROOT {
+      return true;
+    }
+    if !self.modules_full && self.tree.count() < self.max_modules {
+      return true;
+    }
+    if !self.modules_full {
+      self.modules_full = true;
+      self.past_module_limit(adding);
+    }
+    false
   }
 
   /// Walks the items of `document`, the file `source`, which is placed in the module `module`;
@@ -528,9 +585,10 @@ impl<'d> Walk<'d, '_> {
   /// The module the inline `mod` `declaration`, written in the file `source` inside the module
   /// `parent`, declares.
   ///
-  /// `None` when that module would sit deeper than the limit: it is reported, and nothing inside it
-  /// is walked. A module the package already has is declared again, which is reported, and the
-  /// items are walked into that one module all the same.
+  /// `None` when that module would sit deeper than the depth limit, or be one module past the
+  /// module limit: nothing inside it is walked. A module the package already has is declared
+  /// again, which is reported, and adds no module: the items are walked into that one module all
+  /// the same.
   fn declare<S: AsRef<[u8]>>(
     &mut self,
     declaration: &'d ModDefinition<S>,
@@ -547,6 +605,9 @@ impl<'d> Walk<'d, '_> {
     if let Some(found) = self.tree.child(parent, name) {
       self.declared_twice(at, name, found);
       return Some(found);
+    }
+    if !self.module_room(Adding::Mod(at, name)) {
+      return None;
     }
     let description: Option<(&'d [u8], Location)> =
       declaration
@@ -622,6 +683,41 @@ impl<'d> Walk<'d, '_> {
           "the parser that read this file is newer than this analyzer; analyze it with a release \
            of the analyzer that knows every kind of item the parser reads",
         )
+        .build(),
+    );
+  }
+
+  /// Reports the first module past the module limit, which `adding` would have added: a directory
+  /// at its package's package source, a `mod` where it names its module.
+  fn past_module_limit(&mut self, adding: Adding<'_>) {
+    let kind = DiagnosticKind::ResourceLimit;
+    let max = self.max_modules;
+    let (at, message) = match adding {
+      Adding::Directory(directory) => (
+        self.package_source,
+        format!(
+          "package `{}` holds the directory `{}`, whose module would pass the limit of {max} \
+           modules the model may hold, so the files under it are placed in no module, and no \
+           module after it is declared",
+          Excerpt(self.package_name),
+          Excerpt(directory)
+        ),
+      ),
+      Adding::Mod(at, name) => (
+        at,
+        format!(
+          "`mod {}` declares a module that would pass the limit of {max} modules the model may \
+           hold, so nothing inside it is collected, and no module after it is declared",
+          Excerpt(name)
+        ),
+      ),
+    };
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), at)
+        .severity(kind.severity())
+        .message(message)
+        .primary_label(kind.title())
+        .help("raise `Limits::max_modules`, or use fewer directories and `mod`s")
         .build(),
     );
   }

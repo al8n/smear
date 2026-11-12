@@ -607,16 +607,22 @@ fn within(parts: impl Iterator<Item = Run>, whole: Run, what: &str) {
 
 /// Two module paths, segment by segment, each segment bytewise, a path before every path it
 /// begins.
+///
+/// A name is interned once, so two segments of one symbol are one spelling and two of different
+/// symbols are different spellings. The paths are therefore compared symbol by symbol, and only
+/// the first two segments whose symbols differ are compared bytewise: that pair decides, as it
+/// does when every segment is compared bytewise, since every pair before it is equal either way.
+/// Two neighbouring modules share their ancestors' segments, so comparing those by symbol is what
+/// keeps a long name from being read again for every module under it.
 fn compare_paths(model: &Model, a: Run, b: Run) -> Ordering {
-  let left = a
-    .of(&model.paths)
-    .iter()
-    .map(|segment: &Sym| model.name(*segment).as_bytes());
-  let right = b
-    .of(&model.paths)
-    .iter()
-    .map(|segment: &Sym| model.name(*segment).as_bytes());
-  left.cmp(right)
+  let left: &[Sym] = a.of(&model.paths);
+  let right: &[Sym] = b.of(&model.paths);
+  for (x, y) in left.iter().zip(right) {
+    if x != y {
+      return model.name(*x).as_bytes().cmp(model.name(*y).as_bytes());
+    }
+  }
+  left.len().cmp(&right.len())
 }
 
 /// Whether `row`'s name is written in a source of its module's package. Only a GraphQL built-in

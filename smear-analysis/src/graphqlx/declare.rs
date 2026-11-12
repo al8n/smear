@@ -327,9 +327,22 @@ pub(crate) fn declarations<'d, 'a>(
       .take_while(|found: &&Found<'d>| modules[found.placed.module as usize] == module)
       .count();
     let run: &[Found<'d>] = &definitions[start..start + len];
-    let mut duplicates = Duplicates::over(run.len(), |at: usize| key(&run[at]));
+    // What each definition is named by in its module: its namespace and its interned name. Two
+    // definitions with one key are two declarations of one name, whatever their kinds; and one
+    // name has one symbol, so comparing keys reads no spelling again.
+    let keys: Vec<(u8, Sym)> = run
+      .iter()
+      .map(|found: &Found<'d>| {
+        (
+          namespace(found.kind),
+          builder.intern(&String::from_utf8_lossy(found.name)),
+        )
+      })
+      .collect();
+    let mut duplicates = Duplicates::over(run.len(), |at: usize| keys[at]);
     for (offset, found) in run.iter().enumerate() {
-      if let Some(first) = duplicates.first(offset, key(found)) {
+      let (space, name) = keys[offset];
+      if let Some(first) = duplicates.first(offset, (space, name)) {
         duplicate(reporter, found, &run[first]);
         continue;
       }
@@ -337,8 +350,8 @@ pub(crate) fn declarations<'d, 'a>(
       if let Some(def) = ids[at] {
         names.push(Binding {
           module,
-          namespace: namespace(found.kind),
-          name: builder.intern(&String::from_utf8_lossy(found.name)),
+          namespace: space,
+          name,
           def,
           replaces: replacing[at],
         });
@@ -442,12 +455,6 @@ fn order(modules: &[ModuleId], found: &Found<'_>) -> (ModuleId, SourceId, usize)
     found.placed.source,
     position,
   )
-}
-
-/// What a definition is named by in its module: its namespace and its name. Two definitions with
-/// one key are two declarations of one name, whatever their kinds.
-fn key<'d>(found: &Found<'d>) -> (u8, &'d [u8]) {
-  (namespace(found.kind), found.name)
 }
 
 /// Gives `def` the description written as `description`, decoded into `text`.
