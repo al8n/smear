@@ -56,7 +56,7 @@ mod near;
 mod uses;
 
 use core::cell::Cell;
-use std::{collections::BTreeMap, format, string::String, vec::Vec};
+use std::{collections::BTreeMap, format, string::String, vec, vec::Vec};
 
 use smear_parser::graphqlx::ast::{Path, PathRoot};
 use tokora::{
@@ -72,9 +72,9 @@ use super::{
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{DefId, ModuleId, PackageId, SourceId, Sym, dense},
   limits::Limits,
-  model::{ModelBuilder, Primitive},
+  model::{ModelBuilder, ModuleKind, Primitive},
   package::{IntegerProvider, Layout},
-  set::{FileView, PackageView, ROOT},
+  set::{PackageView, ROOT},
   source::SourceMap,
 };
 
@@ -102,6 +102,13 @@ pub(crate) struct Scopes<'x> {
   /// Every glob: by module, the module the glob names, and the `use` item, each with where the
   /// glob is written.
   globs: BTreeMap<(ModuleId, ModuleId, u32), Location>,
+  /// The directory module of each file of a `Directory` package, by source id: where a string
+  /// source written in the file starts. `None` for a package source, a file of a `Flat` package,
+  /// and a file placed in no module.
+  directories: Vec<Option<ModuleId>>,
+  /// Each file of a `Directory` package that sits in a directory module, by that module, then by
+  /// the file's name: what tells a string source that names a file from one that names nothing.
+  files: Vec<FileName<'x>>,
   /// `Limits::max_path_segments`.
   max_segments: u32,
   /// `Limits::max_use_depth`.
@@ -134,10 +141,18 @@ struct PackageScope<'x> {
   /// The supplied packages it declares and may reach, by name, each with its root module. The
   /// built-in packages it reaches without declaring them.
   dependencies: Vec<(&'x [u8], ModuleId)>,
-  /// Its files, in source order: what a string source's path is checked against.
-  files: &'x [FileView<'x>],
   /// Its package source's id, which its files' ids follow.
   source: u32,
+}
+
+/// A file of a `Directory` package, as a string source that names it is told by: the module of
+/// its directory, its name, the bytes after its path's last `/`, and its directory's path, the
+/// bytes before that `/`, which the help quotes. Both are slices of the file's own path.
+#[derive(Clone, Copy)]
+struct FileName<'x> {
+  module: ModuleId,
+  name: &'x [u8],
+  directory: &'x [u8],
 }
 
 /// What a path is wanted to name.
@@ -452,7 +467,6 @@ pub(crate) fn scopes<'x>(
       layout: view.layout,
       integers: view.integers,
       dependencies: reached,
-      files: view.files.as_slice(),
       source: sources.package_sources(index).start(),
     });
   }
@@ -467,6 +481,8 @@ pub(crate) fn scopes<'x>(
     non_zero: None,
     explicit: BTreeMap::new(),
     globs: BTreeMap::new(),
+    directories: Vec::new(),
+    files: Vec::new(),
     max_segments: limits.max_path_segments(),
     max_use_depth: limits.max_use_depth(),
     near: Cell::new(limits.max_near_miss_comparisons()),
@@ -475,9 +491,99 @@ pub(crate) fn scopes<'x>(
     .find(b"NonZero")
     .and_then(|sym: Sym| scopes.def(roots[CORE], TYPE, sym));
   scopes.non_zero = non_zero;
+  let (directories, files) = scopes.file_tables(packages, sources, builder);
+  scopes.directories = directories;
+  scopes.files = files;
   scopes.shadowed(builder, reporter);
   uses::resolve(&mut scopes, declarations, limits, builder, reporter);
   scopes
+}
+
+impl<'x> Scopes<'x> {
+  /// The directory module of every file of a `Directory` package, by source id, and those files by
+  /// module and name: the tables a string source is resolved against. Each file's path is read
+  /// once, split at its last `/`, and its directories are walked down from its package's root
+  /// module, one child module per name, as the module tree placed the file.
+  ///
+  /// A package's files are in source order, which keeps the files of one directory in the bytewise
+  /// order of their names. So a stable sort by module alone leaves the rows in module, then name
+  /// order, and reads no name.
+  fn file_tables(
+    &self,
+    packages: &'x [PackageView<'_>],
+    sources: &SourceMap,
+    names: &ModelBuilder,
+  ) -> (Vec<Option<ModuleId>>, Vec<FileName<'x>>) {
+    let mut directories: Vec<Option<ModuleId>> = vec![None; sources.len() as usize];
+    let mut files: Vec<FileName<'x>> = Vec::new();
+    for (index, view) in packages.iter().enumerate() {
+      if view.layout != Layout::Directory {
+        continue;
+      }
+      let first = sources.package_sources(index).start() as usize + 1;
+      for (offset, file) in view.files.iter().enumerate() {
+        let path: &'x [u8] = file.path;
+        let (directory, name) = match path.iter().rposition(|byte: &u8| *byte == b'/') {
+          Some(cut) => (&path[..cut], &path[cut + 1..]),
+          None => (&path[..0], path),
+        };
+        let Some(module) = self.directory_module(names, index, directory) else {
+          continue;
+        };
+        if let Some(slot) = directories.get_mut(first + offset) {
+          *slot = Some(module);
+        }
+        files.push(FileName {
+          module,
+          name,
+          directory,
+        });
+      }
+    }
+    files.sort_by_key(|file: &FileName<'x>| file.module);
+    (directories, files)
+  }
+
+  /// The path, relative to its package's root, of the directory of the file named `name` in the
+  /// directory whose module is `module`: `None` when no file of that directory is named so.
+  fn named_file(&self, module: ModuleId, name: &[u8]) -> Option<&'x [u8]> {
+    let at = self
+      .files
+      .binary_search_by(|file: &FileName<'x>| {
+        file.module.cmp(&module).then_with(|| file.name.cmp(name))
+      })
+      .ok()?;
+    Some(self.files[at].directory)
+  }
+
+  /// The module of `directory`, a directory of the package at `package`: its names joined by `/`,
+  /// none for the package's root directory, walked down from its root module. `None` when a name
+  /// names no child module, or one that only an inline `mod` declares, where no file is placed.
+  fn directory_module(
+    &self,
+    names: &ModelBuilder,
+    package: usize,
+    directory: &[u8],
+  ) -> Option<ModuleId> {
+    let mut module = self.roots[package];
+    if directory.is_empty() {
+      return Some(module);
+    }
+    for name in directory.split(|byte: &u8| *byte == b'/') {
+      module = self.child(module, names.find(name)?)?;
+    }
+    (self.modules[module.get() as usize].kind == ModuleKind::Directory).then_some(module)
+  }
+
+  /// The directory module of the file `source`, when it is a file of a `Directory` package placed
+  /// in one.
+  fn directory_of(&self, source: SourceId) -> Option<ModuleId> {
+    self
+      .directories
+      .get(source.get() as usize)
+      .copied()
+      .flatten()
+  }
 }
 
 impl Scopes<'_> {

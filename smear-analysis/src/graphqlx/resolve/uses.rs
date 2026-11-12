@@ -72,7 +72,6 @@ use crate::graphqlx::{
   limits::Limits,
   model::{ModelBuilder, ModuleKind, Primitive},
   package::Layout,
-  set::{FileView, compare_paths},
 };
 
 use super::{
@@ -1079,11 +1078,17 @@ impl<'x> Run<'_, 'x> {
 
   /// The module the string source `raw`, written in the file `source`, names: its directory's.
   ///
-  /// The source is decoded, then read as a path relative to the directory of `source`: it starts
-  /// with `.` or `..`, each `/`-separated segment after that is `.`, `..` or a directory's name, and
-  /// one `/` may end it. It must stay inside its package's root directory, and it names a
-  /// directory that is a module, never a file. A package of the `Flat` layout has no directory
-  /// module, and a URL is not supported.
+  /// The source is decoded, then walked from the directory module of `source`, the module of the
+  /// directory the file is in, whatever `mod` the item is written in: it starts with `.` or `..`,
+  /// each `/`-separated segment after that is `.`, `..` or a name, and one `/` may end it. `.`
+  /// stays, `..` goes up to the parent module, which a root module has none of, and a name goes down
+  /// to the child module of that name; a name that is no child module, but a file of the directory
+  /// reached, names that file. The module reached must be a directory's. A package of the `Flat`
+  /// layout has no directory module, and a URL is not supported.
+  ///
+  /// Each segment costs a lookup of its own spelling, in the child modules and in the files of one
+  /// directory, which `scopes` tabled once: nothing read here is proportional to the length of the
+  /// file's path.
   fn directory(&mut self, source: SourceId, raw: &'x [u8]) -> Result<ModuleId, Why<'x>> {
     if self.scopes.packages[self.package].layout == Layout::Flat {
       return Err(Why::Flat);
@@ -1095,60 +1100,32 @@ impl<'x> Run<'_, 'x> {
     if is_url(&self.text) {
       return Err(Why::Url);
     }
-    let files: &'x [FileView<'x>] = self.scopes.packages[self.package].files;
-    let first = self.scopes.packages[self.package].source.saturating_add(1);
-    let file: &'x [u8] = source
-      .get()
-      .checked_sub(first)
-      .and_then(|index: u32| files.get(index as usize))
-      .map(|file: &FileView<'x>| file.path)
-      .ok_or(Why::NotRelative)?;
-
-    // The directory the file is in, then each segment of the source.
-    let mut path: Vec<&[u8]> = file.split(|byte: &u8| *byte == b'/').collect();
-    path.pop();
+    let mut module = self.scopes.directory_of(source).ok_or(Why::NoDirectory)?;
     let text: &str = self.text.strip_suffix('/').unwrap_or(&self.text);
     for (index, part) in text.split('/').enumerate() {
       match part {
         "." => {}
-        ".." => {
-          if path.pop().is_none() {
-            return Err(Why::Outside);
-          }
-        }
+        ".." => match self.scopes.modules[module.get() as usize].parent {
+          Some(parent) => module = parent,
+          None => return Err(Why::Outside),
+        },
         _ if index == 0 || part.is_empty() => return Err(Why::NotRelative),
-        name => path.push(name.as_bytes()),
-      }
-    }
-
-    if !path.is_empty() {
-      let mut joined: Vec<u8> = Vec::new();
-      for (index, part) in path.iter().enumerate() {
-        if index > 0 {
-          joined.push(b'/');
+        name => {
+          let name = name.as_bytes();
+          let child = self
+            .names
+            .find(name)
+            .and_then(|sym: Sym| self.scopes.child(module, sym));
+          module = match child {
+            Some(child) => child,
+            None => {
+              return Err(match self.scopes.named_file(module, name) {
+                Some(directory) => Why::File { directory },
+                None => Why::NoDirectory,
+              });
+            }
+          };
         }
-        joined.extend_from_slice(part);
-      }
-      let named = files.binary_search_by(|file: &FileView<'x>| compare_paths(file.path, &joined));
-      if let Ok(at) = named {
-        let named: &'x [u8] = files[at].path;
-        let directory: &'x [u8] = match named.iter().rposition(|byte: &u8| *byte == b'/') {
-          Some(cut) => &named[..cut],
-          None => &[],
-        };
-        return Err(Why::File { directory });
-      }
-    }
-
-    let mut module = self.scopes.roots[self.package];
-    for part in &path {
-      let child = self
-        .names
-        .find(part)
-        .and_then(|sym: Sym| self.scopes.child(module, sym));
-      match child {
-        Some(child) => module = child,
-        None => return Err(Why::NoDirectory),
       }
     }
     match self.scopes.modules[module.get() as usize].kind {

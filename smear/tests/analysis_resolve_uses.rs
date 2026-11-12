@@ -756,6 +756,82 @@ fn a_string_source_is_refused_where_it_names_no_directory_module() {
   );
 }
 
+/// A string source starts at the directory of the file it is written in, whatever `mod` it is
+/// written in: a `mod` of a directory module is refused as a module declared twice, but its items
+/// are collected into that module, whose directory is not the file's. Each name a source walks
+/// through must be a module, so `..` does not undo a name that names nothing.
+#[test]
+fn a_string_source_starts_at_its_files_directory_whatever_mod_it_is_in() {
+  let text = "mod a {\n  use \"./b\" as near\n  use \"./a/b\" as far\n  \
+              use \"./nowhere/../b\" as gone\n}\n";
+  let root = directory(
+    "app",
+    &[
+      ("lib.graphqlx", text),
+      ("a/x.graphqlx", "scalar InA\n"),
+      ("a/b/y.graphqlx", "scalar InAB\n"),
+      ("b/z.graphqlx", "scalar InB\n"),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  let lib = file(&analysis, 3, "lib.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        code(DiagnosticKind::ModuleDefinedTwice),
+        inside(lib, text, "mod a", 0, "a")
+      ),
+      (
+        code(DiagnosticKind::UnresolvedPath),
+        at(lib, text, "\"./nowhere/../b\"", 0)
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  all(
+    &root,
+    &[],
+    "^::app::a",
+    &[
+      ("near::InB", Some("^::app::b::InB")),
+      ("far::InAB", Some("^::app::a::b::InAB")),
+      ("mod gone", None),
+    ],
+  );
+}
+
+/// A long file path is not read again for each string source written in the file.
+///
+/// A string source names a directory relative to the file it is written in, and the file's
+/// directory was found by splitting the file's path, then the directory reached was joined into a
+/// path and searched for among the package's files, for every string source: a file whose path is
+/// L bytes and that holds U string sources cost L × U, and a path is not source text, which
+/// `Limits::max_source_bytes` counts. Now each file's directory module, and the files of each
+/// directory by name, are tabled once, and a string source walks from its file's directory module
+/// by its own segments.
+///
+/// Nothing here can count that work, so the sizes tell the two costs apart. A file named with 32
+/// MiB of `N` holds 60 000 items `use "./" as here`, about 1 MiB of text. Read for each item, the
+/// path costs about 2 × 10^12 bytes in all, which is minutes at memory speed; read once, it costs
+/// about what reading the file's text costs.
+#[test]
+fn a_long_file_path_is_not_read_again_for_each_string_source() {
+  const LONG: usize = 1 << 25;
+  const SOURCES: usize = 60_000;
+  let path = format!("{}.graphqlx", "N".repeat(LONG));
+  let text = "use \"./\" as here\n".repeat(SOURCES);
+  let root: Package<&str> = Package::new("app", Layout::Directory, Tier::Std)
+    .with_files([SourceFile::new(path.as_str(), text.as_str())]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert_eq!(
+    test_support::resolve(&root, &[], "^::app", &[], "mod here").as_deref(),
+    Some("mod ^::app")
+  );
+}
+
 #[test]
 fn a_use_binds_in_each_namespace_and_types_and_modules_share_one() {
   let root = directory(
