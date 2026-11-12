@@ -124,6 +124,12 @@ where
 /// [`ErrorData::LeadingPathSeparator`](crate::graphqlx::error::ErrorData::LeadingPathSeparator),
 /// whose help names `^::`. Once a separator has been consumed, the next name is committed rather
 /// than transactionally retried.
+///
+/// Each refusal names what its position takes, at the token found there: a path whose first name
+/// is missing, after its root or with none, is refused as a missing
+/// [`Path`](crate::graphqlx::error::Expectation::Path), and a `::` with no name after it as a
+/// missing [`Name`](crate::graphqlx::error::Expectation::Name). A scanner stop at either position
+/// is still the stop.
 pub fn path<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<ast::Path<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
@@ -136,7 +142,12 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let root = path_root(inp)?;
-  let first = name(inp)?;
+  // `try_name`, not the committed `name`: tokora's committed identifier refuses with no expectation
+  // of its own. `try_name` reads through `try_expect_or_stop`, so a stop is still the stop.
+  let first = match try_name(inp)? {
+    ParseAttempt::Accept(name) => name,
+    ParseAttempt::Decline => return unexpected_here(inp, Expectation::Path),
+  };
   let start = root
     .span()
     .map_or_else(|| first.span().start(), |span| span.start());
@@ -277,6 +288,8 @@ where
 }
 
 /// Builds a path after its root and its first name have been consumed by a fused caller.
+///
+/// A `::` with no name after it is refused as a missing name, at the token found in its place.
 pub(crate) fn path_after_first<'inp, Src, Ctx>(
   start: usize,
   first: ast::Name<GraphqlxSlice<'inp, Src>>,
@@ -289,10 +302,15 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let mut segments = Vec::from([first]);
   while matches!(try_double_colon(inp)?, ParseAttempt::Accept(_)) {
-    segments.push(name(inp)?);
+    // As in `path`: `try_name`, so the refusal names its position and a stop stays a stop.
+    match try_name(inp)? {
+      ParseAttempt::Accept(name) => segments.push(name),
+      ParseAttempt::Decline => return unexpected_here(inp, Expectation::Name),
+    }
   }
   let end = segments
     .last()

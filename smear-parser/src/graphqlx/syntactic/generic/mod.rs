@@ -23,7 +23,7 @@ use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, keyword_of, path,
-  path_after_first, path_root, try_name, ty::try_type_generics, unexpected_here,
+  ty::try_type_generics, unexpected_here,
 };
 use crate::{
   combinator::{
@@ -449,33 +449,6 @@ generic_parser!(
 );
 
 generic_parser!(
-  /// A type path at a position that takes one: an interface after `implements` or `&`, and each
-  /// type a `where` predicate names.
-  ///
-  /// [`type_path`] reads its first name as a committed atom, and that atom refuses with no
-  /// expectation of its own. Here a head that starts no path, or a root with no name after it, is
-  /// refused as a missing path at the token found in its place, as a directive's name is. A `::`
-  /// where the path begins keeps its own diagnostic.
-  pub(crate) take_type_path,
-  inp,
-  TypePath<GraphqlxSlice<'inp, Src>>,
-  token_bounds = [];
-  {
-    let root = path_root(inp)?;
-    let first = match try_name(inp)? {
-      ParseAttempt::Accept(name) => name,
-      ParseAttempt::Decline => return expected_generic_phase(inp, Expectation::Path),
-    };
-    let start = root
-      .span()
-      .map_or_else(|| first.span().start(), |span| span.start());
-    let path = path_after_first(start, first, root, inp)?;
-    let generics = try_type_generics(inp)?;
-    Ok(TypePath::new(extent_since(inp, start), path, generics))
-  }
-);
-
-generic_parser!(
   /// Parses one committed GraphQLx `where` predicate.
   ///
   /// A predicate is `TypePath ':' TypePath ('&' TypePath)*`.
@@ -484,11 +457,11 @@ generic_parser!(
   WherePredicate<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
   {
-    let bounded_type = take_type_path(inp)?;
+    let bounded_type = type_path(inp)?;
     colon(inp)?;
-    let first = take_type_path(inp)?;
+    let first = type_path(inp)?;
     let bounds: Vec<TypePath<GraphqlxSlice<'inp, Src>>> = ampersand
-      .ignore_then(take_type_path)
+      .ignore_then(type_path)
       .repeated_while::<_, U1>(decide_ampersand_tail::<Src, Ctx>)
       .collect_with(Vec::from([first]))
       .parse_input(inp)?;

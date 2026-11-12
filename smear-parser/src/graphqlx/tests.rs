@@ -1013,10 +1013,11 @@ fn a_scalar_ends_on_its_where_clause_and_the_next_entry_is_its_own() {
 }
 
 #[test]
-fn a_missing_interface_or_bound_is_refused_as_a_missing_path() {
-  // Each of these positions takes a type path, so each refusal names one, at the token standing in
-  // its place: an interface after `implements` or `&`, a root with no name after it, and each type
-  // a `where` predicate names.
+fn a_path_missing_its_head_or_a_segment_is_refused_by_what_it_takes() {
+  // Every position that takes a path refuses a missing first name as a missing path, at the token
+  // standing in its place, whether the path has a root or not: an interface after `implements` or
+  // `&`, each type a `where` predicate names, a union member, a type condition, a root operation
+  // type, an extension's name, and a rooted spread, type or enum value.
   for (src, found) in [
     ("scalar S implements 5", Some(SyntacticTokenKind::Int)),
     (
@@ -1031,11 +1032,42 @@ fn a_missing_interface_or_bound_is_refused_as_a_missing_path() {
     ("scalar S where 5", Some(SyntacticTokenKind::Int)),
     ("scalar S<A> where A: 5", Some(SyntacticTokenKind::Int)),
     ("scalar S<A> where A: B & 5", Some(SyntacticTokenKind::Int)),
+    ("union U = 5", Some(SyntacticTokenKind::Int)),
+    ("union U = A | 5", Some(SyntacticTokenKind::Int)),
+    ("fragment F on 5 { f }", Some(SyntacticTokenKind::Int)),
+    ("{ ... on 5 { f } }", Some(SyntacticTokenKind::Int)),
+    ("schema { query: 5 }", Some(SyntacticTokenKind::Int)),
+    ("extend type 5 @d", Some(SyntacticTokenKind::Int)),
+    ("{ ...^:: }", Some(SyntacticTokenKind::RBrace)),
+    ("type T { f: ^::5 }", Some(SyntacticTokenKind::Int)),
+    ("{ f(a: ^::5) }", Some(SyntacticTokenKind::Int)),
   ] {
     assert_unexpected(
       |inp| ast::Document::graphqlx(inp).map(|_| ()),
       src,
       Expectation::Path,
+      found,
+    );
+  }
+
+  // And a `::` with no name after it is refused as a missing name, in every kind of path.
+  for (src, found) in [
+    ("union U = A::", None),
+    (
+      "type T implements a::5 { f: Int }",
+      Some(SyntacticTokenKind::Int),
+    ),
+    ("type T { f: a::5 }", Some(SyntacticTokenKind::Int)),
+    ("{ f(a: A::5) }", Some(SyntacticTokenKind::Int)),
+    ("type T @a::5 { f: Int }", Some(SyntacticTokenKind::Int)),
+    ("{ ...a::5 }", Some(SyntacticTokenKind::Int)),
+    ("scalar S<A> where A: b::5", Some(SyntacticTokenKind::Int)),
+    ("scalar S implements ^::a::5", Some(SyntacticTokenKind::Int)),
+  ] {
+    assert_unexpected(
+      |inp| ast::Document::graphqlx(inp).map(|_| ()),
+      src,
+      Expectation::Name,
       found,
     );
   }
