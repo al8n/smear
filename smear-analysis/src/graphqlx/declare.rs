@@ -191,13 +191,14 @@ pub(crate) fn declarations<'d, 'a>(
         primitives.insert(primitive.rank(), at);
         replacing[at] = true;
       }
-      Some(Replaced::Built(package, space, name)) => {
-        if built.contains_key(&(package, space, name)) {
-          named.insert((package, space, name), at);
-          replacing[at] = true;
-        }
+      Some(Replaced::Built(package, space, name))
+        if built.contains_key(&(package, space, name)) =>
+      {
+        named.insert((package, space, name), at);
+        replacing[at] = true;
       }
-      None => {}
+      // A built-in the library does not hold is replaced by nothing.
+      Some(Replaced::Built(..)) | None => {}
     }
   }
 
