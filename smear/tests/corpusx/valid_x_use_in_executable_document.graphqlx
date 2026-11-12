@@ -1,0 +1,2 @@
+use ^::queries::*
+query Q { f }

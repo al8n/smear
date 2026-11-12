@@ -192,13 +192,13 @@
 //! guarantee ends on is complete: every recursive position the grammar produces, and every leaf,
 //! because a leaf is a type that has said it is one.
 //!
-//! ## The other two trees, and why the set is derived rather than listed
+//! ## The other three trees, and why the set is derived rather than listed
 //!
-//! **There are three trees, and the value one is not special.** The set is exactly the types
-//! implementing [`Nestable`] — that is what "released iteratively" means here — and it is three
-//! families: the six **value** enums, both dialects' **type** references, and both dialects'
-//! **selections**. Every one of them releases its payload positions as leaves, so every one needs
-//! the same promise about them.
+//! **There are four trees, and the value one is not special.** The set is exactly the types
+//! implementing [`Nestable`] — that is what "released iteratively" means here — and it is four
+//! families: the six **value** enums, both dialects' **type** references, both dialects'
+//! **selections**, and GraphQLx's **use trees**. Every one of them releases its payload positions
+//! as leaves, so every one needs the same promise about them.
 //!
 //! This was learned the expensive way. Three consecutive rounds each closed one door — the value
 //! `S`, then the value `Span` and `I`, then the type `Span` — and each time an adversarial review
@@ -215,6 +215,8 @@
 //!   `SelectionSet`, `Field`, each owning one by value: six constructors, all bounded. An inline
 //!   fragment owns a nested set and a field an optional one, so selections nest exactly as values
 //!   do.
+//! * **Use tree, `S` and `Span`** — `UseTree::new`, the one door that seats either: a group holds
+//!   trees, and every name, path and string source a tree holds is dropped in place. Bounded.
 //!
 //! Each list is closed on the same evidence as `Name`'s four: private fields, and only `AsSpan`,
 //! `IntoSpan` and `IntoComponents` — which read out and never put back. No `From`, no
@@ -242,8 +244,8 @@
 //!   dropped in place and both take the bound**.
 //! * `MapEntry<Key, Value, Span>` — `Key` and `Value` are both [`Nestable`] and both handed over,
 //!   so neither is a payload; `Span` is dropped in place and takes the bound.
-//! * the six value enums, both `Type` families and both `Selection`s — their parameters are `S`,
-//!   `Span` and `I`, bounded at the doors that seat them.
+//! * the six value enums, both `Type` families, both `Selection`s and `UseTree` — their
+//!   parameters are `S`, `Span` and `I`, bounded at the doors that seat them.
 //! * `Absent<N>` is uninhabited.
 //!
 //! A carrier that is **not** `Nestable` — `Alias`, `TypeCondition`, `FragmentSpread`,
@@ -1215,8 +1217,9 @@ pub trait Nestable: Sized + Sealed {
   /// downwards.
   ///
   /// **The trees form a DAG and this is its topological rank.** A leaf is rank 0 by definition —
-  /// it has no `Nestable` impl at all, which is what "leaf" means. The **value** and **type**
-  /// trees are rank 1: neither can hold a node of the other, and neither can hold a selection.
+  /// it has no `Nestable` impl at all, which is what "leaf" means. The **value**, **type** and
+  /// GraphQLx **use** trees are rank 1: none of them can hold a node of another, and none can hold
+  /// a selection.
   /// The **selection** tree is rank 2, because a selection holds arguments and directives whose
   /// payloads are values, and in GraphQLx a type condition whose payload is a type.
   ///
@@ -1290,11 +1293,13 @@ pub trait Nestable: Sized + Sealed {
   /// ```text
   /// Selection ──→ Value ──→ Leaf
   ///     └───────→ Type  ──→ Leaf
+  ///             UseTree ──→ Leaf
   /// ```
   ///
   /// A selection holds arguments and directives whose payloads are values, and in GraphQLx a type
   /// condition whose payload is a type; it drops all of them in place. Value and type are
-  /// siblings — neither holds a node of the other — and a leaf holds nothing at all.
+  /// siblings — neither holds a node of the other — a use tree holds names, paths and strings and
+  /// no node of another tree, and a leaf holds nothing at all.
   ///
   /// **The reverse edges cannot be written, and that is a fact about the payload bounds rather
   /// than a convention.** A value's or a type's payload parameters are bounded [`Leaf`], and a
@@ -1306,7 +1311,7 @@ pub trait Nestable: Sized + Sealed {
   /// place sits beside a `const _: () = assert!(…)` comparing the two ranks, so an edge added in
   /// the wrong direction stops compiling.
   ///
-  /// "Leaf" means **holds no node of this crate's own** — of *any* of the three trees. A node of a
+  /// "Leaf" means **holds no node of this crate's own** — of *any* of the four trees. A node of a
   /// lower-ranked tree is not a leaf and does not have to be; it is admitted by the second bullet
   /// above, on the strength of its own iterative release. An arm an implementation treats as a leaf
   /// still releases whatever its payload parameters were instantiated with, and a caller who put a

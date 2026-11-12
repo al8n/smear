@@ -15,8 +15,8 @@
 //! sentence.
 //!
 //! **The comma is trivia, not punctuation**, here as in GraphQL. It is not a separator any
-//! production may require or count — and GraphQLx's generic lists, `where` clauses and import
-//! lists are all comma-*tolerant* rather than comma-separated for exactly that reason.
+//! production may require or count — and GraphQLx's generic lists, `where` clauses and `use`
+//! groups are all comma-*tolerant* rather than comma-separated for exactly that reason.
 //!
 //! # The kind vocabulary here is the lexer's, not the tree's
 //!
@@ -90,8 +90,8 @@ where
 /// a fixed `peek::<U2>()` answers about *trivia*, which is the trap Task 10's `set`/`map` dispatch
 /// recorded and worked around by consuming the keyword and peeking again. **One GraphQLx
 /// production cannot use that workaround.** A `where` clause's continuation test is
-/// `(Identifier, Colon | PathSeparator | LAngle) | (PathSeparator, Identifier)`
-/// (`graphqlx/syntactic/generic/mod.rs:442-453`), and on the *decline* branch the head belongs to
+/// `(Identifier, Colon | PathSeparator | LAngle) | (Tilde | Caret | DotDot, PathSeparator)`
+/// (`graphqlx/syntactic/generic/mod.rs:481-507`), and on the *decline* branch the head belongs to
 /// the next definition — `directive @d on FIELD where A: B` followed by `type X { f: Int }` ends
 /// its clause at `B`, and a one-token test would read `type` as another predicate's bounded type,
 /// consume it, and lose the whole `ObjectTypeDefinition`. There is no retro-wrap for a token that
@@ -352,7 +352,7 @@ pub mod test_support {
 
   /// `super::peek_as` over `src`, projecting to the contextual keyword.
   ///
-  /// The atom GraphQLx leans on hardest: `import`, `from`, `as`, `where`, `set` and `map` are all
+  /// The atom GraphQLx leans on hardest: `use`, `mod`, `as`, `where`, `set` and `map` are all
   /// ordinary identifier tokens, so every one of those dispatches is a downcast and not a kind
   /// comparison. A `None` means either "no token" or "this identifier spells nothing contextual",
   /// which is the flattening the substrate's `peek_as` documents.

@@ -11,8 +11,8 @@
 //! **across** kinds; a formatter walks [`syntax`](Document::syntax)`().children()` instead. See
 //! `ast/value.rs`'s module docs for the same ruling and the same Phase B answer.
 //!
-//! **Both roots admit imports**, which is the one entry kind GraphQL's twin has no counterpart
-//! for, and it is why the counts here are one higher than the shapes otherwise suggest.
+//! **Both roots admit `use` items**, which is the one entry kind GraphQL's twin has no
+//! counterpart for, and it is why the counts here are one higher than the shapes otherwise suggest.
 
 use crate::{
   ast_node,
@@ -29,7 +29,7 @@ use crate::{
         DirectiveExtension, EnumTypeExtension, InputObjectTypeExtension, InterfaceTypeExtension,
         ObjectTypeExtension, ScalarTypeExtension, SchemaExtension, UnionTypeExtension,
       },
-      import::ImportDefinition,
+      use_tree::UseDefinition,
     },
   },
 };
@@ -39,8 +39,8 @@ ast_node!(
   /// A mixed executable-plus-type-system document — what
   /// [`parse_document`](crate::graphqlx::lossless::parse_document) builds.
   Document => K::Document {
-    /// Every import the document makes, in order.
-    import_definitions: many ImportDefinition,
+    /// Every `use` item in the document, in order.
+    use_definitions: many UseDefinition,
     /// Every operation the document defines, in order.
     operation_definitions: many OperationDefinition,
     /// Every fragment the document defines, in order.
@@ -90,8 +90,8 @@ ast_node!(
   /// [`parse_type_system_document`](crate::graphqlx::lossless::parse_type_system_document), which
   /// reports an executable definition rather than admitting one.
   TypeSystemDocument => K::TypeSystemDocument {
-    /// Every import the document makes, in order.
-    import_definitions: many ImportDefinition,
+    /// Every `use` item in the document, in order.
+    use_definitions: many UseDefinition,
     /// Every scalar type the document defines, in order.
     scalar_type_definitions: many ScalarTypeDefinition,
     /// Every object type the document defines, in order.

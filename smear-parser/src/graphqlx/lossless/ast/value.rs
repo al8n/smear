@@ -29,7 +29,7 @@
 //! # An enum value wraps a whole path
 //!
 //! Divergence 9's value half: `graphqlx::ast::EnumValue` carries a `Path`, so `Colour` is
-//! `EnumValue > Path > Name` and `::ns::Colour` is a fully qualified one. [`EnumValue::path`] is a
+//! `EnumValue > Path > Name` and `^::ns::Colour` is a rooted one. [`EnumValue::path`] is a
 //! *child* getter for that reason, where GraphQL's `EnumValue::name` is a token getter. The SDL
 //! half diverges the other way — see
 //! [`EnumValueDefinition`](super::definition::EnumValueDefinition), whose value is a bare `Name`.
@@ -81,8 +81,8 @@ ast_node!(
   /// One node kind over two token kinds: the block/inline distinction is the *token*'s and
   /// survives on it, so a consumer that cares reads
   /// [`string_token`](StringValue::string_token)`().kind()` and one that does not is spared
-  /// matching two node kinds for one grammar production. The one position that narrows — an
-  /// import's `from "…"` — narrows on the token, so it is the same node either way.
+  /// matching two node kinds for one grammar production. The one position that narrows — a use
+  /// tree's string source — narrows on the token, so it is the same node either way.
   StringValue => K::StringValue {
     /// The literal token — [`InlineString`](K::InlineString) for `"s"`,
     /// [`BlockString`](K::BlockString) for `"""s"""`.
@@ -114,7 +114,7 @@ ast_node!(
   ///
   /// See this module's docs for divergence 9 and for the SDL half, which goes the other way.
   EnumValue => K::EnumValue {
-    /// The path naming the value, `Colour` or `::ns::Colour`.
+    /// The path naming the value, `Colour` or `^::ns::Colour`.
     path: opt Path,
   }
 );

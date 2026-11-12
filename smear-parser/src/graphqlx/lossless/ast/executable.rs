@@ -38,9 +38,9 @@ use crate::{
       generic::{
         DefinitionName, ExecutableDefinitionName, ExecutableDefinitionTypeGenerics, WhereClause,
       },
-      import::ImportDefinition,
       selection::{SelectionSet, TypeCondition},
       ty::{DefinitionTypePath, ListType},
+      use_tree::UseDefinition,
       value::{DefaultValue, VariableValue},
     },
   },
@@ -145,11 +145,11 @@ ast_node!(
   /// the mixed [`Document`](super::document::Document). A consumer that will only accept
   /// executable syntax calls
   /// [`parse_executable_document`](crate::graphqlx::lossless::parse_executable_document), which
-  /// reports a type-system definition rather than admitting one. It admits imports, which
+  /// reports a type-system definition rather than admitting one. It admits `use` items, which
   /// is why it has three iterators where GraphQL's has two.
   ExecutableDocument => K::ExecutableDocument {
-    /// Every import the document makes, in order.
-    import_definitions: many ImportDefinition,
+    /// Every `use` item in the document, in order.
+    use_definitions: many UseDefinition,
     /// Every operation the document defines, in order.
     operation_definitions: many OperationDefinition,
     /// Every fragment the document defines, in order.

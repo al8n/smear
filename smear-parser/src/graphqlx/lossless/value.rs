@@ -12,26 +12,27 @@
 //! # The four places GraphQLx's value grammar is not GraphQL's
 //!
 //! **1. An enum value is a whole path.** `graphqlx/syntactic/value.rs`'s `enum_after_first` builds
-//! `EnumValue::new(span, path)`, so `::ns::Colour` and `Colour` are both enum values and the node
+//! `EnumValue::new(span, path)`, so `^::ns::Colour` and `Colour` are both enum values and the node
 //! is [`EnumValue`](crate::graphqlx::kinds::SyntaxKind::EnumValue) wrapping a
 //! [`Path`](crate::graphqlx::kinds::SyntaxKind::Path). The nesting is not decoration: it is the
 //! shape the AST has, so a typed wrapper can ask an enum value for its segments.
 //!
-//! **2. A bare `::` is a value head.** `::ns::Colour` in value position is a fully qualified enum
-//! value (`value.rs:872-874`), which is why `recover::VALUE_HEADS` carries `PathSeparator` and
-//! GraphQL's does not.
+//! **2. A root's sigil is a value head.** `~::ns::Colour`, `^::ns::Colour` and `..::Colour` in
+//! value position are rooted enum values (`value.rs:878-880`), which is why `recover::VALUE_HEADS`
+//! carries `Tilde`, `DotDot` and `Caret` and GraphQL's does not. A `::` is not a head: it only
+//! joins, and a value that starts with one is refused.
 //!
 //! **3. `set` and `map` are contextual, and the test is the *immediately following* token.**
 //! `set!{ 1, 2 }` is a [`SetValue`](crate::graphqlx::kinds::SyntaxKind::SetValue); `set` alone,
 //! `set::Thing`, and the `set` of `set { a: 1 }`, are ordinary enum values
-//! (`value.rs:820-835, 931-946`). See this module's private `collection_or_enum` for why the test
+//! (`value.rs:826-841, 938-953`). See this module's private `collection_or_enum` for why the test
 //! needs a retro-wrap rather than a two-token peek.
 //!
 //! **4. `MapEntry` is `Value => Value`,** with both halves full values — a map key is not
 //! restricted to a name.
 //!
 //! What did **not** widen: an `ObjectField`'s key is still a plain `Name`
-//! (`value.rs:519-540`, `name then_ignore(colon) then(value)`). Only the value side moved.
+//! (`value.rs:522-543`, `name then_ignore(colon) then(value)`). Only the value side moved.
 //!
 //! # A `VariableValue` in a const position is reported **and still built**
 //!
@@ -166,7 +167,8 @@ lossless_production! {
   /// The block/inline distinction is the *token*'s, and it survives on the token in the tree; the
   /// node above it is `StringValue` either way. GraphQLx's AST names `InlineStringValue` and
   /// `BlockStringValue` aliases, and the kind space deliberately gives neither its own kind — the
-  /// one position that narrows (an import's `from "…"`) narrows on the token, not on the node.
+  /// one position that narrows (a `use` tree's string source) narrows on the token, not on the
+  /// node.
   fn string_value<'inp, Src, Ctx>(inp) {
     node(
       K::StringValue.raw(),
@@ -208,15 +210,15 @@ lossless_production! {
   /// `Path` *but not* `true`, `false` or `null` in its first position.
   ///
   /// **The divergence that shows up in every tree.** GraphQL's `EnumValue` wraps one `Name` token;
-  /// this one wraps a whole [`Path`](K::Path) node, so `Colour` is
-  /// `EnumValue > Path > Name` and `::ns::Colour` is `EnumValue > Path > [PathSeparator, Name,
-  /// PathSeparator, Name]`. The extra level is the AST's — `EnumValue::new(span, path)` — and it is
-  /// what lets a typed wrapper ask an enum value for its segments instead of re-lexing its text.
+  /// this one wraps a whole [`Path`](K::Path) node, so `Colour` is `EnumValue > Path > Name` and
+  /// `^::ns::Colour` is `EnumValue > Path > [Caret, PathSeparator, Name, PathSeparator, Name]`. The
+  /// extra level is the AST's — `EnumValue::new(span, path)` — and it is what lets a typed wrapper
+  /// ask an enum value for its segments instead of re-lexing its text.
   ///
   /// The three reserved spellings are excluded by [`value`]'s dispatch rather than by a check here,
   /// exactly as in GraphQL: the exclusion is the dispatch, not a re-test inside the arm dispatched
-  /// to. Their reservation is only over the **first** segment — `x::null` is a perfectly good enum
-  /// value, and `path` never looks at a spelling.
+  /// to. Their reservation is only over the **first** segment of a path with no root — `x::null`
+  /// and `^::null` are perfectly good enum values, and `path` never looks at a spelling.
   fn enum_value<'inp, Src, Ctx>(inp) {
     // The leading trivia is crossed here, before the node opens, so `EnumValue` starts at its own
     // first token rather than at the whitespace in front of it. `path` makes the same guarantee
@@ -286,7 +288,7 @@ lossless_production! {
   /// `Name : Value`
   ///
   /// **The key is a `Name`, not a `Path`.** GraphQLx widened the enum *value* to a path and left
-  /// the object field's key alone (`graphqlx/syntactic/value.rs:519-540`), so `{ ns::a: 1 }` is not
+  /// the object field's key alone (`graphqlx/syntactic/value.rs:522-543`), so `{ ns::a: 1 }` is not
   /// a field with a qualified key — the `::` ends the field and is recovered.
   fn object_field<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
@@ -428,7 +430,7 @@ lossless_production! {
 
   /// Dispatch on the value head. Opens **no** node of its own; the chosen production opens its own.
   ///
-  /// Two arms have no GraphQL counterpart. `PathSeparator` opens a fully qualified enum value, and
+  /// Two arms have no GraphQL counterpart. A root's sigil opens a rooted enum value, and
   /// the `set`/`map` spellings inside the `Identifier` arm route to [`collection_or_enum`] rather
   /// than straight to [`enum_value`] — everything else about the identifier arm is GraphQL's, since
   /// `true`, `false` and `null` are reserved in both dialects and reserved only in a path's first
@@ -446,8 +448,9 @@ lossless_production! {
       Some(Kind::InlineString | Kind::BlockString) => string_value::<Src, Ctx>(inp),
       Some(Kind::LBracket) => list_value::<Src, Ctx>(inp, konst),
       Some(Kind::LBrace) => object_value::<Src, Ctx>(inp, konst),
-      // GraphQLx only: a leading `::` is a fully qualified enum value.
-      Some(Kind::PathSeparator) => enum_value::<Src, Ctx>(inp),
+      // GraphQLx only: a root's sigil opens a rooted enum value. A `::` opens nothing and falls to
+      // the recovery below.
+      Some(Kind::Tilde | Kind::DotDot | Kind::Caret) => enum_value::<Src, Ctx>(inp),
       Some(Kind::Identifier) => match peek_as::<Src, Ctx, Keyword>(inp)? {
         Some(Keyword::True | Keyword::False) => boolean_value::<Src, Ctx>(inp),
         Some(Keyword::Null) => null_value::<Src, Ctx>(inp),

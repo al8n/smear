@@ -5,8 +5,13 @@
 //! supplied parser input, allowing the same APIs over `str`, `[u8]`, and the
 //! lexer-supported owned source wrappers.
 
+use core::num::NonZeroUsize;
 use std::vec::Vec;
-use tokora::{ErrorOf, InputRef, Lexer, ParseAttempt, ParseContext, SimpleSpan, Slice, Source};
+use tokora::{
+  ErrorOf, InputRef, Lexer, ParseAttempt, ParseContext, SimpleSpan, Slice, Source,
+  error::{UnexpectedEot, UnexpectedToken},
+  span::Spanned,
+};
 
 use smear_lexer::graphqlx::{
   ContextualKeyword,
@@ -15,7 +20,7 @@ use smear_lexer::graphqlx::{
 
 use super::GraphQLx;
 use crate::{
-  combinator::{ParseCtx, ident, try_double_colon, try_ident},
+  combinator::{ParseCtx, caret, double_colon, ident, tilde, try_double_colon, try_ident},
   graphqlx::{
     ast,
     error::{Expectation, GraphqlxError as DialectGraphqlxError},
@@ -58,12 +63,12 @@ pub mod directive;
 pub mod document;
 pub mod executable;
 pub mod generic;
-pub mod import;
 pub mod selection;
 pub mod ty;
+pub mod use_tree;
 pub mod value;
 
-pub use document::{document, import_or_definition_or_extension};
+pub use document::{document, document_item};
 
 // The suite's three document roots, side by side, for the reason GraphQL's `syntactic/mod.rs`
 // records: each alternate was already `pub` where it is defined, but only the mixed one was
@@ -111,11 +116,14 @@ where
   try_ident(inp).map(|attempt| attempt.map(ast::Name::from))
 }
 
-/// Parses a committed `::`-separated GraphQLx path.
+/// Parses a committed GraphQLx path, `PathRoot? Name (:: Name)*`.
 ///
-/// The grammar accepts an optional leading `::`, then one name followed by zero
-/// or more `:: Name` suffixes. Once a separator has been consumed, the next
-/// name is committed rather than transactionally retried.
+/// The root is `~ ::` (the own package), `^ ::` (a dependency, named by the first segment), or
+/// `.. ::` once per parent level, and trivia may stand between a root's tokens. A `::` where the
+/// path begins roots nothing — `::` only joins — so it is refused with
+/// [`ErrorData::LeadingPathSeparator`](crate::graphqlx::error::ErrorData::LeadingPathSeparator),
+/// whose help names `^::`. Once a separator has been consumed, the next name is committed rather
+/// than transactionally retried.
 pub fn path<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<ast::Path<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
@@ -125,18 +133,19 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let leading_separator = try_double_colon(inp)?;
-  let fully_qualified = matches!(&leading_separator, ParseAttempt::Accept(_));
+  let root = path_root(inp)?;
   let first = name(inp)?;
-  let start = match leading_separator {
-    ParseAttempt::Accept(separator) => separator.span().start(),
-    ParseAttempt::Decline => first.span().start(),
-  };
-  path_after_first(start, first, fully_qualified, inp)
+  let start = root
+    .span()
+    .map_or_else(|| first.span().start(), |span| span.start());
+  path_after_first(start, first, root, inp)
 }
 
 /// Attempts a GraphQLx path without consuming on a non-path head.
+///
+/// A path's heads are a name and the three root sigils `~`, `..` and `^`; a `::` is not one.
 pub fn try_path<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<ParseAttempt<ast::Path<GraphqlxSlice<'inp, Src>>>, GraphqlxError<'inp, Src, Ctx>>
@@ -146,20 +155,132 @@ where
   GraphqlxLexer<'inp, Src>:
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   match peek_kind(inp)? {
-    Some(SyntacticTokenKind::Identifier | SyntacticTokenKind::PathSeparator) => {
-      path(inp).map(ParseAttempt::Accept)
-    }
+    Some(
+      SyntacticTokenKind::Identifier
+      | SyntacticTokenKind::Tilde
+      | SyntacticTokenKind::DotDot
+      | SyntacticTokenKind::Caret,
+    ) => path(inp).map(ParseAttempt::Accept),
     _ => Ok(ParseAttempt::Decline),
   }
 }
 
-/// Builds a path after its first name has been consumed by a fused caller.
+/// Reads the root a path starts with — nothing, `~ ::`, `^ ::`, or `.. ::` repeated — and refuses a
+/// `::` where the path begins.
+///
+/// A root is a fixed pair of tokens per sigil, and the `.. ::` pairs are read in a loop rather than
+/// by recursion, so a long chain costs no stack. Their count is bounded the way the `:: Name`
+/// segments after them are: by the input, each pair consuming two tokens.
+pub(crate) fn path_root<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ast::PathRoot, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  Ok(match peek_kind(inp)? {
+    Some(SyntacticTokenKind::Tilde) => {
+      let start = tilde(inp)?.span().start();
+      ast::PathRoot::Package(SimpleSpan::new(start, root_separator(inp)?))
+    }
+    Some(SyntacticTokenKind::Caret) => {
+      let start = caret(inp)?.span().start();
+      ast::PathRoot::Dependency(SimpleSpan::new(start, root_separator(inp)?))
+    }
+    Some(SyntacticTokenKind::DotDot) => {
+      let start = dot_dot(inp)?.start();
+      let mut end = root_separator(inp)?;
+      let mut count = NonZeroUsize::MIN;
+      while matches!(peek_kind(inp)?, Some(SyntacticTokenKind::DotDot)) {
+        dot_dot(inp)?;
+        end = root_separator(inp)?;
+        count = count.saturating_add(1);
+      }
+      ast::PathRoot::Parent {
+        span: SimpleSpan::new(start, end),
+        count,
+      }
+    }
+    Some(SyntacticTokenKind::PathSeparator) => return leading_path_separator(inp),
+    _ => ast::PathRoot::Relative,
+  })
+}
+
+/// The `::` that ends a root's sigil, and where it ends.
+fn root_separator<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<usize, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+{
+  double_colon(inp).map(|separator| separator.span().end())
+}
+
+/// Commits to the `..` punctuator; errors on anything else.
+///
+/// tokora has no `..` punctuator to build an atom from, so this one is written over the token kind,
+/// with the shape and the errors of [`combinator`](crate::combinator)'s committed atoms.
+pub(crate) fn dot_dot<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<SimpleSpan, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+{
+  // `next_or_stop`, not `next`: a terminal scanner stop must not read as an end of input here, as
+  // at every committed leaf — smear issue #177.
+  match inp.next_or_stop()? {
+    Some(Spanned {
+      span,
+      data: GraphqlxToken::<'inp, Src>::DotDot,
+    }) => Ok(span),
+    Some(Spanned { span, data: token }) => {
+      Err(UnexpectedToken::expected_one_with_found(span, token, SyntacticTokenKind::DotDot).into())
+    }
+    // Fully qualified so the `Span` trait need not join this module's imports.
+    None => Err(UnexpectedEot::eot_of(tokora::Span::end(inp.span())).into()),
+  }
+}
+
+/// Refuses the `::` at the input head, where a path begins: a path's root is written before its
+/// first `::`, so this one roots nothing. Consumes nothing, as [`unexpected_here`] does not.
+pub(crate) fn leading_path_separator<'inp, Src, Ctx, T>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<T, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  let offset = *inp.offset();
+  let span = inp
+    .peek_head_map(|token| *token.span)?
+    .unwrap_or_else(|| SimpleSpan::new(offset, offset));
+  Err(DialectGraphqlxError::leading_path_separator(span).into())
+}
+
+/// Builds a path after its root and its first name have been consumed by a fused caller.
 pub(crate) fn path_after_first<'inp, Src, Ctx>(
   start: usize,
   first: ast::Name<GraphqlxSlice<'inp, Src>>,
-  fully_qualified: bool,
+  root: ast::PathRoot,
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<ast::Path<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
@@ -178,11 +299,7 @@ where
     .expect("a GraphQLx path always contains its first name")
     .span()
     .end();
-  Ok(ast::Path::new(
-    SimpleSpan::new(start, end),
-    segments,
-    fully_qualified,
-  ))
+  Ok(ast::Path::new(SimpleSpan::new(start, end), root, segments))
 }
 
 /// Peeks one concrete token kind without consuming it.
@@ -264,10 +381,10 @@ impl<S> ast::Name<S> {
 }
 
 impl<S> ast::Path<S> {
-  /// Parses one committed GraphQLx qualified path.
+  /// Parses one committed GraphQLx path, root included.
   ///
-  /// `::`-separated paths are a GraphQLx extension, so GraphQL has no
-  /// corresponding grammar anchor.
+  /// Rooted `::`-separated paths are a GraphQLx extension, so GraphQL has no
+  /// corresponding grammar anchor. See [`path`].
   pub fn graphqlx<'inp, Src, Ctx>(
     inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
@@ -276,14 +393,15 @@ impl<S> ast::Path<S> {
     S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+    GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<S>>,
   {
     path(inp)
   }
 
-  /// Attempts one GraphQLx qualified path without consuming on a non-path head.
+  /// Attempts one GraphQLx path without consuming on a non-path head.
   ///
-  /// `::`-separated paths are a GraphQLx extension, so GraphQL has no
-  /// corresponding grammar anchor.
+  /// Rooted `::`-separated paths are a GraphQLx extension, so GraphQL has no
+  /// corresponding grammar anchor. See [`try_path`].
   pub fn try_graphqlx<'inp, Src, Ctx>(
     inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   ) -> Result<ParseAttempt<Self>, GraphqlxError<'inp, Src, Ctx>>
@@ -292,6 +410,7 @@ impl<S> ast::Path<S> {
     S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+    GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<S>>,
   {
     try_path(inp)
   }

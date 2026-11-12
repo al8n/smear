@@ -563,8 +563,8 @@ fn an_error_run_no_longer_burns_the_scan_allowance() {
     // `Err` even when its suffix check passes, so it was charged to `spent` and never committed:
     // `spent = 20 040` against `committed = 39`. Both counters move now.
     "-.5",
-    // `:` is absent for the reason it is absent in `Cell`: a run of colons lexes as `::`, which is
-    // a sync point here, so it never refuses.
+    // `:` is absent for the reason it is absent in `Cell`: a run of colons lexes as `::` here, not
+    // as the `:` the GraphQL cell runs.
     &[("!", 1), ("@", 1), ("=", 1), ("! ", 2), ("@ ", 2)],
   ));
   assert!(
@@ -665,9 +665,9 @@ fn every_refusal_commits_at_least_one_item() {
     "gqlx",
     gqlx_document,
     // `:` is deliberately absent and `*`, `+`, `-`, `=>` deliberately present. A run of colons
-    // lexes as `::` in this dialect, which IS a sync point, so it zero-skips through at zero
-    // refusals — the non-vacuity guard below caught that, which is how it was found. The four
-    // that replace it are junk here and are tokens GraphQL does not have.
+    // lexes as `::` in this dialect, a token GraphQL does not have, so it is not the `:` the
+    // GraphQL row measures. The four that replace it are junk here and are tokens GraphQL does
+    // not have.
     &[
       "!", "! ", "@", "=", "|", "&", "*", "+", "-", "=>", "!@:=|&", "()", "( )",
     ],

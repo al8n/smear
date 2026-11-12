@@ -165,9 +165,9 @@ fn a_directive_name_is_a_type_path() {
     "a directive name may carry generic arguments"
   );
   assert_eq!(
-    kinds!(parse_directive, "@::ns::d"),
+    kinds!(parse_directive, "@^::ns::d"),
     vec![K::Root, K::Directive, K::TypePath, K::Path],
-    "a fully qualified directive name keeps its leading `::` inside the Path"
+    "a rooted directive name keeps its root's tokens inside the Path"
   );
 }
 
@@ -378,10 +378,18 @@ fn the_spread_dispatch_has_four_arms() {
     vec![K::Root, K::FragmentSpread, K::TypePath, K::Path],
     "an Identifier after `...` is a spread, and its target is a TypePath"
   );
+  for src in ["... ^::ns::F", "... ~::F", "... ..::F"] {
+    assert_eq!(
+      kinds!(parse_selection, src),
+      vec![K::Root, K::FragmentSpread, K::TypePath, K::Path],
+      "{src:?}: GraphQLx only, a root's sigil after `...` opens a rooted spread"
+    );
+  }
+  // Only a relative target's first segment can be the `on` of an inline fragment.
   assert_eq!(
-    kinds!(parse_selection, "... ::ns::F"),
+    kinds!(parse_selection, "... ^::on"),
     vec![K::Root, K::FragmentSpread, K::TypePath, K::Path],
-    "GraphQLx only: a `::` after `...` is a fully qualified spread"
+    "`^::on` is a spread's target, not a type condition"
   );
   assert_eq!(
     kinds!(parse_selection, "... on T { f }"),
@@ -463,7 +471,7 @@ fn a_type_condition_is_its_own_node() {
     "the `on` keyword is inside the condition, not beside it"
   );
   assert_eq!(
-    kinds!(parse_type_condition, "on ::ns::T<Int>"),
+    kinds!(parse_type_condition, "on ^::ns::T<Int>"),
     vec![
       K::Root,
       K::TypeCondition,

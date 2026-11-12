@@ -47,7 +47,7 @@ fn graphqlx_carriers_support_custom_spans() {
   // it, so the import follows the `cfg` that decides whether it is compiled.
   use std::vec;
 
-  use crate::path::Path;
+  use crate::path::{Path, PathRoot};
 
   use super::{DefinitionTypePath, TypeGenerics};
 
@@ -61,7 +61,11 @@ fn graphqlx_carriers_support_custom_spans() {
 
   let definition = DefinitionTypePath::<_, _, CustomSpan>::new(
     CustomSpan(6),
-    Path::new(CustomSpan(7), vec!["Namespace", "Item"], true),
+    Path::new(
+      CustomSpan(7),
+      PathRoot::Dependency(CustomSpan(7)),
+      vec!["Namespace", "Item"],
+    ),
     Some(TypeGenerics::<_, CustomSpan>::new(
       CustomSpan(8),
       vec!["Argument"],
@@ -69,7 +73,10 @@ fn graphqlx_carriers_support_custom_spans() {
     true,
   );
   assert_eq!(definition.as_span(), &CustomSpan(6));
-  assert!(definition.path().is_fully_qualified());
+  assert_eq!(
+    definition.path().root(),
+    &PathRoot::Dependency(CustomSpan(7))
+  );
   assert_eq!(definition.path().segments(), &["Namespace", "Item"]);
   assert_eq!(definition.type_generics().unwrap().params(), &["Argument"]);
   assert!(definition.required());

@@ -22,21 +22,21 @@ pub mod document;
 pub mod executable;
 /// GraphQLx generic-definition AST aliases.
 pub mod generic;
-/// GraphQLx import AST nodes.
-pub mod import;
 /// GraphQLx selection and field AST aliases.
 pub mod selection;
 /// GraphQLx type-system AST aliases and enums.
 pub mod type_system;
+/// GraphQLx `use` item AST nodes.
+pub mod use_tree;
 
 pub use argument::*;
 pub use directive::*;
 pub use document::*;
 pub use executable::*;
 pub use generic::*;
-pub use import::*;
 pub use selection::*;
 pub use type_system::*;
+pub use use_tree::*;
 
 /// The default collection container used by GraphQLx AST collections.
 pub type DefaultVec<T> = Vec<T>;
@@ -46,12 +46,14 @@ pub type DefaultVec<T> = Vec<T>;
 ///
 /// Re-exported here because both reach a consumer's signatures whether or not they name them.
 /// [`Nested`] is the default `Container` argument of every value alias below, of
-/// [`SelectionSet`] and of [`DefinitionTypePath`]'s type arguments;
+/// [`SelectionSet`] and of [`DefinitionTypePath`]'s type arguments, and the container a
+/// [`UseTreeKind::Group`] holds its trees in;
 /// [`Nest`] is the payload type of a public [`Type`] variant, so it reaches a consumer's
 /// `match` as well. [`Nested`] is a `Vec` in every respect a consumer can observe and [`Nest`]
 /// answers as the pointer it wraps does; what each adds is the iterative release that keeps a
-/// value, a selection or a type nested through these carriers from aborting the process on the way
-/// out, however deep it is. That ranges over every recursive position the grammar forms, and over
+/// value, a selection, a type or a use tree nested through these carriers from aborting the
+/// process on the way out, however deep it is. That ranges over every recursive position the
+/// grammar forms, and over
 /// a node a caller stored in `S` or in `Span` as well, because both are [`Leaf`] — see
 /// [`Nested`]'s own documentation, which states the scope. [`Nestable`], [`NestPtr`] and
 /// [`SoleNestPtr`] are all sealed, which fixes who may implement them and says nothing about what
@@ -73,9 +75,12 @@ pub use crate::value::{
 #[allow(type_alias_bounds)]
 pub type Name<S: ?Sized, Span = SimpleSpan> = crate::name::Name<S, Span, GraphQLx>;
 
-/// A `::`-separated GraphQLx path.
+/// A GraphQLx path: an optional [`PathRoot`], then `::`-separated names.
 pub type Path<S, Span = SimpleSpan, Container = DefaultVec<Name<S, Span>>> =
   crate::path::Path<Name<S, Span>, Span, Container>;
+
+/// The root a GraphQLx [`Path`] starts at: none, `~::`, `^::`, or `..::` repeated.
+pub use crate::path::PathRoot;
 
 /// A GraphQLx boolean literal.
 pub type BooleanValue<S, Span = SimpleSpan> = crate::value::BooleanValue<S, Span, GraphQLx>;

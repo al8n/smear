@@ -23,8 +23,8 @@
 //! The contract, the error vocabulary, the span rule, the `(tree, source)` verification and the
 //! green traversal are [the substrate](crate::lossless::project)'s, and the entry shapes are the
 //! naming symmetry its header states. **Everything below that is this dialect's**: sixteen of
-//! GraphQLx's seventy-seven wrappers are structurally identical to a GraphQL one, thirty-seven
-//! share a name with a different shape, and twenty-four have no GraphQL image at all. Three of those
+//! GraphQLx's seventy-five wrappers are structurally identical to a GraphQL one, thirty-seven
+//! share a name with a different shape, and twenty-two have no GraphQL image at all. Three of those
 //! differences are *mapping* divergences rather than renamings, and each one changes what a walk
 //! has to do rather than what it has to call something:
 //!
@@ -117,47 +117,49 @@
 //! GraphQLx's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
 //! Every one of those shapes reaches this projection looking well-formed, and each needs an
-//! answer. The population is every call that reports without building a hole — **49**
+//! answer. The population is every call that reports without building a hole — **51**
 //! `recover::report_unexpected::<…>` sites and **16** `recover::unclosed_{list,object,parens,angle}::<…>`
 //! sites across `graphqlx/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 65 are mapped** in the table below, one probe each: a text that reaches the site with a
+//! **all 67 are mapped** in the table below, one probe each: a text that reaches the site with a
 //! hole-free tree, and what this projection answers for it. The table is executable:
 //! `every_report_and_build_site_has_a_measured_answer` holds the same rows, asserts their count
 //! per file and family against the source's own spelling of each call, and measures every answer.
 //!
 //! **The "what the site leaves out" column is where the lenient set comes from.** A site either
-//! leaves out one token with **no AST image** (a closer, `from`, `on`), leaves out a constituent
+//! leaves out one token with **no AST image** (a closer, `on`), leaves out a constituent
 //! the AST holds (a member, a path, a tail — never lenient), or leaves nothing out and reports
 //! something present (an extra description, a spelling a rule refuses). For every row of the first
 //! kind the site's own probe is the witness the criterion asks for, when its tree holds the node
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Fifteen project; fifty refuse.** The fifteen are the lenient rows a site can leave with a
+//! **Fifteen project; fifty-two refuse.** The fifteen are the lenient rows a site can leave with a
 //! well-formed value. The others refuse either the shape the site built, or — for the unclosed
 //! sites whose definition the parser cannot finish at end of input — the rubble the document is
 //! left holding.
 //!
 //! | file | site | probe | what the site leaves out | the projection |
 //! |---|---|---|---|---|
-//! | `document.rs` | report | `"d" import { A } from "m"` | nothing — a present token is refused | `UnexpectedChild { Document, InlineString }` |
+//! | `document.rs` | report | `"d" use "m"::{A}` | nothing — a present token is refused | `UnexpectedChild { Document, InlineString }` |
 //! | `document.rs` | report | `"d" extend scalar S @k` | nothing — a present token is refused | `UnexpectedChild { Document, InlineString }` |
 //! | `document.rs` | report | `"d" { f }` | nothing — a present token is refused | `UnexpectedChild { OperationDefinition, InlineString }` |
-//! | `document.rs` | report | `"d" import { A } from "m"` (executable root) | nothing — a present token is refused | `UnexpectedChild { ExecutableDocument, InlineString }` |
+//! | `document.rs` | report | `"d" use "m"::{A}` (executable root) | nothing — a present token is refused | `UnexpectedChild { ExecutableDocument, InlineString }` |
 //! | `document.rs` | report | `"d" { f }` (executable root) | nothing — a present token is refused | `UnexpectedChild { OperationDefinition, InlineString }` |
-//! | `document.rs` | report | `"d" import { A } from "m"` (SDL root) | nothing — a present token is refused | `UnexpectedChild { TypeSystemDocument, InlineString }` |
+//! | `document.rs` | report | `"d" use "m"::{A}` (SDL root) | nothing — a present token is refused | `UnexpectedChild { TypeSystemDocument, InlineString }` |
 //! | `document.rs` | report | `"d" extend scalar S @k` (SDL root) | nothing — a present token is refused | `UnexpectedChild { TypeSystemDocument, InlineString }` |
 //! | `document.rs` | report | the empty document | a constituent with an image | `MissingChild { Document }` |
 //! | `document.rs` | report | the empty document (SDL root) | a constituent with an image | `MissingChild { TypeSystemDocument }` |
 //! | `executable.rs` | report | `query Q() { f }` (executable root) | a constituent with an image | `MissingChild { VariablesDefinition }` |
 //! | `executable.rs` | report | the empty document (executable root) | a constituent with an image | `MissingChild { ExecutableDocument }` |
 //! | `executable.rs` | unclosed | `query Q($a: Int` (executable root) | `)` of `VariablesDefinition` — **no image** | `UnexpectedChild { ExecutableDocument, Name }` |
-//! | `import.rs` | report | `import { A as } from "m"` | a constituent with an image | `MissingChild { NamedSpecifier }` |
-//! | `import.rs` | report | `import { } from "m"` | a constituent with an image | `MissingChild { ImportList }` |
-//! | `import.rs` | report | `import { A } "m"` | `from` of `ImportDefinition` — **no image** | **projects** |
-//! | `import.rs` | report | `import { A } from """m"""` | nothing — a present token is refused | `UnexpectedChild { StringValue, BlockString }` |
-//! | `import.rs` | report | `import { A } from` | a constituent with an image | `MissingChild { ImportDefinition }` |
-//! | `import.rs` | unclosed | `import { A` | `}` of `ImportList` — **no image** | `MissingChild { ImportDefinition }` |
+//! | `use_tree.rs` | report | `use a as` | a constituent with an image | `MissingChild { UseTree }` |
+//! | `use_tree.rs` | report | `use a::* as b` | nothing — a present token is refused | `UnexpectedChild { UseTree, Name }` |
+//! | `use_tree.rs` | report | `use a::{}` | a constituent with an image | `MissingChild { UseTree }` |
+//! | `use_tree.rs` | report | `use a::{~::b}` | nothing — a present token is refused | `UnexpectedChild { Path, Tilde }` |
+//! | `use_tree.rs` | unclosed | `use a::{b` | `}` of `UseTree` — **no image** | **projects** |
+//! | `use_tree.rs` | report | `use a::` | a constituent with an image | `MissingChild { UseTree }` |
+//! | `use_tree.rs` | report | `use """m"""` | nothing — a present token is refused | `UnexpectedChild { StringValue, BlockString }` |
+//! | `use_tree.rs` | report | `use` | a constituent with an image | `MissingChild { UseDefinition }` |
 //! | `generic.rs` | report | `type T<> { f: Int }` | a constituent with an image | `MissingChild { DefinitionTypeGenerics }` |
 //! | `generic.rs` | unclosed | `type T<A` | `>` of `DefinitionTypeGenerics` — **no image** | **projects** |
 //! | `generic.rs` | report | `fragment <> F on T { f }` | a constituent with an image | `MissingChild { ExecutableDefinitionTypeGenerics }` |
@@ -212,16 +214,19 @@
 //! |---|---|---|
 //! | a present-but-empty required container | `MissingChild` | `a_present_but_empty_required_container_refuses` |
 //! | a variable in a constant position | `UnexpectedChild` | `a_variable_in_a_constant_position_refuses_through_both_new_containers` |
-//! | a description in front of an extension or an import | `UnexpectedChild { parent: Document, found: InlineString }` — the string stays **outside** the node, so it is rubble at document level | `a_described_import_refuses_as_rubble` |
+//! | a description in front of an extension or a `use` item | `UnexpectedChild { parent: Document, found: InlineString }` — the string stays **outside** the node, so it is rubble at document level | `a_described_use_item_refuses_as_rubble` |
 //! | **a description in front of a shorthand operation** | `UnexpectedChild { parent: OperationDefinition, found: InlineString }` — here the string is **inside** the node | `a_described_shorthand_refuses_and_its_recovery_is_not_complete` |
 //! | an enum value named `true`, `false` or `null` | `SemanticRule` | `an_enum_value_named_true_refuses` |
 //! | a fragment named `on` | `SemanticRule` | `a_fragment_named_on_refuses` |
 //! | an unknown directive location | `MalformedToken` | `an_unknown_directive_location_refuses` |
 //! | a `where` clause with no block to constrain | `MissingChild` | `a_where_clause_with_nothing_to_constrain_refuses` |
-//! | a block string as an import source | `UnexpectedChild` | `an_import_source_that_is_a_block_string_refuses` |
-//! | **an `as` with no path after it** | refuses — the committing prefix commits | `an_as_without_its_path_refuses_and_its_recovery_is_not_complete` |
+//! | a block string as a `use` source | `UnexpectedChild` | `a_use_source_that_is_a_block_string_refuses` |
+//! | a root or a string source in front of a group's tree | `UnexpectedChild` at the root's sigil or at the string | `a_group_member_with_a_root_or_a_source_refuses` |
+//! | an empty `use` group | `MissingChild` | `a_present_but_empty_required_container_refuses` |
+//! | an alias on a `use` item's glob or group | `UnexpectedChild { parent: UseTree, found: Name }` at the `as` | `an_alias_on_a_glob_or_a_group_refuses` |
+//! | **an `as` with no name after it** | refuses — the committing prefix commits | `an_as_without_its_name_refuses_and_its_recovery_is_not_complete` |
 //! | **a dangling separator**, in each of the four separated walks | `MissingChild` over the node when nothing follows it; `UnexpectedChild` at the element when a doubled separator or a stranger does | `the_separated_atoms_refuse_at_the_obstruction` |
-//! | **an unterminated closer** whose site builds its node hole-free, **an import with no `from`**, **a type condition or a directive definition with no `on`** | **project** — or refuse for another constituent, exactly as the text with the token restored does; they are the missing-token class below | `the_unclosed_brace_class_projects_although_the_parser_rejects_it`, `a_type_condition_without_its_on_projects_what_the_text_with_it_parses_to`, `a_directive_definition_without_its_on_projects_what_the_text_with_it_parses_to`, `every_unclosed_closer_projects_what_the_closed_text_parses_to` |
+//! | **an unterminated closer** whose site builds its node hole-free, **a type condition or a directive definition with no `on`** | **project** — or refuse for another constituent, exactly as the text with the token restored does; they are the missing-token class below | `the_unclosed_brace_class_projects_although_the_parser_rejects_it`, `a_type_condition_without_its_on_projects_what_the_text_with_it_parses_to`, `a_directive_definition_without_its_on_projects_what_the_text_with_it_parses_to`, `every_unclosed_closer_projects_what_the_closed_text_parses_to` |
 //! | an unterminated `)` of a variables or arguments definition, or `>` of an executable definition's generics | lenient, and refused all the same — the definition around it is lost and the list is rubble | `every_unclosed_closer_projects_what_the_closed_text_parses_to` |
 //!
 //! ## The missing-token class: where an absent token still projects
@@ -245,11 +250,10 @@
 //! | [`EnumValuesDefinition`](SyntaxKind::EnumValuesDefinition) | `}` | `definition.rs` unclosed — `enum E { A` |
 //! | [`RootOperationTypesDefinition`](SyntaxKind::RootOperationTypesDefinition) | `}` | `definition.rs` unclosed — `schema { query: Q` |
 //! | [`Arguments`](SyntaxKind::Arguments) | `)` | `directive.rs` unclosed — `{ f(a: 1` |
-//! | [`ImportDefinition`](SyntaxKind::ImportDefinition) | `from` | `import.rs` report — `import { A } "m"` |
 //! | [`TypeCondition`](SyntaxKind::TypeCondition) | `on` | `selection.rs` report — `fragment F T { f }`; Codex round five's first finding |
 //! | [`DirectiveDefinition`](SyntaxKind::DirectiveDefinition) | `on` | `definition.rs` report — `directive @d FIELD` |
 //! | [`ExtensionTypeGenerics`](SyntaxKind::ExtensionTypeGenerics) | `>` | `generic.rs` unclosed — `extend type T<A`; refuses either way, the extension having no tail |
-//! | [`ImportList`](SyntaxKind::ImportList) | `}` | `import.rs` unclosed — `import { A`; refuses either way, the import having no source |
+//! | [`UseTree`](SyntaxKind::UseTree) | `}` | `use_tree.rs` unclosed — `use a::{b` |
 //! | [`DefinitionTypeGenerics`](SyntaxKind::DefinitionTypeGenerics) | `>` | `generic.rs` unclosed — `type T<A` |
 //! | [`TypeGenerics`](SyntaxKind::TypeGenerics) | `>` | `ty.rs` unclosed — `type T { f: A<B` |
 //! | [`ListType`](SyntaxKind::ListType) | `]` | `ty.rs` unclosed — `type T { f: [Int` |
@@ -264,14 +268,14 @@
 //! **This table is the criterion's whole extension, derived rather than listed.** A position is
 //! lenient iff its token has no AST image and the lossless parser builds a hole-free tree holding
 //! the node without it; the report-and-build census above enumerates every place the parser leaves
-//! a token out without a hole, and its twenty-one image-less rows — each witnessed by its own
-//! probe's tree — are these twenty-one, which the cell asserts. Three of them are witnessed only
-//! as **orphans**: at end of input the operation, the field or the fragment around the list cannot
-//! be finished, so the root keeps the list as a stray child of the document beside the lost
+//! a token out without a hole, and its twenty image-less rows — each witnessed by its own probe's
+//! tree — are these twenty, which the cell asserts. Three of them are witnessed only as
+//! **orphans**: at end of input the operation, the field or the fragment around the list cannot be
+//! finished, so the root keeps the list as a stray child of the document beside the lost
 //! definition's tokens, and every projection of such a tree refuses at the rubble. Those three,
-//! with an extension's `>` and an import list's `}`, are lenient by the criterion and change no
-//! answer. The mutation law's census of deletions both sides refuse is a second instrument, and it
-//! agrees: every token it still lists has an image.
+//! with an extension's `>`, are lenient by the criterion and change no answer. The mutation law's
+//! census of deletions both sides refuse is a second instrument, and it agrees: every token it
+//! still lists has an image.
 //!
 //! Every row is also **measured as a value** where a value exists: `tests/lossless_x_mutation.rs`
 //! deletes the token from a real tree — or finds a corpus tree already without it — and requires
@@ -293,23 +297,23 @@
 //! | position | the syntactic refusal | the projection |
 //! |---|---|---|
 //! | a fragment's name is not `on` | `generic/mod.rs:392` (`Expectation::FragmentName`) | `name_except` in `executable_definition_name` |
-//! | a fragment spread's target is not an unqualified `on…` | `selection/mod.rs:446` (the spread dispatch reads `on` as an inline fragment's head) and `:551` (`fragment_type_path`, `Expectation::Path`) | `path_except` through `type_path_except` in `fragment_spread` |
-//! | an enum value is not an unqualified `true…`, `false…` or `null…` | `value.rs:290-295` (the enum production, `Expectation::EnumValue`), and the value dispatch that reads those spellings as a boolean or a null in both grammars — `value.rs:811-820` non-const, `:922-931` const | `path_except` in `enum_value`, shared by both value grammars |
+//! | a fragment spread's target is not a relative `on…` | `selection/mod.rs:440` (the spread dispatch reads `on` as an inline fragment's head) and `:541-542` (`fragment_type_path`, `Expectation::Path`) | `path_except` through `type_path_except` in `fragment_spread` |
+//! | an enum value is not a relative `true…`, `false…` or `null…` | `value.rs:290-295` (the enum production, `Expectation::EnumValue`), and the value dispatch that reads those spellings as a boolean or a null in both grammars — `value.rs:814-823` non-const, `:925-934` const | `path_except` in `enum_value`, shared by both value grammars |
 //! | an enum value definition is not named `true`, `false` or `null` | `definition/enum_type.rs:21-22` (`Expectation::EnumValue`) | `name_except` in `enum_value_definition` |
 //!
 //! Each answers [`SemanticRule`](ProjectErrorKind::SemanticRule) at the offending segment, and a
-//! path rule reads only the first segment of a path with no leading `::` — `::on`, `ns::on`,
-//! `::true` and `x::true` are the parser's too. The two path rules are invisible to the mutation
-//! law: a tree the parser builds never holds them, and a retexted one re-parses to a different
-//! skeleton. Hand-built cells pin all four. Beside them, two shapes rather than rules:
+//! path rule reads only the first segment of a relative path, one with no root — `^::on`, `..::on`,
+//! `ns::on`, `~::true` and `x::true` are the parser's too. The two path rules are invisible to the
+//! mutation law: a tree the parser builds never holds them, and a retexted one re-parses to a
+//! different skeleton. Hand-built cells pin all four. Beside them, two shapes rather than rules:
 //!
 //! - **A variable has no place in a constant position.** The AST's own type system forbids it —
 //!   [`ConstInputValue`] has no `Variable` variant — so it is
 //!   [`UnexpectedChild`](ProjectErrorKind::UnexpectedChild) and not a policy this module invented.
 //!   GraphQLx reaches it through two carriers GraphQL does not have, a set and a map.
-//! - **An import's source must be an inline string.** [`ImportDefinition`](SyntaxKind::ImportDefinition)
-//!   holds an [`InlineStringValue`], so a block string there is a shape the AST cannot store, and
-//!   the refusal names the token.
+//! - **A `use` source must be an inline string.** [`UsePrefix::Source`] holds an
+//!   [`InlineStringValue`], so a block string there is a shape the AST cannot store, and the
+//!   refusal names the token.
 //!
 //! The fragment-name rule is the draft's `FragmentName : Name but not on`, the same rule the
 //! vanilla dialect carries; this dialect accepted the spelling in both suites until
@@ -320,12 +324,12 @@
 //!
 //! **No other position reserves a spelling.** This dialect's keywords are contextual: the lexer
 //! reads `on`, `true`, `null` and `type` as identifiers, and the syntactic parser accepts
-//! `type on { x: null }`, `import { true as null } from "m"` and `query on { on: true }` — so every
+//! `type on { x: null }`, `use a::{true as null}` and `query on { on: true }` — so every
 //! other name position takes any identifier, through the one door `Cursor::name_token`, and the
 //! rules above are that door with a reserved list (`Cursor::name_except`, `path_except`).
 //! `a_contextual_keyword_is_a_name_at_every_name_position` pins it. al8n/smear#58's round five read
 //! 45 mutation-law violations as a rule missing at four more positions; round six measured each
-//! and found every one a mutation of a corpus tree that already lacked its `}` or its `from`.
+//! and found every one a mutation of a corpus tree that already lacked a lenient token.
 //!
 //! # What is walked, and how a span is folded
 //!
@@ -381,7 +385,7 @@
 //! | `leaf_token` took the first token of the leaf's kind and folded the rest | `IntValue` over `Int("1")` and `Int("2")` answering `1` with a span across both | **gone** — a leaf is one token atom and then `end` |
 //! | a keyword slot a walk collected and never read | `directive @d foo FIELD` answering what `directive @d on FIELD` answers | each keyword is a `keyword` atom at its own position |
 //! | a **shared walker** taking the union of six callers' vocabularies | a `ScalarTypeDefinition` holding a whole `FieldsDefinition`, projected `Ok` with the block dropped | one transcription per kind — see below |
-//! | a **one-of slot group** read by picking a winner | an import holding both a list and a wildcard, projected as the list | one `one_of` atom — see below |
+//! | a **one-of slot group** read by picking a winner | a choice holding both of its alternatives, projected as the first | one atom per choice — see below |
 //!
 //! `every_walk_is_a_transcription` reads this file's own code and asserts the census: no
 //! `extent.token(`, no `Names`, no `is_none() =>` guard, no wildcard arm that covers, and two child
@@ -404,8 +408,8 @@
 //! A walk that dispatches children into slots by kind can express a shape's **set** of children
 //! and cannot express their **sequence** or **multiplicity**, and wherever a production has a
 //! committing prefix (`as`, `:`, `=`, `implements`, `where`, `on`) or a separator (`&`, `|`, `=>`,
-//! `::`) the same kinds in a different order or count are a different sentence:
-//! `import { A as } from "m"` projected an *unaliased* import with `as` inside its extent, and
+//! `::`) the same kinds in a different order or count are a different sentence: an `as` with
+//! nothing after it projected an *unaliased* entry with the `as` inside its extent, and
 //! `type T where A:B & { f: Int }` projected the weaker `A:B` with the `&` covered. Each earlier
 //! round had found the previous such gap; the next would have found the sixth.
 //!
@@ -448,7 +452,7 @@
 //!
 //! | group | the production | the walk | pinned by |
 //! |---|---|---|---|
-//! | an import's clause | `ImportList \| WildcardSpecifier` | `import_definition` — one `one_of`, so the second alternative is left for `end` | `an_import_with_both_clause_alternatives_refuses_in_either_order` |
+//! | a use tree's scope | `* \| { UseTree+ }` | `use_scope` — a glob finishes the tree, so a group after it is left for `end`, and so is a glob after a group | `a_use_tree_with_both_a_glob_and_a_group_refuses_in_either_order` |
 //! | an operation's head | `Description? OperationType … \| SelectionSet` | `operation_definition` — the shorthand branch refuses a description, a name, variables, directives and a where clause | `a_described_shorthand_refuses_and_its_recovery_is_not_complete` |
 //! | a definition's or an extension's tail | one tail per keyword | structural: no row above holds two tails | the two cross-product cells |
 //! | a slot filled from a **kind set** — a type reference under a field, input value or variable definition, the element of a list type, a value under an object field | one `Type` / one `Value` | one `one_of` atom; the next atom in the sequence refuses a second | `a_one_of_slot_group_refuses_its_second_member` |
@@ -488,8 +492,8 @@
 //! **Why the first row is a refusal and not an empty carrier.** The design's contract is that the
 //! projection succeeds iff the tree's shape determines a well-formed AST, and that it never
 //! produces a value outside the syntactic parser's image — placeholder ASTs are rejected there in
-//! so many words. A `SelectionSet` with no selections, a `FieldsDefinition` with no fields, an
-//! `ImportList` with no members: the syntactic parser cannot produce any of those values for any
+//! so many words. A `SelectionSet` with no selections, a `FieldsDefinition` with no fields, a
+//! `use` group with no trees: the syntactic parser cannot produce any of those values for any
 //! input, so projecting to one is exactly the forbidden case. It is **not** the unclosed-brace
 //! case, which projects precisely because its image — a definition with the one field it does have
 //! — *is* a value the parser produces, for the closed text.
@@ -508,14 +512,14 @@
 //! | AST container | grammar | present-empty | pinned by |
 //! |---|---|---|---|
 //! | [`Document`](SyntaxKind::Document), [`TypeSystemDocument`](SyntaxKind::TypeSystemDocument), [`ExecutableDocument`](SyntaxKind::ExecutableDocument) | `Entry+` | `MissingChild` | kind-level only |
-//! | [`ImportList`](SyntaxKind::ImportList) | `Member+` in `{ }` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
+//! | a [`UseTree`](SyntaxKind::UseTree)'s group | `UseTree+` in `{ }` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
 //! | [`DefinitionTypeGenerics`](SyntaxKind::DefinitionTypeGenerics) | `Param+` in `< >` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
 //! | [`ExtensionTypeGenerics`](SyntaxKind::ExtensionTypeGenerics) | `Name+` in `< >` | `MissingChild` | kind-level only |
 //! | [`ExecutableDefinitionTypeGenerics`](SyntaxKind::ExecutableDefinitionTypeGenerics) | `Name+` in `< >` | `MissingChild` | kind-level only |
 //! | [`TypeGenerics`](SyntaxKind::TypeGenerics), both spellings | `Type+` in `< >` | `MissingChild` | kind-level only |
 //! | [`WhereClause`](SyntaxKind::WhereClause) | `Predicate+` | `MissingChild` | `a_where_clause_with_nothing_to_constrain_refuses` |
 //! | a predicate's bounds | `TypePath+` after `:` | `MissingChild` | kind-level only |
-//! | [`Path`](SyntaxKind::Path) | `Name+` separated by `::` | `MissingChild` | kind-level only |
+//! | [`Path`](SyntaxKind::Path) | a root's tokens, then `Name+` separated by `::` | `MissingChild` | kind-level only |
 //! | [`Directives`](SyntaxKind::Directives), [`ConstDirectives`](SyntaxKind::Directives) | `Directive+` | `MissingChild` | `a_present_directive_run_with_no_directive_refuses` |
 //! | [`SelectionSet`](SyntaxKind::SelectionSet) | `Selection+` in `{ }` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
 //! | [`VariablesDefinition`](SyntaxKind::VariablesDefinition) | `Definition+` in `( )` | `MissingChild` | `a_present_but_empty_required_container_refuses` |
@@ -560,20 +564,22 @@
 //!
 //! # No node dispatch below spends a native frame per level
 //!
-//! The grammar is bounded above a value, and **three cycles are not**: `value` ↔
-//! `object_field`/`map_entry`, `selection_set` ↔ `field`/`inline_fragment`, and `ty` ↔ a list's
-//! element and a path's generic arguments. Each is a **worklist**, as in
-//! `graphql/lossless/project.rs`. al8n/smear#201.
+//! The grammar is bounded above a value, and **four cycles are not**: `value` ↔
+//! `object_field`/`map_entry`, `selection_set` ↔ `field`/`inline_fragment`, `ty` ↔ a list's
+//! element and a path's generic arguments, and a `use` tree ↔ its group's trees. Each is a
+//! **worklist**, as in `graphql/lossless/project.rs`. al8n/smear#201.
 //!
-//! Three cycles rather than GraphQL's four, and it is not a smaller surface: the const and
-//! non-const value walks are one machine parameterised by a trait here as they are there, and what
-//! GraphQL splits off as a `NonNullType` wrapper is a `!` token of the type it modifies here, so
-//! the type cycle absorbs it. What the type cycle gains instead is a *branching* level GraphQL's
-//! does not have — a path's generic arguments are types, so `A<B<C<…>>>` nests without a bracket.
+//! Four cycles where GraphQL has four, and not the same four: the const and non-const value walks
+//! are one machine parameterised by a trait here as they are there, and what GraphQL splits off as
+//! a `NonNullType` wrapper is a `!` token of the type it modifies here, so the type cycle absorbs
+//! it. What the type cycle gains instead is a *branching* level GraphQL's does not have — a path's
+//! generic arguments are types, so `A<B<C<…>>>` nests without a bracket — and the `use` tree is a
+//! cycle GraphQL has no grammar for at all.
 //!
 //! `smear-parser/tests/deep_projection_x.rs` reads the flatness off a real projection, one fixture
 //! per cycle plus one per GraphQLx-only carrier.
 
+use core::num::NonZeroUsize;
 use std::vec::Vec;
 
 use rowan_0_17::{NodeOrToken, TextRange, TextSize};
@@ -592,22 +598,22 @@ use crate::{
       ConstObject, ConstObjectField, ConstSet, DefaultInputValue, DefinitionName,
       DefinitionTypeGenerics, DefinitionTypeParam, DefinitionTypePath, Described,
       DescribedVariableDefinition, Directive, DirectiveExtension, DirectiveLocations, Directives,
-      Document, EnumTypeDefinition, EnumTypeExtension, EnumValue, EnumValuesDefinition,
-      ExecutableDefinition, ExecutableDefinitionHeader, ExecutableDefinitionName,
-      ExecutableDefinitionTypeGenerics, ExecutableDocument, ExtensionName, ExtensionTypeGenerics,
-      ExtensionTypeParam, Field, FieldsDefinition, FloatValue, FragmentSpread, ImplementInterfaces,
-      ImportOrDefinitionOrExtension, ImportOrExecutableDefinition,
-      ImportOrTypeSystemDefinitionOrExtension, InlineFragment, InlineStringValue,
+      Document, DocumentItem, EnumTypeDefinition, EnumTypeExtension, EnumValue,
+      EnumValuesDefinition, ExecutableDefinition, ExecutableDefinitionHeader,
+      ExecutableDefinitionName, ExecutableDefinitionTypeGenerics, ExecutableDocument,
+      ExtensionName, ExtensionTypeGenerics, ExtensionTypeParam, Field, FieldsDefinition,
+      FloatValue, FragmentSpread, ImplementInterfaces, InlineFragment, InlineStringValue,
       InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension, InputValue,
       IntValue, InterfaceTypeDefinition, InterfaceTypeExtension, List, Map, MapEntry, Name,
       NamedOperationDefinition, Nest, Nested, NullValue, Object, ObjectField, ObjectTypeDefinition,
-      ObjectTypeExtension, OperationDefinition, OperationType, Path, RootOperationTypeDefinition,
-      RootOperationTypesDefinition, ScalarTypeDefinition, ScalarTypeExtension, SchemaDefinition,
-      SchemaExtension, Selection, SelectionSet, Set, StringValue, Type, TypeCondition,
-      TypeDefinition, TypeExtension, TypeGenerics, TypePath, TypeSystemDefinition,
-      TypeSystemDocument, TypeSystemExtension, UnionMemberTypes, UnionTypeDefinition,
-      UnionTypeExtension, VariableDefinition, VariableValue, VariablesDefinition, WhereClause,
-      WherePredicate,
+      ObjectTypeExtension, OperationDefinition, OperationType, Path, PathRoot,
+      RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
+      ScalarTypeExtension, SchemaDefinition, SchemaExtension, Selection, SelectionSet, Set,
+      StringValue, Type, TypeCondition, TypeDefinition, TypeExtension, TypeGenerics, TypePath,
+      TypeSystemDefinition, TypeSystemDocument, TypeSystemExtension, TypeSystemItem,
+      UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension, UseDefinition,
+      UseOrExecutableDefinition, UsePrefix, UseTree, UseTreeKind, VariableDefinition,
+      VariableValue, VariablesDefinition, WhereClause, WherePredicate,
     },
     kinds::{GraphQLxLang, SyntaxKind},
     lossless::Parse,
@@ -1180,7 +1186,7 @@ fn sole_document<'g>(root: Node<'g>, kind: SyntaxKind, wanted: &'static str) -> 
 fn recoverable_entry<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(ImportOrExecutableDefinition<&'src str>, TextRange)> {
+) -> Out<(UseOrExecutableDefinition<&'src str>, TextRange)> {
   scan_holes(node)?;
   executable_entry(node, source)
 }
@@ -1190,10 +1196,7 @@ fn recoverable_entry<'src>(
 fn recoverable_type_system_entry<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(
-  ImportOrTypeSystemDefinitionOrExtension<&'src str>,
-  TextRange,
-)> {
+) -> Out<(TypeSystemItem<&'src str>, TextRange)> {
   scan_holes(node)?;
   type_system_entry(node, source)
 }
@@ -1506,10 +1509,10 @@ fn string_value<'src>(token: Token<'_>, source: &'src str) -> Out<StringValue<&'
   ))
 }
 
-/// An import's source, which the grammar narrows to an **inline** string.
+/// A use tree's string source, which the grammar narrows to an **inline** string.
 ///
-/// [`ImportDefinition`](crate::graphqlx::ast::ImportDefinition) stores an [`InlineStringValue`], so a
-/// block string here is a shape the AST cannot hold rather than a value it holds differently — the
+/// [`UsePrefix::Source`] stores an [`InlineStringValue`], so a block string here is a shape the AST
+/// cannot hold rather than a value it holds differently — the
 /// lossless production reports it and builds the [`StringValue`](SyntaxKind::StringValue) node
 /// anyway, which is why the narrowing has to be re-checked. The classification is the same
 /// [`LitStr`] door every other literal goes through, read for which half it answered.
@@ -1594,21 +1597,21 @@ const TYPE_SYSTEM_DEFINITION_KINDS: [SyntaxKind; 8] = [
   K::SchemaDefinition,
 ];
 
-/// What the mixed root's entry run holds: an import, either executable definition, a type-system
+/// What the mixed root's entry run holds: a `use` item, either executable definition, a type-system
 /// definition or an extension.
 const MIXED_ENTRY_KINDS: [SyntaxKind; 19] = entry_kinds::<19>(true, true);
 
 /// What the SDL root's entry run holds — the mixed run without the two executable kinds.
 const TYPE_SYSTEM_ENTRY_KINDS: [SyntaxKind; 17] = entry_kinds::<17>(false, true);
 
-/// What the executable root's entry run holds — an import or one of the two executable kinds.
+/// What the executable root's entry run holds — a `use` item or one of the two executable kinds.
 const EXECUTABLE_ENTRY_KINDS: [SyntaxKind; 3] = entry_kinds::<3>(true, false);
 
 /// One entry-kind row, assembled from the lists above so the three roots cannot disagree about a
 /// kind they share. `N` is checked by the assembly itself: a count that does not match the chosen
 /// halves fails const evaluation.
 const fn entry_kinds<const N: usize>(executable: bool, type_system: bool) -> [SyntaxKind; N] {
-  let mut kinds = [K::ImportDefinition; N];
+  let mut kinds = [K::UseDefinition; N];
   let mut at = 1;
   if executable {
     kinds[at] = K::OperationDefinition;
@@ -1640,11 +1643,11 @@ const fn entry_kinds<const N: usize>(executable: bool, type_system: bool) -> [Sy
 const SELECTION_KINDS: [SyntaxKind; 3] = [K::Field, K::FragmentSpread, K::InlineFragment];
 
 fn document<'src>(node: Node<'_>, source: &'src str) -> Out<Document<&'src str>> {
-  // `ImportOrDefinitionOrExtension+`, in source order: neither this root nor the syntactic
-  // `document` orders an import against a definition. A token here is rubble — the lost-node
-  // recovery class drops a failed definition's bytes straight under the document, and so does
-  // the description of a described import or extension, a string this grammar gives no slot —
-  // so the run stops at it and `end` refuses it where it stands.
+  // `DocumentItem+`, in source order: neither this root nor the syntactic `document` orders a
+  // `use` item against a definition. A token here is rubble — the lost-node recovery class drops a
+  // failed definition's bytes straight under the document, and so does the description of a
+  // described `use` item or extension, a string this grammar gives no slot — so the run stops at
+  // it and `end` refuses it where it stands.
   let mut cursor = Cursor::new(node);
   let entries = cursor.many1(&MIXED_ENTRY_KINDS, None, "a definition")?;
   cursor.end()?;
@@ -1661,31 +1664,27 @@ fn document<'src>(node: Node<'_>, source: &'src str) -> Out<Document<&'src str>>
 fn document_entry<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(ImportOrDefinitionOrExtension<&'src str>, TextRange)> {
-  if node.kind() == K::ImportDefinition {
-    let (import, extent) = import_definition(node, source)?;
-    return Ok((ImportOrDefinitionOrExtension::Import(import), extent));
+) -> Out<(DocumentItem<&'src str>, TextRange)> {
+  if node.kind() == K::UseDefinition {
+    let (item, extent) = use_definition(node, source)?;
+    return Ok((DocumentItem::Use(item), extent));
   }
   if let Some((extension, extent)) = type_system_extension(node, source)? {
-    return Ok((ImportOrDefinitionOrExtension::Extension(extension), extent));
+    return Ok((DocumentItem::Extension(extension), extent));
   }
   let (description, definition, outer) = definition(node, source)?;
   Ok((
-    ImportOrDefinitionOrExtension::Definition(Described::new(
-      to_span(outer),
-      description,
-      definition,
-    )),
+    DocumentItem::Definition(Described::new(to_span(outer), description, definition)),
     outer,
   ))
 }
 
-/// [`document`]'s SDL-only twin, over the `ImportOrTypeSystemDefinitionOrExtension+` root.
+/// [`document`]'s SDL-only twin, over the `TypeSystemItem+` root.
 fn type_system_document<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<TypeSystemDocument<&'src str>> {
-  // `ImportOrTypeSystemDefinitionOrExtension+` — rubble exactly as at the mixed root, and an
+  // `TypeSystemItem+` — rubble exactly as at the mixed root, and an
   // executable definition is not in this root's run at all, so `end` refuses it at its own range.
   let mut cursor = Cursor::new(node);
   let entries = cursor.many1(&TYPE_SYSTEM_ENTRY_KINDS, None, "a definition")?;
@@ -1702,7 +1701,7 @@ fn type_system_document<'src>(
 
 /// [`document_entry`]'s SDL-only twin.
 ///
-/// The import and extension arms stay — both are type-system syntax and this root builds them —
+/// The `use` and extension arms stay — both are type-system syntax and this root builds them —
 /// and what goes is the executable half: an `OperationDefinition` or a `FragmentDefinition` under
 /// this root has no image in a `TypeSystemDocument`, and the SDL root reports one at the parser's
 /// own position rather than shaping it, so reaching that arm means the tree is not the one this
@@ -1710,40 +1709,27 @@ fn type_system_document<'src>(
 fn type_system_entry<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(
-  ImportOrTypeSystemDefinitionOrExtension<&'src str>,
-  TextRange,
-)> {
-  if node.kind() == K::ImportDefinition {
-    let (import, extent) = import_definition(node, source)?;
-    return Ok((
-      ImportOrTypeSystemDefinitionOrExtension::Import(import),
-      extent,
-    ));
+) -> Out<(TypeSystemItem<&'src str>, TextRange)> {
+  if node.kind() == K::UseDefinition {
+    let (item, extent) = use_definition(node, source)?;
+    return Ok((TypeSystemItem::Use(item), extent));
   }
   if let Some((extension, extent)) = type_system_extension(node, source)? {
-    return Ok((
-      ImportOrTypeSystemDefinitionOrExtension::Extension(extension),
-      extent,
-    ));
+    return Ok((TypeSystemItem::Extension(extension), extent));
   }
   let (description, definition, outer) = type_system_definition(node, source)?;
   Ok((
-    ImportOrTypeSystemDefinitionOrExtension::Definition(Described::new(
-      to_span(outer),
-      description,
-      definition,
-    )),
+    TypeSystemItem::Definition(Described::new(to_span(outer), description, definition)),
     outer,
   ))
 }
 
-/// [`document`]'s executable-only twin, over the `ImportOrExecutableDefinition+` root.
+/// [`document`]'s executable-only twin, over the `UseOrExecutableDefinition+` root.
 fn executable_document<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<ExecutableDocument<&'src str>> {
-  // `ImportOrExecutableDefinition+` — the SDL root's mirror.
+  // `UseOrExecutableDefinition+` — the SDL root's mirror.
   let mut cursor = Cursor::new(node);
   let entries = cursor.many1(&EXECUTABLE_ENTRY_KINDS, None, "a definition")?;
   cursor.end()?;
@@ -1759,24 +1745,20 @@ fn executable_document<'src>(
 
 /// [`document_entry`]'s executable-only twin.
 ///
-/// The import arm stays — this dialect's executable root admits imports, which is the one entry
+/// The `use` arm stays — this dialect's executable root admits `use` items, which is the one entry
 /// kind GraphQL's twin has no counterpart for — and the extension arm goes, `extend` not being
 /// executable syntax.
 fn executable_entry<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(ImportOrExecutableDefinition<&'src str>, TextRange)> {
-  if node.kind() == K::ImportDefinition {
-    let (import, extent) = import_definition(node, source)?;
-    return Ok((ImportOrExecutableDefinition::Import(import), extent));
+) -> Out<(UseOrExecutableDefinition<&'src str>, TextRange)> {
+  if node.kind() == K::UseDefinition {
+    let (item, extent) = use_definition(node, source)?;
+    return Ok((UseOrExecutableDefinition::Use(item), extent));
   }
   let (description, definition, outer) = executable_definition(node, source)?;
   Ok((
-    ImportOrExecutableDefinition::Definition(Described::new(
-      to_span(outer),
-      description,
-      definition,
-    )),
+    UseOrExecutableDefinition::Definition(Described::new(to_span(outer), description, definition)),
     outer,
   ))
 }
@@ -1990,37 +1972,25 @@ fn hoisted_description<'src>(
 }
 
 // ---------------------------------------------------------------------------------------------
-// imports
+// `use` items
 // ---------------------------------------------------------------------------------------------
 
-fn import_definition<'src>(
+fn use_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(crate::graphqlx::ast::ImportDefinition<&'src str>, TextRange)> {
-  use crate::graphqlx::ast::{ImportClause, ImportDefinition};
-
-  // `import (ImportList | WildcardSpecifier) from InlineStringValue`
+) -> Out<(UseDefinition<&'src str>, TextRange)> {
+  // `use UseTree`
   let mut cursor = Cursor::new(node);
-  cursor.keyword(ContextualKeyword::Import, "the `import` keyword")?;
-  // A choice is one atom, so the exclusivity the fourth round enforced with two cross-guards is a
-  // consequence here: whichever alternative comes second is left for `end` to refuse.
-  let clause_node = cursor.one_of(&[K::ImportList, K::WildcardSpecifier], "an import clause")?;
-  let clause = match clause_node.kind() {
-    K::ImportList => ImportClause::List(cursor.keep(import_list(clause_node, source)?)),
-    _ => ImportClause::Wildcard(cursor.keep(wildcard_specifier(clause_node, source)?)),
-  };
-  // Lenient: the parser reports a missing `from` and still builds a hole-free tree — the corpus
-  // has `invalid_x_import_without_from` — so an absent one projects, and the clause and the source
-  // are both still present. A `from` with no source is not lenient; the atom below is required.
-  cursor.opt_keyword(ContextualKeyword::From);
-  let source_node = cursor.node(K::StringValue, "a module to import from")?;
-  let file = cursor.keep(import_source(source_node, source)?);
-  let extent = cursor.finish("a token")?;
-  Ok((ImportDefinition::new(to_span(extent), clause, file), extent))
+  cursor.keyword(ContextualKeyword::Use, "the `use` keyword")?;
+  let tree_node = cursor.node(K::UseTree, "a use tree")?;
+  cursor.end()?;
+  let tree = cursor.keep(use_tree(tree_node, source)?);
+  let extent = cursor.range("a token")?;
+  Ok((UseDefinition::new(to_span(extent), tree), extent))
 }
 
-/// The `from "…"` half of an import, narrowed to the inline spelling the AST can hold.
-fn import_source<'src>(
+/// A string source, narrowed to the inline spelling the AST can hold.
+fn string_source<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(InlineStringValue<&'src str>, TextRange)> {
@@ -2031,84 +2001,206 @@ fn import_source<'src>(
   Ok((inline_string_value(node, token, source)?, extent))
 }
 
-fn import_list<'src>(
-  node: Node<'_>,
-  source: &'src str,
-) -> Out<(crate::graphqlx::ast::ImportList<&'src str>, TextRange)> {
-  use crate::graphqlx::ast::{ImportList, ImportMember};
-
-  // `{ ImportMember+ }` — the `}` is required: no corpus tree witnesses a hole-free list without
-  // it, which is the leniency criterion's second half.
+/// A path the grammar requires to be **relative**: a group member's, and the names after a string
+/// source. A root's sigil in front of the first segment is refused where it stands.
+fn relative_path<'src>(node: Node<'_>, source: &'src str) -> Out<(Path<&'src str>, TextRange)> {
   let mut cursor = Cursor::new(node);
-  cursor.token(K::LBrace, "the `{` an import list opens with")?;
-  let listed = cursor.many1(
-    &[K::NamedSpecifier, K::WildcardSpecifier],
-    Some(K::RBrace),
-    "an import member",
-  )?;
-  // Lenient: no AST image, and `unclosed_*` builds the node hole-free without it — see the
-  // module header's missing-token table.
-  cursor.opt_token(K::RBrace);
-  cursor.end()?;
-  let mut members = Vec::with_capacity(listed.len());
-  for child in listed {
-    members.push(match child.kind() {
-      K::NamedSpecifier => ImportMember::Named(cursor.keep(named_specifier(child, source)?)),
-      _ => ImportMember::Wildcard(cursor.keep(wildcard_specifier(child, source)?)),
-    });
-  }
-  let extent = cursor.range("a token")?;
-  Ok((ImportList::new(to_span(extent), members), extent))
-}
-
-fn named_specifier<'src>(
-  node: Node<'_>,
-  source: &'src str,
-) -> Out<(crate::graphqlx::ast::NamedSpecifier<&'src str>, TextRange)> {
-  use crate::graphqlx::ast::NamedSpecifier;
-
-  // `Name (as Path)?`
-  let mut cursor = Cursor::new(node);
-  let name = cursor.name_token(source, "an imported name")?;
-  let alias = optional_alias(&mut cursor, source)?;
-  let extent = cursor.finish("a token")?;
-  Ok((NamedSpecifier::new(to_span(extent), name, alias), extent))
-}
-
-fn wildcard_specifier<'src>(
-  node: Node<'_>,
-  source: &'src str,
-) -> Out<(
-  crate::graphqlx::ast::WildcardSpecifier<&'src str>,
-  TextRange,
-)> {
-  use crate::graphqlx::ast::WildcardSpecifier;
-
-  // `* (as Path)?`
-  let mut cursor = Cursor::new(node);
-  cursor.token(K::Asterisk, "a `*`")?;
-  let alias = optional_alias(&mut cursor, source)?;
-  let extent = cursor.finish("a token")?;
-  Ok((WildcardSpecifier::new(to_span(extent), alias), extent))
-}
-
-/// `(as Path)?` — the alias both specifier forms carry, and **the `as` commits its `Path`**.
-///
-/// One of the cross-child rules the transcription keeps as a rule: `if opt(A) then require(B)`.
-/// The lossless production consumes the keyword, reports when no path follows, and closes the node
-/// with **no hole** (`graphqlx/lossless/import.rs`'s `optional_alias`), so `import { A as } from
-/// "m"` reached a walk that accepted `alias == None` and answered an unaliased import with `as`
-/// inside its extent — covered, and in no AST field. al8n/smear#58, round 5.
-fn optional_alias<'src>(
-  cursor: &mut Cursor<'_>,
-  source: &'src str,
-) -> Out<Option<Path<&'src str>>> {
-  match cursor.opt_keyword(ContextualKeyword::As) {
-    Some(_) => {
-      let child = cursor.node(K::Path, "the path an `as` renames to")?;
-      Ok(Some(cursor.keep(path(child, source)?)))
+  if let Some(NodeOrToken::Token(token)) = cursor.peek() {
+    if matches!(token.kind(), K::Tilde | K::Caret | K::DotDot) {
+      return Err(unexpected_token(node, token));
     }
-    None => Ok(None),
+  }
+  path(node, source)
+}
+
+/// A use tree whose group is being read: the tree's cursor, past its `{` and the members already
+/// read, the prefix in front of the group, and the members already finished.
+struct UseGroup<'g, 'src> {
+  cursor: Cursor<'g>,
+  prefix: UsePrefix<&'src str>,
+  trees: Vec<UseTree<&'src str>>,
+}
+
+/// What reading a tree up to its group answered.
+enum OpenedTree<'g, 'src> {
+  /// The tree is finished: it binds one item or is a glob.
+  Finished(UseTree<&'src str>, TextRange),
+  /// The tree's group is open, and its members are next.
+  Group(UseGroup<'g, 'src>),
+}
+
+/// Read one tree as far as its group, or to its end when it has none.
+///
+/// `item` is whether the tree is a `use` item's own: a group member is relative to its group's
+/// prefix, so a root or a string source in front of one is refused where it stands.
+fn open_use_tree<'g, 'src>(
+  node: Node<'g>,
+  item: bool,
+  source: &'src str,
+) -> Out<OpenedTree<'g, 'src>> {
+  // `PathRoot (Path | "*" | "{" UseTree+ "}")`, `Path ("::" ("*" | "{" UseTree+ "}") | "as" Name)?`
+  // or `StringValue ("::" (Path ("::" …)? | "*" | "{" … "}") | "as" Name)?`, with the root's
+  // tokens inside the `Path` whenever a path follows them.
+  let mut cursor = Cursor::new(node);
+  match cursor.peek() {
+    Some(element @ NodeOrToken::Token(token))
+      if matches!(token.kind(), K::Tilde | K::Caret | K::DotDot) =>
+    {
+      if !item {
+        return Err(cursor.unexpected(element));
+      }
+      let root = path_root(&mut cursor)?;
+      use_scope(cursor, UsePrefix::Root(root))
+    }
+    Some(element @ NodeOrToken::Node(child)) if child.kind() == K::StringValue => {
+      if !item {
+        return Err(cursor.unexpected(element));
+      }
+      cursor.bump();
+      let string = cursor.keep(string_source(child, source)?);
+      if cursor.opt_token(K::PathSeparator).is_none() {
+        return use_alias(
+          cursor,
+          UsePrefix::Source {
+            source: string,
+            segments: Vec::new(),
+          },
+          source,
+        );
+      }
+      match cursor.opt_node(K::Path) {
+        Some(names) => {
+          let segments = cursor.keep(relative_path(names, source)?).into_segments();
+          use_after_path(
+            cursor,
+            UsePrefix::Source {
+              source: string,
+              segments,
+            },
+            source,
+          )
+        }
+        None => use_scope(
+          cursor,
+          UsePrefix::Source {
+            source: string,
+            segments: Vec::new(),
+          },
+        ),
+      }
+    }
+    _ => {
+      let path_node = cursor.node(K::Path, "a use tree's path")?;
+      let prefix = cursor.keep(if item {
+        path(path_node, source)?
+      } else {
+        relative_path(path_node, source)?
+      });
+      use_after_path(cursor, UsePrefix::Path(prefix), source)
+    }
+  }
+}
+
+/// After a tree's path, or a string source and its names: a `::` into a glob or a group, or an
+/// alias.
+fn use_after_path<'g, 'src>(
+  mut cursor: Cursor<'g>,
+  prefix: UsePrefix<&'src str>,
+  source: &'src str,
+) -> Out<OpenedTree<'g, 'src>> {
+  if cursor.opt_token(K::PathSeparator).is_some() {
+    return use_scope(cursor, prefix);
+  }
+  use_alias(cursor, prefix, source)
+}
+
+/// `(as Name)?`, and **the `as` commits its name**: the lossless production reports an `as` with
+/// nothing after it and closes the tree with no hole, so `use a as` reaches this walk, and the
+/// `as` would otherwise be covered and in no AST field.
+fn use_alias<'g, 'src>(
+  mut cursor: Cursor<'g>,
+  prefix: UsePrefix<&'src str>,
+  source: &'src str,
+) -> Out<OpenedTree<'g, 'src>> {
+  let alias = match cursor.opt_keyword(ContextualKeyword::As) {
+    Some(_) => Some(cursor.name_token(source, "the name an `as` gives")?),
+    None => None,
+  };
+  let extent = cursor.finish("a token")?;
+  Ok(OpenedTree::Finished(
+    UseTree::new(to_span(extent), prefix, UseTreeKind::Simple { alias }),
+    extent,
+  ))
+}
+
+/// What a `::`, or a bare root, leads to: `*`, or a group's `{`. A glob is finished here; a group
+/// is handed back open. Either way an `as` the lossless production built after one is not in the
+/// sequence, and `end` refuses it.
+fn use_scope<'g, 'src>(
+  mut cursor: Cursor<'g>,
+  prefix: UsePrefix<&'src str>,
+) -> Out<OpenedTree<'g, 'src>> {
+  if cursor.opt_token(K::Asterisk).is_some() {
+    let extent = cursor.finish("a token")?;
+    return Ok(OpenedTree::Finished(
+      UseTree::new(to_span(extent), prefix, UseTreeKind::Glob),
+      extent,
+    ));
+  }
+  cursor.token(K::LBrace, "a `*` or a group's `{`")?;
+  Ok(OpenedTree::Group(UseGroup {
+    cursor,
+    prefix,
+    trees: Vec::new(),
+  }))
+}
+
+/// Close a group whose members have run out: `UseTree+`, so an empty one is refused through
+/// [`Cursor::absent`], and the `}` is **lenient** — see the module header's missing-token table.
+fn close_use_group<'src>(group: UseGroup<'_, 'src>) -> Out<(UseTree<&'src str>, TextRange)> {
+  let UseGroup {
+    mut cursor,
+    prefix,
+    trees,
+  } = group;
+  if trees.is_empty() {
+    return Err(cursor.absent(Some(K::RBrace), "a use tree"));
+  }
+  cursor.opt_token(K::RBrace);
+  let extent = cursor.finish("a token")?;
+  Ok((
+    UseTree::new(to_span(extent), prefix, UseTreeKind::Group(trees.into())),
+    extent,
+  ))
+}
+
+/// A use tree, with the groups nested inside it read on a worklist rather than a stack.
+///
+/// Every group a tree opens is suspended on `groups` while its members are read, and a member that
+/// opens a group of its own is read the same way, so the walk's native stack does not grow with
+/// the nesting however deep it is.
+fn use_tree<'src>(node: Node<'_>, source: &'src str) -> Out<(UseTree<&'src str>, TextRange)> {
+  let mut groups: Vec<UseGroup<'_, 'src>> = Vec::new();
+  let mut opened = open_use_tree(node, true, source)?;
+  loop {
+    let (tree, extent) = match opened {
+      OpenedTree::Finished(tree, extent) => (tree, extent),
+      OpenedTree::Group(mut group) => match group.cursor.opt_node(K::UseTree) {
+        Some(member) => {
+          groups.push(group);
+          opened = open_use_tree(member, false, source)?;
+          continue;
+        }
+        None => close_use_group(group)?,
+      },
+    };
+    // A tree finished; it is a member of the group waiting on it, if any is.
+    let Some(mut group) = groups.pop() else {
+      return Ok((tree, extent));
+    };
+    group.cursor.extent.cover(extent);
+    group.trees.push(tree);
+    opened = OpenedTree::Group(group);
   }
 }
 
@@ -2465,32 +2557,32 @@ fn optional_constrained_after<'src, T>(
 // paths
 // ---------------------------------------------------------------------------------------------
 
-/// A `::`-separated path, and its extent.
+/// A rooted, `::`-separated path, and its extent.
 ///
-/// GraphQLx only, and the node every name-shaped position in this dialect goes through. The
-/// leading `::` is **part of the path** rather than a prefix on it — `graphqlx::ast::Path` carries
-/// `fully_qualified` and the tree records the same fact by keeping the token — so the flag is read
-/// off whether the node's first non-trivia token is a separator, which is the same question the
-/// wrapper layer answers by counting.
+/// GraphQLx only, and the node every name-shaped position in this dialect goes through. The root
+/// is **part of the path** rather than a prefix on it — `graphqlx::ast::Path` carries a
+/// [`PathRoot`] and the tree records the same fact by keeping the root's tokens as the node's
+/// leading children — so the root is read off those tokens, which is the same question the
+/// wrapper layer answers with its `tilde_token`, `caret_token` and `dot_dot_tokens` getters.
 fn path<'src>(node: Node<'_>, source: &'src str) -> Out<(Path<&'src str>, TextRange)> {
   path_except(node, source, &[], "")
 }
 
-/// [`path`] at a position the syntactic parser makes a **rule** of: an **unqualified** path whose
+/// [`path`] at a position the syntactic parser makes a **rule** of: a **relative** path whose
 /// first segment spells one of `reserved` is [`SemanticRule`](ProjectErrorKind::SemanticRule)
-/// naming `rule`. `::on` and `ns::on` are untouched — the syntactic productions refuse only the
-/// first segment of a path with no leading `::`.
+/// naming `rule`. `^::on`, `..::on` and `ns::on` are untouched — the syntactic productions refuse
+/// only the first segment of a path with no root.
 fn path_except<'src>(
   node: Node<'_>,
   source: &'src str,
   reserved: &[ContextualKeyword],
   rule: &'static str,
 ) -> Out<(Path<&'src str>, TextRange)> {
-  // `::? Name (:: Name)*` — the leading separator is what `fully_qualified` records, and every
-  // segment goes through the name door; the first one through the rule's, when unqualified.
+  // `PathRoot? Name (:: Name)*` — the root's tokens are what `PathRoot` records, and every segment
+  // goes through the name door; the first one through the rule's, when the path is relative.
   let mut cursor = Cursor::new(node);
-  let fully_qualified = cursor.opt_token(K::PathSeparator).is_some();
-  let mut first = !fully_qualified;
+  let root = path_root(&mut cursor)?;
+  let mut first = root.is_relative();
   let (segments, _) = cursor.separated(
     |cursor| {
       if core::mem::take(&mut first) {
@@ -2509,10 +2601,43 @@ fn path_except<'src>(
     "a path segment",
   )?;
   let extent = cursor.finish("a token")?;
-  Ok((
-    Path::new(to_span(extent), segments, fully_qualified),
-    extent,
-  ))
+  Ok((Path::new(to_span(extent), root, segments), extent))
+}
+
+/// The root a `Path` node's leading tokens spell: `~ ::`, `^ ::`, `.. ::` once per level, or none.
+///
+/// Strict, as every token atom here is: a sigil must be followed by its `::`. A `::` in front of
+/// the first segment is not a root, and the segment walk refuses it as the leading separator it is.
+fn path_root(cursor: &mut Cursor<'_>) -> Out<PathRoot> {
+  if let Some(sigil) = cursor.opt_token(K::Tilde) {
+    let separator = cursor.token(K::PathSeparator, "the `::` after a root's `~`")?;
+    return Ok(PathRoot::Package(root_span(sigil, separator)));
+  }
+  if let Some(sigil) = cursor.opt_token(K::Caret) {
+    let separator = cursor.token(K::PathSeparator, "the `::` after a root's `^`")?;
+    return Ok(PathRoot::Dependency(root_span(sigil, separator)));
+  }
+  let Some(sigil) = cursor.opt_token(K::DotDot) else {
+    return Ok(PathRoot::Relative);
+  };
+  let mut separator = cursor.token(K::PathSeparator, "the `::` after a root's `..`")?;
+  let mut count = NonZeroUsize::MIN;
+  while cursor.opt_token(K::DotDot).is_some() {
+    separator = cursor.token(K::PathSeparator, "the `::` after a root's `..`")?;
+    count = count.saturating_add(1);
+  }
+  Ok(PathRoot::Parent {
+    span: root_span(sigil, separator),
+    count,
+  })
+}
+
+/// A root's span: from its first token to its last `::`.
+fn root_span(first: Token<'_>, last: Token<'_>) -> SimpleSpan {
+  SimpleSpan::new(
+    usize::from(first.text_range().start()),
+    usize::from(last.text_range().end()),
+  )
 }
 
 /// `Path TypeGenerics?` in a position that admits no `!`.
@@ -3059,7 +3184,7 @@ fn enum_value<'src>(node: Node<'_>, source: &'src str) -> Out<(EnumValue<&'src s
   let mut cursor = Cursor::new(node);
   let path_node = cursor.node(K::Path, "a path")?;
   cursor.end()?;
-  // `true`, `false` and `null` as an unqualified first segment are a boolean and a null in both
+  // `true`, `false` and `null` as a relative path's first segment are a boolean and a null in both
   // value grammars' dispatch, and the enum production refuses them (`syntactic/value.rs`), so an
   // enum value spelled that way is outside the parser's image.
   let (path, path_extent) = path_except(
@@ -4020,7 +4145,7 @@ fn fragment_spread<'src>(
   let directives_node = cursor.opt_node(K::Directives);
   cursor.end()?;
   // `... on` is an inline fragment's head in both parsers (`selection/mod.rs`'s spread dispatch,
-  // and `fragment_type_path`'s refusal), so an unqualified target spelled `on` is no spread any
+  // and `fragment_type_path`'s refusal), so a relative target spelled `on` is no spread any
   // source produces.
   let path = cursor.keep(type_path_except(
     path_node,

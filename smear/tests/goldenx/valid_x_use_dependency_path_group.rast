@@ -1,0 +1,17 @@
+Root@0..26
+  Document@0..26
+    UseDefinition@0..26
+      Name@0..3 "use"
+      Space@3..4 " "
+      UseTree@4..26
+        Path@4..14
+          Caret@4..5 "^"
+          PathSeparator@5..7 "::"
+          Name@7..14 "ingraph"
+        PathSeparator@14..16 "::"
+        LBrace@16..17 "{"
+        UseTree@17..24
+          Path@17..24
+            Name@17..24 "MediaId"
+        RBrace@24..25 "}"
+        Newline@25..26 "\n"

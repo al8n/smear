@@ -103,8 +103,8 @@ fn the_terminal_arms_answer_for_every_variant() {
         );
         cells += 1;
       })+)+
-      // A census that selected nothing exits `ok`. 10 = 9 variants + `Lexer`'s second sample.
-      assert_eq!(cells, 10, "the cell set collapsed");
+      // A census that selected nothing exits `ok`. 11 = 10 variants + `Lexer`'s second sample.
+      assert_eq!(cells, 11, "the cell set collapsed");
     };
   }
 
@@ -139,6 +139,8 @@ fn the_terminal_arms_answer_for_every_variant() {
       Err::unexpected_token(SyntacticTokenKind::Colon, Expectation::Name, span).into_data(),
       false
     )],
+    // A path written with a leading `::`: a grammar rejection like the one above it.
+    LeadingPathSeparator => [(Err::leading_path_separator(span).into_data(), false)],
     Other => [(ErrorData::Other(std::borrow::Cow::Borrowed("x")), false)],
     // A malformed lexeme kept by its kind: a grammar rejection, as the note it replaced was.
     Lexical => [(ErrorData::Lexical(SyntaxErrorKind::UnknownCharacter), false)],
@@ -492,9 +494,9 @@ fn the_marks_smear_has_to_make_itself_reach_the_caller() {
 /// Round 2's census was derived over the two primitive **names** round 1 had mentioned, `next` and
 /// a raw `peek`. `try_expect_map` folds a stop into the same `Ok(None)` those do — tokora says so
 /// in the primitive's own doc (`input_ref/try_expect.rs:262`) — and this dialect reaches it from
-/// ten places, every one of them an optional or attempt probe. `NamedSpecifier::graphqlx` on
-/// `Foo as Bar` therefore **succeeded, as a bare `Foo`**, when the budget landed on `as`: a
-/// truncated AST with no error at all, which is worse than the wrong error.
+/// ten places, every one of them an optional or attempt probe. An alias probe over `Foo as Bar`
+/// therefore **succeeded, as a bare `Foo`**, when the budget landed on `as`: a truncated AST with
+/// no error at all, which is worse than the wrong error.
 ///
 /// # The sweep is the assertion, and it is derived rather than picked
 ///
@@ -514,8 +516,8 @@ fn every_optional_probe_raises_the_stop_instead_of_declining() {
   use crate::graphqlx::{
     GraphQLx,
     ast::{
-      DescribedExecutableDefinition, DirectiveDefinition, InterfaceTypeDefinition, NamedSpecifier,
-      Selection, WildcardSpecifier,
+      DescribedExecutableDefinition, DirectiveDefinition, InterfaceTypeDefinition, Selection,
+      UseDefinition, UseTree, UseTreeKind,
     },
     error::GraphqlxErrors,
     syntactic::{GraphqlxInput, GraphqlxLexer},
@@ -585,18 +587,18 @@ fn every_optional_probe_raises_the_stop_instead_of_declining() {
     }};
   }
 
-  // `optional_alias`, the probe Codex named, through both import specifiers.
+  // `optional_alias`, the alias probe, through a use tree and through a whole `use` item.
   sweep!(
-    "NamedSpecifier::graphqlx",
+    "UseTree::graphqlx",
     "Foo as Bar",
-    "optional_alias / try_expect_map",
-    |inp| NamedSpecifier::<_>::graphqlx(inp).map(|_| ())
+    "optional_alias / peek_head_map",
+    |inp| UseTree::<_>::graphqlx(inp).map(|_| ())
   );
   sweep!(
-    "WildcardSpecifier::graphqlx",
-    "* as Bar",
-    "optional_alias / try_expect_map",
-    |inp| WildcardSpecifier::<_>::graphqlx(inp).map(|_| ())
+    "UseDefinition::graphqlx",
+    "use a::b as c",
+    "optional_alias / peek_head_map",
+    |inp| UseDefinition::<_>::graphqlx(inp).map(|_| ())
   );
   // `try_on` — the inline-fragment type condition.
   sweep!(
@@ -629,17 +631,23 @@ fn every_optional_probe_raises_the_stop_instead_of_declining() {
 
   // ── THE CONTROLS: every probe must still report a genuinely absent thing as absent ──
   let no_alias = budgeted(
-    |inp| NamedSpecifier::<_>::graphqlx(inp).map(|s| s.alias().is_some()),
+    |inp| {
+      UseTree::<_>::graphqlx(inp)
+        .map(|tree| matches!(tree.kind(), UseTreeKind::Simple { alias: Some(_) }))
+    },
     "Foo",
     64,
   )
-  .expect("a bare specifier parses");
-  assert!(!no_alias, "a specifier with no `as` must have no alias");
+  .expect("a bare tree parses");
+  assert!(!no_alias, "a tree with no `as` must have no alias");
   let with_alias = budgeted(
-    |inp| NamedSpecifier::<_>::graphqlx(inp).map(|s| s.alias().is_some()),
+    |inp| {
+      UseTree::<_>::graphqlx(inp)
+        .map(|tree| matches!(tree.kind(), UseTreeKind::Simple { alias: Some(_) }))
+    },
     "Foo as Bar",
     64,
   )
-  .expect("an aliased specifier parses");
-  assert!(with_alias, "a specifier with an `as` must have its alias");
+  .expect("an aliased tree parses");
+  assert!(with_alias, "a tree with an `as` must have its alias");
 }

@@ -1,0 +1,39 @@
+Root@0..35
+  Document@0..35
+    UseDefinition@0..9
+      Name@0..3 "use"
+      Space@3..4 " "
+      UseTree@4..9
+        Tilde@4..5 "~"
+        PathSeparator@5..7 "::"
+        Asterisk@7..8 "*"
+        Newline@8..9 "\n"
+    UseDefinition@9..21
+      Name@9..12 "use"
+      Space@12..13 " "
+      UseTree@13..21
+        DotDot@13..15 ".."
+        PathSeparator@15..17 "::"
+        LBrace@17..18 "{"
+        UseTree@18..19
+          Path@18..19
+            Name@18..19 "A"
+        RBrace@19..20 "}"
+        Newline@20..21 "\n"
+    UseDefinition@21..35
+      Name@21..24 "use"
+      Space@24..25 " "
+      UseTree@25..35
+        Caret@25..26 "^"
+        PathSeparator@26..28 "::"
+        LBrace@28..29 "{"
+        UseTree@29..32
+          Path@29..32
+            Name@29..30 "a"
+            Comma@30..31 ","
+            Space@31..32 " "
+        UseTree@32..33
+          Path@32..33
+            Name@32..33 "b"
+        RBrace@33..34 "}"
+        Newline@34..35 "\n"

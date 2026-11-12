@@ -21,8 +21,8 @@ use tokora::{
 use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 
 use super::{
-  GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, keyword_of, path,
-  path_after_first, unexpected_here,
+  GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, keyword_of,
+  leading_path_separator, path, path_after_first, unexpected_here,
 };
 use crate::{
   combinator::{
@@ -251,10 +251,10 @@ value_parser!(
   }
 );
 
+/// An enum value whose first name is consumed: a relative path, the only kind a name can start.
 fn enum_after_first<'inp, Src, Ctx>(
   start: usize,
   first: super::ast::Name<GraphqlxSlice<'inp, Src>>,
-  fully_qualified: bool,
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<EnumValue<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
@@ -265,16 +265,16 @@ where
     Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
-  path_after_first(start, first, fully_qualified, inp)
+  path_after_first(start, first, super::ast::PathRoot::Relative, inp)
     .map(|path| EnumValue::new(*path.span(), path))
 }
 
 value_parser!(
   /// Parses a committed GraphQLx enum/path value.
   ///
-  /// GraphQLx extends GraphQL's `EnumValue` from a single name to an optional
-  /// qualified path, while retaining GraphQL's reserved `true`, `false`, and
-  /// `null` exclusions.
+  /// GraphQLx extends GraphQL's `EnumValue` from a single name to a path under an
+  /// optional root, while retaining GraphQL's reserved `true`, `false`, and `null`
+  /// exclusions for a relative path's first segment; `^::null` is a path.
   ///
   /// See the [GraphQL Enum Value specification](https://spec.graphql.org/draft/#sec-Enum-Value).
   pub enum_value,
@@ -298,7 +298,7 @@ value_parser!(
               Expectation::EnumValue,
             )
           } else {
-            enum_after_first(span.start(), super::ast::Name::new(span, source), false, inp)
+            enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
           }
         }
         _ => unreachable!("fused GraphQLx enum dispatch received a non-identifier token"),
@@ -311,9 +311,10 @@ value_parser!(
   {
     ParseAttempt::Accept(value) => Ok(value),
     ParseAttempt::Decline => match super::peek_kind(inp)? {
-      Some(SyntacticTokenKind::PathSeparator) => {
-        path(inp).map(|path| EnumValue::new(*path.span(), path))
-      }
+      Some(
+        SyntacticTokenKind::Tilde | SyntacticTokenKind::DotDot | SyntacticTokenKind::Caret,
+      ) => path(inp).map(|path| EnumValue::new(*path.span(), path)),
+      Some(SyntacticTokenKind::PathSeparator) => leading_path_separator(inp),
       _ => unexpected_here(inp, Expectation::EnumValue),
     },
   }
@@ -412,7 +413,9 @@ pub(crate) fn value_head<S>(
     smear_lexer::graphqlx::syntactic::SyntacticToken::Dollar => ValueHead::Dollar,
     smear_lexer::graphqlx::syntactic::SyntacticToken::LBracket => ValueHead::List,
     smear_lexer::graphqlx::syntactic::SyntacticToken::LBrace => ValueHead::Object,
-    smear_lexer::graphqlx::syntactic::SyntacticToken::PathSeparator => ValueHead::Path,
+    smear_lexer::graphqlx::syntactic::SyntacticToken::Tilde
+    | smear_lexer::graphqlx::syntactic::SyntacticToken::DotDot
+    | smear_lexer::graphqlx::syntactic::SyntacticToken::Caret => ValueHead::Path,
     _ => return None,
   })
 }
@@ -824,7 +827,7 @@ value_parser!(
           if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::Bang)) {
             set_after_keyword(span.start(), inp).map(InputValue::Set)
           } else {
-            enum_after_first(span.start(), super::ast::Name::new(span, source), false, inp)
+            enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
               .map(InputValue::Enum)
           }
         }
@@ -832,12 +835,12 @@ value_parser!(
           if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::Bang)) {
             map_after_keyword(span.start(), inp).map(InputValue::Map)
           } else {
-            enum_after_first(span.start(), super::ast::Name::new(span, source), false, inp)
+            enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
               .map(InputValue::Enum)
           }
         }
         (GraphqlxToken::<'inp, Src>::Identifier(source), _) => {
-          enum_after_first(span.start(), super::ast::Name::new(span, source), false, inp)
+          enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
             .map(InputValue::Enum)
         }
         _ => unreachable!("fused GraphQLx value dispatch received a non-identifier token"),
@@ -872,9 +875,10 @@ value_parser!(
     ParseAttempt::Decline => match super::peek_kind(inp)? {
       Some(SyntacticTokenKind::LBracket) => list_value(inp).map(InputValue::List),
       Some(SyntacticTokenKind::LBrace) => object_value(inp).map(InputValue::Object),
-      Some(SyntacticTokenKind::PathSeparator) => {
-        path(inp).map(|path| InputValue::Enum(EnumValue::new(*path.span(), path)))
-      }
+      Some(
+        SyntacticTokenKind::Tilde | SyntacticTokenKind::DotDot | SyntacticTokenKind::Caret,
+      ) => path(inp).map(|path| InputValue::Enum(EnumValue::new(*path.span(), path))),
+      Some(SyntacticTokenKind::PathSeparator) => leading_path_separator(inp),
       _ => unexpected_here(inp, Expectation::InputValue),
     },
   }
@@ -935,7 +939,7 @@ value_parser!(
           if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::Bang)) {
             const_set_after_keyword(span.start(), inp).map(ConstInputValue::Set)
           } else {
-            enum_after_first(span.start(), super::ast::Name::new(span, source), false, inp)
+            enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
               .map(ConstInputValue::Enum)
           }
         }
@@ -943,12 +947,12 @@ value_parser!(
           if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::Bang)) {
             const_map_after_keyword(span.start(), inp).map(ConstInputValue::Map)
           } else {
-            enum_after_first(span.start(), super::ast::Name::new(span, source), false, inp)
+            enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
               .map(ConstInputValue::Enum)
           }
         }
         (GraphqlxToken::<'inp, Src>::Identifier(source), _) => {
-          enum_after_first(span.start(), super::ast::Name::new(span, source), false, inp)
+          enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
             .map(ConstInputValue::Enum)
         }
         _ => unreachable!("fused GraphQLx const-value dispatch received a non-identifier token"),
@@ -969,9 +973,10 @@ value_parser!(
     ParseAttempt::Decline => match super::peek_kind(inp)? {
       Some(SyntacticTokenKind::LBracket) => const_list_value(inp).map(ConstInputValue::List),
       Some(SyntacticTokenKind::LBrace) => const_object_value(inp).map(ConstInputValue::Object),
-      Some(SyntacticTokenKind::PathSeparator) => {
-        path(inp).map(|path| ConstInputValue::Enum(EnumValue::new(*path.span(), path)))
-      }
+      Some(
+        SyntacticTokenKind::Tilde | SyntacticTokenKind::DotDot | SyntacticTokenKind::Caret,
+      ) => path(inp).map(|path| ConstInputValue::Enum(EnumValue::new(*path.span(), path))),
+      Some(SyntacticTokenKind::PathSeparator) => leading_path_separator(inp),
       _ => unexpected_here(inp, Expectation::ConstInputValue),
     },
   }

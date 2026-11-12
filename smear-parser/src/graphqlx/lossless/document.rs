@@ -5,8 +5,8 @@
 //! # Divergence 22: a description may precede a **keyworded definition**, and nothing else
 //!
 //! `entry_after_description` commits to a *keyworded definition* — executable or type-system —
-//! and never reaches an import, an extension, or the shorthand operation, so
-//! `"doc" import * from "x"`, `"doc" extend type T @d` and `"doc" { f }` are all grammar errors.
+//! and never reaches a `use` item, an extension, or the shorthand operation, so
+//! `"doc" use ~::x::*`, `"doc" extend type T @d` and `"doc" { f }` are all grammar errors.
 //! The last of the three is the grammar's own: `OperationDefinition : Description? OperationType
 //! … | SelectionSet` gives the second alternative no `Description?` slot. All three re-print byte
 //! for byte and all three build every node they would have built undescribed, so **only the
@@ -52,13 +52,13 @@ use super::{
   definition::type_system_definition_at,
   executable::{executable_definition_at, starts_executable_keyword},
   extension::type_system_extension,
-  import::import_definition,
   recover,
   recover::{
     DEFINITION_HEADS, DESCRIBED_DEFINITION_HEADS, EXECUTABLE_ENTRY_HEADS, TYPE_SYSTEM_ENTRY_HEADS,
     starts_description,
   },
   trivia::{peek_as, peek_kind},
+  use_tree::use_definition,
 };
 
 use crate::lossless::depth::{self, RootTurn};
@@ -68,7 +68,7 @@ use crate::lossless::lossless_production;
 lossless_production! {
   dialect = graphqlx::lossless;
 
-  /// One entry of a mixed [`document`]: an import, an extension, or a described definition.
+  /// One entry of a mixed [`document`]: a `use` item, an extension, or a described definition.
   ///
   /// The `described` flag is what carries divergence 22 into the two arms that must refuse it. It
   /// is computed before the description is committed, because afterwards the head peek answers
@@ -81,13 +81,13 @@ lossless_production! {
       super::executable::description::<Src, Ctx>(inp)?;
     }
     match peek_as::<Src, Ctx, Keyword>(inp)? {
-      Some(Keyword::Import) => {
+      Some(Keyword::Use) => {
         if described {
           recover::report_unexpected::<Src, Ctx>(inp, DEFINITION_HEADS)?;
         }
-        // The mark is left unspent: an import is never described, so there is nothing for it to
-        // wrap, and an unspent mark materializes into nothing.
-        import_definition::<Src, Ctx>(inp)
+        // The mark is left unspent: a `use` item is never described, so there is nothing for it
+        // to wrap, and an unspent mark materializes into nothing.
+        use_definition::<Src, Ctx>(inp)
       }
       Some(Keyword::Extend) => {
         if described {
@@ -130,20 +130,20 @@ lossless_production! {
     recover::unexpected::<Src, Ctx>(inp, DEFINITION_HEADS)
   }
 
-  /// One entry of an [`executable_document`](super::executable::executable_document): an import or
-  /// a described executable definition.
-  fn import_or_executable_definition<'inp, Src, Ctx>(inp) {
+  /// One entry of an [`executable_document`](super::executable::executable_document): a `use` item
+  /// or a described executable definition.
+  fn use_or_executable_definition<'inp, Src, Ctx>(inp) {
     let head = peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
     let described = starts_description(head);
     if described {
       super::executable::description::<Src, Ctx>(inp)?;
     }
-    if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Import) {
+    if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Use) {
       if described {
         recover::report_unexpected::<Src, Ctx>(inp, EXECUTABLE_ENTRY_HEADS)?;
       }
-      return import_definition::<Src, Ctx>(inp);
+      return use_definition::<Src, Ctx>(inp);
     }
     // The shorthand operation carries no `Description?` slot — see
     // [`definition_after_description`], which refuses the same pair from the mixed root.
@@ -153,9 +153,9 @@ lossless_production! {
     executable_definition_at::<Src, Ctx>(inp, mark)
   }
 
-  /// One entry of a [`type_system_document`]: an import, an extension, or a described type-system
-  /// definition.
-  fn import_or_type_system_definition_or_extension<'inp, Src, Ctx>(inp) {
+  /// One entry of a [`type_system_document`]: a `use` item, an extension, or a described
+  /// type-system definition.
+  fn type_system_item<'inp, Src, Ctx>(inp) {
     let head = peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
     let described = starts_description(head);
@@ -163,11 +163,11 @@ lossless_production! {
       super::executable::description::<Src, Ctx>(inp)?;
     }
     match peek_as::<Src, Ctx, Keyword>(inp)? {
-      Some(Keyword::Import) => {
+      Some(Keyword::Use) => {
         if described {
           recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS)?;
         }
-        import_definition::<Src, Ctx>(inp)
+        use_definition::<Src, Ctx>(inp)
       }
       Some(Keyword::Extend) => {
         if described {
@@ -182,7 +182,7 @@ lossless_production! {
     }
   }
 
-  /// `ImportOrDefinitionOrExtension+` — the mixed root [`super::parse_document`] parses.
+  /// `DocumentItem+` — the mixed root [`super::parse_document`] parses.
   ///
   /// The empty form is reported: `syntactic/` rejects an empty input, and gate 1 compares verdicts.
   /// A failed entry is caught and resynchronised past, which is the only place in this suite that
@@ -221,7 +221,7 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `ImportOrTypeSystemDefinitionOrExtension+` — the SDL-only root.
+  /// `TypeSystemItem+` — the SDL-only root.
   ///
   /// [`document`]'s loop over the SDL-only dispatcher, written out rather than shared: a
   /// higher-ranked `fn` parameter would be the only way to abstract over the three dispatchers, and
@@ -240,11 +240,7 @@ lossless_production! {
         }
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
           // The refusal arm [`document`]'s note explains, through the same call and the same slot.
-          match depth::root_turn(
-            inp,
-            stop,
-            import_or_type_system_definition_or_extension::<Src, Ctx>,
-          ) {
+          match depth::root_turn(inp, stop, type_system_item::<Src, Ctx>) {
             RootTurn::Parsed { .. } => {}
             RootTurn::EndsTheDocument { error } => return Err(error),
             RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,

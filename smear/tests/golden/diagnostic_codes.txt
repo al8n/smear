@@ -144,6 +144,7 @@ SyntaxErrorKind::InvalidSyntax = smear::syntax::invalid-syntax
 SyntaxErrorKind::InvalidUnicodeEscape = smear::syntax::invalid-unicode-escape
 SyntaxErrorKind::InvalidUnicodeScalar = smear::syntax::invalid-unicode-scalar
 SyntaxErrorKind::InvalidUtf8 = smear::syntax::invalid-utf8
+SyntaxErrorKind::LeadingPathSeparator = smear::syntax::leading-path-separator
 SyntaxErrorKind::LeadingZero = smear::syntax::leading-zero
 SyntaxErrorKind::LineTerminatorInString = smear::syntax::line-terminator-in-string
 SyntaxErrorKind::NestingLimit = smear::syntax::nesting-limit

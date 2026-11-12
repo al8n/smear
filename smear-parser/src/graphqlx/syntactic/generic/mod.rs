@@ -478,6 +478,9 @@ generic_parser!(
   }
 );
 
+/// Whether the next two tokens open another `where` predicate: a name followed by `:`, `::` or
+/// `<`, or a root's sigil followed by its `::`. Any other pair ends the clause, which has no
+/// terminator of its own.
 fn predicate_head_in_window<'inp, Src>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U2>,
 ) -> bool
@@ -497,8 +500,8 @@ where
         SyntacticTokenKind::Colon | SyntacticTokenKind::PathSeparator | SyntacticTokenKind::LAngle
       )
     ) | (
-      Some(SyntacticTokenKind::PathSeparator),
-      Some(SyntacticTokenKind::Identifier)
+      Some(SyntacticTokenKind::Tilde | SyntacticTokenKind::Caret | SyntacticTokenKind::DotDot),
+      Some(SyntacticTokenKind::PathSeparator)
     )
   )
 }

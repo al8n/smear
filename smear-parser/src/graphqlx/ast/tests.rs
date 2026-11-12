@@ -8,8 +8,8 @@ use tokora::{
 use super::{
   Argument, BooleanValue, DefinitionName, DefinitionTypeGenerics, DefinitionTypeParam,
   ExecutableDefinitionName, ExecutableDefinitionTypeGenerics, ExtensionName, ExtensionTypeGenerics,
-  ExtensionTypeParam, Field, ImportMember, InputValue, Name, NamedSpecifier, OperationType, Path,
-  Selection, TypePath, WhereClause, WherePredicate,
+  ExtensionTypeParam, Field, InputValue, Name, OperationType, Path, PathRoot, Selection, TypePath,
+  UseDefinition, UsePrefix, UseTree, UseTreeKind, WhereClause, WherePredicate,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -25,7 +25,11 @@ fn name(span: u8, source: &'static str) -> Name<&'static str, CustomSpan> {
 }
 
 fn path(span: u8, source: &'static str) -> Path<&'static str, CustomSpan> {
-  Path::new(CustomSpan(span), Vec::from([name(span, source)]), false)
+  Path::new(
+    CustomSpan(span),
+    PathRoot::Relative,
+    Vec::from([name(span, source)]),
+  )
 }
 
 #[test]
@@ -69,7 +73,7 @@ fn generic_definition_and_where_aliases_preserve_custom_spans() {
 }
 
 #[test]
-fn executable_selection_and_import_nodes_keep_their_span_type() {
+fn executable_selection_and_use_nodes_keep_their_span_type() {
   let value: InputValue<&str, CustomSpan> =
     InputValue::Boolean(BooleanValue::new(CustomSpan(1), true));
   let argument = Argument::new(CustomSpan(2), name(2, "enabled"), value);
@@ -92,12 +96,25 @@ fn executable_selection_and_import_nodes_keep_their_span_type() {
     &"T"
   );
 
-  let specifier = NamedSpecifier::new(CustomSpan(6), name(6, "User"), None);
-  let import = ImportMember::Named(specifier.clone());
-  assert_eq!(import.as_span(), &CustomSpan(6));
+  let tree = UseTree::new(
+    CustomSpan(6),
+    UsePrefix::Path(path(6, "User")),
+    UseTreeKind::Simple {
+      alias: Some(name(6, "Account")),
+    },
+  );
+  let item = UseDefinition::new(CustomSpan(8), tree.clone());
+  assert_eq!(item.as_span(), &CustomSpan(8));
+  assert_eq!(item.tree().as_span(), &CustomSpan(6));
   assert_eq!(
-    specifier.into_components(),
-    (CustomSpan(6), name(6, "User"), None)
+    tree.into_components(),
+    (
+      CustomSpan(6),
+      UsePrefix::Path(path(6, "User")),
+      UseTreeKind::Simple {
+        alias: Some(name(6, "Account")),
+      },
+    )
   );
 
   let operation = OperationType::Query(CustomSpan(7));

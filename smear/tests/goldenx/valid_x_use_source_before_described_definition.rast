@@ -1,0 +1,30 @@
+Root@0..49
+  Document@0..49
+    UseDefinition@0..15
+      Name@0..3 "use"
+      Space@3..4 " "
+      UseTree@4..15
+        StringValue@4..14
+          InlineString@4..14 "\"./vision\""
+        Newline@14..15 "\n"
+    ObjectTypeDefinition@15..48
+      InlineString@15..26 "\"An image.\""
+      Space@26..27 " "
+      Name@27..31 "type"
+      Space@31..32 " "
+      DefinitionName@32..38
+        Name@32..37 "Image"
+        Space@37..38 " "
+      FieldsDefinition@38..48
+        LBrace@38..39 "{"
+        Space@39..40 " "
+        FieldDefinition@40..47
+          Name@40..42 "id"
+          Colon@42..43 ":"
+          Space@43..44 " "
+          DefinitionTypePath@44..47
+            Path@44..47
+              Name@44..46 "ID"
+              Space@46..47 " "
+        RBrace@47..48 "}"
+    Newline@48..49 "\n"

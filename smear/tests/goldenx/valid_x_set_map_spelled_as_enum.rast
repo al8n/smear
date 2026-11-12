@@ -1,14 +1,14 @@
-Root@0..45
-  Document@0..45
-    OperationDefinition@0..44
+Root@0..46
+  Document@0..46
+    OperationDefinition@0..45
       Name@0..5 "query"
       Space@5..6 " "
-      SelectionSet@6..44
+      SelectionSet@6..45
         LBrace@6..7 "{"
         Space@7..8 " "
-        Field@8..43
+        Field@8..44
           Name@8..9 "f"
-          Arguments@9..42
+          Arguments@9..43
             LParen@9..10 "("
             Argument@10..18
               Name@10..11 "a"
@@ -30,15 +30,16 @@ Root@0..45
                   Name@26..31 "Thing"
                   Comma@31..32 ","
                   Space@32..33 " "
-            Argument@33..41
+            Argument@33..42
               Name@33..34 "c"
               Colon@34..35 ":"
               Space@35..36 " "
-              EnumValue@36..41
-                Path@36..41
-                  PathSeparator@36..38 "::"
-                  Name@38..41 "set"
-            RParen@41..42 ")"
-          Space@42..43 " "
-        RBrace@43..44 "}"
-    Newline@44..45 "\n"
+              EnumValue@36..42
+                Path@36..42
+                  Caret@36..37 "^"
+                  PathSeparator@37..39 "::"
+                  Name@39..42 "set"
+            RParen@42..43 ")"
+          Space@43..44 " "
+        RBrace@44..45 "}"
+    Newline@45..46 "\n"

@@ -1,0 +1,41 @@
+Root@0..44
+  Document@0..44
+    UseDefinition@0..11
+      Name@0..3 "use"
+      Space@3..4 " "
+      UseTree@4..11
+        StringValue@4..7
+          InlineString@4..7 "\"n\""
+        PathSeparator@7..9 "::"
+        Asterisk@9..10 "*"
+        Newline@10..11 "\n"
+    UseDefinition@11..25
+      Name@11..14 "use"
+      Space@14..15 " "
+      UseTree@15..25
+        StringValue@15..18
+          InlineString@15..18 "\"o\""
+        Space@18..19 " "
+        Name@19..21 "as"
+        Space@21..22 " "
+        Name@22..25 "all"
+    Newline@25..26 "\n"
+    ObjectTypeDefinition@26..43
+      Name@26..30 "type"
+      Space@30..31 " "
+      DefinitionName@31..33
+        Name@31..32 "T"
+        Space@32..33 " "
+      FieldsDefinition@33..43
+        LBrace@33..34 "{"
+        Space@34..35 " "
+        FieldDefinition@35..42
+          Name@35..36 "f"
+          Colon@36..37 ":"
+          Space@37..38 " "
+          DefinitionTypePath@38..42
+            Path@38..42
+              Name@38..41 "Int"
+              Space@41..42 " "
+        RBrace@42..43 "}"
+    Newline@43..44 "\n"

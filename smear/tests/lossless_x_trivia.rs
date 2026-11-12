@@ -61,7 +61,7 @@
 //! Both exception sets are **derived**, not hand-listed. [`node_kinds`] takes the kind space minus
 //! its image prefix and minus the bookkeeping triple the [`KindSpace`] trait names, so a kind added
 //! anywhere in the node block defaults into the must-be-covered set — the safe direction — and a
-//! seventy-eighth node kind nobody reaches is a failure rather than an omission.
+//! seventy-sixth node kind nobody reaches is a failure rather than an omission.
 //!
 //! And the counter has a blind spot of its own, which the plan does not name and a mutation found:
 //! a **loop that runs exactly once** reports full coverage while its continuation test is dead.
@@ -153,7 +153,7 @@ const REPETITIONS_THAT_MUST_CONTINUE: &[(K, K)] = &[
   (K::WhereClause, K::WherePredicate),
   (K::DefinitionTypeGenerics, K::DefinitionTypeParam),
   (K::MapValue, K::MapEntry),
-  (K::ImportList, K::NamedSpecifier),
+  (K::UseTree, K::UseTree),
   (K::Arguments, K::Argument),
   (K::ObjectValue, K::ObjectField),
   (K::SelectionSet, K::Field),
@@ -667,7 +667,7 @@ fn the_graphqlx_syntactic_lexer_skips_a_bom_at_any_offset() {
 ///
 /// - **soundness** — every token every form produces is trivia, and maps into the image block;
 /// - **completeness** — the trivia images are a *suffix* of the image block (the kind space's
-///   documented layout: twenty-six non-trivia images, then six trivia ones), and the alphabet
+///   documented layout: twenty-nine non-trivia images, then six trivia ones), and the alphabet
 ///   reaches every kind in that suffix.
 ///
 /// The suffix formulation is what makes this survive a change rather than merely describe today. A

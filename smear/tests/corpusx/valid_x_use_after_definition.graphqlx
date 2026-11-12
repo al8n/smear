@@ -1,0 +1,2 @@
+type A { f: Int }
+use ~::b::C

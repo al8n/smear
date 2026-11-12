@@ -1,6 +1,6 @@
 //! GraphQLx-only document benchmarks.
 //!
-//! These fixtures intentionally exercise imports, generic headers, qualified
+//! These fixtures intentionally exercise `use` items, generic headers, rooted
 //! paths, `where` clauses, and extensions. They are benchmarked only against
 //! smear-parser because standard GraphQL parsers do not accept the same
 //! GraphQLx language surface.
@@ -20,8 +20,8 @@ struct Fixture {
 
 const FIXTURES: &[Fixture] = &[
   Fixture {
-    name: "graphqlx_01_imports_and_paths",
-    source: include_str!("../../tests/fixtures/parser/graphqlx/ok/0013_complex_import.graphqlx"),
+    name: "graphqlx_01_use_items_and_paths",
+    source: include_str!("../../tests/fixtures/parser/graphqlx/ok/0013_complex_use.graphqlx"),
   },
   Fixture {
     name: "graphqlx_02_definitions_and_extensions",

@@ -23,8 +23,8 @@
 //!   mark-plus-`node_at` idiom serves, so the `...` lands inside its node rather than beside it.
 //!
 //! Divergence 11 gives that dispatch **four** arms against GraphQL's three
-//! (`graphqlx/syntactic/selection/mod.rs:409-447`): `on` ⇒ inline fragment, `Identifier` ⇒ spread,
-//! **`PathSeparator` ⇒ fully qualified spread**, `At | LBrace` ⇒ untyped inline fragment. And a
+//! (`graphqlx/syntactic/selection/mod.rs:424-472`): `on` ⇒ inline fragment, `Identifier` ⇒ spread,
+//! **`Tilde | DotDot | Caret` ⇒ rooted spread**, `At | LBrace` ⇒ untyped inline fragment. And a
 //! spread's target is a `TypePath`, so `... ns::F<Int>` is one spread rather than a spread
 //! followed by junk.
 //!
@@ -81,7 +81,7 @@ lossless_production! {
     let on = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::On);
     if !on && !matches!(
       peek_kind::<Src, Ctx>(inp)?,
-      Some(Kind::Identifier | Kind::PathSeparator)
+      Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret)
     ) {
       return recover::report_unexpected::<Src, Ctx>(inp, TYPE_CONDITION_HEADS);
     }
@@ -94,7 +94,9 @@ lossless_production! {
           recover::report_unexpected::<Src, Ctx>(inp, TYPE_CONDITION_HEADS)?;
         }
         match peek_kind::<Src, Ctx>(inp)? {
-          Some(Kind::Identifier | Kind::PathSeparator) => type_path::<Src, Ctx>(inp),
+          Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret) => {
+            type_path::<Src, Ctx>(inp)
+          }
           // `on` with nothing after it. Reported, and again nothing is consumed: whatever is here
           // is the next component's, not this one's.
           _ => recover::report_unexpected::<Src, Ctx>(inp, TYPE_CONDITION_HEADS),
@@ -180,10 +182,10 @@ lossless_production! {
           fragment_spread_tail::<Src, Ctx>(inp, mark)
         }
       }
-      // GraphQLx only: a `::` after the `...` is a fully qualified fragment name. GraphQL has no
+      // GraphQLx only: a root's sigil after the `...` opens a rooted fragment name. GraphQL has no
       // such head, so this arm has no counterpart to port and is the one a port would be missing —
-      // after which `... ::ns::F` would report and become an `Error` node that still round-trips.
-      Some(Kind::PathSeparator) => fragment_spread_tail::<Src, Ctx>(inp, mark),
+      // after which `... ^::ns::F` would report and become an `Error` node that still round-trips.
+      Some(Kind::Tilde | Kind::DotDot | Kind::Caret) => fragment_spread_tail::<Src, Ctx>(inp, mark),
       // No type condition, but a selection set (with or without directives) — an inline fragment
       // on the enclosing type.
       Some(Kind::At | Kind::LBrace) => node_at(
@@ -206,8 +208,8 @@ lossless_production! {
   /// The `TypePath Directives?` tail of a named fragment spread, retro-wrapped at `mark`.
   ///
   /// Two of [`spread_selection`]'s four arms reach it, which is the whole reason it is a
-  /// production and not two copies: an `Identifier` head and a `PathSeparator` head differ only in
-  /// where the path starts, and `type_path` already handles both.
+  /// production and not two copies: an `Identifier` head and a root's sigil differ only in where
+  /// the path starts, and `type_path` already handles both.
   fn fragment_spread_tail<'inp, Src, Ctx>(inp, mark: tokora::cst::EventMark) {
     node_at(
       mark,

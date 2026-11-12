@@ -1,0 +1,3 @@
+use "n"::*
+use "o" as all
+type T { f: Int }

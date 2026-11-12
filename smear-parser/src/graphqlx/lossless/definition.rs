@@ -261,7 +261,7 @@ lossless_production! {
         loop {
           if !matches!(
             peek_kind::<Src, Ctx>(inp)?,
-            Some(Kind::Identifier | Kind::PathSeparator)
+            Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret)
           ) {
             // `implements` or an `&` with nothing after it. Reported, and nothing is consumed:
             // whatever is here belongs to the next component.
@@ -291,7 +291,7 @@ lossless_production! {
         loop {
           if !matches!(
             peek_kind::<Src, Ctx>(inp)?,
-            Some(Kind::Identifier | Kind::PathSeparator)
+            Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret)
           ) {
             return recover::report_unexpected::<Src, Ctx>(inp, PATH_HEADS);
           }

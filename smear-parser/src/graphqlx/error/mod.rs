@@ -65,6 +65,12 @@ pub enum Expectation {
   Minus,
   /// A path separator (`::`).
   PathSeparator,
+  /// A tilde (`~`), the package root's sigil.
+  Tilde,
+  /// A double dot (`..`), the parent-module root's sigil.
+  DotDot,
+  /// A caret (`^`), the dependency root's sigil.
+  Caret,
   /// A fat arrow (`=>`).
   FatArrow,
   /// A pipe (`|`).
@@ -97,14 +103,12 @@ pub enum Expectation {
   InputValue,
   /// A constant GraphQLx input value.
   ConstInputValue,
-  /// A GraphQLx import clause.
-  ImportClause,
-  /// An import member.
-  ImportMember,
-  /// The contextual `import` keyword.
-  Import,
-  /// The contextual `from` keyword.
-  From,
+  /// A use tree: a root, a name or an inline string.
+  UseTree,
+  /// What a use tree's `::` continues into: a name, the glob `*`, or a group's `{`.
+  NameGlobOrGroup,
+  /// The contextual `use` keyword.
+  Use,
   /// The contextual `as` keyword.
   As,
   /// An operation type or the `fragment` keyword.
@@ -163,6 +167,9 @@ impl core::fmt::Display for Expectation {
       Self::Plus => f.write_str("`+`"),
       Self::Minus => f.write_str("`-`"),
       Self::PathSeparator => f.write_str("`::`"),
+      Self::Tilde => f.write_str("`~`"),
+      Self::DotDot => f.write_str("`..`"),
+      Self::Caret => f.write_str("`^`"),
       Self::FatArrow => f.write_str("`=>`"),
       Self::Pipe => f.write_str("`|`"),
       Self::Bang => f.write_str("`!`"),
@@ -179,10 +186,9 @@ impl core::fmt::Display for Expectation {
       Self::Type => f.write_str("a type"),
       Self::InputValue => f.write_str("a value"),
       Self::ConstInputValue => f.write_str("a constant value"),
-      Self::ImportClause => f.write_str("an import clause"),
-      Self::ImportMember => f.write_str("an import member"),
-      Self::Import => f.write_str("`import`"),
-      Self::From => f.write_str("`from`"),
+      Self::UseTree => f.write_str("a use tree"),
+      Self::NameGlobOrGroup => f.write_str("a name, `*` or `{`"),
+      Self::Use => f.write_str("`use`"),
       Self::As => f.write_str("`as`"),
       Self::OperationTypeOrFragment => f.write_str("an operation type or `fragment`"),
       Self::FragmentName => f.write_str("a fragment name"),
@@ -240,7 +246,7 @@ pub enum Unclosed {
   Parentheses,
   /// A list, missing `]`.
   List,
-  /// A brace-delimited object, set, map, or import list, missing `}`.
+  /// A brace-delimited object, set, map, or `use` group, missing `}`.
   Object,
   /// An angle-delimited type-argument list, missing `>`.
   Angle,
@@ -311,6 +317,14 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// of `LosslessLimits::max_tokens` comes back indistinguishable from one that parsed.
   #[from(skip)]
   TokenBudgetExhausted,
+  /// A path that starts with `::`, where only a root or a name may: `::` joins two segments and
+  /// roots none.
+  ///
+  /// A variant rather than an [`UnexpectedToken`](Self::UnexpectedToken) because the help is the
+  /// point of it: the dependency root used to be spelled with a bare leading `::` and is `^::`, and
+  /// [`SyntaxErrorKind::LeadingPathSeparator`]'s help says so. The span is the `::`'s.
+  #[from(skip)]
+  LeadingPathSeparator,
   /// A dialect-specific message not represented by a dedicated variant.
   Other(std::borrow::Cow<'static, str>),
   /// Retains the source type in this generic family even when the current
@@ -355,6 +369,7 @@ impl<S, T, Char, Exp, StateError> MaybeTerminal for ErrorData<S, T, Char, Exp, S
       Self::TerminalEndOfInput => true,
       Self::Unclosed(_)
       | Self::UnexpectedToken(_)
+      | Self::LeadingPathSeparator
       | Self::Lexical(_)
       | Self::Other(_)
       | Self::Source(_) => false,
@@ -450,6 +465,12 @@ impl<S, T, Char, Exp, StateError> Error<S, T, Char, Exp, StateError> {
     Self::new(span, ErrorData::TerminalEndOfInput)
   }
 
+  /// Creates the refusal of a path that starts with `::`, at the `::`'s span.
+  #[inline]
+  pub const fn leading_path_separator(span: Span) -> Self {
+    Self::new(span, ErrorData::LeadingPathSeparator)
+  }
+
   /// Creates an unclosed-list error.
   #[inline]
   pub const fn unclosed_list(span: Span) -> Self {
@@ -522,6 +543,7 @@ impl<S, T, Char, Exp, StateError> ErrorData<S, T, Char, Exp, StateError> {
           SyntaxErrorKind::UnexpectedEndOfInput
         }
       }
+      Self::LeadingPathSeparator => SyntaxErrorKind::LeadingPathSeparator,
       Self::TerminalEndOfInput => SyntaxErrorKind::ResourceLimit,
       Self::NestingLimitExceeded => SyntaxErrorKind::NestingLimit,
       Self::TokenBudgetExhausted => SyntaxErrorKind::TokenBudget,
@@ -586,6 +608,9 @@ where
           None => f.write_str("unexpected end of input")?,
         }
         expected_clause(f, token.expected())
+      }
+      ErrorData::LeadingPathSeparator => {
+        f.write_str(SyntaxErrorKind::LeadingPathSeparator.message())
       }
       ErrorData::TerminalEndOfInput => f.write_str(SyntaxErrorKind::ResourceLimit.message()),
       ErrorData::NestingLimitExceeded => f.write_str(SyntaxErrorKind::NestingLimit.message()),
@@ -790,12 +815,15 @@ fn expectation_from_token_kind(kind: SyntacticTokenKind) -> Expectation {
     SyntacticTokenKind::Plus => Expectation::Plus,
     SyntacticTokenKind::Minus => Expectation::Minus,
     SyntacticTokenKind::PathSeparator => Expectation::PathSeparator,
+    SyntacticTokenKind::Tilde => Expectation::Tilde,
+    SyntacticTokenKind::DotDot => Expectation::DotDot,
+    SyntacticTokenKind::Caret => Expectation::Caret,
     // `#[allow]` and not a deletion. `SyntacticTokenKind` is `#[non_exhaustive]`, which forced this
     // arm while the lexer was a separate crate; with the crates merged (#83) the compiler can see
-    // every variant from here and calls it unreachable. The arm stays because deleting it would
-    // turn "a new token kind falls back to `Unspecified`" into "a new token kind fails to
-    // compile" — a real change to this function's contract, and this merge is a relocation.
-    // Revisiting that choice is follow-up work, not part of the move.
+    // every variant from here and calls the arm unreachable whenever every kind has a row. The arm
+    // stays because deleting it would turn "a new token kind falls back to `Unspecified`" into "a
+    // new token kind fails to compile" — a real change to this function's contract, and this merge
+    // is a relocation. Revisiting that choice is follow-up work, not part of the move.
     #[allow(unreachable_patterns)]
     _ => Expectation::Unspecified,
   }

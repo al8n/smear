@@ -1,1 +1,1 @@
-query { f(a: set, b: map::Thing, c: ::set) }
+query { f(a: set, b: map::Thing, c: ^::set) }

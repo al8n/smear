@@ -769,7 +769,7 @@ impl RootStop {
 /// attempt** — tokora states the floor as one speculative parse for a recovery, one retry cycle
 /// for `skip_then_retry`, one *element* for its resilient collection loops — and a root
 /// loop's attempt is **one entry**: one definition, one type-system definition-or-extension, one
-/// import-or-executable-definition. That is the unit this function takes it at.
+/// `use` item or executable definition. That is the unit this function takes it at.
 ///
 /// Hoisting it above the loop compiles and is arithmetically a session-absolute read for every
 /// entry after the first: the counter never comes back down, so one entry that catches a trip and

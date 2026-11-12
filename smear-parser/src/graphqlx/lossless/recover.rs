@@ -41,8 +41,9 @@ use crate::lossless::recover::keyword_of;
 /// `true`, `false`, `null`, `set` and `map` are `Identifier`s to the lexer, so none of them needs
 /// an entry of its own; the value dispatcher separates them on their spelling, not on their kind.
 ///
-/// **`PathSeparator` is here and is not in GraphQL's set.** A bare `::` opens a fully qualified
-/// enum value (`::ns::Colour`), which is a value head this dialect has and the other does not.
+/// **`Tilde`, `DotDot` and `Caret` are here and are not in GraphQL's set.** A root's sigil opens a
+/// rooted enum value (`^::ns::Colour`), which is a value head this dialect has and the other does
+/// not. `PathSeparator` is not: a `::` only joins, so no value starts with one.
 pub(crate) const VALUE_HEADS: &[Kind] = &[
   Kind::Dollar,
   Kind::Int,
@@ -52,7 +53,9 @@ pub(crate) const VALUE_HEADS: &[Kind] = &[
   Kind::LBracket,
   Kind::LBrace,
   Kind::Identifier,
-  Kind::PathSeparator,
+  Kind::Tilde,
+  Kind::DotDot,
+  Kind::Caret,
 ];
 
 /// The token kinds a `Value[Const]` may begin with — [`VALUE_HEADS`] without the `$`.
@@ -69,7 +72,9 @@ pub(crate) const CONST_VALUE_HEADS: &[Kind] = &[
   Kind::LBracket,
   Kind::LBrace,
   Kind::Identifier,
-  Kind::PathSeparator,
+  Kind::Tilde,
+  Kind::DotDot,
+  Kind::Caret,
 ];
 
 /// The token kinds an `ObjectField` may begin with.
@@ -79,16 +84,23 @@ pub(crate) const CONST_VALUE_HEADS: &[Kind] = &[
 /// the *value* side widened.
 pub(crate) const OBJECT_FIELD_HEADS: &[Kind] = &[Kind::Identifier];
 
-/// The token kinds a `Type` may begin with — **three**, against GraphQL's two.
+/// The token kinds a `Type` may begin with — **five**, against GraphQL's two.
 ///
-/// A path's name, a path's leading `::`, or a list type's `[` (`graphqlx/syntactic/ty.rs:38-45`).
-/// The `!` is not among them: it is a *suffix* folded into the node it follows, so no type
-/// reference ever starts with one, and a `!` in head position is exactly the mistake this set
-/// names.
-pub(crate) const TYPE_HEADS: &[Kind] = &[Kind::Identifier, Kind::PathSeparator, Kind::LBracket];
+/// A path's name, one of its root sigils `~`, `..` and `^`, or a list type's `[`
+/// (`graphqlx/syntactic/ty.rs:38-49`). The `!` is not among them: it is a *suffix* folded into the
+/// node it follows, so no type reference ever starts with one, and a `!` in head position is
+/// exactly the mistake this set names. Nor is `::`, which only joins two segments.
+pub(crate) const TYPE_HEADS: &[Kind] = &[
+  Kind::Identifier,
+  Kind::Tilde,
+  Kind::DotDot,
+  Kind::Caret,
+  Kind::LBracket,
+];
 
-/// The token kinds a `Path` — and therefore a `TypePath` — may begin with.
-pub(crate) const PATH_HEADS: &[Kind] = &[Kind::Identifier, Kind::PathSeparator];
+/// The token kinds a `Path` — and therefore a `TypePath` — may begin with: a name, or one of the
+/// three root sigils.
+pub(crate) const PATH_HEADS: &[Kind] = &[Kind::Identifier, Kind::Tilde, Kind::DotDot, Kind::Caret];
 
 /// The token kinds an `Argument` may begin with.
 ///
@@ -100,13 +112,16 @@ pub(crate) const ARGUMENT_HEADS: &[Kind] = &[Kind::Identifier];
 /// The token kinds a `Selection` may begin with.
 pub(crate) const SELECTION_HEADS: &[Kind] = &[Kind::Identifier, Kind::Spread];
 
-/// The token kinds that may follow a `...` — **four**, against GraphQL's three.
+/// The token kinds that may follow a `...` — **six**, against GraphQL's three.
 ///
-/// `PathSeparator` is the extra one and it is a whole arm rather than a wider name: a `...` before
-/// a `::` opens a fully qualified fragment spread (`graphqlx/syntactic/selection/mod.rs:427-435`).
+/// The three root sigils are the extra ones and they are a whole arm rather than a wider name: a
+/// `...` before `~`, `..` or `^` opens a rooted fragment spread
+/// (`graphqlx/syntactic/selection/mod.rs:459-462`).
 pub(crate) const SPREAD_TAIL_HEADS: &[Kind] = &[
   Kind::Identifier,
-  Kind::PathSeparator,
+  Kind::Tilde,
+  Kind::DotDot,
+  Kind::Caret,
   Kind::At,
   Kind::LBrace,
 ];
@@ -115,8 +130,9 @@ pub(crate) const SPREAD_TAIL_HEADS: &[Kind] = &[
 ///
 /// `on` is an `Identifier` to the lexer, and the type after it is a
 /// [`TypePath`](crate::graphqlx::kinds::SyntaxKind::TypePath) rather than GraphQL's bare named
-/// type — so a leading `::` is a head here and is not one in GraphQL's set.
-pub(crate) const TYPE_CONDITION_HEADS: &[Kind] = &[Kind::Identifier, Kind::PathSeparator];
+/// type — so a root's sigil is a head here and is not one in GraphQL's set.
+pub(crate) const TYPE_CONDITION_HEADS: &[Kind] =
+  &[Kind::Identifier, Kind::Tilde, Kind::DotDot, Kind::Caret];
 
 /// The token kinds a `VariableDefinition` may begin with.
 ///
@@ -170,8 +186,8 @@ pub(crate) const ROOT_OPERATION_TYPES_HEADS: &[Kind] = &[Kind::LBrace];
 /// three definition sites where a present `where` makes the block mandatory.
 pub(crate) const FIELDS_BLOCK_HEADS: &[Kind] = &[Kind::LBrace];
 
-/// The token kinds a mixed document entry may begin with: a description, an import, an extension,
-/// a definition keyword, or the shorthand operation's `{`.
+/// The token kinds a mixed document entry may begin with: a description, a `use` item, an
+/// extension, a definition keyword, or the shorthand operation's `{`.
 pub(crate) const DEFINITION_HEADS: &[Kind] = &[
   Kind::InlineString,
   Kind::BlockString,
@@ -204,17 +220,34 @@ pub(crate) const TYPE_EXTENSION_HEADS: &[Kind] = &[Kind::Identifier];
 pub(crate) const EXTENSION_TAIL_HEADS: &[Kind] =
   &[Kind::At, Kind::LBrace, Kind::Equal, Kind::Identifier];
 
-/// The token kinds an import member may begin with — divergence 21: a name, or the wildcard `*`.
-pub(crate) const IMPORT_MEMBER_HEADS: &[Kind] = &[Kind::Identifier, Kind::Asterisk];
+/// The token kinds that may follow `use`: a path's name, a root's sigil, or the inline string a
+/// source is.
+pub(crate) const USE_TREE_HEADS: &[Kind] = &[
+  Kind::Identifier,
+  Kind::Tilde,
+  Kind::DotDot,
+  Kind::Caret,
+  Kind::InlineString,
+];
 
-/// The token kinds an import clause may begin with: the wildcard, or a braced list.
-pub(crate) const IMPORT_CLAUSE_HEADS: &[Kind] = &[Kind::Asterisk, Kind::LBrace];
+/// The token kinds a use tree's `::`, or a bare root, continues into: a name, the glob `*`, or a
+/// group's `{`.
+pub(crate) const USE_SCOPE_HEADS: &[Kind] = &[Kind::Identifier, Kind::Asterisk, Kind::LBrace];
 
-/// The one token kind an import's `from` source may be.
+/// The token kinds a tree inside a group may begin with: a name, and nothing else — no root and no
+/// string source.
+pub(crate) const USE_MEMBER_HEADS: &[Kind] = &[Kind::Identifier];
+
+/// The one token kind a string source may be.
 ///
-/// **Inline only.** `import_definition_after_keyword` calls `inline_string_value`, so a block
-/// string is a grammar error there even though the node above it is a `StringValue` either way.
-pub(crate) const IMPORT_SOURCE_HEADS: &[Kind] = &[Kind::InlineString];
+/// **Inline only.** `graphqlx/syntactic/use_tree.rs` reads a source through `inline_string_value`,
+/// so a block string is a grammar error there even though the node above it is a `StringValue`
+/// either way.
+pub(crate) const USE_SOURCE_HEADS: &[Kind] = &[Kind::InlineString];
+
+/// What may follow a `use` item's glob or group: nothing of the item's own. The item ends there,
+/// so an `as` after one is reported against no head at all.
+pub(crate) const USE_ITEM_END_HEADS: &[Kind] = &[];
 
 /// The `=` a union's members must open with — divergence 17's expectation, which is `Equal` and
 /// **not** `LBrace`: a union's `where` requires the members *before* it where an object's requires
@@ -245,7 +278,9 @@ pub(crate) const fn starts_value(kind: Kind) -> bool {
       | Kind::LBracket
       | Kind::LBrace
       | Kind::Identifier
-      | Kind::PathSeparator
+      | Kind::Tilde
+      | Kind::DotDot
+      | Kind::Caret
   )
 }
 
@@ -255,7 +290,7 @@ pub(crate) const fn starts_value(kind: Kind) -> bool {
 pub(crate) const fn starts_type(kind: Kind) -> bool {
   matches!(
     kind,
-    Kind::Identifier | Kind::PathSeparator | Kind::LBracket
+    Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret | Kind::LBracket
   )
 }
 
@@ -288,13 +323,13 @@ pub(crate) use crate::lossless::recover::opener_span;
 ///
 /// # What this dialect adds to GraphQL's set, and what it deliberately does not
 ///
-/// `PathSeparator` and `RAngle` are in; `LAngle`, `FatArrow`, `Asterisk`, `Plus` and `Minus` are
-/// out. A `::` starts a fully qualified path, which is a value and a type head, so a skip that ran
-/// past one would fold a whole qualified name into the junk before it. A `>` closes a generic list
-/// — the same argument the other three closers make. The five that stay out begin no production
-/// this suite can restart at: `<` only ever *follows* a path, `=>` only ever separates, and
-/// `*`/`+`/`-` reach the tree through recovery alone. Stopping at one of those would only split one
-/// `Error` node into two.
+/// `Tilde`, `DotDot`, `Caret` and `RAngle` are in; `PathSeparator`, `LAngle`, `FatArrow`,
+/// `Asterisk`, `Plus` and `Minus` are out. A root's sigil starts a rooted path, which is a value and
+/// a type head, so a skip that ran past one would fold a whole rooted name into the junk before it.
+/// A `>` closes a generic list — the same argument the other three closers make. The six that stay
+/// out begin no production this suite can restart at: `::` and `=>` only ever join or separate,
+/// `<` only ever *follows* a path, and `*`/`+`/`-` reach the tree through recovery alone. Stopping
+/// at one of those would only split one `Error` node into two.
 #[inline]
 fn is_sync_point(kind: Kind) -> bool {
   matches!(
@@ -307,7 +342,9 @@ fn is_sync_point(kind: Kind) -> bool {
       | Kind::LBracket
       | Kind::LBrace
       | Kind::Identifier
-      | Kind::PathSeparator
+      | Kind::Tilde
+      | Kind::DotDot
+      | Kind::Caret
       | Kind::Spread
       | Kind::RBracket
       | Kind::RBrace
@@ -326,8 +363,8 @@ fn is_sync_point(kind: Kind) -> bool {
 /// it would break recovery for the whole generics area rather than merely coarsening it.
 /// Where a document loop is willing to restart after an entry failed: the head of another entry.
 ///
-/// **Fourteen spellings against GraphQL's thirteen** — `import` is the extra one, and its absence
-/// would cost every import after a broken definition. `extend` is in the set for the reason
+/// **Fourteen spellings against GraphQL's thirteen** — `use` is the extra one, and its absence
+/// would cost every `use` item after a broken definition. `extend` is in the set for the reason
 /// GraphQL's is: an extension is an entry even though it is not a definition.
 #[inline]
 fn is_definition_start(kind: Kind, keyword: Option<Keyword>) -> bool {
@@ -349,7 +386,7 @@ fn is_definition_start(kind: Kind, keyword: Option<Keyword>) -> bool {
           | Keyword::Enum
           | Keyword::Input
           | Keyword::Extend
-          | Keyword::Import
+          | Keyword::Use
       )
     ),
     _ => false,

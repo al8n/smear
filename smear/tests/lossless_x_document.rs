@@ -210,12 +210,12 @@ fn an_extension_union_where_clause_requires_its_members() {
 /// A description may precede a **keyworded executable or type-system definition**, and nothing
 /// else.
 ///
-/// `entry_after_description` commits to a keyworded definition and never reaches an import, an
-/// extension, or the shorthand `OperationDefinition : SelectionSet`, so
-/// `"doc" import * from "x"`, `"doc" extend type T @d` and `"doc" { f }` are all documents
-/// `syntactic/` rejects. Each re-prints byte for byte and each builds every node it would have
-/// built undescribed, so only the verdict moves — which is exactly why the mutation "allow a
-/// description before an import" is invisible to a round-trip gate and to a golden tree alike.
+/// `entry_after_description` commits to a keyworded definition and never reaches a `use` item,
+/// an extension, or the shorthand `OperationDefinition : SelectionSet`, so `"doc" use "x"::*`,
+/// `"doc" extend type T @d` and `"doc" { f }` are all documents `syntactic/` rejects. Each
+/// re-prints byte for byte and each builds every node it would have built undescribed, so only the
+/// verdict moves — which is exactly why the mutation "allow a description before a `use` item" is
+/// invisible to a round-trip gate and to a golden tree alike.
 #[test]
 fn a_description_may_precede_a_keyworded_definition_and_nothing_else() {
   for src in [
@@ -232,14 +232,14 @@ fn a_description_may_precede_a_keyworded_definition_and_nothing_else() {
     );
   }
   for src in [
-    "\"doc\" import * from \"x\"",
+    "\"doc\" use \"x\"::*",
     "\"doc\" extend type T @d",
     "\"doc\" { f }",
   ] {
     let parse = parse_document(src);
     assert!(
       parse.has_errors(),
-      "an import and an extension are deliberately undescribed: {src}"
+      "a `use` item and an extension are deliberately undescribed: {src}"
     );
     assert_eq!(
       parse.syntax().text().to_string(),
@@ -247,13 +247,13 @@ fn a_description_may_precede_a_keyworded_definition_and_nothing_else() {
       "and every byte is still kept"
     );
   }
-  // The described import still builds its ImportDefinition, so a diagnostic has a node to point
+  // The described `use` item still builds its UseDefinition, so a diagnostic has a node to point
   // at — the same trade every rejected-but-kept shape in this suite makes.
   assert!(
-    parse_document("\"doc\" import * from \"x\"")
+    parse_document("\"doc\" use \"x\"::*")
       .syntax()
       .descendants()
-      .any(|n| n.kind() == K::ImportDefinition)
+      .any(|n| n.kind() == K::UseDefinition)
   );
 }
 
@@ -262,8 +262,8 @@ fn a_description_may_precede_a_keyworded_definition_and_nothing_else() {
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn a_document_holds_imports_definitions_and_extensions_side_by_side() {
-  let src = "import { A } from \"a.graphql\"\n\
+fn a_document_holds_use_items_definitions_and_extensions_side_by_side() {
+  let src = "use \"a.graphql\"::{A}\n\
              \"doc\" type T { f: Int }\n\
              extend type T @d\n\
              query Q { f }\n";
@@ -285,7 +285,7 @@ fn a_document_holds_imports_definitions_and_extensions_side_by_side() {
       .descendants()
       .filter(|n| matches!(
         n.kind(),
-        K::ImportDefinition
+        K::UseDefinition
           | K::ObjectTypeDefinition
           | K::ObjectTypeExtension
           | K::OperationDefinition
@@ -293,7 +293,7 @@ fn a_document_holds_imports_definitions_and_extensions_side_by_side() {
       .map(|n| n.kind())
       .collect::<Vec<K>>(),
     vec![
-      K::ImportDefinition,
+      K::UseDefinition,
       K::ObjectTypeDefinition,
       K::ObjectTypeExtension,
       K::OperationDefinition
@@ -356,18 +356,18 @@ fn a_broken_entry_costs_itself_and_not_the_rest_of_the_document() {
   );
 }
 
-/// After a broken entry, **every** entry head is a restart point — including `import`.
+/// After a broken entry, **every** entry head is a restart point — including `use`.
 ///
 /// `resync_to_definition`'s predicate is a table of fourteen spellings, and a missing row costs the
 /// entry after the failure: the skip runs past its head and folds the whole entry into the `Error`
 /// region. The text still round-trips — that is what makes the row invisible — so the witness has
-/// to be the *node* the following entry should have built. Measured: dropping `Import` from the
-/// table is green against every other test in this file, and `import` is the row GraphQL's own
-/// table does not have, so it is the one a port would be missing.
+/// to be the *node* the following entry should have built. No other test in this file restarts at
+/// a `use` item, so dropping `Use` from the table leaves every one of them green, and `use` is the
+/// row GraphQL's own table does not have, so it is the one a port would be missing.
 #[test]
 fn every_entry_head_is_a_restart_point_after_a_broken_entry() {
   for (tail, expected) in [
-    ("import * from \"x\"", K::ImportDefinition),
+    ("use \"x\"::*", K::UseDefinition),
     ("extend type T @d", K::ObjectTypeExtension),
     ("\"doc\" scalar S", K::ScalarTypeDefinition),
     ("type T { f: Int }", K::ObjectTypeDefinition),
@@ -406,14 +406,14 @@ fn parse_document_round_trips_every_fixture() {
     "   ",
     "# just a comment\n",
     "{ f }",
-    "import * as ns from \"x\"",
+    "use \"x\" as ns",
     "extend schema @d",
     "type T<A = Int> implements ns::I<A> @d where A: Node { f(a: Int = 1): [A!]! @d }",
     "directive @d<T>(a: Int) repeatable on FIELD | OBJECT where T: Node\ntype X { f: Int }",
     "query Q($x: set<Int> = set!{ 1 }) { a: f(m: map!{ 1 => 2 }) { ...F ... on T { g } } }",
     "!!! not a document at all &&&",
     "type T { f: Int",
-    "union U = | A | ::ns::B where A: C & D",
+    "union U = | A | ^::ns::B where A: C & D",
   ] {
     let parse = parse_document(src);
     assert_eq!(

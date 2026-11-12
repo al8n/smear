@@ -10,9 +10,10 @@
 //! - **A fourth balanced pair.** GraphQLx's `<>` is depth-counted by the lexer alongside `()`,
 //!   `[]` and `{}` (`smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`), so the `unclosed` list
 //!   below has four entries and [`crate::graphqlx::error::Unclosed`] a fourth variant.
-//! - **A wider image space.** Seven images GraphQL has no counterpart for — `<`, `>`, `::`, `=>`,
-//!   `*`, `+`, `-` — which is why [`crate::graphqlx::kinds::SyntaxKind`] cannot be GraphQL's space
-//!   with a tail appended, and why [`kind_map`] is not GraphQL's mapper with arms added.
+//! - **A wider image space.** Ten images GraphQL has no counterpart for — `<`, `>`, `::`, `~`,
+//!   `..`, `^`, `=>`, `*`, `+`, `-` — which is why [`crate::graphqlx::kinds::SyntaxKind`] cannot be
+//!   GraphQL's space with a tail appended, and why [`kind_map`] is not GraphQL's mapper with arms
+//!   added.
 //! - **A different expectation vocabulary.** The two dialects' `Expectation` enums agree on their
 //!   first nine variants and neither is a superset, so this module's private `expectation_of` is
 //!   hand-written per dialect. It is the one member the design's measurement showed survives every
@@ -123,7 +124,7 @@ pub type TokenKind = LosslessTokenKind;
 /// This dialect's contextual-keyword projection — the door a production reads a keyword's
 /// *spelling* through, since every one of them arrives as an ordinary identifier token.
 ///
-/// GraphQLx has forty-five of them against GraphQL's thirty-nine: `import`, `from`, `as`, `where`,
+/// GraphQLx has forty-five of them against GraphQL's thirty-nine: `use`, `mod`, `as`, `where`,
 /// `set` and `map` are keywords here and ordinary names there.
 pub type Keyword = smear_lexer::graphqlx::ContextualKeyword;
 
@@ -252,8 +253,8 @@ crate::lossless::lossless_error_impls! {
 /// *syntactic* suite this one is compared against. `IntValue` and `FloatValue` exist in the enum
 /// and are reached from productions that name a value shape directly.
 ///
-/// The seven rows GraphQL has no counterpart for — `<`, `>`, `*`, `+`, `-`, `::`, `=>` — are the
-/// same seven images that widened the kind space.
+/// The ten rows GraphQL has no counterpart for — `<`, `>`, `*`, `+`, `-`, `::`, `~`, `..`, `^`,
+/// `=>` — are the ten images that widened the kind space.
 fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectation {
   match expected {
     Some(Expected::One(kind)) => match kind {
@@ -283,6 +284,9 @@ fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectat
       LosslessTokenKind::Plus => Expectation::Plus,
       LosslessTokenKind::Minus => Expectation::Minus,
       LosslessTokenKind::PathSeparator => Expectation::PathSeparator,
+      LosslessTokenKind::Tilde => Expectation::Tilde,
+      LosslessTokenKind::DotDot => Expectation::DotDot,
+      LosslessTokenKind::Caret => Expectation::Caret,
       _ => Expectation::Unspecified,
     },
     _ => Expectation::Unspecified,
@@ -297,7 +301,6 @@ pub mod document;
 pub mod executable;
 pub mod extension;
 pub mod generic;
-pub mod import;
 pub mod kind_map;
 pub mod project;
 pub mod recover;
@@ -305,6 +308,7 @@ pub mod runner;
 pub mod selection;
 pub mod trivia;
 pub mod ty;
+pub mod use_tree;
 pub mod value;
 
 // The three document roots this suite parses, all at the same module level: the mixed one

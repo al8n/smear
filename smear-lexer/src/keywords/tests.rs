@@ -1,7 +1,7 @@
 //! The cross-dialect keyword-prefix pin.
 //!
 //! `graphqlx::ContextualKeyword` is `graphql::ContextualKeyword`'s 39 variants **verbatim, in
-//! order**, plus six (`Import`, `From`, `As`, `Where`, `Set`, `Map`). Measured by diffing the two
+//! order**, plus six (`Use`, `Mod`, `As`, `Where`, `Set`, `Map`). Measured by diffing the two
 //! enum bodies: exactly one hunk, six pure additions at the tail, nothing changed and nothing
 //! reordered.
 //!
@@ -111,8 +111,8 @@ const SHARED: &[(&str, G, X)] = &[
 
 /// The six GraphQLx adds, and the fact that it adds exactly six.
 const EXTRA: &[(&str, X)] = &[
-  ("import", X::Import),
-  ("from", X::From),
+  ("use", X::Use),
+  ("mod", X::Mod),
   ("as", X::As),
   ("where", X::Where),
   ("set", X::Set),

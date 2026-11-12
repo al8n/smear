@@ -11,7 +11,7 @@ use super::{lossless::LosslessToken, syntactic::SyntacticToken};
 /// A GraphQLx contextual spelling recognized from an identifier.
 ///
 /// This includes every standard GraphQL contextual spelling and directive
-/// location, followed by the GraphQLx-only import and collection spellings.
+/// location, followed by the GraphQLx-only module and collection spellings.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum ContextualKeyword {
   /// `type`
@@ -92,10 +92,10 @@ pub enum ContextualKeyword {
   InputFieldDefinitionLocation,
   /// `DIRECTIVE_DEFINITION`
   DirectiveDefinitionLocation,
-  /// `import`
-  Import,
-  /// `from`
-  From,
+  /// `use`
+  Use,
+  /// `mod`
+  Mod,
   /// `as`
   As,
   /// `where`
@@ -150,8 +150,8 @@ impl ContextualKeyword {
       Self::InputObjectLocation => "INPUT_OBJECT",
       Self::InputFieldDefinitionLocation => "INPUT_FIELD_DEFINITION",
       Self::DirectiveDefinitionLocation => "DIRECTIVE_DEFINITION",
-      Self::Import => "import",
-      Self::From => "from",
+      Self::Use => "use",
+      Self::Mod => "mod",
       Self::As => "as",
       Self::Where => "where",
       Self::Set => "set",
@@ -209,8 +209,8 @@ pub fn contextual_keyword(source: &[u8]) -> Option<ContextualKeyword> {
     b"INPUT_OBJECT" => Some(ContextualKeyword::InputObjectLocation),
     b"INPUT_FIELD_DEFINITION" => Some(ContextualKeyword::InputFieldDefinitionLocation),
     b"DIRECTIVE_DEFINITION" => Some(ContextualKeyword::DirectiveDefinitionLocation),
-    b"import" => Some(ContextualKeyword::Import),
-    b"from" => Some(ContextualKeyword::From),
+    b"use" => Some(ContextualKeyword::Use),
+    b"mod" => Some(ContextualKeyword::Mod),
     b"as" => Some(ContextualKeyword::As),
     b"where" => Some(ContextualKeyword::Where),
     b"set" => Some(ContextualKeyword::Set),
@@ -292,8 +292,8 @@ pub(crate) const KEYWORDS: [ContextualKeyword; 45] = [
   ContextualKeyword::InputObjectLocation,
   ContextualKeyword::InputFieldDefinitionLocation,
   ContextualKeyword::DirectiveDefinitionLocation,
-  ContextualKeyword::Import,
-  ContextualKeyword::From,
+  ContextualKeyword::Use,
+  ContextualKeyword::Mod,
   ContextualKeyword::As,
   ContextualKeyword::Where,
   ContextualKeyword::Set,
@@ -353,8 +353,8 @@ impl ContextualKeyword {
       | Self::InputObjectLocation
       | Self::InputFieldDefinitionLocation
       | Self::DirectiveDefinitionLocation
-      | Self::Import
-      | Self::From
+      | Self::Use
+      | Self::Mod
       | Self::As
       | Self::Where
       | Self::Set

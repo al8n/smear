@@ -1,0 +1,50 @@
+Root@0..64
+  Document@0..64
+    UseDefinition@0..21
+      Name@0..3 "use"
+      Space@3..4 " "
+      UseTree@4..21
+        Path@4..12
+          Tilde@4..5 "~"
+          PathSeparator@5..7 "::"
+          Name@7..12 "types"
+        PathSeparator@12..14 "::"
+        LBrace@14..15 "{"
+        UseTree@15..19
+          Path@15..19
+            Name@15..19 "User"
+        RBrace@19..20 "}"
+        Newline@20..21 "\n"
+    ObjectTypeDefinition@21..46
+      Name@21..25 "type"
+      Space@25..26 " "
+      DefinitionName@26..32
+        Name@26..31 "Query"
+        Space@31..32 " "
+      FieldsDefinition@32..46
+        LBrace@32..33 "{"
+        Space@33..34 " "
+        FieldDefinition@34..45
+          Name@34..38 "user"
+          Colon@38..39 ":"
+          Space@39..40 " "
+          DefinitionTypePath@40..45
+            Path@40..45
+              Name@40..44 "User"
+              Space@44..45 " "
+        RBrace@45..46 "}"
+    Newline@46..47 "\n"
+    OperationDefinition@47..63
+      Name@47..52 "query"
+      Space@52..53 " "
+      DefinitionName@53..55
+        Name@53..54 "Q"
+        Space@54..55 " "
+      SelectionSet@55..63
+        LBrace@55..56 "{"
+        Space@56..57 " "
+        Field@57..62
+          Name@57..61 "user"
+          Space@61..62 " "
+        RBrace@62..63 "}"
+    Newline@63..64 "\n"

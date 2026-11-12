@@ -77,6 +77,8 @@ punct_atoms!(
   fat_arrow / try_fat_arrow => FatArrow,
   double_colon / try_double_colon => DoubleColon,
   spread / try_spread => Spread,
+  tilde / try_tilde => Tilde,
+  caret / try_caret => Caret,
 );
 
 /// The identifier lexer `L` yields, over its source slice and span, tagged with

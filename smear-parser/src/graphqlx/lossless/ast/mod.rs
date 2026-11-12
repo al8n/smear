@@ -33,8 +33,10 @@
 //!   [`InputValueDefinition`], a [`FieldDefinition`] and an [`EnumValueDefinition`] each carry
 //!   their description as a direct string token.
 //! - **Several tokens of one kind** ([`tokens`]). [`Path`] holds its segments as bare
-//!   [`Name`](crate::graphqlx::kinds::SyntaxKind::Name) tokens and its `::`s as bare
-//!   [`PathSeparator`](crate::graphqlx::kinds::SyntaxKind::PathSeparator) tokens;
+//!   [`Name`](crate::graphqlx::kinds::SyntaxKind::Name) tokens, its `::`s as bare
+//!   [`PathSeparator`](crate::graphqlx::kinds::SyntaxKind::PathSeparator) tokens, and a
+//!   parent-module root's `..`s as bare [`DotDot`](crate::graphqlx::kinds::SyntaxKind::DotDot)
+//!   tokens; a [`UseTree`] holds its `as` and the alias after it as two bare `Name` tokens;
 //!   [`DirectiveLocations`], [`ExtensionTypeGenerics`] and
 //!   [`ExecutableDefinitionTypeGenerics`] each hold a whole list of bare `Name` tokens, their
 //!   members having no node kind of their own.
@@ -53,6 +55,7 @@
 //! [`ExecutableDefinitionTypeGenerics`]: generic::ExecutableDefinitionTypeGenerics
 //! [`StringValue`]: value::StringValue
 //! [`Path`]: ty::Path
+//! [`UseTree`]: use_tree::UseTree
 
 pub use crate::lossless::ast::{CastNode, NodeChildren, cast};
 
@@ -72,9 +75,9 @@ pub mod document;
 pub mod executable;
 pub mod extension;
 pub mod generic;
-pub mod import;
 pub mod selection;
 pub mod ty;
+pub mod use_tree;
 pub mod value;
 
 pub use definition::*;
@@ -83,9 +86,9 @@ pub use document::*;
 pub use executable::*;
 pub use extension::*;
 pub use generic::*;
-pub use import::*;
 pub use selection::*;
 pub use ty::*;
+pub use use_tree::*;
 pub use value::*;
 
 /// [`crate::lossless::ast::AstChildren`] with this dialect's language pinned.
