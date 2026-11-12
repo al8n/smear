@@ -2114,10 +2114,10 @@ fn string_source<'src>(
 /// source. A root's sigil in front of the first segment is refused where it stands.
 fn relative_path<'src>(node: Node<'_>, source: &'src str) -> Out<(Path<&'src str>, TextRange)> {
   let mut cursor = Cursor::new(node);
-  if let Some(NodeOrToken::Token(token)) = cursor.peek() {
-    if matches!(token.kind(), K::Tilde | K::Caret | K::DotDot) {
-      return Err(unexpected_token(node, token));
-    }
+  if let Some(NodeOrToken::Token(token)) = cursor.peek()
+    && matches!(token.kind(), K::Tilde | K::Caret | K::DotDot)
+  {
+    return Err(unexpected_token(node, token));
   }
   path(node, source)
 }

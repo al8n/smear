@@ -1465,7 +1465,7 @@ fn a_use_group_chain_under_a_recovering_emitter_nests_no_deeper_than_the_ceiling
   fn bounded(src: &str, what: &str) {
     match recovering(src) {
       Err(errors) => assert!(
-        errors.first().is_some(),
+        !errors.is_empty(),
         "{what}: the parse returned a refusal holding no error"
       ),
       Ok(parsed) => {
@@ -1635,7 +1635,9 @@ fn a_flat_use_chain_costs_no_depth() {
 }
 
 /// A `use`-group chain at **twice** the default ceiling returns on the default test thread, in
-/// both layers — the lower bound `smear-lexer/src/limits.rs` records for the cycle.
+/// both layers — the lower bound `smear-lexer/src/limits.rs` records for the syntactic cycle. For
+/// the lossless one it records a deeper bound, from the `use_group` cell of
+/// `a_refusal_is_one_diagnostic_at_every_cycle`.
 ///
 /// The ceiling is raised for this cell only, through the two doors' own knobs, and the guard comes
 /// first: at the default ceiling one level past it is refused in both layers, so the raised parses

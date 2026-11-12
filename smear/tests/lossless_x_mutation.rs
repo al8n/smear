@@ -617,16 +617,16 @@ const TRIED: &[((&str, &str), usize)] = &[
 const TRIED_TOTAL: usize = 121_418;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 107_433;
+const UNFAITHFUL: usize = 107_256;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 10_631;
+const EQUAL: usize = 10_748;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 2935;
+const BOTH_REFUSE: usize = 2989;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
-const LENIENT_EQUAL: usize = 306;
+const LENIENT_EQUAL: usize = 312;
 
 /// Skeleton-faithful with a lenient token missing, and both refusing the restored text.
 const LENIENT_BOTH_REFUSE: usize = 113;
@@ -660,12 +660,12 @@ const LENIENT_REFUSED_HITS: [usize; 21] = [
 /// A position is lenient iff the token has no AST image and the lossless parser builds the tree
 /// hole-free without it; a faithful deletion is exactly the second half, so any token here with
 /// no image would be a lenient position still strict. Every entry left has an image: a directive
-/// location, a generic parameter or argument name, a path segment, a module's name — and a module's
-/// description, which is strict only under the executable door, where the module around it is
-/// refused whole. Round six's first run of this
-/// census found two image-less ones — `(DirectiveDefinition, on)` and `(ExtensionTypeGenerics,
-/// >)` — which are the last two [`LENIENT`] rows now. Deleting a relative path's first segment
-/// is never faithful: it leaves a path that starts with `::`, which the parser refuses.
+/// location, a generic parameter or argument name, a use tree's alias, a glob's `*`, a module's name
+/// — and a module's description, which is strict only under the executable door, where the module
+/// around it is refused whole. Round six's first run of this census found two image-less ones —
+/// `(DirectiveDefinition, on)` and `(ExtensionTypeGenerics, >)` — which are the eighth and ninth
+/// [`LENIENT`] rows now. Deleting a relative path's first segment is never faithful: it leaves a
+/// path that starts with `::`, which the parser refuses.
 const STRICT_DELETIONS: &[(&str, usize)] = &[
   ("DirectiveLocations Name ARGUMENT_DEFINITION", 2),
   ("DirectiveLocations Name INPUT_FIELD_DEFINITION", 2),
@@ -679,6 +679,7 @@ const STRICT_DELETIONS: &[(&str, usize)] = &[
   ("ModDefinition Name media", 3),
   ("ModDefinition Name outer", 3),
   ("ModDefinition Name x", 3),
+  ("UseTree Asterisk *", 2),
   ("UseTree Name b", 3),
   ("UseTree Name c", 3),
   ("UseTree Name x", 3),

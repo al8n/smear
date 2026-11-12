@@ -130,28 +130,33 @@ use tokora::state::{
 /// | GraphQL lossless, **the recovery bypass** `{ ) f {`, `str`, aarch64 | **673** |
 /// | GraphQLx lossless, the same with `)` and with `>` alike, `str`, aarch64 | **671** |
 /// | GraphQLx syntactic, `use` groups `a::{ … }`, `str` | **48 or deeper** — a lower bound |
-/// | GraphQLx lossless, `use` groups `a::{ … }`, `str` | **48 or deeper** — a lower bound |
+/// | GraphQLx lossless, `use` groups `a::{ … }`, `str` | **256 or deeper** — a lower bound |
 /// | GraphQLx syntactic, modules `mod a { … }`, `str` | **48 or deeper** — a lower bound |
-/// | GraphQLx lossless, modules `mod a { … }`, `str` | **48 or deeper** — a lower bound |
+/// | GraphQLx lossless, modules `mod a { … }`, `str` | **256 or deeper** — a lower bound |
 ///
 /// **The two `use`-group rows and the two module rows are not bisections.** A `use` item's group
 /// and a module's body are recursive positions the dialect gained after the rest of the table was
-/// measured, and their rows were never bisected: two cells in `smear/tests/nesting_depth.rs`,
-/// `a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread` and
-/// `a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread`, each parse a chain of 48
-/// levels — twice this ceiling, raised for that cell only — on the 2 MiB thread libtest hands every
-/// test, in both layers, and assert that it returns. CI running those cells is what proves 48, and
-/// nothing proves more, so the rows cannot stand in for the boundary: they hold this number's
-/// margin only at 48 / 24 = 2.0x, the least the cells can show.
+/// measured, and their rows were never bisected. Each is the deepest chain a cell in
+/// `smear/tests/nesting_depth.rs` runs on the 2 MiB thread libtest hands every test, so none can
+/// stand in for the boundary:
 ///
-/// The last two rows are the shape that walked past the first fix, and they are why the count
-/// moved to the parse. They cost about the same per level as the row above them — a `field` frame
-/// plus a `selection_set` frame — and needed 3.5 KB of input to reach 673, with the lexer's tally
-/// reading **1** the whole way. Under the parse-side budget the same input refuses at 24 and
+/// - the syntactic rows are `a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread`
+///   and `a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread`, which each parse a chain
+///   of 48 levels — twice this ceiling, raised for that cell only — in both layers and assert that it
+///   returns. CI running those cells is what proves 48, and they hold this number's margin only at
+///   48 / 24 = 2.0x, the least the cells can show;
+/// - the lossless rows are the `use_group` and `mod_body` cells of
+///   `a_refusal_is_one_diagnostic_at_every_cycle`, whose 300 levels, under a ceiling raised past
+///   [`HARD_MAX`], descend [`HARD_MAX`] levels before the parse refuses the next one, and return.
+///
+/// The two recovery-bypass rows are the shape that walked past the first fix, and they are why the
+/// count moved to the parse. They cost about the same per level as the row above them — a `field`
+/// frame plus a `selection_set` frame — and needed 3.5 KB of input to reach 673, with the lexer's
+/// tally reading **1** the whole way. Under the parse-side budget the same input refuses at 24 and
 /// returns; the mapping did not move, because a level of that shape is a level of any other.
 ///
-/// **The three lossless rows are re-measurements and the numbers moved.** They read 745 / 702 /
-/// 700 when they were taken at `6f39cb9`, through a stand-in emitter, because `Sink::new` is
+/// **The three bisected lossless rows are re-measurements and the numbers moved.** They read 745 /
+/// 702 / 700 when they were taken at `6f39cb9`, through a stand-in emitter, because `Sink::new` is
 /// crate-private and no door existed that would install a budget of the caller's. The figures
 /// above are bisected through the shipped `parse_document_with_limits` itself, at
 /// `LosslessLimits::unlimited()`, so the real `cst::Sink` is in the loop — see [`HARD_MAX`], which
@@ -292,12 +297,13 @@ const _: () = assert!(
 /// | input objects `{k: … }` | 886 | 884 |
 /// | list types `[ … ]Int` | 1083 | 1384 |
 /// | list values `[ … ]` | 1303 | 1299 |
-/// | `use` groups `a::{ … }` | — | **48 or deeper**, a lower bound |
-/// | modules `mod a { … }` | — | **48 or deeper**, a lower bound |
+/// | `use` groups `a::{ … }` | — | **256 or deeper**, a lower bound |
+/// | modules `mod a { … }` | — | **256 or deeper**, a lower bound |
 ///
 /// **The `use`-group and module rows are the lower bounds [`MAX_NESTING_DEPTH`]'s table records,
-/// not bisections,** so this wall's 1.9x margin is not re-proved for either cycle: 256 keeps it
-/// only if a cycle returns at 487 levels or deeper, which nothing in this tree shows.
+/// not bisections.** The deepest chain any cell runs stops at this wall, so the wall's 1.9x margin
+/// is not re-proved for either cycle: 256 keeps it only if a cycle returns at 487 levels or deeper,
+/// which nothing in this tree shows.
 ///
 /// **The shape list is the suite's own, not a guess.** It is the strongly-connected components of
 /// each dialect's lossless call graph — the enumeration `smear/tests/nesting_depth.rs`'s

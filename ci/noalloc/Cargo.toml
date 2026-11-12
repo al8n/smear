@@ -32,8 +32,3 @@ smear = { path = "../../smear", default-features = false, features = [
   "bstr",
   "bstr_1",
 ] }
-
-# TEMPORARY, removed before this branch leaves draft: tokora 0.13.0 is not published yet, and
-# this branch proves its diagnostic contract first. See CHANGELOG `[Unreleased]`.
-[patch.crates-io]
-tokora = { git = "https://github.com/al8n/tokora", rev = "d4648189a812bfcd663168c0630d9a6edd4b7323" }
