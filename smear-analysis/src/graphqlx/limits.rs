@@ -264,15 +264,18 @@ impl Limits {
   /// How many distinct instantiations of generic definitions the analysis may intern: each
   /// definition of at least one type parameter with each list of arguments, those the program
   /// writes, those filling its defaults derives, those a bound derives when it is put under an
-  /// instantiation's arguments, and each directive application's type, its directive with its
-  /// complete type arguments, together, a type that names a type parameter included. An
-  /// instantiation written nullable and non-null counts once.
+  /// instantiation's arguments, each directive application's type, its directive with its
+  /// complete type arguments, and those a member's type rebuilt under type arguments derives,
+  /// together, a type that names a type parameter included. An instantiation written nullable and
+  /// non-null counts once.
   ///
   /// Past it, each occurrence that would need one more is reported where it is written, and is the
   /// unresolved type; one already interned is still built. An application that would need one
-  /// more is reported at its path, and its type arguments are not completed. An occurrence whose
-  /// bounds, put under its arguments, would need one more is reported where it is written too, and
-  /// keeps its type. The built-in library's are not counted.
+  /// more is reported at its path, and its type arguments are not completed. A value whose type
+  /// under type arguments would need one more is reported as
+  /// [`max_value_steps`](Self::max_value_steps) says of a type that cannot be built. An occurrence
+  /// whose bounds, put under its arguments, would need one more is reported where it is written
+  /// too, and keeps its type. The built-in library's are not counted.
   ///
   /// The default is 2^16. A program writes hundreds of instantiations; derived ones can double per
   /// level of a chain of defaults, or of an `implements` chain, and this bound is what keeps that
@@ -346,7 +349,11 @@ impl Limits {
   /// which is not made; a list that a written value stands for where a list is expected, one for
   /// each level of list between the value and its type, as `tags: [[Int]] = 1` stands for a list
   /// of a list of `1`; a required argument an application leaves out, and a required field an
-  /// object literal leaves out, each of which is reported; and converting a decimal integer of more
+  /// object literal leaves out, each of which is reported; a node a rebuild of a member's type
+  /// under type arguments looks at, its root included, once for each written type and
+  /// instantiation; a node of a count made under a type its default is not written against; an
+  /// argument that may be required, a bare nullable type parameter of its directive, that an
+  /// application with complete type arguments leaves out; and converting a decimal integer of more
   /// than 38 significant digits, the most `u128` arithmetic reads whatever they spell, to its
   /// value, charged before the conversion as an upper bound of its work:
   /// `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine digits times
@@ -354,6 +361,12 @@ impl Limits {
   /// takes none. The built-in library's own values take none: its defaults where it writes them,
   /// and a copy made for an application it writes. A copy of one of its defaults made for an
   /// application a supplied package writes, a bare `@deprecated` among them, is charged.
+  ///
+  /// A type that cannot be built under type arguments, past this bound, past
+  /// [`max_generic_depth`](Self::max_generic_depth) or past
+  /// [`max_instantiations`](Self::max_instantiations), makes a written value one unresolved row,
+  /// `resource-limit` at it, and starves an application that leaves out an argument of that type,
+  /// the report naming the limit.
   ///
   /// Past it, a written value whose lists cannot all be paid for is `resource-limit` where it is
   /// written, and the level of list that could not be paid for is its one unresolved row, under

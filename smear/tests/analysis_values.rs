@@ -421,17 +421,22 @@ fn a_custom_scalar_keeps_any_literal() {
 
 #[test]
 fn what_takes_no_value_keeps_its_literal_and_says_nothing() {
-  // A type that names a type parameter: an application's argument and a generic input's fields.
-  let text = "directive @d<T>(v: T) on OBJECT\ntype Q @d<Int>(v: \"x\") {\n  f: Int\n}\n\
+  // A type that still names a type parameter: an argument of an application inside a generic
+  // definition, whose type argument is that definition's parameter, typed with that parameter;
+  // and a generic input's fields. An application whose type arguments are closed is coerced under
+  // them, which `analysis_type_arguments.rs` tells.
+  let text = "directive @d<T>(v: T) on OBJECT\ntype Q<T> @d<T>(v: \"x\") {\n  f: Int\n}\n\
               input I<T> {\n  x: T = 1\n  l: [T] = [1]\n}\n";
   let analysis = analyze_text(text, &Limits::new());
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let argument = arguments_of(model, "Q")[0];
   assert_eq!(shown(model, argument.value()), "Literal(String) \"x\"");
+  let application = model.def(type_def(model, "Q")).applications()[0];
+  let parameter = model.application(application).type_args()[0];
   assert_eq!(
     model.value(argument.value()).ty(),
-    member_ty(model, argument.argument())
+    model.type_expr(parameter).ty()
   );
   assert_eq!(shown_default(model, "I", "x"), "Literal(Int) 1");
   assert_eq!(shown_default(model, "I", "l"), "Literal(List) [1]");

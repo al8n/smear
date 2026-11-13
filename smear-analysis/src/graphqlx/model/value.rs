@@ -73,9 +73,12 @@ impl ObjectEntry {
 ///
 /// Three kinds of value are kept as written, as a [`Literal`] with nothing coerced beyond syntax: a
 /// value of a custom scalar that is no collection, an extern one included, but `null`, which is
-/// `null` where the scalar is nullable; a value whose expected type names a type parameter, which
-/// only an instantiation can check; and a value whose expected type can take none, an output type
-/// or a path that names nothing among them, which is another rule's or phase's to refuse.
+/// `null` where the scalar is nullable; a value whose expected type still names a type parameter,
+/// inside a generic definition or under a directive application with no complete type arguments,
+/// which only an instantiation can check; and a value whose expected type can take none, an output
+/// type or a path that names nothing among them, which is another rule's or phase's to refuse. A
+/// value under a generic directive's application with complete type arguments is coerced against
+/// its type under them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum ValueKind<'a> {
@@ -123,7 +126,7 @@ pub enum ValueKind<'a> {
   /// left out are never filled.
   Object(&'a [ObjectEntry]),
   /// A value kept as written: of a custom scalar that is no collection, but `null`; of a type that
-  /// names a type parameter; or of a type that can take no value.
+  /// still names a type parameter; or of a type that can take no value.
   Literal(Literal<'a>),
   /// A value that did not coerce or resolve. Only an analysis that is not ok has one, within the
   /// extent of the error that says why.

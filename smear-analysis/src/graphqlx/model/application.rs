@@ -144,6 +144,8 @@ impl<'a> Application<'a> {
   /// here twice, and each one the author left out whose definition has a default, a copy of the
   /// default filling it. One neither written nor defaulted is absent, and so is a defaulted one
   /// that [`Limits::max_value_steps`](crate::graphqlx::Limits::max_value_steps) could not pay for.
+  /// An application of a generic directive with its complete type arguments has each value, a
+  /// copy included, coerced against its argument's type under them, and reads "required" there.
   #[inline]
   pub fn arguments(&self) -> &'a [ApplicationArgument] {
     let model: &'a Model = self.model;

@@ -263,8 +263,8 @@ impl Analysis {
 ///   collection of its shape is expected, is `collection-literal`, and so is an element or a key
 ///   written twice, told by its coerced value, at the later occurrence. `TypeRef` takes a path,
 ///   resolved as a type where it is written, that names a definition of any kind. Any other scalar
-///   takes any literal, kept as written, and so does a type that names a type parameter or can
-///   take no value, with nothing said. A prefix, or a type value's path, that names nothing is the
+///   takes any literal, kept as written, and so does a type that still names a type parameter or
+///   can take no value, with nothing said. A prefix, or a type value's path, that names nothing is the
 ///   resolver's to report. A value
 ///   that does not fit is unresolved and reported where it is written, with GraphQL's
 ///   `invalid-default-value` or `invalid-directive-argument-value`, but for a number out of the
@@ -274,7 +274,13 @@ impl Analysis {
 ///   directive's order: each one written, and each one left out whose definition has a default, a
 ///   copy of the default filling it, each row of the copy not written and located at the default,
 ///   and silent, the default's own diagnostic saying once what does not fit; a required argument
-///   left out is `missing-required-directive-argument`, at the application's path. A copy is
+///   left out is `missing-required-directive-argument`, at the application's path. An
+///   application with its complete type arguments reads each argument's type under them, a type
+///   that cannot be built there `resource-limit`, "required" read there, and an argument written
+///   as a bare nullable type parameter required where they make it non-null; a copy that does not
+///   fit the type they give it is `invalid-default-value`, once for the application, at its path,
+///   labelled at the default, its count paying a step for each node and judging the copy as a
+///   written value is judged. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
 ///   copy of itself is not copied: the argument, or the field, is absent. Each row of a copy, each
 ///   read of another default's count while counting, each read of a count made already for a

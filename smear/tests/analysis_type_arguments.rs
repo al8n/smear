@@ -1,13 +1,15 @@
 //! The GraphQLx analyzer's values under type arguments, and what they rest on: a directive
 //! application's complete type arguments, typed as an occurrence of its directive would be, its
-//! written type arguments first and its directive's defaults filling the rest; and its directive's
-//! bounds, judged at it by those arguments.
+//! written type arguments first and its directive's defaults filling the rest; its directive's
+//! bounds, judged at it by those arguments; and its arguments, each read under them, written or a
+//! copy of its default, the copy's count judging whether it fits and paying for each node.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, ApplicationId, DefId, Diagnostic, Layout, Limits, Model, Namespace, Package,
-    PackageId, SourceFile, SourceId, Tier, TyId, TyKind, analyze, test_support,
+    Analysis, ApplicationId, DefId, Diagnostic, Layout, Limits, Model, Namespace, ObjectEntry,
+    Package, PackageId, SourceFile, SourceId, Tier, TyId, TyKind, ValueId, ValueKind, analyze,
+    test_support,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -23,6 +25,16 @@ const LIMIT: &str = "smear::graphqlx::resource-limit";
 const UNDEFINED_TYPE: &str = "smear::schema::undefined-type";
 /// The resolver's code for a directive name that names nothing.
 const UNDEFINED_DIRECTIVE: &str = "smear::schema::undefined-directive";
+/// GraphQL's code for a default that does not fit.
+const DEFAULT: &str = "smear::schema::invalid-default-value";
+/// GraphQL's code for a directive argument's value that does not fit.
+const ARGUMENT: &str = "smear::schema::invalid-directive-argument-value";
+/// GraphQL's code for a required directive argument left out or given `null`.
+const MISSING: &str = "smear::schema::missing-required-directive-argument";
+
+/// The codes coercion reports values with. A program another rule refuses, an input object as a
+/// directive's type argument among them, is asserted on these alone.
+const PHASE: [&str; 4] = [DEFAULT, ARGUMENT, MISSING, LIMIT];
 
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_text(text: &str, limits: &Limits) -> Analysis {
@@ -51,6 +63,16 @@ fn at(source: SourceId, text: &str, needle: &str, nth: usize) -> Location {
     .map(|(start, _): (usize, &str)| start)
     .unwrap_or_else(|| panic!("`{needle}` does not occur {} times", nth + 1));
   Location::new(source.get(), SimpleSpan::new(start, start + needle.len()))
+}
+
+/// Where `literal` is written right after `before`, the first time, in `text`, the file `source`.
+fn after(source: SourceId, text: &str, before: &str, literal: &str) -> Location {
+  let written = format!("{before}{literal}");
+  let start = text
+    .find(written.as_str())
+    .unwrap_or_else(|| panic!("`{written}` is not written"))
+    + before.len();
+  Location::new(source.get(), SimpleSpan::new(start, start + literal.len()))
 }
 
 /// Where the `nth` occurrence, counting from 0, of the name `name` written right after `before` is
@@ -91,6 +113,14 @@ fn sorted(mut rows: Vec<(&'static str, Location)>) -> Vec<(&'static str, Locatio
     )
   });
   rows
+}
+
+/// The rows of `found` whose code is one of `codes`, in the list's order.
+fn found_of(analysis: &Analysis, codes: &[&str]) -> Vec<(&'static str, Location)> {
+  found(analysis)
+    .into_iter()
+    .filter(|row: &(&'static str, Location)| codes.contains(&row.0))
+    .collect()
 }
 
 /// Asserts that `analysis` says nothing.
@@ -428,4 +458,305 @@ fn an_application_inside_a_generic_definition_is_judged_through_its_parameters()
     report.help(),
     Some("bound this type parameter by the interface in this definition's `where` clause")
   );
+}
+
+/// The value `id`, written out: a coerced value as its kind's name and its text, `Int 1`, `String
+/// "q"`; `List [Int 1]`; an input object as `Object {a: Int 1, b= Int 2}`, a field a default filled
+/// marked `=` for its `:`; `Set {Int 1}`; a literal kept as written as `Literal(Int) 1`; and an
+/// unresolved value as `?`.
+fn valued(model: &Model, id: ValueId) -> String {
+  let value = model.value(id);
+  let joined = |items: &[ValueId]| -> String {
+    let items: Vec<String> = items
+      .iter()
+      .map(|item: &ValueId| valued(model, *item))
+      .collect();
+    items.join(", ")
+  };
+  match value.kind() {
+    ValueKind::Null => String::from("Null null"),
+    ValueKind::Int(int) => format!("Int {}", int.text()),
+    ValueKind::Float(float) => format!("Float {}", float.text()),
+    ValueKind::String(text) => format!("String {text:?}"),
+    ValueKind::List(items) => format!("List [{}]", joined(items)),
+    ValueKind::Set(items) => format!("Set {{{}}}", joined(items)),
+    ValueKind::Object(entries) => {
+      let entries: Vec<String> = entries
+        .iter()
+        .map(|entry: &ObjectEntry| {
+          let mark = if entry.name().is_some() { ":" } else { "=" };
+          format!(
+            "{}{mark} {}",
+            model.member(entry.field()).name(),
+            valued(model, entry.value())
+          )
+        })
+        .collect();
+      format!("Object {{{}}}", entries.join(", "))
+    }
+    ValueKind::Literal(literal) => format!("Literal({:?}) {}", literal.kind(), literal.text()),
+    ValueKind::Unresolved => String::from("?"),
+    other => format!("{other:?}"),
+  }
+}
+
+/// The application at `nth` of those on the root package's type `owner`.
+fn application_on(model: &Model, owner: &str, nth: usize) -> ApplicationId {
+  model.def(type_def(model, owner)).applications()[nth]
+}
+
+/// The value of `application`'s argument named `name`, written or a copy: `None` when it has none.
+fn argument(model: &Model, application: ApplicationId, name: &str) -> Option<ValueId> {
+  model
+    .application(application)
+    .arguments()
+    .iter()
+    .find(|argument| model.member(argument.argument()).name() == name)
+    .map(|argument| argument.value())
+}
+
+/// The value of the argument named `name` of the application at `nth` on `owner`, written out.
+fn argument_shown(model: &Model, owner: &str, nth: usize, name: &str) -> String {
+  argument(model, application_on(model, owner, nth), name).map_or_else(
+    || String::from("absent"),
+    |value: ValueId| valued(model, value),
+  )
+}
+
+/// The type of the argument named `name` of the application at `nth` on `owner`, written out.
+fn argument_ty(model: &Model, owner: &str, nth: usize, name: &str) -> String {
+  let value = argument(model, application_on(model, owner, nth), name).expect("an argument");
+  shown(model, model.value(value).ty())
+}
+
+/// A generic directive's argument is coerced against its type under the application's type
+/// arguments: `a: T` takes `Int` and `l: [T]` a lone value as `[Int]` under `@d<Int>`, and `1` is
+/// no `String`. Refuses a parameter-typed argument kept as written at a closed application.
+#[test]
+fn a_generic_directives_argument_takes_the_type_its_application_gives_it() {
+  let text = "type Query @d<Int>(a: 1, l: 2) @d<String>(a: 1) {\n  x: Int\n}\n\
+              directive @d<T>(a: T, l: [T]) repeatable on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(ARGUMENT, after(schema, text, "@d<String>(a: ", "1"))]
+  );
+  let model = analysis.model();
+  assert_eq!(argument_shown(model, "Query", 0, "a"), "Int 1");
+  assert_eq!(argument_ty(model, "Query", 0, "a"), "i32");
+  assert_eq!(argument_shown(model, "Query", 0, "l"), "List [Int 2]");
+  assert_eq!(argument_ty(model, "Query", 0, "l"), "[i32]");
+  assert_eq!(argument_shown(model, "Query", 1, "a"), "?");
+  assert_eq!(argument_ty(model, "Query", 1, "a"), "string");
+}
+
+/// "Required" is read under the application's type arguments: `@d<Int!>` and `@e`, whose default
+/// fills `Int!`, leave a required argument out, `@d<Int>` does not, and `@d<Int!>` gives it `null`.
+/// Refuses "required" read off the written `!`.
+#[test]
+fn required_is_read_under_the_applications_type_arguments() {
+  let text = "type Query @d<Int!> @d<Int> @d<Int!>(a: null) @e {\n  x: Int\n}\n\
+              directive @d<T>(a: T) repeatable on OBJECT\n\
+              directive @e<T = Int!>(a: T) on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    sorted(found(&analysis)),
+    sorted(vec![
+      (MISSING, named(schema, text, "@", "d", 0)),
+      (MISSING, named(schema, text, "(", "a", 0)),
+      (MISSING, named(schema, text, "@", "e", 0)),
+    ])
+  );
+}
+
+/// An argument that may be required, a bare nullable type parameter, costs a step each time an
+/// application leaves it out, whatever its type turns out to be: the first `@m<Int>` three and one
+/// for rebuilding `T`, the second three, seven in all. At six the second application alone is
+/// `resource-limit`. Refuses entries walked for nothing, which pass at six.
+#[test]
+fn an_argument_that_may_be_required_costs_a_step_when_left_out() {
+  let text = "type Query @m<Int> @m<Int> {\n  x: Int\n}\n\
+              directive @m<T>(a: T, b: T, c: T) repeatable on OBJECT\n";
+  quiet(&analyze_text(text, &Limits::new().with_max_value_steps(7)));
+  let short = analyze_text(text, &Limits::new().with_max_value_steps(6));
+  let schema = schema_file(&short);
+  assert_eq!(found(&short), [(LIMIT, named(schema, text, "@", "m", 1))]);
+}
+
+/// A default left out is copied under the application's type arguments: `[1]` against `[Int]`,
+/// each row typed under them, not written, and located at the default. Refuses a copy against the
+/// written type, which keeps its literal.
+#[test]
+fn a_default_is_copied_under_the_applications_type_arguments() {
+  let text = "type Query @d<Int> {\n  x: Int\n}\n\
+              directive @d<T>(a: [T] = [1]) on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new());
+  quiet(&analysis);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  let copy = argument(model, application_on(model, "Query", 0), "a").expect("a copy");
+  assert_eq!(valued(model, copy), "List [Int 1]");
+  assert_eq!(shown(model, model.value(copy).ty()), "[i32]");
+  assert!(!model.value(copy).written());
+  assert_eq!(model.value(copy).location(), at(schema, text, "[1]", 0));
+  let ValueKind::List(items) = model.value(copy).kind() else {
+    panic!("no list");
+  };
+  assert_eq!(shown(model, model.value(items[0]).ty()), "i32");
+}
+
+/// A default that does not fit the type an application's type arguments give it is reported once,
+/// at the application that leaves it out, labelled at the default, and its copy is made, silently:
+/// `@d<String>`'s `1`. `@d<Int>`'s fits, and an application that writes the argument uses no
+/// default. Refuses a silent copy, a report at the default, and one at an application that writes
+/// the argument.
+#[test]
+fn a_default_that_does_not_fit_is_reported_at_the_application() {
+  let text = "type Query @d<String> @d<Int> @d<String>(a: \"x\") {\n  x: Int\n}\n\
+              directive @d<T>(a: T = 1) repeatable on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let first = named(schema, text, "@", "d", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, first)]);
+  let report = the(&analysis, DEFAULT, first);
+  assert_eq!(
+    report.to_string(),
+    "under this application's type arguments, the default `1` of `a` does not fit the type `a` \
+     takes"
+  );
+  let default = after(schema, text, "T = ", "1");
+  assert_eq!(labels(report), [(default, "this default")]);
+  let model = analysis.model();
+  assert_eq!(argument_shown(model, "Query", 0, "a"), "?");
+  let copy = argument(model, application_on(model, "Query", 0), "a").expect("a copy");
+  assert_eq!(model.value(copy).location(), default);
+  assert_eq!(argument_shown(model, "Query", 1, "a"), "Int 1");
+  assert_eq!(argument_shown(model, "Query", 2, "a"), "String \"x\"");
+}
+
+/// An application reports its first default that does not fit, and no other: two `@d<String>`,
+/// each once, labelled at `a`'s default. Refuses a report for each default.
+#[test]
+fn one_diagnostic_per_application_for_its_first_failing_default() {
+  let text = "type Query @d<String> @d<String> {\n  x: Int\n}\n\
+              directive @d<T>(a: T = 1, b: T = 2) repeatable on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let (first, second) = (
+    named(schema, text, "@", "d", 0),
+    named(schema, text, "@", "d", 1),
+  );
+  assert_eq!(found(&analysis), [(DEFAULT, first), (DEFAULT, second)]);
+  let default = after(schema, text, "a: T = ", "1");
+  for at in [first, second] {
+    assert_eq!(
+      labels(the(&analysis, DEFAULT, at)),
+      [(default, "this default")]
+    );
+  }
+}
+
+/// A copy is judged whole under the application's type arguments, as a written value is: a field
+/// its input object does not declare, a required field left out, a OneOf literal of no field, and
+/// a set that holds one element twice each make the copy unfit, though no row of it is unresolved.
+/// Refuses a fit read off unresolved rows alone, which none of the four makes.
+#[test]
+fn a_copy_is_judged_whole_under_the_applications_type_arguments() {
+  let text = "type Query @u<In> @n<Need> @o<O> @s<Int> {\n  x: Int\n}\n\
+              input In {\n  x: Int\n}\ninput Need {\n  y: Int!\n}\n\
+              input O @oneOf {\n  a: Int\n  b: Int\n}\nscalar Bag<T> @set\n\
+              directive @u<T>(a: T = { z: 1 }) on OBJECT\n\
+              directive @n<T>(a: T = {}) on OBJECT\n\
+              directive @o<T>(a: T = {}) on OBJECT\n\
+              directive @s<T>(a: Bag<T> = set!{1, 0x1}) on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found_of(&analysis, &PHASE),
+    [
+      (DEFAULT, named(schema, text, "@", "u", 0)),
+      (DEFAULT, named(schema, text, "@", "n", 0)),
+      (DEFAULT, named(schema, text, "@", "o", 0)),
+      (DEFAULT, named(schema, text, "@", "s", 0)),
+    ]
+  );
+  let model = analysis.model();
+  assert_eq!(argument_shown(model, "Query", 0, "a"), "Object {}");
+  assert_eq!(argument_shown(model, "Query", 1, "a"), "Object {}");
+  assert_eq!(argument_shown(model, "Query", 2, "a"), "Object {}");
+  assert_eq!(
+    argument_shown(model, "Query", 3, "a"),
+    "Set {Int 1, Int 0x1}"
+  );
+}
+
+/// A count under a type its default is not written against pays a step for each node: the first
+/// `@d<Float>` rebuilds `[T]`, two, counts four nodes, four, and copies four rows, four; the
+/// second reads the kept count, one, and copies four; `@d<Int>` rebuilds two, counts four and
+/// copies four: twenty-five. At twenty-four the third alone is `resource-limit`, with no `a`.
+/// Refuses a judged count nobody pays for, which passes at twenty-four, and a count made again for
+/// a type already counted, which fails at twenty-five.
+#[test]
+fn the_count_under_type_arguments_is_charged_as_it_is_counted() {
+  let text = "type Query @d<Float> @d<Float> @d<Int> {\n  x: Int\n}\n\
+              directive @d<T>(a: [T] = [1, 2, 3]) repeatable on OBJECT\n";
+  let paid = analyze_text(text, &Limits::new().with_max_value_steps(25));
+  quiet(&paid);
+  assert_eq!(
+    argument_shown(paid.model(), "Query", 0, "a"),
+    "List [Float 1, Float 2, Float 3]"
+  );
+  assert_eq!(argument_ty(paid.model(), "Query", 1, "a"), "[f64]");
+  let short = analyze_text(text, &Limits::new().with_max_value_steps(24));
+  let schema = schema_file(&short);
+  assert_eq!(found(&short), [(LIMIT, named(schema, text, "@", "d", 2))]);
+  assert_eq!(argument_shown(short.model(), "Query", 2, "a"), "absent");
+}
+
+/// A type that cannot be built under the application's type arguments is a limit: under a depth of
+/// two, `[[T]]` under `@w<[Int]>` is three deep, and its written value is one unresolved row with
+/// `resource-limit` at it; an application that leaves such an argument out is starved, at its
+/// path. Refuses a rebuild past the depth.
+#[test]
+fn an_arguments_type_that_cannot_be_built_is_a_limit() {
+  let text = "type Query @w<[Int]>(a: 1) @v<[Int]> {\n  x: Int\n}\n\
+              directive @w<T>(a: [[T]]) on OBJECT\n\
+              directive @v<T>(a: [[T]] = [[1]]) on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_generic_depth(2));
+  let schema = schema_file(&analysis);
+  let written = after(schema, text, "@w<[Int]>(a: ", "1");
+  let left = named(schema, text, "@", "v", 0);
+  assert_eq!(found(&analysis), [(LIMIT, written), (LIMIT, left)]);
+  assert_eq!(
+    the(&analysis, LIMIT, written).to_string(),
+    "this value takes a type that, under these type arguments, nests deeper than \
+     `Limits::max_generic_depth`, 2, admits"
+  );
+  assert_eq!(
+    the(&analysis, LIMIT, left).to_string(),
+    "the arguments this application leaves out take a type that, under these type arguments, \
+     nests deeper than `Limits::max_generic_depth`, 2, admits"
+  );
+  let model = analysis.model();
+  assert_eq!(argument_shown(model, "Query", 0, "a"), "?");
+  assert_eq!(argument_ty(model, "Query", 0, "a"), "[[w#0]]");
+  assert_eq!(argument_shown(model, "Query", 1, "a"), "absent");
+}
+
+/// An application inside a generic definition whose type arguments name its parameters keeps its
+/// arguments' literals, written and copied, each typed with that parameter, and says nothing.
+/// Refuses a value under an open type coerced.
+#[test]
+fn an_application_inside_a_generic_definition_keeps_its_literals() {
+  let text = "type Query {\n  x: Int\n}\ndirective @d<X>(a: X, b: X = 2) on OBJECT\n\
+              type G<T> @d<T>(a: \"x\") {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  quiet(&analysis);
+  let model = analysis.model();
+  assert_eq!(argument_shown(model, "G", 0, "a"), "Literal(String) \"x\"");
+  assert_eq!(argument_shown(model, "G", 0, "b"), "Literal(Int) 2");
+  assert_eq!(argument_ty(model, "G", 0, "a"), "G#0");
+  assert_eq!(argument_ty(model, "G", 0, "b"), "G#0");
 }

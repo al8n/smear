@@ -2181,9 +2181,10 @@ fn type_arguments_of_an_application_are_occurrences() {
   assert_eq!(member_types(model, model.def(typed).arguments()), ["T=#0"]);
   let boxed = def(model, Namespace::Type, "^::app::Box");
   let application = model.application(model.def(boxed).applications()[0]);
+  // Its argument takes its type under the type argument, `[Int!]`: a lone value there.
   assert_eq!(
     applied(model, application.id()),
-    "@typed=typed<[Int=i32!]>(value: Literal(Int) 1)"
+    "@typed=typed<[Int=i32!]>(value: List [Int 1])"
   );
   // The application's type argument, and what it nests, come before the next member's type.
   let argument = application.type_args()[0];

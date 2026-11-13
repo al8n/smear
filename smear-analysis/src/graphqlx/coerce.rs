@@ -23,7 +23,8 @@
 //! the node, typed with that type, its `!` included. In this order:
 //!
 //! 1. A node whose type can take no value is kept as written, a `Literal`, and nothing is said: a
-//!    type that names a type parameter, which only an instantiation can check; the unresolved
+//!    type that still names a type parameter, inside a generic definition or under an application
+//!    with no complete type arguments, which only an instantiation can check; the unresolved
 //!    type, an object, an interface, a union or a directive; `NonZero` of what is no nullable
 //!    integer primitive at least one bit wide; and a collection of another count of type arguments
 //!    than its collection has, or one its own package makes both a set and a map. The type is
@@ -133,6 +134,38 @@
 //! application's path, with a label at the argument. An argument neither written, defaulted nor
 //! required is absent.
 //!
+//! # Under type arguments
+//!
+//! An application whose type is its directive's instantiation, with its complete type arguments,
+//! reads each argument's type under them: a type that names the directive's parameters is rebuilt
+//! with the application's type arguments in their place, through the type services' rebuild, and
+//! one written closed is the type as written. A rebuild is remembered by the written type and the
+//! instantiation's nullable form, what stopped it included, so both nullnesses and every
+//! application of one instantiation share it. "Required" is read there: non-null under the
+//! arguments, with no default. An argument written as a bare nullable type parameter of its
+//! directive, with no default, may be required: left out of an application with complete type
+//! arguments, it is required where its type under them is non-null, `@d<Int!>` and not `@d<Int>`.
+//! Under an application inside a generic definition, a type that names that definition's
+//! parameters is still open, and its value a `Literal`. An application with no complete type
+//! arguments is read as written.
+//!
+//! A type that cannot be built under the arguments, past `Limits::max_generic_depth` or
+//! `Limits::max_instantiations`, or whose rebuild is past `Limits::max_value_steps`, makes a
+//! written value one unresolved row, typed with the type the argument is written with, with
+//! `resource-limit` at it; an application that leaves such an argument out is starved, and
+//! `resource-limit` names the limit.
+//!
+//! A copy made against a type a rebuild made is judged: its count pays a step for each node, and
+//! judges whether the copy fits, through the classifier and the reading of literals the written
+//! mode uses, with no row written: what the written mode would refuse, `null` where its type is
+//! non-null, a leaf its type does not take, an object literal's unknown field, a required field it
+//! leaves out, a OneOf literal of other than one field or of `null` for its one, a set or a map
+//! literal that holds an element or a key twice, and a judged count it reads that does not fit. A
+//! count that is not judged fits: its default was judged where it is written. The copy is made all
+//! the same, silently. An application whose type arguments rebuilt the type of an argument it
+//! leaves out reports a copy of it that does not fit, the first in its directive's order: one
+//! `invalid-default-value`, at its path, labelled at the default.
+//!
 //! # The count of a copy
 //!
 //! A copy's rows are counted before its first row is made, and the count is what is charged. A
@@ -145,6 +178,11 @@
 //! before it is read, and spent whether or not the copy it was counted for is made. So is asking
 //! again for a count made already, for a later copy of the same default: the asker reads the kept
 //! count, a step paid before the count is used, besides the rows the copy then pays.
+//!
+//! A count under a type its default is not written against is judged, as above: each of its nodes
+//! is a step too, paid before it is counted, and what does not fit is kept beside the count. A
+//! count still meets itself by its key, the tree and the type: a tree read again under another
+//! type is a count of its own.
 //!
 //! A count is exact, past the budget, or poisoned. A count that reads a count still being made
 //! has met itself: the copy would hold a copy of itself, and the count is poisoned, with every
@@ -167,8 +205,11 @@
 //! writes is a step of `Limits::max_value_steps`: each list a written lone value stands for; each
 //! row of a copy, its whole count charged before its first row; each read of a count while
 //! counting, and each count made already that is asked for again; each default asked for that
-//! needs itself; and each required argument, and each required field of an object literal, found
-//! left out. So is the one reading that is more than linear: a decimal integer of more than 38
+//! needs itself; each required argument, and each required field of an object literal, found
+//! left out; each node of a judged count; each node a rebuild of a member's type under type
+//! arguments looks at, its root included, once for each type and instantiation; and each argument
+//! that may be required left out of an application with complete type arguments. So is the one
+//! reading that is more than linear: a decimal integer of more than 38
 //! significant digits, the most `u128` arithmetic reads whatever they spell, is converted nine
 //! digits at a time over a vector of limbs, and that is charged first, an upper bound of its limb
 //! updates; one the budget cannot pay for is `resource-limit` where it is written, and
@@ -217,7 +258,7 @@ use super::{
   resolve::{Position, Request, Resolved, Root, Scopes, Segment, Wanted},
   set::ROOT,
   source::SourceMap,
-  types::Types,
+  types::{Counter, Limit, Stop, Types},
 };
 
 mod number;
@@ -287,9 +328,11 @@ pub(crate) fn coerce(
       one_of.push(def);
     }
   }
+  let max_steps = types.limits().max_value_steps();
   let mut coercion = Coercion {
     builder,
     reporter,
+    types,
     scopes,
     raw,
     primitives: &declarations.primitives,
@@ -304,8 +347,8 @@ pub(crate) fn coerce(
     objects: BTreeMap::new(),
     entries: Vec::new(),
     supplied: sources.package_sources(ROOT).start(),
-    max_steps: types.limits().max_value_steps(),
-    spent: 0,
+    values: Counter::new(max_steps),
+    rebuilds: BTreeMap::new(),
     kept: Vec::new(),
     magnitudes: Vec::new(),
     limbs: Vec::new(),
@@ -324,8 +367,10 @@ pub(crate) fn coerce(
     listed: Vec::new(),
     runs: Vec::new(),
     counts: BTreeMap::new(),
+    unfit: BTreeSet::new(),
     counting: Vec::new(),
     frames: Vec::new(),
+    held: Vec::new(),
     paid: 0,
     copied: 0,
     levels: BTreeMap::new(),
@@ -421,8 +466,43 @@ impl Mode {
 #[derive(Clone, Copy)]
 struct Listed {
   argument: MemberId,
-  /// Its default's tree; `None` for a required argument with no default.
-  default: Option<u32>,
+  /// What leaving it out does.
+  left: Left,
+}
+
+/// What leaving a listed argument out does.
+#[derive(Clone, Copy)]
+enum Left {
+  /// A copy of its default, whose tree this is, fills it.
+  Default(u32),
+  /// It is required: written non-null, with no default.
+  Required,
+  /// It may be required: written as a bare nullable type parameter of its directive, with no
+  /// default, it is required where the application's type arguments make its type non-null.
+  Maybe,
+}
+
+/// An application whose arguments are being merged: its id, its directive's path, whether the
+/// built-in library wrote it, and its type with its directive, the instantiation its arguments are
+/// read under, when it has its directive's.
+#[derive(Clone, Copy)]
+struct Applying {
+  application: ApplicationId,
+  at: Location,
+  library: bool,
+  env: Option<(TyId, DefId)>,
+}
+
+/// The type a member's value takes, read under an instantiation's arguments.
+#[derive(Clone, Copy)]
+struct Expected {
+  /// The type: as instantiation typed the member's occurrence, or rebuilt under the arguments.
+  ty: Option<TyId>,
+  /// Whether a rebuild made it.
+  rebuilt: bool,
+  /// Whether the member is non-null as the value takes it: the rebuilt type's `!`, or else the
+  /// `!` the member's type is written with.
+  non_null: bool,
 }
 
 /// An input object's fields that an object literal leaving them out does something about, each run
@@ -451,28 +531,46 @@ enum Count {
 /// One entry of a count's stack.
 #[derive(Clone, Copy)]
 enum Counted {
-  /// A node of the tree being counted, against the type it is made against.
-  Node { node: u32, ty: Option<TyId> },
-  /// A read: the count of the default whose tree is `tree`, against `ty`.
-  Fill { tree: u32, ty: Option<TyId> },
+  /// A node of the tree being counted, against the type it is made against; in a judged count, an
+  /// element or a key of a set or a map whose identity goes in the slot `slot` of the elements
+  /// being searched.
+  Node {
+    node: u32,
+    ty: Option<TyId>,
+    slot: Option<u32>,
+  },
+  /// A read: the count of the default whose tree is `tree`, against `ty`, judged when `ty` is not
+  /// the type the default is written against.
+  Fill {
+    tree: u32,
+    ty: Option<TyId>,
+    judged: bool,
+  },
+  /// In a judged count, a set or a map, as `held` says, whose elements or keys counted since have
+  /// their identities from the slot `start` on: searched for one held twice.
+  Held { start: u32, held: Held },
 }
 
 /// A default being counted: its tree and the type it is counted against, where its own entries of
-/// the count's stack start, and its rows so far.
+/// the count's stack start, and its rows so far; whether it is judged, its type not the one its
+/// default is written against, and, judged, whether its copy fits so far.
 #[derive(Clone, Copy)]
 struct Frame {
   tree: u32,
   ty: Option<TyId>,
   base: usize,
   rows: u32,
+  judged: bool,
+  fits: bool,
 }
 
 /// What asking for a default left out does, an application's argument or an object literal's
 /// field.
 #[derive(Clone, Copy)]
 enum Asked {
-  /// A copy of this many rows is made.
-  Copy(u32),
+  /// A copy of this many rows is made; under a type its default is not written against, `fits`
+  /// says whether each of its nodes takes its type as a written one would.
+  Copy { rows: u32, fits: bool },
   /// Nothing is made: the argument, or the field, is absent.
   Absent,
   /// The budget cannot pay: the asker is past it.
@@ -761,6 +859,9 @@ enum Task {
 struct Coercion<'c, 'p, 'x> {
   builder: &'c mut ModelBuilder,
   reporter: &'c mut Reporter,
+  /// The type services: the rebuild that reads a member's type under an instantiation's
+  /// arguments.
+  types: &'c mut Types,
   /// Every module's scope: what a qualified enum value's prefix names.
   scopes: &'c Scopes<'x>,
   /// The trees, and each source's text.
@@ -794,10 +895,13 @@ struct Coercion<'c, 'p, 'x> {
   entries: Vec<(MemberId, Option<Location>, ValueId)>,
   /// The first source of a supplied package: every source below it is the built-in library's.
   supplied: u32,
-  /// `Limits::max_value_steps`.
-  max_steps: u32,
-  /// The steps spent.
-  spent: u32,
+  /// `Limits::max_value_steps`, and the steps spent: completing values, and reading types and
+  /// counting under type arguments.
+  values: Counter,
+  /// Each member's type read under an instantiation's arguments so far, by the type it is written
+  /// with and the instantiation's nullable form: the type rebuilt, `None` for a type that is not
+  /// rebuilt, or what stopped the rebuild.
+  rebuilds: BTreeMap<(TyId, TyId), Result<Option<TyId>, Stop>>,
   /// What has been read of each node read so far: the rows a node's `kept` slot indexes.
   kept: Vec<Kept>,
   /// Every integer's magnitude converted so far.
@@ -839,11 +943,17 @@ struct Coercion<'c, 'p, 'x> {
   runs: Vec<(DefId, u32, u32)>,
   /// Each default counted so far, by its tree and the type it is counted against: its count.
   counts: BTreeMap<(u32, Option<TyId>), Count>,
+  /// The counts, by the same key, made under a type their default is not written against whose
+  /// copy does not fit it.
+  unfit: BTreeSet<(u32, Option<TyId>)>,
   /// What the count being made has still to count: nodes, and reads of other counts.
   counting: Vec<Counted>,
   /// The defaults the count being made is counting: the one asked for first, and each later one
   /// read by the one before it.
   frames: Vec<Frame>,
+  /// The identities of the elements or the keys of the sets and the maps a judged count is
+  /// searching, by slot.
+  held: Vec<Option<Ident>>,
   /// The rows of every count a copy was made of, charged or not.
   paid: u64,
   /// The rows made of copies: what `paid` is when the phase ends, since a copy and its count are
@@ -891,6 +1001,81 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.member_occurrence(member).0
   }
 
+  /// The type `member`'s value takes under `env`, when it is given: a named type of `owner`, the
+  /// member's own definition, whose arguments the member's type is read under, `library` when the
+  /// built-in library writes what asks. A type written closed, or with no `env`, is the type as
+  /// instantiation typed it, with the `!` it is written with; one that names `owner`'s parameters
+  /// is rebuilt with `env`'s arguments in their place, a step of `Limits::max_value_steps` for its
+  /// root and one for each argument or element of a node rebuilt, each new type completed as an
+  /// occurrence's is, with its own `!`. A rebuild is remembered by the written type and `env`'s
+  /// nullable form, whose arguments are its own, what stopped it included: a second costs nothing.
+  fn under(
+    &mut self,
+    member: MemberId,
+    env: Option<(TyId, DefId)>,
+    library: bool,
+  ) -> Result<Expected, Stop> {
+    let (written, non_null) = self.member_occurrence(member);
+    let unbuilt = Expected {
+      ty: written,
+      rebuilt: false,
+      non_null,
+    };
+    let (Some(written), Some((env, owner))) = (written, env) else {
+      return Ok(unbuilt);
+    };
+    if self.builder.ty_closed(written) {
+      return Ok(unbuilt);
+    }
+    if !self.is_named(env, owner) {
+      return Ok(unbuilt);
+    }
+    // A named type's nullable form is interned before its non-null one, and is found.
+    let builder: &ModelBuilder = &*self.builder;
+    let nullable = builder
+      .find_named(owner, builder.ty_args(env), false)
+      .unwrap_or(env);
+    let made = match self.rebuilds.get(&(written, nullable)).copied() {
+      Some(made) => made,
+      None => {
+        let made = self.types.derived.rebuild(
+          self.builder,
+          &mut self.values,
+          library,
+          written,
+          nullable,
+          owner,
+        );
+        self.rebuilds.insert((written, nullable), made);
+        made
+      }
+    };
+    Ok(match made? {
+      Some(ty) => Expected {
+        ty: Some(ty),
+        rebuilt: true,
+        non_null: self.builder.ty_non_null(ty),
+      },
+      None => unbuilt,
+    })
+  }
+
+  /// Whether `ty` is a named type of `def`.
+  fn is_named(&self, ty: TyId, def: DefId) -> bool {
+    matches!(self.builder.ty_shape(ty), Some(Shape::Named(named)) if named == def)
+  }
+
+  /// Whether the type `member`, of `owner`, is written with is a bare nullable type parameter of
+  /// `owner`: a member that may be required, as its type under an instantiation's arguments says.
+  fn bare_param(&self, member: MemberId, owner: DefId) -> bool {
+    let (ty, non_null) = self.member_occurrence(member);
+    !non_null
+      && matches!(
+        ty.and_then(|ty: TyId| self.builder.ty_shape(ty)),
+        Some(Shape::Param { def, .. }) if def == owner
+      )
+  }
+
   /// The arguments of `application`, in its directive's order: its written run, found by one binary
   /// search, merged with its directive's listed run. A written argument is coerced as written. A
   /// listed one it leaves out is filled with a copy of its default, or, required, reported left
@@ -918,7 +1103,20 @@ impl<'p> Coercion<'_, 'p, '_> {
         (start as usize, end as usize)
       });
     let library = at.source() < self.supplied;
+    // Its directive's instantiation, when it has one: its arguments are read under it.
+    let env = match (directive, self.builder.application_ty(application)) {
+      (Some(def), Some(ty)) if self.is_named(ty, def) => Some((ty, def)),
+      _ => None,
+    };
+    let applying = Applying {
+      application,
+      at,
+      library,
+      env,
+    };
     let mut starved = false;
+    // Whether a copy that does not fit under its type arguments is reported: once for it.
+    let mut reported = false;
     loop {
       let next_written = self
         .raw
@@ -934,19 +1132,19 @@ impl<'p> Coercion<'_, 'p, '_> {
       match (next_written, next_listed) {
         (None, None) => break,
         (Some(argument), None) => {
-          self.written_argument(application, argument);
+          self.written_argument(applying, argument);
           written += 1;
         }
         (Some(argument), Some(left)) if argument.argument <= left.argument => {
           if argument.argument == left.argument {
             listed += 1;
           }
-          self.written_argument(application, argument);
+          self.written_argument(applying, argument);
           written += 1;
         }
         (_, Some(left)) => {
           listed += 1;
-          if !self.left_out(application, left, at, library) {
+          if !self.left_out(applying, left, &mut reported) {
             starved = true;
           }
         }
@@ -954,31 +1152,73 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
   }
 
-  /// Does what `left`, an argument `application` leaves out, asks, the application's path at `at`
-  /// and written by the built-in library when `library`: a copy of its default, as
-  /// [`ask`](Self::ask) says, or, required, a report that it is left out, a step charged first.
-  /// Answers `false`, and reports the application once, when the budget cannot pay.
-  fn left_out(
-    &mut self,
-    application: ApplicationId,
-    left: Listed,
-    at: Location,
-    library: bool,
-  ) -> bool {
-    let Some(tree) = left.default else {
-      if !library && !self.charge(1) {
-        self.starved(at);
+  /// Does what `left`, an argument the application `applying` says leaves out, asks, its type read
+  /// under the application's type arguments: a copy of its default, as [`ask`](Self::ask) says;
+  /// required, a report that it is left out; and one that may be required, a step, then that
+  /// report when its type under the arguments is non-null, passed over with no step when the
+  /// application has no complete type arguments. Each is charged first, but on an application the
+  /// built-in library writes. A copy under the arguments that does not fit them is reported at the
+  /// application, the first of its arguments' copies alone, as `reported` keeps. Answers `false`,
+  /// and reports the application once, when the budget cannot pay, or when a type the argument
+  /// takes cannot be built under the arguments.
+  fn left_out(&mut self, applying: Applying, left: Listed, reported: &mut bool) -> bool {
+    let Applying {
+      application,
+      at,
+      library,
+      env,
+    } = applying;
+    let tree = match left.left {
+      Left::Default(tree) => tree,
+      Left::Required => {
+        if !library && !self.charge(1) {
+          self.starved(at, Stop::Steps);
+          return false;
+        }
+        self.missing(application, left.argument, at);
+        return true;
+      }
+      Left::Maybe => {
+        if env.is_none() {
+          return true;
+        }
+        if !library && !self.charge(1) {
+          self.starved(at, Stop::Steps);
+          return false;
+        }
+        return match self.under(left.argument, env, library) {
+          Ok(expected) => {
+            if expected.non_null {
+              self.missing(application, left.argument, at);
+            }
+            true
+          }
+          Err(stop) => {
+            self.starved(at, stop);
+            false
+          }
+        };
+      }
+    };
+    let expected = match self.under(left.argument, env, library) {
+      Ok(expected) => expected,
+      Err(stop) => {
+        self.starved(at, stop);
         return false;
       }
-      self.missing(application, left.argument, at);
-      return true;
     };
-    let ty = self.member_type(left.argument);
-    let rows = match self.ask(tree, ty, library) {
-      Asked::Copy(rows) => rows,
+    let ty = expected.ty;
+    let rows = match self.ask(tree, ty, library, expected.rebuilt) {
+      Asked::Copy { rows, fits } => {
+        if !fits && !*reported {
+          *reported = true;
+          self.unfit_default(at, left.argument, tree);
+        }
+        rows
+      }
       Asked::Absent => return true,
       Asked::Starved => {
-        self.starved(at);
+        self.starved(at, Stop::Steps);
         return false;
       }
     };
@@ -997,8 +1237,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Lists each directive's arguments that an application leaving them out does something about:
-  /// one with a default, with its default's tree, and one required, written non-null with no
-  /// default. A later argument of a name an earlier one has is not listed: no application can
+  /// one with a default, with its default's tree; one required, written non-null with no default;
+  /// and one that may be required, written as a bare nullable type parameter of the directive with
+  /// no default. A later argument of a name an earlier one has is not listed: no application can
   /// write it.
   fn list_arguments(&mut self) {
     let mut names: BTreeSet<Sym> = BTreeSet::new();
@@ -1017,17 +1258,13 @@ impl<'p> Coercion<'_, 'p, '_> {
           continue;
         }
         let (_, non_null) = self.member_occurrence(argument);
-        match self.raw.defaults.get(&argument).copied() {
-          Some(tree) => self.listed.push(Listed {
-            argument,
-            default: Some(tree),
-          }),
-          None if non_null => self.listed.push(Listed {
-            argument,
-            default: None,
-          }),
-          None => {}
-        }
+        let left = match self.raw.defaults.get(&argument).copied() {
+          Some(tree) => Left::Default(tree),
+          None if non_null => Left::Required,
+          None if self.bare_param(argument, def) => Left::Maybe,
+          None => continue,
+        };
+        self.listed.push(Listed { argument, left });
       }
       let end = dense(self.listed.len());
       if end > start {
@@ -1094,18 +1331,22 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// paid before the count is used and apart from the rows a copy then pays; one that cannot be
   /// paid starves the asker. Exact, its rows are charged, all or none, and a copy is made; past
   /// the budget, the asker is starved; a default that needs itself costs one step and is absent.
-  /// Steps its count's reads paid stay spent whatever the copy.
-  fn ask(&mut self, tree: u32, ty: Option<TyId>, library: bool) -> Asked {
+  /// Steps its count's reads paid stay spent whatever the copy. `judged` when `ty` is not the type
+  /// the default is written against: the count then judges whether the copy fits it.
+  fn ask(&mut self, tree: u32, ty: Option<TyId>, library: bool, judged: bool) -> Asked {
     if !library && self.counts.contains_key(&(tree, ty)) && !self.charge(1) {
       return Asked::Starved;
     }
-    match self.count(tree, ty, !library) {
+    match self.count(tree, ty, !library, judged) {
       Count::Rows(rows) => {
         if !library && !self.charge(rows) {
           return Asked::Starved;
         }
         self.paid = self.paid.saturating_add(u64::from(rows));
-        Asked::Copy(rows)
+        Asked::Copy {
+          rows,
+          fits: !self.unfit.contains(&(tree, ty)),
+        }
       }
       Count::Past => Asked::Starved,
       // A count asked for is never one being made: a count makes no copy and asks for none.
@@ -1134,13 +1375,20 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// and rows that pass `u32::MAX`, or `Limits::max_value_steps` when `charged`, are past it. So a
   /// count past the budget is never added up further, and an exact one is exact whatever the
   /// limit.
-  fn count(&mut self, tree: u32, ty: Option<TyId>, charged: bool) -> Count {
+  ///
+  /// A count `judged`, against a type its default is not written against, the asker's `ty` a
+  /// rebuild made, pays a step for each node before it is counted, and judges whether the copy
+  /// fits: whether each of its nodes takes its type as a written one would, and each judged count
+  /// it reads fits. A count that is not judged fits: its default was judged where it is written.
+  /// What does not fit is kept beside the count.
+  fn count(&mut self, tree: u32, ty: Option<TyId>, charged: bool, judged: bool) -> Count {
     if let Some(&kept) = self.counts.get(&(tree, ty)) {
       return kept;
     }
     self.counting.clear();
     self.frames.clear();
-    self.open(tree, ty);
+    self.held.clear();
+    self.open(tree, ty, judged);
     loop {
       let Some(frame) = self.frames.last().copied() else {
         return Count::Past;
@@ -1149,8 +1397,15 @@ impl<'p> Coercion<'_, 'p, '_> {
         self.frames.pop();
         let done = Count::Rows(frame.rows);
         self.counts.insert((frame.tree, frame.ty), done);
+        if !frame.fits {
+          self.unfit.insert((frame.tree, frame.ty));
+        }
         if self.frames.is_empty() {
           return done;
+        }
+        // A copy that holds one that does not fit does not fit.
+        if !frame.fits {
+          self.misfit();
         }
         if let Err(verdict) = self.add_rows(frame.rows, charged) {
           return self.verdict(verdict);
@@ -1161,16 +1416,27 @@ impl<'p> Coercion<'_, 'p, '_> {
         return self.verdict(Count::Past);
       };
       let counted = match entry {
-        Counted::Node { node, ty } => self.count_node(node, ty, charged),
-        Counted::Fill { tree, ty } => match self.counts.get(&(tree, ty)).copied() {
-          Some(Count::Rows(rows)) => self.add_rows(rows, charged),
+        Counted::Node { node, ty, slot } => self.count_node(node, ty, slot, charged),
+        Counted::Fill { tree, ty, judged } => match self.counts.get(&(tree, ty)).copied() {
+          Some(Count::Rows(rows)) => {
+            if self.unfit.contains(&(tree, ty)) {
+              self.misfit();
+            }
+            self.add_rows(rows, charged)
+          }
           Some(Count::Counting | Count::Poisoned) => Err(Count::Poisoned),
           Some(Count::Past) => Err(Count::Past),
           None => {
-            self.open(tree, ty);
+            self.open(tree, ty, judged);
             Ok(())
           }
         },
+        Counted::Held { start, held } => {
+          if !self.held_once(start, held) {
+            self.misfit();
+          }
+          Ok(())
+        }
       };
       if let Err(verdict) = counted {
         return self.verdict(verdict);
@@ -1178,9 +1444,9 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
   }
 
-  /// Opens a frame for the default whose tree is `tree`, against `ty`: it is being counted from
-  /// now on, and its tree's root is the next node counted.
-  fn open(&mut self, tree: u32, ty: Option<TyId>) {
+  /// Opens a frame for the default whose tree is `tree`, against `ty`, judged when `judged`: it is
+  /// being counted from now on, and its tree's root is the next node counted.
+  fn open(&mut self, tree: u32, ty: Option<TyId>, judged: bool) {
     self.counts.insert((tree, ty), Count::Counting);
     let base = self.counting.len();
     self.frames.push(Frame {
@@ -1188,6 +1454,8 @@ impl<'p> Coercion<'_, 'p, '_> {
       ty,
       base,
       rows: 0,
+      judged,
+      fits: true,
     });
     if let Some(root) = self
       .raw
@@ -1195,7 +1463,11 @@ impl<'p> Coercion<'_, 'p, '_> {
       .get(tree as usize)
       .map(|tree: &RawTree| tree.root)
     {
-      self.counting.push(Counted::Node { node: root, ty });
+      self.counting.push(Counted::Node {
+        node: root,
+        ty,
+        slot: None,
+      });
     }
   }
 
@@ -1205,13 +1477,24 @@ impl<'p> Coercion<'_, 'p, '_> {
       self.counts.insert((frame.tree, frame.ty), verdict);
     }
     self.counting.clear();
+    self.held.clear();
     verdict
+  }
+
+  /// The copy of the default counted on top does not fit, when it is judged: one that is not
+  /// judged fits, its default judged where it is written.
+  fn misfit(&mut self) {
+    if let Some(frame) = self.frames.last_mut()
+      && frame.judged
+    {
+      frame.fits = false;
+    }
   }
 
   /// Adds `rows` to the default being counted on top: a sum past `u32::MAX`, or, when `charged`,
   /// past `Limits::max_value_steps`, is past the budget.
   fn add_rows(&mut self, rows: u32, charged: bool) -> Result<(), Count> {
-    let max = self.max_steps;
+    let max = self.values.max();
     let Some(frame) = self.frames.last_mut() else {
       return Ok(());
     };
@@ -1225,20 +1508,42 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Counts `node` against `ty` into the default being counted on top, as [`count`](Self::count)
-  /// says, or fails with the count's verdict.
-  fn count_node(&mut self, node: u32, ty: Option<TyId>, charged: bool) -> Result<(), Count> {
+  /// says, or fails with the count's verdict; in a judged count, an element or a key of a set or a
+  /// map being searched whose identity goes in `slot`.
+  fn count_node(
+    &mut self,
+    node: u32,
+    ty: Option<TyId>,
+    slot: Option<u32>,
+    charged: bool,
+  ) -> Result<(), Count> {
     let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
       return Ok(());
     };
+    let judged = self.frames.last().is_some_and(|frame: &Frame| frame.judged);
+    // Under a type its default is not written against, a node is a step, paid before it is
+    // counted: its source paid for it under that type alone.
+    if judged && charged && !self.charge(1) {
+      return Err(Count::Past);
+    }
     self.add_rows(1, charged)?;
     match self.classify(raw.kind, ty) {
-      Class::NoValue | Class::Null | Class::NotNull | Class::Leaf(_) => {}
-      Class::List(element) | Class::Set(element) => {
-        self.count_items(node, raw, (element, element));
+      Class::NoValue | Class::Null => {}
+      Class::NotNull => self.misfit(),
+      Class::Leaf(base) => {
+        if judged {
+          self.judge_leaf(node, base, slot)?;
+        }
+      }
+      Class::List(element) => {
+        self.count_items(node, raw, (element, element), None);
+      }
+      Class::Set(element) => {
+        self.count_items(node, raw, (element, element), judged.then_some(Held::Set));
       }
       Class::Map(key, value) => {
         // A last key with no value is dropped, as the copy drops it.
-        if self.count_items(node, raw, (key, value)) % 2 == 1 {
+        if self.count_items(node, raw, (key, value), judged.then_some(Held::Map)) % 2 == 1 {
           let _ = self.counting.pop();
         }
       }
@@ -1253,17 +1558,25 @@ impl<'p> Coercion<'_, 'p, '_> {
           self.counting.push(Counted::Node {
             node,
             ty: Some(under),
+            slot: None,
           });
         }
       }
       Class::Object { def, first } => {
         let fields = self.fields_of(node, def, first);
+        if judged && !self.object_fits(def, fields, charged)? {
+          self.misfit();
+        }
         let mut merge = self.merge(def, fields);
         while let Some(next) = self.next(&mut merge) {
           match next {
             Next::Set(set) => {
               let ty = self.member_type(set.field);
-              self.counting.push(Counted::Node { node: set.node, ty });
+              self.counting.push(Counted::Node {
+                node: set.node,
+                ty,
+                slot: None,
+              });
             }
             Next::Default(field, tree) => {
               // A read is paid before it is pushed: no charge covers work pushed before it.
@@ -1271,7 +1584,11 @@ impl<'p> Coercion<'_, 'p, '_> {
                 return Err(Count::Past);
               }
               let ty = self.member_type(field);
-              self.counting.push(Counted::Fill { tree, ty });
+              self.counting.push(Counted::Fill {
+                tree,
+                ty,
+                judged: false,
+              });
             }
           }
         }
@@ -1280,16 +1597,157 @@ impl<'p> Coercion<'_, 'p, '_> {
     Ok(())
   }
 
+  /// Judges `node`, a leaf of the default counted on top, against `base`, as the written mode reads
+  /// it and writing no row: one it refuses does not fit, but for a path whose root lowering does
+  /// not know, which lowering reported. A conversion the budget cannot pay for is past it. Its
+  /// identity, an element's or a key's, goes in `slot`.
+  fn judge_leaf(&mut self, node: u32, base: Base, slot: Option<u32>) -> Result<(), Count> {
+    let tree = self
+      .frames
+      .last()
+      .and_then(|frame: &Frame| self.raw.trees.get(frame.tree as usize).copied());
+    let Some(tree) = tree else {
+      return Ok(());
+    };
+    match self.leaf(None, node, tree, base) {
+      Ok(ident) => {
+        if let Some(slot) = slot
+          && let Some(held) = self.held.get_mut(slot as usize)
+        {
+          *held = ident;
+        }
+      }
+      Err(Refused {
+        why: Why::Costly { .. },
+        ..
+      }) => return Err(Count::Past),
+      Err(refused) => {
+        if !self.unknown_root(refused.node) {
+          self.misfit();
+        }
+      }
+    }
+    Ok(())
+  }
+
+  /// Whether the object literal of the input object `def` that sets `fields` is refused nothing
+  /// where it is written, as a judged count reads it: no field `def` does not declare; for a OneOf
+  /// input object, one field, not `null`; and every required field set, each passed left out a
+  /// step, the first that is missing ending the walk.
+  fn object_fits(&mut self, def: DefId, fields: Fields, charged: bool) -> Result<bool, Count> {
+    if fields.written > fields.len {
+      return Ok(false);
+    }
+    if self.one_of.binary_search(&def).is_ok()
+      && (fields.written != 1
+        || self
+          .set_fields
+          .get(fields.start as usize)
+          .is_some_and(|set: &SetField| matches!(self.kind(set.node), RawKind::Null)))
+    {
+      return Ok(false);
+    }
+    let Some(input) = self.input(def) else {
+      return Ok(true);
+    };
+    let (start, end) = input.required;
+    let set_end = fields.start.saturating_add(fields.len);
+    let mut set = fields.start;
+    for row in start..end {
+      let Some(&field) = self.required.get(row as usize) else {
+        break;
+      };
+      while set < set_end
+        && self
+          .set_field_at(set)
+          .is_some_and(|kept: MemberId| kept < field)
+      {
+        set = set.saturating_add(1);
+      }
+      if set < set_end && self.set_field_at(set) == Some(field) {
+        continue;
+      }
+      if charged && !self.charge(1) {
+        return Err(Count::Past);
+      }
+      return Ok(false);
+    }
+    Ok(true)
+  }
+
+  /// Whether the elements of a set, or the keys of a map, as `held` says, whose identities are the
+  /// slots from `start` on, hold none twice: each identity rendered once, the shared kernel finding
+  /// the first of each. The slots are let go.
+  fn held_once(&mut self, start: u32, held: Held) -> bool {
+    self.key_bytes.clear();
+    self.keyed.clear();
+    let step = match held {
+      Held::Map => 2,
+      Held::List | Held::Set => 1,
+    };
+    let mut at = start as usize;
+    while let Some(&ident) = self.held.get(at) {
+      at = at.saturating_add(step);
+      let Some(ident) = ident else {
+        continue;
+      };
+      let from = dense(self.key_bytes.len());
+      self.render(ident);
+      self.keyed.push((from, dense(self.key_bytes.len()), 0));
+    }
+    let keys: &[u8] = &self.key_bytes;
+    let keyed: &[(u32, u32, u32)] = &self.keyed;
+    let mut duplicates: Duplicates<&[u8]> =
+      Duplicates::over(keyed.len(), |position: usize| key_at(keys, keyed, position));
+    let twice = (0..keyed.len()).any(|position: usize| {
+      duplicates
+        .first(position, key_at(keys, keyed, position))
+        .is_some()
+    });
+    self.held.truncate(start as usize);
+    !twice
+  }
+
+  /// Whether `node` is a path whose root lowering does not know, which lowering reported.
+  fn unknown_root(&self, node: u32) -> bool {
+    match self.kind(node) {
+      RawKind::Path(row) => self
+        .raw
+        .paths
+        .get(row as usize)
+        .is_some_and(|path: &RawPath| path.written.is_none()),
+      _ => false,
+    }
+  }
+
   /// Pushes each child of `node`, whose node is `raw`, to be counted: those at even places against
-  /// `types.0`, and those at odd places against `types.1`. Answers how many it pushed.
-  fn count_items(&mut self, node: u32, raw: RawNode, types: (TyId, TyId)) -> u32 {
+  /// `types.0`, and those at odd places against `types.1`; when `held` says the node is a set or a
+  /// map a judged count searches, with a slot for each one's identity, under the entry that
+  /// searches them. Answers how many it pushed.
+  fn count_items(
+    &mut self,
+    node: u32,
+    raw: RawNode,
+    types: (TyId, TyId),
+    held: Option<Held>,
+  ) -> u32 {
+    if let Some(held) = held {
+      let start = dense(self.held.len());
+      self.counting.push(Counted::Held { start, held });
+    }
     let mut pushed: u32 = 0;
     let mut child = node.saturating_add(1);
     while child < raw.after {
       let ty = if pushed % 2 == 1 { types.1 } else { types.0 };
+      let slot = held.map(|_: Held| {
+        let slot = dense(self.held.len());
+        self.held.push(None);
+        slot
+      });
       self.counting.push(Counted::Node {
         node: child,
         ty: Some(ty),
+        slot,
       });
       pushed = pushed.saturating_add(1);
       let next = self
@@ -1412,28 +1870,129 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Reports that the arguments the application whose path is at `at` leaves out are past the
-  /// budget.
-  fn starved(&mut self, at: Location) {
+  /// budget, or, as `stop` says, take a type that cannot be built under its type arguments.
+  fn starved(&mut self, at: Location, stop: Stop) {
+    let (message, help) = match stop {
+      Stop::Steps => (
+        format!(
+          "the arguments this application leaves out pass `Limits::max_value_steps`, {}, the \
+           steps the analysis may take to complete values, and are not filled",
+          self.values.max()
+        ),
+        "raise the limit with `Limits::with_max_value_steps`, or write the arguments",
+      ),
+      Stop::Built(_) => self.stopped(stop, "the arguments this application leaves out take"),
+    };
+    self.limit(at, message, help);
+  }
+
+  /// Reports `resource-limit` at `at`, saying `message`, with `help`.
+  fn limit(&mut self, at: Location, message: String, help: &'static str) {
     let kind = DiagnosticKind::ResourceLimit;
-    let max = self.max_steps;
     self.reporter.report(
       Diagnostic::builder(kind.code(), at)
         .severity(kind.severity())
-        .message(format!(
-          "the arguments this application leaves out pass `Limits::max_value_steps`, {max}, the \
-           steps the analysis may take to complete values, and are not filled"
-        ))
+        .message(message)
         .primary_label(kind.title())
-        .help("raise the limit with `Limits::with_max_value_steps`, or write the arguments")
+        .help(help)
         .build(),
     );
   }
 
-  /// The argument `argument` of `application`, as written: its value coerced against the
-  /// argument's type. A required argument, written non-null and with no default, given `null` is
-  /// reported as left out, at its name, and its value is unresolved.
-  fn written_argument(&mut self, application: ApplicationId, argument: RawArgument) {
-    let (ty, non_null) = self.member_occurrence(argument.argument);
+  /// What a report says, and its help, of a type `what` names, followed by its verb, that `stop`
+  /// kept from being read under type arguments.
+  fn stopped(&self, stop: Stop, what: &str) -> (String, &'static str) {
+    let limits = self.types.limits();
+    match stop {
+      Stop::Steps => (
+        format!(
+          "{what} a type that could not be read under these type arguments within \
+           `Limits::max_value_steps`, {}, the steps the analysis may take to complete values",
+          self.values.max()
+        ),
+        "raise the limit with `Limits::with_max_value_steps`",
+      ),
+      Stop::Built(Limit::Depth) => (
+        format!(
+          "{what} a type that, under these type arguments, nests deeper than \
+           `Limits::max_generic_depth`, {}, admits",
+          limits.max_generic_depth()
+        ),
+        "raise the bound with `Limits::with_max_generic_depth`, or nest types less deeply",
+      ),
+      Stop::Built(Limit::Instantiations) => (
+        format!(
+          "{what} a type that, under these type arguments, is one more instantiation of a \
+           generic definition than `Limits::max_instantiations`, {}, admits",
+          limits.max_instantiations()
+        ),
+        "raise the bound with `Limits::with_max_instantiations`, or instantiate fewer types",
+      ),
+      // The match's arm alone: a rebuild fills nothing, and never draws on this limit.
+      Stop::Built(Limit::Substitutions) => (
+        format!(
+          "{what} a type that could not be read under these type arguments within \
+           `Limits::max_substitutions`, {}",
+          limits.max_substitutions()
+        ),
+        "raise the bound with `Limits::with_max_substitutions`",
+      ),
+    }
+  }
+
+  /// Reports, at the path `at` of an application that leaves `argument` out, that the copy of its
+  /// default, whose tree is `tree`, does not fit the type the application's type arguments give
+  /// it, labelled at the default: the one diagnostic of that copy.
+  fn unfit_default(&mut self, at: Location, argument: MemberId, tree: u32) {
+    let Some(RawTree { root, source, .. }) = self.raw.trees.get(tree as usize).copied() else {
+      return;
+    };
+    let Some(node) = self.raw.nodes.get(root as usize).copied() else {
+      return;
+    };
+    let name: &[u8] = match self.builder.member_name(argument) {
+      Some(sym) => self.builder.spelling(sym),
+      None => b"",
+    };
+    let name = Excerpt(name);
+    let message = format!(
+      "under this application's type arguments, the default `{}` of `{name}` does not fit the \
+       type `{name}` takes",
+      Excerpt(self.raw.text(source, node.span))
+    );
+    let (code, label) = Site::Default.refusal();
+    self.reporter.report(
+      Diagnostic::builder(code, at)
+        .message(message)
+        .primary_label(label)
+        .label(Location::new(source, node.span), "this default")
+        .build(),
+    );
+  }
+
+  /// The argument `argument` of the application `applying` says, as written: its value coerced
+  /// against the argument's type under the application's type arguments. A required argument,
+  /// non-null there and with no default, given `null` is reported as left out, at its name, and
+  /// its value is unresolved. A value whose type cannot be built under the arguments is one
+  /// unresolved row, typed with the type the argument is written with, `resource-limit` at it.
+  fn written_argument(&mut self, applying: Applying, argument: RawArgument) {
+    let application = applying.application;
+    let expected = match self.under(argument.argument, applying.env, applying.library) {
+      Ok(expected) => expected,
+      Err(stop) => {
+        let written = self.member_type(argument.argument);
+        if let Some(value) = self.unbuilt_value(argument.tree, written, stop) {
+          self.builder.push_application_argument(
+            application,
+            argument.argument,
+            Some(argument.name),
+            value,
+          );
+        }
+        return;
+      }
+    };
+    let (ty, non_null) = (expected.ty, expected.non_null);
     let required = non_null && !self.raw.defaults.contains_key(&argument.argument);
     let null = self
       .raw
@@ -1454,6 +2013,22 @@ impl<'p> Coercion<'_, 'p, '_> {
         value,
       );
     }
+  }
+
+  /// The value of the tree `tree`, written where it takes a type that `stop` kept from being read
+  /// under type arguments: one unresolved row at its root, typed `ty`, the type it is written
+  /// against, and `resource-limit` at it.
+  fn unbuilt_value(&mut self, tree: u32, ty: Option<TyId>, stop: Stop) -> Option<ValueId> {
+    let RawTree { root, source, .. } = self.raw.trees.get(tree as usize).copied()?;
+    let node = self.raw.nodes.get(root as usize).copied()?;
+    let at = Location::new(source, node.span);
+    let id = self.builder.push_value(at, true);
+    if let Some(ty) = ty {
+      self.builder.set_value_ty(id, ty);
+    }
+    let (message, help) = self.stopped(stop, "this value takes");
+    self.limit(at, message, help);
+    Some(id)
   }
 
   /// The value of `argument`, a required argument of `application` given `null`, of type `ty`:
@@ -1585,7 +2160,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       Class::Object { def, first } => self.object(id, making, def, first),
       Class::Leaf(base) => {
         self.path(id, raw.kind);
-        match self.leaf(id, node, tree, base) {
+        match self.leaf(Some(id), node, tree, base) {
           Ok(ident) => {
             if let Some(last) = self.idents.last_mut() {
               last.0 = ident;
@@ -1862,11 +2437,11 @@ impl<'p> Coercion<'_, 'p, '_> {
       // this default's count, through this same reading of the literal, and it was exact, or no
       // copy would be made. So its rows are among those already paid for.
       if mode.written() {
-        match self.ask(default, ty, library) {
-          Asked::Copy(_) => {}
+        match self.ask(default, ty, library, false) {
+          Asked::Copy { .. } => {}
           Asked::Absent => continue,
           Asked::Starved => {
-            self.object_starved(at);
+            self.object_starved(at, Stop::Steps);
             merge.default = merge.default_end;
             continue;
           }
@@ -2057,7 +2632,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         continue;
       }
       if !library && !self.charge(1) {
-        self.object_starved(at);
+        self.object_starved(at, Stop::Steps);
         return false;
       }
       self.missing_field(def, field, at);
@@ -2096,21 +2671,21 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.reporter.report(report.build());
   }
 
-  /// Reports that the fields the object literal at `at` leaves out are past the budget.
-  fn object_starved(&mut self, at: Location) {
-    let kind = DiagnosticKind::ResourceLimit;
-    let max = self.max_steps;
-    self.reporter.report(
-      Diagnostic::builder(kind.code(), at)
-        .severity(kind.severity())
-        .message(format!(
-          "the fields this literal leaves out pass `Limits::max_value_steps`, {max}, the steps \
-           the analysis may take to complete values, and are not filled"
-        ))
-        .primary_label(kind.title())
-        .help("raise the limit with `Limits::with_max_value_steps`, or write the fields")
-        .build(),
-    );
+  /// Reports that the fields the object literal at `at` leaves out are past the budget, or, as
+  /// `stop` says, take a type that cannot be built under its input object's type arguments.
+  fn object_starved(&mut self, at: Location, stop: Stop) {
+    let (message, help) = match stop {
+      Stop::Steps => (
+        format!(
+          "the fields this literal leaves out pass `Limits::max_value_steps`, {}, the steps the \
+           analysis may take to complete values, and are not filled",
+          self.values.max()
+        ),
+        "raise the limit with `Limits::with_max_value_steps`, or write the fields",
+      ),
+      Stop::Built(_) => self.stopped(stop, "the fields this literal leaves out take"),
+    };
+    self.limit(at, message, help);
   }
 
   /// Makes the row of `making`'s node one unresolved row, typed with its type, and reports why,
@@ -2283,10 +2858,11 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Makes `id`, the row of `node`, of `tree`, what `base` takes of it. Answers its identity, when
-  /// it has one.
+  /// it has one. With no `id` it reads the node exactly so, through the same kept reads, and writes
+  /// no row: what does not fit is told by what tells it where the node is written.
   fn leaf(
     &mut self,
-    id: ValueId,
+    id: Option<ValueId>,
     node: u32,
     tree: RawTree,
     base: Base,
@@ -2296,18 +2872,24 @@ impl<'p> Coercion<'_, 'p, '_> {
     let refused = move |why: Why| Refused { node, why };
     match (base, kind) {
       (Base::Kept, _) => {
-        self.literal(id, node, source);
+        if let Some(id) = id {
+          self.literal(id, node, source);
+        }
         Ok(None)
       }
       (Base::Enum(def), RawKind::Path(row)) => self.enum_value(id, node, row, def, tree),
       (Base::TypeRef, RawKind::Path(row)) => self.type_value(id, node, row, tree),
       (Base::Bool, RawKind::Boolean(flag)) => {
-        self.builder.set_bool(id, flag);
+        if let Some(id) = id {
+          self.builder.set_bool(id, flag);
+        }
         Ok(Some(Ident::Bool(flag)))
       }
       (Base::String | Base::Id, RawKind::String) => {
         let text = self.cooked(node, source).ok_or(refused(Why::Kind))?;
-        self.builder.give_string(id, text);
+        if let Some(id) = id {
+          self.builder.give_string(id, text);
+        }
         Ok(Some(Ident::Text(text)))
       }
       (Base::Int(range), RawKind::Int(radix)) => {
@@ -2332,7 +2914,9 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       (Base::Bytes, RawKind::String | RawKind::List) => {
         let bytes = self.bytes(node, source)?;
-        self.builder.give_bytes(id, bytes);
+        if let Some(id) = id {
+          self.builder.give_bytes(id, bytes);
+        }
         Ok(Some(Ident::Bytes(bytes)))
       }
       // Every literal a base does not take: a collection takes its own literal alone, and a
@@ -2352,12 +2936,12 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
   }
 
-  /// Makes `id` the integer `node` is, of `radix`, when it is in `range`. Its digits are counted
-  /// first, and a count past what the width holds refuses it unconverted. Answers whether it is
-  /// written below zero, and its magnitude.
+  /// Makes `id` the integer `node` is, of `radix`, when it is in `range`, and no row with no `id`.
+  /// Its digits are counted first, and a count past what the width holds refuses it unconverted.
+  /// Answers whether it is written below zero, and its magnitude.
   fn int(
     &mut self,
-    id: ValueId,
+    id: Option<ValueId>,
     node: u32,
     source: u32,
     radix: Radix,
@@ -2389,28 +2973,40 @@ impl<'p> Coercion<'_, 'p, '_> {
     ) {
       return Err(refused(out));
     }
-    let row = self.int_row(node, source, scanned.negative, converted);
-    self.builder.give_int(id, row);
+    if let Some(id) = id {
+      let row = self.int_row(node, source, scanned.negative, converted);
+      self.builder.give_int(id, row);
+    }
     Ok((scanned.negative, converted))
   }
 
   /// Makes `id` the float `node`, a float or an integer, reads as in `f32` when `single` and in
-  /// `f64` otherwise, when it is finite there: an `f32` is the literal rounded once to `f32`, never
-  /// its `f64` rounded again, and is kept widened to an `f64`, which is exact. Answers its
-  /// identity: the bits of its value in its type, `-0.0` made `0.0`.
-  fn float(&mut self, id: ValueId, node: u32, source: u32, single: bool) -> Result<u64, Refused> {
+  /// `f64` otherwise, when it is finite there, and no row with no `id`: an `f32` is the literal
+  /// rounded once to `f32`, never its `f64` rounded again, and is kept widened to an `f64`, which
+  /// is exact. Answers its identity: the bits of its value in its type, `-0.0` made `0.0`.
+  fn float(
+    &mut self,
+    id: Option<ValueId>,
+    node: u32,
+    source: u32,
+    single: bool,
+  ) -> Result<u64, Refused> {
     let refused = move |why: Why| Refused { node, why };
     let read = self.float_read(node, source).ok_or(refused(Why::Kind))?;
     // Adding `0.0` makes `-0.0` `0.0`, and leaves every other value as it is.
     if single {
       let narrow = read.single.ok_or(refused(Why::Single))?;
-      let row = self.float_row(node, source, f64::from(narrow), true);
-      self.builder.give_float(id, row);
+      if let Some(id) = id {
+        let row = self.float_row(node, source, f64::from(narrow), true);
+        self.builder.give_float(id, row);
+      }
       return Ok(u64::from((narrow + 0.0).to_bits()));
     }
     let value = read.value.ok_or(refused(Why::Infinite))?;
-    let row = self.float_row(node, source, value, false);
-    self.builder.give_float(id, row);
+    if let Some(id) = id {
+      let row = self.float_row(node, source, value, false);
+      self.builder.give_float(id, row);
+    }
     Ok((value + 0.0).to_bits())
   }
 
@@ -2488,10 +3084,10 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// are resolved once, as a type, where the value is written, and must name `def`: another enum,
   /// a parameter, `NonZero` or a module does not fit, and a prefix the resolver refused leaves the
   /// value unresolved and says nothing more, the resolver having said why. Answers the value's
-  /// identity, its member, when it names one.
+  /// identity, its member, when it names one. With no `id` it makes no row.
   fn enum_value(
     &mut self,
-    id: ValueId,
+    id: Option<ValueId>,
     node: u32,
     row: u32,
     def: DefId,
@@ -2524,7 +3120,9 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     match self.members.get(&(def, last)) {
       Some(&member) => {
-        self.builder.set_enum(id, def, member);
+        if let Some(id) = id {
+          self.builder.set_enum(id, def, member);
+        }
         Ok(Some(Ident::Member(member)))
       }
       None => Err(refused(Why::NoValue { def, name: last })),
@@ -2605,10 +3203,11 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// resolved once, as a type, where the value is written. A definition of any kind is a type
   /// value; a type parameter, an alias such as `NonZeroU32`, which names an instantiation, and a
   /// module do not fit; a path the resolver refused leaves the value unresolved and says nothing
-  /// more, the resolver having said why, whoever asked first. A type value has no identity.
+  /// more, the resolver having said why, whoever asked first. A type value has no identity. With
+  /// no `id` it makes no row.
   fn type_value(
     &mut self,
-    id: ValueId,
+    id: Option<ValueId>,
     node: u32,
     row: u32,
     tree: RawTree,
@@ -2622,7 +3221,9 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     match self.named(row, path, tree) {
       Resolved::Def(def) => {
-        self.builder.set_type_value(id, def);
+        if let Some(id) = id {
+          self.builder.set_type_value(id, def);
+        }
         Ok(None)
       }
       Resolved::Unresolved => Ok(None),
@@ -2908,13 +3509,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Spends `steps` of `Limits::max_value_steps`, or spends none and answers that the budget
   /// cannot pay them.
   fn charge(&mut self, steps: u32) -> bool {
-    match self.spent.checked_add(steps) {
-      Some(spent) if spent <= self.max_steps => {
-        self.spent = spent;
-        true
-      }
-      _ => false,
-    }
+    self.values.charge(steps)
   }
 
   /// Reports `refused`, a node written in the source `source`, that does not fit, the value it
@@ -2928,13 +3523,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     let Some(raw) = self.raw.nodes.get(refused.node as usize).copied() else {
       return;
     };
-    if let RawKind::Path(row) = raw.kind
-      && self
-        .raw
-        .paths
-        .get(row as usize)
-        .is_some_and(|path: &RawPath| path.written.is_none())
-    {
+    if self.unknown_root(refused.node) {
       return;
     }
     let at = Location::new(source, raw.span);
@@ -3015,7 +3604,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         )
       }
       Why::Costly { digits, cost } => {
-        let max = self.max_steps;
+        let max = self.values.max();
         (
           Coded::Kind(DiagnosticKind::ResourceLimit),
           format!(
@@ -3111,7 +3700,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Reports that the lists a value written at `at` stands for are past the budget.
   fn lone_limit(&mut self, at: Location) {
     let kind = DiagnosticKind::ResourceLimit;
-    let max = self.max_steps;
+    let max = self.values.max();
     self.reporter.report(
       Diagnostic::builder(kind.code(), at)
         .severity(kind.severity())
