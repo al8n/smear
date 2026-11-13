@@ -395,6 +395,7 @@ pub(crate) fn coerce(
     supplied: sources.package_sources(ROOT).start(),
     values: Counter::new(max_steps),
     rebuilds: BTreeMap::new(),
+    nullables: BTreeMap::new(),
     kept: Vec::new(),
     magnitudes: Vec::new(),
     limbs: Vec::new(),
@@ -995,6 +996,9 @@ struct Coercion<'c, 'p, 'x> {
   /// with and the instantiation's nullable form: the type rebuilt, `None` for a type that is not
   /// rebuilt, or what stopped the rebuild.
   rebuilds: BTreeMap<(TyId, TyId), Result<Option<TyId>, Stop>>,
+  /// Each non-null instantiation read so far, an environment or a written occurrence's type, by
+  /// its id: its nullable form, found once off its arguments.
+  nullables: BTreeMap<TyId, TyId>,
   /// What has been read of each node read so far: the rows a node's `kept` slot indexes.
   kept: Vec<Kept>,
   /// Every integer's magnitude converted so far.
@@ -1146,7 +1150,8 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// type of `owner`, in their place, `library` when the built-in library writes what asks: rebuilt
   /// the first time it is asked, a step of `Limits::max_value_steps` for the root and one for each
   /// argument or element of a node rebuilt, and remembered by `written` and `env`'s nullable form,
-  /// what stopped it included. `None` when it names no parameter of `owner`.
+  /// what stopped it included. `None` when it names no parameter of `owner`. A rebuild remembered
+  /// reads none of `env`'s arguments.
   fn rebuilt(
     &mut self,
     written: TyId,
@@ -1154,11 +1159,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     owner: DefId,
     library: bool,
   ) -> Result<Option<TyId>, Stop> {
-    // A named type's nullable form is interned before its non-null one, and is found.
-    let builder: &ModelBuilder = &*self.builder;
-    let nullable = builder
-      .find_named(owner, builder.ty_args(env), false)
-      .unwrap_or(env);
+    let nullable = self.nullable(env, owner);
     if let Some(&made) = self.rebuilds.get(&(written, nullable)) {
       return made;
     }
@@ -1172,6 +1173,25 @@ impl<'p> Coercion<'_, 'p, '_> {
     );
     self.rebuilds.insert((written, nullable), made);
     made
+  }
+
+  /// The nullable form of `ty`, a named type of `def`: itself when it is nullable; otherwise
+  /// found off its arguments the first time it is asked, once for each distinct non-null type,
+  /// and remembered by its id. A named type's nullable form is interned before its non-null one,
+  /// so it is found.
+  fn nullable(&mut self, ty: TyId, def: DefId) -> TyId {
+    if !self.builder.ty_non_null(ty) {
+      return ty;
+    }
+    if let Some(&found) = self.nullables.get(&ty) {
+      return found;
+    }
+    let builder: &ModelBuilder = &*self.builder;
+    let found = builder
+      .find_named(def, builder.ty_args(ty), false)
+      .unwrap_or(ty);
+    self.nullables.insert(ty, found);
+    found
   }
 
   /// Records the value of the tree `tree`, of the type `ty`, written at `site` in the definition
@@ -1219,10 +1239,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       if start >= end {
         continue;
       }
-      let builder: &ModelBuilder = &*self.builder;
-      let nullable = builder
-        .find_named(def, builder.ty_args(ty), false)
-        .unwrap_or(ty);
+      let nullable = self.nullable(ty, def);
       let verdict = match self.checked.get(&nullable).copied() {
         Some(verdict) => verdict,
         None => {

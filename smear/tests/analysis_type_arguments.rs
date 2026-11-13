@@ -1271,6 +1271,76 @@ fn a_default_that_meets_itself_is_judged_where_it_is_left_out() {
   );
 }
 
+/// Many defaulted type parameters and many defaulted values cost steps in their sum. `@d` has `N`
+/// type parameters, each `Int` by default, and `M` arguments typed `T0`, each `1` by default, and
+/// `Query` applies it bare twice. The first application leaves out `N` slots, a substitution step
+/// each, and fills each from its one-node default, a step each: `2N`; the second finds its type in
+/// the fill table, for nothing. The first rebuilds `T0` once, a value step, then counts each
+/// argument's default under `Int`, its one node a step, and charges the copy's one row: `2M + 1`;
+/// the second reads each kept count, a step, and charges the row: `2M`. So at `4M + 1` nothing is
+/// said, and at `4M` the second application's last copy is past the budget, at its path; at
+/// `2N - 1` substitutions each application's fill is, at its path. `In` has the same parameters
+/// and `M` such fields, and `H.y`, a non-null `In!`, leaves every field out: `2M + 1`, as the
+/// first application, its fields read under `In!`'s nullable form; then `In!`'s check, a step for
+/// each of its `M` values, their counts kept: `3M + 1`, and at `3M` the check is
+/// `resource-limit` at `In!`. A test sees steps, not work: the work is linear by construction, a
+/// nullable environment used as it is, a non-null one's nullable form found once and remembered,
+/// and a remembered rebuild reading none of the environment's arguments. Refuses a charge for
+/// each lookup.
+#[test]
+fn many_defaulted_parameters_and_values_cost_their_sum() {
+  const N: u32 = 1000;
+  const M: u32 = 1000;
+  let params: Vec<String> = (0..N).map(|i: u32| format!("T{i} = Int")).collect();
+  let params = params.join(", ");
+  let arguments: Vec<String> = (0..M).map(|k: u32| format!("a{k}: T0 = 1")).collect();
+  let directive = format!(
+    "type Query @d @d {{\n  x: Int\n}}\ndirective @d<{params}>({}) repeatable on OBJECT\n",
+    arguments.join(", ")
+  );
+  quiet(&analyze_text(&directive, &Limits::new()));
+  quiet(&analyze_text(
+    &directive,
+    &Limits::new().with_max_value_steps(4 * M + 1),
+  ));
+  let short = analyze_text(&directive, &Limits::new().with_max_value_steps(4 * M));
+  let schema = schema_file(&short);
+  assert_eq!(
+    found(&short),
+    [(LIMIT, named(schema, &directive, "@", "d", 1))]
+  );
+  let last = format!("a{}", M - 1);
+  assert_eq!(argument_shown(short.model(), "Query", 0, &last), "Int 1");
+  assert_eq!(argument_shown(short.model(), "Query", 1, &last), "absent");
+  quiet(&analyze_text(
+    &directive,
+    &Limits::new().with_max_substitutions(2 * N),
+  ));
+  let unfilled = analyze_text(&directive, &Limits::new().with_max_substitutions(2 * N - 1));
+  let schema = schema_file(&unfilled);
+  assert_eq!(
+    found(&unfilled),
+    [
+      (LIMIT, named(schema, &directive, "@", "d", 0)),
+      (LIMIT, named(schema, &directive, "@", "d", 1)),
+    ]
+  );
+
+  let fields: String = (0..M).map(|k: u32| format!("  a{k}: T0 = 1\n")).collect();
+  let input = format!(
+    "type Query {{\n  x: Int\n}}\ninput In<{params}> {{\n{fields}}}\n\
+     input H {{\n  y: In! = {{}}\n}}\n"
+  );
+  quiet(&analyze_text(&input, &Limits::new()));
+  quiet(&analyze_text(
+    &input,
+    &Limits::new().with_max_value_steps(3 * M + 1),
+  ));
+  let short = analyze_text(&input, &Limits::new().with_max_value_steps(3 * M));
+  let schema = schema_file(&short);
+  assert_eq!(found(&short), [(LIMIT, at(schema, &input, "In!", 0))]);
+}
+
 /// Every value a walk of some packages reaches.
 #[derive(Default)]
 struct Values {
