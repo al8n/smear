@@ -67,7 +67,7 @@ use rowan::{GreenNodeBuilder, Language};
 use smear::parser::{
   graphqlx::{
     GraphQLx,
-    ast::{Document, ExecutableDocument, TypeSystemDocument},
+    ast::{Document, ExecutableDocument, TypeSystemDocument, TypeSystemItem},
     error::GraphqlxErrors,
     kinds::{GraphQLxLang, SyntaxKind as K},
     lossless::{
@@ -457,9 +457,9 @@ fn the_type_system_projection_equals_the_parse_over_the_shared_corpus() {
         recovery.skipped()
       );
       assert_eq!(
-        recovery.projected() as usize,
-        expected.definitions().len(),
-        "{name} ({form}): the recovery counted a different number of entries"
+        recovery.projected(),
+        items_at_every_depth(&expected),
+        "{name} ({form}): the recovery did not count every item at every module depth"
       );
       assert_eq!(
         recovered, expected,
@@ -475,6 +475,28 @@ fn the_type_system_projection_equals_the_parse_over_the_shared_corpus() {
     entries.len() * (ALPHABET.len() + 1),
     "the sweep did not run every form over every entry"
   );
+}
+
+/// How many items `document` holds at every module depth, an inline module counting one beside
+/// the items inside it: what [`Recovery::projected`] is over a parse nothing was skipped in.
+///
+/// A worklist, as the projection's own module walk is.
+fn items_at_every_depth(document: &TypeSystemDocument<&str>) -> u32 {
+  let mut count = 0u32;
+  let mut pending: Vec<&[TypeSystemItem<&str>]> = Vec::new();
+  let mut current: &[TypeSystemItem<&str>] = document.definitions();
+  loop {
+    for item in current {
+      count = count.saturating_add(1);
+      if let TypeSystemItem::Mod(module) = item {
+        pending.push(module.items());
+      }
+    }
+    match pending.pop() {
+      Some(next) => current = next,
+      None => return count,
+    }
+  }
 }
 
 /// The three roots refuse each other's trees rather than filtering them.
@@ -4943,15 +4965,16 @@ fn every_walk_is_a_transcription() {
     0,
     "a wildcard arm that covers what it drops"
   );
-  // The two loops over a child iterator that remain are not walks: the cursor's own trivia skip,
-  // and the recovering door's pass over the root, which counts what it skips rather than
-  // projecting a production. The cursor is the substrate's since al8n/smear#217/#218 hoisted it,
-  // so its loop is counted where it now lives — the substrate's `walk` module — and the two still
-  // sum to the two this census has always found.
+  // The three loops over a child iterator that remain are not walks: the cursor's own trivia
+  // skip; the recovering door's pass over the root, which counts what it skips rather than
+  // projecting a production; and the kind check that door makes of a module's direct children,
+  // which reads no kind's meaning and projects nothing. The cursor is the substrate's since
+  // al8n/smear#217/#218 hoisted it, so its loop is counted where it now lives — the substrate's
+  // `walk` module — beside the two here.
   assert_eq!(
     count("for element in"),
-    1,
-    "a child loop outside the cursor"
+    2,
+    "a child loop that is neither the root pass nor a module's kind check"
   );
   let substrate = std::fs::read_to_string(
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../smear-parser/src/lossless/project.rs"),
