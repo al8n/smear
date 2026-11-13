@@ -155,15 +155,22 @@ impl Visitor for MarkerMisuse {
       DefKind::Union => ("union", "a union"),
       _ => return,
     };
-    let entry = match (interface, occurrence.kind()) {
-      (Some(interface), _) => format!("`{}`", Excerpt(interface.name().as_bytes())),
-      (None, TypeExprKind::Param { def, index }) => {
-        let Some(param) = model.def(def).type_params().nth(index as usize) else {
+    let entry = match interface {
+      Some(interface) => format!("`{}`", Excerpt(interface.name().as_bytes())),
+      // The type parameter as the entry writes it, with one look: an extension's own name for its
+      // target's parameter is its own.
+      None => {
+        let Some(path) = occurrence.path() else {
           return;
         };
-        format!("its type parameter `{}`", Excerpt(param.name().as_bytes()))
+        let Some(&name) = path.segments().last() else {
+          return;
+        };
+        format!(
+          "its type parameter `{}`",
+          Excerpt(model.name(name).as_bytes())
+        )
       }
-      (None, _) => return,
     };
     cx.report(
       Diagnostic::builder(kind.code(), occurrence.location())
