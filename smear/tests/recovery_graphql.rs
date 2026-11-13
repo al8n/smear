@@ -11,7 +11,7 @@
 //! of the block it stands in or anything after that block.
 //!
 //! Every text the lossless tests read is also held to round-trip. Nothing here asserts what a
-//! layer lends its sink or how many errors it counts.
+//! layer lends its sink, and the one error counted is a budget's refusal, which is reported once.
 
 use smear::parser::graphql::Syntactic;
 
@@ -30,11 +30,20 @@ fn the_syntactic_layer_answers_no_document_for_a_broken_text() {
 
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 mod lossless {
-  use smear::parser::graphql::{
-    Lossless, Recovery,
-    kinds::SyntaxKind as K,
-    lossless::{Parse, SyntaxNode, parse_document},
+  use core::ops::Range;
+
+  use smear::{
+    lexer::limits::LosslessLimits,
+    parser::graphql::{
+      Lossless, Recovery,
+      kinds::SyntaxKind as K,
+      lossless::{
+        Parse, SyntaxNode, parse_document, parse_document_with_limits,
+        parse_type_system_document_with_limits,
+      },
+    },
   };
+  use tokora::emitter::Severity;
 
   use super::MISSING_FIELD_TYPE;
 
@@ -288,5 +297,134 @@ mod lossless {
       entries(&tree, K::Document, K::OperationDefinition),
       ["query R { g }"]
     );
+  }
+
+  // ── A budget that runs out while a skip is scanned again ───────────────────────────────────
+
+  /// The fifth external review's witness: three `(` of junk at the root, a `}` no skip opened, two
+  /// `)` and a definition.
+  const REPLAYED: &str = "(((}))scalar B";
+
+  /// [`REPLAYED`] at both roots under a produce-event budget of `max`, each root's name with its
+  /// parse.
+  fn replayed(max: usize) -> [(&'static str, Parse); 2] {
+    let limits = LosslessLimits::default().with_max_produce_events(max);
+    [
+      (
+        "type-system",
+        parse_type_system_document_with_limits(REPLAYED, limits),
+      ),
+      ("mixed", parse_document_with_limits(REPLAYED, limits)),
+    ]
+  }
+
+  /// The gap tiles anywhere in `tree`, text the parse never read, each as it is written and where.
+  fn gaps(tree: &SyntaxNode) -> Vec<(String, Range<usize>)> {
+    tree
+      .descendants_with_tokens()
+      .filter_map(|element| element.into_token())
+      .filter(|token| token.kind() == K::Gap)
+      .map(|token| {
+        let range = token.text_range();
+        (
+          token.text().to_string(),
+          usize::from(range.start())..usize::from(range.end()),
+        )
+      })
+      .collect()
+  }
+
+  /// [`REPLAYED`] under the produce-event budget, the budget no rollback refunds.
+  ///
+  /// tokora charges one produce event for each item its one lexing site hands back, a token, a
+  /// space or a lexer error, whether the parse consumes it or only peeks it into the cache
+  /// (`InputRef::lex_within_boundary`, `spend()` after `lexer.lex()` hands an item back). Taking a
+  /// token out of the cache charges nothing, and neither does the end of the input: `lex()`
+  /// handing back nothing is charged nothing, and with the budget spent, `settle_met_ceiling`
+  /// answers a genuine end by position, before it lexes anything.
+  ///
+  /// The text is nine lexemes. The root peeks the first `(`, event 1, and the skip from it lexes
+  /// the next six, up to `scalar`, as events 2 to 7, and finds its restart point there. The skip as
+  /// it always ran kept that hole and read the space and `B` as events 8 and 9: nine events in all.
+  /// Here the hole holds a `}` the skip did not open, so the attempt is declined. The second scan
+  /// lexes the three `(` and the `}` again as events 8 to 11 and keeps the hole `(((` in front of
+  /// the `}`. The root takes the `}` from the cache, then reads `)`, `)`, `scalar`, the space and
+  /// `B` as events 12 to 16. So `B` is read from a budget of 16 on.
+  ///
+  /// Below 16 the budget runs out first and the parse ends where it does. At 9 and 10 it runs out
+  /// inside the second scan, which keeps `((` or `(((` with no hole. At 11 to 15 it runs out after
+  /// the second scan, before `B`. At 9 the tree holds `((` and the gap of what was never read,
+  /// nothing else, and the refusal is reported once, at the end of what the parse committed.
+  #[test]
+  fn a_budget_that_runs_out_while_a_skip_is_scanned_again_ends_the_parse_there() {
+    for (root, parse) in replayed(9) {
+      let tree: SyntaxNode = parse.syntax();
+      assert_eq!(tree.text().to_string(), REPLAYED, "at the {root} root");
+      assert!(
+        written(&tree, K::ScalarTypeDefinition).is_empty(),
+        "at the {root} root: `B` is read"
+      );
+      assert!(
+        written(&tree, K::Error).is_empty(),
+        "at the {root} root: a hole is kept"
+      );
+      assert_eq!(
+        gaps(&tree),
+        [(String::from("(}))scalar B"), 2..REPLAYED.len())],
+        "at the {root} root: what the parse never read"
+      );
+      let refusals = parse
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| {
+          diagnostic.severity() == Severity::Error && diagnostic.span() == (2..2)
+        })
+        .count();
+      assert_eq!(refusals, 1, "at the {root} root: the budget's refusal");
+    }
+
+    for (budget, parses) in [("16", replayed(16)), ("none", replayed(usize::MAX))] {
+      for (root, parse) in parses {
+        let tree: SyntaxNode = parse.syntax();
+        assert_eq!(
+          tree.text().to_string(),
+          REPLAYED,
+          "at the {root} root under {budget}"
+        );
+        assert_eq!(
+          written(&tree, K::ScalarTypeDefinition),
+          ["scalar B"],
+          "at the {root} root under {budget}"
+        );
+        assert_eq!(
+          written(&tree, K::Error),
+          ["(((", "}", ")", ")"],
+          "at the {root} root under {budget}: the hole in front of the `}}`, then the junk"
+        );
+        assert!(gaps(&tree).is_empty(), "at the {root} root under {budget}");
+      }
+    }
+  }
+
+  /// Every budget from none to one past 16, the least at which [`REPLAYED`] reads `B`: the tree
+  /// spells its text at each, and `B` is read at 16 and 17 and at none below. A change that makes
+  /// recovery here dearer or cheaper moves the threshold, and this names the budget it moved at.
+  #[test]
+  fn a_budget_that_runs_out_while_a_skip_is_scanned_again_reads_b_from_sixteen_on() {
+    for max in 0..=17 {
+      for (root, parse) in replayed(max) {
+        let tree: SyntaxNode = parse.syntax();
+        assert_eq!(
+          tree.text().to_string(),
+          REPLAYED,
+          "at the {root} root under max_produce_events({max})"
+        );
+        assert_eq!(
+          written(&tree, K::ScalarTypeDefinition) == ["scalar B"],
+          max >= 16,
+          "at the {root} root under max_produce_events({max}): whether `B` is read"
+        );
+      }
+    }
   }
 }

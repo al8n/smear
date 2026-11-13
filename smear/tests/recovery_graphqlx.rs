@@ -1184,6 +1184,38 @@ mod lossless {
     }
   }
 
+  /// The fifth external review's witness, `(((}))scalar B`, where GraphQLx reads it through this
+  /// helper with a module's brace in it.
+  ///
+  /// A module's body hands its own junk to the body's skip, not to this helper, and
+  /// `mod m { (((}))scalar B }` puts the module's own `}` where the witness's stands. So the witness
+  /// stands behind an argument list: the list takes the first `(` as its own, the three after it
+  /// are the witness's junk, and `m`'s `}` is the brace the skip did not open.
+  const REPLAYED: &str = "mod m { scalar A @d((((}))scalar B }";
+
+  /// [`REPLAYED`] at every produce-event budget from none to one past the least at which it reads
+  /// `B`, held to the braces as written at both roots.
+  ///
+  /// Every space is a lexeme, and nothing is lexed twice before the skip. The list takes its own
+  /// `(` as lexeme 13 and peeks the junk `(` at 14. The skip from there lexes 15 to 19, `m`'s `}` at
+  /// 17, and stops at `scalar`, lexeme 20, so the parse has spent 20 events. The hole holds the
+  /// `}`, so the attempt is declined, and the second scan lexes 14 to 17 again as events 21 to 24.
+  /// Budgets 20 to 23 stop that second scan after a skip that found its restart point: it keeps
+  /// nothing, `(`, `((` or `(((`, and `m` is left open. Budgets 17 to 19 stop the skip itself after
+  /// the `}`, and the second scan is refused before it takes anything. From 24 on `m` closes on its
+  /// own `}`. The root then reads `)`, `)`, `scalar`, the space and `B` as events 25 to 29, so `B`
+  /// is read from 29 on, and the sweep runs to 30.
+  #[test]
+  fn the_braces_hold_while_a_skip_is_scanned_again_under_every_produce_event_budget() {
+    for max in 0..=30 {
+      faithful_under(
+        REPLAYED,
+        LosslessLimits::default().with_max_produce_events(max),
+        &format!("max_produce_events({max})"),
+      );
+    }
+  }
+
   /// The last token of `node` that is neither trivia nor text the parse never read: its text, its
   /// range, and whether it is a child of `node` itself.
   fn last_read(node: &SyntaxNode) -> (String, Range<usize>, bool) {
