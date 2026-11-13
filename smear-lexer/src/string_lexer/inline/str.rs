@@ -16,6 +16,10 @@ use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInl
 
 #[derive(Logos, Debug)]
 #[logos(crate = tokora::logos, extras = usize, error(StringError, unmatched))]
+#[allow(
+  clippy::duplicated_attributes,
+  reason = "each `#[regex]` is one logos rule, and three rules of `EscapedUnicode` share a callback"
+)]
 pub(crate) enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
   #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
