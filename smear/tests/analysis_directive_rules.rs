@@ -102,16 +102,6 @@ fn schema_file(analysis: &Analysis) -> SourceId {
   file(analysis, 3, "schema.graphqlx")
 }
 
-/// Where the `nth` occurrence, counting from 0, of `needle` is in `text`, the file `source`.
-fn at(source: SourceId, text: &str, needle: &str, nth: usize) -> Location {
-  let start = text
-    .match_indices(needle)
-    .nth(nth)
-    .map(|(start, _): (usize, &str)| start)
-    .unwrap_or_else(|| panic!("`{needle}` does not occur {} times", nth + 1));
-  Location::new(source.get(), SimpleSpan::new(start, start + needle.len()))
-}
-
 /// Where the `nth`, counting from 0, of the names `name` written right after `before` is in `text`,
 /// the file `source`: a name, so one followed by no letter, digit or `_`.
 fn named(source: SourceId, text: &str, before: &str, name: &str, nth: usize) -> Location {
