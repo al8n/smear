@@ -1,10 +1,11 @@
 //! Instantiation: the phase after lowering, which gives each definition its built-in meaning,
-//! checks each definition's defaults where they are written, and gives every type occurrence its
-//! type.
+//! checks each definition's defaults where they are written, gives every type occurrence its
+//! type, and judges the bounds of every instantiation the program writes.
 //!
 //! It reads no document: it reads the rows lowering wrote, through the builder, and writes onto
-//! them. It does four things, in this order: built-in meaning; each definition's defaults; every
-//! occurrence's type; every application's count of type arguments.
+//! them. It does five things, in this order: built-in meaning; each definition's defaults; every
+//! occurrence's type; every application's count of type arguments; the bounds of every written
+//! instantiation, which the `bounds` module holds.
 //!
 //! # Built-in meaning
 //!
@@ -100,6 +101,18 @@
 //! An application whose directive resolved writes no more type arguments than the directive has
 //! type parameters, and no fewer than it takes, or it is `generic-arity`, at its path. Its type
 //! arguments are occurrences the walk types.
+//!
+//! # Bounds
+//!
+//! Last, every written occurrence of a definition that has a bound is judged by its complete type,
+//! a slot a default filled included: each bound in turn, its interface type with the type's
+//! arguments in place of the definition's type parameters, which the argument for the bounded
+//! parameter, without its own `!`, must satisfy. The first that fails is `unsatisfied-bound`, at
+//! the occurrence, which keeps its type. A type's verdict is made once and shared by its two
+//! nullnesses, a pair of an argument and an interface type is asked once, and every step beyond
+//! one lookup per occurrence is paid from `Limits::max_bound_steps`; an occurrence whose bounds a
+//! limit kept from being judged is `resource-limit`. The `bounds` module says what is judged, and
+//! what is not.
 
 use std::{
   boxed::Box,
@@ -113,21 +126,24 @@ use smear_semantics::scc;
 use tokora::diagnostic::Location;
 
 use super::{
-  builtin::{CORE, DIRECTIVE},
+  builtin::{ALLOC, CORE, DIRECTIVE, TYPE},
   code::DiagnosticKind,
   declare::{Binding, Declarations},
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{ApplicationId, DefId, PackageId, Sym, TyId, TypeExprId, dense},
   limits::Limits,
-  model::{Collection, DefKind, ModelBuilder, Resolution, Written},
+  model::{Collection, DefKind, Keys, ModelBuilder, Resolution, Written},
   set::ROOT,
   source::SourceMap,
 };
 
+mod bounds;
+
 /// Instantiates what lowering left in `builder`, whose declarations are `declarations` and whose
 /// sources `sources` numbers, within `limits`, reporting into `reporter`: each definition's
 /// built-in meaning, then its defaults, checked where they are written, then every occurrence's
-/// type, then every application's count of type arguments.
+/// type, then every application's count of type arguments, then the bounds of every written
+/// instantiation.
 pub(crate) fn instantiate(
   declarations: &Declarations<'_, '_>,
   sources: &SourceMap,
@@ -137,6 +153,14 @@ pub(crate) fn instantiate(
 ) {
   meaning(declarations, sources, builder);
   let Defaults { least, roots } = defaults(builder, reporter);
+  // The built-in definitions satisfaction is keyed on, each by its name in its package's root
+  // module, never by a spelling a program writes.
+  let keys = Keys {
+    map_key: binding(declarations, builder, CORE, TYPE, b"MapKey"),
+    non_zero: binding(declarations, builder, CORE, TYPE, b"NonZero"),
+    string: binding(declarations, builder, ALLOC, TYPE, b"string"),
+    id: binding(declarations, builder, ALLOC, TYPE, b"id"),
+  };
   let mut typing = Typing {
     builder,
     reporter,
@@ -161,15 +185,16 @@ pub(crate) fn instantiate(
   };
   typing.trees();
   typing.applications();
+  typing.bounds(keys, limits.max_bound_steps());
 }
 
 /// Gives each definition its built-in meaning: an interface its own package applies `core`'s
 /// `@marker` to is a marker, and a scalar its own package applies `core`'s `@set` or `@map` to
 /// stands for that collection. `sources` tells which package wrote each application.
 fn meaning(declarations: &Declarations<'_, '_>, sources: &SourceMap, builder: &mut ModelBuilder) {
-  let marker = directive(declarations, builder, b"marker");
-  let set = directive(declarations, builder, b"set");
-  let map = directive(declarations, builder, b"map");
+  let marker = binding(declarations, builder, CORE, DIRECTIVE, b"marker");
+  let set = binding(declarations, builder, CORE, DIRECTIVE, b"set");
+  let map = binding(declarations, builder, CORE, DIRECTIVE, b"map");
   for index in 0..builder.def_count() {
     let def = DefId::new(index);
     match builder.def_kind(def) {
@@ -267,16 +292,20 @@ fn applies(
     })
 }
 
-/// `core`'s directive named `name`: the one `core`'s root module declares, read off its binding
-/// there. `None` when no name so spelled was ever interned, which an analysis's library rules out.
-fn directive(
+/// The definition named `name` in the namespace of rank `namespace` that the root module of the
+/// built-in package at `package` declares, read off its binding there: `core`'s `@marker` or its
+/// `MapKey`, `alloc`'s `string`. `None` when no name so spelled was ever interned, which an
+/// analysis's library rules out.
+fn binding(
   declarations: &Declarations<'_, '_>,
   builder: &ModelBuilder,
+  package: usize,
+  namespace: u8,
   name: &[u8],
 ) -> Option<DefId> {
-  let module = *declarations.roots.get(CORE)?;
+  let module = *declarations.roots.get(package)?;
   let sym = builder.find(name)?;
-  let key = (module, DIRECTIVE, sym);
+  let key = (module, namespace, sym);
   let at = declarations
     .names
     .binary_search_by(|binding: &Binding| {

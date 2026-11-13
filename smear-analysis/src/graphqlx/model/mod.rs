@@ -22,7 +22,7 @@ use std::{string::String, vec::Vec};
 
 pub use application::{Application, ApplicationArgument, Resolution};
 pub use build::ModelBuilder;
-pub(crate) use build::Written;
+pub(crate) use build::{Shape, Written};
 pub use def::{
   Collection, Contribution, Contributions, Def, DefKind, DirectiveLocation, Extern, Externs,
   Origin, Primitive, TypeBound, TypeParam, TypeParams,
@@ -30,6 +30,7 @@ pub use def::{
 pub use member::{Member, MemberKind};
 pub use module::{Module, ModuleKind};
 pub use name::{CanonicalName, Description, Namespace};
+pub(crate) use satisfy::{Keys, Steps};
 pub use schema::{Builtins, Root, RootOperation, Schema};
 pub use ty::{Path, PathRoot, Ty, TyKind, TypeExpr, TypeExprKind};
 pub use value::{FloatValue, IntValue, Literal, LiteralKind, ObjectEntry, Value, ValueKind};

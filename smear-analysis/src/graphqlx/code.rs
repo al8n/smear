@@ -124,6 +124,15 @@ pub enum DiagnosticKind {
   /// definitions or through its own: the default it is written in can never fill, and the
   /// occurrence is reported where it is written.
   GenericDefault,
+  /// An instantiation of a definition whose type argument does not satisfy a bound the definition
+  /// writes on that type parameter. The argument, taken without its own `!`, satisfies the bound's
+  /// interface type, with the instantiation's arguments in place of the definition's type
+  /// parameters, when it is that interface type, or declares it, or is a type parameter bounded by
+  /// it or by an interface that declares it; `core`'s `MapKey` is satisfied intrinsically too. Each
+  /// occurrence that writes such an instantiation is reported where it is written, once, for the
+  /// first of the definition's bounds that fails, with a label at the bound and one at the type
+  /// argument, written or filled from a default. The occurrence keeps its type.
+  UnsatisfiedBound,
 
   // -- smear's rules -----------------------------------------------------------------------------
   /// A package other than the root package writes a `schema` definition or a schema extension. A
@@ -178,6 +187,7 @@ impl DiagnosticKind {
     Self::InvalidBound,
     Self::GenericArity,
     Self::GenericDefault,
+    Self::UnsatisfiedBound,
     Self::SchemaOutsideRoot,
     Self::OrphanExtension,
     Self::GenericEnum,
@@ -210,6 +220,7 @@ impl DiagnosticKind {
       Self::InvalidBound => Code::new("smear::graphqlx::invalid-bound"),
       Self::GenericArity => Code::new("smear::graphqlx::generic-arity"),
       Self::GenericDefault => Code::new("smear::graphqlx::generic-default"),
+      Self::UnsatisfiedBound => Code::new("smear::graphqlx::unsatisfied-bound"),
       Self::SchemaOutsideRoot => Code::new("smear::graphqlx::schema-outside-root"),
       Self::OrphanExtension => Code::new("smear::graphqlx::orphan-extension"),
       Self::GenericEnum => Code::new("smear::graphqlx::generic-enum"),
@@ -242,6 +253,7 @@ impl DiagnosticKind {
       Self::InvalidBound => "invalid bound",
       Self::GenericArity => "wrong number of type arguments",
       Self::GenericDefault => "type parameter default that can never fill",
+      Self::UnsatisfiedBound => "unsatisfied bound",
       Self::SchemaOutsideRoot => "schema outside the root package",
       Self::OrphanExtension => "orphan extension",
       Self::GenericEnum => "generic enum",
@@ -274,6 +286,7 @@ impl DiagnosticKind {
       | Self::InvalidBound
       | Self::GenericArity
       | Self::GenericDefault
+      | Self::UnsatisfiedBound
       | Self::SchemaOutsideRoot
       | Self::OrphanExtension
       | Self::GenericEnum

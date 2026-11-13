@@ -220,9 +220,11 @@ impl TypeBound {
     self.parameter
   }
 
-  /// The interface or marker the parameter must satisfy, as written. A right side that names
-  /// neither, a definition of another kind or a type parameter, is refused where it is written,
-  /// and kept here all the same.
+  /// The interface or marker the parameter must satisfy, as written. Its type may name the
+  /// definition's type parameters, which stand for an instantiation's arguments: `Comparable<T>`
+  /// of `where T: Comparable<T>` is, for `Sorted<User>`, `Comparable<User>`. A right side that
+  /// names neither an interface nor a marker, a definition of another kind or a type parameter, is
+  /// refused where it is written, and kept here all the same.
   #[inline]
   pub const fn interface(&self) -> TypeExprId {
     self.interface

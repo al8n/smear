@@ -63,6 +63,20 @@ impl Steps {
     }
   }
 
+  /// The steps of a question a budget pays for, which has `left` steps left.
+  pub(crate) const fn counted(left: u32) -> Self {
+    Self {
+      left,
+      counted: true,
+    }
+  }
+
+  /// How many steps are left: what was given less what was taken. A question that is not counted
+  /// answers 0.
+  pub(crate) const fn left(&self) -> u32 {
+    self.left
+  }
+
   /// Takes `steps`: `false`, taking nothing, when they are counted and fewer are left.
   fn take(&mut self, steps: u32) -> bool {
     if !self.counted {

@@ -17,8 +17,8 @@
 //!   each field's arguments, field by field;
 //! - type occurrences, values and applications, by lowering: in the order of the walk over every
 //!   package, an occurrence before what it nests (`order` spells the walk out);
-//! - types, by interning as instantiation reaches each type occurrence: a type's arguments before
-//!   it;
+//! - types, by interning as instantiation reaches each type occurrence, and then as it judges the
+//!   bounds of each: a type's arguments before it;
 //! - names, by interning, in the order the analysis first interns them, phase by phase: the
 //!   module tree, the declarations, the names `use` items bind, then lowering, each in its own
 //!   order, which is a function of the program alone; it is no order over spellings.
@@ -43,7 +43,7 @@
 mod phases;
 mod read;
 
-pub(crate) use read::Written;
+pub(crate) use read::{Shape, Written};
 
 use std::{boxed::Box, collections::BTreeMap, string::String, vec, vec::Vec};
 

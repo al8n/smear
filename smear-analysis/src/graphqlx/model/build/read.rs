@@ -9,12 +9,26 @@ use tokora::diagnostic::Location;
 use crate::graphqlx::{
   id::{ApplicationId, DefId, ModuleId, Sym, TyId, TypeExprId, dense},
   model::{
-    Collection, DefKind, Resolution,
+    Collection, DefKind, Resolution, TypeBound,
+    satisfy::{Keys, Steps, Wanted},
     table::{DefRow, KIND_LIST, KIND_NAMED, KIND_PARAM, TyRow, UNSET_TY},
   },
 };
 
 use super::{ModelBuilder, type_key};
+
+/// What a type is, as a phase after instantiation reads it.
+#[derive(Clone, Copy)]
+pub(crate) enum Shape {
+  /// A named type of this definition.
+  Named(DefId),
+  /// One of `def`'s type parameters, the one at `index`.
+  Param { def: DefId, index: u32 },
+  /// A list of this element.
+  List(TyId),
+  /// The one unresolved type.
+  Unresolved,
+}
 
 /// What a type occurrence names, as lowering resolved it.
 #[derive(Clone, Copy)]
@@ -187,6 +201,60 @@ impl ModelBuilder {
       .tys
       .get(ty.get() as usize)
       .is_some_and(|row: &TyRow| row.closed)
+  }
+
+  /// What `ty` is: `None` for a type the builder did not issue.
+  pub(crate) fn ty_shape(&self, ty: TyId) -> Option<Shape> {
+    let row = self.model.tys.get(ty.get() as usize)?;
+    Some(match row.shape {
+      KIND_NAMED => Shape::Named(row.def),
+      KIND_PARAM => Shape::Param {
+        def: row.def,
+        index: row.index,
+      },
+      KIND_LIST => Shape::List(row.element),
+      _ => Shape::Unresolved,
+    })
+  }
+
+  /// Every argument of `ty`, a named type: none for a type of any other shape, and for one the
+  /// builder did not issue.
+  pub(crate) fn ty_args(&self, ty: TyId) -> &[TyId] {
+    match self.model.tys.get(ty.get() as usize) {
+      Some(row) if row.shape == KIND_NAMED => row.args.of(&self.model.ty_args),
+      _ => &[],
+    }
+  }
+
+  /// Whether `ty` is non-null: `false` for a type the builder did not issue.
+  pub(crate) fn ty_non_null(&self, ty: TyId) -> bool {
+    self
+      .model
+      .tys
+      .get(ty.get() as usize)
+      .is_some_and(|row: &TyRow| row.non_null)
+  }
+
+  /// The bounds of `def`, in the order they are written: none for an id the builder did not
+  /// issue.
+  pub(crate) fn def_bounds(&self, def: DefId) -> &[TypeBound] {
+    match self.model.defs.get(def.get() as usize) {
+      Some(row) => row.bounds.of(&self.model.bounds),
+      None => &[],
+    }
+  }
+
+  /// Whether `ty` satisfies the interface type `interface`, read off the rows written so far, by
+  /// the routine the finished model answers `Model::satisfies_ty` with, keyed on `keys`; `None`
+  /// when `steps` ran out before it was known.
+  pub(crate) fn judge(
+    &self,
+    keys: &Keys,
+    ty: TyId,
+    interface: TyId,
+    steps: &mut Steps,
+  ) -> Option<bool> {
+    self.model.judge(keys, ty, Wanted::Type(interface), steps)
   }
 
   /// The named type of `def` with every argument `args`, non-null when `non_null`, when it is

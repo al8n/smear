@@ -20,6 +20,8 @@ const DEFAULT_GENERIC_DEPTH: u32 = 64;
 const DEFAULT_INSTANTIATIONS: u32 = 1 << 16;
 /// See [`Limits::max_substitutions`].
 const DEFAULT_SUBSTITUTIONS: u32 = 1 << 20;
+/// See [`Limits::max_bound_steps`].
+const DEFAULT_BOUND_STEPS: u32 = 1 << 20;
 /// See [`Limits::max_source_bytes`].
 const DEFAULT_SOURCE_BYTES: u32 = 1 << 26;
 /// See [`Limits::max_diagnostics`].
@@ -33,16 +35,18 @@ const DEFAULT_NEAR_MISS_COMPARISONS: u32 = 1 << 20;
 /// otherwise grow without limit: the number of definitions and of modules, how deep modules, `use`
 /// trees and types nest, how long a path is, how many rounds the glob fixpoint runs, how many
 /// modules one module's globs name, how many instantiations of generic definitions it interns, how
-/// many steps of substitution it takes, and how many bytes of source it reads. A bound that is
-/// passed is reported as `smear::graphqlx::resource-limit`, never as a panic. Two bounds are not
-/// refusals: the diagnostic ceiling and the near-miss budget limit what the analysis says, not
-/// what it accepts.
+/// many steps of substitution it takes, how many steps judging bounds takes, and how many bytes of
+/// source it reads. A bound that is passed is reported as `smear::graphqlx::resource-limit`, never
+/// as a panic. Two bounds are not refusals: the diagnostic ceiling and the near-miss budget limit
+/// what the analysis says, not what it accepts.
 ///
 /// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
 /// is always declared whole and every package has its root module, and that the built-in library's
-/// types are built whatever the generic depth, instantiation and substitution bounds are: see
-/// [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_generic_depth`],
-/// [`Limits::max_instantiations`] and [`Limits::max_substitutions`].
+/// types are built whatever the generic depth, instantiation and substitution bounds are, and its
+/// bounds cost nothing to judge, since it writes no instantiation of a definition with a bound:
+/// see [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_generic_depth`],
+/// [`Limits::max_instantiations`], [`Limits::max_substitutions`] and
+/// [`Limits::max_bound_steps`].
 ///
 /// # Building one
 ///
@@ -70,6 +74,7 @@ pub struct Limits {
   max_generic_depth: u32,
   max_instantiations: u32,
   max_substitutions: u32,
+  max_bound_steps: u32,
   max_source_bytes: u32,
   max_diagnostics: u32,
   max_near_miss_comparisons: u32,
@@ -99,6 +104,7 @@ impl Limits {
       max_generic_depth: DEFAULT_GENERIC_DEPTH,
       max_instantiations: DEFAULT_INSTANTIATIONS,
       max_substitutions: DEFAULT_SUBSTITUTIONS,
+      max_bound_steps: DEFAULT_BOUND_STEPS,
       max_source_bytes: DEFAULT_SOURCE_BYTES,
       max_diagnostics: DEFAULT_DIAGNOSTICS,
       max_near_miss_comparisons: DEFAULT_NEAR_MISS_COMPARISONS,
@@ -219,7 +225,9 @@ impl Limits {
   /// two.
   ///
   /// A type deeper than this is reported at each occurrence that would have it, which is then the
-  /// unresolved type. The built-in library's types are built whatever the bound, so `0`, which
+  /// unresolved type; but for a bound put under an instantiation's arguments, which would nest
+  /// deeper than this: each occurrence of the instantiation is reported where it is written, and
+  /// keeps its type. The built-in library's types are built whatever the bound, so `0`, which
   /// refuses every list and every type with an argument a supplied package writes, reports nothing
   /// inside it.
   ///
@@ -234,11 +242,14 @@ impl Limits {
 
   /// How many distinct instantiations of generic definitions the analysis may intern: each
   /// definition of at least one type parameter with each list of arguments, those the program
-  /// writes and those filling its defaults derives together, a type that names a type parameter
-  /// included. An instantiation written nullable and non-null counts once.
+  /// writes, those filling its defaults derives and those a bound derives when it is put under an
+  /// instantiation's arguments together, a type that names a type parameter included. An
+  /// instantiation written nullable and non-null counts once.
   ///
   /// Past it, each occurrence that would need one more is reported where it is written, and is the
-  /// unresolved type; one already interned is still built. The built-in library's are not counted.
+  /// unresolved type; one already interned is still built. An occurrence whose bounds, put under
+  /// its arguments, would need one more is reported where it is written too, and keeps its type.
+  /// The built-in library's are not counted.
   ///
   /// The default is 2^16. A program writes hundreds of instantiations; derived ones can double per
   /// level of a chain of defaults, or of an `implements` chain, and this bound is what keeps that
@@ -254,7 +265,9 @@ impl Limits {
   /// arguments a use leaves out is substitution: a set of written arguments filled for the first
   /// time takes one step for each argument left out, and one for each type occurrence of a default
   /// that the filling walks, whether the type that occurrence yields is new or not. A set of
-  /// arguments filled once is not filled again, whichever use asks for it.
+  /// arguments filled once is not filled again, whichever use asks for it. Judging a bound puts an
+  /// instantiation's arguments in place of the parameters the bound names too, and draws on
+  /// [`max_bound_steps`](Self::max_bound_steps), never on this bound.
   ///
   /// Past it, each type occurrence whose type would take one more step is reported where it is
   /// written, and its type is the unresolved one.
@@ -267,6 +280,28 @@ impl Limits {
   #[inline]
   pub const fn max_substitutions(&self) -> u32 {
     self.max_substitutions
+  }
+
+  /// How many steps the analysis may take to judge bounds, over the whole analysis.
+  ///
+  /// The bounds of each instantiation the program writes of a definition with a bound are judged
+  /// once, whatever nullness the instantiation is written with. A step is one of: a bound taken
+  /// under the instantiation's arguments; a node of a bound's interface rebuilt with those
+  /// arguments in place of the definition's type parameters; an `implements` entry, or a type
+  /// parameter's bound, looked at; and a pair of types, or an argument, compared. What a type
+  /// argument takes against one interface type is taken once, whichever instantiation asks it.
+  ///
+  /// Past it, each occurrence of an instantiation whose bounds could not be judged within it is
+  /// reported where it is written, and keeps its type. Every bound takes a step, so `0` reports
+  /// every instantiation of a definition with a bound, a `HashMap` among them.
+  ///
+  /// The default is 2^20: sixteen steps for each of the instantiations
+  /// [`max_instantiations`](Self::max_instantiations) admits at its default. An instantiation with
+  /// two bounds, whose arguments' definitions declare three interfaces each, takes at most eight
+  /// steps, and at most fourteen when its bounds name a type parameter.
+  #[inline]
+  pub const fn max_bound_steps(&self) -> u32 {
+    self.max_bound_steps
   }
 
   /// How many bytes of source text the supplied packages may hold together. The built-in
@@ -387,6 +422,14 @@ impl Limits {
   #[must_use]
   pub const fn with_max_substitutions(mut self, max: u32) -> Self {
     self.max_substitutions = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_bound_steps`](Self::max_bound_steps) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_bound_steps(mut self, max: u32) -> Self {
+    self.max_bound_steps = max;
     self
   }
 

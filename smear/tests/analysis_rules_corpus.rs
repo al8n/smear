@@ -520,6 +520,7 @@ fn each_walk_of_a_program_of_several_packages_reaches_what_the_model_says_once()
   assert_eq!(
     codes(&analysis),
     [
+      "smear::graphqlx::unsatisfied-bound",
       "smear::schema::undefined-type",
       "smear::graphqlx::orphan-extension",
       "smear::graphqlx::orphan-extension",
@@ -542,6 +543,7 @@ fn permuting_the_dependencies_changes_nothing_the_rules_report_or_mark() {
   assert_eq!(
     codes(&forward),
     [
+      "smear::graphqlx::unsatisfied-bound",
       "smear::schema::undefined-type",
       "smear::graphqlx::orphan-extension",
       "smear::graphqlx::orphan-extension",

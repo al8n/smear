@@ -35,7 +35,11 @@ included: by declaration, read off the `implements` entries and the bounds the m
 enum and `NonZero` of an integer primitive. Each
 definition's type parameter defaults are checked where they are written, and each use's count of
 type arguments where it is written. Filling defaults is bounded by `Limits::max_substitutions`, and
-the types it derives by `Limits::max_generic_depth` and `Limits::max_instantiations`. It resolves
+the types it derives by `Limits::max_generic_depth` and `Limits::max_instantiations`. Every
+instantiation the program writes has its bounds judged, exactly: a type argument that does not
+satisfy a bound's interface type, with the instantiation's arguments in its parameters' place, is
+`smear::graphqlx::unsatisfied-bound` where the instantiation is written, and judging is bounded by
+`Limits::max_bound_steps`. It resolves
 every module's `use` items too, globs and string sources included, against scopes that end with the
 prelude and the packages each package may reach. The built-in packages, `core`, `alloc` and `std`,
 are one embedded GraphQLx file each, parsed on every analysis.

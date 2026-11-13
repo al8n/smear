@@ -27,6 +27,7 @@ DiagnosticKind::ShadowedPrimitive = smear::graphqlx::shadowed-primitive
 DiagnosticKind::UnknownItem = smear::graphqlx::unknown-item
 DiagnosticKind::UnknownPackage = smear::graphqlx::unknown-package
 DiagnosticKind::UnresolvedPath = smear::graphqlx::unresolved-path
+DiagnosticKind::UnsatisfiedBound = smear::graphqlx::unsatisfied-bound
 DiagnosticKind::UrlUnsupported = smear::graphqlx::url-unsupported
 DiagnosticKind::UseDeclarationCollision = smear::graphqlx::use-declaration-collision
 DiagnosticKind::UseNameCollision = smear::graphqlx::use-name-collision

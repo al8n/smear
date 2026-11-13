@@ -200,6 +200,18 @@ impl Analysis {
 ///   unresolved type. Each closed type an occurrence of a generic definition resolves to is one of
 ///   the definition's instantiations. Last, an application writes no more type arguments than its
 ///   directive has parameters and no fewer than it takes, or it is `generic-arity`, at its path.
+/// - Judges the bounds of every written occurrence of a definition that has one, by its complete
+///   type, a slot a default filled included: for each bound in its definition's order, the
+///   argument for the bounded parameter, without its own `!`, must satisfy the bound's interface
+///   type with the type's arguments in place of the definition's parameters, each with its `!`, as
+///   [`Model::satisfies_ty`](super::Model::satisfies_ty) answers. An occurrence that names a
+///   parameter of the definition it is written in is judged through that parameter's bounds, and
+///   an instantiation only a fill derives is not judged. The first bound that fails is
+///   `unsatisfied-bound`, at each occurrence of the type, which keeps its type. Each type is
+///   judged once, whatever its nullness, within [`Limits::max_bound_steps`]; an occurrence whose
+///   bounds that budget, or a type they derive past [`Limits::max_generic_depth`] or
+///   [`Limits::max_instantiations`], kept from being judged is `resource-limit`, and keeps its
+///   type too.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///   Each schema definition the root package writes after its first is

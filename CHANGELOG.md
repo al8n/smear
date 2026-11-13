@@ -187,7 +187,16 @@ All notable changes to Smear are documented in this file.
   filling defaults takes, and `Limits::max_generic_depth`, a list counting a level, and
   `Limits::max_instantiations`, every distinct instantiation counting once whatever its nullness,
   are enforced: each occurrence past one is `resource-limit` where it is written, and the built-in
-  library is typed whatever the three are. Then smear's rules walk the model, each a visitor on
+  library is typed whatever the three are. Last, every written occurrence of a definition with a
+  bound is judged by its complete type, a slot a default filled included: the argument for each
+  bounded parameter, without its own `!`, satisfies the bound's interface type with the type's
+  arguments in place of the definition's parameters, each with its `!`, or the occurrence is the
+  new `smear::graphqlx::unsatisfied-bound`, for the first bound that fails, and keeps its type; an
+  occurrence that names a parameter of the definition it is written in is judged through that
+  parameter's bounds. A new `Limits::max_bound_steps`, 2^20 by default, bounds the steps judging
+  takes, each type judged once whatever its nullness; past it, and past the depth or the
+  instantiations the types it derives may reach, each occurrence is `resource-limit` and keeps its
+  type. Then smear's rules walk the model, each a visitor on
   the public trait. A program defines its schema at most once: each schema definition the root
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
   code, with a label at the first. And the schema is the root package's: each schema definition

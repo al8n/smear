@@ -1706,7 +1706,8 @@ fn the_built_in_library_is_built_whatever_the_limits() {
   let limits = Limits::new()
     .with_max_generic_depth(0)
     .with_max_instantiations(0)
-    .with_max_substitutions(0);
+    .with_max_substitutions(0)
+    .with_max_bound_steps(0);
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
   let analysis = analyze(&root, &[], &limits);
   assert!(
@@ -1851,8 +1852,9 @@ fn an_ok_analysis_has_no_unresolved_type_occurrence() {
               extend type Page<U, D> {\n  last: U\n}\n\
               union Either = Page<Item> | Item\n\
               directive @typed<V = Int>(value: Int) on OBJECT\n\
-              type Item implements Node @typed<[Int!]>(value: 1) {\n  id: ID\n  \
-              small: NonZeroU32!\n  tags: HashSet<String>\n  index: HashMap<String, [Item!]>\n}\n\
+              type Item implements Node & Comparable<Item> @typed<[Int!]>(value: 1) {\n  \
+              id: ID\n  small: NonZeroU32!\n  tags: HashSet<String>\n  \
+              index: HashMap<String, [Item!]>\n}\n\
               type Query @typed(value: 2) {\n  page: Page<Item>\n  items: [Item!]!\n  \
               either: Either\n  boxed: Box<Box<Int>>\n}\n\
               schema {\n  query: Query\n}\n";
