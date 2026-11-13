@@ -465,11 +465,31 @@ where
 /// `node` combinator, so a caller that reaches this at genuine end of input gets no node at all
 /// rather than an empty zero-width `Error` one.
 ///
+/// # The skip never closes a brace it did not open
+///
+/// Braces are counted apart from the other pairs. The scan's own depth counts braces alone, so its
+/// predicate is asked at every token outside the braces the skip itself opened, and a `}` met
+/// there closes a brace that was open before the skip began: the skip ends before it, whatever
+/// else it has open. The other pairs keep their count among themselves, blind to which closer
+/// answers which opener: inside one the skip opened nothing is a restart point, and with none open
+/// `is_sync_point` decides, an opener that is no restart point opening one. A `{` met with none of
+/// them open is what `is_sync_point` says, a restart point in both dialects; met inside one, it is
+/// an opener the skip follows to its own `}`.
+///
+/// So the skip closes no brace that was open before it. The fallback is another matter: a `}` at
+/// the head stops the scan before it has taken anything, and the fallback then takes that `}`. A
+/// caller that may stand on a `}` closing a brace that was open before the caller began asks
+/// before it calls, and leaves that `}` to the production around it.
+///
+/// The brace pair is the one whose identity in `delimiters` is `b'{'`, as it is in both dialects'
+/// tables. A table with no such pair has no brace boundary, and its scan counts every pair alike.
+///
 /// # The two `fn` pointers
 ///
-/// `delimiters` is the dialect's pair classifier and `is_sync_point` its depth-zero restart
-/// predicate. Both are tables rather than logic, which is why they are arguments and why this
-/// function is here: Task 6b's threshold admits a helper needing at most two of them.
+/// `delimiters` is the dialect's pair classifier and `is_sync_point` its restart predicate, asked
+/// with none of the skip's pairs open. Both are tables rather than logic, which is why they are
+/// arguments and why this function is here: Task 6b's threshold admits a helper needing at most
+/// two of them.
 pub fn unexpected<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   expected: &'static [<L::Token as Token<'inp>>::Kind],
@@ -498,7 +518,33 @@ where
   let hole = if allowance_exhausted {
     None
   } else {
-    inp.sync_balanced(delimiters, |t| is_sync_point(t.data))?
+    // How many of the other pairs the skip has opened and not closed, outside its braces.
+    let mut open: usize = 0;
+    inp.sync_balanced(
+      // Braces alone: the scan's depth is how many braces the skip itself has opened.
+      |kind: &<L::Token as Token<'inp>>::Kind| match delimiters(kind) {
+        Balance::Open(b'{') => Balance::Open(b'{'),
+        Balance::Close(b'{') => Balance::Close(b'{'),
+        _ => Balance::Neutral,
+      },
+      // Asked at every token outside the braces the skip opened.
+      |t| {
+        let balance: Balance<u8> = delimiters(&<L::Token as Token<'inp>>::kind(t.data));
+        // A brace the skip did not open closes here: the skip ends before it.
+        if matches!(balance, Balance::Close(b'{')) {
+          return true;
+        }
+        if open == 0 && is_sync_point(t.data) {
+          return true;
+        }
+        match balance {
+          Balance::Open(b'{') | Balance::Neutral => {}
+          Balance::Open(_) => open = open.saturating_add(1),
+          Balance::Close(_) => open = open.saturating_sub(1),
+        }
+        false
+      },
+    )?
   };
   if hole.is_some_and(|h| h.skipped() > 0) {
     // The sink wrapped the skipped region in the profile's `error_kind` on its own.

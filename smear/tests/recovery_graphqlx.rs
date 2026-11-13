@@ -612,17 +612,19 @@ mod lossless {
     assert_eq!(scalars(&top(&answer.tree)), ["scalar Z"]);
   }
 
+  /// The text that once ended a body by its rule 1, which no text reaches now. The two `(` are
+  /// junk of the argument list, and the skip that takes them stops before the first `}`, which
+  /// closes a brace the skip did not open: the list leaves it to the fields, the field fails on
+  /// it, and the body's own skip takes it as a brace the failed item left open. The second `}` is
+  /// the module's. A skip blind to which closer answers which opener took both, and the module's
+  /// node held no `}` of its own.
   #[test]
-  fn a_body_whose_brace_an_item_closed_is_over() {
-    // The two `(` are junk of the argument list, and the scan that skips them is blind to which
-    // closer answers which opener: it takes both `}` for theirs. The second was the module's.
+  fn a_skip_in_an_item_leaves_the_braces_it_did_not_open() {
     let answer = read("mod m { type T { f(a: Int ( ( } } ) scalar W");
     assert!(answer.errors);
     let m = module(&answer.tree, "mod m");
-    assert!(
-      !holds_a_closing_brace(&m),
-      "the module took a `}}` of its own"
-    );
+    assert_eq!(m.text().to_string(), "mod m { type T { f(a: Int ( ( } }");
+    assert!(holds_a_closing_brace(&m), "the module lost its `}}`");
     assert!(scalars(&m).is_empty());
     assert_eq!(scalars(&top(&answer.tree)), ["scalar W"]);
   }
