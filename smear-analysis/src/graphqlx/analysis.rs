@@ -312,8 +312,10 @@ impl Analysis {
 ///   `root-operation-type-not-object`, at the type. Of the roots that are object types, presumed
 ///   or written, one that is one type with an earlier one, in the order query, mutation and
 ///   subscription, is `shared-root-operation-type`, at a written root's type, with a label at the
-///   other. A rule says nothing about a contribution a phase already refused something in, and a
-///   root rule nothing while any of the schema's contributions holds a phase's error.
+///   other. When the root package writes no schema definition and no query root is presumed, each
+///   schema extension it writes is `schema-extension-without-schema`, at its `extend`. A rule says
+///   nothing about a contribution a phase already refused something in, and a root rule nothing
+///   while any of the schema's contributions holds a phase's error.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

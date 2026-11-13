@@ -119,6 +119,9 @@ const ROOT_OPERATION_TYPE_NOT_OBJECT: &str = "smear::schema::root-operation-type
 /// GraphQL's code for two root operations of one type.
 const SHARED_ROOT_OPERATION_TYPE: &str = "smear::schema::shared-root-operation-type";
 
+/// GraphQL's code for a schema extension with no schema to extend.
+const SCHEMA_EXTENSION_WITHOUT_SCHEMA: &str = "smear::schema::schema-extension-without-schema";
+
 /// The code of a type name that names nothing, a phase's.
 const UNDEFINED_TYPE: &str = "smear::schema::undefined-type";
 
@@ -417,8 +420,9 @@ fn no_schema_definition_is_no_diagnostic() {
   );
   assert_eq!(analysis.model().schema().contributions().count(), 0);
 
-  // A schema extension with no schema definition to extend is no rule's of this layer: it gives
-  // the schema its root, beside the one presumed.
+  // A schema extension beside a presumed `Query` extends a schema that is defined: omitting the
+  // schema definition beside an object type `Query` defines one. The extension gives the schema
+  // its root, beside the one presumed.
   let analysis = analyze_one(
     "type Query {\n  ok: Int\n}\ntype Change {\n  done: Int\n}\n\
      extend schema {\n  mutation: Change\n}\n",
@@ -772,17 +776,25 @@ fn the_root_operations_have_distinct_types() {
     analysis.diagnostics()
   );
   // And when the presumed one is the later: at the written one still, labelled at the presumed
-  // one's definition.
+  // one's definition. With no `Query` presumed, the extension that writes the query root has no
+  // schema to extend, which is another rule's to say.
   let text = "type Mutation {\n  m: Int\n}\nextend schema {\n  query: Mutation\n}\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
   assert_eq!(
     found(&analysis),
-    [(
-      SHARED_ROOT_OPERATION_TYPE,
-      named(schema, text, "query: ", "Mutation", 0),
-      Some(named(schema, text, "type ", "Mutation", 0))
-    )],
+    [
+      (
+        SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+        at(schema, text, "extend", 0),
+        None
+      ),
+      (
+        SHARED_ROOT_OPERATION_TYPE,
+        named(schema, text, "query: ", "Mutation", 0),
+        Some(named(schema, text, "type ", "Mutation", 0))
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
@@ -796,6 +808,129 @@ fn the_root_operations_have_distinct_types() {
       ROOT_OPERATION_TYPE_NOT_OBJECT,
       ROOT_OPERATION_TYPE_NOT_OBJECT
     ]
+  );
+}
+
+#[test]
+fn a_schema_extension_extends_a_schema_that_is_defined() {
+  // `smear-schema`'s fixture: no schema definition, and no `Query` presumed, so the extension
+  // extends nothing, although it gives the schema its query root.
+  let text = "type Q {\n  ok: Int\n}\nextend schema {\n  query: Q\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+      at(schema, text, "extend", 0),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the root package extends the schema, and has none to extend: it writes no schema \
+       definition, and no object type `Query` is presumed its query root"
+    ]
+  );
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    diagnostic.primary_label(),
+    Some("schema extension has no schema to extend")
+  );
+  assert_eq!(
+    diagnostic.help(),
+    Some(
+      "`extend schema` adds to a schema the document defines: write a `schema` definition, or \
+       define the `Query` type that omitting one presumes."
+    )
+  );
+  assert!(matches!(
+    analysis.model().schema().root(RootOperation::Query),
+    Some(Root::Written(_))
+  ));
+
+  // Two such extensions are two.
+  let text = "type Q {\n  ok: Int\n}\ntype M {\n  m: Int\n}\nextend schema {\n  query: Q\n}\n\
+              extend schema {\n  mutation: M\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+        at(schema, text, "extend", 0),
+        None
+      ),
+      (
+        SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+        at(schema, text, "extend", 1),
+        None
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // Beside a schema definition the file writes after it, and beside a presumed `Query`, the
+  // schema is defined.
+  for text in [
+    "extend schema {\n  mutation: M\n}\nschema {\n  query: Q\n}\ntype Q {\n  ok: Int\n}\n\
+     type M {\n  m: Int\n}\n",
+    "type Query {\n  ok: Int\n}\ntype M {\n  m: Int\n}\nextend schema {\n  mutation: M\n}\n",
+  ] {
+    let analysis = analyze_one(text);
+    assert!(
+      analysis.diagnostics().is_empty(),
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+  }
+
+  // An interface named `Query` is not presumed, so it defines no schema.
+  let text = "interface Query {\n  ok: Int\n}\ntype Q {\n  q: Int\n}\n\
+              extend schema {\n  query: Q\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+      at(schema, text, "extend", 0),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A dependency's schema extension is the rule on schema items outside the root package's
+  // alone, beside the root package's own, which this rule refuses.
+  let ours = "type Q {\n  ok: Int\n}\nextend schema {\n  query: Q\n}\n";
+  let theirs = "type Point {\n  x: Int\n}\nextend schema {\n  mutation: Point\n}\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let schema = schema_file(&analysis);
+  let geo_file = file(&analysis, 4, "geo.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+        at(schema, ours, "extend", 0),
+        None
+      ),
+      (OUTSIDE, at(geo_file, theirs, "extend", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
   );
 }
 
@@ -829,6 +964,20 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     (
       "type Q {\n  q: Int\n}\nschema {\n  query: Q\n  mutation: Q\n}\ntype G {\n  x: Missing\n}\n",
       &[SHARED_ROOT_OPERATION_TYPE, UNDEFINED_TYPE][..],
+    ),
+    // A schema extension that holds the phase's error says nothing; one beside it, and one beside
+    // an undefined type in a definition, speak.
+    (
+      "type Q {\n  q: Int\n}\nextend schema {\n  query: Q\n  mutation: Missing\n}\n",
+      &[UNDEFINED_ROOT][..],
+    ),
+    (
+      "type Q {\n  q: Int\n}\nextend schema {\n  query: Q\n}\nextend schema {\n  mutation: Missing\n}\n",
+      &[SCHEMA_EXTENSION_WITHOUT_SCHEMA, UNDEFINED_ROOT][..],
+    ),
+    (
+      "type Q {\n  q: Int\n}\nextend schema {\n  query: Q\n}\ntype G {\n  x: Missing\n}\n",
+      &[SCHEMA_EXTENSION_WITHOUT_SCHEMA, UNDEFINED_TYPE][..],
     ),
   ] {
     let analysis = analyze_one(text);
@@ -2012,6 +2161,10 @@ const FIXTURES: &[(Code, Fixture)] = &[
     a_root_that_is_no_object,
   ),
   (Code::new(SHARED_ROOT_OPERATION_TYPE), two_roots_of_one_type),
+  (
+    Code::new(SCHEMA_EXTENSION_WITHOUT_SCHEMA),
+    a_schema_extension_with_no_schema,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -2239,6 +2392,11 @@ fn a_directive_that_is_not_repeatable_applied_twice() -> Analysis {
 /// A root operation type that is an interface.
 fn a_root_that_is_no_object() -> Analysis {
   analyze_one("interface Root { ok: Int } schema { query: Root }")
+}
+
+/// A schema extension with no schema to extend.
+fn a_schema_extension_with_no_schema() -> Analysis {
+  analyze_one("type Q { ok: Int } extend schema { query: Q }")
 }
 
 /// Two root operations of one type.

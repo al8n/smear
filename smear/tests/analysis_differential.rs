@@ -116,9 +116,6 @@ const IMPLEMENTATION: &str = "the implementation phase reports it: pull request 
 /// Why a row of the input-object cycles exists.
 const CYCLES: &str = "the cycle rules report it: the last part of this pull request";
 
-/// Why a row of a rule of part 2.3 exists.
-const PART_2_3: &str = "its rule is written in part 2.3 of this pull request";
-
 /// Why a row of a rule of part 2.4 exists.
 const PART_2_4: &str = "its rule is written in part 2.4 of this pull request";
 
@@ -171,7 +168,6 @@ const ALLOWED: &[Allowed] = &[
   every("smear::schema::circular-non-null-input-field", CYCLES),
   every("smear::schema::circular-one-of-input-field", CYCLES),
   every("smear::schema::input-object-default-value-cycle", CYCLES),
-  every("smear::schema::schema-extension-without-schema", PART_2_3),
   every("smear::schema::missing-query-root-operation-type", PART_2_4),
   Allowed {
     code: "smear::schema::undefined-implements-interface",

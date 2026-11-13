@@ -76,7 +76,7 @@ rule_set! {
 #[test]
 fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   let table: &[(&str, &[Code])] = Rules::TABLE;
-  assert_eq!(table.len(), 27);
+  assert_eq!(table.len(), 28);
   assert_eq!(table[0].0, "DuplicateSchemaDefinition");
   assert_eq!(
     table[0].1,
@@ -230,6 +230,11 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   assert_eq!(
     table[26].1,
     &[Code::new("smear::schema::shared-root-operation-type")]
+  );
+  assert_eq!(table[27].0, "SchemaExtensionWithoutSchema");
+  assert_eq!(
+    table[27].1,
+    &[Code::new("smear::schema::schema-extension-without-schema")]
   );
 }
 

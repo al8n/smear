@@ -133,7 +133,9 @@
 //! scalar of the built-in library is `smear::schema::specified-by-on-built-in-scalar`. And the
 //! schema keeps GraphQL's own rules on its roots, with GraphQL's codes: a root operation type that
 //! is no object type is `smear::schema::root-operation-type-not-object`, and two roots of one type
-//! are `smear::schema::shared-root-operation-type`. A rule says nothing about a contribution a
+//! are `smear::schema::shared-root-operation-type`; and a schema extension the root package writes
+//! when it defines no schema, by a definition or a presumed query root, is
+//! `smear::schema::schema-extension-without-schema`. A rule says nothing about a contribution a
 //! phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and

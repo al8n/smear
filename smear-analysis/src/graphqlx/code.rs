@@ -585,4 +585,9 @@ pub(crate) mod schema {
   /// Two root operations have one type: `smear-schema`'s `SharedRootOperationType`.
   pub(crate) const SHARED_ROOT_OPERATION_TYPE: Code =
     Code::new("smear::schema::shared-root-operation-type");
+
+  /// The root package extends the schema, and defines none to extend: `smear-schema`'s
+  /// `SchemaExtensionWithoutSchema`.
+  pub(crate) const SCHEMA_EXTENSION_WITHOUT_SCHEMA: Code =
+    Code::new("smear::schema::schema-extension-without-schema");
 }
