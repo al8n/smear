@@ -5,7 +5,8 @@
 /// has.
 const KEPT: usize = 800;
 
-/// The bound in magnitude of a written exponent as it is read.
+/// The bound in magnitude of a written exponent as it is read: a literal would need about 2^40
+/// digits, a tebibyte, to offset it back into range.
 const EXPONENT_BOUND: i64 = 1 << 40;
 
 /// The least exponent of a first significant digit past `f64::MAX`.
@@ -80,9 +81,9 @@ impl Writer<'_> {
 /// exponent is then misread: `0.` and 99 998 zeros then `1e999999` is 10^900000 and reads as 1.0,
 /// and `1` and 99 999 zeros then `e-999999` is 10^-900000 and reads as 1.0 too. So one scan of the
 /// literal reads, in saturating arithmetic, whether any digit is significant, the place of the
-/// first that is, and the written exponent, its magnitude saturated at 2^40, past any count of
-/// digits a source can hold to offset it. Their sum is the exponent `E` of the first significant
-/// digit:
+/// first that is, and the written exponent, its magnitude saturated at 2^40, which only a literal
+/// of about a tebibyte has the digits to offset back into range. Their sum is the exponent `E` of
+/// the first significant digit:
 /// - `E` of 309 or more is past `f64::MAX`, below 1.8 × 10^308, and so past every finite `f32`:
 ///   [`DecimalFloat::Overflow`];
 /// - `E` below -400 is below 10^-400, far below half of `f64`'s least subnormal, 2^-1075, which is
