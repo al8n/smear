@@ -29,6 +29,9 @@ All notable changes to Smear are documented in this file.
   `smear-parser`'s and imply no tier, and `smear`'s features of the same names forward to them.
   `smear-schema`'s builder now takes those three kernels from `smear-semantics`, behind
   `build`, with no change in behaviour.
+- `smear-semantics`: `scc::components` answers, for each node of a directed graph, the least
+  node of its strongly connected component, over the same compressed rows and iterative walk as
+  `scc::on_cycle`, which is unchanged.
 - `smear-analysis`: the analyzer's entrance, its exits and its rules. `graphqlx::analyze`
   takes a root `Package` and its dependencies, each file's text any `SourceText` (`&str`,
   `&[u8]`, or a source feature's type), within `Limits`, and answers an `Analysis` with no
