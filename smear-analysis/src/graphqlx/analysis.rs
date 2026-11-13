@@ -239,18 +239,17 @@ impl Analysis {
 ///   first type parameter's name. A marker that declares a field is `marker-misuse`, once, at the
 ///   first field its own package wrote; so is a marker named anywhere but as the outermost type of
 ///   an `implements` entry or of a bound, where it is named, and an `implements` entry of a scalar,
-///   an enum, an input object or a union that names what is no marker, a type parameter among
-///   them. A scalar its own package makes a set with `@set` and that has not exactly one type
-///   parameter, or a map with `@map`
-///   and that has not exactly two, is `collection-arity`, at the application, and so is one that
-///   applies both, at the later. `TypeRef` anywhere but as the type of a directive definition's
-///   argument or of an input field, under lists alone, is `typeref-misuse`, where it is named, a
-///   type argument of any generic definition included. `NonZero` whose type argument, in the
-///   occurrence's type, is no integer primitive at least one bit wide written without `!` is
-///   `nonzero-argument`, where it is written, with a label at the argument. A type parameter with
-///   the name of an earlier one of its definition is `duplicate-type-parameter`, at its name, with
-///   a label at the first of that name. A rule says nothing about a contribution a phase already
-///   refused something in.
+///   an enum, an input object or a union that names what is no marker, a type parameter among them.
+///   A scalar its own package makes a set with `@set` and that has not exactly one type parameter,
+///   or a map with `@map` and that has not exactly two, is `collection-arity`, at the application,
+///   and so is one that applies both, at the later. `TypeRef` anywhere but as the type of a
+///   directive definition's argument or of an input field, under lists alone, is `typeref-misuse`,
+///   where it is named, a type argument of any generic definition included. `NonZero` whose type
+///   argument, in the occurrence's type, is no integer primitive at least one bit wide written
+///   without `!` is `nonzero-argument`, where it is written, with a label at the argument. A type
+///   parameter with the name of an earlier one of its definition is `duplicate-type-parameter`, at
+///   its name, with a label at the first of that name. A rule says nothing about a contribution a
+///   phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

@@ -95,13 +95,13 @@
 //! object or a union that names what is no marker, a type parameter among them, are each
 //! `smear::graphqlx::marker-misuse`. And a set has one type parameter and a map two: a scalar its
 //! own package makes a collection with another count, or makes both, is
-//! `smear::graphqlx::collection-arity`. And `TypeRef` stands only
-//! as the type of a directive definition's argument or of an input field, under lists alone:
-//! anywhere else it is `smear::graphqlx::typeref-misuse`. And `NonZero` makes an integer never
-//! zero: `NonZero` of what is no integer primitive at least one bit wide, written without `!`, is
+//! `smear::graphqlx::collection-arity`. And `TypeRef` stands only as the type of a directive
+//! definition's argument or of an input field, under lists alone: anywhere else it is
+//! `smear::graphqlx::typeref-misuse`. And `NonZero` makes an integer never zero: `NonZero` of what
+//! is no integer primitive at least one bit wide, written without `!`, is
 //! `smear::graphqlx::nonzero-argument`. And a definition's type parameters have distinct names: a
-//! type parameter with the name of an earlier one is `smear::graphqlx::duplicate-type-parameter`.
-//! A rule says nothing about a contribution a phase already refused something in.
+//! type parameter with the name of an earlier one is `smear::graphqlx::duplicate-type-parameter`. A
+//! rule says nothing about a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and
