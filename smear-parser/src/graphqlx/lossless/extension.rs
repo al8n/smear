@@ -47,7 +47,7 @@ use super::{
   directive::directives,
   generic::extension_name,
   recover,
-  recover::{EXTENSION_TAIL_HEADS, TYPE_EXTENSION_HEADS, is_closer},
+  recover::{EXTENSION_TAIL_HEADS, TYPE_EXTENSION_HEADS},
   trivia::{expect, peek_as, peek_kind},
   value::Constness,
 };
@@ -270,17 +270,20 @@ lossless_production! {
       Some(Keyword::Input) => input_object_type_extension::<Src, Ctx>(inp, mark),
       Some(Keyword::Schema) => schema_extension::<Src, Ctx>(inp, mark),
       Some(Keyword::Directive) => directive_extension::<Src, Ctx>(inp, mark),
-      // A name that is none of the eight, or no name at all. Reported and skipped, except a
-      // closing delimiter: that is the closer of the body this extension stands in, so it is
-      // reported and left, and a module ends where it was written. No loop's progress rests on
-      // this arm, the `extend` being consumed already. The mark is left unspent and materializes
-      // into nothing.
-      _ => {
-        if peek_kind::<Src, Ctx>(inp)?.is_some_and(is_closer) {
-          return recover::report_unexpected::<Src, Ctx>(inp, TYPE_EXTENSION_HEADS);
+      // A name that is none of the eight, or no name at all. Reported and skipped, except a `}`
+      // while a brace is open: that closes a block this extension stands in — a module's body,
+      // or a brace junk opened before it — so it is reported and left to the loop around the
+      // extension, and a module ends where it was written. Every other head is skipped, as a
+      // root's own dispatcher skips it: with no brace open no block is around the extension, and
+      // a `)`, `]` or `>` closes none an extension stands in, so leaving it would only have the
+      // loop report it a second time. No loop's progress rests on this arm, the `extend` being
+      // consumed already. The mark is left unspent and materializes into nothing.
+      _ => match peek_kind::<Src, Ctx>(inp)? {
+        Some(Kind::RBrace) if inp.state().brace_depth() > 0 => {
+          recover::report_unexpected::<Src, Ctx>(inp, TYPE_EXTENSION_HEADS)
         }
-        recover::unexpected::<Src, Ctx>(inp, TYPE_EXTENSION_HEADS)
-      }
+        _ => recover::unexpected::<Src, Ctx>(inp, TYPE_EXTENSION_HEADS),
+      },
     }
   }
 

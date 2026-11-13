@@ -87,8 +87,7 @@ use super::{
   recover,
   recover::{
     DEFINITION_HEADS, DESCRIBED_DEFINITION_HEADS, EXECUTABLE_ENTRY_HEADS, MOD_BODY_HEADS,
-    NAME_HEADS, TYPE_SYSTEM_ENTRY_HEADS, is_closer, opener_span, starts_description,
-    starts_mod_item,
+    NAME_HEADS, TYPE_SYSTEM_ENTRY_HEADS, opener_span, starts_description, starts_mod_item,
   },
   trivia::{eat_if, expect, peek_as, peek_kind},
   use_tree::use_definition,
@@ -369,16 +368,19 @@ lossless_production! {
         type_system_extension::<Src, Ctx>(inp, extend_mark)
       }
       Some(_) => type_system_definition_at::<Src, Ctx>(inp, mark),
-      None => {
-        // After a description, a closing delimiter is the closer of the body this item stands
-        // in: reported and left, so a module ends where it was written. The description was this
-        // turn's progress. With nothing consumed the head is skipped whatever it is, because the
-        // roots' loops end only if every turn consumes.
-        if described && peek_kind::<Src, Ctx>(inp)?.is_some_and(is_closer) {
-          return recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS);
+      // After a description, a `}` while a brace is open closes a block this item stands in — a
+      // module's body, or a brace junk opened before it — so it is reported and left to the loop
+      // around the item, and a module ends where it was written. The description was this turn's
+      // progress. Any other head is skipped, as a root's own dispatcher skips it: with no brace
+      // open no block is around the item, and a `)`, `]` or `>` closes none an item stands in, so
+      // leaving it would only have the loop report it a second time. With nothing consumed the
+      // head is skipped whatever it is, because the roots' loops end only if every turn consumes.
+      None => match peek_kind::<Src, Ctx>(inp)? {
+        Some(Kind::RBrace) if described && inp.state().brace_depth() > 0 => {
+          recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS)
         }
-        recover::unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS)
-      }
+        _ => recover::unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS),
+      },
     }
   }
 

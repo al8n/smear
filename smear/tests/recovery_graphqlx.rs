@@ -12,7 +12,8 @@
 //! costs that item alone.
 //!
 //! Every text the lossless tests read is also held to round-trip. Nothing here asserts what a
-//! layer lends its sink or how many errors it counts.
+//! layer lends its sink, which `layers_handover_graphqlx.rs` holds: where a test counts what a
+//! mistake costs, it counts the error diagnostics of the tree.
 
 use smear::parser::graphqlx::Syntactic;
 
@@ -31,15 +32,18 @@ fn the_syntactic_layer_answers_no_document_for_a_broken_text() {
 
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 mod lossless {
+  use core::ops::Range;
+
   use smear::{
     lexer::limits::LosslessLimits,
     parser::graphqlx::{
       Lossless, Recovery, Syntactic,
       ast::{TypeSystemDocument, TypeSystemItem},
       kinds::SyntaxKind as K,
-      lossless::SyntaxNode,
+      lossless::{Parse, SyntaxNode, parse_document, parse_type_system_document},
     },
   };
+  use tokora::emitter::Severity;
 
   use super::MISSING_FIELD_TYPE;
 
@@ -206,7 +210,9 @@ mod lossless {
   fn a_closer_after_a_description_still_closes_the_module() {
     let answer = read("mod m { \"doc\" } scalar Y");
     assert!(answer.errors);
-    assert!(scalars(&module(&answer.tree, "mod m")).is_empty());
+    let m = module(&answer.tree, "mod m");
+    assert!(scalars(&m).is_empty());
+    assert!(holds_a_closing_brace(&m), "the module lost its `}}`");
     assert_eq!(scalars(&top(&answer.tree)), ["scalar Y"]);
     assert_eq!(answer.document.definitions().len(), 2);
     assert!(items(&answer.document.definitions()[0]).is_empty());
@@ -216,10 +222,91 @@ mod lossless {
   fn a_closer_after_extend_still_closes_the_module() {
     let answer = read("mod m { extend } scalar Y");
     assert!(answer.errors);
-    assert!(scalars(&module(&answer.tree, "mod m")).is_empty());
+    let m = module(&answer.tree, "mod m");
+    assert!(scalars(&m).is_empty());
+    assert!(holds_a_closing_brace(&m), "the module lost its `}}`");
     assert_eq!(scalars(&top(&answer.tree)), ["scalar Y"]);
     assert_eq!(answer.document.definitions().len(), 2);
     assert!(items(&answer.document.definitions()[0]).is_empty());
+  }
+
+  /// `text` through the two roots a module is an entry of, the mixed root and the type-system
+  /// root, as each root's name, its tree and where its parse reported an error, each tree held to
+  /// round-trip. Through the doors rather than the layer, which reads the type-system root alone.
+  fn at_both_roots(text: &str) -> [(&'static str, SyntaxNode, Vec<Range<usize>>); 2] {
+    [
+      ("mixed", parse_document(text)),
+      ("type-system", parse_type_system_document(text)),
+    ]
+    .map(|(root, parse): (&'static str, Parse)| {
+      let tree: SyntaxNode = parse.syntax();
+      assert_eq!(
+        tree.text().to_string(),
+        text,
+        "{root}: the tree spells its text"
+      );
+      let errors: Vec<Range<usize>> = parse
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+        .map(|diagnostic| diagnostic.span())
+        .collect();
+      (root, tree, errors)
+    })
+  }
+
+  /// With no brace open no block stands around the item, so a closer after its description or
+  /// its `extend` closes nothing the item stands in: the dispatcher takes it, with its one report.
+  /// A dispatcher that left it would have the root's loop report the same token a second time.
+  #[test]
+  fn a_closer_after_a_description_or_extend_at_a_root_is_one_report() {
+    for opener in ["\"d\"", "extend"] {
+      for closer in ["}", ")", "]", ">"] {
+        let text = format!("{opener} {closer}");
+        let reported: Range<usize> = text.len() - closer.len()..text.len();
+        for (root, _, errors) in at_both_roots(&text) {
+          assert_eq!(errors, [reported.clone()], "{text} at the {root} root");
+        }
+      }
+    }
+  }
+
+  /// Inside a module a brace is open, so a `}` after a description or an `extend` is left to the
+  /// body: one report, and the `}` is the module's own. A dispatcher that took it would cost no
+  /// second report, since a body whose brace an item consumed is over, but the module would hold
+  /// no `}` of its own.
+  #[test]
+  fn a_modules_brace_after_a_description_or_extend_is_one_report_and_its_closer() {
+    for text in ["mod m { \"d\" }", "mod m { extend }"] {
+      let reported: Range<usize> = text.len() - 1..text.len();
+      for (root, tree, errors) in at_both_roots(text) {
+        assert_eq!(errors, [reported.clone()], "{text} at the {root} root");
+        assert!(
+          holds_a_closing_brace(&module(&tree, "mod m")),
+          "{text} at the {root} root: the module lost its `}}`"
+        );
+      }
+    }
+  }
+
+  /// A `)`, `]` or `>` closes no block an item stands in, even inside a module: after a
+  /// description or an `extend` the dispatcher takes it with one report, and the item after it
+  /// stays in the module. A dispatcher that left it would have the body report it again as junk.
+  #[test]
+  fn a_bracket_after_a_description_or_extend_in_a_module_is_one_report() {
+    for opener in ["\"d\"", "extend"] {
+      for closer in [")", "]", ">"] {
+        let text = format!("mod m {{ {opener} {closer} scalar X }}");
+        let at: usize = text.find(closer).expect("the text holds its closer");
+        let reported: Range<usize> = at..at + closer.len();
+        for (root, tree, errors) in at_both_roots(&text) {
+          assert_eq!(errors, [reported.clone()], "{text} at the {root} root");
+          let m = module(&tree, "mod m");
+          assert_eq!(scalars(&m), ["scalar X"], "{text} at the {root} root");
+          assert!(holds_a_closing_brace(&m), "{text} at the {root} root");
+        }
+      }
+    }
   }
 
   // ── Depth and counting ─────────────────────────────────────────────────────────────────────
