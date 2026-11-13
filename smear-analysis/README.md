@@ -42,19 +42,20 @@ a type argument that does not satisfy a bound's interface type, with the instant
 in its parameters' place, is `smear::graphqlx::unsatisfied-bound` where the instantiation is
 written, and judging is bounded by `Limits::max_bound_steps`. A value that does not fit the type
 expected of it is refused where it is written, with GraphQL's `smear::schema::invalid-default-value`
-or `invalid-directive-argument-value`, an integer read at any length and range-checked against its
-width, `smear::graphqlx::width-overflow` past any width but the 32-bit signed one or past `f32`, and
+or `invalid-directive-argument-value`, an integer read at any length, a decimal one past 38
+significant digits within `Limits::max_value_steps`, and range-checked against its width,
+`smear::graphqlx::width-overflow` past any width but the 32-bit signed one or past `f32`, and
 `smear::graphqlx::nonzero-zero` for a zero where `NonZero` is expected. An application's argument
 left out takes a copy of its default, and a required one left out is
-`smear::schema::missing-required-directive-argument`; the copies, the required arguments left out
-and the lists a value written alone stands for where a list is expected are bounded by
-`Limits::max_value_steps`. It resolves
+`smear::schema::missing-required-directive-argument`; the copies, the required arguments left out,
+the lists a value written alone stands for where a list is expected and the conversion of a decimal
+integer of more than 38 significant digits are bounded by `Limits::max_value_steps`. It resolves
 every module's `use` items too, globs and string sources included, against scopes that end with the
 prelude and the packages each package may reach. The built-in packages, `core`, `alloc` and `std`,
-are one embedded GraphQLx file each, parsed on every analysis. `graphqlx::analyze_with` is the same analysis with the parser
-layer the caller passes, such as `smear-parser`'s lossless layer, which recovers, so the well-formed
-rest of a broken file is analyzed, and it answers `Trees` beside the `Analysis`: what that layer
-kept for each file it read.
+are one embedded GraphQLx file each, parsed on every analysis. `graphqlx::analyze_with` is the same
+analysis with the parser layer the caller passes, such as `smear-parser`'s lossless layer, which
+recovers, so the well-formed rest of a broken file is analyzed, and it answers `Trees` beside the
+`Analysis`: what that layer kept for each file it read.
 
 Rules are visitors. A `graphqlx::Visitor` implements the hooks it needs, one for each entity a walk
 enters, leaves or reaches, and `graphqlx::visit` walks an analysis's model for it over the packages

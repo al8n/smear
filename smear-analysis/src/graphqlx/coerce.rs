@@ -71,31 +71,34 @@
 //! about are listed once, in member order: one with a default, with the count of rows a copy of it
 //! makes, counted once through the same classifier that makes the rows, its written nodes walked
 //! and a lone value counted from its type's levels of list, and saturating at
-//! `Limits::max_value_steps` plus one; and one required, written non-null with no default. A later argument of a name an earlier one has is not listed, since no
-//! application can write it. An application merges its written arguments, which lowering kept in
-//! its directive's order, with that list, by the argument each sets. A written argument is coerced
-//! as written, and a required one given `null` is `missing-required-directive-argument`, at its
-//! name, and nothing more. A listed argument left out takes a copy of its default: the default's
-//! tree coerced again against the argument's type, silently, each row not written and located at
-//! the node it copies, what was read of the literal shared; a node that does not fit is
-//! unresolved, and the default's own diagnostic, where it is written, says why once. A required one
-//! left out is `missing-required-directive-argument`, at the application's path, with a label at
-//! the argument. An argument neither written, defaulted nor required is absent.
+//! `Limits::max_value_steps` plus one; and one required, written non-null with no default. A later
+//! argument of a name an earlier one has is not listed, since no application can write it. An
+//! application merges its written arguments, which lowering kept in its directive's order, with
+//! that list, by the argument each sets. A written argument is coerced as written, and a required
+//! one given `null` is `missing-required-directive-argument`, at its name, and nothing more. A
+//! listed argument left out takes a copy of its default: the default's tree coerced again against
+//! the argument's type, silently, each row not written and located at the node it copies, what was
+//! read of the literal shared; a node that does not fit is unresolved, and the default's own
+//! diagnostic, where it is written, says why once. A required one left out is
+//! `missing-required-directive-argument`, at the application's path, with a label at the argument.
+//! An argument neither written, defaulted nor required is absent.
 //!
 //! # What bounds it
 //!
 //! A written row is a written literal, which `Limits::max_source_bytes` bounds. What no literal
 //! writes is a step of `Limits::max_value_steps`: each list a written lone value stands for; each
 //! row of a copy, its whole count charged before its first row; and each required argument found
-//! left out. So is the one reading that is more than linear: a decimal integer longer than `u128`
-//! holds, 38 significant digits, is converted nine digits at a time over a vector of limbs, and
-//! that is charged first, an upper bound of its limb updates; one the budget cannot pay for is
-//! `resource-limit` where it is written, and unresolved. A shorter one is read in `u128`
-//! arithmetic, and a hexadecimal, octal or binary one in one pass, each for nothing. Past it a lone value is unresolved, and `resource-limit` where it is written; and an
-//! application is `resource-limit` once, at its path, its written arguments still coerced, a copy
-//! made whole or not at all, and the rest of its directive's list not read. The built-in library's
-//! own values are charged nothing, and neither is a copy made for an application it writes; a copy
-//! of one of its defaults made for an application a supplied package writes is charged.
+//! left out. So is the one reading that is more than linear: a decimal integer of more than 38
+//! significant digits, the most `u128` arithmetic reads whatever they spell, is converted nine
+//! digits at a time over a vector of limbs, and that is charged first, an upper bound of its limb
+//! updates; one the budget cannot pay for is `resource-limit` where it is written, and unresolved.
+//! A shorter one is read in `u128` arithmetic, and a hexadecimal, octal or binary one in one pass,
+//! each for nothing. Past it a lone value is unresolved, and `resource-limit` where it is written;
+//! and an application is `resource-limit` once, at its path, its written arguments still coerced, a
+//! copy made whole or not at all, and the rest of its directive's list not read. The built-in
+//! library's own values are charged nothing, and neither is a copy made for an application it
+//! writes; a copy of one of its defaults made for an application a supplied package writes is
+//! charged.
 //!
 //! # The arenas
 //!

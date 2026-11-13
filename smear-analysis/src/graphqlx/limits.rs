@@ -315,32 +315,36 @@ impl Limits {
   /// How many steps the analysis may take to complete values beyond what is written, over the
   /// whole analysis.
   ///
-  /// A written value takes none: [`max_source_bytes`](Self::max_source_bytes) bounds those. A step
-  /// is one of: a value of a copy of a default, which fills an argument an application leaves out,
+  /// A written value takes none, but for the conversion of a long decimal integer below:
+  /// [`max_source_bytes`](Self::max_source_bytes) bounds the rest of what is written. A step is
+  /// one of: a value of a copy of a default, which fills an argument an application leaves out,
   /// each value nested in the default counting one; a list that a written value stands for where a
   /// list is expected, one for each level of list between the value and its type, as
   /// `tags: [[Int]] = 1` stands for a list of a list of `1`; a required argument an application
   /// leaves out, which is reported; and converting a decimal integer of more than 38 significant
-  /// digits, which `u128` cannot hold, to its value, charged before the conversion as an upper
-  /// bound of its work: `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of
-  /// nine digits times the 32-bit limbs of its value. A hexadecimal, octal or binary integer
-  /// converts in one pass and takes none. The built-in library's own values take none: its
-  /// defaults where it writes them, and a copy made for an application it writes. A copy of one of
-  /// its defaults made for an application a supplied package writes, a bare `@deprecated` among
-  /// them, is charged.
+  /// digits, the most `u128` arithmetic reads whatever they spell, to its value, charged before the
+  /// conversion as an upper bound of its work: `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for
+  /// `d` digits, its chunks of nine digits times the 32-bit limbs of its value. A hexadecimal,
+  /// octal or binary integer converts in one pass and takes none. The built-in library's own
+  /// values take none: its defaults where it writes them, and a copy made for an application it
+  /// writes. A copy of one of its defaults made for an application a supplied package writes, a
+  /// bare `@deprecated` among them, is charged.
   ///
   /// Past it, a written value whose lists cannot all be paid for is `resource-limit` where it is
   /// written, and the level of list that could not be paid for is its one unresolved row, under
   /// the levels that were: with one step left, `a: [[Int]] = 1` is a list of one unresolved value.
   /// An integer whose conversion cannot be paid for is `resource-limit` where it is written, and
-  /// unresolved. An application whose next argument left out cannot be paid
-  /// for is `resource-limit` at its path, once, and is filled no further: what it writes is still
+  /// unresolved. An application whose next argument left out cannot be paid for is
+  /// `resource-limit` at its path, once, and is filled no further: what it writes is still
   /// coerced, an argument the budget kept from being filled is absent, a required one it kept from
   /// being reported is not reported, and a copy is made whole or not at all. At `0`, no default
-  /// fills an argument and no written value stands for a list.
+  /// fills an argument, no written value stands for a list, and no decimal integer of more than 38
+  /// significant digits is read: a decimal `u128::MAX` is `resource-limit`.
   ///
   /// The default is 2^20: one copied value for each of a million applications, so a program of a
-  /// hundred thousand applications that each leave eight defaults out stays inside it.
+  /// hundred thousand applications that each leave eight defaults out stays inside it. The longest
+  /// decimal integer it converts, with nothing else spent, has 9 526 digits, charged 1 048 410
+  /// steps; a longer one is written in hexadecimal, or read under a higher limit.
   #[inline]
   pub const fn max_value_steps(&self) -> u32 {
     self.max_value_steps

@@ -29,8 +29,8 @@
 //! complete instantiation with defaults filled and an alias expanded, each type interned once;
 //! every application with its type arguments and its arguments; every value, coerced to the type
 //! expected where it stands, each nested value one of its own, and a custom scalar's but `null`
-//! kept as written; and the schema, with its contributions, one for each schema item, its description, its
-//! roots, written or presumed, and its applications. [`Model::satisfies`] and
+//! kept as written; and the schema, with its contributions, one for each schema item, its
+//! description, its roots, written or presumed, and its applications. [`Model::satisfies`] and
 //! [`Model::satisfies_ty`] answer what a type satisfies, read off what it declares, and every
 //! instantiation the program writes has its bounds judged so: a type argument that does not
 //! satisfy a bound of its definition is `smear::graphqlx::unsatisfied-bound`, where the

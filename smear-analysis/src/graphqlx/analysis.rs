@@ -226,16 +226,17 @@ impl Analysis {
 ///   member's type for its default and an argument's for its value, with its `!`: `null` where it
 ///   is nullable; a list's elements each against its element, and any other value where a list is
 ///   expected the one-element list that holds it, a list for each level, each list a step of
-///   [`Limits::max_value_steps`]; a boolean; an integer in its width's range, read at any length;
-///   a float, or an integer, finite in `f32` or `f64`; a string, cooked; for `id` a string or an
-///   integer in `i32`'s range; for `bytes` a string's UTF-8 encoding or a list of integers from 0
-///   to 255; for `NonZero` an integer that is not zero; for an enum one of its values, a bare name
-///   looked up under that enum alone, and a qualified one whose prefix names that enum where the
-///   value is written, through any path or alias, the nearest value in its help when it names
-///   none. Any other scalar, a collection and an input object take any literal, kept as written,
-///   and so does a type that names a type parameter or can take no value, with nothing said. A
-///   prefix that names nothing is the resolver's to report. A value that does not fit is unresolved
-///   and reported where it is written, with GraphQL's `invalid-default-value` or
+///   [`Limits::max_value_steps`]; a boolean; an integer in its width's range, read at any length, a
+///   decimal one of more than 38 significant digits converted within the same budget; a float, or
+///   an integer, finite in `f32` or `f64`; a string, cooked; for `id` a string or an integer in
+///   `i32`'s range; for `bytes` a string's UTF-8 encoding or a list of integers from 0 to 255; for
+///   `NonZero` an integer that is not zero; for an enum one of its values, a bare name looked up
+///   under that enum alone, and a qualified one whose prefix names that enum where the value is
+///   written, through any path or alias, the nearest value in its help when it names none. Any
+///   other scalar, a collection and an input object take any literal, kept as written, and so does
+///   a type that names a type parameter or can take no value, with nothing said. A prefix that
+///   names nothing is the resolver's to report. A value that does not fit is unresolved and
+///   reported where it is written, with GraphQL's `invalid-default-value` or
 ///   `invalid-directive-argument-value`, but for a number out of the range of any width but the
 ///   32-bit signed one, or of `f32`, which is `width-overflow`, and zero for `NonZero`, which is
 ///   `nonzero-zero`; a required argument given `null` is `missing-required-directive-argument`,
@@ -245,10 +246,10 @@ impl Analysis {
 ///   saying once what does not fit; a required argument left out is
 ///   `missing-required-directive-argument`, at the application's path. Each row of a copy, and each
 ///   required argument found left out, is a step of [`Limits::max_value_steps`]: past it the
-///   application is `resource-limit` once, at its path, and filled no further. Last, names and
-///   texts past what the model's `u32` offsets address, which only a
-///   [`Limits::max_source_bytes`] far above its default admits, are reported at the root package's
-///   package source.
+///   application is `resource-limit` once, at its path, and filled no further, and an integer whose
+///   conversion it cannot pay for is `resource-limit` where it is written. Last, names and texts
+///   past what the model's `u32` offsets address, which only a [`Limits::max_source_bytes`] far
+///   above its default admits, are reported at the root package's package source.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///   Each schema definition the root package writes after its first is
