@@ -37,9 +37,12 @@
 //! instantiation the program writes has its bounds judged so: a type argument that does not
 //! satisfy a bound of its definition is `smear::graphqlx::unsatisfied-bound`, where the
 //! instantiation is written, and so is each directive application, by its complete type
-//! arguments, at its path. A value that does not fit its type is refused where it is written,
-//! and a default fills each argument and each input field a value leaves out. The phases that
-//! write the rest of it, among them tiers, are still to come.
+//! arguments, at its path. A value that does not fit its type is refused where it is written, a
+//! generic directive's arguments and a generic input object's fields read under their type
+//! arguments, and a default fills each argument and each input field a value leaves out; a value
+//! of a generic type definition whose type names its type parameters is checked at each closed
+//! instantiation of it the program writes, and refused there. The phases that write the rest of
+//! it, among them tiers, are still to come.
 //!
 //! [`analyze_with`] answers the same analysis with the parser the caller chose, a GraphQLx parser
 //! layer, and the [`Trees`] that layer kept beside it, one for each file it read. Each

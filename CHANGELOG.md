@@ -429,7 +429,19 @@ All notable changes to Smear are documented in this file.
   it a value is `resource-limit` where it is written, an application once, at its path, its
   written arguments kept and a copy made whole or not at all, and an object literal once, at the
   literal; the built-in library's own values cost nothing, and a copy made for an application it
-  writes neither. Then smear's rules walk the model, each a visitor on the public trait. A program
+  writes neither. A directive application whose count its directive takes has its complete type
+  arguments, filled from the directive's defaults as an occurrence's are, on the same limits, a
+  default that cannot fill one `smear::graphqlx::generic-arity` at its path; its directive's bounds
+  are judged at it, `smear::graphqlx::unsatisfied-bound` at its path. A generic directive's
+  arguments are coerced under its application's type arguments, "required" read there, and so are
+  a generic input object's fields under its type's arguments; a copy of a default made under them
+  is counted a step a node and judged as a written value is, the first that does not fit
+  `invalid-default-value` once, at the application, or at the literal whose type a rebuild made.
+  A value of a generic type definition whose type names its type parameters stays a `Literal`,
+  and is checked at each closed instantiation of it the program writes: the first that does not
+  fit is reported once at each occurrence, with its site's code, labelled at the value. The steps
+  this takes are `Limits::max_value_steps`'s. Then smear's rules walk the model, each a visitor on
+  the public trait. A program
   defines its schema at most once: each schema definition the root
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
   code, with a label at the first. And the schema is the root package's: each schema definition

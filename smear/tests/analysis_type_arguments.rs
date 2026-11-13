@@ -4,14 +4,16 @@
 //! bounds, judged at it by those arguments; its arguments, each read under them, written or a
 //! copy of its default, the copy's count judging whether it fits and paying for each node; and a
 //! generic input object's fields, read under its type's arguments, a copy that does not fit them
-//! reported by the written literal whose type a rebuild made.
+//! reported by the written literal whose type a rebuild made; and a value of a generic type
+//! definition whose type names its type parameters, checked at each closed instantiation of it the
+//! program writes.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, ApplicationId, DefId, Diagnostic, Layout, Limits, MemberId, Model, Namespace,
-    ObjectEntry, Package, PackageId, SourceFile, SourceId, Tier, TyId, TyKind, ValueId, ValueKind,
-    analyze, test_support,
+    Analysis, ApplicationId, Cx, DefId, Diagnostic, Layout, Limits, MemberId, Model, Namespace,
+    ObjectEntry, Package, PackageId, Packages, SourceFile, SourceId, Tier, TyId, TyKind, ValueId,
+    ValueKind, Visitor, analyze, test_support, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -360,8 +362,10 @@ const NODES: &str = "type Query {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
                      type User implements Node {\n  id: ID\n}\ntype Post {\n  id: ID\n}\n";
 
 /// What a bound's report tells the author of a named type argument.
-const NAMED_HELP: &str = "declare the interface on the type argument with exactly these type arguments, or pass a type \
-   that declares it";
+const NAMED_HELP: &str = concat!(
+  "declare the interface on the type argument with exactly these type arguments, ",
+  "or pass a type that declares it"
+);
 
 /// A generic directive's bounds are judged at each application, by its complete type arguments:
 /// `@d<Post>` is `unsatisfied-bound` at its path, the message naming `@d`, labelled at the bound
@@ -921,7 +925,11 @@ fn growing_arguments_end_at_the_depth_limit() {
   let analysis = analyze_text(text, &Limits::new());
   let schema = schema_file(&analysis);
   let literal = at(schema, text, "{}", 0);
-  assert_eq!(found_of(&analysis, &[DEFAULT, LIMIT]), [(LIMIT, literal)]);
+  // `G<Int>`'s check, whose own diagnostic is the next test's.
+  assert_eq!(
+    found_of(&analysis, &[DEFAULT, LIMIT]),
+    [(LIMIT, at(schema, text, "G<Int>", 0)), (LIMIT, literal)]
+  );
   assert_eq!(
     the(&analysis, LIMIT, literal).to_string(),
     "the fields this literal leaves out take a type that, under these type arguments, nests \
@@ -932,4 +940,354 @@ fn growing_arguments_end_at_the_depth_limit() {
     valued(model, argument_default(model, "Query", "f", "x")),
     "Object {}"
   );
+}
+
+/// A default whose type names its definition's type parameter is checked at each closed
+/// instantiation the program writes: `In<String>` is `invalid-default-value`, at the occurrence,
+/// labelled at the `1`, and `In<Int>` fits. The default stays its definition's literal. Refuses the
+/// check never made, and a value row made by it.
+#[test]
+fn a_default_under_type_parameters_is_checked_at_each_written_instantiation() {
+  let text = "type Query {\n  x(f: In<Int>): Int\n  y(f: In<String>): Int\n}\n\
+              input In<T> {\n  a: T = 1\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "In<String>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
+  let report = the(&analysis, DEFAULT, occurrence);
+  assert_eq!(
+    report.to_string(),
+    "`In` is instantiated here with type arguments under which `1`, a value it holds, does not fit \
+     the type it takes"
+  );
+  assert_eq!(
+    labels(report),
+    [(after(schema, text, "a: T = ", "1"), "this value")]
+  );
+  let model = analysis.model();
+  assert_eq!(
+    valued(model, input_default(model, "In", "a")),
+    "Literal(Int) 1"
+  );
+  // The check makes no row: the root package's one value is `In`'s own default.
+  let mut reached = Values::default();
+  let _ = visit(&analysis, Packages::Supplied, &mut reached);
+  assert_eq!(reached.ids.len(), 1);
+}
+
+/// Each occurrence of an instantiation whose values do not fit is reported once, for its first
+/// value in the definition's order: three occurrences, three reports, each labelled at `a1`'s.
+/// Refuses a report for each value at each occurrence.
+#[test]
+fn one_diagnostic_per_occurrence_for_the_first_value_that_does_not_fit() {
+  let text = "type Query {\n  x(f: In<String>): Int\n  y(f: In<String>): Int\n  \
+              z(f: In<String>): Int\n}\ninput In<T> {\n  a1: T = 1\n  a2: T = 2\n  a3: T = 3\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrences: Vec<Location> = (0..3)
+    .map(|nth: usize| at(schema, text, "In<String>", nth))
+    .collect();
+  assert_eq!(
+    found(&analysis),
+    occurrences
+      .iter()
+      .map(|at: &Location| (DEFAULT, *at))
+      .collect::<Vec<(&str, Location)>>()
+  );
+  let first = after(schema, text, "a1: T = ", "1");
+  for at in occurrences {
+    assert_eq!(labels(the(&analysis, DEFAULT, at)), [(first, "this value")]);
+  }
+}
+
+/// An instantiation's two nullnesses share one verdict, on `Limits::max_value_steps`: `In<Int>`
+/// costs a step for its pair, two to rebuild `[T]` and three for the nodes of `[1, 2]`, six;
+/// `In<Int>!` nothing; `In<Float>` six; twelve. At eleven `In<Float>` alone is `resource-limit`.
+/// Refuses a verdict per nullness, which needs eighteen, and an uncharged count.
+#[test]
+fn both_nullnesses_share_one_verdict() {
+  let text = "type Query {\n  f(x: In<Int>): Int\n  g(y: In<Int>!): Int\n  \
+              h(z: In<Float>): Int\n}\ninput In<T> {\n  a: [T] = [1, 2]\n}\n";
+  quiet(&analyze_text(text, &Limits::new().with_max_value_steps(12)));
+  let short = analyze_text(text, &Limits::new().with_max_value_steps(11));
+  let schema = schema_file(&short);
+  let float = at(schema, text, "In<Float>", 0);
+  assert_eq!(found(&short), [(LIMIT, float)]);
+  assert_eq!(
+    the(&short, LIMIT, float).to_string(),
+    "the values `In` holds could not be checked under the type arguments it is instantiated with \
+     here within `Limits::max_value_steps`, 11, the steps the analysis may take to complete values"
+  );
+}
+
+/// Each pair of a distinct instantiation and a value its definition records is a step: fifty
+/// values of `In<T, U>` under fifty `In<Int, Xj>` share every count after the first
+/// instantiation's, and still cost a step each pair, 2,600 in all. Refuses verdicts read off shared
+/// counts for nothing, which cost 100.
+#[test]
+fn every_pair_of_an_instantiation_and_a_value_is_a_step() {
+  let mut text = String::from("type Query {\n");
+  for j in 1..=50 {
+    text.push_str(&format!("  f{j}(x: In<Int, X{j}>): Int\n"));
+  }
+  text.push_str("}\ninput In<T, U> {\n");
+  for k in 1..=50 {
+    text.push_str(&format!("  a{k}: T = 1\n"));
+  }
+  text.push_str("}\n");
+  for j in 1..=50 {
+    text.push_str(&format!("input X{j} {{\n  v: Int\n}}\n"));
+  }
+  quiet(&analyze_text(&text, &Limits::new()));
+  let short = analyze_text(&text, &Limits::new().with_max_value_steps(1000));
+  assert!(
+    found(&short)
+      .iter()
+      .any(|row: &(&str, Location)| row.0 == LIMIT)
+  );
+}
+
+/// A field argument's default is a value its type records too: `Page<String>`'s `10`.
+#[test]
+fn a_field_arguments_default_is_checked_too() {
+  let text = "type Query {\n  p: Page<String>\n  q: Page<Int>\n}\n\
+              type Page<T> {\n  items(first: T = 10): [T]\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Page<String>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [(after(schema, text, "T = ", "10"), "this value")]
+  );
+}
+
+/// An argument of an application on a generic definition whose type names its parameters is one of
+/// its values: `G<Int>` refuses `"x"`, with the argument's code. Refuses the check of defaults
+/// alone.
+#[test]
+fn an_application_on_a_generic_definition_is_checked_at_its_instantiations() {
+  let text = "type Query {\n  g: G<Int>\n  h: G<String>\n}\n\
+              directive @d<X>(a: X) on OBJECT\ntype G<T> @d<T>(a: \"x\") {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "G<Int>", 0);
+  assert_eq!(found(&analysis), [(ARGUMENT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, ARGUMENT, occurrence)),
+    [(after(schema, text, "(a: ", "\"x\""), "this value")]
+  );
+}
+
+/// A default under derived arguments is checked through the counts it reads: `In<String>`'s `{}`
+/// leaves out `Box`'s `1`, under `Box<String>`, which no occurrence writes. Refuses a check that
+/// stops at the first level.
+#[test]
+fn a_nested_default_under_derived_arguments_is_checked() {
+  let text = "type Query {\n  f(x: In<String>): Int\n}\ninput Box<U> {\n  v: U = 1\n}\n\
+              input In<T> {\n  a: Box<T> = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "In<String>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [(after(schema, text, "a: Box<T> = ", "{}"), "this value")]
+  );
+}
+
+/// A default whose type is closed was judged where it is written, and a check that reads it says
+/// nothing more: `Pair`'s `n`. Refuses a judged count that judges a frame of a closed type.
+#[test]
+fn a_default_judged_where_it_is_written_is_not_reported_again() {
+  let text = "type Query {\n  f(x: In<Int>): Int\n}\n\
+              input Pair<T> {\n  t: T = 1\n  n: Int = \"s\"\n}\n\
+              input In<T> {\n  a: Pair<T> = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(found(&analysis), [(DEFAULT, at(schema, text, "\"s\"", 0))]);
+}
+
+/// A check a limit stops is `resource-limit` at the occurrence, naming the limit: `G<Int>`'s value
+/// `{}` reads types that grow past `Limits::max_generic_depth`.
+#[test]
+fn a_check_a_limit_stops_is_reported_at_the_occurrence() {
+  let text = "type Query {\n  f(x: G<Int> = {}): Int\n}\ninput G<T> {\n  g: G<[T]> = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    the(&analysis, LIMIT, at(schema, text, "G<Int>", 0)).to_string(),
+    "a value `G` holds takes a type that, under these type arguments, nests deeper than \
+     `Limits::max_generic_depth`, 64, admits"
+  );
+}
+
+/// Every value a walk of some packages reaches.
+#[derive(Default)]
+struct Values {
+  ids: Vec<ValueId>,
+}
+
+impl Visitor for Values {
+  fn value(&mut self, _cx: &mut Cx<'_>, value: ValueId) {
+    self.ids.push(value);
+  }
+}
+
+/// Values under type arguments are numbered where the walk reaches them: `@d<Int>`'s copy of `a`
+/// at `k` and `k+1`, its `2` at `k+2`, `x`'s object at `k+3` and its copy of `v` at `k+4` and
+/// `k+5`, then `In`'s own default at `k+6`; the walk reaches every value in id order.
+#[test]
+fn values_under_type_arguments_are_numbered_in_the_walks_order() {
+  let text = "directive @d<T>(a: [T] = [1], b: T) on OBJECT\n\
+              type Query @d<Int>(b: 2) {\n  x(i: In<Int> = {}): Int\n}\n\
+              input In<T> {\n  v: [T] = [3]\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  quiet(&analysis);
+  let model = analysis.model();
+  let application = application_on(model, "Query", 0);
+  let k = argument(model, application, "a").expect("a copy").get();
+  assert_eq!(
+    argument(model, application, "b").map(|id: ValueId| id.get()),
+    Some(k + 2)
+  );
+  let object = argument_default(model, "Query", "x", "i");
+  assert_eq!(object.get(), k + 3);
+  let ValueKind::Object(entries) = model.value(object).kind() else {
+    panic!("no object");
+  };
+  assert_eq!(entries[0].value().get(), k + 4);
+  assert_eq!(input_default(model, "In", "v").get(), k + 6);
+  let mut reached = Values::default();
+  let _ = visit(&analysis, Packages::All, &mut reached);
+  let ids: Vec<u32> = reached.ids.iter().map(|id: &ValueId| id.get()).collect();
+  let expected: Vec<u32> = (0..u32::try_from(ids.len()).expect("few")).collect();
+  assert_eq!(ids, expected);
+}
+
+/// Whether the type `id` names a type parameter, anywhere in it.
+fn names_param(model: &Model, id: TyId) -> bool {
+  match model.ty(id).kind() {
+    TyKind::Param { .. } => true,
+    TyKind::Named { args, .. } => args.iter().any(|arg: &TyId| names_param(model, *arg)),
+    TyKind::List { element, .. } => names_param(model, element),
+    _ => false,
+  }
+}
+
+/// An ok analysis under type arguments holds no unresolved value, and keeps a literal only where
+/// its type names a type parameter: an application's arguments, written and copied, an object
+/// literal's fields and its copies, a nested literal's whose type a rebuild made, and the values
+/// each instantiation checks.
+#[test]
+fn an_ok_analysis_under_type_arguments_has_no_unresolved_value() {
+  let text = "type Query @d<Int>(a: 1) @d<String>(a: \"s\") {\n  x(i: In<Int> = { v: 2 }): Int\n  \
+              g: G<Int>\n}\ndirective @d<T>(a: T, l: [T] = []) repeatable on OBJECT\n\
+              input In<T> {\n  v: T\n  w: [T] = [4]\n  b: Box<T> = {}\n}\n\
+              input Box<U> {\n  u: U = 5\n}\ninput Wrap<W> {\n  w: Box<W>\n}\n\
+              input H {\n  h: Wrap<Int> = { w: {} }\n}\n\
+              type G<T> @d<T>(a: 6) {\n  f(y: T = 7): Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let mut reached = Values::default();
+  let _ = visit(&analysis, Packages::All, &mut reached);
+  for id in reached.ids {
+    let value = model.value(id);
+    match value.kind() {
+      ValueKind::Unresolved => panic!("value {} is unresolved", id.get()),
+      ValueKind::Literal(_) => assert!(
+        names_param(model, value.ty()),
+        "value {} keeps its literal under a closed type",
+        id.get()
+      ),
+      _ => {}
+    }
+  }
+  assert_eq!(
+    valued(model, input_default(model, "H", "h")),
+    "Object {w: Object {u= Int 5}}"
+  );
+}
+
+/// The analysis of a generic directive applied with a default that does not fit, and of a generic
+/// input object instantiated in two files, written out: every value, every application's complete
+/// type arguments and every diagnostic.
+fn rendered(analysis: &Analysis) -> String {
+  let model = analysis.model();
+  let (_, _, values, applications) = test_support::counts(model);
+  let mut text = String::new();
+  for index in 0..values {
+    text.push_str(&format!("{index} {}\n", valued(model, ValueId::new(index))));
+  }
+  for index in 0..applications {
+    let arguments = arguments(model, ApplicationId::new(index));
+    text.push_str(&format!("@{index} {arguments:?}\n"));
+  }
+  for diagnostic in analysis.diagnostics() {
+    text.push_str(&format!("{diagnostic:?}\n"));
+  }
+  text
+}
+
+/// Permuting a package's files and the dependencies changes no value, no complete type argument
+/// and no diagnostic under type arguments.
+#[test]
+fn reversing_files_and_dependencies_changes_nothing_under_type_arguments() {
+  let files = [
+    SourceFile::new(
+      "a.graphqlx",
+      "type Query @^::dep::g<String> {\n  x(i: In<Int>): Int\n}\ninput In<T> {\n  a: T = 1\n}\n",
+    ),
+    SourceFile::new(
+      "b.graphqlx",
+      "type Other {\n  y(i: In<String>): Int\n  z(i: In<Int> = {}): Int\n}\n",
+    ),
+  ];
+  let dep = Package::new("dep", Layout::Flat, Tier::Std).with_files([SourceFile::new(
+    "d.graphqlx",
+    "directive @g<T>(a: T = 1) on OBJECT\n",
+  )]);
+  let other = Package::new("other", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("o.graphqlx", "type Far {\n  f: Int\n}\n")]);
+  let [first, second] = files;
+  let forward = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([first.clone(), second.clone()])
+    .with_dependencies(["dep", "other"]);
+  let backward = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([second, first])
+    .with_dependencies(["other", "dep"]);
+  let one = analyze(&forward, &[dep.clone(), other.clone()], &Limits::new());
+  let two = analyze(&backward, &[other, dep], &Limits::new());
+  // Not vacuous: `@g<String>`'s copy and `In<String>` are each reported.
+  assert_eq!(
+    found(&one)
+      .iter()
+      .map(|row: &(&str, Location)| row.0)
+      .collect::<Vec<&str>>(),
+    [DEFAULT, DEFAULT]
+  );
+  assert_eq!(rendered(&one), rendered(&two));
+}
+
+/// A name past what an excerpt quotes is quoted elided, in the copy's report at an application and
+/// in an instantiation's check.
+#[test]
+fn long_spellings_are_quoted_as_excerpts() {
+  let long = "a".repeat(4096);
+  let text = format!(
+    "type Query @d<String> {{\n  x(f: I{long}<String>): Int\n}}\n\
+     directive @d<T>({long}: T = 1) on OBJECT\ninput I{long}<T> {{\n  v: T = 2\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  let messages: Vec<String> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.to_string())
+    .collect();
+  assert_eq!(messages.len(), 2, "{messages:#?}");
+  for message in messages {
+    assert!(message.len() < 1024, "{message}");
+    assert!(message.contains('…'), "{message}");
+  }
 }

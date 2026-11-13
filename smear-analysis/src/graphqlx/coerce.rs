@@ -183,6 +183,25 @@
 //!
 //! A copy reports nothing: whether it fits reaches whoever asked for its outermost count.
 //!
+//! # At each instantiation
+//!
+//! A value of a generic type definition whose expected type names its type parameters stays a
+//! `Literal`, and is recorded under the definition, in the walk's order: a default of one of its
+//! members, an input field's or a field argument's; and an argument of an application on it or on
+//! one of its members whose type, under the application's open type arguments, names them,
+//! written or copied from its directive's default. A generic directive's own values are judged at
+//! its applications, and recorded nowhere. When the walk has ended, each type occurrence a supplied
+//! package writes, in id order, whose type is a closed named type of a definition with recorded
+//! values, asks that instantiation's verdict, made once for its nullable form and kept: each
+//! recorded value in turn, a step paid before it is asked, its type read under the instantiation's
+//! arguments and its count judged there, until one does not fit. Each occurrence of an
+//! instantiation whose verdict fails is reported once, with the recorded value's site code,
+//! `invalid-default-value` or `invalid-directive-argument-value`, labelled at the value; each one
+//! a limit stopped is `resource-limit`. The value stays its definition's `Literal`, and the check
+//! makes no row. A count that meets itself fits here: the cycle is another rule's to report. An
+//! instantiation only a derivation reaches is not checked: a value written under such a type is
+//! judged where it is written.
+//!
 //! # The count of a copy
 //!
 //! A copy's rows are counted before its first row is made, and the count is what is charged. A
@@ -224,8 +243,9 @@
 //! counting, and each count made already that is asked for again; each default asked for that
 //! needs itself; each required argument, and each required field of an object literal, found
 //! left out; each node of a judged count; each node a rebuild of a member's type under type
-//! arguments looks at, its root included, once for each type and instantiation; and each argument
-//! that may be required left out of an application with complete type arguments. So is the one
+//! arguments looks at, its root included, once for each type and instantiation; each argument or
+//! field that may be required left out where the type arguments are complete; and each pair of a
+//! written instantiation checked and a value recorded under its definition. So is the one
 //! reading that is more than linear: a decimal integer of more than 38
 //! significant digits, the most `u128` arithmetic reads whatever they spell, is converted nine
 //! digits at a time over a vector of limbs, and that is charged first, an upper bound of its limb
@@ -270,6 +290,7 @@ use super::{
   instantiate::{applies, binding, own_package},
   model::{
     Bytes, Collection, DefKind, LiteralKind, ModelBuilder, Primitive, Resolution, Shape, Text,
+    Written,
   },
   raw::{Radix, RawArgument, RawKind, RawNode, RawPath, RawTree, RawValues, UNREAD},
   resolve::{Position, Request, Resolved, Root, Scopes, Segment, Wanted},
@@ -388,6 +409,9 @@ pub(crate) fn coerce(
     counting: Vec::new(),
     frames: Vec::new(),
     held: Vec::new(),
+    owner: None,
+    recorded: Vec::new(),
+    checked: BTreeMap::new(),
     paid: 0,
     copied: 0,
     levels: BTreeMap::new(),
@@ -397,6 +421,11 @@ pub(crate) fn coerce(
   coercion.list_fields();
   for index in 0..coercion.builder.def_count() {
     let def = DefId::new(index);
+    // A generic type definition's values that name its type parameters are recorded under it; a
+    // generic directive's are judged at its applications.
+    coercion.owner = (coercion.builder.type_param_count(def) > 0
+      && coercion.builder.def_kind(def) != Some(DefKind::Directive))
+    .then_some(def);
     let count = coercion.builder.def_applications(def).len();
     for at in 0..count {
       if let Some(&application) = coercion.builder.def_applications(def).get(at) {
@@ -410,12 +439,14 @@ pub(crate) fn coerce(
       }
     }
   }
+  coercion.owner = None;
   let count = coercion.builder.schema_applications().len();
   for at in 0..count {
     if let Some(&application) = coercion.builder.schema_applications().get(at) {
       coercion.application(application);
     }
   }
+  coercion.instantiations();
   debug_assert_eq!(
     coercion.paid, coercion.copied,
     "the copies make exactly the rows they were counted to"
@@ -530,6 +561,27 @@ struct Input {
   def: DefId,
   defaults: (u32, u32),
   required: (u32, u32),
+}
+
+/// A value of a generic type definition whose type names its type parameters: its definition, its
+/// tree, its type, and the site its value is written at, which says the code it is refused with.
+#[derive(Clone, Copy)]
+struct Recorded {
+  def: DefId,
+  tree: u32,
+  ty: TyId,
+  site: Site,
+}
+
+/// What a definition's recorded values come to under one instantiation's arguments.
+#[derive(Clone, Copy)]
+enum Checked {
+  /// Each fits.
+  Fits,
+  /// The recorded value at this row, the first in the walk's order, does not fit.
+  Unfit(u32),
+  /// A limit stopped the check before it was known.
+  Stopped(Stop),
 }
 
 /// A default's count: how many rows a copy of it makes, or why no copy is made.
@@ -982,6 +1034,14 @@ struct Coercion<'c, 'p, 'x> {
   /// The identities of the elements or the keys of the sets and the maps a judged count is
   /// searching, by slot.
   held: Vec<Option<Ident>>,
+  /// The generic type definition whose values the walk is making, when it is in one.
+  owner: Option<DefId>,
+  /// Each value of a generic type definition whose type names its type parameters, in the walk's
+  /// order, and so by its definition: what each written instantiation of it checks.
+  recorded: Vec<Recorded>,
+  /// What the values recorded under each closed instantiation's definition come to under its
+  /// arguments, by the instantiation's nullable form.
+  checked: BTreeMap<TyId, Checked>,
   /// The rows of every count a copy was made of, charged or not.
   paid: u64,
   /// The rows made of copies: what `paid` is when the phase ends, since a copy and its count are
@@ -1002,6 +1062,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       if let Some(value) = self.value(tree, ty, Mode::Written(Site::Default), false) {
         self.builder.set_member_default(member, value);
       }
+      self.record(tree, ty, Site::Default);
     }
     let count = self.builder.member_applications(member).len();
     for at in 0..count {
@@ -1058,27 +1119,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     if !self.is_named(env, owner) {
       return Ok(unbuilt);
     }
-    // A named type's nullable form is interned before its non-null one, and is found.
-    let builder: &ModelBuilder = &*self.builder;
-    let nullable = builder
-      .find_named(owner, builder.ty_args(env), false)
-      .unwrap_or(env);
-    let made = match self.rebuilds.get(&(written, nullable)).copied() {
-      Some(made) => made,
-      None => {
-        let made = self.types.derived.rebuild(
-          self.builder,
-          &mut self.values,
-          library,
-          written,
-          nullable,
-          owner,
-        );
-        self.rebuilds.insert((written, nullable), made);
-        made
-      }
-    };
-    Ok(match made? {
+    Ok(match self.rebuilt(written, env, owner, library)? {
       Some(ty) => Expected {
         ty: Some(ty),
         rebuilt: true,
@@ -1086,6 +1127,184 @@ impl<'p> Coercion<'_, 'p, '_> {
       },
       None => unbuilt,
     })
+  }
+
+  /// `written`, a type that names type parameters of `owner`, with the arguments of `env`, a named
+  /// type of `owner`, in their place, `library` when the built-in library writes what asks: rebuilt
+  /// the first time it is asked, a step of `Limits::max_value_steps` for the root and one for each
+  /// argument or element of a node rebuilt, and remembered by `written` and `env`'s nullable form,
+  /// what stopped it included. `None` when it names no parameter of `owner`.
+  fn rebuilt(
+    &mut self,
+    written: TyId,
+    env: TyId,
+    owner: DefId,
+    library: bool,
+  ) -> Result<Option<TyId>, Stop> {
+    // A named type's nullable form is interned before its non-null one, and is found.
+    let builder: &ModelBuilder = &*self.builder;
+    let nullable = builder
+      .find_named(owner, builder.ty_args(env), false)
+      .unwrap_or(env);
+    if let Some(&made) = self.rebuilds.get(&(written, nullable)) {
+      return made;
+    }
+    let made = self.types.derived.rebuild(
+      self.builder,
+      &mut self.values,
+      library,
+      written,
+      nullable,
+      owner,
+    );
+    self.rebuilds.insert((written, nullable), made);
+    made
+  }
+
+  /// Records the value of the tree `tree`, of the type `ty`, written at `site` in the definition
+  /// the walk is in, when that is a generic type definition and `ty` names its type parameters:
+  /// each closed instantiation the program writes of it checks the value.
+  fn record(&mut self, tree: u32, ty: Option<TyId>, site: Site) {
+    let (Some(def), Some(ty)) = (self.owner, ty) else {
+      return;
+    };
+    if !self.builder.ty_closed(ty) {
+      self.recorded.push(Recorded {
+        def,
+        tree,
+        ty,
+        site,
+      });
+    }
+  }
+
+  /// Checks the values recorded under each generic type definition at each closed instantiation of
+  /// it a supplied package writes, every type occurrence in id order: one verdict for each
+  /// instantiation, both nullnesses sharing it, made the first time it is asked and kept, and one
+  /// report for each occurrence of an instantiation whose verdict fails or that a limit stopped.
+  fn instantiations(&mut self) {
+    if self.recorded.is_empty() {
+      return;
+    }
+    for index in 0..self.builder.type_expr_count() {
+      let Some(occurrence) = self.builder.occurrence(TypeExprId::new(index)) else {
+        continue;
+      };
+      let (Written::Named(def), Some(ty)) = (occurrence.written, occurrence.ty) else {
+        continue;
+      };
+      let at = occurrence.location;
+      if at.source() < self.supplied || !self.builder.ty_closed(ty) || !self.is_named(ty, def) {
+        continue;
+      }
+      let start = self
+        .recorded
+        .partition_point(|row: &Recorded| row.def < def);
+      let end = self
+        .recorded
+        .partition_point(|row: &Recorded| row.def <= def);
+      if start >= end {
+        continue;
+      }
+      let builder: &ModelBuilder = &*self.builder;
+      let nullable = builder
+        .find_named(def, builder.ty_args(ty), false)
+        .unwrap_or(ty);
+      let verdict = match self.checked.get(&nullable).copied() {
+        Some(verdict) => verdict,
+        None => {
+          let verdict = self.check(def, nullable, start, end);
+          self.checked.insert(nullable, verdict);
+          verdict
+        }
+      };
+      match verdict {
+        Checked::Fits => {}
+        Checked::Unfit(row) => self.report_unfit(at, def, row),
+        Checked::Stopped(stop) => self.report_unchecked(at, def, stop),
+      }
+    }
+  }
+
+  /// What the values recorded at the rows `start..end`, all `def`'s, come to under `ty`, a closed
+  /// instantiation of `def`: each in turn, a step paid before it is asked, its type read under
+  /// `ty`'s arguments and its count judged under that type, until one does not fit. A count that
+  /// meets itself fits here: the cycle is another rule's to report. A step that cannot be paid, a
+  /// count past the budget and a type that cannot be built stop the check.
+  fn check(&mut self, def: DefId, ty: TyId, start: usize, end: usize) -> Checked {
+    for row in start..end {
+      let Some(recorded) = self.recorded.get(row).copied() else {
+        break;
+      };
+      if !self.charge(1) {
+        return Checked::Stopped(Stop::Steps);
+      }
+      let under = match self.rebuilt(recorded.ty, ty, def, false) {
+        Ok(Some(under)) => under,
+        Ok(None) => continue,
+        Err(stop) => return Checked::Stopped(stop),
+      };
+      match self.count(recorded.tree, Some(under), true, true) {
+        Count::Rows(_) => {
+          if self.unfit.contains(&(recorded.tree, Some(under))) {
+            return Checked::Unfit(dense(row));
+          }
+        }
+        Count::Poisoned | Count::Counting => {}
+        Count::Past => return Checked::Stopped(Stop::Steps),
+        Count::Unbuilt(limit) => return Checked::Stopped(Stop::Built(limit)),
+      }
+    }
+    Checked::Fits
+  }
+
+  /// Reports, at the occurrence `at` of an instantiation of `def`, the value recorded at `row` that
+  /// does not fit the type the instantiation's arguments give it: with the code of the site it is
+  /// written at, labelled at the value.
+  fn report_unfit(&mut self, at: Location, def: DefId, row: u32) {
+    let Some(recorded) = self.recorded.get(row as usize).copied() else {
+      return;
+    };
+    let Some(RawTree { root, source, .. }) = self.raw.trees.get(recorded.tree as usize).copied()
+    else {
+      return;
+    };
+    let Some(node) = self.raw.nodes.get(root as usize).copied() else {
+      return;
+    };
+    let message = format!(
+      "`{}` is instantiated here with type arguments under which `{}`, a value it holds, does not \
+       fit the type it takes",
+      Excerpt(self.builder.def_name(def)),
+      Excerpt(self.raw.text(source, node.span))
+    );
+    let (code, label) = recorded.site.refusal();
+    self.reporter.report(
+      Diagnostic::builder(code, at)
+        .message(message)
+        .primary_label(label)
+        .label(Location::new(source, node.span), "this value")
+        .build(),
+    );
+  }
+
+  /// Reports, at the occurrence `at` of an instantiation of `def`, that `stop` kept its values from
+  /// being checked under its arguments.
+  fn report_unchecked(&mut self, at: Location, def: DefId, stop: Stop) {
+    let name = Excerpt(self.builder.def_name(def));
+    let (message, help) = match stop {
+      Stop::Steps => (
+        format!(
+          "the values `{name}` holds could not be checked under the type arguments it is \
+           instantiated with here within `Limits::max_value_steps`, {}, the steps the analysis may \
+           take to complete values",
+          self.values.max()
+        ),
+        "raise the limit with `Limits::with_max_value_steps`, or instantiate fewer types",
+      ),
+      Stop::Built(_) => self.stopped(stop, &format!("a value `{name}` holds takes")),
+    };
+    self.limit(at, message, help);
   }
 
   /// Whether `ty` is a named type of `def`.
@@ -1236,6 +1455,9 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
     };
     let ty = expected.ty;
+    if env.is_some() {
+      self.record(tree, ty, Site::Default);
+    }
     let rows = match self.ask(tree, ty, library, expected.rebuilt) {
       Asked::Copy { rows, fits } => {
         if !fits && !*reported {
@@ -2077,6 +2299,9 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
     };
     let (ty, non_null) = (expected.ty, expected.non_null);
+    if applying.env.is_some() {
+      self.record(argument.tree, ty, Site::Argument);
+    }
     let required = non_null && !self.raw.defaults.contains_key(&argument.argument);
     let null = self
       .raw

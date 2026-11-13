@@ -60,7 +60,14 @@ copy is counted before it is made, and a default whose copy would hold a copy of
 copied; the copies, the reads of a default's count, by another's and by each later copy of it, the
 required arguments and fields left out, the lists a value written alone stands for where a list is
 expected and the conversion of a decimal integer of more than 38 significant digits are bounded by
-`Limits::max_value_steps`. It
+`Limits::max_value_steps`. A directive application has its complete type arguments, filled from
+its directive's defaults as an occurrence's are, and its directive's bounds are judged at it; its
+arguments are read under them, a generic input object's fields under its type's arguments, and a
+copy of a default made there is judged as a written value is, the first that does not fit
+reported once, at the application or at the literal whose type the arguments made. A value of a
+generic type definition whose type names its type parameters stays a literal, and is checked at
+each closed instantiation of the definition the program writes, reported once at each occurrence
+of one under which it does not fit. It
 resolves every module's `use` items too, globs and string sources included, against scopes that
 end with the prelude and the packages each package may reach. The built-in packages, `core`, `alloc`
 and `std`, are one embedded GraphQLx file each, parsed on every analysis. `graphqlx::analyze_with`

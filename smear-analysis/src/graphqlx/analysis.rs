@@ -284,7 +284,12 @@ impl Analysis {
 ///   its fields' types under its type arguments likewise, a field written as a bare nullable type
 ///   parameter required where they make it non-null; a copy it makes that does not fit is
 ///   `invalid-default-value` at the literal, once, when a rebuild made the literal's own type, and
-///   is left to the instantiation's check otherwise. A copy is
+///   is left to the instantiation's check otherwise. A value of a generic type definition whose
+///   type names its type parameters, a default of its members or an argument of an application
+///   on it, stays a literal, and is checked at each closed instantiation of the definition a
+///   supplied package writes, one verdict for each instantiation, each pair of one and a value a
+///   step: the first value that does not fit under its arguments is reported once at each
+///   occurrence of it, with the value's site code, labelled at the value. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
 ///   copy of itself is not copied: the argument, or the field, is absent. Each row of a copy, each
 ///   read of another default's count while counting, each read of a count made already for a
