@@ -36,7 +36,24 @@ use self::{
   orphan_extension::OrphanExtension, schema_outside_root::SchemaOutsideRoot,
   type_ref_misuse::TypeRefMisuse,
 };
-use super::{Contribution, Cx, Model, TypeExprId, TypeExprKind, id::dense};
+use super::{Contribution, Cx, DefId, Model, PackageId, TypeExprId, TypeExprKind, id::dense};
+
+/// The definition `def`'s own contribution, its first, which is no extension, and the package that
+/// wrote it, read off where it is written: the package that wrote the definition, whose
+/// applications alone give it a meaning. That is the root package for a GraphQL built-in it
+/// replaces, though the definition is the built-in's, and the built-in's package for every other
+/// built-in. `None` when the first contribution is an extension, so that the answer never rests
+/// on the order lowering appends contributions in.
+fn own_contribution<'a>(cx: &Cx<'a>, def: DefId) -> Option<(Contribution<'a>, PackageId)> {
+  let own = cx
+    .model()
+    .def(def)
+    .contributions()
+    .next()
+    .filter(|part: &Contribution<'a>| !part.is_extension())?;
+  let writer = cx.sources().written_by(own.location())?;
+  Some((own, writer))
+}
 
 /// Whether a rule says nothing at the occurrence the walk has reached in `type_expr`: a phase
 /// reported an error within the contribution that wrote it, or, for a written root, which no

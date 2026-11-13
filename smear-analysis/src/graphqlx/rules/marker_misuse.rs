@@ -25,11 +25,11 @@
 use std::format;
 
 use crate::graphqlx::{
-  Cx, DefId, DefKind, Diagnostic, DiagnosticKind, PackageKind, Site, TypeExprId, TypeExprKind,
-  Visitor, diagnostic::Excerpt,
+  Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, PackageKind, Site, TypeExprId,
+  TypeExprKind, Visitor, diagnostic::Excerpt,
 };
 
-use super::{Nesting, Silence};
+use super::{Nesting, Silence, own_contribution};
 
 /// Reports each marker that declares a field, each occurrence of a marker that is no outermost
 /// `implements` entry or bound's interface, and each `implements` entry of a scalar, an enum, an
@@ -66,12 +66,8 @@ impl Visitor for MarkerMisuse {
     if !definition.is_marker() {
       return;
     }
-    // The package that wrote the marker, which its own contribution, the first, is written by.
-    let Some(own) = definition
-      .contributions()
-      .next()
-      .and_then(|part| sources.written_by(part.location()))
-    else {
+    // The package that wrote the marker.
+    let Some((_, own)) = own_contribution(cx, def) else {
       return;
     };
     if model.package(own).kind() == PackageKind::BuiltIn {
@@ -79,12 +75,12 @@ impl Visitor for MarkerMisuse {
     }
     let first = definition
       .contributions()
-      .filter(|part| {
+      .filter(|part: &Contribution<'_>| {
         sources.written_by(part.location()) == Some(own)
           && !part.has_errors()
           && !part.members().is_empty()
       })
-      .find_map(|part| part.members().into_iter().next());
+      .find_map(|part: Contribution<'_>| part.members().into_iter().next());
     let Some(first) = first else {
       return;
     };

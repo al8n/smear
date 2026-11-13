@@ -31,6 +31,8 @@ use crate::graphqlx::{
   diagnostic::Excerpt,
 };
 
+use super::own_contribution;
+
 /// Reports each scalar its own package makes a set or a map with a count of type parameters that
 /// collection has not, and each that its own package makes both.
 ///
@@ -57,12 +59,8 @@ impl Visitor for CollectionArity {
     if definition.kind() != DefKind::Scalar {
       return;
     }
-    // The package that wrote the scalar, which its own contribution, the first, is written by.
-    let Some(own) = definition
-      .contributions()
-      .next()
-      .and_then(|part| sources.written_by(part.location()))
-    else {
+    // The package that wrote the scalar.
+    let Some((_, own)) = own_contribution(cx, def) else {
       return;
     };
     if model.package(own).kind() == PackageKind::BuiltIn {

@@ -45,9 +45,11 @@
 use std::{format, string::String};
 
 use crate::graphqlx::{
-  Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, PackageKind, Resolution, Visitor,
-  diagnostic::Excerpt,
+  Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, PackageId, PackageKind, Resolution,
+  Visitor, diagnostic::Excerpt,
 };
+
+use super::own_contribution;
 
 /// Reports each extension of a definition that the package that wrote the extension may not
 /// extend, and each application of `core`'s `@marker`, `@set` or `@map` in the root package's
@@ -76,14 +78,10 @@ impl Visitor for OrphanExtension {
     let home = model.module(definition.module()).package();
     let root = model.root_package();
     let kind = DiagnosticKind::OrphanExtension;
-    // The package that wrote the definition, which its own contribution, the first, is written by:
-    // the root package for a GraphQL built-in it replaces, though the definition is the built-in's
-    // and belongs to the built-in's package.
-    let definer = definition
-      .contributions()
-      .next()
-      .filter(|own: &Contribution<'_>| !own.is_extension())
-      .and_then(|own: Contribution<'_>| sources.written_by(own.location()));
+    // The package that wrote the definition: the root package for a GraphQL built-in it replaces,
+    // though the definition is the built-in's and belongs to the built-in's package.
+    let definer =
+      own_contribution(cx, def).map(|(_, writer): (Contribution<'_>, PackageId)| writer);
     for part in definition.contributions() {
       if !part.is_extension() || part.has_errors() {
         continue;

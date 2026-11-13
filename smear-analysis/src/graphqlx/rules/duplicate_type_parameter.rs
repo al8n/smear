@@ -17,9 +17,11 @@ use std::{format, vec::Vec};
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, PackageKind, Sym, TypeParam,
-  Visitor, diagnostic::Excerpt,
+  Cx, DefId, DefKind, Diagnostic, DiagnosticKind, PackageKind, Sym, TypeParam, Visitor,
+  diagnostic::Excerpt,
 };
+
+use super::own_contribution;
 
 /// Reports each type parameter whose name an earlier one of its definition has.
 ///
@@ -45,23 +47,16 @@ impl Visitor for DuplicateTypeParameter {
 
   fn enter_def(&mut self, cx: &mut Cx<'_>, def: DefId) {
     let model = cx.model();
-    let sources = cx.sources();
     let definition = model.def(def);
     if definition.type_params().len() < 2 {
       return;
     }
-    // The contribution that writes the parameters: the definition's own, its first.
-    let Some(own) = definition
-      .contributions()
-      .next()
-      .filter(|own: &Contribution<'_>| !own.is_extension() && !own.has_errors())
-    else {
+    // The contribution that writes the parameters, the definition's own, and the package that
+    // wrote it.
+    let Some((own, writer)) = own_contribution(cx, def) else {
       return;
     };
-    let Some(writer) = sources.written_by(own.location()) else {
-      return;
-    };
-    if model.package(writer).kind() == PackageKind::BuiltIn {
+    if own.has_errors() || model.package(writer).kind() == PackageKind::BuiltIn {
       return;
     }
     self.names.clear();
