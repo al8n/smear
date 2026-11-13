@@ -3,15 +3,19 @@
 //! package defines or extends the schema; and a package extends its own definitions alone, but
 //! for the directives the root package adds to a built-in. Each rule says nothing about what a
 //! phase already refused, marks what it reports, and quotes a name only as an excerpt.
+//!
+//! Then the rule set itself: every code a rule lists fires on a fixture; and the walk the rules
+//! ride, over an analyzed program of two packages, written out hook by hook.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Contribution, DefId, Diagnostic, DiagnosticKind, Layout, Limits, MemberId, Model,
-    Namespace, Package, PackageId, Primitive, Root, RootOperation, SourceFile, SourceId, Tier,
-    analyze,
+    Analysis, ApplicationId, Contribution, Cx, DefId, Diagnostic, DiagnosticKind, Layout, Limits,
+    MemberId, Model, ModuleId, Namespace, Package, PackageId, Packages, Primitive, Root,
+    RootOperation, SourceFile, SourceId, Tier, TypeExprId, ValueId, Visitor, analyze,
+    test_support::RULES, visit,
   },
-  diagnostic::{Diagnose, Location},
+  diagnostic::{Code, Diagnose, Location},
   lexer::tokora::SimpleSpan,
 };
 
@@ -888,5 +892,346 @@ fn long_names_are_quoted_as_excerpts() {
       "E".repeat(64),
       "E".repeat(64)
     )]
+  );
+}
+
+/// A program on which a code a rule lists must fire.
+type Fixture = fn() -> Analysis;
+
+/// Each code a rule of smear's lists, with a program on which it must fire. The liveness test
+/// looks each code of the rule table up here, so the key is the code the table holds.
+const FIXTURES: &[(Code, Fixture)] = &[
+  (Code::new(DUPLICATE), two_schema_definitions),
+  (Code::new(OUTSIDE), a_dependencys_schema_definition),
+  (Code::new(ORPHAN), an_extension_of_a_dependencys_type),
+];
+
+/// A root package that defines its schema twice.
+fn two_schema_definitions() -> Analysis {
+  analyze_one(
+    "schema {\n  query: Query\n}\nschema {\n  query: Query\n}\ntype Query {\n  ok: Int\n}\n",
+  )
+}
+
+/// A dependency that defines the schema.
+fn a_dependencys_schema_definition() -> Analysis {
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[("schema.graphqlx", "type Query {\n  ok: Int\n}\n")],
+  )
+  .with_dependencies(["geo"]);
+  let geo = package(
+    "geo",
+    Layout::Flat,
+    &[(
+      "geo.graphqlx",
+      "schema {\n  query: Point\n}\ntype Point {\n  x: Int\n}\n",
+    )],
+  );
+  analyze(&root, &[geo], &Limits::new())
+}
+
+/// A root package that extends a dependency's type.
+fn an_extension_of_a_dependencys_type() -> Analysis {
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[(
+      "schema.graphqlx",
+      "extend type ^::geo::Point {\n  label: String\n}\n",
+    )],
+  )
+  .with_dependencies(["geo"]);
+  let geo = package(
+    "geo",
+    Layout::Flat,
+    &[("geo.graphqlx", "type Point {\n  x: Int\n}\n")],
+  );
+  analyze(&root, &[geo], &Limits::new())
+}
+
+/// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and
+/// no fixture is for a code no rule lists. A rule added with no fixture fails here, by its name.
+#[test]
+fn every_code_of_every_rule_fires_on_its_fixture() {
+  let mut listed: Vec<Code> = Vec::new();
+  for (rule, codes) in RULES {
+    assert!(!codes.is_empty(), "the rule `{rule}` lists no code");
+    for code in *codes {
+      let fixture = FIXTURES
+        .iter()
+        .find(|(key, _): &&(Code, Fixture)| key == code);
+      let Some((_, program)) = fixture else {
+        panic!("the rule `{rule}` lists `{code}`, which no fixture makes fire");
+      };
+      let analysis = program();
+      assert!(
+        analysis
+          .diagnostics()
+          .iter()
+          .any(|diagnostic: &Diagnostic| diagnostic.code() == *code),
+        "`{code}`, which the rule `{rule}` lists, does not fire on its fixture: {:#?}",
+        analysis.diagnostics()
+      );
+      listed.push(*code);
+    }
+  }
+  for (code, _) in FIXTURES {
+    assert!(
+      listed.contains(code),
+      "a fixture is for `{code}`, which no rule lists"
+    );
+  }
+}
+
+/// The root package of the walk written out below: a directive with a defaulted argument; an
+/// interface; an object type that implements it, applies the directive, and holds a field with a
+/// defaulted argument and a field that is a list; an extension of that type; and a schema
+/// definition with an application.
+const ORDER_APP: &str = r#"directive @tag(name: String = "none") repeatable on OBJECT | SCHEMA
+interface Node {
+  id: ID
+}
+type Query implements Node @tag(name: "q") {
+  id: ID
+  node(id: ID = "1"): Node
+  nodes: [Node!]
+}
+extend type Query @tag {
+  origin: ^::geo::Point
+}
+schema @tag(name: "s") {
+  query: Query
+}
+"#;
+
+/// Its dependency, `geo`.
+const ORDER_GEO: &str = "type Point {\n  x: Float\n}\n";
+
+/// The walk of that program over the supplied packages, hook by hook. A package is written by its
+/// id, and every other id as its offset from the first of its kind the walk reaches.
+///
+/// The definitions are `@tag` (+0), `Node` (+1), `Query` (+2) and `geo`'s `Point` (+3). The
+/// members are `@tag`'s `name` (+0), `Node`'s `id` (+1), then `Query`'s direct members, its own
+/// `id` (+2), `node` (+3) and `nodes` (+4) and then its extension's `origin` (+5), then `node`'s
+/// argument `id` (+6), which every direct member comes before, and `Point`'s `x` (+7).
+const ORDER: &[&str] = &[
+  "begin",
+  "enter_package 3",
+  "enter_module +0",
+  // `@tag`: its argument's type and default.
+  "enter_def +0",
+  "enter_member +0",
+  "type_expr +0 MemberType",
+  "value +0 Default",
+  "exit_member +0",
+  "exit_def +0",
+  // `Node`.
+  "enter_def +1",
+  "enter_member +1",
+  "type_expr +1 MemberType",
+  "exit_member +1",
+  "exit_def +1",
+  // `Query`: its `implements` entry; its own application and its extension's; its own members,
+  // an argument nested in its field and a list before its element; then its extension's member.
+  "enter_def +2",
+  "type_expr +2 Implements",
+  "application +0",
+  "value +1 ApplicationArgument in +0",
+  "application +1",
+  "enter_member +2",
+  "type_expr +3 MemberType",
+  "exit_member +2",
+  "enter_member +3",
+  "type_expr +4 MemberType",
+  "enter_member +6",
+  "type_expr +5 MemberType",
+  "value +2 Default",
+  "exit_member +6",
+  "exit_member +3",
+  "enter_member +4",
+  "type_expr +6 MemberType",
+  "type_expr +7 MemberType",
+  "exit_member +4",
+  "enter_member +5",
+  "type_expr +8 MemberType",
+  "exit_member +5",
+  "exit_def +2",
+  "exit_module +0",
+  "exit_package 3",
+  // `geo`: `Point`.
+  "enter_package 4",
+  "enter_module +1",
+  "enter_def +3",
+  "enter_member +7",
+  "type_expr +9 MemberType",
+  "exit_member +7",
+  "exit_def +3",
+  "exit_module +1",
+  "exit_package 4",
+  // The schema, after every package: its written root, then its application.
+  "schema",
+  "type_expr +10 RootOperation",
+  "application +2",
+  "value +3 ApplicationArgument in +2",
+  "end",
+];
+
+/// Writes down every hook a walk calls: its name and the id it is handed, and for an occurrence
+/// where its outermost occurrence sits and the application it is in.
+///
+/// A package is written by its id. Every other id is written as its offset from the first id of
+/// its kind the walk hands a hook, which is the least the walk reaches: the built-in library's
+/// rows come first in every table, and how many it has is not what a walk's order is about.
+#[derive(Default)]
+struct Recorder {
+  lines: Vec<String>,
+  /// The first id of each kind the walk handed a hook.
+  modules: Option<u32>,
+  defs: Option<u32>,
+  members: Option<u32>,
+  type_exprs: Option<u32>,
+  applications: Option<u32>,
+  values: Option<u32>,
+}
+
+/// `id` as its offset from the first id of its kind, which `first` holds once one is reached.
+fn offset(first: &mut Option<u32>, id: u32) -> u32 {
+  let least = *first.get_or_insert(id);
+  id.checked_sub(least)
+    .expect("the first id of a kind a walk reaches is the least it reaches")
+}
+
+impl Recorder {
+  /// An occurrence's line: the hook, the occurrence's offset, its site, and the application it is
+  /// in, if any.
+  fn occurrence(&mut self, hook: &str, at: u32, cx: &Cx<'_>) -> String {
+    let site: String = match cx.site() {
+      Some(site) => format!("{site:?}"),
+      None => String::from("nowhere"),
+    };
+    match cx.application() {
+      Some(application) => {
+        let within = offset(&mut self.applications, application.get());
+        format!("{hook} +{at} {site} in +{within}")
+      }
+      None => format!("{hook} +{at} {site}"),
+    }
+  }
+}
+
+impl Visitor for Recorder {
+  fn begin(&mut self, _cx: &mut Cx<'_>) {
+    self.lines.push(String::from("begin"));
+  }
+
+  fn enter_package(&mut self, _cx: &mut Cx<'_>, package: PackageId) {
+    self.lines.push(format!("enter_package {}", package.get()));
+  }
+
+  fn exit_package(&mut self, _cx: &mut Cx<'_>, package: PackageId) {
+    self.lines.push(format!("exit_package {}", package.get()));
+  }
+
+  fn enter_module(&mut self, _cx: &mut Cx<'_>, module: ModuleId) {
+    let at = offset(&mut self.modules, module.get());
+    self.lines.push(format!("enter_module +{at}"));
+  }
+
+  fn exit_module(&mut self, _cx: &mut Cx<'_>, module: ModuleId) {
+    let at = offset(&mut self.modules, module.get());
+    self.lines.push(format!("exit_module +{at}"));
+  }
+
+  fn enter_def(&mut self, _cx: &mut Cx<'_>, def: DefId) {
+    let at = offset(&mut self.defs, def.get());
+    self.lines.push(format!("enter_def +{at}"));
+  }
+
+  fn exit_def(&mut self, _cx: &mut Cx<'_>, def: DefId) {
+    let at = offset(&mut self.defs, def.get());
+    self.lines.push(format!("exit_def +{at}"));
+  }
+
+  fn enter_member(&mut self, _cx: &mut Cx<'_>, member: MemberId) {
+    let at = offset(&mut self.members, member.get());
+    self.lines.push(format!("enter_member +{at}"));
+  }
+
+  fn exit_member(&mut self, _cx: &mut Cx<'_>, member: MemberId) {
+    let at = offset(&mut self.members, member.get());
+    self.lines.push(format!("exit_member +{at}"));
+  }
+
+  fn type_expr(&mut self, cx: &mut Cx<'_>, ty: TypeExprId) {
+    let at = offset(&mut self.type_exprs, ty.get());
+    let line = self.occurrence("type_expr", at, cx);
+    self.lines.push(line);
+  }
+
+  fn application(&mut self, _cx: &mut Cx<'_>, application: ApplicationId) {
+    let at = offset(&mut self.applications, application.get());
+    self.lines.push(format!("application +{at}"));
+  }
+
+  fn value(&mut self, cx: &mut Cx<'_>, value: ValueId) {
+    let at = offset(&mut self.values, value.get());
+    let line = self.occurrence("value", at, cx);
+    self.lines.push(line);
+  }
+
+  fn schema(&mut self, _cx: &mut Cx<'_>) {
+    self.lines.push(String::from("schema"));
+  }
+
+  fn end(&mut self, _cx: &mut Cx<'_>) {
+    self.lines.push(String::from("end"));
+  }
+}
+
+/// The order: the walk `analyze` runs its rules through, over an analyzed program of two packages,
+/// is the sequence of hooks written out above.
+#[test]
+fn the_walk_of_an_analyzed_program_is_the_written_sequence_of_hooks() {
+  let root =
+    package("app", Layout::Flat, &[("schema.graphqlx", ORDER_APP)]).with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("geo.graphqlx", ORDER_GEO)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  let mut recorder = Recorder::default();
+  let reported = visit(&analysis, Packages::Supplied, &mut recorder);
+  assert!(reported.is_empty(), "the recorder reports nothing");
+  for (index, (line, want)) in recorder.lines.iter().zip(ORDER).enumerate() {
+    assert_eq!(line.as_str(), *want, "line {index} of the walk");
+  }
+  assert_eq!(recorder.lines.len(), ORDER.len(), "the walk's length");
+
+  // The offsets are from the root package's first rows: its root module, and the first
+  // definition that module holds, `@tag`, whose one member is its argument.
+  let model = analysis.model();
+  let root_module = model.package(model.root_package()).root_module();
+  let tag = model
+    .module(root_module)
+    .defs()
+    .into_iter()
+    .next()
+    .expect("the root module holds `@tag`");
+  assert_eq!(model.def(tag).name(), "tag");
+  assert_eq!(recorder.modules, Some(root_module.get()));
+  assert_eq!(recorder.defs, Some(tag.get()));
+  assert_eq!(
+    recorder.members,
+    model
+      .def(tag)
+      .arguments()
+      .into_iter()
+      .next()
+      .map(|argument: MemberId| argument.get())
   );
 }
