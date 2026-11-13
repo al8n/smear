@@ -282,9 +282,9 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
 ///
 /// A file that holds nothing but white space, commas, byte order marks and comments never reaches
 /// the layer: the analysis accepts it as a document with no item, so it has no entry here. A tool
-/// that wants a tree for such a file parses its text with `smear-parser`'s lossless layer itself.
-/// That parse reports a syntax error, because for the parser a text with no item is not a
-/// document.
+/// that wants a tree for such a file parses its text with `smear-parser`'s lossless layer itself,
+/// and is answered a tree with one syntax error, because for the parser a text with no item is
+/// not a document.
 #[derive(Debug, Clone)]
 pub struct Trees<T> {
   trees: Vec<(SourceId, T)>,
