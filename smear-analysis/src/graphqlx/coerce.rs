@@ -142,7 +142,9 @@
 //! A count goes through the same classifier and the same reading of object literals as the copy:
 //! its written nodes, a lone value counted from its type's levels of list, and, for each default
 //! an object literal of it leaves out, a read of that default's count. A read is a step, paid
-//! before it is read, and spent whether or not the copy it was counted for is made.
+//! before it is read, and spent whether or not the copy it was counted for is made. So is asking
+//! again for a count made already, for a later copy of the same default: the asker reads the kept
+//! count, a step paid before the count is used, besides the rows the copy then pays.
 //!
 //! A count is exact, past the budget, or poisoned. A count that reads a count still being made
 //! has met itself: the copy would hold a copy of itself, and the count is poisoned, with every
@@ -152,24 +154,26 @@
 //! checked, so it is exact whatever the limit; a default whose count is exact reaches no default
 //! twice on one chain. Counting uses explicit stacks, a frame for each default being counted.
 //!
-//! Who asks for a count does what it says: exact, the count is charged, all of it or none, and
-//! the copy is made; past the budget, the asker is starved; poisoned, one step is charged, and
-//! nothing is made: the argument, or the field, is absent, and the cycle is another rule's to
-//! report. A copy is whole or absent, and the rows a copy makes are its count's, which the phase
-//! asserts when it ends.
+//! Who asks for a count does what it says, once it has paid for reading a count made already:
+//! exact, the count is charged, all of it or none, and the copy is made; past the budget, the
+//! asker is starved; poisoned, one step is charged, and nothing is made: the argument, or the
+//! field, is absent, and the cycle is another rule's to report. A read the budget cannot pay for
+//! starves the asker too. A copy is whole or absent, and the rows a copy makes are its count's,
+//! which the phase asserts when it ends.
 //!
 //! # What bounds it
 //!
 //! A written row is a written literal, which `Limits::max_source_bytes` bounds. What no literal
 //! writes is a step of `Limits::max_value_steps`: each list a written lone value stands for; each
-//! row of a copy, its whole count charged before its first row; each read of a count; each default
-//! asked for that needs itself; and each required argument, and each required field of an object
-//! literal, found left out. So is the one reading that is more than linear: a decimal integer of
-//! more than 38 significant digits, the most `u128` arithmetic reads whatever they spell, is
-//! converted nine digits at a time over a vector of limbs, and that is charged first, an upper
-//! bound of its limb updates; one the budget cannot pay for is `resource-limit` where it is
-//! written, and unresolved. A shorter one is read in `u128` arithmetic, and a hexadecimal, octal or
-//! binary one in one pass, each for nothing. Past it a lone value is unresolved, and
+//! row of a copy, its whole count charged before its first row; each read of a count while
+//! counting, and each count made already that is asked for again; each default asked for that
+//! needs itself; and each required argument, and each required field of an object literal, found
+//! left out. So is the one reading that is more than linear: a decimal integer of more than 38
+//! significant digits, the most `u128` arithmetic reads whatever they spell, is converted nine
+//! digits at a time over a vector of limbs, and that is charged first, an upper bound of its limb
+//! updates; one the budget cannot pay for is `resource-limit` where it is written, and
+//! unresolved. A shorter one is read in `u128` arithmetic, and a hexadecimal, octal or binary one
+//! in one pass, each for nothing. Past it a lone value is unresolved, and
 //! `resource-limit` where it is written; an application is `resource-limit` once, at its path, its
 //! written arguments still coerced, a copy made whole or not at all, and the rest of its
 //! directive's list not read; and an object literal likewise, once, at the literal, its written
@@ -1086,10 +1090,15 @@ impl<'p> Coercion<'_, 'p, '_> {
 
   /// What asking for the default whose tree is `tree`, of the type `ty`, where it is left out
   /// does, the asker the built-in library's when `library`: its count is asked for, and charged
-  /// unless `library`. Exact, its rows are charged, all or none, and a copy is made; past the
-  /// budget, the asker is starved; a default that needs itself costs one step and is absent. Steps
-  /// its count's reads paid stay spent whatever the copy.
+  /// unless `library`. A count made already is read first, a step, as a count's own reads are,
+  /// paid before the count is used and apart from the rows a copy then pays; one that cannot be
+  /// paid starves the asker. Exact, its rows are charged, all or none, and a copy is made; past
+  /// the budget, the asker is starved; a default that needs itself costs one step and is absent.
+  /// Steps its count's reads paid stay spent whatever the copy.
   fn ask(&mut self, tree: u32, ty: Option<TyId>, library: bool) -> Asked {
+    if !library && self.counts.contains_key(&(tree, ty)) && !self.charge(1) {
+      return Asked::Starved;
+    }
     match self.count(tree, ty, !library) {
       Count::Rows(rows) => {
         if !library && !self.charge(rows) {
@@ -1110,12 +1119,14 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// The count of the default whose tree is `tree`, against `ty`: kept once made, by the two, and
-  /// made with two stacks of its own, a frame for each default being counted. A frame counts its
-  /// tree's written nodes through [`classify`](Self::classify), as a copy makes them: one row each,
-  /// a list's elements, a lone value's levels of list from its type and then the value against the
-  /// type under them, and the fields an object literal sets; and for each default an object
-  /// literal leaves out, a read of that default's count, a step charged before it is pushed when
-  /// `charged`. A read of a kept count adds its rows; of one not counted yet, opens its frame.
+  /// answered as kept when asked again, its asker having paid for that read
+  /// ([`ask`](Self::ask)); and made with two stacks of its own, a frame for each default being
+  /// counted. A frame counts its tree's written nodes through [`classify`](Self::classify), as a
+  /// copy makes them: one row each, a list's elements, a lone value's levels of list from its type
+  /// and then the value against the type under them, and the fields an object literal sets; and
+  /// for each default an object literal leaves out, a read of that default's count, a step charged
+  /// before it is pushed when `charged`. A read of a kept count adds its rows; of one not counted
+  /// yet, opens its frame.
   ///
   /// A frame with nothing left is exact, kept, and its rows added to the frame that read it. A
   /// verdict is every open frame's, each reading the one above it: a read of a count being made,

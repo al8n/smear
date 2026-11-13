@@ -331,19 +331,20 @@ impl Limits {
   /// one of: a value of a copy of a default, which fills an argument an application leaves out or
   /// a field an object literal leaves out, each value nested in the default counting one, the
   /// copies of the defaults its own object literals leave out among them; a read, while a copy is
-  /// counted, of the count of each default one of its object literals leaves out, spent whether or
-  /// not the copy it was counted for is made; a default left out whose copy would hold a copy of
-  /// itself, which is not made; a list that a written value stands for where a list is expected,
-  /// one for each level of list between the value and its type, as `tags: [[Int]] = 1` stands for
-  /// a list of a list of `1`; a required argument an application leaves out, and a required field
-  /// an object literal leaves out, each of which is reported; and converting a decimal integer of
-  /// more than 38 significant digits, the most `u128` arithmetic
-  /// reads whatever they spell, to its value, charged before the conversion as an upper bound of
-  /// its work: `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine
-  /// digits times the 32-bit limbs of its value. A hexadecimal, octal or binary integer converts in
-  /// one pass and takes none. The built-in library's own values take none: its defaults where it
-  /// writes them, and a copy made for an application it writes. A copy of one of its defaults made
-  /// for an application a supplied package writes, a bare `@deprecated` among them, is charged.
+  /// counted, of the count of each default one of its object literals leaves out, and a read of a
+  /// count made already, when a later copy of its default is asked for, each spent whether or not
+  /// the copy it was read for is made; a default left out whose copy would hold a copy of itself,
+  /// which is not made; a list that a written value stands for where a list is expected, one for
+  /// each level of list between the value and its type, as `tags: [[Int]] = 1` stands for a list
+  /// of a list of `1`; a required argument an application leaves out, and a required field an
+  /// object literal leaves out, each of which is reported; and converting a decimal integer of more
+  /// than 38 significant digits, the most `u128` arithmetic reads whatever they spell, to its
+  /// value, charged before the conversion as an upper bound of its work:
+  /// `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine digits times
+  /// the 32-bit limbs of its value. A hexadecimal, octal or binary integer converts in one pass and
+  /// takes none. The built-in library's own values take none: its defaults where it writes them,
+  /// and a copy made for an application it writes. A copy of one of its defaults made for an
+  /// application a supplied package writes, a bare `@deprecated` among them, is charged.
   ///
   /// Past it, a written value whose lists cannot all be paid for is `resource-limit` where it is
   /// written, and the level of list that could not be paid for is its one unresolved row, under
@@ -360,13 +361,13 @@ impl Limits {
   /// value stands for a list, and no decimal integer of more than 38 significant digits is read: a
   /// decimal `u128::MAX` is `resource-limit`.
   ///
-  /// The default is 2^20: one copied value for each of a million applications, so a program of a
-  /// hundred thousand applications that each leave eight defaults out stays inside it. The longest
-  /// decimal integer it converts, with nothing else spent, has 9 526 digits, charged 1 048 410
-  /// steps; a longer one is written in hexadecimal, or read under a higher limit. Defaults that
-  /// fill defaults multiply: input objects that each default two fields to `{}` of the next fill
-  /// twice as many values at each level, and nineteen of them, a valid GraphQL document, pass the
-  /// default where their own defaults are written.
+  /// The default is 2^20: a read and one copied value for each of half a million applications, so
+  /// a program of a hundred thousand applications that each leave four defaults of one value out
+  /// stays inside it. The longest decimal integer it converts, with nothing else spent, has 9 526
+  /// digits, charged 1 048 410 steps; a longer one is written in hexadecimal, or read under a
+  /// higher limit. Defaults that fill defaults multiply: input objects that each default two fields
+  /// to `{}` of the next fill twice as many values at each level, and nineteen of them, a valid
+  /// GraphQL document, pass the default where their own defaults are written.
   #[inline]
   pub const fn max_value_steps(&self) -> u32 {
     self.max_value_steps

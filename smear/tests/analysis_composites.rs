@@ -915,17 +915,19 @@ fn a_later_field_of_a_name_already_taken_is_not_asked_for() {
   assert_eq!(shown_default(analysis.model(), "H", "i"), "Object {}");
 }
 
-/// A count is made once and kept: the default `{}` where it is written fills two fields, 2 steps;
-/// `T`'s copy reads two counts, 2 steps, and makes three rows, 3; `U`'s copy, its count kept, is 3
-/// more. At 10 all is paid; at 9 `U` alone is past the budget. At 6 `T`'s two reads stay spent
-/// though its copy is refused, so `U` cannot be paid either. Refuses a count made again for each
-/// copy, which fails at 10; one whose reads nobody pays for, which passes at 9; and reads paid
-/// together with the copy as one charge, which fills `U` at 6.
+/// A count is made once and kept: the default `{}` where it is written fills two fields, counting
+/// `x`'s and `y`'s defaults then, 2 steps; `T`'s copy counts the default, which reads those two
+/// kept counts, 2 steps, and makes three rows, 3; `U` reads the count `T`'s copy made, 1, and its
+/// copy is 3 more: 11 in all. At 11 all is paid; at 10 `U` alone is past the budget, its read paid
+/// and its copy not. At 6 `T`'s two reads stay spent though its copy is refused, and `U`'s read is
+/// paid, so `U`'s copy cannot be paid either. Refuses a count made again for each copy, which
+/// fails at 11; one whose reads nobody pays for, and a kept count read for nothing, which each
+/// pass at 10; and reads paid together with the copy as one charge, which fills `U` at 6.
 #[test]
 fn a_default_is_counted_once() {
   let text = "type Query {\n  x: Int\n}\ninput I {\n  x: Int = 1\n  y: Int = 2\n}\n\
               directive @d(a: I = {}) on OBJECT\ntype T @d {\n  f: Int\n}\ntype U @d {\n  f: Int\n}\n";
-  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(10));
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(11));
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   assert_eq!(
@@ -933,7 +935,7 @@ fn a_default_is_counted_once() {
     "Object {x= Int 1, y= Int 2}"
   );
 
-  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(9));
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(10));
   let schema = schema_file(&analysis);
   assert_eq!(
     found(&analysis),
@@ -952,6 +954,37 @@ fn a_default_is_counted_once() {
       (LIMIT, after(schema, text, "type U @", "d")),
     ]
   );
+}
+
+/// A later copy of a default reads the count an earlier copy made, a step, before it pays its
+/// rows: the default `1` is one row, written, for nothing; `T`'s copy counts it and pays 1; `U`'s
+/// reads the kept count, 1, and pays 1: 3 in all. At 3 both are filled; at 2 `U`'s read is paid
+/// and its copy is not, so `U` alone is past the budget, and has no argument. Refuses a kept count
+/// read for nothing, which fills both at 2, and a step charged for the read that made the count,
+/// which starves `U` at 3.
+#[test]
+fn a_later_copy_pays_a_step_to_read_its_count() {
+  let text = "type Query {\n  x: Int\n}\ndirective @d(x: Int = 1) on OBJECT\n\
+              type T @d {\n  f: Int\n}\ntype U @d {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(3));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  for owner in ["T", "U"] {
+    let arguments = arguments_of(model, owner);
+    assert_eq!(arguments.len(), 1, "`{owner}`");
+    assert_eq!(shown(model, arguments[0].value()), "Int 1", "`{owner}`");
+    assert!(!model.value(arguments[0].value()).written(), "`{owner}`");
+  }
+
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(2));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(LIMIT, after(schema, text, "type U @", "d"))]
+  );
+  let model = analysis.model();
+  assert_eq!(arguments_of(model, "T").len(), 1);
+  assert!(arguments_of(model, "U").is_empty());
 }
 
 /// Sixty-four input objects that each default two fields to `{}` of the next stand for about 2^64
@@ -1015,21 +1048,24 @@ fn required_fields_are_asked_before_defaults_are_filled() {
 }
 
 /// A default that needs itself costs a step each time it is asked for, besides the reads that met
-/// it: seven in all. `A.b`'s default reads `B.a`'s count, which reads `A.b`'s, which meets itself,
-/// 2, and pays 1 for the poisoned default; `B.a`'s and `@d`'s defaults pay 1 each; `T`'s copy reads
-/// 1 and pays 1. Refuses a default that needs itself passed by for nothing.
+/// it: nine in all. `A.b`'s default counts `B.a`'s, which reads `A.b`'s, which meets itself, 2
+/// reads, and pays 1 for the poisoned default; `B.a`'s and `@d`'s defaults each read the poisoned
+/// count of `A.b`'s default, kept, 1, and pay 1 for it; `T`'s copy counts `@d`'s default, which
+/// reads that same count, 1, and pays 1. At 9 nothing is past the budget; at 8 `T` alone is, its
+/// read paid and its poisoned default not. Refuses a default that needs itself passed by for
+/// nothing, and a kept count read for nothing, which each pass at 8.
 #[test]
 fn a_default_that_needs_itself_costs_a_step() {
   let text = "type Query {\n  x: Int\n}\ninput A {\n  b: B = {}\n}\ninput B {\n  a: A = {}\n}\n\
               directive @d(a: A = {}) on OBJECT\ntype T @d {\n  f: Int\n}\n";
-  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(7));
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(9));
   assert!(
     found_of(&analysis, &[LIMIT]).is_empty(),
     "{:#?}",
     analysis.diagnostics()
   );
 
-  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(6));
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(8));
   let schema = schema_file(&analysis);
   assert_eq!(
     found_of(&analysis, &[LIMIT]),

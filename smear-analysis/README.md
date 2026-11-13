@@ -57,9 +57,9 @@ application's argument left out takes a copy of its default, and so does an obje
 but a OneOf input object's; a required argument left out is
 `smear::schema::missing-required-directive-argument`. A
 copy is counted before it is made, and a default whose copy would hold a copy of itself is not
-copied; the copies, the reads of one default's count by another's, the required arguments and
-fields left out, the lists a value written alone stands for where a list is expected and the
-conversion of a decimal integer of more than 38 significant digits are bounded by
+copied; the copies, the reads of a default's count, by another's and by each later copy of it, the
+required arguments and fields left out, the lists a value written alone stands for where a list is
+expected and the conversion of a decimal integer of more than 38 significant digits are bounded by
 `Limits::max_value_steps`. It
 resolves every module's `use` items too, globs and string sources included, against scopes that
 end with the prelude and the packages each package may reach. The built-in packages, `core`, `alloc`

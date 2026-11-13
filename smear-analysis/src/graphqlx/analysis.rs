@@ -269,11 +269,12 @@ impl Analysis {
 ///   left out is `missing-required-directive-argument`, at the application's path. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
 ///   copy of itself is not copied: the argument, or the field, is absent. Each row of a copy, each
-///   read of another default's count while counting, each default left out that needs itself, and
-///   each required argument found left out, is a step of [`Limits::max_value_steps`]: past it the
-///   application is `resource-limit` once, at its path, and filled no further, an object literal
-///   likewise at the literal, and an integer whose conversion it cannot pay for is
-///   `resource-limit` where it is written. Last, names and texts
+///   read of another default's count while counting, each read of a count made already for a
+///   later copy, each default left out that needs itself, and each required argument found left
+///   out, is a step of [`Limits::max_value_steps`]: past it the application is `resource-limit`
+///   once, at its path, and filled no further, an object literal likewise at the literal, and an
+///   integer whose conversion it cannot pay for is `resource-limit` where it is written. Last,
+///   names and texts
 ///   past what the model's `u32` offsets address, which only a [`Limits::max_source_bytes`] far
 ///   above its default admits, are reported at the root package's package source.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package

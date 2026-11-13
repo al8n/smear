@@ -1375,17 +1375,21 @@ fn a_copy_spends_no_near_miss() {
 
 #[test]
 fn a_copy_costs_a_step_a_row() {
+  // The copy of `["a", "b"]` is three rows. The first application counts the default and pays its
+  // three; each of the ninety-nine after it reads the kept count, a step, and pays three more:
+  // 3 + 99 × 4 = 399.
   let applied = "@tag ".repeat(100);
   let text = format!(
     "directive @tag(names: [String] = [\"a\", \"b\"]) repeatable on OBJECT\n\
      type T {applied}{{\n  f: Int\n}}\n"
   );
-  let analysis = analyze_text(&text, &Limits::new().with_max_value_steps(300));
+  let analysis = analyze_text(&text, &Limits::new().with_max_value_steps(399));
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
 
-  let analysis = analyze_text(&text, &Limits::new().with_max_value_steps(299));
+  let analysis = analyze_text(&text, &Limits::new().with_max_value_steps(398));
   let schema = schema_file(&analysis);
-  // The last application the walk reaches, alone, is starved, whole: it has no `names`.
+  // The last application the walk reaches, alone, is starved, whole: its read is paid and its
+  // copy is not, and it has no `names`.
   assert_eq!(found(&analysis), [(LIMIT, at(schema, &text, "tag", 100))]);
   let diagnostic = analysis
     .diagnostics()
