@@ -172,6 +172,13 @@ pub enum DiagnosticKind {
   /// its count. An application another package writes gives the scalar no meaning, and is not
   /// judged here.
   CollectionArity,
+  /// `core`'s `TypeRef` where it may not stand. It is the type of a value that names a
+  /// definition, which only a directive's arguments hold: it stands as the type of a directive
+  /// definition's argument or of an input field, under lists alone, and nowhere else, a field's
+  /// type or argument, a type argument of any generic definition, a collection's included, an
+  /// application's type argument, a union member or a default among them. Reported where it is
+  /// named.
+  TypeRefMisuse,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -209,6 +216,7 @@ impl DiagnosticKind {
     Self::GenericEnum,
     Self::MarkerMisuse,
     Self::CollectionArity,
+    Self::TypeRefMisuse,
     Self::ResourceLimit,
   ];
 
@@ -244,6 +252,7 @@ impl DiagnosticKind {
       Self::GenericEnum => Code::new("smear::graphqlx::generic-enum"),
       Self::MarkerMisuse => Code::new("smear::graphqlx::marker-misuse"),
       Self::CollectionArity => Code::new("smear::graphqlx::collection-arity"),
+      Self::TypeRefMisuse => Code::new("smear::graphqlx::typeref-misuse"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -279,6 +288,7 @@ impl DiagnosticKind {
       Self::GenericEnum => "generic enum",
       Self::MarkerMisuse => "marker misused",
       Self::CollectionArity => "wrong number of a collection's type parameters",
+      Self::TypeRefMisuse => "`TypeRef` where it may not stand",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -314,6 +324,7 @@ impl DiagnosticKind {
       | Self::GenericEnum
       | Self::MarkerMisuse
       | Self::CollectionArity
+      | Self::TypeRefMisuse
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }

@@ -23,11 +23,12 @@ mod generic_enum;
 mod marker_misuse;
 mod orphan_extension;
 mod schema_outside_root;
+mod type_ref_misuse;
 
 use self::{
   collection_arity::CollectionArity, duplicate_schema_definition::DuplicateSchemaDefinition,
   generic_enum::GenericEnum, marker_misuse::MarkerMisuse, orphan_extension::OrphanExtension,
-  schema_outside_root::SchemaOutsideRoot,
+  schema_outside_root::SchemaOutsideRoot, type_ref_misuse::TypeRefMisuse,
 };
 use super::{Contribution, Cx, Model, TypeExprId, TypeExprKind, id::dense};
 
@@ -49,26 +50,50 @@ fn silenced(cx: &Cx<'_>) -> bool {
 /// them in: each outermost occurrence first, then everything it nests, in pre-order.
 ///
 /// A rule that keeps one resets it in `begin`, and hands it every occurrence the walk reaches,
-/// before it decides to say nothing about one. It keeps one count.
+/// before it decides to say nothing about one. It keeps a count and a flag.
 #[derive(Default)]
 struct Nesting {
   /// The occurrences of the current tree still to come.
   pending: u32,
+  /// Whether every occurrence of the current tree reached so far is a list.
+  lists: bool,
+}
+
+/// Where an occurrence stands in its tree.
+#[derive(Clone, Copy)]
+struct Place {
+  /// Whether it is the root of its tree, the outermost occurrence.
+  root: bool,
+  /// Whether every occurrence above it in its tree is a list: `TypeRef`, `[TypeRef!]` and
+  /// `[[TypeRef]]` are, and an argument of any named occurrence is not.
+  lists: bool,
 }
 
 impl Nesting {
-  /// Takes `ty`, the occurrence of `model` the walk reached next, and answers whether it is the
-  /// root of its tree: no occurrence of the tree before it is still to come.
-  fn reach(&mut self, model: &Model, ty: TypeExprId) -> bool {
+  /// Takes `ty`, the occurrence of `model` the walk reached next, and answers where it stands.
+  ///
+  /// It is the root when no occurrence of the tree before it is still to come. A list has one
+  /// child, so the lists above an occurrence are exactly the occurrences of its tree reached
+  /// before it while each of them is a list.
+  fn reach(&mut self, model: &Model, ty: TypeExprId) -> Place {
     let root = self.pending == 0;
-    self.pending = self.pending.saturating_sub(1);
+    if root {
+      self.lists = true;
+    } else {
+      self.pending = self.pending.saturating_sub(1);
+    }
+    let place = Place {
+      root,
+      lists: self.lists,
+    };
     let occurrence = model.type_expr(ty);
     // What the walk reaches under it: its written arguments, whatever it resolved to, or a list's
     // element.
-    let element = u32::from(matches!(occurrence.kind(), TypeExprKind::List { .. }));
-    let children = dense(occurrence.written_args().len()).saturating_add(element);
+    let list = matches!(occurrence.kind(), TypeExprKind::List { .. });
+    let children = dense(occurrence.written_args().len()).saturating_add(u32::from(list));
     self.pending = self.pending.saturating_add(children);
-    root
+    self.lists &= list;
+    place
   }
 }
 
@@ -208,8 +233,8 @@ rule_set! {
   /// or extends the schema; a package extends its own definitions alone, but for the directives
   /// the root package adds to a built-in, none of which may give it a built-in meaning; an enum
   /// takes no type parameter; a marker has no field and is named only in `implements` and in
-  /// bounds, and a scalar, an enum, an input object or a union implements markers alone; and a set
-  /// has one type parameter and a map two.
+  /// bounds, and a scalar, an enum, an input object or a union implements markers alone; a set has
+  /// one type parameter and a map two; and `TypeRef` stands only in a directive's arguments.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -218,6 +243,7 @@ rule_set! {
     generic_enum: GenericEnum => [super::DiagnosticKind::GenericEnum.code()],
     marker_misuse: MarkerMisuse => [super::DiagnosticKind::MarkerMisuse.code()],
     collection_arity: CollectionArity => [super::DiagnosticKind::CollectionArity.code()],
+    type_ref_misuse: TypeRefMisuse => [super::DiagnosticKind::TypeRefMisuse.code()],
   }
 }
 

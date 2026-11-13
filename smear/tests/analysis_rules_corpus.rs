@@ -628,10 +628,11 @@ fn a_rule_fired(analysis: &Analysis) -> bool {
 ///
 /// No corpus file makes a rule fire: each is the one file of a `Flat` root package, with no
 /// dependency beside it; none defines the schema twice, adds more than directives to a built-in or
-/// applies `@marker`, `@set` or `@map` anywhere; none declares an enum with a type parameter; and
-/// none names a marker, and every interface a scalar, an enum, an input object or a union of the
-/// corpus implements names nothing. So over the corpus this pins that no rule panics, and nothing
-/// more. It prints on how many files a rule fired, which shows the first file that makes one fire.
+/// applies `@marker`, `@set` or `@map` anywhere; none declares an enum with a type parameter; none
+/// names a marker or `TypeRef`, and every interface a scalar, an enum, an input object or a union
+/// of the corpus implements names nothing. So over the corpus this pins that no rule panics, and
+/// nothing more. It prints on how many files a rule fired, which shows the first file that makes
+/// one fire.
 #[test]
 fn no_rule_repeats_a_phase_over_any_corpus_file() {
   let files = corpus();

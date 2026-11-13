@@ -1,7 +1,8 @@
 //! The GraphQLx analyzer's rules on what is judged of types: a marker has no field, is named only
 //! in `implements` and in bounds, and is what a scalar, an enum, an input object or a union
-//! implements; and a set has one type parameter and a map two. Each rule says nothing within what
-//! a phase refused, and quotes a name only as an excerpt.
+//! implements; a set has one type parameter and a map two; and `TypeRef` stands only in a
+//! directive's arguments. Each rule says nothing within what a phase refused, and quotes a name
+//! only as an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -20,6 +21,9 @@ const COLLECTION: &str = "smear::graphqlx::collection-arity";
 
 /// The code of an extension its package may not write, which the orphan rule reports.
 const ORPHAN: &str = "smear::graphqlx::orphan-extension";
+
+/// The code of `TypeRef` where it may not stand.
+const TYPEREF: &str = "smear::graphqlx::typeref-misuse";
 
 /// The code of a type name that names nothing.
 const UNDEFINED: &str = "smear::schema::undefined-type";
@@ -326,6 +330,51 @@ fn a_set_has_one_type_parameter_and_a_map_two() {
   );
 }
 
+/// `TypeRef` where it may stand, a directive definition's argument, alone and in a list, and an
+/// input field; then where it may not: a type argument of a directive's argument, a collection's
+/// and another's, a field's type, a field's argument, an application's type argument, a union
+/// member and a default.
+const TYPE_REFS: &str = "directive @d(of: TypeRef, many: [TypeRef!]) on OBJECT\n\
+                         input Binding {\n  type: TypeRef!\n}\nscalar Box<T>\n\
+                         directive @t<T> on OBJECT\n\
+                         directive @m(map: HashMap<string, TypeRef>) on OBJECT\n\
+                         directive @b(boxed: [Box<TypeRef>]) on OBJECT\n\
+                         type Field {\n  f: TypeRef\n}\ntype Argument {\n  f(a: TypeRef): Int\n}\n\
+                         type Applied @t<TypeRef> {\n  id: ID\n}\nunion U = TypeRef\n\
+                         scalar P<T = TypeRef>\n";
+
+#[test]
+fn type_ref_is_a_directive_arguments_type() {
+  let analysis = analyze_one(TYPE_REFS);
+  let schema = schema_file(&analysis);
+  let refused = |before: &str| -> (&'static str, Location, Option<Location>) {
+    (
+      TYPEREF,
+      named(schema, TYPE_REFS, before, "TypeRef", 0),
+      None,
+    )
+  };
+  assert_eq!(
+    found(&analysis),
+    [
+      refused("string, "),
+      refused("Box<"),
+      refused("f: "),
+      refused("a: "),
+      refused("@t<"),
+      refused("U = "),
+      refused("T = "),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis)[0],
+    "`TypeRef` names a definition, and stands only as the type of a directive definition's \
+     argument or of an input field, a list of it included"
+  );
+}
+
 #[test]
 fn a_rule_says_nothing_where_a_phase_spoke() {
   // Each refusal beside a phase's error in the same definition: the phase's diagnostic alone.
@@ -343,6 +392,7 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
       "scalar S0 @set @missing\n",
       "smear::schema::undefined-directive",
     ),
+    ("type F {\n  f: TypeRef\n  x: Missing\n}\n", UNDEFINED),
   ] {
     let analysis = analyze_one(text);
     assert_eq!(codes(&analysis), [expected], "{text}");
@@ -362,6 +412,10 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
       MARKER,
     ),
     ("scalar S0 @set\ntype G {\n  x: Missing\n}\n", COLLECTION),
+    (
+      "type F {\n  f: TypeRef\n}\ntype G {\n  x: Missing\n}\n",
+      TYPEREF,
+    ),
   ] {
     let analysis = analyze_one(text);
     assert_eq!(codes(&analysis), [rule, UNDEFINED], "{text}");

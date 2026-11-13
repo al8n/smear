@@ -26,6 +26,7 @@ DiagnosticKind::ReservedPackageName = smear::graphqlx::reserved-package-name
 DiagnosticKind::ResourceLimit = smear::graphqlx::resource-limit
 DiagnosticKind::SchemaOutsideRoot = smear::graphqlx::schema-outside-root
 DiagnosticKind::ShadowedPrimitive = smear::graphqlx::shadowed-primitive
+DiagnosticKind::TypeRefMisuse = smear::graphqlx::typeref-misuse
 DiagnosticKind::UnknownItem = smear::graphqlx::unknown-item
 DiagnosticKind::UnknownPackage = smear::graphqlx::unknown-package
 DiagnosticKind::UnresolvedPath = smear::graphqlx::unresolved-path

@@ -103,7 +103,7 @@ impl Visitor for MarkerMisuse {
 
   fn type_expr(&mut self, cx: &mut Cx<'_>, ty: TypeExprId) {
     let model = cx.model();
-    let root = self.nesting.reach(model, ty);
+    let root = self.nesting.reach(model, ty).root;
     if silenced(cx) {
       return;
     }

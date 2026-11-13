@@ -230,8 +230,10 @@ impl Analysis {
 ///   an enum, an input object or a union that names what is no marker. A scalar its own package
 ///   makes a set with `@set` and that has not exactly one type parameter, or a map with `@map`
 ///   and that has not exactly two, is `collection-arity`, at the application, and so is one that
-///   applies both, at the later. A rule says nothing about a contribution a phase already refused
-///   something in.
+///   applies both, at the later. `TypeRef` anywhere but as the type of a directive definition's
+///   argument or of an input field, under lists alone, is `typeref-misuse`, where it is named, a
+///   type argument of any generic definition included. A rule says nothing about a contribution a
+///   phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

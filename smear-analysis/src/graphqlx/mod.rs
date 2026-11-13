@@ -91,8 +91,10 @@
 //! `implements` entry or of a bound, and an `implements` entry of a scalar, an enum, an input
 //! object or a union that names what is no marker, are each `smear::graphqlx::marker-misuse`. And
 //! a set has one type parameter and a map two: a scalar its own package makes a collection with
-//! another count, or makes both, is `smear::graphqlx::collection-arity`. A rule says nothing about
-//! a contribution a phase already refused something in.
+//! another count, or makes both, is `smear::graphqlx::collection-arity`. And `TypeRef` stands only
+//! as the type of a directive definition's argument or of an input field, under lists alone:
+//! anywhere else it is `smear::graphqlx::typeref-misuse`. A rule says nothing about a contribution
+//! a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

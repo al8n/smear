@@ -40,6 +40,9 @@ const MARKER_MISUSE: &str = "smear::graphqlx::marker-misuse";
 /// The code for a collection whose count of type parameters it has not.
 const COLLECTION_ARITY: &str = "smear::graphqlx::collection-arity";
 
+/// The code for `TypeRef` where it may not stand.
+const TYPEREF_MISUSE: &str = "smear::graphqlx::typeref-misuse";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1249,6 +1252,7 @@ const FIXTURES: &[(Code, Fixture)] = &[
   (Code::new(GENERIC_ENUM), a_generic_enum),
   (Code::new(MARKER_MISUSE), a_marker_as_a_fields_type),
   (Code::new(COLLECTION_ARITY), a_set_of_two_type_parameters),
+  (Code::new(TYPEREF_MISUSE), a_type_ref_as_a_fields_type),
 ];
 
 /// A root package that defines its schema twice.
@@ -1309,6 +1313,11 @@ fn a_marker_as_a_fields_type() -> Analysis {
 /// A root package that makes a scalar of two type parameters a set.
 fn a_set_of_two_type_parameters() -> Analysis {
   analyze_one("scalar Pair<A, B> @set\n")
+}
+
+/// A root package that types a field with `TypeRef`.
+fn a_type_ref_as_a_fields_type() -> Analysis {
+  analyze_one("type Query {\n  named: TypeRef\n}\n")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and
