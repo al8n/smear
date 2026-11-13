@@ -4,7 +4,7 @@
 //!
 //! # What is here and what is in the substrate
 //!
-//! Everything below is **table**: the twenty-one head sets an "expected one of" diagnostic names,
+//! Everything below is **table**: the head sets an "expected one of" diagnostic names,
 //! this dialect's three balanced pairs, its depth-zero restart predicate and its definition-start
 //! predicate. The *logic* — report, skip, attribute, guarantee progress — is
 //! [`crate::lossless::recover`]'s, shared with every dialect, and its module docs carry the
@@ -183,6 +183,14 @@ pub(crate) const BLOCK_EXTENSION_TAIL_HEADS: &[Kind] = &[Kind::At, Kind::LBrace]
 /// The token kinds a `SchemaDefinition`'s root-operation block may begin with.
 pub(crate) const ROOT_OPERATION_TYPES_HEADS: &[Kind] = &[Kind::LBrace];
 
+/// The `)` a parenthesised list closes with: what such a list reports as expected where it
+/// stops short of one, at a `}` that belongs to a block around it. See
+/// [`closes_enclosing_block`].
+pub(crate) const PARENS_CLOSER_HEADS: &[Kind] = &[Kind::RParen];
+
+/// The `]` a list type or a list value closes with, reported as [`PARENS_CLOSER_HEADS`] is.
+pub(crate) const LIST_CLOSER_HEADS: &[Kind] = &[Kind::RBracket];
+
 pub(crate) use crate::lossless::recover::opener_span;
 
 /// Whether `kind` closes one of GraphQL's three delimiter pairs.
@@ -195,6 +203,26 @@ pub(crate) use crate::lossless::recover::opener_span;
 #[inline]
 pub(crate) const fn is_closer(kind: Kind) -> bool {
   matches!(kind, Kind::RParen | Kind::RBracket | Kind::RBrace)
+}
+
+/// Whether a `}` at the head of a list delimited by `(` or `[` belongs to a block around the
+/// list, and so is not the list's to consume.
+///
+/// `open_at` is the lexer's count of open braces right after the list's own opener was read,
+/// and `now` is the count at the committed position: the `}` at the head is only peeked, so it
+/// is not in `now` yet. The `}` closes a brace that was open before the list began exactly when
+/// one was (`open_at > 0`) and the list's own content has left none of its own open
+/// (`now <= open_at`). The list then reports its own closer as missing and returns, and the
+/// block's loop finds its `}` where it stands. Taking it as junk would cost the block its end,
+/// and hand the list everything after the block.
+///
+/// In the two other cases the `}` stays junk of the list. With no brace open before the list it
+/// closes nothing and is a stray; with more open now than then it closes a brace the list's own
+/// content opened. A `)` or `]` that is not the list's own is junk too, as it has always been:
+/// no count tells a stray one from an enclosing one.
+#[inline]
+pub(crate) const fn closes_enclosing_block(open_at: usize, now: usize) -> bool {
+  open_at > 0 && now <= open_at
 }
 
 /// Where a recovery is willing to stop: a token that could start something the caller knows

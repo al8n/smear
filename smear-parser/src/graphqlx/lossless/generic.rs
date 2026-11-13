@@ -65,7 +65,7 @@ use super::coverage::node;
 
 use super::{
   GraphqlxLosslessInput, Keyword, recover,
-  recover::{NAME_HEADS, PATH_HEADS, opener_span},
+  recover::{ANGLE_CLOSER_HEADS, NAME_HEADS, PATH_HEADS, closes_enclosing_block, opener_span},
   trivia::{eat_if, expect, peek_as, peek_kind, peek_second_kind},
   ty::{path, type_path, type_ref},
 };
@@ -105,6 +105,9 @@ lossless_production! {
   /// the loop's to eat and `<>` closes on its own delimiter. Reaching for the consuming form here
   /// would eat that `>` — a closer is a depth-zero sync point — and the list would then run to end
   /// of input hunting a closer it had already swallowed.
+  ///
+  /// A `}` of a block around the list ends it unclosed, by [`closes_enclosing_block`]: a
+  /// definition inside a module leaves the module's brace to the module.
   fn definition_type_generics<'inp, Src, Ctx>(inp) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
@@ -113,6 +116,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LAngle)?;
         let open = opener_span(inp.span().end());
+        let open_at: usize = inp.state().brace_depth();
         // `<>` is reported here rather than after the loop, where the diagnostic would point past
         // the closer it is about.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::RAngle) {
@@ -124,6 +128,9 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_angle::<Src, Ctx>(inp, open),
+            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+              return recover::report_unexpected::<Src, Ctx>(inp, ANGLE_CLOSER_HEADS);
+            }
             Some(Kind::Identifier) => definition_type_param::<Src, Ctx>(inp)?,
             Some(_) => recover::unexpected::<Src, Ctx>(inp, NAME_HEADS)?,
           }
@@ -163,6 +170,8 @@ lossless_production! {
   /// in nothing else, and the one thing that *must* differ — which kind — is then impossible to
   /// get wrong by editing one copy. It is also what a typed accessor distinguishes them by, since
   /// `< T >` is the same bytes in both positions.
+  ///
+  /// It leaves a `}` of a block around it as [`definition_type_generics`] does.
   fn angle_name_list<'inp, Src, Ctx>(inp, kind: K) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
@@ -171,6 +180,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LAngle)?;
         let open = opener_span(inp.span().end());
+        let open_at: usize = inp.state().brace_depth();
         // `<>` is reported, and the report consumes nothing so the `>` is still the loop's.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::RAngle) {
           recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?;
@@ -181,6 +191,9 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_angle::<Src, Ctx>(inp, open),
+            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+              return recover::report_unexpected::<Src, Ctx>(inp, ANGLE_CLOSER_HEADS);
+            }
             Some(Kind::Identifier) => {
               expect::<Src, Ctx>(inp, Kind::Identifier)?;
             }

@@ -109,18 +109,26 @@
 //!
 //! GraphQL's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
-//! The population is every call that reports without building a hole — **41**
+//! The population is every call that reports without building a hole — **46**
 //! `recover::report_unexpected::<…>` sites and **11** `recover::unclosed_{list,object,parens}::<…>`
 //! sites across `graphql/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 52 are mapped** below, one probe each: a text that reaches the site with a hole-free tree,
+//! **all 57 are mapped** below, one probe each: a text that reaches the site with a hole-free tree,
 //! and what this projection answers for it. `every_report_and_build_site_has_a_measured_answer`
 //! holds the same rows, asserts their count per file and family against the source's own spelling
 //! of each call, and measures every answer.
 //!
+//! **Two sites have no hole-free probe**, and their rows say so. A `(` or `[` list that meets a
+//! `}` closing a brace that was open before the list reports its own closer as missing and leaves
+//! the brace to the block around it — five sites, one per list. Three of them stand inside a block
+//! whose loop then takes the brace. An arguments definition inside a block is a field's, and the
+//! field fails for want of its `:` once the list has stopped; a variables definition stands inside
+//! no block at all. In both the `}` the list leaves is the root's, which takes it into an `Error`.
+//!
 //! **The "what the site leaves out" column is where the lenient set comes from.** A site either
 //! leaves out one token with **no AST image** (a closer, an `on`), leaves out a constituent the AST
 //! holds (a member, a name, a tail — never lenient), or leaves nothing out and reports something
-//! present (a description, a spelling a rule refuses). **Eleven project; forty-one refuse.**
+//! present (a description, a spelling a rule refuses). **Fourteen project; forty-three refuse**,
+//! the two rows above for the hole among them.
 //!
 //! | file | site | probe | what the site leaves out | the projection |
 //! |---|---|---|---|---|
@@ -139,6 +147,7 @@
 //! | `document.rs` | report | the empty document (SDL root) | a constituent with an image | `MissingChild { TypeSystemDocument }` |
 //! | `executable.rs` | report | `query Q() { f }` (executable root) | a constituent with an image | `MissingChild { VariablesDefinition }` |
 //! | `executable.rs` | unclosed | `query Q($a: Int` (executable root) | `)` of `VariablesDefinition` — **no image** | `UnexpectedChild { Root, OperationType }` — the executable root abandons its document node, so the list is rubble beside no container |
+//! | `executable.rs` | report | `type T { f query Q($a: Int }` | `)` of `VariablesDefinition` — **no image** | **a hole** — the `}` the list leaves is the root's, as an `Error` |
 //! | `executable.rs` | report | `fragment on on T { f }` (executable root) | nothing — a present token is refused | `SemanticRule` |
 //! | `executable.rs` | report | `"d" { f }` (executable root) | nothing — a present node is refused | `UnexpectedChild { OperationDefinition, Description }` |
 //! | `executable.rs` | report | the empty document (executable root) | a constituent with an image | `MissingChild { ExecutableDocument }` |
@@ -149,6 +158,7 @@
 //! | `selection.rs` | unclosed | `{ f` | `}` of `SelectionSet` — **no image** | **projects** |
 //! | `definition.rs` | report | `type T { f(): Int }` | a constituent with an image | `MissingChild { ArgumentsDefinition }` |
 //! | `definition.rs` | unclosed | `type T { f(a: Int` | `)` of `ArgumentsDefinition` — **no image** | `UnexpectedChild { Document, Name }` |
+//! | `definition.rs` | report | `type T { f(a: Int }` | `)` of `ArgumentsDefinition` — **no image** | **a hole** — the field is lost for want of its `:`, and the `}` the list leaves is the root's, as an `Error` |
 //! | `definition.rs` | report | `type T { }` | a constituent with an image | `MissingChild { FieldsDefinition }` |
 //! | `definition.rs` | unclosed | `type T { f: Int` | `}` of `FieldsDefinition` — **no image** | **projects** |
 //! | `definition.rs` | report | `input I { }` | a constituent with an image | `MissingChild { InputFieldsDefinition }` |
@@ -170,9 +180,12 @@
 //! | `definition.rs` | report | `directive @d on` | a constituent with an image | `MissingChild { DirectiveDefinition }` |
 //! | `definition.rs` | report | `schema @k` | a constituent with an image | `MissingChild { SchemaDefinition }` |
 //! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
+//! | `directive.rs` | report | `{ f(a: 1 }` | `)` of `Arguments` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: [Int` | `]` of `ListType` — **no image** | **projects** |
+//! | `ty.rs` | report | `type T { f: [Int }` | `]` of `ListType` — **no image** | **projects** |
 //! | `ty.rs` | report | `type T { f: }` | a constituent with an image | `MissingChild { FieldDefinition }` |
 //! | `value.rs` | unclosed | `{ f(a: [1` | `]` of `ListValue` — **no image** | **projects** |
+//! | `value.rs` | report | `{ f(a: [1 }` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
 //! | `value.rs` | report | `type T { f(a: Int = $v): Int }` | nothing — a present node is refused | `UnexpectedChild { DefaultValue, Variable }` |
 //! | `value.rs` | report | `{ f(a: ) }` | a constituent with an image | `MissingChild { Argument }` |
@@ -204,11 +217,13 @@
 //!
 //! **This table is the criterion's whole extension, derived rather than listed.** The
 //! report-and-build census above enumerates every place the parser leaves a token out without a
-//! hole, and its thirteen image-less rows — each witnessed by its own probe's tree — are these
-//! thirteen, which the cell asserts. Two are witnessed only as **orphans**: at end of input the
-//! operation or the field around the list cannot be finished, so the root keeps the list as a stray
-//! child beside the lost definition's tokens, and every projection of such a tree refuses at the
-//! rubble. They are lenient by the criterion and change no answer.
+//! hole, and the pairs its image-less rows leave out — each witnessed by the tree of at least one
+//! probe — are these thirteen, which the cell asserts. A pair can have two sites: a `(` or `[`
+//! list leaves its closer out at the end of input, and again at the `}` of a block around it. Two
+//! pairs are witnessed only as **orphans**: at end of input the operation or the field around the
+//! list cannot be finished, so the root keeps the list as a stray child beside the lost
+//! definition's tokens, and every projection of such a tree refuses at the rubble. They are
+//! lenient by the criterion and change no answer.
 //!
 //! The `on` of an **inline** fragment is not a row, and not by omission: the same `type_condition`
 //! production serves both fragments, but the spread dispatch opens an inline fragment *because* it

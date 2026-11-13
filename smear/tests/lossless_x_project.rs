@@ -3588,7 +3588,7 @@ fn a_dangling_separator_refuses_in_every_separated_walk() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// the report-and-build table, 75/75
+// the report-and-build table, 83/83
 // ---------------------------------------------------------------------------------------------
 
 /// Which door a probe goes through.
@@ -3616,6 +3616,9 @@ enum Absent {
 /// family it is (`report` for a `recover::report_unexpected::<…>` call, `unclosed` for a
 /// `recover::unclosed_*::<…>` one), a probe that reaches it with a hole-free tree, the root, what
 /// the projection answers, and what the site leaves out.
+///
+/// One site builds no hole and still has no hole-free probe, and its row answers `hole`: see the
+/// `executable.rs` report row for a variables definition.
 type Site = (
   &'static str,
   &'static str,
@@ -3766,6 +3769,17 @@ const SITES: &[Site] = &[
     "UnexpectedChild ExecutableDocument Name",
     Absent::Token(K::VariablesDefinition, ")"),
   ),
+  // The one site no hole-free text reaches. No block of the grammar stands around an operation,
+  // so the brace open in front of this list is one a failed definition left, and the `}` the list
+  // leaves is a stray the root then takes into an `Error`.
+  (
+    "executable.rs",
+    "report",
+    "type T { f query Q($a: Int }",
+    Root::Mixed,
+    "hole",
+    Absent::Token(K::VariablesDefinition, ")"),
+  ),
   (
     "use_tree.rs",
     "report",
@@ -3849,6 +3863,14 @@ const SITES: &[Site] = &[
   (
     "generic.rs",
     "report",
+    "mod m { type T<A }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::DefinitionTypeGenerics, ">"),
+  ),
+  (
+    "generic.rs",
+    "report",
     "fragment <> F on T { f }",
     Root::Mixed,
     "MissingChild ExecutableDefinitionTypeGenerics",
@@ -3858,6 +3880,14 @@ const SITES: &[Site] = &[
     "generic.rs",
     "unclosed",
     "extend type T<A",
+    Root::Mixed,
+    "MissingChild ObjectTypeExtension",
+    Absent::Token(K::ExtensionTypeGenerics, ">"),
+  ),
+  (
+    "generic.rs",
+    "report",
+    "mod m { extend type T<A }",
     Root::Mixed,
     "MissingChild ObjectTypeExtension",
     Absent::Token(K::ExtensionTypeGenerics, ">"),
@@ -3948,6 +3978,16 @@ const SITES: &[Site] = &[
     "type T { f(a: Int",
     Root::Mixed,
     "UnexpectedChild Document Name",
+    Absent::Token(K::ArgumentsDefinition, ")"),
+  ),
+  // A field wants its `:` after the list and fails without one, so the hole-free probe is the
+  // other definition that takes arguments: a directive's, inside a module for the brace.
+  (
+    "definition.rs",
+    "report",
+    "mod m { directive @d(a: Int }",
+    Root::Mixed,
+    "MissingChild DirectiveDefinition",
     Absent::Token(K::ArgumentsDefinition, ")"),
   ),
   (
@@ -4184,6 +4224,14 @@ const SITES: &[Site] = &[
   ),
   (
     "value.rs",
+    "report",
+    "{ f(a: [1 }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ListValue, "]"),
+  ),
+  (
+    "value.rs",
     "unclosed",
     "{ f(a: {b: 1",
     Root::Mixed,
@@ -4207,6 +4255,14 @@ const SITES: &[Site] = &[
     Absent::Token(K::Arguments, ")"),
   ),
   (
+    "directive.rs",
+    "report",
+    "{ f(a: 1 }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::Arguments, ")"),
+  ),
+  (
     "ty.rs",
     "unclosed",
     "type T { f: A<B",
@@ -4216,8 +4272,24 @@ const SITES: &[Site] = &[
   ),
   (
     "ty.rs",
+    "report",
+    "type T { f: A<B }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::TypeGenerics, ">"),
+  ),
+  (
+    "ty.rs",
     "unclosed",
     "type T { f: [Int",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ListType, "]"),
+  ),
+  (
+    "ty.rs",
+    "report",
+    "type T { f: [Int }",
     Root::Mixed,
     "Ok",
     Absent::Token(K::ListType, "]"),
@@ -4411,12 +4483,13 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (58, 17),
+    (66, 17),
     "the two families' populations"
   );
 
   // Each probe: the parser reported, the tree is hole-free — the site is a report-and-build one
-  // and not a hole — and the projection answers what the table says.
+  // and not a hole — and the projection answers what the table says. The one row that answers
+  // `hole` is measured like the rest: its tree carries one, made by the root and not by the site.
   let mut lenient = 0;
   for (file, family, text, root, expected, _) in SITES {
     let (errors, got) = site_answer(text, *root);
@@ -4458,8 +4531,13 @@ fn every_report_and_build_site_has_a_measured_answer() {
       }
     }
   }
+  // A set: two sites can leave the same token out of the same node — a list that runs to the end
+  // of input and one that stops at the `}` of a block around it — and each pair is derived once
+  // however many probes witness it.
   derived.sort();
+  derived.dedup();
   unwitnessed.sort();
+  unwitnessed.dedup();
   println!("DERIVED {derived:?}\nUNWITNESSED {unwitnessed:?}");
   assert_eq!(
     derived,
@@ -4477,12 +4555,17 @@ fn every_report_and_build_site_has_a_measured_answer() {
 }
 
 /// How many of [`SITES`]' probes project.
-const PROJECTING_SITES: usize = 16;
+const PROJECTING_SITES: usize = 21;
 
-/// Image-less tokens a site can leave out whose probe is **not** a witness — none: even the three
-/// closers whose definition is lost at end of input leave their list in the tree, an orphan child
-/// of the document, which is a hole-free witness by the criterion's letter.
-const UNWITNESSED: &[(&str, &str)] = &[];
+/// Image-less tokens a site can leave out whose probe is **not** a witness.
+///
+/// One: the `)` of a variables definition that stops at a `}` open before it. No block of the
+/// grammar stands around an operation, so that probe's tree always carries the `Error` the root
+/// makes of the stray `}`. The pair is in the header's table all the same, witnessed by the site
+/// that leaves the same `)` out at the end of input: even the three closers whose definition is
+/// lost there leave their list in the tree, an orphan child of the document, which is a hole-free
+/// witness by the criterion's letter.
+const UNWITNESSED: &[(&str, &str)] = &[("VariablesDefinition", ")")];
 
 // ---------------------------------------------------------------------------------------------
 // the separated atoms, and where they refuse
@@ -5030,10 +5113,11 @@ fn a_directive_definition_without_its_on_projects_what_the_text_with_it_parses_t
 #[test]
 fn an_extension_argument_list_without_its_closer_answers_what_the_text_with_it_does() {
   // `(ExtensionTypeGenerics, >)` meets the criterion — no image, and the list is built hole-free
-  // without it — but only at end of input: any other token after the names is recovered as an
-  // `Error` node. So the extension is always tail-less, and the leniency changes no answer: the
-  // projection refuses at the extension, exactly as it does for the text with the `>` restored,
-  // and the recovering door counts it skipped either way.
+  // without it — but only at end of input or in front of the `}` of a module around the
+  // extension: any other token after the names is recovered as an `Error` node. So the extension
+  // is always tail-less, and the leniency changes no answer: the projection refuses at the
+  // extension, exactly as it does for the text with the `>` restored, and the recovering door
+  // counts it skipped either way.
   for src in ["extend type T<A", "extend type T<A>"] {
     let parse = parse_document(src);
     assert!(parse.has_errors(), "{src}");

@@ -271,6 +271,16 @@ pub(crate) const MOD_ITEM_HEADS: &[Kind] =
 /// the block *after* it.
 pub(crate) const UNION_MEMBERS_HEADS: &[Kind] = &[Kind::Equal];
 
+/// The `)` a parenthesised list closes with: what such a list reports as expected where it stops
+/// short of one, at a `}` that belongs to a block around it. See [`closes_enclosing_block`].
+pub(crate) const PARENS_CLOSER_HEADS: &[Kind] = &[Kind::RParen];
+
+/// The `]` a list type or a list value closes with, reported as [`PARENS_CLOSER_HEADS`] is.
+pub(crate) const LIST_CLOSER_HEADS: &[Kind] = &[Kind::RBracket];
+
+/// The `>` a generic list closes with, reported as [`PARENS_CLOSER_HEADS`] is.
+pub(crate) const ANGLE_CLOSER_HEADS: &[Kind] = &[Kind::RAngle];
+
 /// Whether `kind` can begin a value.
 ///
 /// [`VALUE_HEADS`] as a predicate. The two are kept in step by
@@ -323,6 +333,26 @@ pub(crate) const fn is_closer(kind: Kind) -> bool {
     kind,
     Kind::RParen | Kind::RBracket | Kind::RBrace | Kind::RAngle
   )
+}
+
+/// Whether a `}` at the head of a list delimited by `(`, `[` or `<` belongs to a block around the
+/// list, and so is not the list's to consume.
+///
+/// `open_at` is the lexer's count of open braces right after the list's own opener was read, and
+/// `now` is the count at the committed position: the `}` at the head is only peeked, so it is not
+/// in `now` yet. The `}` closes a brace that was open before the list began exactly when one was
+/// (`open_at > 0`) and the list's own content has left none of its own open (`now <= open_at`).
+/// The list then reports its own closer as missing and returns, and the block's loop finds its `}`
+/// where it stands. Taking it as junk would cost the block its end, and hand the list everything
+/// after the block.
+///
+/// In the two other cases the `}` stays junk of the list. With no brace open before the list it
+/// closes nothing and is a stray; with more open now than then it closes a brace the list's own
+/// content opened. A `)`, `]` or `>` that is not the list's own is junk too, as it has always
+/// been: no count tells a stray one from an enclosing one.
+#[inline]
+pub(crate) const fn closes_enclosing_block(open_at: usize, now: usize) -> bool {
+  open_at > 0 && now <= open_at
 }
 
 // `starts_description` — the one two-kind test every described position makes. Generated from

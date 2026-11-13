@@ -80,7 +80,9 @@
 //! A missing component is not such a shape, and the goldens hold the rule. A `FieldDefinition`
 //! whose type is missing reports at the `}` that stands where the type should and leaves it, so
 //! the surrounding `FieldsDefinition` closes on its own brace (`invalid_missing_field_type`,
-//! `shape_kept_object_type_definition`) and a definition after it is parsed whole.
+//! `shape_kept_object_type_definition`) and a definition after it is parsed whole. A `(` or `[`
+//! list that is never closed follows the rule one level up: it stops at the `}` of the block
+//! around it and leaves the brace to that block (`invalid_unterminated_bracket`).
 //!
 //! **The attachment policy was left as prose, and prose is what a re-bless walks through.** Reading
 //! the policy once and judging it deliberate is not the same as pinning it: the goldens were the
@@ -228,10 +230,10 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// - **Recovery geometry**, where the node that was open at the peek is open because a recovery put
 ///   it there. `Document > Error` is a resynchronised run whose document-level peek crossed the
 ///   trivia after it. `Argument > ListValue` is the sharper one and it has a single witness,
-///   `invalid_unterminated_bracket` (`{\n  f(a: [1, 2 }`): the list never gets its `]`, so the
-///   enclosing `}` is consumed into an `Error` *inside* the `ListValue` and the trailing newline
-///   follows it in. That is the same recovery shape this file's header already records for a
-///   `FieldDefinition` with no type, read from the other side.
+///   `invalid_unterminated_bracket` (`{\n  f(a: [1, 2 }`): the list never gets its `]`. It stops
+///   at the `}` of the selection set around it and leaves that brace where it stands, so what it
+///   holds past its last element is the space it crossed to find the brace. That is the rule this
+///   file's header records for a `FieldDefinition` with no type, one level up.
 ///
 /// `Root > Document` is in both lists, and for one reason: `Document` spans the whole source, so a
 /// file that begins or ends with trivia has nowhere else to put it.
@@ -1154,7 +1156,7 @@ fn only_the_recorded_nodes_close_on_their_trailing_trivia() {
   // and the difference above reports it without saying why.
   assert!(
     pairings("{\n  f(a: [1, 2 }\n").contains(&"Argument > ListValue".to_string()),
-    "the unterminated bracket no longer parks the enclosing `}}` and the newline after it inside \
-     the `ListValue`, so the recovery family has lost its only witness"
+    "the unterminated bracket no longer parks the space in front of the enclosing `}}` inside the \
+     `ListValue`, so the recovery family has lost its only witness"
   );
 }

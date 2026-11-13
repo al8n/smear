@@ -53,7 +53,8 @@ use super::coverage::{node, node_at};
 use super::{
   GraphqlxLosslessInput, Keyword, recover,
   recover::{
-    CONST_VALUE_HEADS, OBJECT_FIELD_HEADS, VALUE_HEADS, is_closer, opener_span, starts_value,
+    CONST_VALUE_HEADS, LIST_CLOSER_HEADS, OBJECT_FIELD_HEADS, VALUE_HEADS, closes_enclosing_block,
+    is_closer, opener_span, starts_value,
   },
   trivia::{eat_if, expect, peek_as, peek_kind},
   ty::{path, path_tail},
@@ -236,6 +237,9 @@ lossless_production! {
 
   /// `[ Value* ]` — `[ Value[Const]* ]` when `konst` says so, the parameter riding down to every
   /// element.
+  ///
+  /// A `}` of a block around the list ends it unclosed, by [`closes_enclosing_block`]. The head is
+  /// asked before `value` is, because `value` would take that `}` as junk.
   fn list_value<'inp, Src, Ctx>(inp, konst: Constness) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
@@ -244,15 +248,20 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LBracket)?;
         let open = opener_span(inp.span().end());
+        let open_at: usize = inp.state().brace_depth();
         while !eat_if::<Src, Ctx>(inp, Kind::RBracket)? {
-          if peek_kind::<Src, Ctx>(inp)?.is_none() {
+          match peek_kind::<Src, Ctx>(inp)? {
             // Unterminated at end of input: report and return `Ok`, so the enclosing `node` still
             // closes and the rest of the file keeps its structure.
-            return recover::unclosed_list::<Src, Ctx>(inp, open);
+            None => return recover::unclosed_list::<Src, Ctx>(inp, open),
+            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+              return recover::report_unexpected::<Src, Ctx>(inp, LIST_CLOSER_HEADS);
+            }
+            // `value` recovers on a head that starts no value, and that recovery is guaranteed to
+            // consume. The two arms above return, so every turn returns or consumes — which is
+            // this loop's only termination argument.
+            Some(_) => value::<Src, Ctx>(inp, konst)?,
           }
-          // `value` recovers on a head that starts no value, and that recovery is guaranteed to
-          // consume — which is this loop's only termination argument.
-          value::<Src, Ctx>(inp, konst)?;
         }
         Ok(())
       },

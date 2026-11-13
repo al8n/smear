@@ -385,7 +385,7 @@ where
 /// # When to reach for this rather than [`unexpected`]
 ///
 /// Whenever the offending token is worth more to the *next* production than it would be inside an
-/// `Error` node. Three shapes are in that class, and each one is a bug if it consumes:
+/// `Error` node. Five shapes are in that class, and each one is a bug if it consumes:
 ///
 /// - **A required keyword is absent**, as with a type condition's `on`. The name that *is* there
 ///   is still the condition's type, so eating it would trade one diagnostic for a lost subtree.
@@ -394,6 +394,12 @@ where
 /// - **A prefix has no tail**, as with a `...` at the end of a selection set. The `}` after it
 ///   belongs to the enclosing set; [`unexpected`] would swallow it (a closer *is* a sync point)
 ///   and the set would then run to end of input looking for a closer it had already consumed.
+/// - **A required component is absent in front of a closer**, as with the type after a field's
+///   `:` or the value after an argument's. The closer is the enclosing block's, for the reason
+///   the shape above gives.
+/// - **A list's own closer is absent in front of a `}` of a block around the list.** The brace is
+///   that block's: the list reports its closer as missing and stops, where taking the brace as
+///   junk would hand the list everything after the block.
 ///
 /// **Consuming nothing makes this unsafe inside a loop that continues.** Every caller must either
 /// `return` afterwards or have already made progress on its own — the same distinction

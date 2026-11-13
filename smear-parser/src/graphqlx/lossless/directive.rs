@@ -47,7 +47,7 @@ use super::coverage::node;
 
 use super::{
   GraphqlxLosslessInput, recover,
-  recover::{ARGUMENT_HEADS, opener_span},
+  recover::{ARGUMENT_HEADS, PARENS_CLOSER_HEADS, closes_enclosing_block, opener_span},
   trivia::{eat_if, expect, peek_kind},
   ty::type_path,
   value::{Constness, required_value},
@@ -82,6 +82,9 @@ lossless_production! {
   /// same reason: routing a non-`Identifier` head into `argument`'s own `expect` would return
   /// `Err` and abort the whole list, so `(a: 1, !, b: 2)` would cost the rest of the parse instead
   /// of one token.
+  ///
+  /// A `}` of a block around the list ends it unclosed: `{ f(a: 1 }` keeps the selection set's
+  /// brace for the selection set. [`closes_enclosing_block`] is the rule.
   fn arguments<'inp, Src, Ctx>(inp, konst: Constness) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
@@ -90,12 +93,16 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LParen)?;
         let open = opener_span(inp.span().end());
+        let open_at: usize = inp.state().brace_depth();
         loop {
           if eat_if::<Src, Ctx>(inp, Kind::RParen)? {
             return Ok(());
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
+            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+              return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
+            }
             Some(Kind::Identifier) => argument::<Src, Ctx>(inp, konst)?,
             Some(_) => recover::unexpected::<Src, Ctx>(inp, ARGUMENT_HEADS)?,
           }

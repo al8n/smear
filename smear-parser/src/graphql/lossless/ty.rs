@@ -51,7 +51,7 @@ use super::coverage::{node, node_at};
 
 use super::{
   GraphqlLosslessInput, recover,
-  recover::{TYPE_HEADS, is_closer, opener_span},
+  recover::{LIST_CLOSER_HEADS, TYPE_HEADS, closes_enclosing_block, is_closer, opener_span},
   trivia::{eat_if, expect, peek_kind, try_eat},
 };
 
@@ -101,9 +101,10 @@ lossless_production! {
   ///
   /// Exactly one inner type, then the closer. The loop exists only for what may sit *between*
   /// them: it consumes nothing on the well-formed path, and on the malformed one it attributes
-  /// each junk region to an `Error` node until the `]` or end of input arrives. `unexpected`
-  /// consumes at least one token whenever input remains, which is this loop's whole termination
-  /// argument.
+  /// each junk region to an `Error` node until the `]`, a `}` of a block around the list
+  /// ([`closes_enclosing_block`]) or end of input arrives. Every turn returns or reaches
+  /// `unexpected`, which consumes at least one token whenever input remains: that is this
+  /// loop's whole termination argument.
   fn list_type<'inp, Src, Ctx>(inp) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
@@ -112,21 +113,26 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LBracket)?;
         let open = opener_span(inp.span().end());
+        let open_at: usize = inp.state().brace_depth();
         // The element type. `type_ref` recovers on a head that starts no type, so this call
         // reports rather than aborting the list. A closer is the one head it leaves, and the
-        // loop below takes it: a `]` as this list's own, any other as junk.
+        // loop below takes it: a `]` as this list's own, a `}` of a block around the list as
+        // that block's, any other as junk.
         type_ref::<Src, Ctx>(inp)?;
         loop {
           if eat_if::<Src, Ctx>(inp, Kind::RBracket)? {
             return Ok(());
           }
-          if peek_kind::<Src, Ctx>(inp)?.is_none() {
+          match peek_kind::<Src, Ctx>(inp)? {
             // Unterminated at end of input: report and return `Ok`, so the enclosing `node`
             // still closes and the rest of the file keeps its structure. There is nothing left
             // to skip and nothing to wrap — see `recover::unclosed_list`.
-            return recover::unclosed_list::<Src, Ctx>(inp, open);
+            None => return recover::unclosed_list::<Src, Ctx>(inp, open),
+            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+              return recover::report_unexpected::<Src, Ctx>(inp, LIST_CLOSER_HEADS);
+            }
+            Some(_) => recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS)?,
           }
-          recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS)?;
         }
       },
     )

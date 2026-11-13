@@ -120,13 +120,20 @@
 //! GraphQLx's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
 //! Every one of those shapes reaches this projection looking well-formed, and each needs an
-//! answer. The population is every call that reports without building a hole — **58**
+//! answer. The population is every call that reports without building a hole — **66**
 //! `recover::report_unexpected::<…>` sites and **17** `recover::unclosed_{list,object,parens,angle}::<…>`
 //! sites across `graphqlx/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 75 are mapped** in the table below, one probe each: a text that reaches the site with a
+//! **all 83 are mapped** in the table below, one probe each: a text that reaches the site with a
 //! hole-free tree, and what this projection answers for it. The table is executable:
 //! `every_report_and_build_site_has_a_measured_answer` holds the same rows, asserts their count
 //! per file and family against the source's own spelling of each call, and measures every answer.
+//!
+//! **One site has no hole-free probe**, and its row says so. A `(`, `[` or `<` list that meets a
+//! `}` closing a brace that was open before the list reports its own closer as missing and leaves
+//! the brace to the block around it — eight sites, one per list. Seven of them stand inside a
+//! block of the grammar, whose loop then takes the brace. A variables definition stands inside
+//! none: the brace open in front of it is one a failed definition left, and the `}` it leaves is a
+//! stray the root takes into an `Error`.
 //!
 //! **The "what the site leaves out" column is where the lenient set comes from.** A site either
 //! leaves out one token with **no AST image** (a closer, `on`), leaves out a constituent
@@ -136,10 +143,10 @@
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Sixteen project; fifty-nine refuse.** The sixteen are the lenient rows a site can leave with a
-//! well-formed value. The others refuse either the shape the site built, or — for the unclosed
-//! sites whose definition the parser cannot finish at end of input — the rubble the document is
-//! left holding.
+//! **Twenty-one project; sixty-two refuse.** The twenty-one are the lenient rows a site can leave
+//! with a well-formed value. The others refuse either the shape the site built, or — for the
+//! unclosed sites whose definition the parser cannot finish at end of input — the rubble the
+//! document is left holding, or, for the one row above, the hole.
 //!
 //! | file | site | probe | what the site leaves out | the projection |
 //! |---|---|---|---|---|
@@ -160,6 +167,7 @@
 //! | `executable.rs` | report | `query Q() { f }` (executable root) | a constituent with an image | `MissingChild { VariablesDefinition }` |
 //! | `executable.rs` | report | the empty document (executable root) | a constituent with an image | `MissingChild { ExecutableDocument }` |
 //! | `executable.rs` | unclosed | `query Q($a: Int` (executable root) | `)` of `VariablesDefinition` — **no image** | `UnexpectedChild { ExecutableDocument, Name }` |
+//! | `executable.rs` | report | `type T { f query Q($a: Int }` | `)` of `VariablesDefinition` — **no image** | **a hole** — the `}` the list leaves is the root's, as an `Error` |
 //! | `use_tree.rs` | report | `use a as` | a constituent with an image | `MissingChild { UseTree }` |
 //! | `use_tree.rs` | report | `use a::* as b` | nothing — a present token is refused | `UnexpectedChild { UseTree, Name }` |
 //! | `use_tree.rs` | report | `use a::{}` | a constituent with an image | `MissingChild { UseTree }` |
@@ -170,8 +178,10 @@
 //! | `use_tree.rs` | report | `use` | a constituent with an image | `MissingChild { UseDefinition }` |
 //! | `generic.rs` | report | `type T<> { f: Int }` | a constituent with an image | `MissingChild { DefinitionTypeGenerics }` |
 //! | `generic.rs` | unclosed | `type T<A` | `>` of `DefinitionTypeGenerics` — **no image** | **projects** |
+//! | `generic.rs` | report | `mod m { type T<A }` | `>` of `DefinitionTypeGenerics` — **no image** | **projects** |
 //! | `generic.rs` | report | `fragment <> F on T { f }` | a constituent with an image | `MissingChild { ExecutableDefinitionTypeGenerics }` |
 //! | `generic.rs` | unclosed | `extend type T<A` | `>` of `ExtensionTypeGenerics` — **no image** | `MissingChild { ObjectTypeExtension }` |
+//! | `generic.rs` | report | `mod m { extend type T<A }` | `>` of `ExtensionTypeGenerics` — **no image** | `MissingChild { ObjectTypeExtension }` |
 //! | `generic.rs` | report | `fragment on on T { f }` | nothing — a present token is refused | `SemanticRule` |
 //! | `generic.rs` | report | `type T where A: { f: Int }` | a constituent with an image | `MissingChild { WherePredicate }` |
 //! | `generic.rs` | report | `type T where { f: Int }` | a constituent with an image | `MissingChild { WhereClause }` |
@@ -183,6 +193,7 @@
 //! | `selection.rs` | unclosed | `{ f` | `}` of `SelectionSet` — **no image** | **projects** |
 //! | `definition.rs` | report | `type T { f(): Int }` | a constituent with an image | `MissingChild { ArgumentsDefinition }` |
 //! | `definition.rs` | unclosed | `type T { f(a: Int` | `)` of `ArgumentsDefinition` — **no image** | `UnexpectedChild { Document, Name }` |
+//! | `definition.rs` | report | `mod m { directive @d(a: Int }` | `)` of `ArgumentsDefinition` — **no image** | `MissingChild { DirectiveDefinition }` |
 //! | `definition.rs` | report | `type T { }` | a constituent with an image | `MissingChild { FieldsDefinition }` |
 //! | `definition.rs` | unclosed | `type T { f: Int` | `}` of `FieldsDefinition` — **no image** | **projects** |
 //! | `definition.rs` | report | `input I { }` | a constituent with an image | `MissingChild { InputFieldsDefinition }` |
@@ -212,11 +223,15 @@
 //! | `value.rs` | report | `type T { f(a: Int = $v): Int }` | nothing — a present token is refused | `UnexpectedChild { DefaultValue, VariableValue }` |
 //! | `value.rs` | report | `{ f(a: ) }` | a constituent with an image | `MissingChild { Argument }` |
 //! | `value.rs` | unclosed | `{ f(a: [1` | `]` of `ListValue` — **no image** | **projects** |
+//! | `value.rs` | report | `{ f(a: [1 }` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: set!{1` | `}` of `SetValue` — **no image** | **projects** |
 //! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
+//! | `directive.rs` | report | `{ f(a: 1 }` | `)` of `Arguments` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: A<B` | `>` of `TypeGenerics` — **no image** | **projects** |
+//! | `ty.rs` | report | `type T { f: A<B }` | `>` of `TypeGenerics` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: [Int` | `]` of `ListType` — **no image** | **projects** |
+//! | `ty.rs` | report | `type T { f: [Int }` | `]` of `ListType` — **no image** | **projects** |
 //! | `ty.rs` | report | `type T { f: }` | a constituent with an image | `MissingChild { FieldDefinition }` |
 //!
 //! The rows are what the named cells pin by shape, where a shape has one:
@@ -282,14 +297,17 @@
 //! **This table is the criterion's whole extension, derived rather than listed.** A position is
 //! lenient iff its token has no AST image and the lossless parser builds a hole-free tree holding
 //! the node without it; the report-and-build census above enumerates every place the parser leaves
-//! a token out without a hole, and its twenty-one image-less rows — each witnessed by its own
-//! probe's tree — are these twenty-one, which the cell asserts. Three of them are witnessed only as
-//! **orphans**: at end of input the operation, the field or the fragment around the list cannot be
-//! finished, so the root keeps the list as a stray child of the document beside the lost
-//! definition's tokens, and every projection of such a tree refuses at the rubble. Those three,
-//! with an extension's `>`, are lenient by the criterion and change no answer. The mutation law's
-//! census of deletions both sides refuse is a second instrument, and it agrees: every token it
-//! still lists has an image.
+//! a token out without a hole, and the pairs its image-less rows leave out — each witnessed by the
+//! tree of at least one probe — are these twenty-one, which the cell asserts. A pair can have two
+//! sites: a `(`, `[` or `<` list leaves its closer out at the end of input, and again at the `}`
+//! of a block around it. Two of the pairs are witnessed only as **orphans**: at end of input the
+//! operation or the fragment around the list cannot be finished, so the root keeps the list as a
+//! stray child of the document beside the lost definition's tokens, and every projection of such a
+//! tree refuses at the rubble. An arguments definition's `)` is witnessed that way under a field,
+//! and once more inside a directive definition that a module's `}` cuts short, which refuses for
+//! the locations it never got. Those three, with an extension's `>`, are lenient by the criterion
+//! and change no answer. The mutation law's census of deletions both sides refuse is a second
+//! instrument, and it agrees: every token it still lists has an image.
 //!
 //! Every row is also **measured as a value** where a value exists: `tests/lossless_x_mutation.rs`
 //! deletes the token from a real tree — or finds a corpus tree already without it — and requires
