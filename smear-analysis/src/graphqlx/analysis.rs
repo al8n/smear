@@ -291,7 +291,8 @@ impl Analysis {
 ///   step: the first value that does not fit under its arguments is reported once at each
 ///   occurrence of it, with the value's site code, labelled at the value. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
-///   copy of itself is not copied: the argument, or the field, is absent. Each row of a copy, each
+///   copy of itself is not copied: the argument, or the field, is absent, and under type arguments
+///   what its count reached is judged as a copy is. Each row of a copy, each
 ///   read of another default's count while counting, each read of a count made already for a
 ///   later copy, each default left out that needs itself, and each required argument found left
 ///   out, is a step of [`Limits::max_value_steps`]: past it the application is `resource-limit`

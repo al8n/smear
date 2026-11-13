@@ -1122,6 +1122,155 @@ fn a_check_a_limit_stops_is_reported_at_the_occurrence() {
   );
 }
 
+/// A count that meets itself still judges the values it reached. `Rec<Int>`'s check counts
+/// `next`'s default under `Rec<Int>`, judged: its object pushes `"bad"` against `Int`, `value`'s
+/// type there, then the read of `next`'s default, its own. The stack takes the read first, which
+/// meets the count being made: the count is poisoned, no copy is made, and the read is cut. Then
+/// `"bad"`, which `Int` does not take: the count does not fit, so `Rec<Int>` is
+/// `invalid-default-value`, the code of a default's site, at the occurrence, labelled at the
+/// value. `next`'s default stays its literal. The cycle is another rule's, so this phase's codes
+/// alone are read. Refuses a poison that clears the check pending beside it.
+#[test]
+fn a_count_that_meets_itself_still_judges_the_values_it_reached() {
+  let text = "type Query {\n  f(arg: Rec<Int>): Int\n}\n\
+              input Rec<T> {\n  value: T\n  next: Rec<T> = { value: \"bad\" }\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Rec<Int>", 0);
+  assert_eq!(found_of(&analysis, &PHASE), [(DEFAULT, occurrence)]);
+  let report = the(&analysis, DEFAULT, occurrence);
+  assert_eq!(
+    report.to_string(),
+    "`Rec` is instantiated here with type arguments under which `{ value: \"bad\" }`, a value it \
+     holds, does not fit the type it takes"
+  );
+  assert_eq!(
+    labels(report),
+    [(
+      after(schema, text, "next: Rec<T> = ", "{ value: \"bad\" }"),
+      "this value"
+    )]
+  );
+  let model = analysis.model();
+  assert_eq!(
+    valued(model, input_default(model, "Rec", "next")),
+    "Literal(Object) { value: \"bad\" }"
+  );
+}
+
+/// The same count, its `1` taking `Int`, fits: the count is poisoned as before, and nothing it
+/// reached is refused, so this phase says nothing, and the cycle is another rule's to report.
+/// Refuses a poison taken for a value that does not fit.
+#[test]
+fn a_count_that_meets_itself_with_values_that_fit_says_nothing() {
+  let text = "type Query {\n  f(arg: Rec<Int>): Int\n}\n\
+              input Rec<T> {\n  value: T\n  next: Rec<T> = { value: 1 }\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(
+    found_of(&analysis, &PHASE).is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// What a count reaches only after it meets itself is judged too. In `Rec`, `["bad"]` against
+/// `[Int]` is pushed under the read of `next`'s default, which the stack takes first and which
+/// meets the count; the list is counted after that, and its `"bad"` only then. In `Ring`, `{}`
+/// against `Box<Int>` is likewise counted after the read that meets the count, and leaves out
+/// `Box`'s `v`, whose `"bad"` its read reaches under `Int`: a count of its own, opened after the
+/// poison, exact, and not fitting, which `Ring<Int>`'s count holds. No occurrence writes
+/// `Box<Int>`, so this count alone judges it. Each program is one `invalid-default-value` at its
+/// written instantiation, labelled at the value it holds. Refuses a count that stops judging where
+/// it meets itself.
+#[test]
+fn what_a_count_reaches_after_it_meets_itself_is_judged() {
+  let nested = "type Query {\n  f(arg: Rec<Int>): Int\n}\n\
+                input Rec<T> {\n  value: [T]\n  next: Rec<T> = { value: [\"bad\"] }\n}\n";
+  let analysis = analyze_text(nested, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, nested, "Rec<Int>", 0);
+  assert_eq!(found_of(&analysis, &PHASE), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [(
+      after(schema, nested, "next: Rec<T> = ", "{ value: [\"bad\"] }"),
+      "this value"
+    )]
+  );
+
+  let read = "type Query {\n  f(arg: Ring<Int>): Int\n}\ninput Box<U> {\n  v: U = \"bad\"\n}\n\
+              input Ring<T> {\n  box: Box<T>\n  next: Ring<T> = { box: {} }\n}\n";
+  let analysis = analyze_text(read, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, read, "Ring<Int>", 0);
+  assert_eq!(found_of(&analysis, &PHASE), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [(
+      after(schema, read, "next: Ring<T> = ", "{ box: {} }"),
+      "this value"
+    )]
+  );
+}
+
+/// A default whose copy would hold a copy of itself is judged where it is left out, by what its
+/// count reached, and is absent. `@d<Int>` leaves out `a`, whose default is counted under
+/// `Rec<Int>`: it reads `next`'s default, whose own read of itself poisons it, and so `a`'s count;
+/// `a`'s `"bad"` is counted after, and `Int` does not take it. So the application reports `a`'s
+/// default, at its path. `H.h`'s `{ r: {} }` gives its `{}` the type `Rec<Int>`, rebuilt under
+/// `Wrap<Int>`; `{}` leaves out `next`, whose count reads itself, and whose `"bad"` is counted
+/// after: the literal reports it, at the `{}`. Refuses an absent default taken to fit.
+#[test]
+fn a_default_that_meets_itself_is_judged_where_it_is_left_out() {
+  let applied = "type Query @d<Int> {\n  x: Int\n}\n\
+                 directive @d<T>(a: Rec<T> = { value: \"bad\" }) on OBJECT\n\
+                 input Rec<T> {\n  value: T\n  next: Rec<T> = { value: 1 }\n}\n";
+  let analysis = analyze_text(applied, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, applied, "@", "d", 0);
+  assert_eq!(found_of(&analysis, &PHASE), [(DEFAULT, path)]);
+  let report = the(&analysis, DEFAULT, path);
+  assert_eq!(
+    report.to_string(),
+    "under this application's type arguments, the default `{ value: \"bad\" }` of `a` does not \
+     fit the type `a` takes"
+  );
+  assert_eq!(
+    labels(report),
+    [(
+      after(schema, applied, "Rec<T> = ", "{ value: \"bad\" }"),
+      "this default"
+    )]
+  );
+  assert_eq!(argument_shown(analysis.model(), "Query", 0, "a"), "absent");
+
+  let literal = "type Query {\n  x: Int\n}\n\
+                 input Rec<T> {\n  value: T\n  next: Rec<T> = { value: \"bad\" }\n}\n\
+                 input Wrap<W> {\n  r: Rec<W>\n}\ninput H {\n  h: Wrap<Int> = { r: {} }\n}\n";
+  let analysis = analyze_text(literal, &Limits::new());
+  let schema = schema_file(&analysis);
+  let object = after(schema, literal, "{ r: ", "{}");
+  assert_eq!(found_of(&analysis, &PHASE), [(DEFAULT, object)]);
+  let report = the(&analysis, DEFAULT, object);
+  assert_eq!(
+    report.to_string(),
+    "this literal leaves out `next`, whose default `{ value: \"bad\" }` does not fit the type \
+     `next` takes under these type arguments"
+  );
+  assert_eq!(
+    labels(report),
+    [(
+      after(schema, literal, "next: Rec<T> = ", "{ value: \"bad\" }"),
+      "this default"
+    )]
+  );
+  let model = analysis.model();
+  assert_eq!(
+    valued(model, input_default(model, "H", "h")),
+    "Object {r: Object {}}"
+  );
+}
+
 /// Every value a walk of some packages reaches.
 #[derive(Default)]
 struct Values {

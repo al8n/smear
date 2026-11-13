@@ -181,7 +181,9 @@
 //! - a written object literal whose type a written occurrence gave is silent: that occurrence's
 //!   instantiation is checked where it is written.
 //!
-//! A copy reports nothing: whether it fits reaches whoever asked for its outermost count.
+//! A copy reports nothing: whether it fits reaches whoever asked for its outermost count. A
+//! default whose copy would hold a copy of itself is not copied, and is judged all the same, by
+//! what its count reached: one of its nodes that does not fit is reported as a copy's would be.
 //!
 //! # At each instantiation
 //!
@@ -198,7 +200,8 @@
 //! instantiation whose verdict fails is reported once, with the recorded value's site code,
 //! `invalid-default-value` or `invalid-directive-argument-value`, labelled at the value; each one
 //! a limit stopped is `resource-limit`. The value stays its definition's `Literal`, and the check
-//! makes no row. A count that meets itself fits here: the cycle is another rule's to report. An
+//! makes no row. A count that meets itself is judged by what it reached, as an exact one is: the
+//! cycle is another rule's to report, and a value that does not fit is reported all the same. An
 //! instantiation only a derivation reaches is not checked: a value written under such a type is
 //! judged where it is written.
 //!
@@ -222,18 +225,23 @@
 //!
 //! A count is exact, past the budget, or poisoned. A count that reads a count still being made
 //! has met itself: the copy would hold a copy of itself, and the count is poisoned, with every
-//! count on the way to it, and so is every count that reads a poisoned one. A count whose rows
-//! pass `Limits::max_value_steps`, or one of whose reads cannot be paid for, is past it, with every
-//! count on the way, and is never added up further. An exact count's rows are added with overflow
-//! checked, so it is exact whatever the limit; a default whose count is exact reaches no default
-//! twice on one chain. Counting uses explicit stacks, a frame for each default being counted.
+//! count on the way to it, and so is every count that reads a poisoned one. That read is cut: it
+//! adds nothing, and nothing more is added up for a poisoned count. One that is not judged has
+//! nothing to judge, and stops; a judged one goes on judging what it reaches besides, each node a
+//! step as before, so whether what it reached fits is known and kept as an exact count's is: the
+//! cycle is another rule's to report, and never clears a value that does not fit. A count whose
+//! rows pass `Limits::max_value_steps`, or one of whose reads cannot be paid for, is past it, with
+//! every count on the way, and is never added up further. An exact count's rows are added with
+//! overflow checked, so it is exact whatever the limit; a default whose count is exact reaches no
+//! default twice on one chain. Counting uses explicit stacks, a frame for each default being
+//! counted.
 //!
 //! Who asks for a count does what it says, once it has paid for reading a count made already:
 //! exact, the count is charged, all of it or none, and the copy is made; past the budget, the
 //! asker is starved; poisoned, one step is charged, and nothing is made: the argument, or the
-//! field, is absent, and the cycle is another rule's to report. A read the budget cannot pay for
-//! starves the asker too. A copy is whole or absent, and the rows a copy makes are its count's,
-//! which the phase asserts when it ends.
+//! field, is absent, and the cycle is another rule's to report, while what its count reached is
+//! judged as a copy is. A read the budget cannot pay for starves the asker too. A copy is whole or
+//! absent, and the rows a copy makes are its count's, which the phase asserts when it ends.
 //!
 //! # What bounds it
 //!
@@ -593,7 +601,8 @@ enum Count {
   Rows(u32),
   /// Its rows pass `Limits::max_value_steps`, or a read it makes could not be paid for.
   Past,
-  /// It reads its own count: its copy would hold a copy of itself.
+  /// It reads its own count: its copy would hold a copy of itself. Judged, what it reaches besides
+  /// is judged all the same.
   Poisoned,
   /// A type it reads under type arguments passes this limit, and cannot be built.
   Unbuilt(Limit),
@@ -624,7 +633,8 @@ enum Counted {
 
 /// A default being counted: its tree and the type it is counted against, where its own entries of
 /// the count's stack start, and its rows so far; whether it is judged, its type not the one its
-/// default is written against, and, judged, whether its copy fits so far.
+/// default is written against, and, judged, whether its copy fits so far; and whether its copy
+/// would hold a copy of itself, which no rows are added to.
 #[derive(Clone, Copy)]
 struct Frame {
   tree: u32,
@@ -633,6 +643,7 @@ struct Frame {
   rows: u32,
   judged: bool,
   fits: bool,
+  poisoned: bool,
 }
 
 /// What asking for a default left out does, an application's argument or an object literal's
@@ -642,8 +653,10 @@ enum Asked {
   /// A copy of this many rows is made; under a type its default is not written against, `fits`
   /// says whether each of its nodes takes its type as a written one would.
   Copy { rows: u32, fits: bool },
-  /// Nothing is made: the argument, or the field, is absent.
-  Absent,
+  /// Nothing is made: the argument, or the field, is absent, its copy holding a copy of itself;
+  /// under a type its default is not written against, `fits` says whether each node its count
+  /// reached takes its type as a written one would.
+  Absent { fits: bool },
   /// The budget cannot pay: the asker is past it.
   Starved,
   /// A type its count reads under type arguments passes this limit: the asker is past it.
@@ -1229,8 +1242,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// What the values recorded at the rows `start..end`, all `def`'s, come to under `ty`, a closed
   /// instantiation of `def`: each in turn, a step paid before it is asked, its type read under
   /// `ty`'s arguments and its count judged under that type, until one does not fit. A count that
-  /// meets itself fits here: the cycle is another rule's to report. A step that cannot be paid, a
-  /// count past the budget and a type that cannot be built stop the check.
+  /// meets itself is judged as an exact one is, by what it reached: the cycle is another rule's to
+  /// report, and no value that does not fit is passed for it. A step that cannot be paid, a count
+  /// past the budget and a type that cannot be built stop the check.
   fn check(&mut self, def: DefId, ty: TyId, start: usize, end: usize) -> Checked {
     for row in start..end {
       let Some(recorded) = self.recorded.get(row).copied() else {
@@ -1245,12 +1259,11 @@ impl<'p> Coercion<'_, 'p, '_> {
         Err(stop) => return Checked::Stopped(stop),
       };
       match self.count(recorded.tree, Some(under), true, true) {
-        Count::Rows(_) => {
+        Count::Rows(_) | Count::Poisoned | Count::Counting => {
           if self.unfit.contains(&(recorded.tree, Some(under))) {
             return Checked::Unfit(dense(row));
           }
         }
-        Count::Poisoned | Count::Counting => {}
         Count::Past => return Checked::Stopped(Stop::Steps),
         Count::Unbuilt(limit) => return Checked::Stopped(Stop::Built(limit)),
       }
@@ -1405,9 +1418,10 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// report when its type under the arguments is non-null, passed over with no step when the
   /// application has no complete type arguments. Each is charged first, but on an application the
   /// built-in library writes. A copy under the arguments that does not fit them is reported at the
-  /// application, the first of its arguments' copies alone, as `reported` keeps. Answers `false`,
-  /// and reports the application once, when the budget cannot pay, or when a type the argument
-  /// takes cannot be built under the arguments.
+  /// application, the first of its arguments' copies alone, as `reported` keeps, and so is a
+  /// default left absent, its copy holding a copy of itself, whose count reached a node that does
+  /// not fit them. Answers `false`, and reports the application once, when the budget cannot pay,
+  /// or when a type the argument takes cannot be built under the arguments.
   fn left_out(&mut self, applying: Applying, left: Listed, reported: &mut bool) -> bool {
     let Applying {
       application,
@@ -1458,15 +1472,10 @@ impl<'p> Coercion<'_, 'p, '_> {
     if env.is_some() {
       self.record(tree, ty, Site::Default);
     }
-    let rows = match self.ask(tree, ty, library, expected.rebuilt) {
-      Asked::Copy { rows, fits } => {
-        if !fits && !*reported {
-          *reported = true;
-          self.unfit_default(at, left.argument, tree);
-        }
-        rows
-      }
-      Asked::Absent => return true,
+    let (rows, fits) = match self.ask(tree, ty, library, expected.rebuilt) {
+      Asked::Copy { rows, fits } => (Some(rows), fits),
+      // Absent, its copy holding a copy of itself: what its count reached is judged all the same.
+      Asked::Absent { fits } => (None, fits),
       Asked::Starved => {
         self.starved(at, Stop::Steps);
         return false;
@@ -1475,6 +1484,13 @@ impl<'p> Coercion<'_, 'p, '_> {
         self.starved(at, Stop::Built(limit));
         return false;
       }
+    };
+    if !fits && !*reported {
+      *reported = true;
+      self.unfit_default(at, left.argument, tree);
+    }
+    let Some(rows) = rows else {
+      return true;
     };
     let before = self.builder.value_count();
     if let Some(value) = self.value(tree, ty, Mode::Copied, false) {
@@ -1588,7 +1604,8 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// paid starves the asker. Exact, its rows are charged, all or none, and a copy is made; past
   /// the budget, the asker is starved; a default that needs itself costs one step and is absent.
   /// Steps its count's reads paid stay spent whatever the copy. `judged` when `ty` is not the type
-  /// the default is written against: the count then judges whether the copy fits it.
+  /// the default is written against: the count then judges whether the copy fits it, and whether
+  /// what an absent one's count reached fits it.
   fn ask(&mut self, tree: u32, ty: Option<TyId>, library: bool, judged: bool) -> Asked {
     if !library && self.counts.contains_key(&(tree, ty)) && !self.charge(1) {
       return Asked::Starved;
@@ -1611,7 +1628,9 @@ impl<'p> Coercion<'_, 'p, '_> {
         if !library && !self.charge(1) {
           return Asked::Starved;
         }
-        Asked::Absent
+        Asked::Absent {
+          fits: !self.unfit.contains(&(tree, ty)),
+        }
       }
     }
   }
@@ -1627,11 +1646,17 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// yet, opens its frame.
   ///
   /// A frame with nothing left is exact, kept, and its rows added to the frame that read it. A
-  /// verdict is every open frame's, each reading the one above it: a read of a count being made,
-  /// or of a poisoned one, poisons; a read of one past the budget, a read that cannot be paid for,
-  /// and rows that pass `u32::MAX`, or `Limits::max_value_steps` when `charged`, are past it. So a
-  /// count past the budget is never added up further, and an exact one is exact whatever the
-  /// limit.
+  /// verdict is every open frame's, each reading the one above it: a read of one past the budget,
+  /// a read that cannot be paid for, and rows that pass `u32::MAX`, or `Limits::max_value_steps`
+  /// when `charged`, are past it. So a count past the budget is never added up further, and an
+  /// exact one is exact whatever the limit.
+  ///
+  /// A read of a count being made, or of a poisoned one, poisons the frame that reads it, and
+  /// so every frame on the way to it, each when the frame above it ends: its copy would hold a
+  /// copy of itself. The read is cut, and nothing more is added to a poisoned frame. A poisoned
+  /// frame that is not judged has nothing to judge, and reads nothing more; one that is judged
+  /// goes on with what it reaches besides, its reads of defaults whose type is written as it is
+  /// passed over, and ends poisoned, what does not fit kept beside it as an exact count's is.
   ///
   /// A count `judged`, against a type its default is not written against, the asker's `ty` a
   /// rebuild made, pays a step for each node before it is counted, and judges whether the copy
@@ -1652,7 +1677,11 @@ impl<'p> Coercion<'_, 'p, '_> {
       };
       if self.counting.len() <= frame.base {
         self.frames.pop();
-        let done = Count::Rows(frame.rows);
+        let done = if frame.poisoned {
+          Count::Poisoned
+        } else {
+          Count::Rows(frame.rows)
+        };
         self.counts.insert((frame.tree, frame.ty), done);
         if !frame.fits {
           self.unfit.insert((frame.tree, frame.ty));
@@ -1664,6 +1693,11 @@ impl<'p> Coercion<'_, 'p, '_> {
         if !frame.fits {
           self.misfit();
         }
+        // One that holds a copy of itself is poisoned.
+        if frame.poisoned {
+          self.poison();
+          continue;
+        }
         if let Err(verdict) = self.add_rows(frame.rows, charged) {
           return self.verdict(verdict);
         }
@@ -1674,6 +1708,9 @@ impl<'p> Coercion<'_, 'p, '_> {
       };
       let counted = match entry {
         Counted::Node { node, ty, slot } => self.count_node(node, ty, slot, charged),
+        // A poisoned frame makes no copy, and a default its type is written against holds nothing
+        // it judges: the read is passed over.
+        Counted::Fill { judged: false, .. } if self.poisoned() => Ok(()),
         Counted::Fill { tree, ty, judged } => match self.counts.get(&(tree, ty)).copied() {
           Some(Count::Rows(rows)) => {
             if self.unfit.contains(&(tree, ty)) {
@@ -1681,7 +1718,18 @@ impl<'p> Coercion<'_, 'p, '_> {
             }
             self.add_rows(rows, charged)
           }
-          Some(Count::Counting | Count::Poisoned) => Err(Count::Poisoned),
+          // The read is cut: the copy would hold a copy of itself.
+          Some(Count::Counting) => {
+            self.poison();
+            Ok(())
+          }
+          Some(Count::Poisoned) => {
+            if self.unfit.contains(&(tree, ty)) {
+              self.misfit();
+            }
+            self.poison();
+            Ok(())
+          }
           Some(verdict @ (Count::Past | Count::Unbuilt(_))) => Err(verdict),
           None => {
             self.open(tree, ty, judged);
@@ -1713,6 +1761,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       rows: 0,
       judged,
       fits: true,
+      poisoned: false,
     });
     if let Some(root) = self
       .raw
@@ -1748,13 +1797,39 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
   }
 
+  /// The copy of the default counted on top would hold a copy of itself: it is poisoned, and is
+  /// never made. One that is not judged has nothing to judge, and what it has still to count is
+  /// let go; one that is judged goes on judging what it reaches.
+  fn poison(&mut self) {
+    let Some(frame) = self.frames.last_mut() else {
+      return;
+    };
+    frame.poisoned = true;
+    if !frame.judged {
+      let base = frame.base;
+      self.counting.truncate(base);
+    }
+  }
+
+  /// Whether the copy of the default counted on top would hold a copy of itself.
+  fn poisoned(&self) -> bool {
+    self
+      .frames
+      .last()
+      .is_some_and(|frame: &Frame| frame.poisoned)
+  }
+
   /// Adds `rows` to the default being counted on top: a sum past `u32::MAX`, or, when `charged`,
-  /// past `Limits::max_value_steps`, is past the budget.
+  /// past `Limits::max_value_steps`, is past the budget. A poisoned one adds nothing: it makes no
+  /// copy.
   fn add_rows(&mut self, rows: u32, charged: bool) -> Result<(), Count> {
     let max = self.values.max();
     let Some(frame) = self.frames.last_mut() else {
       return Ok(());
     };
+    if frame.poisoned {
+      return Ok(());
+    }
     match frame.rows.checked_add(rows) {
       Some(sum) if !charged || sum <= max => {
         frame.rows = sum;
@@ -2697,10 +2772,11 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// object's order, then the task that closes it: each field it sets, and each default it leaves
   /// out, a copy. Where it is written, its unknown fields are reported, a OneOf input object's
   /// count of fields, and the required fields it leaves out, before any default is filled; a
-  /// default is asked for as [`ask`](Self::ask) says, and once the budget cannot pay, the literal
-  /// is reported once and its written fields alone are read on. In a copy each default it leaves
-  /// out is copied with nothing asked and no count read: the count the copy was charged for read
-  /// each of their counts and found it exact, so their rows are among those it paid for.
+  /// default is asked for as [`ask`](Self::ask) says, one left absent judged as a copy is, and
+  /// once the budget cannot pay, the literal is reported once and its written fields alone are
+  /// read on. In a copy each default it leaves out is copied with nothing asked and no count read:
+  /// the count the copy was charged for read each of their counts and found it exact, so their
+  /// rows are among those it paid for.
   fn object(&mut self, id: ValueId, making: Making, def: DefId, first: u32) {
     let Making {
       node, tree, mode, ..
@@ -2770,16 +2846,11 @@ impl<'p> Coercion<'_, 'p, '_> {
       // this default's count, through this same reading of the literal, and it was exact, or no
       // copy would be made. So its rows are among those already paid for.
       if mode.written() {
-        match self.ask(default, ty, library, expected.rebuilt) {
-          Asked::Copy { fits, .. } => {
-            // A literal whose type a rebuild made reports its copy that does not fit; one whose
-            // type a written occurrence gave leaves it to that occurrence's instantiation.
-            if !fits && making.rebuilt && !reported {
-              reported = true;
-              self.unfit_field(at, field, default);
-            }
-          }
-          Asked::Absent => continue,
+        let (fits, made) = match self.ask(default, ty, library, expected.rebuilt) {
+          Asked::Copy { fits, .. } => (fits, true),
+          // Absent, its copy holding a copy of itself: what its count reached is judged all the
+          // same.
+          Asked::Absent { fits } => (fits, false),
           Asked::Starved => {
             self.object_starved(at, Stop::Steps);
             merge.default = merge.default_end;
@@ -2790,6 +2861,15 @@ impl<'p> Coercion<'_, 'p, '_> {
             merge.default = merge.default_end;
             continue;
           }
+        };
+        // A literal whose type a rebuild made reports its copy that does not fit; one whose type a
+        // written occurrence gave leaves it to that occurrence's instantiation.
+        if !fits && making.rebuilt && !reported {
+          reported = true;
+          self.unfit_field(at, field, default);
+        }
+        if !made {
+          continue;
         }
       }
       self.entries.push((field, None, ValueId::new(0)));
