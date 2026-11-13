@@ -20,7 +20,10 @@ macro_rules! dialect {
     #[cfg(feature = $feature)]
     mod $module {
       #[cfg(all(feature = "rowan_0_17", feature = "std"))]
-      use smear::lexer::limits::{LosslessLimits, MAX_NESTING_DEPTH};
+      use smear::lexer::{
+        limits::{LosslessLimits, MAX_NESTING_DEPTH},
+        tokora::SimpleSpan,
+      };
       #[cfg(all(feature = "rowan_0_17", feature = "std"))]
       use smear::parser::$dialect::{Lossless, kinds::SyntaxKind, lossless::$lent};
       use smear::{
@@ -91,8 +94,12 @@ macro_rules! dialect {
           assert_eq!(lent[0].kind(), SyntaxErrorKind::NestingLimit);
           assert_eq!(parsed.error_count(), 1);
           assert_eq!(parsed.tree().syntax().text().to_string(), text);
-          // `A` stands before the refusal, `T` holds it, and `Z` was never read.
-          assert_eq!(parsed.document().definitions().len(), 1);
+          // `A` stands before the refusal, `T` holds it, and `Z` was never read: the one
+          // definition projected is the one the text starts with.
+          let projected = parsed.document().definitions();
+          assert_eq!(projected.len(), 1);
+          let first: &SimpleSpan = projected[0].span();
+          assert_eq!(first.start(), 0, "the definition projected is not `A`");
           assert!(!parsed.recovery().is_complete());
         }
       }
@@ -150,6 +157,14 @@ macro_rules! dialect {
            the one gap"
         );
 
+        for definition in parsed.document().definitions() {
+          let at: &SimpleSpan = definition.span();
+          assert!(
+            at.start() < gap_start,
+            "a definition that starts at {} is projected, where the gap starts at {gap_start}",
+            at.start()
+          );
+        }
         let projected = parsed.document().definitions().len();
         let read = starts
           .iter()
