@@ -485,11 +485,20 @@ where
 ///   taken by the fallback, whether or not the skip stepped over such a `}`;
 /// - where it found one and its hole holds no such `}`: the same hole;
 /// - where it found one and its hole holds such a `}`: the prefix of that hole in front of the
-///   first of them. It is never empty;
+///   first of them, which is never empty, unless the produce-event budget below runs out first;
 /// - where a limit or an error stopped it: what it committed, a prefix of the text from its first
 ///   token, if that holds no such `}`; if it holds one, the prefix in front of the first of them,
-///   or nothing where the durable produce-event budget stopped it, and the parse meets the same
-///   stop again where it next reads that far.
+///   unless the produce-event budget below runs out first, and the parse meets the same stop again
+///   where it next reads that far.
+///
+/// tokora's produce-event budget is the one no rollback refunds, and the second scan below lexes
+/// again what the skip lexed, so under that budget the same text is paid for twice. Where the
+/// budget runs out before the second scan ends, this helper keeps what the second scan had
+/// committed, a part of the prefix or nothing, never such a `}`, and the parse ends at the budget,
+/// as it does wherever that budget runs out. The budget's default is none, so only a caller who
+/// sets it meets this. It is the price of the look-ahead: to tell a skip that finds no restart
+/// point from one that finds one past such a `}`, the helper has to read past the `}`, and a
+/// look-ahead that is taken back is lexed, and paid for, again.
 ///
 /// So it keeps something other than the skip's answer only where the skip committed a `}` it had
 /// not opened, and nothing it commits holds one, whatever stops it.
@@ -509,10 +518,11 @@ where
 /// the two take the same tokens and the second stops nowhere the skip did not, so the second stops
 /// at that `}`. The skip had taken that `}`, so neither a limit of the lexer's own, whose tallies
 /// come back with the lexer state, nor an error stops the second scan before it: they stand
-/// further on. Only the durable produce-event budget, which no rollback refunds, can, and it
-/// refuses the second scan before it takes anything. The prefix in front of a restart point is not
-/// empty because a `}` at the head is a restart point in both dialects' tables, where the skip
-/// stops before taking anything.
+/// further on. Only the durable produce-event budget, which no rollback refunds, can: where it
+/// stopped the skip itself, it refuses the second scan before it takes anything, and after a skip
+/// that found a restart point, it may run out anywhere in the second scan, which lexes again what
+/// the skip lexed. The prefix in front of a restart point is not empty because a `}` at the head
+/// is a restart point in both dialects' tables, where the skip stops before taking anything.
 ///
 /// The allowance flag is read once and governs both scans: an exhausted allowance runs neither. A
 /// declined attempt costs what a failed scan costs, and the guard reads it the same way: `spent`

@@ -3,10 +3,10 @@
 //! While a brace is open, a closing brace is taken only by the production that owns it, and that
 //! rule is what makes a module's node faithful to the braces: counting braces alone from the
 //! node's own `{`, the count returns to zero at most once, at the node's own `}`, which is the
-//! last token of the node that is no trivia; a node with no `}` of its own never returns to zero.
-//! [`faithful`] checks every module of a tree in one walk, so a sweep can afford it on every tree
-//! it builds, and answers how many modules it read and how many of them hold an `Error`: a sweep
-//! that never met a broken module witnessed nothing.
+//! last token of the node that is neither trivia nor text the parse never read; a node with no `}`
+//! of its own never returns to zero. [`faithful`] checks every module of a tree in one walk, so a
+//! sweep can afford it on every tree it builds, and answers how many modules it read and how many
+//! of them hold an `Error`: a sweep that never met a broken module witnessed nothing.
 //!
 //! # The braces are told by count, never by parentage
 //!
@@ -25,6 +25,16 @@
 //! stands at the end of the text, or in front of what a refusal left unread, which is a gap tile:
 //! once the walk has left such a module, every later token is trivia or a gap. A real token after
 //! it is how a body that returned early would look, and is named with the module it follows.
+//!
+//! # Text the parse never read may trail a module's own `}`
+//!
+//! A gap tile is text the parse never read: what a stop left unread, or bytes the lexer refused.
+//! tokora tiles such a run at the token it trails, before the close that follows is read (its
+//! `cst/sink/finish/mod.rs`: "The run is now tiled at the token it trails, before this close is
+//! even read"), so a run that comes right after a module's own `}` is a child of the module's
+//! node: a limit that stops the parse just after the `}`, or a byte the lexer refuses there. The
+//! braces are a rule about the tokens the parse read, and a gap tile is none of them, so after a
+//! module's own `}` it is allowed as trivia is. Any other token there is still refused.
 //!
 //! Shared by the sweeps that parse broken texts, `lossless_x_mutation.rs`,
 //! `lossless_x_roundtrip.rs` and `lossless_x_parity.rs`, and by `recovery_graphqlx.rs`.
@@ -135,6 +145,11 @@ pub fn faithful(tree: &SyntaxNode) -> Result<Modules, String> {
           continue;
         };
         if innermost.closed {
+          // A gap tile after the module's own `}` is text the parse never read, which tokora tiles
+          // at the token it trails: see the module docs.
+          if kind == K::Gap {
+            continue;
+          }
           return Err(std::format!(
             "the module at {:?} holds `{}` at {:?}, after its braces have closed",
             innermost.node.text_range(),
@@ -160,7 +175,7 @@ pub fn faithful(tree: &SyntaxNode) -> Result<Modules, String> {
             };
             count -= 1;
             // The count from the module's `{` is back at zero: this is its own `}`, and nothing
-            // but trivia may follow it in the node.
+            // but trivia or text the parse never read may follow it in the node.
             if count == base {
               innermost.closed = true;
             }

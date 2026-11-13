@@ -67,10 +67,14 @@ All notable changes to Smear are documented in this file.
   and stops there; and the skip over junk keeps no `}` it did not open: where what it committed
   held one, taken for the closer of a `(`, `[` or `<` it had open, it keeps what stands in front
   of the first such `}`, whether a restart point, a limit or an error stopped it, and everywhere
-  else it keeps what it kept before. That skip is
-  `lossless::recover::unexpected`'s, which 0.0.1 released: it now also watches the braces it
-  opens, the pair whose identity in its `delimiters` table is `b'{'`, and a table with no such
-  pair skips as it did. The trees and the diagnostics of broken documents change accordingly.
+  else it keeps what it kept before. That skip is `lossless::recover::unexpected`'s, which 0.0.1
+  released: it now also watches the braces it opens, the pair whose identity in its `delimiters`
+  table is `b'{'`, and a table with no such pair skips as it did. To tell a skip that finds no
+  restart point from one that finds one past such a `}`, it reads past the `}` and then reads the
+  prefix again, so under a produce-event budget, which no rollback refunds and whose default is
+  none, that prefix is paid for twice: where the budget runs out first, the skip keeps part of
+  the prefix or nothing, and the parse ends there. The trees and the diagnostics of broken
+  documents change accordingly.
 - `smear-parser`: in GraphQLx, a module's body recovers its own items. An item that fails costs
   itself, and the module keeps its other items and its node; the body ends at the `}` the braces
   as written give it, which no item inside it can take; junk between two items is reported once

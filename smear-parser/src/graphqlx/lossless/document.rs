@@ -193,10 +193,11 @@ lossless_production! {
   /// that took a `{` takes back with its own `}` that one at most; the body's skips take a `}`
   /// only above `floor`, and its closer at `floor`. So every module's node is faithful to the
   /// braces as written: counting braces alone from the node's `{`, the count first returns to
-  /// zero at the node's own `}`, which is its last token that is no trivia, and a node with no `}`
-  /// of its own never returns to zero. `smear`'s `tests/support/braces.rs` states that as a check,
-  /// and the sweeps that parse broken texts hold every tree they build to it: the one-child
-  /// mutation law's re-parses, the corpus through every root, and the padded corpus.
+  /// zero at the node's own `}`, which is its last token that is neither trivia nor text the parse
+  /// never read, and a node with no `}` of its own never returns to zero. `smear`'s
+  /// `tests/support/braces.rs` states that as a check, and the sweeps that parse broken texts
+  /// hold every tree they build to it: the one-child mutation law's re-parses, the corpus
+  /// through every root, and the padded corpus.
   ///
   /// # What a turn does with an item
   ///
