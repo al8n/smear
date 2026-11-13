@@ -141,6 +141,9 @@ All notable changes to Smear are documented in this file.
   `smear-parser`'s and imply no tier, and `smear`'s features of the same names forward to them.
   `smear-schema`'s builder now takes those three kernels from `smear-semantics`, behind
   `build`, with no change in behaviour.
+- `smear-semantics`: `scc::components` answers, for each node of a directed graph, the least
+  node of its strongly connected component, over the same compressed rows and iterative walk as
+  `scc::on_cycle`, which is unchanged.
 - `smear-analysis`: the analyzer's entrance, its exits and its rules. `graphqlx::analyze`
   takes a root `Package` and its dependencies, each file's text any `SourceText` (`&str`,
   `&[u8]`, or a source feature's type), within `Limits`, and answers an `Analysis` with no
@@ -237,13 +240,18 @@ All notable changes to Smear are documented in this file.
   definition of another kind than its keyword is `smear::schema::extension-kind-mismatch`, one
   that is an alias such as `NonZeroU32`, which spells an instantiation of `NonZero` and is no
   definition of its own, is `smear::schema::undefined-extension-target`, and these and one that
-  names nothing contribute nothing. A definition holds its contributions, its own,
+  names nothing contribute nothing. An extension's parameter list names its target's type
+  parameters by position, one name each, and a list of another length is the new
+  `smear::graphqlx::generic-arity`, though the extension still contributes what it writes; an
+  extension that writes no list names none of them, and is legal whatever their count. A
+  definition holds its contributions, its own,
   named where its name is written, then each extension's, by source and position, named where
   its target path is written; its type parameters; a directive definition's locations and whether
   it is `repeatable`; and its members, the direct members of each contribution in turn as written
   and then each field's arguments, field by field, each with its description. A GraphQL
   built-in the root package replaces holds what the root package's definition
-  writes, and the root package may add directives to a built-in by an extension.
+  writes, and the root package may add directives to a built-in by an extension; it declares no
+  type parameter, since the built-in keeps its identity, and a list it writes is `generic-arity`.
   `Contribution::is_extension()` says whether a contribution is a definition or one of its
   extensions. `Contribution::extent()`, `Member::extent()` and `Module::extent()` answer where
   each contribution, member and inline module is written, in its own file, from its description,
@@ -259,7 +267,8 @@ All notable changes to Smear are documented in this file.
   extension by position, in scope; one that names nothing is reported with the code of its place
   and stays unresolved. A `where` predicate bounds one of its definition's own type parameters;
   any other left side, and any `where` clause on an extension, is the new
-  `smear::graphqlx::invalid-bound`. Every directive application, on a definition, an extension, a
+  `smear::graphqlx::invalid-bound`, and so is a right side that names no interface, which is kept
+  as written. Every directive application, on a definition, an extension, a
   member or an argument, is numbered in the walk's order too, with its directive's path as
   written and resolved where it is written; one whose directive names nothing keeps no type
   argument and no argument. The others keep their type arguments, each an occurrence, and the
@@ -276,8 +285,50 @@ All notable changes to Smear are documented in this file.
   `smear::schema::duplicate-root-operation-type`; with no schema definition of the root
   package's, an object type the root package's root module declares named `Query`, `Mutation` or
   `Subscription` is presumed that operation's root. Names and texts past what the model's `u32`
-  offsets address are `resource-limit`. Then smear's rules walk the model, each a visitor on the
-  public trait. A program defines its schema at most once: each schema definition the root
+  offsets address are `resource-limit`. Then each definition gets its built-in meaning, read off
+  what its applications resolved to and never off how they are spelled, and only off those the
+  package that wrote the definition writes: an interface that applies `core`'s `@marker` is a
+  marker, as `Def::is_marker()` says, and a scalar that applies `core`'s `@set` or `@map` stands for
+  that collection, as `Def::collection()` says. Each definition's type parameter defaults are
+  checked where they are written: they are trailing, a parameter with no default after one with a
+  default being the new `smear::graphqlx::generic-default`; a default
+  may name any parameter of its definition, written before it or after it; and each group of a
+  definition's defaults that need each other, a default that names its own parameter included, is
+  `generic-default` once, at the default of the group's lowest parameter, which a use that leaves
+  that parameter out can never fill. Then every type occurrence gets its type, `TypeExpr::ty()`,
+  each type interned once, so that `==` on `TyId` is type equality, and where the model's walk
+  first needs it, its arguments before it: a list's, a type parameter's, of its own definition,
+  and a definition's with every argument, those written and then each one left out filled from its
+  default, substituted, a default that names a parameter written after it filled first; a
+  collection's key or element is non-null in it however it is written, and an alias such as
+  `NonZeroU32` is the `NonZero<u32>` it spells. More type arguments than a definition has type
+  parameters, fewer than it takes, type arguments on a type parameter or an alias, and an argument
+  left to a default that cannot fill it, are `generic-arity`, each where it is written; an
+  occurrence inside a default whose filling leads back to a default being filled is
+  `generic-default`; and an application's count of type arguments is checked against its
+  directive's. An occurrence that cannot be typed, or holds one that cannot, has the unresolved
+  type. `Model::instantiations` lists the closed types a generic definition's written occurrences
+  resolve to. `Model::satisfies` answers whether a type satisfies an interface or a marker, and the
+  new `Model::satisfies_ty` whether it satisfies one interface type exactly, the `!` of its
+  arguments included, both read off what the model holds and nothing stored: by declaration,
+  through the `implements` entries of a named type's definition under its arguments and the bounds
+  of a type parameter, with `core`'s `MapKey` satisfied intrinsically by every integer primitive,
+  `bool`, `string`, `id`, every enum and `NonZero` of an integer primitive. A new
+  `Limits::max_substitutions`, 2^20 by default, bounds the steps of substitution
+  filling defaults takes, and `Limits::max_generic_depth`, a list counting a level, and
+  `Limits::max_instantiations`, every distinct instantiation counting once whatever its nullness,
+  are enforced: each occurrence past one is `resource-limit` where it is written, and the built-in
+  library is typed whatever the three are. Last, every written occurrence of a definition with a
+  bound is judged by its complete type, a slot a default filled included: the argument for each
+  bounded parameter, without its own `!`, satisfies the bound's interface type with the type's
+  arguments in place of the definition's parameters, each with its `!`, or the occurrence is the
+  new `smear::graphqlx::unsatisfied-bound`, for the first bound that fails, and keeps its type; an
+  occurrence that names a parameter of the definition it is written in is judged through that
+  parameter's bounds. A new `Limits::max_bound_steps`, 2^20 by default, bounds the steps judging
+  takes, each type judged once whatever its nullness; past it, and past the depth or the
+  instantiations the types it derives may reach, each occurrence is `resource-limit` and keeps its
+  type. Then smear's rules walk the model, each a visitor on
+  the public trait. A program defines its schema at most once: each schema definition the root
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
   code, with a label at the first. And the schema is the root package's: each schema definition
   and each schema extension a dependency writes is the new
@@ -285,11 +336,31 @@ All notable changes to Smear are documented in this file.
   extends its own definitions alone: an extension of a type or directive another supplied
   package defines is the new `smear::graphqlx::orphan-extension`, at its target path, with a
   label at the definition's name; and so is an extension of a definition of `core`, `alloc` or
-  `std`, a GraphQL built-in the root package replaces among them, unless the root package
-  writes it and it adds directives and nothing else. A rule says nothing about a contribution a
+  `std`, a GraphQL built-in the root package replaces among them, unless the root package writes it
+  and it adds directives and nothing else; in the root package's extension of a built-in it did not
+  write, each application of `core`'s `@marker`, `@set` or `@map` is `orphan-extension` too, at its
+  path, since what a built-in is is the language's to say. And an enum takes no type parameter: an
+  enum that declares one is the new `smear::graphqlx::generic-enum`, at its first type parameter's
+  name, and each use of it is still typed. And a marker is used as a marker: one that declares a
+  field, once, at the first its own package wrote; one named anywhere but as the outermost type of
+  an `implements` entry or of a bound, a type argument and a list's element included; and an
+  `implements` entry of a scalar, an enum, an input object or a union that names what is no marker,
+  a type parameter among them, are each the new `smear::graphqlx::marker-misuse`. And a set has one
+  type parameter and a map two: the first `@set` of a scalar its own package writes that has not
+  exactly one, or `@map` not exactly two, is the new `smear::graphqlx::collection-arity`, at the
+  application, and a scalar that applies both is so once, at the later. And `TypeRef` stands only as
+  the type of a directive definition's argument or of an input field, under lists alone: anywhere
+  else, a type argument of any generic definition included, it is the new
+  `smear::graphqlx::typeref-misuse`. And `NonZero`'s type argument is an integer primitive at least
+  one bit wide, written without `!`: `NonZero` of a float, `string`, an object, a list, `u0`, a type
+  parameter or an integer written with `!` is the new `smear::graphqlx::nonzero-argument`, where it
+  is written, which is then all a map or a set keyed by it is refused with. And a definition's type
+  parameters have distinct names, and so do the names an extension's own list gives them: a type
+  parameter with the name of an earlier one is the new `smear::graphqlx::duplicate-type-parameter`,
+  at its name, with a label at the first of that name. A rule says nothing about a contribution a
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
-  forwards, compiles a hidden door to the crate-private model builder, and to analyses of the
-  models it builds, for `smear`'s own tests; it is not API.
+  forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models
+  it builds, for `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`! and `smear-parser`!: the five features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`

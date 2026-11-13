@@ -520,6 +520,7 @@ fn each_walk_of_a_program_of_several_packages_reaches_what_the_model_says_once()
   assert_eq!(
     codes(&analysis),
     [
+      "smear::graphqlx::unsatisfied-bound",
       "smear::schema::undefined-type",
       "smear::graphqlx::orphan-extension",
       "smear::graphqlx::orphan-extension",
@@ -542,6 +543,7 @@ fn permuting_the_dependencies_changes_nothing_the_rules_report_or_mark() {
   assert_eq!(
     codes(&forward),
     [
+      "smear::graphqlx::unsatisfied-bound",
       "smear::schema::undefined-type",
       "smear::graphqlx::orphan-extension",
       "smear::graphqlx::orphan-extension",
@@ -641,9 +643,12 @@ fn a_rule_fired(analysis: &Analysis) -> bool {
 /// Tolerance, over every corpus file: no rule panics on one, and none repeats a phase.
 ///
 /// No corpus file makes a rule fire: each is the one file of a `Flat` root package, with no
-/// dependency beside it, and none defines the schema twice or adds more than directives to a
-/// built-in. So over the corpus this pins that no rule panics, and nothing more. It prints on how
-/// many files a rule fired, which shows the first file that makes one fire.
+/// dependency beside it; none defines the schema twice, adds more than directives to a built-in or
+/// applies `@marker`, `@set` or `@map` anywhere; none declares an enum with a type parameter, or
+/// two type parameters of one name; none names a marker, `TypeRef` or `NonZero`, and every
+/// interface a scalar, an enum, an input object or a union of the corpus implements names nothing.
+/// So over the corpus this pins that no rule panics, and nothing more. It prints on how many files
+/// a rule fired, which shows the first file that makes one fire.
 #[test]
 fn no_rule_repeats_a_phase_over_any_corpus_file() {
   let files = corpus();

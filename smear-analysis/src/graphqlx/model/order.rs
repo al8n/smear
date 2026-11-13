@@ -41,8 +41,8 @@ use super::{
   module::ModuleKind,
   schema::Root,
   table::{
-    ApplicationRow, ContributionRow, DefRow, KIND_LIST, MemberRow, ModuleRow, PackageRow, Run,
-    UNSET_MODULE, VALUE_LIST, VALUE_MAP, VALUE_OBJECT, VALUE_SET,
+    ApplicationRow, ContributionRow, DefRow, KIND_LIST, KIND_NAMED, KIND_UNRESOLVED, MemberRow,
+    ModuleRow, PackageRow, Run, UNSET_MODULE, VALUE_LIST, VALUE_MAP, VALUE_OBJECT, VALUE_SET,
   },
 };
 
@@ -207,8 +207,9 @@ fn defs(model: &Model) {
   }
 }
 
-/// Contributions: a definition's own first, then only extensions; the schema's definitions, then
-/// only extensions.
+/// Contributions: a definition's own first, then only extensions, and only an extension of a
+/// definition keeps the type parameter list it writes; the schema's definitions, then only
+/// extensions.
 fn contributions(model: &Model) {
   for (index, def) in model.defs.iter().enumerate() {
     for (position, part) in def
@@ -222,6 +223,11 @@ fn contributions(model: &Model) {
         position > 0,
         "definition {index}'s first contribution is its own, and every later one an extension"
       );
+      assert!(
+        part.extension || part.params.len == 0,
+        "definition {index}'s own names are its type parameters, and its own contribution keeps no \
+         list"
+      );
     }
   }
   let mut extending = false;
@@ -230,6 +236,7 @@ fn contributions(model: &Model) {
       part.extension || !extending,
       "the schema's definitions are appended before its extensions"
     );
+    assert_eq!(part.params.len, 0, "a schema item names no type parameter");
     extending = part.extension;
   }
 }
@@ -329,6 +336,14 @@ fn lists(model: &Model) {
     model.defs.iter().map(|row: &DefRow| row.type_params),
     model.type_params.len(),
     "type parameters",
+  );
+  tiles(
+    model
+      .contributions
+      .iter()
+      .map(|part: &ContributionRow| part.params),
+    model.written_params.len(),
+    "extensions' own type parameter names",
   );
   tiles(
     model.defs.iter().map(|row: &DefRow| row.bounds),
@@ -477,20 +492,40 @@ fn walk(model: &Model) {
   }
 }
 
-/// Types: a type's arguments and element are interned before it.
+/// Types: a type's arguments and element are interned before it; a named type has one argument
+/// for each of its definition's type parameters; and the unresolved type is no argument and no
+/// element of any type, since it makes unresolved whatever holds it.
 fn types(model: &Model) {
   for (index, row) in model.tys.iter().enumerate() {
     let id = dense(index);
-    for arg in row.args.of(&model.ty_args) {
+    let args = row.args.of(&model.ty_args);
+    for arg in args {
       assert!(
         arg.get() < id,
         "type {index}'s arguments are interned before it"
+      );
+      assert_ne!(
+        model.tys[arg.get() as usize].shape,
+        KIND_UNRESOLVED,
+        "type {index} has no unresolved argument"
       );
     }
     if row.shape == KIND_LIST {
       assert!(
         row.element.get() < id,
         "type {index}'s element is interned before it"
+      );
+      assert_ne!(
+        model.tys[row.element.get() as usize].shape,
+        KIND_UNRESOLVED,
+        "type {index}, a list, has no unresolved element"
+      );
+    }
+    if row.shape == KIND_NAMED {
+      assert_eq!(
+        args.len(),
+        model.defs[row.def.get() as usize].type_params.len as usize,
+        "type {index} has one argument for each of its definition's type parameters"
       );
     }
   }

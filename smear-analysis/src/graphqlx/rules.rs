@@ -6,25 +6,141 @@
 //! every code a rule lists must fire on at least one fixture.
 //!
 //! A rule reads the model the phases wrote, through its public views, and reports through the
-//! context. Which package wrote a contribution is read off where the contribution is written
-//! (`written_by`). A rule says nothing about a contribution a phase already refused something in,
-//! whose `has_errors()` is set: a diagnostic of its own within that contribution would repeat the
-//! phase's. It sees the phases' marks alone, since the rules' are applied once the walk has ended.
+//! context. Which package wrote a contribution or an application is read off where it is written,
+//! by `SourceMap::written_by`, the one answer instantiation reads too. A rule says nothing about a
+//! contribution a phase already refused something in, whose `has_errors()` is set: a diagnostic of
+//! its own within that contribution would repeat the phase's. It sees the phases' marks alone,
+//! since the rules' are applied once the walk has ended. `Silence` says it for an occurrence, and
+//! answers for a written root, which no contribution holds, from one look at the schema's
+//! contributions for the whole walk.
+//!
+//! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
+//! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk
+//! descends the written arguments of an occurrence that names a type parameter, or nothing, and
+//! the public kind does not answer them. `DuplicateTypeParameter` reads another,
+//! `Def::extension_params`: the names an extension's own list writes, which no public view holds.
 
+mod collection_arity;
 mod duplicate_schema_definition;
+mod duplicate_type_parameter;
+mod generic_enum;
+mod marker_misuse;
+mod non_zero_argument;
 mod orphan_extension;
 mod schema_outside_root;
-
-use tokora::diagnostic::Location;
+mod type_ref_misuse;
 
 use self::{
-  duplicate_schema_definition::DuplicateSchemaDefinition, orphan_extension::OrphanExtension,
-  schema_outside_root::SchemaOutsideRoot,
+  collection_arity::CollectionArity, duplicate_schema_definition::DuplicateSchemaDefinition,
+  duplicate_type_parameter::DuplicateTypeParameter, generic_enum::GenericEnum,
+  marker_misuse::MarkerMisuse, non_zero_argument::NonZeroArgument,
+  orphan_extension::OrphanExtension, schema_outside_root::SchemaOutsideRoot,
+  type_ref_misuse::TypeRefMisuse,
 };
-use super::{
-  id::{PackageId, SourceId},
-  source::SourceMap,
-};
+use super::{Contribution, Cx, DefId, Model, PackageId, TypeExprId, TypeExprKind, id::dense};
+
+/// The definition `def`'s own contribution, its first, which is no extension, and the package that
+/// wrote it, read off where it is written: the package that wrote the definition, whose
+/// applications alone give it a meaning. That is the root package for a GraphQL built-in it
+/// replaces, though the definition is the built-in's, and the built-in's package for every other
+/// built-in. `None` when the first contribution is an extension, so that the answer never rests
+/// on the order lowering appends contributions in.
+fn own_contribution<'a>(cx: &Cx<'a>, def: DefId) -> Option<(Contribution<'a>, PackageId)> {
+  let own = cx
+    .model()
+    .def(def)
+    .contributions()
+    .next()
+    .filter(|part: &Contribution<'a>| !part.is_extension())?;
+  let writer = cx.sources().written_by(own.location())?;
+  Some((own, writer))
+}
+
+/// Whether a rule says nothing at the occurrence the walk has reached in `type_expr`: a phase
+/// reported an error within the contribution that wrote it, or, for a written root, which no
+/// contribution holds, within one of the schema's contributions.
+///
+/// The second is one answer for the whole walk, since the phases' marks are all applied before it
+/// and the rules' after it. A rule that keeps one makes it in `begin`, so that it looks at the
+/// schema's contributions once, and at no occurrence.
+#[derive(Default)]
+struct Silence {
+  /// Whether a phase reported an error within one of the schema's contributions.
+  schema: bool,
+}
+
+impl Silence {
+  /// The silence of the walk `cx` begins.
+  fn of(cx: &Cx<'_>) -> Self {
+    Self {
+      schema: cx
+        .model()
+        .schema()
+        .contributions()
+        .any(|part: Contribution<'_>| part.has_errors()),
+    }
+  }
+
+  /// Whether a rule says nothing at the occurrence the walk has reached, `cx` saying where that
+  /// is: one look at the contribution that holds it.
+  fn silenced(&self, cx: &Cx<'_>) -> bool {
+    match cx.contribution() {
+      Some(part) => part.has_errors(),
+      None => self.schema,
+    }
+  }
+}
+
+/// Where each occurrence the walk reaches stands in its tree, told from the order the walk reaches
+/// them in: each outermost occurrence first, then everything it nests, in pre-order.
+///
+/// A rule that keeps one resets it in `begin`, and hands it every occurrence the walk reaches,
+/// before it decides to say nothing about one. It keeps a count and a flag.
+#[derive(Default)]
+struct Nesting {
+  /// The occurrences of the current tree still to come.
+  pending: u32,
+  /// Whether every occurrence of the current tree reached so far is a list.
+  lists: bool,
+}
+
+/// Where an occurrence stands in its tree.
+#[derive(Clone, Copy)]
+struct Place {
+  /// Whether it is the root of its tree, the outermost occurrence.
+  root: bool,
+  /// Whether every occurrence above it in its tree is a list: `TypeRef`, `[TypeRef!]` and
+  /// `[[TypeRef]]` are, and an argument of any named occurrence is not.
+  lists: bool,
+}
+
+impl Nesting {
+  /// Takes `ty`, the occurrence of `model` the walk reached next, and answers where it stands.
+  ///
+  /// It is the root when no occurrence of the tree before it is still to come. A list has one
+  /// child, so the lists above an occurrence are exactly the occurrences of its tree reached
+  /// before it while each of them is a list.
+  fn reach(&mut self, model: &Model, ty: TypeExprId) -> Place {
+    let root = self.pending == 0;
+    if root {
+      self.lists = true;
+    } else {
+      self.pending = self.pending.saturating_sub(1);
+    }
+    let place = Place {
+      root,
+      lists: self.lists,
+    };
+    let occurrence = model.type_expr(ty);
+    // What the walk reaches under it: its written arguments, whatever it resolved to, or a list's
+    // element.
+    let list = matches!(occurrence.kind(), TypeExprKind::List { .. });
+    let children = dense(occurrence.written_args().len()).saturating_add(u32::from(list));
+    self.pending = self.pending.saturating_add(children);
+    self.lists &= list;
+    place
+  }
+}
 
 /// Declares a rule set: a struct with one field per rule, its `Visitor` impl, whose every hook
 /// calls each rule's in field order, and its table of each rule with the codes it reports.
@@ -159,29 +275,26 @@ macro_rules! rule_set {
 rule_set! {
   /// smear's own rules, which `analyze` runs over every supplied package once its phases have
   /// written the model: a program defines its schema at most once; only the root package defines
-  /// or extends the schema; and a package extends its own definitions alone, but for the
-  /// directives the root package adds to a built-in.
+  /// or extends the schema; a package extends its own definitions alone, but for the directives
+  /// the root package adds to a built-in, none of which may give it a built-in meaning; an enum
+  /// takes no type parameter; a marker has no field and is named only in `implements` and in
+  /// bounds, and a scalar, an enum, an input object or a union implements markers alone; a set has
+  /// one type parameter and a map two; `TypeRef` stands only in a directive's arguments;
+  /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; and
+  /// a definition's type parameters have distinct names, and so do the names an extension's own
+  /// list gives them.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
     schema_outside_root: SchemaOutsideRoot => [super::DiagnosticKind::SchemaOutsideRoot.code()],
     orphan_extension: OrphanExtension => [super::DiagnosticKind::OrphanExtension.code()],
-  }
-}
-
-/// The package that wrote what is written at `at`: the package of the source `at` is in. For a
-/// contribution's location that is the package that wrote the contribution, which for an
-/// extension, and for a definition that replaces a built-in, need not be its definition's.
-///
-/// `None` when `at`'s source is none of `sources`', as a location of a model built by hand may be:
-/// a rule then reports nothing about what is written there. A package this answers is one of the
-/// model's, since an analysis's source map numbers the sources of its model's packages.
-fn written_by(sources: &SourceMap, at: Location) -> Option<PackageId> {
-  let source = SourceId::new(at.source());
-  if sources.sources().contains(source) {
-    Some(sources.source(source).package())
-  } else {
-    None
+    generic_enum: GenericEnum => [super::DiagnosticKind::GenericEnum.code()],
+    marker_misuse: MarkerMisuse => [super::DiagnosticKind::MarkerMisuse.code()],
+    collection_arity: CollectionArity => [super::DiagnosticKind::CollectionArity.code()],
+    type_ref_misuse: TypeRefMisuse => [super::DiagnosticKind::TypeRefMisuse.code()],
+    non_zero_argument: NonZeroArgument => [super::DiagnosticKind::NonZeroArgument.code()],
+    duplicate_type_parameter: DuplicateTypeParameter
+      => [super::DiagnosticKind::DuplicateTypeParameter.code()],
   }
 }
 

@@ -11,7 +11,8 @@ the GraphQLx analyzer in `smear-analysis`.
   arena's two ceilings.
 - `duplicates` — the earlier position of a name list that wrote a given name, scanned while the
   list is narrow and sorted once when it is wide.
-- `scc` — which nodes of a directed graph lie on a cycle, found in one walk over compressed rows.
+- `scc` — which nodes of a directed graph lie on a cycle, and which strongly connected component
+  each node is in, each found in one walk over compressed rows.
 
 Each is generic over its caller's symbol type and names nothing of either layer.
 

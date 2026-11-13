@@ -93,7 +93,7 @@ scalar NonZero<T>
 scalar TypeRef
 
 """
-The marker a map's key type and a set's element type satisfy. Every integer primitive, `bool`, `string`, `id` and every enum satisfy it without saying so.
+The marker a map's key type and a set's element type satisfy. Every integer primitive, `bool`, `string`, `id`, every enum and `NonZero` of an integer primitive satisfy it without saying so.
 """
 interface MapKey @marker
 

@@ -137,7 +137,10 @@ model_id! {
   ///
   /// Dense from 0, interned as the walk over every package reaches each type expression, a type's
   /// arguments before the type itself. A type no expression writes (an argument filled from a
-  /// default, an alias's argument) is interned where the walk first needs it.
+  /// default, an alias's argument) is interned where the walk first needs it. A type that judging
+  /// a bound derives, the bound's interface with an instantiation's arguments in place, comes after
+  /// every occurrence's type, in the order the walk reaches the occurrences, its arguments before
+  /// it.
   TyId
 }
 

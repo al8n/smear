@@ -17,8 +17,6 @@ use std::format;
 
 use crate::graphqlx::{Cx, Diagnostic, DiagnosticKind, Visitor, diagnostic::Excerpt};
 
-use super::written_by;
-
 /// Reports each schema definition and each schema extension a package other than the root package
 /// writes.
 ///
@@ -41,7 +39,7 @@ impl Visitor for SchemaOutsideRoot {
     let root = model.root_package();
     let kind = DiagnosticKind::SchemaOutsideRoot;
     for part in model.schema().contributions() {
-      let Some(writer) = written_by(sources, part.location()) else {
+      let Some(writer) = sources.written_by(part.location()) else {
         continue;
       };
       if writer == root || part.has_errors() {

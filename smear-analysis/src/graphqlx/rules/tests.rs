@@ -76,7 +76,7 @@ rule_set! {
 #[test]
 fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   let table: &[(&str, &[Code])] = Rules::TABLE;
-  assert_eq!(table.len(), 3);
+  assert_eq!(table.len(), 9);
   assert_eq!(table[0].0, "DuplicateSchemaDefinition");
   assert_eq!(
     table[0].1,
@@ -91,6 +91,27 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   assert_eq!(
     table[2].1,
     &[Code::new("smear::graphqlx::orphan-extension")]
+  );
+  assert_eq!(table[3].0, "GenericEnum");
+  assert_eq!(table[3].1, &[Code::new("smear::graphqlx::generic-enum")]);
+  assert_eq!(table[4].0, "MarkerMisuse");
+  assert_eq!(table[4].1, &[Code::new("smear::graphqlx::marker-misuse")]);
+  assert_eq!(table[5].0, "CollectionArity");
+  assert_eq!(
+    table[5].1,
+    &[Code::new("smear::graphqlx::collection-arity")]
+  );
+  assert_eq!(table[6].0, "TypeRefMisuse");
+  assert_eq!(table[6].1, &[Code::new("smear::graphqlx::typeref-misuse")]);
+  assert_eq!(table[7].0, "NonZeroArgument");
+  assert_eq!(
+    table[7].1,
+    &[Code::new("smear::graphqlx::nonzero-argument")]
+  );
+  assert_eq!(table[8].0, "DuplicateTypeParameter");
+  assert_eq!(
+    table[8].1,
+    &[Code::new("smear::graphqlx::duplicate-type-parameter")]
   );
 }
 

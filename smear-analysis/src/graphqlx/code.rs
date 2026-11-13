@@ -90,8 +90,53 @@ pub enum DiagnosticKind {
   /// A `where` predicate whose left side is not one of its definition's own type parameters,
   /// written with no type argument, or any `where` clause on an extension: the model holds a bound
   /// only on a definition's own parameter, under the definition. Reported at the predicate's left
-  /// side, or at the extension's clause, and nothing of it is in the model.
+  /// side, or at the extension's clause, and nothing of it is in the model. Or a bound whose right
+  /// side names no interface: a definition of another kind, an alias such as `NonZeroU32`, or a
+  /// type parameter. Reported at the right side, and the bound is in the model as written.
   InvalidBound,
+
+  // -- Types -------------------------------------------------------------------------------------
+  /// A use with a count of type arguments its definition does not take. A type occurrence writes
+  /// more type arguments than its definition has type parameters, or fewer than it takes, every
+  /// parameter from the first of a trailing run of defaulted ones being left to its default: it is
+  /// reported where it is written, with a label at the definition's name. So is a directive
+  /// application, at its path. A type parameter, or an alias such as `NonZeroU32`, written with
+  /// type arguments is reported where it is written. An occurrence that leaves a type argument to
+  /// a default that cannot fill it is reported where it is written, with a label at that default.
+  /// Each such occurrence has the unresolved type.
+  ///
+  /// Lowering reports two lists of type parameters of the wrong length under it too. An
+  /// extension's list names its target's type parameters by position, one name each, and names
+  /// another number of them: reported at the list, with a label at the definition's name; the
+  /// extension still contributes what it writes. Or a definition that replaces a GraphQL built-in
+  /// writes one, where the built-in's identity has none: reported at the list, and nothing of the
+  /// list is in the model.
+  GenericArity,
+  /// A default of a definition's type parameter that can never fill. A type parameter with no
+  /// default follows one with a default: type arguments bind by position, so that default could
+  /// never fill, and the first such parameter is reported, at its name, with a label at the
+  /// default before it. Or a group of the definition's defaults need each other, a default that
+  /// names its own parameter included: a use that leaves the group's lowest parameter out leaves
+  /// out the whole group, so that parameter's default can never fill, and each such group is
+  /// reported once, at that default, with a label, for a group of more than one, where the next of
+  /// its members to name that parameter first names it. Or an occurrence written inside a default
+  /// leaves out an argument whose filling leads back to a default being filled, through other
+  /// definitions or through its own: the default it is written in can never fill, and the
+  /// occurrence is reported where it is written.
+  GenericDefault,
+  /// An instantiation of a definition whose type argument does not satisfy a bound the definition
+  /// writes on that type parameter. The argument, taken without its own `!`, satisfies the bound's
+  /// interface type, with the instantiation's arguments in place of the definition's type
+  /// parameters, when it is that interface type, or declares it, or is a type parameter bounded by
+  /// it or by an interface that declares it; `core`'s `MapKey` is satisfied intrinsically too. Each
+  /// occurrence that writes such an instantiation is reported where it is written, once, for the
+  /// first of the definition's bounds that fails, with a label at the bound and one at the type
+  /// argument, written or filled from a default. The occurrence keeps its type.
+  ///
+  /// A bound of `MapKey` that a `NonZero` fails is passed over: that `NonZero` holds what is no
+  /// integer primitive, and is [`NonZeroArgument`](Self::NonZeroArgument) where it is written. A
+  /// directive application's type arguments are not judged against its directive's bounds.
+  UnsatisfiedBound,
 
   // -- smear's rules -----------------------------------------------------------------------------
   /// A package other than the root package writes a `schema` definition or a schema extension. A
@@ -105,7 +150,52 @@ pub enum DiagnosticKind {
   /// `core`, `alloc` or `std`, a GraphQL built-in the root package replaces among them, is
   /// extended by the root package alone, and only with directives. Reported at the extension's
   /// target path, with a label at the definition's name when the definition has a position.
+  ///
+  /// Nor may those directives say what the built-in is: in the root package's extension of a
+  /// built-in it did not write, each application of `core`'s `@marker`, `@set` or `@map` is
+  /// reported too, at the application's path, with the same label. A built-in the root package
+  /// replaces is the root package's own, and its extension may.
   OrphanExtension,
+  /// An enum that declares a type parameter. An enum's values are names that hold no type, so an
+  /// enum takes no type parameter. Reported once, at the enum's first type parameter's name; each
+  /// use of the enum is still counted and typed as any generic definition's is.
+  GenericEnum,
+  /// A marker, an interface `core`'s `@marker` makes one, used as a marker may not be. A marker
+  /// has no field: one that declares any is reported once, at the first field its own package
+  /// wrote, with a label at the marker's name. A marker is named only as an `implements` entry or
+  /// as a bound's interface, the outermost type there: named anywhere else, a type argument and a
+  /// list's element included, it is reported where it is named. And a scalar, an enum, an input
+  /// object or a union implements markers only: an entry of its `implements` that names what is no
+  /// marker, a type parameter among them, is reported where it is written.
+  MarkerMisuse,
+  /// A scalar whose own package makes it a collection with a count of type parameters the
+  /// collection does not have: `core`'s `@set` makes a scalar of one type parameter a set, and
+  /// `@map` one of two a map. The first application of `@set` on a scalar that has not exactly
+  /// one, or of `@map` on one that has not exactly two, is reported at its path, with a label at
+  /// the scalar's name; one that applies both is reported once, at the later of the two, whatever
+  /// its count. An application another package writes gives the scalar no meaning, and is not
+  /// judged here.
+  CollectionArity,
+  /// `core`'s `TypeRef` where it may not stand. It is the type of a value that names a
+  /// definition, which only a directive's arguments hold: it stands as the type of a directive
+  /// definition's argument or of an input field, under lists alone, and nowhere else, a field's
+  /// type or argument, a type argument of any generic definition, a collection's included, an
+  /// application's type argument, a union member or a default among them. Reported where it is
+  /// named.
+  TypeRefMisuse,
+  /// `core`'s `NonZero` of what is no integer primitive at least one bit wide, written without
+  /// `!`. `NonZero` makes an integer never zero, so its type argument is the integer primitive
+  /// itself: a float, `string`, an object, a list, `u0`, a type parameter and an integer written
+  /// with `!` are each refused. Judged by the occurrence's type, an alias such as `NonZeroU32`
+  /// being `NonZero` of the integer it spells, and reported where `NonZero` is written, with a
+  /// label at its type argument.
+  NonZeroArgument,
+  /// A type parameter with the name of an earlier type parameter of its definition, or a name an
+  /// extension's own list gives one of its target's type parameters after it gave it to an
+  /// earlier one. A type argument binds by position, and the definition, or the extension, names
+  /// a parameter by its name, which would name the first of the two alone. Reported at the later
+  /// name, with a label at the first of that name.
+  DuplicateTypeParameter,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -135,8 +225,17 @@ impl DiagnosticKind {
     Self::UseNameCollision,
     Self::ShadowedPrimitive,
     Self::InvalidBound,
+    Self::GenericArity,
+    Self::GenericDefault,
+    Self::UnsatisfiedBound,
     Self::SchemaOutsideRoot,
     Self::OrphanExtension,
+    Self::GenericEnum,
+    Self::MarkerMisuse,
+    Self::CollectionArity,
+    Self::TypeRefMisuse,
+    Self::NonZeroArgument,
+    Self::DuplicateTypeParameter,
     Self::ResourceLimit,
   ];
 
@@ -164,8 +263,17 @@ impl DiagnosticKind {
       Self::UseNameCollision => Code::new("smear::graphqlx::use-name-collision"),
       Self::ShadowedPrimitive => Code::new("smear::graphqlx::shadowed-primitive"),
       Self::InvalidBound => Code::new("smear::graphqlx::invalid-bound"),
+      Self::GenericArity => Code::new("smear::graphqlx::generic-arity"),
+      Self::GenericDefault => Code::new("smear::graphqlx::generic-default"),
+      Self::UnsatisfiedBound => Code::new("smear::graphqlx::unsatisfied-bound"),
       Self::SchemaOutsideRoot => Code::new("smear::graphqlx::schema-outside-root"),
       Self::OrphanExtension => Code::new("smear::graphqlx::orphan-extension"),
+      Self::GenericEnum => Code::new("smear::graphqlx::generic-enum"),
+      Self::MarkerMisuse => Code::new("smear::graphqlx::marker-misuse"),
+      Self::CollectionArity => Code::new("smear::graphqlx::collection-arity"),
+      Self::TypeRefMisuse => Code::new("smear::graphqlx::typeref-misuse"),
+      Self::NonZeroArgument => Code::new("smear::graphqlx::nonzero-argument"),
+      Self::DuplicateTypeParameter => Code::new("smear::graphqlx::duplicate-type-parameter"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -193,8 +301,17 @@ impl DiagnosticKind {
       Self::UseNameCollision => "two uses of one name",
       Self::ShadowedPrimitive => "declaration shadows a primitive",
       Self::InvalidBound => "invalid bound",
+      Self::GenericArity => "wrong number of type arguments",
+      Self::GenericDefault => "type parameter default that can never fill",
+      Self::UnsatisfiedBound => "unsatisfied bound",
       Self::SchemaOutsideRoot => "schema outside the root package",
       Self::OrphanExtension => "orphan extension",
+      Self::GenericEnum => "generic enum",
+      Self::MarkerMisuse => "marker misused",
+      Self::CollectionArity => "wrong number of a collection's type parameters",
+      Self::TypeRefMisuse => "`TypeRef` where it may not stand",
+      Self::NonZeroArgument => "invalid `NonZero` argument",
+      Self::DuplicateTypeParameter => "duplicate type parameter",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -222,8 +339,17 @@ impl DiagnosticKind {
       | Self::UseDeclarationCollision
       | Self::UseNameCollision
       | Self::InvalidBound
+      | Self::GenericArity
+      | Self::GenericDefault
+      | Self::UnsatisfiedBound
       | Self::SchemaOutsideRoot
       | Self::OrphanExtension
+      | Self::GenericEnum
+      | Self::MarkerMisuse
+      | Self::CollectionArity
+      | Self::TypeRefMisuse
+      | Self::NonZeroArgument
+      | Self::DuplicateTypeParameter
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }

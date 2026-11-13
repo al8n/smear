@@ -1,40 +1,28 @@
-//! What the phases after lowering write: each definition's built-in meaning and its externs, its
-//! instantiations and satisfactions; types; the shapes and types coercion gives values; and marks.
+//! What the phases after instantiation write: each definition's externs; the tiers of definitions
+//! and types; the shapes and types coercion gives values; and marks.
 //!
-//! GATED ON HAVING A CALLER. Instantiation, coercion and the tier phase are this module's callers,
-//! and until each lands the test-support door is its only one: a method that no shipped build calls
-//! is dead code. A phase that lands moves the methods it calls out of this module, as the module
-//! tree, item collection and lowering moved theirs.
+//! GATED ON HAVING A CALLER. The phases still to come are this module's callers, and until each
+//! lands the test-support door is its only caller: a method that no shipped build calls is dead
+//! code. A phase moves the methods it calls out of this module, as the module tree, item
+//! collection, lowering and instantiation moved theirs.
 
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{DefId, MemberId, TyId, TypeExprId, ValueId, dense},
+  id::{DefId, MemberId, TyId, ValueId, dense},
   model::{
-    def::Collection,
     table::{
-      ExternRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM, NO_DEF, Run, TyRow,
-      VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST, VALUE_MAP, VALUE_NULL,
-      VALUE_OBJECT, VALUE_SET, VALUE_STRING, VALUE_TYPE,
+      ExternRow, FloatRow, IntRow, Run, VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST,
+      VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET, VALUE_STRING, VALUE_TYPE,
     },
     value::ObjectEntry,
   },
   package::Tier,
 };
 
-use super::{ModelBuilder, append, grow, push_text, unresolved_ty};
+use super::{ModelBuilder, append, grow, push_text};
 
 impl ModelBuilder {
-  /// Makes `def` a marker.
-  pub fn set_marker(&mut self, def: DefId) {
-    self.model.defs[def.get() as usize].marker = true;
-  }
-
-  /// Makes `def` stand for `collection`.
-  pub fn set_collection(&mut self, def: DefId, collection: Collection) {
-    self.model.defs[def.get() as usize].collection = Some(collection);
-  }
-
   /// Adds an `@extern` to `def`, after those it has: its `lang` and `type`, and its effective
   /// tier.
   pub fn push_extern(&mut self, def: DefId, lang: &str, ty: &str, tier: Tier) {
@@ -46,81 +34,6 @@ impl ModelBuilder {
       &mut row.externs,
       ExternRow { lang, ty, tier },
     );
-  }
-
-  /// Records `ty` as a closed instantiation of `def`. Instantiations are added in any order, and
-  /// each is kept once.
-  pub fn push_instantiation(&mut self, def: DefId, ty: TyId) {
-    self.instantiations.push((def, ty));
-  }
-
-  /// Records that `ty` satisfies `interface`, declared or intrinsic. Satisfactions are added in
-  /// any order, and each is kept once.
-  pub fn push_satisfaction(&mut self, ty: TyId, interface: DefId) {
-    self.model.satisfactions.push((ty, interface));
-  }
-
-  /// Gives `type_expr` its type.
-  pub fn set_type_expr_ty(&mut self, type_expr: TypeExprId, ty: TyId) {
-    debug_assert!(
-      (ty.get() as usize) < self.model.tys.len(),
-      "a type is interned before an occurrence is given it"
-    );
-    self.model.type_exprs[type_expr.get() as usize].ty = ty;
-  }
-
-  /// Interns the named type of `def` with `args`, every argument of it, each interned before it.
-  pub fn intern_named(&mut self, def: DefId, args: &[TyId], non_null: bool) -> TyId {
-    let closed = args
-      .iter()
-      .all(|arg: &TyId| self.model.tys[arg.get() as usize].closed);
-    let row = TyRow {
-      shape: KIND_NAMED,
-      def,
-      index: 0,
-      element: TyId::new(0),
-      args: Run::default(),
-      non_null,
-      closed,
-      tier: Tier::Core,
-    };
-    self.intern_type(row, args)
-  }
-
-  /// Interns `def`'s type parameter `index`.
-  pub fn intern_param(&mut self, def: DefId, index: u32, non_null: bool) -> TyId {
-    let row = TyRow {
-      shape: KIND_PARAM,
-      def,
-      index,
-      element: TyId::new(0),
-      args: Run::default(),
-      non_null,
-      closed: false,
-      tier: Tier::Core,
-    };
-    self.intern_type(row, &[])
-  }
-
-  /// Interns the list of `element`, interned before it.
-  pub fn intern_list(&mut self, element: TyId, non_null: bool) -> TyId {
-    let closed = self.model.tys[element.get() as usize].closed;
-    let row = TyRow {
-      shape: KIND_LIST,
-      def: NO_DEF,
-      index: 0,
-      element,
-      args: Run::default(),
-      non_null,
-      closed,
-      tier: Tier::Core,
-    };
-    self.intern_type(row, &[])
-  }
-
-  /// Interns the one type every unresolved occurrence shares.
-  pub fn intern_unresolved(&mut self) -> TyId {
-    self.intern_type(unresolved_ty(), &[])
   }
 
   /// Gives `ty` the tier it requires.

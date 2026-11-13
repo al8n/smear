@@ -14,7 +14,12 @@
 //! mistake, one diagnostic. Every other extension is a contribution of its target, after the
 //! definition's own, by source id and position wherever each is written: named where its target
 //! path is written, and spanning from its `extend` to its last token. The parameter names an
-//! extension writes name its target's parameters by position, and are no rows of their own.
+//! extension writes name its target's parameters by position, and are no type parameters of their
+//! own: each is kept with its extension, for the rule that judges them distinct. A list of them
+//! names every one of its target's parameters: a list of another length is `generic-arity`, at the
+//! list, with a label at the definition's name, and the extension still contributes what it writes.
+//! An extension that writes no list names none of its target's parameters, whatever their count,
+//! and a name in it resolves as any other name of its module does.
 //!
 //! # The definitions
 //!
@@ -25,7 +30,11 @@
 //!    and spanning from its description, or its first keyword, to its last token; then each of its
 //!    extensions. A primitive `core` materialises has the whole of `core`'s package source for its
 //!    own, which writes nothing else;
-//! 2. its type parameters, in written order, each named where its name is written;
+//! 2. its type parameters, in written order, each named where its name is written. A definition
+//!    that replaces a GraphQL built-in keeps the built-in's identity, which has no type parameter:
+//!    a list it writes is `generic-arity`, at the list, and nothing of it is lowered, neither a
+//!    parameter, nor a default, nor its `where` clause. Its names stay in scope, so a path inside
+//!    it that names one names a position no parameter has;
 //! 3. a directive definition's locations, in written order, and whether it is `repeatable`;
 //! 4. its direct members, contribution by contribution and as written within each: an object's or
 //!    an interface's fields, an input object's fields, an enum's values, a directive definition's
@@ -63,13 +72,19 @@
 //! contribution: a definition's own, in every one of its parameters' defaults too, and an
 //! extension's own names, each naming its target's parameter at the same position. A path that
 //! names nothing leaves its occurrence unresolved, with its path and its arguments, once name
-//! resolution has reported it with the code of its place. No type is interned: an occurrence's
-//! type is instantiation's.
+//! resolution has reported it with the code of its place. An alias such as `NonZeroU32` names
+//! `core`'s `NonZero`, with its path and its arguments as written, none unless it is written with
+//! some, as a `NonZero` a `use` item renames does too; the primitive the alias spells is noted
+//! beside the row, whatever is written with it, for instantiation, which alone tells the two apart
+//! and refuses an alias's arguments. No type is interned: an occurrence's type is instantiation's.
 //!
 //! A bound is its definition's own: a `where` predicate whose left side is one of the definition's
 //! type parameters, written with no argument, gives each interface it names as a bound of that
 //! parameter, located at the predicate. Any other left side, and any `where` clause on an
-//! extension, is `invalid-bound`, and nothing of it is lowered.
+//! extension, is `invalid-bound`, and nothing of it is lowered. A right side is an interface, a
+//! marker among them, with or without type arguments: once its occurrence is appended, one that
+//! names a definition of another kind, an alias such as `NonZeroU32` or a type parameter is
+//! `invalid-bound` too, at the right side, and the bound is still recorded, as written.
 //!
 //! An application keeps its directive's path as written, and its directive is resolved where it
 //! is written, as a type is. One whose directive names nothing stays, unresolved, with no type
@@ -154,7 +169,7 @@ use super::{
   },
   model::{
     DefKind, DirectiveLocation, LiteralKind, MemberKind, ModelBuilder, PathRoot, Root,
-    RootOperation,
+    RootOperation, Written,
   },
   resolve::{self, Position, Request, Resolved, Scopes, Wanted},
   set::{PackageView, ROOT},
@@ -274,6 +289,9 @@ struct Writer {
   def: DefId,
   contribution: u32,
   source: u32,
+  /// Whether the contribution is the definition the root package replaces a GraphQL built-in with,
+  /// whose identity is the built-in's and has no type parameter.
+  replaces: bool,
 }
 
 /// An extension that joins its target, as the definitions' walk takes it.
@@ -354,6 +372,8 @@ struct Part<'p> {
   item: Item,
   /// Its index among the definition's contributions.
   contribution: u32,
+  /// Whether it is the definition the root package replaces a GraphQL built-in with.
+  replaces: bool,
   /// Where its paths resolve.
   site: Site<'p>,
 }
@@ -618,12 +638,14 @@ impl Lowering<'_, '_> {
     self.field_ids.clear();
     self.next_field = 0;
     let direct = self.next_member;
+    let replaces = replaces_built_in(&*self.builder, def, declaration);
     // A primitive `core` materialises writes nothing of its own: its extensions may.
     if let Some(item) = declaration.item {
       let at = Writer {
         def,
         contribution: own,
         source: item.source.get(),
+        replaces,
       };
       self.walk(declarations, item, at, Step::Members);
     }
@@ -635,6 +657,7 @@ impl Lowering<'_, '_> {
         def,
         contribution,
         source: extension.entry.item.source.get(),
+        replaces: false,
       };
       self.walk(declarations, extension.entry.item, at, Step::Members);
     }
@@ -644,6 +667,7 @@ impl Lowering<'_, '_> {
         def,
         contribution: own,
         source: item.source.get(),
+        replaces,
       };
       self.walk(declarations, item, at, Step::Arguments);
     }
@@ -653,6 +677,7 @@ impl Lowering<'_, '_> {
         def,
         contribution,
         source: extension.entry.item.source.get(),
+        replaces: false,
       };
       self.walk(declarations, extension.entry.item, at, Step::Arguments);
     }
@@ -870,11 +895,17 @@ impl Lowering<'_, '_> {
     }
   }
 
-  /// The type parameters `name` declares, which `at` writes, in written order.
+  /// The type parameters `name` declares, which `at` writes, in written order. A definition that
+  /// replaces a GraphQL built-in declares none: a list it writes is reported, and none of it is a
+  /// row.
   fn type_params<S: AsRef<[u8]>>(&mut self, at: Writer, name: &DefinitionName<S>) {
     let Some(generics) = name.generics() else {
       return;
     };
+    if at.replaces {
+      self.replaced_generics(Location::new(at.source, *generics.span()), at.def, name);
+      return;
+    }
     for parameter in generics.params() {
       let written = parameter.name();
       let sym = self.intern(written);
@@ -1026,6 +1057,7 @@ impl Lowering<'_, '_> {
     for &(from, to) in &runs {
       tables.push(resolve::params(names.get(from..to).unwrap_or_default()));
     }
+    let replaces = replaces_built_in(&*self.builder, def, declaration);
     for step in [
       Occurrences::Generics,
       Occurrences::Implements,
@@ -1038,6 +1070,8 @@ impl Lowering<'_, '_> {
           def,
           item,
           contribution,
+          // The definition's own contribution is the first; the rest are extensions.
+          replaces: replaces && contribution == 0,
           site: Site {
             owner: Some(def),
             module,
@@ -1352,10 +1386,37 @@ impl Lowering<'_, '_> {
 
   /// The contribution `part`'s generics, read as `shape`: for the definition's own, each type
   /// parameter's default, then each bound, predicate by predicate and bound by bound as written.
-  /// An extension's `where` clause is refused: the model's bounds are the definition's.
+  /// An extension's parameter list names its target's parameters by position, one name each, and
+  /// another count is refused; its names are kept with the extension, for the rule that judges
+  /// them distinct. Its `where` clause is refused too: the model's bounds are the definition's. A
+  /// definition that replaces a GraphQL built-in has none of its list lowered.
   fn generics<S: AsRef<[u8]>>(&mut self, part: Part<'_>, shape: &Shape<'_, S>) {
     let source = part.site.source.get();
-    if shape.extension.is_some() {
+    if let Some(extension) = shape.extension {
+      // An extension that writes no list names none of its target's parameters, and is legal
+      // whatever their count.
+      if let Some(list) = extension.generics() {
+        let written = dense(list.params().len());
+        let count = self.builder.type_param_count(part.def);
+        if written != count {
+          self.extension_arity(
+            part.def,
+            Location::new(source, *list.span()),
+            written,
+            count,
+          );
+        }
+        // The names the list gives, kept for the rule that judges them distinct.
+        let mut names: Vec<(Sym, Location)> = Vec::with_capacity(list.params().len());
+        for parameter in list.params() {
+          let name = parameter.name();
+          let sym = self.intern(name);
+          names.push((sym, Location::new(source, *name.as_span())));
+        }
+        self
+          .builder
+          .set_extension_params(part.def, part.contribution, &names);
+      }
       if let Some(clause) = shape.clause {
         self.invalid_bound(
           Location::new(source, *clause.span()),
@@ -1364,6 +1425,14 @@ impl Lowering<'_, '_> {
           "move the bounds to the definition's own `where` clause",
         );
       }
+      return;
+    }
+    // The first walk reported the list, and made no parameter row a default or a bound could name.
+    if part.replaces
+      && shape
+        .name
+        .is_some_and(|name: &DefinitionName<S>| name.generics().is_some())
+    {
       return;
     }
     if let Some(name) = shape.name
@@ -1414,6 +1483,7 @@ impl Lowering<'_, '_> {
       let location = Location::new(source, *predicate.span());
       for bound in predicate.bounds() {
         let interface = self.type_path(part.site, bound, Position::Type);
+        self.bound_interface(interface);
         self
           .builder
           .push_bound(part.def, parameter, interface, location);
@@ -1767,8 +1837,16 @@ impl Lowering<'_, '_> {
       .resolve(&*self.builder, self.reporter, &request, path)
     {
       Resolved::Def(def) => self.builder.resolve_named(id, def),
-      // `NonZeroU32` and its kin name `core`'s `NonZero`; what they stand for is instantiation's.
-      Resolved::NonZero { non_zero, .. } => self.builder.resolve_named(id, non_zero),
+      // `NonZeroU32` and its kin name `core`'s `NonZero`, of the primitive they spell. The row is
+      // a renamed `NonZero`'s too, so the primitive is noted beside it for instantiation, which
+      // expands the alias.
+      Resolved::NonZero {
+        non_zero,
+        primitive,
+      } => {
+        self.builder.resolve_named(id, non_zero);
+        self.builder.note_non_zero(id, primitive);
+      }
       Resolved::Param(index) => {
         if let Some(owner) = site.owner {
           self.builder.resolve_param(id, owner, index);
@@ -1801,6 +1879,31 @@ impl Lowering<'_, '_> {
     }
   }
 
+  /// Refuses `interface`, the occurrence a bound's right side is, where it is written, unless it
+  /// names an interface, a marker among them: a definition of another kind, an alias such as
+  /// `NonZeroU32` and a type parameter are `invalid-bound`. One whose path names nothing was
+  /// reported by name resolution. The bound is recorded either way.
+  fn bound_interface(&mut self, interface: TypeExprId) {
+    let Some(occurrence) = self.builder.occurrence(interface) else {
+      return;
+    };
+    let at = occurrence.location;
+    let refused = match occurrence.written {
+      Written::Named(def) => self.builder.def_kind(def) != Some(DefKind::Interface),
+      Written::Param { .. } | Written::List(_) => true,
+      Written::Unresolved => false,
+    };
+    if refused {
+      self.invalid_bound(
+        at,
+        "a bound's right side is an interface or a marker, which the type parameter must \
+         implement",
+        "name an interface, as `where T: Node` does, or an interface with type arguments, as \
+         `where T: Comparable<T>` does",
+      );
+    }
+  }
+
   /// Reports, at `at`, a bound the model cannot hold: `message` says why, and `help` what to write.
   fn invalid_bound(&mut self, at: Location, message: &'static str, help: &'static str) {
     let kind = DiagnosticKind::InvalidBound;
@@ -1812,6 +1915,64 @@ impl Lowering<'_, '_> {
         .help(help)
         .build(),
     );
+  }
+
+  /// What a message writes before the name of `def`: `@` for a directive, as every message quotes
+  /// one, and nothing for a type.
+  fn sigil(&self, def: DefId) -> &'static str {
+    if self.builder.def_kind(def) == Some(DefKind::Directive) {
+      "@"
+    } else {
+      ""
+    }
+  }
+
+  /// Reports the type parameter list written at `at` on `name`, the definition `def` that replaces
+  /// a GraphQL built-in: the built-in keeps its identity, which has no type parameter. A directive
+  /// is quoted with its `@`, as every message quotes one.
+  fn replaced_generics<S: AsRef<[u8]>>(
+    &mut self,
+    at: Location,
+    def: DefId,
+    name: &DefinitionName<S>,
+  ) {
+    let kind = DiagnosticKind::GenericArity;
+    let written: &[u8] = name.name().source().as_ref();
+    let sigil = self.sigil(def);
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), at)
+        .severity(kind.severity())
+        .message(format!(
+          "`{sigil}{}` replaces a GraphQL built-in and keeps its identity, which has no type \
+           parameter",
+          Excerpt(written)
+        ))
+        .primary_label("a built-in has no type parameter")
+        .help("remove the type parameter list: a definition that replaces a built-in declares none")
+        .build(),
+    );
+  }
+
+  /// Reports the parameter list written at `at` on an extension of `def`, which names `written`
+  /// type parameters where `def` has `count`. A directive is quoted with its `@`.
+  fn extension_arity(&mut self, def: DefId, at: Location, written: u32, count: u32) {
+    let kind = DiagnosticKind::GenericArity;
+    let definition = self.builder.def_location(def);
+    let sigil = self.sigil(def);
+    let mut report = Diagnostic::builder(kind.code(), at)
+      .severity(kind.severity())
+      .message(format!(
+        "an extension's list names its target's type parameters by position, one name each: \
+         `{sigil}{}` has {count}, and this list names {written}",
+        Excerpt(self.builder.def_name(def))
+      ))
+      .primary_label("wrong number of type parameters named")
+      .help("name every type parameter of the definition, in order, or write no list");
+    // A primitive `core` materialises has no position of its own to point at.
+    if !definition.is_entire() {
+      report = report.label(definition, "the definition it extends");
+    }
+    self.reporter.report(report.build());
   }
 
   /// The schema: its contributions, after every definition's, each schema definition by source id
@@ -2221,6 +2382,12 @@ fn gives(
   } else {
     first == Some(index)
   }
+}
+
+/// Whether `def`, declared as `declaration`, is the definition the root package replaces a GraphQL
+/// built-in with: written in the root package's root module, it belongs to the built-in's.
+fn replaces_built_in(builder: &ModelBuilder, def: DefId, declaration: &Declaration) -> bool {
+  builder.def_module(def) != Some(declaration.module)
 }
 
 /// Where the run of `attached`, sorted by target, that extends `def` and starts at `next` ends.

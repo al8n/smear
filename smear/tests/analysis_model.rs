@@ -1109,10 +1109,7 @@ fn fixture() -> Model {
     EVERYTHING,
   );
 
-  // What the instantiation phase adds, a second name, and one reported error.
-  b.push_satisfaction(QUERY_TY, NODE);
-  b.push_satisfaction(I32_TY, MAP_KEY);
-  b.push_satisfaction(QUERY_TY, NODE);
+  // A second name, and one reported error.
   let int_alias = b.intern("Int");
   b.push_alias(CORE_ROOT, int_alias, I32);
   b.mark(at(APP_SCHEMA, 912, 915));
@@ -1836,11 +1833,25 @@ fn a_type_answers_its_kind_nullness_tier_and_closedness() {
   assert_eq!(model.instantiations(PAGE), &[PAGE_QUERY_TY]);
   assert!(model.instantiations(QUERY).is_empty());
 
-  // Each satisfaction recorded, whether added once or twice, and nothing else.
+  // What each type satisfies, read off the rows: `Query`'s one `implements` entry names `Node`.
   assert!(model.satisfies(QUERY_TY, NODE));
+  assert!(model.satisfies_ty(QUERY_TY, NODE_TY));
+  // `i32` is an integer primitive, `string` is the built-in the model finds by that name in `core`,
+  // and `Color` an enum: each a key of `MapKey`, the marker the model finds by that name in `core`.
   assert!(model.satisfies(I32_TY, MAP_KEY));
-  assert!(!model.satisfies(STRING_TY, MAP_KEY));
+  assert!(model.satisfies(STRING_TY, MAP_KEY));
+  assert!(model.satisfies(COLOR_TY, MAP_KEY));
+  // `Query` is none of those, and declares `Node` alone.
   assert!(!model.satisfies(QUERY_TY, MAP_KEY));
+  // `Page`'s `T` is bounded by `Node`, whatever its nullness.
+  assert!(model.satisfies(T_TY, NODE));
+  assert!(!model.satisfies(T_TY, MAP_KEY));
+  // `Page<Query>` declares nothing, a list satisfies nothing, nor does the unresolved type, and
+  // `Query` is no interface.
+  assert!(!model.satisfies(PAGE_QUERY_TY, NODE));
+  assert!(!model.satisfies(STRINGS_TY, MAP_KEY));
+  assert!(!model.satisfies(UNRESOLVED_TY, NODE));
+  assert!(!model.satisfies(QUERY_TY, QUERY));
 }
 
 #[test]

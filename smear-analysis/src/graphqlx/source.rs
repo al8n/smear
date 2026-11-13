@@ -4,6 +4,8 @@
 use core::cmp::Ordering;
 use std::{boxed::Box, string::String, vec, vec::Vec};
 
+use tokora::diagnostic::Location;
+
 use super::{
   id::{IdRange, PackageId, SourceId, dense},
   package::Package,
@@ -204,6 +206,24 @@ impl SourceMap {
   #[inline]
   pub fn sources(&self) -> IdRange<SourceId> {
     IdRange::new(0, self.len())
+  }
+
+  /// The package that wrote what is written at `at`: the package of the source `at` is in.
+  ///
+  /// It is the one answer the analysis gives to who wrote something. For a definition's own
+  /// contribution, which is written where its declaration is, it is the package that wrote the
+  /// definition: the root package for a GraphQL built-in it replaces, though the definition stays
+  /// the built-in's, and `core` for a primitive `core` materialises, whose contribution is the
+  /// whole of `core`'s package source. For an extension or a directive application it is the
+  /// package that wrote that, which need not be its definition's.
+  ///
+  /// `None` when `at`'s source is none of this map's, as a location of a model built by hand may
+  /// be.
+  pub(crate) fn written_by(&self, at: Location) -> Option<PackageId> {
+    self
+      .sources
+      .get(at.source() as usize)
+      .map(|slot: &SourceSlot| slot.package)
   }
 
   /// The source `id` names.

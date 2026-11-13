@@ -13,25 +13,40 @@ the dialect's modules, imports, generics and packages are what this crate resolv
 package set, parses every file and runs smear's own rules over the supplied packages. It answers an
 `Analysis`: the model, the diagnostics in one total order, and the source map that pairs the
 analysis with the caller's texts again. The model is dense tables read through `Copy` views over
-packages, modules, definitions, members, type occurrences and types, values, directive
-applications, the schema and the built-ins, with canonical names and lookup; so far `analyze` fills
-in the packages, their modules, one for every directory of a `Directory` package and one for every
-inline `mod`, and every definition: each type and directive a package declares, and each intrinsic
+packages, modules, definitions, members, type occurrences and types, values, directive applications,
+the schema and the built-ins, with canonical names and lookup; so far `analyze` fills in the
+packages, their modules, one for every directory of a `Directory` package and one for every inline
+`mod`, and every definition: each type and directive a package declares, and each intrinsic
 primitive the program writes, with its identity, its contributions, its own and then each
 extension's, its type parameters with their defaults and its bounds, its `implements` entries and
-union members, its directive applications, a directive definition's locations, and its members
-with their descriptions, types, defaults and applications, every written type an occurrence with
-its path and arguments as written and what it resolves to, every application with its type
-arguments and its arguments, and every value as written; and the schema, with its contributions,
-one for each schema item, its description, its roots, written or presumed, and its applications.
-It resolves every module's `use` items too, globs and string sources included, against scopes that
-end with the prelude and the packages each package may reach. The built-in packages, `core`,
-`alloc` and `std`, are one embedded GraphQLx file each, parsed on every analysis.
-`graphqlx::analyze_with` is the same analysis with the parser layer the caller passes, such as
-`smear-parser`'s lossless layer, which recovers, so the well-formed rest of a broken file is
-analyzed, and it answers `Trees` beside the `Analysis`: what that layer kept for each file it read.
-Each contribution, member and inline module answers its extent, where it is written in its file,
-and `Trees::node` answers the node of a kept tree that an extent was written as.
+union members, its directive applications, a directive definition's locations, whether it is a
+marker or a collection, read off `core`'s `@marker`, `@set` and `@map` where the package that wrote
+it applies them, the closed instantiations its written occurrences resolve to, and its members with
+their descriptions, types, defaults and applications; every written type an occurrence with its path
+and arguments as written, what it resolves to, and its type: the complete instantiation, with each
+argument left out filled from its default and an alias such as `NonZeroU32` expanded, each type
+interned once, so that `==` on two type ids is type equality; every application with its type
+arguments and its arguments, and every value as written; and the schema, with its contributions, one
+for each schema item, its description, its roots, written or presumed, and its applications.
+`Model::satisfies` answers whether a type satisfies an interface or a marker, and
+`Model::satisfies_ty` whether it satisfies one interface type exactly, its arguments' `!` included:
+by declaration, read off the `implements` entries and the bounds the model holds, with `core`'s
+`MapKey` satisfied intrinsically by every integer primitive, `bool`, `string`, `id`, every enum and
+`NonZero` of an integer primitive. Each definition's type parameter defaults are checked where they
+are written, and each use's count of type arguments where it is written. Filling defaults is bounded
+by `Limits::max_substitutions`, and the types it derives by `Limits::max_generic_depth` and
+`Limits::max_instantiations`. Every instantiation the program writes has its bounds judged, exactly:
+a type argument that does not satisfy a bound's interface type, with the instantiation's arguments
+in its parameters' place, is `smear::graphqlx::unsatisfied-bound` where the instantiation is
+written, and judging is bounded by `Limits::max_bound_steps`. It resolves every module's `use` items
+too, globs and string sources included, against scopes that end with the prelude and the packages
+each package may reach. The built-in packages, `core`, `alloc` and `std`, are one embedded GraphQLx
+file each, parsed on every analysis. `graphqlx::analyze_with` is the same analysis with the parser
+layer the caller passes, such as `smear-parser`'s lossless layer, which recovers, so the well-formed
+rest of a broken file is analyzed, and it answers `Trees` beside the `Analysis`: what that layer
+kept for each file it read. Each contribution, member and inline module answers its extent, where
+it is written in its file, and `Trees::node` answers the node of a kept tree that an extent was
+written as.
 
 Rules are visitors. A `graphqlx::Visitor` implements the hooks it needs, one for each entity a walk
 enters, leaves or reaches, and `graphqlx::visit` walks an analysis's model for it over the packages
@@ -40,13 +55,26 @@ reports. Visitors compose at compile time: a tuple of up to twelve, an `Option` 
 a `Box` of one, and `()`. `analyze` runs smear's own rules through the same walk: a program defines
 its schema at most once, each later schema definition of the root package being
 `smear::schema::duplicate-schema-definition`; only the root package defines or extends it, a
-dependency's schema item being `smear::graphqlx::schema-outside-root`; and a package extends its
-own definitions alone, an extension of another package's being
-`smear::graphqlx::orphan-extension`, but for the directives the root package adds to a definition
-of `core`, `alloc` or `std`. An error that a phase or a rule reports marks the contributions,
-members and definitions that hold it, as their `has_errors()` says, whether the diagnostic ceiling
-keeps it or not. A syntax error marks nothing. A consumer's walk marks nothing, answers its own
-diagnostics under the same ceiling, and holds memory bounded by it.
+dependency's schema item being `smear::graphqlx::schema-outside-root`; and a package extends its own
+definitions alone, an extension of another package's being `smear::graphqlx::orphan-extension`, but
+for the directives the root package adds to a definition of `core`, `alloc` or `std`, none of which
+may be `@marker`, `@set` or `@map` unless the root package wrote that definition; an enum takes no
+type parameter, an enum that declares one being `smear::graphqlx::generic-enum`; and a marker
+declares no field, is named only as the outermost type of an `implements` entry or of a bound, and
+is all a scalar, an enum, an input object or a union implements, each other use being
+`smear::graphqlx::marker-misuse`; and a set has one type parameter and a map two, a scalar its own
+package makes a collection with another count, or makes both, being
+`smear::graphqlx::collection-arity`; and `TypeRef` stands only as the type of a directive
+definition's argument or of an input field, under lists alone, anywhere else being
+`smear::graphqlx::typeref-misuse`; and `NonZero`'s type argument is an integer primitive at least
+one bit wide, written without `!`, `NonZero` of anything else being
+`smear::graphqlx::nonzero-argument`; and a definition's type parameters have distinct names, and so
+do the names an extension's own list gives them, a type parameter with the name of an earlier one
+being `smear::graphqlx::duplicate-type-parameter`. An
+error that a phase or a rule reports marks the contributions, members and definitions that hold it,
+as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error marks
+nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and
+holds memory bounded by it.
 
 ## Feature flags
 

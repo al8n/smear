@@ -220,7 +220,11 @@ impl TypeBound {
     self.parameter
   }
 
-  /// The interface or marker the parameter must satisfy, as written.
+  /// The interface or marker the parameter must satisfy, as written. Its type may name the
+  /// definition's type parameters, which stand for an instantiation's arguments: `Comparable<T>`
+  /// of `where T: Comparable<T>` is, for `Sorted<User>`, `Comparable<User>`. A right side that
+  /// names neither an interface nor a marker, a definition of another kind or a type parameter, is
+  /// refused where it is written, and kept here all the same.
   #[inline]
   pub const fn interface(&self) -> TypeExprId {
     self.interface
@@ -350,6 +354,30 @@ impl<'a> Def<'a> {
     }
   }
 
+  /// The names the contribution at `position` among its contributions gives its type parameters,
+  /// when it is an extension that writes a list, which names them by position: each name with
+  /// where it is written, in written order. None for its own contribution, whose names are its
+  /// [`type_params`](Self::type_params), for an extension that writes no list, and for a position
+  /// past its contributions.
+  //
+  // Crate-private: the public model has no view of an extension's own names, and the rule on
+  // duplicate type parameter names reads them here.
+  #[inline]
+  pub(crate) fn extension_params(&self, position: u32) -> &'a [(Sym, Location)] {
+    let model: &'a Model = self.model;
+    let run = self.row().contributions;
+    if position >= run.len {
+      return &[];
+    }
+    match model
+      .contributions
+      .get(run.start as usize + position as usize)
+    {
+      Some(part) => part.params.of(&model.written_params),
+      None => &[],
+    }
+  }
+
   /// The bounds on its type parameters, in order.
   #[inline]
   pub fn bounds(&self) -> &'a [TypeBound] {
@@ -433,14 +461,25 @@ impl<'a> Def<'a> {
     self.row().intrinsic
   }
 
-  /// Whether it is a marker: an interface `@marker` makes one, with no field, which only
-  /// `implements` and bounds may name.
+  /// Whether it is a marker: an interface `core`'s `@marker` makes one, which declares no field,
+  /// and which only `implements` and bounds may name. Only an application the package that wrote
+  /// the definition writes makes it one, in its definition or in an extension of its own: an
+  /// extension another package writes says nothing of what the definition is. A marker that
+  /// declares a field is a marker all the same: the field is
+  /// [`MarkerMisuse`](crate::graphqlx::DiagnosticKind::MarkerMisuse), which the marker's
+  /// `has_errors()` says.
   #[inline]
   pub fn is_marker(&self) -> bool {
     self.row().marker
   }
 
-  /// The collection it stands for, through `@set` or `@map`, if any.
+  /// The collection it stands for, through `core`'s `@set` or `@map`, if any: the first of the two
+  /// that the package that wrote the definition applies to it, in its definition or in an
+  /// extension of its own. An extension another package writes says nothing of what the definition
+  /// is. A scalar with another count of type parameters than its collection has, or that applies
+  /// both, stands for the first all the same: its application is
+  /// [`CollectionArity`](crate::graphqlx::DiagnosticKind::CollectionArity), which the scalar's
+  /// `has_errors()` says.
   #[inline]
   pub fn collection(&self) -> Option<Collection> {
     self.row().collection

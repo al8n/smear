@@ -16,8 +16,6 @@ use tokora::diagnostic::Location;
 
 use crate::graphqlx::{Cx, Diagnostic, Visitor, code::schema};
 
-use super::written_by;
-
 /// Reports each schema definition the root package writes after its first.
 ///
 /// It reads the schema's contributions in the `schema` hook, and tells a definition from an
@@ -40,7 +38,7 @@ impl Visitor for DuplicateSchemaDefinition {
     // Where the root package's first schema definition is.
     let mut first: Option<Location> = None;
     for part in model.schema().contributions() {
-      if part.is_extension() || written_by(sources, part.location()) != Some(root) {
+      if part.is_extension() || sources.written_by(part.location()) != Some(root) {
         continue;
       }
       let Some(earlier) = first else {
