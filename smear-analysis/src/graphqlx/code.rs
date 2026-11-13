@@ -541,4 +541,9 @@ pub(crate) mod schema {
   /// A OneOf input object's field is written non-null: `smear-schema`'s `OneOfFieldNotNullable`.
   pub(crate) const ONE_OF_FIELD_NOT_NULLABLE: Code =
     Code::new("smear::schema::one-of-field-not-nullable");
+
+  /// A OneOf input object's field declares a default value: `smear-schema`'s
+  /// `OneOfFieldHasDefault`.
+  pub(crate) const ONE_OF_FIELD_HAS_DEFAULT: Code =
+    Code::new("smear::schema::one-of-field-has-default");
 }

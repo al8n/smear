@@ -3,8 +3,8 @@
 //! names, and so have a field's arguments; a definition that holds members holds one at least; a
 //! member's type is of the kind its position takes; an object or an interface implements
 //! interfaces; no interface implements itself; a union's members are object types; a required
-//! argument or input field is not deprecated; and a OneOf input object's fields are nullable. Each
-//! rule judges what a supplied
+//! argument or input field is not deprecated; and a OneOf input object's fields are nullable and
+//! have no default. Each rule judges what a supplied
 //! package's definition holds, says nothing within what a phase refused, and quotes a name only as
 //! an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -68,6 +68,7 @@ const DEPRECATED_INPUT_FIELD: &str = "smear::schema::deprecated-required-input-f
 
 /// GraphQL's codes for the three mistakes of a OneOf input object.
 const ONE_OF_NON_NULL: &str = "smear::schema::one-of-field-not-nullable";
+const ONE_OF_DEFAULT: &str = "smear::schema::one-of-field-has-default";
 
 /// The code of a marker used as a marker may not be, which L3's rule reports.
 const MARKER: &str = "smear::graphqlx::marker-misuse";
@@ -993,25 +994,41 @@ fn a_one_of_input_objects_fields_are_nullable_and_have_no_default() {
     found(&analysis),
     [
       (ONE_OF_NON_NULL, named(schema, ONE_OF, "  ", "a", 0), None),
+      (ONE_OF_DEFAULT, named(schema, ONE_OF, "  ", "b", 0), None),
+      // A field that is both is two diagnostics, one of each rule.
+      (ONE_OF_DEFAULT, named(schema, ONE_OF, "  ", "c", 0), None),
       (ONE_OF_NON_NULL, named(schema, ONE_OF, "  ", "c", 0), None),
     ],
     "{:#?}",
     analysis.diagnostics()
   );
   assert_eq!(
-    messages(&analysis)[0],
-    "the field `a` of the OneOf input object `A` is non-null"
+    messages(&analysis)[..2],
+    [
+      "the field `a` of the OneOf input object `A` is non-null",
+      "the field `b` of the OneOf input object `A` has a default value",
+    ]
   );
-  let first = analysis.diagnostics().iter().next().expect("a diagnostic");
+  let words: Vec<(Option<&str>, Option<&str>)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| (diagnostic.primary_label(), diagnostic.help()))
+    .collect();
   assert_eq!(
-    (first.primary_label(), first.help()),
-    (
-      Some("field of a @oneOf input object is non-null"),
-      Some(
-        "every field of a `@oneOf` input object is one of the alternatives, so each one has to \
-         be nullable."
-      )
-    )
+    words[..2],
+    [
+      (
+        Some("field of a @oneOf input object is non-null"),
+        Some(
+          "every field of a `@oneOf` input object is one of the alternatives, so each one has to \
+           be nullable."
+        )
+      ),
+      (
+        Some("field of a @oneOf input object has a default value"),
+        Some("a defaulted field would always be present, which is the one thing `@oneOf` forbids.")
+      ),
+    ]
   );
 }
 
@@ -1094,6 +1111,11 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int!\n  x: Missing\n}\n",
     "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int!\n}\ninput U {\n  x: Missing\n}\n",
   );
+  silent_beside_a_phase(
+    ONE_OF_DEFAULT,
+    "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int = 1\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int = 1\n}\ninput U {\n  x: Missing\n}\n",
+  );
   // An error in an interface's own contribution silences it, and not the other interface of its
   // ring.
   let text = "type Query {\n  ok: Int\n}\ninterface A implements B {\n  id: ID\n  x: Missing\n}\n\
@@ -1141,6 +1163,7 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
       "type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  f({plain}: Int! @deprecated): Int\n}}\n"
     ),
     format!("type Query {{\n  ok: Int\n}}\ninput {owner} @oneOf {{\n  {plain}: Int!\n}}\n"),
+    format!("type Query {{\n  ok: Int\n}}\ninput {owner} @oneOf {{\n  {plain}: Int = 1\n}}\n"),
   ];
   for text in &texts {
     let analysis = analyze_text(text);

@@ -39,6 +39,7 @@ mod implements_non_interface;
 mod marker_misuse;
 mod member_type_kind;
 mod non_zero_argument;
+mod one_of_field_has_default;
 mod one_of_field_not_nullable;
 mod orphan_extension;
 mod reserved_name;
@@ -53,10 +54,11 @@ use self::{
   duplicate_type_parameter::DuplicateTypeParameter, empty_definition::EmptyDefinition,
   generic_enum::GenericEnum, implements_non_interface::ImplementsNonInterface,
   marker_misuse::MarkerMisuse, member_type_kind::MemberTypeKind,
-  non_zero_argument::NonZeroArgument, one_of_field_not_nullable::OneOfFieldNotNullable,
-  orphan_extension::OrphanExtension, reserved_name::ReservedName,
-  schema_outside_root::SchemaOutsideRoot, self_implementing_interface::SelfImplementingInterface,
-  type_ref_misuse::TypeRefMisuse, union_member_not_object::UnionMemberNotObject,
+  non_zero_argument::NonZeroArgument, one_of_field_has_default::OneOfFieldHasDefault,
+  one_of_field_not_nullable::OneOfFieldNotNullable, orphan_extension::OrphanExtension,
+  reserved_name::ReservedName, schema_outside_root::SchemaOutsideRoot,
+  self_implementing_interface::SelfImplementingInterface, type_ref_misuse::TypeRefMisuse,
+  union_member_not_object::UnionMemberNotObject,
 };
 use super::{
   ApplicationId, Contribution, Cx, DefId, DefKind, Model, PackageId, PackageKind, Resolution,
@@ -339,7 +341,8 @@ rule_set! {
   /// field's arguments; a definition that holds members holds one at least, a marker holding
   /// none; a member's type is of the kind its position takes; an object or an interface implements
   /// interfaces; no interface implements itself; a union's members are object types; a required
-  /// argument or input field is not deprecated; and a OneOf input object's fields are nullable.
+  /// argument or input field is not deprecated; and a OneOf input object's fields are nullable and
+  /// have no default.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -393,6 +396,8 @@ rule_set! {
     ],
     one_of_field_not_nullable: OneOfFieldNotNullable
       => [super::code::schema::ONE_OF_FIELD_NOT_NULLABLE],
+    one_of_field_has_default: OneOfFieldHasDefault
+      => [super::code::schema::ONE_OF_FIELD_HAS_DEFAULT],
   }
 }
 

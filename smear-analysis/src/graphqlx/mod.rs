@@ -117,7 +117,8 @@
 //! `smear::schema::union-member-not-object`; and a required argument or input field that applies
 //! `core`'s `@deprecated` is `smear::schema::deprecated-required-argument`, or the code of an input
 //! field; and a field written non-null of an input object its own package makes OneOf is
-//! `smear::schema::one-of-field-not-nullable`. A rule says nothing about a contribution a phase
+//! `smear::schema::one-of-field-not-nullable`, and one with a default
+//! `smear::schema::one-of-field-has-default`. A rule says nothing about a contribution a phase
 //! already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
