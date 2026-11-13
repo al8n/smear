@@ -88,7 +88,9 @@ field, and a field written non-null of an input object its own package makes One
 `smear::schema::one-of-field-has-default`, and `@oneOf` in an extension of an input object is
 `smear::schema::one-of-on-input-object-extension`. And every application a supplied package
 writes keeps GraphQL's own rules on directives, with GraphQL's codes: one at a location its
-directive's definition does not list is `smear::schema::unsupported-directive-location`. An
+directive's definition does not list is `smear::schema::unsupported-directive-location`, and one
+of a directive that is not repeatable, applied again where it is applied, a definition and its
+extensions being one location, is `smear::schema::duplicate-directive-use`. An
 error that a phase or a rule reports marks the contributions, members and definitions that hold it,
 as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error marks
 nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and

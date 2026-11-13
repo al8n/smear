@@ -556,4 +556,9 @@ pub(crate) mod schema {
   /// `UnsupportedDirectiveLocation`.
   pub(crate) const UNSUPPORTED_DIRECTIVE_LOCATION: Code =
     Code::new("smear::schema::unsupported-directive-location");
+
+  /// A directive that is not repeatable is applied again where it is applied: `smear-schema`'s
+  /// `DuplicateDirectiveUse`.
+  pub(crate) const DUPLICATE_DIRECTIVE_USE: Code =
+    Code::new("smear::schema::duplicate-directive-use");
 }

@@ -34,6 +34,7 @@
 
 mod collection_arity;
 mod deprecated_required;
+mod duplicate_directive_use;
 mod duplicate_member;
 mod duplicate_schema_definition;
 mod duplicate_type_parameter;
@@ -56,7 +57,8 @@ mod unsupported_directive_location;
 
 use self::{
   collection_arity::CollectionArity, deprecated_required::DeprecatedRequired,
-  duplicate_member::DuplicateMember, duplicate_schema_definition::DuplicateSchemaDefinition,
+  duplicate_directive_use::DuplicateDirectiveUse, duplicate_member::DuplicateMember,
+  duplicate_schema_definition::DuplicateSchemaDefinition,
   duplicate_type_parameter::DuplicateTypeParameter, empty_definition::EmptyDefinition,
   generic_enum::GenericEnum, implements_non_interface::ImplementsNonInterface,
   marker_misuse::MarkerMisuse, member_type_kind::MemberTypeKind,
@@ -352,7 +354,8 @@ rule_set! {
   /// argument or input field is not deprecated; a OneOf input object's fields are nullable and have
   /// no default; and an input object takes `@oneOf` in its definition alone; and of every
   /// application a supplied package writes, GraphQL's own rules: a directive stands where its
-  /// definition lists.
+  /// definition lists; and a directive that is not repeatable is applied once to a location, a
+  /// definition and its extensions being one.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -412,6 +415,8 @@ rule_set! {
       => [super::code::schema::ONE_OF_ON_INPUT_OBJECT_EXTENSION],
     unsupported_directive_location: UnsupportedDirectiveLocation
       => [super::code::schema::UNSUPPORTED_DIRECTIVE_LOCATION],
+    duplicate_directive_use: DuplicateDirectiveUse
+      => [super::code::schema::DUPLICATE_DIRECTIVE_USE],
   }
 }
 

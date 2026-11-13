@@ -101,6 +101,9 @@ const ONE_OF_ON_INPUT_OBJECT_EXTENSION: &str = "smear::schema::one-of-on-input-o
 /// GraphQL's code for a directive applied where its definition does not list.
 const UNSUPPORTED_DIRECTIVE_LOCATION: &str = "smear::schema::unsupported-directive-location";
 
+/// GraphQL's code for a directive that is not repeatable applied twice to one location.
+const DUPLICATE_DIRECTIVE_USE: &str = "smear::schema::duplicate-directive-use";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -137,6 +140,11 @@ const INTROSPECTION_LABEL: &str = "introspection type extension adds more than d
 /// `@set` or `@map`.
 const MEANING: &str = "`@marker`, `@set` and `@map` say what a definition is, and what a built-in \
                        is is the language's to say: remove this directive";
+
+/// What GraphQL tells the author of a directive that is not repeatable applied twice to one
+/// location: `smear-schema`'s help, word for word.
+const DUPLICATE_DIRECTIVE_USE_HELP: &str = "declare the directive `repeatable`, or apply it once; \
+                                            a definition and its extensions are one location.";
 
 /// What GraphQL tells the author of a directive applied where its definition does not list:
 /// `smear-schema`'s help, word for word.
@@ -971,7 +979,9 @@ fn meaning(directive: &str, what: &str, built_in: &str) -> String {
 fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
   // `@set` on `core`'s `NonZero`, `@marker` on `core`'s `MapKey` and `@set` on `std`'s `HashMap`:
   // each refused where the directive is written, with a label at the definition, and none
-  // changes what the definition is.
+  // changes what the definition is. `core`'s own `MapKey` applies `@marker` already, and a
+  // definition and its extensions are one location, so GraphQL's own rule refuses the second
+  // `@marker` beside the orphan rule, labelled at `core`'s.
   let text =
     "extend scalar NonZero @set\nextend interface MapKey @marker\nextend scalar HashMap @set\n";
   let analysis = analyze_one(text);
@@ -980,6 +990,14 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
   let builtins = model.builtins();
   let hash_map = def(model, "^::std::HashMap");
   let named = |id: DefId| -> Option<Location> { Some(model.def(id).location()) };
+  // Where the first application a definition holds, its own definition's, names its directive.
+  let first_applied = |id: DefId| -> Option<Location> {
+    model
+      .def(id)
+      .applications()
+      .first()
+      .map(|application: &ApplicationId| model.application(*application).path_location())
+  };
   assert_eq!(
     found(&analysis),
     [
@@ -993,6 +1011,11 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
         at(schema, text, "marker", 0),
         named(builtins.map_key())
       ),
+      (
+        DUPLICATE_DIRECTIVE_USE,
+        at(schema, text, "marker", 0),
+        first_applied(builtins.map_key())
+      ),
       (ORPHAN, at(schema, text, "set", 1), named(hash_map)),
     ],
     "{:#?}",
@@ -1003,14 +1026,34 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
     [
       meaning("set", "type `NonZero`", "core"),
       meaning("marker", "type `MapKey`", "core"),
+      String::from(
+        "the directive `@marker` is applied to the type `MapKey` again, and it is not repeatable"
+      ),
       meaning("set", "type `HashMap`", "std"),
     ]
   );
   assert_eq!(
     helps(&analysis),
-    [Some(MEANING), Some(MEANING), Some(MEANING)]
+    [
+      Some(MEANING),
+      Some(MEANING),
+      Some(DUPLICATE_DIRECTIVE_USE_HELP),
+      Some(MEANING)
+    ]
   );
   for diagnostic in analysis.diagnostics() {
+    // GraphQL's own refusal has GraphQL's labels.
+    if diagnostic.code() == Code::new(DUPLICATE_DIRECTIVE_USE) {
+      assert_eq!(
+        diagnostic.primary_label(),
+        Some("directive is not repeatable")
+      );
+      assert_eq!(
+        diagnostic.label(0).map(|label| label.text()),
+        Some("first applied here")
+      );
+      continue;
+    }
     assert_eq!(diagnostic.primary_label(), Some("orphan extension"));
     assert_eq!(
       diagnostic.label(0).map(|label| label.text()),
@@ -1146,20 +1189,41 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
   );
 
   // `@map`; `@set` on a primitive `core` materialises, which has no position for a label to point
-  // at; and two of the three in one extension, each reported where it is written.
+  // at; and two of the three in one extension, each reported where it is written. `BTreeMap`
+  // applies `@map`, and `HashSet` `@set`, in their own definitions, so each extension's is a
+  // second application to one location too, labelled at the library's.
   let text =
     "extend scalar BTreeMap @map\nextend scalar Int @set\nextend scalar HashSet @set @map\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
   let model = analysis.model();
-  let btree_map = Some(model.def(def(model, "^::alloc::BTreeMap")).location());
-  let hash_set = Some(model.def(def(model, "^::std::HashSet")).location());
+  let btree_map_def = def(model, "^::alloc::BTreeMap");
+  let hash_set_def = def(model, "^::std::HashSet");
+  let btree_map = Some(model.def(btree_map_def).location());
+  let hash_set = Some(model.def(hash_set_def).location());
+  let first_applied = |id: DefId| -> Option<Location> {
+    model
+      .def(id)
+      .applications()
+      .first()
+      .map(|application: &ApplicationId| model.application(*application).path_location())
+  };
   assert_eq!(
     found(&analysis),
     [
       (ORPHAN, at(schema, text, "map", 0), btree_map),
+      (
+        DUPLICATE_DIRECTIVE_USE,
+        at(schema, text, "map", 0),
+        first_applied(btree_map_def)
+      ),
       (ORPHAN, at(schema, text, "set", 0), None),
       (ORPHAN, at(schema, text, "set", 1), hash_set),
+      (
+        DUPLICATE_DIRECTIVE_USE,
+        at(schema, text, "set", 1),
+        first_applied(hash_set_def)
+      ),
       (ORPHAN, at(schema, text, "map", 1), hash_set),
     ],
     "{:#?}",
@@ -1169,8 +1233,14 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
     messages(&analysis),
     [
       meaning("map", "type `BTreeMap`", "alloc"),
+      String::from(
+        "the directive `@map` is applied to the type `BTreeMap` again, and it is not repeatable"
+      ),
       meaning("set", "type `i32`", "core"),
       meaning("set", "type `HashSet`", "std"),
+      String::from(
+        "the directive `@set` is applied to the type `HashSet` again, and it is not repeatable"
+      ),
       meaning("map", "type `HashSet`", "std"),
     ]
   );
@@ -1583,6 +1653,10 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(UNSUPPORTED_DIRECTIVE_LOCATION),
     a_directive_where_its_definition_does_not_list,
   ),
+  (
+    Code::new(DUPLICATE_DIRECTIVE_USE),
+    a_directive_that_is_not_repeatable_applied_twice,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1800,6 +1874,11 @@ fn a_one_of_that_an_extension_provides() -> Analysis {
 /// A directive applied where its definition does not list.
 fn a_directive_where_its_definition_does_not_list() -> Analysis {
   analyze_one("directive @onEnum on ENUM\n     type Query @onEnum { ok: Int }")
+}
+
+/// A directive that is not repeatable applied twice to one type.
+fn a_directive_that_is_not_repeatable_applied_twice() -> Analysis {
+  analyze_one("directive @onObject on OBJECT\n     type Query @onObject @onObject { ok: Int }")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

@@ -293,8 +293,11 @@ impl Analysis {
 ///   GraphQL's codes: an application at a location its directive's definition does not list, the
 ///   schema, a kind of definition, a directive definition, a field, an argument, an input field or
 ///   an enum value, is `unsupported-directive-location`, at its path, with a label at the
-///   directive's definition. A rule says nothing about a contribution a phase already refused
-///   something in.
+///   directive's definition. An application of a directive that is not `repeatable`, which an
+///   earlier application to the same location applies, a definition and its extensions being one
+///   location and the schema's definition and extensions one, is `duplicate-directive-use`, at its
+///   path, with a label at the first. A rule says nothing about a contribution a phase already
+///   refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

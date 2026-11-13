@@ -418,7 +418,10 @@ All notable changes to Smear are documented in this file.
   writes keeps GraphQL's own rules on directives, with GraphQL's codes: one at a location its
   directive's definition does not list, a built-in's own directive or a program's, is
   `smear::schema::unsupported-directive-location`, at its path, with a label at the directive's
-  definition. A rule says nothing about a contribution a phase already refused something in. On every GraphQL document of smear's corpora the analyzer
+  definition; and one of a directive that is not repeatable, applied again where it is applied, a
+  definition and its extensions being one location, `core`'s own definition among them, is
+  `duplicate-directive-use`, at its path, with a label at the first. A rule says nothing about a
+  contribution a phase already refused something in. On every GraphQL document of smear's corpora the analyzer
   is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
   divergence it allows. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models
