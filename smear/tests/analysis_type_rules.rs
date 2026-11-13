@@ -429,7 +429,8 @@ fn type_ref_is_a_directive_arguments_type() {
     [
       refused("string, "),
       refused("Box<"),
-      refused("f: "),
+      // The field's, indented: `of: TypeRef`, the argument of `@d`, holds `f: TypeRef` too.
+      refused("  f: "),
       refused("a: "),
       refused("@t<"),
       refused("U = "),
