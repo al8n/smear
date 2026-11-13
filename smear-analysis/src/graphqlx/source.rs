@@ -22,14 +22,14 @@ use super::{
 /// The map keeps each source's package, path and length, and never its text, which stays with the
 /// caller. [`SourceMap::bind`] pairs the map with the packages it was made from again, and that is
 /// what a renderer reads texts through.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceMap {
   packages: Vec<PackageSlot>,
   sources: Vec<SourceSlot>,
 }
 
 /// One package, as the map records it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PackageSlot {
   /// The name, as given, which `bind` finds a dependency by and holds the root to.
   name: Box<[u8]>,
@@ -42,7 +42,7 @@ struct PackageSlot {
 }
 
 /// One source, as the map records it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct SourceSlot {
   /// The package it belongs to.
   package: PackageId,

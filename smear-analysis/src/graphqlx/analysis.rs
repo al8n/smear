@@ -32,7 +32,16 @@ use super::{
 /// It has no type parameter and no lifetime: it is the same type whatever text type the packages
 /// were supplied in, and it borrows nothing from them. The model and the diagnostics are complete
 /// whatever was refused; [`is_ok`](Self::is_ok) is the verdict.
-#[derive(Debug, Clone)]
+///
+/// Two analyses are equal when their models, their diagnostics (the list, the error count and
+/// whether the ceiling dropped any), their source maps and the diagnostic ceilings they were made
+/// under are equal. So two analyses of one package set made under two ceilings are unequal, even
+/// when neither list was truncated: a walk over each keeps to its own ceiling. The models are
+/// compared as [`Model`]'s equality says, every row and every id, which is the question to ask of
+/// two analyses of the same packages: [`analyze_with`] says when two parser layers answer equal
+/// ones. It is `PartialEq` and not `Eq` because a float value is compared as an `f64` is; no
+/// literal spells a NaN, so an analysis is equal to itself.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Analysis {
   model: Model,
   diagnostics: Diagnostics,
@@ -248,6 +257,12 @@ pub fn analyze<S: SourceText>(
 /// The trees borrow nothing of the packages at a concrete call: they are `Trees<()>` for
 /// [`Syntactic`], and a tree of the lossless layer holds no text of the caller's. A consumer generic
 /// over the layer that keeps the trees past the packages bounds `P::Tree: 'static`.
+///
+/// For a package set no layer reports a syntax error for, every layer answers an equal
+/// [`Analysis`], the rules' diagnostics and marks included: the layers hand the same phases the
+/// same documents in the same order. Where a layer reports a syntax error, the package ids and the
+/// source ids are still those every other layer answers, and nothing else is promised. The trees
+/// are beside the analysis, and no part of its equality.
 pub fn analyze_with<'a, P, S>(
   parser: &P,
   root: &'a Package<S>,

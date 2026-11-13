@@ -98,7 +98,11 @@ All notable changes to Smear are documented in this file.
   type parameter: a `Model` of the packages, the `Diagnostics` and a `SourceMap`.
   `graphqlx::analyze_with` is the same entrance with the parser layer the caller passes, and it
   answers beside the `Analysis` a `Trees`: what that layer kept for each supplied file it read,
-  by source id, found by `get` and `node` and walked by `TreesIter` and `TreesIntoIter`. Packages
+  by source id, found by `get` and `node` and walked by `TreesIter` and `TreesIntoIter`.
+  `Analysis` and `Model` implement `PartialEq`, and `SourceMap` `PartialEq` and `Eq`: two
+  analyses are equal when their models, every row and every id, their diagnostics, their source
+  maps and the diagnostic ceilings they were made under are, and for a package set no layer
+  reports a syntax error for, every parser layer answers an equal analysis. Packages
   and sources are numbered deterministically, whatever order they are passed in. The package
   set's file paths, package names, dependencies and total size are checked, under the new
   `smear::graphqlx` codes `DiagnosticKind` lists; a message quotes a name or a path whole when
