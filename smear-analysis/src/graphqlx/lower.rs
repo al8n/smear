@@ -72,8 +72,10 @@
 //! contribution: a definition's own, in every one of its parameters' defaults too, and an
 //! extension's own names, each naming its target's parameter at the same position. A path that
 //! names nothing leaves its occurrence unresolved, with its path and its arguments, once name
-//! resolution has reported it with the code of its place. No type is interned: an occurrence's
-//! type is instantiation's.
+//! resolution has reported it with the code of its place. An alias such as `NonZeroU32` names
+//! `core`'s `NonZero`, with its path as written and no argument, as a `NonZero` a `use` item
+//! renames does too; the primitive the alias spells is noted beside the row, for instantiation,
+//! which alone tells the two apart. No type is interned: an occurrence's type is instantiation's.
 //!
 //! A bound is its definition's own: a `where` predicate whose left side is one of the definition's
 //! type parameters, written with no argument, gives each interface it names as a bound of that
@@ -1819,8 +1821,16 @@ impl Lowering<'_, '_> {
       .resolve(&*self.builder, self.reporter, &request, path)
     {
       Resolved::Def(def) => self.builder.resolve_named(id, def),
-      // `NonZeroU32` and its kin name `core`'s `NonZero`; what they stand for is instantiation's.
-      Resolved::NonZero { non_zero, .. } => self.builder.resolve_named(id, non_zero),
+      // `NonZeroU32` and its kin name `core`'s `NonZero`, of the primitive they spell. The row is
+      // a renamed `NonZero`'s too, so the primitive is noted beside it for instantiation, which
+      // expands the alias.
+      Resolved::NonZero {
+        non_zero,
+        primitive,
+      } => {
+        self.builder.resolve_named(id, non_zero);
+        self.builder.note_non_zero(id, primitive);
+      }
       Resolved::Param(index) => {
         if let Some(owner) = site.owner {
           self.builder.resolve_param(id, owner, index);

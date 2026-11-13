@@ -181,6 +181,23 @@ impl Analysis {
 ///   for the definition; and so is each group of its defaults that need each other, a default that
 ///   names its own parameter included, once, at the default of the group's lowest parameter,
 ///   which a use can never fill.
+/// - Gives every type occurrence its type, each type interned where the model's walk first needs
+///   it, its arguments before it: a list is the list of its element's type; a type parameter is
+///   that parameter of its definition, in a default's own tree too; an alias such as `NonZeroU32`
+///   is the `NonZero` it spells; and an occurrence of a definition is that definition with every
+///   argument, the written ones first, a collection's key or element non-null however it is
+///   written, then each one left out filled from its default, substituted, a default that names a
+///   parameter written after it filled first. Type arguments on a type parameter or an alias, more
+///   type arguments than a definition has parameters or fewer than it takes, and an argument left
+///   to a default that cannot fill it, are `generic-arity`, where they are written; an occurrence
+///   inside a default whose filling leads back to a default being filled is `generic-default`. A
+///   type nested deeper than [`Limits::max_generic_depth`], an instantiation past
+///   [`Limits::max_instantiations`] and filling past [`Limits::max_substitutions`] are
+///   `resource-limit`, each where it is written, and the built-in library is typed whatever the
+///   limits. An occurrence that cannot be typed, or that holds one that cannot, has the one
+///   unresolved type. Each closed type an occurrence of a generic definition resolves to is one of
+///   the definition's instantiations. Last, an application writes no more type arguments than its
+///   directive has parameters and no fewer than it takes, or it is `generic-arity`, at its path.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///   Each schema definition the root package writes after its first is
@@ -258,7 +275,7 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
     &mut builder,
     &mut reporter,
   );
-  instantiate::instantiate(&declarations, &mut builder, &mut reporter);
+  instantiate::instantiate(&declarations, &sources, limits, &mut builder, &mut reporter);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }

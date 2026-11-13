@@ -94,11 +94,21 @@ pub enum DiagnosticKind {
   InvalidBound,
 
   // -- Types -------------------------------------------------------------------------------------
-  /// A list of type parameters of the wrong length. An extension's list names its target's type
-  /// parameters by position, one name each, and names another number of them: reported at the
-  /// list, with a label at the definition's name; the extension still contributes what it writes.
-  /// Or a definition that replaces a GraphQL built-in writes one, where the built-in's identity has
-  /// none: reported at the list, and nothing of the list is in the model.
+  /// A use with a count of type arguments its definition does not take. A type occurrence writes
+  /// more type arguments than its definition has type parameters, or fewer than it takes, every
+  /// parameter from the first of a trailing run of defaulted ones being left to its default: it is
+  /// reported where it is written, with a label at the definition's name. So is a directive
+  /// application, at its path. A type parameter, or an alias such as `NonZeroU32`, written with
+  /// type arguments is reported where it is written. An occurrence that leaves a type argument to
+  /// a default that cannot fill it is reported where it is written, with a label at that default.
+  /// Each such occurrence has the unresolved type.
+  ///
+  /// Lowering reports two lists of type parameters of the wrong length under it too. An
+  /// extension's list names its target's type parameters by position, one name each, and names
+  /// another number of them: reported at the list, with a label at the definition's name; the
+  /// extension still contributes what it writes. Or a definition that replaces a GraphQL built-in
+  /// writes one, where the built-in's identity has none: reported at the list, and nothing of the
+  /// list is in the model.
   GenericArity,
   /// A default of a definition's type parameter that can never fill. A type parameter with no
   /// default follows one with a default: type arguments bind by position, so that default could
@@ -107,7 +117,10 @@ pub enum DiagnosticKind {
   /// names its own parameter included: a use that leaves the group's lowest parameter out leaves
   /// out the whole group, so that parameter's default can never fill, and each such group is
   /// reported once, at that default, with a label, for a group of more than one, where the next of
-  /// its members to name that parameter first names it.
+  /// its members to name that parameter first names it. Or an occurrence written inside a default
+  /// leaves out an argument whose filling leads back to a default being filled, through other
+  /// definitions or through its own: the default it is written in can never fill, and the
+  /// occurrence is reported where it is written.
   GenericDefault,
 
   // -- smear's rules -----------------------------------------------------------------------------

@@ -20,14 +20,20 @@ inline `mod`, and every definition: each type and directive a package declares, 
 primitive the program writes, with its identity, its contributions, its own and then each
 extension's, its type parameters with their defaults and its bounds, its `implements` entries and
 union members, its directive applications, a directive definition's locations, whether it is a
-marker or a collection, read off `core`'s `@marker`, `@set` and `@map`, and its members
-with their descriptions, types, defaults and applications, every written type an occurrence with
-its path and arguments as written and what it resolves to, every application with its type
-arguments and its arguments, and every value as written; and the schema, with its contributions,
-one for each schema item, its description, its roots, written or presumed, and its applications.
-It resolves every module's `use` items too, globs and string sources included, against scopes that
-end with the prelude and the packages each package may reach. The built-in packages, `core`,
-`alloc` and `std`, are one embedded GraphQLx file each, parsed on every analysis.
+marker or a collection, read off `core`'s `@marker`, `@set` and `@map`, the closed instantiations
+its written occurrences resolve to, and its members with their descriptions, types, defaults and
+applications; every written type an occurrence with its path and arguments as written, what it
+resolves to, and its type: the complete instantiation, with each argument left out filled from its
+default and an alias such as `NonZeroU32` expanded, each type interned once, so that `==` on two
+type ids is type equality; every application with its type arguments and its arguments, and every
+value as written; and the schema, with its contributions, one for each schema item, its
+description, its roots, written or presumed, and its applications. Each definition's type
+parameter defaults are checked where they are written, and each use's count of type arguments
+where it is written. Filling defaults is bounded by `Limits::max_substitutions`, and the types it
+derives by `Limits::max_generic_depth` and `Limits::max_instantiations`. It resolves every
+module's `use` items too, globs and string sources included, against scopes that end with the
+prelude and the packages each package may reach. The built-in packages, `core`, `alloc` and
+`std`, are one embedded GraphQLx file each, parsed on every analysis.
 
 Rules are visitors. A `graphqlx::Visitor` implements the hooks it needs, one for each entity a walk
 enters, leaves or reaches, and `graphqlx::visit` walks an analysis's model for it over the packages

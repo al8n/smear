@@ -23,12 +23,14 @@
 //! module, location, origin and description, its contributions, its own and then its extensions',
 //! its type parameters with their defaults and its bounds, its `implements` entries and union
 //! members, its directive applications, a directive definition's locations, whether it is a
-//! marker or a collection, and its members with
-//! their descriptions, types, defaults and applications, every written type an occurrence with
-//! its path and arguments as written and what it resolves to, every application with its type
-//! arguments and its arguments, and every value as written; and the schema, with its
-//! contributions, one for each schema item, its description, its roots, written or presumed, and
-//! its applications. The phases that write the rest of it are still to come.
+//! marker or a collection, the closed instantiations its written occurrences resolve to, and its
+//! members with their descriptions, types, defaults and applications; every written type an
+//! occurrence with its path and arguments as written, what it resolves to, and its type, the
+//! complete instantiation with defaults filled and an alias expanded, each type interned once;
+//! every application with its type arguments and its arguments, and every value as written; and
+//! the schema, with its contributions, one for each schema item, its description, its roots,
+//! written or presumed, and its applications. The phases that write the rest of it, satisfaction,
+//! values and tiers, are still to come.
 //!
 //! ```
 //! use smear_analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};

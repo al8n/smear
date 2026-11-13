@@ -162,8 +162,25 @@ All notable changes to Smear are documented in this file.
   may name any parameter of its definition, written before it or after it; and each group of a
   definition's defaults that need each other, a default that names its own parameter included, is
   `generic-default` once, at the default of the group's lowest parameter, which a use that leaves
-  that parameter out can never fill. Then smear's rules walk the model, each a visitor on the
-  public trait. A program defines its schema at most once: each schema definition the root
+  that parameter out can never fill. Then every type occurrence gets its type, `TypeExpr::ty()`,
+  each type interned once, so that `==` on `TyId` is type equality, and where the model's walk
+  first needs it, its arguments before it: a list's, a type parameter's, of its own definition,
+  and a definition's with every argument, those written and then each one left out filled from its
+  default, substituted, a default that names a parameter written after it filled first; a
+  collection's key or element is non-null in it however it is written, and an alias such as
+  `NonZeroU32` is the `NonZero<u32>` it spells. More type arguments than a definition has type
+  parameters, fewer than it takes, type arguments on a type parameter or an alias, and an argument
+  left to a default that cannot fill it, are `generic-arity`, each where it is written; an
+  occurrence inside a default whose filling leads back to a default being filled is
+  `generic-default`; and an application's count of type arguments is checked against its
+  directive's. An occurrence that cannot be typed, or holds one that cannot, has the unresolved
+  type. `Model::instantiations` lists the closed types a generic definition's written occurrences
+  resolve to. A new `Limits::max_substitutions`, 2^20 by default, bounds the steps of substitution
+  filling defaults takes, and `Limits::max_generic_depth`, a list counting a level, and
+  `Limits::max_instantiations`, every distinct instantiation counting once whatever its nullness,
+  are enforced: each occurrence past one is `resource-limit` where it is written, and the built-in
+  library is typed whatever the three are. Then smear's rules walk the model, each a visitor on
+  the public trait. A program defines its schema at most once: each schema definition the root
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
   code, with a label at the first. And the schema is the root package's: each schema definition
   and each schema extension a dependency writes is the new

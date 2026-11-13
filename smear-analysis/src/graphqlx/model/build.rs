@@ -24,10 +24,12 @@
 //!   order, which is a function of the program alone; it is no order over spellings.
 //!
 //! Lowering resolves each type occurrence and each application as it appends it. The later phases
-//! write onto rows already appended: instantiation gives occurrences their types, and adds
-//! instantiations and satisfactions; coercion gives values their shapes and types; the tier phase
-//! gives definitions and types their tiers. What none of them wrote keeps the neutral value its
-//! row was appended with, which the accessors document.
+//! write onto rows already appended, and read what is written so far through `read`, which never
+//! indexes past a table: instantiation gives definitions their built-in meaning and occurrences
+//! their types, interning each type where it first needs it, and adds instantiations; the judging
+//! of bounds, still to come, adds satisfactions; coercion gives values their shapes and types; the
+//! tier phase gives definitions and types their tiers. What none of them wrote keeps the neutral
+//! value its row was appended with, which the accessors document.
 //!
 //! # The checks
 //!
@@ -99,6 +101,10 @@ pub struct ModelBuilder {
   instantiations: Vec<(DefId, TyId)>,
   /// Every location an error was reported at: applied when the model is finished.
   marks: Vec<Location>,
+  /// Each occurrence of an alias such as `NonZeroU32`, with the primitive whose `NonZero` it
+  /// names, in id order: what lowering knew of it that its row does not hold. No row of the model,
+  /// it is dropped when the model is finished.
+  non_zero: Vec<(TypeExprId, DefId)>,
 }
 
 impl Default for ModelBuilder {
@@ -110,6 +116,7 @@ impl Default for ModelBuilder {
       types: BTreeMap::new(),
       instantiations: Vec::new(),
       marks: Vec::new(),
+      non_zero: Vec::new(),
     }
   }
 }
@@ -597,6 +604,115 @@ impl ModelBuilder {
     row.index = index;
   }
 
+  /// Notes that `type_expr`, resolved to `core`'s `NonZero`, is an alias of it, `NonZeroU32` and
+  /// its kin, naming `NonZero` of the primitive whose definition is `primitive`. The row holds the
+  /// path as written and no argument, as a renamed `NonZero` does too: only this note tells the two
+  /// apart. Noted in id order, as lowering appends occurrences.
+  pub(crate) fn note_non_zero(&mut self, type_expr: TypeExprId, primitive: DefId) {
+    debug_assert!(
+      self
+        .non_zero
+        .last()
+        .is_none_or(|&(noted, _): &(TypeExprId, DefId)| noted < type_expr),
+      "aliases are noted in id order"
+    );
+    self.non_zero.push((type_expr, primitive));
+  }
+
+  /// Gives `type_expr` its type.
+  pub fn set_type_expr_ty(&mut self, type_expr: TypeExprId, ty: TyId) {
+    debug_assert!(
+      (ty.get() as usize) < self.model.tys.len(),
+      "a type is interned before an occurrence is given it"
+    );
+    self.model.type_exprs[type_expr.get() as usize].ty = ty;
+  }
+
+  /// Records `ty` as a closed instantiation of `def`. Instantiations are added in any order, and
+  /// each is kept once.
+  pub fn push_instantiation(&mut self, def: DefId, ty: TyId) {
+    self.instantiations.push((def, ty));
+  }
+
+  /// Interns the named type of `def` with `args`, every argument of it, each interned before it.
+  pub fn intern_named(&mut self, def: DefId, args: &[TyId], non_null: bool) -> TyId {
+    let closed = args
+      .iter()
+      .all(|arg: &TyId| self.model.tys[arg.get() as usize].closed);
+    // One level deeper than its deepest argument; with none, it nests nothing.
+    let depth = args
+      .iter()
+      .map(|arg: &TyId| self.model.tys[arg.get() as usize].depth.saturating_add(1))
+      .max()
+      .unwrap_or(0);
+    let row = TyRow {
+      shape: KIND_NAMED,
+      def,
+      index: 0,
+      element: TyId::new(0),
+      args: Run::default(),
+      non_null,
+      closed,
+      depth,
+      tier: Tier::Core,
+    };
+    self.intern_type(row, args)
+  }
+
+  /// Interns `def`'s type parameter `index`.
+  pub fn intern_param(&mut self, def: DefId, index: u32, non_null: bool) -> TyId {
+    let row = TyRow {
+      shape: KIND_PARAM,
+      def,
+      index,
+      element: TyId::new(0),
+      args: Run::default(),
+      non_null,
+      closed: false,
+      depth: 0,
+      tier: Tier::Core,
+    };
+    self.intern_type(row, &[])
+  }
+
+  /// Interns the list of `element`, interned before it.
+  pub fn intern_list(&mut self, element: TyId, non_null: bool) -> TyId {
+    let of = &self.model.tys[element.get() as usize];
+    let (closed, depth) = (of.closed, of.depth.saturating_add(1));
+    let row = TyRow {
+      shape: KIND_LIST,
+      def: NO_DEF,
+      index: 0,
+      element,
+      args: Run::default(),
+      non_null,
+      closed,
+      depth,
+      tier: Tier::Core,
+    };
+    self.intern_type(row, &[])
+  }
+
+  /// Interns the one type every unresolved occurrence shares.
+  pub fn intern_unresolved(&mut self) -> TyId {
+    self.intern_type(unresolved_ty(), &[])
+  }
+
+  /// `ty` with the nullness `non_null`: itself when it has it already, and otherwise its other
+  /// form, interned if nothing has. The unresolved type has no nullness, and answers itself.
+  ///
+  /// It reads `ty`'s arguments to make the other form's key, and so costs `ty`'s size.
+  pub(crate) fn intern_nullness(&mut self, ty: TyId, non_null: bool) -> TyId {
+    let Some(&row) = self.model.tys.get(ty.get() as usize) else {
+      return ty;
+    };
+    if row.shape == KIND_UNRESOLVED || row.non_null == non_null {
+      return ty;
+    }
+    let args: Vec<TyId> = row.args.of(&self.model.ty_args).to_vec();
+    self.intern_type(TyRow { non_null, ..row }, &args)
+  }
+
   /// Adds `application` to the applications of `def`'s contribution `contribution`, after those it
   /// has.
   pub fn push_def_application(
@@ -833,21 +949,16 @@ impl ModelBuilder {
   }
 
   /// The type `row` describes, whose arguments are `args`: the one already interned with the same
-  /// shape, or a new one appended.
-  ///
-  /// A type's key is its shape as words: the kind, whether it is non-null, its definition, its
-  /// parameter index and its element, then its arguments. A field a shape gives no meaning to holds
-  /// the same placeholder in every row, so two types are one exactly when their keys are equal.
+  /// shape, or a new one appended. Its key is `type_key`'s.
   fn intern_type(&mut self, mut row: TyRow, args: &[TyId]) -> TyId {
-    let mut key: Vec<u32> = Vec::with_capacity(5 + args.len());
-    key.push(u32::from(row.shape));
-    key.push(u32::from(row.non_null));
-    key.push(row.def.get());
-    key.push(row.index);
-    key.push(row.element.get());
-    for arg in args {
-      key.push(arg.get());
-    }
+    let key = type_key(
+      row.shape,
+      row.non_null,
+      row.def,
+      row.index,
+      row.element,
+      args,
+    );
     if let Some(found) = self.types.get(key.as_slice()) {
       return *found;
     }
@@ -1050,8 +1161,34 @@ fn unresolved_ty() -> TyRow {
     args: Run::default(),
     non_null: false,
     closed: true,
+    depth: 0,
     tier: Tier::Core,
   }
+}
+
+/// The key a type is interned by: its shape as words, the kind, whether it is non-null, its
+/// definition, its parameter index and its element, then its arguments. A field a shape gives no
+/// meaning to holds the same placeholder in every row, so two types are one exactly when their
+/// keys are equal. How deep it nests and whether it is closed follow from the key, and are no part
+/// of it.
+fn type_key(
+  shape: u8,
+  non_null: bool,
+  def: DefId,
+  index: u32,
+  element: TyId,
+  args: &[TyId],
+) -> Vec<u32> {
+  let mut key: Vec<u32> = Vec::with_capacity(args.len().saturating_add(5));
+  key.push(u32::from(shape));
+  key.push(u32::from(non_null));
+  key.push(def.get());
+  key.push(index);
+  key.push(element.get());
+  for arg in args {
+    key.push(arg.get());
+  }
+  key
 }
 
 /// Whether one of `marks`, sorted by source and then span, lies within `extent`.

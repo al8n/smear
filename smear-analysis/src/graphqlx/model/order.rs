@@ -41,8 +41,8 @@ use super::{
   module::ModuleKind,
   schema::Root,
   table::{
-    ApplicationRow, ContributionRow, DefRow, KIND_LIST, MemberRow, ModuleRow, PackageRow, Run,
-    UNSET_MODULE, VALUE_LIST, VALUE_MAP, VALUE_OBJECT, VALUE_SET,
+    ApplicationRow, ContributionRow, DefRow, KIND_LIST, KIND_NAMED, KIND_UNRESOLVED, MemberRow,
+    ModuleRow, PackageRow, Run, UNSET_MODULE, VALUE_LIST, VALUE_MAP, VALUE_OBJECT, VALUE_SET,
   },
 };
 
@@ -477,20 +477,40 @@ fn walk(model: &Model) {
   }
 }
 
-/// Types: a type's arguments and element are interned before it.
+/// Types: a type's arguments and element are interned before it; a named type has one argument
+/// for each of its definition's type parameters; and the unresolved type is no argument and no
+/// element of any type, since it makes unresolved whatever holds it.
 fn types(model: &Model) {
   for (index, row) in model.tys.iter().enumerate() {
     let id = dense(index);
-    for arg in row.args.of(&model.ty_args) {
+    let args = row.args.of(&model.ty_args);
+    for arg in args {
       assert!(
         arg.get() < id,
         "type {index}'s arguments are interned before it"
+      );
+      assert_ne!(
+        model.tys[arg.get() as usize].shape,
+        KIND_UNRESOLVED,
+        "type {index} has no unresolved argument"
       );
     }
     if row.shape == KIND_LIST {
       assert!(
         row.element.get() < id,
         "type {index}'s element is interned before it"
+      );
+      assert_ne!(
+        model.tys[row.element.get() as usize].shape,
+        KIND_UNRESOLVED,
+        "type {index}, a list, has no unresolved element"
+      );
+    }
+    if row.shape == KIND_NAMED {
+      assert_eq!(
+        args.len(),
+        model.defs[row.def.get() as usize].type_params.len as usize,
+        "type {index} has one argument for each of its definition's type parameters"
       );
     }
   }

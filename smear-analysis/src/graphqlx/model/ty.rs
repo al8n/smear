@@ -82,7 +82,8 @@ pub enum TypeExprKind<'a> {
     def: DefId,
     /// The parameter's position: its index among the definition's type parameters. An extension
     /// names its target's parameters by position, so a name it gives past them has a position
-    /// past them too, which instantiation refuses.
+    /// past them too: the extension's list is refused where it is written, and the occurrence's
+    /// type is the unresolved one.
     index: u32,
   },
   /// A list.
@@ -106,7 +107,9 @@ pub enum TyKind<'a> {
   Named {
     /// The definition.
     def: DefId,
-    /// Every argument, in the definition's order.
+    /// Every argument, in the definition's order. A collection's key or element, the first
+    /// argument of a definition `@set` or `@map` makes one, is non-null here however it is written,
+    /// so it may differ in nullness from the type of the occurrence that writes it.
     args: &'a [TyId],
   },
   /// One of a definition's type parameters: the `T` of `Page<T>` and the `U` of `Cursor<U>` are
@@ -174,8 +177,8 @@ impl Model {
   ///
   /// If `def` is not one of [`defs`](Self::defs).
   //
-  // The instantiation phase records them. Until it lands nothing does, and every definition
-  // answers none.
+  // The instantiation phase records each written occurrence's own type, both nullnesses when both
+  // are written; the builder sorts them and keeps each once.
   #[inline]
   pub fn instantiations(&self, def: DefId) -> &[TyId] {
     self.defs[def.get() as usize]
@@ -190,8 +193,8 @@ impl Model {
   /// [`Def::implements`](super::Def::implements) lists only what is written; this answers whether
   /// the type may stand where the interface is required.
   //
-  // The instantiation phase records them. Until it lands nothing does, and every pair answers
-  // `false`.
+  // The next part of the type phase, which judges bounds, records them. Until it lands nothing
+  // does, and every pair answers `false`.
   #[inline]
   pub fn satisfies(&self, ty: TyId, interface: DefId) -> bool {
     self.satisfactions.binary_search(&(ty, interface)).is_ok()
@@ -252,9 +255,8 @@ impl<'a> TypeExpr<'a> {
   /// Its type: the complete instantiation, with defaults filled and substituted and an alias
   /// expanded. Two occurrences of one type answer one id.
   //
-  // The instantiation phase gives it; no phase before it interns a type. Until then every
-  // occurrence answers the one unresolved type, in an analysis that is ok too, which therefore
-  // holds an unresolved type wherever it holds an occurrence: the interim this accessor accepts.
+  // The instantiation phase gives it. An occurrence it could not type, or that holds one it could
+  // not, has the one unresolved type, within the extent of the error a phase reported for it.
   #[inline]
   pub fn ty(&self) -> TyId {
     self.row().ty

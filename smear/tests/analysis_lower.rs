@@ -1256,9 +1256,29 @@ fn a_type_keeps_its_written_path_arguments_and_nullness() {
     &[("p.graphqlx", "type Point {\n  x: Int\n}\n")],
   );
   let analysis = analyze(&root, &[geo], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = file(&analysis, 3, "schema.graphqlx");
+
+  // Instantiation refuses the two counts the definitions do not take, each where it is written,
+  // with a label at the definition's name; lowering records them all the same.
+  let btree = model
+    .def(def(model, Namespace::Type, "^::alloc::BTreeMap"))
+    .location();
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        "smear::graphqlx::generic-arity",
+        at(schema, TYPES, "BTreeMap<string>", 0),
+        Some(btree)
+      ),
+      (
+        "smear::graphqlx::generic-arity",
+        at(schema, TYPES, "Local<Int, Int>", 0),
+        Some(named(schema, TYPES, "scalar ", "Local", 0))
+      ),
+    ]
+  );
 
   // `Int` stays `Int` and names `i32`; arguments are recorded however many the definition has
   // parameters.

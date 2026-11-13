@@ -31,16 +31,18 @@ const DEFAULT_NEAR_MISS_COMPARISONS: u32 = 1 << 20;
 ///
 /// A package set is untrusted input, and the analysis bounds every resource such input could
 /// otherwise grow without limit: the number of definitions and of modules, how deep modules, `use`
-/// trees and type arguments nest, how long a path is, how many rounds the glob fixpoint runs, how
-/// many modules one module's globs name, how many instantiations it records, how many steps of
-/// substitution it takes, and how many bytes of source it reads. A bound that is passed is
-/// reported as `smear::graphqlx::resource-limit`, never as a panic. Two bounds are not refusals:
-/// the diagnostic ceiling and the near-miss budget limit what the analysis says, not what it
-/// accepts.
+/// trees and types nest, how long a path is, how many rounds the glob fixpoint runs, how many
+/// modules one module's globs name, how many instantiations of generic definitions it interns, how
+/// many steps of substitution it takes, and how many bytes of source it reads. A bound that is
+/// passed is reported as `smear::graphqlx::resource-limit`, never as a panic. Two bounds are not
+/// refusals: the diagnostic ceiling and the near-miss budget limit what the analysis says, not
+/// what it accepts.
 ///
 /// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
-/// is always declared whole and every package has its root module: see
-/// [`Limits::max_definitions`] and [`Limits::max_modules`].
+/// is always declared whole and every package has its root module, and that the built-in library's
+/// types are built whatever the generic depth, instantiation and substitution bounds are: see
+/// [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_generic_depth`],
+/// [`Limits::max_instantiations`] and [`Limits::max_substitutions`].
 ///
 /// # Building one
 ///
@@ -212,22 +214,35 @@ impl Limits {
     self.max_globs
   }
 
-  /// How deeply type arguments may nest in one type once substitution has filled them:
-  /// `Vec<Map<string, Vec<i32>>>` is three deep.
+  /// How deeply one type may nest once substitution has filled it: a type argument and a list's
+  /// element each nest one level, so `Vec<Map<string, Vec<i32>>>` is three deep, and `[[i32]]` is
+  /// two.
+  ///
+  /// A type deeper than this is reported at each occurrence that would have it, which is then the
+  /// unresolved type. The built-in library's types are built whatever the bound, so `0`, which
+  /// refuses every list and every type with an argument a supplied package writes, reports nothing
+  /// inside it.
   ///
   /// The default is 64. A written type is already bounded by the parser's bracket ceiling (24 at
-  /// its default); substitution is what can go deeper, since `interface A<X> implements B<Box<X>>`
-  /// wraps once more per level, and this bound stops that growth.
+  /// its default); substitution is what can go deeper, since a default that wraps a parameter once
+  /// more, or `interface A<X> implements B<Box<X>>`, nests once more per level, and this bound
+  /// stops that growth.
   #[inline]
   pub const fn max_generic_depth(&self) -> u32 {
     self.max_generic_depth
   }
 
-  /// How many distinct instantiations of generic definitions the analysis may record, those the
-  /// program writes and those substitution derives together.
+  /// How many distinct instantiations of generic definitions the analysis may intern: each
+  /// definition of at least one type parameter with each list of arguments, those the program
+  /// writes and those filling its defaults derives together, a type that names a type parameter
+  /// included. An instantiation written nullable and non-null counts once.
+  ///
+  /// Past it, each occurrence that would need one more is reported where it is written, and is the
+  /// unresolved type; one already interned is still built. The built-in library's are not counted.
   ///
   /// The default is 2^16. A program writes hundreds of instantiations; derived ones can double per
-  /// level of an `implements` chain, and this bound is what keeps that doubling finite.
+  /// level of a chain of defaults, or of an `implements` chain, and this bound is what keeps that
+  /// doubling finite.
   #[inline]
   pub const fn max_instantiations(&self) -> u32 {
     self.max_instantiations

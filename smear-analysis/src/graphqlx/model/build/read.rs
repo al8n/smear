@@ -7,20 +7,21 @@
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{ApplicationId, DefId, ModuleId, Sym, TypeExprId, dense},
+  id::{ApplicationId, DefId, ModuleId, Sym, TyId, TypeExprId, dense},
   model::{
-    DefKind, Resolution,
-    table::{DefRow, KIND_LIST, KIND_NAMED, KIND_PARAM},
+    Collection, DefKind, Resolution,
+    table::{DefRow, KIND_LIST, KIND_NAMED, KIND_PARAM, TyRow, UNSET_TY},
   },
 };
 
-use super::ModelBuilder;
+use super::{ModelBuilder, type_key};
 
 /// What a type occurrence names, as lowering resolved it.
 #[derive(Clone, Copy)]
 pub(crate) enum Written {
-  /// A definition.
-  Named,
+  /// A definition: `core`'s `NonZero` for an alias such as `NonZeroU32`, which `non_zero_of`
+  /// tells apart.
+  Named(DefId),
   /// One of `def`'s type parameters: the one at `index`, which an extension's name past its
   /// target's parameters leaves past them.
   Param { def: DefId, index: u32 },
@@ -36,8 +37,12 @@ pub(crate) struct Occurrence<'b> {
   pub(crate) written: Written,
   /// The arguments written for it, in order, whatever it names.
   pub(crate) args: &'b [TypeExprId],
+  /// Whether it is written non-null, with `!`.
+  pub(crate) non_null: bool,
   /// Where it is written.
   pub(crate) location: Location,
+  /// Its type: `None` until a phase gives it one.
+  pub(crate) ty: Option<TyId>,
 }
 
 impl ModelBuilder {
@@ -73,6 +78,15 @@ impl ModelBuilder {
     }
   }
 
+  /// The collection `def` stands for, once built-in meaning is given.
+  pub(crate) fn def_collection(&self, def: DefId) -> Option<Collection> {
+    self
+      .model
+      .defs
+      .get(def.get() as usize)
+      .and_then(|row: &DefRow| row.collection)
+  }
+
   /// The applications of `def`, every contribution's, in order.
   pub(crate) fn def_applications(&self, def: DefId) -> &[ApplicationId] {
     match self.model.defs.get(def.get() as usize) {
@@ -106,11 +120,28 @@ impl ModelBuilder {
     Some((param.name, param.location, param.default))
   }
 
-  /// The type occurrence `id`, as lowering wrote it.
+  /// How many directive applications the model holds.
+  pub(crate) fn application_count(&self) -> u32 {
+    dense(self.model.applications.len())
+  }
+
+  /// The application `id`: the directive it resolved to, how many type arguments it writes, and
+  /// where its directive's path is written.
+  pub(crate) fn applied(&self, id: ApplicationId) -> Option<(Resolution<DefId>, u32, Location)> {
+    let row = self.model.applications.get(id.get() as usize)?;
+    Some((row.directive, row.type_args.len, row.path.location))
+  }
+
+  /// How many type occurrences the model holds.
+  pub(crate) fn type_expr_count(&self) -> u32 {
+    dense(self.model.type_exprs.len())
+  }
+
+  /// The type occurrence `id`, as lowering wrote it, with the type a phase gave it.
   pub(crate) fn occurrence(&self, id: TypeExprId) -> Option<Occurrence<'_>> {
     let row = self.model.type_exprs.get(id.get() as usize)?;
     let written = match row.shape {
-      KIND_NAMED => Written::Named,
+      KIND_NAMED => Written::Named(row.def),
       KIND_PARAM => Written::Param {
         def: row.def,
         index: row.index,
@@ -121,14 +152,47 @@ impl ModelBuilder {
     Some(Occurrence {
       written,
       args: row.args.of(&self.model.type_expr_args),
+      non_null: row.non_null,
       location: row.location,
+      ty: (row.ty != UNSET_TY).then_some(row.ty),
     })
   }
 
-  /// The application `id`: the directive it resolved to, how many type arguments it writes, and
-  /// where its directive's path is written.
-  pub(crate) fn applied(&self, id: ApplicationId) -> Option<(Resolution<DefId>, u32, Location)> {
-    let row = self.model.applications.get(id.get() as usize)?;
-    Some((row.directive, row.type_args.len, row.path.location))
+  /// The primitive whose `NonZero` the occurrence `id` names, when it is an alias such as
+  /// `NonZeroU32`, as lowering noted it: one binary search of the notes.
+  pub(crate) fn non_zero_of(&self, id: TypeExprId) -> Option<DefId> {
+    let at = self
+      .non_zero
+      .binary_search_by_key(&id, |&(noted, _): &(TypeExprId, DefId)| noted)
+      .ok()?;
+    self
+      .non_zero
+      .get(at)
+      .map(|&(_, primitive): &(TypeExprId, DefId)| primitive)
+  }
+
+  /// How deeply `ty` nests: 0 for a type the builder did not issue.
+  pub(crate) fn ty_depth(&self, ty: TyId) -> u32 {
+    self
+      .model
+      .tys
+      .get(ty.get() as usize)
+      .map_or(0, |row: &TyRow| row.depth)
+  }
+
+  /// Whether `ty` names no type parameter.
+  pub(crate) fn ty_closed(&self, ty: TyId) -> bool {
+    self
+      .model
+      .tys
+      .get(ty.get() as usize)
+      .is_some_and(|row: &TyRow| row.closed)
+  }
+
+  /// The named type of `def` with every argument `args`, non-null when `non_null`, when it is
+  /// interned already: found by the key interning makes, and interning nothing.
+  pub(crate) fn find_named(&self, def: DefId, args: &[TyId], non_null: bool) -> Option<TyId> {
+    let key = type_key(KIND_NAMED, non_null, def, 0, TyId::new(0), args);
+    self.types.get(key.as_slice()).copied()
   }
 }
