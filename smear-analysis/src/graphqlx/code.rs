@@ -523,4 +523,8 @@ pub(crate) mod schema {
   /// `SelfImplementingInterface`.
   pub(crate) const SELF_IMPLEMENTING_INTERFACE: Code =
     Code::new("smear::schema::self-implementing-interface");
+
+  /// A union's member names what is no object type: `smear-schema`'s `UnionMemberNotObject`.
+  pub(crate) const UNION_MEMBER_NOT_OBJECT: Code =
+    Code::new("smear::schema::union-member-not-object");
 }

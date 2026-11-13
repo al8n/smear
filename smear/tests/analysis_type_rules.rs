@@ -48,6 +48,9 @@ const ARGUMENT_TYPE: &str = "smear::schema::argument-type-not-input-type";
 /// GraphQL's code of an input field typed by what is no input type.
 const INPUT_FIELD_TYPE: &str = "smear::schema::input-field-type-not-input-type";
 
+/// GraphQL's code of a union member that is no object type.
+const UNION_MEMBER: &str = "smear::schema::union-member-not-object";
+
 /// What the rule on `NonZero`'s argument says, whatever the argument is.
 const NONZERO_MESSAGE: &str = "`NonZero` takes an integer primitive at least one bit wide, written \
                                without `!`, as its type argument, and this one is not";
@@ -191,7 +194,7 @@ fn a_marker_stands_in_implements_and_where_and_nowhere_else() {
     (MARKER, named(schema, SITES, before, "M", nth), None)
   };
   // A marker is an interface, so as a field's argument and as an input field it is also no input
-  // type, which GraphQL's own rule says at the same token.
+  // type, and as a union member no object type, which GraphQL's own rules say at the same token.
   assert_eq!(
     found(&analysis),
     [
@@ -202,6 +205,7 @@ fn a_marker_stands_in_implements_and_where_and_nowhere_else() {
       at_marker("m: ", 1),
       (INPUT_FIELD_TYPE, named(schema, SITES, "m: ", "M", 1), None),
       at_marker("U = ", 0),
+      (UNION_MEMBER, named(schema, SITES, "U = ", "M", 0), None),
       at_marker("B<", 0),
       at_marker("I<", 0),
       at_marker("T = ", 0),
@@ -477,6 +481,12 @@ fn type_ref_is_a_directive_arguments_type() {
       refused("a: "),
       refused("@t<"),
       refused("U = "),
+      // `TypeRef` is a scalar, so as a union member it is also no object type.
+      (
+        UNION_MEMBER,
+        named(schema, TYPE_REFS, "U = ", "TypeRef", 0),
+        None
+      ),
       refused("T = "),
       (
         TYPEREF,

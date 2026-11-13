@@ -2,7 +2,8 @@
 //! code: a member's name does not begin with two underscores; a definition's members have distinct
 //! names, and so have a field's arguments; a definition that holds members holds one at least; a
 //! member's type is of the kind its position takes; an object or an interface implements
-//! interfaces; and no interface implements itself. Each rule judges what a supplied
+//! interfaces; no interface implements itself; and a union's members are object types. Each rule
+//! judges what a supplied
 //! package's definition holds, says nothing within what a phase refused, and quotes a name only as
 //! an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -53,6 +54,12 @@ const IMPLEMENTS: &str = "smear::schema::implements-non-interface";
 
 /// GraphQL's code for an interface that implements itself.
 const SELF_IMPLEMENTING: &str = "smear::schema::self-implementing-interface";
+
+/// GraphQL's code for a union member that is no object type.
+const UNION_MEMBER: &str = "smear::schema::union-member-not-object";
+
+/// The code of a union member that names nothing, a phase's.
+const UNDEFINED_MEMBER: &str = "smear::schema::undefined-union-member";
 
 /// The code of a marker used as a marker may not be, which L3's rule reports.
 const MARKER: &str = "smear::graphqlx::marker-misuse";
@@ -802,6 +809,59 @@ fn no_interface_implements_itself() {
   assert_eq!(first.help(), None);
 }
 
+/// Unions of an interface, a scalar, an enum, an input object, a union and a generic scalar; then
+/// of an object, a generic object, and a generic union's own parameters.
+const UNIONS: &str = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\ntype Page<P> {\n  items: [P]\n}\n\
+                      interface Face {\n  f: Int\n}\nscalar Sca\nenum Enu {\n  V\n}\n\
+                      input Inp {\n  i: Int\n}\nunion Inner = Obj\nscalar Box<B>\n\
+                      union U1 = Face\nunion U2 = Sca\nunion U3 = Enu\nunion U4 = Inp\n\
+                      union U5 = Inner\nunion U6 = Box<Int>\n\
+                      union Good = Obj | Page<Obj>\nunion Either<A, B> = A | B\n";
+
+#[test]
+fn a_unions_members_are_object_types() {
+  let analysis = analyze_one(UNIONS);
+  let schema = schema_file(&analysis);
+  let member = |before: &str, name: &str| -> (&'static str, Location, Option<Location>) {
+    (UNION_MEMBER, named(schema, UNIONS, before, name, 0), None)
+  };
+  assert_eq!(
+    found(&analysis),
+    [
+      member("U1 = ", "Face"),
+      member("U2 = ", "Sca"),
+      member("U3 = ", "Enu"),
+      member("U4 = ", "Inp"),
+      member("U5 = ", "Inner"),
+      (UNION_MEMBER, at(schema, UNIONS, "Box<Int>", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the union `U1` holds `Face`, which is an interface and no object type",
+      "the union `U2` holds `Sca`, which is a scalar and no object type",
+      "the union `U3` holds `Enu`, which is an enum and no object type",
+      "the union `U4` holds `Inp`, which is an input object and no object type",
+      "the union `U5` holds `Inner`, which is a union and no object type",
+      "the union `U6` holds `Box`, which is a scalar and no object type",
+    ]
+  );
+  let first = analysis.diagnostics().iter().next().expect("a diagnostic");
+  assert_eq!(
+    (first.primary_label(), first.help()),
+    (
+      Some("union member is not an object type"),
+      Some(
+        "a union's members must be object types: a union of interfaces or of unions has no \
+         concrete member set."
+      )
+    )
+  );
+}
+
 /// A refusal of `code` is silent in a contribution that also holds a phase's error, `together`,
 /// and is reported beside it when the error is in a sibling definition, `apart`. The phase's error
 /// is an undefined type.
@@ -865,6 +925,12 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\ntype T implements Obj {\n  id: ID\n}\n\
      type U {\n  x: Missing\n}\n",
   );
+  silent_beside(
+    UNDEFINED_MEMBER,
+    UNION_MEMBER,
+    "type Query {\n  ok: Int\n}\ninterface Face {\n  f: Int\n}\nunion U = Face | Missing\n",
+    "type Query {\n  ok: Int\n}\ninterface Face {\n  f: Int\n}\nunion U = Face\nunion V = Missing\n",
+  );
   // An error in an interface's own contribution silences it, and not the other interface of its
   // ring.
   let text = "type Query {\n  ok: Int\n}\ninterface A implements B {\n  id: ID\n  x: Missing\n}\n\
@@ -904,6 +970,9 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
     ),
     format!(
       "type Query {{\n  ok: Int\n}}\ninterface {owner} implements {owner} {{\n  id: ID\n}}\n"
+    ),
+    format!(
+      "type Query {{\n  ok: Int\n}}\ninterface {plain} {{\n  f: Int\n}}\nunion {owner} = {plain}\n"
     ),
   ];
   for text in &texts {

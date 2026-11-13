@@ -41,6 +41,7 @@ mod reserved_name;
 mod schema_outside_root;
 mod self_implementing_interface;
 mod type_ref_misuse;
+mod union_member_not_object;
 
 use self::{
   collection_arity::CollectionArity, duplicate_member::DuplicateMember,
@@ -51,6 +52,7 @@ use self::{
   non_zero_argument::NonZeroArgument, orphan_extension::OrphanExtension,
   reserved_name::ReservedName, schema_outside_root::SchemaOutsideRoot,
   self_implementing_interface::SelfImplementingInterface, type_ref_misuse::TypeRefMisuse,
+  union_member_not_object::UnionMemberNotObject,
 };
 use super::{
   Contribution, Cx, DefId, Model, PackageId, PackageKind, TypeExprId, TypeExprKind, id::dense,
@@ -311,7 +313,7 @@ rule_set! {
   /// name does not begin with `__`; a definition's members have distinct names, and so have a
   /// field's arguments; a definition that holds members holds one at least, a marker holding
   /// none; a member's type is of the kind its position takes; an object or an interface implements
-  /// interfaces; and no interface implements itself.
+  /// interfaces; no interface implements itself; and a union's members are object types.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -357,6 +359,8 @@ rule_set! {
       => [super::code::schema::IMPLEMENTS_NON_INTERFACE],
     self_implementing_interface: SelfImplementingInterface
       => [super::code::schema::SELF_IMPLEMENTING_INTERFACE],
+    union_member_not_object: UnionMemberNotObject
+      => [super::code::schema::UNION_MEMBER_NOT_OBJECT],
   }
 }
 

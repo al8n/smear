@@ -174,7 +174,6 @@ const ALLOWED: &[Allowed] = &[
   every("smear::schema::circular-non-null-input-field", CYCLES),
   every("smear::schema::circular-one-of-input-field", CYCLES),
   every("smear::schema::input-object-default-value-cycle", CYCLES),
-  every("smear::schema::union-member-not-object", PART_2_2),
   every("smear::schema::deprecated-required-argument", PART_2_2),
   every("smear::schema::deprecated-required-input-field", PART_2_2),
   every("smear::schema::one-of-field-not-nullable", PART_2_2),

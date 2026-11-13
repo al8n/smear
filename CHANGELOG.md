@@ -323,8 +323,9 @@ All notable changes to Smear are documented in this file.
   `directive-argument-type-not-input-type`, at the base; and an `implements` entry of an object or
   an interface that names what is no interface, a type parameter among them, is
   `implements-non-interface`; and an interface on a cycle of `implements` entries, of any length,
-  is `self-implementing-interface`. A rule says nothing about a contribution a phase already
-  refused something in. On every GraphQL document of smear's corpora the analyzer
+  is `self-implementing-interface`; and a union member that names what is no object type is
+  `union-member-not-object`. A rule says nothing about a contribution a phase already refused
+  something in. On every GraphQL document of smear's corpora the analyzer
   is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
   divergence it allows. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models

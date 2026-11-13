@@ -76,7 +76,7 @@ rule_set! {
 #[test]
 fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   let table: &[(&str, &[Code])] = Rules::TABLE;
-  assert_eq!(table.len(), 15);
+  assert_eq!(table.len(), 16);
   assert_eq!(table[0].0, "DuplicateSchemaDefinition");
   assert_eq!(
     table[0].1,
@@ -167,6 +167,11 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   assert_eq!(
     table[14].1,
     &[Code::new("smear::schema::self-implementing-interface")]
+  );
+  assert_eq!(table[15].0, "UnionMemberNotObject");
+  assert_eq!(
+    table[15].1,
+    &[Code::new("smear::schema::union-member-not-object")]
   );
 }
 

@@ -271,8 +271,9 @@ impl Analysis {
 ///   `input-field-type-not-input-type` or `directive-argument-type-not-input-type`, at the base.
 ///   An `implements` entry of an object or an interface that names what is no interface, a type
 ///   parameter among them, is `implements-non-interface`, at the entry. An interface on a cycle
-///   of `implements` entries, of any length, is `self-implementing-interface`, at its name. A rule
-///   says nothing about a contribution a phase already refused something in.
+///   of `implements` entries, of any length, is `self-implementing-interface`, at its name. A
+///   union member that names what is no object type is `union-member-not-object`, at the member.
+///   A rule says nothing about a contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

@@ -86,6 +86,9 @@ const IMPLEMENTS_NON_INTERFACE: &str = "smear::schema::implements-non-interface"
 /// GraphQL's code for an interface that implements itself.
 const SELF_IMPLEMENTING_INTERFACE: &str = "smear::schema::self-implementing-interface";
 
+/// GraphQL's code for a union member that is no object type.
+const UNION_MEMBER_NOT_OBJECT: &str = "smear::schema::union-member-not-object";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1511,6 +1514,7 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(SELF_IMPLEMENTING_INTERFACE),
     an_interface_implementing_itself,
   ),
+  (Code::new(UNION_MEMBER_NOT_OBJECT), a_union_of_an_interface),
 ];
 
 /// A root package that defines its schema twice.
@@ -1693,6 +1697,11 @@ fn an_object_implementing_an_object() -> Analysis {
 /// An interface that implements itself.
 fn an_interface_implementing_itself() -> Analysis {
   analyze_one("type Query { ok: Int } interface I implements I { a: Int }")
+}
+
+/// A union whose member is an interface.
+fn a_union_of_an_interface() -> Analysis {
+  analyze_one("type Query { ok: Int } interface I { a: Int } union U = I")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and
