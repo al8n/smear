@@ -331,7 +331,11 @@ mod lossless {
         let text = format!("{opener} {closer}");
         let reported: Range<usize> = text.len() - closer.len()..text.len();
         for (root, _, errors) in at_both_roots(&text) {
-          assert_eq!(errors, [reported.clone()], "{text} at the {root} root");
+          assert_eq!(
+            errors,
+            core::slice::from_ref(&reported),
+            "{text} at the {root} root"
+          );
         }
       }
     }
@@ -346,7 +350,11 @@ mod lossless {
     for text in ["mod m { \"d\" }", "mod m { extend }"] {
       let reported: Range<usize> = text.len() - 1..text.len();
       for (root, tree, errors) in at_both_roots(text) {
-        assert_eq!(errors, [reported.clone()], "{text} at the {root} root");
+        assert_eq!(
+          errors,
+          core::slice::from_ref(&reported),
+          "{text} at the {root} root"
+        );
         assert!(
           holds_a_closing_brace(&module(&tree, "mod m")),
           "{text} at the {root} root: the module lost its `}}`"
@@ -366,7 +374,11 @@ mod lossless {
         let at: usize = text.find(closer).expect("the text holds its closer");
         let reported: Range<usize> = at..at + closer.len();
         for (root, tree, errors) in at_both_roots(&text) {
-          assert_eq!(errors, [reported.clone()], "{text} at the {root} root");
+          assert_eq!(
+            errors,
+            core::slice::from_ref(&reported),
+            "{text} at the {root} root"
+          );
           let m = module(&tree, "mod m");
           assert_eq!(scalars(&m), ["scalar X"], "{text} at the {root} root");
           assert!(holds_a_closing_brace(&m), "{text} at the {root} root");
