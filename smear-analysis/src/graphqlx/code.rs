@@ -190,10 +190,11 @@ pub enum DiagnosticKind {
   /// being `NonZero` of the integer it spells, and reported where `NonZero` is written, with a
   /// label at its type argument.
   NonZeroArgument,
-  /// A type parameter with the name of an earlier type parameter of its definition. A type
-  /// argument binds by position, and the definition names a parameter by its name, which would
-  /// name the first of the two alone. Reported at the later parameter's name, with a label at the
-  /// first of that name.
+  /// A type parameter with the name of an earlier type parameter of its definition, or a name an
+  /// extension's own list gives one of its target's type parameters after it gave it to an
+  /// earlier one. A type argument binds by position, and the definition, or the extension, names
+  /// a parameter by its name, which would name the first of the two alone. Reported at the later
+  /// name, with a label at the first of that name.
   DuplicateTypeParameter,
 
   // -- Resources ---------------------------------------------------------------------------------

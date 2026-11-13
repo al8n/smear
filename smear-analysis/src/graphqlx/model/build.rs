@@ -353,6 +353,39 @@ impl ModelBuilder {
     index
   }
 
+  /// Gives the extension at `contribution` among `def`'s contributions the type parameter list it
+  /// writes: `names`, each name with where it is written, in written order.
+  ///
+  /// The lists are appended in the order of the contributions, every definition's in id order and
+  /// each definition's in its own, so that they tile one pool. Nothing is kept for an index that
+  /// is no extension of `def`.
+  pub(crate) fn set_extension_params(
+    &mut self,
+    def: DefId,
+    contribution: u32,
+    names: &[(Sym, Location)],
+  ) {
+    let Some(row) = self.model.defs.get(def.get() as usize) else {
+      return;
+    };
+    if contribution >= row.contributions.len {
+      return;
+    }
+    let at = row.contributions.start as usize + contribution as usize;
+    if !self
+      .model
+      .contributions
+      .get(at)
+      .is_some_and(|part: &ContributionRow| part.extension)
+    {
+      return;
+    }
+    let run = append(&mut self.model.written_params, names);
+    if let Some(part) = self.model.contributions.get_mut(at) {
+      part.params = run;
+    }
+  }
+
   /// Gives `def` the description `text`, cooked, written at `location`.
   pub fn set_def_description(&mut self, def: DefId, text: &str, location: Location) {
     let description = self.description(text, location);
@@ -1220,6 +1253,7 @@ fn contribution_row(location: Location, extent: Location, extension: bool) -> Co
     implements: Run::default(),
     union_members: Run::default(),
     applications: Run::default(),
+    params: Run::default(),
     marked: false,
   }
 }

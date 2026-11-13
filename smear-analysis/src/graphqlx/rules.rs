@@ -17,7 +17,8 @@
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk
 //! descends the written arguments of an occurrence that names a type parameter, or nothing, and
-//! the public kind does not answer them.
+//! the public kind does not answer them. `DuplicateTypeParameter` reads another,
+//! `Def::extension_params`: the names an extension's own list writes, which no public view holds.
 
 mod collection_arity;
 mod duplicate_schema_definition;
@@ -280,7 +281,8 @@ rule_set! {
   /// bounds, and a scalar, an enum, an input object or a union implements markers alone; a set has
   /// one type parameter and a map two; `TypeRef` stands only in a directive's arguments;
   /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; and
-  /// a definition's type parameters have distinct names.
+  /// a definition's type parameters have distinct names, and so do the names an extension's own
+  /// list gives them.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],

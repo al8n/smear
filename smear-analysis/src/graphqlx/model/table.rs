@@ -210,6 +210,10 @@ pub(super) struct ContributionRow {
   pub(super) union_members: Run,
   /// The applications it contributed, in the model's listed-application pool.
   pub(super) applications: Run,
+  /// The names an extension's own type parameter list gives its target's type parameters, in the
+  /// model's written-parameter pool: none for a definition's own contribution, whose names are its
+  /// type parameters, nor for an extension that writes no list.
+  pub(super) params: Run,
   /// Whether an error a phase or one of smear's rules reported lies within its extent.
   pub(super) marked: bool,
 }

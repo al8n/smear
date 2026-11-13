@@ -207,8 +207,9 @@ fn defs(model: &Model) {
   }
 }
 
-/// Contributions: a definition's own first, then only extensions; the schema's definitions, then
-/// only extensions.
+/// Contributions: a definition's own first, then only extensions, and only an extension of a
+/// definition keeps the type parameter list it writes; the schema's definitions, then only
+/// extensions.
 fn contributions(model: &Model) {
   for (index, def) in model.defs.iter().enumerate() {
     for (position, part) in def
@@ -222,6 +223,11 @@ fn contributions(model: &Model) {
         position > 0,
         "definition {index}'s first contribution is its own, and every later one an extension"
       );
+      assert!(
+        part.extension || part.params.len == 0,
+        "definition {index}'s own names are its type parameters, and its own contribution keeps no \
+         list"
+      );
     }
   }
   let mut extending = false;
@@ -230,6 +236,7 @@ fn contributions(model: &Model) {
       part.extension || !extending,
       "the schema's definitions are appended before its extensions"
     );
+    assert_eq!(part.params.len, 0, "a schema item names no type parameter");
     extending = part.extension;
   }
 }
@@ -329,6 +336,14 @@ fn lists(model: &Model) {
     model.defs.iter().map(|row: &DefRow| row.type_params),
     model.type_params.len(),
     "type parameters",
+  );
+  tiles(
+    model
+      .contributions
+      .iter()
+      .map(|part: &ContributionRow| part.params),
+    model.written_params.len(),
+    "extensions' own type parameter names",
   );
   tiles(
     model.defs.iter().map(|row: &DefRow| row.bounds),

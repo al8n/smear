@@ -647,6 +647,65 @@ fn a_type_parameter_is_named_once() {
 }
 
 #[test]
+fn an_extensions_list_names_each_type_parameter_once() {
+  // An extension's own list names its target's type parameters by position: a second `U` is
+  // refused, labelled at the first.
+  let text = "type P<A, B> {\n  a: A\n}\nextend type P<U, U> {\n  b: U\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DUPLICATE,
+      named(schema, text, ", ", "U", 0),
+      Some(named(schema, text, "P<", "U", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the type parameter `U` this extension of `P` names has the name of an earlier one of its \
+       list, and an extension's list gives its target's type parameters distinct names"
+    ]
+  );
+
+  // A list of another count is the phase's alone: the rule says nothing beside it.
+  let analysis = analyze_one("type P<A, B> {\n  a: A\n}\nextend type P<U, U, V> {\n  b: U\n}\n");
+  assert_eq!(codes(&analysis), [ARITY], "{:#?}", analysis.diagnostics());
+
+  // An extension a dependency writes of its own type, in a file of its own.
+  let theirs = "extend type P<U, U> {\n  b: U\n}\n";
+  let geo = package(
+    "geo",
+    Layout::Flat,
+    &[
+      ("a.graphqlx", "type P<A, B> {\n  a: A\n}\n"),
+      ("b.graphqlx", theirs),
+    ],
+  );
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[("schema.graphqlx", "type Query {\n  ok: Int\n}\n")],
+  )
+  .with_dependencies(["geo"]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let extension = file(&analysis, 4, "b.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(
+      DUPLICATE,
+      named(extension, theirs, ", ", "U", 0),
+      Some(named(extension, theirs, "P<", "U", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
 fn a_rule_says_nothing_where_a_phase_spoke() {
   // Each refusal beside a phase's error in the same definition: the phase's diagnostic alone.
   for (text, expected) in [

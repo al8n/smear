@@ -1387,8 +1387,9 @@ impl Lowering<'_, '_> {
   /// The contribution `part`'s generics, read as `shape`: for the definition's own, each type
   /// parameter's default, then each bound, predicate by predicate and bound by bound as written.
   /// An extension's parameter list names its target's parameters by position, one name each, and
-  /// another count is refused; its `where` clause is refused too: the model's bounds are the
-  /// definition's. A definition that replaces a GraphQL built-in has none of its list lowered.
+  /// another count is refused; its names are kept with the extension, for the rule that judges
+  /// them distinct. Its `where` clause is refused too: the model's bounds are the definition's. A
+  /// definition that replaces a GraphQL built-in has none of its list lowered.
   fn generics<S: AsRef<[u8]>>(&mut self, part: Part<'_>, shape: &Shape<'_, S>) {
     let source = part.site.source.get();
     if let Some(extension) = shape.extension {
@@ -1405,6 +1406,16 @@ impl Lowering<'_, '_> {
             count,
           );
         }
+        // The names the list gives, kept for the rule that judges them distinct.
+        let mut names: Vec<(Sym, Location)> = Vec::with_capacity(list.params().len());
+        for parameter in list.params() {
+          let name = parameter.name();
+          let sym = self.intern(name);
+          names.push((sym, Location::new(source, *name.as_span())));
+        }
+        self
+          .builder
+          .set_extension_params(part.def, part.contribution, &names);
       }
       if let Some(clause) = shape.clause {
         self.invalid_bound(

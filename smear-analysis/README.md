@@ -66,8 +66,9 @@ package makes a collection with another count, or makes both, being
 definition's argument or of an input field, under lists alone, anywhere else being
 `smear::graphqlx::typeref-misuse`; and `NonZero`'s type argument is an integer primitive at least
 one bit wide, written without `!`, `NonZero` of anything else being
-`smear::graphqlx::nonzero-argument`; and a definition's type parameters have distinct names, a type
-parameter with the name of an earlier one being `smear::graphqlx::duplicate-type-parameter`. An
+`smear::graphqlx::nonzero-argument`; and a definition's type parameters have distinct names, and so
+do the names an extension's own list gives them, a type parameter with the name of an earlier one
+being `smear::graphqlx::duplicate-type-parameter`. An
 error that a phase or a rule reports marks the contributions, members and definitions that hold it,
 as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error marks
 nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and

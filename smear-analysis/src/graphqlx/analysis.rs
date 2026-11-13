@@ -247,9 +247,10 @@ impl Analysis {
 ///   where it is named, a type argument of any generic definition included. `NonZero` whose type
 ///   argument, in the occurrence's type, is no integer primitive at least one bit wide written
 ///   without `!` is `nonzero-argument`, where it is written, with a label at the argument. A type
-///   parameter with the name of an earlier one of its definition is `duplicate-type-parameter`, at
-///   its name, with a label at the first of that name. A rule says nothing about a contribution a
-///   phase already refused something in.
+///   parameter with the name of an earlier one of its definition, and a name an extension's own
+///   list gives after it gave it to an earlier one, is `duplicate-type-parameter`, at that name,
+///   with a label at the first of that name. A rule says nothing about a contribution a phase
+///   already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

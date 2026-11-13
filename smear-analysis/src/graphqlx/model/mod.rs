@@ -73,6 +73,9 @@ pub struct Model {
   defs: Vec<DefRow>,
   /// Every definition's contributions, then the schema's.
   contributions: Vec<ContributionRow>,
+  /// The names each extension's own type parameter list writes, each with where it is written,
+  /// one run per extension that writes a list, in the order of the contributions.
+  written_params: Vec<(Sym, tokora::diagnostic::Location)>,
   type_params: Vec<TypeParamRow>,
   bounds: Vec<TypeBound>,
   implements: Vec<TypeExprId>,
@@ -148,6 +151,7 @@ impl Model {
       module_children: Vec::new(),
       defs: Vec::new(),
       contributions: Vec::new(),
+      written_params: Vec::new(),
       type_params: Vec::new(),
       bounds: Vec::new(),
       implements: Vec::new(),

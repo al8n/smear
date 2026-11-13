@@ -354,6 +354,30 @@ impl<'a> Def<'a> {
     }
   }
 
+  /// The names the contribution at `position` among its contributions gives its type parameters,
+  /// when it is an extension that writes a list, which names them by position: each name with
+  /// where it is written, in written order. None for its own contribution, whose names are its
+  /// [`type_params`](Self::type_params), for an extension that writes no list, and for a position
+  /// past its contributions.
+  //
+  // Crate-private: the public model has no view of an extension's own names, and the rule on
+  // duplicate type parameter names reads them here.
+  #[inline]
+  pub(crate) fn extension_params(&self, position: u32) -> &'a [(Sym, Location)] {
+    let model: &'a Model = self.model;
+    let run = self.row().contributions;
+    if position >= run.len {
+      return &[];
+    }
+    match model
+      .contributions
+      .get(run.start as usize + position as usize)
+    {
+      Some(part) => part.params.of(&model.written_params),
+      None => &[],
+    }
+  }
+
   /// The bounds on its type parameters, in order.
   #[inline]
   pub fn bounds(&self) -> &'a [TypeBound] {
