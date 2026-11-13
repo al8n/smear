@@ -125,7 +125,8 @@ impl<'a> Application<'a> {
 
   /// Its arguments, in its definition's order: each one the author wrote, an argument written twice
   /// here twice, and each one the author left out whose definition has a default, a copy of the
-  /// default filling it. One neither written nor defaulted is absent.
+  /// default filling it. One neither written nor defaulted is absent, and so is a defaulted one
+  /// that [`Limits::max_value_steps`](crate::graphqlx::Limits::max_value_steps) could not pay for.
   #[inline]
   pub fn arguments(&self) -> &'a [ApplicationArgument] {
     let model: &'a Model = self.model;

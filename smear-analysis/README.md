@@ -27,9 +27,9 @@ and arguments as written, what it resolves to, and its type: the complete instan
 argument left out filled from its default and an alias such as `NonZeroU32` expanded, each type
 interned once, so that `==` on two type ids is type equality; every application with its type
 arguments and its arguments; every value, coerced to the type expected where it stands, each value
-nested in it one of its own, and a custom scalar's kept as written; and the schema, with its
-contributions, one for each schema item, its description, its roots, written or presumed, and its
-applications.
+nested in it one of its own, and a custom scalar's but `null` kept as written; and the schema,
+with its contributions, one for each schema item, its description, its roots, written or presumed,
+and its applications.
 `Model::satisfies` answers whether a type satisfies an interface or a marker, and
 `Model::satisfies_ty` whether it satisfies one interface type exactly, its arguments' `!` included:
 by declaration, read off the `implements` entries and the bounds the model holds, with `core`'s

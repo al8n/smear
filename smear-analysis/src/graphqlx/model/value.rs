@@ -72,11 +72,11 @@ impl ObjectEntry {
 /// What one value is: the shape it was coerced to, by the type expected where it stands.
 ///
 /// Three kinds of value are kept as written, as a [`Literal`] with nothing coerced beyond syntax: a
-/// value of a custom scalar, an extern one included; a value whose expected type names a type
-/// parameter, which only an instantiation can check; and a value whose expected type can take none,
-/// which another diagnostic refuses, an output type or a path that names nothing among them. In
-/// this version a value of an input object, of a collection and of `TypeRef` is kept as written
-/// too.
+/// value of a custom scalar, an extern one included, but `null`, which is `null` where the scalar
+/// is nullable; a value whose expected type names a type parameter, which only an instantiation
+/// can check; and a value whose expected type can take none, an output type or a path that names
+/// nothing among them, which is another rule's or phase's to refuse. In this version a value of an
+/// input object, of a collection and of `TypeRef` is kept as written too.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum ValueKind<'a> {
@@ -115,8 +115,8 @@ pub enum ValueKind<'a> {
   Map(&'a [(ValueId, ValueId)]),
   /// An input object, of its fields: each one written or defaulted, and no absent one.
   Object(&'a [ObjectEntry]),
-  /// A value kept as written: of a custom scalar, of a type that names a type parameter, or of a
-  /// type that can take no value.
+  /// A value kept as written: of a custom scalar, but `null`; of a type that names a type
+  /// parameter; or of a type that can take no value.
   Literal(Literal<'a>),
   /// A value that did not coerce or resolve. Only an analysis that is not ok has one, within the
   /// extent of the error that says why.

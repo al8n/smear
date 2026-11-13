@@ -329,9 +329,11 @@ impl Limits {
   /// its defaults made for an application a supplied package writes, a bare `@deprecated` among
   /// them, is charged.
   ///
-  /// Past it, a written value whose lists cannot be paid for is `resource-limit` where it is
-  /// written, and is unresolved, and so is an integer whose conversion cannot be paid for; and an
-  /// application whose next argument left out cannot be paid
+  /// Past it, a written value whose lists cannot all be paid for is `resource-limit` where it is
+  /// written, and the level of list that could not be paid for is its one unresolved row, under
+  /// the levels that were: with one step left, `a: [[Int]] = 1` is a list of one unresolved value.
+  /// An integer whose conversion cannot be paid for is `resource-limit` where it is written, and
+  /// unresolved. An application whose next argument left out cannot be paid
   /// for is `resource-limit` at its path, once, and is filled no further: what it writes is still
   /// coerced, an argument the budget kept from being filled is absent, a required one it kept from
   /// being reported is not reported, and a copy is made whole or not at all. At `0`, no default

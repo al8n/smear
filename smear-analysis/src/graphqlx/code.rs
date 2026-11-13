@@ -141,10 +141,12 @@ pub enum DiagnosticKind {
   // -- Values ------------------------------------------------------------------------------------
   /// A number out of the range of the type expected where it is written. An integer out of the
   /// range of an integer primitive of any width but the 32-bit signed one, or of the primitive a
-  /// `NonZero` holds when that is not `i32`; and a float, or an integer where a float is expected,
-  /// out of `f32`'s range. `i32`, `Int`, `id`'s integers, `NonZero<i32>`, `f64` and `Float` keep
-  /// GraphQL's own code, the one of the place the value is written in. Reported at the literal,
-  /// whose value is unresolved; the help gives the type's range as a formula.
+  /// `NonZero` holds when that is not `i32`; a float, or an integer where a float is expected, out
+  /// of `f32`'s range; and an element of a `bytes` list out of a byte's range, 0 to 255. `i32`,
+  /// `Int`, `id`'s integers, `NonZero<i32>`, `f64` and `Float` keep GraphQL's own code, the one of
+  /// the place the value is written in. Reported at the literal, whose value is unresolved, or for
+  /// a `bytes` element at the element, the list being the one unresolved value; the help gives
+  /// the type's range as a formula.
   WidthOverflow,
   /// A zero where `core`'s `NonZero` is expected, of any width, in any radix and with either sign,
   /// in a default or in a directive's argument. Reported at the literal, whose value is unresolved.

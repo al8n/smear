@@ -25,8 +25,8 @@
 //! 1. A node whose type can take no value is kept as written, a `Literal`, and nothing is said: a
 //!    type that names a type parameter, which only an instantiation can check; the unresolved
 //!    type, an object, an interface, a union or a directive; and `NonZero` of what is no nullable
-//!    integer primitive at least one bit wide. Whoever refused the type said so, and that is asked
-//!    before `null` is.
+//!    integer primitive at least one bit wide. The type is another rule's or phase's to refuse,
+//!    and that is asked before `null` is.
 //! 2. `null` is `null` where its type is nullable, and does not fit where it is not.
 //! 3. By the type, without its `!`: a list takes a list, each element coerced against its
 //!    element, and any other node is a lone value, which stands for the one-element list that
