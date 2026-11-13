@@ -74,6 +74,9 @@ as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A 
 nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and
 holds memory bounded by it.
 
+On every GraphQL document of smear's corpora the analyzer is held to `smear-schema`'s verdict, code
+for code, by a differential test that lists each divergence it allows and why.
+
 ## Feature flags
 
 | Feature | Description | Default |

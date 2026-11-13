@@ -306,7 +306,9 @@ All notable changes to Smear are documented in this file.
   parameters have distinct names, and so do the names an extension's own list gives them: a type
   parameter with the name of an earlier one is the new `smear::graphqlx::duplicate-type-parameter`,
   at its name, with a label at the first of that name. A rule says nothing about a contribution a
-  phase already refused something in. A new `test-support` feature, which `smear/test-support`
+  phase already refused something in. On every GraphQL document of smear's corpora the analyzer
+  is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
+  divergence it allows. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models
   it builds, for `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features
