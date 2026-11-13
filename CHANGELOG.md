@@ -4,6 +4,12 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-schema` and `smear-compiler`: an `Int` literal stands for a `Float` only while a finite
+  double holds its value, as `Float`'s input coercion requires (§3.5.2). `Schema::build` and
+  `Rule::ValuesOfCorrectType` refuse one of magnitude `2^1024 - 2^970` or more, the least integer
+  that rounds to infinity, such as `1` and 309 zeros, where they accepted every integer; one below
+  that keeps its verdict. The request door now reads such an integer's digits, and charges them
+  as it charges a `Float` literal's.
 - `smear-lexer`: `normalize_decimal_float` reads a decimal float literal's spelling, its `-`
   included, as a binary float would hold it: `DecimalFloat::Zero`, `DecimalFloat::Overflow`, or
   `DecimalFloat::Spelled`, a spelling `str::parse::<f64>` and `::<f32>` read exactly, written into

@@ -2951,6 +2951,54 @@ fn legal_default_values_are_accepted() {
   );
 }
 
+/// The first 308 digits of `2^1024 - 2^970`, the least integer that rounds to infinity as a double:
+/// with a final `2` it is that integer, and with a final `1` it is the greatest that rounds to
+/// `f64::MAX`.
+const EDGE_HEAD: &str = concat!(
+  "17976931348623158079372897140530341507993413271003782693617377898044496829276",
+  "47509466490179775872070963302864166928879109465555478519404026306574886715058",
+  "20681908902000708383676273854845817711531764475730270069855571366959622842914",
+  "81986083493647529271907416844436551070434271155969950809304288017790417449779",
+);
+
+/// An `Int` literal stands for a `Float` while a double holds it, and is refused past that as a
+/// `Float` literal is (§3.5.2): at an argument's default, an input field's default and a
+/// directive's argument, around the edge of a double's range.
+#[test]
+fn an_integer_for_a_float_is_refused_past_a_doubles_range() {
+  let zeros = "0".repeat(308);
+  for (integer, finite) in [
+    (format!("{EDGE_HEAD}1"), true),
+    (format!("{EDGE_HEAD}2"), false),
+    (format!("1{zeros}"), true),
+    (format!("1{zeros}0"), false),
+  ] {
+    for (sdl, kind) in [
+      (
+        format!("type Query {{ f(x: Float = {integer}): Int }}"),
+        SchemaErrorKind::InvalidDefaultValue,
+      ),
+      (
+        format!("type Query {{ ok: Int }} input In {{ x: Float = {integer} }}"),
+        SchemaErrorKind::InvalidDefaultValue,
+      ),
+      (
+        format!("directive @d(x: Float) on OBJECT type Query @d(x: {integer}) {{ ok: Int }}"),
+        SchemaErrorKind::InvalidDirectiveArgumentValue,
+      ),
+    ] {
+      if finite {
+        built(&sdl);
+      } else {
+        let errors = refused(&sdl);
+        assert_eq!(errors.kinds(), vec![kind], "---\n{sdl}");
+        let span = errors.errors()[0].span();
+        assert_eq!(&sdl[span.start()..span.end()], integer, "---\n{sdl}");
+      }
+    }
+  }
+}
+
 /// `@oneOf` on the definition stays legal; only an extension providing it is refused.
 #[test]
 fn one_of_on_the_definition_is_accepted() {

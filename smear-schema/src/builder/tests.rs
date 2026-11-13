@@ -362,7 +362,7 @@ fn a_deep_literal_formats_without_a_frame_per_level() {
   ));
   let ordinary = std::format!("{builder:?}");
   for expected in [
-    "Int(true)",
+    "Int { fits_i32: true, is_finite: true }",
     "List(2 entries)",
     "Object(1 fields)",
     "literals: Interner { symbols: ",
