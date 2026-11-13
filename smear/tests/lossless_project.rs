@@ -3348,7 +3348,10 @@ enum Absent {
 /// the site leaves out.
 ///
 /// Two sites build no hole and still have no hole-free probe, and their rows answer `hole`: the
-/// `report` rows for a variables definition and for an arguments definition.
+/// `report` rows for a variables definition and for an arguments definition. A `hole` measures
+/// nothing of the site itself, so what holds their arms is `recovery_graphql.rs`:
+/// `an_unclosed_variables_definition_leaves_the_operation_after_the_brace` and
+/// `an_unclosed_arguments_definition_leaves_the_definition_after_the_brace`.
 type Site = (
   &'static str,
   &'static str,

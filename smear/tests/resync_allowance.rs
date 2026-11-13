@@ -434,6 +434,13 @@ fn a_module_whose_items_all_fail_stays_linear() {
       small.peak_spent,
       large.peak_spent
     );
+    // The ratio is the guard's work only where the guard engaged: a parse it never refused a scan
+    // in would read linear for a reason of its own.
+    assert!(
+      large.refusals > 0,
+      "{root_name}: the allowance refused no scan over {} items",
+      N * 2
+    );
   }
 }
 

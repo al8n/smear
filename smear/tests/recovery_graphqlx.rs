@@ -53,6 +53,8 @@ mod lossless {
     document: TypeSystemDocument<&'a str>,
     recovery: Recovery,
     errors: bool,
+    /// How many error diagnostics the tree holds.
+    reports: usize,
   }
 
   /// `text` through the lossless layer at its default limits.
@@ -72,6 +74,12 @@ mod lossless {
       document: parsed.document().clone(),
       recovery: parsed.recovery(),
       errors: parsed.tree().has_errors(),
+      reports: parsed
+        .tree()
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+        .count(),
     }
   }
 
@@ -202,6 +210,64 @@ mod lossless {
         "{what}: the document went on past the refusal"
       );
     }
+  }
+
+  /// A refusal that ends the document while the lexer reads on. Both cases above stop the lexer,
+  /// after which nothing could be read whatever a body did, so neither tells a body that returns
+  /// a refusal from one that catches it. Here the parse's own nesting ceiling refuses, under
+  /// three bodies whose junk keeps the lexer's tally low.
+  ///
+  /// The ceiling and the counts, from `depth::descend` and the limits:
+  ///
+  /// - `with_max_nesting_depth(3)` gives the parse `parse_ceiling()`, 3, which is below
+  ///   `HARD_MAX`, and every body takes one frame through `descend` before it reads its `{`.
+  ///   Nothing else in this text descends, so the bodies of `a`, `b` and `c` are the three
+  ///   frames, and `d`'s, the fourth, is refused before its `{` is read.
+  /// - The lexer's tally is blind to which closer answers which opener, and each `)` undoes the
+  ///   `{` in front of it: the tally reads 1 after each body's `{` and 0 after each `)`, never
+  ///   more than 1, so the lexer's own ceiling of 3 never trips.
+  /// - Each `)` is junk between two items, one report each, and `descend` reports the refusal:
+  ///   four. The refusal ends the document, so no body on the way out reports anything, and
+  ///   nothing after it is read: `D`, inside the refused body, and `C`, `B` and `Z` after it.
+  ///
+  /// A body that caught the refusal as an ordinary failure would skip to its next item and read
+  /// on: it would parse `C`, `B` and `Z`.
+  #[test]
+  fn a_refusal_with_the_lexer_still_reading_ends_the_document_inside_the_modules() {
+    let limits = LosslessLimits::with_max_nesting_depth(3);
+    assert_eq!(limits.parse_ceiling(), 3);
+    let text = "mod a { ) mod b { ) mod c { ) mod d { scalar D } } scalar C } scalar B } scalar Z";
+    let answer = read_with(&Lossless::with_limits(limits), text);
+    assert!(answer.errors);
+    // Each module keeps its node inside the one it was written in, and only `d`'s body, the one
+    // past the ceiling, was not entered.
+    for (name, depth) in [("mod a", 1), ("mod b", 2), ("mod c", 3), ("mod d", 4)] {
+      let m = module(&answer.tree, name);
+      assert_eq!(
+        m.ancestors()
+          .filter(|node: &SyntaxNode| node.kind() == K::ModDefinition)
+          .count(),
+        depth,
+        "{name}: not inside the modules around it"
+      );
+      assert_eq!(
+        m.children_with_tokens()
+          .any(|element| element.kind() == K::LBrace),
+        name != "mod d",
+        "{name}: a body entered past the ceiling, or not entered under it"
+      );
+    }
+    assert!(
+      !answer
+        .tree
+        .descendants()
+        .any(|node: SyntaxNode| node.kind() == K::ScalarTypeDefinition),
+      "an item after the refusal was read"
+    );
+    assert_eq!(
+      answer.reports, 4,
+      "one report for each `)` and one for the refusal"
+    );
   }
 
   // ── The reverse direction ──────────────────────────────────────────────────────────────────
@@ -399,12 +465,23 @@ mod lossless {
         "mod m { \"doc\" }",
         Recovery::new(1, 1),
       ),
+      ("a gap tile", "mod m { \"oops", Recovery::new(1, 1)),
     ] {
       let answer = read(text);
       assert!(answer.errors, "{what}");
       assert_eq!(answer.document.definitions().len(), 1, "{what}");
       assert_eq!(answer.recovery, recovery, "{what}");
     }
+
+    // The string that never ends runs to the end of the text, so no token is lexed from it: its
+    // bytes are a gap tile, and the tile is the module's, behind the space the body's peek read.
+    let answer = read("mod m { \"oops");
+    assert!(
+      module(&answer.tree, "mod m")
+        .children_with_tokens()
+        .any(|element| element.kind() == K::Gap),
+      "the gap tile is not the module's"
+    );
   }
 
   // ── A missing component, and the definition after it ───────────────────────────────────────
@@ -488,6 +565,31 @@ mod lossless {
       // A closer has no image, so `T` is kept beside `S`.
       assert_eq!(answer.recovery, Recovery::new(2, 0), "{text}");
     }
+  }
+
+  /// A variables definition that meets a `}` reports its `)` as missing and leaves the brace.
+  /// No block of the grammar stands around an operation, so the brace here is one a failed
+  /// definition left open: the root takes it as a stray, and reads the operation after it whole.
+  /// It refuses the removal of that arm in `variables_definition`, without which the list takes
+  /// the brace and every token after it as its own junk, to the end of the text, and loses `R`.
+  ///
+  /// Through the document door, the one root that holds a type and an operation.
+  #[test]
+  fn an_unclosed_variables_definition_leaves_the_operation_after_the_brace() {
+    let text = "type T { f query Q($a: Int } query R { g }";
+    let parse: Parse = parse_document(text);
+    let tree: SyntaxNode = parse.syntax();
+    assert_eq!(tree.text().to_string(), text, "the tree spells its text");
+    assert!(parse.has_errors());
+    let operations: Vec<String> = tree
+      .children()
+      .find(|node: &SyntaxNode| node.kind() == K::Document)
+      .expect("the document's node")
+      .children()
+      .filter(|node: &SyntaxNode| node.kind() == K::OperationDefinition)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect();
+    assert_eq!(operations, ["query R { g }"]);
   }
 
   #[test]

@@ -3618,7 +3618,9 @@ enum Absent {
 /// the projection answers, and what the site leaves out.
 ///
 /// One site builds no hole and still has no hole-free probe, and its row answers `hole`: see the
-/// `executable.rs` report row for a variables definition.
+/// `executable.rs` report row for a variables definition. A `hole` measures nothing of the site
+/// itself, so what holds its arm is `recovery_graphqlx.rs`'s
+/// `an_unclosed_variables_definition_leaves_the_operation_after_the_brace`.
 type Site = (
   &'static str,
   &'static str,
@@ -5758,5 +5760,146 @@ fn a_root_with_two_containers_is_recovered_whole_and_refused_fail_fast() {
       "{kind:?}: fail-fast"
     );
     assert_eq!(refusal.span(), &second, "{kind:?}: at the second container");
+  }
+}
+
+/// The type-system root's own tree for `src`, minted again through `finish_root` with every node
+/// of kind `rekind` opened at the raw kind `raw` instead, and every token the lexer's.
+///
+/// The shape is read off the door's parse of `src` and replayed, as [`twin_container_parse`]
+/// replays one, under a profile that maps each token as the dialect's does and admits every raw
+/// kind, as [`foreign_root_parse`]'s does. So the tree differs from the door's in one kind alone.
+fn rekinded_parse(src: &str, rekind: K, raw: u16) -> smear::parser::graphqlx::lossless::Parse {
+  use smear::parser::{
+    graphqlx::lossless::{
+      Brand, GraphqlxLosslessErrors, GraphqlxLosslessSlice, Lexer, LexerState, kind_map::token_kind,
+    },
+    lossless::runner::finish_root,
+  };
+  use tokora::{
+    InputRef, SimpleSpan,
+    cache::DefaultCache,
+    cst::{CstProfile, KindValidator, Sink},
+    emitter::Verbose,
+  };
+
+  type Lx<'a> = Lexer<'a, str>;
+  type Em<'a> = Verbose<GraphqlxLosslessErrors<&'a str>, SimpleSpan, Brand>;
+  type Ctx<'a> = (Sink<'a, Lx<'a>, Em<'a>>, DefaultCache<'a, Lx<'a>>);
+
+  let own = parse_type_system_document(src);
+  assert!(!own.has_errors(), "{src:?} parses clean");
+  let root = own.syntax();
+  let container = root
+    .children()
+    .find(|child| child.kind() == K::TypeSystemDocument)
+    .expect("the door builds its container");
+  assert_eq!(
+    root.children_with_tokens().count(),
+    1,
+    "{src:?}: nothing beside the container"
+  );
+  let opened = |kind: K| -> u16 {
+    if kind == rekind {
+      raw
+    } else {
+      GraphQLxLang::kind_to_raw(kind).0
+    }
+  };
+  let mut shape = Vec::new();
+  for event in container.preorder_with_tokens() {
+    match event {
+      rowan::WalkEvent::Enter(rowan::NodeOrToken::Node(node)) => {
+        shape.push(Replay::Open(opened(node.kind())))
+      }
+      rowan::WalkEvent::Leave(rowan::NodeOrToken::Node(node)) => {
+        shape.push(Replay::Close(opened(node.kind())))
+      }
+      rowan::WalkEvent::Enter(rowan::NodeOrToken::Token(_)) => shape.push(Replay::Token),
+      rowan::WalkEvent::Leave(rowan::NodeOrToken::Token(_)) => {}
+    }
+  }
+  return mint(src, &shape);
+
+  fn mint<'a>(src: &'a str, shape: &[Replay]) -> smear::parser::graphqlx::lossless::Parse {
+    let profile = CstProfile::new(
+      token_kind::<GraphqlxLosslessSlice<'a, str>> as fn(&_) -> u16,
+      KindValidator::accept_all(),
+      GraphQLxLang::kind_to_raw(K::Error).0,
+      GraphQLxLang::kind_to_raw(K::Gap).0,
+    );
+    let (cst, _) =
+      tokora::cst::parse_lossless::<Lx<'a>, Brand, Em<'a>, DefaultCache<'a, Lx<'a>>, (), _>(
+        src,
+        LexerState::default(),
+        Em::new(),
+        profile,
+        DefaultCache::<'a, Lx<'a>>::default(),
+        |inp: &mut InputRef<'a, '_, Lx<'a>, Ctx<'a>, Brand>| {
+          for step in shape {
+            match step {
+              Replay::Open(kind) => {
+                let _ = inp.cst_start(*kind);
+              }
+              Replay::Token => {
+                let _ = inp.next();
+              }
+              Replay::Close(kind) => inp.cst_finish(*kind),
+            }
+          }
+          Ok(())
+        },
+      );
+    finish_root::<GraphQLxLang, Lx<'a>, Em<'a>>(
+      cst,
+      GraphQLxLang::kind_to_raw(K::Root).0,
+      "a permissive profile",
+    )
+    .expect("the permissive profile admits the dialect's root")
+  }
+}
+
+/// **al8n/smear#218, one level down.** A direct child of a module whose raw kind is outside the
+/// space is refused before a cursor asks it its kind, so the recovering door counts the module
+/// that holds it as one skipped element, with nothing inside it counted, where `kind_from_raw`
+/// could only panic.
+///
+/// No text reaches this: the doors emit kinds of the space alone. The tree is the door's own with
+/// one node re-kinded, and the fail-fast door is the premise: it refuses the same tree for that
+/// kind. In-process, no `catch_unwind`, so a panic is the test failing.
+#[test]
+fn a_module_holding_a_kind_outside_the_space_is_one_skipped_element() {
+  const FOREIGN: u16 = 60_000;
+  let refusal = ProjectErrorKind::InvalidRawKind { raw: FOREIGN };
+  for (src, definitions, recovery) in [
+    // The module is a top-level item, and nothing of it is kept.
+    ("mod m { scalar X }", 0, Recovery::new(0, 1)),
+    // The module is an item of another, which keeps its node and nothing else.
+    ("mod a { mod m { scalar X } }", 1, Recovery::new(1, 1)),
+  ] {
+    let parse = rekinded_parse(src, K::ScalarTypeDefinition, FOREIGN);
+    assert_eq!(
+      parse.syntax().text().to_string(),
+      src,
+      "{src}: the minted tree spells its source"
+    );
+    assert_eq!(
+      project_type_system_document(&parse, src)
+        .map(|_| ())
+        .err()
+        .map(|error| error.kind().clone()),
+      Some(refusal.clone()),
+      "{src}: the fail-fast door refuses the tree for the foreign kind"
+    );
+    let (document, recovered) =
+      project_type_system_document_recovered(&parse, src).expect("the pair verifies");
+    assert_eq!(recovered, recovery, "{src}");
+    assert_eq!(document.definitions().len(), definitions, "{src}");
+    for item in document.definitions() {
+      assert!(
+        matches!(item, TypeSystemItem::Mod(module) if module.items().is_empty()),
+        "{src}: the module around the refused one kept an item"
+      );
+    }
   }
 }

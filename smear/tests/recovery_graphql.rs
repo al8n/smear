@@ -30,7 +30,11 @@ fn the_syntactic_layer_answers_no_document_for_a_broken_text() {
 
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 mod lossless {
-  use smear::parser::graphql::{Lossless, Recovery, kinds::SyntaxKind as K, lossless::SyntaxNode};
+  use smear::parser::graphql::{
+    Lossless, Recovery,
+    kinds::SyntaxKind as K,
+    lossless::{Parse, SyntaxNode, parse_document},
+  };
 
   use super::MISSING_FIELD_TYPE;
 
@@ -57,16 +61,22 @@ mod lossless {
     }
   }
 
-  /// The scalars that are direct children of the document's node, each as it is written.
-  fn top_level_scalars(tree: &SyntaxNode) -> Vec<String> {
+  /// The `kind` nodes that are direct children of the `container` node under `tree`, each as it
+  /// is written.
+  fn entries(tree: &SyntaxNode, container: K, kind: K) -> Vec<String> {
     tree
       .children()
-      .find(|node: &SyntaxNode| node.kind() == K::TypeSystemDocument)
+      .find(|node: &SyntaxNode| node.kind() == container)
       .expect("the document's node")
       .children()
-      .filter(|child: &SyntaxNode| child.kind() == K::ScalarTypeDefinition)
+      .filter(|child: &SyntaxNode| child.kind() == kind)
       .map(|child: SyntaxNode| child.text().to_string().trim().to_string())
       .collect()
+  }
+
+  /// The scalars that are direct children of the document's node, each as it is written.
+  fn top_level_scalars(tree: &SyntaxNode) -> Vec<String> {
+    entries(tree, K::TypeSystemDocument, K::ScalarTypeDefinition)
   }
 
   #[test]
@@ -101,5 +111,42 @@ mod lossless {
       assert_eq!(answer.definitions, 2, "{text}");
       assert_eq!(answer.recovery, Recovery::new(2, 0), "{text}");
     }
+  }
+
+  /// An arguments definition that meets the `}` of the type around it reports its `)` as missing
+  /// and leaves the brace. The field then fails for want of its `:`, and the type with it, and
+  /// the root takes the brace as a stray and reads the next definition whole. It refuses the
+  /// removal of that arm in `arguments_definition`, without which the list takes the brace as
+  /// junk and reads `type` as an argument's name, which fails at `R`, and `R` is lost to the skip
+  /// that follows.
+  #[test]
+  fn an_unclosed_arguments_definition_leaves_the_definition_after_the_brace() {
+    let answer = read("type T { f(a: Int } type R { g: Int }");
+    assert!(answer.errors);
+    assert_eq!(
+      entries(&answer.tree, K::TypeSystemDocument, K::ObjectTypeDefinition),
+      ["type R { g: Int }"]
+    );
+    assert_eq!(answer.definitions, 1);
+  }
+
+  /// A variables definition that meets a `}` reports its `)` as missing and leaves the brace.
+  /// No block of the grammar stands around an operation, so the brace here is one a failed
+  /// definition left open: the root takes it as a stray, and reads the operation after it whole.
+  /// It refuses the removal of that arm in `variables_definition`, without which the list takes
+  /// the brace and every token after it as its own junk, to the end of the text, and loses `R`.
+  ///
+  /// Through the document door, the one root that holds a type and an operation.
+  #[test]
+  fn an_unclosed_variables_definition_leaves_the_operation_after_the_brace() {
+    let text = "type T { f query Q($a: Int } query R { g }";
+    let parse: Parse = parse_document(text);
+    let tree: SyntaxNode = parse.syntax();
+    assert_eq!(tree.text().to_string(), text, "the tree spells its text");
+    assert!(parse.has_errors());
+    assert_eq!(
+      entries(&tree, K::Document, K::OperationDefinition),
+      ["query R { g }"]
+    );
   }
 }
