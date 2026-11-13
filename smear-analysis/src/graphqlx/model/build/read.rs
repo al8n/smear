@@ -7,15 +7,35 @@
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{ApplicationId, DefId, IdRange, MemberId, ModuleId, Sym, TyId, TypeExprId, dense},
-  model::{
-    Collection, DefKind, Resolution, TypeBound,
-    satisfy::{Keys, Steps, Wanted},
-    table::{DefRow, KIND_LIST, KIND_NAMED, KIND_PARAM, MemberRow, TyRow, UNSET_TY},
+  id::{
+    ApplicationId, DefId, IdRange, MemberId, ModuleId, PackageId, Sym, TyId, TypeExprId, ValueId,
+    dense,
   },
+  model::{
+    ApplicationArgument, Collection, DefKind, Origin, Resolution, TypeBound,
+    satisfy::{Keys, Steps, Wanted},
+    table::{
+      DefRow, KIND_LIST, KIND_NAMED, KIND_PARAM, MemberRow, PackageRow, TyRow, UNSET_TY,
+      VALUE_ENUM, VALUE_NULL, VALUE_STRING,
+    },
+  },
+  package::Tier,
 };
 
-use super::{ModelBuilder, type_key};
+use super::{ModelBuilder, Text, type_key};
+
+/// What a value stores, as a phase after coercion reads it.
+#[derive(Clone, Copy)]
+pub(crate) enum Stored {
+  /// `null`.
+  Null,
+  /// A string: its cooked text, the run coercion kept.
+  String(Text),
+  /// A value of an enum: the value.
+  Enum(MemberId),
+  /// Anything else, an unresolved value among them.
+  Other,
+}
 
 /// What a type is, as a phase after instantiation reads it.
 #[derive(Clone, Copy)]
@@ -227,6 +247,47 @@ impl ModelBuilder {
       Some(row) => row.type_args.of(&self.model.application_type_args),
       None => &[],
     }
+  }
+
+  /// The arguments of the application `id`, in its directive's order: none for an id the builder
+  /// did not issue.
+  pub(crate) fn application_arguments(&self, id: ApplicationId) -> &[ApplicationArgument] {
+    match self.model.applications.get(id.get() as usize) {
+      Some(row) => row.arguments.of(&self.model.arguments),
+      None => &[],
+    }
+  }
+
+  /// What the value `value` stores, once coercion made it: `Other` for an id the builder did not
+  /// issue.
+  pub(crate) fn value_stored(&self, value: ValueId) -> Stored {
+    match self.model.values.get(value.get() as usize) {
+      Some(row) => match row.shape {
+        VALUE_NULL => Stored::Null,
+        VALUE_STRING => Stored::String(Text(row.run)),
+        VALUE_ENUM => Stored::Enum(row.member),
+        _ => Stored::Other,
+      },
+      None => Stored::Other,
+    }
+  }
+
+  /// The tier `package` is declared at.
+  pub(crate) fn package_tier(&self, package: PackageId) -> Option<Tier> {
+    self
+      .model
+      .packages
+      .get(package.get() as usize)
+      .map(|row: &PackageRow| row.tier)
+  }
+
+  /// Where `def` comes from.
+  pub(crate) fn def_origin(&self, def: DefId) -> Option<Origin> {
+    self
+      .model
+      .defs
+      .get(def.get() as usize)
+      .map(|row: &DefRow| row.origin)
   }
 
   /// How many type occurrences the model holds.

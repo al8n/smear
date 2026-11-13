@@ -21,7 +21,8 @@ primitive the program writes, with its identity, its contributions, its own and 
 extension's, its type parameters with their defaults and its bounds, its `implements` entries and
 union members, its directive applications, a directive definition's locations, whether it is a
 marker or a collection, read off `core`'s `@marker`, `@set` and `@map` where the package that wrote
-it applies them, the closed instantiations its written occurrences resolve to, and its members with
+it applies them, a scalar's host types, each `@extern` its own package writes on it, with its
+effective tier, the closed instantiations its written occurrences resolve to, and its members with
 their descriptions, types, defaults and applications; every written type an occurrence with its path
 and arguments as written, what it resolves to, and its type: the complete instantiation, with each
 argument left out filled from its default and an alias such as `NonZeroU32` expanded, each type

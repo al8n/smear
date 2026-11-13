@@ -22,7 +22,7 @@ use std::{string::String, vec::Vec};
 
 pub use application::{Application, ApplicationArgument, Resolution};
 pub use build::ModelBuilder;
-pub(crate) use build::{Bytes, Occurrence, Segments, Shape, Text, Written};
+pub(crate) use build::{Bytes, Occurrence, Segments, Shape, Stored, Text, Written};
 pub use def::{
   Collection, Contribution, Contributions, Def, DefKind, DirectiveLocation, Extern, Externs,
   Origin, Primitive, TypeBound, TypeParam, TypeParams,

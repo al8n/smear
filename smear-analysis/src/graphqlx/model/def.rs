@@ -485,7 +485,15 @@ impl<'a> Def<'a> {
     self.row().collection
   }
 
-  /// Its `@extern`s, in order, each with its effective tier.
+  /// Its host types: each `core` `@extern` its own package writes on it, in its definition or in an
+  /// extension of its own, in its applications' order, as (`lang`, `type`, `tier`), each with its
+  /// effective tier. Only a scalar a supplied package defines has any, and only an `@extern` whose
+  /// `lang` and `type` are strings and whose `tier` is absent, `null` or a value of `core`'s `Tier`
+  /// is one: what another package writes binds nothing, and a value that does not fit is refused
+  /// where it is written. A `lang` written twice is here twice.
+  ///
+  /// A built-in has none, a primitive and a GraphQL built-in the root package replaces among them:
+  /// a built-in's host type is given by `@repr(for: …)` on the schema alone.
   #[inline]
   pub fn externs(&self) -> Externs<'a> {
     Externs {
@@ -800,7 +808,9 @@ impl core::fmt::Debug for TypeParams<'_> {
   }
 }
 
-/// One `@extern` of a definition: the host type that stands for it in one language.
+/// One `@extern` of a scalar: the host type that stands for it in one language, which smear never
+/// reads. Its `lang` and its `type` are the strings written, cooked, and its tier is the one its
+/// `tier` names, or its scalar's package's when it names none.
 ///
 /// `Copy`: everything it answers is borrowed from the model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -811,19 +821,20 @@ pub struct Extern<'a> {
 }
 
 impl<'a> Extern<'a> {
-  /// Its `lang`: the host language.
+  /// Its `lang`: the host language, as the string is cooked.
   #[inline]
   pub const fn lang(&self) -> &'a str {
     self.lang
   }
 
-  /// Its `type`: the host type, spelled as its language spells it.
+  /// Its `type`: the host type, spelled as its language spells it, as the string is cooked.
   #[inline]
   pub const fn r#type(&self) -> &'a str {
     self.ty
   }
 
-  /// Its effective tier: the `tier` it writes, or its declaring package's when it writes none.
+  /// Its effective tier: the `tier` it writes, or its declaring package's when it writes none or
+  /// `null`.
   #[inline]
   pub const fn tier(&self) -> Tier {
     self.tier

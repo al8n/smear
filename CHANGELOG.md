@@ -443,8 +443,13 @@ All notable changes to Smear are documented in this file.
   this takes are `Limits::max_value_steps`'s, and so are each field a count reads of an object
   literal against an input object it had not read it against, and each 64 bytes of the identities
   of a set's elements or a map's keys a count under type arguments renders to search them for one
-  held twice, a search made once for each literal and the type they are read against. Then
-  smear's rules walk the model, each a visitor on
+  held twice, a search made once for each literal and the type they are read against. Then each
+  scalar a supplied package defines is bound to its host types: `Def::externs()` answers each
+  `core` `@extern` its own package writes on it, in its definition or an extension of its own,
+  in application order, a `lang` written twice twice, with its `lang` and `type`, the strings
+  coerced, and its effective tier, the `tier` it writes or, absent or `null`, its package's. An
+  `@extern` whose values did not coerce, one another package writes and one on a built-in bind
+  nothing. Then smear's rules walk the model, each a visitor on
   the public trait. A program
   defines its schema at most once: each schema definition the root
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own

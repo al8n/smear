@@ -27,8 +27,9 @@
 //! write onto rows already appended, and read what is written so far through `read`, which never
 //! indexes past a table: instantiation gives definitions their built-in meaning and occurrences
 //! their types, interning each type where it first needs it, and adds instantiations; coercion
-//! appends the values and gives applications their arguments; the tier phase gives definitions and
-//! types their tiers.
+//! appends the values and gives applications their arguments; binding appends each scalar's
+//! externs, definition by definition, in id order, over the texts coercion kept; the tier phase
+//! gives definitions and types their tiers.
 //! What none of them wrote keeps the neutral value its row was appended with, which the accessors
 //! document. What a type satisfies is no row: it is read off the rows, by the finished model and
 //! by a phase alike.
@@ -44,7 +45,7 @@
 mod phases;
 mod read;
 
-pub(crate) use read::{Occurrence, Shape, Written};
+pub(crate) use read::{Occurrence, Shape, Stored, Written};
 
 /// A run of the text arena: a text kept once, which any number of rows may share.
 #[derive(Clone, Copy)]
@@ -81,11 +82,11 @@ use super::{
   schema::{Root, RootOperation},
   table::{
     AliasRow, ApplicationRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, ContributionRow,
-    DefRow, DescriptionRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED,
-    LiteralRow, MemberRow, ModuleRow, NO_DEF, PackageRow, PathRow, Run, TyRow, TypeExprRow,
-    TypeParamRow, UNSET_MODULE, UNSET_TY, VALUE_BOOL, VALUE_BYTES, VALUE_ENUM, VALUE_FLOAT,
-    VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET,
-    VALUE_STRING, VALUE_TYPE, VALUE_UNRESOLVED, ValueRow,
+    DefRow, DescriptionRow, ExternRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM,
+    KIND_UNRESOLVED, LiteralRow, MemberRow, ModuleRow, NO_DEF, PackageRow, PathRow, Run, TyRow,
+    TypeExprRow, TypeParamRow, UNSET_MODULE, UNSET_TY, VALUE_BOOL, VALUE_BYTES, VALUE_ENUM,
+    VALUE_FLOAT, VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_MAP, VALUE_NULL, VALUE_OBJECT,
+    VALUE_SET, VALUE_STRING, VALUE_TYPE, VALUE_UNRESOLVED, ValueRow,
   },
   ty::PathRoot,
   value::{LiteralKind, ObjectEntry},
@@ -442,6 +443,45 @@ impl ModelBuilder {
   /// Gives `def` the tier it requires.
   pub fn set_def_tier(&mut self, def: DefId, tier: Tier) {
     self.model.defs[def.get() as usize].tier = tier;
+  }
+
+  /// Adds to `def`, after the externs it has, the binding `application` writes: its `lang` and its
+  /// `type`, the runs coercion kept for those strings, and its effective tier. It writes no text.
+  ///
+  /// A definition's externs are added together, in its applications' order, before the next
+  /// definition's.
+  pub(crate) fn bind_extern(
+    &mut self,
+    def: DefId,
+    application: ApplicationId,
+    lang: Text,
+    ty: Text,
+    tier: Tier,
+  ) {
+    self.append_extern(def, lang, ty, tier, Some(application));
+  }
+
+  /// Appends to `def`'s externs one of `lang` and `ty`, kept texts, and `tier`, bound from
+  /// `application` when it is one an analysis bound: the one place an extern's run grows.
+  fn append_extern(
+    &mut self,
+    def: DefId,
+    lang: Text,
+    ty: Text,
+    tier: Tier,
+    application: Option<ApplicationId>,
+  ) {
+    let row = &mut self.model.defs[def.get() as usize];
+    grow(
+      &mut self.model.externs,
+      &mut row.externs,
+      ExternRow {
+        lang: lang.0,
+        ty: ty.0,
+        tier,
+        application,
+      },
+    );
   }
 
   /// Makes `def` a marker.

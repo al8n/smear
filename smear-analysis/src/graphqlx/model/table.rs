@@ -8,7 +8,10 @@
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{DefId, IdRange, MemberId, ModuleId, PackageId, SourceId, Sym, TyId, TypeExprId, ValueId},
+  id::{
+    ApplicationId, DefId, IdRange, MemberId, ModuleId, PackageId, SourceId, Sym, TyId, TypeExprId,
+    ValueId,
+  },
   package::{Layout, Tier},
 };
 
@@ -231,15 +234,17 @@ pub(super) struct TypeParamRow {
   pub(super) default: Option<TypeExprId>,
 }
 
-/// One `@extern` of a definition, resolved.
+/// One `@extern` of a definition, bound.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ExternRow {
-  /// Its `lang`, in the text arena.
+  /// Its `lang`, in the text arena: the run coercion kept for the string.
   pub(super) lang: Run,
-  /// Its `type`, in the text arena.
+  /// Its `type`, in the text arena: the run coercion kept for the string.
   pub(super) ty: Run,
   /// Its effective tier.
   pub(super) tier: Tier,
+  /// The application it is bound from: `None` only for one a hand-built model holds.
+  pub(super) application: Option<ApplicationId>,
 }
 
 /// A second name a module gives a definition: `Int` for `i32`.

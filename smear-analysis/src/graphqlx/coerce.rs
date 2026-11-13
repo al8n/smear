@@ -275,9 +275,11 @@
 //! # The arenas
 //!
 //! The model addresses its names and its texts with `u32` offsets, and this phase is the last that
-//! writes either. When it ends, a spelling the name arena refused, or a text arena longer than a
-//! `u32` addresses, is reported once, as `resource-limit`, at the whole of the root package's
-//! package source: otherwise the model would answer a wrong spelling with no diagnostic.
+//! writes either: the phase after it, binding, writes none, since an extern holds the runs this
+//! phase kept for its `lang` and `type` strings. When it ends, a spelling the name arena refused,
+//! or a text arena longer than a `u32` addresses, is reported once, as `resource-limit`, at the
+//! whole of the root package's package source: otherwise the model would answer a wrong spelling
+//! with no diagnostic.
 
 use std::{
   collections::{BTreeMap, BTreeSet},

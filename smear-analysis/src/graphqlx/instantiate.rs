@@ -256,8 +256,9 @@ pub(crate) fn own_package(declarations: &Declarations<'_, '_>, def: DefId) -> Op
 
 /// The directive `application` resolved to, when the package that wrote it is `own`, the package
 /// that wrote the definition it is applied to: an application another package writes gives that
-/// definition no meaning, whether or not a rule refuses it.
-fn own_directive(
+/// definition no meaning, whether or not a rule refuses it. Binding asks it which `@extern`s a
+/// scalar's own package writes.
+pub(crate) fn own_directive(
   builder: &ModelBuilder,
   sources: &SourceMap,
   own: PackageId,

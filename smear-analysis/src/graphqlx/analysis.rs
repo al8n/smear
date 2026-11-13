@@ -11,7 +11,7 @@ use smear_parser::{
 use tokora::diagnostic::Location;
 
 use super::{
-  check, coerce, collect, declare,
+  bind, check, coerce, collect, declare,
   diagnostic::{Diagnostics, Reporter},
   id::{PackageId, SourceId},
   instantiate,
@@ -305,6 +305,14 @@ impl Analysis {
 ///   names and texts
 ///   past what the model's `u32` offsets address, which only a [`Limits::max_source_bytes`] far
 ///   above its default admits, are reported at the root package's package source.
+/// - Binds each scalar a supplied package defines to its host types: each application of `core`'s
+///   `@extern` its own package writes on it, in its definition or in an extension of its own, told
+///   by what the application resolved to, is one of its externs, in application order, a `lang`
+///   written twice twice; its `lang` and its `type` are the strings coerced, and its tier the one
+///   its `tier` names or, absent or `null`, the tier the scalar's package is declared at. An
+///   `@extern` whose `lang`, `type` or `tier` did not coerce binds nothing, and so does one another
+///   package writes, and one on a built-in, a GraphQL built-in the root package replaces among
+///   them. An extern holds the strings coercion kept, and binding writes no text.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///   Each schema definition the root package writes after its first is
@@ -522,6 +530,7 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut builder,
     &mut reporter,
   );
+  bind::bind(&declarations, &sources, &mut builder);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }

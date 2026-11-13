@@ -23,7 +23,8 @@
 //! location, origin and description, its contributions, its own and then its extensions', its type
 //! parameters with their defaults and its bounds, its `implements` entries and union members, its
 //! directive applications, a directive definition's locations, whether its own package makes it a
-//! marker or a collection, the closed instantiations its written occurrences resolve to, and its
+//! marker or a collection, a scalar's host types, each `@extern` its own package writes on it,
+//! the closed instantiations its written occurrences resolve to, and its
 //! members with their descriptions, types, defaults and applications; every written type an
 //! occurrence with its path and arguments as written, what it resolves to, and its type, the
 //! complete instantiation with defaults filled and an alias expanded, each type interned once;
@@ -124,6 +125,7 @@
 //! reports.
 
 mod analysis;
+mod bind;
 mod builtin;
 mod check;
 mod code;

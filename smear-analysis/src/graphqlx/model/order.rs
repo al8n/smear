@@ -380,6 +380,26 @@ fn lists(model: &Model) {
     model.externs.len(),
     "externs",
   );
+  // An extern an analysis bound is bound from one of its definition's applications, each later
+  // extern from a later one.
+  for row in &model.defs {
+    let mut rest: &[ApplicationId] = row.applications.of(&model.listed_applications);
+    for bound in row.externs.of(&model.externs) {
+      let Some(application) = bound.application else {
+        continue;
+      };
+      let at = rest
+        .iter()
+        .position(|listed: &ApplicationId| *listed == application);
+      assert!(
+        at.is_some(),
+        "an extern is bound from an application of its definition, in the applications' order"
+      );
+      rest = rest
+        .get(at.map_or(0, |at: usize| at.saturating_add(1))..)
+        .unwrap_or_default();
+    }
+  }
   tiles(
     model
       .applications
