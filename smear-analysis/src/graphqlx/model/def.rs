@@ -531,6 +531,7 @@ impl core::fmt::Debug for Def<'_> {
 #[derive(Debug, Clone, Copy)]
 pub struct Contribution<'a> {
   location: Location,
+  extent: Location,
   members: IdRange<MemberId>,
   implements: &'a [TypeExprId],
   union_members: &'a [TypeExprId],
@@ -546,6 +547,26 @@ impl<'a> Contribution<'a> {
   #[inline]
   pub const fn location(&self) -> Location {
     self.location
+  }
+
+  /// Where it is written, in its own source, which for an extension is the extension's file: a
+  /// definition, or a schema definition, from its description, or its first keyword when it has
+  /// none, to its last token; an extension from its `extend` to its last token.
+  ///
+  /// A primitive `core` materialises, when no definition of the root package's replaces it, has no
+  /// text of its own: its own contribution answers the whole of `core`'s package source, which has
+  /// no span, as its [`Def::location`] does, and an extension of it answers the extension's extent.
+  /// A GraphQL built-in the root package replaces, a primitive among them, answers for its own
+  /// contribution the extent of the root package's definition.
+  ///
+  /// In an analysis made through [`analyze_with`](crate::graphqlx::analyze_with) with a layer that
+  /// keeps a tree, such as `smear-parser`'s lossless layer, the smallest node of its file's tree
+  /// that covers the extent is the node the contribution was written as, and
+  /// [`Trees::node`](crate::graphqlx::Trees::node) answers it. A file of a built-in package has no
+  /// tree, and `Trees::node` answers `None` for an extent in one.
+  #[inline]
+  pub const fn extent(&self) -> Location {
+    self.extent
   }
 
   /// Whether it is an extension: `false` for a definition's own contribution, which is its first,
@@ -614,6 +635,7 @@ impl<'a> Contributions<'a> {
     let row = &model.contributions[(self.run.start + position) as usize];
     Contribution {
       location: row.location,
+      extent: row.extent,
       members: row.members,
       implements: row.implements.of(&model.implements),
       union_members: row.union_members.of(&model.union_members),

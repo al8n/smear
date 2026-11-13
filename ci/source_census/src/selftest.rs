@@ -6,9 +6,10 @@
 //! resolution, the source-position derivation and the four tests, end to end. Nothing is stubbed;
 //! if the reader stops finding public entries, these fail first.
 //!
-//! Two of the cases are the discrimination al8n/smear#122 asks for by name: `Executor::start`'s
-//! `operation: Option<&str>` must come out a datum and the three narrowed doors must come out
-//! findings, in signatures shaped like the real ones.
+//! Three of the cases are the discrimination al8n/smear#122 asks for: `Executor::start`'s
+//! `operation: Option<&str>` must come out a datum, and an entry that narrows a tree's text must
+//! come out a finding in both of its shapes, a tree and its text, and a tree, a text and a sink
+//! over that text.
 
 use std::{
   fs,
@@ -63,18 +64,13 @@ const CASES: &[Case] = &[
     source: r#"
       pub mod door {
         use crate::ast::Parse;
-        pub fn validate_schema_lossless(parse: &Parse, source: &str) -> u32 {
+        pub fn check_schema_tree(parse: &Parse, source: &str) -> u32 {
           let _ = (parse, source);
           0
         }
       }
     "#,
-    wants: &[(
-      "validate_schema_lossless",
-      "source",
-      Verdict::Narrowed,
-      "test 2",
-    )],
+    wants: &[("check_schema_tree", "source", Verdict::Narrowed, "test 2")],
     absent: &[],
   },
   Case {
@@ -83,7 +79,7 @@ const CASES: &[Case] = &[
       pub mod door {
         use crate::ast::Parse;
         use crate::sink::Sink;
-        pub fn validate_executable_lossless<'src, K>(parse: &Parse, buffer: &'src str, sink: &mut K)
+        pub fn check_executable_tree<'src, K>(parse: &Parse, buffer: &'src str, sink: &mut K)
         where
           K: Sink<&'src str>,
         { let _ = (parse, buffer, sink); }
@@ -92,7 +88,7 @@ const CASES: &[Case] = &[
     // `buffer` is in no lexicon and the entry holds nothing generically, so only the
     // `Sink<&'src str>` bound can convict it. That is test 1 on its own.
     wants: &[(
-      "validate_executable_lossless",
+      "check_executable_tree",
       "buffer",
       Verdict::Narrowed,
       "test 1 — `Sink` carries a source position",

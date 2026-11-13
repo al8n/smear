@@ -246,27 +246,6 @@ pub const EXEMPTIONS: &[Exemption] = &[
              became of the map, which by construction does not.",
   },
   Exemption {
-    path: "smear::validator::LosslessInvalid",
-    kind: Kind::Verdict,
-    element: None,
-    issue: None,
-    reason: "`Invalid` paired with the `Recovery` the successful arm carries, so a caller learns \
-             what was wrong and how much of the document had an AST image from one value. It is a \
-             verdict for its inner verdict's reason, and adding a recovery fraction to a counter \
-             does not make either of them a diagnostic.",
-  },
-  Exemption {
-    path: "smear::validator::LosslessSchemaErrors",
-    kind: Kind::Verdict,
-    element: None,
-    issue: None,
-    reason: "`LosslessInvalid`'s twin on the SDL side: the `SchemaErrors` draft §3 produced, \
-             paired with the parse's `Recovery`. Recorded as a verdict rather than as an \
-             aggregate because its element is `SchemaErrors`, which is itself an aggregate — the \
-             contract rows are two levels down, reachable through `errors()`, and a record \
-             claiming a direct element would be claiming something untrue.",
-  },
-  Exemption {
     path: "smear::validator::schema::IntrospectionError",
     kind: Kind::Verdict,
     element: None,

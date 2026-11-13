@@ -7,15 +7,16 @@
 //! [`FIXTURES`] was `validator_rules.rs`'s own, and it moved here unchanged when
 //! `validator_lossless.rs` needed the same thirty documents. A second copy is the failure this
 //! move exists to prevent: the two gates would drift, and the differential one would then be
-//! comparing the doors over a corpus the liveness floor no longer covers. One table, two readers,
-//! and `validator_rules.rs`'s [`liveness_floor`] still asserts that every rule in `Rule::ALL` has
-//! an entry here.
+//! comparing the two parser layers' documents over a corpus the liveness floor no longer covers.
+//! One table, two readers, and `validator_rules.rs`'s [`liveness_floor`] still asserts that every
+//! rule in `Rule::ALL` has an entry here.
 //!
 //! [`SCHEMA_FIXTURES`] arrived the same way and for the same reason. It was
 //! `validator_schema.rs`'s, and `validator_lossless_schema.rs` needed exactly it — the SDL that
-//! makes each §3 kind fire is the SDL a differential over the two schema doors has to compare on,
-//! and a second copy would be a corpus the refusal floor no longer covers. `validator_schema.rs`'s
-//! `refusal_floor` is the census that keeps it complete, unchanged and still there.
+//! makes each §3 kind fire is the SDL a differential over the two parser layers' type-system
+//! documents has to compare on, and a second copy would be a corpus the refusal floor no longer
+//! covers. `validator_schema.rs`'s `refusal_floor` is the census that keeps it complete, unchanged
+//! and still there.
 //!
 //! Nothing in this file runs. It is data plus the shape that holds it, so a reader that needs a
 //! different harness — parsed twice, padded with trivia, validated through a different door —

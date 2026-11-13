@@ -27,38 +27,55 @@
 //! smear's row needs no subtraction: `validate_executable` borrows the AST and the caller's
 //! `Scratch`, so the timed region is validation and nothing else.
 //!
-//! # Two smear doors, one apollo control
+//! # The syntactic road, two lossless roads, one apollo control
 //!
-//! smear has two validator entry points and both are timed here, against the same apollo rows, on
-//! the same corpora, in the same process:
+//! smear's validator has one entry point, [`validate_executable`], and it reads the AST either
+//! parser layer answers. The rows time it on each road, against the same apollo rows, on the same
+//! corpora, in the same process:
 //!
 //! * **`smear/validate`** takes the AST the syntactic parser builds. It is the fast path, and it
 //!   has no counterpart in apollo, whose only parser is a lossless CST.
-//! * **`smear/validate_lossless`** takes the rowan CST the lossless parser builds, projects it to
-//!   that same AST and runs the same rules over it — [`validate_executable_lossless`] *is*
-//!   [`validate_executable`] with [`project_executable_document_recovered`][project] in front. That
-//!   is the architecturally matched comparison: `apollo-parser` is a rowan CST too, and
+//! * **`smear/validate_lossless`** takes a rowan `Parse` kept from outside the timed region, the
+//!   road of a caller that kept one: [`project_executable_document_recovered`][project] checks that
+//!   the parse is of the text and projects it to that same AST, and the same rules run over it.
+//!   That is the architecturally matched comparison: `apollo-parser` is a rowan CST too, and
 //!   [`ast::Document::parse`][apollo_ast::Document::parse] is a CST build followed by a conversion
 //!   into apollo's AST, which is the shape of smear's lossless leg and not of its syntactic one.
 //!
 //! Neither smear row is a subtraction. The lossless row's timed region is projection plus rules,
-//! and that is the whole of what the door costs a caller holding a CST; the projection is not
-//! separable from it, because the projection is what makes the CST validatable at all. So
+//! and that is the whole of what a caller holding a `Parse` pays; the projection is not separable
+//! from it, because the projection is what makes the tree validatable at all. So
 //! `smear/validate_lossless ÷ smear/validate` is the price of losslessness, and
 //! `smear/validate_lossless` against apollo's rows is the comparison a consumer of a CST faces.
 //!
-//! The SDL half is the same pair: `schema_build/smear` parses with the syntactic parser and calls
-//! `Schema::build`, `schema_build/smear_lossless` parses to a CST and calls
-//! [`validate_schema_lossless`], which projects and reaches that same builder.
+//! `smear/parse_and_validate_lossless` is the other lossless road, from the text: the lossless
+//! layer, `Lossless::new().executable_document`, parses and projects its own tree, and the
+//! validator reads the document it answers. The SDL half is the same pair: `schema_build/smear`
+//! parses with the syntactic parser and calls `Schema::build`, and `schema_build/smear_lossless`
+//! reads the SDL with the lossless layer and hands its document to that same builder.
 //!
 //! # The lossless rows are gated on the corpus
 //!
-//! A lossless row means something only where the door answers what the syntactic door answers.
-//! Before a workload gets one, three things are checked outside every timed region: that the
-//! lossless parse reports no grammar error, that the projection is complete
-//! ([`Recovery::is_complete`][complete]), and that the two doors return the same verdict. A
-//! workload that fails any of them keeps its syntactic and apollo rows, loses its lossless ones,
-//! and says why on stderr — a missing row is better than an invented one.
+//! A lossless row means something only where the lossless layer answers what the syntactic parser
+//! answers. Before a workload gets one, these are checked outside every timed region: that the
+//! lossless layer answers a document; that the text is one ([`Parsed::is_valid`][valid]); that the
+//! projection is complete ([`Recovery::is_complete`][complete]); that the validator's verdict, or
+//! the builder's, is the syntactic document's; and, for the executable rows, that the kept `Parse`
+//! projects completely and validates to the same verdict too. A workload that fails any of them
+//! keeps its syntactic and apollo rows, loses its lossless ones, and says why on stderr — a missing
+//! row is better than an invented one.
+//!
+//! # What the lossless rows measure across the removal of the validator's lossless doors
+//!
+//! The end-to-end rows, `smear/parse_and_validate_lossless` and `schema_build/…/smear_lossless`,
+//! time the same task on either side of that change, from a text to a validated document or a
+//! built schema, and across it they are the measurement of the lossless road. Before it, the road
+//! was the lossless parse, then the door's check that the parse and the text were one document,
+//! then its projection, and on the executable row a prepayment for that projection out of
+//! `validation_work`. After it, the road is the lossless layer's parse and its projection of its
+//! own tree, with no pair to check and nothing prepaid. `smear/validate_lossless` still checks its
+//! pair, in the recovering projection, and prepays nothing; `smear/parse_lossless` times the same
+//! parse it did.
 //!
 //! # What is warm and what is not
 //!
@@ -69,11 +86,13 @@
 //! fresh `Scratch` per iteration would time the warm-up the design exists to eliminate.
 //!
 //! The lossless leg reuses the same `Scratch` for the same reason, and its `Parse` is built once
-//! outside the validate-only row so that row times the door and not the CST parser. The
-//! `parse_lossless` and `parse_and_validate_lossless` rows are where the CST build is paid for.
+//! outside the validate-only row so that row times the projection and the rules and not the CST
+//! parser. The `parse_lossless` and `parse_and_validate_lossless` rows are where the CST build is
+//! paid for.
 //!
 //! [project]: smear::parser::graphql::lossless::project_executable_document_recovered
-//! [complete]: smear::validator::Recovery::is_complete
+//! [valid]: smear::parser::layer::Parsed::is_valid
+//! [complete]: smear::parser::graphql::Recovery::is_complete
 
 // The shared harness. It is a module compiled into this target rather than a library
 // linked into it; `support/mod.rs` carries why, and why this file sits under `benches/`.
@@ -89,16 +108,15 @@ use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use smear::{
   lexer::tokora::{Parse as _, Parser as SmearParser},
   parser::graphql::{
-    GraphQL,
+    GraphQL, Lossless,
     ast::ExecutableDocument as SmearExecutable,
     error::GraphqlErrors,
-    lossless::{Parse as LosslessParse, parse_executable_document, parse_type_system_document},
+    lossless::{
+      Parse as LosslessParse, parse_executable_document, project_executable_document_recovered,
+    },
     syntactic::{GraphqlLexer, executable_document},
   },
-  validator::{
-    Budget, First, Schema, Scratch, validate_executable, validate_executable_lossless,
-    validate_schema_lossless,
-  },
+  validator::{Budget, First, Schema, Scratch, validate_executable},
 };
 
 /// One (schema, query) pair to time.
@@ -138,12 +156,13 @@ fn smear_parse(query: &str) -> SmearExecutable<&str> {
   .expect("the benchmark query parses")
 }
 
-/// Why the lossless executable door does not describe this workload the way the syntactic one
-/// does, or `None` if it does.
+/// Why the lossless roads to a validated document do not describe this workload the way the
+/// syntactic one does, or `None` if they do.
 ///
 /// `Some` names the reason, and the caller drops the workload's lossless rows rather than reporting
-/// a number for a door that answered a different question. `syntactic_ok` is the verdict
-/// [`validate_executable`] already returned for the same schema and the same bytes.
+/// a number for a road that answered a different question. `syntactic_ok` is the verdict
+/// [`validate_executable`] already returned for the same schema and the same bytes, and `parse` is
+/// the `Parse` the validate-only row keeps.
 fn executable_lossless_blocker(
   schema: &Schema,
   parse: &LosslessParse,
@@ -152,53 +171,64 @@ fn executable_lossless_blocker(
   budget: &Budget,
   syntactic_ok: bool,
 ) -> Option<String> {
-  if parse.has_errors() {
-    return Some("the lossless parser reports a grammar error".to_owned());
-  }
-
-  let mut sink = First::new();
-  let verdict = validate_executable_lossless(schema, parse, query, scratch, budget, &mut sink);
-  let recovery = match &verdict {
-    Ok(recovery) => Some(*recovery),
-    Err(invalid) => invalid.recovery(),
+  let disagree = |lossless_ok: bool, road: &str| -> Option<String> {
+    (lossless_ok != syntactic_ok).then(|| {
+      format!(
+        "the documents disagree: syntactic says {}, {road} says {}",
+        if syntactic_ok { "valid" } else { "invalid" },
+        if lossless_ok { "valid" } else { "invalid" },
+      )
+    })
   };
 
-  match recovery {
-    // The budget refused before the projection ran, so there is no AST for the doors to disagree
-    // about. Reported for the same reason a partial projection is: this comparison is only
-    // meaningful over a document both doors actually looked at.
-    None => return Some("the validation budget refused before the projection".to_owned()),
-    Some(recovery) if !recovery.is_complete() => {
-      return Some(format!("the projection is partial ({recovery})"));
-    }
-    Some(_) => {}
+  // The road from the text: the lossless layer parses and projects its own tree.
+  let Ok(parsed) = Lossless::new().executable_document(query, &mut ()) else {
+    return Some("the lossless layer answers no document".to_owned());
+  };
+  if !parsed.is_valid() {
+    return Some("the lossless layer reports a syntax error".to_owned());
   }
-  if verdict.is_ok() != syntactic_ok {
-    return Some(format!(
-      "the doors disagree: syntactic says {}, lossless says {}",
-      if syntactic_ok { "valid" } else { "invalid" },
-      if verdict.is_ok() { "valid" } else { "invalid" },
-    ));
+  let recovery = parsed.recovery();
+  if !recovery.is_complete() {
+    return Some(format!("the projection is partial ({recovery})"));
   }
-  None
+  let mut sink = First::new();
+  let verdict = validate_executable(schema, parsed.document(), scratch, budget, &mut sink);
+  if let Some(why) = disagree(verdict.is_ok(), "the lossless layer") {
+    return Some(why);
+  }
+
+  // The road of a caller that kept a `Parse`: the recovering projection, which checks the pair.
+  let (document, recovery) = match project_executable_document_recovered(parse, query) {
+    Ok(projected) => projected,
+    Err(unverified) => return Some(format!("the kept parse is not of the query: {unverified}")),
+  };
+  if !recovery.is_complete() {
+    return Some(format!("the kept parse projects partially ({recovery})"));
+  }
+  let mut sink = First::new();
+  let verdict = validate_executable(schema, &document, scratch, budget, &mut sink);
+  disagree(verdict.is_ok(), "the kept parse")
 }
 
 /// [`executable_lossless_blocker`]'s twin one section of the specification over.
 ///
-/// Draft §3 lives in one builder both doors reach, so the verdict cannot differ once the same
-/// document arrives; what can differ is the parse and the projection, which is what the two checks
-/// here are. A refusal from the builder therefore says the projected document was not the one
-/// [`build_smear_schema`] builds from, and is reported for the same reason.
+/// Draft §3 lives in one builder both layers' documents reach, so the verdict cannot differ once
+/// the same document arrives; what can differ is the parse and the projection, which is what the
+/// checks here are. A refusal from the builder therefore says the projected document was not the
+/// one [`build_smear_schema`] builds from, and is reported for the same reason.
 fn schema_lossless_blocker(sdl: &str) -> Option<String> {
-  let parse = parse_type_system_document(sdl);
-  if parse.has_errors() {
-    return Some("the lossless parser reports a grammar error".to_owned());
+  let Ok(parsed) = Lossless::new().type_system_document(sdl, &mut ()) else {
+    return Some("the lossless layer answers no document".to_owned());
+  };
+  if !parsed.is_valid() {
+    return Some("the lossless layer reports a syntax error".to_owned());
   }
-
-  match validate_schema_lossless(&parse, sdl) {
-    Ok((_, recovery)) if !recovery.is_complete() => {
-      Some(format!("the projection is partial ({recovery})"))
-    }
+  let recovery = parsed.recovery();
+  if !recovery.is_complete() {
+    return Some(format!("the projection is partial ({recovery})"));
+  }
+  match Schema::build(parsed.document()) {
     Ok(_) => None,
     Err(errors) => Some(format!("the §3 pass refuses the projected SDL: {errors}")),
   }
@@ -265,19 +295,16 @@ fn validators(criterion: &mut Criterion) {
       });
     });
     if lossless {
-      // Projection plus rules. The projection is inside the timed region because it is what the
-      // door does — see the header.
+      // Projection plus rules: the road of a caller that kept a `Parse`. The projection is inside
+      // the timed region because it is what that caller pays for — see the header.
       group.bench_function("smear/validate_lossless", |bencher| {
         bencher.iter(|| {
+          let (document, _) =
+            project_executable_document_recovered(black_box(&lossless_parse), workload.query)
+              .expect("the kept parse is of the query");
           let mut sink = First::new();
-          let verdict = validate_executable_lossless(
-            schemas.smear(),
-            black_box(&lossless_parse),
-            workload.query,
-            &mut scratch,
-            &budget,
-            &mut sink,
-          );
+          let verdict =
+            validate_executable(schemas.smear(), &document, &mut scratch, &budget, &mut sink);
           black_box(verdict.is_ok())
         });
       });
@@ -336,12 +363,13 @@ fn validators(criterion: &mut Criterion) {
     if lossless {
       group.bench_function("smear/parse_and_validate_lossless", |bencher| {
         bencher.iter(|| {
-          let parse = parse_executable_document(black_box(workload.query));
+          let parsed = Lossless::new()
+            .executable_document(black_box(workload.query), &mut ())
+            .expect("the benchmark query is short enough for a tree");
           let mut sink = First::new();
-          let verdict = validate_executable_lossless(
+          let verdict = validate_executable(
             schemas.smear(),
-            &parse,
-            workload.query,
+            parsed.document(),
             &mut scratch,
             &budget,
             &mut sink,
@@ -358,8 +386,9 @@ fn validators(criterion: &mut Criterion) {
 /// Informational: both sides' one-off cost, which a server pays at startup and never again.
 ///
 /// All three rows parse and then run draft §3, because that is what a server hands an SDL file to.
-/// `smear_lossless` differs from `smear` only in which parser produced the document the one §3
-/// builder reads, which is the same difference the executable group's lossless rows measure.
+/// `smear_lossless` differs from `smear` only in which parser layer produced the document the one
+/// §3 builder reads, which is the same difference the executable group's end-to-end lossless row
+/// measures.
 fn schema_build(criterion: &mut Criterion) {
   for workload in WORKLOADS {
     let blocker = schema_lossless_blocker(workload.sdl);
@@ -379,8 +408,10 @@ fn schema_build(criterion: &mut Criterion) {
     if lossless {
       group.bench_function("smear_lossless", |bencher| {
         bencher.iter(|| {
-          let parse = parse_type_system_document(black_box(workload.sdl));
-          let schema = validate_schema_lossless(&parse, workload.sdl);
+          let parsed = Lossless::new()
+            .type_system_document(black_box(workload.sdl), &mut ())
+            .expect("the benchmark SDL is short enough for a tree");
+          let schema = Schema::build(parsed.document());
           black_box(schema.is_ok())
         });
       });

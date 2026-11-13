@@ -78,8 +78,8 @@
 //! caller's own `root` argument, into a dialect's `Parse`. So the facts a dialect door establishes
 //! by construction are, for such a `Parse`, claims: that the root is a document root, that every
 //! element's kind is in the space, and the rest of the rows below. This table is the enumeration:
-//! every assumption the projection doors and the compiler's lossless doors make about a `Parse`,
-//! and which of the three things answers for it.
+//! every assumption the projection doors make about a `Parse`, and which of the three things
+//! answers for it.
 //!
 //! | assumption | `finish_root` | the projection | status |
 //! |---|---|---|---|
@@ -91,7 +91,7 @@
 //! | the root holds one document container of the door's kind, plus trivia | **no** | the fail-fast doors assert it (`sole_document`, `UnexpectedChild { Root, .. }`); the recovering doors do not — every root child is an element, stepped through when it is a container of the door's kind and otherwise counted skipped, so a root with two valid containers projects both and is complete. That difference is the contract, not a gap: each container is a legitimate document image and the recovering contract is per entry — see [`Recovery`] | closed, differently per door family |
 //! | the recovery tiles are the dialect's `Error` and `Gap` | **no** — the profile names its own | nothing reads a tile *as* a tile except the hole scan, which refuses the dialect's two; a tile of any other kind is an element like any other and meets the production that holds it | closed by not being assumed |
 //! | the element count a `Verified` pair is priced by | — | counted by [`verify_source_counted`] from the tree itself, never read from the `Parse` | closed by not being assumed |
-//! | `Parse::diagnostics` and `Parse::has_errors` describe the tree | **no** — they are the caller's emitter's | no projection door and no compiler lossless door reads either; they are a consumer's, and a consumer of a minted `Parse` reads what its minter wrote | not relied on |
+//! | `Parse::diagnostics` and `Parse::has_errors` describe the tree | **no** — they are the caller's emitter's | no projection door reads either; they are a consumer's, and a consumer of a minted `Parse` reads what its minter wrote | not relied on |
 //! | a token's text is what its kind spells | **no** | re-cooked, through the lexer's own doors, wherever the text reaches the AST — names, numbers, strings, the spellings a walk classifies. A token whose text reaches **no** AST field — trivia, punctuation, a keyword read by kind — is taken at its label | **out of contract, by decision** — see below |
 //!
 //! **The last row is the one not closed, and deliberately.** It is al8n/smear#58's leaf-table

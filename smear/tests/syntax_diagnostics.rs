@@ -12,8 +12,9 @@
 //! that names no position, and points at the text it refused. This file drives each kind from a
 //! real input through the public syntactic doors — `TokenBudget` and `NestingLimit`, which only
 //! the lossless door's own machinery raises, are driven in `smear-parser`'s lossless tests,
-//! because a `Parse` drops the payload that would carry them out here — and `InvalidSyntax`, the
-//! one kind no input reaches, by construction.
+//! because a `Parse` drops the payload that would carry them out here — and the two kinds no input
+//! reaches, by construction: `InvalidSyntax`, and `LineTerminatorInString`, which the lexer never
+//! reports because a single-line string ends at its first line terminator.
 //!
 //! The message predicate is the one al8n/smear#126's gate wrote down so that "no position" is a
 //! check rather than a sentiment: no `[0-9]+..[0-9]+` range, and none of "byte", "offset",
@@ -215,10 +216,11 @@ mod graphql {
         SyntaxErrorKind::UnterminatedString,
         Exact("unterminated string"),
       ),
+      // A single-line string ends at its first line terminator, unterminated there.
       (
         "{ a(x: \"\nhello\n\") }",
-        SyntaxErrorKind::LineTerminatorInString,
-        Exact("line terminator in a string"),
+        SyntaxErrorKind::UnterminatedString,
+        Exact("unterminated string"),
       ),
       (
         r#"{ a(x: "a\qb") }"#,
@@ -384,8 +386,9 @@ mod graphql {
   }
 
   /// The kinds no document reaches through this door, read at the value: the lossless door's two
-  /// budgets, which `smear-parser`'s lossless tests drive from a real input, and `InvalidSyntax`,
-  /// which only a free-form message is — here, the empty lexer batch's note.
+  /// budgets, which `smear-parser`'s lossless tests drive from a real input, `InvalidSyntax`,
+  /// which only a free-form message is — here, the empty lexer batch's note — and
+  /// `LineTerminatorInString`, which the lexer never reports.
   #[test]
   fn the_kinds_this_door_does_not_reach_render_their_sentences() {
     let span = SimpleSpan::new(3, 3);
@@ -394,6 +397,15 @@ mod graphql {
       "a parser-frame refusal",
       SyntaxErrorKind::NestingLimit,
       Message::Exact("nesting limit exceeded"),
+    );
+    check(
+      &GraphqlError::<&str>::new(
+        span,
+        ErrorData::Lexical(SyntaxErrorKind::LineTerminatorInString),
+      ),
+      "a line terminator in a string",
+      SyntaxErrorKind::LineTerminatorInString,
+      Message::Exact("line terminator in a string"),
     );
     check(
       &GraphqlError::<&str>::token_budget_exhausted(span),
@@ -683,10 +695,11 @@ mod graphqlx {
         SyntaxErrorKind::UnterminatedString,
         Exact("unterminated string"),
       ),
+      // A single-line string ends at its first line terminator, unterminated there.
       (
         "{ a(x: \"\nhello\n\") }",
-        SyntaxErrorKind::LineTerminatorInString,
-        Exact("line terminator in a string"),
+        SyntaxErrorKind::UnterminatedString,
+        Exact("unterminated string"),
       ),
       (
         r#"{ a(x: "a\qb") }"#,
@@ -773,8 +786,9 @@ mod graphqlx {
   }
 
   /// The variants no document here reaches, read at the value as GraphQL's twin reads them: the
-  /// lossless door's two budgets, the empty lexer batch's note, the three delimiters besides `{`,
-  /// an empty kept batch, and the variant that exists only to keep `S`.
+  /// lossless door's two budgets, a line terminator in a string, which the lexer never reports,
+  /// the empty lexer batch's note, the three delimiters besides `{`, an empty kept batch, and the
+  /// variant that exists only to keep `S`.
   #[test]
   fn the_kinds_this_door_does_not_reach_render_their_sentences() {
     use smear::{
@@ -788,6 +802,15 @@ mod graphqlx {
       "a parser-frame refusal",
       SyntaxErrorKind::NestingLimit,
       Message::Exact("nesting limit exceeded"),
+    );
+    check(
+      &GraphqlxError::<&str>::new(
+        span,
+        ErrorData::Lexical(SyntaxErrorKind::LineTerminatorInString),
+      ),
+      "a line terminator in a string",
+      SyntaxErrorKind::LineTerminatorInString,
+      Message::Exact("line terminator in a string"),
     );
     check(
       &GraphqlxError::<&str>::token_budget_exhausted(span),

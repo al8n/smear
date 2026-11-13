@@ -2,10 +2,16 @@
 //! no member, one that holds the door's own variant beside an ordinary error, one that holds
 //! nothing but that variant, one on the warning channel, and a recovery hole.
 //!
-//! No production emits the first four, and a production's hole never comes alone, so each root
-//! here is written by hand and handed to the door itself, as the cells of the lossless tree's own
-//! `tests.rs` are. They stand here because the hand-over is this layer's: the layer counts and
-//! forwards exactly what the door lends.
+//! And what the parse's ceiling on kept diagnostics makes of those records: a record refused past
+//! it counts one error whatever it held, the door's variant alone included; a ceiling of zero
+//! keeps no record and the parse still has its errors; a refused warning or hole is counted
+//! nowhere; and the door's own budget refusal stands beside a full ceiling.
+//!
+//! No production emits the records with no member or with the door's variant, nor one on the
+//! warning channel, and a production's hole never comes alone, so each root here is written by
+//! hand and handed to the door itself, as the cells of the lossless tree's own `tests.rs` are.
+//! They stand here because the hand-over is this layer's: the layer counts and forwards exactly
+//! what the door lends.
 
 use std::vec::Vec;
 
@@ -17,7 +23,7 @@ use crate::{
     GraphQL,
     error::{Error as DialectError, ErrorData},
     lossless::{
-      GraphqlLosslessErrorValue, GraphqlLosslessErrors, GraphqlLosslessLexer,
+      GraphqlLosslessErrorValue, GraphqlLosslessErrors, GraphqlLosslessLexer, Parse,
       runner::{LosslessEmitter, parse_lossless_document},
     },
   },
@@ -63,6 +69,35 @@ where
     .filter(|diagnostic| diagnostic.severity() == tokora::emitter::Severity::Error)
     .count();
   (lent, errors)
+}
+
+/// What the door lends for [`SRC`] under `root` and `limits`, in order, and the parse it answers.
+fn under<R>(limits: LosslessLimits, root: R) -> (Vec<Lent>, Parse)
+where
+  R: for<'c> FnOnce(
+    &mut InputRef<'static, 'c, Lx<'static>, Ctx<'static>, GraphQL>,
+    &mut RootStop,
+  ) -> Result<(), Errs<'static>>,
+{
+  let mut lent: Vec<Lent> = Vec::new();
+  let parse = parse_lossless_document(
+    SRC,
+    limits,
+    root,
+    |error: &GraphqlLosslessErrorValue<&'static str>| {
+      lent.push((error.kind(), error.span().start(), error.span().end()));
+    },
+  );
+  (lent, parse)
+}
+
+/// How many of `parse`'s diagnostics are errors.
+fn error_diagnostics(parse: &Parse) -> usize {
+  parse
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic| diagnostic.severity() == tokora::emitter::Severity::Error)
+    .count()
 }
 
 /// A root that emits an empty container on the error channel and reads the source to its end.
@@ -127,6 +162,50 @@ fn emits_a_hole<'inp>(
   _stop: &mut RootStop,
 ) -> Result<(), Errs<'inp>> {
   let _ = inp.emit_skipped_region(SimpleSpan::new(1, 2), 0);
+  inp.skip_while(|_| true)?;
+  Ok(())
+}
+
+/// A root that emits two records of two ordinary errors each, at `1..2` and then at `3..4`, and
+/// reads the source to its end.
+fn emits_two_pairs<'inp>(
+  inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+  _stop: &mut RootStop,
+) -> Result<(), Errs<'inp>> {
+  let first = SimpleSpan::new(1, 2);
+  let mut first_pair = Errs::from(DialectError::new(first, ErrorData::FloatOverflow("x")));
+  first_pair.extend(core::iter::once(DialectError::new(
+    first,
+    ErrorData::FloatOverflow("y"),
+  )));
+  let _ = inp.emit_error(Spanned::new(first, first_pair));
+  let second = SimpleSpan::new(3, 4);
+  let mut second_pair = Errs::from(DialectError::new(second, ErrorData::FloatOverflow("x")));
+  second_pair.extend(core::iter::once(DialectError::new(
+    second,
+    ErrorData::FloatOverflow("y"),
+  )));
+  let _ = inp.emit_error(Spanned::new(second, second_pair));
+  inp.skip_while(|_| true)?;
+  Ok(())
+}
+
+/// A root that emits a record of one ordinary error at `1..2`, then a record holding nothing but
+/// the door's own variant at `0..0`, with nothing refused, and reads the source to its end.
+fn emits_an_error_then_the_doors_variant<'inp>(
+  inp: &mut InputRef<'inp, '_, Lx<'inp>, Ctx<'inp>, GraphQL>,
+  _stop: &mut RootStop,
+) -> Result<(), Errs<'inp>> {
+  let ordinary = SimpleSpan::new(1, 2);
+  let _ = inp.emit_error(Spanned::new(
+    ordinary,
+    Errs::from(DialectError::new(ordinary, ErrorData::FloatOverflow("x"))),
+  ));
+  let forged = SimpleSpan::new(0, 0);
+  let _ = inp.emit_error(Spanned::new(
+    forged,
+    Errs::from(DialectError::new(forged, ErrorData::TokenBudgetExhausted)),
+  ));
   inp.skip_while(|_| true)?;
   Ok(())
 }
@@ -219,4 +298,142 @@ fn the_doors_refusal_is_lent_once_and_last() {
   let (lent, errors) = lent_by(4, emits_the_doors_variant_alone);
   assert_eq!(lent, [(SyntaxErrorKind::TokenBudget, 4, 4)]);
   assert_eq!(errors, 1);
+}
+
+/// A record refused past the ceiling on kept diagnostics counts one error, whatever it held: its
+/// payload is dropped before the door could lend a member of it. Two records of two errors each
+/// lend four under the default; under a ceiling of one record the first record's two are lent and
+/// the second is one refused error, so the layer counts three where the uncapped parse counts
+/// four.
+#[test]
+fn a_refused_record_counts_one_whatever_it_held() {
+  let (lent, parse) = under(LosslessLimits::default(), emits_two_pairs);
+  assert_eq!(
+    lent,
+    [
+      (SyntaxErrorKind::FloatOverflow, 1, 2),
+      (SyntaxErrorKind::FloatOverflow, 1, 2),
+      (SyntaxErrorKind::FloatOverflow, 3, 4),
+      (SyntaxErrorKind::FloatOverflow, 3, 4),
+    ]
+  );
+  assert_eq!(parse.refused_errors(), 0);
+  assert_eq!(error_diagnostics(&parse), 2);
+
+  let (lent, parse) = under(
+    LosslessLimits::default().with_max_diagnostics(1),
+    emits_two_pairs,
+  );
+  assert_eq!(
+    lent,
+    [
+      (SyntaxErrorKind::FloatOverflow, 1, 2),
+      (SyntaxErrorKind::FloatOverflow, 1, 2),
+    ]
+  );
+  assert_eq!(parse.refused_errors(), 1);
+  assert_eq!(error_diagnostics(&parse), 1);
+  assert_eq!(
+    lent.len() + parse.refused_errors(),
+    3,
+    "the layer's count under the ceiling"
+  );
+}
+
+/// A record that holds nothing but the door's own variant is dropped when it is kept, and counted
+/// when it is refused: the emitter refuses it before the door could classify it. Under the default
+/// the one ordinary error is lent and nothing is refused; under a ceiling of one record the same
+/// error is lent and the record of the door's variant is one refused error. A ceiling of zero
+/// refuses that record alone, and the parse then has an error it does not have under the default.
+#[test]
+fn a_refused_record_of_the_doors_variant_alone_is_still_counted() {
+  let (lent, parse) = under(
+    LosslessLimits::default(),
+    emits_an_error_then_the_doors_variant,
+  );
+  assert_eq!(lent, [(SyntaxErrorKind::FloatOverflow, 1, 2)]);
+  assert_eq!(parse.refused_errors(), 0);
+
+  let (lent, parse) = under(
+    LosslessLimits::default().with_max_diagnostics(1),
+    emits_an_error_then_the_doors_variant,
+  );
+  assert_eq!(lent, [(SyntaxErrorKind::FloatOverflow, 1, 2)]);
+  assert_eq!(parse.refused_errors(), 1);
+
+  let (lent, parse) = under(
+    LosslessLimits::default().with_max_diagnostics(0),
+    emits_the_doors_variant_alone,
+  );
+  assert!(lent.is_empty(), "{lent:?}");
+  assert!(parse.diagnostics().is_empty());
+  assert_eq!(parse.refused_errors(), 1);
+  assert!(parse.has_errors());
+
+  let (_, parse) = under(LosslessLimits::default(), emits_the_doors_variant_alone);
+  assert!(!parse.has_errors());
+}
+
+/// A ceiling of zero keeps no record, lends nothing, and still counts the error the parse found,
+/// so the parse has an error with no diagnostic.
+#[test]
+fn a_ceiling_of_zero_keeps_no_record_and_the_parse_still_has_errors() {
+  let (lent, parse) = under(
+    LosslessLimits::default().with_max_diagnostics(0),
+    emits_empty,
+  );
+  assert!(lent.is_empty(), "{lent:?}");
+  assert!(parse.diagnostics().is_empty());
+  assert_eq!(parse.refused_errors(), 1);
+  assert!(parse.has_errors());
+}
+
+/// Past the ceiling only errors are counted: a refused warning and a refused recovery hole leave
+/// no diagnostic, no count and no error.
+#[test]
+fn a_refused_warning_and_a_refused_hole_are_counted_nowhere() {
+  let (lent, parse) = under(
+    LosslessLimits::default().with_max_diagnostics(0),
+    emits_empty_warning,
+  );
+  assert!(lent.is_empty(), "{lent:?}");
+  assert!(parse.diagnostics().is_empty());
+  assert_eq!(parse.refused_errors(), 0);
+  assert!(!parse.has_errors());
+
+  let (lent, parse) = under(
+    LosslessLimits::default().with_max_diagnostics(0),
+    emits_a_hole,
+  );
+  assert!(lent.is_empty(), "{lent:?}");
+  assert!(parse.diagnostics().is_empty());
+  assert_eq!(parse.refused_errors(), 0);
+  assert!(!parse.has_errors());
+}
+
+/// The door's own budget refusal is not the emitter's, so no ceiling on kept diagnostics refuses
+/// it. Under a produce-event ceiling of 4 and a ceiling of one record, the grammar's record and
+/// the door's refusal are both kept and both lent; under a ceiling of zero the grammar's record is
+/// refused and counted, and the refusal is still the parse's one diagnostic and its one lent
+/// error.
+#[test]
+fn the_doors_refusal_stands_beside_a_full_ceiling() {
+  let budget = LosslessLimits::default().with_max_produce_events(4);
+
+  let (lent, parse) = under(budget.with_max_diagnostics(1), emits_mixed);
+  assert_eq!(
+    lent,
+    [
+      (SyntaxErrorKind::FloatOverflow, 1, 2),
+      (SyntaxErrorKind::TokenBudget, 4, 4),
+    ]
+  );
+  assert_eq!(parse.diagnostics().len(), 2);
+  assert_eq!(parse.refused_errors(), 0);
+
+  let (lent, parse) = under(budget.with_max_diagnostics(0), emits_mixed);
+  assert_eq!(lent, [(SyntaxErrorKind::TokenBudget, 4, 4)]);
+  assert_eq!(parse.diagnostics().len(), 1);
+  assert_eq!(parse.refused_errors(), 1);
+  assert!(parse.has_errors());
 }

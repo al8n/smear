@@ -314,8 +314,8 @@ fn inline_string_fast_path() {
 ///
 /// A `}` closes it, so content that is not one to six hex digits is an invalid sequence through the
 /// brace, from a text source as from a byte source. Any other stop leaves the escape unclosed over
-/// what its rule matched, and is lexed by its own rule: the literal still ends at its own quote, a
-/// line break in it is still refused, and a `}` past the quote is a token of its own.
+/// what its rule matched, and is lexed by its own rule: the literal still ends at its own quote, or
+/// at a line break, before it, and a `}` past either is a token of its own.
 #[test]
 fn a_braced_escape_ends_at_its_brace_or_at_the_first_delimiter() {
   use crate::graphqlx::syntactic::SyntacticTokenKind;
@@ -332,19 +332,21 @@ fn a_braced_escape_ends_at_its_brace_or_at_the_first_delimiter() {
     ))
   }
 
-  // Each text literal is the whole input, so it ends at its own quote where the input does.
+  // A text literal with no line break is the whole input, so it ends at its own quote where the
+  // input does. One with a line break ends before the break, unterminated, and the next line's `}`
+  // is the token after it.
   let text: [(&str, Vec<StringError<char>>); 6] = [
     (r#""\u{G}""#, vec![invalid(1, 6)]),
     (r#""\u{12G4}""#, vec![invalid(1, 9)]),
     (r#""\u{G""#, vec![unclosed(1, 5)]),
     (
       "\"\\u{G\n}\"",
-      vec![unclosed(1, 5), StringError::unexpected_new_line('\n', 5)],
+      vec![unclosed(1, 5), StringError::unterminated_inline_string()],
     ),
     (r#""\u{""#, vec![unclosed(1, 4)]),
     (
       "\"\\u{\n}\"",
-      vec![unclosed(1, 4), StringError::unexpected_new_line('\n', 4)],
+      vec![unclosed(1, 4), StringError::unterminated_inline_string()],
     ),
   ];
   for (src, want) in text {
@@ -354,8 +356,10 @@ fn a_braced_escape_ends_at_its_brace_or_at_the_first_delimiter() {
       want.as_slice(),
       "{src:?}"
     );
-    assert_eq!(span, Some(SimpleSpan::new(0, src.len())), "{src:?}");
-    assert_eq!(next, None, "{src:?}");
+    let end = src.find('\n').unwrap_or(src.len());
+    assert_eq!(span, Some(SimpleSpan::new(0, end)), "{src:?}");
+    let after = (end < src.len()).then_some(SyntacticTokenKind::RBrace);
+    assert_eq!(next, after, "{src:?}");
   }
 
   let bytes: [(&[u8], Vec<StringError<u8>>); 2] = [

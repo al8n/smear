@@ -106,7 +106,7 @@
 //! what that costs — an `expect` that skips trivia on its accepting branch as well as before it
 //! moves trailing placement across the whole corpus while round-trip, the gap census, the parity
 //! gate, the injection gate and the projection differential all stay green. So the sentence is now
-//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-eight pairings re-derived on every run by
+//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-nine pairings re-derived on every run by
 //! [`only_the_recorded_nodes_close_on_their_trailing_trivia`]. It is nearly twice its GraphQL
 //! twin's length for a reason the constant states: two GraphQLx productions end on a probe for an
 //! optional continuation that is usually not there — `::` for a path, `<` for a definition's name
@@ -179,7 +179,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// Every `parent > node` pairing where a node closes *after* the trivia behind it, so that the
 /// trivia lands inside the node's range instead of beside it.
 ///
-/// **Forty-eight entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
+/// **Forty-nine entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
 /// one and its full account is on the GraphQL twin's constant: an atom commits the trivia it
 /// crosses to whichever node is open at that moment, a production about to open a node crosses its
 /// leading trivia at a dispatch peek made *before* the mark, and trailing trivia has no such
@@ -204,7 +204,10 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 ///   there. `Document > Error` is a resynchronised run; `Argument > ListValue`
 ///   (`invalid_unterminated_bracket`) is a list that never gets its `]`: it stops at the `}` of
 ///   the selection set around it and leaves that brace where it stands, and the space it crossed
-///   to find the brace stays inside the list; `TypeGenerics > Error`
+///   to find the brace stays inside the list; `Arguments > Argument`
+///   (`invalid_unterminated_string`) is the same stop one level higher, an argument whose string
+///   its line ended, so that the peek for its value crossed the line break and found the `}`;
+///   `TypeGenerics > Error`
 ///   (`invalid_x_name_adjacent_to_angle_in_generics`) is junk between two arguments of an angle
 ///   list, skipped with the space behind it;
 ///   `Document > UseDefinition` (`invalid_x_use_without_tree`) is a `use` with no tree after it,
@@ -275,7 +278,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// inside. That is a difference in the grammar, not in the discipline applied to it.
 ///
 /// **Trailing attachment is already the policy a CST consumer has to handle**, uniformly, before
-/// any of this. All twenty-eight pairings in the GraphQL twin's `CLOSES_ON_TRAILING_TRIVIA` are
+/// any of this. All twenty-nine pairings in the GraphQL twin's `CLOSES_ON_TRAILING_TRIVIA` are
 /// this shape: `SelectionSet > Field` means that in `{ a\n  b }` — the positive control in
 /// [`only_the_recorded_nodes_close_on_their_trailing_trivia`] and in its GraphQL twin — the
 /// `Field` for `a` already contains the newline. `tests/golden/valid_executable_query.rast` has it
@@ -301,6 +304,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// the parity gate, the injection gate and the projection differential all stay green through it.
 const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "Argument > ListValue",
+  "Arguments > Argument",
   "ArgumentsDefinition > InputValueDefinition",
   "DefinitionTypeGenerics > DefinitionTypeParam",
   "DefinitionTypePath > Path",
@@ -1207,7 +1211,7 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
 /// appeared where a production began holding its node open across a peek, and list pairings
 /// vanished, because trivia eaten by the `expect` that ends an element never reaches the loop peek
 /// that used to leave it inside the preceding sibling. So the failure is reported as the two
-/// differences rather than as two forty-eight-element vectors: which half moved is what tells a
+/// differences rather than as two forty-nine-element vectors: which half moved is what tells a
 /// reader whether a production gained a probe or lost one.
 #[test]
 fn only_the_recorded_nodes_close_on_their_trailing_trivia() {

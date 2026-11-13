@@ -44,7 +44,7 @@ use std::{
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Layout, Limits, Package, SourceFile, SourceId, Tier, analyze,
+    Analysis, Layout, Limits, MemberId, Model, Package, SourceFile, SourceId, Tier, analyze,
     test_support::{self, RULES},
   },
   diagnostic::{Code, Diagnose, Location, Severity},
@@ -272,6 +272,26 @@ fn holds(extent: Location, at: Location) -> bool {
   }
 }
 
+/// The extent of every contribution of `model`, each definition's and then the schema's, and then
+/// of every member's, read as a consumer reads them. The members' ids run from 0 to the count the
+/// test-support door answers, as no public range holds every member.
+fn extents(model: &Model) -> Vec<Location> {
+  let (members, _, _, _) = test_support::counts(model);
+  let mut extents: Vec<Location> = Vec::new();
+  for def in model.defs() {
+    for part in model.def(def).contributions() {
+      extents.push(part.extent());
+    }
+  }
+  for part in model.schema().contributions() {
+    extents.push(part.extent());
+  }
+  for index in 0..members {
+    extents.push(model.member(MemberId::new(index)).extent());
+  }
+  extents
+}
+
 /// Each place `smear-schema` reports `code` among `errors`, as a line, saying whether an extent of
 /// `analysis`'s model holds that place and the primary location of an error a phase reported. Such
 /// a place is one a rule is silent at, beside the phase.
@@ -290,7 +310,7 @@ fn places(analysis: &Analysis, errors: &[SchemaError], code: &str) -> String {
       phases.push(diagnostic.primary());
     }
   }
-  let extents = test_support::extents(model);
+  let extents = extents(model);
   let mut lines = String::new();
   for error in errors {
     if error.kind().code().as_str() != code {

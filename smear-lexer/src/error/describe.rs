@@ -80,6 +80,13 @@ pub(crate) fn string_error<Char>(
       LitStrDelimiterHint::QuoteOrTripleQuote => SyntaxErrorKind::UnterminatedString.message(),
     }),
     StringError::Unicode(error) => f.write_str(unicode_error(error)),
+    StringError::Omitted(1) => {
+      f.write_str("1 more error in this string literal was found and not kept")
+    }
+    StringError::Omitted(count) => write!(
+      f,
+      "{count} more errors in this string literal were found and not kept"
+    ),
     StringError::Other(message) => f.write_str(message),
   }
 }

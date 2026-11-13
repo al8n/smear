@@ -269,7 +269,8 @@ impl core::error::Error for Diagnostic {}
 /// An analysis keeps the least diagnostics in that order, up to its
 /// [`Limits::max_diagnostics`](super::Limits::max_diagnostics), and drops the rest, so which are
 /// kept depends on the diagnostics alone and never on the order they were reported in.
-/// [`truncated`](Self::truncated) says whether any was dropped.
+/// [`truncated`](Self::truncated) says whether any was dropped. The list is also truncated by a
+/// syntax error a parser found and did not lend, which is counted and has no diagnostic.
 ///
 /// The verdict is counted, never read off the list: [`error_count`](Self::error_count) counts
 /// every error reported, kept or dropped, and [`has_errors`](Self::has_errors) reads that count.
@@ -296,25 +297,29 @@ impl Diagnostics {
     self.list.len()
   }
 
-  /// Whether none was kept. A truncated list is never empty unless its ceiling was 0.
+  /// Whether none was kept. A truncated list is empty only when its ceiling was 0, or when every
+  /// error it counts is one a parser did not lend.
   #[inline]
   pub fn is_empty(&self) -> bool {
     self.list.is_empty()
   }
 
-  /// Whether the ceiling dropped any diagnostic.
+  /// Whether the list holds fewer diagnostics than were found: the ceiling dropped one, or a
+  /// parser found a syntax error it did not lend.
   #[inline]
   pub fn truncated(&self) -> bool {
     self.truncated
   }
 
-  /// How many diagnostics of [`Severity::Error`] were reported, kept or dropped.
+  /// How many errors were found: every diagnostic of [`Severity::Error`] reported, kept or
+  /// dropped, and every syntax error a parser found and did not lend.
   #[inline]
   pub fn error_count(&self) -> usize {
     self.errors
   }
 
-  /// Whether any diagnostic of [`Severity::Error`] was reported, kept or dropped.
+  /// Whether any error was found: a diagnostic of [`Severity::Error`] reported, kept or dropped,
+  /// or a syntax error a parser found and did not lend.
   #[inline]
   pub fn has_errors(&self) -> bool {
     self.errors != 0
@@ -406,6 +411,15 @@ impl Collector {
     }
   }
 
+  /// Counts `errors` errors that have no diagnostic, and marks the list truncated when there is
+  /// one: the list then holds fewer diagnostics than were found.
+  pub(crate) fn count_unlisted(&mut self, errors: usize) {
+    if errors > 0 {
+      self.errors = self.errors.saturating_add(errors);
+      self.truncated = true;
+    }
+  }
+
   /// The finished list, in order.
   pub(crate) fn finish(self) -> Diagnostics {
     let mut list: Vec<Diagnostic> = Vec::with_capacity(self.kept.len());
@@ -479,6 +493,13 @@ impl Reporter {
   /// mistake of a file: noted, a file's syntax errors would grow it with the file.
   pub(crate) fn report_syntax(&mut self, diagnostic: Diagnostic) {
     self.collector.report(diagnostic);
+  }
+
+  /// Counts `errors` syntax errors a parser found and did not lend, as a layer that keeps a
+  /// bounded number of records does past its ceiling: each is an error of the analysis with no
+  /// diagnostic, so the list is truncated by them. Like every syntax error, they note no mark.
+  pub(crate) fn count_unlent(&mut self, errors: usize) {
+    self.collector.count_unlisted(errors);
   }
 
   /// How many diagnostics the list keeps.

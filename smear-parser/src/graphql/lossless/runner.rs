@@ -206,6 +206,15 @@ pub type Parse = crate::lossless::runner::Parse<crate::graphql::kinds::GraphQLLa
 /// `std::thread::spawn`, a tokio worker and the libtest harness each give a thread. A caller on a
 /// different stack, or with deeper documents, uses [`parse_document_with_limits`].
 ///
+/// # The ceiling on kept diagnostics
+///
+/// Under [`LosslessLimits::default`] a parse keeps at most 32 768 diagnostics, the first it
+/// records. Past that an error is counted in
+/// [`refused_errors`](crate::lossless::runner::Parse::refused_errors) and not kept, and
+/// [`has_errors`](crate::lossless::runner::Parse::has_errors) still reads it. A caller that wants
+/// every record passes `LosslessLimits::new().with_max_diagnostics(usize::MAX)` to
+/// [`parse_document_with_limits`].
+///
 /// # Holding something that is not a `&str`
 ///
 /// [`parse_document_from`] is this door over any [`LosslessSource`] — `&[u8]`, `bytes::Bytes`,

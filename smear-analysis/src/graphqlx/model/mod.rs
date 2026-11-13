@@ -58,7 +58,14 @@ use table::{
 ///
 /// The model is always complete: what could not be resolved is still in it, and the diagnostics
 /// say why.
-#[derive(Debug, Clone)]
+///
+/// Two models are equal when every table holds equal rows in the same order and both arenas hold
+/// the same spellings: when every id names the same thing in both. That is finer than every
+/// accessor answering alike: a model built by another route, with the same content interned in
+/// another order, is not equal. It is `PartialEq` and not `Eq` because a float value is compared
+/// as an `f64` is. A float the model holds comes from a float literal, and no literal spells a
+/// NaN, so a model is equal to itself.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Model {
   packages: Vec<PackageRow>,
   /// Every package's resolved dependencies, one run per package.
@@ -228,21 +235,6 @@ impl Model {
       dense(self.values.len()),
       dense(self.applications.len()),
     )
-  }
-
-  /// The extent of every contribution, each definition's and then the schema's, and then of every
-  /// member: what an error's mark is tested against.
-  #[cfg(feature = "test-support")]
-  pub(crate) fn extents(&self) -> Vec<tokora::diagnostic::Location> {
-    let mut extents: Vec<tokora::diagnostic::Location> =
-      Vec::with_capacity(self.contributions.len() + self.members.len());
-    for row in &self.contributions {
-      extents.push(row.extent);
-    }
-    for row in &self.members {
-      extents.push(row.extent);
-    }
-    extents
   }
 }
 

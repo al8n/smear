@@ -437,13 +437,20 @@ const _: () = assert!(
    carries."
 );
 
-// The lossless state is the combined tracker and two words: the brace count and the durable
-// produce-event ceiling.
+// The lossless state is the combined tracker and three words: the brace count, the durable
+// produce-event ceiling and the ceiling on kept diagnostics.
 const _: () = assert!(
   core::mem::size_of::<LosslessLimits>()
-    == core::mem::size_of::<Limiter>() + 2 * core::mem::size_of::<usize>(),
-  "LosslessLimits must stay a Limiter and two words: every cached lossless token carries a copy."
+    == core::mem::size_of::<Limiter>() + 3 * core::mem::size_of::<usize>(),
+  "LosslessLimits must stay a Limiter and three words: every cached lossless token carries a copy."
 );
+
+/// The default of [`LosslessLimits::max_diagnostics`]: 2^15.
+///
+/// Twice the 16 384 diagnostics smear's analyzer keeps by default, so that a parse under the
+/// default limits keeps a record for each error such an analysis can show, and a recovery hole
+/// beside each.
+const DEFAULT_MAX_DIAGNOSTICS: usize = 1 << 15;
 
 /// The budget a **syntactic** lex runs under: nesting depth, and nothing else.
 ///
@@ -557,8 +564,8 @@ impl State for SyntacticLimits {
   }
 }
 
-/// The budget a **lossless** parse runs under: nesting depth, token count, and the durable
-/// produce-event ceiling.
+/// The budget a **lossless** parse runs under: nesting depth, token count, the durable
+/// produce-event ceiling, and the ceiling on the diagnostics a parse keeps.
 ///
 /// This is [`Lexer::State`](tokora::Lexer::State) for
 /// [`graphql::lossless::LosslessLexer`](crate::graphql::lossless::LosslessLexer) and its GraphQLx
@@ -612,6 +619,7 @@ impl State for SyntacticLimits {
 /// assert_eq!(LosslessLimits::default().max_nesting_depth(), MAX_NESTING_DEPTH);
 /// assert_eq!(LosslessLimits::default().max_tokens(), usize::MAX);
 /// assert_eq!(LosslessLimits::default().max_produce_events(), usize::MAX);
+/// assert_eq!(LosslessLimits::default().max_diagnostics(), 32_768);
 ///
 /// // The two are independent, and setting one leaves the other alone.
 /// let limits = LosslessLimits::default().with_max_tokens(1_000);
@@ -619,6 +627,16 @@ impl State for SyntacticLimits {
 /// let limits = limits.with_max_produce_events(8_000);
 /// assert_eq!(limits.max_tokens(), 1_000);
 /// assert_eq!(limits.max_produce_events(), 8_000);
+///
+/// // The ceiling on kept diagnostics is a number of its own: setting the two left it alone,
+/// // setting it leaves them alone, and setting them again leaves it alone.
+/// assert_eq!(limits.max_diagnostics(), 32_768);
+/// let limits = limits.with_max_diagnostics(1_024);
+/// assert_eq!(limits.max_diagnostics(), 1_024);
+/// assert_eq!(limits.max_tokens(), 1_000);
+/// assert_eq!(limits.max_produce_events(), 8_000);
+/// let limits = limits.with_max_tokens(2_000).with_max_produce_events(9_000);
+/// assert_eq!(limits.max_diagnostics(), 1_024);
 /// ```
 ///
 /// # One count that is no budget
@@ -634,14 +652,11 @@ impl State for SyntacticLimits {
 ///
 /// # The records a parse keeps
 ///
-/// A lossless parse records every error it finds, and by default nothing bounds how many: a text
-/// dense with errors is recorded error for error, so its records are bounded only by its size.
-/// For untrusted text the bound is the caller's own
-/// [`with_max_produce_events`](Self::with_max_produce_events): the records a parse keeps are a
-/// bounded multiple of the produce-events it may spend. A multiple and not one each, because a
-/// lexer error is one event and a recovery skips at least one token, but a report that consumes
-/// nothing can follow another at the same token, as a missing name and then a missing body do,
-/// as often as the grammar's nesting allows.
+/// A lossless parse keeps a record for each error, warning and recovery hole it finds, up to
+/// [`max_diagnostics`](Self::max_diagnostics), 32 768 by default: the first it records. Past
+/// them it counts each further error and keeps nothing, so a text dense with errors keeps that
+/// many records and no more. The produce-event ceiling bounds the lexing a text may buy, which
+/// is another question.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LosslessLimits {
   /// The lexer's own two tallies: the rewindable token count and the bracket depth.
@@ -654,6 +669,11 @@ pub struct LosslessLimits {
   /// [`TokenBudgetTally`](tokora::input::TokenBudgetTally), which lives on the `Input` and which
   /// this type cannot reach — see [`max_produce_events`](Self::max_produce_events).
   produce_events: usize,
+  /// The most diagnostics a lossless door lets the parse keep.
+  ///
+  /// Configuration only, as `produce_events` is: nothing here counts against it. See
+  /// [`max_diagnostics`](Self::max_diagnostics).
+  diagnostics: usize,
 }
 
 impl Default for LosslessLimits {
@@ -674,6 +694,7 @@ impl LosslessLimits {
       ),
       braces: 0,
       produce_events: usize::MAX,
+      diagnostics: DEFAULT_MAX_DIAGNOSTICS,
     }
   }
 
@@ -684,6 +705,7 @@ impl LosslessLimits {
       limiter: Limiter::with_trackers(TokenLimiter::new(), RecursionLimiter::with_limitation(max)),
       braces: 0,
       produce_events: usize::MAX,
+      diagnostics: DEFAULT_MAX_DIAGNOSTICS,
     }
   }
 
@@ -695,12 +717,17 @@ impl LosslessLimits {
   /// [`HARD_MAX`], so the effective bound here is [`HARD_MAX`] rather than no bound at all. That
   /// is what makes this value safe to hand a lossless door: it removes the cheap pre-filter and
   /// leaves the stack-safety wall standing.
+  ///
+  /// The ceiling on kept diagnostics stays at its default, as the parse's own depth ceiling stays:
+  /// this value lifts the lexer's tally and no bound on what a parse keeps.
+  /// [`with_max_diagnostics`](Self::with_max_diagnostics) is how a caller lifts that one.
   #[inline(always)]
   pub const fn unlimited() -> Self {
     Self {
       limiter: Limiter::with_trackers(TokenLimiter::new(), RecursionLimiter::unlimited()),
       braces: 0,
       produce_events: usize::MAX,
+      diagnostics: DEFAULT_MAX_DIAGNOSTICS,
     }
   }
 
@@ -719,6 +746,7 @@ impl LosslessLimits {
       ),
       braces: self.braces,
       produce_events: self.produce_events,
+      diagnostics: self.diagnostics,
     }
   }
 
@@ -739,6 +767,7 @@ impl LosslessLimits {
       limiter: self.limiter,
       braces: self.braces,
       produce_events: max,
+      diagnostics: self.diagnostics,
     }
   }
 
@@ -797,6 +826,65 @@ impl LosslessLimits {
   #[inline(always)]
   pub const fn max_produce_events(&self) -> usize {
     self.produce_events
+  }
+
+  /// The same budget with `max` as its ceiling on the diagnostics a lossless parse keeps.
+  ///
+  /// See [`max_diagnostics`](Self::max_diagnostics) for what the number bounds and what it does
+  /// not, and for what `0` and `usize::MAX` mean.
+  #[inline(always)]
+  pub const fn with_max_diagnostics(self, max: usize) -> Self {
+    Self {
+      limiter: self.limiter,
+      braces: self.braces,
+      produce_events: self.produce_events,
+      diagnostics: max,
+    }
+  }
+
+  /// The most diagnostics a lossless parse keeps: errors, warnings and recovery holes together,
+  /// the first the parse records. None is dropped later to make room for another.
+  ///
+  /// Past it the parse goes on, and the ceiling changes neither the tree nor the document. A
+  /// further error is counted and not kept; a further warning or recovery hole is dropped and
+  /// counted nowhere.
+  ///
+  /// # The default, and the two edges
+  ///
+  /// 32 768, which is 2^15: twice the 16 384 diagnostics smear's analyzer keeps by default, so
+  /// that a parse under the default limits keeps a record for each error such an analysis can
+  /// show, and a recovery hole beside each. Every constructor seeds it,
+  /// [`unlimited`](Self::unlimited) and the widening from a `Limiter` among them.
+  ///
+  /// `usize::MAX` is no ceiling, which is tokora's own sentinel: the parse keeps every record.
+  /// `0` keeps nothing the parse records: every error is then counted, and none is kept or lent.
+  /// A door's own budget refusal is not the emitter's, so no ceiling refuses it: it is still the
+  /// parse's one diagnostic and its one lent error.
+  ///
+  /// # Where it is enforced
+  ///
+  /// Each lossless door reads it from the limits it is handed, before the parse, and makes the
+  /// parse's recording emitter, tokora's `Verbose`, with it. Nothing in this type counts against
+  /// it, and the copies of the state the lexer carries are never read for it. On a bare lexer it
+  /// is inert, as [`max_produce_events`](Self::max_produce_events) is.
+  ///
+  /// # What it bounds, and what it does not
+  ///
+  /// How many records a parse holds while it runs, and how many diagnostics the finished parse
+  /// keeps. A record kept at a span of its own is two B-tree entries keyed by that span, each
+  /// with a group buffer, the payload's own buffer, and an entry of the emitter's log.
+  ///
+  /// So it bounds the records' bytes too, because what one record holds is bounded whatever its
+  /// token. A lexer error keeps at most eighteen entries, which only a string literal's reaches:
+  /// its first sixteen faults, one that counts the rest, and the `Unterminated` that ends it where
+  /// its line or the text does. The parse reads text, where a comment is never refused.
+  ///
+  /// It does not bound the tree or the parse's own log of events, which grow with the text
+  /// whether the text is valid or not: a diagnostic refused past the ceiling still costs its entry
+  /// of that log. A caller that bounds a parse's whole memory bounds the text's length.
+  #[inline(always)]
+  pub const fn max_diagnostics(&self) -> usize {
+    self.diagnostics
   }
 
   /// The token ceiling this budget refuses past — counted in lexemes the scanner **attempted**,
@@ -1014,7 +1102,9 @@ impl LosslessLimits {
 /// the documented default and tokora's own sentinel for *no ceiling* — so this is a total
 /// widening rather than a lossy one: a `Limiter` never held that number and this conversion
 /// invents nothing. [`brace_depth`](LosslessLimits::brace_depth) starts at zero, as it does in
-/// every constructor: a `Limiter` holds no brace count either.
+/// every constructor: a `Limiter` holds no brace count either. And
+/// [`max_diagnostics`](LosslessLimits::max_diagnostics) is seeded at its default, the ceiling on
+/// kept diagnostics every constructor seeds, which a `Limiter` never held.
 ///
 /// # Its partner is gone, and that is smear issue #193 round 2
 ///
@@ -1040,9 +1130,10 @@ impl LosslessLimits {
 /// ```
 /// use smear_lexer::{limits::LosslessLimits, tokora::state::Limiter};
 ///
-/// // The widening compiles, and it seeds the documented default.
+/// // The widening compiles, and it seeds the documented defaults.
 /// let widened = LosslessLimits::from(Limiter::default());
 /// assert_eq!(widened.max_produce_events(), usize::MAX);
+/// assert_eq!(widened.max_diagnostics(), 32_768);
 /// ```
 ///
 /// ```compile_fail
@@ -1062,6 +1153,7 @@ impl From<Limiter> for LosslessLimits {
       limiter,
       braces: 0,
       produce_events: usize::MAX,
+      diagnostics: DEFAULT_MAX_DIAGNOSTICS,
     }
   }
 }

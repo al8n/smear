@@ -37,25 +37,16 @@
 //!
 //! Every cost here is a count, and a count answers the same on a loaded runner as on a quiet one
 //! and the same in a debug build as in a release one: the smallest [`Budget::validation_work`] a
-//! document clears ([`min_budget`]), the working set's own row count ([`Scratch::capacity`]), or
-//! allocation events on the test's own thread (`support/counting.rs`). Wall-clock shapes stood in
-//! some of these places and reddened loaded and instrumented runners with no change under
-//! `smear/`, which is a gate measuring the runner rather than the property it names —
-//! al8n/smear#210. What a count cannot see is work the ledger does not charge and that allocates
-//! nothing; the tests whose subject is that kind of work say so.
+//! document clears ([`min_budget`]), or the working set's own row count ([`Scratch::capacity`]).
+//! Wall-clock shapes stood in some of these places and reddened loaded and instrumented runners
+//! with no change under `smear/`, which is a gate measuring the runner rather than the property it
+//! names — al8n/smear#210. What a count cannot see is work the ledger does not charge; the tests
+//! whose subject is that kind of work say so.
 
 // The same gate every other validator test carries: `smear::validator` does not exist in the
 // crate's API surface with the feature off.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "validator"))]
 #![allow(missing_docs)]
-
-// The allocation instrument, for the two questions a unit count cannot answer: whether the
-// lossless door projected before it refused, and whether its verified twin verified at all.
-// `tests/support/counting.rs` owns the allocator, the thread-local counters and the window that
-// reads them, and its header says why it is a file shared between targets; the `#[path]` form is
-// what puts its `#[global_allocator]` into this binary.
-#[path = "support/counting.rs"]
-mod counting;
 
 use std::{string::String, thread, vec::Vec};
 
@@ -976,131 +967,7 @@ fn a_uniqueness_sort_cannot_outrun_the_ledger() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 6. the pass that runs before the validator exists
-// ---------------------------------------------------------------------------------------------
-
-/// The lossless door's projection is charged, and charged before it runs.
-///
-/// It builds the **entire AST** out of the CST before any rule exists to refuse anything, so a
-/// ledger that opened inside the validator opened too late. "Bounded by the document" was the
-/// answer al8n/smear#198's first pass table gave and it was the wrong one: the parser's limits
-/// bound the CST's *shape* — nesting — and leave its *size* alone, and the size is what an
-/// adversary picks.
-///
-/// So the ledger opens in `validate_executable_lossless_with`, the projection spends from it
-/// first, and the validator continues on what is left.
-///
-/// # The instrument
-///
-/// An AST is allocations — a selection set per operation at the least — so a projection that ran
-/// shows up as allocation events on this thread, and a refusal in front of it as none. The door
-/// verifies the pair first, outside the ledger, and at this fixture's nesting that allocates
-/// nothing; `validator_allocation.rs` pins the zero. Measured on this tree: projecting the
-/// 161,801-byte pair — 120,016 elements — allocates 16,022 times, and refusing it allocates none.
-#[cfg(all(feature = "rowan_0_17", feature = "std"))]
-#[test]
-fn the_projection_is_charged_before_it_runs() {
-  use smear::{
-    parser::graphql::lossless::{
-      Verified, parse_executable_document, project_executable_document_verified,
-    },
-    validator::validate_executable_lossless_with,
-  };
-
-  let schema = build(SCHEMA);
-  // Broad rather than deep: the nesting ceiling is the one limit the lossless parser does apply,
-  // and it is not the one this is about.
-  let source = fragment_bomb(4_000, 4_000);
-  let parse = parse_executable_document(&source);
-
-  let refuse_at = |work: u32, rules: RuleSet| {
-    let budget = Budget::default().with_validation_work(work);
-    let mut scratch = Scratch::new();
-    // Room for the one diagnostic before the window opens, so the sink's growth is not read as
-    // the door's.
-    let mut collected = Vec::with_capacity(1);
-    let mut sink = Collect::new(&mut collected);
-    let mut verdict = None;
-    let allocated = counting::allocations(|| {
-      verdict = Some(validate_executable_lossless_with(
-        &schema,
-        &parse,
-        &source,
-        &mut scratch,
-        &budget,
-        rules,
-        &mut sink,
-      ));
-    });
-    let verdict = verdict.expect("the window ran the door");
-    (verdict, collected, allocated)
-  };
-
-  // Sixteen units against a document whose projection alone is priced at over a hundred thousand:
-  // a unit per element and one per eight bytes.
-  let (verdict, collected, allocated) = refuse_at(16, RuleSet::ALL);
-  let invalid = verdict.expect_err("a projection the budget cannot pay for came back Ok");
-  assert!(invalid.invalid().budget_tripped());
-  assert_eq!(invalid.invalid().emitted(), 1);
-  assert_eq!(
-    collected.iter().map(Diagnostic::rule).collect::<Vec<_>>(),
-    [Rule::ValidationWorkBudget]
-  );
-  // Nothing was projected, so there is no recovery — not a recovery that reads as a clean parse,
-  // and not one carrying a number nobody counted.
-  assert_eq!(invalid.recovery(), None);
-
-  // And it did not project first: the whole point is that this is not a walk of the CST. What the
-  // projection allocates is the premise, so the zero below is a reading and not a blind gate.
-  let pair = Verified::new(&parse, &source).expect("the pair matches");
-  let projected = counting::allocations(|| {
-    std::hint::black_box(project_executable_document_verified(pair));
-  });
-  println!(
-    "projection: {} bytes, {} elements, refused at 16 units with {allocated} allocations; \
-     projecting allocates {projected}",
-    source.len(),
-    pair.projection_cost()
-  );
-  assert!(
-    projected >= 4_000,
-    "projecting 4,000 operations allocated only {projected} times, so the reading below \
-     discriminates nothing"
-  );
-  assert_eq!(
-    allocated, 0,
-    "refusing before the projection allocated {allocated} times, which is a projection that ran"
-  );
-
-  // Giving up is not spelled like finishing, on this path either: with the rule filtered out there
-  // is nothing to emit and the verdict is still `Err` with the flag set.
-  let (verdict, collected, _) = refuse_at(16, RuleSet::ALL.without(Rule::ValidationWorkBudget));
-  let invalid = verdict.expect_err("a refused projection came back Ok with the rule off");
-  assert!(invalid.invalid().budget_tripped());
-  assert_eq!(invalid.invalid().emitted(), 0);
-  assert!(collected.is_empty());
-  assert_eq!(invalid.recovery(), None);
-
-  // Raised, and the same parse projects and validates: the charge is a bound, not a wall.
-  let budget = Budget::default().with_validation_work(u32::MAX);
-  let mut scratch = Scratch::new();
-  let mut sink = smear::validator::Ignore;
-  let recovery = validate_executable_lossless_with(
-    &schema,
-    &parse,
-    &source,
-    &mut scratch,
-    &budget,
-    without_merge(),
-    &mut sink,
-  )
-  .expect("the document is valid once the budget admits it");
-  assert!(recovery.is_complete());
-  let _ = &recovery;
-}
-
-// ---------------------------------------------------------------------------------------------
-// 7. the siblings: the same reasoning, one site over
+// 6. the siblings: the same reasoning, one site over
 // ---------------------------------------------------------------------------------------------
 
 /// The **selection** coordinate resolver pays for its descent, exactly as the value one does.
@@ -1226,199 +1093,8 @@ fn a_disabled_coercion_rule_does_not_read_the_literal() {
   );
 }
 
-/// The prepayment prices the pair it is about to project, and a pair it will not project is not a
-/// resource problem.
-///
-/// # Two rounds in one test
-///
-/// The second round's half: `parse` and `source` are separate arguments and nothing pairs them, so
-/// pricing from `source.len()` alone meant a tree of `N` top-level definitions handed in beside an
-/// empty source paid **one unit** — and the recovering projector then visited all `N` CST children
-/// and returned `Ok`. The prepayment was priced from one input and spent on the other.
-///
-/// The twentieth round's half: pricing it over `max(parse, source)` fixed the number and left the
-/// **verdict** wrong. A caller holding a stale pair and a budget too small for that maximum was
-/// told `Refusal::Budget`, with a `ValidationWorkBudget` diagnostic to match — for a pair whose
-/// lengths already disagreed. The remedy that answer names is raising a limit or retrying, and
-/// neither can help. `verify_source` compares lengths first, which is the reason the fail-fast
-/// doors were safe; this door now asks the same question before it prices anything.
-///
-/// The twenty-first round is the other half of that: a length compare answers an unequal pair and
-/// says nothing about an **equal-length** one, so that branch still reached the prepayment and
-/// still got the budget's answer. The whole of `verify_parse` runs above the charge now, and the
-/// charge prices only the projection.
-///
-/// So the mismatch is answered as a mismatch **at every budget and at every shape**, and the
-/// prepayment is measured where it still exists — on a pair the door will actually project.
-#[cfg(all(feature = "rowan_0_17", feature = "std"))]
-#[test]
-fn the_projection_prepayment_prices_the_pair_it_projects() {
-  use smear::{
-    parser::graphql::lossless::parse_executable_document,
-    validator::validate_executable_lossless_with,
-  };
-
-  let schema = build(SCHEMA);
-  let parsed = fragment_bomb(4_000, 4_000);
-  let parse = parse_executable_document(&parsed);
-
-  let door = |source: &str, work: u32| {
-    let budget = Budget::default().with_validation_work(work);
-    let mut scratch = Scratch::new();
-    let mut collected = Vec::new();
-    let mut sink = Collect::new(&mut collected);
-    let verdict = validate_executable_lossless_with(
-      &schema,
-      &parse,
-      source,
-      &mut scratch,
-      &budget,
-      RuleSet::ALL,
-      &mut sink,
-    );
-    let invalid = verdict.err().map(|refused| {
-      (
-        refused.invalid().budget_tripped(),
-        refused.recovery().is_some(),
-        collected.iter().map(Diagnostic::rule).collect::<Vec<_>>(),
-      )
-    });
-    invalid.expect("a 160 KB parse came back Ok")
-  };
-
-  // Two mismatches, and the second one is why the twentieth round's dissolution was half of one.
-  // A **different length** is answered by `verify_source`'s first comparison; an **equal** length
-  // with different content needs the walk, and putting only the length compare above the
-  // prepayment left that branch still paying the budget's answer. Both, at a budget far too small
-  // for either and at one that could pay for both.
-  let same_length = {
-    let mut swapped = parsed.clone();
-    // One byte, so the lengths are identical and only the content differs.
-    let at = swapped
-      .find("f0: name")
-      .expect("the bomb has a first field");
-    swapped.replace_range(at..at + 1, "g");
-    swapped
-  };
-  assert_eq!(
-    same_length.len(),
-    parsed.len(),
-    "the twin must be the same length"
-  );
-  for source in ["", same_length.as_str()] {
-    let shape = if source.is_empty() {
-      "a length mismatch"
-    } else {
-      "an equal-length mismatch"
-    };
-    for work in [16, u32::MAX - 1] {
-      let (tripped, recovered, rules) = door(source, work);
-      assert!(
-        !tripped,
-        "{shape} was reported as budget exhaustion at validation_work {work}"
-      );
-      assert!(!recovered, "nothing was projected, so there is no recovery");
-      assert_eq!(rules, [], "{shape} emits nothing at validation_work {work}");
-    }
-  }
-
-  // And the prepayment is still there, on the pair the door does project: the same 160 KB, matched,
-  // refuses at a budget that cannot cover it and says so as a budget.
-  let (tripped, recovered, rules) = door(&parsed, 16);
-  assert!(
-    tripped,
-    "the prepayment over a matching pair stopped existing"
-  );
-  assert!(!recovered, "nothing was projected, so there is no recovery");
-  assert_eq!(rules, [Rule::ValidationWorkBudget]);
-}
-
-/// A refused projection reports a count of what it did not look at, and the sink's answer.
-///
-/// Two disclosures that were wrong rather than approximate. `Recovery::skipped` is documented as
-/// evidence that something was dropped **and a bound on how much**, so reporting `1` for a parse
-/// with hundreds of top-level elements is not a floor, it is an under-count wearing one. And the
-/// sink's `ControlFlow::Break` was discarded while the verdict hardcoded `stopped: false`, so a
-/// `First` sink could be told to stop by a verdict that then said it had not been.
-#[cfg(all(feature = "rowan_0_17", feature = "std"))]
-#[test]
-fn a_refused_projection_reports_what_it_did_not_look_at() {
-  use smear::{
-    parser::graphql::lossless::parse_executable_document,
-    validator::{First, validate_executable_lossless_with},
-  };
-
-  let schema = build(SCHEMA);
-  // Five hundred top-level definitions, so a `skipped` of `1` is off by more than a rounding.
-  let source = fragment_bomb(500, 4);
-  let parse = parse_executable_document(&source);
-  let budget = Budget::default().with_validation_work(16);
-
-  let mut scratch = Scratch::new();
-  let mut sink = First::new();
-  let invalid = validate_executable_lossless_with(
-    &schema,
-    &parse,
-    &source,
-    &mut scratch,
-    &budget,
-    RuleSet::ALL,
-    &mut sink,
-  )
-  .expect_err("the projection was not paid for and the door said Ok");
-
-  // The count does not exist, which is the only representation that cannot be misread. It was `1`
-  // with a prose disclosure, then `1` with a flag beside it saying how to read the `1`; both still
-  // constructed a number, and for an empty or trivia-only parse the true count is zero, so the `1`
-  // was not even the floor it claimed to be.
-  assert_eq!(
-    invalid.recovery(),
-    None,
-    "a refusal taken before the projection invented a recovery"
-  );
-  // And it renders as the state rather than as a count.
-  assert!(
-    invalid.to_string().ends_with("(nothing was projected)"),
-    "{invalid}"
-  );
-
-  // And the ordinary refusal — inside the walk, after a projection that did run — says so too, so
-  // the flag separates the two rather than being always false on an error.
-  //
-  // The budget is **found rather than named**: it has to clear the door's prepayment and not the
-  // walk, and the prepayment's size is the pair's own — bytes plus elements — which is not this
-  // test's subject. Doubling from a value below it takes the first budget in that window.
-  let inside = (10..31)
-    .map(|shift| Budget::default().with_validation_work(1u32 << shift))
-    .find_map(|generous| {
-      let mut scratch = Scratch::new();
-      let mut quiet = smear::validator::Ignore;
-      validate_executable_lossless_with(
-        &schema,
-        &parse,
-        &source,
-        &mut scratch,
-        &generous,
-        RuleSet::ALL,
-        &mut quiet,
-      )
-      .err()
-      .filter(|refused| refused.recovery().is_some())
-    })
-    .expect("no budget refuses this document inside the walk");
-  assert!(inside.invalid().budget_tripped());
-
-  // `First` keeps one diagnostic and breaks. The verdict has to say so.
-  assert_eq!(invalid.invalid().emitted(), 1);
-  assert!(
-    invalid.invalid().stopped(),
-    "the sink asked to stop and the verdict reports that it did not"
-  );
-  assert!(sink.get().is_some());
-}
-
 // ---------------------------------------------------------------------------------------------
-// 8. states that cannot be half-read
+// 7. states that cannot be half-read
 // ---------------------------------------------------------------------------------------------
 
 /// The smallest `merge_work` at which `source` is not refused.
@@ -1569,46 +1245,8 @@ fn a_definition_local_rule_does_not_pay_per_operation() {
   );
 }
 
-/// An empty parse the budget cannot pay for reports no recovery at all.
-///
-/// The reviewer's own counterexample to the `1`: a parse with nothing in it has a true skipped
-/// count of **zero**, so `1` was not the floor it was documented as. The repair is that there is no
-/// number — the state carries no [`Recovery`], and the rendering branches on the state.
-#[cfg(all(feature = "rowan_0_17", feature = "std"))]
-#[test]
-fn a_refused_projection_of_an_empty_parse_reports_no_recovery() {
-  use smear::{
-    parser::graphql::lossless::parse_executable_document,
-    validator::validate_executable_lossless_with,
-  };
-
-  let schema = build(SCHEMA);
-  for source in ["", "   \n# just a comment\n"] {
-    let parse = parse_executable_document(source);
-    let budget = Budget::default().with_validation_work(0);
-    let mut scratch = Scratch::new();
-    let mut sink = smear::validator::Ignore;
-    let invalid = validate_executable_lossless_with(
-      &schema,
-      &parse,
-      source,
-      &mut scratch,
-      &budget,
-      RuleSet::ALL,
-      &mut sink,
-    )
-    .expect_err("a zero budget cannot pay for a projection");
-    assert_eq!(
-      invalid.recovery(),
-      None,
-      "an empty parse was given a recovery it did not earn"
-    );
-    assert!(invalid.to_string().ends_with("(nothing was projected)"));
-  }
-}
-
 // ---------------------------------------------------------------------------------------------
-// 9. the dimension, and the gate on the call path
+// 8. the dimension, and the gate on the call path
 // ---------------------------------------------------------------------------------------------
 
 /// The subscription pass charges the response names it compares, in bytes.
@@ -1751,7 +1389,7 @@ fn a_selection_only_rule_set_pays_for_selections() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 10. gates named after readers, not families
+// 9. gates named after readers, not families
 // ---------------------------------------------------------------------------------------------
 
 /// A usage-only rule set does not resolve declared types or walk constant defaults.
@@ -1889,7 +1527,7 @@ fn a_diagnostic_subject_is_charged_before_it_is_cloned() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 11. where the charge lives
+// 10. where the charge lives
 // ---------------------------------------------------------------------------------------------
 
 /// The subject a diagnostic clones is charged by the code that clones it.
@@ -2014,7 +1652,7 @@ fn the_variable_definition_loop_charges_per_definition() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 12. a gate that skips is a wrong answer
+// 11. a gate that skips is a wrong answer
 // ---------------------------------------------------------------------------------------------
 
 /// The verdict does not depend on the order the operations were written in.
@@ -2131,7 +1769,7 @@ fn a_schema_sized_scan_is_charged_per_position_that_reaches_it() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 13. setup is work
+// 12. setup is work
 // ---------------------------------------------------------------------------------------------
 
 /// Opening a walk costs the same whatever the document's fragment population is.
@@ -2213,7 +1851,7 @@ fn opening_a_walk_does_not_scale_with_the_fragment_population() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 14. over-charges: a false refusal is still a wrong answer
+// 13. over-charges: a false refusal is still a wrong answer
 // ---------------------------------------------------------------------------------------------
 
 /// 5.2.1.1 pays for a name only when it names one.
@@ -2305,7 +1943,7 @@ fn an_equal_type_spread_pays_for_no_bitset_scan() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 15. the branch a document takes is the branch that decides what it owes
+// 14. the branch a document takes is the branch that decides what it owes
 // ---------------------------------------------------------------------------------------------
 
 /// 5.5.2.3 pays for the words the intersection reads, not the words it could have.
@@ -2560,7 +2198,7 @@ fn the_required_argument_scan_stops_where_it_matches() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 16. n = 0, n = 1, and the short circuit — three questions, not one
+// 15. n = 0, n = 1, and the short circuit — three questions, not one
 // ---------------------------------------------------------------------------------------------
 
 /// A spread's name is charged when there is an index to search for it.
@@ -3735,247 +3373,4 @@ fn a_sort_is_charged_for_the_bytes_its_comparisons_read() {
       accepted.diagnostics
     );
   }
-}
-
-/// A verified pair makes the ceiling absolute: at `validation_work = 0` the bounded door does no
-/// work the input can grow.
-///
-/// # The two properties, and why a type was needed
-///
-/// A lossless door is asked for both of these, and a door handed an **unverified** pair cannot have
-/// both:
-///
-/// - a **source mismatch outranks a budget refusal** — a stale pair is not a resource problem, and
-///   the remedy the budget's answer names cannot help; and
-/// - the **ceiling is absolute** — no input-linear work runs outside the ledger.
-///
-/// Deciding the first needs the `O(tokens)` comparison *finished*; honouring the second needs it
-/// *stoppable*. That is a property of the arguments, not of the ordering, so the twenty-first
-/// round's repair and the twenty-second round's finding could not both be satisfied by moving the
-/// check again. `Verified` moves it out of the bounded call instead: checked once by whoever
-/// constructs the pair, and every call after that is under the ledger from its first instruction.
-///
-/// # The instrument
-///
-/// The work in question runs outside the ledger by design, so no unit sees it; two other counts
-/// do. The verification's own: [`Verified::projection_cost`] is the element count of the walk that
-/// verified the pair, so it grows exactly as verifying does. And its footprint: that walk keeps the
-/// first sixteen branching ancestors in its own frame and spills the rest to the heap, so verifying
-/// a pair nested past them is an allocation event on this thread. Both inputs carry the same
-/// nesting in front of different widths, which makes every verification visible to the counter —
-/// and at a budget of zero the verified door must leave none. Measured on this tree: 508 and
-/// 280,228 elements; verifying the large pair allocates twice, the unverified door twice, and the
-/// verified door never.
-#[cfg(all(feature = "rowan_0_17", feature = "std"))]
-#[test]
-fn a_verified_pair_is_bounded_from_the_first_instruction() {
-  use smear::{
-    parser::graphql::lossless::{Verified, parse_executable_document},
-    validator::{validate_executable_lossless_verified_with, validate_executable_lossless_with},
-  };
-
-  let schema = build(SCHEMA);
-  // Twenty selection sets deep, past what the verification walk holds in its own frame, in front
-  // of the fragment whose width is the only difference between the two inputs.
-  let nested = |fields: usize| {
-    let mut source = String::from("query deep {");
-    for _ in 0..19 {
-      source.push_str(" nest {");
-    }
-    source.push_str(" leaf");
-    for _ in 0..19 {
-      source.push_str(" }");
-    }
-    source.push_str(" }\n");
-    source.push_str(&fragment_bomb(2, fields));
-    source
-  };
-  let small = nested(40);
-  let large = nested(40_000);
-  let small_parse = parse_executable_document(&small);
-  let large_parse = parse_executable_document(&large);
-  assert!(
-    large.len() > small.len() * 100,
-    "the two inputs have to differ enough for a ratio to mean anything"
-  );
-  let small_pair = Verified::new(&small_parse, &small).expect("the pair matches");
-  let large_pair = Verified::new(&large_parse, &large).expect("the pair matches");
-  let growth = f64::from(large_pair.projection_cost()) / f64::from(small_pair.projection_cost());
-
-  let budget = Budget::default().with_validation_work(0);
-  let verifying = counting::allocations(|| {
-    let _ = std::hint::black_box(Verified::new(&large_parse, &large));
-  });
-  let unverified = counting::allocations(|| {
-    let mut scratch = Scratch::new();
-    let mut sink = smear::validator::Ignore;
-    let _ = std::hint::black_box(validate_executable_lossless_with(
-      &schema,
-      &large_parse,
-      &large,
-      &mut scratch,
-      &budget,
-      RuleSet::ALL,
-      &mut sink,
-    ));
-  });
-  let verified = |pair: Verified<'_, '_>| {
-    counting::allocations(|| {
-      let mut scratch = Scratch::new();
-      let mut sink = smear::validator::Ignore;
-      let _ = std::hint::black_box(validate_executable_lossless_verified_with(
-        &schema,
-        pair,
-        &mut scratch,
-        &budget,
-        RuleSet::ALL,
-        &mut sink,
-      ));
-    })
-  };
-  let (verified_small, verified_large) = (verified(small_pair), verified(large_pair));
-  println!(
-    "at validation_work = 0 over {} B and {} B: verifying walks {} and {} elements ({growth:.1}x) \
-     and allocates {verifying} times on the large one; the unverified door allocates \
-     {unverified}, the verified door {verified_small} and {verified_large}",
-    small.len(),
-    large.len(),
-    small_pair.projection_cost(),
-    large_pair.projection_cost()
-  );
-
-  // The premise: the walk the unverified door runs before its ledger grows with the input it was
-  // handed, which is the finding. Hundreds of times the elements against a fourfold threshold.
-  assert!(
-    growth > 4.0,
-    "verifying the larger input walked only {growth:.1}x the elements, so the comparison below is \
-     not measuring anything"
-  );
-  // And the counter sees that walk, on that door: a zero further down is a reading, not a counter
-  // that was never looking.
-  assert!(
-    verifying >= 1,
-    "verifying a pair nested past the walk's own frame allocated nothing, so a zero below would \
-     be blind"
-  );
-  assert!(
-    unverified >= verifying,
-    "the unverified door allocated {unverified} times at a budget of zero against the \
-     {verifying} its verification costs, so it no longer verifies before its ledger"
-  );
-  // And the claim, on both inputs: refusing without reading the pair leaves no trace of reading it.
-  for (allocated, input) in [(verified_small, &small), (verified_large, &large)] {
-    assert_eq!(
-      allocated,
-      0,
-      "the verified door allocated {allocated} times on a {} B input it was supposed to refuse \
-       before reading",
-      input.len()
-    );
-  }
-}
-
-/// The pair's proof and the door's charge measure the same quantity: **elements**, not bytes.
-///
-/// # Bytes do not bound structure
-///
-/// `Verified` proves the bytes agree. The door then priced the projection from `source.len()`,
-/// which is the assumption that bytes bound what the projection visits — and they do not, in either
-/// direction. A megabyte string literal is one token; a balanced pair of zero-width nodes is two
-/// elements and no bytes at all. `smear_parser::lossless::runner::finish_root` is public, so a
-/// caller can mint a `Parse` from its own CST event stream and reach the second case directly: an
-/// empty source over a tree of a million empty nodes verified against `""`, paid one unit, and then
-/// had every node visited.
-///
-/// The proof carries the cost of the thing it proves now, counted by the same walk that establishes
-/// it. al8n/smear#198's twenty-third round.
-///
-/// # The instrument
-///
-/// Two documents of the **same source length** and very different element counts, so the byte term
-/// is held constant and only the structural one moves. A charge that reads `source.len()` cannot
-/// tell them apart; one that reads the pair's own count must.
-#[cfg(all(feature = "rowan_0_17", feature = "std"))]
-#[test]
-fn the_projection_charge_follows_the_tree_and_not_the_bytes() {
-  use smear::{
-    parser::graphql::lossless::{Verified, parse_executable_document},
-    validator::validate_executable_lossless_verified_with,
-  };
-
-  let schema = build(SCHEMA);
-  // One token carrying the bytes, against many nodes carrying the same number of bytes.
-  let heavy = {
-    let mut source = String::from("{ dog { name ");
-    while source.len() < 20_000 {
-      source.push_str("name ");
-    }
-    source.push_str("} }");
-    source
-  };
-  let light = {
-    let padding = "x".repeat(heavy.len() - "{ dog { withJson(payload: \"\") } }".len());
-    std::format!("{{ dog {{ withJson(payload: \"{padding}\") }} }}")
-  };
-  assert_eq!(
-    heavy.len(),
-    light.len(),
-    "the two documents have to be the same size for this to hold bytes constant"
-  );
-
-  let heavy_parse = parse_executable_document(&heavy);
-  let light_parse = parse_executable_document(&light);
-  let heavy_pair = Verified::new(&heavy_parse, &heavy).expect("the pair matches");
-  let light_pair = Verified::new(&light_parse, &light).expect("the pair matches");
-  println!(
-    "same {} B: heavy {} elements, light {} elements",
-    heavy.len(),
-    heavy_pair.projection_cost(),
-    light_pair.projection_cost()
-  );
-
-  // The premise: the counts really do differ, so the charge has something to follow.
-  assert!(
-    heavy_pair.projection_cost() > light_pair.projection_cost() * 10,
-    "the two trees are too alike ({} against {}) for this to measure anything",
-    heavy_pair.projection_cost(),
-    light_pair.projection_cost()
-  );
-
-  // And the door charges it. The smallest budget each pair clears is found by bisection, so no
-  // number here is fitted to an implementation.
-  let least = |pair: Verified<'_, '_>| {
-    let refused = |work: u32| {
-      let budget = Budget::default().with_validation_work(work);
-      let mut scratch = Scratch::new();
-      let mut sink = smear::validator::Ignore;
-      validate_executable_lossless_verified_with(
-        &schema,
-        pair,
-        &mut scratch,
-        &budget,
-        RuleSet::EMPTY,
-        &mut sink,
-      )
-      .is_err()
-    };
-    assert!(!refused(u32::MAX - 1), "refused at every budget");
-    let (mut lo, mut hi) = (0u32, u32::MAX - 1);
-    while lo < hi {
-      let mid = lo + (hi - lo) / 2;
-      if refused(mid) {
-        lo = mid + 1;
-      } else {
-        hi = mid;
-      }
-    }
-    lo
-  };
-  let (heavy_units, light_units) = (least(heavy_pair), least(light_pair));
-  println!("least validation_work: heavy {heavy_units}, light {light_units}");
-  assert!(
-    heavy_units > light_units * 5,
-    "the same byte count cost {heavy_units} against {light_units} units, so the charge is still \
-     reading the source length rather than the tree"
-  );
 }
