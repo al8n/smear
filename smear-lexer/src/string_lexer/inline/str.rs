@@ -325,8 +325,7 @@ where
         // The literal ends where its line does, and the caller lexes the terminator as it does
         // anywhere else.
         lexer.bump(string_lexer.span().start);
-        errs.push(StringError::unterminated_inline_string());
-        return Err(errs.into_string_errors());
+        return Err(errs.into_unterminated(StringError::unterminated_inline_string()));
       }
       Ok(StringToken::StringCharacters) => {
         // Plain content normalizes byte-for-byte
@@ -348,6 +347,5 @@ where
   }
 
   lexer.bump(string_lexer.span().end);
-  errs.push(StringError::unterminated_inline_string());
-  Err(errs.into_string_errors())
+  Err(errs.into_unterminated(StringError::unterminated_inline_string()))
 }

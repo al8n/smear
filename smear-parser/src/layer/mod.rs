@@ -408,8 +408,9 @@ impl<D: ?Sized> fmt::Debug for Syntactic<D> {
 /// it has found, up to its limits' [`max_diagnostics`](LosslessLimits::max_diagnostics), 32 768
 /// by default. Past that each further error is counted in [`error_count`](Parsed::error_count),
 /// and neither kept nor lent. So how many records a parse holds is bounded whatever the text, and
-/// so are their bytes: a lexer error keeps at most seventeen entries however long its token, the
-/// first sixteen faults of a string literal or of a comment and one that counts the rest.
+/// so are their bytes: a lexer error keeps at most eighteen entries however long its token, which
+/// only a string literal's reaches, with its first sixteen faults, one that counts the rest, and
+/// the `Unterminated` that ends it where its line or the text does.
 ///
 /// The tree and the parse's own log of events are not bounded: they grow with the text, and a
 /// caller bounds them by bounding its length.

@@ -257,8 +257,9 @@ fn a_line_terminator_in_a_string_renders_its_sentence_at_the_value() {
   }
 }
 
-/// The entry that counts what a string literal's record did not keep closes the record and is never
-/// its first, so its sentence is read at the value, in the singular and in the plural.
+/// The entry that counts what a string literal's record did not keep follows the sixteen it kept,
+/// so it is never the record's first, and its sentence is read at the value, in the singular and in
+/// the plural.
 #[test]
 fn the_count_of_what_a_record_did_not_keep_renders_its_sentence_at_the_value() {
   for (count, message) in [

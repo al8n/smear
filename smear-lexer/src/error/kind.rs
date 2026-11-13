@@ -229,7 +229,10 @@ impl SyntaxErrorKind {
       ),
       Self::UnterminatedSpread => Some("a spread is written with exactly three dots: `...`"),
       Self::LeadingZero => Some("an integer part may start with `0` only when it is exactly `0`"),
-      Self::UnterminatedString => Some("close the string with the delimiter that opened it"),
+      Self::UnterminatedString => Some(
+        "close the string with the delimiter that opened it; an inline string ends with its \
+         line, so text that spans lines needs a block string (`\"\"\"`)",
+      ),
       Self::LineTerminatorInString => Some(
         "use a block string (`\"\"\"`) for text that spans lines, or write the line break as `\\n`",
       ),

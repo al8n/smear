@@ -165,9 +165,7 @@ where
     }
     None => {
       lexer.bump(remainder_bytes.len());
-      let mut errs = LexemeErrors::new();
-      errs.push(StringError::unterminated_block_string());
-      Err(errs.into_string_errors())
+      Err(LexemeErrors::new().into_unterminated(StringError::unterminated_block_string()))
     }
   }
 }
@@ -246,11 +244,10 @@ pub(crate) fn skip_block_str_from_bytes<const CHECK_UTF8: bool>(
         .into(),
       )
     }
-    None => {
-      let mut errs = LexemeErrors::new();
-      errs.push(StringError::unterminated_block_string());
-      Err((read, errs.into_string_errors()))
-    }
+    None => Err((
+      read,
+      LexemeErrors::new().into_unterminated(StringError::unterminated_block_string()),
+    )),
   }
 }
 

@@ -47,10 +47,11 @@ All notable changes to Smear are documented in this file.
   add it, answering 0 when its emitter has no ceiling. The lossless state grows by a word more,
   which every token the parser caches carries: with the brace count's, it is two words larger
   than 0.0.1's. What the ceiling bounds is how many records a parse keeps, and with them their
-  bytes: a lexer error's record keeps at most seventeen entries however long its token, the first
-  sixteen faults of a string literal or of a comment and one that counts the rest. It does not
-  bound the tree or the parse's log of events, which grow with the text, and a caller that bounds
-  a parse's whole memory bounds the text's length.
+  bytes: a lexer error's record keeps at most eighteen entries however long its token, which only
+  a string literal's reaches, with its first sixteen faults, one that counts the rest, and the
+  `Unterminated` that ends it where its line or the text does. It does not bound the tree or the
+  parse's log of events, which grow with the text, and a caller that bounds a parse's whole
+  memory bounds the text's length.
 - `smear-lexer`: an inline string literal ends at its first line terminator, `\n`, `\r` or
   `\r\n`, before it. It is refused with the errors of what came before and
   `StringError::Unterminated`, and the terminator and the next line lex as they do anywhere
@@ -59,10 +60,13 @@ All notable changes to Smear are documented in this file.
   literal used to run on to the next `"` or to the end of the text, with an error for each line
   break, and the quotes after it paired up the other way. `StringError::UnexpectedLineTerminator`,
   its three constructors and `SyntaxErrorKind::LineTerminatorInString` stay, and no lexer reports
-  them.
+  them. `SyntaxErrorKind::UnterminatedString`'s help now says that an inline string ends with its
+  line, and that text spanning lines needs a block string.
 - `smear-lexer`: a string literal's record keeps at most sixteen errors, inline or block: the first
   sixteen in the order found, then, when `n` more were found, one `StringError::Omitted(n)` that
-  counts them. So a record holds at most seventeen entries however long its literal, where it
+  counts them. A literal its line or the input ends still closes its record with
+  `StringError::Unterminated`, which the count never takes, because it is why the token ends
+  where it does. So a record holds at most eighteen entries however long its literal, where it
   held one for each fault. `StringError::Omitted` is a new variant: it renders as "n more errors
   in this string literal were found and not kept" and reports `SyntaxErrorKind::InvalidSyntax`.
 - `smear-lexer`: a comment in a byte source keeps at most sixteen errors the same way: an

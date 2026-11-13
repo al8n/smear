@@ -156,8 +156,8 @@ fn what_a_line_held_stays_in_its_literals_record() {
   }
 }
 
-/// A refused literal's record: the kinds of the errors it holds, in order, and the count its last
-/// entry holds when that entry is the one that counts the rest.
+/// A refused literal's record: the kinds of the errors it holds, in order, and the count of the
+/// entry that counts the rest, if it holds one.
 type Record = (Vec<SyntaxErrorKind>, Option<usize>);
 
 /// The record of the string literal a lexer's input opens with, which it refuses.
@@ -174,10 +174,10 @@ macro_rules! first_record {
     let LexerErrorData::String(errs) = error.data() else {
       panic!("a string literal's refusal, got {error:?}");
     };
-    let omitted = match errs.last() {
-      Some(StringError::Omitted(count)) => Some(*count),
+    let omitted = errs.iter().find_map(|error| match error {
+      StringError::Omitted(count) => Some(*count),
       _ => None,
-    };
+    });
     let record: Record = (errs.iter().map(|e| e.kind()).collect(), omitted);
     record
   }};
@@ -206,21 +206,36 @@ fn every_first_record(src: &str) -> [(&'static str, Record); 4] {
   ]
 }
 
-/// A literal's record keeps its first sixteen errors and closes with one entry counting the rest,
-/// exactly, through every lexer: a thousand unknown escapes are sixteen and 984 more, and one fault
-/// more, an escape or the missing closing quote, makes it 985.
+/// A literal's record keeps its first sixteen errors and one entry counting the rest, exactly,
+/// through every lexer: a thousand unknown escapes are sixteen and 984 more, and one escape more
+/// makes it 985. A literal its line or the input ends keeps its `Unterminated` after the count,
+/// where no cap reaches it.
 #[test]
 fn a_literal_keeps_sixteen_errors_and_counts_the_rest() {
   let sixteen = vec![SyntaxErrorKind::UnknownEscape; 16];
-  for (src, omitted) in [
-    (format!("\"{}\"", "\\q".repeat(1000)), 984),
-    (format!("\"{}\"", "\\q".repeat(1001)), 985),
-    (format!("\"{}", "\\q".repeat(1000)), 985),
+  for (src, omitted, unterminated) in [
+    (format!("\"{}\"", "\\q".repeat(1000)), 984, false),
+    (format!("\"{}\"", "\\q".repeat(1001)), 985, false),
+    (format!("\"{}", "\\q".repeat(1000)), 984, true),
+    (format!("\"{}\nx", "\\q".repeat(1000)), 984, true),
   ] {
     for (lexer, (kinds, count)) in every_first_record(&src) {
-      assert_eq!(kinds.len(), 17, "{lexer}: {omitted}");
       assert_eq!(kinds[..16], sixteen[..], "{lexer}: {omitted}");
+      assert_eq!(
+        kinds[16],
+        SyntaxErrorKind::InvalidSyntax,
+        "{lexer}: {omitted}"
+      );
       assert_eq!(count, Some(omitted), "{lexer}");
+      if unterminated {
+        assert_eq!(
+          kinds[17..],
+          [SyntaxErrorKind::UnterminatedString],
+          "{lexer}: {omitted}"
+        );
+      } else {
+        assert_eq!(kinds.len(), 17, "{lexer}: {omitted}");
+      }
     }
   }
 }

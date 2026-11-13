@@ -541,18 +541,22 @@ fn a_fixed_unicode_escape_before_wide_characters_takes_them_whole() {
   );
 }
 
-/// A literal's record keeps its first sixteen errors, in the order found, and closes with one entry
-/// counting the rest, exactly, through either door: a thousand unknown escapes are sixteen and 984
-/// more, and one fault more, an escape or the missing closing quote, makes it 985.
+/// A literal's record keeps its first sixteen errors, in the order found, and one entry counting
+/// the rest, exactly, through either door: a thousand unknown escapes are sixteen and 984 more, and
+/// one escape more makes it 985. A literal its line or the input ends closes its record with
+/// `Unterminated` after the count, where no cap reaches it.
 #[test]
 fn an_inline_literal_keeps_sixteen_errors_and_counts_the_rest() {
-  for (literal, omitted) in [
-    (format!("\"{}\"", "\\q".repeat(1000)), 984),
-    (format!("\"{}\"", "\\q".repeat(1001)), 985),
-    (format!("\"{}", "\\q".repeat(1000)), 985),
+  for (literal, omitted, unterminated) in [
+    (format!("\"{}\"", "\\q".repeat(1000)), 984, false),
+    (format!("\"{}\"", "\\q".repeat(1001)), 985, false),
+    (format!("\"{}", "\\q".repeat(1000)), 984, true),
+    (format!("\"{}\nx", "\\q".repeat(1000)), 984, true),
   ] {
+    let len = if unterminated { 18 } else { 17 };
+
     let text = LitStr::try_from(literal.as_str()).expect_err("unknown escapes");
-    assert_eq!(text.len(), 17, "{omitted}");
+    assert_eq!(text.len(), len, "{omitted}");
     assert!(
       text[..16]
         .iter()
@@ -561,9 +565,12 @@ fn an_inline_literal_keeps_sixteen_errors_and_counts_the_rest() {
       &text[..16]
     );
     assert_eq!(text[16], StringError::Omitted(omitted));
+    if unterminated {
+      assert_eq!(text[17], StringError::unterminated_inline_string());
+    }
 
     let bytes = LitStr::try_from(literal.as_bytes()).expect_err("unknown escapes");
-    assert_eq!(bytes.len(), 17, "{omitted}");
+    assert_eq!(bytes.len(), len, "{omitted}");
     assert!(
       bytes[..16]
         .iter()
@@ -572,6 +579,9 @@ fn an_inline_literal_keeps_sixteen_errors_and_counts_the_rest() {
       &bytes[..16]
     );
     assert_eq!(bytes[16], StringError::Omitted(omitted));
+    if unterminated {
+      assert_eq!(bytes[17], StringError::unterminated_inline_string());
+    }
   }
 }
 

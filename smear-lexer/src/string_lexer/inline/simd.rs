@@ -252,6 +252,15 @@ fn record(errs: Option<LexemeErrors<StringError<u8>>>) -> StringErrors<u8> {
   errs.map_or_else(StringErrors::default, LexemeErrors::into_string_errors)
 }
 
+/// The record of a literal the scan found unterminated: what it found, and then the unterminated
+/// error, which no cap counts away.
+#[inline]
+fn unterminated(errs: Option<LexemeErrors<StringError<u8>>>) -> StringErrors<u8> {
+  errs
+    .unwrap_or_else(LexemeErrors::new)
+    .into_unterminated(StringError::unterminated_inline_string())
+}
+
 /// SIMD-accelerated inline string scanner.
 ///
 /// `src`    — bytes starting **after** the opening `"` (the string body).
@@ -322,8 +331,7 @@ pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
       Some(n) => pos + n,
       None => {
         // No special byte found — string runs off end of input.
-        errs_mut!().push(StringError::unterminated_inline_string());
-        return Err((src.len(), record(errs)));
+        return Err((src.len(), unterminated(errs)));
       }
     };
 
@@ -347,8 +355,7 @@ pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
         pos += 1; // consume '\'
 
         if pos >= src.len() {
-          errs_mut!().push(StringError::unterminated_inline_string());
-          return Err((pos, record(errs)));
+          return Err((pos, unterminated(errs)));
         }
         match src[pos] {
           b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => {
@@ -391,8 +398,7 @@ pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
       // An inline string ends at its line: the literal stops before the terminator, which the
       // caller lexes as it does anywhere else.
       b'\r' | b'\n' => {
-        errs_mut!().push(StringError::unterminated_inline_string());
-        return Err((pos, record(errs)));
+        return Err((pos, unterminated(errs)));
       }
       // Guarded by the const, so a text source's scan keeps the arm below as its
       // only fallback: there `skip_until` stops at the four needles and nowhere

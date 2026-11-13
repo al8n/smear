@@ -697,8 +697,10 @@ pub enum StringError<Char = char> {
   ///
   /// The lexers keep a literal's first sixteen errors (`MAX_LEXEME_ERRORS`, a crate constant) in
   /// the order found. Each fault past them is counted and not stored, and when any was, this entry
-  /// closes the record, after the sixteen. So a record holds at most seventeen entries, however
-  /// long its literal is. It reports [`InvalidSyntax`](SyntaxErrorKind::InvalidSyntax).
+  /// follows the sixteen. A literal its line or the input ends is closed by
+  /// [`Unterminated`](Self::Unterminated) after it, which no count takes, because it says why the
+  /// literal's token ends where it does. So a record holds at most eighteen entries, however long
+  /// its literal is. It reports [`InvalidSyntax`](SyntaxErrorKind::InvalidSyntax).
   #[from(skip)]
   Omitted(usize),
   /// Any other error in a string literal.
@@ -835,18 +837,31 @@ impl<Char> StringError<Char> {
 }
 
 impl<Char> LexemeErrors<StringError<Char>> {
-  /// The literal's record: the errors kept, closed by [`StringError::Omitted`] when more were
-  /// found.
+  /// The record of a literal that ends at its closing delimiter: the errors kept, closed by
+  /// [`StringError::Omitted`] when more were found.
   #[inline]
   pub(crate) fn into_string_errors(self) -> StringErrors<Char> {
     StringErrors(self.finish(StringError::Omitted))
+  }
+
+  /// The record of a literal its line or the input ends: [`into_string_errors`]'s, and after it
+  /// `unterminated`. The cap never counts that one away, because it is why the literal's token
+  /// ends where it does.
+  ///
+  /// [`into_string_errors`]: Self::into_string_errors
+  #[inline]
+  pub(crate) fn into_unterminated(self, unterminated: StringError<Char>) -> StringErrors<Char> {
+    let mut errors = self.finish(StringError::Omitted);
+    errors.push(unterminated);
+    StringErrors(errors)
   }
 }
 
 /// A container for storing multiple string errors.
 ///
-/// The record smear's lexers refuse a string literal with holds at most seventeen: the literal's
-/// first sixteen errors, and [`StringError::Omitted`] counting the rest when there were more.
+/// The record smear's lexers refuse a string literal with holds at most eighteen: the literal's
+/// first sixteen errors, [`StringError::Omitted`] counting the rest when there were more, and
+/// [`StringError::Unterminated`] when the literal's line or the input ends it.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, From, Into, Deref, DerefMut, AsMut, AsRef)]
 pub struct StringErrors<Char = char>(std::vec::Vec<StringError<Char>>);
 
