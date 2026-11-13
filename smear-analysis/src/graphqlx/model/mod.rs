@@ -63,8 +63,8 @@ use table::{
 /// the same spellings: when every id names the same thing in both. That is finer than every
 /// accessor answering alike: a model built by another route, with the same content interned in
 /// another order, is not equal. It is `PartialEq` and not `Eq` because a float value is compared
-/// as an `f64` is. A float the model holds comes from a float literal, and no literal spells a
-/// NaN, so a model is equal to itself.
+/// as an `f64` is. A float the model holds is read from a number literal, a float or an integer
+/// where a float is expected, and none reads as a NaN, so a model is equal to itself.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
   packages: Vec<PackageRow>,

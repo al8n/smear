@@ -357,7 +357,7 @@ pub(super) struct IntRow {
   pub(super) text: Run,
 }
 
-/// A float literal's value.
+/// A float value: what a float literal, or an integer literal where a float is expected, reads as.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct FloatRow {
   pub(super) value: f64,
