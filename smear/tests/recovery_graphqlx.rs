@@ -674,6 +674,170 @@ mod lossless {
     }
   }
 
+  // ── A skip closes no brace it did not open ─────────────────────────────────────────────────
+
+  /// The external review's witness. Every delimiter balances in number.
+  const WITNESS: &str = "mod m { scalar A @d((( } mod n { ))) scalar B }";
+
+  /// The text each of `items` spans in `text`.
+  fn spelled<'t>(text: &'t str, items: &[TypeSystemItem<&str>]) -> Vec<&'t str> {
+    items
+      .iter()
+      .map(|item: &TypeSystemItem<&str>| &text[item.span().start()..item.span().end()])
+      .collect()
+  }
+
+  /// The two `(` after the arguments' own are junk of that list. The skip that takes them stops
+  /// before the `}`, which closes the brace of `m`, one the skip did not open: the list leaves
+  /// it, `A` ends, and `m` closes on it. `n` is a module of its own and `B` its item, in the tree
+  /// and in what the recovering projection answers, where `A`, broken, is not kept. A skip blind
+  /// to which closer answers which opener took `( ( } mod n { ) )` and came back into `m` at the
+  /// count it had left, so `B` was read in `m`, `n`'s `}` closed `m`, and `n` was no module.
+  #[test]
+  fn the_witness_keeps_each_item_in_the_module_its_braces_give_it() {
+    let answer = read(WITNESS);
+    assert!(answer.errors);
+    assert_eq!(
+      kinds(&top(&answer.tree)),
+      [K::ModDefinition, K::ModDefinition]
+    );
+    let m = module(&answer.tree, "mod m");
+    assert_eq!(m.text().to_string(), "mod m { scalar A @d((( }");
+    assert_eq!(scalars(&m), ["scalar A @d((("]);
+    let n = module(&answer.tree, "mod n");
+    assert_eq!(n.text().to_string(), "mod n { ))) scalar B }");
+    assert_eq!(scalars(&n), ["scalar B"]);
+
+    let definitions = answer.document.definitions();
+    assert_eq!(
+      spelled(WITNESS, definitions),
+      ["mod m { scalar A @d((( }", "mod n { ))) scalar B }"]
+    );
+    assert!(items(&definitions[0]).is_empty(), "`A` is kept");
+    assert_eq!(spelled(WITNESS, items(&definitions[1])), ["scalar B"]);
+  }
+
+  /// The witness's kin: the same crossing behind other openers and in other lists. In each, `m`
+  /// closes on the `}` its braces give it and `B` is an item of `n`.
+  ///
+  /// The first five refuse a skip blind to which closer answers which opener, and in none of them
+  /// was `n` a module. With angles, with brackets behind a parenthesis, and in a definition's
+  /// generic list, that skip came back into `m` and read `B` there. In a type's generic list it
+  /// took the fields' `}` and `m`'s, came back into `m` behind `n`'s `{`, and closed `m` on `n`'s
+  /// `}`. In a field's argument list it took both as well and came back into nothing, so `m` had
+  /// no `}` of its own and `B` was read at the root. The last one no skip ever reached: each `[`
+  /// there is the head of a list type, and each list leaves the `}` of the block around it by its
+  /// own test. It refuses a list that took that `}` as junk.
+  #[test]
+  fn a_skip_crosses_no_brace_whatever_it_has_open() {
+    for (what, text, own) in [
+      (
+        "angles in an argument list",
+        "mod m { scalar A @d(<<< } mod n { >>>) scalar B }",
+        "mod m { scalar A @d(<<< }",
+      ),
+      (
+        "brackets behind a parenthesis",
+        "mod m { scalar A @d(([[ } mod n { ]]) ) scalar B }",
+        "mod m { scalar A @d(([[ }",
+      ),
+      (
+        "a definition's generic list",
+        "mod m { type T<<< } mod n { >>> scalar B }",
+        "mod m { type T<<< }",
+      ),
+      (
+        "a type's generic list",
+        "mod m { type T { f: Box<<< } } mod n { >>> scalar B }",
+        "mod m { type T { f: Box<<< } }",
+      ),
+      (
+        "a field's argument list",
+        "mod m { type T { f((( } } mod n { ))) scalar B }",
+        "mod m { type T { f((( } }",
+      ),
+      (
+        "list types, which no skip reaches",
+        "mod m { type T { f: [[[Int } } mod n { ]]] scalar B }",
+        "mod m { type T { f: [[[Int } }",
+      ),
+    ] {
+      let answer = read(text);
+      assert!(answer.errors, "{what}");
+      assert_eq!(
+        kinds(&top(&answer.tree)),
+        [K::ModDefinition, K::ModDefinition],
+        "{what}"
+      );
+      let m = module(&answer.tree, "mod m");
+      assert_eq!(m.text().to_string(), own, "{what}");
+      assert!(holds_a_closing_brace(&m), "{what}");
+      let n = module(&answer.tree, "mod n");
+      assert_eq!(scalars(&n), ["scalar B"], "{what}");
+      assert!(holds_a_closing_brace(&n), "{what}");
+    }
+  }
+
+  /// The crossing out of a nested module into the one around it: `n` is written in `p`, after
+  /// `m`, and that is where it stays. A skip blind to which closer answers which opener came back
+  /// into `m`, read `B` there, and `n` was never a module.
+  #[test]
+  fn a_skip_crosses_no_brace_out_of_a_nested_module() {
+    let answer = read("mod p { mod m { scalar A @d((( } mod n { ))) scalar B } }");
+    assert!(answer.errors);
+    assert_eq!(kinds(&top(&answer.tree)), [K::ModDefinition]);
+    let p = module(&answer.tree, "mod p");
+    assert_eq!(kinds(&p), [K::ModDefinition, K::ModDefinition]);
+    let m = module(&answer.tree, "mod m");
+    assert_eq!(m.text().to_string(), "mod m { scalar A @d((( }");
+    let n = module(&answer.tree, "mod n");
+    assert_eq!(n.text().to_string(), "mod n { ))) scalar B }");
+    assert_eq!(scalars(&n), ["scalar B"]);
+    assert!(holds_a_closing_brace(&p));
+  }
+
+  /// Two walks the review's examples named, which report a missing member and leave what stands
+  /// there. Neither ever took the `}`: before the rule of the braces and since, `m` closes on its
+  /// first `}`, and `X` is read at the root, after the junk there. A walk that took the `}` as
+  /// junk and read on would come back into `m` behind the `{` the junk opens and read `X` there.
+  #[test]
+  fn a_walk_that_misses_a_member_leaves_the_brace() {
+    for (text, own) in [
+      (
+        "mod m { union U = A | } | { | B scalar X }",
+        "mod m { union U = A | }",
+      ),
+      (
+        "mod m { type T implements } { f scalar X }",
+        "mod m { type T implements }",
+      ),
+    ] {
+      let answer = read(text);
+      assert!(answer.errors, "{text}");
+      let m = module(&answer.tree, "mod m");
+      assert_eq!(m.text().to_string(), own, "{text}");
+      assert_eq!(scalars(&top(&answer.tree)), ["scalar X"], "{text}");
+    }
+  }
+
+  /// At a root a `}` is any production's, so a skip there stops before one as well, and the
+  /// dispatcher takes it on its next turn: `n` after it is read as the module it is written as.
+  /// A skip blind to which closer answers which opener took `( ( } mod n { ) )`, and `B` was read
+  /// at the root.
+  #[test]
+  fn a_skip_at_a_root_leaves_the_brace_and_the_module_after_it() {
+    let text = "( ( } mod n { ) ) scalar B }";
+    for (root, tree, _) in at_both_roots(text) {
+      let n = module(&tree, "mod n");
+      assert_eq!(
+        n.text().to_string(),
+        "mod n { ) ) scalar B }",
+        "{text} at the {root} root"
+      );
+      assert_eq!(scalars(&n), ["scalar B"], "{text} at the {root} root");
+    }
+  }
+
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────
 
   #[cfg(feature = "analysis")]
@@ -716,6 +880,21 @@ mod lossless {
           assert_eq!(names(model, m), [name], "{text}");
         }
       }
+    }
+
+    /// The external review's witness through the analyzer: `B` is declared in `n`, where its
+    /// braces put it, and nothing named `B` in `m`. A skip blind to which closer answers which
+    /// opener declared `m::B`, and no module `n`.
+    #[test]
+    fn the_witness_declares_each_item_in_the_module_its_braces_give_it() {
+      let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+        .with_files([SourceFile::new("schema.graphqlx", super::WITNESS)]);
+      let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+      let model: &Model = analysis.model();
+      let m: ModuleId = model.module_by_path("^::app::m").expect("the `mod m`");
+      let n: ModuleId = model.module_by_path("^::app::n").expect("the `mod n`");
+      assert!(!names(model, m).contains(&"B"), "`m` declares `B`");
+      assert_eq!(names(model, n), ["B"]);
     }
   }
 }

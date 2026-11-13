@@ -34,6 +34,11 @@
 //! Every population and bucket below is asserted as a measured constant, and so is the exact
 //! class → instance map of what the law still finds — which is empty — so the mutation space
 //! cannot silently shrink into a gate that passes because it stopped looking.
+//!
+//! Every re-parse, in whatever bucket it lands, is also held to the braces as written: each
+//! module of its tree closes on its own `}` or on none, as `support/braces.rs` defines it. The
+//! re-parses are the largest population of broken texts this suite builds, and the law fails if
+//! none of them held a module with an `Error` in it.
 
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -57,6 +62,9 @@ use smear::parser::{
   lossless::ast::CastNode,
 };
 use tokora::{Parse as _, Parser};
+
+#[path = "support/braces.rs"]
+mod braces;
 
 type SyntaxElement = rowan::NodeOrToken<SyntaxNode, rowan::SyntaxToken<GraphQLxLang>>;
 
@@ -720,6 +728,8 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
   let mut tally = Tally::default();
   let mut pairs = 0usize;
   let mut lenient_bases = 0usize;
+  // Every re-parse, faithful or not, is held to the braces as written.
+  let mut modules = braces::Modules::default();
 
   for (name, source) in corpus() {
     for door in [Door::Mixed, Door::Executable, Door::TypeSystem] {
@@ -793,6 +803,11 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
             let text = mutated.text().to_string();
 
             let reparsed = door.parse(&text);
+            let held = braces::faithful(&reparsed).unwrap_or_else(|why| {
+              panic!("{name} [{door:?}] {} #{index}: {why}\n{text}", op.label())
+            });
+            modules.read += held.read;
+            modules.broken += held.broken;
             let faithful = reparsed
               .children()
               .find(|child| child.kind() == door.container())
@@ -907,6 +922,11 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
   for (deleted, count) in &tally.strict_deletions {
     println!("STRICT {deleted} {count}");
   }
+  println!("BRACES modules={} broken={}", modules.read, modules.broken);
+  assert!(
+    modules.broken > 0,
+    "no re-parse held a module with an `Error` in it, so the braces were held over nothing broken"
+  );
 
   let mut classes: BTreeMap<String, usize> = BTreeMap::new();
   for violation in &tally.violations {

@@ -12,7 +12,7 @@
 //! the lexer reported and every byte it refused, so the text is a function of the *input* and the
 //! tree's shape barely enters into it. What the equality reds on is a **panic**, not an inequality.
 //!
-//! So the assertions that measure something are written deliberately and are four:
+//! So the assertions that measure something are written deliberately and are five:
 //!
 //! 1. [`every_byte_is_carried_by_a_token`] — the token lengths sum to `src.len()`, so a byte
 //!    carried only by a [`Gap`](K::Gap) tile is visible *as* a gap rather than merely as present;
@@ -26,6 +26,10 @@
 //!    perfectly while a whole definition has vanished from the tree. Recording the blindness is
 //!    what stops a green gate 3 being read later as evidence of structural fidelity; only gate 5's
 //!    golden trees can see that class.
+//! 5. [`every_corpus_entry_round_trips_through_every_root`] holds every module of every tree it
+//!    builds to the braces as written, as `support/braces.rs` defines it: each closes on its own
+//!    `}` or on none. That is structure the bytes cannot show, and the invalid entries are where
+//!    a module can lose it; the sweep fails if none of its modules held an `Error`.
 
 use std::path::PathBuf;
 
@@ -56,6 +60,9 @@ fn corpus_files() -> Vec<PathBuf> {
   files.sort();
   files
 }
+
+#[path = "support/braces.rs"]
+mod braces;
 
 /// A named root entry point over a `&str`.
 type Root = (&'static str, fn(&str) -> Parse);
@@ -97,10 +104,12 @@ fn token_bytes(node: &SyntaxNode) -> (usize, usize) {
   (total, gaps)
 }
 
-/// `tree.text() == source`, for every corpus entry through every root.
+/// `tree.text() == source`, for every corpus entry through every root, and every module of every
+/// tree faithful to the braces as written.
 #[test]
 fn every_corpus_entry_round_trips_through_every_root() {
   let mut checked = 0usize;
+  let mut modules = braces::Modules::default();
   for entry in corpus_files() {
     let src = std::fs::read_to_string(&entry).unwrap();
     for (root, parse) in ROOTS {
@@ -111,6 +120,10 @@ fn every_corpus_entry_round_trips_through_every_root() {
         "{} through {root}: the tree does not re-print its source",
         entry.display()
       );
+      let held = braces::faithful(&tree.syntax())
+        .unwrap_or_else(|why| panic!("{} through {root}: {why}", entry.display()));
+      modules.read += held.read;
+      modules.broken += held.broken;
       checked += 1;
     }
   }
@@ -118,6 +131,11 @@ fn every_corpus_entry_round_trips_through_every_root() {
     checked,
     corpus_files().len() * ROOTS.len(),
     "the sweep did not run every entry through every root"
+  );
+  println!("BRACES modules={} broken={}", modules.read, modules.broken);
+  assert!(
+    modules.broken > 0,
+    "no tree held a module with an `Error` in it, so the braces were held over nothing broken"
   );
 }
 

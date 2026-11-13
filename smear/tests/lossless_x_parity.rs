@@ -87,6 +87,9 @@ use tokora::{Parse as _, Parser};
 #[path = "support/graphqlx_padding.rs"]
 mod padding;
 
+#[path = "support/braces.rs"]
+mod braces;
+
 use padding::{ALPHABET, UNPADDABLE, corpus_files, inject, name_of, token_boundaries};
 
 /// The lossless verdict: did the parse report a grammar **error**?
@@ -430,10 +433,17 @@ fn both_alternate_roots_agree_with_their_syntactic_counterparts() {
 /// those wrong answers is a *rejection* in the lossless suite while `syntactic/` — whose lexer
 /// skips trivia before the grammar exists — keeps accepting. That is a parity failure by
 /// construction, and no compact fixture can produce it.
+///
+/// Every padded tree is also held to the braces as written, as `support/braces.rs` defines it:
+/// each of its modules closes on its own `}` or on none. The invalid half is padded too, so this
+/// is the one sweep of broken texts with trivia at every junction, and it fails if none of its
+/// modules held an `Error`.
 #[test]
 fn both_suites_agree_on_every_padded_corpus_entry() {
   let mut skipped = Vec::new();
   let mut variants = 0usize;
+  // Every padded tree, the broken ones above all, is held to the braces as written.
+  let mut modules = braces::Modules::default();
 
   for entry in corpus_files() {
     let name = name_of(&entry);
@@ -444,7 +454,12 @@ fn both_suites_agree_on_every_padded_corpus_entry() {
     };
     for (label, pad) in ALPHABET {
       let padded = inject(&src, &boundaries, pad);
-      let lossless_errs = lossless_has_errors(&padded);
+      let lossless = parse_document(&padded);
+      let held = braces::faithful(&lossless.syntax())
+        .unwrap_or_else(|why| panic!("{name} padded with {label}: {why}"));
+      modules.read += held.read;
+      modules.broken += held.broken;
+      let lossless_errs = lossless.has_errors();
       let syntactic_errs = syntactic_has_errors(&padded);
       assert_eq!(
         lossless_errs, syntactic_errs,
@@ -479,6 +494,12 @@ fn both_suites_agree_on_every_padded_corpus_entry() {
     variants,
     (corpus_files().len() - UNPADDABLE.len()) * ALPHABET.len(),
     "the padded sweep did not run one variant per lexable entry per ignorable form"
+  );
+  println!("BRACES modules={} broken={}", modules.read, modules.broken);
+  assert!(
+    modules.broken > 0,
+    "no padded tree held a module with an `Error` in it, so the braces were held over nothing \
+     broken"
   );
 }
 

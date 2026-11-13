@@ -130,6 +130,22 @@ mod lossless {
     assert_eq!(answer.definitions, 1);
   }
 
+  /// A type missing in front of junk that opens parentheses. The skip that takes the junk stops
+  /// before the `}`, which closes the brace of the type around the list, a brace the skip did not
+  /// open: the list leaves it, the field fails for want of its `:`, the root takes the brace, and
+  /// `R` is read whole. A skip blind to which closer answers which opener took the brace with the
+  /// junk, the list read `type` as an argument's name, and `R` was lost to the skips after it.
+  #[test]
+  fn a_skip_inside_a_list_leaves_the_brace_of_the_block_around_it() {
+    let answer = read("type T { f(a: ( ( } type R { g: Int }");
+    assert!(answer.errors);
+    assert_eq!(
+      entries(&answer.tree, K::TypeSystemDocument, K::ObjectTypeDefinition),
+      ["type R { g: Int }"]
+    );
+    assert_eq!(answer.definitions, 1);
+  }
+
   /// A variables definition that meets a `}` reports its `)` as missing and leaves the brace.
   /// No block of the grammar stands around an operation, so the brace here is one a failed
   /// definition left open: the root takes it as a stray, and reads the operation after it whole.
