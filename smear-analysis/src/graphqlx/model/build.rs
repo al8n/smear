@@ -15,8 +15,8 @@
 //!   extensions;
 //! - members, by lowering: owner by owner, the direct members by contribution and as written, then
 //!   each field's arguments, field by field;
-//! - type occurrences, values and applications, by lowering: in the order of the walk over every
-//!   package, an occurrence before what it nests (`order` spells the walk out);
+//! - type occurrences and applications, by lowering, and values, by coercion: in the order of the
+//!   walk over every package, an occurrence before what it nests (`order` spells the walk out);
 //! - types, by interning as instantiation reaches each type occurrence, and then as it judges the
 //!   bounds of each: a type's arguments before it;
 //! - names, by interning, in the order the analysis first interns them, phase by phase: the
@@ -27,7 +27,8 @@
 //! write onto rows already appended, and read what is written so far through `read`, which never
 //! indexes past a table: instantiation gives definitions their built-in meaning and occurrences
 //! their types, interning each type where it first needs it, and adds instantiations; coercion
-//! gives values their shapes and types; the tier phase gives definitions and types their tiers.
+//! appends the values and gives applications their arguments; the tier phase gives definitions and
+//! types their tiers.
 //! What none of them wrote keeps the neutral value its row was appended with, which the accessors
 //! document. What a type satisfies is no row: it is read off the rows, by the finished model and
 //! by a phase alike.

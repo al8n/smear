@@ -7,11 +7,11 @@
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{ApplicationId, DefId, ModuleId, Sym, TyId, TypeExprId, dense},
+  id::{ApplicationId, DefId, IdRange, MemberId, ModuleId, Sym, TyId, TypeExprId, dense},
   model::{
     Collection, DefKind, Resolution, TypeBound,
     satisfy::{Keys, Steps, Wanted},
-    table::{DefRow, KIND_LIST, KIND_NAMED, KIND_PARAM, TyRow, UNSET_TY},
+    table::{DefRow, KIND_LIST, KIND_NAMED, KIND_PARAM, MemberRow, TyRow, UNSET_TY},
   },
 };
 
@@ -107,6 +107,41 @@ impl ModelBuilder {
       Some(row) => row.applications.of(&self.model.listed_applications),
       None => &[],
     }
+  }
+
+  /// The direct members of `def`, in id order: a directive's are its arguments.
+  pub(crate) fn def_members(&self, def: DefId) -> IdRange<MemberId> {
+    self
+      .model
+      .defs
+      .get(def.get() as usize)
+      .map_or(IdRange::new(0, 0), |row: &DefRow| row.members)
+  }
+
+  /// The arguments of `member`, a field: none for a member of any other kind.
+  pub(crate) fn member_arguments(&self, member: MemberId) -> IdRange<MemberId> {
+    self
+      .model
+      .members
+      .get(member.get() as usize)
+      .map_or(IdRange::new(0, 0), |row: &MemberRow| row.arguments)
+  }
+
+  /// The applications of `member`, in order.
+  pub(crate) fn member_applications(&self, member: MemberId) -> &[ApplicationId] {
+    match self.model.members.get(member.get() as usize) {
+      Some(row) => row.applications.of(&self.model.member_applications),
+      None => &[],
+    }
+  }
+
+  /// The schema's applications, every contribution's, in order.
+  pub(crate) fn schema_applications(&self) -> &[ApplicationId] {
+    self
+      .model
+      .schema
+      .applications
+      .of(&self.model.listed_applications)
   }
 
   /// How many type parameters `def` has: 0 for an id the builder did not issue.

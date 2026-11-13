@@ -11,7 +11,7 @@ use smear_parser::{
 use tokora::diagnostic::Location;
 
 use super::{
-  check, collect, declare,
+  check, coerce, collect, declare,
   diagnostic::{Diagnostics, Reporter},
   id::{PackageId, SourceId},
   instantiate,
@@ -405,7 +405,7 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut builder,
     &mut reporter,
   );
-  lower::lower(
+  let raw = lower::lower(
     &packages,
     &declarations,
     &scopes,
@@ -414,6 +414,7 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut reporter,
   );
   instantiate::instantiate(&declarations, &sources, limits, &mut builder, &mut reporter);
+  coerce::coerce(raw, &sources, &mut builder, &mut reporter);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }

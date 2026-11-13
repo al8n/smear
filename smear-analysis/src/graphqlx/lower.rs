@@ -54,13 +54,13 @@
 //!
 //! # The occurrences
 //!
-//! A second walk over the definitions, in `DefId` order, appends every type occurrence, directive
-//! application and value in the order the model's walk reaches it: each type parameter's default,
-//! then each bound; the `implements` entries, then the union members, then the applications, each
-//! over every contribution in turn; then each direct member's type, default and applications, and
-//! right after a field's, each of its arguments' the same way. The first walk has appended every
-//! member by then, the arguments of every directive definition among them, so each one's id is
-//! known, whichever definition comes first.
+//! A second walk over the definitions, in `DefId` order, appends every type occurrence and
+//! directive application in the order the model's walk reaches it, and reads every written value:
+//! each type parameter's default, then each bound; the `implements` entries, then the union
+//! members, then the applications, each over every contribution in turn; then each direct member's
+//! type, default and applications, and right after a field's, each of its arguments' the same way.
+//! The first walk has appended every member by then, the arguments of every directive definition
+//! among them, so each one's id is known, whichever definition comes first.
 //!
 //! A written type is one occurrence, appended before what it nests: its arguments in order, each
 //! with everything it nests before the next, or its element, walked with an explicit stack. It
@@ -93,12 +93,13 @@
 //! the directive definition's, one lookup each; one the definition does not declare is
 //! `undefined-directive-argument`, with the nearest name it does declare in its help, and is not
 //! kept; the rest are kept in the definition's order, an argument written twice twice, and their
-//! values follow in that order. No default fills an argument that is not written.
+//! values are read in that order.
 //!
-//! A written value, a member's default or an argument's, is one literal: its syntactic kind and
-//! its text as written, quotes, brackets and all, each sequence that is not UTF-8 replaced by
-//! U+FFFD; a value that is a path keeps its path too. Nothing it holds is a value of its own, and
-//! no path in it is resolved: coercion, which knows the type expected, gives a value its shape.
+//! Lowering writes no value. A written value, a member's default or an argument's, is read into a
+//! tree, kept with the member whose default it is or with the application, the argument it sets
+//! and where its name is written: its syntactic kind and where it is written, and for a path its
+//! root and its segments, interned as written. No path in it is resolved: coercion, which runs
+//! after instantiation and knows the type expected, makes the model's values of the trees.
 //!
 //! # The schema
 //!
@@ -123,21 +124,14 @@
 //! however they were written, each a type occurrence resolved where its item is written, with no
 //! generic parameter in scope; then the schema's applications, item by item.
 //!
-//! # The arenas
-//!
-//! The model addresses its names and its texts with `u32` offsets. When lowering ends, a spelling
-//! the name arena refused, or a text arena longer than a `u32` addresses, is reported once, as
-//! `resource-limit`, at the whole of the root package's package source: otherwise the model would
-//! answer a wrong spelling with no diagnostic.
-//!
 //! # Generic once
 //!
 //! This is the last step that sees a parsed document, and so the last that is generic: a document
 //! is `TypeSystemDocument<&str>`, or `TypeSystemDocument<&[u8]>` for a byte text that is not UTF-8,
 //! never the caller's own text type. Each walk is written once, generic over the slice type, and
 //! each item is dispatched on its document's parser where it is walked. Lowering copies every
-//! spelling the model keeps, so the model it builds borrows nothing, and everything after it is
-//! compiled once.
+//! spelling the model keeps, so the model it builds borrows nothing; the trees it answers borrow
+//! the sources' texts and no document, and everything after it is compiled once.
 
 use core::num::NonZeroU32;
 use std::{
@@ -164,13 +158,11 @@ use super::{
   collect::{Items, unknown_item},
   declare::{Binding, Declaration, Declarations, Entry, Item},
   diagnostic::{Diagnostic, Excerpt, Reporter},
-  id::{
-    ApplicationId, DefId, IdRange, MemberId, ModuleId, SourceId, Sym, TypeExprId, ValueId, dense,
-  },
+  id::{ApplicationId, DefId, IdRange, MemberId, ModuleId, SourceId, Sym, TypeExprId, dense},
   model::{
-    DefKind, DirectiveLocation, LiteralKind, MemberKind, ModelBuilder, PathRoot, Root,
-    RootOperation, Written,
+    DefKind, DirectiveLocation, MemberKind, ModelBuilder, PathRoot, Root, RootOperation, Written,
   },
+  raw::{RawArgument, RawKind, RawNode, RawValues},
   resolve::{self, Position, Request, Resolved, Scopes, Wanted},
   set::{PackageView, ROOT},
   source::SourceMap,
@@ -181,18 +173,19 @@ const KEYWORD: usize = 6;
 
 /// Lowers what `declarations` holds into `builder`, which holds every package, module and
 /// definition already, resolving each path through `scopes` and reporting into `reporter`;
-/// `sources` numbers the sources of `packages`, whose texts the values are read from.
-pub(crate) fn lower(
-  packages: &[PackageView<'_>],
+/// `sources` numbers the sources of `packages`. Answers every written value, read from the texts
+/// of `packages`, for coercion.
+pub(crate) fn lower<'p>(
+  packages: &[PackageView<'p>],
   declarations: &Declarations<'_, '_>,
   scopes: &Scopes<'_>,
   sources: &SourceMap,
   builder: &mut ModelBuilder,
   reporter: &mut Reporter,
-) {
+) -> RawValues<'p> {
   // Each source's text, by `SourceId`, numbered as `sources` numbers them: a package source has
   // none.
-  let mut texts: Vec<&[u8]> = Vec::with_capacity(sources.len() as usize);
+  let mut texts: Vec<&'p [u8]> = Vec::with_capacity(sources.len() as usize);
   for package in packages {
     texts.push(&[]);
     for file in &package.files {
@@ -203,7 +196,7 @@ pub(crate) fn lower(
     builder,
     reporter,
     scopes,
-    texts,
+    values: RawValues::new(texts),
     text: String::new(),
     field_ids: Vec::new(),
     next_field: 0,
@@ -233,20 +226,19 @@ pub(crate) fn lower(
     lowering.occurrences(declarations, def, declaration, &attached[next..end]);
     next = end;
   }
-  let root = sources.package_sources(ROOT);
-  lowering.schema(declarations, root);
-  lowering.arenas(Location::entire(root.start()));
+  lowering.schema(declarations, sources.package_sources(ROOT));
+  lowering.values
 }
 
 /// What lowering keeps while it writes: the builder and the reporter it writes into, the scopes it
-/// resolves in, and what it reuses or gathers on the way.
-struct Lowering<'l, 'x> {
+/// resolves in, the values it reads, and what it reuses or gathers on the way.
+struct Lowering<'l, 'x, 'p> {
   builder: &'l mut ModelBuilder,
   reporter: &'l mut Reporter,
   /// Every module's scope: what a path means where it is written.
   scopes: &'l Scopes<'x>,
-  /// Each source's text, by `SourceId`, which a value's text is read from.
-  texts: Vec<&'l [u8]>,
+  /// Every value read so far, and each source's text.
+  values: RawValues<'p>,
   /// The description being cooked: one buffer for every description.
   text: String,
   /// The fields of the definition being lowered, in id order, whose arguments follow every one of
@@ -441,7 +433,7 @@ struct SchemaPart<'d> {
   description: Option<(&'d [u8], Location)>,
 }
 
-impl Lowering<'_, '_> {
+impl Lowering<'_, '_, '_> {
   /// Every extension that joins its target, by target, then source id, then position. Each
   /// target is resolved where its extension is written, in the hand-over's order; an extension
   /// whose target names nothing, which name resolution reports, or names a definition of another
@@ -1527,8 +1519,8 @@ impl Lowering<'_, '_> {
     let ty = self.ty(site, value.ty(), Position::Type);
     self.builder.set_member_type(member, ty);
     if let Some(default) = value.default_value() {
-      let lowered = self.value(site.source.get(), default.value());
-      self.builder.set_member_default(member, lowered);
+      let tree = self.value(site.source.get(), default.value());
+      self.values.defaults.insert(member, tree);
     }
     self.member_applications(site, member, value.directives());
   }
@@ -1608,7 +1600,7 @@ impl Lowering<'_, '_> {
 
   /// The arguments `written`, in the source `source`, of `application`, whose directive is
   /// `directive`, named by `path`: each one the directive declares, found by its name, is kept, in
-  /// the order of the directive's arguments, and its value lowered in that order; each one it does
+  /// the order of the directive's arguments, and its value read in that order; each one it does
   /// not declare is reported and dropped. One written twice is kept twice, in written order.
   fn application_arguments<S: AsRef<[u8]>>(
     &mut self,
@@ -1638,10 +1630,13 @@ impl Lowering<'_, '_> {
     // A stable sort: two of one name keep their written order.
     kept.sort_by_key(|&(member, _, _): &(MemberId, Location, &ConstInputValue<S>)| member);
     for (member, at, value) in kept {
-      let lowered = self.value(source, value);
-      self
-        .builder
-        .push_application_argument(application, member, Some(at), lowered);
+      let tree = self.value(source, value);
+      self.values.arguments.push(RawArgument {
+        application,
+        argument: member,
+        name: at,
+        tree,
+      });
     }
   }
 
@@ -1683,43 +1678,32 @@ impl Lowering<'_, '_> {
     self.reporter.report(report.build());
   }
 
-  /// Lowers the written value `value`, written in the source `source`, as one literal: its
-  /// syntactic kind and its text as written, quotes, brackets and all; a value that is a path keeps
-  /// its path too. Nothing it holds is a value of its own, and nothing in it is resolved. Answers
-  /// its id.
-  //
-  // Coercion gives this function the type expected where the value stands and replaces its body:
-  // it then appends the rows the value's shape needs, and a default's copies, in this same order.
-  fn value<S: AsRef<[u8]>>(&mut self, source: u32, value: &ConstInputValue<S>) -> ValueId {
+  /// Reads the written value `value`, written in the source `source`, into a tree of one node: its
+  /// syntactic kind and where it is written; a value that is a path keeps its path too, its
+  /// segments interned. Nothing in it is resolved. Answers the tree.
+  fn value<S: AsRef<[u8]>>(&mut self, source: u32, value: &ConstInputValue<S>) -> u32 {
     let span = *value.as_span();
-    let id = self.builder.push_value(Location::new(source, span), true);
     let kind = match value {
-      ConstInputValue::Boolean(_) => LiteralKind::Boolean,
-      ConstInputValue::String(_) => LiteralKind::String,
-      ConstInputValue::Float(_) => LiteralKind::Float,
-      ConstInputValue::Int(_) => LiteralKind::Int,
-      ConstInputValue::Enum(_) => LiteralKind::Enum,
-      ConstInputValue::Null(_) => LiteralKind::Null,
-      ConstInputValue::List(_) => LiteralKind::List,
-      ConstInputValue::Set(_) => LiteralKind::Set,
-      ConstInputValue::Map(_) => LiteralKind::Map,
-      ConstInputValue::Object(_) => LiteralKind::Object,
-    };
-    // A span that does not fit its source's text, which the parser never makes, keeps no text.
-    let file: &[u8] = self.texts.get(source as usize).copied().unwrap_or_default();
-    let written = file.get(span.start()..span.end()).unwrap_or_default();
-    self
-      .builder
-      .set_literal(id, kind, &String::from_utf8_lossy(written));
-    if let ConstInputValue::Enum(path) = value {
-      match self.written_path(path.source()) {
-        Some(root) => self.builder.set_value_path(id, root, &self.segments),
+      ConstInputValue::Boolean(_) => RawKind::Boolean,
+      ConstInputValue::String(_) => RawKind::String,
+      ConstInputValue::Float(_) => RawKind::Float,
+      ConstInputValue::Int(_) => RawKind::Int,
+      ConstInputValue::Enum(path) => {
+        let written = self.written_path(path.source());
         // `PathRoot` is `#[non_exhaustive]`: a root of a kind lowering does not know is reported,
         // and the value keeps its text alone.
-        None => self.unknown(source, span),
+        if written.is_none() {
+          self.unknown(source, span);
+        }
+        RawKind::Path(self.values.push_path(written, &self.segments))
       }
-    }
-    id
+      ConstInputValue::Null(_) => RawKind::Null,
+      ConstInputValue::List(_) => RawKind::List,
+      ConstInputValue::Set(_) => RawKind::Set,
+      ConstInputValue::Map(_) => RawKind::Map,
+      ConstInputValue::Object(_) => RawKind::Object,
+    };
+    self.values.push_tree(source, RawNode { kind, span })
   }
 
   /// The id of the next direct member of the definition the second walk is in.
@@ -2346,25 +2330,6 @@ impl Lowering<'_, '_> {
         None
       }
     }
-  }
-
-  /// Reports, once and at `at`, a spelling the model's arenas could not keep.
-  fn arenas(&mut self, at: Location) {
-    if !self.builder.arenas_overflowed() {
-      return;
-    }
-    let kind = DiagnosticKind::ResourceLimit;
-    self.reporter.report(
-      Diagnostic::builder(kind.code(), at)
-        .severity(kind.severity())
-        .message(
-          "the names and texts the model keeps pass the four gigabytes its `u32` offsets \
-           address, so some of the spellings it answers are not the ones written",
-        )
-        .primary_label(kind.title())
-        .help("lower `Limits::max_source_bytes`, or supply less source")
-        .build(),
-    );
   }
 }
 
