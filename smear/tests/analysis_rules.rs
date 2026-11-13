@@ -43,6 +43,9 @@ const COLLECTION_ARITY: &str = "smear::graphqlx::collection-arity";
 /// The code for `TypeRef` where it may not stand.
 const TYPEREF_MISUSE: &str = "smear::graphqlx::typeref-misuse";
 
+/// The code for `NonZero` of what is no integer primitive.
+const NONZERO_ARGUMENT: &str = "smear::graphqlx::nonzero-argument";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1253,6 +1256,7 @@ const FIXTURES: &[(Code, Fixture)] = &[
   (Code::new(MARKER_MISUSE), a_marker_as_a_fields_type),
   (Code::new(COLLECTION_ARITY), a_set_of_two_type_parameters),
   (Code::new(TYPEREF_MISUSE), a_type_ref_as_a_fields_type),
+  (Code::new(NONZERO_ARGUMENT), a_non_zero_float),
 ];
 
 /// A root package that defines its schema twice.
@@ -1318,6 +1322,11 @@ fn a_set_of_two_type_parameters() -> Analysis {
 /// A root package that types a field with `TypeRef`.
 fn a_type_ref_as_a_fields_type() -> Analysis {
   analyze_one("type Query {\n  named: TypeRef\n}\n")
+}
+
+/// A root package that types a field with `NonZero` of a float.
+fn a_non_zero_float() -> Analysis {
+  analyze_one("type Query {\n  count: NonZero<Float>\n}\n")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

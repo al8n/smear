@@ -232,8 +232,10 @@ impl Analysis {
 ///   and that has not exactly two, is `collection-arity`, at the application, and so is one that
 ///   applies both, at the later. `TypeRef` anywhere but as the type of a directive definition's
 ///   argument or of an input field, under lists alone, is `typeref-misuse`, where it is named, a
-///   type argument of any generic definition included. A rule says nothing about a contribution a
-///   phase already refused something in.
+///   type argument of any generic definition included. `NonZero` whose type argument, in the
+///   occurrence's type, is no integer primitive at least one bit wide written without `!` is
+///   `nonzero-argument`, where it is written, with a label at the argument. A rule says nothing
+///   about a contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

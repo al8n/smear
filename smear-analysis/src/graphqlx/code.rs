@@ -179,6 +179,13 @@ pub enum DiagnosticKind {
   /// application's type argument, a union member or a default among them. Reported where it is
   /// named.
   TypeRefMisuse,
+  /// `core`'s `NonZero` of what is no integer primitive at least one bit wide, written without
+  /// `!`. `NonZero` makes an integer never zero, so its type argument is the integer primitive
+  /// itself: a float, `string`, an object, a list, `u0`, a type parameter and an integer written
+  /// with `!` are each refused. Judged by the occurrence's type, an alias such as `NonZeroU32`
+  /// being `NonZero` of the integer it spells, and reported where `NonZero` is written, with a
+  /// label at its type argument.
+  NonZeroArgument,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -217,6 +224,7 @@ impl DiagnosticKind {
     Self::MarkerMisuse,
     Self::CollectionArity,
     Self::TypeRefMisuse,
+    Self::NonZeroArgument,
     Self::ResourceLimit,
   ];
 
@@ -253,6 +261,7 @@ impl DiagnosticKind {
       Self::MarkerMisuse => Code::new("smear::graphqlx::marker-misuse"),
       Self::CollectionArity => Code::new("smear::graphqlx::collection-arity"),
       Self::TypeRefMisuse => Code::new("smear::graphqlx::typeref-misuse"),
+      Self::NonZeroArgument => Code::new("smear::graphqlx::nonzero-argument"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -289,6 +298,7 @@ impl DiagnosticKind {
       Self::MarkerMisuse => "marker misused",
       Self::CollectionArity => "wrong number of a collection's type parameters",
       Self::TypeRefMisuse => "`TypeRef` where it may not stand",
+      Self::NonZeroArgument => "invalid `NonZero` argument",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -325,6 +335,7 @@ impl DiagnosticKind {
       | Self::MarkerMisuse
       | Self::CollectionArity
       | Self::TypeRefMisuse
+      | Self::NonZeroArgument
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }

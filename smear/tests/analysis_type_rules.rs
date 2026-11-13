@@ -1,13 +1,14 @@
 //! The GraphQLx analyzer's rules on what is judged of types: a marker has no field, is named only
 //! in `implements` and in bounds, and is what a scalar, an enum, an input object or a union
-//! implements; a set has one type parameter and a map two; and `TypeRef` stands only in a
-//! directive's arguments. Each rule says nothing within what a phase refused, and quotes a name
-//! only as an excerpt.
+//! implements; a set has one type parameter and a map two; `TypeRef` stands only in a directive's
+//! arguments; and `NonZero`'s argument is an integer primitive. Each rule says nothing within what
+//! a phase refused, and quotes a name only as an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, Layout, Limits, Package, PackageId, SourceFile, SourceId, Tier, analyze,
+    Analysis, Diagnostic, IntegerProvider, Layout, Limits, MemberId, Model, Namespace, Package,
+    PackageId, SourceFile, SourceId, Tier, TyId, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -25,8 +26,18 @@ const ORPHAN: &str = "smear::graphqlx::orphan-extension";
 /// The code of `TypeRef` where it may not stand.
 const TYPEREF: &str = "smear::graphqlx::typeref-misuse";
 
+/// The code of `NonZero` of what is no integer primitive.
+const NONZERO: &str = "smear::graphqlx::nonzero-argument";
+
+/// The code of a count of type arguments that does not match.
+const ARITY: &str = "smear::graphqlx::generic-arity";
+
 /// The code of a type name that names nothing.
 const UNDEFINED: &str = "smear::schema::undefined-type";
+
+/// What the rule on `NonZero`'s argument says, whatever the argument is.
+const NONZERO_MESSAGE: &str = "`NonZero` takes an integer primitive at least one bit wide, written \
+                               without `!`, as its type argument, and this one is not";
 
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
 fn package(
@@ -131,6 +142,21 @@ fn messages(analysis: &Analysis) -> Vec<String> {
     .iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .collect()
+}
+
+/// The type of the field `field` of the type the canonical name `owner` names.
+fn field_type(model: &Model, owner: &str, field: &str) -> TyId {
+  let owner = model
+    .lookup(Namespace::Type, owner)
+    .unwrap_or_else(|| panic!("no type `{owner}`"));
+  let member = model
+    .def(owner)
+    .fields()
+    .into_iter()
+    .find(|id: &MemberId| model.member(*id).name() == field)
+    .unwrap_or_else(|| panic!("no field `{field}`"));
+  let written = model.member(member).ty().expect("a field has a type");
+  model.type_expr(written).ty()
 }
 
 /// A marker, and every place one may stand and may not: an `implements` entry and a bound's
@@ -375,6 +401,124 @@ fn type_ref_is_a_directive_arguments_type() {
   );
 }
 
+/// `NonZero` of integer primitives, written and through an alias; then of a float, `string`, `u0`,
+/// a list, an object, an integer written with `!` and a type parameter; and with no argument.
+const NON_ZEROS: &str = "type User {\n  id: ID\n}\n\
+                         type Good {\n  a: NonZero<u32>\n  b: NonZero<i8>\n  c: NonZeroU16\n}\n\
+                         type Bad {\n  float: NonZero<Float>\n  text: NonZero<string>\n  \
+                         zero: NonZero<u0>\n  list: NonZero<[u8]>\n  user: NonZero<User>\n  \
+                         sure: NonZero<u32!>\n}\n\
+                         type Gen<T> {\n  n: NonZero<T>\n}\ntype Bare {\n  n: NonZero\n}\n";
+
+#[test]
+fn non_zeros_argument_is_an_integer_primitive() {
+  // `u0` is a width beyond `core`'s, which a provider gives.
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", NON_ZEROS)])
+    .with_integers(IntegerProvider::numo());
+  let analysis = analyze(&root, &[], &Limits::new());
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  // At the occurrence, with a label at the argument as written, its `!` included.
+  let refused = |argument: &str| -> (&'static str, Location, Option<Location>) {
+    let written = format!("NonZero<{argument}>");
+    let start = NON_ZEROS
+      .find(written.as_str())
+      .unwrap_or_else(|| panic!("`{written}` is not written"));
+    let inner = start + "NonZero<".len();
+    (
+      NONZERO,
+      Location::new(schema.get(), SimpleSpan::new(start, start + written.len())),
+      Some(Location::new(
+        schema.get(),
+        SimpleSpan::new(inner, inner + argument.len()),
+      )),
+    )
+  };
+  assert_eq!(
+    found(&analysis),
+    [
+      refused("Float"),
+      refused("string"),
+      refused("u0"),
+      refused("[u8]"),
+      refused("User"),
+      refused("u32!"),
+      refused("T"),
+      (
+        ARITY,
+        named(schema, NON_ZEROS, "n: ", "NonZero", 1),
+        Some(model.def(model.builtins().non_zero()).location())
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis)[..7], [NONZERO_MESSAGE; 7]);
+  let integer = "write `NonZero` of an integer primitive, `iN` or `uN` with `N` at least 1, as \
+                 `NonZero<u32>` and its second name `NonZeroU32` do";
+  let nullable = "drop the `!` after the type argument: `NonZero<u32>` is never zero, and \
+                  `NonZero<u32>!` is never null either";
+  let helps: Vec<Option<&str>> = analysis
+    .diagnostics()
+    .iter()
+    .take(7)
+    .map(|diagnostic: &Diagnostic| diagnostic.help())
+    .collect();
+  assert_eq!(
+    helps,
+    [
+      Some(integer),
+      Some(integer),
+      Some(integer),
+      Some(integer),
+      Some(integer),
+      Some(nullable),
+      Some(integer),
+    ]
+  );
+  let labels: Vec<Option<&str>> = analysis
+    .diagnostics()
+    .iter()
+    .take(7)
+    .map(|diagnostic: &Diagnostic| diagnostic.label(0).map(|label| label.text()))
+    .collect();
+  let not_an_integer = Some("no integer primitive at least one bit wide");
+  assert_eq!(
+    labels,
+    [
+      not_an_integer,
+      not_an_integer,
+      not_an_integer,
+      not_an_integer,
+      not_an_integer,
+      Some("written with `!`"),
+      not_an_integer,
+    ]
+  );
+
+  // The root package's `@set` on `NonZero` is the orphan rule's alone, and makes `NonZero` no set:
+  // its argument keeps the nullness it is written with, so the alias and the form it spells stay
+  // one type, and neither is refused.
+  let text = "extend scalar NonZero @set\ntype Query {\n  a: NonZeroU32\n  b: NonZero<u32>\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  assert_eq!(
+    found(&analysis),
+    [(
+      ORPHAN,
+      named(schema, text, "@", "set", 0),
+      Some(model.def(model.builtins().non_zero()).location())
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    field_type(model, "^::app::Query", "a"),
+    field_type(model, "^::app::Query", "b")
+  );
+}
+
 #[test]
 fn a_rule_says_nothing_where_a_phase_spoke() {
   // Each refusal beside a phase's error in the same definition: the phase's diagnostic alone.
@@ -393,6 +537,10 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
       "smear::schema::undefined-directive",
     ),
     ("type F {\n  f: TypeRef\n  x: Missing\n}\n", UNDEFINED),
+    (
+      "type F {\n  n: NonZero<Float>\n  x: Missing\n}\n",
+      UNDEFINED,
+    ),
   ] {
     let analysis = analyze_one(text);
     assert_eq!(codes(&analysis), [expected], "{text}");
@@ -415,6 +563,10 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
     (
       "type F {\n  f: TypeRef\n}\ntype G {\n  x: Missing\n}\n",
       TYPEREF,
+    ),
+    (
+      "type F {\n  n: NonZero<Float>\n}\ntype G {\n  x: Missing\n}\n",
+      NONZERO,
     ),
   ] {
     let analysis = analyze_one(text);
@@ -451,4 +603,11 @@ fn long_names_in_the_rules_are_quoted_as_excerpts() {
       quoted("S")
     )]
   );
+
+  // `NonZero` of a scalar named with four kilobytes: the message names no type.
+  let name = "N".repeat(4096);
+  let analysis = analyze_text(&format!(
+    "scalar {name}\ntype Query {{\n  n: NonZero<{name}>\n}}\n"
+  ));
+  assert_eq!(messages(&analysis), [NONZERO_MESSAGE]);
 }

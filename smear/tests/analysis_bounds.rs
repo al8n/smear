@@ -31,6 +31,9 @@ const LIMIT: &str = "smear::graphqlx::resource-limit";
 /// The code of a count of type arguments that does not match.
 const ARITY: &str = "smear::graphqlx::generic-arity";
 
+/// The code of `NonZero` of what is no integer primitive.
+const NONZERO: &str = "smear::graphqlx::nonzero-argument";
+
 /// What a bound's report tells the author of a named type argument.
 const NAMED_HELP: &str = "declare the interface on the type argument with exactly these type \
                           arguments, or pass a type that declares it";
@@ -597,15 +600,22 @@ fn a_non_zero_integer_is_a_key() {
   );
 
   // A `NonZero` of a float is no key, and its map is not refused for it: the rule on `NonZero`'s
-  // argument is what refuses it.
-  let analysis = analyze_one("type Query {\n  d: HashMap<NonZero<Float>, Int>\n}\n");
+  // argument refuses it, once, where it is written.
+  let text = "type Query {\n  d: HashMap<NonZero<Float>, Int>\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
   assert!(
     !codes(&analysis).contains(&UNSATISFIED),
     "{:#?}",
     analysis.diagnostics()
   );
-  assert!(
-    analysis.diagnostics().is_empty(),
+  assert_eq!(
+    found(&analysis),
+    [(
+      NONZERO,
+      at(schema, text, "NonZero<Float>", 0),
+      Some(at(schema, text, "Float", 0))
+    )],
     "{:#?}",
     analysis.diagnostics()
   );

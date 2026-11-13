@@ -62,7 +62,9 @@ is all a scalar, an enum, an input object or a union implements, each other use 
 package makes a collection with another count, or makes both, being
 `smear::graphqlx::collection-arity`; and `TypeRef` stands only as the type of a directive
 definition's argument or of an input field, under lists alone, anywhere else being
-`smear::graphqlx::typeref-misuse`. An error that a
+`smear::graphqlx::typeref-misuse`; and `NonZero`'s type argument is an integer primitive at least
+one bit wide, written without `!`, `NonZero` of anything else being
+`smear::graphqlx::nonzero-argument`. An error that a
 phase or a rule reports marks the contributions, members and definitions that hold it, as their
 `has_errors()` says, whether the diagnostic ceiling keeps it or not. A consumer's walk marks
 nothing, answers its own diagnostics under the same ceiling, and holds memory bounded by it.

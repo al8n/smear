@@ -219,8 +219,11 @@ All notable changes to Smear are documented in this file.
   exactly two, is the new `smear::graphqlx::collection-arity`, at the application, and a scalar
   that applies both is so once, at the later. And `TypeRef` stands only as the type of a directive
   definition's argument or of an input field, under lists alone: anywhere else, a type argument of
-  any generic definition included, it is the new `smear::graphqlx::typeref-misuse`. A rule says
-  nothing about a contribution a
+  any generic definition included, it is the new `smear::graphqlx::typeref-misuse`. And `NonZero`'s
+  type argument is an integer primitive at least one bit wide, written without `!`: `NonZero` of
+  a float, `string`, an object, a list, `u0`, a type parameter or an integer written with `!` is
+  the new `smear::graphqlx::nonzero-argument`, where it is written, which is then all a map or a
+  set keyed by it is refused with. A rule says nothing about a contribution a
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the
   models it builds, for `smear`'s own tests; it is not API.
