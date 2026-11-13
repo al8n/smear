@@ -1601,6 +1601,251 @@ fn a_where_clause_on_an_extension_is_refused() {
     member_types(model, model.def(pair).fields()),
     ["A=#0", "Int=i32"]
   );
+
+  // The error lies within the extension, which holds it, and through it the definition; the
+  // definition's own contribution does not, nor does the extension's field, which the clause is
+  // outside of.
+  let parts = contributions(model, pair);
+  assert!(!parts[0].3);
+  assert!(parts[1].3);
+  assert!(model.def(pair).has_errors());
+  let b = ids(model.def(pair).fields())[1];
+  assert!(!model.member(b).has_errors());
+}
+
+#[test]
+fn extensions_order_by_source_and_position_whatever_their_modules() {
+  // `a/x.graphqlx` numbers before `b.graphqlx`, though its module, `a`, comes after the root
+  // module that holds `b.graphqlx`.
+  let b = "type Shape {\n  own: Int\n}\nextend type Shape {\n  fromRoot: Int\n}\n";
+  let x = "extend type ~::Shape {\n  fromSub: Int\n}\n";
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[("b.graphqlx", b), ("a/x.graphqlx", x)],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let shape = def(model, Namespace::Type, "^::app::Shape");
+  assert_eq!(
+    member_names(model, model.def(shape).fields()),
+    ["own", "fromSub", "fromRoot"]
+  );
+
+  // An inline `mod` above an extension of the root module: the `mod`'s items follow it in its
+  // file, though its module comes after the root module.
+  let text = "type Shape {\n  own: Int\n}\nmod m {\n  extend type ..::Shape {\n    inMod: Int\n  }\n}\n\
+              extend type Shape {\n  after: Int\n}\n";
+  let analysis = analyze_one(text);
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let shape = def(model, Namespace::Type, "^::app::Shape");
+  assert_eq!(
+    member_names(model, model.def(shape).fields()),
+    ["own", "inMod", "after"]
+  );
+}
+
+#[test]
+fn a_contributions_paths_resolve_where_it_is_written() {
+  // An extension in the module `m` names `m`'s own `Local` and `@here`; the root module, where
+  // its target is, has a `Local` of its own and no `@here`.
+  let b = "type Shape {\n  own: Int\n}\nscalar Local\n";
+  let x =
+    "scalar Local\ndirective @here on OBJECT\nextend type ~::Shape @here {\n  fromM: Local\n}\n";
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[("b.graphqlx", b), ("m/x.graphqlx", x)],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let shape = def(model, Namespace::Type, "^::app::Shape");
+  let from_m = model
+    .member(ids(model.def(shape).fields())[1])
+    .ty()
+    .expect("typed");
+  let TypeExprKind::Named { def: local, .. } = model.type_expr(from_m).kind() else {
+    panic!("`Local` resolves");
+  };
+  assert_eq!(local, def(model, Namespace::Type, "^::app::m::Local"));
+  let extension = model
+    .def(shape)
+    .contributions()
+    .nth(1)
+    .expect("the extension");
+  assert_eq!(
+    model.application(extension.applications()[0]).directive(),
+    Resolution::Resolved(def(model, Namespace::Directive, "@^::app::m::here"))
+  );
+
+  // A built-in the root package replaces is written in the root package's root module, and its
+  // paths resolve there, though its module is `core`'s.
+  let text = "scalar Local\ndirective @deprecated(reason: Local) on FIELD_DEFINITION\n";
+  let analysis = analyze_one(text);
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let deprecated = model.builtins().deprecated();
+  let reason = model
+    .member(ids(model.def(deprecated).arguments())[0])
+    .ty()
+    .expect("typed");
+  let TypeExprKind::Named { def: local, .. } = model.type_expr(reason).kind() else {
+    panic!("`Local` resolves");
+  };
+  assert_eq!(local, def(model, Namespace::Type, "^::app::Local"));
+}
+
+/// Each contribution of `def`: its `implements` entries and its union members, written out.
+fn contributed(model: &Model, def: DefId) -> Vec<(Vec<String>, Vec<String>)> {
+  model
+    .def(def)
+    .contributions()
+    .map(|part: Contribution<'_>| {
+      let implements: Vec<String> = part
+        .implements()
+        .iter()
+        .map(|id: &TypeExprId| written(model, *id))
+        .collect();
+      let members: Vec<String> = part
+        .union_members()
+        .iter()
+        .map(|id: &TypeExprId| written(model, *id))
+        .collect();
+      (implements, members)
+    })
+    .collect()
+}
+
+#[test]
+fn implements_entries_and_union_members_are_each_their_contributions() {
+  let text = "interface A {\n  id: ID\n}\ninterface B {\n  id: ID\n}\n\
+              type T implements A {\n  id: ID\n}\nextend type T implements B {\n  more: Int\n}\n\
+              type V {\n  id: ID\n}\nunion U = T\nextend union U = V\n";
+  let analysis = analyze_one(text);
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let none: Vec<String> = Vec::new();
+  let t = def(model, Namespace::Type, "^::app::T");
+  assert_eq!(
+    contributed(model, t),
+    [
+      (vec![String::from("A=A")], none.clone()),
+      (vec![String::from("B=B")], none.clone()),
+    ]
+  );
+  let u = def(model, Namespace::Type, "^::app::U");
+  assert_eq!(
+    contributed(model, u),
+    [
+      (none.clone(), vec![String::from("T=T")]),
+      (none.clone(), vec![String::from("V=V")]),
+    ]
+  );
+  // The definition's lists are its contributions' runs, in order.
+  let listed = |list: &[TypeExprId]| -> Vec<String> {
+    list
+      .iter()
+      .map(|id: &TypeExprId| written(model, *id))
+      .collect()
+  };
+  assert_eq!(listed(model.def(t).implements()), ["A=A", "B=B"]);
+  assert_eq!(listed(model.def(u).union_members()), ["T=T", "V=V"]);
+}
+
+#[test]
+fn a_default_may_name_a_later_parameter_and_is_numbered_in_parameter_order() {
+  let text = "type P<T = U, U = [Int]> {\n  a: T\n}\n";
+  let analysis = analyze_one(text);
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let p = def(model, Namespace::Type, "^::app::P");
+  let defaults: Vec<Option<TypeExprId>> = model
+    .def(p)
+    .type_params()
+    .map(|param| param.default())
+    .collect();
+  let (t, u) = (
+    defaults[0].expect("`T` has a default"),
+    defaults[1].expect("`U` has a default"),
+  );
+  // Every parameter of the definition is in scope in a default, a later one too.
+  assert_eq!(written(model, t), "U=#1");
+  assert_eq!(written(model, u), "[Int=i32]");
+  // In parameter order, each before what it nests, and both before the members' types.
+  assert_eq!(u.get(), t.get() + 1);
+  let a = model
+    .member(ids(model.def(p).fields())[0])
+    .ty()
+    .expect("typed");
+  assert_eq!(a.get(), u.get() + 2);
+  assert_eq!(written(model, a), "T=#0");
+}
+
+#[test]
+fn a_type_argument_keeps_the_type_positions_code_wherever_it_stands() {
+  // In an `implements` entry, a union member, a root, a bound, a default and an application's
+  // type arguments, each outer path resolves and the argument names nothing.
+  let text = "interface I<X> {\n  id: ID\n}\nscalar Box<Y>\n\
+              type Q implements I<Missing> {\n  id: ID\n}\n\
+              union U = Box<Gone>\n\
+              schema {\n  query: Box<Lost>\n}\n\
+              scalar Keyed<K> where K: I<Nope>\n\
+              scalar Defaulted<T = Absent>\n\
+              directive @typed<Z>(value: Int) on OBJECT\n\
+              type W @typed<Nowhere>(value: 1) {\n  id: ID\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let codes: Vec<(&str, Location)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
+    .collect();
+  assert_eq!(
+    codes,
+    ["Missing", "Gone", "Lost", "Nope", "Absent", "Nowhere"]
+      .map(|name: &str| ("smear::schema::undefined-type", at(schema, text, name, 0)))
+  );
+}
+
+#[test]
+fn the_near_miss_budget_is_spent_in_walk_order_whatever_the_order_given() {
+  // Two near misses of one argument, in two files, within a budget for one search.
+  let one = "directive @d(alpha: Int, beta: Int) repeatable on OBJECT\n\
+             type One @d(alpah: 1) {\n  x: Int\n}\n";
+  let two = "type Two @d(alpah: 1) {\n  y: Int\n}\n";
+  let limits = Limits::new().with_max_near_miss_comparisons(2);
+  let mut runs: Vec<Vec<(String, Location, Option<String>)>> = Vec::new();
+  for files in [
+    [("one.graphqlx", one), ("two.graphqlx", two)],
+    [("two.graphqlx", two), ("one.graphqlx", one)],
+  ] {
+    let root = package("app", Layout::Flat, &files);
+    let analysis = analyze(&root, &[], &limits);
+    runs.push(
+      analysis
+        .diagnostics()
+        .iter()
+        .map(|diagnostic: &Diagnostic| {
+          (
+            diagnostic.to_string(),
+            diagnostic.primary(),
+            diagnostic.help().map(String::from),
+          )
+        })
+        .collect(),
+    );
+  }
+  assert_eq!(runs[0], runs[1]);
+  // Both are reported, and only the first the walk reaches, `One`'s, is given its near miss: the
+  // second search finds the budget spent.
+  let helps: Vec<Option<String>> = runs[0]
+    .iter()
+    .map(|(_, _, help): &(String, Location, Option<String>)| help.clone())
+    .collect();
+  assert_eq!(helps, [Some(String::from("did you mean `alpha`?")), None]);
 }
 
 /// Applications on a definition, on its extension, on a field, a field's argument, an enum value
