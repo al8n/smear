@@ -95,6 +95,19 @@ fn a_self_edge_is_its_own_component_and_a_pair_that_reach_each_other_share_one()
   assert_eq!(groups(&[&[1], &[0], &[]]), [0, 0, 2]);
 }
 
+/// Parallel edges are one edge, and a node's edge to itself inside a larger component changes
+/// nothing of the component.
+#[test]
+fn parallel_edges_and_a_self_edge_inside_a_component_change_nothing() {
+  // 0 → 1 twice and 1 → 0 twice: one component, beside 2 alone.
+  assert_eq!(groups(&[&[1, 1], &[0, 0], &[]]), [0, 0, 2]);
+  // 0 → 1 → 2 → 0, with 1 → 1 too: one component, named by 0.
+  assert_eq!(groups(&[&[1], &[1, 2], &[0]]), [0, 0, 0]);
+  // The same with the self-edge on the least node, and a node with an edge to itself that reaches
+  // the component without being reached back.
+  assert_eq!(groups(&[&[0, 1], &[2], &[0], &[3, 1]]), [0, 0, 0, 3]);
+}
+
 /// A node that reaches a component without being reached back is not in it.
 #[test]
 fn reaching_a_component_is_not_being_in_it() {

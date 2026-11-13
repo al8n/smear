@@ -1063,22 +1063,38 @@ fn a_default_that_needs_itself_through_another_occurrence_is_refused_and_never_f
   }
 }
 
+/// `G` and `H`, written after the type that uses `H`, so that the `H<Int>` that `H`'s `T` writes is
+/// not built yet when the use fills `T`.
+const MEETING_USED_FIRST: &str = "type Query {\n  h: H\n}\n\
+                           type G<T = [U], U = G<Int>> {\n  x: T\n}\n\
+                           type H<T = H<Int>, U = T> {\n  x: T\n}\n";
+
+/// The same, written before the type that uses `H`.
+const MEETING_USED_LAST: &str = "type G<T = [U], U = G<Int>> {\n  x: T\n}\n\
+                          type H<T = H<Int>, U = T> {\n  x: T\n}\n\
+                          type Query {\n  h: H\n}\n";
+
 #[test]
 fn a_forward_default_meets_a_cycle_through_another_occurrence() {
   // `G`'s `U` leaves its own `U` out again: a cycle through another occurrence, at that
-  // occurrence. `H`'s `T` writes `H<Int>`, whose `U` is filled from its own written `T`.
-  let text = "type G<T = [U], U = G<Int>> {\n  x: T\n}\ntype H<T = H<Int>, U = T> {\n  x: T\n}\n\
-              type Query {\n  h: H\n}\n";
-  let analysis = analyze_one(text);
-  let schema = schema_file(&analysis);
-  assert_eq!(
-    found(&analysis),
-    [(DEFAULT, at(schema, text, "G<Int>", 0), None)]
-  );
-  assert_eq!(
-    field_shown(analysis.model(), "^::app::Query", "h"),
-    "H<H<i32, i32>, H<i32, i32>>"
-  );
+  // occurrence. `H`'s `T` writes `H<Int>`, whose `U` is filled from its own written `T`. With the
+  // use written first, that `H<Int>` is filled while the use's own fill of `T` is in progress: a
+  // set keyed by the definition alone would call it a cycle, and slots shared between the two
+  // occurrences would read the use's empty `T`.
+  for text in [MEETING_USED_FIRST, MEETING_USED_LAST] {
+    let analysis = analyze_one(text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(DEFAULT, at(schema, text, "G<Int>", 0), None)],
+      "{text}"
+    );
+    assert_eq!(
+      field_shown(analysis.model(), "^::app::Query", "h"),
+      "H<H<i32, i32>, H<i32, i32>>",
+      "{text}"
+    );
+  }
 }
 
 #[test]
@@ -1349,11 +1365,15 @@ fn an_occurrence_that_holds_an_unresolved_one_is_unresolved_and_says_nothing() {
 #[test]
 fn an_instantiation_is_listed_as_each_written_closed_type() {
   // Both nullnesses of `Page<User>` are written, the non-null one twice; `Page<T>` inside `Page`
-  // names a parameter; `Box<i32>` is only ever a default's; and an alias is `NonZero`'s.
+  // names a parameter; `Box<i32>` is only ever a default's substituted; and an alias is
+  // `NonZero`'s. A union member, a root and a default's own closed tree are written too.
   let text = "type User {\n  id: ID\n}\ntype Page<T, C = [T]> {\n  items: C\n  inner: Page<T>\n}\n\
               scalar Box<X>\nscalar Holder<T, B = Box<T>>\n\
               type Query {\n  a: Page<User>\n  b: Page<User>!\n  c: [Page<User>!]\n  \
-              d: Holder<Int>\n  e: NonZeroU32\n}\n";
+              d: Holder<Int>\n  e: NonZeroU32\n}\n\
+              type Wrap<T> {\n  v: T\n}\nunion Either = Wrap<User>\n\
+              scalar Tag<X>\nscalar Labelled<T, L = Tag<Int>>\n\
+              type Root<T> {\n  item: T\n}\nschema {\n  query: Root<Int>\n}\n";
   let analysis = analyze_one(text);
   assert!(
     analysis.diagnostics().is_empty(),
@@ -1379,6 +1399,29 @@ fn an_instantiation_is_listed_as_each_written_closed_type() {
   assert!(model.instantiations(boxed).is_empty());
   let e = field_type(model, "^::app::Query", "e");
   assert_eq!(model.instantiations(model.builtins().non_zero()), [e]);
+
+  // A union member's type, a root's, and a default's own closed tree's are each listed.
+  let wrap = def(model, Namespace::Type, "^::app::Wrap");
+  let either = def(model, Namespace::Type, "^::app::Either");
+  let member = model.def(either).union_members()[0];
+  assert_eq!(model.instantiations(wrap), [model.type_expr(member).ty()]);
+  assert_eq!(shown(model, model.type_expr(member).ty()), "Wrap<User>");
+  let root_def = def(model, Namespace::Type, "^::app::Root");
+  let Some(Root::Written(root)) = model.schema().root(RootOperation::Query) else {
+    panic!("the query root is written");
+  };
+  assert_eq!(model.instantiations(root_def), [model.type_expr(root).ty()]);
+  let tag = def(model, Namespace::Type, "^::app::Tag");
+  let labelled = def(model, Namespace::Type, "^::app::Labelled");
+  let label = model
+    .def(labelled)
+    .type_params()
+    .nth(1)
+    .expect("`Labelled` has a second type parameter");
+  let default = label.default().expect("`L` has a default");
+  assert_eq!(model.instantiations(tag), [model.type_expr(default).ty()]);
+  assert_eq!(shown(model, model.type_expr(default).ty()), "Tag<i32>");
+  assert!(model.instantiations(labelled).is_empty());
 }
 
 #[test]
@@ -1573,6 +1616,108 @@ fn the_built_in_library_is_built_whatever_the_limits() {
     field_shown(analysis.model(), "^::core::__Schema", "types"),
     "[__Type!]!"
   );
+
+  // Beside it, the root package's own are refused, each where it is written: a list, an alias,
+  // each a level deep, and a use that leaves an argument out, whose fill no step can pay for.
+  let text = "scalar Box<T, U = Int>\ntype Query {\n  a: [Int]\n  b: NonZeroU8\n  c: Box<Int>\n}\n";
+  let analysis = analyze_text(text, &limits);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (LIMIT, at(schema, text, "[Int]", 0), None),
+      (LIMIT, at(schema, text, "NonZeroU8", 0), None),
+      (LIMIT, at(schema, text, "Box<Int>", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let messages = messages(&analysis);
+  assert!(messages[0].contains("`Limits::max_generic_depth`, 0"));
+  assert!(messages[1].contains("`Limits::max_generic_depth`, 0"));
+  assert!(messages[2].contains("`Limits::max_substitutions`, 0"));
+  assert_eq!(
+    field_shown(analysis.model(), "^::core::__Schema", "types"),
+    "[__Type!]!"
+  );
+}
+
+#[test]
+fn derived_instantiations_are_counted() {
+  // Written first, `W<Int>` fills `U` with `Box<i32>`, which takes the one instantiation the
+  // limit admits: `W<i32, Box<i32>>` would be a second, and so would `W`'s default's own
+  // `Box<T>`, which names a parameter and counts all the same. Each is refused where it is
+  // written.
+  let text = "type Query {\n  w: W<Int>\n}\nscalar Box<X>\nscalar W<T, U = Box<T>>\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_instantiations(1));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (LIMIT, at(schema, text, "W<Int>", 0), None),
+      (LIMIT, at(schema, text, "Box<T>", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert!(
+    messages(&analysis)
+      .iter()
+      .all(|message: &String| message.contains("`Limits::max_instantiations`, 1"))
+  );
+  assert_eq!(field_shown(analysis.model(), "^::app::Query", "w"), "?");
+}
+
+#[test]
+fn a_miss_pays_for_every_slot_it_leaves_out_before_any_is_filled() {
+  // `P<Int>` leaves three arguments out, and its miss charges three steps before it fills any:
+  // past a budget of two, the use is `resource-limit`, though `B`'s default would fail at once.
+  let text = "scalar P<A, B = Missing, C = Int, D = Int>\ntype Query {\n  p: P<Int>\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_substitutions(2));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (UNDEFINED, at(schema, text, "Missing", 0), None),
+      (LIMIT, at(schema, text, "P<Int>", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert!(messages(&analysis)[1].contains("`Limits::max_substitutions`, 2"));
+}
+
+#[test]
+fn a_default_that_cannot_be_used_is_remembered_and_told_at_each_use() {
+  // `B`'s default names nothing, which name resolution says once. Each occurrence that leaves `X`
+  // out is `generic-arity`, labelled at that default: `A`'s default `B` too, which is no cycle;
+  // and `A`, whose own default is that `B`, labelled at `A`'s default.
+  let text = "scalar B<X = Missing>\nscalar A<T = B>\ntype Query {\n  a: B\n  b: B\n  c: A\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let missing = Some(at(schema, text, "Missing", 0));
+  let b_default = named(schema, text, "T = ", "B", 0);
+  assert_eq!(
+    found(&analysis),
+    [
+      (UNDEFINED, at(schema, text, "Missing", 0), None),
+      (ARITY, b_default, missing),
+      (ARITY, named(schema, text, "a: ", "B", 0), missing),
+      (ARITY, named(schema, text, "b: ", "B", 0), missing),
+      (ARITY, named(schema, text, "c: ", "A", 0), Some(b_default)),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let messages = messages(&analysis);
+  assert_eq!(
+    messages[1],
+    "`B` is written without a type argument for `X`, and the default of `X` cannot fill it here"
+  );
+  assert_eq!(
+    messages[4],
+    "`A` is written without a type argument for `T`, and the default of `T` cannot fill it here"
+  );
 }
 
 /// Whether some occurrence of `analysis`, of any package, has the unresolved type.
@@ -1682,14 +1827,42 @@ const ORDERED_GEO: (&str, &str) = ("g.graphqlx", "type Wrap<T, U = [T]> {\n  val
 /// The dependency `astro`'s file.
 const ORDERED_ASTRO: (&str, &str) = ("s.graphqlx", "type Star {\n  near: Int\n}\n");
 
-/// Every occurrence's type, written out with its id; every definition's instantiations; and every
-/// diagnostic.
+/// The type `id`, written out as `shown` writes it, with the id of every type in it before it:
+/// two types with no occurrence of their own, a filled argument or the nullable form of a non-null
+/// one, that swapped ids would write otherwise.
+fn structure(model: &Model, id: TyId) -> String {
+  let ty = model.ty(id);
+  let mut text = match ty.kind() {
+    TyKind::Named { def, args, .. } => {
+      let name = model.def(def).name();
+      if args.is_empty() {
+        String::from(name)
+      } else {
+        let args: Vec<String> = args
+          .iter()
+          .map(|arg: &TyId| structure(model, *arg))
+          .collect();
+        format!("{name}<{}>", args.join(", "))
+      }
+    }
+    TyKind::Param { def, index, .. } => format!("{}#{index}", model.def(def).name()),
+    TyKind::List { element, .. } => format!("[{}]", structure(model, element)),
+    _ => String::from("?"),
+  };
+  if ty.non_null() {
+    text.push('!');
+  }
+  format!("{}:{text}", id.get())
+}
+
+/// Every occurrence's type, written out with its id and its arguments' ids; every definition's
+/// instantiations; and every diagnostic.
 fn rendered(analysis: &Analysis) -> Vec<String> {
   let model = analysis.model();
   let mut lines: Vec<String> = Vec::new();
   for id in every_occurrence(analysis) {
     let ty = model.type_expr(id).ty();
-    lines.push(format!("{} {} {}", id.get(), ty.get(), shown(model, ty)));
+    lines.push(format!("{} {}", id.get(), structure(model, ty)));
   }
   for id in model.defs() {
     let listed: Vec<u32> = model
@@ -1808,6 +1981,16 @@ fn a_generic_enum_a_phase_already_refused_is_left_alone() {
   assert_eq!(
     found(&analysis),
     [(UNDEFINED, at(schema, text, "Missing", 0), None)]
+  );
+
+  // The default names its own parameter: instantiation's definition pass says so within the enum,
+  // and the rule says nothing more.
+  let text = "enum E<T = [T]> {\n  A\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(DEFAULT, at(schema, text, "[T]", 0), None)]
   );
 }
 
