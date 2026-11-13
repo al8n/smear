@@ -39,27 +39,10 @@ use super::{
 /// ```
 ///
 /// Each rule implements `Visitor` and `Default`, and resets its state in `begin`; the set derives
-/// `Default`, so `Rules::default()` is the set ready to run. A set may hold no rule, and its every
-/// hook then does nothing. The table, `TABLE`, lists each rule by its type's name, in field order,
-/// and is compiled where something reads it: this crate's unit tests and the test-support door.
+/// `Default`, so `Rules::default()` is the set ready to run. The table, `TABLE`, lists each rule by
+/// its type's name, in field order, and is compiled where something reads it: this crate's unit
+/// tests and the test-support door.
 macro_rules! rule_set {
-  (
-    $(#[$meta:meta])*
-    $vis:vis struct $name:ident {}
-  ) => {
-    $(#[$meta])*
-    #[derive(Default)]
-    $vis struct $name {}
-
-    #[cfg(any(test, feature = "test-support"))]
-    impl $name {
-      /// The rules of the set, each with the codes it reports: none.
-      $vis const TABLE: &'static [(&'static str, &'static [::tokora::diagnostic::Code])] = &[];
-    }
-
-    /// The set holds no rule, so every hook does nothing.
-    impl $crate::graphqlx::Visitor for $name {}
-  };
   (
     $(#[$meta:meta])*
     $vis:vis struct $name:ident {
