@@ -37,25 +37,17 @@ use super::{
   text::View,
 };
 
-/// One file's document: the hand-over from parsing to the phases that read documents.
+/// The parsed documents of one analysis, one entry per source in id order: the hand-over from
+/// parsing to the phases that read documents.
 ///
-/// It borrows the caller's text, so it lives inside one analysis and no longer. The phases read it
-/// and copy into the model every spelling the model keeps; once the model is built, nothing of the
-/// caller's text type remains.
-pub(crate) enum Parsed<'a> {
-  /// A text, or a byte text that is UTF-8.
-  Text(TypeSystemDocument<&'a str>),
-  /// A byte text that is not UTF-8. Such a text was refused with a syntax diagnostic, so this
-  /// variant exists for a parser that recovers; the fail-fast parser this module runs answers no
-  /// document for it.
-  Bytes(TypeSystemDocument<&'a [u8]>),
-}
-
-/// The parsed documents of one analysis, one entry per source in id order.
+/// Each is a document of text, a text's or a byte text's that is UTF-8: a byte text that is not
+/// UTF-8 has none. A document borrows the caller's text, so it lives inside one analysis and no
+/// longer. The phases read it and copy into the model every spelling the model keeps; once the
+/// model is built, nothing of the caller's text type remains.
 pub(crate) struct Documents<'a> {
-  /// `None` for a package source, a file the parser refused, and every supplied file when the
-  /// supplied sources were over their size limit.
-  entries: Vec<Option<Parsed<'a>>>,
+  /// `None` for a package source, a file the parser refused, a byte text that is not UTF-8, and
+  /// every supplied file when the supplied sources were over their size limit.
+  entries: Vec<Option<TypeSystemDocument<&'a str>>>,
 }
 
 impl<'a> Documents<'a> {
@@ -64,9 +56,9 @@ impl<'a> Documents<'a> {
     self.entries.len()
   }
 
-  /// The document of `source`: `None` for a package source, a file the parser refused, and a
-  /// supplied file past the size limit.
-  pub(crate) fn get(&self, source: SourceId) -> Option<&Parsed<'a>> {
+  /// The document of `source`: `None` for a package source, a file the parser refused, a byte
+  /// text that is not UTF-8, and a supplied file past the size limit.
+  pub(crate) fn get(&self, source: SourceId) -> Option<&TypeSystemDocument<&'a str>> {
     self.entries.get(source.get() as usize)?.as_ref()
   }
 }
@@ -90,7 +82,8 @@ where
   P: Layer<'a>,
 {
   let built_in = Syntactic::new();
-  let mut entries: Vec<Option<Parsed<'a>>> = Vec::with_capacity(sources.len() as usize);
+  let mut entries: Vec<Option<TypeSystemDocument<&'a str>>> =
+    Vec::with_capacity(sources.len() as usize);
   for (index, package) in packages.iter().enumerate() {
     // The package source comes first, then the files in the order the map numbered them.
     entries.push(None);
@@ -117,14 +110,15 @@ where
 /// Parses one file with `parser`, reporting its syntax errors at `source`: the file's document, and
 /// what `parser` kept for it.
 ///
-/// A blank text holds a document with no item, and a byte text that is not UTF-8 is read by the
-/// syntactic layer over its bytes; neither reaches `parser`, and neither has a tree.
+/// A blank text holds a document with no item, and a byte text that is not UTF-8 holds none: its
+/// syntax errors are read by the syntactic layer over its bytes. Neither reaches `parser`, and
+/// neither has a tree.
 fn parse<'a, P>(
   parser: &P,
   text: View<'a>,
   source: SourceId,
   reporter: &mut Reporter,
-) -> (Option<Parsed<'a>>, Option<P::Tree>)
+) -> (Option<TypeSystemDocument<&'a str>>, Option<P::Tree>)
 where
   P: Layer<'a>,
 {
@@ -133,23 +127,21 @@ where
     View::Bytes(bytes) => match core::str::from_utf8(bytes) {
       Ok(text) => text,
       Err(_) => {
-        return (
-          parse_bytes(bytes, source, reporter).map(Parsed::Bytes),
-          None,
-        );
+        read_bytes(bytes, source, reporter);
+        return (None, None);
       }
     },
   };
   if blank(text.as_bytes()) {
     let document = TypeSystemDocument::<&'a str>::new(SimpleSpan::new(0, text.len()), Vec::new());
-    return (Some(Parsed::Text(document)), None);
+    return (Some(document), None);
   }
   let mut sink = Syntax::new(reporter, source);
   match parser.type_system_document(text, &mut sink) {
     Ok(parsed) => {
       let (document, _, errors, tree) = parsed.into_components();
       sink.found(errors);
-      (Some(Parsed::Text(document)), Some(tree))
+      (Some(document), Some(tree))
     }
     Err(_) => {
       sink.unread();
@@ -158,21 +150,15 @@ where
   }
 }
 
-/// The type-system document the bytes hold, or `None` once their syntax errors are reported: the
-/// syntactic layer over `[u8]`, under its default limits.
-fn parse_bytes<'a>(
-  bytes: &'a [u8],
-  source: SourceId,
-  reporter: &mut Reporter,
-) -> Option<TypeSystemDocument<&'a [u8]>> {
+/// Reports the syntax errors of a byte text that is not UTF-8, read by the syntactic layer over
+/// `[u8]` under its default limits. Its bad byte is a syntax error wherever it stands, so it has no
+/// document under any layer, and the file contributes nothing; when the layer lent no error, the
+/// file is reported as one that could not be read as a document.
+fn read_bytes(bytes: &[u8], source: SourceId, reporter: &mut Reporter) {
   let mut sink = Syntax::new(reporter, source);
-  match Syntactic::new().type_system_document(bytes, &mut sink) {
-    Ok(parsed) => Some(parsed.into_components().0),
-    Err(_) => {
-      sink.unread();
-      None
-    }
-  }
+  // Whatever the layer answers, the file has no document.
+  let _ = Syntactic::new().type_system_document(bytes, &mut sink);
+  sink.unread();
 }
 
 /// Where a layer lends a file's syntax errors: each one becomes a diagnostic at the file, in the
