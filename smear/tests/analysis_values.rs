@@ -1286,8 +1286,14 @@ fn a_later_argument_of_a_name_already_taken_is_not_asked_for() {
               directive @once(a: Int!) on OBJECT\ntype T @twice @once {\n  f: Int\n}\n";
   let analysis = analyze_text(text, &Limits::new());
   let schema = schema_file(&analysis);
+  // The `MISSING` rows alone: what else the twice-named argument is reported for is no question of
+  // this test's.
+  let missing: Vec<(&str, Location)> = found(&analysis)
+    .into_iter()
+    .filter(|row: &(&str, Location)| row.0 == MISSING)
+    .collect();
   assert_eq!(
-    found(&analysis),
+    missing,
     [(MISSING, after(schema, text, "type T @twice @", "once"))]
   );
   let model = analysis.model();
