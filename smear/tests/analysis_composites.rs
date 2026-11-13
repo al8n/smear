@@ -446,8 +446,8 @@ fn a_literal_that_is_no_object_is_no_input_object() {
 const ONE_OF: &str = "input O @oneOf {\n  a: Int\n  b: Int\n}\n";
 
 /// M4's documents: a OneOf literal of no field, of two, or of one given `null`, at any depth, in a
-/// default or in a directive's argument, is refused once, with the site's code, at the literal or at
-/// the `null`; it stays an object, and its fields are coerced, a field that does not fit being a
+/// default or in a directive's argument, is refused once, with the site's code, at the literal or
+/// at the `null`; it stays an object, and its fields are coerced, a field that does not fit being a
 /// diagnostic of its own; a `null` for a field the input object does not declare is that field's
 /// diagnostic alone. Refuses a OneOf literal left unresolved and not descended, and a second
 /// diagnostic for the `null`.
@@ -1477,10 +1477,13 @@ fn each_later_occurrence_is_reported_at_the_first() {
 /// the 150th, which the third holds already. Refuses a scan that stops at 64.
 #[test]
 fn a_wide_literal_finds_its_duplicates_too() {
-  let mut items: Vec<String> = (0..200u32)
-    .map(|item: u32| (item * 10).to_string())
+  // `0, 10, 20, …`, but the 150th is `20`, as the third is.
+  let items: Vec<String> = (0..200u32)
+    .map(|item: u32| {
+      let value = if item == 149 { 20 } else { item * 10 };
+      value.to_string()
+    })
     .collect();
-  items[149] = items[2].clone();
   let text = format!(
     "type Query {{\n  x: Int\n}}\ninput H {{\n  s: HashSet<Int> = set!{{{}}}\n}}\n",
     items.join(", ")
