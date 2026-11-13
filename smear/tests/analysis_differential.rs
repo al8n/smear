@@ -116,9 +116,6 @@ const IMPLEMENTATION: &str = "the implementation phase reports it: pull request 
 /// Why a row of the input-object cycles exists.
 const CYCLES: &str = "the cycle rules report it: the last part of this pull request";
 
-/// Why a row of a rule of part 2.2 exists.
-const PART_2_2: &str = "its rule is written in part 2.2 of this pull request";
-
 /// Why a row of a rule of part 2.3 exists.
 const PART_2_3: &str = "its rule is written in part 2.3 of this pull request";
 
