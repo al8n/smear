@@ -126,7 +126,8 @@
 //! writes keeps GraphQL's own rules on directives, with GraphQL's codes: one at a location its
 //! directive's definition does not list is `smear::schema::unsupported-directive-location`; and
 //! one of a directive that is not repeatable, applied again where it is applied, a definition and
-//! its extensions being one location, is `smear::schema::duplicate-directive-use`. A rule says
+//! its extensions being one location, is `smear::schema::duplicate-directive-use`; and an argument
+//! an application writes again is `smear::schema::duplicate-directive-argument-use`. A rule says
 //! nothing about a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and

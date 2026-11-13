@@ -561,4 +561,9 @@ pub(crate) mod schema {
   /// `DuplicateDirectiveUse`.
   pub(crate) const DUPLICATE_DIRECTIVE_USE: Code =
     Code::new("smear::schema::duplicate-directive-use");
+
+  /// An application writes one of its directive's arguments again: `smear-schema`'s
+  /// `DuplicateDirectiveArgumentUse`.
+  pub(crate) const DUPLICATE_DIRECTIVE_ARGUMENT_USE: Code =
+    Code::new("smear::schema::duplicate-directive-argument-use");
 }

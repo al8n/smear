@@ -296,8 +296,9 @@ impl Analysis {
 ///   directive's definition. An application of a directive that is not `repeatable`, which an
 ///   earlier application to the same location applies, a definition and its extensions being one
 ///   location and the schema's definition and extensions one, is `duplicate-directive-use`, at its
-///   path, with a label at the first. A rule says nothing about a contribution a phase already
-///   refused something in.
+///   path, with a label at the first. An argument an application writes again, the directive
+///   declaring it, is `duplicate-directive-argument-use`, at its name, with a label at the first.
+///   A rule says nothing about a contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

@@ -2050,7 +2050,16 @@ fn an_unknown_argument_is_reported_and_not_kept() {
 fn an_argument_written_twice_is_kept_twice() {
   let text = "directive @d(a: Int, b: Int) on OBJECT\ntype T @d(a: 1, b: 2, a: 3) {\n  f: Int\n}\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  // GraphQL's own rule refuses the second `a`, and the model keeps both all the same.
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::schema::duplicate-directive-argument-use",
+      named(schema, text, ", ", "a", 0),
+      Some(named(schema, text, "(", "a", 1))
+    )]
+  );
   let model = analysis.model();
   let t = def(model, Namespace::Type, "^::app::T");
   assert_eq!(

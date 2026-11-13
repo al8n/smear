@@ -104,6 +104,9 @@ const UNSUPPORTED_DIRECTIVE_LOCATION: &str = "smear::schema::unsupported-directi
 /// GraphQL's code for a directive that is not repeatable applied twice to one location.
 const DUPLICATE_DIRECTIVE_USE: &str = "smear::schema::duplicate-directive-use";
 
+/// GraphQL's code for an application that passes an argument twice.
+const DUPLICATE_DIRECTIVE_ARGUMENT_USE: &str = "smear::schema::duplicate-directive-argument-use";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1657,6 +1660,10 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(DUPLICATE_DIRECTIVE_USE),
     a_directive_that_is_not_repeatable_applied_twice,
   ),
+  (
+    Code::new(DUPLICATE_DIRECTIVE_ARGUMENT_USE),
+    an_application_that_passes_an_argument_twice,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1879,6 +1886,13 @@ fn a_directive_where_its_definition_does_not_list() -> Analysis {
 /// A directive that is not repeatable applied twice to one type.
 fn a_directive_that_is_not_repeatable_applied_twice() -> Analysis {
   analyze_one("directive @onObject on OBJECT\n     type Query @onObject @onObject { ok: Int }")
+}
+
+/// An application that passes an argument twice.
+fn an_application_that_passes_an_argument_twice() -> Analysis {
+  analyze_one(
+    "directive @onObject(a: Int) on OBJECT\n     type Query @onObject(a: 1, a: 2) { ok: Int }",
+  )
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

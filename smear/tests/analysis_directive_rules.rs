@@ -1,7 +1,8 @@
 //! The GraphQLx analyzer's rules on directive applications, each GraphQL's own with GraphQL's code:
-//! a directive stands where its definition lists; and a directive that is not repeatable is applied
-//! once to a location. Each rule judges every application a supplied package writes, says nothing
-//! within what a phase refused, and quotes a name only as an excerpt.
+//! a directive stands where its definition lists; a directive that is not repeatable is applied
+//! once to a location; and an application passes each argument once. Each rule judges every
+//! application a supplied package writes, says nothing within what a phase refused, and quotes a
+//! name only as an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -27,6 +28,12 @@ const LOCATION_HELP: &str = "add the location to the directive's definition, or 
 
 /// GraphQL's code for a directive that is not repeatable applied twice to one location.
 const DUPLICATE: &str = "smear::schema::duplicate-directive-use";
+
+/// GraphQL's code for an application that passes an argument twice.
+const ARGUMENT: &str = "smear::schema::duplicate-directive-argument-use";
+
+/// The code of an argument its directive does not declare, lowering's.
+const UNDECLARED: &str = "smear::schema::undefined-directive-argument";
 
 /// What GraphQL tells the author of a directive that is not repeatable applied twice to one
 /// location.
@@ -509,6 +516,62 @@ fn a_generic_directive_is_one_directive() {
   );
 }
 
+/// An argument written twice, twice beside another, and three times, each in an application of its
+/// own.
+const ARGUMENTS: &str = "type Query {\n  ok: Int\n}\ndirective @d(a: Int, b: Int) on OBJECT\n\
+                         type One @d(a: 1, a: 2) {\n  o: Int\n}\n\
+                         type Two @d(a: 1, b: 2, a: 3) {\n  t: Int\n}\n\
+                         type Three @d(a: 1, a: 2, a: 3) {\n  h: Int\n}\n";
+
+#[test]
+fn an_application_passes_each_argument_once() {
+  let analysis = analyze_one(ARGUMENTS);
+  let schema = schema_file(&analysis);
+  // A later `a` follows `, `, and an application's first `(`: the directive definition's own
+  // argument is the 0th of those.
+  let later = |nth: usize| -> Location { named(schema, ARGUMENTS, ", ", "a", nth) };
+  let first = |nth: usize| -> Option<Location> { Some(named(schema, ARGUMENTS, "(", "a", nth)) };
+  assert_eq!(
+    found(&analysis),
+    [
+      (ARGUMENT, later(0), first(1)),
+      (ARGUMENT, later(1), first(2)),
+      (ARGUMENT, later(2), first(3)),
+      (ARGUMENT, later(3), first(3)),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis)[0],
+    "this application of `@d` passes the argument `a` again"
+  );
+  // GraphQL's own phrases, and no help, as GraphQL gives none.
+  for diagnostic in analysis.diagnostics() {
+    assert_eq!(
+      diagnostic.primary_label(),
+      Some("directive argument is passed twice")
+    );
+    assert_eq!(
+      diagnostic.label(0).map(|label| label.text()),
+      Some("first passed here")
+    );
+    assert_eq!(diagnostic.help(), None);
+  }
+
+  // An argument the directive does not declare is lowering's, each time it is written, and is not
+  // kept: none of it is this rule's.
+  let text = "type Query {\n  ok: Int\n}\ndirective @d(a: Int) on OBJECT\n\
+              type Four @d(zz: 1, zz: 2) {\n  z: Int\n}\n";
+  let analysis = analyze_one(text);
+  assert_eq!(
+    codes(&analysis),
+    [UNDECLARED, UNDECLARED],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 /// A refusal of `code` is silent in a contribution that also holds the error `phase`, `together`,
 /// and is reported beside it when the error is in a sibling definition, `apart`.
 fn silent_beside(phase: &str, code: &str, together: &'static str, apart: &'static str) {
@@ -551,6 +614,14 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ndirective @d on OBJECT\ntype T @d {\n  t: Int\n  u: Missing\n}\n\
      extend type T @d\n",
   );
+  silent_beside(
+    UNDEFINED,
+    ARGUMENT,
+    "type Query {\n  ok: Int\n}\ndirective @d(a: Int) on OBJECT\n\
+     type T @d(a: 1, a: 2) {\n  t: Int\n  u: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ndirective @d(a: Int) on OBJECT\ntype T @d(a: 1, a: 2) {\n  t: Int\n}\n\
+     type U {\n  u: Missing\n}\n",
+  );
 }
 
 #[test]
@@ -566,6 +637,10 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
     format!(
       "type Query {{\n  ok: Int\n}}\ndirective @{name} on FIELD_DEFINITION\n\
        type {owner} {{\n  {member}: Int @{name} @{name}\n}}\n"
+    ),
+    format!(
+      "type Query {{\n  ok: Int\n}}\ndirective @{name}({member}: Int) on OBJECT\n\
+       type T @{name}({member}: 1, {member}: 2) {{\n  t: Int\n}}\n"
     ),
   ];
   for text in &texts {
