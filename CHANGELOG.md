@@ -390,8 +390,11 @@ All notable changes to Smear are documented in this file.
   the input object does not declare is GraphQL's `smear::schema::undefined-input-object-field`,
   with the nearest field in its help, and is not kept; a required field given `null`, or left out,
   is `smear::schema::missing-required-input-object-field`; an input object its own package applies
-  `@oneOf` to takes exactly one field, and not `null`; and, in this version, a field left out is
-  absent. A custom scalar's value but `null` is its `Literal`, and so, in this version, is a
+  `@oneOf` to takes exactly one field, and not `null`; and a field left out that has a default
+  takes a copy of it, as an argument does, but a OneOf input object's, and is otherwise absent. A
+  copy is counted before it is made, each default's count kept by its tree and its type, and a
+  default whose copy would hold a copy of itself is not copied, its argument or field absent. A
+  custom scalar's value but `null` is its `Literal`, and so, in this version, is a
   collection's, and a value whose type names a type parameter or can take no value. A value that
   does not fit is unresolved and reported where it is written, with GraphQL's
   `smear::schema::invalid-default-value` or `invalid-directive-argument-value`, but for a number out
@@ -405,8 +408,9 @@ All notable changes to Smear are documented in this file.
   diagnostic saying once what does not fit; a required argument left out is
   `missing-required-directive-argument`, at the application's path, with a label at the argument.
   A new `Limits::max_value_steps`, 2^20 by default, bounds what no literal writes: the lists a
-  value written alone stands for, each value of a copy, charged before the copy's first, and each
-  required argument, and each required field of an object literal, found left out; and the one
+  value written alone stands for, each value of a copy, charged before the copy's first, each read
+  of one default's count while another's is counted, each default left out that needs itself, and
+  each required argument, and each required field of an object literal, found left out; and the one
   reading more than linear, the conversion of a decimal integer of more than 38 significant
   digits, charged before it as `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, past
   which the integer is `resource-limit`; a hexadecimal, octal or binary integer costs nothing. Past

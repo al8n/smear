@@ -328,12 +328,16 @@ impl Limits {
   ///
   /// A written value takes none, but for the conversion of a long decimal integer below:
   /// [`max_source_bytes`](Self::max_source_bytes) bounds the rest of what is written. A step is
-  /// one of: a value of a copy of a default, which fills an argument an application leaves out,
-  /// each value nested in the default counting one; a list that a written value stands for where a
-  /// list is expected, one for each level of list between the value and its type, as
-  /// `tags: [[Int]] = 1` stands for a list of a list of `1`; a required argument an application
-  /// leaves out, and a required field an object literal leaves out, each of which is reported; and
-  /// converting a decimal integer of more than 38 significant digits, the most `u128` arithmetic
+  /// one of: a value of a copy of a default, which fills an argument an application leaves out or
+  /// a field an object literal leaves out, each value nested in the default counting one, the
+  /// copies of the defaults its own object literals leave out among them; a read, while a copy is
+  /// counted, of the count of each default one of its object literals leaves out, spent whether or
+  /// not the copy it was counted for is made; a default left out whose copy would hold a copy of
+  /// itself, which is not made; a list that a written value stands for where a list is expected,
+  /// one for each level of list between the value and its type, as `tags: [[Int]] = 1` stands for
+  /// a list of a list of `1`; a required argument an application leaves out, and a required field
+  /// an object literal leaves out, each of which is reported; and converting a decimal integer of
+  /// more than 38 significant digits, the most `u128` arithmetic
   /// reads whatever they spell, to its value, charged before the conversion as an upper bound of
   /// its work: `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine
   /// digits times the 32-bit limbs of its value. A hexadecimal, octal or binary integer converts in
@@ -349,15 +353,20 @@ impl Limits {
   /// `resource-limit` at its path, once, and is filled no further: what it writes is still
   /// coerced, an argument the budget kept from being filled is absent, a required one it kept from
   /// being reported is not reported, and a copy is made whole or not at all. An object literal
-  /// whose next required field left out cannot be paid for is `resource-limit` at the literal,
-  /// once, and the rest of its required fields are not reported; what it writes is still made. At
-  /// `0`, no default fills an argument, no written value stands for a list, and no decimal integer
-  /// of more than 38 significant digits is read: a decimal `u128::MAX` is `resource-limit`.
+  /// whose next required field, or next default, left out cannot be paid for is starved likewise:
+  /// `resource-limit` at the literal, once; what it writes is still made, what was filled stays,
+  /// and none of the rest of its required fields and defaults is read. Its required fields are
+  /// asked for before its defaults. At `0`, no default fills an argument or a field, no written
+  /// value stands for a list, and no decimal integer of more than 38 significant digits is read: a
+  /// decimal `u128::MAX` is `resource-limit`.
   ///
   /// The default is 2^20: one copied value for each of a million applications, so a program of a
   /// hundred thousand applications that each leave eight defaults out stays inside it. The longest
   /// decimal integer it converts, with nothing else spent, has 9 526 digits, charged 1 048 410
-  /// steps; a longer one is written in hexadecimal, or read under a higher limit.
+  /// steps; a longer one is written in hexadecimal, or read under a higher limit. Defaults that
+  /// fill defaults multiply: input objects that each default two fields to `{}` of the next fill
+  /// twice as many values at each level, and nineteen of them, a valid GraphQL document, pass the
+  /// default where their own defaults are written.
   #[inline]
   pub const fn max_value_steps(&self) -> u32 {
     self.max_value_steps

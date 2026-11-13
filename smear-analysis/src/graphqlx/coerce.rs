@@ -65,8 +65,11 @@
 //! own package applies `core`'s `@oneOf` to, in its definition or in an extension of its own,
 //! takes a literal of exactly one field, unknown ones counted, whose value is not `null`: another
 //! literal is refused with the site's code, at the literal, or at the `null`, which is one
-//! unresolved row, and is an `Object` all the same, its fields coerced. In this version a field the
-//! literal leaves out is absent, whatever its default.
+//! unresolved row, and is an `Object` all the same, its fields coerced. A field the literal leaves
+//! out that has a default is an entry with no name, a copy of the default, where the field stands
+//! in the input object's order, but for a OneOf input object, whose fields left out are never
+//! filled; a field neither set, defaulted nor required is absent. Where the literal is written, its
+//! required fields left out are reported before any default is filled.
 //!
 //! A node that does not fit is one row, unresolved, typed with its type, and is not descended: an
 //! element of a list does not fit on its own, and the list keeps the others. It is reported where
@@ -103,29 +106,47 @@
 //! # The count of a copy
 //!
 //! A copy's rows are counted before its first row is made, and the count is what is charged. A
-//! default is counted the first time a copy of it is asked for, and never before, and the count is
-//! kept by the default's tree and the type it is counted against, so a default nothing asks for is
-//! never counted and one asked for again is counted once. The count goes through the same
-//! classifier that makes the rows: its written nodes walked, and a lone value counted from its
-//! type's levels of list, saturating at `Limits::max_value_steps` plus one.
+//! default is counted the first time a copy of it is asked for, by an application that leaves its
+//! argument out, by a written object literal that leaves its field out, or by another count, and
+//! never before; and the count is kept by the default's tree and the type it is counted against.
+//! A count goes through the same classifier and the same reading of object literals as the copy:
+//! its written nodes, a lone value counted from its type's levels of list, and, for each default
+//! an object literal of it leaves out, a read of that default's count. A read is a step, paid
+//! before it is read, and spent whether or not the copy it was counted for is made.
+//!
+//! A count is exact, past the budget, or poisoned. A count that reads a count still being made
+//! has met itself: the copy would hold a copy of itself, and the count is poisoned, with every
+//! count on the way to it, and so is every count that reads a poisoned one. A count whose rows
+//! pass `Limits::max_value_steps`, or one of whose reads cannot be paid for, is past it, with every
+//! count on the way, and is never added up further. An exact count's rows are added with overflow
+//! checked, so it is exact whatever the limit; a default whose count is exact reaches no default
+//! twice on one chain. Counting uses explicit stacks, a frame for each default being counted.
+//!
+//! Who asks for a count does what it says: exact, the count is charged, all of it or none, and
+//! the copy is made; past the budget, the asker is starved; poisoned, one step is charged, and
+//! nothing is made: the argument, or the field, is absent, and the cycle is another rule's to
+//! report. A copy is whole or absent, and the rows a copy makes are its count's, which the phase
+//! asserts when it ends.
 //!
 //! # What bounds it
 //!
 //! A written row is a written literal, which `Limits::max_source_bytes` bounds. What no literal
 //! writes is a step of `Limits::max_value_steps`: each list a written lone value stands for; each
-//! row of a copy, its whole count charged before its first row; and each required argument, and
-//! each required field of an object literal, found left out. So is the one reading that is more
-//! than linear: a decimal integer of more than 38
-//! significant digits, the most `u128` arithmetic reads whatever they spell, is converted nine
-//! digits at a time over a vector of limbs, and that is charged first, an upper bound of its limb
-//! updates; one the budget cannot pay for is `resource-limit` where it is written, and unresolved.
-//! A shorter one is read in `u128` arithmetic, and a hexadecimal, octal or binary one in one pass,
-//! each for nothing. Past it a lone value is unresolved, and `resource-limit` where it is written;
-//! and an application is `resource-limit` once, at its path, its written arguments still coerced, a
-//! copy made whole or not at all, and the rest of its directive's list not read. The built-in
-//! library's own values are charged nothing, and neither is a copy made for an application it
-//! writes; a copy of one of its defaults made for an application a supplied package writes is
-//! charged.
+//! row of a copy, its whole count charged before its first row; each read of a count; each default
+//! asked for that needs itself; and each required argument, and each required field of an object
+//! literal, found left out. So is the one reading that is more than linear: a decimal integer of
+//! more than 38 significant digits, the most `u128` arithmetic reads whatever they spell, is
+//! converted nine digits at a time over a vector of limbs, and that is charged first, an upper
+//! bound of its limb updates; one the budget cannot pay for is `resource-limit` where it is
+//! written, and unresolved. A shorter one is read in `u128` arithmetic, and a hexadecimal, octal or
+//! binary one in one pass, each for nothing. Past it a lone value is unresolved, and
+//! `resource-limit` where it is written; an application is `resource-limit` once, at its path, its
+//! written arguments still coerced, a copy made whole or not at all, and the rest of its
+//! directive's list not read; and an object literal likewise, once, at the literal, its written
+//! fields still coerced and no more of its defaults read. The built-in library's own values are
+//! charged nothing, and neither is a copy made for an application it writes, whose count reads
+//! nothing and is never stopped at the budget; a copy of one of its defaults made for an
+//! application a supplied package writes is charged.
 //!
 //! # The arenas
 //!
@@ -223,6 +244,7 @@ pub(crate) fn coerce(
     builtins,
     members,
     one_of,
+    defaulted: Vec::new(),
     required: Vec::new(),
     inputs: Vec::new(),
     set_fields: Vec::new(),
@@ -245,6 +267,9 @@ pub(crate) fn coerce(
     runs: Vec::new(),
     counts: BTreeMap::new(),
     counting: Vec::new(),
+    frames: Vec::new(),
+    paid: 0,
+    copied: 0,
     levels: BTreeMap::new(),
     chain: Vec::new(),
   };
@@ -271,6 +296,10 @@ pub(crate) fn coerce(
       coercion.application(application);
     }
   }
+  debug_assert_eq!(
+    coercion.paid, coercion.copied,
+    "the copies make exactly the rows they were counted to"
+  );
   let root = sources.package_sources(ROOT);
   arenas(
     coercion.builder,
@@ -316,9 +345,9 @@ enum Mode {
   /// Where it is written, at this site: its rows are written, what does not fit is reported, and
   /// the lists a lone value stands for are charged.
   Written(Site),
-  /// As a copy of a default, for an application that leaves its argument out: its rows are not
-  /// written, and nothing is reported, charged or searched for, the copy's whole count having been
-  /// charged before its first row.
+  /// As a copy of a default, for an application that leaves its argument out or an object literal
+  /// that leaves its field out: its rows are not written, and nothing is reported, charged or
+  /// searched for, the copy's whole count having been charged before its first row.
   Copied,
 }
 
@@ -337,12 +366,77 @@ struct Listed {
   default: Option<u32>,
 }
 
-/// An input object's fields that an object literal leaving them out does something about: its run
-/// of the phase's required fields, each written non-null with no default, in member order.
+/// An input object's fields that an object literal leaving them out does something about, each run
+/// in member order: its run of the phase's defaulted fields, none for a OneOf input object, and
+/// its run of the phase's required fields, each written non-null with no default.
 #[derive(Clone, Copy)]
 struct Input {
   def: DefId,
+  defaults: (u32, u32),
   required: (u32, u32),
+}
+
+/// A default's count: how many rows a copy of it makes, or why no copy is made.
+#[derive(Clone, Copy)]
+enum Count {
+  /// It is being counted: a count that reads it now has met itself.
+  Counting,
+  /// A copy of it makes this many rows, exactly.
+  Rows(u32),
+  /// Its rows pass `Limits::max_value_steps`, or a read it makes could not be paid for.
+  Past,
+  /// It reads its own count: its copy would hold a copy of itself.
+  Poisoned,
+}
+
+/// One entry of a count's stack.
+#[derive(Clone, Copy)]
+enum Counted {
+  /// A node of the tree being counted, against the type it is made against.
+  Node { node: u32, ty: Option<TyId> },
+  /// A read: the count of the default whose tree is `tree`, against `ty`.
+  Fill { tree: u32, ty: Option<TyId> },
+}
+
+/// A default being counted: its tree and the type it is counted against, where its own entries of
+/// the count's stack start, and its rows so far.
+#[derive(Clone, Copy)]
+struct Frame {
+  tree: u32,
+  ty: Option<TyId>,
+  base: usize,
+  rows: u32,
+}
+
+/// What asking for a default left out does, an application's argument or an object literal's
+/// field.
+#[derive(Clone, Copy)]
+enum Asked {
+  /// A copy of this many rows is made.
+  Copy(u32),
+  /// Nothing is made: the argument, or the field, is absent.
+  Absent,
+  /// The budget cannot pay: the asker is past it.
+  Starved,
+}
+
+/// Where a merge of an object literal's fields with its input object's defaults has got to: the
+/// next field the literal sets and the next default, each with the end of its run.
+#[derive(Clone, Copy)]
+struct Merge {
+  set: u32,
+  set_end: u32,
+  default: u32,
+  default_end: u32,
+}
+
+/// What a merge gives next.
+#[derive(Clone, Copy)]
+enum Next {
+  /// A field the literal sets.
+  Set(SetField),
+  /// The default of a field the literal leaves out: the field, and the default's tree.
+  Default(MemberId, u32),
 }
 
 /// A field an object literal sets: the input object's field, where its name is written, in the
@@ -561,9 +655,12 @@ struct Coercion<'c, 'p, 'x> {
   members: BTreeMap<(DefId, Sym), MemberId>,
   /// The input objects their own package applies `core`'s `@oneOf` to, in id order.
   one_of: Vec<DefId>,
+  /// Each input object's defaulted fields, each with its default's tree, one run each, in member
+  /// order.
+  defaulted: Vec<(MemberId, u32)>,
   /// Each input object's required fields, one run each, in member order.
   required: Vec<MemberId>,
-  /// Each input object that has a required field, with its run of `required`, by `DefId`.
+  /// Each input object that has a defaulted or a required field, with its runs, by `DefId`.
   inputs: Vec<Input>,
   /// The fields each object literal read so far sets, one run each, sorted by the field.
   set_fields: Vec<SetField>,
@@ -606,11 +703,18 @@ struct Coercion<'c, 'p, 'x> {
   /// Each directive that has such arguments, with its run of `listed`, by `DefId`: what an
   /// application looks its directive's run up by.
   runs: Vec<(DefId, u32, u32)>,
-  /// Each default counted so far, by its tree and the type it is counted against: how many rows a
-  /// copy of it makes.
-  counts: BTreeMap<(u32, Option<TyId>), u32>,
-  /// The nodes being counted, each with the type it is counted against.
-  counting: Vec<(u32, Option<TyId>)>,
+  /// Each default counted so far, by its tree and the type it is counted against: its count.
+  counts: BTreeMap<(u32, Option<TyId>), Count>,
+  /// What the count being made has still to count: nodes, and reads of other counts.
+  counting: Vec<Counted>,
+  /// The defaults the count being made is counting: the one asked for first, and each later one
+  /// read by the one before it.
+  frames: Vec<Frame>,
+  /// The rows of every count a copy was made of, charged or not.
+  paid: u64,
+  /// The rows made of copies: what `paid` is when the phase ends, since a copy and its count are
+  /// told by one classifier.
+  copied: u64,
   /// How many levels of list each list type read so far is, and the type under them: what a lone
   /// value's count reads.
   levels: BTreeMap<TyId, (u32, TyId)>,
@@ -717,9 +821,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Does what `left`, an argument `application` leaves out, asks, the application's path at `at`
-  /// and written by the built-in library when `library`: a copy of its default, its count of rows
-  /// charged first, or, required, a report that it is left out, a step charged first. Answers
-  /// `false`, and reports the application once, when the budget cannot pay.
+  /// and written by the built-in library when `library`: a copy of its default, as
+  /// [`ask`](Self::ask) says, or, required, a report that it is left out, a step charged first.
+  /// Answers `false`, and reports the application once, when the budget cannot pay.
   fn left_out(
     &mut self,
     application: ApplicationId,
@@ -736,18 +840,20 @@ impl<'p> Coercion<'_, 'p, '_> {
       return true;
     };
     let ty = self.member_type(left.argument);
-    let count = self.count(tree, ty);
-    if !library && !self.charge(count) {
-      self.starved(at);
-      return false;
-    }
+    let rows = match self.ask(tree, ty, library) {
+      Asked::Copy(rows) => rows,
+      Asked::Absent => return true,
+      Asked::Starved => {
+        self.starved(at);
+        return false;
+      }
+    };
     let before = self.builder.value_count();
     if let Some(value) = self.value(tree, ty, Mode::Copied) {
-      // A count past the budget is saturated, and only a copy the library's application asks for,
-      // which is not charged, is made then.
-      debug_assert!(
-        count > self.max_steps || self.builder.value_count().saturating_sub(before) == count,
-        "a copy makes the rows it was counted to"
+      debug_assert_eq!(
+        self.builder.value_count().saturating_sub(before),
+        rows,
+        "a copy makes exactly the rows it was counted to"
       );
       self
         .builder
@@ -797,8 +903,10 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Lists each input object's fields that an object literal leaving them out does something
-  /// about, in member order: each required field, written non-null with no default. A later field
-  /// of a name an earlier one has is not listed: no literal can set it.
+  /// about, in member order: each field with a default, with its default's tree, but for a OneOf
+  /// input object, whose fields left out are never filled; and each required field, written
+  /// non-null with no default. A later field of a name an earlier one has is not listed: no literal
+  /// can set it.
   fn list_fields(&mut self) {
     let mut names: BTreeSet<Sym> = BTreeSet::new();
     for index in 0..self.builder.def_count() {
@@ -806,7 +914,9 @@ impl<'p> Coercion<'_, 'p, '_> {
       if self.builder.def_kind(def) != Some(DefKind::InputObject) {
         continue;
       }
-      let start = dense(self.required.len());
+      let one_of = self.one_of.binary_search(&def).is_ok();
+      let defaults = dense(self.defaulted.len());
+      let required = dense(self.required.len());
       names.clear();
       for field in self.builder.def_members(def) {
         let Some(name) = self.builder.member_name(field) else {
@@ -816,15 +926,20 @@ impl<'p> Coercion<'_, 'p, '_> {
           continue;
         }
         let (_, non_null) = self.member_occurrence(field);
-        if non_null && !self.raw.defaults.contains_key(&field) {
-          self.required.push(field);
+        match self.raw.defaults.get(&field).copied() {
+          Some(tree) if !one_of => self.defaulted.push((field, tree)),
+          Some(_) => {}
+          None if non_null => self.required.push(field),
+          None => {}
         }
       }
-      let end = dense(self.required.len());
-      if end > start {
+      let defaults_end = dense(self.defaulted.len());
+      let required_end = dense(self.required.len());
+      if defaults_end > defaults || required_end > required {
         self.inputs.push(Input {
           def,
-          required: (start, end),
+          defaults: (defaults, defaults_end),
+          required: (required, required_end),
         });
       }
     }
@@ -839,82 +954,246 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.inputs.get(at).copied()
   }
 
-  /// How many rows coercing the tree `tree` against `ty` makes, as a copy makes them, told by
-  /// [`classify`](Self::classify) alone: one for each written node it reaches, the elements of a
-  /// list against a list type and the fields an object literal sets against their types; and for
-  /// a lone value, one for each level of list its type has left, counted from the type and not row
-  /// by row, and then the value against the type under them. The walk visits written nodes alone,
-  /// and stops once the count passes `Limits::max_value_steps`, which no charge can pay: the count
-  /// then saturates at that limit plus one. It is made the first time it is asked for and kept, by
-  /// the tree and the type.
-  fn count(&mut self, tree: u32, ty: Option<TyId>) -> u32 {
-    if let Some(&rows) = self.counts.get(&(tree, ty)) {
-      return rows;
+  /// What asking for the default whose tree is `tree`, of the type `ty`, where it is left out
+  /// does, the asker the built-in library's when `library`: its count is asked for, and charged
+  /// unless `library`. Exact, its rows are charged, all or none, and a copy is made; past the
+  /// budget, the asker is starved; a default that needs itself costs one step and is absent. Steps
+  /// its count's reads paid stay spent whatever the copy.
+  fn ask(&mut self, tree: u32, ty: Option<TyId>, library: bool) -> Asked {
+    match self.count(tree, ty, !library) {
+      Count::Rows(rows) => {
+        if !library && !self.charge(rows) {
+          return Asked::Starved;
+        }
+        self.paid = self.paid.saturating_add(u64::from(rows));
+        Asked::Copy(rows)
+      }
+      Count::Past => Asked::Starved,
+      // A count asked for is never one being made: a count makes no copy and asks for none.
+      Count::Poisoned | Count::Counting => {
+        if !library && !self.charge(1) {
+          return Asked::Starved;
+        }
+        Asked::Absent
+      }
     }
-    let rows = self.walk_count(tree, ty);
-    self.counts.insert((tree, ty), rows);
-    rows
   }
 
-  /// The count of the tree `tree` against `ty`, as [`count`](Self::count) answers it, walked.
-  fn walk_count(&mut self, tree: u32, ty: Option<TyId>) -> u32 {
-    let Some(tree) = self.raw.trees.get(tree as usize).copied() else {
-      return 0;
-    };
-    let cap = self.max_steps.saturating_add(1);
-    let mut rows: u32 = 0;
+  /// The count of the default whose tree is `tree`, against `ty`: kept once made, by the two, and
+  /// made with two stacks of its own, a frame for each default being counted. A frame counts its
+  /// tree's written nodes through [`classify`](Self::classify), as a copy makes them: one row each,
+  /// a list's elements, a lone value's levels of list from its type and then the value against the
+  /// type under them, and the fields an object literal sets; and for each default an object
+  /// literal leaves out, a read of that default's count, a step charged before it is pushed when
+  /// `charged`. A read of a kept count adds its rows; of one not counted yet, opens its frame.
+  ///
+  /// A frame with nothing left is exact, kept, and its rows added to the frame that read it. A
+  /// verdict is every open frame's, each reading the one above it: a read of a count being made,
+  /// or of a poisoned one, poisons; a read of one past the budget, a read that cannot be paid for,
+  /// and rows that pass `u32::MAX`, or `Limits::max_value_steps` when `charged`, are past it. So a
+  /// count past the budget is never added up further, and an exact one is exact whatever the
+  /// limit.
+  fn count(&mut self, tree: u32, ty: Option<TyId>, charged: bool) -> Count {
+    if let Some(&kept) = self.counts.get(&(tree, ty)) {
+      return kept;
+    }
     self.counting.clear();
-    self.counting.push((tree.root, ty));
-    while let Some((node, ty)) = self.counting.pop() {
-      if rows >= cap {
-        self.counting.clear();
-        return cap;
-      }
-      let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
-        continue;
+    self.frames.clear();
+    self.open(tree, ty);
+    loop {
+      let Some(frame) = self.frames.last().copied() else {
+        return Count::Past;
       };
-      rows = rows.saturating_add(1);
-      match self.classify(raw.kind, ty) {
-        Class::List(element) => {
-          let mut child = node.saturating_add(1);
-          while child < raw.after {
-            self.counting.push((child, Some(element)));
-            let next = self
-              .raw
-              .nodes
-              .get(child as usize)
-              .map_or(raw.after, |held: &RawNode| held.after);
-            if next <= child {
-              break;
-            }
-            child = next;
-          }
+      if self.counting.len() <= frame.base {
+        self.frames.pop();
+        let done = Count::Rows(frame.rows);
+        self.counts.insert((frame.tree, frame.ty), done);
+        if self.frames.is_empty() {
+          return done;
         }
-        Class::Lone(element) => {
-          let (levels, under) = self.list_levels(element);
-          rows = rows.saturating_add(levels);
-          if self.is_list(under) {
-            // A list type whose element was not interned before it, which interning never makes:
-            // the value is one row more, and nothing is under it.
-            rows = rows.saturating_add(1);
-          } else {
-            self.counting.push((node, Some(under)));
-          }
+        if let Err(verdict) = self.add_rows(frame.rows, charged) {
+          return self.verdict(verdict);
         }
-        Class::Object { def, first } => {
-          let fields = self.fields_of(node, def, first);
-          for row in fields.start..fields.start.saturating_add(fields.len) {
-            let Some(set) = self.set_fields.get(row as usize).copied() else {
-              break;
-            };
-            let ty = self.member_type(set.field);
-            self.counting.push((set.node, ty));
+        continue;
+      }
+      let Some(entry) = self.counting.pop() else {
+        return self.verdict(Count::Past);
+      };
+      let counted = match entry {
+        Counted::Node { node, ty } => self.count_node(node, ty, charged),
+        Counted::Fill { tree, ty } => match self.counts.get(&(tree, ty)).copied() {
+          Some(Count::Rows(rows)) => self.add_rows(rows, charged),
+          Some(Count::Counting | Count::Poisoned) => Err(Count::Poisoned),
+          Some(Count::Past) => Err(Count::Past),
+          None => {
+            self.open(tree, ty);
+            Ok(())
           }
-        }
-        Class::NoValue | Class::Null | Class::NotNull | Class::Leaf(_) => {}
+        },
+      };
+      if let Err(verdict) = counted {
+        return self.verdict(verdict);
       }
     }
-    rows.min(cap)
+  }
+
+  /// Opens a frame for the default whose tree is `tree`, against `ty`: it is being counted from
+  /// now on, and its tree's root is the next node counted.
+  fn open(&mut self, tree: u32, ty: Option<TyId>) {
+    self.counts.insert((tree, ty), Count::Counting);
+    let base = self.counting.len();
+    self.frames.push(Frame {
+      tree,
+      ty,
+      base,
+      rows: 0,
+    });
+    if let Some(root) = self
+      .raw
+      .trees
+      .get(tree as usize)
+      .map(|tree: &RawTree| tree.root)
+    {
+      self.counting.push(Counted::Node { node: root, ty });
+    }
+  }
+
+  /// Keeps `verdict` as the count of every default being counted, and ends the count: its answer.
+  fn verdict(&mut self, verdict: Count) -> Count {
+    while let Some(frame) = self.frames.pop() {
+      self.counts.insert((frame.tree, frame.ty), verdict);
+    }
+    self.counting.clear();
+    verdict
+  }
+
+  /// Adds `rows` to the default being counted on top: a sum past `u32::MAX`, or, when `charged`,
+  /// past `Limits::max_value_steps`, is past the budget.
+  fn add_rows(&mut self, rows: u32, charged: bool) -> Result<(), Count> {
+    let max = self.max_steps;
+    let Some(frame) = self.frames.last_mut() else {
+      return Ok(());
+    };
+    match frame.rows.checked_add(rows) {
+      Some(sum) if !charged || sum <= max => {
+        frame.rows = sum;
+        Ok(())
+      }
+      _ => Err(Count::Past),
+    }
+  }
+
+  /// Counts `node` against `ty` into the default being counted on top, as [`count`](Self::count)
+  /// says, or fails with the count's verdict.
+  fn count_node(&mut self, node: u32, ty: Option<TyId>, charged: bool) -> Result<(), Count> {
+    let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
+      return Ok(());
+    };
+    self.add_rows(1, charged)?;
+    match self.classify(raw.kind, ty) {
+      Class::NoValue | Class::Null | Class::NotNull | Class::Leaf(_) => {}
+      Class::List(element) => {
+        let mut child = node.saturating_add(1);
+        while child < raw.after {
+          self.counting.push(Counted::Node {
+            node: child,
+            ty: Some(element),
+          });
+          let next = self
+            .raw
+            .nodes
+            .get(child as usize)
+            .map_or(raw.after, |held: &RawNode| held.after);
+          if next <= child {
+            break;
+          }
+          child = next;
+        }
+      }
+      Class::Lone(element) => {
+        let (levels, under) = self.list_levels(element);
+        self.add_rows(levels, charged)?;
+        if self.is_list(under) {
+          // A list type whose element was not interned before it, which interning never makes:
+          // the value is one row more, and nothing is under it.
+          self.add_rows(1, charged)?;
+        } else {
+          self.counting.push(Counted::Node {
+            node,
+            ty: Some(under),
+          });
+        }
+      }
+      Class::Object { def, first } => {
+        let fields = self.fields_of(node, def, first);
+        let mut merge = self.merge(def, fields);
+        while let Some(next) = self.next(&mut merge) {
+          match next {
+            Next::Set(set) => {
+              let ty = self.member_type(set.field);
+              self.counting.push(Counted::Node { node: set.node, ty });
+            }
+            Next::Default(field, tree) => {
+              // A read is paid before it is pushed: no charge covers work pushed before it.
+              if charged && !self.charge(1) {
+                return Err(Count::Past);
+              }
+              let ty = self.member_type(field);
+              self.counting.push(Counted::Fill { tree, ty });
+            }
+          }
+        }
+      }
+    }
+    Ok(())
+  }
+
+  /// The merge of `fields`, what an object literal sets, with the defaults of the input object
+  /// `def`.
+  fn merge(&self, def: DefId, fields: Fields) -> Merge {
+    let (default, default_end) = self
+      .input(def)
+      .map_or((0, 0), |input: Input| input.defaults);
+    Merge {
+      set: fields.start,
+      set_end: fields.start.saturating_add(fields.len),
+      default,
+      default_end,
+    }
+  }
+
+  /// What `merge` gives next, in the input object's order: of the next field the literal sets and
+  /// the next default, the one of the lesser field, a field set before the default of the same
+  /// field, which is then passed by.
+  fn next(&self, merge: &mut Merge) -> Option<Next> {
+    let set = if merge.set < merge.set_end {
+      self.set_fields.get(merge.set as usize).copied()
+    } else {
+      None
+    };
+    let default = if merge.default < merge.default_end {
+      self.defaulted.get(merge.default as usize).copied()
+    } else {
+      None
+    };
+    match (set, default) {
+      (Some(set), Some((field, _))) if set.field <= field => {
+        merge.set = merge.set.saturating_add(1);
+        if set.field == field {
+          merge.default = merge.default.saturating_add(1);
+        }
+        Some(Next::Set(set))
+      }
+      (Some(set), None) => {
+        merge.set = merge.set.saturating_add(1);
+        Some(Next::Set(set))
+      }
+      (_, Some((field, tree))) => {
+        merge.default = merge.default.saturating_add(1);
+        Some(Next::Default(field, tree))
+      }
+      (None, None) => None,
+    }
   }
 
   /// How many levels of list `ty` is before its element is no list, and the type under them: 0
@@ -1106,8 +1385,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     };
     let source = tree.source;
     let at = Location::new(source, raw.span);
-    let id = self.builder.push_value(at, mode.written());
-    self.items.push(id);
+    let id = self.push(at, mode);
     if let Some(ty) = ty {
       self.builder.set_value_ty(id, ty);
     }
@@ -1174,10 +1452,13 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Makes `id`, the row of `making`'s node, an object literal against the input object `def`,
-  /// whose fields' rows of the trees start at `first`, and pushes its entries: each field it sets,
-  /// in the input object's order, then the task that closes it. Where it is written, its unknown
-  /// fields are reported, and so are a OneOf input object's count of fields and the required
-  /// fields it leaves out, before any entry is made.
+  /// whose fields' rows of the trees start at `first`, and pushes its entries in the input
+  /// object's order, then the task that closes it: each field it sets, and each default it leaves
+  /// out, a copy. Where it is written, its unknown fields are reported, a OneOf input object's
+  /// count of fields, and the required fields it leaves out, before any default is filled; a
+  /// default is asked for as [`ask`](Self::ask) says, and once the budget cannot pay, the literal
+  /// is reported once and its written fields alone are read on. In a copy each default's count is
+  /// kept exact, since the count the copy was made of read it, and is copied with nothing asked.
   fn object(&mut self, id: ValueId, making: Making, def: DefId, first: u32) {
     let Making {
       node, tree, mode, ..
@@ -1187,8 +1468,10 @@ impl<'p> Coercion<'_, 'p, '_> {
     };
     let source = tree.source;
     let at = Location::new(source, raw.span);
+    let library = source < self.supplied;
     let fields = self.fields_of(node, def, first);
     let one_of = self.one_of.binary_search(&def).is_ok();
+    let mut merge = self.merge(def, fields);
     if mode.written() {
       self.unknown_fields(node, def, first, source);
       if one_of && fields.written != 1 {
@@ -1198,7 +1481,9 @@ impl<'p> Coercion<'_, 'p, '_> {
         };
         self.refuse(Refused { node, why }, source, making.ty, mode);
       }
-      self.required_left_out(def, fields, at, source < self.supplied);
+      if !self.required_left_out(def, fields, at, library) {
+        merge.default = merge.default_end;
+      }
     }
     let from = self.items.len();
     let entries = self.entries.len();
@@ -1210,12 +1495,41 @@ impl<'p> Coercion<'_, 'p, '_> {
     // The entries' tasks are pushed in order, then reversed, so that the first is made first.
     let tasks = self.stack.len();
     let alone = one_of && fields.written == 1;
-    for row in fields.start..fields.start.saturating_add(fields.len) {
-      let Some(set) = self.set_fields.get(row as usize).copied() else {
-        break;
+    while let Some(next) = self.next(&mut merge) {
+      let (field, default) = match next {
+        Next::Set(set) => {
+          let task = self.entry_task(making, def, set, alone);
+          self.stack.push(task);
+          continue;
+        }
+        Next::Default(field, default) => (field, default),
       };
-      let task = self.entry_task(making, def, set, alone);
-      self.stack.push(task);
+      let Some(default_tree) = self.raw.trees.get(default as usize).copied() else {
+        continue;
+      };
+      let ty = self.member_type(field);
+      let copy = if mode.written() {
+        match self.ask(default, ty, library) {
+          Asked::Copy(_) => true,
+          Asked::Absent => false,
+          Asked::Starved => {
+            self.object_starved(at);
+            merge.default = merge.default_end;
+            false
+          }
+        }
+      } else {
+        matches!(self.counts.get(&(default, ty)), Some(Count::Rows(_)))
+      };
+      if copy {
+        self.entries.push((field, None, ValueId::new(0)));
+        self.stack.push(Task::Make(Making {
+          node: default_tree.root,
+          ty,
+          tree: default_tree,
+          mode: Mode::Copied,
+        }));
+      }
     }
     if let Some(tail) = self.stack.get_mut(tasks..) {
       tail.reverse();
@@ -1462,14 +1776,22 @@ impl<'p> Coercion<'_, 'p, '_> {
     let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
       return;
     };
-    let id = self
-      .builder
-      .push_value(Location::new(tree.source, raw.span), mode.written());
-    self.items.push(id);
+    let id = self.push(Location::new(tree.source, raw.span), mode);
     if let Some(ty) = ty {
       self.builder.set_value_ty(id, ty);
     }
     self.refuse(Refused { node, why }, tree.source, ty, mode);
+  }
+
+  /// Appends a row located at `at`, made as `mode` says, to the model's values and to the open
+  /// values' rows: its id. A copy's rows are tallied.
+  fn push(&mut self, at: Location, mode: Mode) -> ValueId {
+    let id = self.builder.push_value(at, mode.written());
+    self.items.push(id);
+    if !mode.written() {
+      self.copied = self.copied.saturating_add(1);
+    }
+    id
   }
 
   /// Gives the input object `object` its entries: the open entries from `entries` on, each with

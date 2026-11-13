@@ -1,13 +1,15 @@
 //! The GraphQLx analyzer's composite values: an input object's value, its fields found by name and
-//! kept in the input object's order; the codes GraphQL gives an object literal's unknown and
-//! required fields; and an input object its own package makes OneOf.
+//! kept in the input object's order, with copies of the defaults of the fields it leaves out; the
+//! codes GraphQL gives an object literal's unknown and required fields; an input object its own
+//! package makes OneOf; and the count of a copy, which holds copies of defaults that reach other
+//! defaults, made before the copy and charged read by read.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationArgument, Cx, DefId, Diagnostic, Layout, Limits, MemberId, Model,
     Namespace, ObjectEntry, Package, PackageId, Packages, Path, PathRoot, SourceFile, SourceId,
-    Sym, Tier, ValueId, ValueKind, Visitor, analyze, visit,
+    Sym, Tier, ValueId, ValueKind, Visitor, analyze, test_support, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -23,6 +25,10 @@ const UNDEFINED: &str = "smear::schema::undefined-input-object-field";
 const REQUIRED: &str = "smear::schema::missing-required-input-object-field";
 /// A bound of the limits passed.
 const LIMIT: &str = "smear::graphqlx::resource-limit";
+
+/// The codes this phase reports values with. A program the other rules refuse, a cycle of
+/// defaults or a OneOf field with a default among them, is asserted on these alone.
+const PHASE: [&str; 5] = [DEFAULT, ARGUMENT, UNDEFINED, REQUIRED, LIMIT];
 
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_text(text: &str, limits: &Limits) -> Analysis {
@@ -703,4 +709,332 @@ fn long_spellings_are_quoted_as_excerpts() {
   for diagnostic in analysis.diagnostics() {
     assert!(diagnostic.to_string().len() < 1024);
   }
+}
+
+/// A field the literal leaves out takes a copy of its default, with no name, not written, located
+/// at the default, where the field stands in the input object's order. Refuses a copy located at
+/// the object, and the filled entries after the written ones.
+#[test]
+fn a_field_left_out_takes_its_default() {
+  let text = "type Query {\n  range(range: Range = {max: 9, min: 1}): Int\n}\n\
+              input Range {\n  min: Int = 0\n  max: Int\n  step: Int = 1\n}\n\
+              input R2 {\n  a: Int = 0\n  b: Int\n}\ninput H {\n  r: R2 = { b: 1 }\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let schema = schema_file(&analysis);
+  let range = argument_default(model, "Query", "range", "range");
+  assert_eq!(
+    shown(model, range),
+    "Object {min: Int 1, max: Int 9, step= Int 1}"
+  );
+  let step = entries(model, range)[2];
+  assert_eq!(step.name(), None);
+  let filled = model.value(step.value());
+  assert!(!filled.written());
+  assert_eq!(filled.location(), after(schema, text, "step: Int = ", "1"));
+
+  let r = default(model, "H", "r");
+  assert_eq!(shown(model, r), "Object {a= Int 0, b: Int 1}");
+  let entries = entries(model, r);
+  assert!(entries[0].value() < entries[1].value());
+}
+
+/// Two objects that leave one field out each have a copy of its default of their own. Refuses a
+/// row shared.
+#[test]
+fn each_object_has_its_own_copy() {
+  let text = "type Query {\n  x: Int\n}\ninput I {\n  a: Int = 5\n}\n\
+              input J {\n  x: I = {}\n  y: I = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let own = default(model, "I", "a");
+  let x = entries(model, default(model, "J", "x"))[0].value();
+  let y = entries(model, default(model, "J", "y"))[0].value();
+  assert!(own != x && own != y && x != y);
+  for copy in [x, y] {
+    assert_eq!(shown(model, copy), shown(model, own));
+    assert_eq!(model.value(copy).location(), model.value(own).location());
+    assert_eq!(model.value(copy).ty(), model.value(own).ty());
+    assert!(!model.value(copy).written());
+  }
+}
+
+/// A default that leaves a field out is filled from that field's default, and so is its copy:
+/// every row of the copy not written, each at its own default. Refuses a copy that fills one level.
+#[test]
+fn a_default_inside_a_default_is_filled() {
+  let text = "type Query {\n  f(a: A = {}): Int\n}\ninput A {\n  b: B = {}\n}\n\
+              input B {\n  n: Int = 1\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let schema = schema_file(&analysis);
+  assert_eq!(shown_default(model, "A", "b"), "Object {n= Int 1}");
+  let f = argument_default(model, "Query", "f", "a");
+  assert_eq!(shown(model, f), "Object {b= Object {n= Int 1}}");
+  let b = entries(model, f)[0].value();
+  let n = entries(model, b)[0].value();
+  assert!(model.value(f).written());
+  assert!(!model.value(b).written() && !model.value(n).written());
+  assert_eq!(
+    model.value(b).location(),
+    after(schema, text, "b: B = ", "{}")
+  );
+  assert_eq!(
+    model.value(n).location(),
+    after(schema, text, "n: Int = ", "1")
+  );
+}
+
+/// A default that sets its own field reads no default of that field: it is no cycle, and is
+/// filled. Refuses a count that reads the default of a field the literal sets.
+#[test]
+fn a_default_that_sets_its_own_field_is_no_cycle() {
+  let text =
+    "type Query {\n  f(v: C = {}): Int\n}\ninput C {\n  c: C = { c: null }\n  n: Int = 1\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert_eq!(
+    shown(model, argument_default(model, "Query", "f", "v")),
+    "Object {c= Object {c: Null null, n= Int 1}, n= Int 1}"
+  );
+}
+
+/// Filling stops by field: a field is filled again under another field of the chain, and the
+/// chain ends where a literal sets the field. Refuses the stop by object, which leaves a `z` out.
+#[test]
+fn the_stop_is_by_field() {
+  let text = "type Query {\n  x: Int\n}\ninput A {\n  p: B = {}\n  q: B = { a: null }\n}\n\
+              input B {\n  a: A = { p: null }\n  z: Int = 1\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(
+    found_of(&analysis, &PHASE).is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert_eq!(
+    shown_default(model, "A", "p"),
+    "Object {a= Object {p: Null null, q= Object {a: Null null, z= Int 1}}, z= Int 1}"
+  );
+}
+
+/// A default whose copy would hold a copy of itself is not copied, and this phase says nothing:
+/// the cycle is the other rules' to report. So is one that only reads such a default. Refuses
+/// filling until a limit, a diagnostic of this phase, and a poison that does not reach what reads
+/// it.
+#[test]
+fn a_default_that_needs_itself_is_not_filled() {
+  let text = "type Query {\n  x: Int\n}\ninput A {\n  b: B = {}\n}\ninput B {\n  a: A = {}\n}\n\
+              directive @d(a: A = {}) on OBJECT\ntype T @d {\n  f: Int\n}\n\
+              input C2 {\n  c: C2 = { n: 1 }\n  n: Int\n}\n\
+              input A2 {\n  b: B2 = {}\n}\ninput B2 {\n  b: B2 = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(
+    found_of(&analysis, &PHASE).is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert_eq!(shown_default(model, "A", "b"), "Object {}");
+  assert!(arguments_of(model, "T").is_empty());
+  assert_eq!(shown_default(model, "C2", "c"), "Object {n: Int 1}");
+  assert_eq!(shown_default(model, "A2", "b"), "Object {}");
+}
+
+/// A OneOf input object's fields left out are never filled. The codes are read by name: the other
+/// rules refuse the definition. Refuses a OneOf's default filled.
+#[test]
+fn a_one_of_objects_fields_are_never_filled() {
+  let text = "type Query {\n  x: Int\n}\ninput O @oneOf {\n  a: Int = 1\n  b: Int\n}\n\
+              input H {\n  f: O = { b: 2 }\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(
+    found_of(&analysis, &PHASE).is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    shown_default(analysis.model(), "H", "f"),
+    "Object {b: Int 2}"
+  );
+}
+
+/// A generic input object's field is coerced against the type it is written with, which names a
+/// parameter: it keeps its literal, typed with the parameter, and nothing is said. Refuses a field
+/// read under its object's arguments.
+#[test]
+fn a_generic_input_objects_field_keeps_its_literal() {
+  let text = "type Query {\n  x: Int\n}\ninput In<T> {\n  v: T\n  n: Int = 1\n}\n\
+              input H {\n  x: In<i32> = { v: 1 }\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let x = default(model, "H", "x");
+  assert_eq!(shown(model, x), "Object {v: Literal(Int) 1, n= Int 1}");
+  let v = entries(model, x)[0].value();
+  let written = model
+    .member(input_field(model, "In", "v"))
+    .ty()
+    .expect("`v` has a type");
+  assert_eq!(model.value(v).ty(), model.type_expr(written).ty());
+}
+
+/// A later field of a name an earlier field has is never asked for, though it is required; the
+/// control beside it is. Refuses a report for the later field.
+#[test]
+fn a_later_field_of_a_name_already_taken_is_not_asked_for() {
+  let text = "type Query {\n  x: Int\n}\ninput I {\n  a: Int\n  a: Int!\n}\ninput J {\n  b: Int!\n}\n\
+              input H {\n  i: I = {}\n  j: J = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found_of(&analysis, &[REQUIRED]),
+    [(REQUIRED, after(schema, text, "j: J = ", "{}"))]
+  );
+  assert_eq!(shown_default(analysis.model(), "H", "i"), "Object {}");
+}
+
+/// A count is made once and kept: the default `{}` where it is written fills two fields, 2 steps;
+/// `T`'s copy reads two counts, 2 steps, and makes three rows, 3; `U`'s copy, its count kept, is 3
+/// more. At 10 all is paid; at 9 `U` alone is past the budget. At 6 `T`'s two reads stay spent
+/// though its copy is refused, so `U` cannot be paid either. Refuses a count made again for each
+/// copy, which fails at 10; one whose reads nobody pays for, which passes at 9; and reads paid
+/// together with the copy as one charge, which fills `U` at 6.
+#[test]
+fn a_default_is_counted_once() {
+  let text = "type Query {\n  x: Int\n}\ninput I {\n  x: Int = 1\n  y: Int = 2\n}\n\
+              directive @d(a: I = {}) on OBJECT\ntype T @d {\n  f: Int\n}\ntype U @d {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(10));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  assert_eq!(
+    shown(model, arguments_of(model, "U")[0].value()),
+    "Object {x= Int 1, y= Int 2}"
+  );
+
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(9));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(LIMIT, after(schema, text, "type U @", "d"))]
+  );
+  let model = analysis.model();
+  assert_eq!(arguments_of(model, "T").len(), 1);
+  assert!(arguments_of(model, "U").is_empty());
+
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(6));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (LIMIT, after(schema, text, "type T @", "d")),
+      (LIMIT, after(schema, text, "type U @", "d")),
+    ]
+  );
+}
+
+/// Sixty-four input objects that each default two fields to `{}` of the next stand for about 2^64
+/// rows: each count is kept, and is never added up past the budget, so the analysis ends, every
+/// diagnostic is the budget's, and the application that asks for the whole has no argument.
+/// Refuses a copy made before its count, which leaves part of one behind, and a count that neither
+/// keeps what it counted nor stops at the budget, which does not end.
+#[test]
+fn nested_defaults_are_counted_before_they_are_copied() {
+  let mut text = String::from("type Query {\n  x: Int\n}\ninput B63 {\n  z: Int = 1\n}\n");
+  for level in (0..63).rev() {
+    let next = level + 1;
+    text.push_str(&format!(
+      "input B{level} {{\n  x: B{next} = {{}}\n  y: B{next} = {{}}\n}}\n"
+    ));
+  }
+  text.push_str("directive @d(a: B0 = {}) on OBJECT\ntype T @d {\n  f: Int\n}\n");
+  let analysis = analyze_text(&text, &Limits::new().with_max_value_steps(1000));
+  let found = found(&analysis);
+  assert!(!found.is_empty());
+  for (code, at) in found {
+    assert_eq!(code, LIMIT, "{at:?}");
+  }
+  let model = analysis.model();
+  assert!(arguments_of(model, "T").is_empty());
+  let (_, _, values, _) = test_support::counts(model);
+  assert!(values < 3000, "{values} values");
+}
+
+/// A literal starved while its defaults are filled keeps what it had: the field filled before the
+/// budget ran out, and every field it writes. Refuses a second `resource-limit`, and what was
+/// filled taken back.
+#[test]
+fn a_starved_object_keeps_what_it_had() {
+  let text = "type Query {\n  x: Int\n}\ninput I {\n  a: Int = 1\n  b: Int = 2\n  c: Int\n}\n\
+              input J {\n  x: I = { c: 3 }\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(1));
+  let schema = schema_file(&analysis);
+  assert_eq!(found(&analysis), [(LIMIT, at(schema, text, "{ c: 3 }", 0))]);
+  assert_eq!(
+    shown_default(analysis.model(), "J", "x"),
+    "Object {a= Int 1, c: Int 3}"
+  );
+}
+
+/// The required fields a literal leaves out are asked for before its defaults are filled: at one
+/// step, `b` is reported and `a` is not filled. Refuses a budget spent on completing a value that
+/// is wrong.
+#[test]
+fn required_fields_are_asked_before_defaults_are_filled() {
+  let text =
+    "type Query {\n  x: Int\n}\ninput I {\n  a: Int = 1\n  b: Int!\n}\ninput J {\n  x: I = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(1));
+  let schema = schema_file(&analysis);
+  let object = at(schema, text, "{}", 0);
+  assert_eq!(
+    sorted(found(&analysis)),
+    sorted(vec![(REQUIRED, object), (LIMIT, object)])
+  );
+  assert_eq!(shown_default(analysis.model(), "J", "x"), "Object {}");
+}
+
+/// A default that needs itself costs a step each time it is asked for, besides the reads that met
+/// it: seven in all. `A.b`'s default reads `B.a`'s count, which reads `A.b`'s, which meets itself,
+/// 2, and pays 1 for the poisoned default; `B.a`'s and `@d`'s defaults pay 1 each; `T`'s copy reads
+/// 1 and pays 1. Refuses a default that needs itself passed by for nothing.
+#[test]
+fn a_default_that_needs_itself_costs_a_step() {
+  let text = "type Query {\n  x: Int\n}\ninput A {\n  b: B = {}\n}\ninput B {\n  a: A = {}\n}\n\
+              directive @d(a: A = {}) on OBJECT\ntype T @d {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(7));
+  assert!(
+    found_of(&analysis, &[LIMIT]).is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(6));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found_of(&analysis, &[LIMIT]),
+    [(LIMIT, after(schema, text, "type T @", "d"))]
+  );
+}
+
+/// Object literals that set every field cost nothing to complete, in a default and in an
+/// argument. Refuses a charge for a written row.
+#[test]
+fn written_objects_cost_no_step() {
+  let text = "type Query {\n  x: Int\n}\ninput I {\n  a: Int = 1\n  b: Int!\n}\n\
+              input J {\n  x: I = { a: 2, b: 3 }\n  y: I = { b: 4, a: 5 }\n}\n\
+              directive @d(i: I) on OBJECT\ntype T @d(i: { a: 6, b: 7 }) {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(0));
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
 }

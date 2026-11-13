@@ -35,9 +35,9 @@
 //! read off what it declares, and every instantiation the program writes has its bounds judged so:
 //! a type argument that does not satisfy a bound of its definition is
 //! `smear::graphqlx::unsatisfied-bound`, where the instantiation is written. A value that does not
-//! fit its type is refused where it is written. The phases that write the rest of it, among them
-//! tiers, the defaults an input object's fields take, and the values of collections, are still to
-//! come.
+//! fit its type is refused where it is written, and a default fills each argument and each input
+//! field a value leaves out. The phases that write the rest of it, among them tiers and the values
+//! of collections, are still to come.
 //!
 //! [`analyze_with`] answers the same analysis with the parser the caller chose, a GraphQLx parser
 //! layer, and the [`Trees`] that layer kept beside it, one for each file it read. Each

@@ -49,10 +49,13 @@ significant digits within `Limits::max_value_steps`, and range-checked against i
 the input object does not declare is `smear::schema::undefined-input-object-field`, a required field
 given `null` or left out is `smear::schema::missing-required-input-object-field`, and an input
 object its own package makes OneOf takes exactly one field, not `null`. An application's argument
-left out takes a copy of its default, and a required one left out is
-`smear::schema::missing-required-directive-argument`; the copies, the required arguments and fields
-left out, the lists a value written alone stands for where a list is expected and the conversion of
-a decimal integer of more than 38 significant digits are bounded by `Limits::max_value_steps`. It
+left out takes a copy of its default, and so does an object literal's field, but a OneOf input
+object's; a required argument left out is `smear::schema::missing-required-directive-argument`. A
+copy is counted before it is made, and a default whose copy would hold a copy of itself is not
+copied; the copies, the reads of one default's count by another's, the required arguments and
+fields left out, the lists a value written alone stands for where a list is expected and the
+conversion of a decimal integer of more than 38 significant digits are bounded by
+`Limits::max_value_steps`. It
 resolves every module's `use` items too, globs and string sources included, against scopes that
 end with the prelude and the packages each package may reach. The built-in packages, `core`, `alloc`
 and `std`, are one embedded GraphQLx file each, parsed on every analysis. `graphqlx::analyze_with`

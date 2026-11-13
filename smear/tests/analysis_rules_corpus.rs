@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationId, Contribution, Cx, DefId, Diagnostic, Layout, Limits, MemberId, Model,
-    ModuleId, ObjectEntry, Package, PackageId, PackageKind, Packages, SourceFile, SourceId, Tier,
-    TypeExprId, ValueId, ValueKind, Visitor, analyze,
+    ModuleId, Namespace, ObjectEntry, Package, PackageId, PackageKind, Packages, SourceFile,
+    SourceId, Tier, TypeExprId, ValueId, ValueKind, Visitor, analyze,
     test_support::{self, RULES},
     visit,
   },
@@ -92,6 +92,94 @@ fn an_ok_corpus_file_has_no_unresolved_value() {
       );
     }
   }
+}
+
+/// The value `id`, written out: a scalar as its kind and its text, `Int 1`, a list as
+/// `List [Int 1]`, and an input object as `Object {key: String "value", answer= Int 42}`, each
+/// entry its field's name and its value, a field a default filled marked `=` for its `:`.
+fn shown(model: &Model, id: ValueId) -> String {
+  match model.value(id).kind() {
+    ValueKind::Null => String::from("Null null"),
+    ValueKind::Bool(flag) => format!("Boolean {flag}"),
+    ValueKind::Int(int) => format!("Int {}", int.text()),
+    ValueKind::Float(float) => format!("Float {}", float.text()),
+    ValueKind::String(text) => format!("String {text:?}"),
+    ValueKind::List(items) => {
+      let items: Vec<String> = items
+        .iter()
+        .map(|item: &ValueId| shown(model, *item))
+        .collect();
+      format!("List [{}]", items.join(", "))
+    }
+    ValueKind::Object(entries) => {
+      let entries: Vec<String> = entries
+        .iter()
+        .map(|entry: &ObjectEntry| {
+          let mark = if entry.name().is_some() { ":" } else { "=" };
+          format!(
+            "{}{mark} {}",
+            model.member(entry.field()).name(),
+            shown(model, entry.value())
+          )
+        })
+        .collect();
+      format!("Object {{{}}}", entries.join(", "))
+    }
+    other => format!("{other:?}"),
+  }
+}
+
+/// Each object literal the corpus writes as a default is an input object: the fields it writes,
+/// found by name, and the fields a default fills, each in its input object's order; a field with
+/// no default, a OneOf input object's among them, left out and absent. Each value is found by its
+/// owner: the argument of a field of a type of the file.
+#[test]
+fn the_corpus_input_objects_are_objects() {
+  let files = corpus();
+  let default = |name: &str, owner: &str, field: &str, argument: &str| -> String {
+    let (path, text) = files
+      .iter()
+      .find(|(path, _): &&(PathBuf, Vec<u8>)| path.file_name() == Some(std::ffi::OsStr::new(name)))
+      .unwrap_or_else(|| panic!("no corpus file `{name}`"));
+    let analysis = analyzed(path, text);
+    let model = analysis.model();
+    let def = model
+      .lookup(Namespace::Type, &format!("^::app::{owner}"))
+      .unwrap_or_else(|| panic!("{name}: no type `{owner}`"));
+    let field = model
+      .def(def)
+      .fields()
+      .into_iter()
+      .find(|id: &MemberId| model.member(*id).name() == field)
+      .unwrap_or_else(|| panic!("{name}: no field `{owner}.{field}`"));
+    let argument = model
+      .member(field)
+      .arguments()
+      .into_iter()
+      .find(|id: &MemberId| model.member(*id).name() == argument)
+      .unwrap_or_else(|| panic!("{name}: no argument `{argument}`"));
+    let value = model
+      .member(argument)
+      .default()
+      .unwrap_or_else(|| panic!("{name}: no default"));
+    shown(model, value)
+  };
+  assert_eq!(
+    default("introspection_defaults.graphql", "Query", "range", "range"),
+    "Object {min: Int 1, max: Int 9, step= Int 1}"
+  );
+  assert_eq!(
+    default("introspection_agreement.graphql", "User", "posts", "filter"),
+    "Object {published: Boolean false, ranked: List [List [Int 1, Null null], List []]}"
+  );
+  assert_eq!(
+    default("schema_kitchen_sink.graphql", "Foo", "six", "argument"),
+    "Object {key: String \"value\", answer= Int 42, other= Float 1.23e4}"
+  );
+  assert_eq!(
+    default("countries.graphql", "Query", "continents", "filter"),
+    "Object {}"
+  );
 }
 
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.

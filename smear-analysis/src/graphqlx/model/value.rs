@@ -114,8 +114,9 @@ pub enum ValueKind<'a> {
   /// A map, of its entries, each a key and a value.
   Map(&'a [(ValueId, ValueId)]),
   /// An input object, of its fields, in the input object's order: each one its literal writes and
-  /// the input object declares, one written twice twice, in written order. In this version a
-  /// field the literal leaves out is absent, whatever its default.
+  /// the input object declares, one written twice twice, in written order, and each one it leaves
+  /// out that has a default, a copy of the default; no absent one. A OneOf input object's fields
+  /// left out are never filled.
   Object(&'a [ObjectEntry]),
   /// A value kept as written: of a custom scalar, but `null`; of a type that names a type
   /// parameter; or of a type that can take no value.

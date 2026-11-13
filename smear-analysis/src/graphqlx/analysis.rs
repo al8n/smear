@@ -247,22 +247,26 @@ impl Analysis {
 ///   declare is `undefined-input-object-field`, with the nearest field in its help, and is not
 ///   kept, and a required field given `null` or left out is `missing-required-input-object-field`,
 ///   each left out a step of [`Limits::max_value_steps`]; an input object its own package applies
-///   `@oneOf` to takes exactly one field, and not `null`; and a field left out is absent. Any other
-///   scalar and a collection take any literal, kept as written, and so does a type that names a
-///   type parameter or can take no value, with nothing said. A prefix that names nothing is the
-///   resolver's to report. A value that does not fit is unresolved and reported where it is
-///   written, with GraphQL's `invalid-default-value` or `invalid-directive-argument-value`, but
-///   for a number out of the range of any width but the 32-bit signed one, or of `f32`, which is
-///   `width-overflow`, and zero for `NonZero`, which is `nonzero-zero`; a required argument given
-///   `null` is `missing-required-directive-argument`, at its name. An application's arguments are
-///   in its directive's order: each one written, and each one left out whose definition has a
-///   default, a copy of the default filling it, each row of the copy not written and located at
-///   the default, and silent, the default's own diagnostic saying once what does not fit; a
-///   required argument left out is `missing-required-directive-argument`, at the application's
-///   path. Each row of a copy, and each required argument found left out, is a step of
-///   [`Limits::max_value_steps`]: past it the application is `resource-limit` once, at its path,
-///   and filled no further, an object literal likewise at the literal, and an integer whose
-///   conversion it cannot pay for is `resource-limit` where it is written. Last, names and texts
+///   `@oneOf` to takes exactly one field, and not `null`; and a field left out that has a default
+///   takes a copy of it, as an argument does, but a OneOf input object's. Any other scalar and a
+///   collection take any literal, kept as written, and so does a type that names a type parameter
+///   or can take no value, with nothing said. A prefix that names nothing is the resolver's to
+///   report. A value that does not fit is unresolved and reported where it is written, with
+///   GraphQL's `invalid-default-value` or `invalid-directive-argument-value`, but for a number out
+///   of the range of any width but the 32-bit signed one, or of `f32`, which is `width-overflow`,
+///   and zero for `NonZero`, which is `nonzero-zero`; a required argument given `null` is
+///   `missing-required-directive-argument`, at its name. An application's arguments are in its
+///   directive's order: each one written, and each one left out whose definition has a default, a
+///   copy of the default filling it, each row of the copy not written and located at the default,
+///   and silent, the default's own diagnostic saying once what does not fit; a required argument
+///   left out is `missing-required-directive-argument`, at the application's path. A copy is
+///   counted before it is made, each default's count kept, and a default whose copy would hold a
+///   copy of itself is not copied: the argument, or the field, is absent. Each row of a copy, each
+///   read of another default's count while counting, each default left out that needs itself, and
+///   each required argument found left out, is a step of [`Limits::max_value_steps`]: past it the
+///   application is `resource-limit` once, at its path, and filled no further, an object literal
+///   likewise at the literal, and an integer whose conversion it cannot pay for is
+///   `resource-limit` where it is written. Last, names and texts
 ///   past what the model's `u32` offsets address, which only a [`Limits::max_source_bytes`] far
 ///   above its default admits, are reported at the root package's package source.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
