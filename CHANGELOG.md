@@ -44,8 +44,8 @@ All notable changes to Smear are documented in this file.
   in GraphQLx, `<` that meets a `}` closing a brace open before it reports its own closer missing
   and stops there; and the skip over junk stops before a `}` it did not open, whatever `(`, `[`
   or `<` it has open, where it took a `}` for the closer of any opener it had open. That skip is
-  `lossless::recover::unexpected`'s, which 0.0.1 released: it now counts the pair whose identity
-  in its `delimiters` table is `b'{'` apart from the others, and a table with no such pair skips
+  `lossless::recover::unexpected`'s, which 0.0.1 released: it now also counts the braces it opens,
+  the pair whose identity in its `delimiters` table is `b'{'`, and a table with no such pair skips
   as it did. The trees and the diagnostics of broken documents change accordingly.
 - `smear-parser`: in GraphQLx, a module's body recovers its own items. An item that fails costs
   itself, and the module keeps its other items and its node; the body ends at the `}` the braces

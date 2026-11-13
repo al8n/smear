@@ -230,9 +230,9 @@ pub(crate) const fn closes_enclosing_block(open_at: usize, now: usize) -> bool {
 ///
 /// The closers are in the set even though nothing starts with one — stopping *before* `]` is
 /// what lets an enclosing `list_value` close on its own delimiter instead of running to end of
-/// input. The skip asks this only with none of the pairs it opened still open, so a `]` inside
-/// nesting it opened is crossed rather than mistaken for the enclosing one. A `}` it did not open
-/// ends it before this is asked, whatever it has open: see
+/// input. The skip stops at this only where its depth over every pair is zero, so a `]` inside
+/// nesting it opened is crossed rather than mistaken for the enclosing one. A `}` met while none
+/// of the skip's own braces is open ends it whatever its depth: see
 /// [`crate::lossless::recover::unexpected`].
 ///
 /// # One set, not one per position
@@ -328,9 +328,9 @@ fn keyword_of<T: DowncastRef<ContextualKeyword>>(token: &T) -> Option<Contextual
 /// GraphQL's three delimiter pairs, for the recovery scans' depth counting.
 ///
 /// The pair identity is a `u8` rather than a bespoke enum because a scan asks it one thing:
-/// whether it is `b'{'`. [`crate::lossless::recover::unexpected`] counts that pair apart from the
-/// others and never takes a `}` it did not open. Among the other two, and in the roots' resync,
-/// the count is pair-blind: it never checks that a closer matches its opener.
+/// whether it is `b'{'`. Both scans count every pair in one depth, blind to which closer answers
+/// which opener; [`crate::lossless::recover::unexpected`] also counts the braces it opens, and
+/// never takes a `}` it did not open.
 #[inline]
 fn delimiters(kind: &Kind) -> Balance<u8> {
   match kind {
@@ -391,8 +391,7 @@ lossless_production! {
   }
 
   /// Nothing that could start one of `expected` is here, and there is still input.
-  /// [`crate::lossless::recover::unexpected`] with this dialect's pairs, its braces counted apart,
-  /// and its restart predicate.
+  /// [`crate::lossless::recover::unexpected`] with this dialect's pairs and its restart predicate.
   fn unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
     // #168's scan allowance. Read here rather than inside the substrate helper because the
     // committed side is `smear-lexer`'s token tally and `crate::lossless::recover` may not name
