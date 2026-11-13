@@ -1080,7 +1080,7 @@ mod lossless {
     // The six texts and the unclosed list: each keeps `Query` and the scalar after its mistake,
     // and none names anything that does not resolve.
     assert!(
-      held >= SIX.len() + 1,
+      held > SIX.len(),
       "only {held} analyses with syntax errors alone hold a supplied definition"
     );
     // The unclosed list: `a_definition_read_past_a_mistake_holds_it_unmarked` holds that its error
