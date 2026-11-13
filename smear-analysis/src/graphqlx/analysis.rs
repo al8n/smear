@@ -14,6 +14,7 @@ use super::{
   check, collect, declare,
   diagnostic::{Diagnostics, Reporter},
   id::{PackageId, SourceId},
+  instantiate,
   limits::Limits,
   lower,
   model::{Model, ModelBuilder, PackageKind},
@@ -146,9 +147,14 @@ impl Analysis {
 ///   where the extension is written: one that names nothing, one that names a definition of
 ///   another kind than the extension's keyword (`extension-kind-mismatch`), and one that is an
 ///   alias such as `NonZeroU32`, which spells an instantiation and is no definition of its own,
-///   is reported and contributes nothing; every other is a contribution of its target. A definition holds its contributions,
+///   is reported and contributes nothing; every other is a contribution of its target. An
+///   extension's parameter list names its target's type parameters by position, one name each,
+///   and a list of another length is `generic-arity`; an extension that writes no list names none
+///   of them. A definition holds its contributions,
 ///   its own, where its name is written, then its extensions' by source and position, each where
-///   its target path is written; its type parameters; a directive definition's locations and
+///   its target path is written; its type parameters, of which a definition that replaces a
+///   GraphQL built-in declares none, a list it writes being `generic-arity`; a directive
+///   definition's locations and
 ///   whether it is `repeatable`; and its members, the direct members of each contribution in turn
 ///   as written and then each field's arguments, each with its description. A replaced built-in
 ///   holds what the root package's definition writes, and smear's own definition of it
@@ -161,7 +167,8 @@ impl Analysis {
 ///   extension's own names naming its target's by position; one that names nothing is reported,
 ///   with the code of its place, and stays unresolved. A bound is a definition's own type
 ///   parameter's: any other left side of a `where` predicate, and any `where` clause on an
-///   extension, is `invalid-bound`. An application whose directive resolves keeps its type
+///   extension, is `invalid-bound`; and so is a right side that names no interface, the bound
+///   still recorded as written. An application whose directive resolves keeps its type
 ///   arguments and the arguments its directive declares, in the directive's order, an argument
 ///   written twice twice; one it does not declare is `undefined-directive-argument`, with the
 ///   nearest name it does declare in its help. A value is kept as written, its syntactic kind and
@@ -176,6 +183,47 @@ impl Analysis {
 ///   operation's root. Names and texts past what the model's `u32` offsets address,
 ///   which only a [`Limits::max_source_bytes`] far above its default admits, are reported at the
 ///   root package's package source.
+/// - Gives each definition its built-in meaning, read off `core`'s directives by what each
+///   application resolved to, never by how it is spelled, and only off the applications the
+///   package that wrote the definition writes: an interface that applies `@marker` is a marker,
+///   and a scalar that applies `@set` or `@map` stands for that collection, the first of the two
+///   when it applies both. Then checks each definition's defaults where they are written:
+///   a type parameter with no default that follows one with a default is `generic-default`, once
+///   for the definition; and so is each group of its defaults that need each other, a default that
+///   names its own parameter included, once, at the default of the group's lowest parameter,
+///   which a use can never fill.
+/// - Gives every type occurrence its type, each type interned where the model's walk first needs
+///   it, its arguments before it: a list is the list of its element's type; a type parameter is
+///   that parameter of its definition, in a default's own tree too; an alias such as `NonZeroU32`
+///   is the `NonZero` it spells; and an occurrence of a definition is that definition with every
+///   argument, the written ones first, a collection's key or element non-null however it is
+///   written, then each one left out filled from its default, substituted, a default that names a
+///   parameter written after it filled first. Type arguments on a type parameter or an alias, more
+///   type arguments than a definition has parameters or fewer than it takes, and an argument left
+///   to a default that cannot fill it, are `generic-arity`, where they are written; an occurrence
+///   inside a default whose filling leads back to a default being filled is `generic-default`. A
+///   type nested deeper than [`Limits::max_generic_depth`], an instantiation past
+///   [`Limits::max_instantiations`] and filling past [`Limits::max_substitutions`] are
+///   `resource-limit`, each where it is written, and the built-in library is typed whatever the
+///   limits. An occurrence that cannot be typed, or that holds one that cannot, has the one
+///   unresolved type. Each closed type an occurrence of a generic definition resolves to is one of
+///   the definition's instantiations. Last, an application writes no more type arguments than its
+///   directive has parameters and no fewer than it takes, or it is `generic-arity`, at its path.
+/// - Judges the bounds of every written occurrence of a definition that has one, by its complete
+///   type, a slot a default filled included: for each bound in its definition's order, the
+///   argument for the bounded parameter, without its own `!`, must satisfy the bound's interface
+///   type with the type's arguments in place of the definition's parameters, each with its `!`, as
+///   [`Model::satisfies_ty`](super::Model::satisfies_ty) answers. An occurrence that names a
+///   parameter of the definition it is written in is judged through that parameter's bounds, and
+///   an instantiation only a fill derives is not judged. The first bound that fails is
+///   `unsatisfied-bound`, at each occurrence of the type, which keeps its type. A bound of `core`'s
+///   `MapKey` that a `NonZero` fails is passed over: that `NonZero` holds what is no integer
+///   primitive, and `nonzero-argument` refuses it where it is written. A directive application's
+///   type arguments are not judged against its directive's bounds. Each type is
+///   judged once, whatever its nullness, within [`Limits::max_bound_steps`]; an occurrence whose
+///   bounds that budget, or a type they derive past [`Limits::max_generic_depth`] or
+///   [`Limits::max_instantiations`], kept from being judged is `resource-limit`, and keeps its
+///   type too.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///   Each schema definition the root package writes after its first is
@@ -185,7 +233,24 @@ impl Analysis {
 ///   `orphan-extension`, at its target path, with a label at the definition's name; and so is an
 ///   extension of a definition of `core`, `alloc` or `std`, a GraphQL built-in the root package
 ///   replaces among them, unless the root package writes it and it adds directives and nothing
-///   else. A rule says nothing about a contribution a phase already refused something in.
+///   else. In the root package's extension of a built-in it did not write, each application of
+///   `core`'s `@marker`, `@set` or `@map` is `orphan-extension` too, at its path: what a built-in
+///   is is the language's to say. An enum that declares a type parameter is `generic-enum`, at its
+///   first type parameter's name. A marker that declares a field is `marker-misuse`, once, at the
+///   first field its own package wrote; so is a marker named anywhere but as the outermost type of
+///   an `implements` entry or of a bound, where it is named, and an `implements` entry of a scalar,
+///   an enum, an input object or a union that names what is no marker, a type parameter among them.
+///   A scalar its own package makes a set with `@set` and that has not exactly one type parameter,
+///   or a map with `@map` and that has not exactly two, is `collection-arity`, at the application,
+///   and so is one that applies both, at the later. `TypeRef` anywhere but as the type of a
+///   directive definition's argument or of an input field, under lists alone, is `typeref-misuse`,
+///   where it is named, a type argument of any generic definition included. `NonZero` whose type
+///   argument, in the occurrence's type, is no integer primitive at least one bit wide written
+///   without `!` is `nonzero-argument`, where it is written, with a label at the argument. A type
+///   parameter with the name of an earlier one of its definition, and a name an extension's own
+///   list gives after it gave it to an earlier one, is `duplicate-type-parameter`, at that name,
+///   with a label at the first of that name. A rule says nothing about a contribution a phase
+///   already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///
@@ -348,6 +413,7 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut builder,
     &mut reporter,
   );
+  instantiate::instantiate(&declarations, &sources, limits, &mut builder, &mut reporter);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }

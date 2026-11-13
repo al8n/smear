@@ -56,9 +56,9 @@ impl Run {
 }
 
 // A type-expression, type or value row says which variant of its public kind it is with one of
-// the numbers below, rather than with a private enum: lowering writes some of them, but until
-// instantiation and coercion land only the test-support door writes the others, and a private
-// variant that no shipped build constructs is dead code.
+// the numbers below, rather than with a private enum: lowering and instantiation write every type
+// shape, but until coercion lands only the test-support door writes most value shapes, and a
+// private variant that no shipped build constructs is dead code.
 
 /// A named type, a definition and its arguments: `def` and `args` hold it.
 pub(super) const KIND_NAMED: u8 = 0;
@@ -210,6 +210,10 @@ pub(super) struct ContributionRow {
   pub(super) union_members: Run,
   /// The applications it contributed, in the model's listed-application pool.
   pub(super) applications: Run,
+  /// The names an extension's own type parameter list gives its target's type parameters, in the
+  /// model's written-parameter pool: none for a definition's own contribution, whose names are its
+  /// type parameters, nor for an extension that writes no list.
+  pub(super) params: Run,
   /// Whether an error a phase or one of smear's rules reported lies within its extent.
   pub(super) marked: bool,
 }
@@ -305,6 +309,10 @@ pub(super) struct TyRow {
   pub(super) non_null: bool,
   /// Whether it names no type parameter.
   pub(super) closed: bool,
+  /// How deeply it nests: 0 for a type parameter, the unresolved type and a named type with no
+  /// argument; one more than its deepest argument for any other named type, and one more than its
+  /// element for a list. Derived when it is interned, and no part of its identity.
+  pub(super) depth: u32,
   /// The tier it requires: `Core` until the tier phase computes it.
   pub(super) tier: Tier,
 }

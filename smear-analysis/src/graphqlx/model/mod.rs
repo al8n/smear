@@ -12,6 +12,7 @@ mod member;
 mod module;
 mod name;
 mod order;
+mod satisfy;
 mod schema;
 mod table;
 mod ty;
@@ -21,6 +22,7 @@ use std::{string::String, vec::Vec};
 
 pub use application::{Application, ApplicationArgument, Resolution};
 pub use build::ModelBuilder;
+pub(crate) use build::{Occurrence, Shape, Written};
 pub use def::{
   Collection, Contribution, Contributions, Def, DefKind, DirectiveLocation, Extern, Externs,
   Origin, Primitive, TypeBound, TypeParam, TypeParams,
@@ -28,6 +30,7 @@ pub use def::{
 pub use member::{Member, MemberKind};
 pub use module::{Module, ModuleKind};
 pub use name::{CanonicalName, Description, Namespace};
+pub(crate) use satisfy::{Keys, Steps};
 pub use schema::{Builtins, Root, RootOperation, Schema};
 pub use ty::{Path, PathRoot, Ty, TyKind, TypeExpr, TypeExprKind};
 pub use value::{FloatValue, IntValue, Literal, LiteralKind, ObjectEntry, Value, ValueKind};
@@ -70,6 +73,9 @@ pub struct Model {
   defs: Vec<DefRow>,
   /// Every definition's contributions, then the schema's.
   contributions: Vec<ContributionRow>,
+  /// The names each extension's own type parameter list writes, each with where it is written,
+  /// one run per extension that writes a list, in the order of the contributions.
+  written_params: Vec<(Sym, tokora::diagnostic::Location)>,
   type_params: Vec<TypeParamRow>,
   bounds: Vec<TypeBound>,
   implements: Vec<TypeExprId>,
@@ -80,8 +86,6 @@ pub struct Model {
   externs: Vec<ExternRow>,
   /// Every generic definition's closed instantiations, one run per definition.
   instantiations: Vec<TyId>,
-  /// Every `(type, interface)` pair the type satisfies, sorted.
-  satisfactions: Vec<(TyId, DefId)>,
   /// Every second name, sorted by module, then the namespace of the definition it names, then
   /// name.
   aliases: Vec<AliasRow>,
@@ -147,6 +151,7 @@ impl Model {
       module_children: Vec::new(),
       defs: Vec::new(),
       contributions: Vec::new(),
+      written_params: Vec::new(),
       type_params: Vec::new(),
       bounds: Vec::new(),
       implements: Vec::new(),
@@ -155,7 +160,6 @@ impl Model {
       locations: Vec::new(),
       externs: Vec::new(),
       instantiations: Vec::new(),
-      satisfactions: Vec::new(),
       aliases: Vec::new(),
       members: Vec::new(),
       member_applications: Vec::new(),

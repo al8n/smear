@@ -1,8 +1,11 @@
 //! The GraphQLx analyzer's own rules, which `analyze` runs over every supplied package once its
 //! phases have written the model: a program defines its schema at most once; only the root
 //! package defines or extends the schema; and a package extends its own definitions alone, but
-//! for the directives the root package adds to a built-in. Each rule says nothing about what a
-//! phase already refused, marks what it reports, and quotes a name only as an excerpt.
+//! for the directives the root package adds to a built-in, none of which may give the built-in a
+//! built-in meaning. Each rule says nothing about what a phase already refused, marks what it
+//! reports, and quotes a name only as an excerpt. The fourth rule, that an enum takes no type
+//! parameter, is tested in `analysis_types`, beside the phase that types each use of the enum, and
+//! the rules after it, on what is judged of types, in `analysis_type_rules`.
 //!
 //! Then the rule set itself: every code a rule lists fires on a fixture; and the walk the rules
 //! ride, over an analyzed program of two packages, written out hook by hook.
@@ -10,9 +13,9 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, ApplicationId, Contribution, Cx, DefId, Diagnostic, DiagnosticKind, Layout, Limits,
-    MemberId, Model, ModuleId, Namespace, Package, PackageId, Packages, Primitive, Root,
-    RootOperation, SourceFile, SourceId, Tier, TypeExprId, ValueId, Visitor, analyze,
+    Analysis, ApplicationId, Collection, Contribution, Cx, DefId, Diagnostic, DiagnosticKind,
+    Layout, Limits, MemberId, Model, ModuleId, Namespace, Package, PackageId, Packages, Primitive,
+    Root, RootOperation, SourceFile, SourceId, Tier, TypeExprId, ValueId, Visitor, analyze,
     test_support::RULES, visit,
   },
   diagnostic::{Code, Diagnose, Location},
@@ -27,6 +30,24 @@ const OUTSIDE: &str = "smear::graphqlx::schema-outside-root";
 
 /// The code for an extension of a definition its package may not extend.
 const ORPHAN: &str = "smear::graphqlx::orphan-extension";
+
+/// The code for an enum that declares a type parameter.
+const GENERIC_ENUM: &str = "smear::graphqlx::generic-enum";
+
+/// The code for a marker used as a marker may not be.
+const MARKER_MISUSE: &str = "smear::graphqlx::marker-misuse";
+
+/// The code for a collection whose count of type parameters it has not.
+const COLLECTION_ARITY: &str = "smear::graphqlx::collection-arity";
+
+/// The code for `TypeRef` where it may not stand.
+const TYPEREF_MISUSE: &str = "smear::graphqlx::typeref-misuse";
+
+/// The code for `NonZero` of what is no integer primitive.
+const NONZERO_ARGUMENT: &str = "smear::graphqlx::nonzero-argument";
+
+/// The code for a type parameter with the name of an earlier one.
+const DUPLICATE_TYPE_PARAMETER: &str = "smear::graphqlx::duplicate-type-parameter";
 
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
@@ -49,6 +70,11 @@ const NOT_EVEN_THE_ROOT: &str = "only the root package extends a definition of `
 const MORE_THAN_DIRECTIVES: &str = "an extension of a definition of `core`, `alloc` or `std` adds \
                                     directives and nothing else: remove what this one adds beside \
                                     them";
+
+/// What the orphan rule tells the root package when its extension of a built-in applies `@marker`,
+/// `@set` or `@map`.
+const MEANING: &str = "`@marker`, `@set` and `@map` say what a definition is, and what a built-in \
+                       is is the language's to say: remove this directive";
 
 /// What the orphan rule tells the root package when it adds more than directives to a built-in its
 /// own definition replaces, which may write what the extension adds.
@@ -719,6 +745,272 @@ fn a_dependency_extending_a_built_in_is_an_orphan() {
   );
 }
 
+/// What the orphan rule says of the root package's `@directive`, `core`'s `@marker`, `@set` or
+/// `@map`, applied to `what`, a definition of the built-in package `built_in` written as the
+/// message writes it: "type `NonZero`", "directive `@deprecated`".
+fn meaning(directive: &str, what: &str, built_in: &str) -> String {
+  format!(
+    "package `app` applies `@{directive}` to the {what} of the built-in package `{built_in}`, and \
+     what a built-in is cannot be changed by an extension"
+  )
+}
+
+#[test]
+fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
+  // `@set` on `core`'s `NonZero`, `@marker` on `core`'s `MapKey` and `@set` on `std`'s `HashMap`:
+  // each refused where the directive is written, with a label at the definition, and none
+  // changes what the definition is.
+  let text =
+    "extend scalar NonZero @set\nextend interface MapKey @marker\nextend scalar HashMap @set\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  let builtins = model.builtins();
+  let hash_map = def(model, "^::std::HashMap");
+  let named = |id: DefId| -> Option<Location> { Some(model.def(id).location()) };
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        ORPHAN,
+        at(schema, text, "set", 0),
+        named(builtins.non_zero())
+      ),
+      (
+        ORPHAN,
+        at(schema, text, "marker", 0),
+        named(builtins.map_key())
+      ),
+      (ORPHAN, at(schema, text, "set", 1), named(hash_map)),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      meaning("set", "type `NonZero`", "core"),
+      meaning("marker", "type `MapKey`", "core"),
+      meaning("set", "type `HashMap`", "std"),
+    ]
+  );
+  assert_eq!(
+    helps(&analysis),
+    [Some(MEANING), Some(MEANING), Some(MEANING)]
+  );
+  for diagnostic in analysis.diagnostics() {
+    assert_eq!(diagnostic.primary_label(), Some("orphan extension"));
+    assert_eq!(
+      diagnostic.label(0).map(|label| label.text()),
+      Some("the definition it extends")
+    );
+  }
+  assert_eq!(model.def(builtins.non_zero()).collection(), None);
+  assert!(model.def(builtins.map_key()).is_marker());
+  assert_eq!(model.def(hash_map).collection(), Some(Collection::Map));
+  // The error marks the extension that holds it, and the definition's own contribution not.
+  assert_eq!(
+    contributions(model, builtins.non_zero()),
+    [(false, false), (true, true)]
+  );
+
+  // An extension that also adds an `implements` entry makes two mistakes, and is told both.
+  let text = "interface Marked @marker\nextend scalar NonZero implements Marked @set\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  let non_zero = Some(model.def(model.builtins().non_zero()).location());
+  assert_eq!(
+    found(&analysis),
+    [
+      (ORPHAN, at(schema, text, "NonZero", 0), non_zero),
+      (ORPHAN, at(schema, text, "set", 0), non_zero),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      String::from(
+        "package `app` adds more than directives to the type `NonZero` of the built-in package \
+         `core`"
+      ),
+      meaning("set", "type `NonZero`", "core"),
+    ]
+  );
+  assert_eq!(
+    helps(&analysis),
+    [Some(MORE_THAN_DIRECTIVES), Some(MEANING)]
+  );
+
+  // `@set` on a directive could give it no meaning, and is refused all the same, once: what a
+  // built-in is cannot be changed by an extension, whatever the extension applies.
+  let text = "extend directive @deprecated @set\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  assert_eq!(
+    found(&analysis),
+    [(
+      ORPHAN,
+      at(schema, text, "set", 0),
+      Some(model.def(model.builtins().deprecated()).location())
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [meaning("set", "directive `@deprecated`", "core")]
+  );
+  assert_eq!(helps(&analysis), [Some(MEANING)]);
+
+  // Nor could `@marker` give a scalar one: refused once too.
+  let text = "extend scalar NonZero @marker\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  assert_eq!(
+    found(&analysis),
+    [(
+      ORPHAN,
+      at(schema, text, "marker", 0),
+      Some(model.def(model.builtins().non_zero()).location())
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [meaning("marker", "type `NonZero`", "core")]
+  );
+  assert_eq!(helps(&analysis), [Some(MEANING)]);
+  assert!(!model.def(model.builtins().non_zero()).is_marker());
+
+  // `core`'s `@set` under a name a `use` item gives it is still `core`'s `@set`: the directive is
+  // told by what the application resolved to.
+  let text = "use ^::core::set as bag\nextend scalar NonZero @bag\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  assert_eq!(
+    found(&analysis),
+    [(
+      ORPHAN,
+      at(schema, text, "bag", 1),
+      Some(model.def(model.builtins().non_zero()).location())
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // `@map`; `@set` on a primitive `core` materialises, which has no position for a label to point
+  // at; and two of the three in one extension, each reported where it is written.
+  let text =
+    "extend scalar BTreeMap @map\nextend scalar Int @set\nextend scalar HashSet @set @map\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  let btree_map = Some(model.def(def(model, "^::alloc::BTreeMap")).location());
+  let hash_set = Some(model.def(def(model, "^::std::HashSet")).location());
+  assert_eq!(
+    found(&analysis),
+    [
+      (ORPHAN, at(schema, text, "map", 0), btree_map),
+      (ORPHAN, at(schema, text, "set", 0), None),
+      (ORPHAN, at(schema, text, "set", 1), hash_set),
+      (ORPHAN, at(schema, text, "map", 1), hash_set),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      meaning("map", "type `BTreeMap`", "alloc"),
+      meaning("set", "type `i32`", "core"),
+      meaning("set", "type `HashSet`", "std"),
+      meaning("map", "type `HashSet`", "std"),
+    ]
+  );
+  // None changes what the definition is.
+  assert_eq!(
+    model.def(def(model, "^::alloc::BTreeMap")).collection(),
+    Some(Collection::Map)
+  );
+  assert_eq!(
+    model.def(def(model, "^::std::HashSet")).collection(),
+    Some(Collection::Set)
+  );
+}
+
+#[test]
+fn what_gives_a_built_in_no_meaning_is_no_orphan_and_a_dependencys_extension_is_one() {
+  // The root package's own directive named `set`, and another of its own, on built-ins.
+  let text = "directive @set on SCALAR\nextend scalar NonZero @set\ndirective @x on SCALAR\n\
+              extend scalar String @x\n";
+  let analysis = analyze_one(text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert_eq!(model.def(model.builtins().non_zero()).collection(), None);
+
+  // `@set` on a GraphQL built-in the root package replaces, which is the root package's own: no
+  // orphan. The replaced built-in declares no type parameter, and a set has one: that is the rule
+  // on a collection's type parameters' to say.
+  let analysis = analyze_one("scalar String\nextend scalar String @set\n");
+  let codes: Vec<&str> = found(&analysis)
+    .into_iter()
+    .map(|(code, _, _): (&'static str, Location, Option<Location>)| code)
+    .collect();
+  assert_eq!(codes, [COLLECTION_ARITY], "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  assert_eq!(model.def(model.builtins().non_zero()).collection(), None);
+
+  // An extension a phase already refused something in is left alone.
+  let text = "extend scalar NonZero @set @missing\n";
+  let analysis = analyze_one(text);
+  let codes: Vec<&str> = found(&analysis)
+    .into_iter()
+    .map(|(code, _, _): (&'static str, Location, Option<Location>)| code)
+    .collect();
+  assert_eq!(codes, ["smear::schema::undefined-directive"]);
+
+  // A dependency's extension of a built-in is refused whole, once, by the rule's second message,
+  // whatever it applies.
+  let ours = "type Query {\n  ok: Int\n}\n";
+  let theirs = "extend scalar NonZero @set\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let geo_file = file(&analysis, 4, "geo.graphqlx");
+  let model = analysis.model();
+  let non_zero = model.builtins().non_zero();
+  assert_eq!(
+    found(&analysis),
+    [(
+      ORPHAN,
+      at(geo_file, theirs, "NonZero", 0),
+      Some(model.def(non_zero).location())
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "package `geo` extends the type `NonZero` of the built-in package `core`, which only the root \
+      package extends"
+    ]
+  );
+  assert_eq!(helps(&analysis), [Some(NOT_THE_ROOT)]);
+  assert_eq!(model.def(non_zero).collection(), None);
+}
+
 /// Every file of a `Flat` package is one module of one package, as the documents of a GraphQL
 /// schema are one schema: an extension of a definition of the package's own, whichever file holds
 /// it, is no orphan, and nor is a directive it adds to a built-in. A `Flat` root package that adds
@@ -963,6 +1255,15 @@ const FIXTURES: &[(Code, Fixture)] = &[
   (Code::new(DUPLICATE), two_schema_definitions),
   (Code::new(OUTSIDE), a_dependencys_schema_definition),
   (Code::new(ORPHAN), an_extension_of_a_dependencys_type),
+  (Code::new(GENERIC_ENUM), a_generic_enum),
+  (Code::new(MARKER_MISUSE), a_marker_as_a_fields_type),
+  (Code::new(COLLECTION_ARITY), a_set_of_two_type_parameters),
+  (Code::new(TYPEREF_MISUSE), a_type_ref_as_a_fields_type),
+  (Code::new(NONZERO_ARGUMENT), a_non_zero_float),
+  (
+    Code::new(DUPLICATE_TYPE_PARAMETER),
+    two_type_parameters_of_one_name,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1008,6 +1309,36 @@ fn an_extension_of_a_dependencys_type() -> Analysis {
     &[("geo.graphqlx", "type Point {\n  x: Int\n}\n")],
   );
   analyze(&root, &[geo], &Limits::new())
+}
+
+/// A root package that declares an enum with a type parameter.
+fn a_generic_enum() -> Analysis {
+  analyze_one("enum Choice<T> {\n  YES\n  NO\n}\ntype Query {\n  choice: Choice<Int>\n}\n")
+}
+
+/// A root package that types a field with a marker.
+fn a_marker_as_a_fields_type() -> Analysis {
+  analyze_one("interface Marked @marker\ntype Query {\n  marked: Marked\n}\n")
+}
+
+/// A root package that makes a scalar of two type parameters a set.
+fn a_set_of_two_type_parameters() -> Analysis {
+  analyze_one("scalar Pair<A, B> @set\n")
+}
+
+/// A root package that types a field with `TypeRef`.
+fn a_type_ref_as_a_fields_type() -> Analysis {
+  analyze_one("type Query {\n  named: TypeRef\n}\n")
+}
+
+/// A root package that types a field with `NonZero` of a float.
+fn a_non_zero_float() -> Analysis {
+  analyze_one("type Query {\n  count: NonZero<Float>\n}\n")
+}
+
+/// A root package that declares two type parameters of one name.
+fn two_type_parameters_of_one_name() -> Analysis {
+  analyze_one("scalar Pair<T, T>\n")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

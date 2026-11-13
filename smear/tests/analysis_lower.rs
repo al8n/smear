@@ -14,7 +14,7 @@ use smear::{
     Analysis, ApplicationArgument, ApplicationId, Contribution, Cx, DefId, Description, Diagnostic,
     DirectiveLocation, IdRange, Layout, Limits, MemberId, MemberKind, Model, Namespace, Origin,
     Package, PackageId, Packages, Path, PathRoot, Primitive, Resolution, Root, RootOperation,
-    SourceFile, SourceId, Sym, Tier, TypeExprId, TypeExprKind, ValueId, ValueKind, Visitor,
+    SourceFile, SourceId, Sym, Tier, TyKind, TypeExprId, TypeExprKind, ValueId, ValueKind, Visitor,
     analyze, visit,
   },
   diagnostic::{Diagnose, Location},
@@ -1256,9 +1256,29 @@ fn a_type_keeps_its_written_path_arguments_and_nullness() {
     &[("p.graphqlx", "type Point {\n  x: Int\n}\n")],
   );
   let analysis = analyze(&root, &[geo], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = file(&analysis, 3, "schema.graphqlx");
+
+  // Instantiation refuses the two counts the definitions do not take, each where it is written,
+  // with a label at the definition's name; lowering records them all the same.
+  let btree = model
+    .def(def(model, Namespace::Type, "^::alloc::BTreeMap"))
+    .location();
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        "smear::graphqlx::generic-arity",
+        at(schema, TYPES, "BTreeMap<string>", 0),
+        Some(btree)
+      ),
+      (
+        "smear::graphqlx::generic-arity",
+        at(schema, TYPES, "Local<Int, Int>", 0),
+        Some(named(schema, TYPES, "scalar ", "Local", 0))
+      ),
+    ]
+  );
 
   // `Int` stays `Int` and names `i32`; arguments are recorded however many the definition has
   // parameters.
@@ -1367,13 +1387,21 @@ fn a_parameter_shadows_a_type_of_its_module() {
 
 #[test]
 fn an_extension_names_parameters_by_position() {
-  // Each extension names the parameters its own way; one names one more than `Pair` has, which
-  // is recorded and not counted.
+  // Each extension names the parameters its own way; one names one more than `Pair` has, and its
+  // list is refused, while it still contributes its field.
   let text = "type Pair<A, B> {\n  first: A\n}\n\
               extend type Pair<X, Y> {\n  second: Y\n  both: Pair<Y, X>\n}\n\
               extend type Pair<P, Q, R> {\n  third: R\n}\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::graphqlx::generic-arity",
+      at(schema, text, "<P, Q, R>", 0),
+      Some(named(schema, text, "type ", "Pair", 0))
+    )]
+  );
   let model = analysis.model();
   let pair = def(model, Namespace::Type, "^::app::Pair");
   assert_eq!(
@@ -1389,6 +1417,15 @@ fn an_extension_names_parameters_by_position() {
       assert_eq!(owner, pair);
     }
   }
+  // The name past `Pair`'s parameters keeps its position, and its type is the unresolved one.
+  let third = model
+    .member(ids(model.def(pair).fields())[3])
+    .ty()
+    .expect("typed");
+  assert_eq!(
+    model.ty(model.type_expr(third).ty()).kind(),
+    TyKind::Unresolved
+  );
 }
 
 #[test]
