@@ -8,8 +8,9 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationArgument, ApplicationId, Cx, DefId, Diagnostic, IntegerProvider, Layout,
-    Limits, MemberId, Model, Namespace, Package, PackageId, Packages, Path, PathRoot, SourceFile,
-    SourceId, Sym, Tier, TyId, TyKind, ValueId, ValueKind, Visitor, analyze, test_support, visit,
+    Limits, MemberId, Model, Namespace, Package, PackageId, Packages, Path, PathRoot, Resolution,
+    SourceFile, SourceId, Sym, Tier, TyId, TyKind, ValueId, ValueKind, Visitor, analyze,
+    test_support, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -1245,13 +1246,25 @@ fn a_defaults_prefix_is_reported_once_whoever_asks_first() {
 
 #[test]
 fn a_later_argument_of_a_name_already_taken_is_not_asked_for() {
-  let text = "directive @twice(a: Int, a: Int!) on OBJECT\ntype T @twice {\n  f: Int\n}\n";
+  // `@twice` resolves and says nothing of its later `a`, though it is required; `@once`, beside
+  // it, is the control: its required `a`, left out, is reported.
+  let text = "type Query {\n  x: Int\n}\ndirective @twice(a: Int, a: Int!) on OBJECT\n\
+              directive @once(a: Int!) on OBJECT\ntype T @twice @once {\n  f: Int\n}\n";
   let analysis = analyze_text(text, &Limits::new());
-  let codes: Vec<&str> = found(&analysis)
-    .iter()
-    .map(|&(code, _): &(&str, Location)| code)
-    .collect();
-  assert!(!codes.contains(&MISSING), "{codes:?}");
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(MISSING, after(schema, text, "type T @twice @", "once"))]
+  );
+  let model = analysis.model();
+  let twice = model
+    .lookup(Namespace::Directive, "@^::app::twice")
+    .expect("`@twice`");
+  let first = model.def(type_def(model, "T")).applications()[0];
+  assert_eq!(
+    model.application(first).directive(),
+    Resolution::Resolved(twice)
+  );
 }
 
 #[test]
@@ -1512,12 +1525,25 @@ fn written_values_cost_no_step() {
 
 #[test]
 fn the_built_in_library_is_completed_whatever_the_limit() {
-  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
-  let analysis = analyze(&root, &[], &Limits::new().with_max_value_steps(0));
+  let text = "type Query {\n  x: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(0));
   assert!(
     analysis.diagnostics().is_empty(),
     "{:#?}",
     analysis.diagnostics()
+  );
+  // The library's own values are made at zero: `@deprecated`'s default `reason` among them.
+  let model = analysis.model();
+  let reason = model
+    .def(model.builtins().deprecated())
+    .arguments()
+    .into_iter()
+    .next()
+    .expect("`reason`");
+  let default = model.member(reason).default().expect("a default");
+  assert_eq!(
+    model.value(default).kind(),
+    ValueKind::String("No longer supported")
   );
 }
 

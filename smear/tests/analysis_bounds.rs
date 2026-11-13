@@ -1362,13 +1362,18 @@ fn a_type_that_doubles_is_judged_in_its_distinct_nodes() {
 #[test]
 fn the_built_in_library_is_judged_whatever_the_limits() {
   // At 0, every limit leaves the library alone: it writes no instantiation of a definition with a
-  // bound.
+  // bound, and its values cost nothing to complete. The root package holds its query root alone.
   let limits = Limits::new()
     .with_max_generic_depth(0)
     .with_max_instantiations(0)
     .with_max_substitutions(0)
-    .with_max_bound_steps(0);
-  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
+    .with_max_bound_steps(0)
+    .with_max_value_steps(0);
+  let root: Package<&str> =
+    Package::new("app", Layout::Flat, Tier::Std).with_files([SourceFile::new(
+      "schema.graphqlx",
+      "type Query {\n  x: Int\n}\n",
+    )]);
   let analysis = analyze(&root, &[], &limits);
   assert!(
     analysis.diagnostics().is_empty(),
