@@ -75,13 +75,14 @@ impl Writer<'_> {
 /// # Why the literal is rewritten
 ///
 /// `str::parse::<f64>` and `::<f32>` round a decimal literal of any length correctly, but for its
-/// exponent: they stop reading the exponent's digits once the exponent read so far reaches 65 536.
-/// A literal whose written exponent is larger, and whose digits offset it, is then misread: `0.`
-/// and 99 998 zeros then `1e999999` is 10^900000 and reads as 1.0, and `1` and 99 999 zeros then
-/// `e-999999` is 10^-900000 and reads as 1.0 too. So one scan of the literal reads, in saturating
-/// arithmetic, whether any digit is significant, the place of the first that is, and the written
-/// exponent, its magnitude saturated at 2^40, past any count of digits a source can hold to offset
-/// it. Their sum is the exponent `E` of the first significant digit:
+/// exponent: they stop reading the exponent's digits once the exponent read so far reaches 65 536,
+/// so they read one past 655 359 short of its last digits. A literal whose digits offset such an
+/// exponent is then misread: `0.` and 99 998 zeros then `1e999999` is 10^900000 and reads as 1.0,
+/// and `1` and 99 999 zeros then `e-999999` is 10^-900000 and reads as 1.0 too. So one scan of the
+/// literal reads, in saturating arithmetic, whether any digit is significant, the place of the
+/// first that is, and the written exponent, its magnitude saturated at 2^40, past any count of
+/// digits a source can hold to offset it. Their sum is the exponent `E` of the first significant
+/// digit:
 /// - `E` of 309 or more is past `f64::MAX`, below 1.8 × 10^308, and so past every finite `f32`:
 ///   [`DecimalFloat::Overflow`];
 /// - `E` below -400 is below 10^-400, far below half of `f64`'s least subnormal, 2^-1075, which is

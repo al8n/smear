@@ -301,7 +301,7 @@ pub(super) fn fits(negative: bool, bits: u64, power: bool, signed: bool, width: 
 /// What `text`, a decimal float or integer literal, reads as where a float is expected: zero, a
 /// value past every `f64`, or the spelling `normalize_decimal_float` writes of it, read by
 /// `str::parse` as an `f64` and, apart, as an `f32`. The literal is not handed to `str::parse` as
-/// written, which misreads a written exponent past 65 535 that the literal's digits offset. `None`
+/// written, which misreads a written exponent past 655 359 that the literal's digits offset. `None`
 /// for a text that is no decimal float.
 pub(super) fn decimal_float(text: &[u8]) -> Option<Float> {
   let mut buffer = [0; NORMALIZED_FLOAT_LEN];
