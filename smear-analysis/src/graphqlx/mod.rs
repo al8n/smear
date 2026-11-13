@@ -92,9 +92,10 @@
 //! `smear::graphqlx::generic-enum`, at its first type parameter's name. And a marker is used as a
 //! marker: one that declares a field, one named anywhere but as the outermost type of an
 //! `implements` entry or of a bound, and an `implements` entry of a scalar, an enum, an input
-//! object or a union that names what is no marker, are each `smear::graphqlx::marker-misuse`. And
-//! a set has one type parameter and a map two: a scalar its own package makes a collection with
-//! another count, or makes both, is `smear::graphqlx::collection-arity`. And `TypeRef` stands only
+//! object or a union that names what is no marker, a type parameter among them, are each
+//! `smear::graphqlx::marker-misuse`. And a set has one type parameter and a map two: a scalar its
+//! own package makes a collection with another count, or makes both, is
+//! `smear::graphqlx::collection-arity`. And `TypeRef` stands only
 //! as the type of a directive definition's argument or of an input field, under lists alone:
 //! anywhere else it is `smear::graphqlx::typeref-misuse`. And `NonZero` makes an integer never
 //! zero: `NonZero` of what is no integer primitive at least one bit wide, written without `!`, is

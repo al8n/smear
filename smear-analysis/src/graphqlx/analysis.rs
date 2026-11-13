@@ -236,8 +236,9 @@ impl Analysis {
 ///   first type parameter's name. A marker that declares a field is `marker-misuse`, once, at the
 ///   first field its own package wrote; so is a marker named anywhere but as the outermost type of
 ///   an `implements` entry or of a bound, where it is named, and an `implements` entry of a scalar,
-///   an enum, an input object or a union that names what is no marker. A scalar its own package
-///   makes a set with `@set` and that has not exactly one type parameter, or a map with `@map`
+///   an enum, an input object or a union that names what is no marker, a type parameter among
+///   them. A scalar its own package makes a set with `@set` and that has not exactly one type
+///   parameter, or a map with `@map`
 ///   and that has not exactly two, is `collection-arity`, at the application, and so is one that
 ///   applies both, at the later. `TypeRef` anywhere but as the type of a directive definition's
 ///   argument or of an input field, under lists alone, is `typeref-misuse`, where it is named, a

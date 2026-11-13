@@ -13,9 +13,9 @@
 //!   element, a type argument, of an `implements` entry or a bound's interface too, a union member,
 //!   a type parameter's default, a root, an application's type argument;
 //! - a scalar, an enum, an input object and a union implement markers alone: an entry of their
-//!   `implements` that names what is no marker is reported where it is written. An object or an
-//!   interface may implement any interface, and whether what it names is one is GraphQL's own
-//!   rule.
+//!   `implements` that names what is no marker, a type parameter among them, is reported where it
+//!   is written. An object or an interface may implement any interface, and whether what it names
+//!   is one is GraphQL's own rule.
 //!
 //! A marker that takes type parameters is a marker like any other.
 //!
@@ -33,7 +33,7 @@ use super::{Nesting, Silence, own_contribution};
 
 /// Reports each marker that declares a field, each occurrence of a marker that is no outermost
 /// `implements` entry or bound's interface, and each `implements` entry of a scalar, an enum, an
-/// input object or a union that names what is no marker.
+/// input object or a union that names what is no marker, a type parameter among them.
 ///
 /// It reads a definition in the `enter_def` hook and an occurrence in the `type_expr` hook. It
 /// says nothing about a contribution in which a phase reported an error: of a marker's fields, it
@@ -44,7 +44,8 @@ use super::{Nesting, Silence, own_contribution};
 /// It costs one look at each definition the walk enters, and at each contribution of a marker, and
 /// one at each occurrence, and one look at the schema's contributions for the whole walk; it keeps
 /// a count and two flags between two occurrences, and nothing between two walks. Its messages
-/// quote a definition's name as an excerpt, so each is bounded whatever the name's length.
+/// quote a definition's or a type parameter's name as an excerpt, so each is bounded whatever the
+/// name's length.
 #[derive(Default)]
 pub(super) struct MarkerMisuse {
   /// Where each occurrence stands in its tree.
@@ -107,13 +108,17 @@ impl Visitor for MarkerMisuse {
       return;
     }
     let occurrence = model.type_expr(ty);
-    let TypeExprKind::Named { def: named, .. } = occurrence.kind() else {
-      return;
-    };
     let site = cx.site();
-    let interface = model.def(named);
     let kind = DiagnosticKind::MarkerMisuse;
-    if interface.is_marker() {
+    // The definition the occurrence names; none for a type parameter, which is no marker.
+    let interface = match occurrence.kind() {
+      TypeExprKind::Named { def: named, .. } => Some(model.def(named)),
+      TypeExprKind::Param { .. } => None,
+      _ => return,
+    };
+    if let Some(interface) = interface
+      && interface.is_marker()
+    {
       if root && matches!(site, Some(Site::Implements | Site::Bound)) {
         return;
       }
@@ -134,7 +139,8 @@ impl Visitor for MarkerMisuse {
       );
       return;
     }
-    // What a scalar, an enum, an input object or a union implements.
+    // What a scalar, an enum, an input object or a union implements: markers, so neither another
+    // interface nor a type parameter.
     if !root || site != Some(Site::Implements) {
       return;
     }
@@ -149,13 +155,23 @@ impl Visitor for MarkerMisuse {
       DefKind::Union => ("union", "a union"),
       _ => return,
     };
+    let entry = match (interface, occurrence.kind()) {
+      (Some(interface), _) => format!("`{}`", Excerpt(interface.name().as_bytes())),
+      (None, TypeExprKind::Param { def, index }) => {
+        let Some(param) = model.def(def).type_params().nth(index as usize) else {
+          return;
+        };
+        format!("its type parameter `{}`", Excerpt(param.name().as_bytes()))
+      }
+      (None, _) => return,
+    };
     cx.report(
       Diagnostic::builder(kind.code(), occurrence.location())
         .severity(kind.severity())
         .message(format!(
-          "the {noun} `{}` implements `{}`, which is no marker, and {any} implements markers alone",
+          "the {noun} `{}` implements {entry}, which is no marker, and {any} implements markers \
+           alone",
           Excerpt(owner.name().as_bytes()),
-          Excerpt(interface.name().as_bytes())
         ))
         .primary_label(kind.title())
         .help(

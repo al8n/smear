@@ -273,6 +273,43 @@ fn only_a_marker_is_implemented_by_a_scalar_an_enum_an_input_or_a_union() {
 }
 
 #[test]
+fn a_type_parameter_is_no_marker_to_implement() {
+  // A scalar and an input object that implement their own type parameter are each refused at the
+  // entry. An object that does is not this rule's: whether an object's entry names an interface is
+  // GraphQL's own rule.
+  let text = "scalar S<T> implements T\ninput In<T> implements T {\n  x: Int\n}\n\
+              type O<T> implements T {\n  id: ID\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        MARKER,
+        named(schema, text, "S<T> implements ", "T", 0),
+        None
+      ),
+      (
+        MARKER,
+        named(schema, text, "In<T> implements ", "T", 0),
+        None
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the scalar `S` implements its type parameter `T`, which is no marker, and a scalar \
+       implements markers alone",
+      "the input object `In` implements its type parameter `T`, which is no marker, and an input \
+       object implements markers alone",
+    ]
+  );
+}
+
+#[test]
 fn a_generic_marker_is_a_marker() {
   // `Tagged<T>` is a marker: an `implements` entry and a bound may name it, and `S`, which
   // declares `Tagged<Int>`, satisfies the bound; a field may not.

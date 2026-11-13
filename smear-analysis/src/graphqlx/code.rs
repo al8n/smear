@@ -162,7 +162,7 @@ pub enum DiagnosticKind {
   /// as a bound's interface, the outermost type there: named anywhere else, a type argument and a
   /// list's element included, it is reported where it is named. And a scalar, an enum, an input
   /// object or a union implements markers only: an entry of its `implements` that names what is no
-  /// marker is reported where it is written.
+  /// marker, a type parameter among them, is reported where it is written.
   MarkerMisuse,
   /// A scalar whose own package makes it a collection with a count of type parameters the
   /// collection does not have: `core`'s `@set` makes a scalar of one type parameter a set, and
