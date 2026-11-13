@@ -39,7 +39,8 @@ pub enum Root {
   /// Written in a schema definition or extension, as `query: Q` is: the type occurrence, which is
   /// that occurrence's `Unresolved` when it did not resolve. It may be an instantiation.
   Written(TypeExprId),
-  /// Presumed, with no schema definition, from the definition GraphQL's default root names.
+  /// Presumed, with no schema definition of the root package's, from the definition GraphQL's
+  /// default root names.
   Presumed(DefId),
 }
 
@@ -72,7 +73,8 @@ impl<'a> Schema<'a> {
     self.model.schema.roots[operation.index()]
   }
 
-  /// Its directive applications, its schema definition's and then each extension's.
+  /// Its directive applications: the root package's first schema definition's, then each schema
+  /// extension's of the root package.
   #[inline]
   pub fn applications(&self) -> &'a [ApplicationId] {
     let model: &'a Model = self.model;

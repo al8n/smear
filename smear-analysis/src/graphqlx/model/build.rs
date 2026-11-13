@@ -23,8 +23,8 @@
 //!   module tree, the declarations, the names `use` items bind, then lowering, each in its own
 //!   order, which is a function of the program alone; it is no order over spellings.
 //!
-//! The later phases write onto rows already appended: resolution gives occurrences their kinds,
-//! and applications their directives; instantiation gives occurrences their types, and adds
+//! Lowering resolves each type occurrence and each application as it appends it. The later phases
+//! write onto rows already appended: instantiation gives occurrences their types, and adds
 //! instantiations and satisfactions; coercion gives values their shapes and types; the tier phase
 //! gives definitions and types their tiers. What none of them wrote keeps the neutral value its
 //! row was appended with, which the accessors document.

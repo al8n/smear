@@ -1,10 +1,10 @@
 //! What the phases after lowering write: each definition's built-in meaning and its externs, its
 //! instantiations and satisfactions; types; the shapes and types coercion gives values; and marks.
 //!
-//! GATED ON HAVING A CALLER. Lowering, instantiation, coercion and the tier phase are this
-//! module's callers, and until each lands the test-support door is its only one: a method that no
-//! shipped build calls is dead code. A phase that lands moves the methods it calls out of this
-//! module, as the module tree, item collection and lowering's first pass moved theirs.
+//! GATED ON HAVING A CALLER. Instantiation, coercion and the tier phase are this module's callers,
+//! and until each lands the test-support door is its only one: a method that no shipped build calls
+//! is dead code. A phase that lands moves the methods it calls out of this module, as the module
+//! tree, item collection and lowering moved theirs.
 
 use tokora::diagnostic::Location;
 

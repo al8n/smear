@@ -55,7 +55,8 @@ use super::{
 /// names in.
 ///
 /// Name resolution reads the modules, the names each module declares and the `use` items; lowering
-/// reads the definitions, the extensions and the schema's items. An item is addressed by its
+/// reads the definitions, the extensions and the schema's items, and the names the root package's
+/// root module declares, among which it presumes the schema's roots. An item is addressed by its
 /// source and its index among the source's items, which `items` holds for each source, of
 /// whichever parser made its document.
 pub(crate) struct Declarations<'d, 'a> {

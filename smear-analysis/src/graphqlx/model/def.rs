@@ -226,7 +226,8 @@ impl TypeBound {
     self.interface
   }
 
-  /// Where the bound is written.
+  /// Where the `where` predicate that writes it is written, which every bound of that predicate
+  /// shares.
   #[inline]
   pub const fn location(&self) -> Location {
     self.location

@@ -43,7 +43,8 @@ pub enum DiagnosticKind {
   // -- Items -------------------------------------------------------------------------------------
   /// A file holds an item, or a part of one, of a kind this analyzer does not know: a parser newer
   /// than the analyzer read the file. What the item declares, or the part names, is not in the
-  /// model. Reported once per file, at the first such item.
+  /// model. The walk that collects items and lowering each report it once per file, at the first
+  /// they meet; name resolution reports each path whose root is of such a kind, at the path.
   UnknownItem,
 
   // -- Name resolution ---------------------------------------------------------------------------

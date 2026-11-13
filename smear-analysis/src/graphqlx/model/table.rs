@@ -56,9 +56,9 @@ impl Run {
 }
 
 // A type-expression, type or value row says which variant of its public kind it is with one of
-// the numbers below, rather than with a private enum: until the lowering lands, only the
-// test-support door writes such rows, and a private variant that no shipped build constructs is
-// dead code.
+// the numbers below, rather than with a private enum: lowering writes some of them, but until
+// instantiation and coercion land only the test-support door writes the others, and a private
+// variant that no shipped build constructs is dead code.
 
 /// A named type, a definition and its arguments: `def` and `args` hold it.
 pub(super) const KIND_NAMED: u8 = 0;

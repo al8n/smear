@@ -57,8 +57,8 @@
 //! with everything it nests before the next, or its element, walked with an explicit stack. It
 //! keeps its path as written, `Int` staying `Int` and an extension's own name for a parameter
 //! staying its own, and its written arguments, however many its definition has parameters. Its
-//! path is resolved once, where its contribution is written: in the module of the extension's own
-//! file for an extension, and in the root package's root module for a built-in that package
+//! path is resolved once, where its contribution is written: in the module the extension is
+//! written in for an extension, and in the root package's root module for a built-in that package
 //! replaces. In scope are the contribution's generic parameters, built into one table for each
 //! contribution: a definition's own, in every one of its parameters' defaults too, and an
 //! extension's own names, each naming its target's parameter at the same position. A path that
@@ -87,7 +87,8 @@
 //!
 //! # The schema
 //!
-//! After every definition's contributions come the schema's: every schema definition any package
+//! After every definition's contributions come the schema's, appended once the second walk over the
+//! definitions has ended, which appends no contribution: every schema definition any package
 //! writes, by source id and position, then every schema extension, likewise, each marked as what
 //! it is. A schema item's contribution is named where its first keyword is written, `schema` or
 //! `extend`: the six bytes the item's node starts with, as the parser spans a schema definition

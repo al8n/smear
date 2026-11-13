@@ -240,9 +240,9 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }
 
-/// The model of `root` beside `dependencies`, as far as [`analyze`] builds it, and what `path`
-/// names in the module `module` of those packages, where `params` are the generic parameters in
-/// scope: the test-support door to the resolver. `None` when `module` names no module. See
+/// The model of `root` beside `dependencies` as name resolution leaves it, before lowering, and
+/// what `path` names in the module `module` of those packages, where `params` are the generic
+/// parameters in scope: the test-support door to the resolver. `None` when `module` names no module. See
 /// `Scopes::module_at` and `Scopes::door` for how `module` and `path` are spelled.
 #[cfg(feature = "test-support")]
 pub(crate) fn resolve_door<S: SourceText>(

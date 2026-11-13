@@ -80,7 +80,9 @@ pub enum TypeExprKind<'a> {
   Param {
     /// The definition the parameter belongs to.
     def: DefId,
-    /// The parameter's index among the definition's type parameters.
+    /// The parameter's position: its index among the definition's type parameters. An extension
+    /// names its target's parameters by position, so a name it gives past them has a position
+    /// past them too, which instantiation refuses.
     index: u32,
   },
   /// A list.

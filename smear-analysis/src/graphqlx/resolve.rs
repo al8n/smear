@@ -204,9 +204,6 @@ impl Wanted {
 
 /// Where a path is written, which decides the code it is refused with when it does not resolve: a
 /// single segment with no root, where GraphQL has a place of this kind, keeps GraphQL's code.
-// Lowering, the next part of the analyzer, passes each of these; until it lands only the
-// test-support door passes one.
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Position {
   /// A field's, an argument's or an input field's type, a type argument, a default or a bound:
@@ -227,9 +224,6 @@ pub(crate) enum Position {
 }
 
 /// One question to the resolver: where a path is written, and what is wanted of it.
-// Lowering, the next part of the analyzer, asks one at each path it lowers; until it lands only the
-// test-support door does.
-#[allow(dead_code)]
 pub(crate) struct Request<'r> {
   /// The module the path stands in.
   pub(crate) module: ModuleId,
@@ -247,9 +241,6 @@ pub(crate) struct Request<'r> {
 /// spelling with its index, sorted by spelling, one row a spelling, the lowest index of a spelling
 /// written twice. Lowering builds it once for each definition or extension, and the resolver finds
 /// a path's first segment in it by binary search.
-// Lowering, the next part of the analyzer, calls this for each definition and extension; until it
-// lands only the test-support door does.
-#[allow(dead_code)]
 pub(crate) fn params<'r>(written: &[&'r [u8]]) -> Vec<(&'r [u8], u32)> {
   let mut table: Vec<(&'r [u8], u32)> = written
     .iter()
@@ -262,9 +253,6 @@ pub(crate) fn params<'r>(written: &[&'r [u8]]) -> Vec<(&'r [u8], u32)> {
 }
 
 /// What a path names.
-// Lowering, the next part of the analyzer, reads each answer; until it lands only the test-support
-// door does.
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Resolved {
   /// A type or a directive.
@@ -273,7 +261,8 @@ pub(crate) enum Resolved {
   /// `primitive`.
   NonZero { non_zero: DefId, primitive: DefId },
   /// A module.
-  Module(ModuleId),
+  // Lowering asks for no module, so only the test-support door reads which one this is.
+  Module(#[allow(dead_code)] ModuleId),
   /// The generic parameter in scope at this index.
   Param(u32),
   /// Nothing: why has been reported.
@@ -638,9 +627,6 @@ impl Scopes<'_> {
   /// what its place does not want, is reported with GraphQL's code for `request`'s position where
   /// GraphQL has one, and every other path with `smear::graphqlx::unresolved-path`, or
   /// `unknown-package` for a package it may not reach.
-  // Lowering, the next part of the analyzer, calls this at every path it lowers; until it lands
-  // nothing does.
-  #[allow(dead_code)]
   pub(crate) fn resolve<S: AsRef<[u8]>>(
     &self,
     names: &ModelBuilder,
@@ -1501,8 +1487,6 @@ impl Scopes<'_> {
   ///
   /// Lowering asks it what an unknown argument of a directive application may have meant, among
   /// the directive's arguments.
-  // Lowering, the next part of the analyzer, calls this; until it lands only the tests do.
-  #[allow(dead_code)]
   pub(crate) fn nearest<'c>(
     &self,
     wanted: &'c [u8],
