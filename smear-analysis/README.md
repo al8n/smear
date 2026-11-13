@@ -83,7 +83,8 @@ of an object or an interface that names what is no interface is
 `core`'s `@deprecated` is `smear::schema::deprecated-required-argument`, or the code of an input
 field, and a field written non-null of an input object its own package makes OneOf is
 `smear::schema::one-of-field-not-nullable`, and one with a default
-`smear::schema::one-of-field-has-default`. An
+`smear::schema::one-of-field-has-default`, and `@oneOf` in an extension of an input object is
+`smear::schema::one-of-on-input-object-extension`. An
 error that a phase or a rule reports marks the contributions, members and definitions that hold it,
 as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error marks
 nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and

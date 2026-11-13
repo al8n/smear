@@ -3,8 +3,9 @@
 //! names, and so have a field's arguments; a definition that holds members holds one at least; a
 //! member's type is of the kind its position takes; an object or an interface implements
 //! interfaces; no interface implements itself; a union's members are object types; a required
-//! argument or input field is not deprecated; and a OneOf input object's fields are nullable and
-//! have no default. Each rule judges what a supplied
+//! argument or input field is not deprecated; a OneOf input object's fields are nullable and have
+//! no default; and an input object takes `@oneOf` in its definition alone. Each rule judges what a
+//! supplied
 //! package's definition holds, says nothing within what a phase refused, and quotes a name only as
 //! an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -69,6 +70,7 @@ const DEPRECATED_INPUT_FIELD: &str = "smear::schema::deprecated-required-input-f
 /// GraphQL's codes for the three mistakes of a OneOf input object.
 const ONE_OF_NON_NULL: &str = "smear::schema::one-of-field-not-nullable";
 const ONE_OF_DEFAULT: &str = "smear::schema::one-of-field-has-default";
+const ONE_OF_EXTENSION: &str = "smear::schema::one-of-on-input-object-extension";
 
 /// The code of a marker used as a marker may not be, which L3's rule reports.
 const MARKER: &str = "smear::graphqlx::marker-misuse";
@@ -1032,6 +1034,65 @@ fn a_one_of_input_objects_fields_are_nullable_and_have_no_default() {
   );
 }
 
+#[test]
+fn no_extension_makes_an_input_object_one_of() {
+  // An extension of the package's own input object that applies `@oneOf` is refused at it, and
+  // the input object is OneOf all the same: the definition's field is judged, and so is the
+  // extension's own.
+  let text = "type Query {\n  ok: Int\n}\ninput In {\n  a: Int!\n}\nextend input In @oneOf {\n  \
+              b: Int!\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (ONE_OF_NON_NULL, named(schema, text, "  ", "a", 0), None),
+      (ONE_OF_EXTENSION, at(schema, text, "oneOf", 0), None),
+      (ONE_OF_NON_NULL, named(schema, text, "  ", "b", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let refused = analysis.diagnostics().iter().nth(1).expect("a diagnostic");
+  assert_eq!(
+    refused.to_string(),
+    "this extension of the input object `In` applies `@oneOf`, which belongs on its definition"
+  );
+  assert_eq!(
+    (refused.primary_label(), refused.help()),
+    (
+      Some("@oneOf is provided by an input object type extension"),
+      Some(
+        "`@oneOf` changes what every existing field of the type means, so it belongs on the \
+         definition."
+      )
+    )
+  );
+
+  // Another package's extension is an orphan, and its `@oneOf` is refused where it is written,
+  // and makes nothing OneOf: the dependency's field is not judged.
+  let ours = "type Query {\n  ok: Int\n}\nextend input ^::dep::In @oneOf\n";
+  let theirs = "input In {\n  a: Int!\n}\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let dep = package("dep", Layout::Flat, &[("dep.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  let schema = schema_file(&analysis);
+  let dep_file = file(&analysis, 4, "dep.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        ORPHAN,
+        at(schema, ours, "^::dep::In", 0),
+        Some(named(dep_file, theirs, "input ", "In", 0))
+      ),
+      (ONE_OF_EXTENSION, at(schema, ours, "oneOf", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 /// A refusal of `code` is silent in a contribution that also holds a phase's error, `together`,
 /// and is reported beside it when the error is in a sibling definition, `apart`. The phase's error
 /// is an undefined type.
@@ -1116,6 +1177,12 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int = 1\n  x: Missing\n}\n",
     "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int = 1\n}\ninput U {\n  x: Missing\n}\n",
   );
+  silent_beside_a_phase(
+    ONE_OF_EXTENSION,
+    "type Query {\n  ok: Int\n}\ninput In {\n  a: Int\n}\nextend input In @oneOf {\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ninput In {\n  a: Int\n}\nextend input In @oneOf\n\
+     input U {\n  x: Missing\n}\n",
+  );
   // An error in an interface's own contribution silences it, and not the other interface of its
   // ring.
   let text = "type Query {\n  ok: Int\n}\ninterface A implements B {\n  id: ID\n  x: Missing\n}\n\
@@ -1164,6 +1231,9 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
     ),
     format!("type Query {{\n  ok: Int\n}}\ninput {owner} @oneOf {{\n  {plain}: Int!\n}}\n"),
     format!("type Query {{\n  ok: Int\n}}\ninput {owner} @oneOf {{\n  {plain}: Int = 1\n}}\n"),
+    format!(
+      "type Query {{\n  ok: Int\n}}\ninput {owner} {{\n  i: Int\n}}\nextend input {owner} @oneOf\n"
+    ),
   ];
   for text in &texts {
     let analysis = analyze_text(text);

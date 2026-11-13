@@ -96,6 +96,7 @@ const DEPRECATED_REQUIRED_INPUT_FIELD: &str = "smear::schema::deprecated-require
 /// GraphQL's codes for the three mistakes of a OneOf input object.
 const ONE_OF_FIELD_NOT_NULLABLE: &str = "smear::schema::one-of-field-not-nullable";
 const ONE_OF_FIELD_HAS_DEFAULT: &str = "smear::schema::one-of-field-has-default";
+const ONE_OF_ON_INPUT_OBJECT_EXTENSION: &str = "smear::schema::one-of-on-input-object-extension";
 
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
@@ -1539,6 +1540,10 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(ONE_OF_FIELD_HAS_DEFAULT),
     a_one_of_field_with_a_default,
   ),
+  (
+    Code::new(ONE_OF_ON_INPUT_OBJECT_EXTENSION),
+    a_one_of_that_an_extension_provides,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1746,6 +1751,11 @@ fn a_one_of_field_that_is_non_null() -> Analysis {
 /// A OneOf input object's field that declares a default.
 fn a_one_of_field_with_a_default() -> Analysis {
   analyze_one("type Query { ok: Int } input In @oneOf { a: Int = 1 }")
+}
+
+/// An extension that applies `@oneOf` to an input object.
+fn a_one_of_that_an_extension_provides() -> Analysis {
+  analyze_one("type Query { ok: Int } input In { a: Int } extend input In @oneOf")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

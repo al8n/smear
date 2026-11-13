@@ -546,4 +546,9 @@ pub(crate) mod schema {
   /// `OneOfFieldHasDefault`.
   pub(crate) const ONE_OF_FIELD_HAS_DEFAULT: Code =
     Code::new("smear::schema::one-of-field-has-default");
+
+  /// An extension of an input object applies `@oneOf`: `smear-schema`'s
+  /// `OneOfOnInputObjectExtension`.
+  pub(crate) const ONE_OF_ON_INPUT_OBJECT_EXTENSION: Code =
+    Code::new("smear::schema::one-of-on-input-object-extension");
 }
