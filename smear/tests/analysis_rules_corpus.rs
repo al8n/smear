@@ -183,7 +183,7 @@ fn the_corpus_input_objects_are_objects() {
     let analysis = analyzed(path, text);
     let model = analysis.model();
     let def = model
-      .lookup(Namespace::Type, &format!("^::app::{owner}"))
+      .lookup(Namespace::Type, format!("^::app::{owner}"))
       .unwrap_or_else(|| panic!("{name}: no type `{owner}`"));
     let field = model
       .def(def)
