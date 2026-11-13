@@ -226,7 +226,8 @@ impl TypeBound {
     self.interface
   }
 
-  /// Where the bound is written.
+  /// Where the `where` predicate that writes it is written, which every bound of that predicate
+  /// shares.
   #[inline]
   pub const fn location(&self) -> Location {
     self.location
@@ -495,14 +496,25 @@ pub struct Contribution<'a> {
   implements: &'a [TypeExprId],
   union_members: &'a [TypeExprId],
   applications: &'a [ApplicationId],
+  extension: bool,
   has_errors: bool,
 }
 
 impl<'a> Contribution<'a> {
-  /// Where it names what it contributes to, or, for the schema's, where its `schema` is written.
+  /// Where it names what it contributes to: a definition's name, or an extension's path to its
+  /// target. For one of the schema's, where its first keyword is written: `schema` for a schema
+  /// definition, `extend` for a schema extension.
   #[inline]
   pub const fn location(&self) -> Location {
     self.location
+  }
+
+  /// Whether it is an extension: `false` for a definition's own contribution, which is its first,
+  /// and for a schema definition; `true` for each `extend` of a definition or of the schema, which
+  /// follow them.
+  #[inline]
+  pub const fn is_extension(&self) -> bool {
+    self.extension
   }
 
   /// The direct members it contributed, in id order.
@@ -567,6 +579,7 @@ impl<'a> Contributions<'a> {
       implements: row.implements.of(&model.implements),
       union_members: row.union_members.of(&model.union_members),
       applications: row.applications.of(&model.listed_applications),
+      extension: row.extension,
       has_errors: row.marked,
     }
   }

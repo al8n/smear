@@ -12,6 +12,8 @@ const DEFAULT_PATH_SEGMENTS: u32 = 64;
 const DEFAULT_USE_DEPTH: u32 = 32;
 /// See [`Limits::max_glob_iterations`].
 const DEFAULT_GLOB_ITERATIONS: u32 = 1 << 10;
+/// See [`Limits::max_globs`].
+const DEFAULT_GLOBS: u32 = 64;
 /// See [`Limits::max_generic_depth`].
 const DEFAULT_GENERIC_DEPTH: u32 = 64;
 /// See [`Limits::max_instantiations`].
@@ -28,10 +30,10 @@ const DEFAULT_NEAR_MISS_COMPARISONS: u32 = 1 << 20;
 /// A package set is untrusted input, and the analysis bounds every resource such input could
 /// otherwise grow without limit: the number of definitions and of modules, how deep modules, `use`
 /// trees and type arguments nest, how long a path is, how many rounds the glob fixpoint runs, how
-/// many instantiations it records, and how many bytes of source it reads. A bound that is passed is
-/// reported as `smear::graphqlx::resource-limit`, never as a panic. Two bounds are not refusals:
-/// the diagnostic ceiling and the near-miss budget limit what the analysis says, not what it
-/// accepts.
+/// many modules one module's globs name, how many instantiations it records, and how many bytes of
+/// source it reads. A bound that is passed is reported as `smear::graphqlx::resource-limit`, never
+/// as a panic. Two bounds are not refusals: the diagnostic ceiling and the near-miss budget limit
+/// what the analysis says, not what it accepts.
 ///
 /// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
 /// is always declared whole and every package has its root module: see
@@ -59,6 +61,7 @@ pub struct Limits {
   max_path_segments: u32,
   max_use_depth: u32,
   max_glob_iterations: u32,
+  max_globs: u32,
   max_generic_depth: u32,
   max_instantiations: u32,
   max_source_bytes: u32,
@@ -86,6 +89,7 @@ impl Limits {
       max_path_segments: DEFAULT_PATH_SEGMENTS,
       max_use_depth: DEFAULT_USE_DEPTH,
       max_glob_iterations: DEFAULT_GLOB_ITERATIONS,
+      max_globs: DEFAULT_GLOBS,
       max_generic_depth: DEFAULT_GENERIC_DEPTH,
       max_instantiations: DEFAULT_INSTANTIATIONS,
       max_source_bytes: DEFAULT_SOURCE_BYTES,
@@ -168,15 +172,39 @@ impl Limits {
     self.max_use_depth
   }
 
-  /// How many rounds the glob fixpoint may run, each round resolving the `use` items the previous
-  /// round's globs made resolvable.
+  /// How many rounds the glob fixpoint of one module's `use` items may run, each round resolving
+  /// the items that the names and the globs of the round before made resolvable. A round looks up
+  /// only those items, so the bound limits how many rounds there are, not what one costs.
+  ///
+  /// A chain needs a round a link, with or without a glob in it: a module that globs a module that
+  /// globs the next, or `use` items that each rename the one before by a path of its head alone,
+  /// `use A1 as A2`, which waits until both namespaces have its name. Either chain longer than the
+  /// bound is reported once for its module, at the head the next round would resolve, and the items
+  /// left are reported no further.
   ///
   /// The default is 2^10. The fixpoint needs at most one round per `use` item that waits on
-  /// another, and a real program needs a handful; a chain of a thousand modules each globbing the
-  /// next is a generated one, and stopping it bounds the fixpoint's work.
+  /// another, and a real program needs a handful; a chain a thousand long is a generated one.
   #[inline]
   pub const fn max_glob_iterations(&self) -> u32 {
     self.max_glob_iterations
+  }
+
+  /// How many modules the glob `use` items of one module may name: `use ~::a::*` and
+  /// `use ^::geo::*` name two, and another glob of a module already globbed names none more.
+  ///
+  /// A name looked up in a module's scope is searched for in each module its globs name, and so is
+  /// a near miss of a name that does not resolve, so this bound is what one lookup looks at. The
+  /// first glob that would name one module more is reported once for its module, where it is
+  /// written, and gives nothing; a later glob of yet another module gives nothing either,
+  /// unreported, and one of a module already globbed is still accepted. Which glob is refused
+  /// depends on the program alone: a module's `use` items resolve in an order that the order the
+  /// files and the dependencies are given in does not change.
+  ///
+  /// The default is 64. A module globs a handful of modules; one that globs more is generated, and
+  /// every lookup in its scope would pay for each.
+  #[inline]
+  pub const fn max_globs(&self) -> u32 {
+    self.max_globs
   }
 
   /// How deeply type arguments may nest in one type once substitution has filled them:
@@ -286,6 +314,14 @@ impl Limits {
   #[must_use]
   pub const fn with_max_glob_iterations(mut self, max: u32) -> Self {
     self.max_glob_iterations = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_globs`](Self::max_globs) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_globs(mut self, max: u32) -> Self {
+    self.max_globs = max;
     self
   }
 

@@ -90,10 +90,6 @@ pub(crate) struct Collected<'d, 'a> {
 }
 
 /// One document's items, flattened, of the parser that made the document.
-// Read by name resolution and lowering, the next parts of the analyzer, through the items the
-// declarations address; until they land nothing reads it, and `dead_code` would say so of each
-// variant's field.
-#[allow(dead_code)]
 pub(crate) enum Items<'d, 'a> {
   /// A document of text.
   Text(Vec<&'d TypeSystemItem<&'a str>>),
@@ -248,14 +244,36 @@ pub(crate) fn items<'d, 'a: 'd>(
 }
 
 /// Whether the package set refused the path of the file at `at` of `files`, which are in source
-/// order: a path the path rule refuses, or a path another file of the package has.
-fn refused(files: &[FileView<'_>], at: usize) -> bool {
+/// order: a path the path rule refuses, or a path another file of the package has. Name
+/// resolution asks it too, so that its file table holds the files this walk places and no other.
+pub(crate) fn refused(files: &[FileView<'_>], at: usize) -> bool {
   let path = files[at].path;
   check::path_problem(path).is_some()
     || (at > 0 && files[at - 1].path == path)
     || files
       .get(at + 1)
       .is_some_and(|next: &FileView<'_>| next.path == path)
+}
+
+/// Reports that a file holds an item, or a part of one, of a kind this analyzer does not know, the
+/// first of them at `at`: only a parser newer than the analyzer makes one, and what it holds is in
+/// no model. The walk reports it once per file, and so does lowering.
+pub(crate) fn unknown_item(reporter: &mut Reporter, at: Location) {
+  let kind = DiagnosticKind::UnknownItem;
+  reporter.report(
+    Diagnostic::builder(kind.code(), at)
+      .severity(kind.severity())
+      .message(
+        "this file holds an item, or a part of one, of a kind this analyzer does not know, so \
+         what it declares is not in the model",
+      )
+      .primary_label(kind.title())
+      .help(
+        "the parser that read this file is newer than this analyzer; analyze it with a release \
+         of the analyzer that knows every kind of item the parser reads",
+      )
+      .build(),
+  );
 }
 
 /// One list of items being walked, a document's or a `mod`'s, and the module they are in.
@@ -451,7 +469,7 @@ impl<'d> Walk<'d, '_> {
       }
     }
     if let Some(at) = unknown_at {
-      self.unknown_item(at);
+      unknown_item(self.reporter, at);
     }
     walked
   }
@@ -667,26 +685,6 @@ impl<'d> Walk<'d, '_> {
         ))
         .primary_label(kind.title())
         .help("raise `Limits::max_module_depth`, or nest the directories less deeply")
-        .build(),
-    );
-  }
-
-  /// Reports that a file holds an item, or a part of one, of a kind the walk does not know, the
-  /// first of them at `at`.
-  fn unknown_item(&mut self, at: Location) {
-    let kind = DiagnosticKind::UnknownItem;
-    self.reporter.report(
-      Diagnostic::builder(kind.code(), at)
-        .severity(kind.severity())
-        .message(
-          "this file holds an item, or a part of one, of a kind this analyzer does not know, so \
-           what it declares is not in the model",
-        )
-        .primary_label(kind.title())
-        .help(
-          "the parser that read this file is newer than this analyzer; analyze it with a release \
-           of the analyzer that knows every kind of item the parser reads",
-        )
         .build(),
     );
   }

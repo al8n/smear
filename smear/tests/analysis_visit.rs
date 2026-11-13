@@ -200,7 +200,7 @@ fn fixture() -> Model {
     STRING
   );
   assert_eq!(
-    b.push_contribution(STRING, at(APP_SCHEMA, 314, 320), at(APP_SCHEMA, 300, 346)),
+    b.push_extension(STRING, at(APP_SCHEMA, 314, 320), at(APP_SCHEMA, 300, 346)),
     1
   );
   let defs = [
@@ -293,7 +293,7 @@ fn fixture() -> Model {
     );
   }
   assert_eq!(
-    b.push_contribution(POINT, at(APP_SCHEMA, 712, 717), at(APP_SCHEMA, 700, 760)),
+    b.push_extension(POINT, at(APP_SCHEMA, 712, 717), at(APP_SCHEMA, 700, 760)),
     1
   );
   assert_eq!(
@@ -1412,6 +1412,15 @@ fn the_context_says_where_the_walk_is_and_who_wrote_each_member() {
     "the extension itself"
   );
   assert_eq!(positions.members.len(), 14);
+
+  // The contribution that wrote `label` says it is an extension; `Point`'s own does not.
+  let extensions: Vec<bool> = analysis
+    .model()
+    .def(POINT)
+    .contributions()
+    .map(|part: Contribution<'_>| part.is_extension())
+    .collect::<Vec<bool>>();
+  assert_eq!(extensions, [false, true]);
 }
 
 /// Reports an error at every definition it enters, holding the definition's view while it

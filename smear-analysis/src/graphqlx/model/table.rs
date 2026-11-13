@@ -56,9 +56,9 @@ impl Run {
 }
 
 // A type-expression, type or value row says which variant of its public kind it is with one of
-// the numbers below, rather than with a private enum: until the lowering lands, only the
-// test-support door writes such rows, and a private variant that no shipped build constructs is
-// dead code.
+// the numbers below, rather than with a private enum: lowering writes some of them, but until
+// instantiation and coercion land only the test-support door writes the others, and a private
+// variant that no shipped build constructs is dead code.
 
 /// A named type, a definition and its arguments: `def` and `args` hold it.
 pub(super) const KIND_NAMED: u8 = 0;
@@ -194,10 +194,14 @@ pub(super) struct DefRow {
 /// written item contributed. Appended with its owner, in contribution order.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ContributionRow {
-  /// Where its name is written, or the `schema` keyword.
+  /// Where a definition's name, or an extension's target, is written; for one of the schema's, its
+  /// first keyword.
   pub(super) location: Location,
   /// From its description, or its first keyword, to its last token.
   pub(super) extent: Location,
+  /// Whether it is an extension rather than a definition: a definition's first contribution is its
+  /// own, and every later one an extension; the schema's definitions come before its extensions.
+  pub(super) extension: bool,
   /// The direct members it contributed.
   pub(super) members: IdRange<MemberId>,
   /// The `implements` entries it contributed, in the model's implements pool.

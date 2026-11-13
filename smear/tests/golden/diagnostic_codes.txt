@@ -5,8 +5,11 @@
 # Bless with `UPDATE_GOLDEN=1 cargo test -p smear --features \
 # validator,introspection,analysis --test diagnostic_codes`, which rewrites this and then
 # fails.
+DiagnosticKind::AmbiguousGlob = smear::graphqlx::ambiguous-glob
 DiagnosticKind::DuplicateFilePath = smear::graphqlx::duplicate-file-path
 DiagnosticKind::DuplicatePackageName = smear::graphqlx::duplicate-package-name
+DiagnosticKind::FilePathUse = smear::graphqlx::file-path-use
+DiagnosticKind::InvalidBound = smear::graphqlx::invalid-bound
 DiagnosticKind::InvalidDirectoryName = smear::graphqlx::invalid-directory-name
 DiagnosticKind::InvalidFilePath = smear::graphqlx::invalid-file-path
 DiagnosticKind::InvalidPackageName = smear::graphqlx::invalid-package-name
@@ -15,7 +18,14 @@ DiagnosticKind::ModuleDefinedTwice = smear::graphqlx::module-defined-twice
 DiagnosticKind::ModuleTypeCollision = smear::graphqlx::module-type-collision
 DiagnosticKind::ReservedPackageName = smear::graphqlx::reserved-package-name
 DiagnosticKind::ResourceLimit = smear::graphqlx::resource-limit
+DiagnosticKind::ShadowedPrimitive = smear::graphqlx::shadowed-primitive
 DiagnosticKind::UnknownItem = smear::graphqlx::unknown-item
+DiagnosticKind::UnknownPackage = smear::graphqlx::unknown-package
+DiagnosticKind::UnresolvedPath = smear::graphqlx::unresolved-path
+DiagnosticKind::UrlUnsupported = smear::graphqlx::url-unsupported
+DiagnosticKind::UseDeclarationCollision = smear::graphqlx::use-declaration-collision
+DiagnosticKind::UseNameCollision = smear::graphqlx::use-name-collision
+DiagnosticKind::UseResolutionChanged = smear::graphqlx::use-resolution-changed
 ResponseErrorKind::DoubleNonNull = smear::introspection::double-non-null
 ResponseErrorKind::InvalidEnumValue = smear::introspection::invalid-enum-value
 ResponseErrorKind::InvalidMetaType = smear::introspection::invalid-meta-type

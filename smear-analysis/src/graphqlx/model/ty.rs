@@ -80,7 +80,9 @@ pub enum TypeExprKind<'a> {
   Param {
     /// The definition the parameter belongs to.
     def: DefId,
-    /// The parameter's index among the definition's type parameters.
+    /// The parameter's position: its index among the definition's type parameters. An extension
+    /// names its target's parameters by position, so a name it gives past them has a position
+    /// past them too, which instantiation refuses.
     index: u32,
   },
   /// A list.
@@ -250,8 +252,9 @@ impl<'a> TypeExpr<'a> {
   /// Its type: the complete instantiation, with defaults filled and substituted and an alias
   /// expanded. Two occurrences of one type answer one id.
   //
-  // Resolution gives it. An occurrence no phase gave a type, as every one is until resolution
-  // lands, answers the one unresolved type.
+  // The instantiation phase gives it; no phase before it interns a type. Until then every
+  // occurrence answers the one unresolved type, in an analysis that is ok too, which therefore
+  // holds an unresolved type wherever it holds an occurrence: the interim this accessor accepts.
   #[inline]
   pub fn ty(&self) -> TyId {
     self.row().ty

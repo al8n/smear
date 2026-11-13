@@ -39,7 +39,8 @@ pub enum Root {
   /// Written in a schema definition or extension, as `query: Q` is: the type occurrence, which is
   /// that occurrence's `Unresolved` when it did not resolve. It may be an instantiation.
   Written(TypeExprId),
-  /// Presumed, with no schema definition, from the definition GraphQL's default root names.
+  /// Presumed, with no schema definition of the root package's, from the definition GraphQL's
+  /// default root names.
   Presumed(DefId),
 }
 
@@ -72,21 +73,26 @@ impl<'a> Schema<'a> {
     self.model.schema.roots[operation.index()]
   }
 
-  /// Its directive applications, its schema definition's and then each extension's.
+  /// Its directive applications: the root package's first schema definition's, then each schema
+  /// extension's of the root package.
   #[inline]
   pub fn applications(&self) -> &'a [ApplicationId] {
     let model: &'a Model = self.model;
     model.schema.applications.of(&model.listed_applications)
   }
 
-  /// Its description, if its schema definition writes one.
+  /// Its description: the one the root package's first schema definition writes, if it writes one.
   #[inline]
   pub fn description(&self) -> Option<Description<'a>> {
     Description::of(self.model, self.model.schema.description)
   }
 
-  /// What each written item contributed to it: its schema definition, then each extension. None
-  /// when no schema definition is written.
+  /// What each schema item any package writes contributed to it: every schema definition, by
+  /// source id and position, then every schema extension, likewise; none when no package writes
+  /// one. Each says whether it is an extension. The root package's first schema definition gives
+  /// the schema its description, roots and applications, and the root package's schema extensions
+  /// give it roots and applications; any other schema item is a contribution and nothing else,
+  /// there for the rules that refuse it.
   #[inline]
   pub fn contributions(&self) -> Contributions<'a> {
     Contributions::of(self.model, self.model.schema.contributions)

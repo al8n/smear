@@ -10,20 +10,24 @@
 //!   path, compared segment by segment, each segment bytewise;
 //! - definitions, by item collection: by package, module path, source id, then position, the
 //!   materialised primitives first in `core`'s root module;
-//! - contributions, with their definition: the definition, then each extension by source id and
-//!   position; the schema's after every definition's;
-//! - members, by item collection: owner by owner, the direct members by contribution and as
-//!   written, then each field's arguments, field by field;
+//! - contributions, by lowering, with their definition: the definition, then each extension by
+//!   source id and position; the schema's after every definition's, its definitions before its
+//!   extensions;
+//! - members, by lowering: owner by owner, the direct members by contribution and as written, then
+//!   each field's arguments, field by field;
 //! - type occurrences, values and applications, by lowering: in the order of the walk over every
 //!   package, an occurrence before what it nests (`order` spells the walk out);
-//! - types, by interning as resolution reaches each type occurrence: a type's arguments before it;
-//! - names, by interning: by first occurrence, in source-id order, then position.
+//! - types, by interning as instantiation reaches each type occurrence: a type's arguments before
+//!   it;
+//! - names, by interning, in the order the analysis first interns them, phase by phase: the
+//!   module tree, the declarations, the names `use` items bind, then lowering, each in its own
+//!   order, which is a function of the program alone; it is no order over spellings.
 //!
-//! The later phases write onto rows already appended: resolution gives occurrences their kinds and
-//! types, and applications their directives; instantiation adds instantiations and satisfactions;
-//! coercion gives values their shapes and types; the tier phase gives definitions and types their
-//! tiers. What none of them wrote keeps the neutral value its row was appended with, which the
-//! accessors document.
+//! Lowering resolves each type occurrence and each application as it appends it. The later phases
+//! write onto rows already appended: instantiation gives occurrences their types, and adds
+//! instantiations and satisfactions; coercion gives values their shapes and types; the tier phase
+//! gives definitions and types their tiers. What none of them wrote keeps the neutral value its
+//! row was appended with, which the accessors document.
 //!
 //! # The checks
 //!
@@ -41,20 +45,29 @@ use smear_semantics::interner::{Interner, Symbol};
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{DefId, IdRange, ModuleId, PackageId, Sym, TyId, dense},
+  id::{
+    ApplicationId, DefId, IdRange, MemberId, ModuleId, PackageId, Sym, TyId, TypeExprId, ValueId,
+    dense,
+  },
   package::{IntegerProvider, Layout, Tier},
 };
 
 use super::{
   Model, Namespace, PackageKind,
-  def::{DefKind, Origin, Primitive},
+  application::{ApplicationArgument, Resolution},
+  def::{DefKind, DirectiveLocation, Origin, Primitive, TypeBound},
+  member::MemberKind,
   module::ModuleKind,
   order,
+  schema::{Root, RootOperation},
   table::{
-    AliasRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, ContributionRow, DefRow,
-    DescriptionRow, KIND_UNRESOLVED, ModuleRow, NO_DEF, PackageRow, Run, TyRow, TypeExprRow,
-    UNSET_MODULE, UNSET_TY, ValueRow,
+    AliasRow, ApplicationRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, ContributionRow,
+    DefRow, DescriptionRow, KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED, LiteralRow,
+    MemberRow, ModuleRow, NO_DEF, PackageRow, PathRow, Run, TyRow, TypeExprRow, TypeParamRow,
+    UNSET_MODULE, UNSET_TY, VALUE_LITERAL, VALUE_UNRESOLVED, ValueRow,
   },
+  ty::PathRoot,
+  value::LiteralKind,
 };
 
 impl Symbol for Sym {
@@ -224,10 +237,28 @@ impl ModelBuilder {
 
   /// Interns `name`: the symbol it already has, or a new one.
   ///
-  /// Names are interned by first occurrence, in source-id order, then position. A name the
-  /// analyzer makes itself is interned when it is made.
+  /// Symbols are numbered in the order the analysis first interns them, phase by phase: the
+  /// module tree, the declarations, the names `use` items bind, then lowering, each phase in its
+  /// own order. That order is a function of the program alone, never of the order its files and
+  /// dependencies are passed in, and it is not an order over spellings.
   pub fn intern(&mut self, name: &str) -> Sym {
     self.names.intern(name.as_bytes())
+  }
+
+  /// The symbol `name` was interned with, or `None` when no name so spelled was: a query that
+  /// interns nothing.
+  pub(crate) fn find(&self, name: &[u8]) -> Option<Sym> {
+    self.names.lookup(name)
+  }
+
+  /// The spelling `sym` was interned with.
+  pub(crate) fn spelling(&self, sym: Sym) -> &[u8] {
+    self.names.bytes(sym)
+  }
+
+  /// Where the definition `def` is named.
+  pub(crate) fn def_location(&self, def: DefId) -> Location {
+    self.model.defs[def.get() as usize].location
   }
 
   /// Appends a definition: a `kind` named `name` in `module`, its name written at `location`, of
@@ -275,19 +306,38 @@ impl ModelBuilder {
     id
   }
 
-  /// Appends a contribution to `def`: its definition, or one of its extensions, named at
-  /// `location` and spanning `extent`, from its description or first keyword to its last token.
-  /// Answers its index among `def`'s contributions.
+  /// Appends `def`'s own contribution: its definition, named at `location` and spanning `extent`,
+  /// from its description or first keyword to its last token. Answers its index among `def`'s
+  /// contributions, which is 0.
   ///
   /// A definition's contributions are appended together, the definition first, then each
-  /// extension by source id and position, before the next definition's.
+  /// extension by source id and position ([`push_extension`](Self::push_extension)), before the next
+  /// definition's.
   pub fn push_contribution(&mut self, def: DefId, location: Location, extent: Location) -> u32 {
     let row = &mut self.model.defs[def.get() as usize];
     let index = row.contributions.len;
     grow(
       &mut self.model.contributions,
       &mut row.contributions,
-      contribution_row(location, extent),
+      contribution_row(location, extent, false),
+    );
+    index
+  }
+
+  /// Appends an extension of `def` as its next contribution: the extension names `def` at
+  /// `location`, its target path, and spans `extent`, from its `extend` to its last token. Answers
+  /// its index among `def`'s contributions.
+  ///
+  /// It follows `def`'s own contribution ([`push_contribution`](Self::push_contribution)) and
+  /// every extension of `def` before it by source id and position, and comes before the next
+  /// definition's contributions.
+  pub fn push_extension(&mut self, def: DefId, location: Location, extent: Location) -> u32 {
+    let row = &mut self.model.defs[def.get() as usize];
+    let index = row.contributions.len;
+    grow(
+      &mut self.model.contributions,
+      &mut row.contributions,
+      contribution_row(location, extent, true),
     );
     index
   }
@@ -296,6 +346,33 @@ impl ModelBuilder {
   pub fn set_def_description(&mut self, def: DefId, text: &str, location: Location) {
     let description = self.description(text, location);
     self.model.defs[def.get() as usize].description = Some(description);
+  }
+
+  /// Appends a type parameter named `name`, written at `location`, to `def`. Answers its index.
+  pub fn push_type_param(&mut self, def: DefId, name: Sym, location: Location) -> u32 {
+    let row = &mut self.model.defs[def.get() as usize];
+    let index = row.type_params.len;
+    grow(
+      &mut self.model.type_params,
+      &mut row.type_params,
+      TypeParamRow {
+        name,
+        location,
+        default: None,
+      },
+    );
+    index
+  }
+
+  /// Adds `location` to the locations of the directive definition `def`, after those it has.
+  pub fn push_directive_location(&mut self, def: DefId, location: DirectiveLocation) {
+    let row = &mut self.model.defs[def.get() as usize];
+    grow(&mut self.model.locations, &mut row.locations, location);
+  }
+
+  /// Makes the directive definition `def` repeatable.
+  pub fn set_repeatable(&mut self, def: DefId) {
+    self.model.defs[def.get() as usize].repeatable = true;
   }
 
   /// Makes `def` the intrinsic primitive `primitive`.
@@ -313,6 +390,391 @@ impl ModelBuilder {
   /// namespaces; when it gives one name twice in one namespace, the first added is kept.
   pub fn push_alias(&mut self, module: ModuleId, name: Sym, def: DefId) {
     self.model.aliases.push(AliasRow { module, name, def });
+  }
+
+  /// Appends a direct member of `owner`, contributed by its contribution `contribution`: a `kind`
+  /// named `name`, its name written at `location`, spanning `extent`.
+  ///
+  /// Members are appended in id order: owner by owner; an owner's direct members first, by
+  /// contribution and then as written; then each field's arguments, field by field, through
+  /// [`push_argument`](Self::push_argument).
+  pub fn push_member(
+    &mut self,
+    owner: DefId,
+    contribution: u32,
+    kind: MemberKind,
+    name: Sym,
+    location: Location,
+    extent: Location,
+  ) -> MemberId {
+    let index = dense(self.model.members.len());
+    let row = &mut self.model.defs[owner.get() as usize];
+    debug_assert_eq!(
+      row.kind.member_kind(),
+      Some(kind),
+      "a definition's direct members are of the one kind its own kind has"
+    );
+    row.members = extend_range(row.members, index);
+    let part = slot(row.contributions, contribution);
+    let part = &mut self.model.contributions[part];
+    part.members = extend_range(part.members, index);
+    self
+      .model
+      .members
+      .push(member_row(kind, name, owner, None, location, extent));
+    MemberId::new(index)
+  }
+
+  /// Appends an argument of `field`, named `name`, its name written at `location`, spanning
+  /// `extent`.
+  pub fn push_argument(
+    &mut self,
+    field: MemberId,
+    name: Sym,
+    location: Location,
+    extent: Location,
+  ) -> MemberId {
+    let index = dense(self.model.members.len());
+    let parent = &mut self.model.members[field.get() as usize];
+    debug_assert_eq!(parent.kind, MemberKind::Field, "only a field has arguments");
+    parent.arguments = extend_range(parent.arguments, index);
+    let owner = parent.owner;
+    self.model.members.push(member_row(
+      MemberKind::Argument,
+      name,
+      owner,
+      Some(field),
+      location,
+      extent,
+    ));
+    MemberId::new(index)
+  }
+
+  /// Gives `member` the description `text`, cooked, written at `location`.
+  pub fn set_member_description(&mut self, member: MemberId, text: &str, location: Location) {
+    let description = self.description(text, location);
+    self.model.members[member.get() as usize].description = Some(description);
+  }
+
+  /// Gives `def`'s type parameter `index` the default `default`.
+  pub fn set_type_param_default(&mut self, def: DefId, index: u32, default: TypeExprId) {
+    let at = slot(self.model.defs[def.get() as usize].type_params, index);
+    self.model.type_params[at].default = Some(default);
+  }
+
+  /// Adds a bound to `def`, after those it has: its type parameter `parameter` must satisfy
+  /// `interface`, and the bound is written at `location`.
+  pub fn push_bound(
+    &mut self,
+    def: DefId,
+    parameter: u32,
+    interface: TypeExprId,
+    location: Location,
+  ) {
+    let row = &mut self.model.defs[def.get() as usize];
+    debug_assert!(
+      parameter < row.type_params.len,
+      "a bound bounds one of its definition's type parameters"
+    );
+    grow(
+      &mut self.model.bounds,
+      &mut row.bounds,
+      TypeBound {
+        parameter,
+        interface,
+        location,
+      },
+    );
+  }
+
+  /// Adds `interface` to the `implements` entries of `def`'s contribution `contribution`, after
+  /// those it has.
+  pub fn push_implements(&mut self, def: DefId, contribution: u32, interface: TypeExprId) {
+    let index = dense(self.model.implements.len());
+    let row = &mut self.model.defs[def.get() as usize];
+    extend(&mut row.implements, index);
+    let part = slot(row.contributions, contribution);
+    extend(&mut self.model.contributions[part].implements, index);
+    self.model.implements.push(interface);
+  }
+
+  /// Adds `member` to the union members of `def`'s contribution `contribution`, after those it
+  /// has.
+  pub fn push_union_member(&mut self, def: DefId, contribution: u32, member: TypeExprId) {
+    let index = dense(self.model.union_members.len());
+    let row = &mut self.model.defs[def.get() as usize];
+    extend(&mut row.union_members, index);
+    let part = slot(row.contributions, contribution);
+    extend(&mut self.model.contributions[part].union_members, index);
+    self.model.union_members.push(member);
+  }
+
+  /// Gives `member` its type, as written.
+  pub fn set_member_type(&mut self, member: MemberId, ty: TypeExprId) {
+    self.model.members[member.get() as usize].ty = Some(ty);
+  }
+
+  /// Appends a type occurrence written at `location`, non-null when `non_null`.
+  ///
+  /// Type occurrences are appended in the walk's order, an occurrence before its arguments and
+  /// its element. One starts unresolved, with no path, no arguments and no type; the methods
+  /// below give it them.
+  pub fn push_type_expr(&mut self, location: Location, non_null: bool) -> TypeExprId {
+    let id = TypeExprId::new(dense(self.model.type_exprs.len()));
+    self.model.type_exprs.push(TypeExprRow {
+      shape: KIND_UNRESOLVED,
+      def: NO_DEF,
+      index: 0,
+      element: TypeExprId::new(0),
+      args: Run::default(),
+      non_null,
+      location,
+      path: None,
+      ty: UNSET_TY,
+    });
+    id
+  }
+
+  /// Records the path `type_expr` writes: from `root`, through `segments`, written at `location`.
+  pub fn set_type_expr_path(
+    &mut self,
+    type_expr: TypeExprId,
+    root: PathRoot,
+    segments: &[Sym],
+    location: Location,
+  ) {
+    let segments = append(&mut self.model.paths, segments);
+    self.model.type_exprs[type_expr.get() as usize].path = Some(PathRow {
+      root,
+      segments,
+      location,
+    });
+  }
+
+  /// Records the arguments `type_expr` writes, in order, each appended after it.
+  pub fn set_type_expr_args(&mut self, type_expr: TypeExprId, args: &[TypeExprId]) {
+    debug_assert!(
+      args.iter().all(|arg: &TypeExprId| *arg > type_expr),
+      "an occurrence's arguments are appended after it"
+    );
+    let args = append(&mut self.model.type_expr_args, args);
+    self.model.type_exprs[type_expr.get() as usize].args = args;
+  }
+
+  /// Makes `type_expr` the list of `element`, appended after it.
+  pub fn set_type_expr_list(&mut self, type_expr: TypeExprId, element: TypeExprId) {
+    debug_assert!(element > type_expr, "a list's element is appended after it");
+    let row = &mut self.model.type_exprs[type_expr.get() as usize];
+    row.shape = KIND_LIST;
+    row.element = element;
+  }
+
+  /// Resolves `type_expr` to the definition `def`.
+  pub fn resolve_named(&mut self, type_expr: TypeExprId, def: DefId) {
+    let row = &mut self.model.type_exprs[type_expr.get() as usize];
+    row.shape = KIND_NAMED;
+    row.def = def;
+  }
+
+  /// Resolves `type_expr` to `def`'s type parameter `index`.
+  pub fn resolve_param(&mut self, type_expr: TypeExprId, def: DefId, index: u32) {
+    let row = &mut self.model.type_exprs[type_expr.get() as usize];
+    row.shape = KIND_PARAM;
+    row.def = def;
+    row.index = index;
+  }
+
+  /// Adds `application` to the applications of `def`'s contribution `contribution`, after those it
+  /// has.
+  pub fn push_def_application(
+    &mut self,
+    def: DefId,
+    contribution: u32,
+    application: ApplicationId,
+  ) {
+    let index = dense(self.model.listed_applications.len());
+    let row = &mut self.model.defs[def.get() as usize];
+    extend(&mut row.applications, index);
+    let part = slot(row.contributions, contribution);
+    extend(&mut self.model.contributions[part].applications, index);
+    self.model.listed_applications.push(application);
+  }
+
+  /// Gives `member` its default value.
+  pub fn set_member_default(&mut self, member: MemberId, value: ValueId) {
+    self.model.members[member.get() as usize].default = Some(value);
+  }
+
+  /// Adds `application` to `member`'s applications, after those it has.
+  pub fn push_member_application(&mut self, member: MemberId, application: ApplicationId) {
+    let row = &mut self.model.members[member.get() as usize];
+    grow(
+      &mut self.model.member_applications,
+      &mut row.applications,
+      application,
+    );
+  }
+
+  /// Appends a value written at `location`, or filled from a default when `written` is false.
+  ///
+  /// Values are appended in the walk's order, a list, set, map or object before what it holds.
+  /// One starts unresolved, with no type; the methods below give it its shape and its type.
+  pub fn push_value(&mut self, location: Location, written: bool) -> ValueId {
+    let id = ValueId::new(dense(self.model.values.len()));
+    self.model.values.push(ValueRow {
+      shape: VALUE_UNRESOLVED,
+      def: NO_DEF,
+      member: MemberId::new(0),
+      payload: 0,
+      run: Run::default(),
+      location,
+      ty: UNSET_TY,
+      written,
+      path: None,
+    });
+    id
+  }
+
+  /// Makes `value` a literal of `kind`, kept as written: `text`.
+  pub fn set_literal(&mut self, value: ValueId, kind: LiteralKind, text: &str) {
+    let text = push_text(&mut self.model.text, text);
+    let payload = dense(self.model.literals.len());
+    self.model.literals.push(LiteralRow { kind, text });
+    let row = self.value_row(value);
+    row.shape = VALUE_LITERAL;
+    row.payload = payload;
+  }
+
+  /// Records the path an enum or type value writes: from `root`, through `segments`.
+  pub fn set_value_path(&mut self, value: ValueId, root: PathRoot, segments: &[Sym]) {
+    let segments = append(&mut self.model.paths, segments);
+    let row = self.value_row(value);
+    row.path = Some(PathRow {
+      root,
+      segments,
+      location: row.location,
+    });
+  }
+
+  /// Appends an application written at `location`, its directive's path written from `root`
+  /// through `segments` at `path_location`.
+  ///
+  /// Applications are appended in the walk's order. One starts unresolved, with no type argument
+  /// and no argument; the methods below give it them.
+  pub fn push_application(
+    &mut self,
+    location: Location,
+    root: PathRoot,
+    segments: &[Sym],
+    path_location: Location,
+  ) -> ApplicationId {
+    let id = ApplicationId::new(dense(self.model.applications.len()));
+    let segments = append(&mut self.model.paths, segments);
+    self.model.applications.push(ApplicationRow {
+      directive: Resolution::Unresolved,
+      type_args: Run::default(),
+      location,
+      path: PathRow {
+        root,
+        segments,
+        location: path_location,
+      },
+      arguments: Run::default(),
+    });
+    id
+  }
+
+  /// Resolves `application`'s directive to `directive`.
+  pub fn resolve_application(&mut self, application: ApplicationId, directive: DefId) {
+    self.model.applications[application.get() as usize].directive = Resolution::Resolved(directive);
+  }
+
+  /// Records the type arguments `application` writes, in order.
+  pub fn set_application_type_args(&mut self, application: ApplicationId, args: &[TypeExprId]) {
+    let args = append(&mut self.model.application_type_args, args);
+    self.model.applications[application.get() as usize].type_args = args;
+  }
+
+  /// Adds an argument to `application`, after those it has: the directive definition's
+  /// `argument`, where its name is written (`None` when a default filled it), and its value.
+  pub fn push_application_argument(
+    &mut self,
+    application: ApplicationId,
+    argument: MemberId,
+    name: Option<Location>,
+    value: ValueId,
+  ) {
+    let row = &mut self.model.applications[application.get() as usize];
+    grow(
+      &mut self.model.arguments,
+      &mut row.arguments,
+      ApplicationArgument {
+        argument,
+        name,
+        value,
+      },
+    );
+  }
+
+  /// Appends a schema definition to the schema's contributions: at `location`, its `schema`, and
+  /// spanning `extent`, from its description or its `schema` to its last token. Answers its index
+  /// among the schema's contributions.
+  ///
+  /// The schema's contributions are appended after every definition's, its definitions before its
+  /// extensions ([`push_schema_extension`](Self::push_schema_extension)).
+  pub fn push_schema_contribution(&mut self, location: Location, extent: Location) -> u32 {
+    let index = self.model.schema.contributions.len;
+    grow(
+      &mut self.model.contributions,
+      &mut self.model.schema.contributions,
+      contribution_row(location, extent, false),
+    );
+    index
+  }
+
+  /// Appends a schema extension to the schema's contributions: at `location`, its `extend`, and
+  /// spanning `extent`, from its `extend` to its last token. Answers its index among the schema's
+  /// contributions.
+  ///
+  /// It follows every schema definition, and every schema extension before it by source id and
+  /// position.
+  pub fn push_schema_extension(&mut self, location: Location, extent: Location) -> u32 {
+    let index = self.model.schema.contributions.len;
+    grow(
+      &mut self.model.contributions,
+      &mut self.model.schema.contributions,
+      contribution_row(location, extent, true),
+    );
+    index
+  }
+
+  /// Gives the schema the description `text`, cooked, written at `location`.
+  pub fn set_schema_description(&mut self, text: &str, location: Location) {
+    let description = self.description(text, location);
+    self.model.schema.description = Some(description);
+  }
+
+  /// Gives the schema `root` as its root for `operation`.
+  pub fn set_schema_root(&mut self, operation: RootOperation, root: Root) {
+    self.model.schema.roots[operation.index()] = Some(root);
+  }
+
+  /// Adds `application` to the applications of the schema's contribution `contribution`, after
+  /// those it has.
+  pub fn push_schema_application(&mut self, contribution: u32, application: ApplicationId) {
+    let index = dense(self.model.listed_applications.len());
+    extend(&mut self.model.schema.applications, index);
+    let part = slot(self.model.schema.contributions, contribution);
+    extend(&mut self.model.contributions[part].applications, index);
+    self.model.listed_applications.push(application);
+  }
+
+  /// Whether a spelling the model keeps was lost: the name arena refused one, as it does past the
+  /// four gigabytes its `u32` offsets address, answering one shared placeholder for it; or the
+  /// text arena holds more bytes than a `u32` addresses, so that a run of it saturates. Either way
+  /// some spelling the model answers is not the one written.
+  pub(crate) fn arenas_overflowed(&self) -> bool {
+    self.names.refused().is_some() || u32::try_from(self.model.text.len()).is_err()
   }
 
   /// The finished model.
@@ -342,6 +804,11 @@ impl ModelBuilder {
       order::check(&model);
     }
     model
+  }
+
+  /// The row of `value`.
+  fn value_row(&mut self, value: ValueId) -> &mut ValueRow {
+    &mut self.model.values[value.get() as usize]
   }
 
   /// A description of `text`, appended to the text arena, written at `location`.
@@ -591,14 +1058,62 @@ fn holds_any(marks: &[(u32, usize, usize)], extent: Location) -> bool {
     .any(|mark: &(u32, usize, usize)| mark.2 <= end)
 }
 
-/// A contribution at `location`, spanning `extent`, that has contributed nothing yet.
-fn contribution_row(location: Location, extent: Location) -> ContributionRow {
+/// A contribution at `location`, spanning `extent`, that has contributed nothing yet: an
+/// extension when `extension`, and otherwise a definition.
+fn contribution_row(location: Location, extent: Location, extension: bool) -> ContributionRow {
   ContributionRow {
     location,
     extent,
+    extension,
     members: IdRange::new(0, 0),
     implements: Run::default(),
     union_members: Run::default(),
+    applications: Run::default(),
+    marked: false,
+  }
+}
+
+/// The position in its pool of the entry `index` of `run`.
+fn slot(run: Run, index: u32) -> usize {
+  debug_assert!(index < run.len, "the entry is one of the list's");
+  run.start as usize + index as usize
+}
+
+/// `range` with the member `index` added at its end, which must be where it ends: an owner's
+/// direct members, and a field's arguments, are each one run of the member table.
+fn extend_range<Id>(range: IdRange<Id>, index: u32) -> IdRange<Id> {
+  let next = index.saturating_add(1);
+  if range.is_empty() {
+    return IdRange::new(index, next);
+  }
+  debug_assert_eq!(
+    range.end(),
+    index,
+    "a run of members grows only at the end of the member table"
+  );
+  IdRange::new(range.start(), next)
+}
+
+/// A member with no description, type, default, argument or application yet.
+fn member_row(
+  kind: MemberKind,
+  name: Sym,
+  owner: DefId,
+  parent: Option<MemberId>,
+  location: Location,
+  extent: Location,
+) -> MemberRow {
+  MemberRow {
+    kind,
+    name,
+    owner,
+    parent,
+    location,
+    extent,
+    description: None,
+    ty: None,
+    default: None,
+    arguments: IdRange::new(0, 0),
     applications: Run::default(),
     marked: false,
   }

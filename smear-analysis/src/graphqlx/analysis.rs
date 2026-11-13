@@ -19,6 +19,7 @@ use super::{
   model::{Model, ModelBuilder, PackageKind},
   package::Package,
   parse::{self, Documents},
+  resolve,
   rules::Rules,
   set::{self, PackageView, ROOT},
   source::SourceMap,
@@ -124,6 +125,56 @@ impl Analysis {
 ///   in one namespace of one module, a supplied definition named with `__`, and a type named as a
 ///   child module of its module are reported. The first definition a supplied package would add
 ///   past [`Limits::max_definitions`] is reported, and nothing after it is collected.
+/// - Builds every module's scope: its own declarations and child modules, then its explicit `use`
+///   bindings, then its globs, then the prelude, the root modules of `core`, `alloc` and `std`
+///   whatever the package's tier, then, where a module is wanted, the packages its package may
+///   reach. A type a supplied package declares with the name of a primitive of the prelude, `bool`,
+///   `f32`, `f64`, `iN`, `uN`, `string`, `bytes`, `NonZeroIN` or `NonZeroUN`, shadows it in its
+///   module, and is a warning.
+/// - Resolves every `use` item, each module's to a fixpoint, which `use` cycles do not disturb. A
+///   path that names nothing is reported once, as is a package the item's package may not reach, a
+///   string source that is a URL, names a file, leaves its package or stands in a `Flat` package,
+///   a name two globs give two items where an item meets it, a group nested past
+///   [`Limits::max_use_depth`], and the first glob of a module that would name a module past
+///   [`Limits::max_globs`]. An item that names one thing while the module's items are being
+///   resolved and another once all are, a `use` of a name its module declares, and two `use` items
+///   that give one name two items are reported too. A name that does not resolve gets, in its
+///   help, the nearest name visible where it is written, of the namespace wanted, while the
+///   analysis has [`Limits::max_near_miss_comparisons`] left to spend.
+/// - Lowers what each definition holds beyond its identity. Each extension's target is resolved
+///   where the extension is written: one that names nothing, one that names a definition of
+///   another kind than the extension's keyword (`extension-kind-mismatch`), and one that is an
+///   alias such as `NonZeroU32`, which spells an instantiation and is no definition of its own,
+///   is reported and contributes nothing; every other is a contribution of its target. A definition holds its contributions,
+///   its own, where its name is written, then its extensions' by source and position, each where
+///   its target path is written; its type parameters; a directive definition's locations and
+///   whether it is `repeatable`; and its members, the direct members of each contribution in turn
+///   as written and then each field's arguments, each with its description. A replaced built-in
+///   holds what the root package's definition writes, and smear's own definition of it
+///   contributes nothing. Every type written is then a type occurrence, and every directive
+///   application and every value written is one too, appended in the order the model's walk
+///   reaches it, each before what it nests: a type parameter's default, a bound, an `implements`
+///   entry, a union member, an application, a member's type, default and applications. Each
+///   keeps its path as written and the arguments written for it, and its path is resolved where
+///   its contribution is written, with the contribution's generic parameters in scope, an
+///   extension's own names naming its target's by position; one that names nothing is reported,
+///   with the code of its place, and stays unresolved. A bound is a definition's own type
+///   parameter's: any other left side of a `where` predicate, and any `where` clause on an
+///   extension, is `invalid-bound`. An application whose directive resolves keeps its type
+///   arguments and the arguments its directive declares, in the directive's order, an argument
+///   written twice twice; one it does not declare is `undefined-directive-argument`, with the
+///   nearest name it does declare in its help. A value is kept as written, its syntactic kind and
+///   its text. Then the schema's
+///   contributions: every package's schema definitions, then its schema extensions, each by source
+///   and position and each marked as what it is. The root package's first schema definition gives
+///   the schema its description, its roots and its applications, and each schema extension the
+///   root package writes its roots and its applications; any other schema item is a contribution
+///   alone. The first root written for an operation is the schema's, and a second one is
+///   `duplicate-root-operation-type`; with no schema definition of the root package's, an object
+///   type its root module declares named `Query`, `Mutation` or `Subscription` is presumed that
+///   operation's root. Names and texts past what the model's `u32` offsets address,
+///   which only a [`Limits::max_source_bytes`] far above its default admits, are reported at the
+///   root package's package source.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///
@@ -266,12 +317,76 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     "one document entry per source"
   );
 
-  let mut builder = builder_of(&packages, &sources, dependencies);
+  let mut builder = builder_of(&packages, &sources, &dependencies);
   let collected = collect::items(&packages, &sources, documents, limits, &mut reporter);
   let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
-  lower::lower(&declarations);
+  let scopes = resolve::scopes(
+    &packages,
+    &sources,
+    &dependencies,
+    &declarations,
+    limits,
+    &mut builder,
+    &mut reporter,
+  );
+  lower::lower(
+    &packages,
+    &declarations,
+    &scopes,
+    &sources,
+    &mut builder,
+    &mut reporter,
+  );
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
+}
+
+/// The model of `root` beside `dependencies` as name resolution leaves it, before lowering, and
+/// what `path` names in the module `module` of those packages, where `params` are the generic
+/// parameters in scope: the test-support door to the resolver. `None` when `module` names no module. See
+/// `Scopes::module_at` and `Scopes::door` for how `module` and `path` are spelled.
+///
+/// Its files are read as [`analyze`] reads them: by the syntactic layer under its default limits.
+#[cfg(feature = "test-support")]
+pub(crate) fn resolve_door<S: SourceText>(
+  root: &Package<S>,
+  dependencies: &[Package<S>],
+  module: &str,
+  params: &[&[u8]],
+  path: &str,
+) -> Option<(Model, resolve::Resolved)> {
+  let limits = Limits::new();
+  let mut prepared = prepare(views(root, dependencies), &limits);
+  let documents = parse::files(
+    &Syntactic::new(),
+    &prepared.packages,
+    &prepared.sources,
+    prepared.within,
+    &mut prepared.reporter,
+    None,
+  );
+  let Prepared {
+    packages,
+    mut reporter,
+    sources,
+    dependencies: resolved,
+    within: _,
+  } = prepared;
+  let mut builder = builder_of(&packages, &sources, &resolved);
+  let collected = collect::items(&packages, &sources, &documents, &limits, &mut reporter);
+  let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
+  let scopes = resolve::scopes(
+    &packages,
+    &sources,
+    &resolved,
+    &declarations,
+    &limits,
+    &mut builder,
+    &mut reporter,
+  );
+  let at = scopes.module_at(&builder, module)?;
+  let answer = scopes.door(&builder, at, params, path);
+  Some((builder.finish(), answer))
 }
 
 /// What a parser layer kept beside an analysis: one entry for each supplied file the layer read, in
@@ -436,7 +551,7 @@ fn conclude<V: Visitor + ?Sized>(
 fn builder_of(
   packages: &[PackageView<'_>],
   sources: &SourceMap,
-  dependencies: Vec<Vec<PackageId>>,
+  dependencies: &[Vec<PackageId>],
 ) -> ModelBuilder {
   let mut builder = ModelBuilder::default();
   for ((index, view), resolved) in packages.iter().enumerate().zip(dependencies) {
@@ -453,7 +568,7 @@ fn builder_of(
       view.layout,
       sources.package_sources(index).len(),
     );
-    for dependency in resolved {
+    for &dependency in resolved {
       builder.push_dependency(package, dependency);
     }
     if let Some(integers) = view.integers {

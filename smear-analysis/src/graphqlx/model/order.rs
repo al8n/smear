@@ -17,7 +17,8 @@
 //!    4. its direct members, in id order;
 //! 2. each member: its type; its default; its applications; then, for a field, each argument the
 //!    same way;
-//! 3. each application: itself; its type arguments; then each argument's value;
+//! 3. each application: itself; its type arguments; then each argument's value, its arguments in
+//!    the order of its directive's, one written twice twice;
 //! 4. the schema, after every definition: each written root's type, query, mutation, then
 //!    subscription; then its applications.
 //!
@@ -55,6 +56,7 @@ pub(super) fn check(model: &Model) {
   packages(model);
   modules(model);
   defs(model);
+  contributions(model);
   members(model);
   lists(model);
   walk(model);
@@ -202,6 +204,33 @@ fn defs(model: &Model) {
       }
     }
     previous = Some(row);
+  }
+}
+
+/// Contributions: a definition's own first, then only extensions; the schema's definitions, then
+/// only extensions.
+fn contributions(model: &Model) {
+  for (index, def) in model.defs.iter().enumerate() {
+    for (position, part) in def
+      .contributions
+      .of(&model.contributions)
+      .iter()
+      .enumerate()
+    {
+      assert_eq!(
+        part.extension,
+        position > 0,
+        "definition {index}'s first contribution is its own, and every later one an extension"
+      );
+    }
+  }
+  let mut extending = false;
+  for part in model.schema.contributions.of(&model.contributions) {
+    assert!(
+      part.extension || !extending,
+      "the schema's definitions are appended before its extensions"
+    );
+    extending = part.extension;
   }
 }
 
@@ -527,19 +556,26 @@ impl Cursor {
     }
   }
 
-  /// Reaches `application`, then its type arguments, then each argument's value.
+  /// Reaches `application`, then its type arguments, then each argument's value, its arguments in
+  /// the order of its directive's: the argument each sets never goes back.
   fn application(&mut self, model: &Model, application: ApplicationId) {
+    let index = application.get();
     assert_eq!(
-      application.get(),
-      self.applications,
+      index, self.applications,
       "applications are appended in the walk's order"
     );
     self.applications += 1;
-    let row = &model.applications[application.get() as usize];
+    let row = &model.applications[index as usize];
     for arg in row.type_args.of(&model.application_type_args) {
       self.type_expr(model, *arg);
     }
+    let mut previous: Option<MemberId> = None;
     for argument in row.arguments.of(&model.arguments) {
+      assert!(
+        previous.is_none_or(|before: MemberId| before <= argument.argument),
+        "application {index}'s arguments are in the order of its directive's"
+      );
+      previous = Some(argument.argument);
       self.value(model, argument.value);
     }
   }
