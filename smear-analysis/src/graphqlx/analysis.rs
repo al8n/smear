@@ -118,13 +118,14 @@ impl Analysis {
 /// - Collects every module's declarations and numbers them: each type and directive definition a
 ///   placed file declares is a definition of the model, the built-in packages' included, and so is
 ///   every intrinsic primitive the packages write where they may have it, which `core` holds first
-///   in its root module. A file holding only white space, commas and comments declares nothing,
-///   and is no syntax error. In the root package's root module, a scalar named as a GraphQL scalar
-///   (`Int`, `Float`, `String`, `Boolean`, `ID`) and a directive named as a GraphQL specified
-///   directive replace the built-in of that name, which keeps its id. Two definitions of one name
-///   in one namespace of one module, a supplied definition named with `__`, and a type named as a
-///   child module of its module are reported. The first definition a supplied package would add
-///   past [`Limits::max_definitions`] is reported, and nothing after it is collected.
+///   in its root module. A file holding only white space, commas, byte order marks and comments
+///   declares nothing, and is no syntax error. In the root package's root module, a scalar named
+///   as a GraphQL scalar (`Int`, `Float`, `String`, `Boolean`, `ID`) and a directive named as a
+///   GraphQL specified directive replace the built-in of that name, which keeps its id. Two
+///   definitions of one name in one namespace of one module, a supplied definition named with
+///   `__`, and a type named as a child module of its module are reported. The first definition a
+///   supplied package would add past [`Limits::max_definitions`] is reported, and nothing after it
+///   is collected.
 /// - Builds every module's scope: its own declarations and child modules, then its explicit `use`
 ///   bindings, then its globs, then the prelude, the root modules of `core`, `alloc` and `std`
 ///   whatever the package's tier, then, where a module is wanted, the packages its package may
@@ -232,8 +233,8 @@ pub fn analyze<S: SourceText>(
 /// that is text, or bytes that are UTF-8, is read by `parser`, and every syntax error it lends is a
 /// diagnostic at that file, in the analysis's one list. Three kinds of file never reach `parser`
 /// and have no tree: the built-in packages' files, a byte text that is not UTF-8, and a text that
-/// holds nothing but white space, commas and comments. When the supplied sources are over
-/// [`Limits::max_source_bytes`], no supplied file is parsed at all.
+/// holds nothing but white space, commas, byte order marks and comments. When the supplied sources
+/// are over [`Limits::max_source_bytes`], no supplied file is parsed at all.
 ///
 /// The trees borrow nothing of the packages at a concrete call: they are `Trees<()>` for
 /// [`Syntactic`], and a tree of the lossless layer holds no text of the caller's. A consumer generic

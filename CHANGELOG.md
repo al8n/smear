@@ -9,28 +9,57 @@ All notable changes to Smear are documented in this file.
   keeps at error severity, in emission order. 0.0.1 released the method with `retains` alone, and
   the trait is not sealed: an implementation outside the crate must take the argument, and a
   caller that wants nothing lent passes `|_, _| {}`.
-- `smear-parser`: each dialect's `Layer` trait, which its two parser layers implement, is sealed
-  for each layer and source: its supertrait is crate-private and takes the trait's own lifetime
-  and source. No other crate can implement `graphql::Layer` or `graphqlx::Layer`, for a layer
-  value of a brand of its own or for smear's layers over a source of its own.
-- `smear-parser`: `layer::SyntaxTree`, which the lossless tree implements, has a seal of its own,
-  so no other crate can implement it.
-- `smear-parser`: the syntactic layer implements its dialect's `Layer` once for each source its
-  lexer reads, and for no other type: `str` and `[u8]`, and behind their features `BStr`,
-  `Bytes`, `HipStr`, `HipByt` and the four smol-bytes forms. A reference to one, `&str` as the
-  source itself, is not a source the layer reads.
-- `smear-parser`: the lossless layer lends every syntax error to the caller's sink before its
-  method returns: each error of each record its tree keeps at error severity, one
-  `invalid-syntax` error for such a record that holds none, and its token-budget refusal, once
-  and last. A recovery hole and a warning are not lent. `Parsed::error_count()` is how many
-  errors a sink that never breaks is lent, whatever the sink took: for the lossless layer it is
-  zero exactly when the tree's `has_errors()` is false, and never less than the number of the
-  tree's error diagnostics, since one record can hold several errors.
-- `smear-analysis`: `graphqlx::Trees`, which `graphqlx::analyze_with` answers beside the
-  `Analysis`, holds what the caller's parser layer kept for each supplied file it read, by
-  source id. A file of nothing but white space, commas, byte order marks and comments is
-  accepted before any layer reads it and has no entry; the lossless layer, handed such a text,
-  answers a tree with one syntax error. A syntax error marks nothing in the model.
+- `smear-parser`: the parser layers, as values, behind one trait per dialect. `layer` holds what
+  both dialects share: `Report`, the sink a layer lends each syntax error to, of which `()`,
+  `Vec<E>` and `&mut K` are three and which `from_fn` makes of a closure; `Parsed`, a layer's
+  answer, with the document, its `Recovery`, `error_count()`, `is_valid()` and the tree the layer
+  kept; `Rejected`, the syntactic layer's failure; the layer values `Syntactic<D>` and, behind
+  `rowan_0_17` and `std`, `Lossless<D>`; and `SyntaxTree`, which the lossless `Parse` implements
+  through the new `Parse::covering_node`. `graphqlx::Layer`, over type-system documents, and
+  `graphql::Layer`, over both document kinds, are sealed for each layer and source, and so is
+  `SyntaxTree`: no other crate implements them. Each dialect names its two layers `Syntactic` and
+  `Lossless` and gives them the trait's methods as inherent methods. The syntactic layer reads
+  exactly the sources its lexer reads: `str`, `[u8]`, and behind their features `BStr`, `Bytes`,
+  `HipStr`, `HipByt` and the four smol-bytes forms, and `&str` as the source itself is not one. It
+  lends each error of a text it rejects. The lossless layer reads `str`, and answers `Refused`
+  before any scan for a text past `Refused::MAX_SOURCE_LEN`. It lends every error its tree keeps
+  at error severity but a token-budget member the grammar wrote, one `invalid-syntax` error for
+  such a record that holds none, and its token-budget refusal, once and last; a recovery hole and
+  a warning are not lent. `error_count()` is how many errors a sink that never breaks is lent: for
+  the lossless layer it is zero exactly when the tree's `has_errors()` is false, and never less
+  than the number of the tree's error diagnostics. `Recovery` now lives in `layer`, and
+  `lossless::project::Recovery`, where 0.0.1 released it, re-exports it.
+- `smear-parser`!: `Recovery` counts at every module depth. 0.0.1 released it counting a
+  document's top-level elements, so that `projected()` was the length of the document's
+  definitions. GraphQLx's recovering type-system doors, and both layers, now count every item
+  with an AST image at every depth, an inline module counting one beside the items inside it and
+  a `use` item one, and `skipped` every element without one, a module whose header has no image
+  counting one with nothing inside it counted. So in GraphQLx a document that holds an inline
+  module counts more than its top-level items. GraphQL has no modules, and its counts keep their
+  meaning.
+- `smear-parser`: lossless recovery leaves a closing delimiter to the block it closes, in both
+  dialects. A type or a value missing in front of one is reported and the delimiter left, so the
+  block closes on it and the definition after the block is read whole; and a list opened by `(`,
+  `[` or, in GraphQLx, `<` that meets a `}` closing a brace open before it reports its own closer
+  missing and stops there. The trees and the diagnostics of broken documents change accordingly.
+- `smear-parser`: in GraphQLx, a module's body recovers its own items. An item that fails costs
+  itself, and the module keeps its other items and its node; the body ends at the `}` the braces
+  as written give it; junk between two items is reported once and skipped as one run when an
+  item or the body's `}` follows it; a refusal that ends the document inside a module still
+  leaves every module around it its node; and a `}` after a description or an `extend` inside a
+  module is left to close the module. The recovering type-system doors descend into the modules
+  whose header reads, keep every item there that projects, and cover what they skip inside a
+  module with that module's span; when nothing is skipped they answer what the fail-fast door
+  answers.
+- `smear-parser`: `lossless::recover::resync_to_closing`, a public helper beside `resync_to`,
+  skips wreckage that left delimiters open: it spends its first `left` closers on the wreckage and
+  stops before the next restart point outside it. One call costs at most one scan and one token;
+  a caller that loops on it bounds the loop with the allowance flag it passes.
+- `smear-lexer`: `LosslessLimits::brace_depth()` answers how many `{` are open at the state's
+  position. Both dialects' lossless lexers keep the count, over every source. It is no budget and
+  nothing refuses on it; it lives in the rewindable state, so a rewind takes it back; and it joins
+  `LosslessLimits`' equality and hash. The lossless state grows by one word, which every token the
+  parser caches carries. `SyntacticLimits` is unchanged.
 - `smear-lexer`!: both dialects' `LexerErrors` and `StringErrors` keep their errors in a `Vec`
   in every configuration, where they held them in a one-slot `SmallVec` while the `smallvec`
   feature was on, as it was by default. A token's `Result` no longer carries room for a whole
@@ -59,14 +88,18 @@ All notable changes to Smear are documented in this file.
 - `smear-analysis`: the analyzer's entrance, its exits and its rules. `graphqlx::analyze`
   takes a root `Package` and its dependencies, each file's text any `SourceText` (`&str`,
   `&[u8]`, or a source feature's type), within `Limits`, and answers an `Analysis` with no
-  type parameter: a `Model` of the packages, the `Diagnostics` and a `SourceMap`. Packages and
-  sources are numbered deterministically, whatever order they are passed in. The package
+  type parameter: a `Model` of the packages, the `Diagnostics` and a `SourceMap`.
+  `graphqlx::analyze_with` is the same entrance with the parser layer the caller passes, and it
+  answers beside the `Analysis` a `Trees`: what that layer kept for each supplied file it read,
+  by source id, found by `get` and `node` and walked by `TreesIter` and `TreesIntoIter`. Packages
+  and sources are numbered deterministically, whatever order they are passed in. The package
   set's file paths, package names, dependencies and total size are checked, under the new
   `smear::graphqlx` codes `DiagnosticKind` lists; a message quotes a name or a path whole when
   it is at most 128 bytes, and otherwise as its first and last 64 bytes around `…`, each cut
   moved back to the start of a character, unless that would leave nothing out, so no message
-  grows with what it quotes. Every file is parsed with the GraphQLx syntactic parser,
-  its syntax errors reported at that file. `Diagnostic::builder` is public, so a consumer's
+  grows with what it quotes. Every file is parsed with the GraphQLx syntactic parser, or,
+  through `analyze_with`, with the parser layer the caller passes, its syntax errors reported at
+  that file. `Diagnostic::builder` is public, so a consumer's
   findings join smear's in one ordered list, and `SourceMap::bind` pairs an analysis with the
   texts it was made from, finding each file again by its package and its path alone: it
   answers no text for a file whose path another file of its package has, for the files of a
@@ -87,7 +120,8 @@ All notable changes to Smear are documented in this file.
   `analyze` runs smear's own rule set, which holds no rule yet, through the same walk over the
   supplied packages, and an error that a phase or a rule reports marks the contributions,
   members and definitions that hold where it points, as their `has_errors()` says, whether the
-  ceiling keeps the diagnostic or not. Every analysis parses the built-in library too:
+  ceiling keeps the diagnostic or not; a syntax error marks nothing. Every analysis parses the
+  built-in library too:
   `core`, `alloc` and `std`, one GraphQLx file each, embedded in smear. So far `analyze` fills
   in the packages and their modules: a module for every directory of a `Directory` package
   that holds a file or a directory that does, every file of a `Flat` package in its root
@@ -106,7 +140,9 @@ All notable changes to Smear are documented in this file.
   module (`smear::schema::duplicate-type-name`, `duplicate-directive-definition`), a supplied name
   that begins with `__` (`reserved-type-name`, `reserved-directive-name`), and a type named as a
   child module (`module-type-collision`) are reported. A file that holds only white space,
-  commas and comments is accepted and declares nothing. `Limits::max_definitions` bounds every
+  commas, byte order marks and comments is accepted and declares nothing, before any parser
+  layer reads it, so it has no entry in `Trees`; the lossless layer, handed such a text, answers a
+  tree with one syntax error. `Limits::max_definitions` bounds every
   definition the model would hold, the built-in library's and the primitives included: the first
   one a supplied package would add past it is `resource-limit`, and nothing after it is
   collected. A new `Limits::max_modules`, 2^16 by default, bounds every module the model would
