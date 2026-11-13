@@ -75,8 +75,7 @@ impl ObjectEntry {
 /// value of a custom scalar that is no collection, an extern one included, but `null`, which is
 /// `null` where the scalar is nullable; a value whose expected type names a type parameter, which
 /// only an instantiation can check; and a value whose expected type can take none, an output type
-/// or a path that names nothing among them, which is another rule's or phase's to refuse. In this
-/// version a value of `TypeRef` is kept as written too.
+/// or a path that names nothing among them, which is another rule's or phase's to refuse.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum ValueKind<'a> {
@@ -101,7 +100,8 @@ pub enum ValueKind<'a> {
     /// The value.
     value: MemberId,
   },
-  /// A `TypeRef` value: a definition, never an instantiation.
+  /// A `TypeRef` value: a definition, never an instantiation, of any kind, named by a path resolved
+  /// as a type where the value is written; a generic definition is named bare.
   #[non_exhaustive]
   Type {
     /// The definition it names.
@@ -274,8 +274,7 @@ impl<'a> Value<'a> {
 
   /// What it is.
   //
-  // Coercion gives a value its shape. It makes no type value yet: a value of `TypeRef` is the
-  // `Literal` of its syntactic kind and its text.
+  // Coercion gives a value its shape, each of the kind's.
   pub fn kind(&self) -> ValueKind<'a> {
     let model: &'a Model = self.model;
     let row = self.row();
@@ -344,9 +343,9 @@ impl<'a> Value<'a> {
     self.row().written
   }
 
-  /// The path a value written as a path writes, whatever it was coerced to: an enum value's, and
-  /// a literal's that is one. `None` for every other value, among them the lists a value written
-  /// alone where a list is expected stands for.
+  /// The path a value written as a path writes, whatever it was coerced to: an enum value's, a type
+  /// value's, and a literal's that is one. `None` for every other value, among them the lists a
+  /// value written alone where a list is expected stands for.
   #[inline]
   pub fn path(&self) -> Option<Path<'a>> {
     let row = self.row().path?;

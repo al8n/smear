@@ -400,11 +400,13 @@ All notable changes to Smear are documented in this file.
   literal where no collection of its shape is, is the new `smear::graphqlx::collection-literal`;
   and so is a set literal that holds one element twice, or a map literal one key twice, two being
   one when their coerced values are, `1` and `0x1` one integer and `"4"` and `4` one `id`, at the
-  later occurrence, the literal keeping everything it holds. A
-  custom scalar's value but `null` is its `Literal`, a collection literal among them, and so, in
-  this version, is a `TypeRef`'s, and a value whose type names a type parameter or can take no
-  value. A value that
-  does not fit is unresolved and reported where it is written, with GraphQL's
+  later occurrence, the literal keeping everything it holds. A `TypeRef` value is a path resolved
+  as a type where it is written, `ValueKind::Type` of the definition it names, of any kind; a type
+  parameter or an alias such as `NonZeroU32` does not fit, and a path that names nothing is the
+  resolver's, `smear::schema::undefined-type` for one segment. A custom scalar's value but `null`
+  is its `Literal`, a collection literal among them, and so is a value whose type names a type
+  parameter or can take no value. A value that does not fit is unresolved and reported where it
+  is written, with GraphQL's
   `smear::schema::invalid-default-value` or `invalid-directive-argument-value`, but for a number out
   of the range of any width but the 32-bit signed one, or of `f32`, the new
   `smear::graphqlx::width-overflow`, and a zero where `NonZero` is expected, the new

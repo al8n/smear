@@ -1593,3 +1593,160 @@ fn reversing_files_and_dependencies_changes_no_composite_value_and_no_diagnostic
   }
   assert_eq!(rendered[0], rendered[1]);
 }
+
+/// GraphQL's code for a type position that names no type, with one segment and no root.
+const UNDEFINED_TYPE: &str = "smear::schema::undefined-type";
+
+/// A path where `TypeRef` is expected names a definition, resolved as a type where it is written:
+/// through a module path, a package-rooted one and a `use` alias; `Int` names `i32`'s definition,
+/// a generic definition is named bare, and a lone value stands for a list of it. The value keeps
+/// its path as written. Refuses a path looked up among an enum's values, and a type value with no
+/// path.
+#[test]
+fn a_type_ref_value_names_a_definition() {
+  let text = "type Query {\n  x: Int\n}\ntype User {\n  id: Int\n}\nmod m {\n  type User {\n    id: Int\n  }\n}\n\
+              use ~::m::User as Person\ntype Page<T> {\n  items: [T]\n}\ntype A {\n  a: Int\n}\n\
+              type B {\n  b: Int\n}\ndirective @of(t: TypeRef, ts: [TypeRef!]) repeatable on OBJECT\n\
+              type T @of(t: User, ts: [A, B]) @of(t: m::User, ts: A) @of(t: ~::m::User) @of(t: Person) \
+              @of(t: Int) @of(t: Page) {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let named = |value: ValueId| -> DefId {
+    match model.value(value).kind() {
+      ValueKind::Type { def, .. } => def,
+      other => panic!("value {} is no type value: {other:?}", value.get()),
+    }
+  };
+  let inner = model
+    .lookup(Namespace::Type, "^::app::m::User")
+    .expect("`m::User`");
+  let query_x = model
+    .def(type_def(model, "Query"))
+    .fields()
+    .into_iter()
+    .next()
+    .expect("`Query.x`");
+  let int = model
+    .type_expr(model.member(query_x).ty().expect("a type"))
+    .ty();
+  let TyKind::Named { def: i32_def, .. } = model.ty(int).kind() else {
+    panic!("`Int` names no definition");
+  };
+  let applications: Vec<Vec<ApplicationArgument>> = model
+    .def(type_def(model, "T"))
+    .applications()
+    .iter()
+    .map(|&application| model.application(application).arguments().to_vec())
+    .collect();
+  let t = |at: usize| -> ValueId { applications[at][0].value() };
+  assert_eq!(named(t(0)), type_def(model, "User"));
+  assert_eq!(shown(model, t(0)), "Type User");
+  assert_eq!(spelled(model, model.value(t(0)).path()), "User");
+  assert_eq!(
+    shown(model, applications[0][1].value()),
+    "List [Type A, Type B]"
+  );
+  assert_eq!(named(t(1)), inner);
+  assert_eq!(shown(model, applications[1][1].value()), "List [Type A]");
+  assert_eq!(named(t(2)), inner);
+  assert_eq!(spelled(model, model.value(t(2)).path()), "~::m::User");
+  assert_eq!(named(t(3)), inner);
+  assert_eq!(named(t(4)), i32_def);
+  assert_eq!(named(t(5)), type_def(model, "Page"));
+}
+
+/// A path where `TypeRef` is expected that names nothing is the resolver's to report, GraphQL's
+/// `undefined-type` for one segment and `unresolved-path` for more, and the value is unresolved;
+/// an alias that names an instantiation, a type parameter, a string and a number do not fit, with
+/// the site's code; a directive's name is no type. Refuses `unresolved-path` for one segment, and a
+/// second diagnostic where the resolver spoke.
+#[test]
+fn a_type_ref_value_that_names_no_definition() {
+  let text = "type Query {\n  x: Int\n}\ntype User {\n  id: Int\n}\nmod m {\n  type Thing {\n    id: Int\n  }\n}\n\
+              directive @of(t: TypeRef) repeatable on OBJECT\n\
+              directive @g<T>(t: TypeRef = T) on OBJECT\n\
+              type T1 @of(t: Missing) @of(t: m::Missing) @of(t: NonZeroU32) @of(t: \"User\") @of(t: 1) \
+              @of(t: of) {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    sorted(found(&analysis)),
+    sorted(vec![
+      (UNDEFINED_TYPE, at(schema, text, "Missing", 0)),
+      (
+        "smear::graphqlx::unresolved-path",
+        after(schema, text, "m::", "Missing")
+      ),
+      (ARGUMENT, at(schema, text, "NonZeroU32", 0)),
+      (ARGUMENT, at(schema, text, "\"User\"", 0)),
+      (ARGUMENT, after(schema, text, "@of(t: ", "1")),
+      (UNDEFINED_TYPE, after(schema, text, "@of(t: ", "of")),
+      (DEFAULT, after(schema, text, "TypeRef = ", "T")),
+    ])
+  );
+  let model = analysis.model();
+  let missing = model.def(type_def(model, "T1")).applications()[0];
+  assert_eq!(
+    shown(model, model.application(missing).arguments()[0].value()),
+    "?"
+  );
+}
+
+/// A default's path that names nothing is reported once, where it is written, whoever asks
+/// first: the directive's own default, or a copy an application made before the walk reached it.
+/// Refuses a report for each asker, and one at the application.
+#[test]
+fn a_defaults_type_is_resolved_once_whoever_asks_first() {
+  let directive = "directive @e(t: TypeRef = Missing) on OBJECT\n";
+  let applied = "type T @e {\n  f: Int\n}\n";
+  for text in [
+    format!("type Query {{\n  x: Int\n}}\n{applied}{directive}"),
+    format!("type Query {{\n  x: Int\n}}\n{directive}{applied}"),
+  ] {
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(UNDEFINED_TYPE, at(schema, &text, "Missing", 0))]
+    );
+  }
+}
+
+/// A program of every shape this part makes: no value is unresolved, and each value kept as
+/// written is a custom scalar's that is no collection, or one whose type names a type parameter.
+#[test]
+fn an_ok_analysis_keeps_a_literal_only_where_nothing_is_coerced() {
+  let text = "type Query {\n  x: Int\n}\nscalar Any\nenum Color {\n  RED\n}\n\
+              input R {\n  min: Int = 0\n  max: Int\n  step: Int = 1\n}\n\
+              input O @oneOf {\n  a: Int\n  b: Int\n}\ninput G<T> {\n  v: T\n  n: Int = 1\n}\n\
+              type User {\n  id: Int\n}\n\
+              directive @all(r: R = { max: 9 }, o: O, s: HashSet<Int> = set!{1, 2}, \
+              m: HashMap<string, [Color]> = map!{\"a\" => RED}, t: TypeRef = User, ts: [TypeRef!], \
+              a: Any) repeatable on OBJECT\n\
+              input H {\n  g: G<i32> = { v: 1 }\n  any: Any = set!{1}\n}\n\
+              type T @all(o: {b: 2}, ts: [User, Color], a: {x: [1]}) @all(r: {min: 3, max: 4}) {\n  \
+              f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let any = type_def(model, "Any");
+  let reached = values(&analysis, Packages::All);
+  assert!(!reached.is_empty());
+  for id in reached {
+    let value = model.value(id);
+    match value.kind() {
+      ValueKind::Unresolved => panic!("value {} is unresolved", id.get()),
+      ValueKind::Literal(_) => {
+        let ty = model.ty(value.ty());
+        let custom = matches!(ty.kind(), TyKind::Named { def, .. } if def == any);
+        assert!(
+          custom || !ty.is_closed(),
+          "value {} is kept as written",
+          id.get()
+        );
+      }
+      _ => {}
+    }
+  }
+}

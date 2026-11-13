@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, ApplicationId, Contribution, Cx, DefId, Diagnostic, Layout, Limits, MemberId, Model,
-    ModuleId, Namespace, ObjectEntry, Package, PackageId, PackageKind, Packages, SourceFile,
-    SourceId, Tier, TypeExprId, ValueId, ValueKind, Visitor, analyze,
+    Analysis, ApplicationId, Contribution, Cx, DefId, DefKind, Diagnostic, Layout, Limits,
+    MemberId, Model, ModuleId, Namespace, ObjectEntry, Package, PackageId, PackageKind, Packages,
+    SourceFile, SourceId, Tier, TyKind, TypeExprId, ValueId, ValueKind, Visitor, analyze,
     test_support::{self, RULES},
     visit,
   },
@@ -88,6 +88,45 @@ fn an_ok_corpus_file_has_no_unresolved_value() {
           ValueKind::Unresolved
         ),
         "{}: value {index} is unresolved",
+        path.display()
+      );
+    }
+  }
+}
+
+/// Over every corpus file whose analysis is ok, a value kept as written is a custom scalar's that
+/// is no collection, or one whose type names a type parameter, or, since the rule that refuses an
+/// output type in an input position is still to come, one whose type is an output type: every
+/// other value is coerced.
+#[test]
+fn an_ok_corpus_file_keeps_a_literal_only_where_nothing_is_coerced() {
+  for (path, text) in corpus() {
+    let analysis = analyzed(&path, &text);
+    if !analysis.is_ok() {
+      continue;
+    }
+    let model = analysis.model();
+    let (_, _, values, _) = test_support::counts(model);
+    for index in 0..values {
+      let value = model.value(ValueId::new(index));
+      if !matches!(value.kind(), ValueKind::Literal(_)) {
+        continue;
+      }
+      let ty = model.ty(value.ty());
+      let custom = match ty.kind() {
+        TyKind::Named { def, .. } => {
+          let def = model.def(def);
+          match def.kind() {
+            DefKind::Scalar => def.collection().is_none(),
+            DefKind::Object | DefKind::Interface | DefKind::Union => true,
+            _ => false,
+          }
+        }
+        _ => false,
+      };
+      assert!(
+        custom || !ty.is_closed(),
+        "{}: value {index} is kept as written",
         path.display()
       );
     }

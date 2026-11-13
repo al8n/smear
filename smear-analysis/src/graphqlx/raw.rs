@@ -88,6 +88,8 @@ pub(crate) struct RawPath {
   pub(crate) kept: Option<Segments>,
   /// What its segments but the last name, once coercion has asked.
   pub(crate) prefix: Option<Resolved>,
+  /// What the whole path names as a type, once coercion has asked: a `TypeRef` value's.
+  pub(crate) named: Option<Resolved>,
 }
 
 /// One field an object writes: its name, and where the name is written. The object's i-th child
@@ -176,6 +178,7 @@ impl<'p> RawValues<'p> {
       param,
       kept: None,
       prefix: None,
+      named: None,
     });
     row
   }

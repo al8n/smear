@@ -1,6 +1,6 @@
 //! What the phases after coercion write, and what the hand-built models of the tests write in one
-//! step: each definition's externs; the tiers of definitions and types; the values coercion does
-//! not make yet, type values; a value written whole, each over coercion's own writers; and marks.
+//! step: each definition's externs; the tiers of definitions and types; a value written whole,
+//! each over coercion's own writers; and marks.
 //!
 //! GATED ON HAVING A CALLER. The phases still to come are this module's callers, and until each
 //! lands the test-support door is its only caller: a method that no shipped build calls is dead
@@ -11,11 +11,7 @@ use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
   id::{DefId, Sym, TyId, ValueId},
-  model::{
-    table::{ExternRow, VALUE_TYPE},
-    ty::PathRoot,
-    value::LiteralKind,
-  },
+  model::{table::ExternRow, ty::PathRoot, value::LiteralKind},
   package::Tier,
 };
 
@@ -73,13 +69,6 @@ impl ModelBuilder {
   pub fn set_value_path(&mut self, value: ValueId, root: PathRoot, segments: &[Sym]) {
     let segments = self.keep_segments(segments);
     self.give_path(value, root, segments);
-  }
-
-  /// Makes `value` the type value naming `def`.
-  pub fn set_type_value(&mut self, value: ValueId, def: DefId) {
-    let row = self.value_row(value);
-    row.shape = VALUE_TYPE;
-    row.def = def;
   }
 
   /// Marks, as an error reported at `at` does, every contribution and member whose extent holds

@@ -4,8 +4,8 @@
 //! It reads no document: it reads the trees lowering answered, the rows written so far, through
 //! the builder, and the sources' texts, and it is the one writer of the model's values. Its
 //! built-ins are found once, each by its name in its package's root module and never by a spelling
-//! a program writes: `core`'s `NonZero`, and `alloc`'s `string`, `id` and `bytes`; a primitive is
-//! told by its definition, which `core` materialises.
+//! a program writes: `core`'s `NonZero`, `TypeRef`, `@oneOf`, `@set` and `@map`, and `alloc`'s
+//! `string`, `id` and `bytes`; a primitive is told by its definition, which `core` materialises.
 //!
 //! # The walk
 //!
@@ -41,10 +41,11 @@
 //!    in `i32`'s range, kept an integer; `bytes` a string, its UTF-8 encoding, or a list of
 //!    integers from 0 to 255, one value of its bytes either way; `NonZero` of an integer primitive
 //!    an integer in that primitive's range that is not zero; an enum a path that names one of its
-//!    values; an input object an object literal, read as below. Any other scalar takes any
-//!    literal, kept as written, a set or a map literal among them, and so does `TypeRef` in this
-//!    version. A collection given any other literal but `null`, and a set or a map literal given to
-//!    what is no collection of its shape, does not fit, with `collection-literal`.
+//!    values; `core`'s `TypeRef` a path that names a definition, and an input object an object
+//!    literal, each read as below. Any other scalar takes any literal, kept as written, a set or a
+//!    map literal among them. A collection given any other literal but `null`, and a set or a map
+//!    literal given to what is no collection of its shape, does not fit, with
+//!    `collection-literal`.
 //!
 //! A set literal that holds one element twice, and a map literal that holds one key twice, is
 //! `collection-literal`, where it is written, at the later occurrence, with a label at the first;
@@ -66,6 +67,14 @@
 //! the resolver refuses is the resolver's to report, at the path, whoever asks first; the value is
 //! then unresolved, and nothing more is said. A name that is none of the enum's values does not
 //! fit, and its help names the nearest of them, under the analysis's one near-miss budget.
+//!
+//! A `TypeRef` value's whole path is resolved once, as a type, as a field's type is, in the module
+//! and the source the value is written in, the generic parameter its first segment names, if any,
+//! in scope; the answer is kept with the path. A definition of any kind is a type value, a generic
+//! one named bare; a type parameter, an alias such as `NonZeroU32`, which names an instantiation,
+//! and a module do not fit. A path the resolver refuses is the resolver's to report, GraphQL's
+//! `undefined-type` for one segment with no root, whoever asks first; the value is then
+//! unresolved, and nothing more is said.
 //!
 //! An object literal against an input object is read once and kept, by the literal and the input
 //! object: a field whose name is the name of one of the input object's fields, the first of that
@@ -101,8 +110,10 @@
 //! What is read of a literal is read once and kept outside the tree, in a row the node's one slot
 //! indexes: its text, kept in the model's text arena; a string's cooked text; an integer's count
 //! of significant digits, its magnitude once its digits could fit the width asked, and its row; a
-//! float's verdict and its row; a literal's row; a path's segments, and what its prefix names. A
-//! byte string, which only a `bytes` value reads, is kept in a table of its own, by node.
+//! float's verdict and its row; a literal's row; a path's segments, what its prefix names, and
+//! what the whole of it names as a type. A byte string, which only a `bytes` value reads, is kept
+//! in a table of its own, by node. An object literal's fields are kept by the literal and the input
+//! object.
 //!
 //! # An application's arguments
 //!
@@ -229,6 +240,7 @@ pub(crate) fn coerce(
     string: binding(declarations, builder, ALLOC, TYPE, b"string"),
     id: binding(declarations, builder, ALLOC, TYPE, b"id"),
     bytes: binding(declarations, builder, ALLOC, TYPE, b"bytes"),
+    type_ref: binding(declarations, builder, CORE, TYPE, b"TypeRef"),
   };
   let one_of_directive = binding(declarations, builder, CORE, DIRECTIVE, b"oneOf");
   let set_directive = binding(declarations, builder, CORE, DIRECTIVE, b"set");
@@ -355,6 +367,7 @@ struct Builtins {
   string: Option<DefId>,
   id: Option<DefId>,
   bytes: Option<DefId>,
+  type_ref: Option<DefId>,
 }
 
 /// Where a value is written, which says the code it is refused with.
@@ -534,7 +547,9 @@ enum Base {
   Set(TyId),
   /// A map from this key to this value.
   Map(TyId, TyId),
-  /// Any literal, kept as written: a custom scalar that is no collection, and `TypeRef`.
+  /// `core`'s `TypeRef`: a path that names a definition.
+  TypeRef,
+  /// Any literal, kept as written: a custom scalar that is no collection.
   Kept,
 }
 
@@ -2208,6 +2223,9 @@ impl<'p> Coercion<'_, 'p, '_> {
     if Some(def) == builtins.non_zero {
       return self.non_zero(ty).map(Base::Int);
     }
+    if Some(def) == builtins.type_ref {
+      return Some(Base::TypeRef);
+    }
     match self.builder.def_kind(def)? {
       DefKind::Enum => Some(Base::Enum(def)),
       DefKind::InputObject => Some(Base::Object(def)),
@@ -2267,6 +2285,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         Ok(None)
       }
       (Base::Enum(def), RawKind::Path(row)) => self.enum_value(id, node, row, def, tree),
+      (Base::TypeRef, RawKind::Path(row)) => self.type_value(id, node, row, tree),
       (Base::Bool, RawKind::Boolean(flag)) => {
         self.builder.set_bool(id, flag);
         Ok(Some(Ident::Bool(flag)))
@@ -2503,17 +2522,45 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// What the segments but the last of `path`, the path at `row` of `tree`, name, resolved the
-  /// first time it is asked and kept: as a type, in the module and the source of `tree`, with the
-  /// one generic parameter in scope that the path's first segment names, if it names one. The
-  /// resolver reports what does not resolve, at the path where it is written, whoever asks first.
+  /// first time it is asked and kept, as [`resolve_type`](Self::resolve_type) resolves them.
   fn prefix(&mut self, row: u32, path: RawPath, tree: RawTree) -> Resolved {
     if let Some(resolved) = path.prefix {
       return resolved;
     }
+    let resolved = self.resolve_type(path, tree, false);
+    if let Some(kept) = self.raw.paths.get_mut(row as usize) {
+      kept.prefix = Some(resolved);
+    }
+    resolved
+  }
+
+  /// What the whole of `path`, the path at `row` of `tree`, names, resolved the first time it is
+  /// asked and kept, as [`resolve_type`](Self::resolve_type) resolves it.
+  fn named(&mut self, row: u32, path: RawPath, tree: RawTree) -> Resolved {
+    if let Some(resolved) = path.named {
+      return resolved;
+    }
+    let resolved = self.resolve_type(path, tree, true);
+    if let Some(kept) = self.raw.paths.get_mut(row as usize) {
+      kept.named = Some(resolved);
+    }
+    resolved
+  }
+
+  /// What `path`, of `tree`, names as a type, the whole of it when `whole` and its segments but
+  /// the last otherwise: resolved in the module and the source of `tree`, with the one generic
+  /// parameter in scope that the path's first segment names, if it names one. The resolver
+  /// reports what does not resolve, at the path where it is written, with GraphQL's
+  /// `undefined-type` for a whole path of one segment and no root.
+  fn resolve_type(&mut self, path: RawPath, tree: RawTree, whole: bool) -> Resolved {
     let builder: &ModelBuilder = &*self.builder;
     let all = self.raw.path_segments(path);
-    let prefix = all.get(..all.len().saturating_sub(1)).unwrap_or_default();
-    let segments: Vec<Segment<'_>> = prefix
+    let written = if whole {
+      all
+    } else {
+      all.get(..all.len().saturating_sub(1)).unwrap_or_default()
+    };
+    let segments: Vec<Segment<'_>> = written
       .iter()
       .map(|&(sym, span): &(Sym, SimpleSpan)| Segment {
         name: builder.spelling(sym),
@@ -2521,7 +2568,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       })
       .collect();
     let one: [(&[u8], u32); 1];
-    let params: &[(&[u8], u32)] = match (path.param, prefix.first()) {
+    let params: &[(&[u8], u32)] = match (path.param, written.first()) {
       (Some(index), Some(&(first, _))) => {
         one = [(builder.spelling(first), index)];
         &one
@@ -2532,17 +2579,48 @@ impl<'p> Coercion<'_, 'p, '_> {
       module: tree.module,
       source: SourceId::new(tree.source),
       wanted: Wanted::Type,
-      position: Position::Other,
+      position: if whole {
+        Position::Type
+      } else {
+        Position::Other
+      },
       params,
     };
-    let resolved =
-      self
-        .scopes
-        .resolve_segments(builder, self.reporter, &request, path.root, &segments);
-    if let Some(kept) = self.raw.paths.get_mut(row as usize) {
-      kept.prefix = Some(resolved);
+    self
+      .scopes
+      .resolve_segments(builder, self.reporter, &request, path.root, &segments)
+  }
+
+  /// Makes `id` the type value that `node`, the path at `row` of `tree`, names: its whole path
+  /// resolved once, as a type, where the value is written. A definition of any kind is a type
+  /// value; a type parameter, an alias such as `NonZeroU32`, which names an instantiation, and a
+  /// module do not fit; a path the resolver refused leaves the value unresolved and says nothing
+  /// more, the resolver having said why, whoever asked first. A type value has no identity.
+  fn type_value(
+    &mut self,
+    id: ValueId,
+    node: u32,
+    row: u32,
+    tree: RawTree,
+  ) -> Result<Option<Ident>, Refused> {
+    let refused = move |why: Why| Refused { node, why };
+    let Some(path) = self.raw.paths.get(row as usize).copied() else {
+      return Err(refused(Why::Kind));
+    };
+    if path.written.is_none() {
+      return Err(refused(Why::Kind));
     }
-    resolved
+    match self.named(row, path, tree) {
+      Resolved::Def(def) => {
+        self.builder.set_type_value(id, def);
+        Ok(None)
+      }
+      Resolved::Unresolved => Ok(None),
+      // A module is never answered where a type is wanted: the resolver refuses it, and reports it.
+      Resolved::Param(_) | Resolved::NonZero { .. } | Resolved::Module(_) => {
+        Err(refused(Why::Kind))
+      }
+    }
   }
 
   /// The syntactic kind of `node`: `null` for a node lowering did not make.

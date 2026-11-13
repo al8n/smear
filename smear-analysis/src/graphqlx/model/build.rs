@@ -85,7 +85,7 @@ use super::{
     LiteralRow, MemberRow, ModuleRow, NO_DEF, PackageRow, PathRow, Run, TyRow, TypeExprRow,
     TypeParamRow, UNSET_MODULE, UNSET_TY, VALUE_BOOL, VALUE_BYTES, VALUE_ENUM, VALUE_FLOAT,
     VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET,
-    VALUE_STRING, VALUE_UNRESOLVED, ValueRow,
+    VALUE_STRING, VALUE_TYPE, VALUE_UNRESOLVED, ValueRow,
   },
   ty::PathRoot,
   value::{LiteralKind, ObjectEntry},
@@ -936,6 +936,13 @@ impl ModelBuilder {
     let row = self.value_row(value);
     row.shape = VALUE_BOOL;
     row.payload = u32::from(flag);
+  }
+
+  /// Makes `value` the type value naming `def`.
+  pub fn set_type_value(&mut self, value: ValueId, def: DefId) {
+    let row = self.value_row(value);
+    row.shape = VALUE_TYPE;
+    row.def = def;
   }
 
   /// Makes `value` the enum value `member` of the enum `def`.

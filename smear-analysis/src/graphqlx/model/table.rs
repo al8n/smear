@@ -56,9 +56,9 @@ impl Run {
 }
 
 // A type-expression, type or value row says which variant of its public kind it is with one of
-// the numbers below, rather than with a private enum: lowering and instantiation write every type
-// shape, but only the test-support door writes a set, a map, an input object or a type value, and
-// a private variant that no shipped build constructs is dead code.
+// the numbers below, rather than with a private enum: a shape is written by the phase that makes
+// it, lowering and instantiation every type shape and coercion every value shape, each landing on
+// its own, and a private variant that no shipped build constructs would be dead code until it did.
 
 /// A named type, a definition and its arguments: `def` and `args` hold it.
 pub(super) const KIND_NAMED: u8 = 0;

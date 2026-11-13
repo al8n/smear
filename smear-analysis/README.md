@@ -28,9 +28,9 @@ argument left out filled from its default and an alias such as `NonZeroU32` expa
 interned once, so that `==` on two type ids is type equality; every application with its type
 arguments and its arguments; every value, coerced to the type expected where it stands, each value
 nested in it one of its own, an input object's fields found by name and kept in its order, a set's
-elements and a map's entries, and a custom scalar's but `null` kept as written; and the schema, with
-its contributions, one for each schema item, its description, its roots, written or presumed, and
-its applications.
+elements and a map's entries, a `TypeRef` value the definition its path names, and a custom
+scalar's but `null` kept as written; and the schema, with its contributions, one for each schema
+item, its description, its roots, written or presumed, and its applications.
 `Model::satisfies` answers whether a type satisfies an interface or a marker, and
 `Model::satisfies_ty` whether it satisfies one interface type exactly, its arguments' `!` included:
 by declaration, read off the `implements` entries and the bounds the model holds, with `core`'s
