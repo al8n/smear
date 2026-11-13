@@ -106,7 +106,7 @@
 //! what that costs — an `expect` that skips trivia on its accepting branch as well as before it
 //! moves trailing placement across the whole corpus while round-trip, the gap census, the parity
 //! gate, the injection gate and the projection differential all stay green. So the sentence is now
-//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-seven pairings re-derived on every run by
+//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-eight pairings re-derived on every run by
 //! [`only_the_recorded_nodes_close_on_their_trailing_trivia`]. It is nearly twice its GraphQL
 //! twin's length for a reason the constant states: two GraphQLx productions end on a probe for an
 //! optional continuation that is usually not there — `::` for a path, `<` for a definition's name
@@ -179,7 +179,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// Every `parent > node` pairing where a node closes *after* the trivia behind it, so that the
 /// trivia lands inside the node's range instead of beside it.
 ///
-/// **Forty-seven entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
+/// **Forty-eight entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
 /// one and its full account is on the GraphQL twin's constant: an atom commits the trivia it
 /// crosses to whichever node is open at that moment, a production about to open a node crosses its
 /// leading trivia at a dispatch peek made *before* the mark, and trailing trivia has no such
@@ -215,9 +215,12 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 ///   `invalid_x_mod_holding_a_fragment`) is junk between a module's items, skipped as one run up
 ///   to the body's next restart point with the trivia behind it; and `Document > DefinitionName`
 ///   is Task 10's unwound mark — the definition node is never opened, so the name the production
-///   had already built is left as a bare child of `Document` with the trivia after it. That last
-///   one is recorded **with the loss in it**, exactly as `shape_lost_object_type_definition` is,
-///   and it moves the day the loss is fixed.
+///   had already built is left as a bare child of `Document` with the trivia after it. That one
+///   is recorded **with the loss in it**, exactly as `shape_lost_object_type_definition` is, and
+///   it moves the day the loss is fixed. `ModDefinition > DefinitionName`
+///   (`invalid_x_mod_broken_item_between_items`) is the same unwound mark one level down: an item
+///   that fails inside a module's body leaves its name a bare child of the module, which keeps
+///   the items on either side of it.
 ///
 /// # GraphQLx's own, and it is most of the difference
 ///
@@ -325,6 +328,7 @@ const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "InputFieldsDefinition > InputValueDefinition",
   "InputObjectTypeDefinition > DefinitionName",
   "InterfaceTypeDefinition > DefinitionName",
+  "ModDefinition > DefinitionName",
   "ModDefinition > Error",
   "ObjectTypeDefinition > DefinitionName",
   "ObjectTypeDefinition > Directives",
@@ -1203,7 +1207,7 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
 /// appeared where a production began holding its node open across a peek, and list pairings
 /// vanished, because trivia eaten by the `expect` that ends an element never reaches the loop peek
 /// that used to leave it inside the preceding sibling. So the failure is reported as the two
-/// differences rather than as two forty-seven-element vectors: which half moved is what tells a
+/// differences rather than as two forty-eight-element vectors: which half moved is what tells a
 /// reader whether a production gained a probe or lost one.
 #[test]
 fn only_the_recorded_nodes_close_on_their_trailing_trivia() {

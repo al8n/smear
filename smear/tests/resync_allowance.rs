@@ -388,6 +388,55 @@ fn every_graphqlx_census_shape_stays_linear() {
   }
 }
 
+/// A module whose items all fail, where no skip the body makes finds an item to restart at.
+///
+/// `{ type } ` is the body's own census shape, as `[ type ] ` is the root's. The `{` starts no
+/// item and is junk; the `type` names nothing and fails at the `}` behind it. Every skip the body
+/// then makes balances braces, so each later `type` stands at depth one where the restart
+/// predicate is never asked, and the skip runs to the end of the text, finds nothing and rewinds.
+/// That is a walk of the tail for every item in it, which the allowance bounds here as it does at
+/// the root: the body's skip reads the same meter through the same guard.
+///
+/// A prefix opens the module, so this is its own doubling rather than a row of
+/// [`assert_linear`]'s, with that function's floor and its gate.
+#[test]
+#[cfg(feature = "graphqlx")]
+fn a_module_whose_items_all_fail_stays_linear() {
+  const N: usize = 2_000;
+  const UNIT: &str = "{ type } ";
+  let module = |items: usize| -> String { format!("mod m {{ {}", UNIT.repeat(items)) };
+  let roots: [Root; 2] = [
+    ("gqlx/document", gqlx_document),
+    ("gqlx/type-system", gqlx_type_system),
+  ];
+  for (root_name, root) in roots {
+    let (small_src, large_src): (String, String) = (module(N), module(N * 2));
+    let small = run(root, &small_src);
+    let large = run(root, &large_src);
+    assert_eq!(small.covered, small_src.len(), "{root_name}");
+    assert_eq!(large.covered, large_src.len(), "{root_name}");
+    assert!(
+      small.peak_spent > 10_000 && large.peak_spent > 10_000,
+      "{root_name}: peak spend was {} / {}, so the body's skip barely ran and the ratio below \
+       would pass vacuously",
+      small.peak_spent,
+      large.peak_spent
+    );
+    let ratio = large.peak_spent as f64 / small.peak_spent as f64;
+    println!(
+      "  {root_name:<16} mod body       spent {:>9} -> {:>9}  x{ratio:.2}   (refusals {} -> {})",
+      small.peak_spent, large.peak_spent, small.refusals, large.refusals
+    );
+    assert!(
+      ratio < 2.6,
+      "{root_name}: lexer items produced grew x{ratio:.2} for a module of twice the items \
+       ({} -> {}). The body's skip is walking the tail once per failed item.",
+      small.peak_spent,
+      large.peak_spent
+    );
+  }
+}
+
 /// Token **length** is an axis, and the first census had one value of it.
 ///
 /// Every shape above is built from one-byte atoms, so all of them hold the parse's bytes and its

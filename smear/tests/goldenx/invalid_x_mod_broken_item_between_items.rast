@@ -1,0 +1,47 @@
+Root@0..56
+  Document@0..56
+    ModDefinition@0..46
+      Name@0..3 "mod"
+      Space@3..4 " "
+      Name@4..5 "m"
+      Space@5..6 " "
+      LBrace@6..7 "{"
+      Newline@7..8 "\n"
+      Space@8..9 " "
+      Space@9..10 " "
+      ScalarTypeDefinition@10..21
+        Name@10..16 "scalar"
+        Space@16..17 " "
+        DefinitionName@17..21
+          Name@17..18 "X"
+          Newline@18..19 "\n"
+          Space@19..20 " "
+          Space@20..21 " "
+      Name@21..25 "type"
+      Space@25..26 " "
+      DefinitionName@26..28
+        Name@26..27 "T"
+        Space@27..28 " "
+      LBrace@28..29 "{"
+      Space@29..30 " "
+      Name@30..31 "f"
+      Space@31..32 " "
+      Error@32..36
+        RBrace@32..33 "}"
+        Newline@33..34 "\n"
+        Space@34..35 " "
+        Space@35..36 " "
+      ScalarTypeDefinition@36..45
+        Name@36..42 "scalar"
+        Space@42..43 " "
+        DefinitionName@43..45
+          Name@43..44 "W"
+          Newline@44..45 "\n"
+      RBrace@45..46 "}"
+    Newline@46..47 "\n"
+    ScalarTypeDefinition@47..56
+      Name@47..53 "scalar"
+      Space@53..54 " "
+      DefinitionName@54..56
+        Name@54..55 "Z"
+        Newline@55..56 "\n"
