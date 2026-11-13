@@ -76,7 +76,7 @@ rule_set! {
 #[test]
 fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   let table: &[(&str, &[Code])] = Rules::TABLE;
-  assert_eq!(table.len(), 12);
+  assert_eq!(table.len(), 13);
   assert_eq!(table[0].0, "DuplicateSchemaDefinition");
   assert_eq!(
     table[0].1,
@@ -146,6 +146,16 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
       Code::new("smear::schema::empty-union-members"),
       Code::new("smear::schema::empty-enum-values"),
       Code::new("smear::schema::empty-input-fields"),
+    ]
+  );
+  assert_eq!(table[12].0, "MemberTypeKind");
+  assert_eq!(
+    table[12].1,
+    &[
+      Code::new("smear::schema::field-type-not-output-type"),
+      Code::new("smear::schema::argument-type-not-input-type"),
+      Code::new("smear::schema::input-field-type-not-input-type"),
+      Code::new("smear::schema::directive-argument-type-not-input-type"),
     ]
   );
 }

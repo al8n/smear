@@ -73,6 +73,13 @@ const EMPTY_UNION_MEMBERS: &str = "smear::schema::empty-union-members";
 const EMPTY_ENUM_VALUES: &str = "smear::schema::empty-enum-values";
 const EMPTY_INPUT_FIELDS: &str = "smear::schema::empty-input-fields";
 
+/// GraphQL's codes for a member typed by a definition of a kind its position does not take.
+const FIELD_TYPE_NOT_OUTPUT_TYPE: &str = "smear::schema::field-type-not-output-type";
+const ARGUMENT_TYPE_NOT_INPUT_TYPE: &str = "smear::schema::argument-type-not-input-type";
+const INPUT_FIELD_TYPE_NOT_INPUT_TYPE: &str = "smear::schema::input-field-type-not-input-type";
+const DIRECTIVE_ARGUMENT_TYPE_NOT_INPUT_TYPE: &str =
+  "smear::schema::directive-argument-type-not-input-type";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1474,6 +1481,22 @@ const FIXTURES: &[(Code, Fixture)] = &[
   (Code::new(EMPTY_UNION_MEMBERS), an_empty_union),
   (Code::new(EMPTY_ENUM_VALUES), an_empty_enum),
   (Code::new(EMPTY_INPUT_FIELDS), an_empty_input_object),
+  (
+    Code::new(FIELD_TYPE_NOT_OUTPUT_TYPE),
+    a_field_typed_by_an_input,
+  ),
+  (
+    Code::new(ARGUMENT_TYPE_NOT_INPUT_TYPE),
+    an_argument_typed_by_an_object,
+  ),
+  (
+    Code::new(INPUT_FIELD_TYPE_NOT_INPUT_TYPE),
+    an_input_field_typed_by_an_object,
+  ),
+  (
+    Code::new(DIRECTIVE_ARGUMENT_TYPE_NOT_INPUT_TYPE),
+    a_directives_argument_typed_by_an_object,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1626,6 +1649,26 @@ fn an_empty_enum() -> Analysis {
 /// An input object with no field.
 fn an_empty_input_object() -> Analysis {
   analyze_one("type Query { ok: Int } input In")
+}
+
+/// A field typed by an input object.
+fn a_field_typed_by_an_input() -> Analysis {
+  analyze_one("type Query { ok: In } input In { a: Int }")
+}
+
+/// A field's argument typed by an object.
+fn an_argument_typed_by_an_object() -> Analysis {
+  analyze_one("type Query { ok(a: Query): Int }")
+}
+
+/// An input field typed by an object.
+fn an_input_field_typed_by_an_object() -> Analysis {
+  analyze_one("type Query { ok: Int } input In { a: Query }")
+}
+
+/// A directive's argument typed by an object.
+fn a_directives_argument_typed_by_an_object() -> Analysis {
+  analyze_one("type Query { ok: Int } directive @d(a: Query) on FIELD")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

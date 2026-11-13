@@ -50,13 +50,13 @@ const LIST_HELP: &str = "a list satisfies no bound: pass a type that declares th
 /// `Comparable<Box<T>>`; and `Page` and `Sorted`, each with a bound, the second's naming its
 /// parameter.
 const DEFINITIONS: &str = "interface Node {\n  id: ID\n}\n\
-                           interface Comparable<X> {\n  compare(other: X): Int\n}\n\
+                           interface Comparable<X> {\n  compare(other: Int): X\n}\n\
                            interface Ord<X> implements Comparable<X> {\n  \
-                           compare(other: X): Int\n}\n\
+                           compare(other: Int): X\n}\n\
                            type User implements Node & Comparable<User> {\n  id: ID\n  \
-                           compare(other: User): Int\n}\n\
+                           compare(other: Int): User\n}\n\
                            type Box<T> implements Comparable<Box<T>> {\n  item: T\n  \
-                           compare(other: Box<T>): Int\n}\n\
+                           compare(other: Int): Box<T>\n}\n\
                            type Page<T> where T: Node {\n  items: [T]\n}\n\
                            type Sorted<T> where T: Comparable<T> {\n  items: [T]\n}\n";
 
@@ -290,11 +290,11 @@ fn every_occurrence(analysis: &Analysis, packages: Packages) -> Vec<TypeExprId> 
 /// parameter is bounded by `Ord`; and a type whose fields have every type the accessors are asked
 /// about.
 const ASKED: &str = "interface Node {\n  id: ID\n}\n\
-                     interface Comparable<X> {\n  compare(other: X): Int\n}\n\
-                     interface Ord<X> implements Comparable<X> {\n  compare(other: X): Int\n}\n\
+                     interface Comparable<X> {\n  compare(other: Int): X\n}\n\
+                     interface Ord<X> implements Comparable<X> {\n  compare(other: Int): X\n}\n\
                      type User implements Node & Comparable<User> {\n  id: ID\n  \
-                     compare(other: User): Int\n}\n\
-                     type Other implements Comparable<User> {\n  compare(other: User): Int\n}\n\
+                     compare(other: Int): User\n}\n\
+                     type Other implements Comparable<User> {\n  compare(other: Int): User\n}\n\
                      type Outer<U> where U: Ord<U> {\n  u: U\n  ord: Ord<U>\n  \
                      cmp: Comparable<U>\n}\n\
                      type Probe {\n  user: User\n  sure: User!\n  other: Other\n  node: Node\n  \
@@ -642,7 +642,7 @@ fn a_non_zero_integer_is_a_key() {
 fn a_generic_bound_is_checked_exactly() {
   // `Other` declares `Comparable<User>`, and `Sorted<Other>` asks `Comparable<Other>`.
   let text = program(
-    "type Other implements Comparable<User> {\n  compare(other: User): Int\n}\n\
+    "type Other implements Comparable<User> {\n  compare(other: Int): User\n}\n\
      type Query {\n  user: Sorted<User>\n  other: Sorted<Other>\n}\n",
   );
   let analysis = analyze_text(&text, &Limits::new());
@@ -666,7 +666,7 @@ fn an_argument_is_substituted_as_it_is_written() {
   // `Sorted<Strict!>` and not `Sorted<Strict>`. A parameter passed on with its own `!`; a slot a
   // default filled from a non-null argument; and a set's element, non-null however it is written.
   let text = program(
-    "type Strict implements Comparable<Strict!> {\n  compare(other: Strict!): Int\n}\n\
+    "type Strict implements Comparable<Strict!> {\n  compare(other: Int): Strict!\n}\n\
      type Out3<U> where U: Comparable<U> {\n  s: Sorted<U!>\n}\n\
      type Out4<U> where U: Comparable<U!> {\n  s: Sorted<U!>\n}\n\
      type P2<T, U = T> where U: Comparable<U> {\n  t: T\n}\n\
@@ -706,7 +706,7 @@ fn a_generic_argument_satisfies_through_its_own_arguments() {
   // `Box<User>` declares `Comparable<Box<User>>`, its entry with `User` for `T`. `Wrap<User>`
   // declares `Comparable<User>`, and `Sorted<Wrap<User>>` asks `Comparable<Wrap<User>>`.
   let text = program(
-    "type Wrap<T> implements Comparable<T> {\n  compare(other: T): Int\n}\n\
+    "type Wrap<T> implements Comparable<T> {\n  compare(other: Int): T\n}\n\
      type Query {\n  boxed: Sorted<Box<User>>\n  wrapped: Sorted<Wrap<User>>\n}\n",
   );
   let analysis = analyze_text(&text, &Limits::new());
@@ -727,10 +727,10 @@ fn a_generic_argument_satisfies_through_its_own_arguments() {
 fn an_open_entry_is_matched_and_never_compared_by_id() {
   // Inside `Box`, both bounds ask `Comparable<Box<T>>`, the very type `Box`'s entry has. `Box<T>`
   // declares it; `Box<i32>` declares `Comparable<Box<i32>>`, another type.
-  let text = "interface Comparable<X> {\n  compare(other: X): Int\n}\n\
+  let text = "interface Comparable<X> {\n  compare(other: Int): X\n}\n\
               scalar Pin<X, Y> where X: Comparable<Y>\n\
               type Box<T> implements Comparable<Box<T>> {\n  item: T\n  \
-              compare(other: Box<T>): Int\n  same: Pin<Box<T>, Box<T>>\n  \
+              compare(other: Int): Box<T>\n  same: Pin<Box<T>, Box<T>>\n  \
               odd: Pin<Box<Int>, Box<T>>\n}\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
@@ -778,7 +778,7 @@ fn satisfaction_is_by_declaration() {
   // `Lazy` declares `Ord<Lazy>` and not `Comparable<Lazy>`, which `Ord` declares: what an interface
   // declares is not followed. GraphQL's rule on transitive interfaces, L4's, refuses `Lazy` itself.
   let text = program(
-    "type Lazy implements Ord<Lazy> {\n  compare(other: Lazy): Int\n}\n\
+    "type Lazy implements Ord<Lazy> {\n  compare(other: Int): Lazy\n}\n\
      type Query {\n  s: Sorted<Lazy>\n}\n",
   );
   let analysis = analyze_text(&text, &Limits::new());
@@ -796,7 +796,7 @@ fn satisfaction_is_by_declaration() {
 
   // Written too, it holds.
   let text = program(
-    "type Lazy implements Ord<Lazy> & Comparable<Lazy> {\n  compare(other: Lazy): Int\n}\n\
+    "type Lazy implements Ord<Lazy> & Comparable<Lazy> {\n  compare(other: Int): Lazy\n}\n\
      type Query {\n  s: Sorted<Lazy>\n}\n",
   );
   let analysis = analyze_text(&text, &Limits::new());
@@ -1430,7 +1430,7 @@ const NAMING: &str = "interface I<A> {\n  id: ID\n}\ninterface I2<A, B> {\n  id:
                       type Ff implements I<Box2<Ff, Ff>> {\n  id: ID\n}\n\
                       type Wh implements I<Box3<Wh>> {\n  id: ID\n}\n\
                       type Wf implements I<Box3<Wf, Wf>> {\n  id: ID\n}\n\
-                      type Nn implements Comparable<Nn!> {\n  compare(other: Nn!): Int\n}\n\
+                      type Nn implements Comparable<Nn!> {\n  compare(other: Int): Nn!\n}\n\
                       type Gen<V> where V: I<[V]> {\n  l: L<V>\n  j: I<[V]>\n}\n\
                       type Gen2<V> where V: I<V> {\n  l: L<V>\n  j: I<[V]>\n}\n\
                       type Uses {\n  lh: L<Lh>\n  j_lh: I<[Lh]>\n  lf: L<Lf>\n  j_lf: I<[Lf]>\n  \
@@ -1536,8 +1536,8 @@ const ORDERED_APP: [(&str, &str); 2] = [
   ),
   (
     "b.graphqlx",
-    "interface Node {\n  id: ID\n}\ninterface Comparable<X> {\n  compare(other: X): Int\n}\n\
-     type User implements Node & Comparable<User> {\n  id: ID\n  compare(other: User): Int\n}\n\
+    "interface Node {\n  id: ID\n}\ninterface Comparable<X> {\n  compare(other: Int): X\n}\n\
+     type User implements Node & Comparable<User> {\n  id: ID\n  compare(other: Int): User\n}\n\
      type Sorted<T> where T: Comparable<T> {\n  items: [T]\n}\n",
   ),
 ];

@@ -73,7 +73,9 @@ wrote holds keeps GraphQL's own rules, with GraphQL's codes: a member whose name
 `smear::schema::reserved-field-name`, or the code of what else it is, and a member whose name an
 earlier member of its list has is `smear::schema::duplicate-field-name`, or the code of its list,
 and a definition that holds members and holds none, its extensions' counted, is
-`smear::schema::empty-fields-definition`, or the code of its kind, a marker holding none. An
+`smear::schema::empty-fields-definition`, or the code of its kind, a marker holding none, and a
+member typed by a definition of a kind its position does not take is
+`smear::schema::field-type-not-output-type`, or the code of its position. An
 error that a phase or a rule reports marks the contributions, members and definitions that hold it,
 as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error marks
 nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and

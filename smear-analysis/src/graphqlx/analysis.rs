@@ -265,8 +265,11 @@ impl Analysis {
 ///   an interface that is no marker, with no field, a union with no member, an enum with no value
 ///   and an input object with no field, its extensions' members counted, is
 ///   `empty-fields-definition`, `empty-union-members`, `empty-enum-values` or
-///   `empty-input-fields`, at its name. A rule says nothing about a contribution a phase already
-///   refused something in.
+///   `empty-input-fields`, at its name. A field whose type's base, under its lists, is an input
+///   object is `field-type-not-output-type`, and an argument, an input field or a directive's
+///   argument whose base is an object, an interface or a union is `argument-type-not-input-type`,
+///   `input-field-type-not-input-type` or `directive-argument-type-not-input-type`, at the base.
+///   A rule says nothing about a contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

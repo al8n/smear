@@ -1,7 +1,7 @@
 //! The GraphQLx analyzer's rules on what a definition holds, each GraphQL's own with GraphQL's
 //! code: a member's name does not begin with two underscores; a definition's members have distinct
-//! names, and so have a field's arguments; and a definition that holds members holds one at least.
-//! Each rule judges what a supplied
+//! names, and so have a field's arguments; a definition that holds members holds one at least; and
+//! a member's type is of the kind its position takes. Each rule judges what a supplied
 //! package's definition holds, says nothing within what a phase refused, and quotes a name only as
 //! an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -40,6 +40,12 @@ const EMPTY_FIELDS: &str = "smear::schema::empty-fields-definition";
 const EMPTY_UNION: &str = "smear::schema::empty-union-members";
 const EMPTY_ENUM: &str = "smear::schema::empty-enum-values";
 const EMPTY_INPUT: &str = "smear::schema::empty-input-fields";
+
+/// GraphQL's codes for a member typed by a definition of a kind its position does not take.
+const FIELD_TYPE: &str = "smear::schema::field-type-not-output-type";
+const ARGUMENT_TYPE: &str = "smear::schema::argument-type-not-input-type";
+const INPUT_FIELD_TYPE: &str = "smear::schema::input-field-type-not-input-type";
+const DIRECTIVE_ARGUMENT_TYPE: &str = "smear::schema::directive-argument-type-not-input-type";
 
 /// The code of an `implements` entry that names nothing, a phase's.
 const UNDEFINED_INTERFACE: &str = "smear::schema::undefined-implements-interface";
@@ -551,6 +557,126 @@ fn a_marker_and_an_extended_definition_are_not_empty() {
   );
 }
 
+/// An input object, an object, an interface, a union, an enum and a scalar; then each of them as
+/// the type of a field, of a field's argument, of an input field and of a directive's argument,
+/// the input object written under lists too, and the three output types as a list's element.
+const KINDS: &str = "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Obj {\n  o: Int\n}\n\
+                     interface Face {\n  f: Int\n}\nunion Either = Obj\nenum Color {\n  RED\n}\n\
+                     scalar Date\n\
+                     type Fields {\n  bad: In\n  worse: [In!]!\n  date: Date\n  color: Color\n  \
+                     obj: Obj\n  face: Face\n  either: Either\n}\n\
+                     type Arguments {\n  \
+                     f(a1: Obj, a2: Face, a3: Either, a4: [Obj], d: Date, c: Color, i: In): Int\n}\n\
+                     input Inputs {\n  i1: Obj\n  i2: Face\n  i3: Either\n  i4: [Obj]\n  d: Date\n  \
+                     c: Color\n  i: In\n}\n\
+                     directive @d(d1: Obj, d2: Face, d3: Either, d4: [Obj], d: Date, c: Color, \
+                     i: In) on FIELD\n";
+
+#[test]
+fn a_members_type_is_of_the_kind_its_position_takes() {
+  let analysis = analyze_one(KINDS);
+  let schema = schema_file(&analysis);
+  let refused =
+    |code: &'static str, before: &str, name: &str| -> (&'static str, Location, Option<Location>) {
+      (code, named(schema, KINDS, before, name, 0), None)
+    };
+  assert_eq!(
+    found(&analysis),
+    [
+      refused(FIELD_TYPE, "bad: ", "In"),
+      // At the named type under the list, its `!` included, and not at the list.
+      (FIELD_TYPE, at(schema, KINDS, "In!", 0), None),
+      refused(ARGUMENT_TYPE, "a1: ", "Obj"),
+      refused(ARGUMENT_TYPE, "a2: ", "Face"),
+      refused(ARGUMENT_TYPE, "a3: ", "Either"),
+      refused(ARGUMENT_TYPE, "a4: [", "Obj"),
+      refused(INPUT_FIELD_TYPE, "i1: ", "Obj"),
+      refused(INPUT_FIELD_TYPE, "i2: ", "Face"),
+      refused(INPUT_FIELD_TYPE, "i3: ", "Either"),
+      refused(INPUT_FIELD_TYPE, "i4: [", "Obj"),
+      refused(DIRECTIVE_ARGUMENT_TYPE, "d1: ", "Obj"),
+      refused(DIRECTIVE_ARGUMENT_TYPE, "d2: ", "Face"),
+      refused(DIRECTIVE_ARGUMENT_TYPE, "d3: ", "Either"),
+      refused(DIRECTIVE_ARGUMENT_TYPE, "d4: [", "Obj"),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  // Each names the member, its owner and what the base names, and prints no type.
+  let messages = messages(&analysis);
+  assert_eq!(
+    messages[0],
+    "the field `bad` of `Fields` is typed by the input object `In`, and a field's type is an \
+     output type"
+  );
+  assert_eq!(
+    messages[3],
+    "the argument `a2` of the field `f` of `Arguments` is typed by the interface `Face`, and an \
+     argument's type is an input type"
+  );
+  assert_eq!(
+    messages[8],
+    "the input field `i3` of `Inputs` is typed by the union `Either`, and an input field's type \
+     is an input type"
+  );
+  assert_eq!(
+    messages[10],
+    "the argument `d1` of the directive `@d` is typed by the object type `Obj`, and a \
+     directive's argument's type is an input type"
+  );
+  // GraphQL's own phrases and helps, one of each code.
+  let words: Vec<(Option<&str>, Option<&str>)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| (diagnostic.primary_label(), diagnostic.help()))
+    .collect();
+  assert_eq!(
+    [words[0], words[2], words[6], words[10]],
+    [
+      (
+        Some("field type is not an output type"),
+        Some(
+          "a field's type must be a scalar, object, interface, union or enum; an input object \
+           appears only in argument and input-field positions."
+        )
+      ),
+      (
+        Some("argument type is not an input type"),
+        Some("an argument's type must be a scalar, enum or input object.")
+      ),
+      (
+        Some("input field type is not an input type"),
+        Some("an input field's type must be a scalar, enum or input object.")
+      ),
+      (
+        Some("directive argument type is not an input type"),
+        Some("a directive argument's type must be a scalar, enum or input object.")
+      ),
+    ]
+  );
+}
+
+#[test]
+fn what_this_part_leaves_to_instantiations_is_accepted() {
+  // A scalar's arguments, a collection's, and a type parameter are not judged here; a generic
+  // input object as a field's type and a generic object as an argument's are.
+  let text = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\nscalar Ref<R>\n\
+              input Filter<F> {\n  eq: F\n}\ntype Page<P> {\n  items: [P]\n  at(cursor: P): Int\n}\n\
+              type Uses {\n  r(a: Ref<Obj>): Int\n  m(a: HashMap<string, Obj>): Int\n  \
+              filtered: Filter<Int>\n  paged(a: Page<Int>): Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (FIELD_TYPE, at(schema, text, "Filter<Int>", 0), None),
+      (ARGUMENT_TYPE, at(schema, text, "Page<Int>", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 /// A refusal of `code` is silent in a contribution that also holds a phase's error, `together`,
 /// and is reported beside it when the error is in a sibling definition, `apart`. The phase's error
 /// is an undefined type.
@@ -601,6 +727,12 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ntype T implements Missing\n",
     "type Query {\n  ok: Int\n}\ntype T\ntype U implements Missing {\n  a: Int\n}\n",
   );
+  silent_beside_a_phase(
+    FIELD_TYPE,
+    "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype T {\n  f: In\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype T {\n  f: In\n}\n\
+     type U {\n  x: Missing\n}\n",
+  );
 }
 
 #[test]
@@ -612,6 +744,9 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
     format!("type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  {member}: Int\n}}\n"),
     format!("type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  {plain}: Int\n  {plain}: Int\n}}\n"),
     format!("type Query {{\n  ok: Int\n}}\ntype {owner}\n"),
+    format!(
+      "type Query {{\n  ok: Int\n}}\ninput In {{\n  i: Int\n}}\ntype {owner} {{\n  {plain}: In\n}}\n"
+    ),
   ];
   for text in &texts {
     let analysis = analyze_text(text);

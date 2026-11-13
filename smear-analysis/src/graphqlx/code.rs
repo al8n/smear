@@ -493,4 +493,24 @@ pub(crate) mod schema {
 
   /// An input object holds no field: `smear-schema`'s `EmptyInputFields`.
   pub(crate) const EMPTY_INPUT_FIELDS: Code = Code::new("smear::schema::empty-input-fields");
+
+  /// A field's type, under its lists, is an input object: `smear-schema`'s
+  /// `FieldTypeNotOutputType`.
+  pub(crate) const FIELD_TYPE_NOT_OUTPUT_TYPE: Code =
+    Code::new("smear::schema::field-type-not-output-type");
+
+  /// A field's argument's type, under its lists, is an object, an interface or a union:
+  /// `smear-schema`'s `ArgumentTypeNotInputType`.
+  pub(crate) const ARGUMENT_TYPE_NOT_INPUT_TYPE: Code =
+    Code::new("smear::schema::argument-type-not-input-type");
+
+  /// An input field's type, under its lists, is an object, an interface or a union:
+  /// `smear-schema`'s `InputFieldTypeNotInputType`.
+  pub(crate) const INPUT_FIELD_TYPE_NOT_INPUT_TYPE: Code =
+    Code::new("smear::schema::input-field-type-not-input-type");
+
+  /// A directive definition's argument's type, under its lists, is an object, an interface or a
+  /// union: `smear-schema`'s `DirectiveArgumentTypeNotInputType`.
+  pub(crate) const DIRECTIVE_ARGUMENT_TYPE_NOT_INPUT_TYPE: Code =
+    Code::new("smear::schema::directive-argument-type-not-input-type");
 }

@@ -42,6 +42,12 @@ const UNDEFINED: &str = "smear::schema::undefined-type";
 /// The code of a root operation type that names nothing.
 const UNDEFINED_ROOT: &str = "smear::schema::undefined-root-operation-type";
 
+/// GraphQL's code of a field's argument typed by what is no input type.
+const ARGUMENT_TYPE: &str = "smear::schema::argument-type-not-input-type";
+
+/// GraphQL's code of an input field typed by what is no input type.
+const INPUT_FIELD_TYPE: &str = "smear::schema::input-field-type-not-input-type";
+
 /// What the rule on `NonZero`'s argument says, whatever the argument is.
 const NONZERO_MESSAGE: &str = "`NonZero` takes an integer primitive at least one bit wide, written \
                                without `!`, as its type argument, and this one is not";
@@ -184,13 +190,17 @@ fn a_marker_stands_in_implements_and_where_and_nowhere_else() {
   let at_marker = |before: &str, nth: usize| -> (&'static str, Location, Option<Location>) {
     (MARKER, named(schema, SITES, before, "M", nth), None)
   };
+  // A marker is an interface, so as a field's argument and as an input field it is also no input
+  // type, which GraphQL's own rule says at the same token.
   assert_eq!(
     found(&analysis),
     [
       at_marker("m: ", 0),
       at_marker("[", 0),
       at_marker("a: ", 0),
+      (ARGUMENT_TYPE, named(schema, SITES, "a: ", "M", 0), None),
       at_marker("m: ", 1),
+      (INPUT_FIELD_TYPE, named(schema, SITES, "m: ", "M", 1), None),
       at_marker("U = ", 0),
       at_marker("B<", 0),
       at_marker("I<", 0),
