@@ -54,8 +54,11 @@ its schema at most once, each later schema definition of the root package being
 dependency's schema item being `smear::graphqlx::schema-outside-root`; and a package extends its own
 definitions alone, an extension of another package's being `smear::graphqlx::orphan-extension`, but
 for the directives the root package adds to a definition of `core`, `alloc` or `std`, none of which
-may be `@marker`, `@set` or `@map` unless the root package wrote that definition; and an enum takes
-no type parameter, an enum that declares one being `smear::graphqlx::generic-enum`. An error that a
+may be `@marker`, `@set` or `@map` unless the root package wrote that definition; an enum takes
+no type parameter, an enum that declares one being `smear::graphqlx::generic-enum`; and a marker
+declares no field, is named only as the outermost type of an `implements` entry or of a bound, and
+is all a scalar, an enum, an input object or a union implements, each other use being
+`smear::graphqlx::marker-misuse`. An error that a
 phase or a rule reports marks the contributions, members and definitions that hold it, as their
 `has_errors()` says, whether the diagnostic ceiling keeps it or not. A consumer's walk marks
 nothing, answers its own diagnostics under the same ceiling, and holds memory bounded by it.

@@ -10,17 +10,66 @@
 //! by `SourceMap::written_by`, the one answer instantiation reads too. A rule says nothing about a
 //! contribution a phase already refused something in, whose `has_errors()` is set: a diagnostic of
 //! its own within that contribution would repeat the phase's. It sees the phases' marks alone,
-//! since the rules' are applied once the walk has ended.
+//! since the rules' are applied once the walk has ended. `silenced` says it for an occurrence.
+//!
+//! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
+//! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk
+//! descends the written arguments of an occurrence that names a type parameter, or nothing, and
+//! the public kind does not answer them.
 
 mod duplicate_schema_definition;
 mod generic_enum;
+mod marker_misuse;
 mod orphan_extension;
 mod schema_outside_root;
 
 use self::{
   duplicate_schema_definition::DuplicateSchemaDefinition, generic_enum::GenericEnum,
-  orphan_extension::OrphanExtension, schema_outside_root::SchemaOutsideRoot,
+  marker_misuse::MarkerMisuse, orphan_extension::OrphanExtension,
+  schema_outside_root::SchemaOutsideRoot,
 };
+use super::{Contribution, Cx, Model, TypeExprId, TypeExprKind, id::dense};
+
+/// Whether a rule says nothing at the occurrence the walk has reached in `type_expr`, `cx` saying
+/// where that is: a phase reported an error within the contribution that wrote it, or, for a
+/// written root, which no contribution holds, within one of the schema's contributions.
+fn silenced(cx: &Cx<'_>) -> bool {
+  match cx.contribution() {
+    Some(part) => part.has_errors(),
+    None => cx
+      .model()
+      .schema()
+      .contributions()
+      .any(|part: Contribution<'_>| part.has_errors()),
+  }
+}
+
+/// Where each occurrence the walk reaches stands in its tree, told from the order the walk reaches
+/// them in: each outermost occurrence first, then everything it nests, in pre-order.
+///
+/// A rule that keeps one resets it in `begin`, and hands it every occurrence the walk reaches,
+/// before it decides to say nothing about one. It keeps one count.
+#[derive(Default)]
+struct Nesting {
+  /// The occurrences of the current tree still to come.
+  pending: u32,
+}
+
+impl Nesting {
+  /// Takes `ty`, the occurrence of `model` the walk reached next, and answers whether it is the
+  /// root of its tree: no occurrence of the tree before it is still to come.
+  fn reach(&mut self, model: &Model, ty: TypeExprId) -> bool {
+    let root = self.pending == 0;
+    self.pending = self.pending.saturating_sub(1);
+    let occurrence = model.type_expr(ty);
+    // What the walk reaches under it: its written arguments, whatever it resolved to, or a list's
+    // element.
+    let element = u32::from(matches!(occurrence.kind(), TypeExprKind::List { .. }));
+    let children = dense(occurrence.written_args().len()).saturating_add(element);
+    self.pending = self.pending.saturating_add(children);
+    root
+  }
+}
 
 /// Declares a rule set: a struct with one field per rule, its `Visitor` impl, whose every hook
 /// calls each rule's in field order, and its table of each rule with the codes it reports.
@@ -156,14 +205,16 @@ rule_set! {
   /// smear's own rules, which `analyze` runs over every supplied package once its phases have
   /// written the model: a program defines its schema at most once; only the root package defines
   /// or extends the schema; a package extends its own definitions alone, but for the directives
-  /// the root package adds to a built-in, none of which may give it a built-in meaning; and an enum
-  /// takes no type parameter.
+  /// the root package adds to a built-in, none of which may give it a built-in meaning; an enum
+  /// takes no type parameter; and a marker has no field and is named only in `implements` and in
+  /// bounds, and a scalar, an enum, an input object or a union implements markers alone.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
     schema_outside_root: SchemaOutsideRoot => [super::DiagnosticKind::SchemaOutsideRoot.code()],
     orphan_extension: OrphanExtension => [super::DiagnosticKind::OrphanExtension.code()],
     generic_enum: GenericEnum => [super::DiagnosticKind::GenericEnum.code()],
+    marker_misuse: MarkerMisuse => [super::DiagnosticKind::MarkerMisuse.code()],
   }
 }
 

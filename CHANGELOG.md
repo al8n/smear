@@ -210,7 +210,11 @@ All notable changes to Smear are documented in this file.
   write, each application of `core`'s `@marker`, `@set` or `@map` is `orphan-extension` too, at its
   path, since what a built-in is is the language's to say. And an enum takes no type parameter: an
   enum that declares one is the new `smear::graphqlx::generic-enum`, at its first type parameter's
-  name, and each use of it is still typed. A rule says nothing about a contribution a
+  name, and each use of it is still typed. And a marker is used as a marker: one that declares a
+  field, once, at the first its own package wrote; one named anywhere but as the outermost type of
+  an `implements` entry or of a bound, a type argument and a list's element included; and an
+  `implements` entry of a scalar, an enum, an input object or a union that names what is no marker,
+  are each the new `smear::graphqlx::marker-misuse`. A rule says nothing about a contribution a
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the
   models it builds, for `smear`'s own tests; it is not API.

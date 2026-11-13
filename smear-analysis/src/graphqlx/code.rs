@@ -156,6 +156,14 @@ pub enum DiagnosticKind {
   /// enum takes no type parameter. Reported once, at the enum's first type parameter's name; each
   /// use of the enum is still counted and typed as any generic definition's is.
   GenericEnum,
+  /// A marker, an interface `core`'s `@marker` makes one, used as a marker may not be. A marker
+  /// has no field: one that declares any is reported once, at the first field its own package
+  /// wrote, with a label at the marker's name. A marker is named only as an `implements` entry or
+  /// as a bound's interface, the outermost type there: named anywhere else, a type argument and a
+  /// list's element included, it is reported where it is named. And a scalar, an enum, an input
+  /// object or a union implements markers only: an entry of its `implements` that names what is no
+  /// marker is reported where it is written.
+  MarkerMisuse,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -191,6 +199,7 @@ impl DiagnosticKind {
     Self::SchemaOutsideRoot,
     Self::OrphanExtension,
     Self::GenericEnum,
+    Self::MarkerMisuse,
     Self::ResourceLimit,
   ];
 
@@ -224,6 +233,7 @@ impl DiagnosticKind {
       Self::SchemaOutsideRoot => Code::new("smear::graphqlx::schema-outside-root"),
       Self::OrphanExtension => Code::new("smear::graphqlx::orphan-extension"),
       Self::GenericEnum => Code::new("smear::graphqlx::generic-enum"),
+      Self::MarkerMisuse => Code::new("smear::graphqlx::marker-misuse"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -257,6 +267,7 @@ impl DiagnosticKind {
       Self::SchemaOutsideRoot => "schema outside the root package",
       Self::OrphanExtension => "orphan extension",
       Self::GenericEnum => "generic enum",
+      Self::MarkerMisuse => "marker misused",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -290,6 +301,7 @@ impl DiagnosticKind {
       | Self::SchemaOutsideRoot
       | Self::OrphanExtension
       | Self::GenericEnum
+      | Self::MarkerMisuse
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }

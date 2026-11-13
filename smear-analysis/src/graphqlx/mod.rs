@@ -86,8 +86,11 @@
 //! `core`, `alloc` or `std`, unless the root package writes it and it adds directives and nothing
 //! else, none of them `core`'s `@marker`, `@set` or `@map` unless it wrote the definition, a
 //! built-in it replaces. And an enum takes no type parameter: an enum that declares one is
-//! `smear::graphqlx::generic-enum`, at its first type parameter's name. A rule says nothing about a
-//! contribution a phase already refused something in.
+//! `smear::graphqlx::generic-enum`, at its first type parameter's name. And a marker is used as a
+//! marker: one that declares a field, one named anywhere but as the outermost type of an
+//! `implements` entry or of a bound, and an `implements` entry of a scalar, an enum, an input
+//! object or a union that names what is no marker, are each `smear::graphqlx::marker-misuse`. A
+//! rule says nothing about a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

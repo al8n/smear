@@ -4,7 +4,8 @@
 //! for the directives the root package adds to a built-in, none of which may give the built-in a
 //! built-in meaning. Each rule says nothing about what a phase already refused, marks what it
 //! reports, and quotes a name only as an excerpt. The fourth rule, that an enum takes no type
-//! parameter, is tested in `analysis_types`, beside the phase that types each use of the enum.
+//! parameter, is tested in `analysis_types`, beside the phase that types each use of the enum, and
+//! the rules after it, on what is judged of types, in `analysis_type_rules`.
 //!
 //! Then the rule set itself: every code a rule lists fires on a fixture; and the walk the rules
 //! ride, over an analyzed program of two packages, written out hook by hook.
@@ -32,6 +33,9 @@ const ORPHAN: &str = "smear::graphqlx::orphan-extension";
 
 /// The code for an enum that declares a type parameter.
 const GENERIC_ENUM: &str = "smear::graphqlx::generic-enum";
+
+/// The code for a marker used as a marker may not be.
+const MARKER_MISUSE: &str = "smear::graphqlx::marker-misuse";
 
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
@@ -1233,6 +1237,7 @@ const FIXTURES: &[(Code, Fixture)] = &[
   (Code::new(OUTSIDE), a_dependencys_schema_definition),
   (Code::new(ORPHAN), an_extension_of_a_dependencys_type),
   (Code::new(GENERIC_ENUM), a_generic_enum),
+  (Code::new(MARKER_MISUSE), a_marker_as_a_fields_type),
 ];
 
 /// A root package that defines its schema twice.
@@ -1283,6 +1288,11 @@ fn an_extension_of_a_dependencys_type() -> Analysis {
 /// A root package that declares an enum with a type parameter.
 fn a_generic_enum() -> Analysis {
   analyze_one("enum Choice<T> {\n  YES\n  NO\n}\ntype Query {\n  choice: Choice<Int>\n}\n")
+}
+
+/// A root package that types a field with a marker.
+fn a_marker_as_a_fields_type() -> Analysis {
+  analyze_one("interface Marked @marker\ntype Query {\n  marked: Marked\n}\n")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and
