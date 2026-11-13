@@ -888,6 +888,45 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
     "{:#?}",
     analysis.diagnostics()
   );
+
+  // `@map`; `@set` on a primitive `core` materialises, which has no position for a label to point
+  // at; and two of the three in one extension, each reported where it is written.
+  let text =
+    "extend scalar BTreeMap @map\nextend scalar Int @set\nextend scalar HashSet @set @map\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  let btree_map = Some(model.def(def(model, "^::alloc::BTreeMap")).location());
+  let hash_set = Some(model.def(def(model, "^::std::HashSet")).location());
+  assert_eq!(
+    found(&analysis),
+    [
+      (ORPHAN, at(schema, text, "map", 0), btree_map),
+      (ORPHAN, at(schema, text, "set", 0), None),
+      (ORPHAN, at(schema, text, "set", 1), hash_set),
+      (ORPHAN, at(schema, text, "map", 1), hash_set),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      meaning("map", "type `BTreeMap`", "alloc"),
+      meaning("set", "type `i32`", "core"),
+      meaning("set", "type `HashSet`", "std"),
+      meaning("map", "type `HashSet`", "std"),
+    ]
+  );
+  // None changes what the definition is.
+  assert_eq!(
+    model.def(def(model, "^::alloc::BTreeMap")).collection(),
+    Some(Collection::Map)
+  );
+  assert_eq!(
+    model.def(def(model, "^::std::HashSet")).collection(),
+    Some(Collection::Set)
+  );
 }
 
 #[test]

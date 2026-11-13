@@ -542,6 +542,47 @@ fn markers_and_collections_are_read_off_cores_directives() {
   assert_eq!(model.def(bag).collection(), None);
   assert_eq!(field_shown(model, "^::geo::G", "g"), "Bag<i32>");
 
+  // A definition's own package gives its meaning from any of its files or modules: the test
+  // compares packages, never sources or modules. Two files of a `Flat` root package, in each order.
+  for reversed in [false, true] {
+    let analysis = analyze_two(
+      "scalar Bag<T>\ninterface Plain\n",
+      "extend scalar Bag @set\nextend interface Plain @marker\n",
+      reversed,
+    );
+    assert!(
+      analysis.diagnostics().is_empty(),
+      "files reversed: {reversed}: {:#?}",
+      analysis.diagnostics()
+    );
+    let model = analysis.model();
+    let bag = def(model, Namespace::Type, "^::app::Bag");
+    assert_eq!(model.def(bag).collection(), Some(Collection::Set));
+    assert!(
+      model
+        .def(def(model, Namespace::Type, "^::app::Plain"))
+        .is_marker()
+    );
+  }
+  // Two modules of a `Directory` root package.
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[
+      ("schema.graphqlx", "scalar Bag<T>\n"),
+      ("inner/x.graphqlx", "extend scalar ~::Bag @set\n"),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  let bag = def(model, Namespace::Type, "^::app::Bag");
+  assert_eq!(model.def(bag).collection(), Some(Collection::Set));
+
   // A GraphQL built-in the root package replaces is the root package's own: its extension there
   // gives it its meaning, and is no orphan. The next part's rule judges a set of no parameter.
   let text = "scalar String\nextend scalar String @set\n";
@@ -1231,10 +1272,11 @@ const NON_ZERO_SET: [&str; 2] = [
 
 #[test]
 fn an_alias_and_the_form_it_spells_are_one_type_when_non_zero_is_extended() {
-  // The alias's slot is made what a written argument is, so the two are one type and one
-  // instantiation: with room for one instantiation, both are built. The root package's `@set`
-  // gives `core`'s `NonZero` no meaning, so the argument keeps its nullness, and the orphan rule
-  // refuses the directive.
+  // The root package's `@set` gives `core`'s `NonZero` no meaning, so the argument keeps its
+  // nullness, and the orphan rule refuses the directive; the alias and the form it spells are one
+  // type and one instantiation: with room for one instantiation, both are built. No program can
+  // make `NonZero` a collection, so the alias's slot, made what a written argument is, is never
+  // made non-null: that normalisation is a guard this test no longer reaches.
   for text in NON_ZERO_SET {
     for limits in [Limits::new(), Limits::new().with_max_instantiations(1)] {
       let analysis = analyze_text(text, &limits);
@@ -1779,6 +1821,14 @@ fn a_default_that_cannot_be_used_is_remembered_and_told_at_each_use() {
     messages[4],
     "`A` is written without a type argument for `T`, and the default of `T` cannot fill it here"
   );
+
+  // The failure is remembered. The program costs four steps of substitution: two for `A`'s default
+  // `B`, its miss and the one node of `B`'s default, `Missing`, which fails as it is entered; none
+  // for `a` and `b`, which find that failure in the fill table; and two for `c`, its miss and the
+  // node of `A`'s default, `B`, which finds it too. Within a budget of four every diagnostic is as
+  // without one. A table that kept no failure would fill `B` again at `a`, and `b` would pass it.
+  let limited = analyze_text(text, &Limits::new().with_max_substitutions(4));
+  assert_eq!(limited.diagnostics(), analysis.diagnostics());
 }
 
 /// Whether some occurrence of `analysis`, of any package, has the unresolved type.
@@ -1888,9 +1938,8 @@ const ORDERED_GEO: (&str, &str) = ("g.graphqlx", "type Wrap<T, U = [T]> {\n  val
 /// The dependency `astro`'s file.
 const ORDERED_ASTRO: (&str, &str) = ("s.graphqlx", "type Star {\n  near: Int\n}\n");
 
-/// The type `id`, written out as `shown` writes it, with the id of every type in it before it:
-/// two types with no occurrence of their own, a filled argument or the nullable form of a non-null
-/// one, that swapped ids would write otherwise.
+/// The type `id`, written out as `shown` writes it, each type in it, `id` itself and each argument
+/// and element at any depth, after its own id and a `:`.
 fn structure(model: &Model, id: TyId) -> String {
   let ty = model.ty(id);
   let mut text = match ty.kind() {
