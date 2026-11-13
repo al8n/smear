@@ -43,7 +43,8 @@ pub enum DiagnosticKind {
   // -- Items -------------------------------------------------------------------------------------
   /// A file holds an item, or a part of one, of a kind this analyzer does not know: a parser newer
   /// than the analyzer read the file. What the item declares, or the part names, is not in the
-  /// model. Reported once per file, at the first such item.
+  /// model. The walk that collects items and lowering each report it once per file, at the first
+  /// they meet; name resolution reports each path whose root is of such a kind, at the path.
   UnknownItem,
 
   // -- Name resolution ---------------------------------------------------------------------------
@@ -85,6 +86,13 @@ pub enum DiagnosticKind {
   /// reported.
   ShadowedPrimitive,
 
+  // -- Lowering ----------------------------------------------------------------------------------
+  /// A `where` predicate whose left side is not one of its definition's own type parameters,
+  /// written with no type argument, or any `where` clause on an extension: the model holds a bound
+  /// only on a definition's own parameter, under the definition. Reported at the predicate's left
+  /// side, or at the extension's clause, and nothing of it is in the model.
+  InvalidBound,
+
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
   ResourceLimit,
@@ -112,6 +120,7 @@ impl DiagnosticKind {
     Self::UseDeclarationCollision,
     Self::UseNameCollision,
     Self::ShadowedPrimitive,
+    Self::InvalidBound,
     Self::ResourceLimit,
   ];
 
@@ -138,6 +147,7 @@ impl DiagnosticKind {
       Self::UseDeclarationCollision => Code::new("smear::graphqlx::use-declaration-collision"),
       Self::UseNameCollision => Code::new("smear::graphqlx::use-name-collision"),
       Self::ShadowedPrimitive => Code::new("smear::graphqlx::shadowed-primitive"),
+      Self::InvalidBound => Code::new("smear::graphqlx::invalid-bound"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -164,6 +174,7 @@ impl DiagnosticKind {
       Self::UseDeclarationCollision => "use and declaration of one name",
       Self::UseNameCollision => "two uses of one name",
       Self::ShadowedPrimitive => "declaration shadows a primitive",
+      Self::InvalidBound => "invalid bound",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -190,6 +201,7 @@ impl DiagnosticKind {
       | Self::UseResolutionChanged
       | Self::UseDeclarationCollision
       | Self::UseNameCollision
+      | Self::InvalidBound
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }
@@ -244,4 +256,19 @@ pub(crate) mod schema {
   /// `UndefinedRootOperationType`.
   pub(crate) const UNDEFINED_ROOT_OPERATION_TYPE: Code =
     Code::new("smear::schema::undefined-root-operation-type");
+
+  /// An extension's keyword is not the kind of the definition its target names: `smear-schema`'s
+  /// `ExtensionKindMismatch`.
+  pub(crate) const EXTENSION_KIND_MISMATCH: Code =
+    Code::new("smear::schema::extension-kind-mismatch");
+
+  /// An application names an argument its directive does not declare: `smear-schema`'s
+  /// `UndefinedDirectiveArgument`.
+  pub(crate) const UNDEFINED_DIRECTIVE_ARGUMENT: Code =
+    Code::new("smear::schema::undefined-directive-argument");
+
+  /// The schema is given a second root for one operation: `smear-schema`'s
+  /// `DuplicateRootOperationType`.
+  pub(crate) const DUPLICATE_ROOT_OPERATION_TYPE: Code =
+    Code::new("smear::schema::duplicate-root-operation-type");
 }

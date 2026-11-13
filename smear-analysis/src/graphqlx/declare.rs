@@ -9,8 +9,8 @@
 //! primitives the program writes come first in it, at `core`'s package source, in the order
 //! `bool`, `f32`, `f64`, the signed widths ascending, then the unsigned widths ascending. A
 //! definition's row holds its identity alone: its kind, name, module, location, origin, its
-//! package's tier when it is a built-in, its description, and its definition contribution's
-//! location and extent.
+//! package's tier when it is a built-in, and its description. Where each one is declared is handed
+//! on, and lowering appends its definition contribution from it.
 //!
 //! # Replaced built-ins
 //!
@@ -55,17 +55,16 @@ use super::{
 /// names in.
 ///
 /// Name resolution reads the modules, the names each module declares and the `use` items; lowering
-/// reads the definitions, the extensions and the schema's items. An item is addressed by its
+/// reads the definitions, the extensions and the schema's items, and the names the root package's
+/// root module declares, among which it presumes the schema's roots. An item is addressed by its
 /// source and its index among the source's items, which `items` holds for each source, of
 /// whichever parser made its document.
 pub(crate) struct Declarations<'d, 'a> {
   /// Each source's items, in the order the walk read them; `None` for a source it did not read.
   pub(crate) items: Vec<Option<Items<'d, 'a>>>,
-  /// Each definition's declaration, by `DefId`: the item that declares it, `None` for a primitive
-  /// `core` materialises. A built-in the root package replaces has the root package's item.
-  // Read by lowering, the next part of the analyzer; until it lands nothing reads it.
-  #[allow(dead_code)]
-  pub(crate) defs: Vec<Option<Item>>,
+  /// Each definition's declaration, by `DefId`: where it is written, which lowering appends the
+  /// definition's own contribution from and walks for what the definition holds.
+  pub(crate) defs: Vec<Declaration>,
   /// The names each module declares, sorted by module, then namespace, then name: one binding per
   /// name, the first declaration's. A built-in package's second names, `Int` to `ID`, are bindings
   /// of its root module, each to the definition it names.
@@ -83,13 +82,31 @@ pub(crate) struct Declarations<'d, 'a> {
   /// Every `use` item, by module, then source, then position.
   pub(crate) uses: Vec<Entry>,
   /// Every type and directive extension, by module, then source, then position.
-  // Read by lowering, the next part of the analyzer; until it lands nothing reads it.
-  #[allow(dead_code)]
   pub(crate) extensions: Vec<Entry>,
   /// Every schema definition and extension, by module, then source, then position.
-  // Read by lowering, the next part of the analyzer; until it lands nothing reads it.
-  #[allow(dead_code)]
   pub(crate) schemas: Vec<Entry>,
+}
+
+/// Where a definition is declared: what lowering appends the definition's own contribution from,
+/// and the item it walks for what the definition holds.
+#[derive(Clone, Copy)]
+pub(crate) struct Declaration {
+  /// The item that declares it; `None` for a primitive `core` materialises, which writes nothing.
+  /// A built-in the root package replaces has the root package's item.
+  pub(crate) item: Option<Item>,
+  /// The module its declaration is written in, where the paths it writes resolve: its own module,
+  /// but the root package's root module for a built-in the root package replaces, and `core`'s
+  /// root module for a materialised primitive.
+  pub(crate) module: ModuleId,
+  /// Its kind, which an extension of it is checked against: `Scalar` for a materialised
+  /// primitive.
+  pub(crate) kind: DefKind,
+  /// Where its name is written; the whole of `core`'s package source for a materialised
+  /// primitive, which has no position of its own.
+  pub(crate) location: Location,
+  /// From its description, or its first keyword, to its last token; the whole of `core`'s
+  /// package source for a materialised primitive.
+  pub(crate) extent: Location,
 }
 
 /// A module, as name resolution reads it.
@@ -202,7 +219,7 @@ pub(crate) fn declarations<'d, 'a>(
     }
   }
 
-  let mut defs: Vec<Option<Item>> = Vec::with_capacity(written.len() + definitions.len());
+  let mut defs: Vec<Declaration> = Vec::with_capacity(written.len() + definitions.len());
   let mut ids: Vec<Option<DefId>> = vec![None; definitions.len()];
   let mut names: Vec<Binding> = Vec::new();
   let mut text = String::new();
@@ -224,16 +241,20 @@ pub(crate) fn declarations<'d, 'a>(
           root_found.location,
           Origin::BuiltIn,
         );
-        builder.push_contribution(def, root_found.location, root_found.extent);
         describe(builder, def, root_found.description, &mut text);
-        defs.push(Some(item(root_found.placed)));
+        defs.push(declaration(&modules, root_found));
         ids[at] = Some(def);
         def
       }
       None => {
         let def = builder.push_def(core, DefKind::Scalar, name, whole, Origin::BuiltIn);
-        builder.push_contribution(def, whole, whole);
-        defs.push(None);
+        defs.push(Declaration {
+          item: None,
+          module: core,
+          kind: DefKind::Scalar,
+          location: whole,
+          extent: whole,
+        });
         def
       }
     };
@@ -282,12 +303,11 @@ pub(crate) fn declarations<'d, 'a>(
     };
     let name = builder.intern(&String::from_utf8_lossy(found.name));
     let def = builder.push_def(module, found.kind, name, declaring.location, origin);
-    builder.push_contribution(def, declaring.location, declaring.extent);
     describe(builder, def, declaring.description, &mut text);
     if package < ROOT {
       builder.set_def_tier(def, BUILT_INS[package].tier);
     }
-    defs.push(Some(item(declaring.placed)));
+    defs.push(declaration(&modules, declaring));
     ids[at] = Some(def);
     if let Some(by) = replacement {
       ids[by] = Some(def);
@@ -479,6 +499,17 @@ fn item(placed: Placed) -> Item {
   Item {
     source: placed.source,
     index: placed.item,
+  }
+}
+
+/// Where `found` declares its definition, whose module ids `modules` holds by node.
+fn declaration(modules: &[ModuleId], found: &Found<'_>) -> Declaration {
+  Declaration {
+    item: Some(item(found.placed)),
+    module: modules[found.placed.module as usize],
+    kind: found.kind,
+    location: found.location,
+    extent: found.extent,
   }
 }
 

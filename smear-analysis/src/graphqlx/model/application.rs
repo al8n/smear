@@ -19,8 +19,10 @@ pub enum Resolution<T> {
   Unresolved,
 }
 
-/// One argument of a directive application: one the author wrote, or one its definition's default
-/// filled.
+/// One argument of a directive application: one the author wrote.
+//
+// Coercion, still to come, adds one for each argument the author left out whose definition has a
+// default, with no name written for it; `name_location` and `written` answer for it already.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ApplicationArgument {
   pub(super) argument: MemberId,
@@ -123,8 +125,11 @@ impl<'a> Application<'a> {
     Path::of(self.model, self.row().path)
   }
 
-  /// Its arguments, in its definition's order: each one written or filled from its default. An
-  /// argument neither written nor defaulted is absent, and does not appear.
+  /// Its arguments, each one the author wrote, in its definition's order: an argument written twice
+  /// is here twice, and one not written is absent.
+  //
+  // Coercion, still to come, fills each argument the author left out whose definition has a
+  // default; until it lands no default fills one.
   #[inline]
   pub fn arguments(&self) -> &'a [ApplicationArgument] {
     let model: &'a Model = self.model;

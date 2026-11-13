@@ -258,9 +258,9 @@ impl<'a> Value<'a> {
 
   /// What it is.
   //
-  // Coercion gives a value its coerced shape. Until coercion lands, a value keeps its written
-  // shape; one whose written shape cannot be read without its expected type (a custom scalar's
-  // literal, an enum value, a `TypeRef`) is the `Literal` that keeps its text.
+  // Coercion gives a value its coerced shape. Until coercion lands, every written value is the one
+  // `Literal` lowering makes of it, its syntactic kind and its text as written, whatever it holds:
+  // nothing nested in it is a value of its own.
   pub fn kind(&self) -> ValueKind<'a> {
     let model: &'a Model = self.model;
     let row = self.row();
@@ -313,9 +313,10 @@ impl<'a> Value<'a> {
 
   /// The type it was coerced against.
   //
-  // Coercion gives it. A value no phase gave a type, as every one is until coercion lands,
-  // answers the one unresolved type. The design names no neutral value here: an analysis that is
-  // ok and has values breaks the invariant that nothing unresolved appears in it until then.
+  // Coercion gives it; no phase before it gives a value a type. Until then every value answers
+  // the one unresolved type, in an analysis that is ok too, which therefore holds an unresolved
+  // type wherever it holds a value: the interim this accessor accepts, since the design names no
+  // neutral type for a value nothing has coerced.
   #[inline]
   pub fn ty(&self) -> TyId {
     self.row().ty

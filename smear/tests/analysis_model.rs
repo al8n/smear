@@ -1,9 +1,10 @@
 //! The GraphQLx analyzer's model: every accessor, over a model the test-support door builds with
 //! one of each kind of entity.
 //!
-//! The analyzer does not lower documents into models yet, so these tests write one through the
-//! builder the analysis writes its own with. The fixture asserts every id the builder hands back,
-//! so the constants below are the model's numbering, and a change to it fails here first.
+//! These tests write the model through the builder the analysis writes its own with, so that one
+//! small model reaches every accessor, whatever the analyzer lowers yet. The fixture asserts every
+//! id the builder hands back, so the constants below are the model's numbering, and a change to it
+//! fails here first.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -471,7 +472,7 @@ fn fixture() -> Model {
     0
   );
   assert_eq!(
-    b.push_contribution(QUERY, at(APP_SCHEMA, 900, 905), at(APP_SCHEMA, 890, 960)),
+    b.push_extension(QUERY, at(APP_SCHEMA, 900, 905), at(APP_SCHEMA, 890, 960)),
     1
   );
   for (owner, location, extent) in [
@@ -1356,6 +1357,15 @@ fn a_definition_answers_every_accessor() {
     ]
   );
   assert_eq!(query.contributions().len(), 2);
+  let extensions: Vec<bool> = query
+    .contributions()
+    .map(|part: Contribution<'_>| part.is_extension())
+    .collect::<Vec<bool>>();
+  assert_eq!(
+    extensions,
+    [false, true],
+    "its definition, then its extension"
+  );
   let mut parts: Contributions<'_> = query.contributions();
   assert_eq!(
     parts
@@ -2040,6 +2050,7 @@ fn the_schema_answers_its_roots_applications_description_and_contributions() {
   assert_eq!(parts.len(), 1);
   let part: Contribution<'_> = parts.next().expect("the schema has its definition");
   assert_eq!(part.location(), at(APP_SCHEMA, 1000, 1006));
+  assert!(!part.is_extension());
   assert!(part.members().is_empty());
   assert!(part.implements().is_empty());
   assert_eq!(part.applications(), &[SCHEMA_CACHE]);

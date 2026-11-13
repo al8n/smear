@@ -133,6 +133,40 @@ impl Analysis {
 ///   that give one name two items are reported too. A name that does not resolve gets, in its
 ///   help, the nearest name visible where it is written, of the namespace wanted, while the
 ///   analysis has [`Limits::max_near_miss_comparisons`] left to spend.
+/// - Lowers what each definition holds beyond its identity. Each extension's target is resolved
+///   where the extension is written: one that names nothing, one that names a definition of
+///   another kind than the extension's keyword (`extension-kind-mismatch`), and one that is an
+///   alias such as `NonZeroU32`, which spells an instantiation and is no definition of its own,
+///   is reported and contributes nothing; every other is a contribution of its target. A definition holds its contributions,
+///   its own, where its name is written, then its extensions' by source and position, each where
+///   its target path is written; its type parameters; a directive definition's locations and
+///   whether it is `repeatable`; and its members, the direct members of each contribution in turn
+///   as written and then each field's arguments, each with its description. A replaced built-in
+///   holds what the root package's definition writes, and smear's own definition of it
+///   contributes nothing. Every type written is then a type occurrence, and every directive
+///   application and every value written is one too, appended in the order the model's walk
+///   reaches it, each before what it nests: a type parameter's default, a bound, an `implements`
+///   entry, a union member, an application, a member's type, default and applications. Each
+///   keeps its path as written and the arguments written for it, and its path is resolved where
+///   its contribution is written, with the contribution's generic parameters in scope, an
+///   extension's own names naming its target's by position; one that names nothing is reported,
+///   with the code of its place, and stays unresolved. A bound is a definition's own type
+///   parameter's: any other left side of a `where` predicate, and any `where` clause on an
+///   extension, is `invalid-bound`. An application whose directive resolves keeps its type
+///   arguments and the arguments its directive declares, in the directive's order, an argument
+///   written twice twice; one it does not declare is `undefined-directive-argument`, with the
+///   nearest name it does declare in its help. A value is kept as written, its syntactic kind and
+///   its text. Then the schema's
+///   contributions: every package's schema definitions, then its schema extensions, each by source
+///   and position and each marked as what it is. The root package's first schema definition gives
+///   the schema its description, its roots and its applications, and each schema extension the
+///   root package writes its roots and its applications; any other schema item is a contribution
+///   alone. The first root written for an operation is the schema's, and a second one is
+///   `duplicate-root-operation-type`; with no schema definition of the root package's, an object
+///   type its root module declares named `Query`, `Mutation` or `Subscription` is presumed that
+///   operation's root. Names and texts past what the model's `u32` offsets address,
+///   which only a [`Limits::max_source_bytes`] far above its default admits, are reported at the
+///   root package's package source.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///
@@ -185,7 +219,7 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
   let mut builder = builder_of(&packages, &sources, &dependencies);
   let collected = collect::items(&packages, &sources, &documents, limits, &mut reporter);
   let declarations = declare::declarations(collected, &sources, &mut builder, &mut reporter);
-  let mut scopes = resolve::scopes(
+  let scopes = resolve::scopes(
     &packages,
     &sources,
     &dependencies,
@@ -194,14 +228,21 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
     &mut builder,
     &mut reporter,
   );
-  lower::lower(&declarations, &mut scopes);
+  lower::lower(
+    &packages,
+    &declarations,
+    &scopes,
+    &sources,
+    &mut builder,
+    &mut reporter,
+  );
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }
 
-/// The model of `root` beside `dependencies`, as far as [`analyze`] builds it, and what `path`
-/// names in the module `module` of those packages, where `params` are the generic parameters in
-/// scope: the test-support door to the resolver. `None` when `module` names no module. See
+/// The model of `root` beside `dependencies` as name resolution leaves it, before lowering, and
+/// what `path` names in the module `module` of those packages, where `params` are the generic
+/// parameters in scope: the test-support door to the resolver. `None` when `module` names no module. See
 /// `Scopes::module_at` and `Scopes::door` for how `module` and `path` are spelled.
 #[cfg(feature = "test-support")]
 pub(crate) fn resolve_door<S: SourceText>(

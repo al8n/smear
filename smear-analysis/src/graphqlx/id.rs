@@ -160,8 +160,10 @@ model_id! {
 model_id! {
   /// An interned name of one analysis.
   ///
-  /// Dense from 0, by first occurrence in source-id order, then position. A name the analyzer
-  /// makes itself is interned when it is made. Read it with
+  /// Dense from 0, in the order the analysis first interns each name, phase by phase: the module
+  /// tree, the declarations, the names `use` items bind, then lowering, each phase in its own
+  /// order. That order is a function of the program alone, never of the order its files and
+  /// dependencies are passed in, and it is not an order over spellings. Read a name with
   /// [`Model::name`](super::Model::name).
   Sym
 }

@@ -103,13 +103,50 @@ All notable changes to Smear are documented in this file.
   source names its directory's module, relative to the file it is written in, and is
   `file-path-use` when it names a file and `url-unsupported` when it is a URL. A `use` item that
   names one thing while its module's items resolve and another once all have is
-  `use-resolution-changed`, a `use` of a name its module declares is `use-declaration-collision`,
-  and two that give one name two items are `use-name-collision`. A name that does not resolve
-  gets a "did you mean" in its help: the nearest name visible where it is written, of the
-  namespace wanted, within `Limits::max_near_miss_comparisons` names looked at over the whole
-  analysis. A new `test-support` feature, which `smear/test-support` forwards, compiles a
-  hidden door to the crate-private model builder, and to analyses of the models it builds, for
-  `smear`'s own tests; it is not API.
+  `use-resolution-changed`, a `use` of a name its module declares is
+  `use-declaration-collision`, and two that give one name two items are `use-name-collision`. A
+  name that does not resolve gets a "did you mean" in its help: the nearest name visible where
+  it is written, of the namespace wanted, within `Limits::max_near_miss_comparisons` names
+  looked at over the whole analysis. Lowering then writes what each definition holds beyond its
+  identity. Each extension's target is resolved where the extension is written; one that names a
+  definition of another kind than its keyword is `smear::schema::extension-kind-mismatch`, one
+  that is an alias such as `NonZeroU32`, which spells an instantiation of `NonZero` and is no
+  definition of its own, is `smear::schema::undefined-extension-target`, and these and one that
+  names nothing contribute nothing. A definition holds its contributions, its own,
+  named where its name is written, then each extension's, by source and position, named where
+  its target path is written; its type parameters; a directive definition's locations and whether
+  it is `repeatable`; and its members, the direct members of each contribution in turn as written
+  and then each field's arguments, field by field, each with its description. A GraphQL built-in
+  the root package replaces holds what the root package's definition writes, and the root may
+  extend a built-in. `Contribution::is_extension()` says whether a contribution is a definition
+  or one of its extensions. Every written type is a type occurrence, numbered in the order the
+  model's walk reaches it, each before the types it nests: a type parameter's default, a bound,
+  an `implements` entry, a union member, a member's type. It keeps its path as written, `Int`
+  staying `Int`, and its written arguments, however many its definition has parameters, and its
+  path is resolved where it is written, with the generic parameters of its definition, or of its
+  extension by position, in scope; one that names nothing is reported with the code of its place
+  and stays unresolved. A `where` predicate bounds one of its definition's own type parameters;
+  any other left side, and any `where` clause on an extension, is the new
+  `smear::graphqlx::invalid-bound`. Every directive application, on a definition, an extension, a
+  member or an argument, is numbered in the walk's order too, with its directive's path as
+  written and resolved where it is written; one whose directive names nothing keeps no type
+  argument and no argument. The others keep their type arguments, each an occurrence, and the
+  arguments their directive declares, in the directive's order, an argument written twice
+  twice; one the directive does not declare is `smear::schema::undefined-directive-argument`,
+  with the nearest name it does declare in its help. A written value, a default or an
+  argument's, is one `Literal` that keeps its syntactic kind and its text as written, and a
+  value that is a path keeps its path. The schema has a contribution for every schema item any
+  package writes, its definitions first and then its extensions, each by source and position
+  and named at its `schema` or its `extend`. The root package's first schema definition gives it
+  its description, its roots and its applications, the root package's schema extensions give it
+  their roots and their applications, and every other schema item is a contribution alone. The
+  first root written for an operation is the schema's, a type occurrence, and a second one is
+  `smear::schema::duplicate-root-operation-type`; with no schema definition of the root
+  package's, an object type the root package's root module declares named `Query`, `Mutation` or
+  `Subscription` is presumed that operation's root. Names and texts past what the model's `u32`
+  offsets address are `resource-limit`. A new `test-support` feature, which
+  `smear/test-support` forwards, compiles a hidden door to the crate-private model builder, and
+  to analyses of the models it builds, for `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`
