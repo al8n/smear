@@ -1542,3 +1542,104 @@ fn long_spellings_are_quoted_as_excerpts() {
     assert!(message.contains('…'), "{message}");
   }
 }
+
+/// A count reads an object literal's fields once against each input object it is counted against,
+/// each field a step the first time, one the input object does not declare included; a reading
+/// kept costs nothing more.
+///
+/// `@d`'s default writes N = 64 fields, and none of the M = 32 input objects declares one. Each of
+/// the first M applications rebuilds `T`, one step; counts the literal's node under its input
+/// object, one; reads its 64 fields, 64; and copies the copy's one row, one: 67 each, 2,144 in
+/// all, each copy an `invalid-default-value`. The last application writes `@d<I0>` again: it reads
+/// the kept count, one, and copies its row, one, so 2,146 pays for everything. At 2,145 the last
+/// copy cannot be paid for, and that application alone is `resource-limit`. The test pins the
+/// charge: the work of reading the fields is bounded by it by construction, each field paid for
+/// before it is looked at. Refuses the fields read for nothing, which passes at 2,145, since the
+/// rest costs 3 × 32 + 2 = 98; and a reading made again for a literal and an input object read
+/// already, which fails at 2,146.
+#[test]
+fn a_count_pays_for_each_field_it_reads_against_a_new_input_object() {
+  const N: usize = 64;
+  const M: usize = 32;
+  let fields: Vec<String> = (0..N).map(|k: usize| format!("f{k}: 1")).collect();
+  let applied: Vec<String> = (0..M).map(|i: usize| format!("@d<I{i}>")).collect();
+  let inputs: String = (0..M)
+    .map(|i: usize| format!("input I{i} {{\n  a: Int\n}}\n"))
+    .collect();
+  let text = format!(
+    "type Query {} @d<I0> {{\n  x: Int\n}}\n\
+     directive @d<T>(v: T = {{ {} }}) repeatable on OBJECT\n{inputs}",
+    applied.join(" "),
+    fields.join(", ")
+  );
+  let total = u32::try_from(M * (N + 3) + 2).expect("a small budget");
+  let paid = analyze_text(&text, &Limits::new().with_max_value_steps(total));
+  assert!(
+    found_of(&paid, &[LIMIT]).is_empty(),
+    "{:#?}",
+    paid.diagnostics()
+  );
+  assert_eq!(found_of(&paid, &[DEFAULT]).len(), M + 1);
+  let short = analyze_text(&text, &Limits::new().with_max_value_steps(total - 1));
+  let schema = schema_file(&short);
+  assert_eq!(
+    found_of(&short, &[LIMIT]),
+    [(LIMIT, named(schema, &text, "@", "d", M))]
+  );
+}
+
+/// A count under type arguments renders the identities of a set's elements once for each literal
+/// and element type it searches, each a step for each 64 bytes or part, paid before it is
+/// rendered.
+///
+/// The default `set!{"…"}` holds one string of 6,400 bytes, and is copied under M = 20 sets of
+/// distinct definitions, each of `String`, whose element is one type. The first application
+/// rebuilds `T`, one step; counts the set and its element, two; renders the element's identity,
+/// 6,400 bytes, 100; and copies two rows, two: 105. Each later one renders nothing, the literal
+/// searched already against its element type: 1 + 2 + 2 = 5. In all 105 + 19 × 5 = 200; at 199 the
+/// last application's copy cannot be paid for. Refuses a search made again under each collection
+/// type, which needs 19 × 100 more.
+///
+/// Under sets of `String`, `ID` and `bytes`, three element types, each search is made and pays
+/// for its rendering: 105 each, 315 in all; at 314 the third application is `resource-limit`.
+/// Refuses a rendering paid for nothing, which passes at 314 with 15.
+#[test]
+fn a_count_pays_for_each_identity_it_renders_once_per_element_type() {
+  const M: usize = 20;
+  let long = "a".repeat(6400);
+  let applied: Vec<String> = (0..M).map(|i: usize| format!("@d<S{i}<String>>")).collect();
+  let sets: String = (0..M)
+    .map(|i: usize| format!("scalar S{i}<E> @set\n"))
+    .collect();
+  let text = format!(
+    "type Query {} {{\n  x: Int\n}}\n{sets}\
+     directive @d<T>(v: T = set!{{\"{long}\"}}) repeatable on OBJECT\n",
+    applied.join(" ")
+  );
+  let total = u32::try_from(105 + (M - 1) * 5).expect("a small budget");
+  quiet(&analyze_text(
+    &text,
+    &Limits::new().with_max_value_steps(total),
+  ));
+  let short = analyze_text(&text, &Limits::new().with_max_value_steps(total - 1));
+  let schema = schema_file(&short);
+  assert_eq!(
+    found_of(&short, &[LIMIT]),
+    [(LIMIT, named(schema, &text, "@", "d", M - 1))]
+  );
+
+  let text = format!(
+    "type Query @d<S<String>> @d<S<ID>> @d<S<bytes>> {{\n  x: Int\n}}\nscalar S<E> @set\n\
+     directive @d<T>(v: T = set!{{\"{long}\"}}) repeatable on OBJECT\n"
+  );
+  quiet(&analyze_text(
+    &text,
+    &Limits::new().with_max_value_steps(315),
+  ));
+  let short = analyze_text(&text, &Limits::new().with_max_value_steps(314));
+  let schema = schema_file(&short);
+  assert_eq!(
+    found_of(&short, &[LIMIT]),
+    [(LIMIT, named(schema, &text, "@", "d", 2))]
+  );
+}
