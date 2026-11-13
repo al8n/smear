@@ -39,6 +39,7 @@ mod non_zero_argument;
 mod orphan_extension;
 mod reserved_name;
 mod schema_outside_root;
+mod self_implementing_interface;
 mod type_ref_misuse;
 
 use self::{
@@ -49,7 +50,7 @@ use self::{
   marker_misuse::MarkerMisuse, member_type_kind::MemberTypeKind,
   non_zero_argument::NonZeroArgument, orphan_extension::OrphanExtension,
   reserved_name::ReservedName, schema_outside_root::SchemaOutsideRoot,
-  type_ref_misuse::TypeRefMisuse,
+  self_implementing_interface::SelfImplementingInterface, type_ref_misuse::TypeRefMisuse,
 };
 use super::{
   Contribution, Cx, DefId, Model, PackageId, PackageKind, TypeExprId, TypeExprKind, id::dense,
@@ -309,8 +310,8 @@ rule_set! {
   /// gives them; and of the definitions a supplied package wrote, GraphQL's own rules: a member's
   /// name does not begin with `__`; a definition's members have distinct names, and so have a
   /// field's arguments; a definition that holds members holds one at least, a marker holding
-  /// none; a member's type is of the kind its position takes; and an object or an interface
-  /// implements interfaces.
+  /// none; a member's type is of the kind its position takes; an object or an interface implements
+  /// interfaces; and no interface implements itself.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -354,6 +355,8 @@ rule_set! {
     ],
     implements_non_interface: ImplementsNonInterface
       => [super::code::schema::IMPLEMENTS_NON_INTERFACE],
+    self_implementing_interface: SelfImplementingInterface
+      => [super::code::schema::SELF_IMPLEMENTING_INTERFACE],
   }
 }
 

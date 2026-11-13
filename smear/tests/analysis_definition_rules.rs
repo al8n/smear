@@ -1,8 +1,8 @@
 //! The GraphQLx analyzer's rules on what a definition holds, each GraphQL's own with GraphQL's
 //! code: a member's name does not begin with two underscores; a definition's members have distinct
 //! names, and so have a field's arguments; a definition that holds members holds one at least; a
-//! member's type is of the kind its position takes; and an object or an interface implements
-//! interfaces. Each rule judges what a supplied
+//! member's type is of the kind its position takes; an object or an interface implements
+//! interfaces; and no interface implements itself. Each rule judges what a supplied
 //! package's definition holds, says nothing within what a phase refused, and quotes a name only as
 //! an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -50,6 +50,9 @@ const DIRECTIVE_ARGUMENT_TYPE: &str = "smear::schema::directive-argument-type-no
 
 /// GraphQL's code for an `implements` entry that names what is no interface.
 const IMPLEMENTS: &str = "smear::schema::implements-non-interface";
+
+/// GraphQL's code for an interface that implements itself.
+const SELF_IMPLEMENTING: &str = "smear::schema::self-implementing-interface";
 
 /// The code of a marker used as a marker may not be, which L3's rule reports.
 const MARKER: &str = "smear::graphqlx::marker-misuse";
@@ -751,6 +754,54 @@ fn an_object_or_an_interface_implements_interfaces() {
   assert_eq!(first.help(), None);
 }
 
+/// An interface that implements itself; two, and then three, in a ring; one whose entry names
+/// itself with other arguments; a ring an extension closes; and one that implements another that
+/// leads nowhere back.
+const RINGS: &str = "type Query {\n  ok: Int\n}\ninterface Selfish implements Selfish {\n  id: ID\n}\n\
+                     interface P1 implements P2 {\n  id: ID\n}\ninterface P2 implements P1 {\n  id: ID\n}\n\
+                     interface R1 implements R2 {\n  id: ID\n}\ninterface R2 implements R3 {\n  id: ID\n}\n\
+                     interface R3 implements R1 {\n  id: ID\n}\n\
+                     scalar Box<B>\ninterface G<X> implements G<Box<X>> {\n  id: ID\n}\n\
+                     interface E1 implements E2 {\n  id: ID\n}\ninterface E2 {\n  id: ID\n}\n\
+                     extend interface E2 implements E1\n\
+                     interface Down implements Leaf {\n  id: ID\n}\ninterface Leaf {\n  id: ID\n}\n";
+
+#[test]
+fn no_interface_implements_itself() {
+  let analysis = analyze_one(RINGS);
+  let schema = schema_file(&analysis);
+  let ring = |name: &str| -> (&'static str, Location, Option<Location>) {
+    (
+      SELF_IMPLEMENTING,
+      named(schema, RINGS, "interface ", name, 0),
+      None,
+    )
+  };
+  assert_eq!(
+    found(&analysis),
+    [
+      ring("Selfish"),
+      ring("P1"),
+      ring("P2"),
+      ring("R1"),
+      ring("R2"),
+      ring("R3"),
+      ring("G"),
+      ring("E1"),
+      ring("E2"),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis)[0],
+    "the interface `Selfish` implements itself, through the interfaces it implements"
+  );
+  let first = analysis.diagnostics().iter().next().expect("a diagnostic");
+  assert_eq!(first.primary_label(), Some("interface implements itself"));
+  assert_eq!(first.help(), None);
+}
+
 /// A refusal of `code` is silent in a contribution that also holds a phase's error, `together`,
 /// and is reported beside it when the error is in a sibling definition, `apart`. The phase's error
 /// is an undefined type.
@@ -814,6 +865,25 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\ntype T implements Obj {\n  id: ID\n}\n\
      type U {\n  x: Missing\n}\n",
   );
+  // An error in an interface's own contribution silences it, and not the other interface of its
+  // ring.
+  let text = "type Query {\n  ok: Int\n}\ninterface A implements B {\n  id: ID\n  x: Missing\n}\n\
+              interface B implements A {\n  id: ID\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (UNDEFINED, at(schema, text, "Missing", 0), None),
+      (
+        SELF_IMPLEMENTING,
+        named(schema, text, "interface ", "B", 0),
+        None
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
 }
 
 #[test]
@@ -831,6 +901,9 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
     format!(
       "type Query {{\n  ok: Int\n}}\ntype {plain} {{\n  o: Int\n}}\n\
        type {owner} implements {plain} {{\n  id: ID\n}}\n"
+    ),
+    format!(
+      "type Query {{\n  ok: Int\n}}\ninterface {owner} implements {owner} {{\n  id: ID\n}}\n"
     ),
   ];
   for text in &texts {

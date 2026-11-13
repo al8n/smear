@@ -518,4 +518,9 @@ pub(crate) mod schema {
   /// `smear-schema`'s `ImplementsNonInterface`.
   pub(crate) const IMPLEMENTS_NON_INTERFACE: Code =
     Code::new("smear::schema::implements-non-interface");
+
+  /// An interface lies on a cycle of `implements` entries: `smear-schema`'s
+  /// `SelfImplementingInterface`.
+  pub(crate) const SELF_IMPLEMENTING_INTERFACE: Code =
+    Code::new("smear::schema::self-implementing-interface");
 }
