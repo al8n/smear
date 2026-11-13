@@ -490,7 +490,8 @@ impl<'a> Def<'a> {
   /// effective tier. Only a scalar a supplied package defines has any, and only an `@extern` whose
   /// `lang` and `type` are strings and whose `tier` is absent, `null` or a value of `core`'s `Tier`
   /// is one: what another package writes binds nothing, and a value that does not fit is refused
-  /// where it is written. A `lang` written twice is here twice.
+  /// where it is written. A `lang` written twice is here twice, and the later is
+  /// [`ExternMisuse`](crate::graphqlx::DiagnosticKind::ExternMisuse).
   ///
   /// A built-in has none, a primitive and a GraphQL built-in the root package replaces among them:
   /// a built-in's host type is given by `@repr(for: …)` on the schema alone.
@@ -812,15 +813,28 @@ impl core::fmt::Debug for TypeParams<'_> {
 /// reads. Its `lang` and its `type` are the strings written, cooked, and its tier is the one its
 /// `tier` names, or its scalar's package's when it names none.
 ///
+/// Two externs are equal when they are one binding: when they answer alike and are bound from one
+/// application.
+///
 /// `Copy`: everything it answers is borrowed from the model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Extern<'a> {
   lang: &'a str,
   ty: &'a str,
   tier: Tier,
+  application: Option<ApplicationId>,
 }
 
 impl<'a> Extern<'a> {
+  /// The `@extern` it is bound from: `None` only for one a hand-built model holds.
+  //
+  // Crate-private: the public model answers no extern's application, and the rules on `@extern`'s
+  // use and on tiers point at it. A candidate public accessor for the model's review.
+  #[inline]
+  pub(crate) const fn application(&self) -> Option<ApplicationId> {
+    self.application
+  }
+
   /// Its `lang`: the host language, as the string is cooked.
   #[inline]
   pub const fn lang(&self) -> &'a str {
@@ -859,6 +873,7 @@ impl<'a> Externs<'a> {
       lang: row.lang.text(&model.text),
       ty: row.ty.text(&model.text),
       tier: row.tier,
+      application: row.application,
     }
   }
 }

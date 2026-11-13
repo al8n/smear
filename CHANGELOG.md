@@ -462,7 +462,9 @@ All notable changes to Smear are documented in this file.
   `std`, a GraphQL built-in the root package replaces among them, unless the root package writes it
   and it adds directives and nothing else; in the root package's extension of a built-in it did not
   write, each application of `core`'s `@marker`, `@set` or `@map` is `orphan-extension` too, at its
-  path, since what a built-in is is the language's to say. And an enum takes no type parameter: an
+  path, since what a built-in is is the language's to say, and so is each of `core`'s `@extern`
+  there, a built-in's host type being given by `@repr(for: …)` on the schema alone. And an enum
+  takes no type parameter: an
   enum that declares one is the new `smear::graphqlx::generic-enum`, at its first type parameter's
   name, and each use of it is still typed. And a marker is used as a marker: one that declares a
   field, once, at the first its own package wrote; one named anywhere but as the outermost type of
@@ -480,7 +482,11 @@ All notable changes to Smear are documented in this file.
   is written, which is then all a map or a set keyed by it is refused with. And a definition's type
   parameters have distinct names, and so do the names an extension's own list gives them: a type
   parameter with the name of an earlier one is the new `smear::graphqlx::duplicate-type-parameter`,
-  at its name, with a label at the first of that name. A rule says nothing about a contribution a
+  at its name, with a label at the first of that name. And `@extern` binds a scalar its own
+  package defines, once for each language: an extern whose `lang` an earlier extern of its scalar
+  has, the cooked strings compared, and an `@extern` the root package writes on a GraphQL built-in
+  its own definition replaces, are each the new `smear::graphqlx::extern-misuse`, at the
+  `@extern`'s path. A rule says nothing about a contribution a
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models
   it builds, for `smear`'s own tests; it is not API.

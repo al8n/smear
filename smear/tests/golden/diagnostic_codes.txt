@@ -11,6 +11,7 @@ DiagnosticKind::CollectionLiteral = smear::graphqlx::collection-literal
 DiagnosticKind::DuplicateFilePath = smear::graphqlx::duplicate-file-path
 DiagnosticKind::DuplicatePackageName = smear::graphqlx::duplicate-package-name
 DiagnosticKind::DuplicateTypeParameter = smear::graphqlx::duplicate-type-parameter
+DiagnosticKind::ExternMisuse = smear::graphqlx::extern-misuse
 DiagnosticKind::FilePathUse = smear::graphqlx::file-path-use
 DiagnosticKind::GenericArity = smear::graphqlx::generic-arity
 DiagnosticKind::GenericDefault = smear::graphqlx::generic-default

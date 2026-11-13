@@ -92,7 +92,8 @@ its schema at most once, each later schema definition of the root package being
 dependency's schema item being `smear::graphqlx::schema-outside-root`; and a package extends its own
 definitions alone, an extension of another package's being `smear::graphqlx::orphan-extension`, but
 for the directives the root package adds to a definition of `core`, `alloc` or `std`, none of which
-may be `@marker`, `@set` or `@map` unless the root package wrote that definition; an enum takes no
+may be `@marker`, `@set` or `@map` unless the root package wrote that definition, nor `@extern`; an
+enum takes no
 type parameter, an enum that declares one being `smear::graphqlx::generic-enum`; and a marker
 declares no field, is named only as the outermost type of an `implements` entry or of a bound, and
 is all a scalar, an enum, an input object or a union implements, each other use being
@@ -104,7 +105,10 @@ definition's argument or of an input field, under lists alone, anywhere else bei
 one bit wide, written without `!`, `NonZero` of anything else being
 `smear::graphqlx::nonzero-argument`; and a definition's type parameters have distinct names, and so
 do the names an extension's own list gives them, a type parameter with the name of an earlier one
-being `smear::graphqlx::duplicate-type-parameter`. An
+being `smear::graphqlx::duplicate-type-parameter`; and `@extern` binds a scalar its own package
+defines, once for each language, an extern whose `lang` an earlier one of its scalar has, and an
+`@extern` the root package writes on a GraphQL built-in its own definition replaces, being
+`smear::graphqlx::extern-misuse`. An
 error that a phase or a rule reports marks the contributions, members and definitions that hold it,
 as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error marks
 nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and

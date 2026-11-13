@@ -2,10 +2,11 @@
 //! phases have written the model: a program defines its schema at most once; only the root
 //! package defines or extends the schema; and a package extends its own definitions alone, but
 //! for the directives the root package adds to a built-in, none of which may give the built-in a
-//! built-in meaning. Each rule says nothing about what a phase already refused, marks what it
-//! reports, and quotes a name only as an excerpt. The fourth rule, that an enum takes no type
-//! parameter, is tested in `analysis_types`, beside the phase that types each use of the enum, and
-//! the rules after it, on what is judged of types, in `analysis_type_rules`.
+//! built-in meaning or a host type. Each rule says nothing about what a phase already refused,
+//! marks what it reports, and quotes a name only as an excerpt. The fourth rule, that an enum takes
+//! no type parameter, is tested in `analysis_types`, beside the phase that types each use of the
+//! enum, and the rules after it, on what is judged of types, in `analysis_type_rules`; the rule on
+//! `@extern`'s use in `analysis_host`, beside the binding it reads.
 //!
 //! Then the rule set itself: every code a rule lists fires on a fixture; and the walk the rules
 //! ride, over an analyzed program of two packages, written out hook by hook.
@@ -49,6 +50,9 @@ const NONZERO_ARGUMENT: &str = "smear::graphqlx::nonzero-argument";
 /// The code for a type parameter with the name of an earlier one.
 const DUPLICATE_TYPE_PARAMETER: &str = "smear::graphqlx::duplicate-type-parameter";
 
+/// The code for `@extern` misused.
+const EXTERN_MISUSE: &str = "smear::graphqlx::extern-misuse";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -75,6 +79,10 @@ const MORE_THAN_DIRECTIVES: &str = "an extension of a definition of `core`, `all
 /// `@set` or `@map`.
 const MEANING: &str = "`@marker`, `@set` and `@map` say what a definition is, and what a built-in \
                        is is the language's to say: remove this directive";
+
+/// What the orphan rule tells the root package when its extension of a built-in applies `@extern`.
+const HOST: &str = "`@extern` binds a scalar its own package defines: give a built-in its host \
+                    type with `extend schema @repr(for: …, lang: …, type: …)`";
 
 /// What the orphan rule tells the root package when it adds more than directives to a built-in its
 /// own definition replaces, which may write what the extension adds.
@@ -1011,6 +1019,96 @@ fn what_gives_a_built_in_no_meaning_is_no_orphan_and_a_dependencys_extension_is_
   assert_eq!(model.def(non_zero).collection(), None);
 }
 
+/// What the orphan rule says of the root package's `@extern` applied to `what`, a definition of
+/// the built-in package `built_in` written as the message writes it: "type `string`".
+fn host(what: &str, built_in: &str) -> String {
+  format!(
+    "package `app` applies `@extern` to the {what} of the built-in package `{built_in}`, and a \
+     built-in's host type is given by `@repr(for: …)` on the schema alone"
+  )
+}
+
+/// The root package's `@extern` on a built-in it did not write is an orphan: on `alloc`'s
+/// `string`, on `i32`, a primitive `core` materialises with no position for a label, and on `std`'s
+/// `HashSet`, which an extension names with no parameter list. Each is refused where it is written,
+/// and none binds anything. Refuses the root's `@extern` on a built-in accepted, inert or bound.
+#[test]
+fn the_root_giving_a_built_in_a_host_type_is_an_orphan() {
+  let text = "type Query {\n  x: Int\n}\n\
+              extend scalar string @extern(lang: \"rust\", type: \"my::Str\")\n\
+              extend scalar Int @extern(lang: \"rust\", type: \"i32\")\n\
+              extend scalar HashSet @extern(lang: \"rust\", type: \"std::collections::HashSet\")\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  let string = model.builtins().string();
+  let hash_set = def(model, "^::std::HashSet");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        ORPHAN,
+        at(schema, text, "extern", 0),
+        Some(model.def(string).location())
+      ),
+      (ORPHAN, at(schema, text, "extern", 1), None),
+      (
+        ORPHAN,
+        at(schema, text, "extern", 2),
+        Some(model.def(hash_set).location())
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      host("type `string`", "alloc"),
+      host("type `i32`", "core"),
+      host("type `HashSet`", "std"),
+    ]
+  );
+  assert_eq!(helps(&analysis), [Some(HOST), Some(HOST), Some(HOST)]);
+  let int = def(model, "^::core::i32");
+  for built_in in [string, int, hash_set] {
+    assert_eq!(model.def(built_in).externs().len(), 0);
+  }
+}
+
+/// A dependency's extension of a built-in that applies `@extern` is refused whole, once, by the
+/// orphan rule's second message, at its target. Refuses a second diagnostic at the `@extern`.
+#[test]
+fn a_dependencys_extern_on_a_built_in_is_one_orphan() {
+  let ours = "type Query {\n  x: Int\n}\n";
+  let theirs = "extend scalar string @extern(lang: \"rust\", type: \"geo::Str\")\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let geo_file = file(&analysis, 4, "geo.graphqlx");
+  let model = analysis.model();
+  let string = model.builtins().string();
+  assert_eq!(
+    found(&analysis),
+    [(
+      ORPHAN,
+      at(geo_file, theirs, "string", 0),
+      Some(model.def(string).location())
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "package `geo` extends the type `string` of the built-in package `alloc`, which only the root \
+       package extends"
+    ]
+  );
+  assert_eq!(helps(&analysis), [Some(NOT_THE_ROOT)]);
+  assert_eq!(model.def(string).externs().len(), 0);
+}
+
 /// Every file of a `Flat` package is one module of one package, as the documents of a GraphQL
 /// schema are one schema: an extension of a definition of the package's own, whichever file holds
 /// it, is no orphan, and nor is a directive it adds to a built-in. A `Flat` root package that adds
@@ -1264,6 +1362,7 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(DUPLICATE_TYPE_PARAMETER),
     two_type_parameters_of_one_name,
   ),
+  (Code::new(EXTERN_MISUSE), one_language_bound_twice),
 ];
 
 /// A root package that defines its schema twice.
@@ -1339,6 +1438,14 @@ fn a_non_zero_float() -> Analysis {
 /// A root package that declares two type parameters of one name.
 fn two_type_parameters_of_one_name() -> Analysis {
   analyze_one("scalar Pair<T, T>\n")
+}
+
+/// A root package that binds one scalar to two host types of one language.
+fn one_language_bound_twice() -> Analysis {
+  analyze_one(
+    "type Query {\n  x: Int\n}\n\
+     scalar M @extern(lang: \"rust\", type: \"a\") @extern(lang: \"rust\", type: \"b\")\n",
+  )
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

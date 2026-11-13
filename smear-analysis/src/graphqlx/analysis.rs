@@ -324,7 +324,9 @@ impl Analysis {
 ///   replaces among them, unless the root package writes it and it adds directives and nothing
 ///   else. In the root package's extension of a built-in it did not write, each application of
 ///   `core`'s `@marker`, `@set` or `@map` is `orphan-extension` too, at its path: what a built-in
-///   is is the language's to say. An enum that declares a type parameter is `generic-enum`, at its
+///   is is the language's to say; and so is each of `core`'s `@extern`, a built-in's host type
+///   being given by `@repr(for: …)` on the schema alone. An enum that declares a type parameter is
+///   `generic-enum`, at its
 ///   first type parameter's name. A marker that declares a field is `marker-misuse`, once, at the
 ///   first field its own package wrote; so is a marker named anywhere but as the outermost type of
 ///   an `implements` entry or of a bound, where it is named, and an `implements` entry of a scalar,
@@ -338,8 +340,11 @@ impl Analysis {
 ///   without `!` is `nonzero-argument`, where it is written, with a label at the argument. A type
 ///   parameter with the name of an earlier one of its definition, and a name an extension's own
 ///   list gives after it gave it to an earlier one, is `duplicate-type-parameter`, at that name,
-///   with a label at the first of that name. A rule says nothing about a contribution a phase
-///   already refused something in.
+///   with a label at the first of that name. An extern of a scalar whose `lang` an earlier extern
+///   of the scalar has, the cooked strings compared, is `extern-misuse`, at its `@extern`'s path,
+///   with a label at the earlier's; and so is each `@extern` the root package writes on a GraphQL
+///   built-in its own definition replaces, in that definition or its own extension. A rule says
+///   nothing about a contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

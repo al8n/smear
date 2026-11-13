@@ -19,10 +19,13 @@
 //! descends the written arguments of an occurrence that names a type parameter, or nothing, and
 //! the public kind does not answer them. `DuplicateTypeParameter` reads another,
 //! `Def::extension_params`: the names an extension's own list writes, which no public view holds.
+//! `ExternMisuse` reads `Extern::application`, the application an extern is bound from, which the
+//! public model does not answer yet: a candidate public accessor for the model's review.
 
 mod collection_arity;
 mod duplicate_schema_definition;
 mod duplicate_type_parameter;
+mod extern_misuse;
 mod generic_enum;
 mod marker_misuse;
 mod non_zero_argument;
@@ -32,8 +35,8 @@ mod type_ref_misuse;
 
 use self::{
   collection_arity::CollectionArity, duplicate_schema_definition::DuplicateSchemaDefinition,
-  duplicate_type_parameter::DuplicateTypeParameter, generic_enum::GenericEnum,
-  marker_misuse::MarkerMisuse, non_zero_argument::NonZeroArgument,
+  duplicate_type_parameter::DuplicateTypeParameter, extern_misuse::ExternMisuse,
+  generic_enum::GenericEnum, marker_misuse::MarkerMisuse, non_zero_argument::NonZeroArgument,
   orphan_extension::OrphanExtension, schema_outside_root::SchemaOutsideRoot,
   type_ref_misuse::TypeRefMisuse,
 };
@@ -276,13 +279,14 @@ rule_set! {
   /// smear's own rules, which `analyze` runs over every supplied package once its phases have
   /// written the model: a program defines its schema at most once; only the root package defines
   /// or extends the schema; a package extends its own definitions alone, but for the directives
-  /// the root package adds to a built-in, none of which may give it a built-in meaning; an enum
-  /// takes no type parameter; a marker has no field and is named only in `implements` and in
-  /// bounds, and a scalar, an enum, an input object or a union implements markers alone; a set has
-  /// one type parameter and a map two; `TypeRef` stands only in a directive's arguments;
-  /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; and
-  /// a definition's type parameters have distinct names, and so do the names an extension's own
-  /// list gives them.
+  /// the root package adds to a built-in, none of which may give it a built-in meaning or a host
+  /// type; an enum takes no type parameter; a marker has no field and is named only in
+  /// `implements` and in bounds, and a scalar, an enum, an input object or a union implements
+  /// markers alone; a set has one type parameter and a map two; `TypeRef` stands only in a
+  /// directive's arguments; `NonZero`'s argument is an integer primitive at least one bit wide,
+  /// written without `!`; a definition's type parameters have distinct names, and so do the names
+  /// an extension's own list gives them; and `@extern` binds a scalar its own package defines,
+  /// once for each language.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -295,6 +299,7 @@ rule_set! {
     non_zero_argument: NonZeroArgument => [super::DiagnosticKind::NonZeroArgument.code()],
     duplicate_type_parameter: DuplicateTypeParameter
       => [super::DiagnosticKind::DuplicateTypeParameter.code()],
+    extern_misuse: ExternMisuse => [super::DiagnosticKind::ExternMisuse.code()],
   }
 }
 

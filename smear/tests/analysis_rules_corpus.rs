@@ -1014,4 +1014,23 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
     &analysis,
     "a dependency's schema definition that holds a refusal",
   );
+
+  // Two `rust` externs that bind, beside an `@extern` whose `lang` did not coerce, in the scalar's
+  // own contribution: coercion's diagnostic alone, the second `rust` being in a contribution a
+  // phase refused something in.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[(
+      "schema.graphqlx",
+      "type Query {\n  x: Int\n}\nscalar M @extern(lang: \"rust\", type: \"a\") \
+       @extern(lang: \"rust\", type: \"b\") @extern(lang: 1, type: \"c\")\n",
+    )],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(
+    codes(&analysis),
+    ["smear::schema::invalid-directive-argument-value"]
+  );
+  tolerant(&analysis, "a language bound twice beside a value refused");
 }

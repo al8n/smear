@@ -101,7 +101,8 @@
 //! directive is `smear::graphqlx::orphan-extension`, and so is an extension of a definition of
 //! `core`, `alloc` or `std`, unless the root package writes it and it adds directives and nothing
 //! else, none of them `core`'s `@marker`, `@set` or `@map` unless it wrote the definition, a
-//! built-in it replaces. And an enum takes no type parameter: an enum that declares one is
+//! built-in it replaces, and none `core`'s `@extern`. And an enum takes no type parameter: an enum
+//! that declares one is
 //! `smear::graphqlx::generic-enum`, at its first type parameter's name. And a marker is used as a
 //! marker: one that declares a field, one named anywhere but as the outermost type of an
 //! `implements` entry or of a bound, and an `implements` entry of a scalar, an enum, an input
@@ -114,8 +115,11 @@
 //! is no integer primitive at least one bit wide, written without `!`, is
 //! `smear::graphqlx::nonzero-argument`. And a definition's type parameters have distinct names, and
 //! so do the names an extension's own list gives them: a type parameter with the name of an
-//! earlier one is `smear::graphqlx::duplicate-type-parameter`. A rule says nothing about a
-//! contribution a phase already refused something in.
+//! earlier one is `smear::graphqlx::duplicate-type-parameter`. And `@extern` binds a scalar its
+//! own package defines, once for each language: an extern whose `lang` an earlier one of its
+//! scalar has, and an `@extern` the root package writes on a GraphQL built-in its own definition
+//! replaces, are each `smear::graphqlx::extern-misuse`. A rule says nothing about a contribution a
+//! phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

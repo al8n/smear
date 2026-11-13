@@ -179,7 +179,9 @@ pub enum DiagnosticKind {
   /// Nor may those directives say what the built-in is: in the root package's extension of a
   /// built-in it did not write, each application of `core`'s `@marker`, `@set` or `@map` is
   /// reported too, at the application's path, with the same label. A built-in the root package
-  /// replaces is the root package's own, and its extension may.
+  /// replaces is the root package's own, and its extension may. Nor may they bind it to a host
+  /// type: each application of `core`'s `@extern` there is reported likewise, a built-in's host
+  /// type being given by `@repr(for: …)` on the schema alone.
   OrphanExtension,
   /// An enum that declares a type parameter. An enum's values are names that hold no type, so an
   /// enum takes no type parameter. Reported once, at the enum's first type parameter's name; each
@@ -221,6 +223,13 @@ pub enum DiagnosticKind {
   /// a parameter by its name, which would name the first of the two alone. Reported at the later
   /// name, with a label at the first of that name.
   DuplicateTypeParameter,
+  /// `core`'s `@extern` misused. A language binds a scalar once: an `@extern` whose `lang` an
+  /// earlier one its package binds the scalar with has, told by the cooked strings, is reported at
+  /// its path, with a label at the earlier. And `@extern` binds a scalar its own package defines:
+  /// one the root package writes on a GraphQL built-in its own definition replaces, in that
+  /// definition or its extension, is reported at its path, a built-in's host type being given by
+  /// `@repr(for: …)` on the schema alone.
+  ExternMisuse,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -264,6 +273,7 @@ impl DiagnosticKind {
     Self::TypeRefMisuse,
     Self::NonZeroArgument,
     Self::DuplicateTypeParameter,
+    Self::ExternMisuse,
     Self::ResourceLimit,
   ];
 
@@ -305,6 +315,7 @@ impl DiagnosticKind {
       Self::TypeRefMisuse => Code::new("smear::graphqlx::typeref-misuse"),
       Self::NonZeroArgument => Code::new("smear::graphqlx::nonzero-argument"),
       Self::DuplicateTypeParameter => Code::new("smear::graphqlx::duplicate-type-parameter"),
+      Self::ExternMisuse => Code::new("smear::graphqlx::extern-misuse"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -346,6 +357,7 @@ impl DiagnosticKind {
       Self::TypeRefMisuse => "`TypeRef` where it may not stand",
       Self::NonZeroArgument => "invalid `NonZero` argument",
       Self::DuplicateTypeParameter => "duplicate type parameter",
+      Self::ExternMisuse => "`@extern` misused",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -387,6 +399,7 @@ impl DiagnosticKind {
       | Self::TypeRefMisuse
       | Self::NonZeroArgument
       | Self::DuplicateTypeParameter
+      | Self::ExternMisuse
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }

@@ -17,6 +17,10 @@ const ARGUMENT: &str = "smear::schema::invalid-directive-argument-value";
 const MISSING: &str = "smear::schema::missing-required-directive-argument";
 /// A collection literal out of its place.
 const COLLECTION: &str = "smear::graphqlx::collection-literal";
+/// The code for `@extern` misused.
+const EXTERN_MISUSE: &str = "smear::graphqlx::extern-misuse";
+/// The code for an extension of a definition its package may not extend.
+const ORPHAN: &str = "smear::graphqlx::orphan-extension";
 
 /// A package named `name`, `Flat`, at `tier`, holding `files`, `(path, text)`.
 fn package<'a>(name: &'a str, tier: Tier, files: &[(&'a str, &'a str)]) -> Package<&'a str> {
@@ -67,6 +71,26 @@ fn found_of(analysis: &Analysis, codes: &[&str]) -> Vec<(&'static str, Location)
     .iter()
     .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
     .filter(|row: &(&'static str, Location)| codes.contains(&row.0))
+    .collect()
+}
+
+/// Each diagnostic whose code is one of `codes`: its code, its primary location and its first
+/// label's location, in the list's order.
+fn labelled(
+  analysis: &Analysis,
+  codes: &[&str],
+) -> Vec<(&'static str, Location, Option<Location>)> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| codes.contains(&diagnostic.code().as_str()))
+    .map(|diagnostic: &Diagnostic| {
+      (
+        diagnostic.code().as_str(),
+        diagnostic.primary(),
+        diagnostic.label(0).map(|label| label.location()),
+      )
+    })
     .collect()
 }
 
@@ -299,6 +323,182 @@ fn a_lang_written_twice_is_bound_twice() {
   let analysis = analyze_text(
     "type Query {\n  x: Int\n}\n\
      scalar M @extern(lang: \"rust\", type: \"a\") @extern(lang: \"rust\", type: \"b\")\n",
+  );
+  assert_eq!(
+    externs(analysis.model(), "^::app::M"),
+    [("rust", "a", Tier::Std), ("rust", "b", Tier::Std)]
+  );
+}
+
+/// A language binds a scalar once: the later of two externs of one `lang` is `extern-misuse`, at
+/// its `@extern`'s path, with a label at the earlier one's, in one definition and across the
+/// definition and the package's own extension in another file. The `lang`s are compared as they
+/// are cooked: `"rust"` is `"rust"`, and `"Rust"` is another. Refuses spellings compared, and
+/// a duplicate across contributions missed.
+#[test]
+fn a_lang_bound_twice_is_refused_at_the_later() {
+  let text = "type Query {\n  x: Int\n}\n\
+              scalar M @extern(lang: \"rust\", type: \"a\") @extern(lang: \"rust\", type: \"b\")\n";
+  let analysis = analyze_text(text);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    labelled(&analysis, &[EXTERN_MISUSE]),
+    [(
+      EXTERN_MISUSE,
+      at(schema, text, "extern", 1),
+      Some(at(schema, text, "extern", 0))
+    )]
+  );
+
+  let a = "type Query {\n  x: Int\n}\nscalar M @extern(lang: \"rust\", type: \"a\")\n";
+  let b = "extend scalar M @extern(lang: \"rust\", type: \"b\")\n";
+  let analysis = analyze(
+    &package("app", Tier::Std, &[("a.graphqlx", a), ("b.graphqlx", b)]),
+    &[],
+    &Limits::new(),
+  );
+  let (a_file, b_file) = (
+    file(&analysis, 3, "a.graphqlx"),
+    file(&analysis, 3, "b.graphqlx"),
+  );
+  assert_eq!(
+    labelled(&analysis, &[EXTERN_MISUSE]),
+    [(
+      EXTERN_MISUSE,
+      at(b_file, b, "extern", 0),
+      Some(at(a_file, a, "extern", 0))
+    )]
+  );
+
+  let text = "type Query {\n  x: Int\n}\n\
+              scalar M @extern(lang: \"rust\", type: \"a\") @extern(lang: \"r\\u0075st\", type: \"b\")\n";
+  let analysis = analyze_text(text);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    labelled(&analysis, &[EXTERN_MISUSE]),
+    [(
+      EXTERN_MISUSE,
+      at(schema, text, "extern", 1),
+      Some(at(schema, text, "extern", 0))
+    )]
+  );
+  assert_eq!(
+    analysis
+      .diagnostics()
+      .iter()
+      .next()
+      .map(Diagnostic::to_string),
+    Some(String::from(
+      "the scalar `M` is bound to a host type of `rust` twice, and a language binds a scalar once"
+    ))
+  );
+
+  let analysis = analyze_text(
+    "type Query {\n  x: Int\n}\n\
+     scalar M @extern(lang: \"rust\", type: \"a\") @extern(lang: \"Rust\", type: \"b\")\n",
+  );
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// Sixty-five externs, all of distinct `lang`s but the last, which is the third's: one
+/// diagnostic, at the last, labelled at the third, found by the kernel's sort past its scan's
+/// sixty-four. Refuses a search that stops at sixty-four.
+#[test]
+fn sixty_five_externs_find_their_duplicate() {
+  let mut externs: Vec<String> = (0..64)
+    .map(|k: usize| format!("@extern(lang: \"l{k}\", type: \"t\")"))
+    .collect();
+  externs.push(String::from("@extern(lang: \"l2\", type: \"t\")"));
+  let text = format!(
+    "type Query {{\n  x: Int\n}}\nscalar M {}\n",
+    externs.join(" ")
+  );
+  let analysis = analyze_text(&text);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    labelled(&analysis, &[EXTERN_MISUSE]),
+    [(
+      EXTERN_MISUSE,
+      at(schema, &text, "extern", 64),
+      Some(at(schema, &text, "extern", 2))
+    )]
+  );
+}
+
+/// `@extern` on a GraphQL built-in the root package's own definition replaces is `extern-misuse`,
+/// at its path, in the definition and in the root package's own extension of it, and no orphan:
+/// `[Z5]`'s programs 3 and 4. Its help names `@repr(for: …)`. Refuses an `@extern` on a replaced
+/// built-in bound, or left to the orphan rule.
+#[test]
+fn extern_on_a_replaced_built_in_is_refused() {
+  for (text, nth) in [
+    (
+      "type Query {\n  x: Int\n}\nscalar String @extern(lang: \"rust\", type: \"my::Str\")\n",
+      0,
+    ),
+    (
+      "type Query {\n  x: Int\n}\nscalar Int @extern(lang: \"rust\", type: \"my::Int\")\n",
+      0,
+    ),
+    (
+      "type Query {\n  x: Int\n}\nscalar String\n\
+       extend scalar String @extern(lang: \"rust\", type: \"my::Str\")\n",
+      0,
+    ),
+  ] {
+    let analysis = analyze_text(text);
+    let schema = file(&analysis, 3, "schema.graphqlx");
+    assert_eq!(
+      labelled(&analysis, &[EXTERN_MISUSE, ORPHAN]),
+      [(EXTERN_MISUSE, at(schema, text, "extern", nth), None)],
+      "{text}"
+    );
+    let help = analysis
+      .diagnostics()
+      .iter()
+      .find_map(|diagnostic: &Diagnostic| diagnostic.help());
+    assert!(
+      help.is_some_and(|help: &str| help.contains("@repr(for: …")),
+      "{text}: {help:?}"
+    );
+  }
+}
+
+/// A package binding a scalar of its own, on its definition and on its own extension in another
+/// file, says nothing: `[Z5]`'s second program.
+#[test]
+fn a_package_binding_its_own_scalar_says_nothing() {
+  let a = "type Query {\n  x: Int\n}\n\
+           scalar MediaId @extern(lang: \"rust\", type: \"crate::MediaId\")\n";
+  let b = "extend scalar MediaId @extern(lang: \"typescript\", type: \"string\")\n";
+  let analysis = analyze(
+    &package("app", Tier::Std, &[("a.graphqlx", a), ("b.graphqlx", b)]),
+    &[],
+    &Limits::new(),
+  );
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// Two `rust` externs that bind, beside an `@extern` whose `lang` did not coerce in the same
+/// contribution: coercion's diagnostic alone, the rule silent within what a phase refused. Refuses
+/// a rule that ignores the contribution's errors.
+#[test]
+fn extern_misuse_says_nothing_where_a_phase_spoke() {
+  let text = "type Query {\n  x: Int\n}\nscalar M @extern(lang: \"rust\", type: \"a\") \
+              @extern(lang: \"rust\", type: \"b\") @extern(lang: 1, type: \"c\")\n";
+  let analysis = analyze_text(text);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    labelled(&analysis, &[EXTERN_MISUSE, ARGUMENT]),
+    [(ARGUMENT, at(schema, text, "1", 0), None)]
   );
   assert_eq!(
     externs(analysis.model(), "^::app::M"),
