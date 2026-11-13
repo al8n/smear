@@ -133,11 +133,25 @@ fn named(source: SourceId, text: &str, before: &str, name: &str, nth: usize) -> 
   Location::new(source.get(), SimpleSpan::new(start, start + name.len()))
 }
 
-/// Each diagnostic's code, primary location, and first label's location, in the list's order.
-fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
   analysis
     .diagnostics()
     .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// Each diagnostic's code, primary location, and first label's location, in the list's order, but
+/// for the missing query root.
+fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| {
       (
         diagnostic.code().as_str(),
@@ -148,20 +162,18 @@ fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)>
     .collect()
 }
 
-/// Each diagnostic's code, in the list's order.
+/// Each diagnostic's code, in the list's order, but for the missing query root.
 fn codes(analysis: &Analysis) -> Vec<&'static str> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.code().as_str())
     .collect()
 }
 
-/// Each diagnostic's message, in the list's order.
+/// Each diagnostic's message, in the list's order, but for the missing query root.
 fn messages(analysis: &Analysis) -> Vec<String> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .collect()
 }
@@ -579,9 +591,8 @@ fn non_zeros_argument_is_an_integer_primitive() {
                  `NonZero<u32>` and its second name `NonZeroU32` do";
   let nullable = "drop the `!` after the type argument: `NonZero<u32>` is never zero, and \
                   `NonZero<u32>!` is never null either";
-  let helps: Vec<Option<&str>> = analysis
-    .diagnostics()
-    .iter()
+  let helps: Vec<Option<&str>> = reported(&analysis)
+    .into_iter()
     .take(7)
     .map(|diagnostic: &Diagnostic| diagnostic.help())
     .collect();
@@ -597,9 +608,8 @@ fn non_zeros_argument_is_an_integer_primitive() {
       Some(integer),
     ]
   );
-  let labels: Vec<Option<&str>> = analysis
-    .diagnostics()
-    .iter()
+  let labels: Vec<Option<&str>> = reported(&analysis)
+    .into_iter()
     .take(7)
     .map(|diagnostic: &Diagnostic| diagnostic.label(0).map(|label| label.text()))
     .collect();

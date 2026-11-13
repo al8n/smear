@@ -232,11 +232,32 @@ fn at(source: SourceId, text: &str, needle: &str, nth: usize) -> Location {
   Location::new(source.get(), SimpleSpan::new(start, start + needle.len()))
 }
 
-/// Each diagnostic's code, primary location, and first label's location, in the list's order.
-fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
   analysis
     .diagnostics()
     .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// Whether `analysis` reports nothing but that its program has no query root.
+fn clean(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics.len() - reported(analysis).len();
+  diagnostics.len() == waived && diagnostics.error_count() == waived
+}
+
+/// Each diagnostic's code, primary location, and first label's location, in the list's order, but
+/// for the missing query root.
+fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| {
       (
         diagnostic.code().as_str(),
@@ -265,28 +286,26 @@ fn named(source: SourceId, text: &str, before: &str, name: &str, nth: usize) -> 
   Location::new(source.get(), SimpleSpan::new(start, start + name.len()))
 }
 
-/// Each diagnostic's code, in the list's order.
+/// Each diagnostic's code, in the list's order, but for the missing query root.
 fn codes(analysis: &Analysis) -> Vec<&'static str> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.code().as_str())
     .collect::<Vec<&'static str>>()
 }
 
-/// Each diagnostic's message, in the list's order.
+/// Each diagnostic's message, in the list's order, but for the missing query root.
 fn messages(analysis: &Analysis) -> Vec<String> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .collect::<Vec<String>>()
 }
 
-/// Each diagnostic's help, in the list's order.
+/// Each diagnostic's help, in the list's order, but for the missing query root.
 fn helps(analysis: &Analysis) -> Vec<Option<&str>> {
   let mut helps: Vec<Option<&str>> = Vec::new();
-  for diagnostic in analysis.diagnostics() {
+  for diagnostic in reported(analysis) {
     helps.push(diagnostic.help());
   }
   helps
@@ -1043,7 +1062,7 @@ fn the_root_extending_a_dependencys_type_is_an_orphan() {
       "package `app` extends the directive `@tag`, which package `geo` defines",
     ]
   );
-  for diagnostic in analysis.diagnostics() {
+  for diagnostic in reported(&analysis) {
     assert_eq!(diagnostic.code(), DiagnosticKind::OrphanExtension.code());
     assert_eq!(diagnostic.primary_label(), Some("orphan extension"));
     assert_eq!(diagnostic.labels(), 1);
@@ -1129,11 +1148,7 @@ fn a_package_extends_its_own_types_from_any_module() {
     ],
   );
   let analysis = analyze(&root, &[geo], &Limits::new());
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   assert_eq!(
     contributions(model, def(model, "^::app::Shape")),
@@ -1155,11 +1170,7 @@ fn the_root_adds_directives_to_a_built_in() {
               scalar Float\nextend scalar Float @x\n\
               extend scalar NonZero @x\nextend directive @deprecated @x\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   // Each is a contribution of a built-in definition, which the rule read and let be.
   let model = analysis.model();
   let builtins = model.builtins();
@@ -1255,7 +1266,7 @@ fn the_root_adding_more_than_directives_to_a_built_in_is_an_orphan() {
       Some(MORE_THAN_DIRECTIVES_TO_ITS_OWN),
     ]
   );
-  for diagnostic in analysis.diagnostics() {
+  for diagnostic in reported(&analysis) {
     // GraphQL's own refusal has GraphQL's label.
     if diagnostic.code() == Code::new(INTROSPECTION) {
       assert_eq!(diagnostic.primary_label(), Some(INTROSPECTION_LABEL));
@@ -1528,7 +1539,7 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
       Some(MEANING)
     ]
   );
-  for diagnostic in analysis.diagnostics() {
+  for diagnostic in reported(&analysis) {
     // GraphQL's own refusal has GraphQL's labels.
     if diagnostic.code() == Code::new(DUPLICATE_DIRECTIVE_USE) {
       assert_eq!(
@@ -1748,11 +1759,7 @@ fn what_gives_a_built_in_no_meaning_is_no_orphan_and_a_dependencys_extension_is_
   let text = "directive @set on SCALAR\nextend scalar NonZero @set\ndirective @x on SCALAR\n\
               extend scalar String @x\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   assert_eq!(model.def(model.builtins().non_zero()).collection(), None);
 

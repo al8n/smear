@@ -23,6 +23,11 @@ mod view;
 
 use view::{APP, ASTRO, GEO, NESTED, package, render};
 
+/// GraphQL's code for a schema with no query root. The programs of this file that have none are
+/// parts of a program and say nothing of the schema, so each reading below that has to know what
+/// else was reported leaves this code out, as a consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
 /// `analysis_modules_builtins.rs`'s program that writes six primitives, one through a second name
 /// and one through a `NonZero` name.
 const WRITES: &str =
@@ -405,6 +410,7 @@ fn a_contribution_answers_its_own_files_extent() {
   let codes: Vec<&str> = analysis
     .diagnostics()
     .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
     .map(|diagnostic: &Diagnostic| diagnostic.code().as_str())
     .collect();
   assert_eq!(codes, ["smear::schema::specified-by-on-built-in-scalar"]);
@@ -607,7 +613,7 @@ mod lossless {
   };
 
   use super::{
-    contribution, def,
+    NO_QUERY_ROOT, contribution, def,
     view::{blank, corpus, sets},
   };
 
@@ -955,7 +961,8 @@ mod lossless {
     );
   }
 
-  /// Whether every error `analysis` holds is a syntax error.
+  /// Whether every error `analysis` holds is a syntax error, but for the missing query root: a
+  /// file with a syntax error may lose the `Query` it writes.
   fn only_syntax_errors(analysis: &Analysis) -> bool {
     analysis
       .diagnostics()
@@ -963,6 +970,7 @@ mod lossless {
       .all(|diagnostic: &Diagnostic| {
         diagnostic.severity() != Severity::Error
           || diagnostic.code().as_str().starts_with("smear::syntax::")
+          || diagnostic.code().as_str() == NO_QUERY_ROOT
       })
   }
 
