@@ -141,6 +141,7 @@ mod set;
 mod source;
 mod text;
 mod tree;
+mod types;
 mod visitor;
 mod widths;
 

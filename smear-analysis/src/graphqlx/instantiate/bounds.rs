@@ -59,7 +59,7 @@
 //! occurrence of one a limit stopped judging, `resource-limit`. The occurrence keeps its type
 //! either way.
 
-use std::{collections::BTreeMap, format, string::String, vec::Vec};
+use std::{collections::BTreeMap, format, string::String};
 
 use tokora::diagnostic::Location;
 
@@ -68,18 +68,10 @@ use crate::graphqlx::{
   diagnostic::{Diagnostic, Excerpt},
   id::{DefId, TyId, TypeExprId, dense},
   model::{DefKind, Keys, Occurrence, Shape, Steps, TypeBound, Written},
+  types::{Limit, Stop},
 };
 
-use super::{Limit, Typing};
-
-/// What kept an instantiation's bounds from being judged.
-#[derive(Clone, Copy)]
-enum Stop {
-  /// `Limits::max_bound_steps`.
-  Steps,
-  /// A type a bound rebuilt under the instantiation's arguments would derive passes this limit.
-  Built(Limit),
-}
+use super::Typing;
 
 /// What an instantiation's bounds come to.
 #[derive(Clone, Copy)]
@@ -88,18 +80,16 @@ enum Verdict {
   Holds,
   /// The bound at this index of its definition's, the first in their order that does not hold.
   Fails { bound: u32 },
-  /// A limit stopped the judging before it was known.
+  /// A limit stopped the judging before it was known: `Limits::max_bound_steps`, or a limit on a
+  /// type a bound rebuilt under the instantiation's arguments would derive.
   Stopped(Stop),
 }
 
-/// What the pass keeps from one occurrence to the next, beside the walk's own state.
+/// What the pass keeps from one occurrence to the next, beside the walk's own state and the type
+/// services, whose budget of bound steps it spends.
 struct Judging {
   /// The built-in definitions satisfaction is keyed on.
   keys: Keys,
-  /// `Limits::max_bound_steps`.
-  max: u32,
-  /// The steps spent.
-  spent: u32,
   /// Each type an occurrence of a definition with a bound has, and the nullable form of each that
   /// is written non-null only, with what its bounds come to. Keyed by the type, which the loop
   /// looks up for each occurrence.
@@ -107,29 +97,6 @@ struct Judging {
   /// Each pair of an argument and an interface type asked, with whether the argument satisfies
   /// it. Keyed by the pair, which a verdict looks up before it asks the routine.
   pairs: BTreeMap<(TyId, TyId), bool>,
-  /// While one bound is rebuilt: each open node of its type rebuilt, with what it became. Keyed by
-  /// the node, which the rebuild looks up for each child it meets; cleared for each bound.
-  rebuilt: BTreeMap<TyId, TyId>,
-  /// While one bound is rebuilt: the nodes being rebuilt, each with its next child to look at.
-  frames: Vec<(TyId, u32)>,
-}
-
-impl Judging {
-  /// Spends `steps`, or spends none and answers that the budget cannot pay them.
-  fn charge(&mut self, steps: u32) -> bool {
-    match self.spent.checked_add(steps) {
-      Some(spent) if spent <= self.max => {
-        self.spent = spent;
-        true
-      }
-      _ => false,
-    }
-  }
-
-  /// How many steps the budget has left.
-  fn left(&self) -> u32 {
-    self.max.saturating_sub(self.spent)
-  }
 }
 
 /// What a bound's report tells the author of a named type argument.
@@ -144,18 +111,13 @@ const PARAM_HELP: &str = "bound this type parameter by the interface in this def
 const LIST_HELP: &str = "a list satisfies no bound: pass a type that declares the interface";
 
 impl Typing<'_> {
-  /// Judges the bounds of every instantiation the program writes, keyed on `keys`, within
-  /// `max_steps` steps over the whole pass, and reports each occurrence of one that fails or that
-  /// a limit stopped.
-  pub(super) fn bounds(&mut self, keys: Keys, max_steps: u32) {
+  /// Judges the bounds of every instantiation the program writes, keyed on `keys`, within the
+  /// budget of bound steps, and reports each occurrence of one that fails or that a limit stopped.
+  pub(super) fn bounds(&mut self, keys: Keys) {
     let mut judging = Judging {
       keys,
-      max: max_steps,
-      spent: 0,
       verdicts: BTreeMap::new(),
       pairs: BTreeMap::new(),
-      rebuilt: BTreeMap::new(),
-      frames: Vec::new(),
     };
     for index in 0..self.builder.type_expr_count() {
       self.judge_occurrence(&mut judging, TypeExprId::new(index));
@@ -187,7 +149,7 @@ impl Typing<'_> {
     match self.verdict(judging, ty, def, location) {
       Verdict::Holds => {}
       Verdict::Fails { bound } => self.report_unsatisfied(id, ty, def, bound),
-      Verdict::Stopped(stop) => self.report_unjudged(location, stop, judging.max),
+      Verdict::Stopped(stop) => self.report_unjudged(location, stop),
     }
   }
 
@@ -233,7 +195,7 @@ impl Typing<'_> {
   fn judged(&mut self, judging: &mut Judging, ty: TyId, def: DefId) -> Verdict {
     let count = dense(self.builder.def_bounds(def).len());
     for index in 0..count {
-      if !judging.charge(1) {
+      if !self.types.bound_steps.charge(1) {
         return Verdict::Stopped(Stop::Steps);
       }
       let Some(bound) = self.builder.def_bounds(def).get(index as usize).copied() else {
@@ -246,7 +208,16 @@ impl Typing<'_> {
       let goal = if self.builder.ty_closed(written) {
         written
       } else {
-        match self.rebuild(judging, written, ty, def) {
+        let types = &mut *self.types;
+        let rebuilt = types.derived.rebuild(
+          self.builder,
+          &mut types.bound_steps,
+          self.library,
+          written,
+          ty,
+          def,
+        );
+        match rebuilt {
           Ok(Some(goal)) => goal,
           Ok(None) => continue,
           Err(stop) => return Verdict::Stopped(stop),
@@ -263,14 +234,16 @@ impl Typing<'_> {
       let holds = match judging.pairs.get(&(argument, goal)).copied() {
         Some(holds) => holds,
         None => {
-          let left = judging.left();
+          let left = self.types.bound_steps.left();
           let mut steps = Steps::counted(left);
           let answer = self
             .builder
             .judge(&judging.keys, argument, goal, &mut steps);
           // What the routine took, which the budget had left: it never takes more.
-          let taken = left.saturating_sub(steps.left());
-          judging.spent = judging.spent.saturating_add(taken);
+          self
+            .types
+            .bound_steps
+            .take(left.saturating_sub(steps.left()));
           let Some(holds) = answer else {
             return Verdict::Stopped(Stop::Steps);
           };
@@ -311,130 +284,6 @@ impl Typing<'_> {
     match self.builder.ty_shape(written) {
       Some(Shape::Named(_)) => Some((interface, written)),
       _ => None,
-    }
-  }
-
-  /// `bound`, the interface type of a bound of `def`, with the arguments of `ty`, an instantiation
-  /// of `def`, in place of `def`'s type parameters, each as it is: interned, a node's arguments or
-  /// element before it, each distinct node of `bound` once. One step for the root, and one for each
-  /// argument or element of a node rebuilt, as it is looked at.
-  ///
-  /// `Err` when a limit stopped it; `Ok(None)` for a type parameter of another definition, which a
-  /// bound cannot name, and which passes the bound over.
-  fn rebuild(
-    &mut self,
-    judging: &mut Judging,
-    bound: TyId,
-    ty: TyId,
-    def: DefId,
-  ) -> Result<Option<TyId>, Stop> {
-    judging.rebuilt.clear();
-    judging.frames.clear();
-    if !judging.charge(1) {
-      return Err(Stop::Steps);
-    }
-    judging.frames.push((bound, 0));
-    while let Some(&(node, next)) = judging.frames.last() {
-      let child = match self.builder.ty_shape(node) {
-        Some(Shape::Named(_)) => self.builder.ty_args(node).get(next as usize).copied(),
-        Some(Shape::List(element)) => (next == 0).then_some(element),
-        Some(Shape::Param { .. } | Shape::Unresolved) | None => None,
-      };
-      if let Some(child) = child {
-        if let Some(frame) = judging.frames.last_mut() {
-          frame.1 = next.saturating_add(1);
-        }
-        // Looked at, whether it is closed, rebuilt already or still to do.
-        if !judging.charge(1) {
-          return Err(Stop::Steps);
-        }
-        if !self.builder.ty_closed(child) && !judging.rebuilt.contains_key(&child) {
-          judging.frames.push((child, 0));
-        }
-        continue;
-      }
-      judging.frames.pop();
-      let Some(made) = self.rebuilt_node(&judging.rebuilt, node, ty, def)? else {
-        return Ok(None);
-      };
-      if judging.frames.is_empty() {
-        return Ok(Some(made));
-      }
-      judging.rebuilt.insert(node, made);
-    }
-    Ok(None)
-  }
-
-  /// What `node`, an open node of a bound of `def` whose arguments or element `rebuilt` holds
-  /// already, becomes with the arguments of `ty`, an instantiation of `def`, in place of `def`'s
-  /// type parameters.
-  fn rebuilt_node(
-    &mut self,
-    rebuilt: &BTreeMap<TyId, TyId>,
-    node: TyId,
-    ty: TyId,
-    def: DefId,
-  ) -> Result<Option<TyId>, Stop> {
-    let non_null = self.builder.ty_non_null(node);
-    match self.builder.ty_shape(node) {
-      // The argument for the parameter, as it is, its `!` included; written `T!`, its non-null
-      // form, which a collection's key, already non-null, is.
-      Some(Shape::Param { def: owner, index }) => {
-        debug_assert!(
-          owner == def,
-          "a bound names its own definition's type parameters"
-        );
-        if owner != def {
-          return Ok(None);
-        }
-        let Some(argument) = self.builder.ty_args(ty).get(index as usize).copied() else {
-          return Ok(None);
-        };
-        Ok(Some(if non_null {
-          self.non_null_of(argument)
-        } else {
-          argument
-        }))
-      }
-      Some(Shape::List(element)) => {
-        let element = if self.builder.ty_closed(element) {
-          element
-        } else {
-          match rebuilt.get(&element) {
-            Some(&made) => made,
-            None => return Ok(None),
-          }
-        };
-        let depth = self.builder.ty_depth(element).saturating_add(1);
-        if !self.library && depth > self.max_depth {
-          return Err(Stop::Built(Limit::Depth));
-        }
-        Ok(Some(self.builder.intern_list(element, non_null)))
-      }
-      // Completed as an occurrence's type is from its slots, and recorded as no instantiation:
-      // the program does not write it.
-      Some(Shape::Named(named)) => {
-        self.slots.clear();
-        let args: &[TyId] = self.builder.ty_args(node);
-        for &arg in args {
-          let slot = if self.builder.ty_closed(arg) {
-            arg
-          } else {
-            match rebuilt.get(&arg) {
-              Some(&made) => made,
-              None => return Ok(None),
-            }
-          };
-          self.slots.push(slot);
-        }
-        let nullable = self.instantiation(named).map_err(Stop::Built)?;
-        Ok(Some(if non_null {
-          self.non_null_of(nullable)
-        } else {
-          nullable
-        }))
-      }
-      Some(Shape::Unresolved) | None => Ok(None),
     }
   }
 
@@ -505,8 +354,10 @@ impl Typing<'_> {
   }
 
   /// Reports, at `at`, an occurrence of an instantiation whose bounds `stop` kept from being
-  /// judged, `max_steps` being `Limits::max_bound_steps`.
-  fn report_unjudged(&mut self, at: Location, stop: Stop, max_steps: u32) {
+  /// judged.
+  fn report_unjudged(&mut self, at: Location, stop: Stop) {
+    let max_steps = self.types.bound_steps.max();
+    let limits = self.types.limits();
     let (message, help): (String, &'static str) = match stop {
       Stop::Steps => (
         format!(
@@ -520,7 +371,7 @@ impl Typing<'_> {
         format!(
           "the bounds of this instantiation could not be judged: a bound put under its type \
            arguments nests deeper than `Limits::max_generic_depth`, {}, admits",
-          self.max_depth
+          limits.max_generic_depth()
         ),
         "raise the bound with `Limits::with_max_generic_depth`, or nest types less deeply",
       ),
@@ -529,7 +380,7 @@ impl Typing<'_> {
           "the bounds of this instantiation could not be judged: a bound put under its type \
            arguments is one more instantiation of a generic definition than \
            `Limits::max_instantiations`, {}, admits",
-          self.max_instantiations
+          limits.max_instantiations()
         ),
         "raise the bound with `Limits::with_max_instantiations`, or instantiate fewer types",
       ),
@@ -540,7 +391,7 @@ impl Typing<'_> {
         format!(
           "the bounds of this instantiation could not be judged within \
            `Limits::max_substitutions`, {}",
-          self.max_substitutions
+          limits.max_substitutions()
         ),
         "raise the bound with `Limits::with_max_substitutions`",
       ),

@@ -131,23 +131,23 @@ use super::{
   declare::{Binding, Declarations},
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{ApplicationId, DefId, PackageId, Sym, TyId, TypeExprId, dense},
-  limits::Limits,
   model::{Collection, DefKind, Keys, ModelBuilder, Resolution, Written},
   set::ROOT,
   source::SourceMap,
+  types::{Limit, Types},
 };
 
 mod bounds;
 
 /// Instantiates what lowering left in `builder`, whose declarations are `declarations` and whose
-/// sources `sources` numbers, within `limits`, reporting into `reporter`: each definition's
-/// built-in meaning, then its defaults, checked where they are written, then every occurrence's
-/// type, then every application's count of type arguments, then the bounds of every written
-/// instantiation.
+/// sources `sources` numbers, with the type services and budgets of `types`, reporting into
+/// `reporter`: each definition's built-in meaning, then its defaults, checked where they are
+/// written, then every occurrence's type, then every application's count of type arguments, then
+/// the bounds of every written instantiation.
 pub(crate) fn instantiate(
   declarations: &Declarations<'_, '_>,
   sources: &SourceMap,
-  limits: &Limits,
+  types: &mut Types,
   builder: &mut ModelBuilder,
   reporter: &mut Reporter,
 ) {
@@ -164,28 +164,21 @@ pub(crate) fn instantiate(
   let mut typing = Typing {
     builder,
     reporter,
+    types,
     least,
     roots,
-    max_depth: limits.max_generic_depth(),
-    max_instantiations: limits.max_instantiations(),
-    max_substitutions: limits.max_substitutions(),
     supplied: sources.package_sources(ROOT).start(),
     table: BTreeMap::new(),
     progress: BTreeSet::new(),
-    non_null: BTreeMap::new(),
-    unresolved: None,
-    counted: 0,
-    spent: 0,
     frames: Vec::new(),
     values: Vec::new(),
     key: Vec::new(),
-    slots: Vec::new(),
     library: false,
     in_default: false,
   };
   typing.trees();
   typing.applications();
-  typing.bounds(keys, limits.max_bound_steps());
+  typing.bounds(keys);
 }
 
 /// Gives each definition its built-in meaning: an interface its own package applies `core`'s
@@ -572,17 +565,6 @@ const PARAM_ARGUMENTS: &str = "a type parameter takes no type argument";
 const ALIAS_ARGUMENTS: &str =
   "an alias such as `NonZeroU32` names one `NonZero`, and takes no type argument";
 
-/// The limit a type passed, which its report names.
-#[derive(Clone, Copy)]
-enum Limit {
-  /// `Limits::max_generic_depth`.
-  Depth,
-  /// `Limits::max_instantiations`.
-  Instantiations,
-  /// `Limits::max_substitutions`.
-  Substitutions,
-}
-
 /// Why a type could not be built, carried unchanged from where it arose to the occurrence typed
 /// for its own sake that reports it.
 #[derive(Clone, Copy)]
@@ -671,16 +653,12 @@ struct Seen {
 struct Typing<'p> {
   builder: &'p mut ModelBuilder,
   reporter: &'p mut Reporter,
+  /// The type services, and the budgets of substitution and of judging bounds.
+  types: &'p mut Types,
   /// Each definition's least number of type arguments, by `DefId`.
   least: Vec<u32>,
   /// The root of every default's tree, ascending.
   roots: Vec<TypeExprId>,
-  /// `Limits::max_generic_depth`.
-  max_depth: u32,
-  /// `Limits::max_instantiations`.
-  max_instantiations: u32,
-  /// `Limits::max_substitutions`.
-  max_substitutions: u32,
   /// The first source of a supplied package: every source below it is the built-in library's.
   supplied: u32,
   /// The fill table: by a definition and the types of the slots an occurrence of it writes, the
@@ -690,23 +668,12 @@ struct Typing<'p> {
   /// The fills in progress, each as its definition, how many arguments the occurrence being filled
   /// writes, and the slot: exactly the keys of the fill frames on the stack.
   progress: BTreeSet<(DefId, u32, u32)>,
-  /// Each type's non-null form, once made: every non-null occurrence, non-null parameter read from
-  /// a slot and collection key asks through it, so a type's arguments are read once for it.
-  non_null: BTreeMap<TyId, TyId>,
-  /// The one unresolved type, once interned.
-  unresolved: Option<TyId>,
-  /// The instantiations of generic definitions interned outside the built-in library.
-  counted: u32,
-  /// The steps of substitution spent.
-  spent: u32,
   /// The frames of the tree being typed.
   frames: Vec<Frame>,
   /// The results of the occurrences being typed, and the slots of those being filled.
   values: Vec<Option<TyId>>,
   /// A fill table key being made: one buffer for every key.
   key: Vec<u32>,
-  /// The slots of the type being completed: one buffer for every type.
-  slots: Vec<TyId>,
   /// Whether the tree being typed is written in the built-in library.
   library: bool,
   /// Whether the tree being typed is a type parameter's default.
@@ -771,12 +738,10 @@ impl Typing<'_> {
 
   /// Spends `steps` of substitution, or spends none and answers that the budget cannot pay them.
   fn charge(&mut self, steps: u32) -> Result<(), Reason> {
-    match self.spent.checked_add(steps) {
-      Some(spent) if spent <= self.max_substitutions => {
-        self.spent = spent;
-        Ok(())
-      }
-      _ => Err(Reason::Limit(Limit::Substitutions)),
+    if self.types.substitutions.charge(steps) {
+      Ok(())
+    } else {
+      Err(Reason::Limit(Limit::Substitutions))
     }
   }
 
@@ -921,7 +886,7 @@ impl Typing<'_> {
 
   /// Completes `visit`, a list whose element is typed: one level deeper than its element.
   fn list(&mut self, visit: Visit, seen: Seen) {
-    let unresolved = self.unresolved;
+    let unresolved = self.types.derived.interned_unresolved();
     let element = self
       .values
       .get(visit.start as usize)
@@ -933,7 +898,7 @@ impl Typing<'_> {
       return self.unusable(visit);
     };
     let depth = self.builder.ty_depth(element).saturating_add(1);
-    if !self.library && depth > self.max_depth {
+    if !self.library && depth > self.types.limits().max_generic_depth() {
       return self.limited(visit, seen, Limit::Depth);
     }
     let ty = self.builder.intern_list(element, seen.non_null);
@@ -1052,7 +1017,7 @@ impl Typing<'_> {
     let start = visit.start as usize;
     // A written argument that is unresolved makes the occurrence so, with nothing more to say. A
     // default's node fails rather than be unresolved, so only one typed for its own sake meets one.
-    if let Some(unresolved) = self.unresolved
+    if let Some(unresolved) = self.types.derived.interned_unresolved()
       && self
         .values
         .get(start..)
@@ -1191,10 +1156,11 @@ impl Typing<'_> {
     let start = visit.start as usize;
     let end = start.saturating_add(count as usize);
     let slots: &[Option<TyId>] = self.values.get(start..end).unwrap_or_default();
-    self.slots.clear();
-    self.slots.extend(slots.iter().flatten().copied());
+    let filling = &mut self.types.derived.slots;
+    filling.clear();
+    filling.extend(slots.iter().flatten().copied());
     // Every slot is written or filled before this.
-    if self.slots.len() != count as usize {
+    if filling.len() != count as usize {
       return self.unusable(visit);
     }
     if count == 0 {
@@ -1221,27 +1187,13 @@ impl Typing<'_> {
     }
   }
 
-  /// The nullable named type of `def` with the slots `slots` holds, one level deeper than its
-  /// deepest slot: one interned already, or one more instantiation, counted, when the limits admit
-  /// it. The built-in library's are neither checked nor counted.
+  /// The nullable named type of `def` with the slots the type services hold, as
+  /// `Derived::instantiation` completes it, for the tree being typed.
   fn instantiation(&mut self, def: DefId) -> Result<TyId, Limit> {
-    let mut depth: u32 = 0;
-    for slot in &self.slots {
-      depth = depth.max(self.builder.ty_depth(*slot).saturating_add(1));
-    }
-    if !self.library && depth > self.max_depth {
-      return Err(Limit::Depth);
-    }
-    if let Some(found) = self.builder.find_named(def, &self.slots, false) {
-      return Ok(found);
-    }
-    if !self.library {
-      if self.counted >= self.max_instantiations {
-        return Err(Limit::Instantiations);
-      }
-      self.counted = self.counted.saturating_add(1);
-    }
-    Ok(self.builder.intern_named(def, &self.slots, false))
+    self
+      .types
+      .derived
+      .instantiation(self.builder, self.library, def)
   }
 
   /// Completes `visit`, an occurrence of the generic definition `def` whose instantiation is
@@ -1367,22 +1319,12 @@ impl Typing<'_> {
 
   /// `ty`'s non-null form, made the first time it is asked for and remembered.
   fn non_null_of(&mut self, ty: TyId) -> TyId {
-    if let Some(&made) = self.non_null.get(&ty) {
-      return made;
-    }
-    let made = self.builder.intern_nullness(ty, true);
-    self.non_null.insert(ty, made);
-    made
+    self.types.derived.non_null_of(self.builder, ty)
   }
 
   /// The one unresolved type, interned the first time it is needed.
   fn unresolved(&mut self) -> TyId {
-    if let Some(ty) = self.unresolved {
-      return ty;
-    }
-    let ty = self.builder.intern_unresolved();
-    self.unresolved = Some(ty);
-    ty
+    self.types.derived.unresolved(self.builder)
   }
 
   /// The least number of type arguments `def` takes.
@@ -1501,11 +1443,12 @@ impl Typing<'_> {
 
   /// Reports, at `at`, a type that cannot be built because it passes `limit`.
   fn report_limit(&mut self, at: Location, limit: Limit) {
+    let limits = self.types.limits();
     let (message, help) = match limit {
       Limit::Depth => (
         format!(
           "this type nests deeper than `Limits::max_generic_depth`, {}, admits",
-          self.max_depth
+          limits.max_generic_depth()
         ),
         "raise the bound with `Limits::with_max_generic_depth`, or nest types less deeply",
       ),
@@ -1513,7 +1456,7 @@ impl Typing<'_> {
         format!(
           "this type is one more instantiation of a generic definition than \
            `Limits::max_instantiations`, {}, admits",
-          self.max_instantiations
+          limits.max_instantiations()
         ),
         "raise the bound with `Limits::with_max_instantiations`, or instantiate fewer types",
       ),
@@ -1521,7 +1464,7 @@ impl Typing<'_> {
         format!(
           "filling the type arguments this type leaves out takes more steps of substitution than \
            `Limits::max_substitutions`, {}, admits",
-          self.max_substitutions
+          limits.max_substitutions()
         ),
         "raise the bound with `Limits::with_max_substitutions`, or write the type arguments out",
       ),

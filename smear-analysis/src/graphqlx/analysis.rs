@@ -25,6 +25,7 @@ use super::{
   set::{self, PackageView, ROOT},
   source::SourceMap,
   text::SourceText,
+  types::Types,
   visitor::{Packages, Visitor, drive},
 };
 
@@ -477,13 +478,20 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut builder,
     &mut reporter,
   );
-  instantiate::instantiate(&declarations, &sources, limits, &mut builder, &mut reporter);
+  let mut types = Types::new(*limits);
+  instantiate::instantiate(
+    &declarations,
+    &sources,
+    &mut types,
+    &mut builder,
+    &mut reporter,
+  );
   coerce::coerce(
     raw,
     &declarations,
     &scopes,
     &sources,
-    limits,
+    &mut types,
     &mut builder,
     &mut reporter,
   );

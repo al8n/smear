@@ -210,7 +210,6 @@ use super::{
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{ApplicationId, DefId, MemberId, SourceId, Sym, TyId, TypeExprId, ValueId, dense},
   instantiate::{applies, binding, own_package},
-  limits::Limits,
   model::{
     Bytes, Collection, DefKind, LiteralKind, ModelBuilder, Primitive, Resolution, Shape, Text,
   },
@@ -218,6 +217,7 @@ use super::{
   resolve::{Position, Request, Resolved, Root, Scopes, Segment, Wanted},
   set::ROOT,
   source::SourceMap,
+  types::Types,
 };
 
 mod number;
@@ -229,15 +229,15 @@ use number::{Float, Scanned};
 const FLOAT_BITS: u32 = 1024;
 
 /// Makes the model's values of `raw`, the values lowering read, in `builder`, whose declarations
-/// are `declarations`, whose scopes are `scopes` and whose sources `sources` numbers, within
-/// `limits`, reporting into `reporter`: each member's default and each application's arguments, in
-/// the model's walk; then the check of the model's arenas.
+/// are `declarations`, whose scopes are `scopes` and whose sources `sources` numbers, with the type
+/// services and limits of `types`, reporting into `reporter`: each member's default and each
+/// application's arguments, in the model's walk; then the check of the model's arenas.
 pub(crate) fn coerce(
   raw: RawValues<'_>,
   declarations: &Declarations<'_, '_>,
   scopes: &Scopes<'_>,
   sources: &SourceMap,
-  limits: &Limits,
+  types: &mut Types,
   builder: &mut ModelBuilder,
   reporter: &mut Reporter,
 ) {
@@ -304,7 +304,7 @@ pub(crate) fn coerce(
     objects: BTreeMap::new(),
     entries: Vec::new(),
     supplied: sources.package_sources(ROOT).start(),
-    max_steps: limits.max_value_steps(),
+    max_steps: types.limits().max_value_steps(),
     spent: 0,
     kept: Vec::new(),
     magnitudes: Vec::new(),
