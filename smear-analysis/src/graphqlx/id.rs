@@ -143,7 +143,10 @@ model_id! {
   /// it. After those come the types that completing each directive application's type arguments
   /// derives, application by application: the arguments its directive's defaults fill, then its
   /// type, its directive with every type argument. Then those that judging the applications'
-  /// bounds derives, in application order, its arguments before it.
+  /// bounds derives, in application order, its arguments before it. Then those that coercion
+  /// derives, reading a member's type under an application's or an instantiation's type arguments,
+  /// in the order its walk first needs each; and last those that checking the values of each
+  /// closed instantiation the program writes derives, in the order of its occurrences.
   TyId
 }
 
