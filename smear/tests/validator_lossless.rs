@@ -38,9 +38,9 @@
 //! are hand-written GraphQL with spaces in it, so "compact" already means "padded wherever the
 //! author typed a space".
 //!
-//! The measurement, taken by making the projection's `extent` return the node's own range: 2 of
-//! the 62 compact documents disagree, and 16 of the 496 padded pairs. The padding is worth
-//! roughly eight times the catch rate, not the whole of it, and
+//! The measurement, taken by making the projection's `extent` return the node's own range when
+//! the corpus held 31 fixtures: 2 of its 62 compact documents disagree, and 16 of its 496 padded
+//! pairs. The padding is worth roughly eight times the catch rate, not the whole of it, and
 //! [`the_padding_is_load_bearing`] pins the mechanism behind that — after injection, **every**
 //! diagnostic the corpus produces sits next to trivia.
 //!

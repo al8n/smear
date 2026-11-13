@@ -301,10 +301,10 @@ fn every_kind_of_entity_answers_its_extent() {
 }
 
 /// What has no text of its own answers no span, and nothing else does. A primitive `core`
-/// materialises for a type position and no definition of the root package's replaces has one
-/// contribution, and its extent is the whole of `core`'s package source, as its location is. A
-/// root module and a directory module have no extent. A module two `mod`s declare has the extent
-/// of the first in source order.
+/// materialises for a type position, which no definition of the root package's replaces and
+/// nothing extends, has one contribution, and its extent is the whole of `core`'s package source,
+/// as its location is. A root module and a directory module have no extent. A module two `mod`s
+/// declare has the extent of the first in source order.
 #[test]
 fn what_has_no_text_of_its_own_answers_no_span() {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", WRITES)]);

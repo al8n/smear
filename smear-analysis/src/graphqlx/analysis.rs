@@ -466,8 +466,9 @@ impl<T> Trees<T> {
   /// source.
   ///
   /// `None` for a location with no span, for a source with no tree, and for a span that does not
-  /// lie inside its tree's text. An extent the analysis answers has a span, unless it is that of a
-  /// primitive `core` materialises that no definition of the root package's replaces.
+  /// lie inside its tree's text. An extent the analysis answers has a span, but for one: the own
+  /// contribution of a primitive `core` materialises, when no definition of the root package's
+  /// replaces it, answers the whole of `core`'s package source.
   ///
   /// Leading trivia lies outside a node, and trailing trivia can lie inside it, up to the next
   /// token, so a node's range may hold a comment written for what follows. A tool that rewrites an

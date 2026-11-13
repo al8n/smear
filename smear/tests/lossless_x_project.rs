@@ -2391,8 +2391,8 @@ fn the_invalid_half_is_a_census_rather_than_a_wall_of_refusals() {
   );
 }
 
-/// A **direct** consumer of the recovering projector — no validator, no `smear-compiler` door —
-/// cannot obtain an AST it can mistake for the whole document.
+/// A consumer of the recovering projector cannot obtain an AST it can mistake for the whole
+/// document.
 #[test]
 fn the_recovering_projector_refuses_a_pair_it_is_not_a_projection_of() {
   let executable = [

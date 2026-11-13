@@ -137,10 +137,9 @@ const LOSSLESS_PROJECTION: &str = "A projection re-slices the caller's own buffe
 /// al8n/smear#122 named three sites as the calibration answer, and two of them are the first two
 /// groups. They are recorded rather than fixed because #103 and #121 own them, and because a
 /// census whose known answer is invisible in its own output cannot be checked against that answer.
-/// The third, the validator's lossless doors, is in no group because it is in no crate: the doors
-/// were removed, a lossless document comes from `smear-parser`'s `Lossless` layer, and a layer's
-/// public entries take their text as `&'src Src` for a type parameter `Src`, which names no
-/// concrete text type, so the rule acquits it before its first test.
+/// The third calibration site is in no crate, because a lossless document comes from
+/// `smear-parser`'s `Lossless` layer, whose public entries take their text as `&'src Src`, which
+/// the rule acquits before its first test.
 ///
 /// One of those groups has since been answered rather than carried, and the shape of the answer is
 /// worth reading off the table. al8n/smear#121 gave the parse doors a wide sibling each and left

@@ -48,7 +48,9 @@ All notable changes to Smear are documented in this file.
   - `validate_executable_lossless`, `validate_executable_lossless_with` and
     `validate_executable_lossless_verified_with`. A caller that kept a `Parse` projects it with
     `project_executable_document_recovered` and validates the document;
-  - `validate_schema_lossless`;
+  - `validate_schema_lossless`. A caller reads the text with the `Lossless` layer's
+    `type_system_document`, or, having kept a `Parse`, projects it with
+    `project_type_system_document_recovered`, and builds the schema from the document;
   - `LosslessInvalid` and `LosslessSchemaErrors`;
   - the re-exports `Recovery` and `Verified`, which are `smear_parser::graphql::Recovery` and
     `smear_parser::graphql::lossless::Verified`;
@@ -222,10 +224,11 @@ All notable changes to Smear are documented in this file.
   `Contribution::is_extension()` says whether a contribution is a definition or one of its
   extensions. `Contribution::extent()`, `Member::extent()` and `Module::extent()` answer where
   each contribution, member and inline module is written, in its own file, from its description,
-  or its first token, to its last token; a primitive `core` materialises answers the whole of
-  `core`'s package source, which has no span, and through `analyze_with` with a layer that keeps
-  a tree, `Trees::node` answers the node an extent was written as. Every written type is a type
-  occurrence, numbered in the order the
+  or its first token, to its last token; the own contribution of a primitive `core` materialises,
+  when no definition of the root package's replaces it, answers the whole of `core`'s package
+  source, which has no span; and through `analyze_with` with a layer that keeps a tree,
+  `Trees::node` answers the node an extent in a file the layer read was written as. Every written
+  type is a type occurrence, numbered in the order the
   model's walk reaches it, each before the types it nests: a type parameter's default, a bound,
   an `implements` entry, a union member, a member's type. It keeps its path as written, `Int`
   staying `Int`, and its written arguments, however many its definition has parameters, and its

@@ -112,7 +112,8 @@ impl<'a> Module<'a> {
   /// In an analysis made through [`analyze_with`](crate::graphqlx::analyze_with) with a layer that
   /// keeps a tree, such as `smear-parser`'s lossless layer, the smallest node of its file's tree
   /// that covers the extent is the node of that `mod`, and
-  /// [`Trees::node`](crate::graphqlx::Trees::node) answers it.
+  /// [`Trees::node`](crate::graphqlx::Trees::node) answers it. A file of a built-in package has no
+  /// tree, and `Trees::node` answers `None` for an extent in one.
   #[inline]
   pub fn extent(&self) -> Option<Location> {
     self.row().extent

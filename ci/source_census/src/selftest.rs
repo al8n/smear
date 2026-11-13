@@ -6,9 +6,10 @@
 //! resolution, the source-position derivation and the four tests, end to end. Nothing is stubbed;
 //! if the reader stops finding public entries, these fail first.
 //!
-//! Two of the cases are the discrimination al8n/smear#122 asks for by name: `Executor::start`'s
-//! `operation: Option<&str>` must come out a datum and the three narrowed doors must come out
-//! findings, in signatures shaped like the real ones.
+//! Three of the cases are the discrimination al8n/smear#122 asks for: `Executor::start`'s
+//! `operation: Option<&str>` must come out a datum, and an entry that narrows a tree's text must
+//! come out a finding in both of its shapes, a tree and its text, and a tree, a text and a sink
+//! over that text.
 
 use std::{
   fs,
