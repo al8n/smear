@@ -97,9 +97,11 @@
 //!
 //! Lowering writes no value. A written value, a member's default or an argument's, is read into a
 //! tree, kept with the member whose default it is or with the application, the argument it sets
-//! and where its name is written: its syntactic kind and where it is written, and for a path its
-//! root and its segments, interned as written. No path in it is resolved: coercion, which runs
-//! after instantiation and knows the type expected, makes the model's values of the trees.
+//! and where its name is written: one node for each literal it writes, the value first and then
+//! what it holds, in pre-order, walked with an explicit stack. A node keeps its syntactic kind and
+//! where it is written, a number its radix, a boolean its value, and a path its root and its
+//! segments, interned as written. No path in it is resolved: coercion, which runs after
+//! instantiation and knows the type expected, makes the model's values of the trees.
 //!
 //! # The schema
 //!
@@ -138,10 +140,14 @@ use std::{
   collections::{BTreeMap, BTreeSet},
   format,
   string::String,
+  vec,
   vec::Vec,
 };
 
-use smear_lexer::decode_string_value;
+use smear_lexer::{
+  decode_string_value,
+  graphqlx::{LitFloat, LitInt},
+};
 use smear_parser::graphqlx::ast::{
   self, ConstArgument, ConstDirective, ConstDirectives, ConstInputValue, DefinitionName,
   DescribedTypeSystemDefinition, EnumValueDefinition, ExecutableDirectiveLocation, ExtensionName,
@@ -162,7 +168,7 @@ use super::{
   model::{
     DefKind, DirectiveLocation, MemberKind, ModelBuilder, PathRoot, Root, RootOperation, Written,
   },
-  raw::{RawArgument, RawKind, RawNode, RawValues},
+  raw::{Radix, RawArgument, RawKind, RawValues},
   resolve::{self, Position, Request, Resolved, Scopes, Wanted},
   set::{PackageView, ROOT},
   source::SourceMap,
@@ -403,6 +409,14 @@ struct Shape<'d, S> {
   input_values: &'d [InputValueDefinition<S>],
   /// An enum's values.
   enum_values: &'d [EnumValueDefinition<S>],
+}
+
+/// What the walk of one written value has still to do.
+enum Read<'v, S> {
+  /// Read this value into the next node.
+  Enter(&'v ConstInputValue<S>),
+  /// Close the node at this index: everything under it is read.
+  Leave(u32),
 }
 
 /// What the walk of one written type has still to do.
@@ -1678,32 +1692,83 @@ impl Lowering<'_, '_, '_> {
     self.reporter.report(report.build());
   }
 
-  /// Reads the written value `value`, written in the source `source`, into a tree of one node: its
-  /// syntactic kind and where it is written; a value that is a path keeps its path too, its
-  /// segments interned. Nothing in it is resolved. Answers the tree.
+  /// Reads the written value `value`, written in the source `source`, into a tree: one node for
+  /// each literal it writes, in pre-order, each with its syntactic kind and where it is written, a
+  /// number with its radix, a boolean with its value, and a path with its root and its segments,
+  /// interned. Walked with an explicit stack. Nothing in it is resolved. Answers the tree.
   fn value<S: AsRef<[u8]>>(&mut self, source: u32, value: &ConstInputValue<S>) -> u32 {
-    let span = *value.as_span();
-    let kind = match value {
-      ConstInputValue::Boolean(_) => RawKind::Boolean,
-      ConstInputValue::String(_) => RawKind::String,
-      ConstInputValue::Float(_) => RawKind::Float,
-      ConstInputValue::Int(_) => RawKind::Int,
-      ConstInputValue::Enum(path) => {
-        let written = self.written_path(path.source());
-        // `PathRoot` is `#[non_exhaustive]`: a root of a kind lowering does not know is reported,
-        // and the value keeps its text alone.
-        if written.is_none() {
-          self.unknown(source, span);
+    let root = dense(self.values.nodes.len());
+    let mut pending: Vec<Read<'_, S>> = vec![Read::Enter(value)];
+    while let Some(next) = pending.pop() {
+      let value = match next {
+        Read::Enter(value) => value,
+        Read::Leave(at) => {
+          self.values.close_node(at);
+          continue;
         }
-        RawKind::Path(self.values.push_path(written, &self.segments))
+      };
+      let span = *value.as_span();
+      let kind = match value {
+        ConstInputValue::Boolean(boolean) => RawKind::Boolean(boolean.value()),
+        ConstInputValue::String(_) => RawKind::String,
+        ConstInputValue::Float(float) => RawKind::Float {
+          hex: matches!(float.source(), LitFloat::Hex(_)),
+        },
+        ConstInputValue::Int(int) => RawKind::Int(match int.source() {
+          LitInt::Decimal(_) => Radix::Decimal,
+          LitInt::Hex(_) => Radix::Hex,
+          LitInt::Octal(_) => Radix::Octal,
+          LitInt::Binary(_) => Radix::Binary,
+        }),
+        ConstInputValue::Enum(path) => {
+          let written = self.written_path(path.source());
+          // `PathRoot` is `#[non_exhaustive]`: a root of a kind lowering does not know is reported,
+          // and the path is kept without it.
+          if written.is_none() {
+            self.unknown(source, span);
+          }
+          RawKind::Path(self.values.push_path(written, &self.segments))
+        }
+        ConstInputValue::Null(_) => RawKind::Null,
+        ConstInputValue::List(_) => RawKind::List,
+        ConstInputValue::Set(_) => RawKind::Set,
+        ConstInputValue::Map(_) => RawKind::Map,
+        ConstInputValue::Object(_) => RawKind::Object,
+      };
+      let at = self.values.push_node(kind, span);
+      // What a value holds is entered after it, in written order, so it is pushed in reverse over
+      // the entry that closes it.
+      match value {
+        ConstInputValue::List(list) => {
+          pending.push(Read::Leave(at));
+          pending.extend(list.values().iter().rev().map(Read::Enter));
+        }
+        ConstInputValue::Set(set) => {
+          pending.push(Read::Leave(at));
+          pending.extend(set.values().iter().rev().map(Read::Enter));
+        }
+        ConstInputValue::Map(map) => {
+          pending.push(Read::Leave(at));
+          for entry in map.entries().iter().rev() {
+            pending.push(Read::Enter(entry.value()));
+            pending.push(Read::Enter(entry.key()));
+          }
+        }
+        ConstInputValue::Object(object) => {
+          pending.push(Read::Leave(at));
+          for field in object.fields().iter().rev() {
+            pending.push(Read::Enter(field.value()));
+          }
+        }
+        ConstInputValue::Boolean(_)
+        | ConstInputValue::String(_)
+        | ConstInputValue::Float(_)
+        | ConstInputValue::Int(_)
+        | ConstInputValue::Enum(_)
+        | ConstInputValue::Null(_) => {}
       }
-      ConstInputValue::Null(_) => RawKind::Null,
-      ConstInputValue::List(_) => RawKind::List,
-      ConstInputValue::Set(_) => RawKind::Set,
-      ConstInputValue::Map(_) => RawKind::Map,
-      ConstInputValue::Object(_) => RawKind::Object,
-    };
-    self.values.push_tree(source, RawNode { kind, span })
+    }
+    self.values.push_tree(root, source)
   }
 
   /// The id of the next direct member of the definition the second walk is in.

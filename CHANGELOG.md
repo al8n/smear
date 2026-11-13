@@ -217,10 +217,9 @@ All notable changes to Smear are documented in this file.
   argument and no argument. The others keep their type arguments, each an occurrence, and the
   arguments their directive declares, in the directive's order, an argument written twice
   twice; one the directive does not declare is `smear::schema::undefined-directive-argument`,
-  with the nearest name it does declare in its help. A written value, a default or an
-  argument's, is one `Literal` that keeps its syntactic kind and its text as written, and a
-  value that is a path keeps its path. The schema has a contribution for every schema item any
-  package writes, its definitions first and then its extensions, each by source and position
+  with the nearest name it does declare in its help. The schema has a contribution for every
+  schema item any package writes, its definitions first and then its extensions, each by source
+  and position
   and named at its `schema` or its `extend`. The root package's first schema definition gives it
   its description, its roots and its applications, the root package's schema extensions give it
   their roots and their applications, and every other schema item is a contribution alone. The
@@ -270,7 +269,25 @@ All notable changes to Smear are documented in this file.
   parameter's bounds. A new `Limits::max_bound_steps`, 2^20 by default, bounds the steps judging
   takes, each type judged once whatever its nullness; past it, and past the depth or the
   instantiations the types it derives may reach, each occurrence is `resource-limit` and keeps its
-  type. Then smear's rules walk the model, each a visitor on
+  type. Then every value is made, in the model's walk, each by the type expected where it stands,
+  with its `!`, as `Value::ty()` answers, each value nested in it a value of its own at its own
+  location: `null` where the type is nullable; a list's elements each against its element, and any
+  other value where a list is expected the one-element list that holds it, a list for each level;
+  a boolean; an integer of any length, range-checked against its width by smear itself, in every
+  radix; a float, or an integer, finite in `f32` or `f64`, `f32`'s range judged on the literal
+  itself; a string, cooked; for `id` a string, or an integer in `i32`'s range; for `bytes` a
+  string's UTF-8 encoding or a list of integers from 0 to 255, either one `ValueKind::Bytes`, a new
+  kind; and for `NonZero` an integer that is not zero. A custom scalar's value is its `Literal`,
+  and so, in this version, is an enum's, an input object's and a collection's, and a value whose
+  type names a type parameter or can take no value. A value that does not fit is unresolved and
+  reported where it is written, with GraphQL's `smear::schema::invalid-default-value` or
+  `invalid-directive-argument-value`, but for a number out of the range of any width but the 32-bit
+  signed one, or of `f32`, the new `smear::graphqlx::width-overflow`, and a zero where `NonZero` is
+  expected, the new `smear::graphqlx::nonzero-zero`; a required argument given `null` is
+  `smear::schema::missing-required-directive-argument`, at its name. A row made of a written path
+  keeps its path. A new `Limits::max_value_steps`, 2^20 by default, bounds the lists a value written
+  alone stands for: past it the value is `resource-limit` where it is written, and the built-in
+  library's own values cost nothing. Then smear's rules walk the model, each a visitor on
   the public trait. A program defines its schema at most once: each schema definition the root
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
   code, with a label at the first. And the schema is the root package's: each schema definition

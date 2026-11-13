@@ -127,6 +127,15 @@ impl ModelBuilder {
       .map_or(IdRange::new(0, 0), |row: &MemberRow| row.arguments)
   }
 
+  /// The type occurrence `member`'s type is written as: none for an enum value.
+  pub(crate) fn member_ty(&self, member: MemberId) -> Option<TypeExprId> {
+    self
+      .model
+      .members
+      .get(member.get() as usize)
+      .and_then(|row: &MemberRow| row.ty)
+  }
+
   /// The applications of `member`, in order.
   pub(crate) fn member_applications(&self, member: MemberId) -> &[ApplicationId] {
     match self.model.members.get(member.get() as usize) {

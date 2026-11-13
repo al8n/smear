@@ -138,6 +138,18 @@ pub enum DiagnosticKind {
   /// directive application's type arguments are not judged against its directive's bounds.
   UnsatisfiedBound,
 
+  // -- Values ------------------------------------------------------------------------------------
+  /// A number out of the range of the type expected where it is written. An integer out of the
+  /// range of an integer primitive of any width but the 32-bit signed one, or of the primitive a
+  /// `NonZero` holds when that is not `i32`; and a float, or an integer where a float is expected,
+  /// out of `f32`'s range. `i32`, `Int`, `id`'s integers, `NonZero<i32>`, `f64` and `Float` keep
+  /// GraphQL's own code, the one of the place the value is written in. Reported at the literal,
+  /// whose value is unresolved; the help gives the type's range as a formula.
+  WidthOverflow,
+  /// A zero where `core`'s `NonZero` is expected, of any width, in any radix and with either sign,
+  /// in a default or in a directive's argument. Reported at the literal, whose value is unresolved.
+  NonZeroZero,
+
   // -- smear's rules -----------------------------------------------------------------------------
   /// A package other than the root package writes a `schema` definition or a schema extension. A
   /// dependency is a library, and the schema is the root package's, which alone defines and
@@ -228,6 +240,8 @@ impl DiagnosticKind {
     Self::GenericArity,
     Self::GenericDefault,
     Self::UnsatisfiedBound,
+    Self::WidthOverflow,
+    Self::NonZeroZero,
     Self::SchemaOutsideRoot,
     Self::OrphanExtension,
     Self::GenericEnum,
@@ -266,6 +280,8 @@ impl DiagnosticKind {
       Self::GenericArity => Code::new("smear::graphqlx::generic-arity"),
       Self::GenericDefault => Code::new("smear::graphqlx::generic-default"),
       Self::UnsatisfiedBound => Code::new("smear::graphqlx::unsatisfied-bound"),
+      Self::WidthOverflow => Code::new("smear::graphqlx::width-overflow"),
+      Self::NonZeroZero => Code::new("smear::graphqlx::nonzero-zero"),
       Self::SchemaOutsideRoot => Code::new("smear::graphqlx::schema-outside-root"),
       Self::OrphanExtension => Code::new("smear::graphqlx::orphan-extension"),
       Self::GenericEnum => Code::new("smear::graphqlx::generic-enum"),
@@ -304,6 +320,8 @@ impl DiagnosticKind {
       Self::GenericArity => "wrong number of type arguments",
       Self::GenericDefault => "type parameter default that can never fill",
       Self::UnsatisfiedBound => "unsatisfied bound",
+      Self::WidthOverflow => "out of the type's range",
+      Self::NonZeroZero => "zero where `NonZero` is expected",
       Self::SchemaOutsideRoot => "schema outside the root package",
       Self::OrphanExtension => "orphan extension",
       Self::GenericEnum => "generic enum",
@@ -342,6 +360,8 @@ impl DiagnosticKind {
       | Self::GenericArity
       | Self::GenericDefault
       | Self::UnsatisfiedBound
+      | Self::WidthOverflow
+      | Self::NonZeroZero
       | Self::SchemaOutsideRoot
       | Self::OrphanExtension
       | Self::GenericEnum
@@ -424,4 +444,18 @@ pub(crate) mod schema {
   /// `DuplicateSchemaDefinition`.
   pub(crate) const DUPLICATE_SCHEMA_DEFINITION: Code =
     Code::new("smear::schema::duplicate-schema-definition");
+
+  /// A member's default does not fit the type the member is declared with: `smear-schema`'s
+  /// `InvalidDefaultValue`.
+  pub(crate) const INVALID_DEFAULT_VALUE: Code = Code::new("smear::schema::invalid-default-value");
+
+  /// An application's argument does not fit the type its directive declares for it:
+  /// `smear-schema`'s `InvalidDirectiveArgumentValue`.
+  pub(crate) const INVALID_DIRECTIVE_ARGUMENT_VALUE: Code =
+    Code::new("smear::schema::invalid-directive-argument-value");
+
+  /// An application leaves out an argument its directive requires, or passes it `null`:
+  /// `smear-schema`'s `MissingRequiredDirectiveArgument`.
+  pub(crate) const MISSING_REQUIRED_DIRECTIVE_ARGUMENT: Code =
+    Code::new("smear::schema::missing-required-directive-argument");
 }

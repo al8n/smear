@@ -1,21 +1,21 @@
-//! What the phases after instantiation write: each definition's externs; the tiers of definitions
-//! and types; the shapes and types coercion gives values; and marks.
+//! What the phases after coercion write, and what the hand-built models of the tests write in one
+//! step: each definition's externs; the tiers of definitions and types; the values coercion does
+//! not make yet, sets, maps, input objects, enum values and type values; a value written whole,
+//! each over coercion's own writers; and marks.
 //!
 //! GATED ON HAVING A CALLER. The phases still to come are this module's callers, and until each
 //! lands the test-support door is its only caller: a method that no shipped build calls is dead
 //! code. A phase moves the methods it calls out of this module, as the module tree, item
-//! collection, lowering and instantiation moved theirs.
+//! collection, lowering, instantiation and coercion moved theirs.
 
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{DefId, MemberId, TyId, ValueId, dense},
+  id::{DefId, MemberId, Sym, TyId, ValueId, dense},
   model::{
-    table::{
-      ExternRow, FloatRow, IntRow, Run, VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST,
-      VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET, VALUE_STRING, VALUE_TYPE,
-    },
-    value::ObjectEntry,
+    table::{ExternRow, Run, VALUE_ENUM, VALUE_MAP, VALUE_OBJECT, VALUE_SET, VALUE_TYPE},
+    ty::PathRoot,
+    value::{LiteralKind, ObjectEntry},
   },
   package::Tier,
 };
@@ -41,55 +41,39 @@ impl ModelBuilder {
     self.model.tys[ty.get() as usize].tier = tier;
   }
 
-  /// Makes `value` `null`.
-  pub fn set_null(&mut self, value: ValueId) {
-    self.value_row(value).shape = VALUE_NULL;
-  }
-
-  /// Makes `value` the boolean `flag`.
-  pub fn set_bool(&mut self, value: ValueId, flag: bool) {
-    let row = self.value_row(value);
-    row.shape = VALUE_BOOL;
-    row.payload = u32::from(flag);
-  }
-
   /// Makes `value` an integer: negative when `negative`, of absolute value `magnitude`,
   /// little-endian, written as `text`. Trailing zero bytes of `magnitude` are not kept, so zero is
   /// no bytes, and zero is never negative.
   pub fn set_int(&mut self, value: ValueId, negative: bool, magnitude: &[u8], text: &str) {
-    let len = magnitude
-      .iter()
-      .rposition(|byte: &u8| *byte != 0)
-      .map_or(0, |last: usize| last + 1);
-    let kept = &magnitude[..len];
-    let int = IntRow {
-      negative: negative && !kept.is_empty(),
-      magnitude: append(&mut self.model.magnitudes, kept),
-      text: push_text(&mut self.model.text, text),
-    };
-    let payload = dense(self.model.ints.len());
-    self.model.ints.push(int);
-    let row = self.value_row(value);
-    row.shape = VALUE_INT;
-    row.payload = payload;
+    let text = self.keep_text(text);
+    let int = self.push_int(negative, magnitude, text);
+    self.give_int(value, int);
   }
 
   /// Makes `value` the float `float`, written as `text`.
   pub fn set_float(&mut self, value: ValueId, float: f64, text: &str) {
-    let text = push_text(&mut self.model.text, text);
-    let payload = dense(self.model.floats.len());
-    self.model.floats.push(FloatRow { value: float, text });
-    let row = self.value_row(value);
-    row.shape = VALUE_FLOAT;
-    row.payload = payload;
+    let text = self.keep_text(text);
+    let row = self.push_float(float, text);
+    self.give_float(value, row);
   }
 
   /// Makes `value` the string `text`, cooked.
   pub fn set_string(&mut self, value: ValueId, text: &str) {
-    let run = push_text(&mut self.model.text, text);
-    let row = self.value_row(value);
-    row.shape = VALUE_STRING;
-    row.run = run;
+    let text = self.keep_text(text);
+    self.give_string(value, text);
+  }
+
+  /// Makes `value` a literal of `kind`, kept as written: `text`.
+  pub fn set_literal(&mut self, value: ValueId, kind: LiteralKind, text: &str) {
+    let text = self.keep_text(text);
+    let literal = self.push_literal(kind, text);
+    self.give_literal(value, literal);
+  }
+
+  /// Records the path an enum or type value writes: from `root`, through `segments`.
+  pub fn set_value_path(&mut self, value: ValueId, root: PathRoot, segments: &[Sym]) {
+    let segments = self.keep_segments(segments);
+    self.give_path(value, root, segments);
   }
 
   /// Makes `value` the enum value `member` of the enum `def`.
@@ -105,11 +89,6 @@ impl ModelBuilder {
     let row = self.value_row(value);
     row.shape = VALUE_TYPE;
     row.def = def;
-  }
-
-  /// Makes `value` the list of `elements`, each appended after it.
-  pub fn set_list(&mut self, value: ValueId, elements: &[ValueId]) {
-    self.set_items(value, VALUE_LIST, elements);
   }
 
   /// Makes `value` the set of `elements`, each appended after it.
@@ -152,30 +131,9 @@ impl ModelBuilder {
     };
   }
 
-  /// Gives `value` the type it was coerced against.
-  pub fn set_value_ty(&mut self, value: ValueId, ty: TyId) {
-    debug_assert!(
-      (ty.get() as usize) < self.model.tys.len(),
-      "a type is interned before a value is given it"
-    );
-    self.value_row(value).ty = ty;
-  }
-
   /// Marks, as an error reported at `at` does, every contribution and member whose extent holds
   /// `at`. Marks are applied when the model is finished.
   pub fn mark(&mut self, at: Location) {
     self.marks.push(at);
-  }
-
-  /// Makes `value` a list or a set, `shape`, of `elements`, each appended after it.
-  fn set_items(&mut self, value: ValueId, shape: u8, elements: &[ValueId]) {
-    debug_assert!(
-      elements.iter().all(|item: &ValueId| *item > value),
-      "what a value holds is appended after it"
-    );
-    let run = append(&mut self.model.value_items, elements);
-    let row = self.value_row(value);
-    row.shape = shape;
-    row.run = run;
   }
 }

@@ -1,20 +1,64 @@
 //! Coercion: the phase after instantiation, which makes the model's values of the values lowering
-//! read.
+//! read, each by the type expected where it stands.
 //!
 //! It reads no document: it reads the trees lowering answered, the rows written so far, through
-//! the builder, and the sources' texts, and it is the one writer of the model's values.
+//! the builder, and the sources' texts, and it is the one writer of the model's values. Its
+//! built-ins are found once, each by its name in its package's root module and never by a spelling
+//! a program writes: `core`'s `NonZero`, and `alloc`'s `string`, `id` and `bytes`; a primitive is
+//! told by its definition, which `core` materialises.
 //!
 //! # The walk
 //!
 //! A value is appended when the model's walk reaches it, and never before, so a value's id is its
 //! place in that walk: each definition in id order, its applications, every contribution's in
 //! order, then each of its direct members in id order, right after each its arguments; a member's
-//! default, then its applications; and last the schema's applications. An application's arguments
-//! are appended all at once, in the order of its directive's arguments.
+//! default, then its applications; and last the schema's applications. Within a value, a value
+//! comes before what it holds, a list before its elements, left to right. An application's
+//! arguments are appended all at once, in the order of its directive's arguments.
 //!
-//! A written value is one literal: its syntactic kind and its text as written, quotes, brackets
-//! and all, each sequence that is not UTF-8 replaced by U+FFFD; a value that is a path keeps its
-//! path too. Nothing it holds is a value of its own.
+//! # What a value becomes
+//!
+//! Each node of a tree is coerced against the type expected where it stands, a member's type for
+//! its default and an argument's for its value, with an explicit stack: one row for each node, at
+//! the node, typed with that type, its `!` included. In this order:
+//!
+//! 1. A node whose type can take no value is kept as written, a `Literal`, and nothing is said: a
+//!    type that names a type parameter, which only an instantiation can check; the unresolved
+//!    type, an object, an interface, a union or a directive; and `NonZero` of what is no nullable
+//!    integer primitive at least one bit wide. Whoever refused the type said so, and that is asked
+//!    before `null` is.
+//! 2. `null` is `null` where its type is nullable, and does not fit where it is not.
+//! 3. By the type, without its `!`: a list takes a list, each element coerced against its
+//!    element, and any other node is a lone value, which stands for the one-element list that
+//!    holds it, a list for each level of list the type has more than the node, each level one row
+//!    at the node; `bool` a boolean; an integer primitive an integer in its width's range, read at
+//!    any length; `f32` and `f64` a float, or an integer, whose value is finite in that type;
+//!    `string` a string, cooked; `id` a string, or an integer in `i32`'s range, kept an integer;
+//!    `bytes` a string, its UTF-8 encoding, or a list of integers from 0 to 255, one value of its
+//!    bytes either way; `NonZero` of an integer primitive an integer in that primitive's range
+//!    that is not zero. Any other scalar takes any literal, kept as written, and so does an input
+//!    object, an enum and a collection in this version.
+//!
+//! A node that does not fit is one row, unresolved, typed with its type, and is not descended: an
+//! element of a list does not fit on its own, and the list keeps the others. It is reported where
+//! it is written, with GraphQL's code for a default or for a directive's argument that does not
+//! fit, but for a number out of range of any width but the 32-bit signed one, or out of `f32`'s,
+//! which is `width-overflow`, and a zero where `NonZero` is expected, which is `nonzero-zero`. A
+//! required argument, one written non-null with no default, given `null` is
+//! `missing-required-directive-argument`, at its name, once. A path whose root lowering does not
+//! know was reported there, and does not fit silently. A row made of a written path keeps its
+//! path, whatever it becomes.
+//!
+//! What is read of a literal is read once and kept outside the tree, in a row the node's one slot
+//! indexes: its text, kept in the model's text arena; a string's cooked text; an integer's count
+//! of significant digits, its magnitude once its digits could fit the width asked, and its row; a
+//! float's verdict and its row; a byte string; a literal's row; a path's segments.
+//!
+//! # What bounds it
+//!
+//! A written row is a written literal, which `Limits::max_source_bytes` bounds. Each list a lone
+//! value stands for is a step of `Limits::max_value_steps`: past it, the value is unresolved, and
+//! `resource-limit` where it is written. The built-in library's own values are charged nothing.
 //!
 //! # The arenas
 //!
@@ -23,30 +67,69 @@
 //! `u32` addresses, is reported once, as `resource-limit`, at the whole of the root package's
 //! package source: otherwise the model would answer a wrong spelling with no diagnostic.
 
-use std::string::String;
+use std::{format, string::String, vec::Vec};
 
-use tokora::diagnostic::Location;
+use smear_lexer::decode_string_value;
+use tokora::diagnostic::{Code, Location};
 
 use super::{
-  code::DiagnosticKind,
-  diagnostic::{Diagnostic, Reporter},
-  id::{ApplicationId, DefId, MemberId, ValueId},
-  model::{LiteralKind, ModelBuilder},
-  raw::{RawArgument, RawKind, RawTree, RawValues},
+  builtin::{ALLOC, CORE, TYPE},
+  code::{DiagnosticKind, schema},
+  declare::Declarations,
+  diagnostic::{Diagnostic, Excerpt, Reporter},
+  id::{ApplicationId, DefId, MemberId, TyId, TypeExprId, ValueId, dense},
+  instantiate::binding,
+  limits::Limits,
+  model::{Bytes, DefKind, LiteralKind, ModelBuilder, Primitive, Resolution, Shape, Text},
+  raw::{Radix, RawArgument, RawKind, RawNode, RawPath, RawTree, RawValues, UNREAD},
   set::ROOT,
   source::SourceMap,
 };
 
-/// Makes the model's values of `raw`, the values lowering read, in `builder`, whose sources
-/// `sources` numbers, reporting into `reporter`: each member's default and each application's
-/// arguments, in the model's walk; then the check of the model's arenas.
+mod number;
+
+use number::{Float, Scanned};
+
+/// The width an integer is read in where a float is expected: an integer longer than one of this
+/// many bits is no finite float.
+const FLOAT_BITS: u32 = 1024;
+
+/// Makes the model's values of `raw`, the values lowering read, in `builder`, whose declarations
+/// are `declarations` and whose sources `sources` numbers, within `limits`, reporting into
+/// `reporter`: each member's default and each application's arguments, in the model's walk; then
+/// the check of the model's arenas.
 pub(crate) fn coerce(
   raw: RawValues<'_>,
+  declarations: &Declarations<'_, '_>,
   sources: &SourceMap,
+  limits: &Limits,
   builder: &mut ModelBuilder,
   reporter: &mut Reporter,
 ) {
-  let mut coercion = Coercion { builder, raw };
+  let builtins = Builtins {
+    non_zero: binding(declarations, builder, CORE, TYPE, b"NonZero"),
+    string: binding(declarations, builder, ALLOC, TYPE, b"string"),
+    id: binding(declarations, builder, ALLOC, TYPE, b"id"),
+    bytes: binding(declarations, builder, ALLOC, TYPE, b"bytes"),
+  };
+  let mut coercion = Coercion {
+    builder,
+    reporter,
+    raw,
+    primitives: &declarations.primitives,
+    builtins,
+    supplied: sources.package_sources(ROOT).start(),
+    max_steps: limits.max_value_steps(),
+    spent: 0,
+    kept: Vec::new(),
+    magnitudes: Vec::new(),
+    limbs: Vec::new(),
+    scratch: String::new(),
+    octets: Vec::new(),
+    stack: Vec::new(),
+    items: Vec::new(),
+    children: Vec::new(),
+  };
   for index in 0..coercion.builder.def_count() {
     let def = DefId::new(index);
     let count = coercion.builder.def_applications(def).len();
@@ -69,22 +152,210 @@ pub(crate) fn coerce(
     }
   }
   let root = sources.package_sources(ROOT);
-  arenas(coercion.builder, reporter, Location::entire(root.start()));
+  arenas(
+    coercion.builder,
+    coercion.reporter,
+    Location::entire(root.start()),
+  );
 }
 
-/// What coercion keeps while it writes: the builder it writes into and the values it reads.
+/// The built-in definitions coercion keys on, each found by its name in its package's root module.
+#[derive(Clone, Copy)]
+struct Builtins {
+  non_zero: Option<DefId>,
+  string: Option<DefId>,
+  id: Option<DefId>,
+  bytes: Option<DefId>,
+}
+
+/// Where a value is written, which says the code it is refused with.
+#[derive(Clone, Copy)]
+enum Site {
+  /// A member's default: GraphQL's code for an invalid default.
+  Default,
+  /// An application's argument: GraphQL's code for an invalid directive argument.
+  Argument,
+}
+
+impl Site {
+  /// The code of a value written here that does not fit, and its label.
+  fn refusal(self) -> (Code, &'static str) {
+    match self {
+      Self::Default => (schema::INVALID_DEFAULT_VALUE, "invalid default value"),
+      Self::Argument => (
+        schema::INVALID_DIRECTIVE_ARGUMENT_VALUE,
+        "invalid directive argument value",
+      ),
+    }
+  }
+}
+
+/// The range of an integer type: the integer primitive `width` bits wide, signed when `signed`,
+/// and never zero when `non_zero`.
+#[derive(Clone, Copy)]
+struct Range {
+  signed: bool,
+  width: u32,
+  non_zero: bool,
+}
+
+/// `id`'s integers: `i32`'s.
+const ID_RANGE: Range = Range {
+  signed: true,
+  width: 32,
+  non_zero: false,
+};
+
+/// What a named type takes.
+#[derive(Clone, Copy)]
+enum Base {
+  Bool,
+  /// An integer primitive, or `NonZero` of one.
+  Int(Range),
+  /// `f32` when `single`, and `f64` otherwise.
+  Float {
+    single: bool,
+  },
+  String,
+  Id,
+  Bytes,
+  /// An enum, whose values are kept as written in this version.
+  Enum,
+  /// Any literal, kept as written: a custom scalar, a collection, `TypeRef` and an input object.
+  Kept,
+}
+
+/// What a node is made against a type, told by the node's syntactic kind and the type alone.
+#[derive(Clone, Copy)]
+enum Class {
+  /// The type can take no value, or there is none: one `Literal` row.
+  NoValue,
+  /// `null` against a nullable type: one `Null` row.
+  Null,
+  /// `null` against a non-null type: one unresolved row.
+  NotNull,
+  /// A list against a list of this element: a `List` row, then each element against it.
+  List(TyId),
+  /// Any other node against a list of this element: a `List` row, then the same node against it.
+  Lone(TyId),
+  /// A node against a named type: one row, its kind told by what the type takes.
+  Leaf(Base),
+}
+
+/// Why a node does not fit.
+#[derive(Clone, Copy)]
+enum Why {
+  /// `null` where a non-null value is expected.
+  Null,
+  /// A literal of another kind than the type takes.
+  Kind,
+  /// An integer out of this range.
+  Range(Range),
+  /// A float, or an integer where a float is expected, that is not finite as an `f64`.
+  Infinite,
+  /// A float, or an integer where `f32` is expected, out of `f32`'s range.
+  Single,
+  /// Zero where `NonZero` is expected.
+  Zero,
+  /// An element of a `bytes` list that is no integer.
+  Byte,
+  /// An element of a `bytes` list out of a byte's range.
+  ByteRange,
+}
+
+/// A node that does not fit, and why: the node may be an element of the value being made.
+#[derive(Clone, Copy)]
+struct Refused {
+  node: u32,
+  why: Why,
+}
+
+/// An integer's magnitude once converted: its run of the phase's own magnitudes, its bit length,
+/// and whether it is a power of two.
+#[derive(Clone, Copy)]
+struct Converted {
+  start: u32,
+  len: u32,
+  bits: u64,
+  power: bool,
+}
+
+/// What coercion has read of one node, each part read the first time it is asked for and kept, so
+/// that no literal is read twice and no text kept twice.
+#[derive(Clone, Copy, Default)]
+struct Kept {
+  /// Its text as written, in the model's text arena.
+  text: Option<Text>,
+  /// A string's cooked text, in the model's text arena; `None` inside for a spelling the decoder
+  /// refuses.
+  cooked: Option<Option<Text>>,
+  /// An integer as scanned; `None` inside for a text that is no integer of its radix.
+  scanned: Option<Option<Scanned>>,
+  /// An integer's magnitude, once converted.
+  converted: Option<Converted>,
+  /// An integer's row of the model's integer table.
+  int: Option<u32>,
+  /// What it reads as where a float is expected; `None` inside for a text no float reads.
+  float: Option<Option<Float>>,
+  /// Its row of the model's float table.
+  float_row: Option<u32>,
+  /// Its row of the model's literal table.
+  literal: Option<u32>,
+  /// Its bytes as a `bytes` value, in the model's byte pool, or why it is none.
+  bytes: Option<Result<Bytes, Refused>>,
+}
+
+/// One step of making a tree's rows.
+#[derive(Clone, Copy)]
+enum Task {
+  /// Make the row of `node` against `ty`.
+  Make { node: u32, ty: Option<TyId> },
+  /// Give the list `list` the rows made since `from` among the open lists' rows.
+  Close { list: ValueId, from: usize },
+}
+
+/// What coercion keeps while it writes.
 struct Coercion<'c, 'p> {
   builder: &'c mut ModelBuilder,
+  reporter: &'c mut Reporter,
+  /// The trees, and each source's text.
   raw: RawValues<'p>,
+  /// Each primitive `core` materialises, with its definition: the primitive at index `i` is the
+  /// definition `i`.
+  primitives: &'c [(Primitive, DefId)],
+  builtins: Builtins,
+  /// The first source of a supplied package: every source below it is the built-in library's.
+  supplied: u32,
+  /// `Limits::max_value_steps`.
+  max_steps: u32,
+  /// The steps spent.
+  spent: u32,
+  /// What has been read of each node read so far: the rows a node's `kept` slot indexes.
+  kept: Vec<Kept>,
+  /// Every integer's magnitude converted so far.
+  magnitudes: Vec<u8>,
+  /// The limbs of the decimal integer being converted.
+  limbs: Vec<u32>,
+  /// The text being cooked or read.
+  scratch: String,
+  /// The bytes of the list being read as a `bytes` value.
+  octets: Vec<u8>,
+  /// What making the current tree has still to do.
+  stack: Vec<Task>,
+  /// The rows made of the lists that are open, each list's after it.
+  items: Vec<ValueId>,
+  /// The children of the list being opened.
+  children: Vec<u32>,
 }
 
-impl Coercion<'_, '_> {
+impl<'p> Coercion<'_, 'p> {
   /// The values of `member`: its default, then each of its applications' arguments.
   fn member(&mut self, member: MemberId) {
-    if let Some(&tree) = self.raw.defaults.get(&member)
-      && let Some(value) = self.value(tree)
-    {
-      self.builder.set_member_default(member, value);
+    if let Some(&tree) = self.raw.defaults.get(&member) {
+      let ty = self.member_type(member);
+      if let Some(value) = self.value(tree, ty, Site::Default) {
+        self.builder.set_member_default(member, value);
+      }
     }
     let count = self.builder.member_applications(member).len();
     for at in 0..count {
@@ -92,6 +363,24 @@ impl Coercion<'_, '_> {
         self.application(application);
       }
     }
+  }
+
+  /// The type `member` is written with, as instantiation typed it, and whether it is written
+  /// non-null.
+  fn member_occurrence(&self, member: MemberId) -> (Option<TyId>, bool) {
+    let occurrence = self
+      .builder
+      .member_ty(member)
+      .and_then(|ty: TypeExprId| self.builder.occurrence(ty));
+    match occurrence {
+      Some(occurrence) => (occurrence.ty, occurrence.non_null),
+      None => (None, false),
+    }
+  }
+
+  /// The type `member` is written with, as instantiation typed it.
+  fn member_type(&self, member: MemberId) -> Option<TyId> {
+    self.member_occurrence(member).0
   }
 
   /// The arguments `application` writes, in the order lowering kept them, which is its directive's:
@@ -105,51 +394,783 @@ impl Coercion<'_, '_> {
     while let Some(&argument) = self.raw.arguments.get(next)
       && argument.application == application
     {
-      if let Some(value) = self.value(argument.tree) {
-        self.builder.push_application_argument(
-          application,
-          argument.argument,
-          Some(argument.name),
-          value,
-        );
-      }
+      self.written_argument(application, argument);
       next += 1;
     }
   }
 
-  /// The value of the tree `tree`, written as it is written: one literal, which keeps its path
-  /// when it is one. `None` for a tree lowering did not make.
-  fn value(&mut self, tree: u32) -> Option<ValueId> {
-    let RawTree { root, source } = self.raw.trees.get(tree as usize).copied()?;
+  /// The argument `argument` of `application`, as written: its value coerced against the
+  /// argument's type. A required argument, written non-null and with no default, given `null` is
+  /// reported as left out, at its name, and its value is unresolved.
+  fn written_argument(&mut self, application: ApplicationId, argument: RawArgument) {
+    let (ty, non_null) = self.member_occurrence(argument.argument);
+    let required = non_null && !self.raw.defaults.contains_key(&argument.argument);
+    let null = self
+      .raw
+      .trees
+      .get(argument.tree as usize)
+      .and_then(|tree: &RawTree| self.raw.nodes.get(tree.root as usize))
+      .is_some_and(|node: &RawNode| matches!(node.kind, RawKind::Null));
+    let value = if required && null {
+      self.null_for_required(application, argument, ty)
+    } else {
+      self.value(argument.tree, ty, Site::Argument)
+    };
+    if let Some(value) = value {
+      self.builder.push_application_argument(
+        application,
+        argument.argument,
+        Some(argument.name),
+        value,
+      );
+    }
+  }
+
+  /// The value of `argument`, a required argument of `application` given `null`, of type `ty`:
+  /// one unresolved row, and one diagnostic, at the argument's name.
+  fn null_for_required(
+    &mut self,
+    application: ApplicationId,
+    argument: RawArgument,
+    ty: Option<TyId>,
+  ) -> Option<ValueId> {
+    let RawTree { root, source } = self.raw.trees.get(argument.tree as usize).copied()?;
     let node = self.raw.nodes.get(root as usize).copied()?;
     let id = self
       .builder
       .push_value(Location::new(source, node.span), true);
-    let kind = match node.kind {
-      RawKind::Null => LiteralKind::Null,
-      RawKind::Boolean => LiteralKind::Boolean,
-      RawKind::Int => LiteralKind::Int,
-      RawKind::Float => LiteralKind::Float,
-      RawKind::String => LiteralKind::String,
-      RawKind::Path(_) => LiteralKind::Enum,
-      RawKind::List => LiteralKind::List,
-      RawKind::Set => LiteralKind::Set,
-      RawKind::Map => LiteralKind::Map,
-      RawKind::Object => LiteralKind::Object,
-    };
-    let written = self.raw.text(source, node.span);
-    self
-      .builder
-      .set_literal(id, kind, &String::from_utf8_lossy(written));
-    if let RawKind::Path(row) = node.kind
-      && let Some(path) = self.raw.paths.get(row as usize).copied()
-      && let Some(root) = path.written
-    {
-      self
-        .builder
-        .set_value_path(id, root, self.raw.path_segments(path));
+    if let Some(ty) = ty {
+      self.builder.set_value_ty(id, ty);
     }
+    let directive: &[u8] = match self.builder.applied(application) {
+      Some((Resolution::Resolved(def), _, _)) => self.builder.def_name(def),
+      _ => b"",
+    };
+    let name = argument.name;
+    let written: &[u8] = match name.span() {
+      Some(span) => self.raw.text(name.source(), span),
+      None => b"",
+    };
+    let message = format!(
+      "the argument `{}` of `@{}` is required, and `null` is given",
+      Excerpt(written),
+      Excerpt(directive)
+    );
+    self.reporter.report(
+      Diagnostic::builder(schema::MISSING_REQUIRED_DIRECTIVE_ARGUMENT, name)
+        .message(message)
+        .primary_label("missing required directive argument")
+        .build(),
+    );
     Some(id)
+  }
+
+  /// Makes the rows of the tree `tree` against `ty`, written at `site`: the value, then what it
+  /// holds, in pre-order. Answers the value's id, `None` for a tree lowering did not make.
+  fn value(&mut self, tree: u32, ty: Option<TyId>, site: Site) -> Option<ValueId> {
+    let RawTree { root, source } = self.raw.trees.get(tree as usize).copied()?;
+    let base = self.items.len();
+    self.stack.push(Task::Make { node: root, ty });
+    while let Some(task) = self.stack.pop() {
+      match task {
+        Task::Make { node, ty } => self.make(node, ty, source, site),
+        Task::Close { list, from } => {
+          self
+            .builder
+            .set_list(list, self.items.get(from..).unwrap_or_default());
+          self.items.truncate(from);
+        }
+      }
+    }
+    let value = self.items.get(base).copied();
+    self.items.truncate(base);
+    value
+  }
+
+  /// Makes the row of `node`, written in the source `source` at `site`, against `ty`, and pushes
+  /// what it holds: the row's id goes to the open lists' rows.
+  fn make(&mut self, node: u32, ty: Option<TyId>, source: u32, site: Site) {
+    let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
+      return;
+    };
+    let at = Location::new(source, raw.span);
+    let id = self.builder.push_value(at, true);
+    self.items.push(id);
+    if let Some(ty) = ty {
+      self.builder.set_value_ty(id, ty);
+    }
+    match self.classify(raw.kind, ty) {
+      Class::NoValue => {
+        self.literal(id, node, source);
+        self.path(id, raw.kind);
+      }
+      Class::Null => self.builder.set_null(id),
+      Class::NotNull => self.refuse(
+        Refused {
+          node,
+          why: Why::Null,
+        },
+        source,
+        ty,
+        site,
+      ),
+      Class::List(element) => {
+        let from = self.items.len();
+        self.stack.push(Task::Close { list: id, from });
+        self.children.clear();
+        let mut child = node.saturating_add(1);
+        while child < raw.after {
+          self.children.push(child);
+          let next = self
+            .raw
+            .nodes
+            .get(child as usize)
+            .map_or(raw.after, |held: &RawNode| held.after);
+          if next <= child {
+            break;
+          }
+          child = next;
+        }
+        self
+          .stack
+          .extend(self.children.iter().rev().map(|&child: &u32| Task::Make {
+            node: child,
+            ty: Some(element),
+          }));
+      }
+      Class::Lone(element) => {
+        if source >= self.supplied && !self.charge(1) {
+          self.path(id, raw.kind);
+          self.lone_limit(at);
+        } else {
+          let from = self.items.len();
+          self.stack.push(Task::Close { list: id, from });
+          self.stack.push(Task::Make {
+            node,
+            ty: Some(element),
+          });
+        }
+      }
+      Class::Leaf(base) => {
+        self.path(id, raw.kind);
+        if let Err(refused) = self.leaf(id, node, source, base) {
+          self.refuse(refused, source, ty, site);
+        }
+      }
+    }
+  }
+
+  /// What `kind` is made against `ty`, told by the two alone: no literal is read.
+  fn classify(&self, kind: RawKind, ty: Option<TyId>) -> Class {
+    let Some(ty) = ty else {
+      return Class::NoValue;
+    };
+    let builder: &ModelBuilder = &*self.builder;
+    if !builder.ty_closed(ty) {
+      return Class::NoValue;
+    }
+    let class = match builder.ty_shape(ty) {
+      Some(Shape::Named(def)) => match self.base(def, ty) {
+        Some(base) => Class::Leaf(base),
+        None => return Class::NoValue,
+      },
+      Some(Shape::List(element)) => match kind {
+        RawKind::List => Class::List(element),
+        _ => Class::Lone(element),
+      },
+      Some(Shape::Param { .. } | Shape::Unresolved) | None => return Class::NoValue,
+    };
+    if matches!(kind, RawKind::Null) {
+      return if builder.ty_non_null(ty) {
+        Class::NotNull
+      } else {
+        Class::Null
+      };
+    }
+    class
+  }
+
+  /// What the named type `ty`, of `def`, takes: `None` when it can take no value.
+  fn base(&self, def: DefId, ty: TyId) -> Option<Base> {
+    if let Some(primitive) = self.primitive(def) {
+      return Some(match primitive {
+        Primitive::Bool => Base::Bool,
+        Primitive::F32 => Base::Float { single: true },
+        Primitive::F64 => Base::Float { single: false },
+        Primitive::Int { signed, width } => Base::Int(Range {
+          signed,
+          width,
+          non_zero: false,
+        }),
+      });
+    }
+    let builtins = self.builtins;
+    if Some(def) == builtins.string {
+      return Some(Base::String);
+    }
+    if Some(def) == builtins.id {
+      return Some(Base::Id);
+    }
+    if Some(def) == builtins.bytes {
+      return Some(Base::Bytes);
+    }
+    if Some(def) == builtins.non_zero {
+      return self.non_zero(ty).map(Base::Int);
+    }
+    match self.builder.def_kind(def)? {
+      DefKind::Enum => Some(Base::Enum),
+      DefKind::Scalar | DefKind::InputObject => Some(Base::Kept),
+      DefKind::Object | DefKind::Interface | DefKind::Union | DefKind::Directive => None,
+    }
+  }
+
+  /// The range `ty`, a named type of `NonZero`, takes: its one argument's, never zero, when that is
+  /// a nullable named type, with no argument of its own, of an integer primitive at least one bit
+  /// wide. `None` otherwise: the type takes no value, and `nonzero-argument` refuses it.
+  fn non_zero(&self, ty: TyId) -> Option<Range> {
+    let builder: &ModelBuilder = &*self.builder;
+    let &[argument] = builder.ty_args(ty) else {
+      return None;
+    };
+    if builder.ty_non_null(argument) || !builder.ty_args(argument).is_empty() {
+      return None;
+    }
+    let Some(Shape::Named(def)) = builder.ty_shape(argument) else {
+      return None;
+    };
+    match self.primitive(def)? {
+      Primitive::Int { signed, width } if width >= 1 => Some(Range {
+        signed,
+        width,
+        non_zero: true,
+      }),
+      _ => None,
+    }
+  }
+
+  /// The primitive `def` is, when `core` materialised it.
+  fn primitive(&self, def: DefId) -> Option<Primitive> {
+    self
+      .primitives
+      .get(def.get() as usize)
+      .filter(|&&(_, at): &&(Primitive, DefId)| at == def)
+      .map(|&(primitive, _): &(Primitive, DefId)| primitive)
+  }
+
+  /// Makes `id`, the row of `node` written in the source `source`, what `base` takes of it.
+  fn leaf(&mut self, id: ValueId, node: u32, source: u32, base: Base) -> Result<(), Refused> {
+    let kind = self.kind(node);
+    let refused = move |why: Why| Refused { node, why };
+    match (base, kind) {
+      (Base::Kept | Base::Enum, _) => {
+        self.literal(id, node, source);
+        Ok(())
+      }
+      (Base::Bool, RawKind::Boolean(flag)) => {
+        self.builder.set_bool(id, flag);
+        Ok(())
+      }
+      (Base::String | Base::Id, RawKind::String) => {
+        let text = self.cooked(node, source).ok_or(refused(Why::Kind))?;
+        self.builder.give_string(id, text);
+        Ok(())
+      }
+      (Base::Int(range), RawKind::Int(radix)) => self.int(id, node, source, radix, range),
+      (Base::Id, RawKind::Int(radix)) => self.int(id, node, source, radix, ID_RANGE),
+      (Base::Float { single }, RawKind::Float { .. } | RawKind::Int(_)) => {
+        self.float(id, node, source, single)
+      }
+      (Base::Bytes, RawKind::String | RawKind::List) => {
+        let bytes = self.bytes(node, source)?;
+        self.builder.give_bytes(id, bytes);
+        Ok(())
+      }
+      _ => Err(refused(Why::Kind)),
+    }
+  }
+
+  /// Makes `id` the integer `node` is, of `radix`, when it is in `range`. Its digits are counted
+  /// first, and a count past what the width holds refuses it unconverted.
+  fn int(
+    &mut self,
+    id: ValueId,
+    node: u32,
+    source: u32,
+    radix: Radix,
+    range: Range,
+  ) -> Result<(), Refused> {
+    let refused = move |why: Why| Refused { node, why };
+    let scanned = self
+      .scanned(node, source, radix)
+      .ok_or(refused(Why::Kind))?;
+    if range.non_zero && scanned.significant == 0 {
+      return Err(refused(Why::Zero));
+    }
+    let out = Why::Range(range);
+    if scanned.significant > number::max_digits(radix, range.width) {
+      return Err(refused(out));
+    }
+    let converted = self.converted(node, source, radix, scanned);
+    if !number::fits(
+      scanned.negative,
+      converted.bits,
+      converted.power,
+      range.signed,
+      range.width,
+    ) {
+      return Err(refused(out));
+    }
+    let row = self.int_row(node, source, scanned.negative, converted);
+    self.builder.give_int(id, row);
+    Ok(())
+  }
+
+  /// Makes `id` the float `node`, a float or an integer, reads as, when it is finite in `f32`
+  /// when `single` and in `f64` otherwise.
+  fn float(&mut self, id: ValueId, node: u32, source: u32, single: bool) -> Result<(), Refused> {
+    let refused = move |why: Why| Refused { node, why };
+    let read = self.float_read(node, source).ok_or(refused(Why::Kind))?;
+    let value = if single {
+      if !read.single {
+        return Err(refused(Why::Single));
+      }
+      read.value.ok_or(refused(Why::Single))?
+    } else {
+      read.value.ok_or(refused(Why::Infinite))?
+    };
+    let row = self.float_row(node, source, value);
+    self.builder.give_float(id, row);
+    Ok(())
+  }
+
+  /// The bytes `node`, a string or a list, is as a `bytes` value, kept: a string's cooked text's
+  /// UTF-8 encoding, or a list's elements, each an integer from 0 to 255.
+  fn bytes(&mut self, node: u32, source: u32) -> Result<Bytes, Refused> {
+    let slot = self.slot(node);
+    if let Some(bytes) = self.read(slot).bytes {
+      return bytes;
+    }
+    let bytes = self.read_bytes(node, source);
+    self.update(slot, |kept: &mut Kept| kept.bytes = Some(bytes));
+    bytes
+  }
+
+  /// Reads the bytes of `node`, a string or a list, as [`bytes`](Self::bytes) keeps them.
+  fn read_bytes(&mut self, node: u32, source: u32) -> Result<Bytes, Refused> {
+    let refused = move |why: Why| Refused { node, why };
+    let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
+      return Err(refused(Why::Kind));
+    };
+    match raw.kind {
+      RawKind::String => {
+        self.scratch.clear();
+        if decode_string_value(self.raw.text(source, raw.span), &mut self.scratch).is_err() {
+          return Err(refused(Why::Kind));
+        }
+        Ok(self.builder.keep_bytes(self.scratch.as_bytes()))
+      }
+      RawKind::List => {
+        self.octets.clear();
+        let mut child = node.saturating_add(1);
+        while child < raw.after {
+          let Some(element) = self.raw.nodes.get(child as usize).copied() else {
+            break;
+          };
+          let RawKind::Int(radix) = element.kind else {
+            return Err(Refused {
+              node: child,
+              why: Why::Byte,
+            });
+          };
+          let byte = self
+            .byte(child, source, radix)
+            .map_err(|why: Why| Refused { node: child, why })?;
+          self.octets.push(byte);
+          if element.after <= child {
+            break;
+          }
+          child = element.after;
+        }
+        Ok(self.builder.keep_bytes(&self.octets))
+      }
+      _ => Err(refused(Why::Kind)),
+    }
+  }
+
+  /// The byte `node`, an integer of `radix`, is: `u8`'s range.
+  fn byte(&mut self, node: u32, source: u32, radix: Radix) -> Result<u8, Why> {
+    let scanned = self.scanned(node, source, radix).ok_or(Why::Byte)?;
+    if scanned.significant > number::max_digits(radix, 8) {
+      return Err(Why::ByteRange);
+    }
+    let converted = self.converted(node, source, radix, scanned);
+    if !number::fits(scanned.negative, converted.bits, converted.power, false, 8) {
+      return Err(Why::ByteRange);
+    }
+    Ok(self.magnitude(converted).first().copied().unwrap_or(0))
+  }
+
+  /// The syntactic kind of `node`: `null` for a node lowering did not make.
+  fn kind(&self, node: u32) -> RawKind {
+    self
+      .raw
+      .nodes
+      .get(node as usize)
+      .map_or(RawKind::Null, |raw: &RawNode| raw.kind)
+  }
+
+  /// The text `node` is written as, in the source `source`.
+  fn written(&self, node: u32, source: u32) -> &'p [u8] {
+    match self.raw.nodes.get(node as usize) {
+      Some(raw) => self.raw.text(source, raw.span),
+      None => &[],
+    }
+  }
+
+  /// The slot of what has been read of `node`, appended the first time something is.
+  fn slot(&mut self, node: u32) -> usize {
+    if let Some(raw) = self.raw.nodes.get(node as usize)
+      && raw.kept != UNREAD
+    {
+      return raw.kept as usize;
+    }
+    let slot = self.kept.len();
+    self.kept.push(Kept::default());
+    if let Some(raw) = self.raw.nodes.get_mut(node as usize) {
+      raw.kept = dense(slot);
+    }
+    slot
+  }
+
+  /// What has been read at `slot`.
+  fn read(&self, slot: usize) -> Kept {
+    self.kept.get(slot).copied().unwrap_or_default()
+  }
+
+  /// Writes what `write` reads into `slot`.
+  fn update(&mut self, slot: usize, write: impl FnOnce(&mut Kept)) {
+    if let Some(kept) = self.kept.get_mut(slot) {
+      write(kept);
+    }
+  }
+
+  /// `node`'s text as written, kept in the model's text arena.
+  fn text(&mut self, node: u32, source: u32) -> Text {
+    let slot = self.slot(node);
+    if let Some(text) = self.read(slot).text {
+      return text;
+    }
+    let written = self.written(node, source);
+    let text = self.builder.keep_text(&String::from_utf8_lossy(written));
+    self.update(slot, |kept: &mut Kept| kept.text = Some(text));
+    text
+  }
+
+  /// Makes `id` the literal `node` is, its syntactic kind and its text as written.
+  fn literal(&mut self, id: ValueId, node: u32, source: u32) {
+    let slot = self.slot(node);
+    let row = match self.read(slot).literal {
+      Some(row) => row,
+      None => {
+        let kind = match self.kind(node) {
+          RawKind::Null => LiteralKind::Null,
+          RawKind::Boolean(_) => LiteralKind::Boolean,
+          RawKind::Int(_) => LiteralKind::Int,
+          RawKind::Float { .. } => LiteralKind::Float,
+          RawKind::String => LiteralKind::String,
+          RawKind::Path(_) => LiteralKind::Enum,
+          RawKind::List => LiteralKind::List,
+          RawKind::Set => LiteralKind::Set,
+          RawKind::Map => LiteralKind::Map,
+          RawKind::Object => LiteralKind::Object,
+        };
+        let text = self.text(node, source);
+        let row = self.builder.push_literal(kind, text);
+        self.update(slot, |kept: &mut Kept| kept.literal = Some(row));
+        row
+      }
+    };
+    self.builder.give_literal(id, row);
+  }
+
+  /// Gives `id` the path its node is written as, when `kind` is a path whose root lowering knows.
+  fn path(&mut self, id: ValueId, kind: RawKind) {
+    let RawKind::Path(row) = kind else {
+      return;
+    };
+    let Some(path) = self.raw.paths.get(row as usize).copied() else {
+      return;
+    };
+    let Some(root) = path.written else {
+      return;
+    };
+    let segments = match path.kept {
+      Some(segments) => segments,
+      None => {
+        let segments = self.builder.keep_segments(self.raw.path_segments(path));
+        if let Some(path) = self.raw.paths.get_mut(row as usize) {
+          path.kept = Some(segments);
+        }
+        segments
+      }
+    };
+    self.builder.give_path(id, root, segments);
+  }
+
+  /// `node`'s cooked text, a string's, kept: `None` for a spelling the decoder refuses, which the
+  /// lexer never makes.
+  fn cooked(&mut self, node: u32, source: u32) -> Option<Text> {
+    let slot = self.slot(node);
+    if let Some(cooked) = self.read(slot).cooked {
+      return cooked;
+    }
+    self.scratch.clear();
+    let cooked = if decode_string_value(self.written(node, source), &mut self.scratch).is_ok() {
+      Some(self.builder.keep_text(&self.scratch))
+    } else {
+      None
+    };
+    self.update(slot, |kept: &mut Kept| kept.cooked = Some(cooked));
+    cooked
+  }
+
+  /// `node`, an integer of `radix`, as scanned, kept.
+  fn scanned(&mut self, node: u32, source: u32, radix: Radix) -> Option<Scanned> {
+    let slot = self.slot(node);
+    if let Some(scanned) = self.read(slot).scanned {
+      return scanned;
+    }
+    let scanned = number::scan(self.written(node, source), radix);
+    self.update(slot, |kept: &mut Kept| kept.scanned = Some(scanned));
+    scanned
+  }
+
+  /// `node`'s magnitude, an integer of `radix` scanned as `scanned`, converted once and kept.
+  fn converted(&mut self, node: u32, source: u32, radix: Radix, scanned: Scanned) -> Converted {
+    let slot = self.slot(node);
+    if let Some(converted) = self.read(slot).converted {
+      return converted;
+    }
+    let start = self.magnitudes.len();
+    number::magnitude(
+      self.written(node, source),
+      radix,
+      scanned.significant,
+      &mut self.magnitudes,
+      &mut self.limbs,
+    );
+    let magnitude = self.magnitudes.get(start..).unwrap_or_default();
+    let converted = Converted {
+      start: dense(start),
+      len: dense(magnitude.len()),
+      bits: number::bit_length(magnitude),
+      power: number::is_power_of_two(magnitude),
+    };
+    self.update(slot, |kept: &mut Kept| kept.converted = Some(converted));
+    converted
+  }
+
+  /// The magnitude `converted` holds.
+  fn magnitude(&self, converted: Converted) -> &[u8] {
+    let start = converted.start as usize;
+    self
+      .magnitudes
+      .get(start..start.saturating_add(converted.len as usize))
+      .unwrap_or_default()
+  }
+
+  /// `node`'s row of the model's integer table, negative when `negative`, of the magnitude
+  /// `converted`: made the first time a type it fits asks, and kept.
+  fn int_row(&mut self, node: u32, source: u32, negative: bool, converted: Converted) -> u32 {
+    let slot = self.slot(node);
+    if let Some(row) = self.read(slot).int {
+      return row;
+    }
+    let text = self.text(node, source);
+    let start = converted.start as usize;
+    let magnitude = self
+      .magnitudes
+      .get(start..start.saturating_add(converted.len as usize))
+      .unwrap_or_default();
+    let row = self.builder.push_int(negative, magnitude, text);
+    self.update(slot, |kept: &mut Kept| kept.int = Some(row));
+    row
+  }
+
+  /// What `node`, a float or an integer, reads as where a float is expected, kept: a decimal one
+  /// by the standard parser, a hexadecimal float by its top 64 bits, and a hexadecimal, octal or
+  /// binary integer by its magnitude, when it is no longer than `FLOAT_BITS` bits could be.
+  fn float_read(&mut self, node: u32, source: u32) -> Option<Float> {
+    let slot = self.slot(node);
+    if let Some(read) = self.read(slot).float {
+      return read;
+    }
+    let read = match self.kind(node) {
+      RawKind::Float { hex: false } | RawKind::Int(Radix::Decimal) => {
+        number::decimal_float(self.written(node, source), &mut self.scratch)
+      }
+      RawKind::Float { hex: true } => number::hex_float(self.written(node, source)),
+      RawKind::Int(radix) => match self.scanned(node, source, radix) {
+        Some(scanned) if scanned.significant <= number::max_digits(radix, FLOAT_BITS) => {
+          let converted = self.converted(node, source, radix, scanned);
+          Some(number::magnitude_float(
+            scanned.negative,
+            self.magnitude(converted),
+          ))
+        }
+        Some(_) => Some(Float {
+          value: None,
+          single: false,
+        }),
+        None => None,
+      },
+      _ => None,
+    };
+    self.update(slot, |kept: &mut Kept| kept.float = Some(read));
+    read
+  }
+
+  /// `node`'s row of the model's float table, of `value`: made the first time a type it fits asks,
+  /// and kept.
+  fn float_row(&mut self, node: u32, source: u32, value: f64) -> u32 {
+    let slot = self.slot(node);
+    if let Some(row) = self.read(slot).float_row {
+      return row;
+    }
+    let text = self.text(node, source);
+    let row = self.builder.push_float(value, text);
+    self.update(slot, |kept: &mut Kept| kept.float_row = Some(row));
+    row
+  }
+
+  /// Spends `steps` of `Limits::max_value_steps`, or spends none and answers that the budget
+  /// cannot pay them.
+  fn charge(&mut self, steps: u32) -> bool {
+    match self.spent.checked_add(steps) {
+      Some(spent) if spent <= self.max_steps => {
+        self.spent = spent;
+        true
+      }
+      _ => false,
+    }
+  }
+
+  /// Reports `refused`, a node written in the source `source` at `site`, that does not fit, the
+  /// value it stands in being expected of `ty`. A path whose root lowering does not know says
+  /// nothing: lowering reported it.
+  fn refuse(&mut self, refused: Refused, source: u32, ty: Option<TyId>, site: Site) {
+    let Some(raw) = self.raw.nodes.get(refused.node as usize).copied() else {
+      return;
+    };
+    if let RawKind::Path(row) = raw.kind
+      && self
+        .raw
+        .paths
+        .get(row as usize)
+        .is_some_and(|path: &RawPath| path.written.is_none())
+    {
+      return;
+    }
+    let at = Location::new(source, raw.span);
+    let literal = Excerpt(self.raw.text(source, raw.span));
+    let name: &[u8] = match ty.and_then(|ty: TyId| self.builder.ty_shape(ty)) {
+      Some(Shape::Named(def)) => self.builder.def_name(def),
+      _ => b"",
+    };
+    let name = Excerpt(name);
+    let width = DiagnosticKind::WidthOverflow;
+    let (kind, message, help): (Option<DiagnosticKind>, String, Option<String>) = match refused.why
+    {
+      Why::Null => (
+        None,
+        String::from("`null` is given where a non-null value is expected"),
+        None,
+      ),
+      Why::Kind => (None, format!("`{literal}` is no value of `{name}`"), None),
+      Why::Range(range) => (
+        (!(range.signed && range.width == 32)).then_some(width),
+        format!("`{literal}` is out of the range of `{name}`"),
+        Some(range_help(range)),
+      ),
+      Why::Infinite => (
+        None,
+        format!("`{literal}` is not finite as a 64-bit float, which `{name}` is"),
+        None,
+      ),
+      Why::Single => (
+        Some(width),
+        format!("`{literal}` is out of the range of `{name}`, a 32-bit float"),
+        Some(String::from(
+          "a 32-bit float holds the finite values below 2^128 in magnitude",
+        )),
+      ),
+      Why::Zero => (
+        Some(DiagnosticKind::NonZeroZero),
+        format!("`{literal}` is zero, and `{name}` is never zero"),
+        None,
+      ),
+      Why::Byte => (
+        None,
+        format!("each element of a list given for `{name}` is a byte, and `{literal}` is none"),
+        Some(String::from("a byte is an integer from 0 to 2^8 - 1")),
+      ),
+      Why::ByteRange => (
+        Some(width),
+        format!(
+          "`{literal}` is out of the range of a byte, which each element of a list given for \
+           `{name}` is"
+        ),
+        Some(String::from("a byte is an integer from 0 to 2^8 - 1")),
+      ),
+    };
+    let mut report = match kind {
+      Some(kind) => Diagnostic::builder(kind.code(), at)
+        .severity(kind.severity())
+        .primary_label(kind.title()),
+      None => {
+        let (code, label) = site.refusal();
+        Diagnostic::builder(code, at).primary_label(label)
+      }
+    }
+    .message(message);
+    if let Some(help) = help {
+      report = report.help(help);
+    }
+    self.reporter.report(report.build());
+  }
+
+  /// Reports that the lists a value written at `at` stands for are past the budget.
+  fn lone_limit(&mut self, at: Location) {
+    let kind = DiagnosticKind::ResourceLimit;
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), at)
+        .severity(kind.severity())
+        .message(
+          "the lists this value stands for, written where a list is expected, pass \
+           `Limits::max_value_steps`, the steps the analysis may take to complete values",
+        )
+        .primary_label(kind.title())
+        .help("raise the limit with `Limits::with_max_value_steps`, or write the lists")
+        .build(),
+    );
+  }
+}
+
+/// What `range` holds, as a formula: a width is the one number it writes.
+fn range_help(range: Range) -> String {
+  let Range {
+    signed,
+    width,
+    non_zero,
+  } = range;
+  let except = if non_zero { ", but zero" } else { "" };
+  if width == 0 {
+    String::from("it holds 0 alone")
+  } else if signed {
+    let high = width - 1;
+    format!("it holds the integers from -2^{high} to 2^{high} - 1{except}")
+  } else {
+    format!("it holds the integers from 0 to 2^{width} - 1{except}")
   }
 }
 

@@ -37,18 +37,20 @@ const DEFAULT_NEAR_MISS_COMPARISONS: u32 = 1 << 20;
 /// otherwise grow without limit: the number of definitions and of modules, how deep modules, `use`
 /// trees and types nest, how long a path is, how many rounds the glob fixpoint runs, how many
 /// modules one module's globs name, how many instantiations of generic definitions it interns, how
-/// many steps of substitution it takes, how many steps judging bounds takes, and how many bytes of
-/// source it reads. A bound that is passed is reported as `smear::graphqlx::resource-limit`, never
-/// as a panic. Two bounds are not refusals: the diagnostic ceiling and the near-miss budget limit
-/// what the analysis says, not what it accepts.
+/// many steps of substitution it takes, how many steps judging bounds takes, how many steps
+/// completing values takes, and how many bytes of source it reads. A bound that is passed is
+/// reported as `smear::graphqlx::resource-limit`, never as a panic. Two bounds are not refusals:
+/// the diagnostic ceiling and the near-miss budget limit what the analysis says, not what it
+/// accepts.
 ///
 /// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
 /// is always declared whole and every package has its root module, and that the built-in library's
-/// types are built whatever the generic depth, instantiation and substitution bounds are, and its
-/// bounds cost nothing to judge, since it writes no instantiation of a definition with a bound:
-/// see [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_generic_depth`],
-/// [`Limits::max_instantiations`], [`Limits::max_substitutions`] and
-/// [`Limits::max_bound_steps`].
+/// types are built whatever the generic depth, instantiation and substitution bounds are, its
+/// bounds cost nothing to judge, since it writes no instantiation of a definition with a bound,
+/// and its own values cost nothing to complete where it writes them: see
+/// [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_generic_depth`],
+/// [`Limits::max_instantiations`], [`Limits::max_substitutions`], [`Limits::max_bound_steps`] and
+/// [`Limits::max_value_steps`].
 ///
 /// # Building one
 ///

@@ -26,8 +26,10 @@ their descriptions, types, defaults and applications; every written type an occu
 and arguments as written, what it resolves to, and its type: the complete instantiation, with each
 argument left out filled from its default and an alias such as `NonZeroU32` expanded, each type
 interned once, so that `==` on two type ids is type equality; every application with its type
-arguments and its arguments, and every value as written; and the schema, with its contributions, one
-for each schema item, its description, its roots, written or presumed, and its applications.
+arguments and its arguments; every value, coerced to the type expected where it stands, each value
+nested in it one of its own, and a custom scalar's kept as written; and the schema, with its
+contributions, one for each schema item, its description, its roots, written or presumed, and its
+applications.
 `Model::satisfies` answers whether a type satisfies an interface or a marker, and
 `Model::satisfies_ty` whether it satisfies one interface type exactly, its arguments' `!` included:
 by declaration, read off the `implements` entries and the bounds the model holds, with `core`'s
@@ -38,10 +40,15 @@ by `Limits::max_substitutions`, and the types it derives by `Limits::max_generic
 `Limits::max_instantiations`. Every instantiation the program writes has its bounds judged, exactly:
 a type argument that does not satisfy a bound's interface type, with the instantiation's arguments
 in its parameters' place, is `smear::graphqlx::unsatisfied-bound` where the instantiation is
-written, and judging is bounded by `Limits::max_bound_steps`. It resolves every module's `use` items
-too, globs and string sources included, against scopes that end with the prelude and the packages
-each package may reach. The built-in packages, `core`, `alloc` and `std`, are one embedded GraphQLx
-file each, parsed on every analysis. `graphqlx::analyze_with` is the same analysis with the parser
+written, and judging is bounded by `Limits::max_bound_steps`. A value that does not fit the type
+expected of it is refused where it is written, with GraphQL's `smear::schema::invalid-default-value`
+or `invalid-directive-argument-value`, an integer read at any length and range-checked against its
+width, `smear::graphqlx::width-overflow` past any width but the 32-bit signed one or past `f32`, and
+`smear::graphqlx::nonzero-zero` for a zero where `NonZero` is expected; the lists a value written
+alone stands for where a list is expected are bounded by `Limits::max_value_steps`. It resolves
+every module's `use` items too, globs and string sources included, against scopes that end with the
+prelude and the packages each package may reach. The built-in packages, `core`, `alloc` and `std`,
+are one embedded GraphQLx file each, parsed on every analysis. `graphqlx::analyze_with` is the same analysis with the parser
 layer the caller passes, such as `smear-parser`'s lossless layer, which recovers, so the well-formed
 rest of a broken file is analyzed, and it answers `Trees` beside the `Analysis`: what that layer
 kept for each file it read.

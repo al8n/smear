@@ -46,6 +46,18 @@ mod read;
 
 pub(crate) use read::{Occurrence, Shape, Written};
 
+/// A run of the text arena: a text kept once, which any number of rows may share.
+#[derive(Clone, Copy)]
+pub(crate) struct Text(Run);
+
+/// A run of the path pool: a path's segments kept once, which any number of paths may share.
+#[derive(Clone, Copy)]
+pub(crate) struct Segments(Run);
+
+/// A run of the byte pool: a byte string kept once, which any number of values may share.
+#[derive(Clone, Copy)]
+pub(crate) struct Bytes(Run);
+
 use std::{boxed::Box, collections::BTreeMap, string::String, vec, vec::Vec};
 
 use smear_semantics::interner::{Interner, Symbol};
@@ -69,9 +81,10 @@ use super::{
   schema::{Root, RootOperation},
   table::{
     AliasRow, ApplicationRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, ContributionRow,
-    DefRow, DescriptionRow, KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED, LiteralRow,
-    MemberRow, ModuleRow, NO_DEF, PackageRow, PathRow, Run, TyRow, TypeExprRow, TypeParamRow,
-    UNSET_MODULE, UNSET_TY, VALUE_LITERAL, VALUE_UNRESOLVED, ValueRow,
+    DefRow, DescriptionRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED,
+    LiteralRow, MemberRow, ModuleRow, NO_DEF, PackageRow, PathRow, Run, TyRow, TypeExprRow,
+    TypeParamRow, UNSET_MODULE, UNSET_TY, VALUE_BOOL, VALUE_BYTES, VALUE_FLOAT, VALUE_INT,
+    VALUE_LIST, VALUE_LITERAL, VALUE_NULL, VALUE_STRING, VALUE_UNRESOLVED, ValueRow,
   },
   ty::PathRoot,
   value::LiteralKind,
@@ -801,25 +814,143 @@ impl ModelBuilder {
     id
   }
 
-  /// Makes `value` a literal of `kind`, kept as written: `text`.
-  pub fn set_literal(&mut self, value: ValueId, kind: LiteralKind, text: &str) {
-    let text = push_text(&mut self.model.text, text);
-    let payload = dense(self.model.literals.len());
-    self.model.literals.push(LiteralRow { kind, text });
-    let row = self.value_row(value);
-    row.shape = VALUE_LITERAL;
-    row.payload = payload;
+  /// Appends `text` to the text arena: its run, which any number of rows may share.
+  pub(crate) fn keep_text(&mut self, text: &str) -> Text {
+    Text(push_text(&mut self.model.text, text))
   }
 
-  /// Records the path an enum or type value writes: from `root`, through `segments`.
-  pub fn set_value_path(&mut self, value: ValueId, root: PathRoot, segments: &[Sym]) {
-    let segments = append(&mut self.model.paths, segments);
+  /// Appends `segments` to the path pool: their run, which any number of paths may share.
+  pub(crate) fn keep_segments(&mut self, segments: &[Sym]) -> Segments {
+    Segments(append(&mut self.model.paths, segments))
+  }
+
+  /// Appends `bytes` to the byte pool, which holds the integers' magnitudes too: their run, which
+  /// any number of values may share.
+  pub(crate) fn keep_bytes(&mut self, bytes: &[u8]) -> Bytes {
+    Bytes(append(&mut self.model.magnitudes, bytes))
+  }
+
+  /// Appends an integer: negative when `negative`, of absolute value `magnitude`, little-endian,
+  /// written as `text`. Trailing zero bytes of `magnitude` are not kept, so zero is no bytes, and
+  /// zero is never negative. Answers its row of the integer table, which any number of values may
+  /// share.
+  pub(crate) fn push_int(&mut self, negative: bool, magnitude: &[u8], text: Text) -> u32 {
+    let len = magnitude
+      .iter()
+      .rposition(|byte: &u8| *byte != 0)
+      .map_or(0, |last: usize| last + 1);
+    let kept = magnitude.get(..len).unwrap_or_default();
+    let row = dense(self.model.ints.len());
+    let magnitude = append(&mut self.model.magnitudes, kept);
+    self.model.ints.push(IntRow {
+      negative: negative && !kept.is_empty(),
+      magnitude,
+      text: text.0,
+    });
+    row
+  }
+
+  /// Appends the float `value`, written as `text`. Answers its row of the float table, which any
+  /// number of values may share.
+  pub(crate) fn push_float(&mut self, value: f64, text: Text) -> u32 {
+    let row = dense(self.model.floats.len());
+    self.model.floats.push(FloatRow {
+      value,
+      text: text.0,
+    });
+    row
+  }
+
+  /// Appends a literal of `kind`, kept as written: `text`. Answers its row of the literal table,
+  /// which any number of values may share.
+  pub(crate) fn push_literal(&mut self, kind: LiteralKind, text: Text) -> u32 {
+    let row = dense(self.model.literals.len());
+    self.model.literals.push(LiteralRow { kind, text: text.0 });
+    row
+  }
+
+  /// Makes `value` the integer at row `int` of the integer table.
+  pub(crate) fn give_int(&mut self, value: ValueId, int: u32) {
+    let row = self.value_row(value);
+    row.shape = VALUE_INT;
+    row.payload = int;
+  }
+
+  /// Makes `value` the float at row `float` of the float table.
+  pub(crate) fn give_float(&mut self, value: ValueId, float: u32) {
+    let row = self.value_row(value);
+    row.shape = VALUE_FLOAT;
+    row.payload = float;
+  }
+
+  /// Makes `value` the string `text`, cooked.
+  pub(crate) fn give_string(&mut self, value: ValueId, text: Text) {
+    let row = self.value_row(value);
+    row.shape = VALUE_STRING;
+    row.run = text.0;
+  }
+
+  /// Makes `value` the byte string `bytes`.
+  pub(crate) fn give_bytes(&mut self, value: ValueId, bytes: Bytes) {
+    let row = self.value_row(value);
+    row.shape = VALUE_BYTES;
+    row.run = bytes.0;
+  }
+
+  /// Makes `value` the literal at row `literal` of the literal table.
+  pub(crate) fn give_literal(&mut self, value: ValueId, literal: u32) {
+    let row = self.value_row(value);
+    row.shape = VALUE_LITERAL;
+    row.payload = literal;
+  }
+
+  /// Records the path `value` is written as, at its own location: from `root`, through
+  /// `segments`.
+  pub(crate) fn give_path(&mut self, value: ValueId, root: PathRoot, segments: Segments) {
     let row = self.value_row(value);
     row.path = Some(PathRow {
       root,
-      segments,
+      segments: segments.0,
       location: row.location,
     });
+  }
+
+  /// Makes `value` `null`.
+  pub fn set_null(&mut self, value: ValueId) {
+    self.value_row(value).shape = VALUE_NULL;
+  }
+
+  /// Makes `value` the boolean `flag`.
+  pub fn set_bool(&mut self, value: ValueId, flag: bool) {
+    let row = self.value_row(value);
+    row.shape = VALUE_BOOL;
+    row.payload = u32::from(flag);
+  }
+
+  /// Makes `value` the list of `elements`, each appended after it.
+  pub fn set_list(&mut self, value: ValueId, elements: &[ValueId]) {
+    self.set_items(value, VALUE_LIST, elements);
+  }
+
+  /// Gives `value` the type it was coerced against.
+  pub fn set_value_ty(&mut self, value: ValueId, ty: TyId) {
+    debug_assert!(
+      (ty.get() as usize) < self.model.tys.len(),
+      "a type is interned before a value is given it"
+    );
+    self.value_row(value).ty = ty;
+  }
+
+  /// Makes `value` a list or a set, `shape`, of `elements`, each appended after it.
+  fn set_items(&mut self, value: ValueId, shape: u8, elements: &[ValueId]) {
+    debug_assert!(
+      elements.iter().all(|item: &ValueId| *item > value),
+      "what a value holds is appended after it"
+    );
+    let run = append(&mut self.model.value_items, elements);
+    let row = self.value_row(value);
+    row.shape = shape;
+    row.run = run;
   }
 
   /// Appends an application written at `location`, its directive's path written from `root`

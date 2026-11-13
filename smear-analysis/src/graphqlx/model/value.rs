@@ -7,8 +7,9 @@ use crate::graphqlx::id::{DefId, MemberId, TyId, ValueId};
 use super::{
   Model,
   table::{
-    VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_MAP,
-    VALUE_NULL, VALUE_OBJECT, VALUE_SET, VALUE_STRING, VALUE_TYPE, VALUE_UNRESOLVED, ValueRow,
+    VALUE_BOOL, VALUE_BYTES, VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST, VALUE_LITERAL,
+    VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET, VALUE_STRING, VALUE_TYPE, VALUE_UNRESOLVED,
+    ValueRow,
   },
   ty::Path,
 };
@@ -68,10 +69,14 @@ impl ObjectEntry {
   }
 }
 
-/// What one value is.
+/// What one value is: the shape it was coerced to, by the type expected where it stands.
 ///
-/// A value of a custom scalar, an extern one included, is kept as written: a [`Literal`], with
-/// nothing coerced beyond syntax.
+/// Three kinds of value are kept as written, as a [`Literal`] with nothing coerced beyond syntax: a
+/// value of a custom scalar, an extern one included; a value whose expected type names a type
+/// parameter, which only an instantiation can check; and a value whose expected type can take none,
+/// which another diagnostic refuses, an output type or a path that names nothing among them. In
+/// this version a value of an input object, of a collection and of `TypeRef` is kept as written
+/// too.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum ValueKind<'a> {
@@ -85,6 +90,9 @@ pub enum ValueKind<'a> {
   Float(FloatValue<'a>),
   /// A string, cooked: escapes decoded, and a block string's indentation removed.
   String(&'a str),
+  /// A `bytes` value: its bytes, whichever literal spelled them, the UTF-8 encoding of a string or
+  /// a list of integers from 0 to 255, so that two spellings of one sequence are one value.
+  Bytes(&'a [u8]),
   /// A value of an enum.
   #[non_exhaustive]
   Enum {
@@ -107,7 +115,8 @@ pub enum ValueKind<'a> {
   Map(&'a [(ValueId, ValueId)]),
   /// An input object, of its fields: each one written or defaulted, and no absent one.
   Object(&'a [ObjectEntry]),
-  /// A value kept as written.
+  /// A value kept as written: of a custom scalar, of a type that names a type parameter, or of a
+  /// type that can take no value.
   Literal(Literal<'a>),
   /// A value that did not coerce or resolve. Only an analysis that is not ok has one, within the
   /// extent of the error that says why.
@@ -258,9 +267,8 @@ impl<'a> Value<'a> {
 
   /// What it is.
   //
-  // Coercion gives a value its coerced shape. Until coercion lands, every written value is the one
-  // `Literal` lowering makes of it, its syntactic kind and its text as written, whatever it holds:
-  // nothing nested in it is a value of its own.
+  // Coercion gives a value its shape. It makes no set, map, input object or type value yet: a
+  // value of a type that would hold one is the `Literal` of its syntactic kind and its text.
   pub fn kind(&self) -> ValueKind<'a> {
     let model: &'a Model = self.model;
     let row = self.row();
@@ -283,6 +291,7 @@ impl<'a> Value<'a> {
         })
       }
       VALUE_STRING => ValueKind::String(row.run.text(&model.text)),
+      VALUE_BYTES => ValueKind::Bytes(row.run.of(&model.magnitudes)),
       VALUE_ENUM => ValueKind::Enum {
         def: row.def,
         value: row.member,
@@ -313,10 +322,9 @@ impl<'a> Value<'a> {
 
   /// The type it was coerced against.
   //
-  // Coercion gives it; no phase before it gives a value a type. Until then every value answers
-  // the one unresolved type, in an analysis that is ok too, which therefore holds an unresolved
-  // type wherever it holds a value: the interim this accessor accepts, since the design names no
-  // neutral type for a value nothing has coerced.
+  // Coercion gives it the type expected where it stands, with its `!`, the list a lone value
+  // stands for included. A value whose expected type is unknown, which only a type that could not
+  // be written has, answers the one unresolved type.
   #[inline]
   pub fn ty(&self) -> TyId {
     self.row().ty
@@ -329,7 +337,9 @@ impl<'a> Value<'a> {
     self.row().written
   }
 
-  /// The path an enum or a type value writes, and `None` for every other value.
+  /// The path a value written as a path writes, whatever it was coerced to: an enum value's, and
+  /// a literal's that is one. `None` for every other value, among them the lists a value written
+  /// alone where a list is expected stands for.
   #[inline]
   pub fn path(&self) -> Option<Path<'a>> {
     let row = self.row().path?;

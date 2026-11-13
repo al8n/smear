@@ -159,9 +159,9 @@ impl Analysis {
 ///   as written and then each field's arguments, each with its description. A replaced built-in
 ///   holds what the root package's definition writes, and smear's own definition of it
 ///   contributes nothing. Every type written is then a type occurrence, and every directive
-///   application and every value written is one too, appended in the order the model's walk
-///   reaches it, each before what it nests: a type parameter's default, a bound, an `implements`
-///   entry, a union member, an application, a member's type, default and applications. Each
+///   application is one too, appended in the order the model's walk reaches it, each before what
+///   it nests: a type parameter's default, a bound, an `implements` entry, a union member, an
+///   application, a member's type and applications. Each
 ///   keeps its path as written and the arguments written for it, and its path is resolved where
 ///   its contribution is written, with the contribution's generic parameters in scope, an
 ///   extension's own names naming its target's by position; one that names nothing is reported,
@@ -171,8 +171,8 @@ impl Analysis {
 ///   still recorded as written. An application whose directive resolves keeps its type
 ///   arguments and the arguments its directive declares, in the directive's order, an argument
 ///   written twice twice; one it does not declare is `undefined-directive-argument`, with the
-///   nearest name it does declare in its help. A value is kept as written, its syntactic kind and
-///   its text. Then the schema's
+///   nearest name it does declare in its help. Each value written is read as it is written, for
+///   coercion. Then the schema's
 ///   contributions: every package's schema definitions, then its schema extensions, each by source
 ///   and position and each marked as what it is. The root package's first schema definition gives
 ///   the schema its description, its roots and its applications, and each schema extension the
@@ -180,9 +180,7 @@ impl Analysis {
 ///   alone. The first root written for an operation is the schema's, and a second one is
 ///   `duplicate-root-operation-type`; with no schema definition of the root package's, an object
 ///   type its root module declares named `Query`, `Mutation` or `Subscription` is presumed that
-///   operation's root. Names and texts past what the model's `u32` offsets address,
-///   which only a [`Limits::max_source_bytes`] far above its default admits, are reported at the
-///   root package's package source.
+///   operation's root.
 /// - Gives each definition its built-in meaning, read off `core`'s directives by what each
 ///   application resolved to, never by how it is spelled, and only off the applications the
 ///   package that wrote the definition writes: an interface that applies `@marker` is a marker,
@@ -224,6 +222,23 @@ impl Analysis {
 ///   bounds that budget, or a type they derive past [`Limits::max_generic_depth`] or
 ///   [`Limits::max_instantiations`], kept from being judged is `resource-limit`, and keeps its
 ///   type too.
+/// - Makes every value, in the model's walk, each by the type expected where it stands, a
+///   member's type for its default and an argument's for its value, with its `!`: `null` where it
+///   is nullable; a list's elements each against its element, and any other value where a list is
+///   expected the one-element list that holds it, a list for each level, each list a step of
+///   [`Limits::max_value_steps`]; a boolean; an integer in its width's range, read at any length;
+///   a float, or an integer, finite in `f32` or `f64`; a string, cooked; for `id` a string or an
+///   integer in `i32`'s range; for `bytes` a string's UTF-8 encoding or a list of integers from 0
+///   to 255; for `NonZero` an integer that is not zero. Any other scalar, an enum, a collection
+///   and an input object take any literal, kept as written, and so does a type that names a type
+///   parameter or can take no value, with nothing said. A value that does not fit is unresolved
+///   and reported where it is written, with GraphQL's `invalid-default-value` or
+///   `invalid-directive-argument-value`, but for a number out of the range of any width but the
+///   32-bit signed one, or of `f32`, which is `width-overflow`, and zero for `NonZero`, which is
+///   `nonzero-zero`; a required argument given `null` is `missing-required-directive-argument`,
+///   at its name. Last, names and texts past what the model's `u32` offsets address, which only a
+///   [`Limits::max_source_bytes`] far above its default admits, are reported at the root package's
+///   package source.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///   Each schema definition the root package writes after its first is
@@ -414,7 +429,14 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut reporter,
   );
   instantiate::instantiate(&declarations, &sources, limits, &mut builder, &mut reporter);
-  coerce::coerce(raw, &sources, &mut builder, &mut reporter);
+  coerce::coerce(
+    raw,
+    &declarations,
+    &sources,
+    limits,
+    &mut builder,
+    &mut reporter,
+  );
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }

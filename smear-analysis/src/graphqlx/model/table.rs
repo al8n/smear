@@ -57,8 +57,8 @@ impl Run {
 
 // A type-expression, type or value row says which variant of its public kind it is with one of
 // the numbers below, rather than with a private enum: lowering and instantiation write every type
-// shape, but until coercion lands only the test-support door writes most value shapes, and a
-// private variant that no shipped build constructs is dead code.
+// shape, but only the test-support door writes a set, a map, an input object or a type value, and
+// a private variant that no shipped build constructs is dead code.
 
 /// A named type, a definition and its arguments: `def` and `args` hold it.
 pub(super) const KIND_NAMED: u8 = 0;
@@ -95,6 +95,8 @@ pub(super) const VALUE_OBJECT: u8 = 10;
 pub(super) const VALUE_LITERAL: u8 = 11;
 /// `ValueKind::Unresolved`, and every row until a phase gives it its shape.
 pub(super) const VALUE_UNRESOLVED: u8 = 12;
+/// `ValueKind::Bytes`: `run` is the bytes, in the model's byte pool.
+pub(super) const VALUE_BYTES: u8 = 13;
 
 /// A description: its cooked text, in the text arena, and where it is written.
 #[derive(Debug, Clone, Copy)]
@@ -329,15 +331,15 @@ pub(super) struct ValueRow {
   /// `VALUE_BOOL`: 1 or 0. `VALUE_INT`, `VALUE_FLOAT` and `VALUE_LITERAL`: the index of its row in
   /// the integer, float or literal table.
   pub(super) payload: u32,
-  /// `VALUE_STRING`: the text, in the text arena. `VALUE_LIST` and `VALUE_SET`: the elements, in
-  /// the value-item pool. `VALUE_MAP`: the entries, in the map-entry pool. `VALUE_OBJECT`: the
-  /// entries, in the object-entry pool.
+  /// `VALUE_STRING`: the text, in the text arena. `VALUE_BYTES`: the bytes, in the byte pool.
+  /// `VALUE_LIST` and `VALUE_SET`: the elements, in the value-item pool. `VALUE_MAP`: the entries,
+  /// in the map-entry pool. `VALUE_OBJECT`: the entries, in the object-entry pool.
   pub(super) run: Run,
   pub(super) location: Location,
   /// Its type: [`UNSET_TY`] until a phase sets it.
   pub(super) ty: TyId,
   pub(super) written: bool,
-  /// The path as written, for an enum or type value.
+  /// The path it is written as, for a value written as a path.
   pub(super) path: Option<PathRow>,
 }
 

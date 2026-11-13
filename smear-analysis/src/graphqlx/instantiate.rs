@@ -295,8 +295,8 @@ fn applies(
 /// The definition named `name` in the namespace of rank `namespace` that the root module of the
 /// built-in package at `package` declares, read off its binding there: `core`'s `@marker` or its
 /// `MapKey`, `alloc`'s `string`. `None` when no name so spelled was ever interned, which an
-/// analysis's library rules out.
-fn binding(
+/// analysis's library rules out. Coercion finds the built-ins it keys on with it too.
+pub(crate) fn binding(
   declarations: &Declarations<'_, '_>,
   builder: &ModelBuilder,
   package: usize,
