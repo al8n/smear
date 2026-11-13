@@ -442,8 +442,11 @@ All notable changes to Smear are documented in this file.
   `Root<Int>` beside `Root<String>` not, is `smear::schema::shared-root-operation-type`, at a
   written root's type, with a label at the other; and when the root package writes no schema
   definition and no object type `Query` of its root module is presumed its query root, each schema
-  extension it writes is `smear::schema::schema-extension-without-schema`, at its `extend`. A rule
-  says nothing about a contribution a phase already refused something in, and a rule on the roots, which no contribution holds, nothing
+  extension it writes is `smear::schema::schema-extension-without-schema`, at its `extend`; and a
+  schema with no query root, neither written nor presumed, is
+  `smear::schema::missing-query-root-operation-type`, so a root package with no query root is not
+  ok, as in GraphQL, and a consumer that analyzes a library as the root package filters that code.
+  A rule says nothing about a contribution a phase already refused something in, and a rule on the roots, which no contribution holds, nothing
   while any of the schema's contributions does. On every GraphQL document of smear's corpora the analyzer
   is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
   divergence it allows. A new `test-support` feature, which `smear/test-support`

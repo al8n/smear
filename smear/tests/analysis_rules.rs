@@ -8,8 +8,8 @@
 //! the rules after it, on what is judged of types, in `analysis_type_rules`. GraphQL's own rules on
 //! what a definition holds are tested in `analysis_definition_rules`, and those on directives and
 //! their applications in `analysis_directive_rules`; those on the schema, that a root operation
-//! type is an object type, that the roots have distinct types and that a schema extension extends
-//! a schema that is defined, are tested here.
+//! type is an object type, that the roots have distinct types, that a schema extension extends a
+//! schema that is defined and that a schema has a query root, are tested here.
 //!
 //! Then the rule set itself: every code a rule lists fires on a fixture; and the walk the rules
 //! ride, over an analyzed program of two packages, written out hook by hook.
@@ -232,9 +232,9 @@ fn at(source: SourceId, text: &str, needle: &str, nth: usize) -> Location {
   Location::new(source.get(), SimpleSpan::new(start, start + needle.len()))
 }
 
-/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
-/// program and say nothing of the schema, so each reading below leaves this code out, as a
-/// consumer that analyzes a library waives it.
+/// GraphQL's code for a schema with no query root. Most programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below but `unwaived` leaves this code
+/// out, as a consumer that analyzes a library waives it; the rule's own tests read the whole list.
 const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
 
 /// The diagnostics of `analysis`, in the list's order, but for the missing query root.
@@ -258,6 +258,22 @@ fn clean(analysis: &Analysis) -> bool {
 fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
   reported(analysis)
     .into_iter()
+    .map(|diagnostic: &Diagnostic| {
+      (
+        diagnostic.code().as_str(),
+        diagnostic.primary(),
+        diagnostic.label(0).map(|label| label.location()),
+      )
+    })
+    .collect()
+}
+
+/// Each diagnostic's code, primary location, and first label's location, in the list's order: the
+/// whole list, the missing query root among them.
+fn unwaived(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
+  analysis
+    .diagnostics()
+    .iter()
     .map(|diagnostic: &Diagnostic| {
       (
         diagnostic.code().as_str(),
@@ -1023,6 +1039,357 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
     assert_eq!(messages.len(), 1, "{:#?}", analysis.diagnostics());
     assert!(messages[0].len() < 1024, "{}", messages[0]);
   }
+}
+
+/// What GraphQL tells the author of a schema with no query root: `smear-schema`'s help, word for
+/// word.
+const NO_QUERY_ROOT_HELP: &str =
+  "define `type Query`, or name an existing object type with `schema { query: … }`.";
+
+/// The whole of the root package's package source, the first of its sources.
+fn root_package_source(analysis: &Analysis) -> Location {
+  let model = analysis.model();
+  let id = model
+    .package(model.root_package())
+    .sources()
+    .into_iter()
+    .next()
+    .expect("every package has a package source");
+  Location::entire(id.get())
+}
+
+#[test]
+fn a_schema_has_a_query_root() {
+  // `smear-schema`'s fixture: a type that is no query root, and nothing else. The schema is the
+  // root package's as a whole, so the diagnostic is at the whole of its package source, with no
+  // label, and not in its file, where it would lie within the type.
+  let analysis = analyze_one("type NotTheRoot {\n  ok: Int\n}");
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    diagnostic.to_string(),
+    "the schema has no query root operation type"
+  );
+  assert_eq!(
+    diagnostic.primary_label(),
+    Some("no query root operation type")
+  );
+  assert_eq!(diagnostic.labels(), 0);
+  assert_eq!(diagnostic.help(), Some(NO_QUERY_ROOT_HELP));
+  assert!(!analysis.is_ok());
+  assert_eq!(analysis.model().schema().root(RootOperation::Query), None);
+
+  // A root package with no file has none either.
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A presumed `Query`, with no schema definition, and a written root with no `Query` at all.
+  for text in [
+    "type Query {\n  ok: Int\n}",
+    "schema {\n  query: Q\n}\ntype Q {\n  ok: Int\n}\n",
+  ] {
+    let analysis = analyze_one(text);
+    assert!(
+      analysis.diagnostics().is_empty(),
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
+
+#[test]
+fn a_schema_definition_with_no_query_root_is_reported_at_its_keyword() {
+  // A schema definition that writes no query root: at its `schema`, with no label.
+  let text = "schema {\n  mutation: M\n}\ntype M {\n  m: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, at(schema, text, "schema", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // Beside an object named `Query`, which a written schema definition does not let be presumed:
+  // still one, at the definition.
+  let text = "schema {\n  mutation: M\n}\ntype M {\n  m: Int\n}\ntype Query {\n  ok: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, at(schema, text, "schema", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(analysis.model().schema().root(RootOperation::Query), None);
+
+  // A second schema definition that writes the query root gives the schema nothing: still one, at
+  // the first, beside the second's own refusal.
+  let text = "schema {\n  mutation: M\n}\nschema {\n  query: Q\n}\ntype M {\n  m: Int\n}\n\
+              type Q {\n  q: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let first = at(schema, text, "schema", 0);
+  assert_eq!(
+    unwaived(&analysis),
+    [
+      (NO_QUERY_ROOT, first, None),
+      (DUPLICATE, at(schema, text, "schema", 1), Some(first)),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn only_an_object_the_root_module_declares_is_presumed() {
+  // An interface named `Query` is no object type.
+  let analysis = analyze_one("interface Query {\n  ok: Int\n}\n");
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // In a `Directory` root, a module other than the root module declares it.
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[("m/a.graphqlx", "type Query {\n  ok: Int\n}\n")],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // The root package declares none, and its dependency declares one.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[("schema.graphqlx", "type Other {\n  ok: Int\n}\n")],
+  )
+  .with_dependencies(["dep"]);
+  let dep = package(
+    "dep",
+    Layout::Flat,
+    &[("dep.graphqlx", "type Query {\n  ok: Int\n}\n")],
+  );
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // Every file of a `Flat` root is its root module: a `Query` its second file declares is
+  // presumed.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[
+      ("a.graphqlx", "type Other {\n  ok: Int\n}\n"),
+      ("b.graphqlx", "type Query {\n  ok: Int\n}\n"),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert!(matches!(
+    analysis.model().schema().root(RootOperation::Query),
+    Some(Root::Presumed(_))
+  ));
+}
+
+#[test]
+fn a_written_root_is_a_root_whatever_it_names() {
+  // A query root that names nothing is name resolution's alone.
+  let text = "schema {\n  query: Missing\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [(
+      UNDEFINED_ROOT,
+      named(schema, text, "query: ", "Missing", 0),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // One that names an interface is the rule on the roots' kinds' alone.
+  let text = "interface I {\n  i: Int\n}\nschema {\n  query: I\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [(
+      ROOT_OPERATION_TYPE_NOT_OBJECT,
+      named(schema, text, "query: ", "I", 0),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // With no schema definition and no `Query`, the query root an extension writes is a root: the
+  // extension has no schema to extend, and that is all.
+  let text = "type Q {\n  q: Int\n}\nextend schema {\n  query: Q\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [(
+      SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+      at(schema, text, "extend", 0),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn the_missing_root_marks_nothing_when_no_schema_is_written() {
+  // At the package source, which no extent holds: the verdict is no, and nothing is marked.
+  let analysis = analyze_one("type NotTheRoot {\n  ok: Int\n}\n");
+  assert!(!analysis.is_ok());
+  let model = analysis.model();
+  for id in model.defs() {
+    let definition = model.def(id);
+    assert!(
+      !definition.has_errors(),
+      "`{}` is marked",
+      definition.name()
+    );
+    for part in definition.contributions() {
+      assert!(
+        !part.has_errors(),
+        "a contribution of `{}` is marked",
+        definition.name()
+      );
+    }
+  }
+  assert_eq!(model.schema().contributions().count(), 0);
+
+  // At a schema definition's `schema`: its contribution holds the error, and no definition does.
+  let analysis = analyze_one("schema {\n  mutation: M\n}\ntype M {\n  m: Int\n}\n");
+  assert!(!analysis.is_ok());
+  let model = analysis.model();
+  assert_eq!(schema_errors(model), [true]);
+  assert!(
+    model
+      .defs()
+      .into_iter()
+      .all(|def: DefId| !model.def(def).has_errors())
+  );
+}
+
+#[test]
+fn a_phase_in_the_schema_definition_silences_it() {
+  // A mutation root that names nothing, in the schema definition that writes no query root: the
+  // phase's diagnostic alone, where GraphQL says both.
+  let text = "schema {\n  mutation: Missing\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [(
+      UNDEFINED_ROOT,
+      named(schema, text, "mutation: ", "Missing", 0),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // With no schema definition, the rule's diagnostic lies in no extent, and a phase's error in a
+  // definition silences nothing: both are said.
+  let text = "type T {\n  x: Missing\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [
+      (NO_QUERY_ROOT, root_package_source(&analysis), None),
+      (UNDEFINED_TYPE, at(schema, text, "Missing", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// A library: an interface, and an object type that implements it.
+const LIBRARY: &str = "interface Shape {\n  area: Float\n}\n\
+                       type Circle implements Shape {\n  area: Float\n  radius: Float\n}\n";
+
+/// Every definition of `model` as its view prints it and whether it has errors, each followed by
+/// its contributions and its fields, each field with its type occurrence and whether it has errors.
+fn answers(model: &Model) -> Vec<String> {
+  let mut lines: Vec<String> = Vec::new();
+  for id in model.defs() {
+    let definition = model.def(id);
+    lines.push(format!("{definition:?} {}", definition.has_errors()));
+    for part in definition.contributions() {
+      lines.push(format!("  {part:?}"));
+    }
+    for field in definition.fields() {
+      let held = model.member(field);
+      lines.push(format!("  {held:?} {:?} {}", held.ty(), held.has_errors()));
+    }
+  }
+  lines
+}
+
+#[test]
+fn a_consumer_waives_the_missing_root_by_its_code() {
+  // A library analyzed as the root package is not ok, and that it has no query root is all it is
+  // told: a consumer that filters the code reads no other diagnostic.
+  let analysis = analyze_one(LIBRARY);
+  assert!(!analysis.is_ok());
+  assert_eq!(analysis.diagnostics().error_count(), 1);
+  let kept: Vec<&Diagnostic> = analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect();
+  assert!(kept.is_empty(), "{kept:#?}");
+
+  // And its model is whole: beside a query root written after it, which adds no definition, every
+  // definition, contribution and field answers as it does here.
+  let text = format!("{LIBRARY}schema {{\n  query: Circle\n}}\n");
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+  let rooted = analyze(&root, &[], &Limits::new());
+  assert!(
+    rooted.diagnostics().is_empty(),
+    "{:#?}",
+    rooted.diagnostics()
+  );
+  assert_eq!(answers(analysis.model()), answers(rooted.model()));
 }
 
 #[test]
@@ -2176,6 +2543,7 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(SCHEMA_EXTENSION_WITHOUT_SCHEMA),
     a_schema_extension_with_no_schema,
   ),
+  (Code::new(NO_QUERY_ROOT), a_schema_with_no_query_root),
 ];
 
 /// A root package that defines its schema twice.
@@ -2413,6 +2781,11 @@ fn a_schema_extension_with_no_schema() -> Analysis {
 /// Two root operations of one type.
 fn two_roots_of_one_type() -> Analysis {
   analyze_one("type Query { ok: Int } schema { query: Query mutation: Query }")
+}
+
+/// A schema with no query root.
+fn a_schema_with_no_query_root() -> Analysis {
+  analyze_one("type NotTheRoot { ok: Int }")
 }
 
 /// A directive that refers to itself, through the input object its argument takes.

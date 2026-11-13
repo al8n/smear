@@ -99,7 +99,10 @@ And the schema keeps GraphQL's own rules on its roots, with GraphQL's codes: a r
 that is no object type is `smear::schema::root-operation-type-not-object`, and two roots of one
 type are `smear::schema::shared-root-operation-type`, and a schema extension the root package
 writes when it defines no schema, by a definition or a presumed query root, is
-`smear::schema::schema-extension-without-schema`.
+`smear::schema::schema-extension-without-schema`, and a schema with no query root, neither written
+nor presumed, is `smear::schema::missing-query-root-operation-type`. So a root package with no
+query root is not ok, as in GraphQL: a library has none, and a consumer that analyzes one as the
+root package filters that code, as it filters any code it waives.
 An error that a phase or a rule reports marks the contributions, members and definitions that hold
 it, as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error
 marks nothing. A consumer's walk marks nothing, answers its own diagnostics under the same

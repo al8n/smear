@@ -313,9 +313,15 @@ impl Analysis {
 ///   or written, one that is one type with an earlier one, in the order query, mutation and
 ///   subscription, is `shared-root-operation-type`, at a written root's type, with a label at the
 ///   other. When the root package writes no schema definition and no query root is presumed, each
-///   schema extension it writes is `schema-extension-without-schema`, at its `extend`. A rule says
-///   nothing about a contribution a phase already refused something in, and a root rule nothing
-///   while any of the schema's contributions holds a phase's error.
+///   schema extension it writes is `schema-extension-without-schema`, at its `extend`. A schema
+///   with no query root, neither written nor presumed, is `missing-query-root-operation-type`, once:
+///   at the `schema` of the root package's first schema definition, silent when a phase refused
+///   something in it, or with none at the root package's package source, where it marks nothing.
+///   So a root package with no query root is not ok, as in GraphQL, and a consumer that analyzes a
+///   library as the root package filters that code. A rule says nothing about a contribution a
+///   phase already refused something in, and the two rules on the roots' types,
+///   `root-operation-type-not-object` and `shared-root-operation-type`, say nothing while any of
+///   the schema's contributions holds a phase's error.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

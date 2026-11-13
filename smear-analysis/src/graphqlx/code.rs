@@ -590,4 +590,9 @@ pub(crate) mod schema {
   /// `SchemaExtensionWithoutSchema`.
   pub(crate) const SCHEMA_EXTENSION_WITHOUT_SCHEMA: Code =
     Code::new("smear::schema::schema-extension-without-schema");
+
+  /// The schema has no query root operation type, written or presumed: `smear-schema`'s
+  /// `MissingQueryRootOperationType`.
+  pub(crate) const MISSING_QUERY_ROOT_OPERATION_TYPE: Code =
+    Code::new("smear::schema::missing-query-root-operation-type");
 }

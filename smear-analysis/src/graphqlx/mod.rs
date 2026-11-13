@@ -17,7 +17,10 @@
 //!
 //! [`analyze`] answers an [`Analysis`]: the [`Model`], its [`Diagnostics`] and its [`SourceMap`].
 //! None of the three has a type parameter or a lifetime, whatever text type went in, and
-//! [`Analysis::is_ok`] is the verdict. So far the model holds the packages, their modules, from
+//! [`Analysis::is_ok`] is the verdict, which keeps GraphQL's: a root package with no query root is
+//! not ok. A library has none, so a consumer that analyzes one as the root package filters
+//! `smear::schema::missing-query-root-operation-type`, as it filters any code it waives; the
+//! analysis exposes no waiver. So far the model holds the packages, their modules, from
 //! their directories and their inline `mod`s, and every definition, the built-in library's and the
 //! primitives the program writes included, with canonical names and lookup: its kind, name, module,
 //! location, origin and description, its contributions, its own and then its extensions', its type
@@ -135,8 +138,10 @@
 //! is no object type is `smear::schema::root-operation-type-not-object`, and two roots of one type
 //! are `smear::schema::shared-root-operation-type`; and a schema extension the root package writes
 //! when it defines no schema, by a definition or a presumed query root, is
-//! `smear::schema::schema-extension-without-schema`. A rule says nothing about a contribution a
-//! phase already refused something in.
+//! `smear::schema::schema-extension-without-schema`; and a schema with no query root, neither
+//! written nor presumed, is `smear::schema::missing-query-root-operation-type`, at the root
+//! package's first schema definition, or with none at the whole of the root package's package
+//! source. A rule says nothing about a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

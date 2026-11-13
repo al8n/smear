@@ -25,6 +25,11 @@
 //! writes, on any definition, a built-in's included: the root package's `extend scalar String @x`
 //! is the root package's to answer for, whatever `String` is.
 //!
+//! GraphQL's own rules over the schema judge the root package's, the one schema a program has. So
+//! a root package with no query root is not ok, as in GraphQL: a library analyzed as the root
+//! package has none, and a consumer that analyzes one waives that code by filtering it, since the
+//! analysis keeps GraphQL's verdict and exposes no waiver.
+//!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk
 //! descends the written arguments of an occurrence that names a type parameter, or nothing, and
@@ -44,6 +49,7 @@ mod generic_enum;
 mod implements_non_interface;
 mod marker_misuse;
 mod member_type_kind;
+mod missing_query_root_operation_type;
 mod non_zero_argument;
 mod one_of_field_has_default;
 mod one_of_field_not_nullable;
@@ -69,6 +75,7 @@ use self::{
   duplicate_type_parameter::DuplicateTypeParameter, empty_definition::EmptyDefinition,
   generic_enum::GenericEnum, implements_non_interface::ImplementsNonInterface,
   marker_misuse::MarkerMisuse, member_type_kind::MemberTypeKind,
+  missing_query_root_operation_type::MissingQueryRootOperationType,
   non_zero_argument::NonZeroArgument, one_of_field_has_default::OneOfFieldHasDefault,
   one_of_field_not_nullable::OneOfFieldNotNullable,
   one_of_on_input_object_extension::OneOfOnInputObjectExtension, orphan_extension::OrphanExtension,
@@ -370,8 +377,8 @@ rule_set! {
   /// once; no directive refers to itself, through the directives and types it names, a scalar that
   /// is no collection hiding its type arguments; and a scalar of the built-in library takes no
   /// `@specifiedBy`. And of the schema, GraphQL's own rules: a root operation type is an object
-  /// type; the root operations have distinct types; and a schema extension extends a schema that
-  /// is defined.
+  /// type; the root operations have distinct types; a schema extension extends a schema that is
+  /// defined; and a schema has a query root operation type, written or presumed.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -445,6 +452,8 @@ rule_set! {
       => [super::code::schema::SHARED_ROOT_OPERATION_TYPE],
     schema_extension_without_schema: SchemaExtensionWithoutSchema
       => [super::code::schema::SCHEMA_EXTENSION_WITHOUT_SCHEMA],
+    missing_query_root_operation_type: MissingQueryRootOperationType
+      => [super::code::schema::MISSING_QUERY_ROOT_OPERATION_TYPE],
   }
 }
 

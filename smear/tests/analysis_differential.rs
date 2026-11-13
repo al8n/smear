@@ -34,6 +34,13 @@
 //! holds the divergences there are and no other. Its target is the three rows of the capacity
 //! ceilings `smear-schema`'s representation has and GraphQLx has not; each other row names the work
 //! that removes it.
+//!
+//! It holds thirty-two rows. Twenty are for every document: the three of the capacity ceilings,
+//! which stay; the five of coercion and the nine of the implementation phase, which pull request 1
+//! deletes; and the three of the input-object cycles, which the last part of this pull request
+//! deletes. Twelve are each for one document both dialects refuse: one where `smear-schema` drops a
+//! second definition of a name unread, and eleven where the mistake lies in a contribution that also
+//! holds a phase's error, beside which the rule is silent.
 #![cfg(all(feature = "std", feature = "analysis", feature = "validator"))]
 
 use std::{
@@ -116,9 +123,6 @@ const IMPLEMENTATION: &str = "the implementation phase reports it: pull request 
 /// Why a row of the input-object cycles exists.
 const CYCLES: &str = "the cycle rules report it: the last part of this pull request";
 
-/// Why a row of a rule of part 2.4 exists.
-const PART_2_4: &str = "its rule is written in part 2.4 of this pull request";
-
 /// Every divergence the test allows.
 const ALLOWED: &[Allowed] = &[
   every("smear::schema::type-reference-too-deep", CEILING),
@@ -168,7 +172,6 @@ const ALLOWED: &[Allowed] = &[
   every("smear::schema::circular-non-null-input-field", CYCLES),
   every("smear::schema::circular-one-of-input-field", CYCLES),
   every("smear::schema::input-object-default-value-cycle", CYCLES),
-  every("smear::schema::missing-query-root-operation-type", PART_2_4),
   Allowed {
     code: "smear::schema::undefined-implements-interface",
     document: Some("implements.graphql"),
