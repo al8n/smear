@@ -18,10 +18,13 @@
 
 use std::{borrow::Cow, vec::Vec};
 
-use tokora::{SimpleSpan, utils::Lexeme};
+use tokora::{
+  SimpleSpan,
+  utils::{Lexeme, PositionedChar},
+};
 
 use super::{LitBlockStr, LitComplexInlineStr, LitInlineStr, LitStr};
-use crate::error::StringError;
+use crate::error::{InvalidUnicodeHexDigits, StringError, UnicodeError};
 
 /// Cooks a literal the way a consumer would: lex it, then convert.
 fn cook(literal: &str) -> Cow<'_, str> {
@@ -493,5 +496,44 @@ fn a_dangling_backslash_reads_alike_from_text_and_bytes() {
   assert_eq!(
     bytes.as_slice(),
     &[StringError::IncompleteEscape(SimpleSpan::new(1, 2))]
+  );
+}
+
+/// A `\u` before characters of three bytes each takes four of them whole, as its digits: the
+/// escape's token ends on a character boundary, at the closing quote, and each digit is reported at
+/// its own byte. The text source counted those characters as bytes, and ended the token inside the
+/// second one, which its sub-lexer refuses with a panic.
+#[test]
+fn a_fixed_unicode_escape_before_wide_characters_takes_them_whole() {
+  let errors = LitStr::try_from("\"\\u€€€€\"").expect_err("no hex digit");
+  let digits = InvalidUnicodeHexDigits::from([
+    PositionedChar::with_position('€', 3),
+    PositionedChar::with_position('€', 6),
+    PositionedChar::with_position('€', 9),
+    PositionedChar::with_position('€', 12),
+  ]);
+  assert_eq!(
+    errors.as_slice(),
+    &[StringError::Unicode(
+      UnicodeError::invalid_fixed_unicode_escape_sequence(digits, SimpleSpan::new(1, 15))
+    )]
+  );
+
+  // One wide character before the quote: the escape takes it and the quote, as it takes any two
+  // characters, and the literal is then unterminated.
+  let errors = LitStr::try_from("\"\\u€\"").expect_err("no hex digit");
+  let digits = InvalidUnicodeHexDigits::from([
+    PositionedChar::with_position('€', 3),
+    PositionedChar::with_position('"', 6),
+  ]);
+  assert_eq!(
+    errors.as_slice(),
+    &[
+      StringError::Unicode(UnicodeError::invalid_fixed_unicode_escape_sequence(
+        digits,
+        SimpleSpan::new(1, 7)
+      )),
+      StringError::unterminated_inline_string(),
+    ]
   );
 }

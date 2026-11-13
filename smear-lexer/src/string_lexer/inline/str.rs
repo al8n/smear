@@ -138,118 +138,52 @@ fn handle_fixed_width_escape_unicode(
   Ok(())
 }
 
+/// The callback of the bare `\u` rule: a fixed-width escape whose four hex digits are not all
+/// there.
+///
+/// It takes up to four characters after the `\u` into the escape's token, as its digits. The token
+/// is measured in bytes and each character is taken whole, so a digit spelled in more than one
+/// byte moves the token's end by its whole width, and each digit that is not hex is reported at
+/// its own byte. Counting characters as bytes would end the token inside a character, which the
+/// sub-lexer refuses with a panic.
 #[inline]
 fn handle_invalid_escaped_unicode(
   lexer: &mut Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
-  let remainder = lexer.remainder();
-  let mut idx = 0;
+  let span = lexer.span();
 
-  let chars = {
-    let mut buf = ['\0'; 4];
-    for (i, c) in remainder.chars().enumerate().take(4) {
-      buf[i] = c;
-      idx += 1;
-    }
-    buf
-  };
+  // Each character taken, with its byte offset after the `\u`.
+  let mut buf = [('\0', 0usize); 4];
+  let mut count = 0usize;
+  for (index, (offset, c)) in lexer.remainder().char_indices().take(4).enumerate() {
+    buf[index] = (c, offset);
+    count = index + 1;
+  }
+  let taken = &buf[..count];
+  let len = taken
+    .last()
+    .map_or(0, |&(c, offset): &(char, usize)| offset + c.len_utf8());
+  lexer.bump(len);
 
-  if idx != 4 && chars[..idx].iter().all(|c| c.is_ascii_hexdigit()) {
-    let span = lexer.span();
-    lexer.bump(idx);
+  // Four hex digits are the fixed-width rule's, so digits that are all hex here are too few.
+  if taken
+    .iter()
+    .all(|&(c, _): &(char, usize)| c.is_ascii_hexdigit())
+  {
     return Err(
-      UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(Span::new(
-        span.start,
-        span.end + idx,
-      )))
-      .into(),
+      UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into())).into(),
     );
   }
 
-  Err(StringError::Unicode(match &chars[..idx] {
-    [a, b, c, d] => {
-      // we already know they aren't all hex digits
-      let span = lexer.span();
-      lexer.bump(4);
-
-      let mut invalid_digits = InvalidUnicodeHexDigits::default();
-
-      if !a.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*a, span.end));
-      }
-
-      if !b.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*b, span.end + 1));
-      }
-
-      if !c.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*c, span.end + 2));
-      }
-
-      if !d.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*d, span.end + 3));
-      }
-
-      UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into())
+  let mut invalid_digits = InvalidUnicodeHexDigits::default();
+  for &(c, offset) in taken {
+    if !c.is_ascii_hexdigit() {
+      invalid_digits.push_fixed(PositionedChar::with_position(c, span.end + offset));
     }
-    [a, b, c] => {
-      let span = lexer.span();
-      lexer.bump(3);
-
-      let mut invalid_digits = InvalidUnicodeHexDigits::default();
-      if !a.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*a, span.end));
-      }
-
-      if !b.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*b, span.end + 1));
-      }
-
-      if !c.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*c, span.end + 2));
-      }
-
-      if invalid_digits.is_empty() {
-        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into()))
-      } else {
-        UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into())
-      }
-    }
-    [a, b] => {
-      let span = lexer.span();
-      lexer.bump(2);
-
-      let mut invalid_digits = InvalidUnicodeHexDigits::default();
-      if !a.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*a, span.end));
-      }
-
-      if !b.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*b, span.end + 1));
-      }
-
-      if invalid_digits.is_empty() {
-        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into()))
-      } else {
-        UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into())
-      }
-    }
-    [a] => {
-      let span = lexer.span();
-      lexer.bump(1);
-
-      if a.is_ascii_hexdigit() {
-        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into()))
-      } else {
-        UnicodeError::invalid_fixed_unicode_escape_sequence(
-          PositionedChar::with_position(*a, span.end).into(),
-          lexer.span().into(),
-        )
-      }
-    }
-    [] => UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into())),
-    _ => unreachable!("impossible array length"),
-  }))
+  }
+  Err(
+    UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into()).into(),
+  )
 }
 
 #[inline(always)]
