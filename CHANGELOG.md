@@ -112,13 +112,18 @@ All notable changes to Smear are documented in this file.
   definition of another kind than its keyword is `smear::schema::extension-kind-mismatch`, one
   that is an alias such as `NonZeroU32`, which spells an instantiation of `NonZero` and is no
   definition of its own, is `smear::schema::undefined-extension-target`, and these and one that
-  names nothing contribute nothing. A definition holds its contributions, its own,
+  names nothing contribute nothing. An extension's parameter list names its target's type
+  parameters by position, one name each, and a list of another length is the new
+  `smear::graphqlx::generic-arity`, though the extension still contributes what it writes; an
+  extension that writes no list names none of them, and is legal whatever their count. A
+  definition holds its contributions, its own,
   named where its name is written, then each extension's, by source and position, named where
   its target path is written; its type parameters; a directive definition's locations and whether
   it is `repeatable`; and its members, the direct members of each contribution in turn as written
   and then each field's arguments, field by field, each with its description. A GraphQL
   built-in the root package replaces holds what the root package's definition
-  writes, and the root package may add directives to a built-in by an extension.
+  writes, and the root package may add directives to a built-in by an extension; it declares no
+  type parameter, since the built-in keeps its identity, and a list it writes is `generic-arity`.
   `Contribution::is_extension()` says whether a contribution is a definition or one of its
   extensions. Every written type is a type occurrence, numbered in the order the
   model's walk reaches it, each before the types it nests: a type parameter's default, a bound,

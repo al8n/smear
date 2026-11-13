@@ -137,9 +137,14 @@ impl Analysis {
 ///   where the extension is written: one that names nothing, one that names a definition of
 ///   another kind than the extension's keyword (`extension-kind-mismatch`), and one that is an
 ///   alias such as `NonZeroU32`, which spells an instantiation and is no definition of its own,
-///   is reported and contributes nothing; every other is a contribution of its target. A definition holds its contributions,
+///   is reported and contributes nothing; every other is a contribution of its target. An
+///   extension's parameter list names its target's type parameters by position, one name each,
+///   and a list of another length is `generic-arity`; an extension that writes no list names none
+///   of them. A definition holds its contributions,
 ///   its own, where its name is written, then its extensions' by source and position, each where
-///   its target path is written; its type parameters; a directive definition's locations and
+///   its target path is written; its type parameters, of which a definition that replaces a
+///   GraphQL built-in declares none, a list it writes being `generic-arity`; a directive
+///   definition's locations and
 ///   whether it is `repeatable`; and its members, the direct members of each contribution in turn
 ///   as written and then each field's arguments, each with its description. A replaced built-in
 ///   holds what the root package's definition writes, and smear's own definition of it

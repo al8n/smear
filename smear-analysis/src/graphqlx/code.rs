@@ -93,6 +93,14 @@ pub enum DiagnosticKind {
   /// side, or at the extension's clause, and nothing of it is in the model.
   InvalidBound,
 
+  // -- Types -------------------------------------------------------------------------------------
+  /// A list of type parameters of the wrong length. An extension's list names its target's type
+  /// parameters by position, one name each, and names another number of them: reported at the
+  /// list, with a label at the definition's name; the extension still contributes what it writes.
+  /// Or a definition that replaces a GraphQL built-in writes one, where the built-in's identity has
+  /// none: reported at the list, and nothing of the list is in the model.
+  GenericArity,
+
   // -- smear's rules -----------------------------------------------------------------------------
   /// A package other than the root package writes a `schema` definition or a schema extension. A
   /// dependency is a library, and the schema is the root package's, which alone defines and
@@ -135,6 +143,7 @@ impl DiagnosticKind {
     Self::UseNameCollision,
     Self::ShadowedPrimitive,
     Self::InvalidBound,
+    Self::GenericArity,
     Self::SchemaOutsideRoot,
     Self::OrphanExtension,
     Self::ResourceLimit,
@@ -164,6 +173,7 @@ impl DiagnosticKind {
       Self::UseNameCollision => Code::new("smear::graphqlx::use-name-collision"),
       Self::ShadowedPrimitive => Code::new("smear::graphqlx::shadowed-primitive"),
       Self::InvalidBound => Code::new("smear::graphqlx::invalid-bound"),
+      Self::GenericArity => Code::new("smear::graphqlx::generic-arity"),
       Self::SchemaOutsideRoot => Code::new("smear::graphqlx::schema-outside-root"),
       Self::OrphanExtension => Code::new("smear::graphqlx::orphan-extension"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
@@ -193,6 +203,7 @@ impl DiagnosticKind {
       Self::UseNameCollision => "two uses of one name",
       Self::ShadowedPrimitive => "declaration shadows a primitive",
       Self::InvalidBound => "invalid bound",
+      Self::GenericArity => "wrong number of type arguments",
       Self::SchemaOutsideRoot => "schema outside the root package",
       Self::OrphanExtension => "orphan extension",
       Self::ResourceLimit => "resource limit exceeded",
@@ -222,6 +233,7 @@ impl DiagnosticKind {
       | Self::UseDeclarationCollision
       | Self::UseNameCollision
       | Self::InvalidBound
+      | Self::GenericArity
       | Self::SchemaOutsideRoot
       | Self::OrphanExtension
       | Self::ResourceLimit => Severity::Error,
