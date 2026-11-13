@@ -440,7 +440,11 @@ All notable changes to Smear are documented in this file.
   A value of a generic type definition whose type names its type parameters stays a `Literal`,
   and is checked at each closed instantiation of it the program writes: the first that does not
   fit is reported once at each occurrence, with its site's code, labelled at the value. The steps
-  this takes are `Limits::max_value_steps`'s. Then smear's rules walk the model, each a visitor on
+  this takes are `Limits::max_value_steps`'s, and so are each field a count reads of an object
+  literal against an input object it had not read it against, and each 64 bytes of the identities
+  of a set's elements or a map's keys a count under type arguments renders to search them for one
+  held twice, a search made once for each literal and the type they are read against. Then
+  smear's rules walk the model, each a visitor on
   the public trait. A program
   defines its schema at most once: each schema definition the root
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own

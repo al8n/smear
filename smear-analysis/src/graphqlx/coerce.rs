@@ -250,7 +250,11 @@
 //! row of a copy, its whole count charged before its first row; each read of a count while
 //! counting, and each count made already that is asked for again; each default asked for that
 //! needs itself; each required argument, and each required field of an object literal, found
-//! left out; each node of a judged count; each node a rebuild of a member's type under type
+//! left out; each node of a judged count; each field an object literal writes, one its input
+//! object does not declare included, the first time a count reads the literal against that input
+//! object; each identity of a set's element or a map's key a judged count renders to search them
+//! for one held twice, a step for each 64 bytes of it or part, once for each literal and the type
+//! its identities are read against; each node a rebuild of a member's type under type
 //! arguments looks at, its root included, once for each type and instantiation; each argument or
 //! field that may be required left out where the type arguments are complete; and each pair of a
 //! written instantiation checked and a value recorded under its definition. So is the one
@@ -314,6 +318,10 @@ use number::{Float, Scanned};
 /// The width an integer is read in where a float is expected: an integer longer than one of this
 /// many bits is no finite float.
 const FLOAT_BITS: u32 = 1024;
+
+/// How many bytes of the identities a judged count searches for one held twice a step of
+/// `Limits::max_value_steps` renders.
+const RENDERED: usize = 64;
 
 /// Makes the model's values of `raw`, the values lowering read, in `builder`, whose declarations
 /// are `declarations`, whose scopes are `scopes` and whose sources `sources` numbers, with the type
@@ -418,6 +426,7 @@ pub(crate) fn coerce(
     counting: Vec::new(),
     frames: Vec::new(),
     held: Vec::new(),
+    searched: BTreeMap::new(),
     owner: None,
     recorded: Vec::new(),
     checked: BTreeMap::new(),
@@ -630,9 +639,15 @@ enum Counted {
     ty: Option<TyId>,
     judged: bool,
   },
-  /// In a judged count, a set or a map, as `held` says, whose elements or keys counted since have
-  /// their identities from the slot `start` on: searched for one held twice.
-  Held { start: u32, held: Held },
+  /// In a judged count, the set or the map literal `node`, as `held` says, whose elements or keys,
+  /// read against `of`, counted since have their identities from the slot `start` on: searched for
+  /// one held twice.
+  Held {
+    start: u32,
+    held: Held,
+    node: u32,
+    of: TyId,
+  },
 }
 
 /// A default being counted: its tree and the type it is counted against, where its own entries of
@@ -1054,6 +1069,9 @@ struct Coercion<'c, 'p, 'x> {
   /// The identities of the elements or the keys of the sets and the maps a judged count is
   /// searching, by slot.
   held: Vec<Option<Ident>>,
+  /// Each set or map literal a judged count searched for an element or a key held twice, by its
+  /// node and the type its identities were read against: whether it holds each once.
+  searched: BTreeMap<(u32, TyId), bool>,
   /// The generic type definition whose values the walk is making, when it is in one.
   owner: Option<DefId>,
   /// Each value of a generic type definition whose type names its type parameters, in the walk's
@@ -1780,12 +1798,23 @@ impl<'p> Coercion<'_, 'p, '_> {
             Ok(())
           }
         },
-        Counted::Held { start, held } => {
-          if !self.held_once(start, held) {
-            self.misfit();
+        Counted::Held {
+          start,
+          held,
+          node,
+          of,
+        } => match self.held_once(start, held, charged) {
+          Ok(once) => {
+            // What a search finds depends on its literal and the type its identities are read
+            // against alone, and is kept by the two.
+            self.searched.insert((node, of), once);
+            if !once {
+              self.misfit();
+            }
+            Ok(())
           }
-          Ok(())
-        }
+          Err(verdict) => Err(verdict),
+        },
       };
       if let Err(verdict) = counted {
         return self.verdict(verdict);
@@ -1915,11 +1944,13 @@ impl<'p> Coercion<'_, 'p, '_> {
         self.count_items(node, raw, (element, element), None);
       }
       Class::Set(element) => {
-        self.count_items(node, raw, (element, element), judged.then_some(Held::Set));
+        let searched = judged.then_some((Held::Set, element));
+        self.count_items(node, raw, (element, element), searched);
       }
       Class::Map(key, value) => {
         // A last key with no value is dropped, as the copy drops it.
-        if self.count_items(node, raw, (key, value), judged.then_some(Held::Map)) % 2 == 1 {
+        let searched = judged.then_some((Held::Map, key));
+        if self.count_items(node, raw, (key, value), searched) % 2 == 1 {
           let _ = self.counting.pop();
         }
       }
@@ -1939,7 +1970,10 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
       }
       Class::Object { def, first } => {
-        let fields = self.fields_of(node, def, first);
+        // Each field the literal writes is a step the first time it is read against `def`.
+        let fields = self
+          .fields_of(node, def, first, charged)
+          .ok_or(Count::Past)?;
         // Each field's type is read under the object's type arguments, as the copy reads it.
         let env = ty.map(|ty: TyId| (ty, def));
         if judged && !self.object_fits(def, fields, charged, env)? {
@@ -2072,8 +2106,17 @@ impl<'p> Coercion<'_, 'p, '_> {
 
   /// Whether the elements of a set, or the keys of a map, as `held` says, whose identities are the
   /// slots from `start` on, hold none twice: each identity rendered once, the shared kernel finding
-  /// the first of each. The slots are let go.
-  fn held_once(&mut self, start: u32, held: Held) -> bool {
+  /// the first of each. When `charged`, each rendering pays a step of `Limits::max_value_steps` for
+  /// each `RENDERED` bytes it renders, or part of them, before it is made, and one the budget cannot
+  /// pay for ends the search past it. The slots are let go.
+  ///
+  /// The comparisons are paid for by the renderings. Two identities compared read no more than the
+  /// shorter of the two, and an identity is compared with at most the sixty-four before it while
+  /// the kernel scans, and in a number of comparisons logarithmic in the list's length once it
+  /// sorts: a bounded multiple of the bytes rendered. A literal is searched once against each type
+  /// its identities are read against, its verdict kept by the two, so no comparison is made again
+  /// without its renderings.
+  fn held_once(&mut self, start: u32, held: Held, charged: bool) -> Result<bool, Count> {
     self.key_bytes.clear();
     self.keyed.clear();
     let step = match held {
@@ -2086,6 +2129,9 @@ impl<'p> Coercion<'_, 'p, '_> {
       let Some(ident) = ident else {
         continue;
       };
+      if charged && !self.charge(dense(self.rendered_len(ident).div_ceil(RENDERED))) {
+        return Err(Count::Past);
+      }
       let from = dense(self.key_bytes.len());
       self.render(ident);
       self.keyed.push((from, dense(self.key_bytes.len()), 0));
@@ -2100,7 +2146,21 @@ impl<'p> Coercion<'_, 'p, '_> {
         .is_some()
     });
     self.held.truncate(start as usize);
-    !twice
+    Ok(!twice)
+  }
+
+  /// How many bytes [`render`](Self::render) appends for `ident`, read before it renders them.
+  fn rendered_len(&self, ident: Ident) -> usize {
+    match ident {
+      Ident::Bool(_) => 1,
+      Ident::Int { len, .. } => (len as usize).saturating_add(1),
+      // An `id`'s integer is in `i32`'s range: a sign and at most ten digits.
+      Ident::Decimal { .. } => 11,
+      Ident::Float(_) => 8,
+      Ident::Text(text) => self.builder.kept_text(text).len(),
+      Ident::Bytes(bytes) => self.builder.kept_bytes(bytes).len(),
+      Ident::Member(_) => 4,
+    }
   }
 
   /// Whether `node` is a path whose root lowering does not know, which lowering reported.
@@ -2116,25 +2176,40 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Pushes each child of `node`, whose node is `raw`, to be counted: those at even places against
-  /// `types.0`, and those at odd places against `types.1`; when `held` says the node is a set or a
-  /// map a judged count searches, with a slot for each one's identity, under the entry that
-  /// searches them. Answers how many it pushed.
+  /// `types.0`, and those at odd places against `types.1`. When `searched` says the node is a set
+  /// or a map a judged count searches, and the type its identities are read against, each child
+  /// has a slot for its identity, under the entry that searches them; unless a search of the node
+  /// against that type was made already, whose verdict is read instead. Answers how many it
+  /// pushed.
   fn count_items(
     &mut self,
     node: u32,
     raw: RawNode,
     types: (TyId, TyId),
-    held: Option<Held>,
+    searched: Option<(Held, TyId)>,
   ) -> u32 {
-    if let Some(held) = held {
-      let start = dense(self.held.len());
-      self.counting.push(Counted::Held { start, held });
+    let mut slots = false;
+    if let Some((held, of)) = searched {
+      match self.searched.get(&(node, of)).copied() {
+        Some(true) => {}
+        Some(false) => self.misfit(),
+        None => {
+          let start = dense(self.held.len());
+          self.counting.push(Counted::Held {
+            start,
+            held,
+            node,
+            of,
+          });
+          slots = true;
+        }
+      }
     }
     let mut pushed: u32 = 0;
     let mut child = node.saturating_add(1);
     while child < raw.after {
       let ty = if pushed % 2 == 1 { types.1 } else { types.0 };
-      let slot = held.map(|_: Held| {
+      let slot = slots.then(|| {
         let slot = dense(self.held.len());
         self.held.push(None);
         slot
@@ -2831,7 +2906,11 @@ impl<'p> Coercion<'_, 'p, '_> {
     let source = tree.source;
     let at = Location::new(source, raw.span);
     let library = source < self.supplied;
-    let fields = self.fields_of(node, def, first);
+    // Where the literal is written its bytes pay for its reading, and in a copy the count the copy
+    // was charged for read it already: uncharged, the reading is always made.
+    let Some(fields) = self.fields_of(node, def, first, false) else {
+      return;
+    };
     let one_of = self.one_of.binary_search(&def).is_ok();
     let mut merge = self.merge(def, fields);
     // Each field's type is read under the object's type arguments.
@@ -2983,9 +3062,15 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// starting at `first`: read the first time it is asked for, and kept by the node and `def`. A
   /// field whose name is a symbol that names one of `def`'s fields sets the first field of that
   /// name, and the fields it sets are sorted by the field, one set twice kept in written order.
-  fn fields_of(&mut self, node: u32, def: DefId, first: u32) -> Fields {
+  ///
+  /// Where a literal is written, its bytes pay for its reading. A count reads a default's literals
+  /// against each input object a type argument makes their type, which no byte pays for: so when
+  /// `charged`, a count's reading not kept yet pays a step of `Limits::max_value_steps` for each
+  /// field it looks at, one its input object does not declare included, before it looks at it, and
+  /// `None` is the budget that cannot pay, nothing kept. A reading kept costs nothing more.
+  fn fields_of(&mut self, node: u32, def: DefId, first: u32, charged: bool) -> Option<Fields> {
     if let Some(&kept) = self.objects.get(&(node, def)) {
-      return kept;
+      return Some(kept);
     }
     let start = self.set_fields.len();
     let after = self
@@ -2997,6 +3082,10 @@ impl<'p> Coercion<'_, 'p, '_> {
     let mut child = node.saturating_add(1);
     let mut row = first;
     while child < after {
+      if charged && !self.charge(1) {
+        self.set_fields.truncate(start);
+        return None;
+      }
       written = written.saturating_add(1);
       if let Some(field) = self.raw.fields.get(row as usize).copied()
         && let Some(name) = field.name
@@ -3029,7 +3118,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       written,
     };
     self.objects.insert((node, def), kept);
-    kept
+    Some(kept)
   }
 
   /// Reports each field the object literal `node`, written in the source `source`, writes that

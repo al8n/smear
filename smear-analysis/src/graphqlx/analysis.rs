@@ -294,8 +294,12 @@ impl Analysis {
 ///   copy of itself is not copied: the argument, or the field, is absent, and under type arguments
 ///   what its count reached is judged as a copy is. Each row of a copy, each
 ///   read of another default's count while counting, each read of a count made already for a
-///   later copy, each default left out that needs itself, and each required argument found left
-///   out, is a step of [`Limits::max_value_steps`]: past it the application is `resource-limit`
+///   later copy, each default left out that needs itself, each required argument found left out,
+///   each field a count reads of an object literal against an input object it had not read it
+///   against, and each 64 bytes, or part, of the identities of a set's elements or a map's keys a
+///   count under type arguments renders to search them for one held twice, once for each literal
+///   and the type they are read against, is a step of [`Limits::max_value_steps`]: past it the
+///   application is `resource-limit`
 ///   once, at its path, and filled no further, an object literal likewise at the literal, and an
 ///   integer whose conversion it cannot pay for is `resource-limit` where it is written. Last,
 ///   names and texts

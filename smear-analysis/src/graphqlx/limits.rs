@@ -351,12 +351,17 @@ impl Limits {
   /// of a list of `1`; a required argument an application leaves out, and a required field an
   /// object literal leaves out, each of which is reported; a node a rebuild of a member's type
   /// under type arguments looks at, its root included, once for each written type and
-  /// instantiation; a node of a count made under a type its default is not written against; an
-  /// argument that may be required, a bare nullable type parameter of its directive, that an
-  /// application with complete type arguments leaves out, and a field that may be required that a
-  /// written object literal of a generic input object leaves out; a pair of a closed instantiation
-  /// the program writes and a value of its definition whose type names its type parameters,
-  /// checked under the instantiation's arguments; and converting a decimal integer of more
+  /// instantiation; a node of a count made under a type its default is not written against, and an
+  /// identity of a set's element or of a map's key that such a count renders to search them for
+  /// one held twice, a step for each 64 bytes of it or part, once for each literal and the type its
+  /// identities are read against; a field an object literal of a default writes, one its input
+  /// object does not declare included, the first time the default's count reads the literal
+  /// against that input object; an argument that may be required, a bare nullable type parameter
+  /// of its directive, that an application with complete type arguments leaves out, and a field
+  /// that may be required that a written object literal of a generic input object leaves out; a
+  /// pair of a closed instantiation the program writes and a value of its definition whose type
+  /// names its type parameters, checked under the instantiation's arguments; and converting a
+  /// decimal integer of more
   /// than 38 significant digits, the most `u128` arithmetic reads whatever they spell, to its
   /// value, charged before the conversion as an upper bound of its work:
   /// `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine digits times

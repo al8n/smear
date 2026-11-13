@@ -59,8 +59,12 @@ but a OneOf input object's; a required argument left out is
 copy is counted before it is made, and a default whose copy would hold a copy of itself is not
 copied; the copies, the reads of a default's count, by another's and by each later copy of it, the
 required arguments and fields left out, the lists a value written alone stands for where a list is
-expected and the conversion of a decimal integer of more than 38 significant digits are bounded by
-`Limits::max_value_steps`. A directive application has its complete type arguments, filled from
+expected, the conversion of a decimal integer of more than 38 significant digits, each field a
+count reads of an object literal against an input object it had not read it against, and the
+identities of a set's elements or a map's keys a count under type arguments renders to search them
+for one held twice, a step for each 64 bytes, once for each literal and the type they are read
+against, are bounded by `Limits::max_value_steps`. A directive application has its complete type
+arguments, filled from
 its directive's defaults as an occurrence's are, and its directive's bounds are judged at it; its
 arguments are read under them, a generic input object's fields under its type's arguments, and a
 copy of a default made there is judged as a written value is, the first that does not fit
