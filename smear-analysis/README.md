@@ -72,7 +72,11 @@ copy of a default made there is judged as a written value is, the first that doe
 reported once, at the application or at the literal whose type the arguments made. A value of a
 generic type definition whose type names its type parameters stays a literal, and is checked at
 each closed instantiation of the definition the program writes, reported once at each occurrence
-of one under which it does not fit. It
+of one under which it does not fit. Every definition and every type has the tier it requires, the
+least of `core`, `alloc` and `std` that holds what it uses: a built-in its package's tag, a scalar
+its externs' greatest tier, an object, an interface, an input object or a union the greatest of its
+positions' and members' types', a position `@heap` marks `alloc` at least, and a type its
+definition's and its arguments', a list `alloc` at least. It
 resolves every module's `use` items too, globs and string sources included, against scopes that
 end with the prelude and the packages each package may reach. The built-in packages, `core`, `alloc`
 and `std`, are one embedded GraphQLx file each, parsed on every analysis. `graphqlx::analyze_with`

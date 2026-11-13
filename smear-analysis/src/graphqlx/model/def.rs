@@ -446,10 +446,16 @@ impl<'a> Def<'a> {
   }
 
   /// The tier it requires: the least of `core`, `alloc` and `std` that holds everything it uses.
-  /// A definition of `core`, `alloc` or `std` requires its package's tier, whatever it names.
-  //
-  // The tier phase computes it for every other definition. Until that phase lands, each of those
-  // answers `Core`: the least tier, and so a lower bound of the tier the phase will compute.
+  ///
+  /// A definition of `core`, `alloc` or `std` requires its package's tier, whatever it names: the
+  /// tier is a tag, a meta-type's and a GraphQL built-in's the root package replaces included. A
+  /// scalar a supplied package defines requires the greatest of its externs' tiers, and `core` with
+  /// none; an enum or a directive requires `core`, a directive's arguments counting nowhere. An
+  /// object or an interface requires the greatest of the tiers of its fields' types and of their
+  /// arguments' types, an input object of its input fields' types, and a union of its members'
+  /// types, each type's as [`Ty::tier`](crate::graphqlx::Ty::tier) answers; a field, an argument
+  /// or an input field that applies `core`'s `@heap` requires `alloc` at least. Definitions that
+  /// hold one another share the greatest tier any of them reaches.
   #[inline]
   pub fn tier(&self) -> Tier {
     self.row().tier

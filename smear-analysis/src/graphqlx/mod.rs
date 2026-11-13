@@ -42,8 +42,9 @@
 //! generic directive's arguments and a generic input object's fields read under their type
 //! arguments, and a default fills each argument and each input field a value leaves out; a value
 //! of a generic type definition whose type names its type parameters is checked at each closed
-//! instantiation of it the program writes, and refused there. The phases that write the rest of
-//! it, among them tiers, are still to come.
+//! instantiation of it the program writes, and refused there. And every definition and every type
+//! has the tier it requires, the least of `core`, `alloc` and `std` that holds everything it uses:
+//! a built-in its package's tag, and anything else what it holds, a list `alloc` at least.
 //!
 //! [`analyze_with`] answers the same analysis with the parser the caller chose, a GraphQLx parser
 //! layer, and the [`Trees`] that layer kept beside it, one for each file it read. Each
@@ -152,6 +153,7 @@ mod rules;
 mod set;
 mod source;
 mod text;
+mod tiers;
 mod tree;
 mod types;
 mod visitor;

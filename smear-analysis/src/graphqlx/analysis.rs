@@ -25,6 +25,7 @@ use super::{
   set::{self, PackageView, ROOT},
   source::SourceMap,
   text::SourceText,
+  tiers,
   types::Types,
   visitor::{Packages, Visitor, drive},
 };
@@ -313,6 +314,15 @@ impl Analysis {
 ///   `@extern` whose `lang`, `type` or `tier` did not coerce binds nothing, and so does one another
 ///   package writes, and one on a built-in, a GraphQL built-in the root package replaces among
 ///   them. An extern holds the strings coercion kept, and binding writes no text.
+/// - Gives every definition and every type the tier it requires, last, once every type is
+///   interned: a built-in keeps its package's tag; a scalar a supplied package defines requires
+///   its externs' greatest tier, `core` with none; an enum and a directive `core`; an object or an
+///   interface the greatest of its fields' types' and their arguments', an input object its input
+///   fields' types', and a union its members' types', a position that applies `core`'s `@heap`
+///   `alloc` at least; a named type its definition's and its arguments', a list `alloc` at least
+///   and its element's, and a type parameter `core`. Definitions and types that hold one another
+///   share the greatest tier any of them reaches, found by one worklist, each rising at most
+///   twice.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///   Each schema definition the root package writes after its first is
@@ -540,6 +550,7 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut reporter,
   );
   bind::bind(&declarations, &sources, &mut builder);
+  tiers::tiers(&declarations, &mut builder);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }

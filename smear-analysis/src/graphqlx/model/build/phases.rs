@@ -1,17 +1,17 @@
-//! What the hand-built models of the tests write in one step, and what the phases still to come
-//! write: an extern whose texts are given, as a hand-built model holds one; the tiers of types; a
-//! value written whole, each over coercion's own writers; and marks.
+//! What the hand-built models of the tests write in one step: an extern whose texts are given, as
+//! a hand-built model holds one; a value written whole, each over coercion's own writers; and
+//! marks.
 //!
 //! GATED ON HAVING A CALLER. The test-support door is this module's only caller: a method that no
 //! shipped build calls is dead code. A phase moves the methods it calls out of this module, as the
-//! module tree, item collection, lowering, instantiation, coercion and binding moved theirs.
-//! Binding writes an extern with `bind_extern`, over the texts coercion kept; `push_extern` keeps
-//! its own, through the same helper.
+//! module tree, item collection, lowering, instantiation, coercion, binding and the tier phase
+//! moved theirs. Binding writes an extern with `bind_extern`, over the texts coercion kept;
+//! `push_extern` keeps its own, through the same helper.
 
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{DefId, Sym, TyId, ValueId},
+  id::{DefId, Sym, ValueId},
   model::{ty::PathRoot, value::LiteralKind},
   package::Tier,
 };
@@ -25,11 +25,6 @@ impl ModelBuilder {
     let lang = self.keep_text(lang);
     let ty = self.keep_text(ty);
     self.append_extern(def, lang, ty, tier, None);
-  }
-
-  /// Gives `ty` the tier it requires.
-  pub fn set_ty_tier(&mut self, ty: TyId, tier: Tier) {
-    self.model.tys[ty.get() as usize].tier = tier;
   }
 
   /// Makes `value` an integer: negative when `negative`, of absolute value `magnitude`,

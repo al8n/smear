@@ -15,7 +15,7 @@ use crate::graphqlx::{
     ApplicationArgument, Collection, DefKind, Origin, Resolution, TypeBound,
     satisfy::{Keys, Steps, Wanted},
     table::{
-      DefRow, KIND_LIST, KIND_NAMED, KIND_PARAM, MemberRow, PackageRow, TyRow, UNSET_TY,
+      DefRow, ExternRow, KIND_LIST, KIND_NAMED, KIND_PARAM, MemberRow, PackageRow, TyRow, UNSET_TY,
       VALUE_ENUM, VALUE_NULL, VALUE_STRING,
     },
   },
@@ -281,6 +281,35 @@ impl ModelBuilder {
       .map(|row: &PackageRow| row.tier)
   }
 
+  /// The tier `def` requires, as written so far: a built-in's tag, which no phase recomputes.
+  pub(crate) fn def_tier(&self, def: DefId) -> Option<Tier> {
+    self
+      .model
+      .defs
+      .get(def.get() as usize)
+      .map(|row: &DefRow| row.tier)
+  }
+
+  /// The greatest of the tiers of `def`'s externs: `None` when it has none.
+  pub(crate) fn def_extern_tier(&self, def: DefId) -> Option<Tier> {
+    let row = self.model.defs.get(def.get() as usize)?;
+    row
+      .externs
+      .of(&self.model.externs)
+      .iter()
+      .map(|bound: &ExternRow| bound.tier)
+      .max()
+  }
+
+  /// The union members of `def`, every contribution's, in order: none for a definition of any
+  /// other kind, and for an id the builder did not issue.
+  pub(crate) fn def_union_members(&self, def: DefId) -> &[TypeExprId] {
+    match self.model.defs.get(def.get() as usize) {
+      Some(row) => row.union_members.of(&self.model.union_members),
+      None => &[],
+    }
+  }
+
   /// Where `def` comes from.
   pub(crate) fn def_origin(&self, def: DefId) -> Option<Origin> {
     self
@@ -327,6 +356,11 @@ impl ModelBuilder {
       .non_zero
       .get(at)
       .map(|&(_, primitive): &(TypeExprId, DefId)| primitive)
+  }
+
+  /// How many types the model holds.
+  pub(crate) fn ty_count(&self) -> u32 {
+    dense(self.model.tys.len())
   }
 
   /// How deeply `ty` nests: 0 for a type the builder did not issue.

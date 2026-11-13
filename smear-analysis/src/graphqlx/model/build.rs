@@ -445,6 +445,11 @@ impl ModelBuilder {
     self.model.defs[def.get() as usize].tier = tier;
   }
 
+  /// Gives `ty` the tier it requires.
+  pub fn set_ty_tier(&mut self, ty: TyId, tier: Tier) {
+    self.model.tys[ty.get() as usize].tier = tier;
+  }
+
   /// Adds to `def`, after the externs it has, the binding `application` writes: its `lang` and its
   /// `type`, the runs coercion kept for those strings, and its effective tier. It writes no text.
   ///

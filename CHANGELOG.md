@@ -449,7 +449,14 @@ All notable changes to Smear are documented in this file.
   in application order, a `lang` written twice twice, with its `lang` and `type`, the strings
   coerced, and its effective tier, the `tier` it writes or, absent or `null`, its package's. An
   `@extern` whose values did not coerce, one another package writes and one on a built-in bind
-  nothing. Then smear's rules walk the model, each a visitor on
+  nothing. Then every definition and every type is given the tier it requires, which
+  `Def::tier()` and `Ty::tier()` answer: a built-in keeps its package's tag; a scalar a supplied
+  package defines requires its externs' greatest tier, `core` with none; an enum and a directive
+  `core`; an object or an interface the greatest of its fields' types' and their arguments', an
+  input object its input fields' types', and a union its members' types', a position that applies
+  `core`'s `@heap` `alloc` at least; a named type its definition's and its arguments', a list
+  `alloc` at least and its element's, and a type parameter `core`; and what holds itself shares
+  the greatest tier any of it reaches. Then smear's rules walk the model, each a visitor on
   the public trait. A program
   defines its schema at most once: each schema definition the root
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
