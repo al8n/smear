@@ -1184,12 +1184,55 @@ mod lossless {
     }
   }
 
+  /// The last token of `node` that is neither trivia nor text the parse never read: its text, its
+  /// range, and whether it is a child of `node` itself.
+  fn last_read(node: &SyntaxNode) -> (String, Range<usize>, bool) {
+    let token = node
+      .descendants_with_tokens()
+      .filter_map(|element| element.into_token())
+      .filter(|token| {
+        !matches!(
+          token.kind(),
+          K::Space | K::Tab | K::Newline | K::Comma | K::Comment | K::Bom | K::Gap
+        )
+      })
+      .last()
+      .expect("the node holds a token the parse read");
+    let range = token.text_range();
+    (
+      token.text().to_string(),
+      usize::from(range.start())..usize::from(range.end()),
+      token.parent().as_ref() == Some(node),
+    )
+  }
+
+  /// The gap tiles anywhere in `node`, text the parse never read, each as it is written and where.
+  fn gaps(node: &SyntaxNode) -> Vec<(String, Range<usize>)> {
+    node
+      .descendants_with_tokens()
+      .filter_map(|element| element.into_token())
+      .filter(|token| token.kind() == K::Gap)
+      .map(|token| {
+        let range = token.text_range();
+        (
+          token.text().to_string(),
+          usize::from(range.start())..usize::from(range.end()),
+        )
+      })
+      .collect()
+  }
+
   /// [`WITNESS`] at `with_max_tokens(17)`, the first budget at which 1e4023b8 broke the rule of the
   /// braces. The limit stops the skip from the junk `(` as it reads lexeme 18, the space after the
-  /// `}` it has taken. 1e4023b8 kept that prefix: `m`'s `}` stood inside `A`, and `m`'s text read the
-  /// same with no `}` of its own. Here the skip is taken back and scanned again, the hole of the two
-  /// parentheses is kept in `A` in front of the `}`, the list leaves the `}`, and `m` closes on it.
-  /// The parse then reads the space again, meets the limit there, and reports it once.
+  /// `}` it has taken. 1e4023b8 kept that prefix, so `m`'s `}` stood inside `A` and `m` held none
+  /// of its own. Here the skip is taken back and scanned again, the hole of the two parentheses is
+  /// kept in `A` in front of the `}`, the list leaves the `}`, and `m` closes on it. The parse then
+  /// reads the space again, meets the limit there, and reports it once.
+  ///
+  /// What the parse never read, ` mod n { ))) scalar B }`, is one gap tile, and tokora tiles it at
+  /// the token it trails, before the close after that token is read: it stands in `m`, after `m`'s
+  /// own `}`. So `m`'s node runs to the end of the text, and its last token that is neither trivia
+  /// nor text the parse never read is its own `}`.
   #[test]
   fn a_limit_after_a_brace_the_skip_did_not_open_leaves_it_to_its_module() {
     let limits = LosslessLimits::default().with_max_tokens(17);
@@ -1205,10 +1248,19 @@ mod lossless {
       let tree: SyntaxNode = parse.syntax();
       assert_eq!(tree.text().to_string(), WITNESS, "at the {root} root");
       let m = module(&tree, "mod m");
+      assert_eq!(m.text().to_string(), WITNESS, "at the {root} root");
       assert_eq!(
-        m.text().to_string(),
-        "mod m { scalar A @d((( }",
-        "at the {root} root"
+        last_read(&m),
+        (String::from("}"), brace..brace + 1, true),
+        "at the {root} root: `m`'s last token read is not its own `}}`"
+      );
+      assert_eq!(
+        gaps(&m),
+        [(
+          String::from(" mod n { ))) scalar B }"),
+          brace + 1..WITNESS.len()
+        )],
+        "at the {root} root: what the parse never read"
       );
       assert!(
         holds_a_closing_brace(&m),
@@ -1232,6 +1284,43 @@ mod lossless {
         })
         .count();
       assert_eq!(reports, 1, "at the {root} root: the limit's report");
+    }
+  }
+
+  /// A byte the lexer refuses right after a module's `}`, in the middle of a document. Its gap tile
+  /// is text the parse never read, and tokora tiles it at the token it trails, before the close
+  /// after that token is read: it stands in `m`, after `m`'s own `}`. The definition after it is
+  /// read at the root, and `m` is faithful to the braces as written.
+  #[test]
+  fn a_gap_right_after_a_modules_brace_stands_in_the_module() {
+    let text = "mod m { scalar A }? scalar B";
+    let brace = text.find('}').expect("the text holds a `}`");
+    for (root, tree, _) in at_both_roots(text) {
+      let m = module(&tree, "mod m");
+      assert_eq!(
+        m.text().to_string(),
+        "mod m { scalar A }?",
+        "at the {root} root"
+      );
+      assert_eq!(
+        last_read(&m),
+        (String::from("}"), brace..brace + 1, true),
+        "at the {root} root: `m`'s last token read is not its own `}}`"
+      );
+      assert_eq!(
+        gaps(&m),
+        [(String::from("?"), brace + 1..brace + 2)],
+        "at the {root} root: the byte the lexer refused"
+      );
+      assert_eq!(scalars(&m), ["scalar A"], "at the {root} root");
+      assert_eq!(
+        scalars(&document_of(&tree)),
+        ["scalar B"],
+        "at the {root} root"
+      );
+      let held = super::braces::faithful(&tree)
+        .unwrap_or_else(|why| panic!("{text} at the {root} root: {why}"));
+      assert_eq!(held.read, 1, "at the {root} root");
     }
   }
 
