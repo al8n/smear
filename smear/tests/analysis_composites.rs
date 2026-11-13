@@ -916,13 +916,14 @@ fn a_later_field_of_a_name_already_taken_is_not_asked_for() {
 }
 
 /// A count is made once and kept: the default `{}` where it is written fills two fields, counting
-/// `x`'s and `y`'s defaults then, 2 steps; `T`'s copy counts the default, which reads those two
-/// kept counts, 2 steps, and makes three rows, 3; `U` reads the count `T`'s copy made, 1, and its
-/// copy is 3 more: 11 in all. At 11 all is paid; at 10 `U` alone is past the budget, its read paid
-/// and its copy not. At 6 `T`'s two reads stay spent though its copy is refused, and `U`'s read is
-/// paid, so `U`'s copy cannot be paid either. Refuses a count made again for each copy, which
-/// fails at 11; one whose reads nobody pays for, and a kept count read for nothing, which each
-/// pass at 10; and reads paid together with the copy as one charge, which fills `U` at 6.
+/// `x`'s and `y`'s defaults then, 2 steps; `T`, asking for a copy, counts the default, which reads
+/// those two kept counts, 2 steps, and the copy is three rows, 3; `U`, asking, reads the count made
+/// for `T`, 1, and its copy is 3 more: 11 in all. At 11 all is paid; at 10 `U` alone is past the
+/// budget, its read paid and its copy not. At 6 `T`'s two reads stay spent though its copy is
+/// refused, and `U`'s read is paid, so `U`'s copy cannot be paid either. Refuses a count made
+/// again for each copy, which fails at 11; one whose reads nobody pays for, and a kept count read
+/// for nothing, which each pass at 10; and reads paid together with the copy as one charge, which
+/// fills `U` at 6.
 #[test]
 fn a_default_is_counted_once() {
   let text = "type Query {\n  x: Int\n}\ninput I {\n  x: Int = 1\n  y: Int = 2\n}\n\
@@ -956,12 +957,12 @@ fn a_default_is_counted_once() {
   );
 }
 
-/// A later copy of a default reads the count an earlier copy made, a step, before it pays its
-/// rows: the default `1` is one row, written, for nothing; `T`'s copy counts it and pays 1; `U`'s
-/// reads the kept count, 1, and pays 1: 3 in all. At 3 both are filled; at 2 `U`'s read is paid
-/// and its copy is not, so `U` alone is past the budget, and has no argument. Refuses a kept count
-/// read for nothing, which fills both at 2, and a step charged for the read that made the count,
-/// which starves `U` at 3.
+/// Asking for a later copy of a default reads the count made for an earlier one, a step, before
+/// the copy's rows are paid: the default `1` is one row, written, for nothing; `T`, asking, counts
+/// it, and its copy pays 1; `U`, asking, reads the kept count, 1, and its copy pays 1: 3 in all. At
+/// 3 both are filled; at 2 `U`'s read is paid and its copy is not, so `U` alone is past the
+/// budget, and has no argument. Refuses a kept count read for nothing, which fills both at 2, and
+/// a step charged for the read that made the count, which starves `U` at 3.
 #[test]
 fn a_later_copy_pays_a_step_to_read_its_count() {
   let text = "type Query {\n  x: Int\n}\ndirective @d(x: Int = 1) on OBJECT\n\
