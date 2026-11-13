@@ -61,7 +61,7 @@ invalid_top_level_junk.graphql as a schema: lossless 1 first smear::syntax::unex
 invalid_top_level_junk.graphql as a query: lossless 5 first smear::syntax::unexpected-token at 0..4; syntactic 1 first smear::syntax::unexpected-token at 0..4; code same, span same, message differs
 invalid_unterminated_brace.graphql as a schema: lossless 1 first smear::syntax::unclosed-delimiter at 7..8; syntactic 1 first smear::syntax::unclosed-delimiter at 7..8; code same, span same, message same
 invalid_unterminated_brace.graphql as a query: lossless 3 first smear::syntax::unexpected-token at 0..4; syntactic 1 first smear::syntax::unexpected-token at 0..4; code same, span same, message differs
-invalid_unterminated_bracket.graphql as a schema: lossless 4 first smear::syntax::unexpected-token at 0..1; syntactic 1 first smear::syntax::unexpected-token at 0..1; code same, span same, message differs
+invalid_unterminated_bracket.graphql as a schema: lossless 9 first smear::syntax::unexpected-token at 0..1; syntactic 1 first smear::syntax::unexpected-token at 0..1; code same, span same, message differs
 invalid_unterminated_bracket.graphql as a query: lossless 2 first smear::syntax::unexpected-token at 15..16; syntactic 1 first smear::syntax::unexpected-token at 15..16; code same, span same, message differs
 invalid_unterminated_string.graphql as a schema: lossless 6 first smear::syntax::unexpected-token at 0..1; syntactic 1 first smear::syntax::unexpected-token at 0..1; code same, span same, message differs
 invalid_unterminated_string.graphql as a query: lossless 4 first smear::syntax::unclosed-delimiter at 0..1; syntactic 1 first smear::syntax::line-terminator-in-string at 9..26; code differs, span differs, message differs

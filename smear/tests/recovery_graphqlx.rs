@@ -966,6 +966,88 @@ mod lossless {
     }
   }
 
+  // ── A skip that finds no stop keeps what it kept before ────────────────────────────────────
+
+  /// The `kind` nodes anywhere in `tree`, each as it is written.
+  fn written(tree: &SyntaxNode, kind: K) -> Vec<String> {
+    tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == kind)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect()
+  }
+
+  /// The first `(` is junk at the root. The skip from it crosses `type T { f: Int }`, takes the
+  /// second `(` and then a `}` it did not open, and finds no restart point after that: no match,
+  /// so the fallback takes the `(` and the root reads `T` whole, as before the rule of the braces.
+  /// The skip from the second `(` takes the `}` and stops at `scalar`, a hole holding a `}` it did
+  /// not open, so only the `(` in front of the `}` is kept; the root takes the `}` and reads `S`.
+  ///
+  /// Three versions of the scan lost `T` here, each stopping before that `}` on the skip from the
+  /// first `(` and taking `( type T { f: Int } (` into one hole: the scan of round two
+  /// (005e784c), the scan of round three (fc85192c), and the old scan with one stop more
+  /// (3da6e901).
+  #[test]
+  fn a_skip_that_finds_no_stop_keeps_what_it_kept_before() {
+    let text = "( type T { f: Int } ( } scalar S";
+    for (root, tree, _) in at_both_roots(text) {
+      assert_eq!(
+        written(&tree, K::ObjectTypeDefinition),
+        ["type T { f: Int }"],
+        "{text} at the {root} root"
+      );
+      assert_eq!(
+        scalars(&document_of(&tree)),
+        ["scalar S"],
+        "{text} at the {root} root"
+      );
+    }
+  }
+
+  /// The same skip in an argument list. The second `(` is junk of the list, and the skip from it
+  /// crosses `b: { c: 2 }`, takes the `}` of the block around the list, one it did not open, and
+  /// finds no restart point after that. No match, so the fallback takes the `(`, as it did before
+  /// the rule of the braces; the list then reads `b: { c: 2 }` as its argument, meets the `}`,
+  /// reports its `)` missing and leaves the brace, and the block closes on it.
+  ///
+  /// The three versions of the scan that lost `T` above stopped before that `}` and took
+  /// `( b: { c: 2 }` into one hole, and the list read no `b`.
+  #[test]
+  fn a_skip_in_a_list_that_finds_no_stop_keeps_what_it_kept_before() {
+    let text = "type T { f: Int @d(a: 1 ( b: { c: 2 } }";
+    for (root, tree, _) in at_both_roots(text) {
+      assert_eq!(
+        written(&tree, K::Argument),
+        ["a: 1", "b: { c: 2 }"],
+        "{text} at the {root} root"
+      );
+      assert_eq!(
+        written(&tree, K::ObjectTypeDefinition),
+        [text],
+        "{text} at the {root} root"
+      );
+    }
+
+    let text = "mod m { scalar A @d(a: 1 ( b: { c: 2 } }";
+    for (root, tree, _) in at_both_roots(text) {
+      assert_eq!(
+        written(&tree, K::Argument),
+        ["a: 1", "b: { c: 2 }"],
+        "{text} at the {root} root"
+      );
+      let m = module(&tree, "mod m");
+      assert_eq!(m.text().to_string(), text, "{text} at the {root} root");
+      assert!(holds_a_closing_brace(&m), "{text} at the {root} root");
+      let held = super::braces::faithful(&tree)
+        .unwrap_or_else(|why| panic!("{text} at the {root} root: {why}"));
+      assert_eq!(
+        (held.read, held.broken),
+        (1, 1),
+        "{text} at the {root} root"
+      );
+    }
+  }
+
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────
 
   #[cfg(feature = "analysis")]

@@ -206,6 +206,70 @@ mod lossless {
     keeps_at_both_roots("scalar A @d(( { ) ) x } ) scalar B", &["scalar B"]);
   }
 
+  /// The `kind` nodes anywhere in `tree`, each as it is written.
+  fn written(tree: &SyntaxNode, kind: K) -> Vec<String> {
+    tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == kind)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect()
+  }
+
+  /// The first `(` is junk at the root. The skip from it crosses `type T { f: Int }`, takes the
+  /// second `(` and then a `}` it did not open, and finds no restart point after that: no match,
+  /// so the fallback takes the `(` and the root reads `T` whole, as before the rule of the braces.
+  /// The skip from the second `(` takes the `}` and stops at `scalar`, a hole holding a `}` it did
+  /// not open, so only the `(` in front of the `}` is kept; the root takes the `}` and reads `S`.
+  ///
+  /// Three versions of the scan lost `T` here, each stopping before that `}` on the skip from the
+  /// first `(` and taking `( type T { f: Int } (` into one hole: the scan of round two
+  /// (005e784c), the scan of round three (fc85192c), and the old scan with one stop more
+  /// (3da6e901).
+  #[test]
+  fn a_skip_that_finds_no_stop_keeps_what_it_kept_before() {
+    let text = "( type T { f: Int } ( } scalar S";
+    keeps_at_both_roots(text, &["scalar S"]);
+    let answer = read(text);
+    assert_eq!(
+      entries(&answer.tree, K::TypeSystemDocument, K::ObjectTypeDefinition),
+      ["type T { f: Int }"]
+    );
+    let mixed: SyntaxNode = parse_document(text).syntax();
+    assert_eq!(
+      entries(&mixed, K::Document, K::ObjectTypeDefinition),
+      ["type T { f: Int }"],
+      "{text} at the mixed root"
+    );
+  }
+
+  /// The same skip in an argument list. The second `(` is junk of the list, and the skip from it
+  /// crosses `b: { c: 2 }`, takes the `}` of the type around the list, one it did not open, and
+  /// finds no restart point after that. No match, so the fallback takes the `(`, as it did before
+  /// the rule of the braces; the list then reads `b: { c: 2 }` as its argument, meets the `}`,
+  /// reports its `)` missing and leaves the brace, and the type closes on it.
+  ///
+  /// The three versions of the scan that lost `T` above stopped before that `}` and took
+  /// `( b: { c: 2 }` into one hole, and the list read no `b`.
+  #[test]
+  fn a_skip_in_a_list_that_finds_no_stop_keeps_what_it_kept_before() {
+    let text = "type T { f: Int @d(a: 1 ( b: { c: 2 } }";
+    let answer = read(text);
+    assert!(answer.errors);
+    let mixed: SyntaxNode = parse_document(text).syntax();
+    for (root, tree) in [("type-system", &answer.tree), ("mixed", &mixed)] {
+      assert_eq!(
+        written(tree, K::Argument),
+        ["a: 1", "b: { c: 2 }"],
+        "{text} at the {root} root"
+      );
+      assert_eq!(
+        written(tree, K::ObjectTypeDefinition),
+        [text],
+        "{text} at the {root} root"
+      );
+    }
+  }
+
   /// A variables definition that meets a `}` reports its `)` as missing and leaves the brace.
   /// No block of the grammar stands around an operation, so the brace here is one a failed
   /// definition left open: the root takes it as a stray, and reads the operation after it whole.
