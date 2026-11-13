@@ -36,7 +36,8 @@
 //! [`Model::satisfies_ty`] answer what a type satisfies, read off what it declares, and every
 //! instantiation the program writes has its bounds judged so: a type argument that does not
 //! satisfy a bound of its definition is `smear::graphqlx::unsatisfied-bound`, where the
-//! instantiation is written. A value that does not fit its type is refused where it is written,
+//! instantiation is written, and so is each directive application, by its complete type
+//! arguments, at its path. A value that does not fit its type is refused where it is written,
 //! and a default fills each argument and each input field a value leaves out. The phases that
 //! write the rest of it, among them tiers, are still to come.
 //!

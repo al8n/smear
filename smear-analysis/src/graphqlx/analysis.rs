@@ -231,12 +231,14 @@ impl Analysis {
 ///   an instantiation only a fill derives is not judged. The first bound that fails is
 ///   `unsatisfied-bound`, at each occurrence of the type, which keeps its type. A bound of `core`'s
 ///   `MapKey` that a `NonZero` fails is passed over: that `NonZero` holds what is no integer
-///   primitive, and `nonzero-argument` refuses it where it is written. A directive application's
-///   type arguments are not judged against its directive's bounds. Each type is
-///   judged once, whatever its nullness, within [`Limits::max_bound_steps`]; an occurrence whose
-///   bounds that budget, or a type they derive past [`Limits::max_generic_depth`] or
-///   [`Limits::max_instantiations`], kept from being judged is `resource-limit`, and keeps its
-///   type too.
+///   primitive, and `nonzero-argument` refuses it where it is written. Last, a directive's bounds
+///   are judged so at each application whose type arguments are complete, by the application's
+///   type, its directive with those arguments, one inside a generic definition through that
+///   definition's bounds, and one that fails is `unsatisfied-bound` at its path. Each type is
+///   judged once, whatever its nullness and however many applications have it, within
+///   [`Limits::max_bound_steps`]; an occurrence or an application whose bounds that budget, or a
+///   type they derive past [`Limits::max_generic_depth`] or [`Limits::max_instantiations`], kept
+///   from being judged is `resource-limit`, and an occurrence keeps its type too.
 /// - Makes every value, in the model's walk, each by the type expected where it stands, a
 ///   member's type for its default and an argument's for its value, with its `!`: `null` where it
 ///   is nullable; a list's elements each against its element, and any other value where a list is

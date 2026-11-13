@@ -310,15 +310,17 @@ impl Limits {
   /// How many steps the analysis may take to judge bounds, over the whole analysis.
   ///
   /// The bounds of each instantiation the program writes of a definition with a bound are judged
-  /// once, whatever nullness the instantiation is written with. A step is one of: a bound taken
+  /// once, whatever nullness the instantiation is written with, and so are a directive's bounds
+  /// once for each distinct type its applications have. A step is one of: a bound taken
   /// under the instantiation's arguments; a node of a bound's interface rebuilt with those
   /// arguments in place of the definition's type parameters; an `implements` entry, or a type
   /// parameter's bound, looked at; and a pair of types, or an argument, compared. What a type
   /// argument takes against one interface type is taken once, whichever instantiation asks it.
   ///
   /// Past it, each occurrence of an instantiation whose bounds could not be judged within it is
-  /// reported where it is written, and keeps its type. Every bound takes a step, so `0` reports
-  /// every instantiation of a definition with a bound, a `HashMap` among them.
+  /// reported where it is written, and keeps its type, and each such application is reported at
+  /// its path. Every bound takes a step, so `0` reports every instantiation of a definition with a
+  /// bound, a `HashMap` among them.
   ///
   /// The default is 2^20: sixteen steps for each of the instantiations
   /// [`max_instantiations`](Self::max_instantiations) admits at its default. `Sorted<User>`, of

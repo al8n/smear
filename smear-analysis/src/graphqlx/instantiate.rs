@@ -3,9 +3,10 @@
 //! type, and judges the bounds of every instantiation the program writes.
 //!
 //! It reads no document: it reads the rows lowering wrote, through the builder, and writes onto
-//! them. It does six things, in this order: built-in meaning; each definition's defaults; every
+//! them. It does seven things, in this order: built-in meaning; each definition's defaults; every
 //! occurrence's type; every application's count of type arguments; the bounds of every written
-//! instantiation, which the `bounds` module holds; every application's complete type arguments.
+//! instantiation, which the `bounds` module holds; every application's complete type arguments;
+//! and its directive's bounds at each application, which the `bounds` module holds too.
 //!
 //! # Built-in meaning
 //!
@@ -119,15 +120,16 @@
 //!
 //! # Bounds
 //!
-//! Last, every written occurrence of a definition that has a bound is judged by its complete type,
+//! Every written occurrence of a definition that has a bound is judged by its complete type,
 //! a slot a default filled included: each bound in turn, its interface type with the type's
 //! arguments in place of the definition's type parameters, which the argument for the bounded
 //! parameter, without its own `!`, must satisfy. The first that fails is `unsatisfied-bound`, at
 //! the occurrence, which keeps its type. A type's verdict is made once and shared by its two
 //! nullnesses, a pair of an argument and an interface type is asked once, and every step beyond
 //! one lookup per occurrence is paid from `Limits::max_bound_steps`; an occurrence whose bounds a
-//! limit kept from being judged is `resource-limit`. The `bounds` module says what is judged, and
-//! what is not.
+//! limit kept from being judged is `resource-limit`. Last, each application of a directive that has
+//! a bound is judged so by its type, once its type arguments are complete, on the same budget,
+//! and reported at its path. The `bounds` module says what is judged, and what is not.
 
 use std::{
   boxed::Box,
@@ -158,7 +160,8 @@ mod bounds;
 /// sources `sources` numbers, with the type services and budgets of `types`, reporting into
 /// `reporter`: each definition's built-in meaning, then its defaults, checked where they are
 /// written, then every occurrence's type, then every application's count of type arguments, then
-/// the bounds of every written instantiation, then every application's complete type arguments.
+/// the bounds of every written instantiation, then every application's complete type arguments,
+/// then its directive's bounds at each application.
 pub(crate) fn instantiate(
   declarations: &Declarations<'_, '_>,
   sources: &SourceMap,
@@ -193,8 +196,10 @@ pub(crate) fn instantiate(
   };
   typing.trees();
   typing.applications();
-  typing.bounds(keys);
+  let mut judging = bounds::Judging::new(keys);
+  typing.bounds(&mut judging);
   typing.complete_applications();
+  typing.application_bounds(&mut judging);
 }
 
 /// Gives each definition its built-in meaning: an interface its own package applies `core`'s

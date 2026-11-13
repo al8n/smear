@@ -1,6 +1,7 @@
 //! The GraphQLx analyzer's values under type arguments, and what they rest on: a directive
 //! application's complete type arguments, typed as an occurrence of its directive would be, its
-//! written type arguments first and its directive's defaults filling the rest.
+//! written type arguments first and its directive's defaults filling the rest; and its directive's
+//! bounds, judged at it by those arguments.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -14,6 +15,8 @@ use smear::{
 
 /// L3's code for a count of type arguments, and for one left to a default that cannot fill it.
 const ARITY: &str = "smear::graphqlx::generic-arity";
+/// L3's code for a type argument that does not satisfy a bound.
+const BOUND: &str = "smear::graphqlx::unsatisfied-bound";
 /// A bound of the limits passed.
 const LIMIT: &str = "smear::graphqlx::resource-limit";
 /// The resolver's code for a type name that names nothing.
@@ -318,4 +321,111 @@ fn an_applications_instantiation_is_counted() {
   let two = analyze_text(deep, &Limits::new().with_max_generic_depth(2));
   quiet(&two);
   assert_eq!(completed(two.model(), "Query"), [vec!["[i32]"]]);
+}
+
+/// The interfaces and types the bounds tests share, with a query root.
+const NODES: &str = "type Query {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
+                     type User implements Node {\n  id: ID\n}\ntype Post {\n  id: ID\n}\n";
+
+/// What a bound's report tells the author of a named type argument.
+const NAMED_HELP: &str = "declare the interface on the type argument with exactly these type arguments, or pass a type \
+   that declares it";
+
+/// A generic directive's bounds are judged at each application, by its complete type arguments:
+/// `@d<Post>` is `unsatisfied-bound` at its path, the message naming `@d`, labelled at the bound
+/// and at `Post`, and `@d<User>` holds. Refuses an application left unjudged.
+#[test]
+fn a_generic_directives_bounds_hold_at_each_application() {
+  let text = format!(
+    "{NODES}directive @d<T> repeatable on OBJECT where T: Node\n\
+     type A @d<User> {{\n  f: Int\n}}\ntype B @d<Post> {{\n  f: Int\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let application = named(schema, &text, "@", "d", 2);
+  assert_eq!(found(&analysis), [(BOUND, application)]);
+  let report = the(&analysis, BOUND, application);
+  assert_eq!(
+    report.to_string(),
+    "`@d` bounds its type parameter `T` by `Node`, and the type argument for `T` here does not \
+     satisfy that bound"
+  );
+  assert_eq!(
+    labels(report),
+    [
+      (named(schema, &text, "T: ", "Node", 0), "the bound"),
+      (named(schema, &text, "@d<", "Post", 0), "the type argument"),
+    ]
+  );
+  assert_eq!(report.help(), Some(NAMED_HELP));
+}
+
+/// A type argument a directive's default fills is judged as a written one, the report labelled at
+/// the default.
+#[test]
+fn a_filled_type_argument_is_judged_at_the_application() {
+  let text =
+    format!("{NODES}directive @e<T = Post> on OBJECT where T: Node\ntype C @e {{\n  f: Int\n}}\n");
+  let analysis = analyze_text(&text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let application = named(schema, &text, "@", "e", 1);
+  assert_eq!(found(&analysis), [(BOUND, application)]);
+  assert_eq!(
+    labels(the(&analysis, BOUND, application)),
+    [
+      (named(schema, &text, "T: ", "Node", 0), "the bound"),
+      (
+        named(schema, &text, "T = ", "Post", 0),
+        "filled from this default"
+      ),
+    ]
+  );
+}
+
+/// Every application of one type shares its verdict, on `Limits::max_bound_steps`: one step for
+/// the bound and one for `User`'s one `implements` entry, two for both applications. At one, the
+/// verdict is stopped, and kept: both applications are `resource-limit`. Refuses a verdict made for
+/// each application, which needs four.
+#[test]
+fn one_verdict_serves_every_application_of_one_instantiation() {
+  let text = "type Query @d<User> @d<User> {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
+              type User implements Node {\n  id: ID\n}\n\
+              directive @d<T> repeatable on OBJECT where T: Node\n";
+  quiet(&analyze_text(text, &Limits::new().with_max_bound_steps(2)));
+  let short = analyze_text(text, &Limits::new().with_max_bound_steps(1));
+  let schema = schema_file(&short);
+  let first = named(schema, text, "@", "d", 0);
+  let second = named(schema, text, "@", "d", 1);
+  assert_eq!(found(&short), [(LIMIT, first), (LIMIT, second)]);
+  assert_eq!(
+    the(&short, LIMIT, second).to_string(),
+    "the bounds of this instantiation could not be judged within `Limits::max_bound_steps`, 1, \
+     the steps judging bounds may take"
+  );
+}
+
+/// An application inside a generic definition whose type argument is that definition's parameter
+/// is judged through the parameter's bounds: `G`'s `T` is bounded by `Node`, and `H`'s is not,
+/// whose report helps with the `where` clause. Refuses an open application left unjudged.
+#[test]
+fn an_application_inside_a_generic_definition_is_judged_through_its_parameters() {
+  let text = "type Query {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
+              directive @d<T> repeatable on OBJECT where T: Node\n\
+              type G<T> @d<T> where T: Node {\n  f: Int\n}\ntype H<T> @d<T> {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let application = named(schema, text, "@", "d", 2);
+  assert_eq!(found(&analysis), [(BOUND, application)]);
+  let report = the(&analysis, BOUND, application);
+  assert_eq!(
+    labels(report),
+    [
+      (named(schema, text, "T: ", "Node", 0), "the bound"),
+      (named(schema, text, "@d<", "T", 2), "the type argument"),
+    ]
+  );
+  assert_eq!(
+    report.help(),
+    Some("bound this type parameter by the interface in this definition's `where` clause")
+  );
 }

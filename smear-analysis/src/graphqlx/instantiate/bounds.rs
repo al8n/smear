@@ -1,10 +1,11 @@
-//! The instantiation phase's last step: the bounds of every instantiation the program writes,
-//! judged exactly.
+//! The instantiation phase's bounds: those of every instantiation the program writes, and those of
+//! every directive at each of its applications, judged exactly.
 //!
-//! It runs once every occurrence has its type and every application its count: judging an
-//! occurrence reads the types of its definition's bounds and of its argument's `implements`
-//! entries, which are typed later than the occurrence whenever they are written later, and a
-//! definition's defaults are typed before its bounds.
+//! The occurrences' are judged once every occurrence has its type and every application its count:
+//! judging an occurrence reads the types of its definition's bounds and of its argument's
+//! `implements` entries, which are typed later than the occurrence whenever they are written
+//! later, and a definition's defaults are typed before its bounds. The applications' are judged
+//! last, once their type arguments are complete.
 //!
 //! # What is judged
 //!
@@ -15,14 +16,18 @@
 //! is written in is judged through that parameter's bounds, so a generic definition is judged once,
 //! where it is written, for all its instantiations.
 //!
+//! Then every application of a directive that has a bound, by its type, the directive's
+//! instantiation with the application's complete type arguments, a slot a default filled
+//! included: an application is an instantiation of its directive. One inside a generic definition
+//! whose type arguments name that definition's parameters is judged through their bounds, as an
+//! occurrence there is.
+//!
 //! An instantiation that only a fill derives is not judged: the default's own occurrence is judged
 //! where it is written. That misses nothing given that every type declares what its declared
 //! interfaces declare, under substitution: a derived instantiation then holds whenever the
 //! occurrence it comes from holds and the use's own bounds hold, since substitution keeps identity.
 //! Without that premise, one step lets an ill-bounded derived instantiation through: the one by
-//! which a parameter satisfies what the interface of one of its bounds declares. An application's
-//! own bounds are not judged here: its complete type arguments are built where its values are
-//! coerced.
+//! which a parameter satisfies what the interface of one of its bounds declares.
 //!
 //! # A bound, under an instantiation's arguments
 //!
@@ -37,15 +42,17 @@
 //! A bound's interface type that names a parameter is rebuilt from its interned type, node by node,
 //! its arguments before it, each distinct node once; a type it derives is completed as an
 //! occurrence's is, its depth checked and its count kept, and is no instantiation the program
-//! writes. The types the pass derives are interned after every occurrence's type, in the order the
-//! pass reaches the occurrences.
+//! writes. The types the pass derives for the occurrences are interned after every occurrence's
+//! type, in the order the pass reaches the occurrences; those it derives for the applications,
+//! after every application's own type, in application order.
 //!
 //! # What it costs
 //!
-//! Each distinct type of an occurrence is judged once, whatever nullness it is written with: a
-//! type's two nullnesses share one verdict, which reads the instantiation's definition and its
-//! arguments alone. Each pair of an argument and an interface type is asked once. Every step beyond
-//! one lookup per occurrence is paid from `Limits::max_bound_steps`: a bound taken under an
+//! Each distinct type of an occurrence or an application is judged once, whatever nullness it is
+//! written with: a type's two nullnesses share one verdict, which reads the instantiation's
+//! definition and its arguments alone, and every application of one type shares it too. Each pair
+//! of an argument and an interface type is asked once. Every step beyond one lookup per occurrence
+//! and per application is paid from `Limits::max_bound_steps`: a bound taken under an
 //! instantiation's arguments, a node of a bound rebuilt, an `implements` entry or a parameter's
 //! bound looked at, a pair of nodes or an argument compared. What the rebuild derives also counts
 //! toward `Limits::max_instantiations` and `Limits::max_generic_depth`. Nothing draws on
@@ -57,7 +64,9 @@
 //! definition, the parameter and the bound's interface, with a label at the bound and one at the
 //! type argument, where the occurrence writes it or at the default that filled it. At each
 //! occurrence of one a limit stopped judging, `resource-limit`. The occurrence keeps its type
-//! either way.
+//! either way. An application is reported so at its path, its directive named with its `@`, the
+//! type argument labelled where the application writes it or at the directive's default that
+//! filled it.
 
 use std::{collections::BTreeMap, format, string::String};
 
@@ -66,8 +75,8 @@ use tokora::diagnostic::Location;
 use crate::graphqlx::{
   code::DiagnosticKind,
   diagnostic::{Diagnostic, Excerpt},
-  id::{DefId, TyId, TypeExprId, dense},
-  model::{DefKind, Keys, Occurrence, Shape, Steps, TypeBound, Written},
+  id::{ApplicationId, DefId, TyId, TypeExprId, dense},
+  model::{DefKind, Keys, Occurrence, Resolution, Shape, Steps, TypeBound, Written},
   types::{Limit, Stop},
 };
 
@@ -85,9 +94,10 @@ enum Verdict {
   Stopped(Stop),
 }
 
-/// What the pass keeps from one occurrence to the next, beside the walk's own state and the type
-/// services, whose budget of bound steps it spends.
-struct Judging {
+/// What the pass keeps from one instantiation to the next, the occurrences' and then the
+/// applications', beside the walk's own state and the type services, whose budget of bound steps
+/// it spends.
+pub(super) struct Judging {
   /// The built-in definitions satisfaction is keyed on.
   keys: Keys,
   /// Each type an occurrence of a definition with a bound has, and the nullable form of each that
@@ -97,6 +107,17 @@ struct Judging {
   /// Each pair of an argument and an interface type asked, with whether the argument satisfies
   /// it. Keyed by the pair, which a verdict looks up before it asks the routine.
   pairs: BTreeMap<(TyId, TyId), bool>,
+}
+
+impl Judging {
+  /// The pass's state before any instantiation is judged, keyed on `keys`.
+  pub(super) const fn new(keys: Keys) -> Self {
+    Self {
+      keys,
+      verdicts: BTreeMap::new(),
+      pairs: BTreeMap::new(),
+    }
+  }
 }
 
 /// What a bound's report tells the author of a named type argument.
@@ -111,16 +132,53 @@ const PARAM_HELP: &str = "bound this type parameter by the interface in this def
 const LIST_HELP: &str = "a list satisfies no bound: pass a type that declares the interface";
 
 impl Typing<'_> {
-  /// Judges the bounds of every instantiation the program writes, keyed on `keys`, within the
-  /// budget of bound steps, and reports each occurrence of one that fails or that a limit stopped.
-  pub(super) fn bounds(&mut self, keys: Keys) {
-    let mut judging = Judging {
-      keys,
-      verdicts: BTreeMap::new(),
-      pairs: BTreeMap::new(),
-    };
+  /// Judges the bounds of every instantiation the program writes, within the budget of bound
+  /// steps, and reports each occurrence of one that fails or that a limit stopped.
+  pub(super) fn bounds(&mut self, judging: &mut Judging) {
     for index in 0..self.builder.type_expr_count() {
-      self.judge_occurrence(&mut judging, TypeExprId::new(index));
+      self.judge_occurrence(judging, TypeExprId::new(index));
+    }
+  }
+
+  /// Judges the bounds of every application's directive, by the application's type, within the
+  /// same budget, and reports each application whose type fails one or that a limit stopped. It
+  /// runs once the applications' type arguments are complete.
+  pub(super) fn application_bounds(&mut self, judging: &mut Judging) {
+    for index in 0..self.builder.application_count() {
+      self.judge_application(judging, ApplicationId::new(index));
+    }
+  }
+
+  /// Judges the application `application`, when its directive has a bound and its type is that
+  /// directive's: one lookup of its type's verdict, which is made the first time it is asked, and
+  /// shared with every other application of the type.
+  fn judge_application(&mut self, judging: &mut Judging, application: ApplicationId) {
+    let Some((Resolution::Resolved(directive), _, at)) = self.builder.applied(application) else {
+      return;
+    };
+    // A directive with no type parameter, an application whose count was refused, and one that
+    // could not be completed have no type of the directive: whoever left it so reported it.
+    let Some(ty) = self.builder.application_ty(application) else {
+      return;
+    };
+    if self.builder.def_bounds(directive).is_empty() {
+      return;
+    }
+    match self.builder.ty_shape(ty) {
+      Some(Shape::Named(named)) if named == directive => {}
+      _ => return,
+    }
+    match self.verdict(judging, ty, directive, at) {
+      Verdict::Holds => {}
+      Verdict::Fails { bound } => {
+        let written = self.written_argument(
+          self.builder.application_type_args(application),
+          directive,
+          bound,
+        );
+        self.report_unsatisfied(at, written, "@", ty, directive, bound);
+      }
+      Verdict::Stopped(stop) => self.report_unjudged(at, stop),
     }
   }
 
@@ -148,9 +206,24 @@ impl Typing<'_> {
     }
     match self.verdict(judging, ty, def, location) {
       Verdict::Holds => {}
-      Verdict::Fails { bound } => self.report_unsatisfied(id, ty, def, bound),
+      Verdict::Fails { bound } => {
+        let written = self
+          .builder
+          .occurrence(id)
+          .and_then(|occurrence: Occurrence<'_>| {
+            self.written_argument(occurrence.args, def, bound)
+          });
+        self.report_unsatisfied(location, written, "", ty, def, bound);
+      }
       Verdict::Stopped(stop) => self.report_unjudged(location, stop),
     }
+  }
+
+  /// The type argument of `args`, the type arguments an occurrence or an application of `def`
+  /// writes, for the parameter `def`'s bound at `bound` bounds: none when it is left to a default.
+  fn written_argument(&self, args: &[TypeExprId], def: DefId, bound: u32) -> Option<TypeExprId> {
+    let bounded = self.builder.def_bounds(def).get(bound as usize)?;
+    args.get(bounded.parameter() as usize).copied()
   }
 
   /// The verdict of `ty`, an instantiation of `def` an occurrence written at `location` has: kept
@@ -287,20 +360,24 @@ impl Typing<'_> {
     }
   }
 
-  /// Reports `unsatisfied-bound` at the occurrence `id`, whose type `ty`, an instantiation of
-  /// `def`, fails `def`'s bound at `bound`: naming the definition, the parameter and the bound's
-  /// interface, labelled at the bound and at the type argument, where the occurrence writes it or
-  /// at the default that filled it.
-  fn report_unsatisfied(&mut self, id: TypeExprId, ty: TyId, def: DefId, bound: u32) {
+  /// Reports `unsatisfied-bound` at `at`, where an occurrence of `def` is written, or an
+  /// application of the directive `def`, `sigil` being what names `def` there, whose type `ty`, an
+  /// instantiation of `def`, fails `def`'s bound at `bound`: naming the definition, the parameter
+  /// and the bound's interface, labelled at the bound and at the type argument, at `argument` where
+  /// it is written, or else at the default that filled it.
+  fn report_unsatisfied(
+    &mut self,
+    at: Location,
+    argument: Option<TypeExprId>,
+    sigil: &str,
+    ty: TyId,
+    def: DefId,
+    bound: u32,
+  ) {
     let Some(written) = self.builder.def_bounds(def).get(bound as usize).copied() else {
       return;
     };
     let parameter = written.parameter();
-    let Some(occurrence) = self.builder.occurrence(id) else {
-      return;
-    };
-    let at = occurrence.location;
-    let argument = occurrence.args.get(parameter as usize).copied();
     let Some(bounding) = self.builder.occurrence(written.interface()) else {
       return;
     };
@@ -311,7 +388,7 @@ impl Typing<'_> {
     let Some((name, _, default)) = self.builder.type_param(def, parameter) else {
       return;
     };
-    // The type argument where this occurrence writes it, or else the default that filled it.
+    // The type argument where it is written, or else the default that filled it.
     let argument = match argument {
       Some(argument) => self
         .builder
@@ -334,8 +411,8 @@ impl Typing<'_> {
     let message = {
       let spelled = Excerpt(self.builder.spelling(name));
       format!(
-        "`{}` bounds its type parameter `{spelled}` by `{}`, and the type argument for `{spelled}` \
-         here does not satisfy that bound",
+        "`{sigil}{}` bounds its type parameter `{spelled}` by `{}`, and the type argument for \
+         `{spelled}` here does not satisfy that bound",
         Excerpt(self.builder.def_name(def)),
         Excerpt(self.builder.def_name(interface)),
       )

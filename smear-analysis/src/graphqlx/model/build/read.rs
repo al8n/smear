@@ -213,6 +213,13 @@ impl ModelBuilder {
     Some((row.directive, row.type_args.len, row.path.location))
   }
 
+  /// The type of the application `id`, once a phase gave it one: its directive's instantiation,
+  /// whose arguments are its complete type arguments, or the unresolved type.
+  pub(crate) fn application_ty(&self, id: ApplicationId) -> Option<TyId> {
+    let row = self.model.applications.get(id.get() as usize)?;
+    (row.ty != UNSET_TY).then_some(row.ty)
+  }
+
   /// The type arguments the application `id` writes, in order: none for an id the builder did not
   /// issue.
   pub(crate) fn application_type_args(&self, id: ApplicationId) -> &[TypeExprId] {
