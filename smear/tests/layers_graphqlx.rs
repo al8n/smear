@@ -625,14 +625,15 @@ mod analysis {
     let root = package(DOC);
     let syntactic = analysis(&Syntactic::new(), &root, &[]);
     assert!(syntactic.is_ok());
-    assert_eq!(
-      syntactic.diagnostics().len(),
-      analyze(&root, &[], &Limits::new()).diagnostics().len()
+    assert!(
+      syntactic == analyze(&root, &[], &Limits::new()),
+      "the syntactic layer's analysis is not the one `analyze` answers"
     );
     #[cfg(all(feature = "rowan_0_17", feature = "std"))]
     {
       let lossless = analysis(&smear::parser::graphqlx::Lossless::new(), &root, &[]);
       assert!(lossless.is_ok());
+      assert!(lossless == syntactic, "the two layers answer two analyses");
     }
   }
 
