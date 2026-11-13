@@ -130,8 +130,10 @@
 //! an application writes again is `smear::schema::duplicate-directive-argument-use`; and a
 //! directive that refers to itself, through the directives applied where it reaches and the types
 //! it names, is `smear::schema::self-referential-directive`; and `core`'s `@specifiedBy` on a
-//! scalar of the built-in library is `smear::schema::specified-by-on-built-in-scalar`. A rule says
-//! nothing about a contribution a phase already refused something in.
+//! scalar of the built-in library is `smear::schema::specified-by-on-built-in-scalar`. And the
+//! schema keeps GraphQL's own rules on its roots, with GraphQL's codes: a root operation type that
+//! is no object type is `smear::schema::root-operation-type-not-object`. A rule says nothing about
+//! a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

@@ -306,8 +306,12 @@ impl Analysis {
 ///   own type parameters' defaults, a scalar that is no collection hiding its type arguments; a
 ///   directive of `core` on such a cycle is reported in `core`'s source. Each application of
 ///   `core`'s `@specifiedBy` on a scalar of the built-in library, a GraphQL scalar the root
-///   package replaces among them, is `specified-by-on-built-in-scalar`, at its path. A rule says
-///   nothing about a contribution a phase already refused something in.
+///   package replaces among them, is `specified-by-on-built-in-scalar`, at its path. GraphQL's
+///   own rules on the schema judge its roots: a written root whose type names a definition that is
+///   no object type, an alias such as `NonZeroU32` among them, is
+///   `root-operation-type-not-object`, at the type. A rule says nothing about a contribution a
+///   phase already refused something in, and a root rule nothing while any of the schema's
+///   contributions holds a phase's error.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

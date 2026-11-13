@@ -54,6 +54,9 @@ const UNION_MEMBER: &str = "smear::schema::union-member-not-object";
 /// GraphQL's code of a directive applied where its definition does not list.
 const LOCATION: &str = "smear::schema::unsupported-directive-location";
 
+/// GraphQL's code of a root operation type that is no object type.
+const ROOT_TYPE: &str = "smear::schema::root-operation-type-not-object";
+
 /// What the rule on `NonZero`'s argument says, whatever the argument is.
 const NONZERO_MESSAGE: &str = "`NonZero` takes an integer primitive at least one bit wide, written \
                                without `!`, as its type argument, and this one is not";
@@ -197,7 +200,8 @@ fn a_marker_stands_in_implements_and_where_and_nowhere_else() {
     (MARKER, named(schema, SITES, before, "M", nth), None)
   };
   // A marker is an interface, so as a field's argument and as an input field it is also no input
-  // type, and as a union member no object type, which GraphQL's own rules say at the same token.
+  // type, as a union member no object type, and as a root no object type either, which GraphQL's
+  // own rules say at the same token.
   assert_eq!(
     found(&analysis),
     [
@@ -214,6 +218,7 @@ fn a_marker_stands_in_implements_and_where_and_nowhere_else() {
       at_marker("T = ", 0),
       at_marker("@d<", 0),
       at_marker("query: ", 0),
+      (ROOT_TYPE, named(schema, SITES, "query: ", "M", 0), None),
     ],
     "{:#?}",
     analysis.diagnostics()
@@ -819,16 +824,16 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
       "type F<T, T> {\n  id: ID\n}\ntype G {\n  x: Missing\n}\n",
       DUPLICATE,
     ),
-    // A written root beside a phase's error in a definition, which is none of the schema's
-    // contributions.
-    (
-      "interface M @marker\nschema {\n  query: M\n}\ntype G {\n  x: Missing\n}\n",
-      MARKER,
-    ),
   ] {
     let analysis = analyze_one(text);
     assert_eq!(codes(&analysis), [rule, UNDEFINED], "{text}");
   }
+  // A written root beside a phase's error in a definition, which is none of the schema's
+  // contributions: the marker, and GraphQL's own refusal of a root that is no object type, at the
+  // same token.
+  let analysis =
+    analyze_one("interface M @marker\nschema {\n  query: M\n}\ntype G {\n  x: Missing\n}\n");
+  assert_eq!(codes(&analysis), [MARKER, ROOT_TYPE, UNDEFINED]);
 }
 
 #[test]

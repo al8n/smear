@@ -50,6 +50,7 @@ mod one_of_field_not_nullable;
 mod one_of_on_input_object_extension;
 mod orphan_extension;
 mod reserved_name;
+mod root_operation_type_not_object;
 mod schema_outside_root;
 mod self_implementing_interface;
 mod self_referential_directive;
@@ -69,8 +70,8 @@ use self::{
   non_zero_argument::NonZeroArgument, one_of_field_has_default::OneOfFieldHasDefault,
   one_of_field_not_nullable::OneOfFieldNotNullable,
   one_of_on_input_object_extension::OneOfOnInputObjectExtension, orphan_extension::OrphanExtension,
-  reserved_name::ReservedName, schema_outside_root::SchemaOutsideRoot,
-  self_implementing_interface::SelfImplementingInterface,
+  reserved_name::ReservedName, root_operation_type_not_object::RootOperationTypeNotObject,
+  schema_outside_root::SchemaOutsideRoot, self_implementing_interface::SelfImplementingInterface,
   self_referential_directive::SelfReferentialDirective,
   specified_by_on_built_in_scalar::SpecifiedByOnBuiltInScalar, type_ref_misuse::TypeRefMisuse,
   union_member_not_object::UnionMemberNotObject,
@@ -364,7 +365,8 @@ rule_set! {
   /// definition and its extensions being one; an application passes each argument once; and no
   /// directive refers to itself, through the directives and types it names, a scalar that is no
   /// collection hiding its type arguments; and a scalar of the built-in library takes no
-  /// `@specifiedBy`.
+  /// `@specifiedBy`; and of the schema, GraphQL's own rules: a root operation type is an object
+  /// type.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -432,6 +434,8 @@ rule_set! {
       => [super::code::schema::SELF_REFERENTIAL_DIRECTIVE],
     specified_by_on_built_in_scalar: SpecifiedByOnBuiltInScalar
       => [super::code::schema::SPECIFIED_BY_ON_BUILT_IN_SCALAR],
+    root_operation_type_not_object: RootOperationTypeNotObject
+      => [super::code::schema::ROOT_OPERATION_TYPE_NOT_OBJECT],
   }
 }
 

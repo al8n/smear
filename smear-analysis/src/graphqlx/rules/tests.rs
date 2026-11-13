@@ -76,7 +76,7 @@ rule_set! {
 #[test]
 fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   let table: &[(&str, &[Code])] = Rules::TABLE;
-  assert_eq!(table.len(), 25);
+  assert_eq!(table.len(), 26);
   assert_eq!(table[0].0, "DuplicateSchemaDefinition");
   assert_eq!(
     table[0].1,
@@ -220,6 +220,11 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   assert_eq!(
     table[24].1,
     &[Code::new("smear::schema::specified-by-on-built-in-scalar")]
+  );
+  assert_eq!(table[25].0, "RootOperationTypeNotObject");
+  assert_eq!(
+    table[25].1,
+    &[Code::new("smear::schema::root-operation-type-not-object")]
   );
 }
 

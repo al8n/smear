@@ -113,6 +113,15 @@ const SELF_REFERENTIAL_DIRECTIVE: &str = "smear::schema::self-referential-direct
 /// GraphQL's code for `@specifiedBy` on a built-in scalar.
 const SPECIFIED_BY_ON_BUILT_IN_SCALAR: &str = "smear::schema::specified-by-on-built-in-scalar";
 
+/// GraphQL's code for a root operation type that is no object type.
+const ROOT_OPERATION_TYPE_NOT_OBJECT: &str = "smear::schema::root-operation-type-not-object";
+
+/// The code of a type name that names nothing, a phase's.
+const UNDEFINED_TYPE: &str = "smear::schema::undefined-type";
+
+/// The code of a root operation that names nothing, a phase's.
+const UNDEFINED_ROOT: &str = "smear::schema::undefined-root-operation-type";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -226,6 +235,33 @@ fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)>
       )
     })
     .collect()
+}
+
+/// Where the `nth`, counting from 0, of the names `name` written right after `before` is in `text`,
+/// the file `source`: a name, so one followed by no letter, digit or `_`.
+fn named(source: SourceId, text: &str, before: &str, name: &str, nth: usize) -> Location {
+  let written = format!("{before}{name}");
+  let start = text
+    .match_indices(written.as_str())
+    .map(|(start, _): (usize, &str)| start + before.len())
+    .filter(|start: &usize| {
+      text[start + name.len()..]
+        .chars()
+        .next()
+        .is_none_or(|next: char| !(next.is_ascii_alphanumeric() || next == '_'))
+    })
+    .nth(nth)
+    .unwrap_or_else(|| panic!("`{written}` does not occur {} times", nth + 1));
+  Location::new(source.get(), SimpleSpan::new(start, start + name.len()))
+}
+
+/// Each diagnostic's code, in the list's order.
+fn codes(analysis: &Analysis) -> Vec<&'static str> {
+  analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.code().as_str())
+    .collect::<Vec<&'static str>>()
 }
 
 /// Each diagnostic's message, in the list's order.
@@ -525,6 +561,162 @@ fn the_root_package_defines_and_extends_the_schema_from_any_of_its_modules() {
       matches!(schema.root(operation), Some(Root::Written(_))),
       "{operation:?}"
     );
+  }
+}
+
+/// What GraphQL tells the author of a root operation type that is no object type.
+const ROOT_TYPE_HELP: &str = "a root operation type must be an object type: an interface or union \
+                              has no concrete field set to resolve.";
+
+#[test]
+fn a_root_operation_type_is_an_object_type() {
+  // Each of the three roots, written as an interface: each at its type.
+  let text = "interface Q {\n  q: Int\n}\ninterface M {\n  m: Int\n}\ninterface S {\n  s: Int\n}\n\
+              schema {\n  query: Q\n  mutation: M\n  subscription: S\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        ROOT_OPERATION_TYPE_NOT_OBJECT,
+        named(schema, text, "query: ", "Q", 0),
+        None
+      ),
+      (
+        ROOT_OPERATION_TYPE_NOT_OBJECT,
+        named(schema, text, "mutation: ", "M", 0),
+        None
+      ),
+      (
+        ROOT_OPERATION_TYPE_NOT_OBJECT,
+        named(schema, text, "subscription: ", "S", 0),
+        None
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let not_object = |operation: &str, name: &str, what: &str| -> String {
+    format!(
+      "the {operation} root operation type `{name}` is {what}, and a root operation type is an \
+       object type"
+    )
+  };
+  assert_eq!(
+    messages(&analysis),
+    [
+      not_object("query", "Q", "an interface"),
+      not_object("mutation", "M", "an interface"),
+      not_object("subscription", "S", "an interface"),
+    ]
+  );
+  for diagnostic in analysis.diagnostics() {
+    assert_eq!(
+      diagnostic.primary_label(),
+      Some("root operation type is not an object type")
+    );
+    assert_eq!(diagnostic.help(), Some(ROOT_TYPE_HELP));
+  }
+
+  // The query root as each other kind that is no object type, `core`'s `NonZero`, which an alias
+  // names, among them: each once, at the type, named by its definition.
+  for (text, written, name, what) in [
+    (
+      "type O {\n  o: Int\n}\nunion U = O\nschema {\n  query: U\n}\n",
+      "U",
+      "U",
+      "a union",
+    ),
+    ("scalar S\nschema {\n  query: S\n}\n", "S", "S", "a scalar"),
+    (
+      "enum E {\n  A\n}\nschema {\n  query: E\n}\n",
+      "E",
+      "E",
+      "an enum",
+    ),
+    (
+      "input In {\n  i: Int\n}\nschema {\n  query: In\n}\n",
+      "In",
+      "In",
+      "an input object",
+    ),
+    (
+      "schema {\n  query: NonZeroU32\n}\n",
+      "NonZeroU32",
+      "NonZero",
+      "a scalar",
+    ),
+  ] {
+    let analysis = analyze_one(text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(
+        ROOT_OPERATION_TYPE_NOT_OBJECT,
+        named(schema, text, "query: ", written, 0),
+        None
+      )],
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+    assert_eq!(messages(&analysis), [not_object("query", name, what)]);
+  }
+
+  // A marker is an interface too, which the marker rule refuses at the same token.
+  let analysis = analyze_one("interface M @marker\nschema {\n  query: M\n}\n");
+  assert_eq!(
+    codes(&analysis),
+    [MARKER_MISUSE, ROOT_OPERATION_TYPE_NOT_OBJECT]
+  );
+  assert_eq!(messages(&analysis)[1], not_object("query", "M", "a marker"));
+
+  // An instantiation of a generic object type is an object type.
+  let analysis = analyze_one("type Root<T> {\n  r: T\n}\nschema {\n  query: Root<Int>\n}\n");
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
+  // A rule on the roots, which no contribution holds, says nothing beside a second root that names
+  // nothing, in the same schema definition or in a schema extension; beside an undefined type in a
+  // definition, which is none of the schema's contributions, it speaks.
+  for (text, expected) in [
+    (
+      "interface I {\n  i: Int\n}\nschema {\n  query: I\n  mutation: Missing\n}\n",
+      &[UNDEFINED_ROOT][..],
+    ),
+    (
+      "interface I {\n  i: Int\n}\nschema {\n  query: I\n}\nextend schema {\n  mutation: Missing\n}\n",
+      &[UNDEFINED_ROOT][..],
+    ),
+    (
+      "interface I {\n  i: Int\n}\nschema {\n  query: I\n}\ntype G {\n  x: Missing\n}\n",
+      &[ROOT_OPERATION_TYPE_NOT_OBJECT, UNDEFINED_TYPE][..],
+    ),
+  ] {
+    let analysis = analyze_one(text);
+    assert_eq!(codes(&analysis), expected, "{text}");
+  }
+}
+
+#[test]
+fn long_names_in_these_rules_are_quoted_as_excerpts() {
+  let name = "R".repeat(4096);
+  let texts = [format!(
+    "interface {name} {{\n  i: Int\n}}\nschema {{\n  query: {name}\n}}\n"
+  )];
+  for text in &texts {
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+    let analysis = analyze(&root, &[], &Limits::new());
+    let messages = messages(&analysis);
+    assert_eq!(messages.len(), 1, "{:#?}", analysis.diagnostics());
+    assert!(messages[0].len() < 1024, "{}", messages[0]);
   }
 }
 
@@ -1682,6 +1874,10 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(SPECIFIED_BY_ON_BUILT_IN_SCALAR),
     a_built_in_scalar_specified_by_a_url,
   ),
+  (
+    Code::new(ROOT_OPERATION_TYPE_NOT_OBJECT),
+    a_root_that_is_no_object,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1904,6 +2100,11 @@ fn a_directive_where_its_definition_does_not_list() -> Analysis {
 /// A directive that is not repeatable applied twice to one type.
 fn a_directive_that_is_not_repeatable_applied_twice() -> Analysis {
   analyze_one("directive @onObject on OBJECT\n     type Query @onObject @onObject { ok: Int }")
+}
+
+/// A root operation type that is an interface.
+fn a_root_that_is_no_object() -> Analysis {
+  analyze_one("interface Root { ok: Int } schema { query: Root }")
 }
 
 /// A directive that refers to itself, through the input object its argument takes.

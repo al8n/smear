@@ -433,8 +433,13 @@ All notable changes to Smear are documented in this file.
   on a scalar of the built-in library, by its definition or by an extension, is
   `specified-by-on-built-in-scalar`, at its path: GraphQL's five, which the root package's own
   `scalar Int` replaces and keeps, and every other scalar of the library, `u64`, `bytes` and
-  `HashMap` among them, which the language specifies itself. A rule says nothing about a
-  contribution a phase already refused something in. On every GraphQL document of smear's corpora the analyzer
+  `HashMap` among them, which the language specifies itself. And the schema keeps GraphQL's own
+  rules on its roots, with GraphQL's codes: a written root operation type whose type names a
+  definition that is no object type, of any of the three operations, an alias such as
+  `NonZeroU32` among them, is `smear::schema::root-operation-type-not-object`, at the type; an
+  instantiation of a generic object type is one. A rule says nothing about a contribution a phase
+  already refused something in, and a rule on the roots, which no contribution holds, nothing
+  while any of the schema's contributions does. On every GraphQL document of smear's corpora the analyzer
   is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
   divergence it allows. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models

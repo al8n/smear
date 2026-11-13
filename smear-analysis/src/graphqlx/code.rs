@@ -576,4 +576,9 @@ pub(crate) mod schema {
   /// `SpecifiedByOnBuiltInScalar`.
   pub(crate) const SPECIFIED_BY_ON_BUILT_IN_SCALAR: Code =
     Code::new("smear::schema::specified-by-on-built-in-scalar");
+
+  /// A written root operation type names a definition that is no object type: `smear-schema`'s
+  /// `RootOperationTypeNotObject`.
+  pub(crate) const ROOT_OPERATION_TYPE_NOT_OBJECT: Code =
+    Code::new("smear::schema::root-operation-type-not-object");
 }
