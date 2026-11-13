@@ -7,6 +7,7 @@ use super::{
   check, collect, declare,
   diagnostic::{Diagnostics, Reporter},
   id::PackageId,
+  instantiate,
   limits::Limits,
   lower,
   model::{Model, ModelBuilder, PackageKind},
@@ -172,6 +173,10 @@ impl Analysis {
 ///   operation's root. Names and texts past what the model's `u32` offsets address,
 ///   which only a [`Limits::max_source_bytes`] far above its default admits, are reported at the
 ///   root package's package source.
+/// - Gives each definition its built-in meaning, read off `core`'s directives by what each
+///   application resolved to, never by how it is spelled: an interface that applies `@marker` is a
+///   marker, and a scalar that applies `@set` or `@map` stands for that collection, the first of
+///   the two when it applies both.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///   Each schema definition the root package writes after its first is
@@ -249,6 +254,7 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
     &mut builder,
     &mut reporter,
   );
+  instantiate::instantiate(&declarations, &mut builder);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }

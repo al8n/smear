@@ -1,11 +1,12 @@
 //! The GraphQLx analyzer's types: what lowering checks of a written parameter list, an extension's
-//! and a replaced built-in's.
+//! and a replaced built-in's; and the built-in meaning of a definition, a marker or a collection,
+//! read off `core`'s directives.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, DefId, Diagnostic, IdRange, Layout, Limits, MemberId, Model, Namespace, Package,
-    PackageId, SourceFile, SourceId, Tier, TyKind, TypeExprKind, analyze,
+    Analysis, Collection, DefId, Diagnostic, IdRange, Layout, Limits, MemberId, Model, Namespace,
+    Package, PackageId, SourceFile, SourceId, Tier, TyKind, TypeExprKind, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -260,5 +261,82 @@ fn a_replaced_built_in_declares_no_type_parameter() {
   assert_eq!(
     model.ty(model.type_expr(reason).ty()).kind(),
     TyKind::Unresolved
+  );
+}
+
+/// The names of the model's markers, in id order.
+fn markers(model: &Model) -> Vec<&str> {
+  model
+    .defs()
+    .into_iter()
+    .filter(|id: &DefId| model.def(*id).is_marker())
+    .map(|id: DefId| model.def(id).name())
+    .collect()
+}
+
+/// The names of the model's collections, each with what it stands for, in id order.
+fn collections(model: &Model) -> Vec<(&str, Collection)> {
+  model
+    .defs()
+    .into_iter()
+    .filter_map(|id: DefId| {
+      let definition = model.def(id);
+      definition
+        .collection()
+        .map(|collection: Collection| (definition.name(), collection))
+    })
+    .collect()
+}
+
+#[test]
+fn markers_and_collections_are_read_off_cores_directives() {
+  // `core`'s directives, on the library's definitions and on the program's: a marker, and one an
+  // extension makes; a set, a map, and a scalar that applies both, which is the first; an
+  // interface that applies nothing, and an object that applies `@set`, which neither is.
+  let text = "interface Ord @marker\ninterface Node {\n  id: ID\n}\ninterface Plain\n\
+              extend interface Plain @marker\n\
+              scalar Bag<T> @set\nscalar Dict<K, V> @map\nscalar Both<K, V> @map @set\n\
+              type Obj @set {\n  x: Int\n}\n";
+  let analysis = analyze_one(text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert_eq!(markers(model), ["MapKey", "Ord", "Plain"]);
+  assert_eq!(
+    collections(model),
+    [
+      ("BTreeMap", Collection::Map),
+      ("BTreeSet", Collection::Set),
+      ("HashMap", Collection::Map),
+      ("HashSet", Collection::Set),
+      ("Bag", Collection::Set),
+      ("Dict", Collection::Map),
+      ("Both", Collection::Map),
+    ]
+  );
+
+  // The program's own directives of those names mean nothing: the meaning is `core`'s
+  // definitions', never a spelling's.
+  let text = "directive @marker on INTERFACE\ndirective @set on SCALAR\n\
+              interface Mine @marker\nscalar Own<T> @set\n";
+  let analysis = analyze_one(text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert_eq!(markers(model), ["MapKey"]);
+  assert_eq!(
+    collections(model),
+    [
+      ("BTreeMap", Collection::Map),
+      ("BTreeSet", Collection::Set),
+      ("HashMap", Collection::Map),
+      ("HashSet", Collection::Set),
+    ]
   );
 }

@@ -56,7 +56,7 @@ use crate::graphqlx::{
 use super::{
   Model, Namespace, PackageKind,
   application::{ApplicationArgument, Resolution},
-  def::{DefKind, DirectiveLocation, Origin, Primitive, TypeBound},
+  def::{Collection, DefKind, DirectiveLocation, Origin, Primitive, TypeBound},
   member::MemberKind,
   module::ModuleKind,
   order,
@@ -384,6 +384,16 @@ impl ModelBuilder {
   /// Gives `def` the tier it requires.
   pub fn set_def_tier(&mut self, def: DefId, tier: Tier) {
     self.model.defs[def.get() as usize].tier = tier;
+  }
+
+  /// Makes `def` a marker.
+  pub fn set_marker(&mut self, def: DefId) {
+    self.model.defs[def.get() as usize].marker = true;
+  }
+
+  /// Makes `def` stand for `collection`.
+  pub fn set_collection(&mut self, def: DefId, collection: Collection) {
+    self.model.defs[def.get() as usize].collection = Some(collection);
   }
 
   /// Makes `name` in `module` a second name of `def`, as `Int` is of `i32`. Second names are added

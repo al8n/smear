@@ -22,7 +22,8 @@
 //! primitives the program writes included, with canonical names and lookup: its kind, name,
 //! module, location, origin and description, its contributions, its own and then its extensions',
 //! its type parameters with their defaults and its bounds, its `implements` entries and union
-//! members, its directive applications, a directive definition's locations, and its members with
+//! members, its directive applications, a directive definition's locations, whether it is a
+//! marker or a collection, and its members with
 //! their descriptions, types, defaults and applications, every written type an occurrence with
 //! its path and arguments as written and what it resolves to, every application with its type
 //! arguments and its arguments, and every value as written; and the schema, with its
@@ -94,6 +95,7 @@ mod collect;
 mod declare;
 mod diagnostic;
 mod id;
+mod instantiate;
 mod limits;
 mod lower;
 mod model;

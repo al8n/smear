@@ -19,7 +19,8 @@ in the packages, their modules, one for every directory of a `Directory` package
 inline `mod`, and every definition: each type and directive a package declares, and each intrinsic
 primitive the program writes, with its identity, its contributions, its own and then each
 extension's, its type parameters with their defaults and its bounds, its `implements` entries and
-union members, its directive applications, a directive definition's locations, and its members
+union members, its directive applications, a directive definition's locations, whether it is a
+marker or a collection, read off `core`'s `@marker`, `@set` and `@map`, and its members
 with their descriptions, types, defaults and applications, every written type an occurrence with
 its path and arguments as written and what it resolves to, every application with its type
 arguments and its arguments, and every value as written; and the schema, with its contributions,

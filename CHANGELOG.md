@@ -150,8 +150,11 @@ All notable changes to Smear are documented in this file.
   `smear::schema::duplicate-root-operation-type`; with no schema definition of the root
   package's, an object type the root package's root module declares named `Query`, `Mutation` or
   `Subscription` is presumed that operation's root. Names and texts past what the model's `u32`
-  offsets address are `resource-limit`. Then smear's rules walk the model, each a visitor on the
-  public trait. A program defines its schema at most once: each schema definition the root
+  offsets address are `resource-limit`. Then each definition gets its built-in meaning, read off
+  what its applications resolved to and never off how they are spelled: an interface that applies
+  `core`'s `@marker` is a marker, as `Def::is_marker()` says, and a scalar that applies `core`'s
+  `@set` or `@map` stands for that collection, as `Def::collection()` says. Then smear's rules
+  walk the model, each a visitor on the public trait. A program defines its schema at most once: each schema definition the root
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
   code, with a label at the first. And the schema is the root package's: each schema definition
   and each schema extension a dependency writes is the new
