@@ -34,15 +34,29 @@ const THIRD_PARTY: &str = "a package extends its own definitions alone, so that 
                            of this package's own, or make the change in the package that defines \
                            it";
 
-/// What the orphan rule tells a dependency that extends a built-in.
+/// What the orphan rule tells a dependency that adds directives alone to a built-in, which the root
+/// package may add.
 const NOT_THE_ROOT: &str = "only the root package extends a definition of `core`, `alloc` or \
                             `std`, and only to add directives: remove this extension, or write it \
                             in the root package";
+
+/// What the orphan rule tells a dependency that adds more than directives to a built-in, which the
+/// root package may not add either.
+const NOT_EVEN_THE_ROOT: &str = "only the root package extends a definition of `core`, `alloc` \
+                                 or `std`, and only to add directives: remove this extension";
 
 /// What the orphan rule tells the root package when it adds more than directives to a built-in.
 const MORE_THAN_DIRECTIVES: &str = "an extension of a definition of `core`, `alloc` or `std` adds \
                                     directives and nothing else: remove what this one adds beside \
                                     them";
+
+/// What the orphan rule tells the root package when it adds more than directives to a built-in its
+/// own definition replaces, which may write what the extension adds.
+const MORE_THAN_DIRECTIVES_TO_ITS_OWN: &str = "an extension of a definition of `core`, `alloc` \
+                                               or `std` adds directives and nothing else, and \
+                                               this package's own definition replaces the \
+                                               built-in: write what this one adds in the \
+                                               definition itself";
 
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
 fn package(
@@ -112,6 +126,15 @@ fn messages(analysis: &Analysis) -> Vec<String> {
     .iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .collect::<Vec<String>>()
+}
+
+/// Each diagnostic's help, in the list's order.
+fn helps(analysis: &Analysis) -> Vec<Option<&str>> {
+  let mut helps: Vec<Option<&str>> = Vec::new();
+  for diagnostic in analysis.diagnostics() {
+    helps.push(diagnostic.help());
+  }
+  helps
 }
 
 /// Whether each of the schema's contributions has errors, in order.
@@ -577,12 +600,14 @@ fn the_root_adds_directives_to_a_built_in() {
 #[test]
 fn the_root_adding_more_than_directives_to_a_built_in_is_an_orphan() {
   // An enum value to `Tier`, a field to `__Type`, and an `implements` entry to a scalar: to
-  // `alloc`'s `string`, and to `i32`, which has no position for a label to point at.
+  // `alloc`'s `string`; to `i32`, which has no position for a label to point at; and to `f64`,
+  // which the root package's own `Float` replaces.
   let text = "interface Marked @marker\n\
               extend enum Tier {\n  EXTRA\n}\n\
               extend type __Type {\n  extra: Int\n}\n\
               extend scalar String implements Marked\n\
-              extend scalar Int implements Marked\n";
+              extend scalar Int implements Marked\n\
+              scalar Float\nextend scalar Float implements Marked\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
   let model = analysis.model();
@@ -602,12 +627,18 @@ fn the_root_adding_more_than_directives_to_a_built_in_is_an_orphan() {
         named("^::alloc::string")
       ),
       (ORPHAN, at(schema, text, "Int", 1), None),
+      // `f64`'s definition is the root package's `scalar Float`, and its name is that `Float`.
+      (
+        ORPHAN,
+        at(schema, text, "Float", 1),
+        Some(at(schema, text, "Float", 0))
+      ),
     ],
     "{:#?}",
     analysis.diagnostics()
   );
-  // Each names the definition by its own name, `string` for `String` and `i32` for `Int`, and
-  // the two packages.
+  // Each names the definition by its own name, `string` for `String`, `i32` for `Int` and `f64`
+  // for `Float`, and the two packages.
   let more = |name: &str, built_in: &str| -> String {
     format!(
       "package `app` adds more than directives to the type `{name}` of the built-in package \
@@ -621,32 +652,54 @@ fn the_root_adding_more_than_directives_to_a_built_in_is_an_orphan() {
       more("__Type", "core"),
       more("string", "alloc"),
       more("i32", "core"),
+      more("f64", "core"),
+    ]
+  );
+  // Only the built-in the root package replaces has a definition of the root package's own to
+  // write what the extension adds in.
+  assert_eq!(
+    helps(&analysis),
+    [
+      Some(MORE_THAN_DIRECTIVES),
+      Some(MORE_THAN_DIRECTIVES),
+      Some(MORE_THAN_DIRECTIVES),
+      Some(MORE_THAN_DIRECTIVES),
+      Some(MORE_THAN_DIRECTIVES_TO_ITS_OWN),
     ]
   );
   for diagnostic in analysis.diagnostics() {
-    assert_eq!(diagnostic.help(), Some(MORE_THAN_DIRECTIVES));
     assert_eq!(diagnostic.primary_label(), Some("orphan extension"));
   }
 }
 
 #[test]
 fn a_dependency_extending_a_built_in_is_an_orphan() {
-  // With a directive alone, which the root package may add and a dependency may not.
+  // With a directive alone, which the root package may add and a dependency may not; and with an
+  // enum value, which neither may add.
   let ours = "type Query {\n  ok: Int\n}\n";
-  let theirs = "directive @once on SCALAR\nextend scalar String @once\n";
+  let theirs =
+    "directive @once on SCALAR\nextend scalar String @once\nextend enum Tier {\n  X\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
   let analysis = analyze(&root, &[geo], &Limits::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   let model = analysis.model();
   let string = model.builtins().string();
+  let tier = def(model, "^::core::Tier");
   assert_eq!(
     found(&analysis),
-    [(
-      ORPHAN,
-      at(geo_file, theirs, "String", 0),
-      Some(model.def(string).location())
-    )],
+    [
+      (
+        ORPHAN,
+        at(geo_file, theirs, "String", 0),
+        Some(model.def(string).location())
+      ),
+      (
+        ORPHAN,
+        at(geo_file, theirs, "Tier", 0),
+        Some(model.def(tier).location())
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
@@ -654,22 +707,25 @@ fn a_dependency_extending_a_built_in_is_an_orphan() {
     messages(&analysis),
     [
       "package `geo` extends the type `string` of the built-in package `alloc`, which only the \
-       root package extends"
+       root package extends",
+      "package `geo` extends the type `Tier` of the built-in package `core`, which only the root \
+       package extends",
     ]
   );
-  let diagnostic = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic");
-  assert_eq!(diagnostic.help(), Some(NOT_THE_ROOT));
+  // The root package may write the first in the dependency's place, and not the second.
+  assert_eq!(
+    helps(&analysis),
+    [Some(NOT_THE_ROOT), Some(NOT_EVEN_THE_ROOT)]
+  );
 }
 
+/// Every file of a `Flat` package is one module of one package, as the documents of a GraphQL
+/// schema are one schema: an extension of a definition of the package's own, whichever file holds
+/// it, is no orphan, and nor is a directive it adds to a built-in. A `Flat` root package that adds
+/// more than directives to a built-in does meet the rule, as
+/// `the_root_adding_more_than_directives_to_a_built_in_is_an_orphan` shows.
 #[test]
-fn a_flat_package_never_meets_the_orphan_rule() {
-  // Every file of a `Flat` package is one module of one package, as the documents of a GraphQL
-  // schema are one schema: each extension is of a definition of the package's own, whichever
-  // file holds it, or adds a directive to a built-in.
+fn a_flat_package_extending_its_own_definitions_never_meets_the_orphan_rule() {
   let a = "type Query {\n  ok: Int\n}\ninterface Node {\n  id: ID\n}\nenum Color {\n  RED\n}\n\
            input Filter {\n  f: Int\n}\nunion Either = Query\nscalar Date\n\
            directive @d on SCALAR | DIRECTIVE_DEFINITION\n";
@@ -871,26 +927,29 @@ fn long_names_are_quoted_as_excerpts() {
     )]
   );
 
-  // A root package whose name is long extends a dependency's type whose name is long: the message
-  // quotes the ends of each, and no path.
+  // A root package whose name is long extends a type whose name is long, of a dependency whose
+  // name is long: the message quotes the ends of each of the three, and no path.
   let root_name = "r".repeat(4096);
+  let geo_name = "g".repeat(4096);
   let type_name = "E".repeat(4096);
-  let ours = format!("extend type ^::geo::{type_name} {{\n  extra: Int\n}}\n");
+  let ours = format!("extend type ^::{geo_name}::{type_name} {{\n  extra: Int\n}}\n");
   let theirs = format!("type {type_name} {{\n  x: Int\n}}\n");
   let root: Package<&str> = Package::new(root_name.as_str(), Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", ours.as_str())])
-    .with_dependencies(["geo"]);
-  let geo: Package<&str> = Package::new("geo", Layout::Flat, Tier::Std)
+    .with_dependencies([geo_name.as_str()]);
+  let geo: Package<&str> = Package::new(geo_name.as_str(), Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("geo.graphqlx", theirs.as_str())]);
   let analysis = analyze(&root, &[geo], &Limits::new());
   assert_eq!(
     messages(&analysis),
     [format!(
-      "package `{}…{}` extends the type `{}…{}`, which package `geo` defines",
+      "package `{}…{}` extends the type `{}…{}`, which package `{}…{}` defines",
       "r".repeat(64),
       "r".repeat(64),
       "E".repeat(64),
-      "E".repeat(64)
+      "E".repeat(64),
+      "g".repeat(64),
+      "g".repeat(64)
     )]
   );
 }
@@ -1212,8 +1271,9 @@ fn the_walk_of_an_analyzed_program_is_the_written_sequence_of_hooks() {
   }
   assert_eq!(recorder.lines.len(), ORDER.len(), "the walk's length");
 
-  // The offsets are from the root package's first rows: its root module, and the first
-  // definition that module holds, `@tag`, whose one member is its argument.
+  // The offsets are from the first rows the walk reaches: the root package's root module; the
+  // first definition that module holds, `@tag`; its one member, its argument, with that argument's
+  // type and default; and `Query`'s own application.
   let model = analysis.model();
   let root_module = model.package(model.root_package()).root_module();
   let tag = model
@@ -1223,15 +1283,32 @@ fn the_walk_of_an_analyzed_program_is_the_written_sequence_of_hooks() {
     .next()
     .expect("the root module holds `@tag`");
   assert_eq!(model.def(tag).name(), "tag");
+  let argument = model
+    .def(tag)
+    .arguments()
+    .into_iter()
+    .next()
+    .expect("`@tag` has an argument");
   assert_eq!(recorder.modules, Some(root_module.get()));
   assert_eq!(recorder.defs, Some(tag.get()));
+  assert_eq!(recorder.members, Some(argument.get()));
   assert_eq!(
-    recorder.members,
+    recorder.type_exprs,
+    model.member(argument).ty().map(|ty: TypeExprId| ty.get())
+  );
+  assert_eq!(
+    recorder.values,
     model
-      .def(tag)
-      .arguments()
-      .into_iter()
-      .next()
-      .map(|argument: MemberId| argument.get())
+      .member(argument)
+      .default()
+      .map(|value: ValueId| value.get())
+  );
+  assert_eq!(
+    recorder.applications,
+    model
+      .def(def(model, "^::app::Query"))
+      .applications()
+      .first()
+      .map(|application: &ApplicationId| application.get())
   );
 }

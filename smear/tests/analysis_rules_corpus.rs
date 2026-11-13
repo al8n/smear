@@ -3,7 +3,8 @@
 //! file of a package of its own, and programs of several packages written here.
 //!
 //! The census: for each selection of packages, each hook is called once per entity the walk must
-//! reach, and what it must reach is read off the model, never off the walk. Tolerance: no rule
+//! reach, and what it must reach is read off the model, never off the walk. The order: passing the
+//! dependencies in another order changes nothing the rules report or mark. Tolerance: no rule
 //! panics on a refused program, and none reports within what a phase already refused.
 #![cfg(all(feature = "std", feature = "analysis"))]
 
@@ -91,6 +92,23 @@ fn codes(analysis: &Analysis) -> Vec<&'static str> {
     .iter()
     .map(|diagnostic: &Diagnostic| diagnostic.code().as_str())
     .collect::<Vec<&'static str>>()
+}
+
+/// Whether each of the schema's contributions has errors, in order.
+fn schema_errors(analysis: &Analysis) -> Vec<bool> {
+  analysis
+    .model()
+    .schema()
+    .contributions()
+    .map(|part: Contribution<'_>| part.has_errors())
+    .collect::<Vec<bool>>()
+}
+
+/// How many definitions the built-in library alone gives a model: its own, and the primitives it
+/// writes.
+fn library_definitions() -> u32 {
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
+  analyze(&root, &[], &Limits::new()).model().defs().len()
 }
 
 /// Every id each hook was handed, in the order it was handed them.
@@ -441,6 +459,12 @@ fn replaced_and_extended_built_ins() -> Analysis {
 /// dependency's, and a type that is none; and a dependency that extends the other's type and a
 /// built-in, and the schema.
 fn three_packages_with_refusals() -> Analysis {
+  let [root, astro, geo] = three_packages();
+  analyze(&root, &[geo, astro], &Limits::new())
+}
+
+/// The packages of `three_packages_with_refusals`: the root package, `astro`, and `geo`.
+fn three_packages() -> [Package<&'static str>; 3] {
   let root = package(
     "app",
     Layout::Flat,
@@ -472,7 +496,7 @@ fn three_packages_with_refusals() -> Analysis {
     )],
   )
   .with_dependencies(["astro"]);
-  analyze(&root, &[geo, astro], &Limits::new())
+  [root, astro, geo]
 }
 
 /// The census, over programs of several packages: what a selection leaves out is then more than
@@ -503,6 +527,30 @@ fn each_walk_of_a_program_of_several_packages_reaches_what_the_model_says_once()
     ]
   );
   census(&analysis, "three packages with refusals");
+}
+
+/// The order, W's test 7 for the rules: what they report, and what their errors mark, is the same
+/// whichever order the dependencies are passed in.
+#[test]
+fn permuting_the_dependencies_changes_nothing_the_rules_report_or_mark() {
+  let [root, astro, geo] = three_packages();
+  let forward = analyze(&root, &[geo.clone(), astro.clone()], &Limits::new());
+  let backward = analyze(&root, &[astro, geo], &Limits::new());
+  // The case is not vacuous: the orphan rule reports a dependency's extension of the other's type
+  // and of a built-in, and the schema rule the dependency's schema extension, which its error
+  // marks.
+  assert_eq!(
+    codes(&forward),
+    [
+      "smear::schema::undefined-type",
+      "smear::graphqlx::orphan-extension",
+      "smear::graphqlx::orphan-extension",
+      "smear::graphqlx::schema-outside-root",
+    ]
+  );
+  assert_eq!(schema_errors(&forward), [true]);
+  assert_eq!(forward.diagnostics(), backward.diagnostics());
+  assert_eq!(schema_errors(&forward), schema_errors(&backward));
 }
 
 /// Every code a rule of smear's lists.
@@ -565,16 +613,38 @@ fn tolerant(analysis: &Analysis, what: &str) {
   }
 }
 
-/// Tolerance, over every corpus file: no rule panics on one, and none repeats a phase.
-#[test]
-fn no_rule_repeats_a_phase_over_any_corpus_file() {
-  for (path, text) in corpus() {
-    let analysis = analyzed(&path, &text);
-    tolerant(&analysis, &path.display().to_string());
-  }
+/// Whether a rule of smear's reported anything on `analysis`.
+fn a_rule_fired(analysis: &Analysis) -> bool {
+  let rules = rule_codes();
+  analysis
+    .diagnostics()
+    .iter()
+    .any(|diagnostic: &Diagnostic| rules.contains(&diagnostic.code()))
 }
 
-/// Tolerance, over refused programs whose rules have something to say beside a phase.
+/// Tolerance, over every corpus file: no rule panics on one, and none repeats a phase.
+///
+/// No corpus file makes a rule fire: each is the one file of a `Flat` root package, with no
+/// dependency beside it, and none defines the schema twice or adds more than directives to a
+/// built-in. So over the corpus this pins that no rule panics, and nothing more. It prints on how
+/// many files a rule fired, which shows the first file that makes one fire.
+#[test]
+fn no_rule_repeats_a_phase_over_any_corpus_file() {
+  let files = corpus();
+  let total = files.len();
+  let mut fired: usize = 0;
+  for (path, text) in files {
+    let analysis = analyzed(&path, &text);
+    if a_rule_fired(&analysis) {
+      fired += 1;
+    }
+    tolerant(&analysis, &path.display().to_string());
+  }
+  println!("a rule fired on {fired} of the {total} corpus files");
+}
+
+/// Tolerance, over refused programs on which a rule has something to say beside a phase, or would
+/// have within what a phase refused.
 #[test]
 fn no_rule_repeats_a_phase_over_refused_programs() {
   // An extension of a dependency's type that holds a type that is none: the phase's diagnostic
@@ -647,4 +717,43 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
     ]
   );
   tolerant(&analysis, "a dependency's schema items");
+
+  // The definition limit leaves room for `Query` and for `i32`, which `Int` writes, and for no
+  // definition after them: the primitive a later schema item writes first is refused where it is
+  // written, inside that item. A schema rule that reported the item all the same would report
+  // within the extent that holds the refusal.
+  let limits = Limits::new().with_max_definitions(library_definitions() + 2);
+
+  // A second schema definition of the root package's that holds the refusal: the phase's
+  // diagnostic alone.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[(
+      "schema.graphqlx",
+      "schema {\n  query: Query\n}\ntype Query {\n  ok: Int\n}\nschema {\n  query: u8\n}\n",
+    )],
+  );
+  let analysis = analyze(&root, &[], &limits);
+  assert_eq!(codes(&analysis), ["smear::graphqlx::resource-limit"]);
+  tolerant(&analysis, "a second schema definition that holds a refusal");
+
+  // A dependency's schema definition that holds the refusal: the phase's diagnostic alone.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[("schema.graphqlx", "type Query {\n  ok: Int\n}\n")],
+  )
+  .with_dependencies(["geo"]);
+  let geo = package(
+    "geo",
+    Layout::Flat,
+    &[("geo.graphqlx", "schema {\n  query: u8\n}\n")],
+  );
+  let analysis = analyze(&root, &[geo], &limits);
+  assert_eq!(codes(&analysis), ["smear::graphqlx::resource-limit"]);
+  tolerant(
+    &analysis,
+    "a dependency's schema definition that holds a refusal",
+  );
 }
