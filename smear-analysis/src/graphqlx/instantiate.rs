@@ -1508,24 +1508,25 @@ impl Typing<'_> {
   }
 }
 
-/// What a count of type arguments says: how many type parameters `name`, written after `sigil`,
-/// has, how many of them have a default, every one from `least` on, and how many type arguments are
-/// written.
+/// What a count of type arguments says: how many type arguments `name`, written after `sigil`,
+/// takes, which is from `least` to `count`, and how many are written. It says what the definition
+/// takes, and so is true of a definition whose defaults are not all trailing too, whose defaults
+/// before its last parameter with none can never fill.
 fn counted(sigil: &str, name: &[u8], count: u32, least: u32, written: u32) -> String {
   let name = Excerpt(name);
-  let arguments = if written == 1 {
-    String::from("1 type argument is")
-  } else {
-    format!("{written} type arguments are")
-  };
+  let verb = if written == 1 { "is" } else { "are" };
   if count == 0 {
-    return format!("`{sigil}{name}` has no type parameter, and {arguments} written");
+    return format!("`{sigil}{name}` takes no type argument, and {written} {verb} written");
   }
-  let parameters = if count == 1 {
-    String::from("1 type parameter")
+  if least < count {
+    return format!(
+      "`{sigil}{name}` takes {least} to {count} type arguments, and {written} {verb} written"
+    );
+  }
+  let arguments = if count == 1 {
+    "type argument"
   } else {
-    format!("{count} type parameters")
+    "type arguments"
   };
-  let defaulted = count.saturating_sub(least);
-  format!("`{sigil}{name}` has {parameters}, {defaulted} with a default, and {arguments} written")
+  format!("`{sigil}{name}` takes {count} {arguments}, and {written} {verb} written")
 }

@@ -1229,8 +1229,8 @@ fn too_many_and_too_few_arguments_are_refused_where_they_are_written() {
   assert_eq!(
     messages(&analysis),
     [
-      "`Page` has 2 type parameters, 1 with a default, and 3 type arguments are written",
-      "`Page` has 2 type parameters, 1 with a default, and 0 type arguments are written",
+      "`Page` takes 1 to 2 type arguments, and 3 are written",
+      "`Page` takes 1 to 2 type arguments, and 0 are written",
     ]
   );
   // Each refused occurrence is unresolved and marks its member and the contribution; its sibling
@@ -1250,6 +1250,31 @@ fn too_many_and_too_few_arguments_are_refused_where_they_are_written() {
     .next()
     .expect("`Query` has its own contribution");
   assert!(own.has_errors());
+}
+
+#[test]
+fn a_count_says_what_the_definition_takes() {
+  // A definition of no type parameter, one that takes every type argument it has, one that takes
+  // a range, and a directive; one type argument written, and several.
+  let text = "scalar Plain\nscalar Pair<A, B>\nscalar Page<T, C = Int>\n\
+              directive @tag<T> on OBJECT\n\
+              type Query @tag<Int, Int> {\n  a: Plain<Int>\n  b: Pair<Int>\n  \
+              c: Page<Int, Int, Int>\n}\n";
+  let analysis = analyze_one(text);
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@tag` takes 1 type argument, and 2 are written",
+      "`Plain` takes no type argument, and 1 is written",
+      "`Pair` takes 2 type arguments, and 1 is written",
+      "`Page` takes 1 to 2 type arguments, and 3 are written",
+    ]
+  );
+  let codes: Vec<&str> = found(&analysis)
+    .into_iter()
+    .map(|(code, _, _): (&'static str, Location, Option<Location>)| code)
+    .collect();
+  assert_eq!(codes, [ARITY, ARITY, ARITY, ARITY]);
 }
 
 #[test]
@@ -1290,8 +1315,8 @@ fn a_directives_type_arguments_are_counted() {
   assert_eq!(
     messages(&analysis),
     [
-      "`@tag` has 2 type parameters, 1 with a default, and 3 type arguments are written",
-      "`@tag` has 2 type parameters, 1 with a default, and 0 type arguments are written",
+      "`@tag` takes 1 to 2 type arguments, and 3 are written",
+      "`@tag` takes 1 to 2 type arguments, and 0 are written",
     ]
   );
 }
@@ -1721,7 +1746,7 @@ fn long_names_are_quoted_as_excerpts() {
   assert_eq!(
     messages(&analysis),
     [format!(
-      "`{}…{}` has 1 type parameter, 0 with a default, and 2 type arguments are written",
+      "`{}…{}` takes 1 type argument, and 2 are written",
       "E".repeat(64),
       "E".repeat(64)
     )]
