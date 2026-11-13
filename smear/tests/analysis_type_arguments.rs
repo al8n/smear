@@ -591,6 +591,37 @@ fn an_argument_that_may_be_required_costs_a_step_when_left_out() {
   assert_eq!(found(&short), [(LIMIT, named(schema, text, "@", "m", 1))]);
 }
 
+/// With no complete type arguments, an argument that may be required is passed over with no step,
+/// each run of them at once, and the arguments after it are read as ever. `@d<Int, Int>`'s count
+/// is refused, so it has none: `a` and `c` are passed over; `b`, required, is reported left out,
+/// a step; and `e` takes a copy of its default, its one row a step. At two steps nothing more is
+/// said, and at one `e`'s copy is past the budget, at the path. Refuses a step for an argument
+/// passed over, which needs four, and a pass that runs over `b` or `e`.
+#[test]
+fn an_application_with_no_complete_type_arguments_passes_over_what_may_be_required() {
+  let text = "type Query @d<Int, Int> {\n  x: Int\n}\n\
+              directive @d<T>(a: T, b: Int!, c: T, e: Int = 1) on OBJECT\n";
+  let codes = [ARITY, DEFAULT, ARGUMENT, MISSING, LIMIT];
+  let paid = analyze_text(text, &Limits::new().with_max_value_steps(2));
+  let schema = schema_file(&paid);
+  let path = named(schema, text, "@", "d", 0);
+  assert_eq!(
+    sorted(found_of(&paid, &codes)),
+    sorted(vec![(ARITY, path), (MISSING, path)])
+  );
+  let model = paid.model();
+  assert_eq!(argument_shown(model, "Query", 0, "e"), "Int 1");
+  for name in ["a", "b", "c"] {
+    assert_eq!(argument_shown(model, "Query", 0, name), "absent");
+  }
+  let short = analyze_text(text, &Limits::new().with_max_value_steps(1));
+  assert_eq!(
+    sorted(found_of(&short, &codes)),
+    sorted(vec![(ARITY, path), (MISSING, path), (LIMIT, path)])
+  );
+  assert_eq!(argument_shown(short.model(), "Query", 0, "e"), "absent");
+}
+
 /// A default left out is copied under the application's type arguments: `[1]` against `[Int]`,
 /// each row typed under them, not written, and located at the default. Refuses a copy against the
 /// written type, which keeps its literal.

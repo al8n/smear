@@ -525,6 +525,9 @@ struct Listed {
   argument: MemberId,
   /// What leaving it out does.
   left: Left,
+  /// The first entry of its run, from it on, that is not one that may be required: where an
+  /// application with no complete type arguments, which passes those over, goes on from it.
+  plain: u32,
 }
 
 /// What leaving a listed argument out does.
@@ -1356,9 +1359,10 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// The arguments of `application`, in its directive's order: its written run, found by one binary
   /// search, merged with its directive's listed run. A written argument is coerced as written. A
   /// listed one it leaves out is filled with a copy of its default, or, required, reported left
-  /// out, each charged first, but on an application the built-in library writes. Once a charge
-  /// fails the application is reported once, at its path, and its written run alone is read on. An
-  /// application whose directive did not resolve has no argument.
+  /// out, each charged first, but on an application the built-in library writes. With no complete
+  /// type arguments, the listed ones that may be required are passed over, each run of them at
+  /// once. Once a charge fails the application is reported once, at its path, and its written run
+  /// alone is read on. An application whose directive did not resolve has no argument.
   fn application(&mut self, application: ApplicationId) {
     let mut written = self
       .raw
@@ -1395,6 +1399,14 @@ impl<'p> Coercion<'_, 'p, '_> {
     // Whether a copy that does not fit under its type arguments is reported: once for it.
     let mut reported = false;
     loop {
+      // With no complete type arguments, an argument that may be required is passed over with no
+      // step, and a run of them at once: no application walks them for nothing.
+      if env.is_none()
+        && listed < end
+        && let Some(entry) = self.listed.get(listed)
+      {
+        listed = entry.plain as usize;
+      }
       let next_written = self
         .raw
         .arguments
@@ -1551,9 +1563,24 @@ impl<'p> Coercion<'_, 'p, '_> {
           None if self.bare_param(argument, def) => Left::Maybe,
           None => continue,
         };
-        self.listed.push(Listed { argument, left });
+        self.listed.push(Listed {
+          argument,
+          left,
+          plain: start,
+        });
       }
       let end = dense(self.listed.len());
+      // Each entry's first entry from it on that is not one that may be required, set from the
+      // run's end back.
+      let mut plain = end;
+      for at in (start..end).rev() {
+        if let Some(entry) = self.listed.get_mut(at as usize) {
+          if !matches!(entry.left, Left::Maybe) {
+            plain = at;
+          }
+          entry.plain = plain;
+        }
+      }
       if end > start {
         self.runs.push((def, start, end));
       }
