@@ -27,6 +27,7 @@
 //! `DuplicateMember` reads `IdRange::start`, to name the member at a position of a list.
 
 mod collection_arity;
+mod deprecated_required;
 mod duplicate_member;
 mod duplicate_schema_definition;
 mod duplicate_type_parameter;
@@ -44,8 +45,8 @@ mod type_ref_misuse;
 mod union_member_not_object;
 
 use self::{
-  collection_arity::CollectionArity, duplicate_member::DuplicateMember,
-  duplicate_schema_definition::DuplicateSchemaDefinition,
+  collection_arity::CollectionArity, deprecated_required::DeprecatedRequired,
+  duplicate_member::DuplicateMember, duplicate_schema_definition::DuplicateSchemaDefinition,
   duplicate_type_parameter::DuplicateTypeParameter, empty_definition::EmptyDefinition,
   generic_enum::GenericEnum, implements_non_interface::ImplementsNonInterface,
   marker_misuse::MarkerMisuse, member_type_kind::MemberTypeKind,
@@ -313,7 +314,8 @@ rule_set! {
   /// name does not begin with `__`; a definition's members have distinct names, and so have a
   /// field's arguments; a definition that holds members holds one at least, a marker holding
   /// none; a member's type is of the kind its position takes; an object or an interface implements
-  /// interfaces; no interface implements itself; and a union's members are object types.
+  /// interfaces; no interface implements itself; a union's members are object types; and a required
+  /// argument or input field is not deprecated.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -361,6 +363,10 @@ rule_set! {
       => [super::code::schema::SELF_IMPLEMENTING_INTERFACE],
     union_member_not_object: UnionMemberNotObject
       => [super::code::schema::UNION_MEMBER_NOT_OBJECT],
+    deprecated_required: DeprecatedRequired => [
+      super::code::schema::DEPRECATED_REQUIRED_ARGUMENT,
+      super::code::schema::DEPRECATED_REQUIRED_INPUT_FIELD,
+    ],
   }
 }
 

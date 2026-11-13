@@ -273,7 +273,10 @@ impl Analysis {
 ///   parameter among them, is `implements-non-interface`, at the entry. An interface on a cycle
 ///   of `implements` entries, of any length, is `self-implementing-interface`, at its name. A
 ///   union member that names what is no object type is `union-member-not-object`, at the member.
-///   A rule says nothing about a contribution a phase already refused something in.
+///   An argument or an input field written non-null, with no default, that applies `core`'s
+///   `@deprecated` is `deprecated-required-argument` or `deprecated-required-input-field`, at its
+///   name, with a label at the `@deprecated`. A rule says nothing about a contribution a phase
+///   already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

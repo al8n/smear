@@ -89,6 +89,10 @@ const SELF_IMPLEMENTING_INTERFACE: &str = "smear::schema::self-implementing-inte
 /// GraphQL's code for a union member that is no object type.
 const UNION_MEMBER_NOT_OBJECT: &str = "smear::schema::union-member-not-object";
 
+/// GraphQL's codes for a required argument and a required input field that are deprecated.
+const DEPRECATED_REQUIRED_ARGUMENT: &str = "smear::schema::deprecated-required-argument";
+const DEPRECATED_REQUIRED_INPUT_FIELD: &str = "smear::schema::deprecated-required-input-field";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1515,6 +1519,14 @@ const FIXTURES: &[(Code, Fixture)] = &[
     an_interface_implementing_itself,
   ),
   (Code::new(UNION_MEMBER_NOT_OBJECT), a_union_of_an_interface),
+  (
+    Code::new(DEPRECATED_REQUIRED_ARGUMENT),
+    a_deprecated_required_argument,
+  ),
+  (
+    Code::new(DEPRECATED_REQUIRED_INPUT_FIELD),
+    a_deprecated_required_input_field,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1702,6 +1714,16 @@ fn an_interface_implementing_itself() -> Analysis {
 /// A union whose member is an interface.
 fn a_union_of_an_interface() -> Analysis {
   analyze_one("type Query { ok: Int } interface I { a: Int } union U = I")
+}
+
+/// A required argument that is deprecated.
+fn a_deprecated_required_argument() -> Analysis {
+  analyze_one("type Query { ok(a: Int! @deprecated): Int }")
+}
+
+/// A required input field that is deprecated.
+fn a_deprecated_required_input_field() -> Analysis {
+  analyze_one("type Query { ok: Int } input In { a: Int! @deprecated }")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

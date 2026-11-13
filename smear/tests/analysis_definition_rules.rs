@@ -2,8 +2,8 @@
 //! code: a member's name does not begin with two underscores; a definition's members have distinct
 //! names, and so have a field's arguments; a definition that holds members holds one at least; a
 //! member's type is of the kind its position takes; an object or an interface implements
-//! interfaces; no interface implements itself; and a union's members are object types. Each rule
-//! judges what a supplied
+//! interfaces; no interface implements itself; a union's members are object types; and a required
+//! argument or input field is not deprecated. Each rule judges what a supplied
 //! package's definition holds, says nothing within what a phase refused, and quotes a name only as
 //! an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -60,6 +60,10 @@ const UNION_MEMBER: &str = "smear::schema::union-member-not-object";
 
 /// The code of a union member that names nothing, a phase's.
 const UNDEFINED_MEMBER: &str = "smear::schema::undefined-union-member";
+
+/// GraphQL's codes for a required argument and a required input field that are deprecated.
+const DEPRECATED_ARGUMENT: &str = "smear::schema::deprecated-required-argument";
+const DEPRECATED_INPUT_FIELD: &str = "smear::schema::deprecated-required-input-field";
 
 /// The code of a marker used as a marker may not be, which L3's rule reports.
 const MARKER: &str = "smear::graphqlx::marker-misuse";
@@ -862,6 +866,115 @@ fn a_unions_members_are_object_types() {
   );
 }
 
+/// A required argument of a field, of a directive and of a generic object's field, and a required
+/// input field, each deprecated; beside a nullable one, one with a default, a field, and a required
+/// argument that applies another directive.
+const DEPRECATED: &str = "type Query {\n  ok: Int\n}\n\
+                          type T {\n  f(req: Int! @deprecated, opt: Int @deprecated, \
+                          dflt: Int! = 1 @deprecated, other: Int! @obsolete): Int\n  \
+                          g: Int! @deprecated\n}\n\
+                          directive @dd(dreq: [Int]! @deprecated) on FIELD\n\
+                          input In {\n  ireq: Int! @deprecated\n  iopt: Int @deprecated\n}\n\
+                          type G<P> {\n  h(preq: P! @deprecated): Int\n}\n\
+                          directive @obsolete on ARGUMENT_DEFINITION\n";
+
+#[test]
+fn a_required_argument_or_input_field_is_not_deprecated() {
+  let analysis = analyze_one(DEPRECATED);
+  let schema = schema_file(&analysis);
+  // Each at its name, labelled at its `@deprecated`, the first, fourth, fifth and seventh of the
+  // text's.
+  let deprecated =
+    |nth: usize| -> Option<Location> { Some(at(schema, DEPRECATED, "deprecated", nth)) };
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, DEPRECATED, "f(", "req", 0),
+        deprecated(0)
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, DEPRECATED, "@dd(", "dreq", 0),
+        deprecated(4)
+      ),
+      (
+        DEPRECATED_INPUT_FIELD,
+        named(schema, DEPRECATED, "  ", "ireq", 0),
+        deprecated(5)
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, DEPRECATED, "h(", "preq", 0),
+        deprecated(7)
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the argument `req` of the field `f` of `T` is required and deprecated",
+      "the argument `dreq` of the directive `@dd` is required and deprecated",
+      "the input field `ireq` of `In` is required and deprecated",
+      "the argument `preq` of the field `h` of `G` is required and deprecated",
+    ]
+  );
+  let words: Vec<(Option<&str>, Option<&str>, Option<&str>)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| {
+      (
+        diagnostic.primary_label(),
+        diagnostic.label(0).map(|label| label.text()),
+        diagnostic.help(),
+      )
+    })
+    .collect();
+  assert_eq!(
+    words[1..3],
+    [
+      (
+        Some("required argument is deprecated"),
+        Some("deprecated here"),
+        Some(
+          "to deprecate a required argument, first make it optional — give it a default, or drop \
+           the `!`."
+        )
+      ),
+      (
+        Some("required input field is deprecated"),
+        Some("deprecated here"),
+        Some(
+          "to deprecate a required input field, first make it optional — give it a default, or \
+           drop the `!`."
+        )
+      ),
+    ]
+  );
+
+  // A directive merely named `deprecated`, in another module, is another directive.
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[
+      ("schema.graphqlx", "type Query {\n  ok: Int\n}\n"),
+      (
+        "m/a.graphqlx",
+        "directive @deprecated on ARGUMENT_DEFINITION\ntype T {\n  f(a: Int! @deprecated): Int\n}\n",
+      ),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 /// A refusal of `code` is silent in a contribution that also holds a phase's error, `together`,
 /// and is reported beside it when the error is in a sibling definition, `apart`. The phase's error
 /// is an undefined type.
@@ -931,6 +1044,11 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ninterface Face {\n  f: Int\n}\nunion U = Face | Missing\n",
     "type Query {\n  ok: Int\n}\ninterface Face {\n  f: Int\n}\nunion U = Face\nunion V = Missing\n",
   );
+  silent_beside_a_phase(
+    DEPRECATED_ARGUMENT,
+    "type Query {\n  ok: Int\n}\ntype T {\n  f(a: Int! @deprecated, x: Missing): Int\n}\n",
+    "type Query {\n  ok: Int\n}\ntype T {\n  f(a: Int! @deprecated): Int\n}\ntype U {\n  x: Missing\n}\n",
+  );
   // An error in an interface's own contribution silences it, and not the other interface of its
   // ring.
   let text = "type Query {\n  ok: Int\n}\ninterface A implements B {\n  id: ID\n  x: Missing\n}\n\
@@ -973,6 +1091,9 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
     ),
     format!(
       "type Query {{\n  ok: Int\n}}\ninterface {plain} {{\n  f: Int\n}}\nunion {owner} = {plain}\n"
+    ),
+    format!(
+      "type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  f({plain}: Int! @deprecated): Int\n}}\n"
     ),
   ];
   for text in &texts {

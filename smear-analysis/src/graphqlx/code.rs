@@ -527,4 +527,14 @@ pub(crate) mod schema {
   /// A union's member names what is no object type: `smear-schema`'s `UnionMemberNotObject`.
   pub(crate) const UNION_MEMBER_NOT_OBJECT: Code =
     Code::new("smear::schema::union-member-not-object");
+
+  /// A required argument, a field's or a directive's, applies `@deprecated`: `smear-schema`'s
+  /// `DeprecatedRequiredArgument`.
+  pub(crate) const DEPRECATED_REQUIRED_ARGUMENT: Code =
+    Code::new("smear::schema::deprecated-required-argument");
+
+  /// A required input field applies `@deprecated`: `smear-schema`'s
+  /// `DeprecatedRequiredInputField`.
+  pub(crate) const DEPRECATED_REQUIRED_INPUT_FIELD: Code =
+    Code::new("smear::schema::deprecated-required-input-field");
 }

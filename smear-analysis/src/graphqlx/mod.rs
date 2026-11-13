@@ -114,8 +114,9 @@
 //! entry of an object or an interface that names what is no interface is
 //! `smear::schema::implements-non-interface`; and an interface on a cycle of `implements` entries
 //! is `smear::schema::self-implementing-interface`; and a union member that is no object type is
-//! `smear::schema::union-member-not-object`. A rule says nothing about a contribution a phase
-//! already refused something in.
+//! `smear::schema::union-member-not-object`; and a required argument or input field that applies
+//! `core`'s `@deprecated` is `smear::schema::deprecated-required-argument`, or the code of an input
+//! field. A rule says nothing about a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and
