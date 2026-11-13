@@ -93,6 +93,20 @@ pub enum DiagnosticKind {
   /// side, or at the extension's clause, and nothing of it is in the model.
   InvalidBound,
 
+  // -- smear's rules -----------------------------------------------------------------------------
+  /// A package other than the root package writes a `schema` definition or a schema extension. A
+  /// dependency is a library, and the schema is the root package's, which alone defines and
+  /// extends it. Reported at the item's first keyword, `schema` or `extend`; the item gives the
+  /// schema nothing.
+  SchemaOutsideRoot,
+  /// An extension of a definition the package that writes it may not extend. A package extends
+  /// its own definitions alone, so that a definition is the same in every program that holds it:
+  /// an extension of another supplied package's type or directive is refused. A definition of
+  /// `core`, `alloc` or `std`, a GraphQL built-in the root package replaces among them, is
+  /// extended by the root package alone, and only with directives. Reported at the extension's
+  /// target path, with a label at the definition's name when the definition has a position.
+  OrphanExtension,
+
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
   ResourceLimit,
@@ -121,6 +135,8 @@ impl DiagnosticKind {
     Self::UseNameCollision,
     Self::ShadowedPrimitive,
     Self::InvalidBound,
+    Self::SchemaOutsideRoot,
+    Self::OrphanExtension,
     Self::ResourceLimit,
   ];
 
@@ -148,6 +164,8 @@ impl DiagnosticKind {
       Self::UseNameCollision => Code::new("smear::graphqlx::use-name-collision"),
       Self::ShadowedPrimitive => Code::new("smear::graphqlx::shadowed-primitive"),
       Self::InvalidBound => Code::new("smear::graphqlx::invalid-bound"),
+      Self::SchemaOutsideRoot => Code::new("smear::graphqlx::schema-outside-root"),
+      Self::OrphanExtension => Code::new("smear::graphqlx::orphan-extension"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -175,6 +193,8 @@ impl DiagnosticKind {
       Self::UseNameCollision => "two uses of one name",
       Self::ShadowedPrimitive => "declaration shadows a primitive",
       Self::InvalidBound => "invalid bound",
+      Self::SchemaOutsideRoot => "schema outside the root package",
+      Self::OrphanExtension => "orphan extension",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -202,6 +222,8 @@ impl DiagnosticKind {
       | Self::UseDeclarationCollision
       | Self::UseNameCollision
       | Self::InvalidBound
+      | Self::SchemaOutsideRoot
+      | Self::OrphanExtension
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }
@@ -271,4 +293,9 @@ pub(crate) mod schema {
   /// `DuplicateRootOperationType`.
   pub(crate) const DUPLICATE_ROOT_OPERATION_TYPE: Code =
     Code::new("smear::schema::duplicate-root-operation-type");
+
+  /// The root package writes a second schema definition: `smear-schema`'s
+  /// `DuplicateSchemaDefinition`.
+  pub(crate) const DUPLICATE_SCHEMA_DEFINITION: Code =
+    Code::new("smear::schema::duplicate-schema-definition");
 }

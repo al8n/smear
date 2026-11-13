@@ -4,6 +4,27 @@
 //! is a named struct of them that `rule_set!` declares. The rule types are private. The macro also
 //! emits the set's table of each rule and the codes it reports, which the liveness test reads:
 //! every code a rule lists must fire on at least one fixture.
+//!
+//! A rule reads the model the phases wrote, through its public views, and reports through the
+//! context. Which package wrote a contribution is read off where the contribution is written
+//! (`written_by`). A rule says nothing about a contribution a phase already refused something in,
+//! whose `has_errors()` is set: a diagnostic of its own within that contribution would repeat the
+//! phase's. It sees the phases' marks alone, since the rules' are applied once the walk has ended.
+
+mod duplicate_schema_definition;
+mod orphan_extension;
+mod schema_outside_root;
+
+use tokora::diagnostic::Location;
+
+use self::{
+  duplicate_schema_definition::DuplicateSchemaDefinition, orphan_extension::OrphanExtension,
+  schema_outside_root::SchemaOutsideRoot,
+};
+use super::{
+  id::{PackageId, SourceId},
+  source::SourceMap,
+};
 
 /// Declares a rule set: a struct with one field per rule, its `Visitor` impl, whose every hook
 /// calls each rule's in field order, and its table of each rule with the codes it reports.
@@ -18,27 +39,10 @@
 /// ```
 ///
 /// Each rule implements `Visitor` and `Default`, and resets its state in `begin`; the set derives
-/// `Default`, so `Rules::default()` is the set ready to run. A set may hold no rule, and its every
-/// hook then does nothing. The table, `TABLE`, lists each rule by its type's name, in field order,
-/// and is compiled where something reads it: this crate's unit tests and the test-support door.
+/// `Default`, so `Rules::default()` is the set ready to run. The table, `TABLE`, lists each rule by
+/// its type's name, in field order, and is compiled where something reads it: this crate's unit
+/// tests and the test-support door.
 macro_rules! rule_set {
-  (
-    $(#[$meta:meta])*
-    $vis:vis struct $name:ident {}
-  ) => {
-    $(#[$meta])*
-    #[derive(Default)]
-    $vis struct $name {}
-
-    #[cfg(any(test, feature = "test-support"))]
-    impl $name {
-      /// The rules of the set, each with the codes it reports: none.
-      $vis const TABLE: &'static [(&'static str, &'static [::tokora::diagnostic::Code])] = &[];
-    }
-
-    /// The set holds no rule, so every hook does nothing.
-    impl $crate::graphqlx::Visitor for $name {}
-  };
   (
     $(#[$meta:meta])*
     $vis:vis struct $name:ident {
@@ -154,8 +158,31 @@ macro_rules! rule_set {
 
 rule_set! {
   /// smear's own rules, which `analyze` runs over every supplied package once its phases have
-  /// written the model: none yet.
-  pub(crate) struct Rules {}
+  /// written the model: a program defines its schema at most once; only the root package defines
+  /// or extends the schema; and a package extends its own definitions alone, but for the
+  /// directives the root package adds to a built-in.
+  pub(crate) struct Rules {
+    duplicate_schema_definition: DuplicateSchemaDefinition
+      => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
+    schema_outside_root: SchemaOutsideRoot => [super::DiagnosticKind::SchemaOutsideRoot.code()],
+    orphan_extension: OrphanExtension => [super::DiagnosticKind::OrphanExtension.code()],
+  }
+}
+
+/// The package that wrote what is written at `at`: the package of the source `at` is in. For a
+/// contribution's location that is the package that wrote the contribution, which for an
+/// extension, and for a definition that replaces a built-in, need not be its definition's.
+///
+/// `None` when `at`'s source is none of `sources`', as a location of a model built by hand may be:
+/// a rule then reports nothing about what is written there. A package this answers is one of the
+/// model's, since an analysis's source map numbers the sources of its model's packages.
+fn written_by(sources: &SourceMap, at: Location) -> Option<PackageId> {
+  let source = SourceId::new(at.source());
+  if sources.sources().contains(source) {
+    Some(sources.source(source).package())
+  } else {
+    None
+  }
 }
 
 #[cfg(test)]

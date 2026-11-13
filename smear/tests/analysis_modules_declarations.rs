@@ -530,7 +530,7 @@ fn the_shared_codes_are_smear_schemas() {
 
   let text = "scalar X\nscalar X\ndirective @d on FIELD\ndirective @d on FIELD\n\
               scalar __Y\ndirective @__y on FIELD\nextend type X {\n  f: Int\n}\n\
-              scalar Z @d(nope: 1)\nschema {\n  query: X\n  query: X\n}\n";
+              scalar Z @d(nope: 1)\nschema {\n  query: X\n  query: X\n}\nschema {\n  query: X\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
   let analysis = analyze(&root, &[], &Limits::new());
   let mut codes: Vec<&str> = analysis
@@ -547,6 +547,7 @@ fn the_shared_codes_are_smear_schemas() {
     SchemaErrorKind::ExtensionKindMismatch,
     SchemaErrorKind::UndefinedDirectiveArgument,
     SchemaErrorKind::DuplicateRootOperationType,
+    SchemaErrorKind::DuplicateSchemaDefinition,
   ]
   .iter()
   .map(|kind: &SchemaErrorKind| kind.code().as_str())

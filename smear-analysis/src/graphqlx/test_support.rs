@@ -57,6 +57,21 @@ pub fn module_extent(model: &Model, module: ModuleId) -> Option<Location> {
   model.module(module).extent()
 }
 
+/// How many members, type occurrences, values and applications `model` holds, in that order: the
+/// lengths of the four tables whose ids the public model answers no whole range of, for the tests
+/// that check a walk reaches every row of each.
+pub fn counts(model: &Model) -> (u32, u32, u32, u32) {
+  model.counts()
+}
+
+/// The extent of every contribution of `model`, each definition's and then the schema's, and then
+/// of every member, each from its description, or its first token, to its last token: what the
+/// model keeps crate-private until extents are public, for the tests that check which extents
+/// hold where a diagnostic points.
+pub fn extents(model: &Model) -> Vec<Location> {
+  model.extents()
+}
+
 /// What `path` names, written in the module `module` of `root` beside `dependencies`, where
 /// `params` are the generic parameters in scope: the one door to the resolver the analysis builds,
 /// asked as lowering asks it.
