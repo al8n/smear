@@ -1783,6 +1783,11 @@ fn digest<'p, S: AsRef<[u8]>>(
       at: Location::new(source.get(), *name.as_span()),
     });
   }
+  root(path, source)
+}
+
+/// The root of `path`, written in `source`, as resolution reads it.
+pub(crate) fn root<S: AsRef<[u8]>>(path: &Path<S>, source: SourceId) -> Root {
   match path.root() {
     PathRoot::Relative => Root::Relative,
     PathRoot::Package(_) => Root::Package,
@@ -1798,7 +1803,7 @@ fn digest<'p, S: AsRef<[u8]>>(
 
 /// The index of the generic parameter spelled `name` in `params`, a table [`params`] built: a
 /// binary search.
-fn param(params: &[(&[u8], u32)], name: &[u8]) -> Option<u32> {
+pub(crate) fn param(params: &[(&[u8], u32)], name: &[u8]) -> Option<u32> {
   let at = params
     .binary_search_by(|(spelling, _): &(&[u8], u32)| (*spelling).cmp(name))
     .ok()?;

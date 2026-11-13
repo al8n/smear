@@ -277,9 +277,12 @@ All notable changes to Smear are documented in this file.
   radix; a float, or an integer, finite in `f32` or `f64`, `f32`'s range judged on the literal
   itself; a string, cooked; for `id` a string, or an integer in `i32`'s range; for `bytes` a
   string's UTF-8 encoding or a list of integers from 0 to 255, either one `ValueKind::Bytes`, a new
-  kind; and for `NonZero` an integer that is not zero. A custom scalar's value is its `Literal`,
-  and so, in this version, is an enum's, an input object's and a collection's, and a value whose
-  type names a type parameter or can take no value. A value that does not fit is unresolved and
+  kind; for `NonZero` an integer that is not zero; and for an enum one of its values, as
+  `ValueKind::Enum`, a bare name looked up under the enum expected alone, and a qualified one whose
+  prefix names that enum where the value is written, through any path or alias, a name that is
+  none of its values having the nearest in its help. A custom scalar's value is its `Literal`, and
+  so, in this version, is an input object's and a collection's, and a value whose type names a
+  type parameter or can take no value. A value that does not fit is unresolved and
   reported where it is written, with GraphQL's `smear::schema::invalid-default-value` or
   `invalid-directive-argument-value`, but for a number out of the range of any width but the 32-bit
   signed one, or of `f32`, the new `smear::graphqlx::width-overflow`, and a zero where `NonZero` is

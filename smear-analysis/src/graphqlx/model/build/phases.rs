@@ -1,7 +1,7 @@
 //! What the phases after coercion write, and what the hand-built models of the tests write in one
 //! step: each definition's externs; the tiers of definitions and types; the values coercion does
-//! not make yet, sets, maps, input objects, enum values and type values; a value written whole,
-//! each over coercion's own writers; and marks.
+//! not make yet, sets, maps, input objects and type values; a value written whole, each over
+//! coercion's own writers; and marks.
 //!
 //! GATED ON HAVING A CALLER. The phases still to come are this module's callers, and until each
 //! lands the test-support door is its only caller: a method that no shipped build calls is dead
@@ -13,7 +13,7 @@ use tokora::diagnostic::Location;
 use crate::graphqlx::{
   id::{DefId, MemberId, Sym, TyId, ValueId, dense},
   model::{
-    table::{ExternRow, Run, VALUE_ENUM, VALUE_MAP, VALUE_OBJECT, VALUE_SET, VALUE_TYPE},
+    table::{ExternRow, Run, VALUE_MAP, VALUE_OBJECT, VALUE_SET, VALUE_TYPE},
     ty::PathRoot,
     value::{LiteralKind, ObjectEntry},
   },
@@ -74,14 +74,6 @@ impl ModelBuilder {
   pub fn set_value_path(&mut self, value: ValueId, root: PathRoot, segments: &[Sym]) {
     let segments = self.keep_segments(segments);
     self.give_path(value, root, segments);
-  }
-
-  /// Makes `value` the enum value `member` of the enum `def`.
-  pub fn set_enum(&mut self, value: ValueId, def: DefId, member: MemberId) {
-    let row = self.value_row(value);
-    row.shape = VALUE_ENUM;
-    row.def = def;
-    row.member = member;
   }
 
   /// Makes `value` the type value naming `def`.

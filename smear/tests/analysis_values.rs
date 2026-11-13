@@ -803,6 +803,155 @@ fn strings_are_cooked() {
   assert_eq!(cooked("b"), ValueKind::String("indented\n  more\ntext"));
 }
 
+/// The enum value `owner.name` is: its enum and its value's name.
+fn enum_of(model: &Model, owner: &str, name: &str) -> (String, String) {
+  match model.value(default(model, owner, name)).kind() {
+    ValueKind::Enum { def, value, .. } => (
+      String::from(model.def(def).name()),
+      String::from(model.member(value).name()),
+    ),
+    other => panic!("`{owner}.{name}` is no enum value: {other:?}"),
+  }
+}
+
+#[test]
+fn a_bare_enum_value_resolves_against_the_expected_enum() {
+  let text = "enum Color {\n  RED\n}\nenum Paint {\n  BLUE\n  RED\n}\n\
+              input I<RED> {\n  c: Color = RED\n  p: Paint = RED\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  // Each is its own enum's `RED`, though a type parameter named `RED` is in scope.
+  assert_eq!(
+    enum_of(model, "I", "c"),
+    (String::from("Color"), String::from("RED"))
+  );
+  assert_eq!(
+    enum_of(model, "I", "p"),
+    (String::from("Paint"), String::from("RED"))
+  );
+  let paint = model.def(type_def(model, "Paint")).enum_values();
+  let ValueKind::Enum { value, .. } = model.value(default(model, "I", "p")).kind() else {
+    panic!("`p` is no enum value");
+  };
+  assert_eq!(Some(value), paint.into_iter().nth(1));
+  assert_eq!(shown_default(model, "I", "c"), "Enum RED");
+}
+
+#[test]
+fn a_qualified_enum_value_names_the_expected_enum() {
+  let text = "enum Color {\n  RED\n}\nmod m {\n  enum Color {\n    RED\n  }\n}\n\
+              use ~::m::Color as Hue\n\
+              input I {\n  a: Color = Color::RED\n  b: m::Color = m::Color::RED\n  \
+              c: m::Color = Hue::RED\n  d: m::Color = ~::m::Color::RED\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  for (name, path) in [
+    ("a", "Color::RED"),
+    ("b", "m::Color::RED"),
+    ("c", "Hue::RED"),
+    ("d", "~::m::Color::RED"),
+  ] {
+    assert_eq!(shown_default(model, "I", name), format!("Enum {path}"));
+    let (_, value) = enum_of(model, "I", name);
+    assert_eq!(value, "RED");
+  }
+}
+
+#[test]
+fn another_enums_value_is_an_error() {
+  let text = "enum Color {\n  RED\n}\nenum Paint {\n  RED\n}\n\
+              input I {\n  a: Color = Paint::RED\n  b: Color = Missing::RED\n  c: Color = ~::RED\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  // The prefix that names nothing is the resolver's alone.
+  assert_eq!(
+    found(&analysis),
+    [
+      (DEFAULT, at(schema, text, "Paint::RED", 0)),
+      (
+        "smear::graphqlx::unresolved-path",
+        at(schema, text, "Missing", 0)
+      ),
+      (DEFAULT, at(schema, text, "~::RED", 0)),
+    ]
+  );
+  let model = analysis.model();
+  for name in ["a", "b", "c"] {
+    assert_eq!(shown_default(model, "I", name), "?", "`{name}`");
+  }
+}
+
+#[test]
+fn an_enum_value_that_is_none_names_the_nearest() {
+  let text = "enum Color {\n  RED\n  GREEN\n}\ninput I {\n  a: Color = REDD\n  \
+              b: Color = Color::REDD\n}\n";
+  let helps = |limits: &Limits| -> Vec<Option<String>> {
+    analyze_text(text, limits)
+      .diagnostics()
+      .iter()
+      .map(|diagnostic: &Diagnostic| diagnostic.help().map(String::from))
+      .collect()
+  };
+  let near = Some(String::from("did you mean `RED`?"));
+  assert_eq!(helps(&Limits::new()), [near.clone(), near]);
+  assert_eq!(
+    helps(&Limits::new().with_max_near_miss_comparisons(0)),
+    [None, None]
+  );
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (DEFAULT, at(schema, text, "REDD", 0)),
+      (DEFAULT, at(schema, text, "Color::REDD", 0)),
+    ]
+  );
+}
+
+#[test]
+fn a_type_parameter_shadows_a_values_prefix() {
+  let text = "enum Color {\n  RED\n}\ninput F<Color> {\n  c: ~::Color = Color::RED\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(DEFAULT, at(schema, text, "Color::RED", 0))]
+  );
+  assert_eq!(shown_default(analysis.model(), "F", "c"), "?");
+}
+
+#[test]
+fn a_literal_that_is_no_path_is_no_enum_value() {
+  let text = "enum Color {\n  RED\n}\ninput I {\n  a: Color = \"RED\"\n  b: Color = 1\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (DEFAULT, at(schema, text, "\"RED\"", 0)),
+      (DEFAULT, after(schema, text, "b: Color = ", "1")),
+    ]
+  );
+}
+
+#[test]
+fn a_lone_enum_value_keeps_its_path_and_its_list_has_none() {
+  let text = "enum Color {\n  RED\n}\ninput I {\n  cs: [Color] = RED\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let list = default(model, "I", "cs");
+  let ValueKind::List(&[red]) = model.value(list).kind() else {
+    panic!("`cs` is no list of one");
+  };
+  assert!(model.value(list).path().is_none());
+  assert_eq!(spelled(model, model.value(red).path()), "RED");
+  assert_eq!(shown(model, list), "List [Enum RED]");
+}
+
 #[test]
 fn a_required_argument_is_reported_once() {
   let text = "directive @need(a: Int!, b: Int! = 1, c: Int) on OBJECT\n\
@@ -917,6 +1066,17 @@ fn long_spellings_are_quoted_as_excerpts() {
   // A literal of four kilobytes where an integer is expected.
   let long = "x".repeat(4096);
   let text = format!("input I {{\n  a: Int = \"{long}\"\n}}\n");
+  let analysis = analyze_text(&text, &Limits::new());
+  assert_eq!(analysis.diagnostics().len(), 1);
+  for diagnostic in analysis.diagnostics() {
+    assert!(diagnostic.to_string().len() < 1024);
+  }
+
+  // An enum value named with four kilobytes, which names no value of its enum.
+  let text = format!(
+    "enum Color {{\n  RED\n}}\ninput I {{\n  a: Color = {}\n}}\n",
+    long.to_uppercase()
+  );
   let analysis = analyze_text(&text, &Limits::new());
   assert_eq!(analysis.diagnostics().len(), 1);
   for diagnostic in analysis.diagnostics() {

@@ -36,8 +36,18 @@
 //!    `string` a string, cooked; `id` a string, or an integer in `i32`'s range, kept an integer;
 //!    `bytes` a string, its UTF-8 encoding, or a list of integers from 0 to 255, one value of its
 //!    bytes either way; `NonZero` of an integer primitive an integer in that primitive's range
-//!    that is not zero. Any other scalar takes any literal, kept as written, and so does an input
-//!    object, an enum and a collection in this version.
+//!    that is not zero; an enum a path that names one of its values. Any other scalar takes any
+//!    literal, kept as written, and so does an input object and a collection in this version.
+//!
+//! An enum value's name is looked up among the values of the enum expected, every enum's values
+//! being kept by the enum and the name, the first of each name. A bare name is looked up there
+//! and nothing else, no scope and no parameter. A qualified one's segments but the last are
+//! resolved once, as a type, in the module and the source the value is written in, the generic
+//! parameter its first segment names, if any, in scope: they must name the enum expected, through
+//! any path or alias, and another enum, a parameter, `NonZero` or a module does not fit. A prefix
+//! the resolver refuses is the resolver's to report, at the path, whoever asks first; the value is
+//! then unresolved, and nothing more is said. A name that is none of the enum's values does not
+//! fit, and its help names the nearest of them, under the analysis's one near-miss budget.
 //!
 //! A node that does not fit is one row, unresolved, typed with its type, and is not descended: an
 //! element of a list does not fit on its own, and the list keeps the others. It is reported where
@@ -52,7 +62,8 @@
 //! What is read of a literal is read once and kept outside the tree, in a row the node's one slot
 //! indexes: its text, kept in the model's text arena; a string's cooked text; an integer's count
 //! of significant digits, its magnitude once its digits could fit the width asked, and its row; a
-//! float's verdict and its row; a byte string; a literal's row; a path's segments.
+//! float's verdict and its row; a byte string; a literal's row; a path's segments, and what its
+//! prefix names.
 //!
 //! # What bounds it
 //!
@@ -67,21 +78,25 @@
 //! `u32` addresses, is reported once, as `resource-limit`, at the whole of the root package's
 //! package source: otherwise the model would answer a wrong spelling with no diagnostic.
 
-use std::{format, string::String, vec::Vec};
+use std::{collections::BTreeMap, format, string::String, vec::Vec};
 
 use smear_lexer::decode_string_value;
-use tokora::diagnostic::{Code, Location};
+use tokora::{
+  SimpleSpan,
+  diagnostic::{Code, Location},
+};
 
 use super::{
   builtin::{ALLOC, CORE, TYPE},
   code::{DiagnosticKind, schema},
   declare::Declarations,
   diagnostic::{Diagnostic, Excerpt, Reporter},
-  id::{ApplicationId, DefId, MemberId, TyId, TypeExprId, ValueId, dense},
+  id::{ApplicationId, DefId, MemberId, SourceId, Sym, TyId, TypeExprId, ValueId, dense},
   instantiate::binding,
   limits::Limits,
   model::{Bytes, DefKind, LiteralKind, ModelBuilder, Primitive, Resolution, Shape, Text},
   raw::{Radix, RawArgument, RawKind, RawNode, RawPath, RawTree, RawValues, UNREAD},
+  resolve::{Position, Request, Resolved, Root, Scopes, Segment, Wanted},
   set::ROOT,
   source::SourceMap,
 };
@@ -95,12 +110,13 @@ use number::{Float, Scanned};
 const FLOAT_BITS: u32 = 1024;
 
 /// Makes the model's values of `raw`, the values lowering read, in `builder`, whose declarations
-/// are `declarations` and whose sources `sources` numbers, within `limits`, reporting into
-/// `reporter`: each member's default and each application's arguments, in the model's walk; then
-/// the check of the model's arenas.
+/// are `declarations`, whose scopes are `scopes` and whose sources `sources` numbers, within
+/// `limits`, reporting into `reporter`: each member's default and each application's arguments, in
+/// the model's walk; then the check of the model's arenas.
 pub(crate) fn coerce(
   raw: RawValues<'_>,
   declarations: &Declarations<'_, '_>,
+  scopes: &Scopes<'_>,
   sources: &SourceMap,
   limits: &Limits,
   builder: &mut ModelBuilder,
@@ -112,12 +128,27 @@ pub(crate) fn coerce(
     id: binding(declarations, builder, ALLOC, TYPE, b"id"),
     bytes: binding(declarations, builder, ALLOC, TYPE, b"bytes"),
   };
+  // Every enum's values, the first of each name: what an enum value's name is looked up by.
+  let mut enums: BTreeMap<(DefId, Sym), MemberId> = BTreeMap::new();
+  for index in 0..builder.def_count() {
+    let def = DefId::new(index);
+    if builder.def_kind(def) != Some(DefKind::Enum) {
+      continue;
+    }
+    for member in builder.def_members(def) {
+      if let Some(name) = builder.member_name(member) {
+        enums.entry((def, name)).or_insert(member);
+      }
+    }
+  }
   let mut coercion = Coercion {
     builder,
     reporter,
+    scopes,
     raw,
     primitives: &declarations.primitives,
     builtins,
+    enums,
     supplied: sources.package_sources(ROOT).start(),
     max_steps: limits.max_value_steps(),
     spent: 0,
@@ -129,6 +160,7 @@ pub(crate) fn coerce(
     stack: Vec::new(),
     items: Vec::new(),
     children: Vec::new(),
+    syms: Vec::new(),
   };
   for index in 0..coercion.builder.def_count() {
     let def = DefId::new(index);
@@ -219,8 +251,8 @@ enum Base {
   String,
   Id,
   Bytes,
-  /// An enum, whose values are kept as written in this version.
-  Enum,
+  /// This enum.
+  Enum(DefId),
   /// Any literal, kept as written: a custom scalar, a collection, `TypeRef` and an input object.
   Kept,
 }
@@ -261,6 +293,9 @@ enum Why {
   Byte,
   /// An element of a `bytes` list out of a byte's range.
   ByteRange,
+  /// A path that names no value of the enum `def`: `name`, its last segment, is none of its
+  /// values.
+  NoValue { def: DefId, name: Sym },
 }
 
 /// A node that does not fit, and why: the node may be an element of the value being made.
@@ -315,15 +350,19 @@ enum Task {
 }
 
 /// What coercion keeps while it writes.
-struct Coercion<'c, 'p> {
+struct Coercion<'c, 'p, 'x> {
   builder: &'c mut ModelBuilder,
   reporter: &'c mut Reporter,
+  /// Every module's scope: what a qualified enum value's prefix names.
+  scopes: &'c Scopes<'x>,
   /// The trees, and each source's text.
   raw: RawValues<'p>,
   /// Each primitive `core` materialises, with its definition: the primitive at index `i` is the
   /// definition `i`.
   primitives: &'c [(Primitive, DefId)],
   builtins: Builtins,
+  /// Every enum's values, by the enum and the name, the first of each name.
+  enums: BTreeMap<(DefId, Sym), MemberId>,
   /// The first source of a supplied package: every source below it is the built-in library's.
   supplied: u32,
   /// `Limits::max_value_steps`.
@@ -346,9 +385,11 @@ struct Coercion<'c, 'p> {
   items: Vec<ValueId>,
   /// The children of the list being opened.
   children: Vec<u32>,
+  /// The segments of the path being kept.
+  syms: Vec<Sym>,
 }
 
-impl<'p> Coercion<'_, 'p> {
+impl<'p> Coercion<'_, 'p, '_> {
   /// The values of `member`: its default, then each of its applications' arguments.
   fn member(&mut self, member: MemberId) {
     if let Some(&tree) = self.raw.defaults.get(&member) {
@@ -468,12 +509,15 @@ impl<'p> Coercion<'_, 'p> {
   /// Makes the rows of the tree `tree` against `ty`, written at `site`: the value, then what it
   /// holds, in pre-order. Answers the value's id, `None` for a tree lowering did not make.
   fn value(&mut self, tree: u32, ty: Option<TyId>, site: Site) -> Option<ValueId> {
-    let RawTree { root, source } = self.raw.trees.get(tree as usize).copied()?;
+    let tree = self.raw.trees.get(tree as usize).copied()?;
     let base = self.items.len();
-    self.stack.push(Task::Make { node: root, ty });
+    self.stack.push(Task::Make {
+      node: tree.root,
+      ty,
+    });
     while let Some(task) = self.stack.pop() {
       match task {
-        Task::Make { node, ty } => self.make(node, ty, source, site),
+        Task::Make { node, ty } => self.make(node, ty, tree, site),
         Task::Close { list, from } => {
           self
             .builder
@@ -487,12 +531,13 @@ impl<'p> Coercion<'_, 'p> {
     value
   }
 
-  /// Makes the row of `node`, written in the source `source` at `site`, against `ty`, and pushes
-  /// what it holds: the row's id goes to the open lists' rows.
-  fn make(&mut self, node: u32, ty: Option<TyId>, source: u32, site: Site) {
+  /// Makes the row of `node`, of `tree`, written at `site`, against `ty`, and pushes what it
+  /// holds: the row's id goes to the open lists' rows.
+  fn make(&mut self, node: u32, ty: Option<TyId>, tree: RawTree, site: Site) {
     let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
       return;
     };
+    let source = tree.source;
     let at = Location::new(source, raw.span);
     let id = self.builder.push_value(at, true);
     self.items.push(id);
@@ -553,7 +598,7 @@ impl<'p> Coercion<'_, 'p> {
       }
       Class::Leaf(base) => {
         self.path(id, raw.kind);
-        if let Err(refused) = self.leaf(id, node, source, base) {
+        if let Err(refused) = self.leaf(id, node, tree, base) {
           self.refuse(refused, source, ty, site);
         }
       }
@@ -618,7 +663,7 @@ impl<'p> Coercion<'_, 'p> {
       return self.non_zero(ty).map(Base::Int);
     }
     match self.builder.def_kind(def)? {
-      DefKind::Enum => Some(Base::Enum),
+      DefKind::Enum => Some(Base::Enum(def)),
       DefKind::Scalar | DefKind::InputObject => Some(Base::Kept),
       DefKind::Object | DefKind::Interface | DefKind::Union | DefKind::Directive => None,
     }
@@ -657,15 +702,17 @@ impl<'p> Coercion<'_, 'p> {
       .map(|&(primitive, _): &(Primitive, DefId)| primitive)
   }
 
-  /// Makes `id`, the row of `node` written in the source `source`, what `base` takes of it.
-  fn leaf(&mut self, id: ValueId, node: u32, source: u32, base: Base) -> Result<(), Refused> {
+  /// Makes `id`, the row of `node`, of `tree`, what `base` takes of it.
+  fn leaf(&mut self, id: ValueId, node: u32, tree: RawTree, base: Base) -> Result<(), Refused> {
+    let source = tree.source;
     let kind = self.kind(node);
     let refused = move |why: Why| Refused { node, why };
     match (base, kind) {
-      (Base::Kept | Base::Enum, _) => {
+      (Base::Kept, _) => {
         self.literal(id, node, source);
         Ok(())
       }
+      (Base::Enum(def), RawKind::Path(row)) => self.enum_value(id, node, row, def, tree),
       (Base::Bool, RawKind::Boolean(flag)) => {
         self.builder.set_bool(id, flag);
         Ok(())
@@ -810,6 +857,96 @@ impl<'p> Coercion<'_, 'p> {
     Ok(self.magnitude(converted).first().copied().unwrap_or(0))
   }
 
+  /// Makes `id` the value of the enum `def` that `node`, the path at `row` of `tree`, names. A
+  /// bare name is looked up under `def` and nothing else. A qualified one's segments but the last
+  /// are resolved once, as a type, where the value is written, and must name `def`: another enum,
+  /// a parameter, `NonZero` or a module does not fit, and a prefix the resolver refused leaves the
+  /// value unresolved and says nothing more, the resolver having said why.
+  fn enum_value(
+    &mut self,
+    id: ValueId,
+    node: u32,
+    row: u32,
+    def: DefId,
+    tree: RawTree,
+  ) -> Result<(), Refused> {
+    let refused = move |why: Why| Refused { node, why };
+    let Some(path) = self.raw.paths.get(row as usize).copied() else {
+      return Err(refused(Why::Kind));
+    };
+    let segments = self.raw.path_segments(path);
+    let (count, last) = match segments.last() {
+      Some(&(last, _)) => (segments.len(), last),
+      None => return Err(refused(Why::Kind)),
+    };
+    if path.written.is_none() {
+      return Err(refused(Why::Kind));
+    }
+    if !(matches!(path.root, Root::Relative) && count == 1) {
+      // A root and one segment, `~::RED`, has no prefix to name the enum.
+      if count < 2 {
+        return Err(refused(Why::Kind));
+      }
+      match self.prefix(row, path, tree) {
+        Resolved::Def(found) if found == def => {}
+        Resolved::Unresolved => return Ok(()),
+        Resolved::Def(_) | Resolved::NonZero { .. } | Resolved::Module(_) | Resolved::Param(_) => {
+          return Err(refused(Why::Kind));
+        }
+      }
+    }
+    match self.enums.get(&(def, last)) {
+      Some(&member) => {
+        self.builder.set_enum(id, def, member);
+        Ok(())
+      }
+      None => Err(refused(Why::NoValue { def, name: last })),
+    }
+  }
+
+  /// What the segments but the last of `path`, the path at `row` of `tree`, name, resolved the
+  /// first time it is asked and kept: as a type, in the module and the source of `tree`, with the
+  /// one generic parameter in scope that the path's first segment names, if it names one. The
+  /// resolver reports what does not resolve, at the path where it is written, whoever asks first.
+  fn prefix(&mut self, row: u32, path: RawPath, tree: RawTree) -> Resolved {
+    if let Some(resolved) = path.prefix {
+      return resolved;
+    }
+    let builder: &ModelBuilder = &*self.builder;
+    let all = self.raw.path_segments(path);
+    let prefix = all.get(..all.len().saturating_sub(1)).unwrap_or_default();
+    let segments: Vec<Segment<'_>> = prefix
+      .iter()
+      .map(|&(sym, span): &(Sym, SimpleSpan)| Segment {
+        name: builder.spelling(sym),
+        at: Location::new(tree.source, span),
+      })
+      .collect();
+    let one: [(&[u8], u32); 1];
+    let params: &[(&[u8], u32)] = match (path.param, prefix.first()) {
+      (Some(index), Some(&(first, _))) => {
+        one = [(builder.spelling(first), index)];
+        &one
+      }
+      _ => &[],
+    };
+    let request = Request {
+      module: tree.module,
+      source: SourceId::new(tree.source),
+      wanted: Wanted::Type,
+      position: Position::Other,
+      params,
+    };
+    let resolved =
+      self
+        .scopes
+        .resolve_segments(builder, self.reporter, &request, path.root, &segments);
+    if let Some(kept) = self.raw.paths.get_mut(row as usize) {
+      kept.prefix = Some(resolved);
+    }
+    resolved
+  }
+
   /// The syntactic kind of `node`: `null` for a node lowering did not make.
   fn kind(&self, node: u32) -> RawKind {
     self
@@ -907,7 +1044,15 @@ impl<'p> Coercion<'_, 'p> {
     let segments = match path.kept {
       Some(segments) => segments,
       None => {
-        let segments = self.builder.keep_segments(self.raw.path_segments(path));
+        self.syms.clear();
+        self.syms.extend(
+          self
+            .raw
+            .path_segments(path)
+            .iter()
+            .map(|&(sym, _): &(Sym, SimpleSpan)| sym),
+        );
+        let segments = self.builder.keep_segments(&self.syms);
         if let Some(path) = self.raw.paths.get_mut(row as usize) {
           path.kept = Some(segments);
         }
@@ -1122,6 +1267,24 @@ impl<'p> Coercion<'_, 'p> {
         ),
         Some(String::from("a byte is an integer from 0 to 2^8 - 1")),
       ),
+      Why::NoValue { def, name: wanted } => {
+        let builder: &ModelBuilder = &*self.builder;
+        let first = (def, Sym::new(0));
+        let last = (def, Sym::new(u32::MAX));
+        let mut candidates = self
+          .enums
+          .range(first..=last)
+          .map(|(&(_, sym), _): (&(DefId, Sym), &MemberId)| builder.spelling(sym));
+        let near: Option<String> = self
+          .scopes
+          .nearest(builder.spelling(wanted), &mut candidates)
+          .map(|spelled: &[u8]| format!("did you mean `{}`?", Excerpt(spelled)));
+        (
+          None,
+          format!("`{literal}` names no value of the enum `{name}`"),
+          near,
+        )
+      }
     };
     let mut report = match kind {
       Some(kind) => Diagnostic::builder(kind.code(), at)

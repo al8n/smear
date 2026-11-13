@@ -229,9 +229,12 @@ impl Analysis {
 ///   [`Limits::max_value_steps`]; a boolean; an integer in its width's range, read at any length;
 ///   a float, or an integer, finite in `f32` or `f64`; a string, cooked; for `id` a string or an
 ///   integer in `i32`'s range; for `bytes` a string's UTF-8 encoding or a list of integers from 0
-///   to 255; for `NonZero` an integer that is not zero. Any other scalar, an enum, a collection
-///   and an input object take any literal, kept as written, and so does a type that names a type
-///   parameter or can take no value, with nothing said. A value that does not fit is unresolved
+///   to 255; for `NonZero` an integer that is not zero; for an enum one of its values, a bare name
+///   looked up under that enum alone, and a qualified one whose prefix names that enum where the
+///   value is written, through any path or alias, the nearest value in its help when it names
+///   none. Any other scalar, a collection and an input object take any literal, kept as written,
+///   and so does a type that names a type parameter or can take no value, with nothing said. A
+///   prefix that names nothing is the resolver's to report. A value that does not fit is unresolved
 ///   and reported where it is written, with GraphQL's `invalid-default-value` or
 ///   `invalid-directive-argument-value`, but for a number out of the range of any width but the
 ///   32-bit signed one, or of `f32`, which is `width-overflow`, and zero for `NonZero`, which is
@@ -432,6 +435,7 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
   coerce::coerce(
     raw,
     &declarations,
+    &scopes,
     &sources,
     limits,
     &mut builder,

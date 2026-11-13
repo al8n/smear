@@ -83,8 +83,8 @@ use super::{
     AliasRow, ApplicationRow, BUILTIN_DIRECTIVES, BUILTIN_TYPES, BuiltinsRow, ContributionRow,
     DefRow, DescriptionRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED,
     LiteralRow, MemberRow, ModuleRow, NO_DEF, PackageRow, PathRow, Run, TyRow, TypeExprRow,
-    TypeParamRow, UNSET_MODULE, UNSET_TY, VALUE_BOOL, VALUE_BYTES, VALUE_FLOAT, VALUE_INT,
-    VALUE_LIST, VALUE_LITERAL, VALUE_NULL, VALUE_STRING, VALUE_UNRESOLVED, ValueRow,
+    TypeParamRow, UNSET_MODULE, UNSET_TY, VALUE_BOOL, VALUE_BYTES, VALUE_ENUM, VALUE_FLOAT,
+    VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_NULL, VALUE_STRING, VALUE_UNRESOLVED, ValueRow,
   },
   ty::PathRoot,
   value::LiteralKind,
@@ -925,6 +925,14 @@ impl ModelBuilder {
     let row = self.value_row(value);
     row.shape = VALUE_BOOL;
     row.payload = u32::from(flag);
+  }
+
+  /// Makes `value` the enum value `member` of the enum `def`.
+  pub fn set_enum(&mut self, value: ValueId, def: DefId, member: MemberId) {
+    let row = self.value_row(value);
+    row.shape = VALUE_ENUM;
+    row.def = def;
+    row.member = member;
   }
 
   /// Makes `value` the list of `elements`, each appended after it.

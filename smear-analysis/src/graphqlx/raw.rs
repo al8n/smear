@@ -14,8 +14,9 @@ use std::{collections::BTreeMap, vec::Vec};
 use tokora::{SimpleSpan, diagnostic::Location};
 
 use super::{
-  id::{ApplicationId, MemberId, Sym, dense},
+  id::{ApplicationId, MemberId, ModuleId, Sym, dense},
   model::{PathRoot, Segments},
+  resolve::{Resolved, Root},
 };
 
 /// The radix an integer literal is written in.
@@ -70,17 +71,26 @@ pub(crate) struct RawPath {
   /// Its root as the model records it: `None` for a root of a kind lowering does not know, which
   /// lowering reports.
   pub(crate) written: Option<PathRoot>,
-  /// Its segments: where its run of the table's segments starts, and how long it is.
+  /// Its root as the resolver reads it.
+  pub(crate) root: Root,
+  /// Its segments, each a symbol and where it is written: where its run of the table's segments
+  /// starts, and how long it is.
   pub(crate) segments: (u32, u32),
+  /// The generic parameter in scope that its first segment names, when it has no root: a
+  /// parameter shadows every module name, and only a first segment can be one.
+  pub(crate) param: Option<u32>,
   /// Its segments in the model's path pool, once coercion has kept them.
   pub(crate) kept: Option<Segments>,
+  /// What its segments but the last name, once coercion has asked.
+  pub(crate) prefix: Option<Resolved>,
 }
 
-/// One written value: its first node, and the source it is written in.
+/// One written value: its first node, and the module and the source it is written in.
 #[derive(Clone, Copy)]
 pub(crate) struct RawTree {
   pub(crate) root: u32,
   pub(crate) source: u32,
+  pub(crate) module: ModuleId,
 }
 
 /// One argument an application writes that its directive declares.
@@ -101,8 +111,8 @@ pub(crate) struct RawValues<'p> {
   pub(crate) nodes: Vec<RawNode>,
   /// Every path a node is.
   pub(crate) paths: Vec<RawPath>,
-  /// Every path's segments, each path's one run.
-  pub(crate) segments: Vec<Sym>,
+  /// Every path's segments, each a symbol and where it is written, each path's one run.
+  pub(crate) segments: Vec<(Sym, SimpleSpan)>,
   /// Every written value.
   pub(crate) trees: Vec<RawTree>,
   /// Each member's default, by the member: what the walk of the members looks a default up by.
@@ -129,15 +139,25 @@ impl<'p> RawValues<'p> {
     }
   }
 
-  /// Appends the path written from `written` through `segments`: its row of the paths.
-  pub(crate) fn push_path(&mut self, written: Option<PathRoot>, segments: &[Sym]) -> u32 {
+  /// Appends the path written from `written`, which the resolver reads as `root`, through
+  /// `segments`, whose first names the generic parameter `param` in scope: its row of the paths.
+  pub(crate) fn push_path(
+    &mut self,
+    written: Option<PathRoot>,
+    root: Root,
+    param: Option<u32>,
+    segments: impl Iterator<Item = (Sym, SimpleSpan)>,
+  ) -> u32 {
     let row = dense(self.paths.len());
-    let start = dense(self.segments.len());
-    self.segments.extend_from_slice(segments);
+    let start = self.segments.len();
+    self.segments.extend(segments);
     self.paths.push(RawPath {
       written,
-      segments: (start, dense(segments.len())),
+      root,
+      segments: (dense(start), dense(self.segments.len() - start)),
+      param,
       kept: None,
+      prefix: None,
     });
     row
   }
@@ -162,10 +182,15 @@ impl<'p> RawValues<'p> {
     }
   }
 
-  /// Appends the tree whose first node is `root`, written in the source `source`: its index.
-  pub(crate) fn push_tree(&mut self, root: u32, source: u32) -> u32 {
+  /// Appends the tree whose first node is `root`, written in the source `source` and in the module
+  /// `module`: its index.
+  pub(crate) fn push_tree(&mut self, root: u32, source: u32, module: ModuleId) -> u32 {
     let tree = dense(self.trees.len());
-    self.trees.push(RawTree { root, source });
+    self.trees.push(RawTree {
+      root,
+      source,
+      module,
+    });
     tree
   }
 
@@ -176,8 +201,9 @@ impl<'p> RawValues<'p> {
     file.get(span.start()..span.end()).unwrap_or_default()
   }
 
-  /// The segments of `path`: none for a run past the table, which no path has.
-  pub(crate) fn path_segments(&self, path: RawPath) -> &[Sym] {
+  /// The segments of `path`, each with where it is written: none for a run past the table, which
+  /// no path has.
+  pub(crate) fn path_segments(&self, path: RawPath) -> &[(Sym, SimpleSpan)] {
     let (start, len) = path.segments;
     let start = start as usize;
     self

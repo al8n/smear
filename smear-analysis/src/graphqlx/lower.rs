@@ -1533,7 +1533,7 @@ impl Lowering<'_, '_, '_> {
     let ty = self.ty(site, value.ty(), Position::Type);
     self.builder.set_member_type(member, ty);
     if let Some(default) = value.default_value() {
-      let tree = self.value(site.source.get(), default.value());
+      let tree = self.value(site, default.value());
       self.values.defaults.insert(member, tree);
     }
     self.member_applications(site, member, value.directives());
@@ -1607,23 +1607,24 @@ impl Lowering<'_, '_, '_> {
       self.type_args.truncate(from);
     }
     if let Some(arguments) = directive.arguments() {
-      self.application_arguments(source, application, def, path, arguments.arguments());
+      self.application_arguments(site, application, def, path, arguments.arguments());
     }
     application
   }
 
-  /// The arguments `written`, in the source `source`, of `application`, whose directive is
+  /// The arguments `written`, where `site` says, of `application`, whose directive is
   /// `directive`, named by `path`: each one the directive declares, found by its name, is kept, in
   /// the order of the directive's arguments, and its value read in that order; each one it does
   /// not declare is reported and dropped. One written twice is kept twice, in written order.
   fn application_arguments<S: AsRef<[u8]>>(
     &mut self,
-    source: u32,
+    site: Site<'_>,
     application: ApplicationId,
     directive: DefId,
     path: &Path<S>,
     written: &[ConstArgument<S>],
   ) {
+    let source = site.source.get();
     let mut kept: Vec<(MemberId, Location, &ConstInputValue<S>)> =
       Vec::with_capacity(written.len());
     for argument in written {
@@ -1644,7 +1645,7 @@ impl Lowering<'_, '_, '_> {
     // A stable sort: two of one name keep their written order.
     kept.sort_by_key(|&(member, _, _): &(MemberId, Location, &ConstInputValue<S>)| member);
     for (member, at, value) in kept {
-      let tree = self.value(source, value);
+      let tree = self.value(site, value);
       self.values.arguments.push(RawArgument {
         application,
         argument: member,
@@ -1692,11 +1693,14 @@ impl Lowering<'_, '_, '_> {
     self.reporter.report(report.build());
   }
 
-  /// Reads the written value `value`, written in the source `source`, into a tree: one node for
-  /// each literal it writes, in pre-order, each with its syntactic kind and where it is written, a
-  /// number with its radix, a boolean with its value, and a path with its root and its segments,
-  /// interned. Walked with an explicit stack. Nothing in it is resolved. Answers the tree.
-  fn value<S: AsRef<[u8]>>(&mut self, source: u32, value: &ConstInputValue<S>) -> u32 {
+  /// Reads the written value `value`, written where `site` says, into a tree: one node for each
+  /// literal it writes, in pre-order, each with its syntactic kind and where it is written, a
+  /// number with its radix, a boolean with its value, and a path with its root, as the model
+  /// records it and as the resolver reads it, its segments, interned, each with where it is
+  /// written, and the generic parameter in scope its first segment names when it has no root.
+  /// Walked with an explicit stack. Nothing in it is resolved. Answers the tree.
+  fn value<S: AsRef<[u8]>>(&mut self, site: Site<'_>, value: &ConstInputValue<S>) -> u32 {
+    let source = site.source.get();
     let root = dense(self.values.nodes.len());
     let mut pending: Vec<Read<'_, S>> = vec![Read::Enter(value)];
     while let Some(next) = pending.pop() {
@@ -1721,13 +1725,27 @@ impl Lowering<'_, '_, '_> {
           LitInt::Binary(_) => Radix::Binary,
         }),
         ConstInputValue::Enum(path) => {
-          let written = self.written_path(path.source());
+          let path = path.source();
+          let written = self.written_path(path);
           // `PathRoot` is `#[non_exhaustive]`: a root of a kind lowering does not know is reported,
           // and the path is kept without it.
           if written.is_none() {
             self.unknown(source, span);
           }
-          RawKind::Path(self.values.push_path(written, &self.segments))
+          let start = resolve::root(path, site.source);
+          let param = match (start, path.segments().first()) {
+            (resolve::Root::Relative, Some(first)) => {
+              resolve::param(site.params, first.source().as_ref())
+            }
+            _ => None,
+          };
+          let spans = path.segments().iter().map(|name: &Name<S>| *name.as_span());
+          RawKind::Path(self.values.push_path(
+            written,
+            start,
+            param,
+            self.segments.iter().copied().zip(spans),
+          ))
         }
         ConstInputValue::Null(_) => RawKind::Null,
         ConstInputValue::List(_) => RawKind::List,
@@ -1768,7 +1786,7 @@ impl Lowering<'_, '_, '_> {
         | ConstInputValue::Null(_) => {}
       }
     }
-    self.values.push_tree(root, source)
+    self.values.push_tree(root, source, site.module)
   }
 
   /// The id of the next direct member of the definition the second walk is in.
