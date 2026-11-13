@@ -223,7 +223,10 @@ All notable changes to Smear are documented in this file.
   type argument is an integer primitive at least one bit wide, written without `!`: `NonZero` of
   a float, `string`, an object, a list, `u0`, a type parameter or an integer written with `!` is
   the new `smear::graphqlx::nonzero-argument`, where it is written, which is then all a map or a
-  set keyed by it is refused with. A rule says nothing about a contribution a
+  set keyed by it is refused with. And a definition's type parameters have distinct names: a type
+  parameter with the name of an earlier one is the new
+  `smear::graphqlx::duplicate-type-parameter`, at its name, with a label at the first of that name.
+  A rule says nothing about a contribution a
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the
   models it builds, for `smear`'s own tests; it is not API.

@@ -19,6 +19,7 @@
 
 mod collection_arity;
 mod duplicate_schema_definition;
+mod duplicate_type_parameter;
 mod generic_enum;
 mod marker_misuse;
 mod non_zero_argument;
@@ -28,7 +29,8 @@ mod type_ref_misuse;
 
 use self::{
   collection_arity::CollectionArity, duplicate_schema_definition::DuplicateSchemaDefinition,
-  generic_enum::GenericEnum, marker_misuse::MarkerMisuse, non_zero_argument::NonZeroArgument,
+  duplicate_type_parameter::DuplicateTypeParameter, generic_enum::GenericEnum,
+  marker_misuse::MarkerMisuse, non_zero_argument::NonZeroArgument,
   orphan_extension::OrphanExtension, schema_outside_root::SchemaOutsideRoot,
   type_ref_misuse::TypeRefMisuse,
 };
@@ -236,8 +238,9 @@ rule_set! {
   /// the root package adds to a built-in, none of which may give it a built-in meaning; an enum
   /// takes no type parameter; a marker has no field and is named only in `implements` and in
   /// bounds, and a scalar, an enum, an input object or a union implements markers alone; a set has
-  /// one type parameter and a map two; `TypeRef` stands only in a directive's arguments; and
-  /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`.
+  /// one type parameter and a map two; `TypeRef` stands only in a directive's arguments;
+  /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; and
+  /// a definition's type parameters have distinct names.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -248,6 +251,8 @@ rule_set! {
     collection_arity: CollectionArity => [super::DiagnosticKind::CollectionArity.code()],
     type_ref_misuse: TypeRefMisuse => [super::DiagnosticKind::TypeRefMisuse.code()],
     non_zero_argument: NonZeroArgument => [super::DiagnosticKind::NonZeroArgument.code()],
+    duplicate_type_parameter: DuplicateTypeParameter
+      => [super::DiagnosticKind::DuplicateTypeParameter.code()],
   }
 }
 

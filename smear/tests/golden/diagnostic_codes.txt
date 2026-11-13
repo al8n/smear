@@ -9,6 +9,7 @@ DiagnosticKind::AmbiguousGlob = smear::graphqlx::ambiguous-glob
 DiagnosticKind::CollectionArity = smear::graphqlx::collection-arity
 DiagnosticKind::DuplicateFilePath = smear::graphqlx::duplicate-file-path
 DiagnosticKind::DuplicatePackageName = smear::graphqlx::duplicate-package-name
+DiagnosticKind::DuplicateTypeParameter = smear::graphqlx::duplicate-type-parameter
 DiagnosticKind::FilePathUse = smear::graphqlx::file-path-use
 DiagnosticKind::GenericArity = smear::graphqlx::generic-arity
 DiagnosticKind::GenericDefault = smear::graphqlx::generic-default

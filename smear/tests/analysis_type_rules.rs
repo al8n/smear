@@ -1,8 +1,9 @@
 //! The GraphQLx analyzer's rules on what is judged of types: a marker has no field, is named only
 //! in `implements` and in bounds, and is what a scalar, an enum, an input object or a union
 //! implements; a set has one type parameter and a map two; `TypeRef` stands only in a directive's
-//! arguments; and `NonZero`'s argument is an integer primitive. Each rule says nothing within what
-//! a phase refused, and quotes a name only as an excerpt.
+//! arguments; `NonZero`'s argument is an integer primitive; and a definition's type parameters
+//! have distinct names. Each rule says nothing within what a phase refused, and quotes a name only
+//! as an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -28,6 +29,9 @@ const TYPEREF: &str = "smear::graphqlx::typeref-misuse";
 
 /// The code of `NonZero` of what is no integer primitive.
 const NONZERO: &str = "smear::graphqlx::nonzero-argument";
+
+/// The code of a type parameter with the name of an earlier one.
+const DUPLICATE: &str = "smear::graphqlx::duplicate-type-parameter";
 
 /// The code of a count of type arguments that does not match.
 const ARITY: &str = "smear::graphqlx::generic-arity";
@@ -520,6 +524,51 @@ fn non_zeros_argument_is_an_integer_primitive() {
 }
 
 #[test]
+fn a_type_parameter_is_named_once() {
+  // A second `T`, once; a third and a fourth `A`, each against the first `A`; a directive's; and
+  // the names of one definition in another say nothing.
+  let text = "type P<T, T> {\n  id: ID\n}\ntype Q<A, B, A, A> {\n  id: ID\n}\n\
+              directive @d<X, X> on OBJECT\ntype R<A, B, T> {\n  id: ID\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let first_a = named(schema, text, "Q<", "A", 0);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DUPLICATE,
+        named(schema, text, ", ", "T", 0),
+        Some(named(schema, text, "P<", "T", 0))
+      ),
+      (DUPLICATE, named(schema, text, ", ", "A", 0), Some(first_a)),
+      (DUPLICATE, named(schema, text, ", ", "A", 1), Some(first_a)),
+      (
+        DUPLICATE,
+        named(schema, text, ", ", "X", 0),
+        Some(named(schema, text, "@d<", "X", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let refused = |param: &str, def: &str| -> String {
+    format!(
+      "the type parameter `{param}` of `{def}` has the name of an earlier one, and a definition's \
+       type parameters have distinct names"
+    )
+  };
+  assert_eq!(
+    messages(&analysis),
+    [
+      refused("T", "P"),
+      refused("A", "Q"),
+      refused("A", "Q"),
+      refused("X", "@d"),
+    ]
+  );
+}
+
+#[test]
 fn a_rule_says_nothing_where_a_phase_spoke() {
   // Each refusal beside a phase's error in the same definition: the phase's diagnostic alone.
   for (text, expected) in [
@@ -541,6 +590,7 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
       "type F {\n  n: NonZero<Float>\n  x: Missing\n}\n",
       UNDEFINED,
     ),
+    ("type F<T, T> {\n  x: Missing\n}\n", UNDEFINED),
   ] {
     let analysis = analyze_one(text);
     assert_eq!(codes(&analysis), [expected], "{text}");
@@ -567,6 +617,10 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
     (
       "type F {\n  n: NonZero<Float>\n}\ntype G {\n  x: Missing\n}\n",
       NONZERO,
+    ),
+    (
+      "type F<T, T> {\n  id: ID\n}\ntype G {\n  x: Missing\n}\n",
+      DUPLICATE,
     ),
   ] {
     let analysis = analyze_one(text);
@@ -610,4 +664,19 @@ fn long_names_in_the_rules_are_quoted_as_excerpts() {
     "scalar {name}\ntype Query {{\n  n: NonZero<{name}>\n}}\n"
   ));
   assert_eq!(messages(&analysis), [NONZERO_MESSAGE]);
+
+  // A definition named with four kilobytes, of two type parameters each named with four kilobytes
+  // too.
+  let name = "D".repeat(4096);
+  let param = "P".repeat(4096);
+  let analysis = analyze_text(&format!("scalar {name}<{param}, {param}>\n"));
+  assert_eq!(
+    messages(&analysis),
+    [format!(
+      "the type parameter `{}` of `{}` has the name of an earlier one, and a definition's type \
+       parameters have distinct names",
+      quoted("P"),
+      quoted("D")
+    )]
+  );
 }

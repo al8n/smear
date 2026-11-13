@@ -186,6 +186,11 @@ pub enum DiagnosticKind {
   /// being `NonZero` of the integer it spells, and reported where `NonZero` is written, with a
   /// label at its type argument.
   NonZeroArgument,
+  /// A type parameter with the name of an earlier type parameter of its definition. A type
+  /// argument binds by position, and the definition names a parameter by its name, which would
+  /// name the first of the two alone. Reported at the later parameter's name, with a label at the
+  /// first of that name.
+  DuplicateTypeParameter,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -225,6 +230,7 @@ impl DiagnosticKind {
     Self::CollectionArity,
     Self::TypeRefMisuse,
     Self::NonZeroArgument,
+    Self::DuplicateTypeParameter,
     Self::ResourceLimit,
   ];
 
@@ -262,6 +268,7 @@ impl DiagnosticKind {
       Self::CollectionArity => Code::new("smear::graphqlx::collection-arity"),
       Self::TypeRefMisuse => Code::new("smear::graphqlx::typeref-misuse"),
       Self::NonZeroArgument => Code::new("smear::graphqlx::nonzero-argument"),
+      Self::DuplicateTypeParameter => Code::new("smear::graphqlx::duplicate-type-parameter"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -299,6 +306,7 @@ impl DiagnosticKind {
       Self::CollectionArity => "wrong number of a collection's type parameters",
       Self::TypeRefMisuse => "`TypeRef` where it may not stand",
       Self::NonZeroArgument => "invalid `NonZero` argument",
+      Self::DuplicateTypeParameter => "duplicate type parameter",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -336,6 +344,7 @@ impl DiagnosticKind {
       | Self::CollectionArity
       | Self::TypeRefMisuse
       | Self::NonZeroArgument
+      | Self::DuplicateTypeParameter
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }

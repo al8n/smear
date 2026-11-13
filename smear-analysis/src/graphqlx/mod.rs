@@ -95,8 +95,9 @@
 //! as the type of a directive definition's argument or of an input field, under lists alone:
 //! anywhere else it is `smear::graphqlx::typeref-misuse`. And `NonZero` makes an integer never
 //! zero: `NonZero` of what is no integer primitive at least one bit wide, written without `!`, is
-//! `smear::graphqlx::nonzero-argument`. A rule says nothing about a contribution a phase already
-//! refused something in.
+//! `smear::graphqlx::nonzero-argument`. And a definition's type parameters have distinct names: a
+//! type parameter with the name of an earlier one is `smear::graphqlx::duplicate-type-parameter`.
+//! A rule says nothing about a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and
