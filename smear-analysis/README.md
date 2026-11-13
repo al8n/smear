@@ -27,9 +27,9 @@ and arguments as written, what it resolves to, and its type: the complete instan
 argument left out filled from its default and an alias such as `NonZeroU32` expanded, each type
 interned once, so that `==` on two type ids is type equality; every application with its type
 arguments and its arguments; every value, coerced to the type expected where it stands, each value
-nested in it one of its own, and a custom scalar's but `null` kept as written; and the schema,
-with its contributions, one for each schema item, its description, its roots, written or presumed,
-and its applications.
+nested in it one of its own, an input object's fields found by name and kept in its order, and a
+custom scalar's but `null` kept as written; and the schema, with its contributions, one for each
+schema item, its description, its roots, written or presumed, and its applications.
 `Model::satisfies` answers whether a type satisfies an interface or a marker, and
 `Model::satisfies_ty` whether it satisfies one interface type exactly, its arguments' `!` included:
 by declaration, read off the `implements` entries and the bounds the model holds, with `core`'s
@@ -45,19 +45,22 @@ expected of it is refused where it is written, with GraphQL's `smear::schema::in
 or `invalid-directive-argument-value`, an integer read at any length, a decimal one past 38
 significant digits within `Limits::max_value_steps`, and range-checked against its width,
 `smear::graphqlx::width-overflow` past any width but the 32-bit signed one or past `f32`, and
-`smear::graphqlx::nonzero-zero` for a zero where `NonZero` is expected. An application's argument
+`smear::graphqlx::nonzero-zero` for a zero where `NonZero` is expected. An object literal's field
+the input object does not declare is `smear::schema::undefined-input-object-field`, a required field
+given `null` or left out is `smear::schema::missing-required-input-object-field`, and an input
+object its own package makes OneOf takes exactly one field, not `null`. An application's argument
 left out takes a copy of its default, and a required one left out is
-`smear::schema::missing-required-directive-argument`; the copies, the required arguments left out,
-the lists a value written alone stands for where a list is expected and the conversion of a decimal
-integer of more than 38 significant digits are bounded by `Limits::max_value_steps`. It resolves
-every module's `use` items too, globs and string sources included, against scopes that end with the
-prelude and the packages each package may reach. The built-in packages, `core`, `alloc` and `std`,
-are one embedded GraphQLx file each, parsed on every analysis. `graphqlx::analyze_with` is the same
-analysis with the parser layer the caller passes, such as `smear-parser`'s lossless layer, which
-recovers, so the well-formed rest of a broken file is analyzed, and it answers `Trees` beside the
-`Analysis`: what that layer kept for each file it read. Each contribution, member and inline module
-answers its extent, where it is written in its file, and `Trees::node` answers the node of a kept
-tree that an extent was written as.
+`smear::schema::missing-required-directive-argument`; the copies, the required arguments and fields
+left out, the lists a value written alone stands for where a list is expected and the conversion of
+a decimal integer of more than 38 significant digits are bounded by `Limits::max_value_steps`. It
+resolves every module's `use` items too, globs and string sources included, against scopes that
+end with the prelude and the packages each package may reach. The built-in packages, `core`, `alloc`
+and `std`, are one embedded GraphQLx file each, parsed on every analysis. `graphqlx::analyze_with`
+is the same analysis with the parser layer the caller passes, such as `smear-parser`'s lossless
+layer, which recovers, so the well-formed rest of a broken file is analyzed, and it answers `Trees`
+beside the `Analysis`: what that layer kept for each file it read. Each contribution, member and
+inline module answers its extent, where it is written in its file, and `Trees::node` answers the
+node of a kept tree that an extent was written as.
 
 Rules are visitors. A `graphqlx::Visitor` implements the hooks it needs, one for each entity a walk
 enters, leaves or reaches, and `graphqlx::visit` walks an analysis's model for it over the packages

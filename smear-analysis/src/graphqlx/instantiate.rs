@@ -230,8 +230,9 @@ fn meaning(declarations: &Declarations<'_, '_>, sources: &SourceMap, builder: &m
 /// the root package for a GraphQL built-in it replaces, whose definition it writes though the
 /// definition stays the built-in's, and `core` for a primitive `core` materialises. It is the
 /// package `SourceMap::written_by` answers of the definition's own contribution, which lowering
-/// appends where the declaration is written, and which the orphan rule reads.
-fn own_package(declarations: &Declarations<'_, '_>, def: DefId) -> Option<PackageId> {
+/// appends where the declaration is written, and which the orphan rule reads. Coercion tells an
+/// input object OneOf with it too.
+pub(crate) fn own_package(declarations: &Declarations<'_, '_>, def: DefId) -> Option<PackageId> {
   let declaration = declarations.defs.get(def.get() as usize)?;
   let module = declarations
     .modules
@@ -276,8 +277,8 @@ fn stands_for(
 }
 
 /// Whether an application of `def` that its own package `own` wrote, in any of its contributions,
-/// applies `directive`.
-fn applies(
+/// applies `directive`. Coercion asks it whether an input object applies `core`'s `@oneOf`.
+pub(crate) fn applies(
   builder: &ModelBuilder,
   sources: &SourceMap,
   own: PackageId,

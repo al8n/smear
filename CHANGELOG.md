@@ -384,8 +384,14 @@ All notable changes to Smear are documented in this file.
   255, either one `ValueKind::Bytes`, a new kind; for `NonZero` an integer that is not zero; and for
   an enum one of its values, as `ValueKind::Enum`, a bare name looked up under the enum expected
   alone, and a qualified one whose prefix names that enum where the value is written, through any
-  path or alias, a name that is none of its values having the nearest in its help. A custom scalar's
-  value but `null` is its `Literal`, and so, in this version, is an input object's and a
+  path or alias, a name that is none of its values having the nearest in its help. For an input
+  object, an object literal is a `ValueKind::Object` of the fields it sets, each found by name, in
+  the input object's order, one written twice twice, each value against its field's type: a field
+  the input object does not declare is GraphQL's `smear::schema::undefined-input-object-field`,
+  with the nearest field in its help, and is not kept; a required field given `null`, or left out,
+  is `smear::schema::missing-required-input-object-field`; an input object its own package applies
+  `@oneOf` to takes exactly one field, and not `null`; and, in this version, a field left out is
+  absent. A custom scalar's value but `null` is its `Literal`, and so, in this version, is a
   collection's, and a value whose type names a type parameter or can take no value. A value that
   does not fit is unresolved and reported where it is written, with GraphQL's
   `smear::schema::invalid-default-value` or `invalid-directive-argument-value`, but for a number out
@@ -400,14 +406,15 @@ All notable changes to Smear are documented in this file.
   `missing-required-directive-argument`, at the application's path, with a label at the argument.
   A new `Limits::max_value_steps`, 2^20 by default, bounds what no literal writes: the lists a
   value written alone stands for, each value of a copy, charged before the copy's first, and each
-  required argument found left out; and the one reading more than linear, the conversion of a
-  decimal integer of more than 38 significant digits, charged before it as
-  `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, past which the integer is
-  `resource-limit`; a hexadecimal, octal or binary integer costs nothing. Past it a value is
-  `resource-limit` where it is written, and an application once, at its path, its written arguments
-  kept and a copy made whole or not at all; the built-in library's own values cost nothing, and a
-  copy made for an application it writes neither. Then smear's rules walk the model, each a visitor
-  on the public trait. A program defines its schema at most once: each schema definition the root
+  required argument, and each required field of an object literal, found left out; and the one
+  reading more than linear, the conversion of a decimal integer of more than 38 significant
+  digits, charged before it as `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, past
+  which the integer is `resource-limit`; a hexadecimal, octal or binary integer costs nothing. Past
+  it a value is `resource-limit` where it is written, an application once, at its path, its
+  written arguments kept and a copy made whole or not at all, and an object literal once, at the
+  literal; the built-in library's own values cost nothing, and a copy made for an application it
+  writes neither. Then smear's rules walk the model, each a visitor on the public trait. A program
+  defines its schema at most once: each schema definition the root
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
   code, with a label at the first. And the schema is the root package's: each schema definition
   and each schema extension a dependency writes is the new

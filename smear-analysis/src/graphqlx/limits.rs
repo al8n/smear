@@ -332,14 +332,14 @@ impl Limits {
   /// each value nested in the default counting one; a list that a written value stands for where a
   /// list is expected, one for each level of list between the value and its type, as
   /// `tags: [[Int]] = 1` stands for a list of a list of `1`; a required argument an application
-  /// leaves out, which is reported; and converting a decimal integer of more than 38 significant
-  /// digits, the most `u128` arithmetic reads whatever they spell, to its value, charged before the
-  /// conversion as an upper bound of its work: `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for
-  /// `d` digits, its chunks of nine digits times the 32-bit limbs of its value. A hexadecimal,
-  /// octal or binary integer converts in one pass and takes none. The built-in library's own
-  /// values take none: its defaults where it writes them, and a copy made for an application it
-  /// writes. A copy of one of its defaults made for an application a supplied package writes, a
-  /// bare `@deprecated` among them, is charged.
+  /// leaves out, and a required field an object literal leaves out, each of which is reported; and
+  /// converting a decimal integer of more than 38 significant digits, the most `u128` arithmetic
+  /// reads whatever they spell, to its value, charged before the conversion as an upper bound of
+  /// its work: `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine
+  /// digits times the 32-bit limbs of its value. A hexadecimal, octal or binary integer converts in
+  /// one pass and takes none. The built-in library's own values take none: its defaults where it
+  /// writes them, and a copy made for an application it writes. A copy of one of its defaults made
+  /// for an application a supplied package writes, a bare `@deprecated` among them, is charged.
   ///
   /// Past it, a written value whose lists cannot all be paid for is `resource-limit` where it is
   /// written, and the level of list that could not be paid for is its one unresolved row, under
@@ -348,9 +348,11 @@ impl Limits {
   /// unresolved. An application whose next argument left out cannot be paid for is
   /// `resource-limit` at its path, once, and is filled no further: what it writes is still
   /// coerced, an argument the budget kept from being filled is absent, a required one it kept from
-  /// being reported is not reported, and a copy is made whole or not at all. At `0`, no default
-  /// fills an argument, no written value stands for a list, and no decimal integer of more than 38
-  /// significant digits is read: a decimal `u128::MAX` is `resource-limit`.
+  /// being reported is not reported, and a copy is made whole or not at all. An object literal
+  /// whose next required field left out cannot be paid for is `resource-limit` at the literal,
+  /// once, and the rest of its required fields are not reported; what it writes is still made. At
+  /// `0`, no default fills an argument, no written value stands for a list, and no decimal integer
+  /// of more than 38 significant digits is read: a decimal `u128::MAX` is `resource-limit`.
   ///
   /// The default is 2^20: one copied value for each of a million applications, so a program of a
   /// hundred thousand applications that each leave eight defaults out stays inside it. The longest

@@ -36,8 +36,9 @@
 //!    `string` a string, cooked; `id` a string, or an integer in `i32`'s range, kept an integer;
 //!    `bytes` a string, its UTF-8 encoding, or a list of integers from 0 to 255, one value of its
 //!    bytes either way; `NonZero` of an integer primitive an integer in that primitive's range
-//!    that is not zero; an enum a path that names one of its values. Any other scalar takes any
-//!    literal, kept as written, and so does an input object and a collection in this version.
+//!    that is not zero; an enum a path that names one of its values; an input object an object
+//!    literal, read as below. Any other scalar takes any literal, kept as written, a collection
+//!    among them in this version.
 //!
 //! An enum value's name is looked up among the values of the enum expected, every enum's values
 //! being kept by the enum and the name, the first of each name. A bare name is looked up there
@@ -48,6 +49,24 @@
 //! the resolver refuses is the resolver's to report, at the path, whoever asks first; the value is
 //! then unresolved, and nothing more is said. A name that is none of the enum's values does not
 //! fit, and its help names the nearest of them, under the analysis's one near-miss budget.
+//!
+//! An object literal against an input object is read once and kept, by the literal and the input
+//! object: a field whose name is the name of one of the input object's fields, the first of that
+//! name, sets that field; the fields it sets are sorted by the field, one written twice kept twice
+//! in written order; and how many fields it writes is kept, unknown ones counted. Its row is an
+//! `Object`, whose entries are the fields it sets in the input object's order, each named where its
+//! name is written, its value coerced against the field's type as written. Where it is written, a
+//! field the input object does not declare is `undefined-input-object-field`, at its name, with the
+//! nearest of the input object's fields in its help, and is not kept: its value is no row. A
+//! required field, one written non-null with no default, given `null` is
+//! `missing-required-input-object-field`, at the `null`, its value one unresolved row; one the
+//! literal leaves out is the same code, at the literal, with a label at the field. A later field of
+//! a name an earlier one has is never asked for, since no literal can set it. An input object its
+//! own package applies `core`'s `@oneOf` to, in its definition or in an extension of its own,
+//! takes a literal of exactly one field, unknown ones counted, whose value is not `null`: another
+//! literal is refused with the site's code, at the literal, or at the `null`, which is one
+//! unresolved row, and is an `Object` all the same, its fields coerced. In this version a field the
+//! literal leaves out is absent, whatever its default.
 //!
 //! A node that does not fit is one row, unresolved, typed with its type, and is not descended: an
 //! element of a list does not fit on its own, and the list keeps the others. It is reported where
@@ -94,8 +113,9 @@
 //!
 //! A written row is a written literal, which `Limits::max_source_bytes` bounds. What no literal
 //! writes is a step of `Limits::max_value_steps`: each list a written lone value stands for; each
-//! row of a copy, its whole count charged before its first row; and each required argument found
-//! left out. So is the one reading that is more than linear: a decimal integer of more than 38
+//! row of a copy, its whole count charged before its first row; and each required argument, and
+//! each required field of an object literal, found left out. So is the one reading that is more
+//! than linear: a decimal integer of more than 38
 //! significant digits, the most `u128` arithmetic reads whatever they spell, is converted nine
 //! digits at a time over a vector of limbs, and that is charged first, an upper bound of its limb
 //! updates; one the budget cannot pay for is `resource-limit` where it is written, and unresolved.
@@ -128,12 +148,12 @@ use tokora::{
 };
 
 use super::{
-  builtin::{ALLOC, CORE, TYPE},
+  builtin::{ALLOC, CORE, DIRECTIVE, TYPE},
   code::{DiagnosticKind, schema},
   declare::Declarations,
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{ApplicationId, DefId, MemberId, SourceId, Sym, TyId, TypeExprId, ValueId, dense},
-  instantiate::binding,
+  instantiate::{applies, binding, own_package},
   limits::Limits,
   model::{Bytes, DefKind, LiteralKind, ModelBuilder, Primitive, Resolution, Shape, Text},
   raw::{Radix, RawArgument, RawKind, RawNode, RawPath, RawTree, RawValues, UNREAD},
@@ -169,17 +189,29 @@ pub(crate) fn coerce(
     id: binding(declarations, builder, ALLOC, TYPE, b"id"),
     bytes: binding(declarations, builder, ALLOC, TYPE, b"bytes"),
   };
-  // Every enum's values, the first of each name: what an enum value's name is looked up by.
-  let mut enums: BTreeMap<(DefId, Sym), MemberId> = BTreeMap::new();
+  let one_of_directive = binding(declarations, builder, CORE, DIRECTIVE, b"oneOf");
+  // Every enum's values and every input object's fields, the first of each name: what an enum
+  // value's name, and an object literal's field, is looked up by.
+  let mut members: BTreeMap<(DefId, Sym), MemberId> = BTreeMap::new();
+  // The input objects their own package applies `@oneOf` to, in id order.
+  let mut one_of: Vec<DefId> = Vec::new();
   for index in 0..builder.def_count() {
     let def = DefId::new(index);
-    if builder.def_kind(def) != Some(DefKind::Enum) {
+    let kind = builder.def_kind(def);
+    if !matches!(kind, Some(DefKind::Enum | DefKind::InputObject)) {
       continue;
     }
     for member in builder.def_members(def) {
       if let Some(name) = builder.member_name(member) {
-        enums.entry((def, name)).or_insert(member);
+        members.entry((def, name)).or_insert(member);
       }
+    }
+    if kind == Some(DefKind::InputObject)
+      && let Some(directive) = one_of_directive
+      && let Some(own) = own_package(declarations, def)
+      && applies(builder, sources, own, def, directive)
+    {
+      one_of.push(def);
     }
   }
   let mut coercion = Coercion {
@@ -189,7 +221,13 @@ pub(crate) fn coerce(
     raw,
     primitives: &declarations.primitives,
     builtins,
-    enums,
+    members,
+    one_of,
+    required: Vec::new(),
+    inputs: Vec::new(),
+    set_fields: Vec::new(),
+    objects: BTreeMap::new(),
+    entries: Vec::new(),
     supplied: sources.package_sources(ROOT).start(),
     max_steps: limits.max_value_steps(),
     spent: 0,
@@ -211,6 +249,7 @@ pub(crate) fn coerce(
     chain: Vec::new(),
   };
   coercion.list_arguments();
+  coercion.list_fields();
   for index in 0..coercion.builder.def_count() {
     let def = DefId::new(index);
     let count = coercion.builder.def_applications(def).len();
@@ -298,6 +337,32 @@ struct Listed {
   default: Option<u32>,
 }
 
+/// An input object's fields that an object literal leaving them out does something about: its run
+/// of the phase's required fields, each written non-null with no default, in member order.
+#[derive(Clone, Copy)]
+struct Input {
+  def: DefId,
+  required: (u32, u32),
+}
+
+/// A field an object literal sets: the input object's field, where its name is written, in the
+/// literal's source, and its value's node.
+#[derive(Clone, Copy)]
+struct SetField {
+  field: MemberId,
+  name: SimpleSpan,
+  node: u32,
+}
+
+/// What is read of an object literal against an input object: its run of the phase's fields it
+/// sets, sorted by the field, and how many fields it writes in all, unknown ones counted.
+#[derive(Clone, Copy)]
+struct Fields {
+  start: u32,
+  len: u32,
+  written: u32,
+}
+
 /// The range of an integer type: the integer primitive `width` bits wide, signed when `signed`,
 /// and never zero when `non_zero`.
 #[derive(Clone, Copy)]
@@ -329,7 +394,9 @@ enum Base {
   Bytes,
   /// This enum.
   Enum(DefId),
-  /// Any literal, kept as written: a custom scalar, a collection, `TypeRef` and an input object.
+  /// This input object.
+  Object(DefId),
+  /// Any literal, kept as written: a custom scalar, a collection and `TypeRef`.
   Kept,
 }
 
@@ -346,7 +413,10 @@ enum Class {
   List(TyId),
   /// Any other node against a list of this element: a `List` row, then the same node against it.
   Lone(TyId),
-  /// A node against a named type: one row, its kind told by what the type takes.
+  /// An object literal against the input object `def`, its fields' rows of the trees starting at
+  /// `first`: an `Object` row, then each field it sets against the field's type.
+  Object { def: DefId, first: u32 },
+  /// Any other node against a named type: one row, its kind told by what the type takes.
   Leaf(Base),
 }
 
@@ -375,6 +445,23 @@ enum Why {
   /// A decimal integer of `digits` significant digits whose conversion, `cost` steps, the budget
   /// could not pay for.
   Costly { digits: u64, cost: u32 },
+  /// `null` for `field`, a required field of the input object `def`.
+  Required { def: DefId, field: MemberId },
+  /// A literal of the OneOf input object `def` that writes `written` fields, not one.
+  OneOf { def: DefId, written: u32 },
+  /// `null` for the one field a literal of the OneOf input object `def` writes.
+  OneOfNull { def: DefId },
+}
+
+/// The code a node that does not fit is reported with.
+#[derive(Clone, Copy)]
+enum Coded {
+  /// The site's: GraphQL's code for a default, or for a directive's argument, that does not fit.
+  Site,
+  /// One of smear's own.
+  Kind(DiagnosticKind),
+  /// One of GraphQL's that is the same at every site, with its label.
+  Schema(Code, &'static str),
 }
 
 /// A node that does not fit, and why: the node may be an element of the value being made.
@@ -423,13 +510,38 @@ struct Kept {
 // a rare kind reads lives in a table of its own: a `bytes` value's bytes.
 const _: () = assert!(core::mem::size_of::<Kept>() <= 128);
 
+/// A node to make: the node, the type it is made against, the tree it is of, and how.
+#[derive(Clone, Copy)]
+struct Making {
+  node: u32,
+  ty: Option<TyId>,
+  tree: RawTree,
+  mode: Mode,
+}
+
+impl Making {
+  /// `node` against `ty`, of the same tree and made the same way.
+  fn child(self, node: u32, ty: Option<TyId>) -> Self {
+    Self { node, ty, ..self }
+  }
+}
+
 /// One step of making a tree's rows.
 #[derive(Clone, Copy)]
 enum Task {
-  /// Make the row of `node` against `ty`.
-  Make { node: u32, ty: Option<TyId> },
-  /// Give the list `list` the rows made since `from` among the open lists' rows.
+  /// Make a node's row, and push what it holds.
+  Make(Making),
+  /// Make a node's row one unresolved row, and report why, where it is written.
+  Refuse(Making, Why),
+  /// Give the list `list` the rows made since `from` among the open values' rows.
   Close { list: ValueId, from: usize },
+  /// Give the input object `object` its entries: the open entries from `entries` on, each with
+  /// its value, the rows made since `from` among the open values' rows, in the same order.
+  CloseObject {
+    object: ValueId,
+    from: usize,
+    entries: usize,
+  },
 }
 
 /// What coercion keeps while it writes.
@@ -444,8 +556,23 @@ struct Coercion<'c, 'p, 'x> {
   /// definition `i`.
   primitives: &'c [(Primitive, DefId)],
   builtins: Builtins,
-  /// Every enum's values, by the enum and the name, the first of each name.
-  enums: BTreeMap<(DefId, Sym), MemberId>,
+  /// Every enum's values and every input object's fields, by the definition and the name, the
+  /// first of each name.
+  members: BTreeMap<(DefId, Sym), MemberId>,
+  /// The input objects their own package applies `core`'s `@oneOf` to, in id order.
+  one_of: Vec<DefId>,
+  /// Each input object's required fields, one run each, in member order.
+  required: Vec<MemberId>,
+  /// Each input object that has a required field, with its run of `required`, by `DefId`.
+  inputs: Vec<Input>,
+  /// The fields each object literal read so far sets, one run each, sorted by the field.
+  set_fields: Vec<SetField>,
+  /// What is read of each object literal read so far, by its node and the input object it was
+  /// read against.
+  objects: BTreeMap<(u32, DefId), Fields>,
+  /// The entries of the input objects that are open, each its field, where its name is written,
+  /// and its value once its row is made.
+  entries: Vec<(MemberId, Option<Location>, ValueId)>,
   /// The first source of a supplied package: every source below it is the built-in library's.
   supplied: u32,
   /// `Limits::max_value_steps`.
@@ -467,7 +594,7 @@ struct Coercion<'c, 'p, 'x> {
   byte_strings: BTreeMap<u32, Result<Bytes, Refused>>,
   /// What making the current tree has still to do.
   stack: Vec<Task>,
-  /// The rows made of the lists that are open, each list's after it.
+  /// The rows made of the values that are open, lists and input objects, each one's after it.
   items: Vec<ValueId>,
   /// The children of the list being opened.
   children: Vec<u32>,
@@ -484,8 +611,9 @@ struct Coercion<'c, 'p, 'x> {
   counts: BTreeMap<(u32, Option<TyId>), u32>,
   /// The nodes being counted, each with the type it is counted against.
   counting: Vec<(u32, Option<TyId>)>,
-  /// How many levels of list each list type read so far is: what a lone value's count reads.
-  levels: BTreeMap<TyId, u32>,
+  /// How many levels of list each list type read so far is, and the type under them: what a lone
+  /// value's count reads.
+  levels: BTreeMap<TyId, (u32, TyId)>,
   /// The list types whose levels are being read.
   chain: Vec<TyId>,
 }
@@ -668,13 +796,57 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
   }
 
+  /// Lists each input object's fields that an object literal leaving them out does something
+  /// about, in member order: each required field, written non-null with no default. A later field
+  /// of a name an earlier one has is not listed: no literal can set it.
+  fn list_fields(&mut self) {
+    let mut names: BTreeSet<Sym> = BTreeSet::new();
+    for index in 0..self.builder.def_count() {
+      let def = DefId::new(index);
+      if self.builder.def_kind(def) != Some(DefKind::InputObject) {
+        continue;
+      }
+      let start = dense(self.required.len());
+      names.clear();
+      for field in self.builder.def_members(def) {
+        let Some(name) = self.builder.member_name(field) else {
+          continue;
+        };
+        if !names.insert(name) {
+          continue;
+        }
+        let (_, non_null) = self.member_occurrence(field);
+        if non_null && !self.raw.defaults.contains_key(&field) {
+          self.required.push(field);
+        }
+      }
+      let end = dense(self.required.len());
+      if end > start {
+        self.inputs.push(Input {
+          def,
+          required: (start, end),
+        });
+      }
+    }
+  }
+
+  /// The runs of `def`, an input object, when it has any.
+  fn input(&self, def: DefId) -> Option<Input> {
+    let at = self
+      .inputs
+      .binary_search_by_key(&def, |input: &Input| input.def)
+      .ok()?;
+    self.inputs.get(at).copied()
+  }
+
   /// How many rows coercing the tree `tree` against `ty` makes, as a copy makes them, told by
   /// [`classify`](Self::classify) alone: one for each written node it reaches, the elements of a
-  /// list against a list type; and for a lone value, one for each level of list its type has
-  /// left and one for the value, counted from the type and not row by row. The walk visits written
-  /// nodes alone, and stops once the count passes `Limits::max_value_steps`, which no charge can
-  /// pay: the count then saturates at that limit plus one. It is made the first time it is asked
-  /// for and kept, by the tree and the type.
+  /// list against a list type and the fields an object literal sets against their types; and for
+  /// a lone value, one for each level of list its type has left, counted from the type and not row
+  /// by row, and then the value against the type under them. The walk visits written nodes alone,
+  /// and stops once the count passes `Limits::max_value_steps`, which no charge can pay: the count
+  /// then saturates at that limit plus one. It is made the first time it is asked for and kept, by
+  /// the tree and the type.
   fn count(&mut self, tree: u32, ty: Option<TyId>) -> u32 {
     if let Some(&rows) = self.counts.get(&(tree, ty)) {
       return rows;
@@ -719,8 +891,25 @@ impl<'p> Coercion<'_, 'p, '_> {
           }
         }
         Class::Lone(element) => {
-          let levels = self.list_levels(element);
-          rows = rows.saturating_add(levels).saturating_add(1);
+          let (levels, under) = self.list_levels(element);
+          rows = rows.saturating_add(levels);
+          if self.is_list(under) {
+            // A list type whose element was not interned before it, which interning never makes:
+            // the value is one row more, and nothing is under it.
+            rows = rows.saturating_add(1);
+          } else {
+            self.counting.push((node, Some(under)));
+          }
+        }
+        Class::Object { def, first } => {
+          let fields = self.fields_of(node, def, first);
+          for row in fields.start..fields.start.saturating_add(fields.len) {
+            let Some(set) = self.set_fields.get(row as usize).copied() else {
+              break;
+            };
+            let ty = self.member_type(set.field);
+            self.counting.push((set.node, ty));
+          }
         }
         Class::NoValue | Class::Null | Class::NotNull | Class::Leaf(_) => {}
       }
@@ -728,14 +917,15 @@ impl<'p> Coercion<'_, 'p, '_> {
     rows.min(cap)
   }
 
-  /// How many levels of list `ty` is before its element is no list: 0 for a type that is no list.
-  /// Each list type's count is kept once read, so the types of one program are walked once in all.
-  fn list_levels(&mut self, ty: TyId) -> u32 {
+  /// How many levels of list `ty` is before its element is no list, and the type under them: 0
+  /// and `ty` itself for a type that is no list. Each list type's answer is kept once read, so the
+  /// types of one program are walked once in all.
+  fn list_levels(&mut self, ty: TyId) -> (u32, TyId) {
     self.chain.clear();
     let mut at = ty;
-    let mut levels = loop {
-      if let Some(&levels) = self.levels.get(&at) {
-        break levels;
+    let (mut levels, under) = loop {
+      if let Some(&kept) = self.levels.get(&at) {
+        break kept;
       }
       match self.builder.ty_shape(at) {
         // An element is interned before its list, so the walk goes down and ends.
@@ -743,14 +933,19 @@ impl<'p> Coercion<'_, 'p, '_> {
           self.chain.push(at);
           at = element;
         }
-        _ => break 0,
+        _ => break (0, at),
       }
     };
     while let Some(list) = self.chain.pop() {
       levels = levels.saturating_add(1);
-      self.levels.insert(list, levels);
+      self.levels.insert(list, (levels, under));
     }
-    levels
+    (levels, under)
+  }
+
+  /// Whether `ty` is a list type.
+  fn is_list(&self, ty: TyId) -> bool {
+    matches!(self.builder.ty_shape(ty), Some(Shape::List(_)))
   }
 
   /// Reports `argument`, required, as left out by `application`, whose path is at `at`, with a
@@ -869,19 +1064,27 @@ impl<'p> Coercion<'_, 'p, '_> {
   fn value(&mut self, tree: u32, ty: Option<TyId>, mode: Mode) -> Option<ValueId> {
     let tree = self.raw.trees.get(tree as usize).copied()?;
     let base = self.items.len();
-    self.stack.push(Task::Make {
+    self.stack.push(Task::Make(Making {
       node: tree.root,
       ty,
-    });
+      tree,
+      mode,
+    }));
     while let Some(task) = self.stack.pop() {
       match task {
-        Task::Make { node, ty } => self.make(node, ty, tree, mode),
+        Task::Make(making) => self.make(making),
+        Task::Refuse(making, why) => self.unfit(making, why),
         Task::Close { list, from } => {
           self
             .builder
             .set_list(list, self.items.get(from..).unwrap_or_default());
           self.items.truncate(from);
         }
+        Task::CloseObject {
+          object,
+          from,
+          entries,
+        } => self.close_object(object, from, entries),
       }
     }
     let value = self.items.get(base).copied();
@@ -889,9 +1092,15 @@ impl<'p> Coercion<'_, 'p, '_> {
     value
   }
 
-  /// Makes the row of `node`, of `tree`, against `ty`, as `mode` says, and pushes what it holds:
-  /// the row's id goes to the open lists' rows.
-  fn make(&mut self, node: u32, ty: Option<TyId>, tree: RawTree, mode: Mode) {
+  /// Makes the row of `making`'s node, as it says, and pushes what it holds: the row's id goes to
+  /// the open values' rows.
+  fn make(&mut self, making: Making) {
+    let Making {
+      node,
+      ty,
+      tree,
+      mode,
+    } = making;
     let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
       return;
     };
@@ -934,12 +1143,13 @@ impl<'p> Coercion<'_, 'p, '_> {
           }
           child = next;
         }
-        self
-          .stack
-          .extend(self.children.iter().rev().map(|&child: &u32| Task::Make {
-            node: child,
-            ty: Some(element),
-          }));
+        self.stack.extend(
+          self
+            .children
+            .iter()
+            .rev()
+            .map(|&child: &u32| Task::Make(making.child(child, Some(element)))),
+        );
       }
       Class::Lone(element) => {
         if mode.written() && source >= self.supplied && !self.charge(1) {
@@ -948,12 +1158,12 @@ impl<'p> Coercion<'_, 'p, '_> {
         } else {
           let from = self.items.len();
           self.stack.push(Task::Close { list: id, from });
-          self.stack.push(Task::Make {
-            node,
-            ty: Some(element),
-          });
+          self
+            .stack
+            .push(Task::Make(making.child(node, Some(element))));
         }
       }
+      Class::Object { def, first } => self.object(id, making, def, first),
       Class::Leaf(base) => {
         self.path(id, raw.kind);
         if let Err(refused) = self.leaf(id, node, tree, base) {
@@ -961,6 +1171,325 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
       }
     }
+  }
+
+  /// Makes `id`, the row of `making`'s node, an object literal against the input object `def`,
+  /// whose fields' rows of the trees start at `first`, and pushes its entries: each field it sets,
+  /// in the input object's order, then the task that closes it. Where it is written, its unknown
+  /// fields are reported, and so are a OneOf input object's count of fields and the required
+  /// fields it leaves out, before any entry is made.
+  fn object(&mut self, id: ValueId, making: Making, def: DefId, first: u32) {
+    let Making {
+      node, tree, mode, ..
+    } = making;
+    let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
+      return;
+    };
+    let source = tree.source;
+    let at = Location::new(source, raw.span);
+    let fields = self.fields_of(node, def, first);
+    let one_of = self.one_of.binary_search(&def).is_ok();
+    if mode.written() {
+      self.unknown_fields(node, def, first, source);
+      if one_of && fields.written != 1 {
+        let why = Why::OneOf {
+          def,
+          written: fields.written,
+        };
+        self.refuse(Refused { node, why }, source, making.ty, mode);
+      }
+      self.required_left_out(def, fields, at, source < self.supplied);
+    }
+    let from = self.items.len();
+    let entries = self.entries.len();
+    self.stack.push(Task::CloseObject {
+      object: id,
+      from,
+      entries,
+    });
+    // The entries' tasks are pushed in order, then reversed, so that the first is made first.
+    let tasks = self.stack.len();
+    let alone = one_of && fields.written == 1;
+    for row in fields.start..fields.start.saturating_add(fields.len) {
+      let Some(set) = self.set_fields.get(row as usize).copied() else {
+        break;
+      };
+      let task = self.entry_task(making, def, set, alone);
+      self.stack.push(task);
+    }
+    if let Some(tail) = self.stack.get_mut(tasks..) {
+      tail.reverse();
+    }
+  }
+
+  /// The task that makes the value of `set`, a field an object literal of the input object `def`,
+  /// made as `making` says, sets, and its entry, now open: the field's value against its type; or,
+  /// for `null`, one unresolved row when the field is required, or when it is the one field,
+  /// `alone`, of a OneOf input object's literal.
+  fn entry_task(&mut self, making: Making, def: DefId, set: SetField, alone: bool) -> Task {
+    let name = Location::new(making.tree.source, set.name);
+    self.entries.push((set.field, Some(name), ValueId::new(0)));
+    let (ty, non_null) = self.member_occurrence(set.field);
+    let value = making.child(set.node, ty);
+    if !matches!(self.kind(set.node), RawKind::Null) {
+      return Task::Make(value);
+    }
+    if non_null && !self.raw.defaults.contains_key(&set.field) {
+      return Task::Refuse(
+        value,
+        Why::Required {
+          def,
+          field: set.field,
+        },
+      );
+    }
+    if alone {
+      return Task::Refuse(value, Why::OneOfNull { def });
+    }
+    Task::Make(value)
+  }
+
+  /// What the object literal `node` sets of the input object `def`, its fields' rows of the trees
+  /// starting at `first`: read the first time it is asked for, and kept by the node and `def`. A
+  /// field whose name is a symbol that names one of `def`'s fields sets the first field of that
+  /// name, and the fields it sets are sorted by the field, one set twice kept in written order.
+  fn fields_of(&mut self, node: u32, def: DefId, first: u32) -> Fields {
+    if let Some(&kept) = self.objects.get(&(node, def)) {
+      return kept;
+    }
+    let start = self.set_fields.len();
+    let after = self
+      .raw
+      .nodes
+      .get(node as usize)
+      .map_or(node, |raw: &RawNode| raw.after);
+    let mut written: u32 = 0;
+    let mut child = node.saturating_add(1);
+    let mut row = first;
+    while child < after {
+      written = written.saturating_add(1);
+      if let Some(field) = self.raw.fields.get(row as usize).copied()
+        && let Some(name) = field.name
+        && let Some(&member) = self.members.get(&(def, name))
+      {
+        self.set_fields.push(SetField {
+          field: member,
+          name: field.at,
+          node: child,
+        });
+      }
+      let next = self
+        .raw
+        .nodes
+        .get(child as usize)
+        .map_or(after, |held: &RawNode| held.after);
+      if next <= child {
+        break;
+      }
+      child = next;
+      row = row.saturating_add(1);
+    }
+    // A stable sort: two of one field keep their written order.
+    if let Some(tail) = self.set_fields.get_mut(start..) {
+      tail.sort_by_key(|set: &SetField| set.field);
+    }
+    let kept = Fields {
+      start: dense(start),
+      len: dense(self.set_fields.len().saturating_sub(start)),
+      written,
+    };
+    self.objects.insert((node, def), kept);
+    kept
+  }
+
+  /// Reports each field the object literal `node`, written in the source `source`, writes that
+  /// `def` does not declare, its fields' rows of the trees starting at `first`: at its name.
+  fn unknown_fields(&mut self, node: u32, def: DefId, first: u32, source: u32) {
+    let after = self
+      .raw
+      .nodes
+      .get(node as usize)
+      .map_or(node, |raw: &RawNode| raw.after);
+    let mut child = node.saturating_add(1);
+    let mut row = first;
+    while child < after {
+      if let Some(field) = self.raw.fields.get(row as usize).copied() {
+        let known = field
+          .name
+          .is_some_and(|name: Sym| self.members.contains_key(&(def, name)));
+        if !known {
+          self.unknown_field(def, field.at, source);
+        }
+      }
+      let next = self
+        .raw
+        .nodes
+        .get(child as usize)
+        .map_or(after, |held: &RawNode| held.after);
+      if next <= child {
+        break;
+      }
+      child = next;
+      row = row.saturating_add(1);
+    }
+  }
+
+  /// Reports the field whose name is written at `at`, in the source `source`, that the input
+  /// object `def` does not declare: with the nearest of `def`'s fields in the help, when one is
+  /// within reach and the analysis's budget for near misses lasts.
+  fn unknown_field(&mut self, def: DefId, at: SimpleSpan, source: u32) {
+    let builder: &ModelBuilder = &*self.builder;
+    let written: &[u8] = self.raw.text(source, at);
+    let first = (def, Sym::new(0));
+    let last = (def, Sym::new(u32::MAX));
+    let mut candidates = self
+      .members
+      .range(first..=last)
+      .map(|(&(_, sym), _): (&(DefId, Sym), &MemberId)| builder.spelling(sym));
+    let near: Option<String> = self
+      .scopes
+      .nearest(written, &mut candidates)
+      .map(|spelled: &[u8]| format!("did you mean `{}`?", Excerpt(spelled)));
+    let message = format!(
+      "the input object `{}` declares no field named `{}`",
+      Excerpt(builder.def_name(def)),
+      Excerpt(written)
+    );
+    let mut report = Diagnostic::builder(
+      schema::UNDEFINED_INPUT_OBJECT_FIELD,
+      Location::new(source, at),
+    )
+    .message(message)
+    .primary_label("undefined input object field");
+    if let Some(near) = near {
+      report = report.help(near);
+    }
+    self.reporter.report(report.build());
+  }
+
+  /// Reports each required field of the input object `def` that the object literal at `at`
+  /// leaves out, its fields set being `fields`, each a step charged first, but where the built-in
+  /// library writes it, `library`. Answers `false`, once it has reported the literal past the
+  /// budget, when the budget cannot pay: the rest is not read.
+  fn required_left_out(&mut self, def: DefId, fields: Fields, at: Location, library: bool) -> bool {
+    let Some(input) = self.input(def) else {
+      return true;
+    };
+    let (start, end) = input.required;
+    let set_end = fields.start.saturating_add(fields.len);
+    let mut set = fields.start;
+    for row in start..end {
+      let Some(&field) = self.required.get(row as usize) else {
+        break;
+      };
+      // The fields it sets are in member order too: pass those before this one.
+      while set < set_end
+        && self
+          .set_field_at(set)
+          .is_some_and(|kept: MemberId| kept < field)
+      {
+        set = set.saturating_add(1);
+      }
+      if set < set_end && self.set_field_at(set) == Some(field) {
+        continue;
+      }
+      if !library && !self.charge(1) {
+        self.object_starved(at);
+        return false;
+      }
+      self.missing_field(def, field, at);
+    }
+    true
+  }
+
+  /// The field the kept row `row` of the fields object literals set sets.
+  fn set_field_at(&self, row: u32) -> Option<MemberId> {
+    self
+      .set_fields
+      .get(row as usize)
+      .map(|set: &SetField| set.field)
+  }
+
+  /// Reports `field`, a required field of the input object `def`, as left out by the object
+  /// literal at `at`, with a label at the field's declaration.
+  fn missing_field(&mut self, def: DefId, field: MemberId, at: Location) {
+    let name: &[u8] = match self.builder.member_name(field) {
+      Some(sym) => self.builder.spelling(sym),
+      None => b"",
+    };
+    let message = format!(
+      "`{}` requires its field `{}`, and this literal leaves it out",
+      Excerpt(self.builder.def_name(def)),
+      Excerpt(name)
+    );
+    let mut report = Diagnostic::builder(schema::MISSING_REQUIRED_INPUT_OBJECT_FIELD, at)
+      .message(message)
+      .primary_label("missing required input object field");
+    if let Some(declared) = self.builder.member_location(field)
+      && !declared.is_entire()
+    {
+      report = report.label(declared, "required here");
+    }
+    self.reporter.report(report.build());
+  }
+
+  /// Reports that the fields the object literal at `at` leaves out are past the budget.
+  fn object_starved(&mut self, at: Location) {
+    let kind = DiagnosticKind::ResourceLimit;
+    let max = self.max_steps;
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), at)
+        .severity(kind.severity())
+        .message(format!(
+          "the fields this literal leaves out pass `Limits::max_value_steps`, {max}, the steps \
+           the analysis may take to complete values, and are not filled"
+        ))
+        .primary_label(kind.title())
+        .help("raise the limit with `Limits::with_max_value_steps`, or write the fields")
+        .build(),
+    );
+  }
+
+  /// Makes the row of `making`'s node one unresolved row, typed with its type, and reports why,
+  /// `why`, where it is written: it holds nothing.
+  fn unfit(&mut self, making: Making, why: Why) {
+    let Making {
+      node,
+      ty,
+      tree,
+      mode,
+    } = making;
+    let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
+      return;
+    };
+    let id = self
+      .builder
+      .push_value(Location::new(tree.source, raw.span), mode.written());
+    self.items.push(id);
+    if let Some(ty) = ty {
+      self.builder.set_value_ty(id, ty);
+    }
+    self.refuse(Refused { node, why }, tree.source, ty, mode);
+  }
+
+  /// Gives the input object `object` its entries: the open entries from `entries` on, each with
+  /// its value, the rows made since `from` among the open values' rows.
+  fn close_object(&mut self, object: ValueId, from: usize, entries: usize) {
+    let made = self.items.get(from..).unwrap_or_default();
+    let open = self.entries.get_mut(entries..).unwrap_or_default();
+    let filled = open.len().min(made.len());
+    for (entry, &value) in open.iter_mut().zip(made) {
+      entry.2 = value;
+    }
+    self.builder.set_object(
+      object,
+      self
+        .entries
+        .get(entries..entries.saturating_add(filled))
+        .unwrap_or_default(),
+    );
+    self.items.truncate(from);
+    self.entries.truncate(entries);
   }
 
   /// What `kind` is made against `ty`, told by the two alone: no literal is read.
@@ -973,9 +1502,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       return Class::NoValue;
     }
     let class = match builder.ty_shape(ty) {
-      Some(Shape::Named(def)) => match self.base(def, ty) {
-        Some(base) => Class::Leaf(base),
-        None => return Class::NoValue,
+      Some(Shape::Named(def)) => match (self.base(def, ty), kind) {
+        (Some(Base::Object(def)), RawKind::Object(first)) => Class::Object { def, first },
+        (Some(base), _) => Class::Leaf(base),
+        (None, _) => return Class::NoValue,
       },
       Some(Shape::List(element)) => match kind {
         RawKind::List => Class::List(element),
@@ -1022,7 +1552,8 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     match self.builder.def_kind(def)? {
       DefKind::Enum => Some(Base::Enum(def)),
-      DefKind::Scalar | DefKind::InputObject => Some(Base::Kept),
+      DefKind::InputObject => Some(Base::Object(def)),
+      DefKind::Scalar => Some(Base::Kept),
       DefKind::Object | DefKind::Interface | DefKind::Union | DefKind::Directive => None,
     }
   }
@@ -1260,7 +1791,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
       }
     }
-    match self.enums.get(&(def, last)) {
+    match self.members.get(&(def, last)) {
       Some(&member) => {
         self.builder.set_enum(id, def, member);
         Ok(())
@@ -1384,7 +1915,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           RawKind::List => LiteralKind::List,
           RawKind::Set => LiteralKind::Set,
           RawKind::Map => LiteralKind::Map,
-          RawKind::Object => LiteralKind::Object,
+          RawKind::Object(_) => LiteralKind::Object,
         };
         let text = self.text(node, source);
         let row = self.builder.push_literal(kind, text);
@@ -1610,27 +2141,34 @@ impl<'p> Coercion<'_, 'p, '_> {
       _ => b"",
     };
     let name = Excerpt(name);
-    let width = DiagnosticKind::WidthOverflow;
-    let (kind, message, help): (Option<DiagnosticKind>, String, Option<String>) = match refused.why
-    {
+    let width = Coded::Kind(DiagnosticKind::WidthOverflow);
+    let (coded, message, help): (Coded, String, Option<String>) = match refused.why {
       Why::Null => (
-        None,
+        Coded::Site,
         String::from("`null` is given where a non-null value is expected"),
         None,
       ),
-      Why::Kind => (None, format!("`{literal}` is no value of `{name}`"), None),
+      Why::Kind => (
+        Coded::Site,
+        format!("`{literal}` is no value of `{name}`"),
+        None,
+      ),
       Why::Range(range) => (
-        (!(range.signed && range.width == 32)).then_some(width),
+        if range.signed && range.width == 32 {
+          Coded::Site
+        } else {
+          width
+        },
         format!("`{literal}` is out of the range of `{name}`"),
         Some(range_help(range)),
       ),
       Why::Infinite => (
-        None,
+        Coded::Site,
         format!("`{literal}` is not finite as a 64-bit float, which `{name}` is"),
         None,
       ),
       Why::Single => (
-        Some(width),
+        width,
         format!("`{literal}` is out of the range of `{name}`, a 32-bit float"),
         Some(String::from(
           "a 32-bit float holds the values below 2^128 - 2^103 in magnitude; one of that \
@@ -1638,17 +2176,17 @@ impl<'p> Coercion<'_, 'p, '_> {
         )),
       ),
       Why::Zero => (
-        Some(DiagnosticKind::NonZeroZero),
+        Coded::Kind(DiagnosticKind::NonZeroZero),
         format!("`{literal}` is zero, and `{name}` is never zero"),
         None,
       ),
       Why::Byte => (
-        None,
+        Coded::Site,
         format!("each element of a list given for `{name}` is a byte, and `{literal}` is none"),
         Some(String::from("a byte is an integer from 0 to 2^8 - 1")),
       ),
       Why::ByteRange => (
-        Some(width),
+        width,
         format!(
           "`{literal}` is out of the range of a byte, which each element of a list given for \
            `{name}` is"
@@ -1660,7 +2198,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         let first = (def, Sym::new(0));
         let last = (def, Sym::new(u32::MAX));
         let mut candidates = self
-          .enums
+          .members
           .range(first..=last)
           .map(|(&(_, sym), _): (&(DefId, Sym), &MemberId)| builder.spelling(sym));
         let near: Option<String> = self
@@ -1668,7 +2206,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           .nearest(builder.spelling(wanted), &mut candidates)
           .map(|spelled: &[u8]| format!("did you mean `{}`?", Excerpt(spelled)));
         (
-          None,
+          Coded::Site,
           format!("`{literal}` names no value of the enum `{name}`"),
           near,
         )
@@ -1676,7 +2214,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       Why::Costly { digits, cost } => {
         let max = self.max_steps;
         (
-          Some(DiagnosticKind::ResourceLimit),
+          Coded::Kind(DiagnosticKind::ResourceLimit),
           format!(
             "converting this decimal integer of {digits} digits takes {cost} steps, more than \
              is left of `Limits::max_value_steps`, {max}, the steps the analysis may take to \
@@ -1688,15 +2226,52 @@ impl<'p> Coercion<'_, 'p, '_> {
           )),
         )
       }
+      Why::Required { def, field } => {
+        let builder: &ModelBuilder = &*self.builder;
+        let field: &[u8] = match builder.member_name(field) {
+          Some(sym) => builder.spelling(sym),
+          None => b"",
+        };
+        (
+          Coded::Schema(
+            schema::MISSING_REQUIRED_INPUT_OBJECT_FIELD,
+            "missing required input object field",
+          ),
+          format!(
+            "the field `{}` of `{}` is required, and `null` is given",
+            Excerpt(field),
+            Excerpt(builder.def_name(def))
+          ),
+          None,
+        )
+      }
+      Why::OneOf { def, written } => (
+        Coded::Site,
+        format!(
+          "`{}` is a OneOf input object, which takes exactly one field, and this literal writes \
+           {written}",
+          Excerpt(self.builder.def_name(def))
+        ),
+        None,
+      ),
+      Why::OneOfNull { def } => (
+        Coded::Site,
+        format!(
+          "`{}` is a OneOf input object, and the one field this literal writes is `null`",
+          Excerpt(self.builder.def_name(def))
+        ),
+        None,
+      ),
     };
-    let mut report = match kind {
-      Some(kind) => Diagnostic::builder(kind.code(), at)
+    let mut report = match coded {
+      Coded::Kind(kind) => Diagnostic::builder(kind.code(), at)
         .severity(kind.severity())
         .primary_label(kind.title()),
-      None => {
+      Coded::Site => {
         let (code, label) = site.refusal();
         Diagnostic::builder(code, at).primary_label(label)
       }
+      Coded::Schema(code, label) => Diagnostic::builder(code, at).primary_label(label),
     }
     .message(message);
     if let Some(help) = help {

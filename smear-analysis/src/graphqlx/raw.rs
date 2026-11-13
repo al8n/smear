@@ -4,10 +4,13 @@
 //! Each default and each argument an application writes is a tree: one fixed-size node for each
 //! literal it writes, the value itself first and then what it holds, in pre-order, a list's and a
 //! set's elements in order, a map's entries each key and then its value, an object's fields'
-//! values in written order. The trees, the table of every source's text the literals are read
-//! from, which default each tree is and which argument, are the analysis's own: lowering builds
-//! them, coercion reads them, and they are dropped when coercion ends. What coercion reads of a
-//! node is kept outside the node, in coercion's own tables, which the node's one slot indexes.
+//! values in written order. An object's node keeps where its fields' names are: one row of the
+//! table's fields for each field it writes, in written order, each the name's symbol, found among
+//! the names interned and never interned, and where the name is written. The trees, the table of
+//! every source's text the literals are read from, which default each tree is and which argument,
+//! are the analysis's own: lowering builds them, coercion reads them, and they are dropped when
+//! coercion ends. What coercion reads of a node is kept outside the node, in coercion's own tables,
+//! which the node's one slot indexes.
 
 use std::{collections::BTreeMap, vec::Vec};
 
@@ -44,7 +47,9 @@ pub(crate) enum RawKind {
   List,
   Set,
   Map,
-  Object,
+  /// An object: its first row of the table's fields, the row of its first field, each later field
+  /// the next row.
+  Object(u32),
 }
 
 /// One literal a value writes: 32 bytes at most.
@@ -85,6 +90,16 @@ pub(crate) struct RawPath {
   pub(crate) prefix: Option<Resolved>,
 }
 
+/// One field an object writes: its name, and where the name is written. The object's i-th child
+/// is the value of its i-th field.
+#[derive(Clone, Copy)]
+pub(crate) struct RawField {
+  /// The name, when a member's name is spelled so: a name never interned is no member's.
+  pub(crate) name: Option<Sym>,
+  /// Where the name is written, in its tree's source.
+  pub(crate) at: SimpleSpan,
+}
+
 /// One written value: its first node, and the module and the source it is written in.
 #[derive(Clone, Copy)]
 pub(crate) struct RawTree {
@@ -113,6 +128,8 @@ pub(crate) struct RawValues<'p> {
   pub(crate) paths: Vec<RawPath>,
   /// Every path's segments, each a symbol and where it is written, each path's one run.
   pub(crate) segments: Vec<(Sym, SimpleSpan)>,
+  /// Every field an object writes, each object's one run, in written order.
+  pub(crate) fields: Vec<RawField>,
   /// Every written value.
   pub(crate) trees: Vec<RawTree>,
   /// Each member's default, by the member: what the walk of the members looks a default up by.
@@ -132,6 +149,7 @@ impl<'p> RawValues<'p> {
       nodes: Vec::new(),
       paths: Vec::new(),
       segments: Vec::new(),
+      fields: Vec::new(),
       trees: Vec::new(),
       defaults: BTreeMap::new(),
       arguments: Vec::new(),

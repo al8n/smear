@@ -1,7 +1,7 @@
 //! What the phases after coercion write, and what the hand-built models of the tests write in one
 //! step: each definition's externs; the tiers of definitions and types; the values coercion does
-//! not make yet, sets, maps, input objects and type values; a value written whole, each over
-//! coercion's own writers; and marks.
+//! not make yet, sets, maps and type values; a value written whole, each over coercion's own
+//! writers; and marks.
 //!
 //! GATED ON HAVING A CALLER. The phases still to come are this module's callers, and until each
 //! lands the test-support door is its only caller: a method that no shipped build calls is dead
@@ -11,11 +11,11 @@
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{DefId, MemberId, Sym, TyId, ValueId, dense},
+  id::{DefId, Sym, TyId, ValueId},
   model::{
-    table::{ExternRow, Run, VALUE_MAP, VALUE_OBJECT, VALUE_SET, VALUE_TYPE},
+    table::{ExternRow, VALUE_MAP, VALUE_SET, VALUE_TYPE},
     ty::PathRoot,
-    value::{LiteralKind, ObjectEntry},
+    value::LiteralKind,
   },
   package::Tier,
 };
@@ -100,27 +100,6 @@ impl ModelBuilder {
     let row = self.value_row(value);
     row.shape = VALUE_MAP;
     row.run = run;
-  }
-
-  /// Makes `value` the input object of `entries`: each the input field it sets, where the field's
-  /// name is written (`None` for a field a default filled), and the field's value, appended after
-  /// `value`.
-  pub fn set_object(&mut self, value: ValueId, entries: &[(MemberId, Option<Location>, ValueId)]) {
-    let start = dense(self.model.object_entries.len());
-    for &(field, name, item) in entries {
-      debug_assert!(item > value, "what a value holds is appended after it");
-      self.model.object_entries.push(ObjectEntry {
-        field,
-        name,
-        value: item,
-      });
-    }
-    let row = self.value_row(value);
-    row.shape = VALUE_OBJECT;
-    row.run = Run {
-      start,
-      len: dense(entries.len()),
-    };
   }
 
   /// Marks, as an error reported at `at` does, every contribution and member whose extent holds

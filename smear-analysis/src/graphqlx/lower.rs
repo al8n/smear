@@ -99,8 +99,9 @@
 //! tree, kept with the member whose default it is or with the application, the argument it sets
 //! and where its name is written: one node for each literal it writes, the value first and then
 //! what it holds, in pre-order, walked with an explicit stack. A node keeps its syntactic kind and
-//! where it is written, a number its radix, a boolean its value, and a path its root and its
-//! segments, interned as written. No path in it is resolved: coercion, which runs after
+//! where it is written, a number its radix, a boolean its value, a path its root and its segments,
+//! interned as written, and an object each field's name, found among the names interned and never
+//! interned, with where it is written. No path in it is resolved: coercion, which runs after
 //! instantiation and knows the type expected, makes the model's values of the trees.
 //!
 //! # The schema
@@ -168,7 +169,7 @@ use super::{
   model::{
     DefKind, DirectiveLocation, MemberKind, ModelBuilder, PathRoot, Root, RootOperation, Written,
   },
-  raw::{Radix, RawArgument, RawKind, RawValues},
+  raw::{Radix, RawArgument, RawField, RawKind, RawValues},
   resolve::{self, Position, Request, Resolved, Scopes, Wanted},
   set::{PackageView, ROOT},
   source::SourceMap,
@@ -1751,7 +1752,21 @@ impl Lowering<'_, '_, '_> {
         ConstInputValue::List(_) => RawKind::List,
         ConstInputValue::Set(_) => RawKind::Set,
         ConstInputValue::Map(_) => RawKind::Map,
-        ConstInputValue::Object(_) => RawKind::Object,
+        ConstInputValue::Object(object) => {
+          // The object's whole run of fields, appended before any object nested in it is entered.
+          // A field's name is interned as a member's is, so a name never interned is no member's.
+          let first = dense(self.values.fields.len());
+          for field in object.fields() {
+            let name = field.name();
+            let spelled = String::from_utf8_lossy(name.source().as_ref());
+            let found = self.builder.find(spelled.as_bytes());
+            self.values.fields.push(RawField {
+              name: found,
+              at: *name.as_span(),
+            });
+          }
+          RawKind::Object(first)
+        }
       };
       let at = self.values.push_node(kind, span);
       // What a value holds is entered after it, in written order, so it is pushed in reverse over

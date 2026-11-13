@@ -460,4 +460,14 @@ pub(crate) mod schema {
   /// `smear-schema`'s `MissingRequiredDirectiveArgument`.
   pub(crate) const MISSING_REQUIRED_DIRECTIVE_ARGUMENT: Code =
     Code::new("smear::schema::missing-required-directive-argument");
+
+  /// An object literal names a field its input object does not declare: `smear-schema`'s
+  /// `UndefinedInputObjectField`.
+  pub(crate) const UNDEFINED_INPUT_OBJECT_FIELD: Code =
+    Code::new("smear::schema::undefined-input-object-field");
+
+  /// An object literal leaves out a field its input object requires, or passes it `null`:
+  /// `smear-schema`'s `MissingRequiredInputObjectField`.
+  pub(crate) const MISSING_REQUIRED_INPUT_OBJECT_FIELD: Code =
+    Code::new("smear::schema::missing-required-input-object-field");
 }

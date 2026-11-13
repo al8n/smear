@@ -75,8 +75,8 @@ impl ObjectEntry {
 /// value of a custom scalar, an extern one included, but `null`, which is `null` where the scalar
 /// is nullable; a value whose expected type names a type parameter, which only an instantiation
 /// can check; and a value whose expected type can take none, an output type or a path that names
-/// nothing among them, which is another rule's or phase's to refuse. In this version a value of an
-/// input object, of a collection and of `TypeRef` is kept as written too.
+/// nothing among them, which is another rule's or phase's to refuse. In this version a value of a
+/// collection and of `TypeRef` is kept as written too.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum ValueKind<'a> {
@@ -113,7 +113,9 @@ pub enum ValueKind<'a> {
   Set(&'a [ValueId]),
   /// A map, of its entries, each a key and a value.
   Map(&'a [(ValueId, ValueId)]),
-  /// An input object, of its fields: each one written or defaulted, and no absent one.
+  /// An input object, of its fields, in the input object's order: each one its literal writes and
+  /// the input object declares, one written twice twice, in written order. In this version a
+  /// field the literal leaves out is absent, whatever its default.
   Object(&'a [ObjectEntry]),
   /// A value kept as written: of a custom scalar, but `null`; of a type that names a type
   /// parameter; or of a type that can take no value.
@@ -267,8 +269,8 @@ impl<'a> Value<'a> {
 
   /// What it is.
   //
-  // Coercion gives a value its shape. It makes no set, map, input object or type value yet: a
-  // value of a type that would hold one is the `Literal` of its syntactic kind and its text.
+  // Coercion gives a value its shape. It makes no set, map or type value yet: a value of a type
+  // that would hold one is the `Literal` of its syntactic kind and its text.
   pub fn kind(&self) -> ValueKind<'a> {
     let model: &'a Model = self.model;
     let row = self.row();

@@ -84,10 +84,11 @@ use super::{
     DefRow, DescriptionRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED,
     LiteralRow, MemberRow, ModuleRow, NO_DEF, PackageRow, PathRow, Run, TyRow, TypeExprRow,
     TypeParamRow, UNSET_MODULE, UNSET_TY, VALUE_BOOL, VALUE_BYTES, VALUE_ENUM, VALUE_FLOAT,
-    VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_NULL, VALUE_STRING, VALUE_UNRESOLVED, ValueRow,
+    VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_NULL, VALUE_OBJECT, VALUE_STRING, VALUE_UNRESOLVED,
+    ValueRow,
   },
   ty::PathRoot,
-  value::LiteralKind,
+  value::{LiteralKind, ObjectEntry},
 };
 
 impl Symbol for Sym {
@@ -938,6 +939,27 @@ impl ModelBuilder {
   /// Makes `value` the list of `elements`, each appended after it.
   pub fn set_list(&mut self, value: ValueId, elements: &[ValueId]) {
     self.set_items(value, VALUE_LIST, elements);
+  }
+
+  /// Makes `value` the input object of `entries`: each the input field it sets, where the field's
+  /// name is written (`None` for a field a default filled), and the field's value, appended after
+  /// `value`.
+  pub fn set_object(&mut self, value: ValueId, entries: &[(MemberId, Option<Location>, ValueId)]) {
+    let start = dense(self.model.object_entries.len());
+    for &(field, name, item) in entries {
+      debug_assert!(item > value, "what a value holds is appended after it");
+      self.model.object_entries.push(ObjectEntry {
+        field,
+        name,
+        value: item,
+      });
+    }
+    let row = self.value_row(value);
+    row.shape = VALUE_OBJECT;
+    row.run = Run {
+      start,
+      len: dense(entries.len()),
+    };
   }
 
   /// Gives `value` the type it was coerced against.
