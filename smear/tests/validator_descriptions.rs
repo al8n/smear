@@ -27,12 +27,13 @@
 //! GraphQL whitespace is ignored between tokens, so the blanked twin is the same document with
 //! the descriptions removed, at the same offsets.
 //!
-//! # Both doors
+//! # Both layers
 //!
-//! The syntactic door validates an AST; the lossless door projects a CST and validates that. A
-//! description is a **node** in the CST, so the two doors reach the property through different
-//! machinery and the lossless leg is where a description could plausibly shift a span. It runs
-//! behind `feature = "rowan_0_17"`, like every other lossless gate.
+//! The syntactic parser answers an AST; the lossless layer reads the text into a tree and answers
+//! the AST it projects from that tree. A description is a **node** in the tree, so the two reach
+//! the property through different machinery and the lossless leg is where a description could
+//! plausibly shift a span. It runs behind `feature = "rowan_0_17"` and `feature = "std"`, like
+//! every other lossless gate.
 //!
 //! # The positive control
 //!
@@ -324,27 +325,28 @@ mod lossless {
   use super::{BTreeSet, Diagnostic, FIRING_FLOOR, FIXTURES, SCHEMA, Vec, blanked, build};
 
   use smear::{
-    parser::graphql::lossless::parse_executable_document,
-    validator::{Budget, Collect, RuleSet, Schema, Scratch, validate_executable_lossless_with},
+    parser::graphql::Lossless,
+    validator::{Budget, Collect, RuleSet, Schema, Scratch, validate_executable_with},
   };
 
-  /// The lossless door: parse to a CST, hand the CST and its text to the validator.
+  /// The lossless layer: the text read into a tree, and the document it answers validated.
   ///
   /// A `Description` is a node in that tree, so this is the leg where one could plausibly shift a
-  /// span — the syntactic door reads a description that the AST has already lifted out.
+  /// span — the syntactic parser reads a description that the AST has already lifted out.
   fn lossless<'a>(schema: &Schema, source: &'a str) -> Vec<Diagnostic<&'a str>> {
-    let parse = parse_executable_document(source);
+    let parsed = Lossless::new()
+      .executable_document(source, &mut ())
+      .expect("short enough for a tree");
     assert!(
-      !parse.has_errors(),
-      "the lossless parser rejects it\n---\n{source}"
+      parsed.is_valid(),
+      "the lossless layer rejects it\n---\n{source}"
     );
     let mut scratch = Scratch::new();
     let mut collected = Vec::new();
     let mut sink = Collect::new(&mut collected);
-    let verdict = validate_executable_lossless_with(
+    let verdict = validate_executable_with(
       schema,
-      &parse,
-      source,
+      parsed.document(),
       &mut scratch,
       &Budget::default(),
       RuleSet::ALL,
@@ -353,13 +355,13 @@ mod lossless {
     assert_eq!(
       verdict.is_err(),
       !collected.is_empty(),
-      "the lossless verdict and its diagnostics disagree\n---\n{source}"
+      "the validator's verdict and its diagnostics disagree\n---\n{source}"
     );
     collected
   }
 
   #[test]
-  fn a_description_changes_no_diagnostic_the_lossless_door_produces() {
+  fn a_description_changes_no_diagnostic_the_lossless_layer_produces() {
     let schema = build(SCHEMA);
     let mut compared = 0usize;
     let mut rules = BTreeSet::new();
@@ -379,7 +381,7 @@ mod lossless {
       for (with, without) in with.iter().zip(without.iter()) {
         assert_eq!(
           with, without,
-          "{}: a description changed a diagnostic through the lossless door",
+          "{}: a description changed a diagnostic through the lossless layer",
           fixture.what
         );
         compared += 1;
@@ -400,17 +402,17 @@ mod lossless {
     );
   }
 
-  /// The two doors agree with each other on the described half, not only each with itself.
+  /// The two layers agree with each other on the described half, not only each with itself.
   ///
   /// Without this, both legs could drift the same way and every equality above would still hold.
   #[test]
-  fn the_two_doors_agree_on_a_described_document() {
+  fn the_two_layers_agree_on_a_described_document() {
     let schema = build(SCHEMA);
     for fixture in FIXTURES {
       assert_eq!(
         super::syntactic(&schema, fixture.source),
         lossless(&schema, fixture.source),
-        "{}: the two doors disagree about a described document",
+        "{}: the two layers disagree about a described document",
         fixture.what
       );
     }
