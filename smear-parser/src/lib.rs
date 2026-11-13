@@ -45,6 +45,10 @@ pub use smear_lexer as lexer;
 
 pub mod combinator;
 
+// No `///` here: `layer/mod.rs` carries its own `//!` header, which is then the module's one doc
+// fragment, so the links in it resolve in the module where they are written.
+pub mod layer;
+
 /// The dialect-generic lossless substrate: the kind-space contract, the trivia atoms, the
 /// `Parse` surface, the coverage shims and the typed-wrapper macro's helpers.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]

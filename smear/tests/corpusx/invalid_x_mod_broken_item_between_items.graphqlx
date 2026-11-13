@@ -1,0 +1,6 @@
+mod m {
+  scalar X
+  type T { f }
+  scalar W
+}
+scalar Z

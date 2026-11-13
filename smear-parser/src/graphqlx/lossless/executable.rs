@@ -80,7 +80,8 @@ use super::{
   },
   recover,
   recover::{
-    EXECUTABLE_DEFINITION_HEADS, VARIABLE_DEFINITION_HEADS, opener_span, starts_description,
+    EXECUTABLE_DEFINITION_HEADS, PARENS_CLOSER_HEADS, VARIABLE_DEFINITION_HEADS,
+    closes_enclosing_block, opener_span, starts_description,
   },
   selection::{selection_set, type_condition},
   trivia::{eat_if, expect, peek_as, peek_kind},
@@ -172,6 +173,13 @@ lossless_production! {
   /// rejects the empty `()` here (`.at_least(1)`, `executable/mod.rs:408`) where it accepts it for
   /// `Arguments`. Gate 1 compares the two suites' verdicts input by input, so the two rulings are
   /// followed one production at a time rather than unified into a house rule.
+  ///
+  /// # A `}` that closes a brace open before the list
+  ///
+  /// It is left where it stands, by [`closes_enclosing_block`], as every other `(` list leaves
+  /// it. No block of the grammar stands around an operation, so a brace open here was left open
+  /// by a definition that failed before this one: the `}` is then a stray for the root to
+  /// report, and what follows it is still read as definitions instead of as this list's junk.
   fn variables_definition<'inp, Src, Ctx>(inp) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
@@ -180,6 +188,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LParen)?;
         let open = opener_span(inp.span().end());
+        let open_at: usize = inp.state().brace_depth();
         // The report consumes nothing, so the `)` is still the loop's to eat; checked here rather
         // than after the loop, where the diagnostic would point past the closer it is about.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::RParen) {
@@ -191,6 +200,9 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
+            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+              return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
+            }
             // A string head is a description, which is why this set is three kinds wide and
             // GraphQL's is one.
             Some(Kind::Dollar | Kind::InlineString | Kind::BlockString) => {

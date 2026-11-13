@@ -92,7 +92,10 @@
 //!    rule the whole file is built on. The three-way rule and the leaf re-cooking below serve the
 //!    shape half.
 //! 3. **Totality** — every non-trivia byte under a projected node is represented in the AST, or
-//!    the projection refuses. The walk rule below is what serves this.
+//!    the projection refuses. The walk rule below is what serves this. A recovering door keeps it
+//!    per **item**: what it cannot project it counts in [`Recovery::skipped`] instead, and an
+//!    inline module is the one projected node that can stand around a skipped element — see
+//!    [`project_type_system_document_recovered`].
 //!
 //! It does **not** promise that the tree is the one the lossless parser would build over those
 //! bytes. A caller can mint a green tree, and [`Verified`] exists so one can be projected; nothing
@@ -117,13 +120,20 @@
 //! GraphQLx's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
 //! Every one of those shapes reaches this projection looking well-formed, and each needs an
-//! answer. The population is every call that reports without building a hole — **54**
+//! answer. The population is every call that reports without building a hole — **66**
 //! `recover::report_unexpected::<…>` sites and **17** `recover::unclosed_{list,object,parens,angle}::<…>`
 //! sites across `graphqlx/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 71 are mapped** in the table below, one probe each: a text that reaches the site with a
+//! **all 83 are mapped** in the table below, one probe each: a text that reaches the site with a
 //! hole-free tree, and what this projection answers for it. The table is executable:
 //! `every_report_and_build_site_has_a_measured_answer` holds the same rows, asserts their count
 //! per file and family against the source's own spelling of each call, and measures every answer.
+//!
+//! **One site has no hole-free probe**, and its row says so. A `(`, `[` or `<` list that meets a
+//! `}` closing a brace that was open before the list reports its own closer as missing and leaves
+//! the brace to the block around it — eight sites, one per list. Seven of them stand inside a
+//! block of the grammar, whose loop then takes the brace. A variables definition stands inside
+//! none: the brace open in front of it is one a failed definition left, and the `}` it leaves is a
+//! stray the root takes into an `Error`.
 //!
 //! **The "what the site leaves out" column is where the lenient set comes from.** A site either
 //! leaves out one token with **no AST image** (a closer, `on`), leaves out a constituent
@@ -133,10 +143,10 @@
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Sixteen project; fifty-five refuse.** The sixteen are the lenient rows a site can leave with a
-//! well-formed value. The others refuse either the shape the site built, or — for the unclosed
-//! sites whose definition the parser cannot finish at end of input — the rubble the document is
-//! left holding.
+//! **Twenty-one project; sixty-two refuse.** The twenty-one are the lenient rows a site can leave
+//! with a well-formed value. The others refuse either the shape the site built, or — for the
+//! unclosed sites whose definition the parser cannot finish at end of input — the rubble the
+//! document is left holding, or, for the one row above, the hole.
 //!
 //! | file | site | probe | what the site leaves out | the projection |
 //! |---|---|---|---|---|
@@ -153,9 +163,11 @@
 //! | `document.rs` | report | `mod m` | a constituent with an image | `MissingChild { ModDefinition }` |
 //! | `document.rs` | unclosed | `mod m {` | `}` of `ModDefinition` — **no image** | **projects** |
 //! | `document.rs` | report | `mod m {}` (executable root) | nothing — a present module is refused | `UnexpectedChild { ExecutableDocument, ModDefinition }` |
+//! | `document.rs` | report | `mod m { "d" }` | a constituent with an image — the description is rubble | `UnexpectedChild { ModDefinition, InlineString }` |
 //! | `executable.rs` | report | `query Q() { f }` (executable root) | a constituent with an image | `MissingChild { VariablesDefinition }` |
 //! | `executable.rs` | report | the empty document (executable root) | a constituent with an image | `MissingChild { ExecutableDocument }` |
 //! | `executable.rs` | unclosed | `query Q($a: Int` (executable root) | `)` of `VariablesDefinition` — **no image** | `UnexpectedChild { ExecutableDocument, Name }` |
+//! | `executable.rs` | report | `type T { f query Q($a: Int }` | `)` of `VariablesDefinition` — **no image** | **a hole** — the `}` the list leaves is the root's, as an `Error` |
 //! | `use_tree.rs` | report | `use a as` | a constituent with an image | `MissingChild { UseTree }` |
 //! | `use_tree.rs` | report | `use a::* as b` | nothing — a present token is refused | `UnexpectedChild { UseTree, Name }` |
 //! | `use_tree.rs` | report | `use a::{}` | a constituent with an image | `MissingChild { UseTree }` |
@@ -166,8 +178,10 @@
 //! | `use_tree.rs` | report | `use` | a constituent with an image | `MissingChild { UseDefinition }` |
 //! | `generic.rs` | report | `type T<> { f: Int }` | a constituent with an image | `MissingChild { DefinitionTypeGenerics }` |
 //! | `generic.rs` | unclosed | `type T<A` | `>` of `DefinitionTypeGenerics` — **no image** | **projects** |
+//! | `generic.rs` | report | `mod m { type T<A }` | `>` of `DefinitionTypeGenerics` — **no image** | **projects** |
 //! | `generic.rs` | report | `fragment <> F on T { f }` | a constituent with an image | `MissingChild { ExecutableDefinitionTypeGenerics }` |
 //! | `generic.rs` | unclosed | `extend type T<A` | `>` of `ExtensionTypeGenerics` — **no image** | `MissingChild { ObjectTypeExtension }` |
+//! | `generic.rs` | report | `mod m { extend type T<A }` | `>` of `ExtensionTypeGenerics` — **no image** | `MissingChild { ObjectTypeExtension }` |
 //! | `generic.rs` | report | `fragment on on T { f }` | nothing — a present token is refused | `SemanticRule` |
 //! | `generic.rs` | report | `type T where A: { f: Int }` | a constituent with an image | `MissingChild { WherePredicate }` |
 //! | `generic.rs` | report | `type T where { f: Int }` | a constituent with an image | `MissingChild { WhereClause }` |
@@ -179,6 +193,7 @@
 //! | `selection.rs` | unclosed | `{ f` | `}` of `SelectionSet` — **no image** | **projects** |
 //! | `definition.rs` | report | `type T { f(): Int }` | a constituent with an image | `MissingChild { ArgumentsDefinition }` |
 //! | `definition.rs` | unclosed | `type T { f(a: Int` | `)` of `ArgumentsDefinition` — **no image** | `UnexpectedChild { Document, Name }` |
+//! | `definition.rs` | report | `mod m { directive @d(a: Int }` | `)` of `ArgumentsDefinition` — **no image** | `MissingChild { DirectiveDefinition }` |
 //! | `definition.rs` | report | `type T { }` | a constituent with an image | `MissingChild { FieldsDefinition }` |
 //! | `definition.rs` | unclosed | `type T { f: Int` | `}` of `FieldsDefinition` — **no image** | **projects** |
 //! | `definition.rs` | report | `input I { }` | a constituent with an image | `MissingChild { InputFieldsDefinition }` |
@@ -204,13 +219,20 @@
 //! | `extension.rs` | report | `extend enum E` | a constituent with an image | `MissingChild { EnumTypeExtension }` |
 //! | `extension.rs` | report | `extend schema` | a constituent with an image | `MissingChild { SchemaExtension }` |
 //! | `extension.rs` | report | `extend directive @d` | a constituent with an image | `MissingChild { DirectiveExtension }` |
+//! | `extension.rs` | report | `mod m { extend }` | a constituent with an image — the `extend` is rubble | `UnexpectedChild { ModDefinition, Name }` |
 //! | `value.rs` | report | `type T { f(a: Int = $v): Int }` | nothing — a present token is refused | `UnexpectedChild { DefaultValue, VariableValue }` |
+//! | `value.rs` | report | `{ f(a: ) }` | a constituent with an image | `MissingChild { Argument }` |
 //! | `value.rs` | unclosed | `{ f(a: [1` | `]` of `ListValue` — **no image** | **projects** |
+//! | `value.rs` | report | `{ f(a: [1 }` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: set!{1` | `}` of `SetValue` — **no image** | **projects** |
 //! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
+//! | `directive.rs` | report | `{ f(a: 1 }` | `)` of `Arguments` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: A<B` | `>` of `TypeGenerics` — **no image** | **projects** |
+//! | `ty.rs` | report | `type T { f: A<B }` | `>` of `TypeGenerics` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: [Int` | `]` of `ListType` — **no image** | **projects** |
+//! | `ty.rs` | report | `type T { f: [Int }` | `]` of `ListType` — **no image** | **projects** |
+//! | `ty.rs` | report | `type T { f: }` | a constituent with an image | `MissingChild { FieldDefinition }` |
 //!
 //! The rows are what the named cells pin by shape, where a shape has one:
 //!
@@ -218,6 +240,7 @@
 //! |---|---|---|
 //! | a present-but-empty required container | `MissingChild` | `a_present_but_empty_required_container_refuses` |
 //! | a variable in a constant position | `UnexpectedChild` | `a_variable_in_a_constant_position_refuses_through_both_new_containers` |
+//! | **a type or a value missing in front of a closer** | `MissingChild` over the node that wants it — the closer is left for its block, so the tree has no hole | `a_missing_constituent_refuses` |
 //! | a description in front of an extension or a `use` item | `UnexpectedChild { parent: Document, found: InlineString }` — the string stays **outside** the node, so it is rubble at document level | `a_described_use_item_refuses_as_rubble` |
 //! | **a description in front of a shorthand operation** | `UnexpectedChild { parent: OperationDefinition, found: InlineString }` — here the string is **inside** the node | `a_described_shorthand_refuses_and_its_recovery_is_not_complete` |
 //! | an enum value named `true`, `false` or `null` | `SemanticRule` | `an_enum_value_named_true_refuses` |
@@ -274,14 +297,17 @@
 //! **This table is the criterion's whole extension, derived rather than listed.** A position is
 //! lenient iff its token has no AST image and the lossless parser builds a hole-free tree holding
 //! the node without it; the report-and-build census above enumerates every place the parser leaves
-//! a token out without a hole, and its twenty-one image-less rows — each witnessed by its own
-//! probe's tree — are these twenty-one, which the cell asserts. Three of them are witnessed only as
-//! **orphans**: at end of input the operation, the field or the fragment around the list cannot be
-//! finished, so the root keeps the list as a stray child of the document beside the lost
-//! definition's tokens, and every projection of such a tree refuses at the rubble. Those three,
-//! with an extension's `>`, are lenient by the criterion and change no answer. The mutation law's
-//! census of deletions both sides refuse is a second instrument, and it agrees: every token it
-//! still lists has an image.
+//! a token out without a hole, and the pairs its image-less rows leave out — each witnessed by the
+//! tree of at least one probe — are these twenty-one, which the cell asserts. A pair can have two
+//! sites: a `(`, `[` or `<` list leaves its closer out at the end of input, and again at the `}`
+//! of a block around it. Two of the pairs are witnessed only as **orphans**: at end of input the
+//! operation or the fragment around the list cannot be finished, so the root keeps the list as a
+//! stray child of the document beside the lost definition's tokens, and every projection of such a
+//! tree refuses at the rubble. An arguments definition's `)` is witnessed that way under a field,
+//! and once more inside a directive definition that a module's `}` cuts short, which refuses for
+//! the locations it never got. Those three, with an extension's `>`, are lenient by the criterion
+//! and change no answer. The mutation law's census of deletions both sides refuse is a second
+//! instrument, and it agrees: every token it still lists has an image.
 //!
 //! Every row is also **measured as a value** where a value exists: `tests/lossless_x_mutation.rs`
 //! deletes the token from a real tree — or finds a corpus tree already without it — and requires
@@ -394,18 +420,25 @@
 //! | a **one-of slot group** read by picking a winner | a choice holding both of its alternatives, projected as the first | one atom per choice — see below |
 //!
 //! `every_walk_is_a_transcription` reads this file's own code and asserts the census: no
-//! `extent.token(`, no `Names`, no `is_none() =>` guard, no wildcard arm that covers, and two child
-//! loops left — the cursor's trivia skip and the recovering door's pass over the root.
+//! `extent.token(`, no `Names`, no `is_none() =>` guard, no wildcard arm that covers, and three
+//! child loops left — the cursor's trivia skip, the recovering door's pass over the root, and the
+//! kind check that door makes of a module's direct children before it reads them.
 //!
 //! **No arm survives that covers and drops**, and there is no kind that legitimately has no image:
 //! the old doc's claim that "an element with no AST image is not part of the AST, but its bytes are
 //! part of the parent's" was the hatch talking. A hole ([`Error`](SyntaxKind::Error),
-//! [`Gap`](SyntaxKind::Gap)) is the one element with no image and the doors refuse it before any
-//! walk, so a walk never meets one.
+//! [`Gap`](SyntaxKind::Gap)) is the one element with no image and the fail-fast doors refuse it
+//! before any walk, so a fail-fast walk never meets one. The recovering doors' module walk
+//! (`recovered_mod`) does meet one, inside a module it keeps, and it is the one walk that covers
+//! an element it does not project — **counting** each in [`Recovery::skipped`], which is what
+//! keeps that from being the hatch again.
 //!
-//! The fold carries no `TooDeep` of its own: nothing below covers a subtree it has not walked, so
-//! no extent is unknowable. The refusal comes from the doors' own verification, and
-//! `a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended` pins it there.
+//! The fold carries no `TooDeep` of its own: no fail-fast walk covers a subtree it has not walked,
+//! so no extent is unknowable. The refusal comes from the doors' own verification, and
+//! `a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended` pins it there. The one cover
+//! of an unwalked subtree is `recovered_mod`'s, of an element it skips: it asks the substrate's
+//! [`node_extent`], which descends that subtree once, and adds nothing to the module's span where
+//! that refuses.
 //!
 //! ## A walk is its production transcribed
 //!
@@ -629,8 +662,8 @@ use crate::{
     syntactic::definition::classify_location,
   },
   lossless::project::{
-    Recovery, Unverified, reject_foreign_kinds_and_holes, to_range, to_span, verify_root_kind,
-    verify_source, verify_source_at, verify_source_counted,
+    Recovery, Unverified, node_extent, reject_foreign_kinds_and_holes, to_range, to_span,
+    verify_root_kind, verify_source, verify_source_at, verify_source_counted,
     walk::{
       Extent, Leading, Optional, Trivia, described_extents, missing, unexpected, unexpected_token,
     },
@@ -885,11 +918,11 @@ pub fn project_type_system_document<'src>(
   )
 }
 
-/// Project every entry of a lossless **type-system** parse that has an AST image, and count the
-/// ones that do not.
+/// Project every item of a lossless **type-system** parse that has an AST image, and count the
+/// elements that do not.
 ///
-/// [`project_executable_document_recovered`]'s mirror at the SDL root, walking the same top level
-/// with the same accounting.
+/// [`project_executable_document_recovered`]'s mirror at the SDL root, with the one thing that
+/// root has and the executable one does not: inline modules, which this door **descends into**.
 ///
 /// ```
 /// # #[cfg(all(feature = "graphqlx", feature = "rowan_0_17"))] {
@@ -908,6 +941,53 @@ pub fn project_type_system_document<'src>(
 /// assert!(!recovery.is_complete());
 /// # }
 /// ```
+///
+/// # Inside a module
+///
+/// A module whose header reads — its description if it has one, `mod`, its name and its `{` — is
+/// kept, and each element of its body is then judged on its own, as an element of the root is:
+///
+/// - an item that projects is kept, in the module it stands in;
+/// - a nested module is read the same way, to any depth;
+/// - anything else is one skipped element — an item or a nested module that does not project, a
+///   recovery hole, any other node, and each token that is neither trivia nor the `}` the body
+///   closes with. Nothing inside a skipped element is counted.
+///
+/// A module whose own header does not read is one skipped element where it stands. A missing `}`
+/// costs nothing, as in [`project_type_system_document`].
+///
+/// So the [`Recovery`] counts at **every module depth**: [`projected`](Recovery::projected) is
+/// every item with an AST image, a module counting one beside the items kept inside it and a
+/// `use` item counting one; [`skipped`](Recovery::skipped) is every element without one. Both
+/// saturate.
+///
+/// ```
+/// # #[cfg(all(feature = "graphqlx", feature = "rowan_0_17"))] {
+/// use smear_parser::graphqlx::lossless::{
+///   parse_type_system_document, project_type_system_document_recovered,
+/// };
+///
+/// let source = "mod m { scalar X type Half { f } scalar W }";
+/// let parse = parse_type_system_document(source);
+/// assert!(parse.has_errors());
+///
+/// let (ast, recovery) =
+///   project_type_system_document_recovered(&parse, source).expect("one document");
+/// // The module is the one top-level item, and it keeps `X` and `W`.
+/// assert_eq!(ast.definitions().len(), 1);
+/// assert_eq!(recovery.projected(), 3);
+/// assert!(!recovery.is_complete());
+/// # }
+/// ```
+///
+/// # What equals the fail-fast door, and what a span covers
+///
+/// Whenever [`project_type_system_document`] answers a document, this door answers the same one
+/// with nothing skipped: value for value, module spans included.
+///
+/// A kept module's span is its node's token extent, so it covers what was skipped inside it: its
+/// `{` and `}` enclose that text whatever is done with it. The document's own span is the extent
+/// of the top-level entries that survived.
 pub fn project_type_system_document_recovered<'src>(
   parse: &Parse,
   source: &'src str,
@@ -932,6 +1012,22 @@ pub fn project_type_system_document_verified<'src>(
     K::TypeSystemDocument,
     recoverable_type_system_entry,
     pair.source(),
+  );
+  (TypeSystemDocument::new(span, definitions), recovery)
+}
+
+/// [`project_type_system_document_recovered`] over the tree a door has just built from `source`
+/// itself, which needs no pair check: the tree is that very text's parse. It is what this
+/// dialect's lossless layer answers a document with.
+pub(crate) fn project_own_type_system_document<'src>(
+  parse: &Parse,
+  source: &'src str,
+) -> (TypeSystemDocument<&'src str>, Recovery) {
+  let (span, definitions, recovery) = recovered_top_level_verified(
+    parse,
+    K::TypeSystemDocument,
+    recoverable_type_system_entry,
+    source,
   );
   (TypeSystemDocument::new(span, definitions), recovery)
 }
@@ -980,8 +1076,9 @@ impl<'p, 'src> Verified<'p, 'src> {
   /// The second half exists because `finish_root` is public and generic, so a `Parse` can be
   /// minted over a root that is not this dialect's `Root` — outside the kind space, or an in-space
   /// kind such as `Name` — and its bytes verify. The refusal is [`Unverified::WrongRoot`]. Kinds
-  /// below the root are checked by each entry's own scan, so a recovering door counts an entry
-  /// holding one as skipped. al8n/smear#218.
+  /// below the root are checked by each item's own scan, and over an inline module's own children
+  /// before the type-system door reads them, so a recovering door counts what holds one as
+  /// skipped: the item, or the module when the kind is a direct child of it. al8n/smear#218.
   ///
   /// `O(green elements + source bytes)` over the borrowed green root: [`verify_source_counted`]
   /// visits every node and token and compares every token's bytes. See [`verify_parse`], which is
@@ -1067,7 +1164,9 @@ pub fn verify_parse(parse: &Parse, source: &str) -> Result<(), Unverified> {
 /// The recovering top-level walk, shared by both single-half roots.
 ///
 /// One implementation rather than one per root, because what it computes is [`Recovery`] and both
-/// doors report it. `entry_of` is a `fn` pointer.
+/// doors report it. `entry_of` is a `fn` pointer, and beside the entry and its extent it answers
+/// what the entry adds to the tally: one projected item for an entry that holds no other, and for
+/// a module everything [`recovered_mod`] counted at and under it.
 ///
 /// # Every element of the root, not every element of the document node
 ///
@@ -1084,7 +1183,7 @@ pub fn verify_parse(parse: &Parse, source: &str) -> Result<(), Unverified> {
 fn recovered_top_level<'src, T>(
   parse: &Parse,
   root_kind: SyntaxKind,
-  entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange)>,
+  entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange, Recovery)>,
   source: &'src str,
 ) -> Result<(SimpleSpan, Vec<T>, Recovery), Unverified> {
   // Established once, over the whole root, before a single element is projected, and **returned**
@@ -1107,13 +1206,16 @@ fn recovered_top_level<'src, T>(
 fn recovered_top_level_verified<'src, T>(
   parse: &Parse,
   root_kind: SyntaxKind,
-  entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange)>,
+  entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange, Recovery)>,
   source: &'src str,
 ) -> (SimpleSpan, Vec<T>, Recovery) {
   let root = parse_root(parse);
   let container = child_node(root, root_kind).unwrap_or(root);
 
   let mut definitions = Vec::new();
+  // Counted as the entries arrive and saturating, like `skipped`: a length cast would wrap where
+  // these stop.
+  let mut projected = 0u32;
   let mut skipped = 0u32;
   // The document's own span is the extent of the tokens under the entries that **survived**, not
   // of the bytes that were dropped: an AST span is an extent of the tokens its node covers, and a
@@ -1132,9 +1234,11 @@ fn recovered_top_level_verified<'src, T>(
     }
     NodeOrToken::Token(_) => {}
     NodeOrToken::Node(child) => match entry_of(child, source) {
-      Ok((entry, piece)) => {
+      Ok((entry, piece, inside)) => {
         extent.cover(piece);
         definitions.push(entry);
+        projected = projected.saturating_add(inside.projected());
+        skipped = skipped.saturating_add(inside.skipped());
       }
       Err(_) => skipped = skipped.saturating_add(1),
     },
@@ -1159,8 +1263,7 @@ fn recovered_top_level_verified<'src, T>(
       SimpleSpan::new(start, start)
     }
   };
-  let recovery = Recovery::new(definitions.len() as u32, skipped);
-  (span, definitions, recovery)
+  (span, definitions, Recovery::new(projected, skipped))
 }
 
 /// The one document container a fail-fast door reads, with the rest of the root's shape refused.
@@ -1185,7 +1288,7 @@ fn sole_document<'g>(root: Node<'g>, kind: SyntaxKind, wanted: &'static str) -> 
 /// One top-level entry, with the holes in **its own** subtree refused.
 ///
 /// The scan is scoped to the entry, so a hole is charged to the entry that holds it and to no
-/// other.
+/// other. An executable entry holds no other item, so what it adds to the tally is itself.
 ///
 /// # It compares no bytes
 ///
@@ -1195,14 +1298,37 @@ fn sole_document<'g>(root: Node<'g>, kind: SyntaxKind, wanted: &'static str) -> 
 fn recoverable_entry<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(UseOrExecutableDefinition<&'src str>, TextRange)> {
+) -> Out<(UseOrExecutableDefinition<&'src str>, TextRange, Recovery)> {
   scan_holes(node)?;
-  executable_entry(node, source)
+  let (entry, extent) = executable_entry(node, source)?;
+  Ok((entry, extent, Recovery::new(1, 0)))
 }
 
-/// [`recoverable_entry`]'s twin at the SDL root, scoped for the same reason and comparing no bytes
-/// for the same one.
+/// [`recoverable_entry`]'s twin at the SDL root, comparing no bytes for the same reason.
+///
+/// A module is the one entry that is not scanned whole and projected whole: [`recovered_mod`]
+/// reads it item by item, and answers what it kept and what it skipped inside. Every other entry
+/// is [`recoverable_item`]'s, and adds itself to the tally.
 fn recoverable_type_system_entry<'src>(
+  node: Node<'_>,
+  source: &'src str,
+) -> Out<(TypeSystemItem<&'src str>, TextRange, Recovery)> {
+  // Compared raw: nothing has checked this node's kind yet, and a module's is all that is asked
+  // of it here.
+  if node.green().kind() == raw_of(K::ModDefinition) {
+    let (module, extent, inside) = recovered_mod(node, source)?;
+    return Ok((TypeSystemItem::Mod(module), extent, inside));
+  }
+  let (entry, extent) = recoverable_item(node, source)?;
+  Ok((entry, extent, Recovery::new(1, 0)))
+}
+
+/// One type-system item that is **not a module**, with the holes in its own subtree refused: the
+/// scan scoped as [`recoverable_entry`] scopes it, at the root and inside a module's body alike.
+///
+/// Its callers send a module to [`recovered_mod`] first, so the module arm of
+/// [`type_system_entry`] is not reached from here.
+fn recoverable_item<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(TypeSystemItem<&'src str>, TextRange)> {
@@ -2077,6 +2203,129 @@ fn mod_definition<'src>(
     parent.cursor.extent.cover(extent);
     parent.items.push(TypeSystemItem::Mod(module));
     frame = parent;
+  }
+}
+
+/// A module read for what survives in it: [`mod_definition`] with every element of every body
+/// judged **on its own**, on the same worklist.
+///
+/// The recovering doors' module. Each child of a body is one of:
+///
+/// - an item that projects — kept, in the module it stands in;
+/// - a nested module whose header projects — descended into, and kept the same way when its own
+///   body runs out;
+/// - the `}` the body closes with, which is the last thing in it;
+/// - anything else — **one skipped element**: an item or a nested module that does not project, a
+///   recovery hole, any other node, and each non-trivia token, a gap tile among them. Nothing
+///   inside a skipped node is counted.
+///
+/// The [`Recovery`] it answers counts `node` itself and every item kept under it, at every depth,
+/// as projected, and every skipped element at every depth as skipped.
+///
+/// # A module is never scanned whole
+///
+/// [`scan_holes`] runs per item, so a hole inside a module refuses the item that holds it and not
+/// the module, and no subtree is scanned once per module around it. What stands in for the scan
+/// at a module's own level is [`open_recovered_mod`]'s kind check.
+///
+/// # Only `node`'s own header can refuse
+///
+/// Once it has projected, nothing below fails the module: a nested module that does not open is a
+/// skipped element of the body it stands in, a missing `}` is lenient as in [`close_mod`], and
+/// the rest is counted. So an `Err` is `node` as one skipped element, with nothing inside it
+/// counted.
+///
+/// # The span is the node's extent
+///
+/// A skipped element is covered like a kept one, so a module's span is its node's token extent
+/// whatever was skipped inside it. With nothing skipped the walk is [`mod_definition`]'s, fold
+/// for fold: the same header, the same projection of each item, the same closer.
+fn recovered_mod<'src>(
+  node: Node<'_>,
+  source: &'src str,
+) -> Out<(ModDefinition<&'src str>, TextRange, Recovery)> {
+  let mut frames: Vec<ModFrame<'_, 'src>> = Vec::new();
+  let mut frame = open_recovered_mod(node, source)?;
+  // `node` itself is an item with an image.
+  let mut projected = 1u32;
+  let mut skipped = 0u32;
+  loop {
+    match frame.cursor.peek() {
+      Some(NodeOrToken::Node(child)) => {
+        frame.cursor.bump();
+        if child.kind() == K::ModDefinition {
+          if let Ok(opened) = open_recovered_mod(child, source) {
+            projected = projected.saturating_add(1);
+            frames.push(frame);
+            frame = opened;
+            continue;
+          }
+        } else if let Ok(item) = recoverable_item(child, source) {
+          projected = projected.saturating_add(1);
+          let item = frame.cursor.keep(item);
+          frame.items.push(item);
+          continue;
+        }
+        skipped = skipped.saturating_add(1);
+        cover_skipped(&mut frame.cursor.extent, child);
+        continue;
+      }
+      Some(NodeOrToken::Token(token)) => {
+        frame.cursor.bump();
+        frame.cursor.extent.cover(token.text_range());
+        // A `}` with nothing after it is the body's closer. Any other token has no place in a
+        // module's body.
+        if token.kind() != K::RBrace || frame.cursor.peek().is_some() {
+          skipped = skipped.saturating_add(1);
+          continue;
+        }
+      }
+      None => {}
+    }
+    // The body ran out, so the cursor is drained and the header that opened the frame covered a
+    // token: `close_mod` has nothing left to refuse.
+    let (module, extent) = close_mod(frame)?;
+    let Some(mut parent) = frames.pop() else {
+      return Ok((module, extent, Recovery::new(projected, skipped)));
+    };
+    parent.cursor.extent.cover(extent);
+    parent.items.push(TypeSystemItem::Mod(module));
+    frame = parent;
+  }
+}
+
+/// [`open_mod`] for a module nothing has scanned.
+///
+/// A cursor asks every direct child of its node for its kind, and [`scan_holes`] — which is what
+/// makes that safe in every other walk — is not run over a module the recovering walk reads. So
+/// the kinds of the module's direct children are checked here, raw, before a cursor is opened
+/// over them: one outside this dialect's space is
+/// [`InvalidRawKind`](ProjectErrorKind::InvalidRawKind) and the module does not open, where
+/// `kind_from_raw` could only panic. al8n/smear#218.
+fn open_recovered_mod<'g, 'src>(node: Node<'g>, source: &'src str) -> Out<ModFrame<'g, 'src>> {
+  for element in node.children() {
+    let (raw, at) = match element {
+      NodeOrToken::Node(child) => (child.green().kind().0, child.text_range()),
+      NodeOrToken::Token(token) => (token.green().kind().0, token.text_range()),
+    };
+    if SyntaxKind::from_raw(raw).is_none() {
+      return Err(ProjectError::new(
+        ProjectErrorKind::InvalidRawKind { raw },
+        to_range(at),
+      ));
+    }
+  }
+  open_mod(node, source)
+}
+
+/// Fold a node the recovering walk skips into the extent of the module that holds it.
+///
+/// The one cover of a subtree no walk projects, so it is read through the substrate's
+/// [`node_extent`], which descends it once. A subtree that refuses — it holds a kind outside this
+/// space — or that holds no token but trivia adds nothing.
+fn cover_skipped(extent: &mut Extent, node: Node<'_>) {
+  if let Ok(Some(piece)) = node_extent(node, is_trivia) {
+    extent.cover(piece);
   }
 }
 

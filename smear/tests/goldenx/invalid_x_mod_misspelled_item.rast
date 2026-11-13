@@ -1,0 +1,35 @@
+Root@0..41
+  Document@0..41
+    ModDefinition@0..40
+      Name@0..3 "mod"
+      Space@3..4 " "
+      Name@4..5 "m"
+      Space@5..6 " "
+      LBrace@6..7 "{"
+      Newline@7..8 "\n"
+      Space@8..9 " "
+      Space@9..10 " "
+      Error@10..30
+        Name@10..14 "tpye"
+        Space@14..15 " "
+        Name@15..16 "T"
+        Space@16..17 " "
+        LBrace@17..18 "{"
+        Space@18..19 " "
+        Name@19..20 "f"
+        Colon@20..21 ":"
+        Space@21..22 " "
+        Name@22..25 "Int"
+        Space@25..26 " "
+        RBrace@26..27 "}"
+        Newline@27..28 "\n"
+        Space@28..29 " "
+        Space@29..30 " "
+      ScalarTypeDefinition@30..39
+        Name@30..36 "scalar"
+        Space@36..37 " "
+        DefinitionName@37..39
+          Name@37..38 "X"
+          Newline@38..39 "\n"
+      RBrace@39..40 "}"
+    Newline@40..41 "\n"

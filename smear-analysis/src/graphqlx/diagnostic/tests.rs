@@ -261,3 +261,31 @@ fn the_analysis_reporter_notes_each_error_and_a_consumer_walk_reporter_notes_non
   assert_eq!(diagnostics.len(), 1);
   assert!(diagnostics.truncated());
 }
+
+/// A parser's syntax error is handed to the list as any error is, counted and kept, and notes no
+/// mark, whichever reporter it goes through; an error a phase reports beside it is still noted.
+#[test]
+fn a_syntax_error_is_counted_and_notes_no_mark() {
+  let syntax = Location::new(4, SimpleSpan::new(2, 5));
+  let phase = Location::entire(6);
+
+  let mut marking = Reporter::new(8);
+  marking.report_syntax(error(syntax));
+  assert!(
+    marking.take_marks().is_empty(),
+    "a syntax error marks nothing"
+  );
+  marking.report_syntax(error(syntax));
+  marking.report(error(phase));
+  let (diagnostics, marks) = marking.finish();
+  assert_eq!(marks, [phase]);
+  assert_eq!(diagnostics.error_count(), 3);
+  assert_eq!(diagnostics.len(), 3);
+  assert!(!diagnostics.truncated());
+
+  let mut consumer = Reporter::without_marks(8);
+  consumer.report_syntax(error(syntax));
+  let (diagnostics, marks) = consumer.finish();
+  assert!(marks.is_empty());
+  assert_eq!(diagnostics.error_count(), 1);
+}

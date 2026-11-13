@@ -23,6 +23,8 @@
 //!   close pairs (`Balance`), `pred` is the depth-0 sync predicate. On a **successful** sync that
 //!   skipped ≥1 token it reports the region once through `emit_skipped_region`, and the sink wraps
 //!   those tokens in the profile's `error_kind` **automatically** — no explicit `node` call.
+//!   [`unexpected`] runs it inside an attempt and declines it where what it committed holds a `}`
+//!   the scan did not open, then scans again with one stop more: see its docs.
 //! - `sync_balanced` **makes no progress in two cases**, and both are reachable here. A no-match
 //!   run to end of input "commits nothing and returns `Ok(None)`, leaving no trace"; and a
 //!   *successful* sync whose predicate matches the very first token returns
@@ -53,17 +55,18 @@
 //!
 //! `sync_balanced`'s no-match exit **rewinds the whole scan**: the position, the lexer state, the
 //! dedup watermark and every emission come back off, and the drained cache prefix comes back too,
-//! "at the cost of re-lexing those tokens on the next read". Both helpers here then advance by
-//! exactly one token and the enclosing loop asks again. A tail containing no restart point is
-//! therefore walked once per token in it — **Θ(n²)**, measured at ×4.0 per doubling on twelve
-//! shapes across both dialects and all six document roots, 24.6 s for 72 KB.
+//! "at the cost of re-lexing those tokens on the next read". Each of the three helpers here that
+//! scans then advances by exactly one token and the enclosing loop asks again. A tail containing
+//! no restart point is therefore walked once per token in it — **Θ(n²)**, measured at ×4.0 per
+//! doubling on twelve shapes across both dialects and all six document roots, 24.6 s for 72 KB.
 //!
 //! A *matching* scan has none of that shape: it commits, so what it crossed is never re-crossed
 //! and the cost is amortised. The defect is exactly the no-match branch repeating, and it repeats
-//! in **both** helpers — [`unexpected`] over a tail of punctuation the wide `is_sync_point` set
-//! does not name, [`resync_to`] over a tail whose definition heads all sit at depth ≥ 1, where the
-//! scan never consults its predicate. `[ type ] ` repeated is the second one alone; `( type ) ` is
-//! both at once.
+//! in **each** of the three — [`unexpected`] over a tail of punctuation the wide `is_sync_point`
+//! set does not name, [`resync_to`] over a tail whose definition heads all sit at depth ≥ 1, where
+//! the scan never consults its predicate, and [`resync_to_closing`] over a module's body whose item
+//! heads all sit inside a brace the scan has crossed. `[ type ] ` repeated is the second one alone;
+//! `( type ) ` is the first two at once; a body of `{ type } ` repeated is the third.
 //!
 //! ## What is bounded, and why it is not the scan
 //!
@@ -125,8 +128,11 @@
 //! sources are enumerable: smear calls no cache-clearing door (`InputRef::state_mut`, `set_state`,
 //! `restore`, `rollback_*` appear nowhere; the `state_mut` calls in `smear-lexer` are
 //! `Lexer::state_mut`, a lexer touching its own bracket counter), the lossless tree's only
-//! speculation is four single-token probes, and the remainder is the failed scan this guard exists
-//! to bound. This exception is the mechanism, not a leak in it.
+//! speculation is four single-token probes and the attempt [`unexpected`] runs its skip in, and
+//! the remainder is the failed scan this guard exists to bound. That attempt is declined only
+//! where what the skip committed holds a `}` the skip did not open, and a declined one is a failed
+//! scan in all but name: it gives back what the skip crossed, to be lexed again, and the guard
+//! charges it as one. This exception is the mechanism, not a leak in it.
 //!
 //! **Exception 2 — lexer errors. Closed, and named here because the arithmetic it drove is still
 //! quoted below.** tokora charges `spent` for *every* item the lexer hands back, errors included
@@ -212,8 +218,9 @@
 //! the denominator rather than out of any shape: the guard permits scanning only while
 //! `spent <= FACTOR * committed + floor`, and `committed` can never exceed `T`, the number of items
 //! the document actually contains. So the total lexing a parse can be made to do is
-//! `FACTOR * T + floor` plus the one scan in flight when the guard closes — **linear in the
-//! document, whatever order the shape puts its progress and its scans in**.
+//! `FACTOR * T + floor` plus the one call in flight when the guard closes, which scans once, or in
+//! [`unexpected`] at most twice, the second no longer than the first — **linear in the document,
+//! whatever order the shape puts its progress and its scans in**.
 //!
 //! `T` is where a configured `LosslessLimits::max_tokens` enters, and it is the only way that knob
 //! reaches the durable count at all: the tally stops the lex one lexeme past its ceiling, so
@@ -304,6 +311,8 @@
 //! would make a refusal observable on documents the guard never refuses on, which is precisely the
 //! unguarded equivalence `the_guard_did_not_change_the_answer` exists to hold.
 
+use core::cell::Cell;
+
 use tokora::{
   InputRef, Lexer, ParseContext, SimpleSpan, Token,
   emitter::{CstEmitter, FromUnclosed},
@@ -385,7 +394,7 @@ where
 /// # When to reach for this rather than [`unexpected`]
 ///
 /// Whenever the offending token is worth more to the *next* production than it would be inside an
-/// `Error` node. Three shapes are in that class, and each one is a bug if it consumes:
+/// `Error` node. Five shapes are in that class, and each one is a bug if it consumes:
 ///
 /// - **A required keyword is absent**, as with a type condition's `on`. The name that *is* there
 ///   is still the condition's type, so eating it would trade one diagnostic for a lost subtree.
@@ -394,6 +403,12 @@ where
 /// - **A prefix has no tail**, as with a `...` at the end of a selection set. The `}` after it
 ///   belongs to the enclosing set; [`unexpected`] would swallow it (a closer *is* a sync point)
 ///   and the set would then run to end of input looking for a closer it had already consumed.
+/// - **A required component is absent in front of a closer**, as with the type after a field's
+///   `:` or the value after an argument's. The closer is the enclosing block's, for the reason
+///   the shape above gives.
+/// - **A list's own closer is absent in front of a `}` of a block around the list.** The brace is
+///   that block's: the list reports its closer as missing and stops, where taking the brace as
+///   junk would hand the list everything after the block.
 ///
 /// **Consuming nothing makes this unsafe inside a loop that continues.** Every caller must either
 /// `return` afterwards or have already made progress on its own — the same distinction
@@ -458,11 +473,76 @@ where
 /// `node` combinator, so a caller that reaches this at genuine end of input gets no node at all
 /// rather than an empty zero-width `Error` one.
 ///
+/// # What the skip keeps
+///
+/// The skip is the one this helper always ran: one depth over every pair of `delimiters`, blind to
+/// which closer answers which opener (an opener adds one, a closer takes one away and never below
+/// zero), stopping at a token where the depth is zero and `is_sync_point` says so. A `}` it takes
+/// while none of the braces it has taken is open closes a brace it did not open. What this helper
+/// keeps, against the skip's own answer:
+///
+/// - where the skip found no restart point, or found one at the head: the same answer, one token
+///   taken by the fallback, whether or not the skip stepped over such a `}`;
+/// - where it found one and its hole holds no such `}`: the same hole;
+/// - where it found one and its hole holds such a `}`: the prefix of that hole in front of the
+///   first of them, which is never empty, unless the produce-event budget below runs out first;
+/// - where a limit or an error stopped it: what it committed, a prefix of the text from its first
+///   token, if that holds no such `}`; if it holds one, the prefix in front of the first of them,
+///   unless the produce-event budget below runs out first, and the parse meets the same stop again
+///   where it next reads that far.
+///
+/// tokora's produce-event budget is the one no rollback refunds, and the second scan below lexes
+/// again what the skip lexed, so under that budget the same text is paid for twice. Where the
+/// budget runs out before the second scan ends, this helper keeps what the second scan had
+/// committed, a part of the prefix or nothing, never such a `}`, and the parse ends at the budget,
+/// as it does wherever that budget runs out. The budget's default is none, so only a caller who
+/// sets it meets this. It is the price of the look-ahead: to tell a skip that finds no restart
+/// point from one that finds one past such a `}`, the helper has to read past the `}`, and a
+/// look-ahead that is taken back is lexed, and paid for, again.
+///
+/// So it keeps something other than the skip's answer only where the skip committed a `}` it had
+/// not opened, and nothing it commits holds one, whatever stops it.
+///
+/// # Two scans and an attempt
+///
+/// The skip runs inside a tokora attempt, with a classifier that hands tokora each of the dialect's
+/// answers unchanged and watches the braces beside them: how many the skip has taken and not
+/// closed, and whether it took a `}` while that count was zero. Where that happened and the skip
+/// committed something, so that the input's committed end stands past where the skip began, the
+/// attempt is declined, which takes back everything the skip did: the position, the lexer state
+/// with its tallies, the emissions with the hole's note or a limit's report, the `Error` node the
+/// sink wrapped round the hole, the dedup watermark, the poison boundary and the cache. A run that
+/// found nothing rewound itself and leaves the committed end where it was, so it is kept. A second
+/// scan then runs from the same token, the same depth kept by its own classifier, with one stop
+/// more: a `}` met while none of its own braces is open. Up to the first `}` the skip did not open,
+/// the two take the same tokens and the second stops nowhere the skip did not, so the second stops
+/// at that `}`. The skip had taken that `}`, so neither a limit of the lexer's own, whose tallies
+/// come back with the lexer state, nor an error stops the second scan before it: they stand
+/// further on. Only the durable produce-event budget, which no rollback refunds, can: where it
+/// stopped the skip itself, it refuses the second scan before it takes anything, and after a skip
+/// that found a restart point, it may run out anywhere in the second scan, which lexes again what
+/// the skip lexed. The prefix in front of a restart point is not empty because a `}` at the head
+/// is a restart point in both dialects' tables, where the skip stops before taking anything.
+///
+/// The allowance flag is read once and governs both scans: an exhausted allowance runs neither. A
+/// declined attempt costs what a failed scan costs, and the guard reads it the same way: `spent`
+/// keeps every item the skip lexed, `committed` comes back with the lexer state, and the second
+/// scan lexes again no more than the skip did.
+///
+/// The fallback is another matter: a `}` at the head stops the skip before it has taken anything,
+/// and the fallback then takes that `}`. A caller that may stand on a `}` closing a brace that was
+/// open before the caller began asks before it calls, and leaves that `}` to the production around
+/// it.
+///
+/// The brace pair is the one whose identity in `delimiters` is `b'{'`, as it is in both dialects'
+/// tables. A table with no such pair never declines, and its skip is kept as it was.
+///
 /// # The two `fn` pointers
 ///
-/// `delimiters` is the dialect's pair classifier and `is_sync_point` its depth-zero restart
-/// predicate. Both are tables rather than logic, which is why they are arguments and why this
-/// function is here: Task 6b's threshold admits a helper needing at most two of them.
+/// `delimiters` is the dialect's pair classifier and `is_sync_point` its restart predicate, which
+/// stops the skip where its depth is zero. Both are tables rather than logic, which is why they are
+/// arguments and why this function is here: Task 6b's threshold admits a helper needing at most
+/// two of them.
 pub fn unexpected<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   expected: &'static [<L::Token as Token<'inp>>::Kind],
@@ -487,11 +567,78 @@ where
   // unlike in [`resync_to`], which needs a peek in its place — because the test below folds `None`
   // and a zero-skip `Some` into the same arm: this helper's caller has already ruled the token at
   // hand junk, so consuming one is right either way. Progress, which is this helper's whole
-  // contract, is therefore unaffected.
+  // contract, is therefore unaffected. The flag is read once, here, and governs both scans below.
   let hole = if allowance_exhausted {
     None
   } else {
-    inp.sync_balanced(delimiters, |t| is_sync_point(t.data))?
+    // The skip as it always ran: the dialect's pairs handed to tokora as they are, and the restart
+    // predicate alone. The classifier passes each answer through and watches the braces beside
+    // it: how many the skip has taken and not closed, and whether it took a `}` while none was.
+    let open_braces: Cell<usize> = Cell::new(0);
+    let foreign: Cell<bool> = Cell::new(false);
+    let kept = inp.attempt(|inp| {
+      let start = inp.span().end();
+      let answer = inp.sync_balanced(
+        |kind: &<L::Token as Token<'inp>>::Kind| -> Balance<u8> {
+          let class = delimiters(kind);
+          match class {
+            Balance::Open(b'{') => open_braces.set(open_braces.get().saturating_add(1)),
+            Balance::Close(b'{') => {
+              if open_braces.get() == 0 {
+                foreign.set(true);
+              }
+              open_braces.set(open_braces.get().saturating_sub(1));
+            }
+            _ => {}
+          }
+          class
+        },
+        |t| is_sync_point(t.data),
+      );
+      // Nothing the skip commits holds a `}` it did not open, whatever stopped it: where the input
+      // stands past where the skip began, at a restart point, a limit or an error, and the skip
+      // took such a `}`, the attempt takes back all the skip did.
+      if foreign.get() && inp.span().end() > start {
+        None
+      } else {
+        Some(answer)
+      }
+    });
+    match kept {
+      Some(answer) => answer?,
+      None => {
+        // The skip again from the same token, its one depth kept by the classifier, which answers
+        // neutral so tokora's own depth stays at zero and the predicate is asked at every token,
+        // and one stop more: a `}` met while none of this scan's braces is open, the first `}` the
+        // skip did not open. Up to it the two scans take the same tokens, so this one stops there.
+        let depth: Cell<usize> = Cell::new(0);
+        let braces: Cell<usize> = Cell::new(0);
+        inp.sync_balanced(
+          |kind: &<L::Token as Token<'inp>>::Kind| -> Balance<u8> {
+            match delimiters(kind) {
+              Balance::Open(pair) => {
+                depth.set(depth.get().saturating_add(1));
+                if pair == b'{' {
+                  braces.set(braces.get().saturating_add(1));
+                }
+              }
+              Balance::Close(pair) => {
+                depth.set(depth.get().saturating_sub(1));
+                if pair == b'{' {
+                  braces.set(braces.get().saturating_sub(1));
+                }
+              }
+              Balance::Neutral => {}
+            }
+            Balance::Neutral
+          },
+          |t| match delimiters(&<L::Token as Token<'inp>>::kind(t.data)) {
+            Balance::Close(b'{') if braces.get() == 0 => true,
+            _ => depth.get() == 0 && is_sync_point(t.data),
+          },
+        )?
+      }
+    }
   };
   if hole.is_some_and(|h| h.skipped() > 0) {
     // The sink wrapped the skipped region in the profile's `error_kind` on its own.
@@ -598,12 +745,12 @@ pub(crate) const SCAN_ALLOWANCE_FLOOR: usize = 4_096;
 /// token, so the two readings differ by at most the peek [`report_unexpected`] takes — a couple of
 /// events against a floor of four thousand.
 ///
-/// # Both helpers consult it, and both must
+/// # Every helper that scans consults it, and each must
 ///
-/// [`unexpected`] carries 47 of the tree's 52 recovery call sites and [`resync_to`] the other 5,
-/// and each reaches the quadratic on tails the other's predicate is blind to. Guarding one leaves
-/// the other live — which is smear issue #167 round 2's finding on this very subsystem, restated
-/// one helper along.
+/// [`unexpected`] carries most of the tree's recovery call sites, [`resync_to`] the document
+/// roots' and [`resync_to_closing`] a module body's, and each reaches the quadratic on tails the
+/// others' predicates are blind to. Guarding one leaves the others live — which is smear issue
+/// #167 round 2's finding on this very subsystem, restated one helper along.
 ///
 /// # It is a rate limiter, not a latch
 ///
@@ -614,9 +761,11 @@ pub(crate) const SCAN_ALLOWANCE_FLOOR: usize = 4_096;
 /// # If the premise under it ever breaks, it breaks safe
 ///
 /// Both readings are monotone at these call sites because no recovery call is inside a speculative
-/// attempt — the lossless tree's only `attempt`/`try_parse_input` bodies are single-token probes.
-/// Should that stop being true, a rollback lowers `committed` and never lowers `spent`, so the
-/// guard engages *earlier*: recovery coarsens, the bound holds, and nothing becomes unsound.
+/// attempt — the lossless tree's only `attempt`/`try_parse_input` bodies are single-token probes
+/// and the skip [`unexpected`] runs, which holds no recovery call and is declined back to its own
+/// start, never below a reading taken before it. Should that stop being true, a rollback lowers
+/// `committed` and never lowers `spent`, so the guard engages *earlier*: recovery coarsens, the
+/// bound holds, and nothing becomes unsound.
 #[inline]
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) fn scan_allowance_exhausted(spent: usize, committed: usize) -> bool {
@@ -690,8 +839,9 @@ pub mod scan_allowance {
     LAST_REFUSAL_COMMITTED.with(|c| c.set(committed));
   }
 
-  /// Ungated, unlike its two neighbours: [`super::resync_to`] is the caller and it exists without
-  /// a dialect, so there is no `dead_code` to move one level down.
+  /// Ungated, unlike its two neighbours: [`super::resync_to`] and [`super::resync_to_closing`]
+  /// are the callers and they exist without a dialect, so there is no `dead_code` to move one
+  /// level down.
   #[inline]
   pub(super) fn record_restart_point_at_hand() {
     RESTART_POINTS_AT_HAND.with(|c| c.set(c.get().saturating_add(1)));
@@ -734,7 +884,8 @@ pub mod scan_allowance {
     PEAK_COMMITTED.with(Cell::get)
   }
 
-  /// How many times [`resync_to`](super::resync_to) took its **refused** path and found a restart
+  /// How many times [`resync_to`](super::resync_to) or
+  /// [`resync_to_closing`](super::resync_to_closing) took its **refused** path and found a restart
   /// point already at hand — the `head_satisfies` arm, and the only place it is exercised.
   ///
   /// `refusals() > 0` is not a substitute and the difference is measured, not theoretical. The
@@ -858,6 +1009,94 @@ where
   // `None` is "there is nothing left to eat". `try_expect(|_| true)` never declines against a real
   // token, so its only `Ok(None)` is absence — or a terminal stop folded into it, which would have
   // this helper report progress over a scanner that had already given up. smear issue #177.
+  if inp.try_expect_or_stop(|_| true)?.is_some() {
+    inp.cst_start_at(mark, error_kind);
+    inp.cst_finish(error_kind);
+  }
+  Ok(())
+}
+
+/// [`resync_to`] for wreckage that left delimiters **open**: skip it, closing them on the way, and
+/// stop before the next restart point outside them.
+///
+/// `left` is how many delimiters of `delimiters`' pairs the wreckage opened and did not close. A
+/// scan that began inside them would take the first closer it met for the enclosing shape's own —
+/// `sync_balanced` counts from zero and saturates there — so this scan spends its first `left`
+/// closers at depth zero on the wreckage. Each is skipped, and **nothing is a restart point until
+/// all of them are behind it**: a restart keyword inside the wreckage is crossed, where a looser
+/// rule would restart on it and later take the wreckage's own closer for the enclosing shape's.
+///
+/// # Why it is a function of its own
+///
+/// The count lives in the predicate, and [`resync_to`] takes its predicate as a `fn` pointer,
+/// which captures nothing. Everything else is [`resync_to`]'s, for the reasons its notes give: it
+/// reports nothing; it crosses the trivia in front of the wreckage first; a scan that finds no
+/// restart point rewinds, and one token goes into an `Error` node; and under an exhausted scan
+/// allowance only the head is asked. With `left` above zero the head is no restart point whatever
+/// it is, so that case takes the one token as well.
+///
+/// # The count is the caller's to re-derive
+///
+/// A scan that finds nothing rewinds, and what it counted is forgotten with it. A caller that
+/// derives `left` from state the rewind restores — a lexer's own count of open delimiters — reads
+/// the right number again on its next call, less whatever the one consumed token closed.
+///
+/// # The allowance is the caller's bound
+///
+/// One call costs at most one scan and one token, and nothing here bounds a loop of calls: a
+/// caller that loops on it with `allowance_exhausted` false pays one scan, as far as the end of
+/// the text, for every call, so the flag is that caller's bound on the work its loop can buy.
+pub fn resync_to_closing<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+  delimiters: fn(&<L::Token as Token<'inp>>::Kind) -> Balance<u8>,
+  is_restart_point: fn(&L::Token) -> bool,
+  left: usize,
+  error_kind: u16,
+  allowance_exhausted: bool,
+) -> Result<(), ErrorOf<'inp, L, Ctx, Lang>>
+where
+  Lang: ?Sized,
+  L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
+  L::Token: FromLogos<'inp>,
+  Ctx: ParseContext<'inp, L, Lang>,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<usize, Lang>>,
+{
+  if crate::lossless::trivia::peek_kind(inp)?.is_none() {
+    return Ok(());
+  }
+
+  let restart_point_at_hand = if allowance_exhausted {
+    // No scan, so nothing can be closed: with a delimiter still open the head is inside the
+    // wreckage, and only `left == 0` can have a restart point at hand.
+    let at_hand = left == 0 && inp.head_satisfies(is_restart_point)?;
+    #[cfg(all(feature = "test-support", feature = "std"))]
+    if at_hand {
+      scan_allowance::record_restart_point_at_hand();
+    }
+    at_hand
+  } else {
+    let mut left = left;
+    inp
+      .sync_balanced(delimiters, |t| {
+        if left == 0 {
+          return is_restart_point(t.data);
+        }
+        // `sync_balanced` consults this at scan depth zero only, so a closer seen here closes a
+        // delimiter the wreckage left open and never one the scan itself crossed.
+        if delimiters(&<L::Token as Token<'inp>>::kind(t.data)).is_close() {
+          left -= 1;
+        }
+        false
+      })?
+      .is_some()
+  };
+  if restart_point_at_hand {
+    return Ok(());
+  }
+
+  let mark = inp.cst_mark();
+  // `_or_stop`, for the reason [`resync_to`]'s fallback gives.
   if inp.try_expect_or_stop(|_| true)?.is_some() {
     inp.cst_start_at(mark, error_kind);
     inp.cst_finish(error_kind);

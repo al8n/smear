@@ -414,6 +414,8 @@ macro_rules! lossless_drivers {
                   }
                 }
               },
+              // A driver answers a `Parse` and nothing beside it, as a shipped door does.
+              |_| {},
             )
         }
       )*
@@ -864,6 +866,7 @@ macro_rules! lossless_door {
   (
     dialect  = $dm:ident::$dl:ident;
     errors   = $errors:ident;
+    value    = $value:ident;
     document = $dmod:ident::$dfn:ident;
     schema   = $smod:ident::$sfn:ident;
     request  = $rmod:ident::$rfn:ident;
@@ -911,6 +914,15 @@ macro_rules! lossless_door {
         ),
         end..end,
       )
+    }
+
+    /// Whether `member` is the variant the **door** owns: the durable token-budget refusal.
+    ///
+    /// Written once and read twice, so the two readers cannot disagree about which member is the
+    /// door's: the classifier that decides whether a record stays in the finished parse, and the
+    /// hand-over that lends a kept record's members.
+    fn is_budget_refusal<S>(member: &$value<S>) -> bool {
+      ::core::matches!(member.data(), ErrorData::TokenBudgetExhausted)
     }
 
     /// The context this door drives its parse under, spelled once.
@@ -1014,6 +1026,10 @@ macro_rules! lossless_door {
     /// A decision taken over the finished log ends that: the grammar's emissions are **inputs** to
     /// it rather than peers of it.
     ///
+    /// `lend` does not reopen it. What it is shown of the refusal is a shared borrow of the built
+    /// value, after the parse has been finished with it: there is no `Cst` in it to finish and no
+    /// log to write to.
+    ///
     /// # The driver's `Result` is dropped here
     ///
     /// A lossless door keeps the tree and the diagnostics and throws the parser's `Result` away —
@@ -1021,10 +1037,32 @@ macro_rules! lossless_door {
     /// dropped once, here, for every door and driver. A cell that needs the stop VALUE runs the
     /// inner frame, which is where that value is decided —
     /// `the_value_a_frame_hands_up_after_a_drain_refusal_is_terminal` is the one that does.
-    pub(crate) fn parse_lossless_document<'inp, Root>(
+    ///
+    /// # What is lent, and in what order
+    ///
+    /// `lend` is called once for each typed syntax error of the finished parse, by shared
+    /// reference, before this function returns and never afterwards:
+    ///
+    /// 1. for each record the finished parse **keeps** at error severity, in emission order: each
+    ///    member of its payload that is not the budget refusal, which is the door's own variant and
+    ///    never the grammar's to report; or, for a kept record whose payload holds no member, one
+    ///    `invalid syntax` error at the record's span, so that a kept record always lends;
+    /// 2. then, when the durable budget refused an item, the door's own refusal, once, last.
+    ///
+    /// A record the classifier below drops is not lent, and a recovery hole, which has no payload,
+    /// is never lent. So an error is lent exactly when the finished parse has an error-severity
+    /// diagnostic for it, and `lend` is called at all exactly when
+    /// [`has_errors`](crate::lossless::runner::Parse::has_errors) is true.
+    ///
+    /// **`lend` reads the verdict and cannot change it.** It is handed shared borrows after every
+    /// root has run and after the classifier has decided each record, so what it does with them
+    /// moves neither the tree nor a diagnostic: the same parse comes back whatever `lend` is. A
+    /// door that answers a `Parse` and nothing beside it passes one that does nothing.
+    pub(crate) fn parse_lossless_document<'inp, Root, Lend>(
       src: &'inp str,
       limits: $crate::$dm::$dl::LexerState,
       root: Root,
+      mut lend: Lend,
     ) -> Parse
     where
       Root: for<'closure> ::core::ops::FnOnce(
@@ -1037,6 +1075,7 @@ macro_rules! lossless_door {
           >,
           &mut $crate::lossless::depth::RootStop,
         ) -> ::core::result::Result<(), $errors<&'inp str>>,
+      Lend: ::core::ops::FnMut(&$value<&'inp str>),
     {
       // THE CONTEXT IS BUILT HERE, from tokora's own API and nothing of this crate's. There is no
       // smear mint left to call: round 5 deleted `lossless_context` rather than widen it, and
@@ -1098,7 +1137,11 @@ macro_rules! lossless_door {
       // one. What leaves is a finished `Parse`, which is a value and not a capability.
       let _ = out;
 
-      $crate::lossless::runner::finish_parsed_root_with(
+      // THE VERDICT, IN ITS TWO HALVES. The typed value is lent to the caller once the finished
+      // parse has been decided, and its span is all a `Parse` keeps of it.
+      let (refusal, refused_at) = door_report.unzip();
+
+      let parse = $crate::lossless::runner::finish_parsed_root_with(
         cst,
         K::Root.raw(),
         <K as $crate::lossless::KindSpace>::NAME,
@@ -1117,14 +1160,40 @@ macro_rules! lossless_door {
         // container holds NO member of the door's, so there is nothing here for the door to take
         // away, and the record stays exactly as it arrived.
         |errs: &$errors<&'inp str>| {
-          errs.is_empty()
-            || errs
-              .iter()
-              .any(|e| !::core::matches!(e.data(), ErrorData::TokenBudgetExhausted))
+          errs.is_empty() || errs.iter().any(|member| !is_budget_refusal(member))
+        },
+        // THE HAND-OVER OF A KEPT RECORD, member by member. The substrate calls this for a record
+        // the classifier above has just kept at error severity, so nothing dropped is lent. The
+        // grammar's own budget members are passed over: the refusal is the door's to lend, below,
+        // and a kept payload has a member beside them or no member at all. An empty payload has
+        // no typed error to lend and is still an error of the finished parse, so it lends one
+        // made here, at its record's span.
+        |span: ::tokora::SimpleSpan, errs: &$errors<&'inp str>| {
+          if errs.is_empty() {
+            lend(&$value::new(
+              span,
+              ErrorData::Other(::std::borrow::Cow::Borrowed("invalid syntax")),
+            ));
+          }
+          for member in errs.iter() {
+            if !is_budget_refusal(member) {
+              lend(member);
+            }
+          }
         },
         // THE VERDICT, as a span. The substrate decides what it looks like in a `Parse`.
-        door_report.map(|(_, span)| span),
-      )
+        refused_at,
+      );
+
+      // THE DOOR'S OWN REFUSAL, lent last and once: it is one value, built once, and the parse
+      // above already holds the one diagnostic that stands for it.
+      if let ::core::option::Option::Some(refusal) = &refusal {
+        for member in refusal.iter() {
+          lend(member);
+        }
+      }
+
+      parse
     }
 
     $crate::lossless::lossless_root! {
@@ -1185,7 +1254,8 @@ macro_rules! lossless_root {
     /// carrying the tail's text, whose only lexer errors would be those a lookahead had already
     /// raised.
     pub(crate) fn $name(src: &str, limits: $crate::$dm::$dl::LexerState) -> Parse {
-      parse_lossless_document(src, limits, super::$pmod::$pfn::<str, _>)
+      // A door that answers a `Parse` lends nothing: the errors' spans and severities are in it.
+      parse_lossless_document(src, limits, super::$pmod::$pfn::<str, _>, |_| {})
     }
 
     $(#[$meta])*

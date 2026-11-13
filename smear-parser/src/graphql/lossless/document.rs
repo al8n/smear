@@ -21,7 +21,7 @@
 //! # This is the suite's only catch-resync-continue point
 //!
 //! Every other production propagates a genuinely unrecoverable `Err` — `argument`'s missing
-//! `:`, `field_definition`'s missing type — because the enclosing shape has nothing left to
+//! `:`, `field_definition`'s missing name — because the enclosing shape has nothing left to
 //! recover into. The two document loops are where that unwinding stops: they catch the `Err`,
 //! call `recover::resync_to_definition`, and carry on with the next definition.
 //!

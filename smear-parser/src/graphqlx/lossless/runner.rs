@@ -22,7 +22,9 @@ use tokora::cst::{Cst, Sink};
 
 #[cfg(feature = "test-support")]
 use super::GraphqlxLosslessLexer;
-use super::{GraphqlxLosslessErrors, GraphqlxLosslessSlice, GraphqlxLosslessToken};
+use super::{
+  GraphqlxLosslessErrorValue, GraphqlxLosslessErrors, GraphqlxLosslessSlice, GraphqlxLosslessToken,
+};
 #[cfg(feature = "test-support")]
 use crate::lossless::KindSpace;
 use crate::{
@@ -102,9 +104,34 @@ pub(crate) type LosslessCst<'inp> =
 crate::lossless::lossless_door! {
   dialect  = graphqlx::lossless;
   errors   = GraphqlxLosslessErrors;
+  value    = GraphqlxLosslessErrorValue;
   document = document::document;
   schema   = document::type_system_document;
   request  = executable::executable_document;
+}
+
+/// The type-system root with the hand-over: the parse [`parse_type_system_document_with_limits`]
+/// answers, and `lend` called once for each typed syntax error of it, by reference, before this
+/// returns: each error the finished parse keeps, in the order the parse recorded them, and then
+/// the door's own token-budget refusal when the durable budget refused an item.
+///
+/// It is what this dialect's lossless layer reads through, and the one root that layer reads. It
+/// has the `&str` doors' precondition: a text longer than [`Refused::MAX_SOURCE_LEN`] panics at
+/// materialisation, so its caller asks the length first.
+pub(crate) fn type_system_document_root_lending<'inp, Lend>(
+  src: &'inp str,
+  limits: LosslessLimits,
+  lend: Lend,
+) -> Parse
+where
+  Lend: FnMut(&GraphqlxLosslessErrorValue<&'inp str>),
+{
+  parse_lossless_document(
+    src,
+    limits,
+    super::document::type_system_document::<str, _>,
+    lend,
+  )
 }
 
 /// Materialize a probe's `cst` at the root kind and collect its diagnostics.

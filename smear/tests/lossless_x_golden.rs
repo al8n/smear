@@ -87,19 +87,26 @@
 //! [`only_the_recorded_nodes_open_on_their_leading_trivia`] is what says so on every run rather than
 //! once.
 //!
-//! Two shapes were read and judged deliberate, both inherited from Phase A's reading: a member
-//! whose type is missing recovers by consuming the enclosing `}` into an `Error`, so the
-//! surrounding block closes without a right brace; and trailing trivia attaches to whichever node
-//! was still open at the peek that crossed it, which is the preceding sibling inside a list and the
-//! enclosing list after its last element. Both are attachment policy rather than loss.
+//! One shape was read and judged deliberate, inherited from Phase A's reading: trailing trivia
+//! attaches to whichever node was still open at the peek that crossed it, which is the preceding
+//! sibling inside a list and the enclosing list after its last element. It is attachment policy
+//! rather than loss.
 //!
-//! **The second of those was left as prose, and prose is what a re-bless walks through.** Reading a
+//! A missing component is not such a shape, and the goldens hold the rule. A member whose type is
+//! missing reports at the closer that stands where the type should and leaves it, so the
+//! surrounding block closes on its own delimiter (`invalid_missing_field_type`,
+//! `invalid_x_empty_type_generics`, `shape_kept_object_type_definition`) and a definition after it
+//! is parsed whole. A `(`, `[` or `<` list that is never closed follows the rule one level up: it
+//! stops at the `}` of the block around it and leaves the brace to that block
+//! (`invalid_unterminated_bracket`, `invalid_x_unterminated_angle`).
+//!
+//! **That policy was left as prose, and prose is what a re-bless walks through.** Reading a
 //! policy once and judging it deliberate is not the same as pinning it: the goldens were the only
 //! thing holding the placement, and an `UPDATE_GOLDEN=1` run rewrites goldens. smear#131 measured
 //! what that costs — an `expect` that skips trivia on its accepting branch as well as before it
 //! moves trailing placement across the whole corpus while round-trip, the gap census, the parity
 //! gate, the injection gate and the projection differential all stay green. So the sentence is now
-//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-seven pairings re-derived on every run by
+//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-eight pairings re-derived on every run by
 //! [`only_the_recorded_nodes_close_on_their_trailing_trivia`]. It is nearly twice its GraphQL
 //! twin's length for a reason the constant states: two GraphQLx productions end on a probe for an
 //! optional continuation that is usually not there — `::` for a path, `<` for a definition's name
@@ -172,7 +179,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// Every `parent > node` pairing where a node closes *after* the trivia behind it, so that the
 /// trivia lands inside the node's range instead of beside it.
 ///
-/// **Forty-seven entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
+/// **Forty-eight entries where [`OPENS_ON_LEADING_TRIVIA`] has one.** The mechanism is the shared
 /// one and its full account is on the GraphQL twin's constant: an atom commits the trivia it
 /// crosses to whichever node is open at that moment, a production about to open a node crosses its
 /// leading trivia at a dispatch peek made *before* the mark, and trailing trivia has no such
@@ -195,18 +202,25 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 ///   plus `DirectiveDefinition > DirectiveLocations`.
 /// - **Recovery geometry**, where the node open at the peek is open because a recovery put it
 ///   there. `Document > Error` is a resynchronised run; `Argument > ListValue`
-///   (`invalid_unterminated_bracket`) is a list that never gets its `]`, so the enclosing `}` is
-///   consumed into an `Error` inside it and the trailing newline follows it in; `TypeGenerics >
-///   Error` (`invalid_x_name_adjacent_to_angle_in_generics`) is that shape inside an angle list;
+///   (`invalid_unterminated_bracket`) is a list that never gets its `]`: it stops at the `}` of
+///   the selection set around it and leaves that brace where it stands, and the space it crossed
+///   to find the brace stays inside the list; `TypeGenerics > Error`
+///   (`invalid_x_name_adjacent_to_angle_in_generics`) is junk between two arguments of an angle
+///   list, skipped with the space behind it;
 ///   `Document > UseDefinition` (`invalid_x_use_without_tree`) is a `use` with no tree after it,
 ///   whose peek for one crossed the newline from inside the item; `Document > ModDefinition`
 ///   (`invalid_x_mod_without_body`, `invalid_x_mod_unclosed_body`) is the same shape for a module
 ///   whose body is missing or never closes, the peek for its `{` or for its next item crossing the
-///   newline from inside it; and `Document > DefinitionName`
+///   newline from inside it; `ModDefinition > Error` (`invalid_x_mod_holding_a_query`,
+///   `invalid_x_mod_holding_a_fragment`) is junk between a module's items, skipped as one run up
+///   to the body's next restart point with the trivia behind it; and `Document > DefinitionName`
 ///   is Task 10's unwound mark — the definition node is never opened, so the name the production
-///   had already built is left as a bare child of `Document` with the trivia after it. That last
-///   one is recorded **with the loss in it**, exactly as `shape_lost_object_type_definition` is,
-///   and it moves the day the loss is fixed.
+///   had already built is left as a bare child of `Document` with the trivia after it. That one
+///   is recorded **with the loss in it**, exactly as `shape_lost_object_type_definition` is, and
+///   it moves the day the loss is fixed. `ModDefinition > DefinitionName`
+///   (`invalid_x_mod_broken_item_between_items`) is the same unwound mark one level down: an item
+///   that fails inside a module's body leaves its name a bare child of the module, which keeps
+///   the items on either side of it.
 ///
 /// # GraphQLx's own, and it is most of the difference
 ///
@@ -290,7 +304,6 @@ const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "ArgumentsDefinition > InputValueDefinition",
   "DefinitionTypeGenerics > DefinitionTypeParam",
   "DefinitionTypePath > Path",
-  "DefinitionTypePath > TypeGenerics",
   "DirectiveDefinition > DefinitionName",
   "DirectiveDefinition > DirectiveLocations",
   "Document > DefinitionName",
@@ -315,6 +328,8 @@ const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "InputFieldsDefinition > InputValueDefinition",
   "InputObjectTypeDefinition > DefinitionName",
   "InterfaceTypeDefinition > DefinitionName",
+  "ModDefinition > DefinitionName",
+  "ModDefinition > Error",
   "ObjectTypeDefinition > DefinitionName",
   "ObjectTypeDefinition > Directives",
   "ObjectTypeExtension > Directives",
@@ -1192,7 +1207,7 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
 /// appeared where a production began holding its node open across a peek, and list pairings
 /// vanished, because trivia eaten by the `expect` that ends an element never reaches the loop peek
 /// that used to leave it inside the preceding sibling. So the failure is reported as the two
-/// differences rather than as two forty-six-element vectors: which half moved is what tells a
+/// differences rather than as two forty-eight-element vectors: which half moved is what tells a
 /// reader whether a production gained a probe or lost one.
 #[test]
 fn only_the_recorded_nodes_close_on_their_trailing_trivia() {

@@ -29,20 +29,22 @@ interned once, so that `==` on two type ids is type equality; every application 
 arguments and its arguments, and every value as written; and the schema, with its contributions, one
 for each schema item, its description, its roots, written or presumed, and its applications.
 `Model::satisfies` answers whether a type satisfies an interface or a marker, and
-`Model::satisfies_ty` whether it satisfies one interface type exactly, its arguments' `!`
-included: by declaration, read off the `implements` entries and the bounds the model holds, with
-`core`'s `MapKey` satisfied intrinsically by every integer primitive, `bool`, `string`, `id`, every
-enum and `NonZero` of an integer primitive. Each
-definition's type parameter defaults are checked where they are written, and each use's count of
-type arguments where it is written. Filling defaults is bounded by `Limits::max_substitutions`, and
-the types it derives by `Limits::max_generic_depth` and `Limits::max_instantiations`. Every
-instantiation the program writes has its bounds judged, exactly: a type argument that does not
-satisfy a bound's interface type, with the instantiation's arguments in its parameters' place, is
-`smear::graphqlx::unsatisfied-bound` where the instantiation is written, and judging is bounded by
-`Limits::max_bound_steps`. It resolves
-every module's `use` items too, globs and string sources included, against scopes that end with the
-prelude and the packages each package may reach. The built-in packages, `core`, `alloc` and `std`,
-are one embedded GraphQLx file each, parsed on every analysis.
+`Model::satisfies_ty` whether it satisfies one interface type exactly, its arguments' `!` included:
+by declaration, read off the `implements` entries and the bounds the model holds, with `core`'s
+`MapKey` satisfied intrinsically by every integer primitive, `bool`, `string`, `id`, every enum and
+`NonZero` of an integer primitive. Each definition's type parameter defaults are checked where they
+are written, and each use's count of type arguments where it is written. Filling defaults is bounded
+by `Limits::max_substitutions`, and the types it derives by `Limits::max_generic_depth` and
+`Limits::max_instantiations`. Every instantiation the program writes has its bounds judged, exactly:
+a type argument that does not satisfy a bound's interface type, with the instantiation's arguments
+in its parameters' place, is `smear::graphqlx::unsatisfied-bound` where the instantiation is
+written, and judging is bounded by `Limits::max_bound_steps`. It resolves every module's `use` items
+too, globs and string sources included, against scopes that end with the prelude and the packages
+each package may reach. The built-in packages, `core`, `alloc` and `std`, are one embedded GraphQLx
+file each, parsed on every analysis. `graphqlx::analyze_with` is the same analysis with the parser
+layer the caller passes, such as `smear-parser`'s lossless layer, which recovers, so the well-formed
+rest of a broken file is analyzed, and it answers `Trees` beside the `Analysis`: what that layer
+kept for each file it read.
 
 Rules are visitors. A `graphqlx::Visitor` implements the hooks it needs, one for each entity a walk
 enters, leaves or reaches, and `graphqlx::visit` walks an analysis's model for it over the packages
@@ -54,8 +56,8 @@ its schema at most once, each later schema definition of the root package being
 dependency's schema item being `smear::graphqlx::schema-outside-root`; and a package extends its own
 definitions alone, an extension of another package's being `smear::graphqlx::orphan-extension`, but
 for the directives the root package adds to a definition of `core`, `alloc` or `std`, none of which
-may be `@marker`, `@set` or `@map` unless the root package wrote that definition; an enum takes
-no type parameter, an enum that declares one being `smear::graphqlx::generic-enum`; and a marker
+may be `@marker`, `@set` or `@map` unless the root package wrote that definition; an enum takes no
+type parameter, an enum that declares one being `smear::graphqlx::generic-enum`; and a marker
 declares no field, is named only as the outermost type of an `implements` entry or of a bound, and
 is all a scalar, an enum, an input object or a union implements, each other use being
 `smear::graphqlx::marker-misuse`; and a set has one type parameter and a map two, a scalar its own
@@ -66,10 +68,10 @@ definition's argument or of an input field, under lists alone, anywhere else bei
 one bit wide, written without `!`, `NonZero` of anything else being
 `smear::graphqlx::nonzero-argument`; and a definition's type parameters have distinct names, a type
 parameter with the name of an earlier one being `smear::graphqlx::duplicate-type-parameter`. An
-error that a
-phase or a rule reports marks the contributions, members and definitions that hold it, as their
-`has_errors()` says, whether the diagnostic ceiling keeps it or not. A consumer's walk marks
-nothing, answers its own diagnostics under the same ceiling, and holds memory bounded by it.
+error that a phase or a rule reports marks the contributions, members and definitions that hold it,
+as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error marks
+nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and
+holds memory bounded by it.
 
 ## Feature flags
 

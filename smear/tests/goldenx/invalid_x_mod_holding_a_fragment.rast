@@ -1,6 +1,6 @@
 Root@0..34
   Document@0..34
-    ModDefinition@0..31
+    ModDefinition@0..33
       Name@0..3 "mod"
       Space@3..4 " "
       Name@4..5 "m"
@@ -9,26 +9,20 @@ Root@0..34
       Newline@7..8 "\n"
       Space@8..9 " "
       Space@9..10 " "
-      Error@10..18
+      Error@10..32
         Name@10..18 "fragment"
-      Space@18..19 " "
-      Error@19..20
+        Space@18..19 " "
         Name@19..20 "F"
-      Space@20..21 " "
-      Error@21..23
+        Space@20..21 " "
         Name@21..23 "on"
-      Space@23..24 " "
-      Error@24..25
+        Space@23..24 " "
         Name@24..25 "T"
-      Space@25..26 " "
-      Error@26..27
+        Space@25..26 " "
         LBrace@26..27 "{"
-      Space@27..28 " "
-      Error@28..29
+        Space@27..28 " "
         Name@28..29 "f"
-      Space@29..30 " "
-      RBrace@30..31 "}"
-    Newline@31..32 "\n"
-    Error@32..33
+        Space@29..30 " "
+        RBrace@30..31 "}"
+        Newline@31..32 "\n"
       RBrace@32..33 "}"
     Newline@33..34 "\n"
