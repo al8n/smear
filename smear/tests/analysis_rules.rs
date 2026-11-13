@@ -2,7 +2,9 @@
 //! phases have written the model: a program defines its schema at most once; only the root
 //! package defines or extends the schema; and a package extends its own definitions alone, but
 //! for the directives the root package adds to a built-in. Each rule says nothing about what a
-//! phase already refused, marks what it reports, and quotes a name only as an excerpt.
+//! phase already refused, marks what it reports, and quotes a name only as an excerpt. The fourth
+//! rule, that an enum takes no type parameter, is tested in `analysis_types`, beside the phase that
+//! types each use of the enum.
 //!
 //! Then the rule set itself: every code a rule lists fires on a fixture; and the walk the rules
 //! ride, over an analyzed program of two packages, written out hook by hook.
@@ -27,6 +29,9 @@ const OUTSIDE: &str = "smear::graphqlx::schema-outside-root";
 
 /// The code for an extension of a definition its package may not extend.
 const ORPHAN: &str = "smear::graphqlx::orphan-extension";
+
+/// The code for an enum that declares a type parameter.
+const GENERIC_ENUM: &str = "smear::graphqlx::generic-enum";
 
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
@@ -963,6 +968,7 @@ const FIXTURES: &[(Code, Fixture)] = &[
   (Code::new(DUPLICATE), two_schema_definitions),
   (Code::new(OUTSIDE), a_dependencys_schema_definition),
   (Code::new(ORPHAN), an_extension_of_a_dependencys_type),
+  (Code::new(GENERIC_ENUM), a_generic_enum),
 ];
 
 /// A root package that defines its schema twice.
@@ -1008,6 +1014,11 @@ fn an_extension_of_a_dependencys_type() -> Analysis {
     &[("geo.graphqlx", "type Point {\n  x: Int\n}\n")],
   );
   analyze(&root, &[geo], &Limits::new())
+}
+
+/// A root package that declares an enum with a type parameter.
+fn a_generic_enum() -> Analysis {
+  analyze_one("enum Choice<T> {\n  YES\n  NO\n}\ntype Query {\n  choice: Choice<Int>\n}\n")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

@@ -136,6 +136,10 @@ pub enum DiagnosticKind {
   /// extended by the root package alone, and only with directives. Reported at the extension's
   /// target path, with a label at the definition's name when the definition has a position.
   OrphanExtension,
+  /// An enum that declares a type parameter. An enum's values are names that hold no type, so an
+  /// enum takes no type parameter. Reported once, at the enum's first type parameter's name; each
+  /// use of the enum is still counted and typed as any generic definition's is.
+  GenericEnum,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -169,6 +173,7 @@ impl DiagnosticKind {
     Self::GenericDefault,
     Self::SchemaOutsideRoot,
     Self::OrphanExtension,
+    Self::GenericEnum,
     Self::ResourceLimit,
   ];
 
@@ -200,6 +205,7 @@ impl DiagnosticKind {
       Self::GenericDefault => Code::new("smear::graphqlx::generic-default"),
       Self::SchemaOutsideRoot => Code::new("smear::graphqlx::schema-outside-root"),
       Self::OrphanExtension => Code::new("smear::graphqlx::orphan-extension"),
+      Self::GenericEnum => Code::new("smear::graphqlx::generic-enum"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -231,6 +237,7 @@ impl DiagnosticKind {
       Self::GenericDefault => "type parameter default that can never fill",
       Self::SchemaOutsideRoot => "schema outside the root package",
       Self::OrphanExtension => "orphan extension",
+      Self::GenericEnum => "generic enum",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -262,6 +269,7 @@ impl DiagnosticKind {
       | Self::GenericDefault
       | Self::SchemaOutsideRoot
       | Self::OrphanExtension
+      | Self::GenericEnum
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }

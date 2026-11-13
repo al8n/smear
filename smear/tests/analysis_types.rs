@@ -3,7 +3,8 @@
 //! off `core`'s directives; a definition's defaults, checked where they are written; and every
 //! type occurrence's type: one identity a type, interned in the walk's order, every argument left
 //! out filled from its default, aliases expanded, counts checked, collections' keys non-null, each
-//! written closed instantiation listed, and the three limits that bound what filling derives.
+//! written closed instantiation listed, and the three limits that bound what filling derives; and
+//! smear's rule that an enum takes no type parameter, beside the uses of such an enum.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -27,6 +28,17 @@ const LIMIT: &str = "smear::graphqlx::resource-limit";
 
 /// The code of a type name that names nothing.
 const UNDEFINED: &str = "smear::schema::undefined-type";
+
+/// The code of an enum that declares a type parameter, which a rule reports.
+const GENERIC_ENUM: &str = "smear::graphqlx::generic-enum";
+
+/// What the rule says of an enum named `name` that declares a type parameter.
+fn generic_enum(name: &str) -> String {
+  format!(
+    "the enum `{name}` declares a type parameter, and an enum takes none: its values are names, \
+     which hold no type"
+  )
+}
 
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
 fn package(
@@ -1627,4 +1639,71 @@ fn long_names_are_quoted_as_excerpts() {
       "the default of `{quoted}` names `{quoted}` itself, so it can never fill"
     )]
   );
+}
+
+#[test]
+fn a_generic_enum_is_refused_at_its_first_parameter() {
+  // Once an enum, at its first type parameter's name, however many it declares; an enum with none
+  // and a generic definition of another kind say nothing, and a use of the enum is typed as any
+  // generic definition's is.
+  let text = "enum Pick<A, B> {\n  ONE\n  TWO\n}\nenum Plain {\n  ONLY\n}\nscalar Box<X>\n\
+              type Query {\n  pick: Pick<Int, String>\n  plain: Plain\n  boxed: Box<Int>\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(GENERIC_ENUM, named(schema, text, "Pick<", "A", 0), None)]
+  );
+  assert_eq!(messages(&analysis), [generic_enum("Pick")]);
+  let model = analysis.model();
+  assert!(
+    model
+      .def(def(model, Namespace::Type, "^::app::Pick"))
+      .has_errors()
+  );
+  assert_eq!(
+    field_shown(model, "^::app::Query", "pick"),
+    "Pick<i32, string>"
+  );
+
+  // A name of four kilobytes is quoted as an excerpt.
+  let name = "N".repeat(4096);
+  let text = format!("enum {name}<T> {{\n  A\n}}\n");
+  let analysis = analyze_text(&text, &Limits::new());
+  let quoted = format!("{}…{}", "N".repeat(64), "N".repeat(64));
+  assert_eq!(messages(&analysis), [generic_enum(&quoted)]);
+}
+
+#[test]
+fn a_generic_enum_a_phase_already_refused_is_left_alone() {
+  // The default of its type parameter names nothing: name resolution says so within the enum,
+  // and the rule says nothing more.
+  let text = "enum E<T = Missing> {\n  A\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(UNDEFINED, at(schema, text, "Missing", 0), None)]
+  );
+}
+
+#[test]
+fn each_use_of_a_generic_enum_that_leaves_its_argument_out_is_an_arity_error() {
+  let text = "enum E<T> {\n  A\n}\ntype Query {\n  f: E\n  g: E<Int>\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (GENERIC_ENUM, named(schema, text, "E<", "T", 0), None),
+      (
+        ARITY,
+        named(schema, text, "f: ", "E", 0),
+        Some(named(schema, text, "enum ", "E", 0))
+      ),
+    ]
+  );
+  let model = analysis.model();
+  assert_eq!(field_shown(model, "^::app::Query", "f"), "?");
+  assert_eq!(field_shown(model, "^::app::Query", "g"), "E<i32>");
 }

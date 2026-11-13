@@ -189,7 +189,9 @@ All notable changes to Smear are documented in this file.
   package defines is the new `smear::graphqlx::orphan-extension`, at its target path, with a
   label at the definition's name; and so is an extension of a definition of `core`, `alloc` or
   `std`, a GraphQL built-in the root package replaces among them, unless the root package
-  writes it and it adds directives and nothing else. A rule says nothing about a contribution a
+  writes it and it adds directives and nothing else. And an enum takes no type parameter: an
+  enum that declares one is the new `smear::graphqlx::generic-enum`, at its first type
+  parameter's name, and each use of it is still typed. A rule says nothing about a contribution a
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the
   models it builds, for `smear`'s own tests; it is not API.
