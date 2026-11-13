@@ -19,18 +19,18 @@
 //! None of the three has a type parameter or a lifetime, whatever text type went in, and
 //! [`Analysis::is_ok`] is the verdict. So far the model holds the packages, their modules, from
 //! their directories and their inline `mod`s, and every definition, the built-in library's and the
-//! primitives the program writes included, with canonical names and lookup: its kind, name,
-//! module, location, origin and description, its contributions, its own and then its extensions',
-//! its type parameters with their defaults and its bounds, its `implements` entries and union
-//! members, its directive applications, a directive definition's locations, whether it is a
+//! primitives the program writes included, with canonical names and lookup: its kind, name, module,
+//! location, origin and description, its contributions, its own and then its extensions', its type
+//! parameters with their defaults and its bounds, its `implements` entries and union members, its
+//! directive applications, a directive definition's locations, whether its own package makes it a
 //! marker or a collection, the closed instantiations its written occurrences resolve to, and its
 //! members with their descriptions, types, defaults and applications; every written type an
 //! occurrence with its path and arguments as written, what it resolves to, and its type, the
 //! complete instantiation with defaults filled and an alias expanded, each type interned once;
-//! every application with its type arguments and its arguments, and every value as written; and
-//! the schema, with its contributions, one for each schema item, its description, its roots,
-//! written or presumed, and its applications. The phases that write the rest of it, satisfaction,
-//! values and tiers, are still to come.
+//! every application with its type arguments and its arguments, and every value as written; and the
+//! schema, with its contributions, one for each schema item, its description, its roots, written or
+//! presumed, and its applications. The phases that write the rest of it, satisfaction, values and
+//! tiers, are still to come.
 //!
 //! ```
 //! use smear_analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};
@@ -81,7 +81,8 @@
 //! package extends its own definitions alone: an extension of another supplied package's type or
 //! directive is `smear::graphqlx::orphan-extension`, and so is an extension of a definition of
 //! `core`, `alloc` or `std`, unless the root package writes it and it adds directives and nothing
-//! else. And an enum takes no type parameter: an enum that declares one is
+//! else, none of them `core`'s `@marker`, `@set` or `@map` unless it wrote the definition, a
+//! built-in it replaces. And an enum takes no type parameter: an enum that declares one is
 //! `smear::graphqlx::generic-enum`, at its first type parameter's name. A rule says nothing about a
 //! contribution a phase already refused something in.
 //!

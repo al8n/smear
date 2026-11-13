@@ -154,11 +154,12 @@ All notable changes to Smear are documented in this file.
   package's, an object type the root package's root module declares named `Query`, `Mutation` or
   `Subscription` is presumed that operation's root. Names and texts past what the model's `u32`
   offsets address are `resource-limit`. Then each definition gets its built-in meaning, read off
-  what its applications resolved to and never off how they are spelled: an interface that applies
-  `core`'s `@marker` is a marker, as `Def::is_marker()` says, and a scalar that applies `core`'s
-  `@set` or `@map` stands for that collection, as `Def::collection()` says. Each definition's
-  type parameter defaults are checked where they are written: they are trailing, a parameter with
-  no default after one with a default being the new `smear::graphqlx::generic-default`; a default
+  what its applications resolved to and never off how they are spelled, and only off those the
+  package that wrote the definition writes: an interface that applies `core`'s `@marker` is a
+  marker, as `Def::is_marker()` says, and a scalar that applies `core`'s `@set` or `@map` stands for
+  that collection, as `Def::collection()` says. Each definition's type parameter defaults are
+  checked where they are written: they are trailing, a parameter with no default after one with a
+  default being the new `smear::graphqlx::generic-default`; a default
   may name any parameter of its definition, written before it or after it; and each group of a
   definition's defaults that need each other, a default that names its own parameter included, is
   `generic-default` once, at the default of the group's lowest parameter, which a use that leaves
@@ -188,10 +189,12 @@ All notable changes to Smear are documented in this file.
   extends its own definitions alone: an extension of a type or directive another supplied
   package defines is the new `smear::graphqlx::orphan-extension`, at its target path, with a
   label at the definition's name; and so is an extension of a definition of `core`, `alloc` or
-  `std`, a GraphQL built-in the root package replaces among them, unless the root package
-  writes it and it adds directives and nothing else. And an enum takes no type parameter: an
-  enum that declares one is the new `smear::graphqlx::generic-enum`, at its first type
-  parameter's name, and each use of it is still typed. A rule says nothing about a contribution a
+  `std`, a GraphQL built-in the root package replaces among them, unless the root package writes it
+  and it adds directives and nothing else; in the root package's extension of a built-in it did not
+  write, each application of `core`'s `@marker`, `@set` or `@map` is `orphan-extension` too, at its
+  path, since what a built-in is is the language's to say. And an enum takes no type parameter: an
+  enum that declares one is the new `smear::graphqlx::generic-enum`, at its first type parameter's
+  name, and each use of it is still typed. A rule says nothing about a contribution a
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the
   models it builds, for `smear`'s own tests; it is not API.

@@ -6,25 +6,20 @@
 //! every code a rule lists must fire on at least one fixture.
 //!
 //! A rule reads the model the phases wrote, through its public views, and reports through the
-//! context. Which package wrote a contribution is read off where the contribution is written
-//! (`written_by`). A rule says nothing about a contribution a phase already refused something in,
-//! whose `has_errors()` is set: a diagnostic of its own within that contribution would repeat the
-//! phase's. It sees the phases' marks alone, since the rules' are applied once the walk has ended.
+//! context. Which package wrote a contribution or an application is read off where it is written,
+//! by `SourceMap::written_by`, the one answer instantiation reads too. A rule says nothing about a
+//! contribution a phase already refused something in, whose `has_errors()` is set: a diagnostic of
+//! its own within that contribution would repeat the phase's. It sees the phases' marks alone,
+//! since the rules' are applied once the walk has ended.
 
 mod duplicate_schema_definition;
 mod generic_enum;
 mod orphan_extension;
 mod schema_outside_root;
 
-use tokora::diagnostic::Location;
-
 use self::{
   duplicate_schema_definition::DuplicateSchemaDefinition, generic_enum::GenericEnum,
   orphan_extension::OrphanExtension, schema_outside_root::SchemaOutsideRoot,
-};
-use super::{
-  id::{PackageId, SourceId},
-  source::SourceMap,
 };
 
 /// Declares a rule set: a struct with one field per rule, its `Visitor` impl, whose every hook
@@ -161,29 +156,14 @@ rule_set! {
   /// smear's own rules, which `analyze` runs over every supplied package once its phases have
   /// written the model: a program defines its schema at most once; only the root package defines
   /// or extends the schema; a package extends its own definitions alone, but for the directives
-  /// the root package adds to a built-in; and an enum takes no type parameter.
+  /// the root package adds to a built-in, none of which may give it a built-in meaning; and an enum
+  /// takes no type parameter.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
     schema_outside_root: SchemaOutsideRoot => [super::DiagnosticKind::SchemaOutsideRoot.code()],
     orphan_extension: OrphanExtension => [super::DiagnosticKind::OrphanExtension.code()],
     generic_enum: GenericEnum => [super::DiagnosticKind::GenericEnum.code()],
-  }
-}
-
-/// The package that wrote what is written at `at`: the package of the source `at` is in. For a
-/// contribution's location that is the package that wrote the contribution, which for an
-/// extension, and for a definition that replaces a built-in, need not be its definition's.
-///
-/// `None` when `at`'s source is none of `sources`', as a location of a model built by hand may be:
-/// a rule then reports nothing about what is written there. A package this answers is one of the
-/// model's, since an analysis's source map numbers the sources of its model's packages.
-fn written_by(sources: &SourceMap, at: Location) -> Option<PackageId> {
-  let source = SourceId::new(at.source());
-  if sources.sources().contains(source) {
-    Some(sources.source(source).package())
-  } else {
-    None
   }
 }
 

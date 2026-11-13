@@ -21,6 +21,19 @@
 //! label at the definition's name unless the definition has no position, as a primitive `core`
 //! materialises has none.
 //!
+//! Of the directives the root package may add to a built-in, three may not be among them: `core`'s
+//! `@marker`, `@set` and `@map`, which say what a definition is. A definition's built-in meaning is
+//! its own package's to say, and what a built-in is is the language's. Each application of one of
+//! the three in the root package's extension of a built-in is refused too, with the same code and
+//! label, at the application's path, whether or not the extension adds more than directives, which
+//! is another mistake. The directive is told by the definition its application resolved to, never
+//! by how it is spelled. The test is the one instantiation asks before it gives a definition its
+//! meaning: whether the package that wrote the directive wrote the definition. So a GraphQL
+//! built-in the root package replaces is the root package's own, and the root package's `@set` on
+//! it is no orphan. An extension the rule refuses whole, a dependency's of a built-in or any
+//! package's of another supplied package's definition, is refused once, and its applications are
+//! not reported again.
+//!
 //! The rule judges a definition's extensions as the walk enters the definition. `analyze` walks
 //! what the supplied packages wrote, and that is exactly what this judges: the walk enters a
 //! definition when a supplied package wrote one of its contributions, and every extension is a
@@ -32,14 +45,13 @@
 use std::{format, string::String};
 
 use crate::graphqlx::{
-  Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, PackageKind, Visitor,
+  Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, PackageKind, Resolution, Visitor,
   diagnostic::Excerpt,
 };
 
-use super::written_by;
-
 /// Reports each extension of a definition that the package that wrote the extension may not
-/// extend.
+/// extend, and each application in the root package's extension of a built-in that would give the
+/// built-in a built-in meaning.
 ///
 /// It reads a definition's contributions in the `enter_def` hook, and tells an extension from the
 /// definition's own contribution by what the model says of each, never by its place among them.
@@ -47,9 +59,11 @@ use super::written_by;
 /// It says nothing about an extension whose `has_errors()` is set: a phase already refused
 /// something in it, and a second diagnostic within it would repeat the phase's.
 ///
-/// It costs one visit of each contribution of each definition the walk enters, and keeps nothing
-/// between two walks. Its messages quote the definition's own name and the two packages' names,
-/// each as an excerpt, so each is bounded whatever the names' lengths, and none quotes a path.
+/// It costs one visit of each contribution of each definition the walk enters, and, in the root
+/// package's extension of a built-in, one look at each application that extension writes; it keeps
+/// nothing between two walks. Its messages quote the definition's own name and the two packages'
+/// names, each as an excerpt, so each is bounded whatever the names' lengths, and none quotes a
+/// path.
 #[derive(Default)]
 pub(super) struct OrphanExtension;
 
@@ -61,11 +75,19 @@ impl Visitor for OrphanExtension {
     let home = model.module(definition.module()).package();
     let root = model.root_package();
     let kind = DiagnosticKind::OrphanExtension;
+    // The package that wrote the definition, which its own contribution, the first, is written by:
+    // the root package for a GraphQL built-in it replaces, though the definition is the built-in's
+    // and belongs to the built-in's package.
+    let definer = definition
+      .contributions()
+      .next()
+      .filter(|own: &Contribution<'_>| !own.is_extension())
+      .and_then(|own: Contribution<'_>| sources.written_by(own.location()));
     for part in definition.contributions() {
       if !part.is_extension() || part.has_errors() {
         continue;
       }
-      let Some(writer) = written_by(sources, part.location()) else {
+      let Some(writer) = sources.written_by(part.location()) else {
         continue;
       };
       if writer == home {
@@ -77,12 +99,6 @@ impl Visitor for OrphanExtension {
       let directives_alone = part.members().is_empty()
         && part.implements().is_empty()
         && part.union_members().is_empty();
-      // The one extension of another package's definition that is allowed: the root package's, of
-      // a built-in, adding directives alone.
-      if built_in && by_root && directives_alone {
-        continue;
-      }
-
       let author = Excerpt(model.package(writer).name().as_bytes());
       let owner = Excerpt(owner.name().as_bytes());
       let name = Excerpt(definition.name().as_bytes());
@@ -91,6 +107,45 @@ impl Visitor for OrphanExtension {
       } else {
         ("type", "")
       };
+      if built_in && by_root {
+        // The root package may add directives to a built-in, but none that says what a definition
+        // is, unless it wrote the definition: a built-in it replaces is its own.
+        if definer != Some(writer) {
+          let builtins = model.builtins();
+          let meanings = [builtins.marker(), builtins.set(), builtins.map()];
+          for application in part.applications() {
+            let applied = model.application(*application);
+            let Resolution::Resolved(directive) = applied.directive() else {
+              continue;
+            };
+            if !meanings.contains(&directive) {
+              continue;
+            }
+            let mut report = Diagnostic::builder(kind.code(), applied.path_location())
+              .severity(kind.severity())
+              .message(format!(
+                "package `{author}` gives the {noun} `{sigil}{name}` of the built-in package \
+                 `{owner}` a built-in meaning, which an extension cannot give"
+              ))
+              .primary_label(kind.title())
+              .help(
+                "`@marker`, `@set` and `@map` say what a definition is, and what a built-in is is \
+                 the language's to say: remove this directive",
+              );
+            // A primitive `core` materialises has no position of its own to point at.
+            if !definition.location().is_entire() {
+              report = report.label(definition.location(), "the definition it extends");
+            }
+            cx.report(report.build());
+          }
+        }
+        // The one extension of another package's definition that is allowed: the root package's,
+        // of a built-in, adding directives alone.
+        if directives_alone {
+          continue;
+        }
+      }
+
       let (message, help): (String, &'static str) = if !built_in {
         (
           format!(
@@ -119,13 +174,8 @@ impl Visitor for OrphanExtension {
         )
       } else {
         // A GraphQL built-in the root package replaces has the root package's definition for its
-        // own contribution, its first, and that definition may write what this extension adds.
-        let replaced = definition
-          .contributions()
-          .next()
-          .is_some_and(|own: Contribution<'_>| {
-            !own.is_extension() && written_by(sources, own.location()) == Some(root)
-          });
+        // own contribution, and that definition may write what this extension adds.
+        let replaced = definer == Some(root);
         (
           format!(
             "package `{author}` adds more than directives to the {noun} `{sigil}{name}` of the \

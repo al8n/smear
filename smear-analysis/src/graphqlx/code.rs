@@ -135,6 +135,11 @@ pub enum DiagnosticKind {
   /// `core`, `alloc` or `std`, a GraphQL built-in the root package replaces among them, is
   /// extended by the root package alone, and only with directives. Reported at the extension's
   /// target path, with a label at the definition's name when the definition has a position.
+  ///
+  /// Nor may those directives say what the built-in is: in the root package's extension of a
+  /// built-in it did not write, each application of `core`'s `@marker`, `@set` or `@map` is
+  /// reported too, at the application's path, with the same label. A built-in the root package
+  /// replaces is the root package's own, and its extension may.
   OrphanExtension,
   /// An enum that declares a type parameter. An enum's values are names that hold no type, so an
   /// enum takes no type parameter. Reported once, at the enum's first type parameter's name; each

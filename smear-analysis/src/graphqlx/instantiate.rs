@@ -11,11 +11,16 @@
 //! `core`'s `@marker`, `@set` and `@map` are found once, each by its name among the directives
 //! `core`'s root module declares. An application means one of them when it resolved to that
 //! definition, whatever path it is written with; a directive of the program's own means nothing
-//! here, whatever its name. Each definition's applications, every contribution's, are then looked
-//! at once: an interface that applies `@marker` is a marker, and a scalar that applies `@set` or
-//! `@map` stands for that collection, the first of the two in application order when it applies
-//! both. A definition of another kind gets neither: where a directive may stand is a rule's to
-//! judge.
+//! here, whatever its name. A definition's built-in meaning is its own package's to say: an
+//! application counts only when the package that wrote it is the package that wrote the
+//! definition, which is the package of the module its declaration is written in. So the root
+//! package's extension of a built-in gives the built-in no meaning, and the orphan rule refuses
+//! the directive, by the same test; a GraphQL built-in the root package replaces is the root
+//! package's own, and an extension the root package writes of it counts. Each definition's
+//! applications that count, every contribution's, are then looked at once: an interface that
+//! applies `@marker` is a marker, and a scalar that applies `@set` or `@map` stands for that
+//! collection, the first of the two in application order when it applies both. A definition of
+//! another kind gets neither: where a directive may stand is a rule's to judge.
 //!
 //! # Defaults, where they are written
 //!
@@ -112,7 +117,7 @@ use super::{
   code::DiagnosticKind,
   declare::{Binding, Declarations},
   diagnostic::{Diagnostic, Excerpt, Reporter},
-  id::{ApplicationId, DefId, Sym, TyId, TypeExprId, dense},
+  id::{ApplicationId, DefId, PackageId, Sym, TyId, TypeExprId, dense},
   limits::Limits,
   model::{Collection, DefKind, ModelBuilder, Resolution, Written},
   set::ROOT,
@@ -130,7 +135,7 @@ pub(crate) fn instantiate(
   builder: &mut ModelBuilder,
   reporter: &mut Reporter,
 ) {
-  meaning(declarations, builder);
+  meaning(declarations, sources, builder);
   let Defaults { least, roots } = defaults(builder, reporter);
   let mut typing = Typing {
     builder,
@@ -158,9 +163,10 @@ pub(crate) fn instantiate(
   typing.applications();
 }
 
-/// Gives each definition its built-in meaning: an interface that applies `core`'s `@marker` is a
-/// marker, and a scalar that applies `core`'s `@set` or `@map` stands for that collection.
-fn meaning(declarations: &Declarations<'_, '_>, builder: &mut ModelBuilder) {
+/// Gives each definition its built-in meaning: an interface its own package applies `core`'s
+/// `@marker` to is a marker, and a scalar its own package applies `core`'s `@set` or `@map` to
+/// stands for that collection. `sources` tells which package wrote each application.
+fn meaning(declarations: &Declarations<'_, '_>, sources: &SourceMap, builder: &mut ModelBuilder) {
   let marker = directive(declarations, builder, b"marker");
   let set = directive(declarations, builder, b"set");
   let map = directive(declarations, builder, b"map");
@@ -168,15 +174,24 @@ fn meaning(declarations: &Declarations<'_, '_>, builder: &mut ModelBuilder) {
     let def = DefId::new(index);
     match builder.def_kind(def) {
       Some(DefKind::Interface) => {
-        if marker.is_some_and(|wanted: DefId| applies(builder, def, wanted)) {
+        if let Some(wanted) = marker
+          && let Some(own) = own_package(declarations, def)
+          && applies(builder, sources, own, def, wanted)
+        {
           builder.set_marker(def);
         }
       }
       Some(DefKind::Scalar) => {
-        let collection = builder
-          .def_applications(def)
-          .iter()
-          .find_map(|application: &ApplicationId| stands_for(builder, *application, set, map));
+        let Some(own) = own_package(declarations, def) else {
+          continue;
+        };
+        let collection =
+          builder
+            .def_applications(def)
+            .iter()
+            .find_map(|application: &ApplicationId| {
+              stands_for(builder, sources, own, *application, set, map)
+            });
         if let Some(collection) = collection {
           builder.set_collection(def, collection);
         }
@@ -186,17 +201,46 @@ fn meaning(declarations: &Declarations<'_, '_>, builder: &mut ModelBuilder) {
   }
 }
 
-/// The collection `application` makes the scalar that applies it stand for: a set when it applies
-/// `set`, `core`'s `@set`, and a map when it applies `map`, `core`'s `@map`.
+/// The package that wrote `def`: the package of the module its declaration is written in. That is
+/// the root package for a GraphQL built-in it replaces, whose definition it writes though the
+/// definition stays the built-in's, and `core` for a primitive `core` materialises. It is the
+/// package `SourceMap::written_by` answers of the definition's own contribution, which lowering
+/// appends where the declaration is written, and which the orphan rule reads.
+fn own_package(declarations: &Declarations<'_, '_>, def: DefId) -> Option<PackageId> {
+  let declaration = declarations.defs.get(def.get() as usize)?;
+  let module = declarations
+    .modules
+    .get(declaration.module.get() as usize)?;
+  Some(PackageId::new(dense(module.package)))
+}
+
+/// The directive `application` resolved to, when the package that wrote it is `own`, the package
+/// that wrote the definition it is applied to: an application another package writes gives that
+/// definition no meaning, whether or not a rule refuses it.
+fn own_directive(
+  builder: &ModelBuilder,
+  sources: &SourceMap,
+  own: PackageId,
+  application: ApplicationId,
+) -> Option<DefId> {
+  let (Resolution::Resolved(directive), _, at) = builder.applied(application)? else {
+    return None;
+  };
+  (sources.written_by(at) == Some(own)).then_some(directive)
+}
+
+/// The collection `application` makes the scalar that applies it stand for, when its own package
+/// `own` wrote it: a set when it applies `set`, `core`'s `@set`, and a map when it applies `map`,
+/// `core`'s `@map`.
 fn stands_for(
   builder: &ModelBuilder,
+  sources: &SourceMap,
+  own: PackageId,
   application: ApplicationId,
   set: Option<DefId>,
   map: Option<DefId>,
 ) -> Option<Collection> {
-  let Some((Resolution::Resolved(directive), _, _)) = builder.applied(application) else {
-    return None;
-  };
+  let directive = own_directive(builder, sources, own, application)?;
   if Some(directive) == set {
     Some(Collection::Set)
   } else if Some(directive) == map {
@@ -206,16 +250,20 @@ fn stands_for(
   }
 }
 
-/// Whether `def` applies `directive`, in any of its contributions.
-fn applies(builder: &ModelBuilder, def: DefId, directive: DefId) -> bool {
+/// Whether an application of `def` that its own package `own` wrote, in any of its contributions,
+/// applies `directive`.
+fn applies(
+  builder: &ModelBuilder,
+  sources: &SourceMap,
+  own: PackageId,
+  def: DefId,
+  directive: DefId,
+) -> bool {
   builder
     .def_applications(def)
     .iter()
     .any(|application: &ApplicationId| {
-      matches!(
-        builder.applied(*application),
-        Some((Resolution::Resolved(found), _, _)) if found == directive
-      )
+      own_directive(builder, sources, own, *application) == Some(directive)
     })
 }
 

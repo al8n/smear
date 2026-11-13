@@ -433,14 +433,19 @@ impl<'a> Def<'a> {
     self.row().intrinsic
   }
 
-  /// Whether it is a marker: an interface `@marker` makes one, with no field, which only
-  /// `implements` and bounds may name.
+  /// Whether it is a marker: an interface `core`'s `@marker` makes one, with no field, which only
+  /// `implements` and bounds may name. Only an application the package that wrote the definition
+  /// writes makes it one, in its definition or in an extension of its own: an extension another
+  /// package writes says nothing of what the definition is.
   #[inline]
   pub fn is_marker(&self) -> bool {
     self.row().marker
   }
 
-  /// The collection it stands for, through `@set` or `@map`, if any.
+  /// The collection it stands for, through `core`'s `@set` or `@map`, if any: the first of the two
+  /// that the package that wrote the definition applies to it, in its definition or in an
+  /// extension of its own. An extension another package writes says nothing of what the definition
+  /// is.
   #[inline]
   pub fn collection(&self) -> Option<Collection> {
     self.row().collection

@@ -174,9 +174,10 @@ impl Analysis {
 ///   which only a [`Limits::max_source_bytes`] far above its default admits, are reported at the
 ///   root package's package source.
 /// - Gives each definition its built-in meaning, read off `core`'s directives by what each
-///   application resolved to, never by how it is spelled: an interface that applies `@marker` is a
-///   marker, and a scalar that applies `@set` or `@map` stands for that collection, the first of
-///   the two when it applies both. Then checks each definition's defaults where they are written:
+///   application resolved to, never by how it is spelled, and only off the applications the
+///   package that wrote the definition writes: an interface that applies `@marker` is a marker,
+///   and a scalar that applies `@set` or `@map` stands for that collection, the first of the two
+///   when it applies both. Then checks each definition's defaults where they are written:
 ///   a type parameter with no default that follows one with a default is `generic-default`, once
 ///   for the definition; and so is each group of its defaults that need each other, a default that
 ///   names its own parameter included, once, at the default of the group's lowest parameter,
@@ -207,8 +208,11 @@ impl Analysis {
 ///   `orphan-extension`, at its target path, with a label at the definition's name; and so is an
 ///   extension of a definition of `core`, `alloc` or `std`, a GraphQL built-in the root package
 ///   replaces among them, unless the root package writes it and it adds directives and nothing
-///   else. An enum that declares a type parameter is `generic-enum`, at its first type parameter's
-///   name. A rule says nothing about a contribution a phase already refused something in.
+///   else. In the root package's extension of a built-in it did not write, each application of
+///   `core`'s `@marker`, `@set` or `@map` is `orphan-extension` too, at its path: what a built-in
+///   is is the language's to say. An enum that declares a type parameter is `generic-enum`, at its
+///   first type parameter's name. A rule says nothing about a contribution a phase already refused
+///   something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

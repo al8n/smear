@@ -29,6 +29,9 @@ const LIMIT: &str = "smear::graphqlx::resource-limit";
 /// The code of a type name that names nothing.
 const UNDEFINED: &str = "smear::schema::undefined-type";
 
+/// The code of an extension its package may not write, which the orphan rule reports.
+const ORPHAN: &str = "smear::graphqlx::orphan-extension";
+
 /// The code of an enum that declares a type parameter, which a rule reports.
 const GENERIC_ENUM: &str = "smear::graphqlx::generic-enum";
 
@@ -411,8 +414,9 @@ fn collections(model: &Model) -> Vec<(&str, Collection)> {
 #[test]
 fn markers_and_collections_are_read_off_cores_directives() {
   // `core`'s directives, on the library's definitions and on the program's: a marker, and one an
-  // extension makes; a set, a map, and a scalar that applies both, which is the first; an
-  // interface that applies nothing, and an object that applies `@set`, which neither is.
+  // extension of the definition's own package makes; a set, a map, and a scalar that applies both,
+  // which is the first; an interface that applies nothing, and an object that applies `@set`,
+  // which neither is.
   let text = "interface Ord @marker\ninterface Node {\n  id: ID\n}\ninterface Plain\n\
               extend interface Plain @marker\n\
               scalar Bag<T> @set\nscalar Dict<K, V> @map\nscalar Both<K, V> @map @set\n\
@@ -458,6 +462,65 @@ fn markers_and_collections_are_read_off_cores_directives() {
       ("HashMap", Collection::Map),
       ("HashSet", Collection::Set),
     ]
+  );
+
+  // A definition's meaning is its own package's to say. The root package's `@set` on `core`'s
+  // `NonZero` makes it no set, and the orphan rule refuses it, once, at the directive: the alias
+  // and the form it spells are one type, whose argument keeps its nullness.
+  let text = "extend scalar NonZero @set\ntype Query {\n  a: NonZeroU32\n  b: NonZero<u32>\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  let non_zero = model.builtins().non_zero();
+  assert_eq!(
+    found(&analysis),
+    [(
+      ORPHAN,
+      named(schema, text, "@", "set", 0),
+      Some(model.def(non_zero).location())
+    )]
+  );
+  assert_eq!(model.def(non_zero).collection(), None);
+  let a = field_type(model, "^::app::Query", "a");
+  assert_eq!(field_type(model, "^::app::Query", "b"), a);
+  assert_eq!(shown(model, a), "NonZero<u32>");
+
+  // The root package's `@set` on a dependency's scalar: the orphan rule refuses the whole
+  // extension, as it refuses any of another package's definition, and the scalar is no set, in the
+  // dependency's own fields too.
+  let ours = "extend scalar ^::geo::Bag @set\n";
+  let theirs = "scalar Bag<T>\ntype G {\n  g: Bag<Int>\n}\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let schema = schema_file(&analysis);
+  let geo_file = file(&analysis, 4, "geo.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(
+      ORPHAN,
+      at(schema, ours, "^::geo::Bag", 0),
+      Some(named(geo_file, theirs, "scalar ", "Bag", 0))
+    )]
+  );
+  let model = analysis.model();
+  let bag = def(model, Namespace::Type, "^::geo::Bag");
+  assert_eq!(model.def(bag).collection(), None);
+  assert_eq!(field_shown(model, "^::geo::G", "g"), "Bag<i32>");
+
+  // A GraphQL built-in the root package replaces is the root package's own: its extension there
+  // gives it its meaning, and is no orphan. The next part's rule judges a set of no parameter.
+  let text = "scalar String\nextend scalar String @set\n";
+  let analysis = analyze_one(text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert_eq!(
+    model.def(model.builtins().string()).collection(),
+    Some(Collection::Set)
   );
 }
 
@@ -1119,20 +1182,28 @@ const NON_ZERO_SET: [&str; 2] = [
 #[test]
 fn an_alias_and_the_form_it_spells_are_one_type_when_non_zero_is_extended() {
   // The alias's slot is made what a written argument is, so the two are one type and one
-  // instantiation: with room for one instantiation, both are built.
+  // instantiation: with room for one instantiation, both are built. The root package's `@set`
+  // gives `core`'s `NonZero` no meaning, so the argument keeps its nullness, and the orphan rule
+  // refuses the directive.
   for text in NON_ZERO_SET {
     for limits in [Limits::new(), Limits::new().with_max_instantiations(1)] {
       let analysis = analyze_text(text, &limits);
-      assert!(
-        analysis.diagnostics().is_empty(),
-        "{text}: {:#?}",
-        analysis.diagnostics()
-      );
+      let schema = schema_file(&analysis);
       let model = analysis.model();
+      let non_zero = model.builtins().non_zero();
+      assert_eq!(
+        found(&analysis),
+        [(
+          ORPHAN,
+          named(schema, text, "@", "set", 0),
+          Some(model.def(non_zero).location())
+        )],
+        "{text}"
+      );
+      assert_eq!(model.def(non_zero).collection(), None, "{text}");
       let a = field_type(model, "^::app::Query", "a");
       assert_eq!(field_type(model, "^::app::Query", "b"), a, "{text}");
-      // The extension makes `NonZero` a set, whose element is non-null in its type.
-      assert_eq!(shown(model, a), "NonZero<u32!>", "{text}");
+      assert_eq!(shown(model, a), "NonZero<u32>", "{text}");
     }
   }
 }
