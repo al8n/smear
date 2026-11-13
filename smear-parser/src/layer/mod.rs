@@ -104,18 +104,21 @@ where
 /// How much of a document an answer covers: how many items have an AST image, and how many
 /// elements have none.
 ///
-/// Both layers count by one rule, at every module depth:
+/// Both layers count by one rule, at every module depth. Standard GraphQL has no modules, so there
+/// the rule counts the document's top level:
 ///
 /// - [`projected`](Self::projected) counts every item that has an AST image. An item is what the
 ///   AST calls one: in GraphQLx a `use` item, an inline module, a definition or an extension; in
-///   standard GraphQL, which has no modules, a definition or an extension. An inline module counts
-///   one, beside the items inside it, and a `use` item counts one.
+///   standard GraphQL a definition or an extension. An inline module counts one, beside the items
+///   inside it, and a `use` item counts one.
 /// - [`skipped`](Self::skipped) counts every element that has none: an item the projection
-///   refused, a recovery hole or gap tile the parser left in an item's place, and each non-trivia
-///   token that stands between items. A module whose header has no image is one skipped element,
-///   and nothing inside it is counted.
+///   refused, a recovery hole or gap tile the parser left in an item's place, any other node it
+///   left between items, and each token between items that is neither trivia nor the `}` that
+///   closes a module's body. A module whose header has no image is one skipped element, and
+///   nothing inside it is counted.
 ///
-/// Both counts saturate.
+/// A missing `}` costs nothing: a module whose node holds no `}` of its own is projected with what
+/// it holds. Both counts saturate.
 ///
 /// The syntactic layer answers a document only for a text it read whole, so its `skipped` is zero
 /// and its recovery is always complete.
@@ -127,27 +130,30 @@ where
 ///
 /// # What `skipped` says
 ///
-/// `skipped() > 0` means at least one element, at some module depth, had no AST image, and nothing
-/// in the AST covers it.
+/// `skipped() > 0` means at least one element, at some module depth, had no AST image: no item
+/// of the AST stands for it. Its text can still lie inside a span. A module that was kept spans
+/// its whole node, so its span covers whatever was skipped inside it, and the document spans its
+/// first kept item to its last.
 ///
 /// [`is_complete`](Self::is_complete) is the one-call form of that question. It is a statement
-/// about **loss**, not about validity: it is the only state in which the AST covers the whole
-/// document, and it does not imply that a fail-fast projection of the same parse succeeds.
+/// about **loss**, not about validity: it is the only state in which every element of the document
+/// has an image in the AST, and it does not imply that a fail-fast projection of the same parse
+/// succeeds.
 ///
 /// # Complete here, refused fail-fast — deliberately
 ///
 /// The two door families answer different contracts. A recovering door steps through **every**
 /// document container under the root and answers per entry; a fail-fast door asserts the root holds
-/// **exactly one** container plus trivia, and that the document has a definition. So two shapes are
+/// **exactly one** container plus trivia, and that the document has an item. So two shapes are
 /// complete here and refused there:
 ///
-/// - a caller-minted root holding two valid containers: every definition of both is projected,
+/// - a caller-minted root holding two valid containers: every item of both is projected,
 ///   `skipped` is zero, and the fail-fast door answers `UnexpectedChild { parent: Root, .. }` at
 ///   the second container. This is kept, not closed: **each container is a legitimate document
 ///   image, and the recovering door's contract is per entry** — it reports what had an AST image
-///   and what did not, and every definition of the second container has one; and
+///   and what did not, and every item of the second container has one; and
 /// - an empty or trivia-only parse: nothing is lost and nothing is projected, and the fail-fast
-///   door refuses a document with no definition.
+///   door refuses a document with no item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Recovery {
   projected: u32,
@@ -173,9 +179,10 @@ impl Recovery {
   /// Returns how many elements had no AST image and were dropped, at every module depth.
   ///
   /// An *element*, not an item: the count includes an item the projection refused, a recovery
-  /// hole or gap tile the parser left in an item's place, and each non-trivia token the parser
-  /// could not attach to an item. One mistyped keyword can leave several. A module whose header
-  /// has no image counts one, and nothing inside it is counted. The count saturates.
+  /// hole or gap tile the parser left in an item's place, any other node it left between items,
+  /// and each non-trivia token the parser could not attach to an item. One mistyped keyword can
+  /// leave several. A module whose header has no image counts one, and nothing inside it is
+  /// counted. The count saturates.
   #[inline]
   pub const fn skipped(&self) -> u32 {
     self.skipped
@@ -186,7 +193,7 @@ impl Recovery {
   /// True exactly when [`skipped`](Self::skipped) is zero.
   ///
   /// It does not say the fail-fast projection would have succeeded. That door additionally asserts
-  /// the root holds exactly one document container and that the document has a definition, so a
+  /// the root holds exactly one document container and that the document has an item, so a
   /// caller-minted root with two valid containers and an empty or trivia-only parse are both
   /// complete here and refused there — see the type's documentation for why.
   #[inline]
