@@ -96,7 +96,8 @@ that refers to itself, through the directives applied where it reaches and the t
 `smear::schema::self-referential-directive`, and `core`'s `@specifiedBy` on a scalar of the
 built-in library, not only on GraphQL's five, is `smear::schema::specified-by-on-built-in-scalar`.
 And the schema keeps GraphQL's own rules on its roots, with GraphQL's codes: a root operation type
-that is no object type is `smear::schema::root-operation-type-not-object`.
+that is no object type is `smear::schema::root-operation-type-not-object`, and two roots of one
+type are `smear::schema::shared-root-operation-type`.
 An error that a phase or a rule reports marks the contributions, members and definitions that hold
 it, as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error
 marks nothing. A consumer's walk marks nothing, answers its own diagnostics under the same

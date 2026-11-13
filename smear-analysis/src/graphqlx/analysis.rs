@@ -309,9 +309,11 @@ impl Analysis {
 ///   package replaces among them, is `specified-by-on-built-in-scalar`, at its path. GraphQL's
 ///   own rules on the schema judge its roots: a written root whose type names a definition that is
 ///   no object type, an alias such as `NonZeroU32` among them, is
-///   `root-operation-type-not-object`, at the type. A rule says nothing about a contribution a
-///   phase already refused something in, and a root rule nothing while any of the schema's
-///   contributions holds a phase's error.
+///   `root-operation-type-not-object`, at the type. Of the roots that are object types, presumed
+///   or written, one that is one type with an earlier one, in the order query, mutation and
+///   subscription, is `shared-root-operation-type`, at a written root's type, with a label at the
+///   other. A rule says nothing about a contribution a phase already refused something in, and a
+///   root rule nothing while any of the schema's contributions holds a phase's error.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

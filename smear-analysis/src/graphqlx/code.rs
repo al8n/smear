@@ -581,4 +581,8 @@ pub(crate) mod schema {
   /// `RootOperationTypeNotObject`.
   pub(crate) const ROOT_OPERATION_TYPE_NOT_OBJECT: Code =
     Code::new("smear::schema::root-operation-type-not-object");
+
+  /// Two root operations have one type: `smear-schema`'s `SharedRootOperationType`.
+  pub(crate) const SHARED_ROOT_OPERATION_TYPE: Code =
+    Code::new("smear::schema::shared-root-operation-type");
 }

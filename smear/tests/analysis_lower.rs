@@ -2949,7 +2949,7 @@ const APP: [(&str, &str); 3] = [
   (
     "z.graphqlx",
     "extend type Query @a::mark(level: 3) {\n  more(first: Int): Int @a::mark(level: 4)\n}\n\
-     scalar Late\nextend schema {\n  subscription: Query\n}\n",
+     scalar Late\nextend schema {\n  subscription: ^::geo::Point\n}\n",
   ),
 ];
 

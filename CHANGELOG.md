@@ -437,7 +437,10 @@ All notable changes to Smear are documented in this file.
   rules on its roots, with GraphQL's codes: a written root operation type whose type names a
   definition that is no object type, of any of the three operations, an alias such as
   `NonZeroU32` among them, is `smear::schema::root-operation-type-not-object`, at the type; an
-  instantiation of a generic object type is one. A rule says nothing about a contribution a phase
+  instantiation of a generic object type is one; and of the roots that are object types, presumed
+  or written, one that is one type with an earlier one, `Root<Int>` twice among them and
+  `Root<Int>` beside `Root<String>` not, is `smear::schema::shared-root-operation-type`, at a
+  written root's type, with a label at the other. A rule says nothing about a contribution a phase
   already refused something in, and a rule on the roots, which no contribution holds, nothing
   while any of the schema's contributions does. On every GraphQL document of smear's corpora the analyzer
   is held to `smear-schema`'s verdict, code for code, by a differential test that lists each

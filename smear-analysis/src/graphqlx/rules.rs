@@ -54,6 +54,7 @@ mod root_operation_type_not_object;
 mod schema_outside_root;
 mod self_implementing_interface;
 mod self_referential_directive;
+mod shared_root_operation_type;
 mod specified_by_on_built_in_scalar;
 mod type_ref_misuse;
 mod union_member_not_object;
@@ -73,6 +74,7 @@ use self::{
   reserved_name::ReservedName, root_operation_type_not_object::RootOperationTypeNotObject,
   schema_outside_root::SchemaOutsideRoot, self_implementing_interface::SelfImplementingInterface,
   self_referential_directive::SelfReferentialDirective,
+  shared_root_operation_type::SharedRootOperationType,
   specified_by_on_built_in_scalar::SpecifiedByOnBuiltInScalar, type_ref_misuse::TypeRefMisuse,
   union_member_not_object::UnionMemberNotObject,
   unsupported_directive_location::UnsupportedDirectiveLocation,
@@ -366,7 +368,7 @@ rule_set! {
   /// directive refers to itself, through the directives and types it names, a scalar that is no
   /// collection hiding its type arguments; and a scalar of the built-in library takes no
   /// `@specifiedBy`; and of the schema, GraphQL's own rules: a root operation type is an object
-  /// type.
+  /// type; and the root operations have distinct types.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -436,6 +438,8 @@ rule_set! {
       => [super::code::schema::SPECIFIED_BY_ON_BUILT_IN_SCALAR],
     root_operation_type_not_object: RootOperationTypeNotObject
       => [super::code::schema::ROOT_OPERATION_TYPE_NOT_OBJECT],
+    shared_root_operation_type: SharedRootOperationType
+      => [super::code::schema::SHARED_ROOT_OPERATION_TYPE],
   }
 }
 

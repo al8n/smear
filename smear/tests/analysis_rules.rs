@@ -116,6 +116,9 @@ const SPECIFIED_BY_ON_BUILT_IN_SCALAR: &str = "smear::schema::specified-by-on-bu
 /// GraphQL's code for a root operation type that is no object type.
 const ROOT_OPERATION_TYPE_NOT_OBJECT: &str = "smear::schema::root-operation-type-not-object";
 
+/// GraphQL's code for two root operations of one type.
+const SHARED_ROOT_OPERATION_TYPE: &str = "smear::schema::shared-root-operation-type";
+
 /// The code of a type name that names nothing, a phase's.
 const UNDEFINED_TYPE: &str = "smear::schema::undefined-type";
 
@@ -681,6 +684,122 @@ fn a_root_operation_type_is_an_object_type() {
 }
 
 #[test]
+fn the_root_operations_have_distinct_types() {
+  // Two of one type, at the later, labelled at the first; and all three, each later one labelled
+  // at the query's.
+  let text = "type Q {\n  q: Int\n}\nschema {\n  query: Q\n  mutation: Q\n  subscription: Q\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let query = Some(named(schema, text, "query: ", "Q", 0));
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        SHARED_ROOT_OPERATION_TYPE,
+        named(schema, text, "mutation: ", "Q", 0),
+        query
+      ),
+      (
+        SHARED_ROOT_OPERATION_TYPE,
+        named(schema, text, "subscription: ", "Q", 0),
+        query
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the query and mutation root operations have one type, `Q`",
+      "the query and subscription root operations have one type, `Q`",
+    ]
+  );
+  for diagnostic in analysis.diagnostics() {
+    assert_eq!(
+      diagnostic.primary_label(),
+      Some("two root operations name the same type")
+    );
+    assert_eq!(
+      diagnostic.label(0).map(|label| label.text()),
+      Some("already a root operation type here")
+    );
+    assert_eq!(
+      diagnostic.help(),
+      Some(
+        "the three roots are the entry points of three different operation kinds, so each needs \
+         its own object type."
+      )
+    );
+  }
+
+  // One instantiation twice is one type; two instantiations of one definition are two.
+  let text = "type Root<T> {\n  r: T\n}\nschema {\n  query: Root<Int>\n  mutation: Root<Int>\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      SHARED_ROOT_OPERATION_TYPE,
+      at(schema, text, "Root<Int>", 1),
+      Some(at(schema, text, "Root<Int>", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let analysis = analyze_one(
+    "type Root<T> {\n  r: T\n}\nschema {\n  query: Root<Int>\n  mutation: Root<String>\n}\n",
+  );
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A presumed root and an extension's written root of its definition: at the written one,
+  // labelled at the definition.
+  let text = "type Query {\n  ok: Int\n}\nextend schema {\n  mutation: Query\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      SHARED_ROOT_OPERATION_TYPE,
+      named(schema, text, "mutation: ", "Query", 0),
+      Some(named(schema, text, "type ", "Query", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  // And when the presumed one is the later: at the written one still, labelled at the presumed
+  // one's definition.
+  let text = "type Mutation {\n  m: Int\n}\nextend schema {\n  query: Mutation\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      SHARED_ROOT_OPERATION_TYPE,
+      named(schema, text, "query: ", "Mutation", 0),
+      Some(named(schema, text, "type ", "Mutation", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // Two roots that are one interface are each no object type, and that is all.
+  let analysis =
+    analyze_one("interface I {\n  i: Int\n}\nschema {\n  query: I\n  mutation: I\n}\n");
+  assert_eq!(
+    codes(&analysis),
+    [
+      ROOT_OPERATION_TYPE_NOT_OBJECT,
+      ROOT_OPERATION_TYPE_NOT_OBJECT
+    ]
+  );
+}
+
+#[test]
 fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
   // A rule on the roots, which no contribution holds, says nothing beside a second root that names
   // nothing, in the same schema definition or in a schema extension; beside an undefined type in a
@@ -698,6 +817,19 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
       "interface I {\n  i: Int\n}\nschema {\n  query: I\n}\ntype G {\n  x: Missing\n}\n",
       &[ROOT_OPERATION_TYPE_NOT_OBJECT, UNDEFINED_TYPE][..],
     ),
+    (
+      "type Q {\n  q: Int\n}\nschema {\n  query: Q\n  mutation: Q\n  subscription: Missing\n}\n",
+      &[UNDEFINED_ROOT][..],
+    ),
+    (
+      "type Q {\n  q: Int\n}\nschema {\n  query: Q\n  mutation: Q\n}\n\
+       extend schema {\n  subscription: Missing\n}\n",
+      &[UNDEFINED_ROOT][..],
+    ),
+    (
+      "type Q {\n  q: Int\n}\nschema {\n  query: Q\n  mutation: Q\n}\ntype G {\n  x: Missing\n}\n",
+      &[SHARED_ROOT_OPERATION_TYPE, UNDEFINED_TYPE][..],
+    ),
   ] {
     let analysis = analyze_one(text);
     assert_eq!(codes(&analysis), expected, "{text}");
@@ -707,9 +839,10 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
 #[test]
 fn long_names_in_these_rules_are_quoted_as_excerpts() {
   let name = "R".repeat(4096);
-  let texts = [format!(
-    "interface {name} {{\n  i: Int\n}}\nschema {{\n  query: {name}\n}}\n"
-  )];
+  let texts = [
+    format!("interface {name} {{\n  i: Int\n}}\nschema {{\n  query: {name}\n}}\n"),
+    format!("type {name} {{\n  q: Int\n}}\nschema {{\n  query: {name}\n  mutation: {name}\n}}\n"),
+  ];
   for text in &texts {
     let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
       .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
@@ -1878,6 +2011,7 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(ROOT_OPERATION_TYPE_NOT_OBJECT),
     a_root_that_is_no_object,
   ),
+  (Code::new(SHARED_ROOT_OPERATION_TYPE), two_roots_of_one_type),
 ];
 
 /// A root package that defines its schema twice.
@@ -2105,6 +2239,11 @@ fn a_directive_that_is_not_repeatable_applied_twice() -> Analysis {
 /// A root operation type that is an interface.
 fn a_root_that_is_no_object() -> Analysis {
   analyze_one("interface Root { ok: Int } schema { query: Root }")
+}
+
+/// Two root operations of one type.
+fn two_roots_of_one_type() -> Analysis {
+  analyze_one("type Query { ok: Int } schema { query: Query mutation: Query }")
 }
 
 /// A directive that refers to itself, through the input object its argument takes.
