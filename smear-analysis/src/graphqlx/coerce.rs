@@ -749,7 +749,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     argument: RawArgument,
     ty: Option<TyId>,
   ) -> Option<ValueId> {
-    let RawTree { root, source } = self.raw.trees.get(argument.tree as usize).copied()?;
+    let RawTree { root, source, .. } = self.raw.trees.get(argument.tree as usize).copied()?;
     let node = self.raw.nodes.get(root as usize).copied()?;
     let id = self
       .builder
