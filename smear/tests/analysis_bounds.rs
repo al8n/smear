@@ -45,6 +45,27 @@ const PARAM_HELP: &str = "bound this type parameter by the interface in this def
 /// What a bound's report tells the author of a type argument that is a list.
 const LIST_HELP: &str = "a list satisfies no bound: pass a type that declares the interface";
 
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// Whether `analysis` reports nothing but that its program has no query root.
+fn clean(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics.len() - reported(analysis).len();
+  diagnostics.len() == waived && diagnostics.error_count() == waived
+}
+
 /// The definitions most tests write their uses after: `Node`; `Comparable`, and `Ord`, which
 /// declares it; `User`, which declares `Node` and `Comparable<User>`; `Box`, which declares
 /// `Comparable<Box<T>>`; and `Page` and `Sorted`, each with a bound, the second's naming its
@@ -136,11 +157,11 @@ fn def(model: &Model, name: &str) -> DefId {
     .unwrap_or_else(|| panic!("no type `{name}`"))
 }
 
-/// Each diagnostic's code, primary location, and first label's location, in the list's order.
+/// Each diagnostic's code, primary location, and first label's location, in the list's order, but
+/// for the missing query root.
 fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| {
       (
         diagnostic.code().as_str(),
@@ -151,11 +172,10 @@ fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)>
     .collect()
 }
 
-/// Each diagnostic's message, in the list's order.
+/// Each diagnostic's message, in the list's order, but for the missing query root.
 fn messages(analysis: &Analysis) -> Vec<String> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .collect()
 }
@@ -220,20 +240,18 @@ fn ids(range: IdRange<MemberId>) -> Vec<MemberId> {
   range.into_iter().collect()
 }
 
-/// Each diagnostic's code, in the list's order.
+/// Each diagnostic's code, in the list's order, but for the missing query root.
 fn codes(analysis: &Analysis) -> Vec<&'static str> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.code().as_str())
     .collect()
 }
 
-/// Each diagnostic's help, in the list's order.
+/// Each diagnostic's help, in the list's order, but for the missing query root.
 fn helps(analysis: &Analysis) -> Vec<Option<&str>> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.help())
     .collect()
 }
@@ -246,11 +264,10 @@ fn labels(diagnostic: &Diagnostic) -> Vec<(Location, &str)> {
     .collect()
 }
 
-/// The diagnostic at `index` of the list.
+/// The diagnostic at `index` of the list, but for the missing query root.
 fn nth(analysis: &Analysis, index: usize) -> &Diagnostic {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .nth(index)
     .unwrap_or_else(|| panic!("no diagnostic {index}: {:#?}", analysis.diagnostics()))
 }
@@ -398,9 +415,8 @@ fn a_bounds_right_side_is_an_interface() {
   assert_eq!(messages(&analysis)[..3], [refused, refused, refused]);
   let help = "name an interface, as `where T: Node` does, or an interface with type arguments, as \
               `where T: Comparable<T>` does";
-  let helps: Vec<Option<&str>> = analysis
-    .diagnostics()
-    .iter()
+  let helps: Vec<Option<&str>> = reported(&analysis)
+    .into_iter()
     .take(3)
     .map(|diagnostic: &Diagnostic| diagnostic.help())
     .collect();
@@ -838,11 +854,7 @@ fn a_filled_argument_is_judged_like_a_written_one() {
   let definition = "type Q<T, C = Int> where C: Node {\n  t: T\n}\n";
   let text = program(definition);
   let analysis = analyze_text(&text, &Limits::new());
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let text = program(&format!(
     "{definition}type Query {{\n  a: Q<User>\n  b: Q<User>\n}}\n"
   ));
@@ -1370,11 +1382,7 @@ fn the_built_in_library_is_judged_whatever_the_limits() {
     .with_max_bound_steps(0);
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
   let analysis = analyze(&root, &[], &limits);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   // The root package's map is refused beside it, in the root package's file alone.
   let text = "type Query {\n  m: HashMap<string, Int>\n}\n";

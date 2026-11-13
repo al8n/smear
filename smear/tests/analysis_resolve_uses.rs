@@ -12,6 +12,27 @@ use smear::{
   lexer::tokora::SimpleSpan,
 };
 
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// Whether `analysis` reports nothing but that its program has no query root.
+fn clean(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics.len() - reported(analysis).len();
+  diagnostics.len() == waived && diagnostics.error_count() == waived
+}
+
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
 fn package(
   name: &str,
@@ -91,11 +112,11 @@ fn package_source(analysis: &Analysis, package: u32) -> Location {
   Location::entire(id.get())
 }
 
-/// Each diagnostic's code and primary location, in the list's order.
+/// Each diagnostic's code and primary location, in the list's order, but for the missing query
+/// root.
 fn found(analysis: &Analysis) -> Vec<(&'static str, Location)> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
     .collect()
 }
@@ -139,7 +160,7 @@ fn every_form_binds_what_it_names() {
   .with_dependencies(["geo"]);
   let dependencies = [geo];
   let analysis = analyze(&root, &dependencies, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
     &root,
@@ -269,7 +290,7 @@ fn a_glob_gives_the_declarations_and_the_child_modules_of_its_module() {
     ],
   );
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
     &root,
@@ -309,11 +330,7 @@ fn a_name_two_globs_give_two_items_is_an_error_only_where_it_is_used() {
     "{:#?}",
     analysis.diagnostics()
   );
-  let diagnostic = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic");
+  let diagnostic = reported(&analysis)[0];
   assert_eq!(
     labels(diagnostic)
       .into_iter()
@@ -353,7 +370,7 @@ fn a_declaration_and_an_explicit_use_each_go_before_a_glob() {
     ],
   );
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
     &root,
@@ -400,7 +417,7 @@ fn a_chain_of_globs_resolves_over_several_rounds() {
   // Four rounds: the package's glob, then `a`'s, then `b`'s, then `Leaf`.
   let limits = Limits::new().with_max_glob_iterations(4);
   let analysis = analyze(&root, &dependencies, &limits);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
     &root,
@@ -473,7 +490,7 @@ fn a_glob_past_the_glob_limit_is_refused_and_reported_once() {
     "{:#?}",
     analysis.diagnostics()
   );
-  let diagnostic = analysis.diagnostics().iter().next().expect("a diagnostic");
+  let diagnostic = reported(&analysis)[0];
   let message = diagnostic.to_string();
   assert!(message.contains("limit of 2 modules"), "{message}");
   assert!(
@@ -499,7 +516,7 @@ fn the_glob_limit_met_exactly_is_no_error() {
     ],
   );
   let analysis = analyze(&root, &[], &Limits::new().with_max_globs(2));
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   let analysis = analyze(&root, &[], &Limits::new().with_max_globs(0));
   let lib = file(&analysis, 3, "lib.graphqlx");
@@ -590,6 +607,8 @@ fn many_globs_of_one_module_are_one_row_and_a_near_miss_search_pays_for_each() {
   for index in 0..MISSING {
     text.push_str(&format!("use m{index}::T\n"));
   }
+  // A root, which moves no `use`: the count below is of the whole list.
+  text.push_str("type Query {\n  ok: Query\n}\n");
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("lib.graphqlx", text.as_str())]);
   let analysis = analyze(&root, &[], &Limits::new());
@@ -612,7 +631,7 @@ fn a_chain_of_renames_past_the_round_limit_is_a_resource_limit() {
   let root = directory("app", &[("lib.graphqlx", text)]);
   // Four rounds, one a link.
   let analysis = analyze(&root, &[], &Limits::new().with_max_glob_iterations(4));
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   let analysis = analyze(&root, &[], &Limits::new().with_max_glob_iterations(3));
   let source = file(&analysis, 3, "lib.graphqlx");
@@ -625,11 +644,7 @@ fn a_chain_of_renames_past_the_round_limit_is_a_resource_limit() {
     "{:#?}",
     analysis.diagnostics()
   );
-  let diagnostic = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic");
+  let diagnostic = reported(&analysis)[0];
   let message = diagnostic.to_string();
   assert!(message.contains("more than 3 rounds"), "{message}");
   assert!(!message.contains("glob"), "{message}");
@@ -720,7 +735,7 @@ fn binding_fives_errors_are_reported_and_one_item_bound_twice_is_not() {
     "{:#?}",
     analysis.diagnostics()
   );
-  let diagnostics: Vec<&Diagnostic> = analysis.diagnostics().iter().collect();
+  let diagnostics = reported(&analysis);
   assert_eq!(
     labels(diagnostics[0]),
     [(
@@ -774,7 +789,7 @@ fn use_cycles_are_legal() {
     ],
   );
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   all(&root, &[], "^::app::a", &[("B", Some("^::app::b::B"))]);
   all(&root, &[], "^::app::b", &[("A", Some("^::app::a::A"))]);
 }
@@ -879,9 +894,8 @@ fn an_unknown_package_says_what_its_name_names() {
     "{:#?}",
     analysis.diagnostics()
   );
-  let messages: Vec<String> = analysis
-    .diagnostics()
-    .iter()
+  let messages: Vec<String> = reported(&analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .collect();
   assert_eq!(
@@ -910,7 +924,9 @@ fn an_unknown_package_says_what_its_name_names() {
 fn a_package_name_is_searched_for_among_the_supplied_packages() {
   const PACKAGES: usize = 1 << 17;
   const PATHS: usize = 1 << 20;
-  let text = "use ^::missing::T\n".repeat(PATHS);
+  let mut text = "use ^::missing::T\n".repeat(PATHS);
+  // A root, which moves no `use`: the count and the first diagnostic are of the whole list.
+  text.push_str("type Query {\n  ok: Query\n}\n");
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("lib.graphqlx", text.as_str())]);
   let dependencies: Vec<Package<&str>> = (0..PACKAGES)
@@ -942,7 +958,7 @@ fn a_package_name_answers_a_use_of_it_alone_and_last() {
   .with_dependencies(["geo"]);
   let dependencies = [geo];
   let analysis = analyze(&root, &dependencies, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
     &root,
@@ -977,7 +993,7 @@ fn a_string_source_names_the_module_of_a_directory() {
     ],
   );
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
     &root,
@@ -1307,7 +1323,7 @@ fn a_long_file_path_is_not_read_again_for_each_string_source() {
   let root: Package<&str> = Package::new("app", Layout::Directory, Tier::Std)
     .with_files([SourceFile::new(path.as_str(), text.as_str())]);
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(
     test_support::resolve(&root, &[], "^::app", &[], "mod here").as_deref(),
     Some("mod ^::app")
@@ -1382,7 +1398,7 @@ fn a_package_and_its_directive_of_one_name_stand_in_one_scope() {
   .with_dependencies(["ingraph"]);
   let dependencies = [ingraph];
   let analysis = analyze(&root, &dependencies, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
     &root,

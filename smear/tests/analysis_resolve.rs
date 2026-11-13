@@ -13,6 +13,21 @@ use smear::{
   lexer::tokora::SimpleSpan,
 };
 
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// Whether `analysis` reports nothing but that its program has no query root.
+fn clean(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() == NO_QUERY_ROOT)
+    .count();
+  diagnostics.len() == waived && diagnostics.error_count() == waived
+}
+
 /// A package named `name` of the `Directory` layout at `tier`, holding `files`, `(path, text)`.
 fn package(
   name: &str,
@@ -96,7 +111,7 @@ fn each_root_starts_where_it_says() {
   )
   .with_dependencies(["geo"]);
   let dependencies = [geo];
-  assert!(analyze(&root, &dependencies, &Limits::new()).is_ok());
+  assert!(clean(&analyze(&root, &dependencies, &Limits::new())));
 
   all(
     &root,
@@ -148,7 +163,7 @@ fn a_package_reaches_its_declared_dependencies_and_the_built_ins_and_nothing_els
   let root =
     package("app", Tier::Std, &[("schema.graphqlx", "scalar Top\n")]).with_dependencies(["geo"]);
   let dependencies = [base, geo, other];
-  assert!(analyze(&root, &dependencies, &Limits::new()).is_ok());
+  assert!(clean(&analyze(&root, &dependencies, &Limits::new())));
 
   all(
     &root,
@@ -199,7 +214,7 @@ fn a_scope_answers_in_its_order_with_package_names_last() {
   )
   .with_dependencies(["geo", "string"]);
   let dependencies = [geo, string];
-  assert!(analyze(&root, &dependencies, &Limits::new()).is_ok());
+  assert!(clean(&analyze(&root, &dependencies, &Limits::new())));
 
   // A generic parameter before the module's own declaration of its name, never a directive, and
   // nothing named through one.
@@ -274,7 +289,7 @@ fn a_parameter_shadows_the_module_prefix_of_a_directive_path() {
       ),
     ],
   );
-  assert!(analyze(&root, &[], &Limits::new()).is_ok());
+  assert!(clean(&analyze(&root, &[], &Limits::new())));
 
   for (path, with, without) in [
     ("T", Some("param T"), None),
@@ -309,7 +324,7 @@ fn types_and_modules_share_a_namespace_and_directives_have_their_own() {
       ("media/a.graphqlx", "scalar Image\n"),
     ],
   );
-  assert!(analyze(&root, &[], &Limits::new()).is_ok());
+  assert!(clean(&analyze(&root, &[], &Limits::new())));
 
   all(
     &root,
@@ -373,7 +388,7 @@ fn a_width_resolves_only_in_a_package_that_may_have_it() {
   )
   .with_dependencies(["wide"]);
   let dependencies = [wide];
-  assert!(analyze(&root, &dependencies, &Limits::new()).is_ok());
+  assert!(clean(&analyze(&root, &dependencies, &Limits::new())));
 
   all(
     &root,

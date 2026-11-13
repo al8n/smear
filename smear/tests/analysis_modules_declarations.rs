@@ -12,6 +12,27 @@ use smear::{
   lexer::tokora::SimpleSpan,
 };
 
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// Whether `analysis` reports nothing but that its program has no query root.
+fn clean(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics.len() - reported(analysis).len();
+  diagnostics.len() == waived && diagnostics.error_count() == waived
+}
+
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
 fn package(
   name: &str,
@@ -87,11 +108,11 @@ fn names(model: &Model, module: ModuleId) -> Vec<&str> {
     .collect()
 }
 
-/// Each diagnostic's code, primary location, and first label's location, in the list's order.
+/// Each diagnostic's code, primary location, and first label's location, in the list's order, but
+/// for the missing query root.
 fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| {
       (
         diagnostic.code().as_str(),
@@ -235,7 +256,7 @@ fn def_ids_follow_the_package_the_module_path_the_source_and_the_position() {
 
   let (root, dependencies) = build(false);
   let forward = analyze(&root, &dependencies, &Limits::new());
-  assert!(forward.is_ok(), "{:#?}", forward.diagnostics());
+  assert!(clean(&forward), "{:#?}", forward.diagnostics());
   let model = forward.model();
   assert_eq!(declared(model), ["A", "B2", "B1", "C", "Z", "Alpha", "G"]);
   let m = model
@@ -311,7 +332,7 @@ fn two_definitions_of_one_name_in_one_namespace_of_one_module_are_reported() {
       ),
     ]
   );
-  for diagnostic in analysis.diagnostics() {
+  for diagnostic in reported(&analysis) {
     assert_eq!(diagnostic.labels(), 1);
     assert_eq!(
       diagnostic.label(0).map(|label| label.text()),
@@ -401,11 +422,7 @@ fn a_type_named_as_a_child_module_of_its_module_collides() {
       Some(named(schema, text, "mod ", "media", 0)),
     )]
   );
-  let diagnostic = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic");
+  let diagnostic = reported(&analysis)[0];
   assert_eq!(
     diagnostic.label(0).map(|label| label.text()),
     Some("the module is declared here")
@@ -581,8 +598,7 @@ fn a_file_that_holds_only_what_the_lexer_skips_declares_nothing() {
     ],
   );
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
-  assert!(analysis.diagnostics().is_empty());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   assert_eq!(declared(model), ["Real"]);
   // A directory whose one file only documents it is a module, and an empty one.
@@ -668,12 +684,7 @@ fn the_first_definition_past_the_limit_is_reported_and_nothing_after_it_is_decla
     analysis.diagnostics()
   );
   assert!(!analysis.is_ok());
-  let message = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic")
-    .to_string();
+  let message = reported(&analysis)[0].to_string();
   assert!(message.contains("the type `B`"), "{message}");
   assert!(message.contains(&format!("limit of {max}")), "{message}");
   let model = analysis.model();
@@ -708,7 +719,7 @@ fn the_definition_limit_met_exactly_is_no_error() {
     &[("schema.graphqlx", "scalar A\nscalar B\n")],
   );
   let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library + 2));
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(declared(analysis.model()), ["A", "B"]);
   assert_eq!(analysis.model().defs().len(), library + 2);
 }
@@ -774,7 +785,7 @@ fn a_replacing_definition_counts_only_the_primitive_it_makes() {
 
   // `String` and `@deprecated` take their built-ins' places, and `Int` makes `i32`.
   let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library + 1));
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(analysis.model().defs().len(), library + 1);
 
   let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library));
