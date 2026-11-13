@@ -1,6 +1,6 @@
 //! The GraphQLx analyzer's types: what lowering checks of a written parameter list, an extension's
-//! and a replaced built-in's; and the built-in meaning of a definition, a marker or a collection,
-//! read off `core`'s directives.
+//! and a replaced built-in's; the built-in meaning of a definition, a marker or a collection, read
+//! off `core`'s directives; and a definition's defaults, checked where they are written.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -14,6 +14,9 @@ use smear::{
 
 /// The code of a count of type arguments or type parameters that does not match.
 const ARITY: &str = "smear::graphqlx::generic-arity";
+
+/// The code of a type parameter's default that can never fill.
+const DEFAULT: &str = "smear::graphqlx::generic-default";
 
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
 fn package(
@@ -31,6 +34,17 @@ fn package(
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_one(text: &'static str) -> Analysis {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
+  analyze(&root, &[], &Limits::new())
+}
+
+/// An analysis of the root package `app`, `Flat`, holding the files `a.graphqlx`, `a`, and
+/// `b.graphqlx`, `b`, passed in that order, or reversed when `reversed`.
+fn analyze_two(a: &'static str, b: &'static str, reversed: bool) -> Analysis {
+  let mut files = vec![("a.graphqlx", a), ("b.graphqlx", b)];
+  if reversed {
+    files.reverse();
+  }
+  let root = package("app", Layout::Flat, &files);
   analyze(&root, &[], &Limits::new())
 }
 
@@ -338,5 +352,117 @@ fn markers_and_collections_are_read_off_cores_directives() {
       ("HashMap", Collection::Map),
       ("HashSet", Collection::Set),
     ]
+  );
+}
+
+#[test]
+fn a_default_after_which_a_parameter_has_none_is_refused() {
+  // Arguments bind by position, so `T`'s default could never fill: refused at `U`, which follows it
+  // with no default of its own, with a label at the default that cannot fill.
+  let text = "scalar P<T = Int, U>\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEFAULT,
+      named(schema, text, ", ", "U", 0),
+      Some(named(schema, text, "T = ", "Int", 0))
+    )]
+  );
+}
+
+#[test]
+fn the_trailing_rule_comes_first() {
+  // `T`'s default names `T` itself, but `T` is below the least number of arguments `F` takes, so
+  // it is always written: only the trailing rule speaks.
+  let text = "scalar F<T = [T], U>\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEFAULT,
+      named(schema, text, ", ", "U", 0),
+      Some(at(schema, text, "[T]", 0))
+    )]
+  );
+}
+
+/// Definitions whose defaults need each other, none of them used: a default that names its own
+/// parameter, and two defaults that name each other.
+const GROUPS_A: &str = "scalar One<T = [T]>\nscalar Two<T = U, U = T>\n";
+
+/// More of them: one group of three, which holds two cycles, `X` and `Y`, `Y` and `Z`; and two
+/// groups in one definition.
+const GROUPS_B: &str = "scalar Pair<X, Y>\nscalar Three<X = Y, Y = Pair<X, Z>, Z = Y>\n\
+                        scalar Four<A = A2, A2 = A, B = B2, B2 = B>\n";
+
+#[test]
+fn a_group_of_defaults_that_need_each_other_is_refused_once_at_its_lowest_parameter() {
+  for reversed in [false, true] {
+    let analysis = analyze_two(GROUPS_A, GROUPS_B, reversed);
+    let a = file(&analysis, 3, "a.graphqlx");
+    let b = file(&analysis, 3, "b.graphqlx");
+    // One report a group, at the default of its lowest parameter, labelled where the lowest other
+    // member of the group whose default names that parameter first names it; none for a group of
+    // one.
+    assert_eq!(
+      found(&analysis),
+      [
+        (DEFAULT, at(a, GROUPS_A, "[T]", 0), None),
+        (
+          DEFAULT,
+          named(a, GROUPS_A, "T = ", "U", 0),
+          Some(named(a, GROUPS_A, "U = ", "T", 0))
+        ),
+        (
+          DEFAULT,
+          named(b, GROUPS_B, "X = ", "Y", 0),
+          Some(named(b, GROUPS_B, "Pair<", "X", 1))
+        ),
+        (
+          DEFAULT,
+          named(b, GROUPS_B, "A = ", "A2", 0),
+          Some(named(b, GROUPS_B, "A2 = ", "A", 0))
+        ),
+        (
+          DEFAULT,
+          named(b, GROUPS_B, "B = ", "B2", 0),
+          Some(named(b, GROUPS_B, "B2 = ", "B", 0))
+        ),
+      ],
+      "files reversed: {reversed}"
+    );
+    let messages: Vec<String> = analysis
+      .diagnostics()
+      .iter()
+      .map(|diagnostic: &Diagnostic| diagnostic.to_string())
+      .collect();
+    assert_eq!(
+      messages[0],
+      "the default of `T` names `T` itself, so it can never fill"
+    );
+    assert_eq!(
+      messages[1],
+      "the default of `T` can never fill: a use that leaves `T` out leaves out the whole group of \
+       type parameters whose defaults need each other"
+    );
+  }
+}
+
+#[test]
+fn a_default_that_leads_into_a_group_says_nothing() {
+  // `A` and `B` need each other; `C`'s default only leads into them, and is reported nowhere.
+  let text = "scalar E<A = B, B = A, C = A>\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEFAULT,
+      named(schema, text, "A = ", "B", 0),
+      Some(named(schema, text, "B = ", "A", 0))
+    )]
   );
 }

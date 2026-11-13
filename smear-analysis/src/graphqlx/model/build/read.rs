@@ -7,11 +7,38 @@
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{ApplicationId, DefId, ModuleId, dense},
-  model::{DefKind, Resolution, table::DefRow},
+  id::{ApplicationId, DefId, ModuleId, Sym, TypeExprId, dense},
+  model::{
+    DefKind, Resolution,
+    table::{DefRow, KIND_LIST, KIND_NAMED, KIND_PARAM},
+  },
 };
 
 use super::ModelBuilder;
+
+/// What a type occurrence names, as lowering resolved it.
+#[derive(Clone, Copy)]
+pub(crate) enum Written {
+  /// A definition.
+  Named,
+  /// One of `def`'s type parameters: the one at `index`, which an extension's name past its
+  /// target's parameters leaves past them.
+  Param { def: DefId, index: u32 },
+  /// A list of its element.
+  List(TypeExprId),
+  /// A path that did not resolve.
+  Unresolved,
+}
+
+/// One type occurrence, as a phase after lowering reads it.
+pub(crate) struct Occurrence<'b> {
+  /// What it names.
+  pub(crate) written: Written,
+  /// The arguments written for it, in order, whatever it names.
+  pub(crate) args: &'b [TypeExprId],
+  /// Where it is written.
+  pub(crate) location: Location,
+}
 
 impl ModelBuilder {
   /// How many definitions the model holds.
@@ -61,6 +88,41 @@ impl ModelBuilder {
       .defs
       .get(def.get() as usize)
       .map_or(0, |row: &DefRow| row.type_params.len)
+  }
+
+  /// `def`'s type parameter at `index`: its name, where its name is written, and the occurrence
+  /// its default is, if it has one.
+  pub(crate) fn type_param(
+    &self,
+    def: DefId,
+    index: u32,
+  ) -> Option<(Sym, Location, Option<TypeExprId>)> {
+    let row = self.model.defs.get(def.get() as usize)?;
+    if index >= row.type_params.len {
+      return None;
+    }
+    let at = row.type_params.start.checked_add(index)?;
+    let param = self.model.type_params.get(at as usize)?;
+    Some((param.name, param.location, param.default))
+  }
+
+  /// The type occurrence `id`, as lowering wrote it.
+  pub(crate) fn occurrence(&self, id: TypeExprId) -> Option<Occurrence<'_>> {
+    let row = self.model.type_exprs.get(id.get() as usize)?;
+    let written = match row.shape {
+      KIND_NAMED => Written::Named,
+      KIND_PARAM => Written::Param {
+        def: row.def,
+        index: row.index,
+      },
+      KIND_LIST => Written::List(row.element),
+      _ => Written::Unresolved,
+    };
+    Some(Occurrence {
+      written,
+      args: row.args.of(&self.model.type_expr_args),
+      location: row.location,
+    })
   }
 
   /// The application `id`: the directive it resolved to, how many type arguments it writes, and

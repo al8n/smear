@@ -100,6 +100,15 @@ pub enum DiagnosticKind {
   /// Or a definition that replaces a GraphQL built-in writes one, where the built-in's identity has
   /// none: reported at the list, and nothing of the list is in the model.
   GenericArity,
+  /// A default of a definition's type parameter that can never fill. A type parameter with no
+  /// default follows one with a default: type arguments bind by position, so that default could
+  /// never fill, and the first such parameter is reported, at its name, with a label at the
+  /// default before it. Or a group of the definition's defaults need each other, a default that
+  /// names its own parameter included: a use that leaves the group's lowest parameter out leaves
+  /// out the whole group, so that parameter's default can never fill, and each such group is
+  /// reported once, at that default, with a label, for a group of more than one, where the next of
+  /// its members to name that parameter first names it.
+  GenericDefault,
 
   // -- smear's rules -----------------------------------------------------------------------------
   /// A package other than the root package writes a `schema` definition or a schema extension. A
@@ -144,6 +153,7 @@ impl DiagnosticKind {
     Self::ShadowedPrimitive,
     Self::InvalidBound,
     Self::GenericArity,
+    Self::GenericDefault,
     Self::SchemaOutsideRoot,
     Self::OrphanExtension,
     Self::ResourceLimit,
@@ -174,6 +184,7 @@ impl DiagnosticKind {
       Self::ShadowedPrimitive => Code::new("smear::graphqlx::shadowed-primitive"),
       Self::InvalidBound => Code::new("smear::graphqlx::invalid-bound"),
       Self::GenericArity => Code::new("smear::graphqlx::generic-arity"),
+      Self::GenericDefault => Code::new("smear::graphqlx::generic-default"),
       Self::SchemaOutsideRoot => Code::new("smear::graphqlx::schema-outside-root"),
       Self::OrphanExtension => Code::new("smear::graphqlx::orphan-extension"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
@@ -204,6 +215,7 @@ impl DiagnosticKind {
       Self::ShadowedPrimitive => "declaration shadows a primitive",
       Self::InvalidBound => "invalid bound",
       Self::GenericArity => "wrong number of type arguments",
+      Self::GenericDefault => "type parameter default that can never fill",
       Self::SchemaOutsideRoot => "schema outside the root package",
       Self::OrphanExtension => "orphan extension",
       Self::ResourceLimit => "resource limit exceeded",
@@ -234,6 +246,7 @@ impl DiagnosticKind {
       | Self::UseNameCollision
       | Self::InvalidBound
       | Self::GenericArity
+      | Self::GenericDefault
       | Self::SchemaOutsideRoot
       | Self::OrphanExtension
       | Self::ResourceLimit => Severity::Error,

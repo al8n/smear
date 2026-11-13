@@ -10,6 +10,7 @@ DiagnosticKind::DuplicateFilePath = smear::graphqlx::duplicate-file-path
 DiagnosticKind::DuplicatePackageName = smear::graphqlx::duplicate-package-name
 DiagnosticKind::FilePathUse = smear::graphqlx::file-path-use
 DiagnosticKind::GenericArity = smear::graphqlx::generic-arity
+DiagnosticKind::GenericDefault = smear::graphqlx::generic-default
 DiagnosticKind::InvalidBound = smear::graphqlx::invalid-bound
 DiagnosticKind::InvalidDirectoryName = smear::graphqlx::invalid-directory-name
 DiagnosticKind::InvalidFilePath = smear::graphqlx::invalid-file-path

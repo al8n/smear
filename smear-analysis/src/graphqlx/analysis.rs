@@ -176,7 +176,11 @@ impl Analysis {
 /// - Gives each definition its built-in meaning, read off `core`'s directives by what each
 ///   application resolved to, never by how it is spelled: an interface that applies `@marker` is a
 ///   marker, and a scalar that applies `@set` or `@map` stands for that collection, the first of
-///   the two when it applies both.
+///   the two when it applies both. Then checks each definition's defaults where they are written:
+///   a type parameter with no default that follows one with a default is `generic-default`, once
+///   for the definition; and so is each group of its defaults that need each other, a default that
+///   names its own parameter included, once, at the default of the group's lowest parameter,
+///   which a use can never fill.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///   Each schema definition the root package writes after its first is
@@ -254,7 +258,7 @@ fn run(packages: Vec<PackageView<'_>>, limits: &Limits) -> Analysis {
     &mut builder,
     &mut reporter,
   );
-  instantiate::instantiate(&declarations, &mut builder);
+  instantiate::instantiate(&declarations, &mut builder, &mut reporter);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())
 }

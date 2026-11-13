@@ -156,8 +156,14 @@ All notable changes to Smear are documented in this file.
   offsets address are `resource-limit`. Then each definition gets its built-in meaning, read off
   what its applications resolved to and never off how they are spelled: an interface that applies
   `core`'s `@marker` is a marker, as `Def::is_marker()` says, and a scalar that applies `core`'s
-  `@set` or `@map` stands for that collection, as `Def::collection()` says. Then smear's rules
-  walk the model, each a visitor on the public trait. A program defines its schema at most once: each schema definition the root
+  `@set` or `@map` stands for that collection, as `Def::collection()` says. Each definition's
+  type parameter defaults are checked where they are written: they are trailing, a parameter with
+  no default after one with a default being the new `smear::graphqlx::generic-default`; a default
+  may name any parameter of its definition, written before it or after it; and each group of a
+  definition's defaults that need each other, a default that names its own parameter included, is
+  `generic-default` once, at the default of the group's lowest parameter, which a use that leaves
+  that parameter out can never fill. Then smear's rules walk the model, each a visitor on the
+  public trait. A program defines its schema at most once: each schema definition the root
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
   code, with a label at the first. And the schema is the root package's: each schema definition
   and each schema extension a dependency writes is the new

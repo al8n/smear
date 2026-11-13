@@ -40,6 +40,8 @@
 mod phases;
 mod read;
 
+pub(crate) use read::Written;
+
 use std::{boxed::Box, collections::BTreeMap, string::String, vec, vec::Vec};
 
 use smear_semantics::interner::{Interner, Symbol};
