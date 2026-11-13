@@ -2398,9 +2398,28 @@ fn a_second_schema_definition_and_a_dependencys_are_contributions_and_nothing_el
     ]
   );
   // And nothing else: only the root package's first schema definition describes the schema and
-  // gives it a root, and nothing written in another schema item is looked for.
-  assert!(
-    analysis.diagnostics().is_empty(),
+  // gives it a root, and nothing written in another schema item is looked for. The rules refuse
+  // each of the others, where its first keyword is: the root package's second definition, with a
+  // label at its first, and the dependency's definition and extension.
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        "smear::schema::duplicate-schema-definition",
+        named(two_file, two, "\n", "schema", 0),
+        Some(named(one_file, one, "\n", "schema", 0)),
+      ),
+      (
+        "smear::graphqlx::schema-outside-root",
+        named(geo_file, theirs, "\n", "schema", 0),
+        None,
+      ),
+      (
+        "smear::graphqlx::schema-outside-root",
+        named(geo_file, theirs, "\n", "extend", 0),
+        None,
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
@@ -2440,8 +2459,21 @@ fn a_second_schema_definition_and_a_dependencys_are_contributions_and_nothing_el
     ]
   );
   assert_eq!(model.schema().description(), None);
-  assert!(
-    analysis.diagnostics().is_empty(),
+  // The dependency's two items are refused, and nothing in them is looked for.
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        "smear::graphqlx::schema-outside-root",
+        named(geo_file, theirs, "\n", "schema", 0),
+        None,
+      ),
+      (
+        "smear::graphqlx::schema-outside-root",
+        named(geo_file, theirs, "\n", "extend", 0),
+        None,
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );

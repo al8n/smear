@@ -57,9 +57,9 @@ All notable changes to Smear are documented in this file.
   reports, and answers those diagnostics under the analysis's ceiling. A consumer's walk marks
   nothing and holds memory bounded by that ceiling. Visitors compose at compile time: a tuple
   of up to twelve, an `Option` of one, a `&mut V`, a `Box<V>` and `()` are each a visitor.
-  `analyze` runs smear's own rule set, which holds no rule yet, through the same walk over the
-  supplied packages, and an error that a phase or a rule reports marks the contributions,
-  members and definitions that hold where it points, as their `has_errors()` says, whether the
+  `analyze` runs smear's own rules through the same walk over the supplied packages,
+  and an error that a phase or a rule reports marks the contributions, members and
+  definitions that hold where it points, as their `has_errors()` says, whether the
   ceiling keeps the diagnostic or not. Every analysis parses the built-in library too:
   `core`, `alloc` and `std`, one GraphQLx file each, embedded in smear. So far `analyze` fills
   in the packages and their modules: a module for every directory of a `Directory` package
@@ -116,10 +116,11 @@ All notable changes to Smear are documented in this file.
   named where its name is written, then each extension's, by source and position, named where
   its target path is written; its type parameters; a directive definition's locations and whether
   it is `repeatable`; and its members, the direct members of each contribution in turn as written
-  and then each field's arguments, field by field, each with its description. A GraphQL built-in
-  the root package replaces holds what the root package's definition writes, and the root may
-  extend a built-in. `Contribution::is_extension()` says whether a contribution is a definition
-  or one of its extensions. Every written type is a type occurrence, numbered in the order the
+  and then each field's arguments, field by field, each with its description. A GraphQL
+  built-in the root package replaces holds what the root package's definition
+  writes, and the root package may add directives to a built-in by an extension.
+  `Contribution::is_extension()` says whether a contribution is a definition or one of its
+  extensions. Every written type is a type occurrence, numbered in the order the
   model's walk reaches it, each before the types it nests: a type parameter's default, a bound,
   an `implements` entry, a union member, a member's type. It keeps its path as written, `Int`
   staying `Int`, and its written arguments, however many its definition has parameters, and its
@@ -144,9 +145,20 @@ All notable changes to Smear are documented in this file.
   `smear::schema::duplicate-root-operation-type`; with no schema definition of the root
   package's, an object type the root package's root module declares named `Query`, `Mutation` or
   `Subscription` is presumed that operation's root. Names and texts past what the model's `u32`
-  offsets address are `resource-limit`. A new `test-support` feature, which
-  `smear/test-support` forwards, compiles a hidden door to the crate-private model builder, and
-  to analyses of the models it builds, for `smear`'s own tests; it is not API.
+  offsets address are `resource-limit`. Then smear's rules walk the model, each a visitor on the
+  public trait. A program defines its schema at most once: each schema definition the root
+  package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
+  code, with a label at the first. And the schema is the root package's: each schema definition
+  and each schema extension a dependency writes is the new
+  `smear::graphqlx::schema-outside-root`, and no duplicate of the root package's. And a package
+  extends its own definitions alone: an extension of a type or directive another supplied
+  package defines is the new `smear::graphqlx::orphan-extension`, at its target path, with a
+  label at the definition's name; and so is an extension of a definition of `core`, `alloc` or
+  `std`, a GraphQL built-in the root package replaces among them, unless the root package
+  writes it and it adds directives and nothing else. A rule says nothing about a contribution a
+  phase already refused something in. A new `test-support` feature, which `smear/test-support`
+  forwards, compiles a hidden door to the crate-private model builder, and to analyses of the
+  models it builds, for `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`
