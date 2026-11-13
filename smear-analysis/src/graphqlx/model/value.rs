@@ -72,11 +72,11 @@ impl ObjectEntry {
 /// What one value is: the shape it was coerced to, by the type expected where it stands.
 ///
 /// Three kinds of value are kept as written, as a [`Literal`] with nothing coerced beyond syntax: a
-/// value of a custom scalar, an extern one included, but `null`, which is `null` where the scalar
-/// is nullable; a value whose expected type names a type parameter, which only an instantiation
-/// can check; and a value whose expected type can take none, an output type or a path that names
-/// nothing among them, which is another rule's or phase's to refuse. In this version a value of a
-/// collection and of `TypeRef` is kept as written too.
+/// value of a custom scalar that is no collection, an extern one included, but `null`, which is
+/// `null` where the scalar is nullable; a value whose expected type names a type parameter, which
+/// only an instantiation can check; and a value whose expected type can take none, an output type
+/// or a path that names nothing among them, which is another rule's or phase's to refuse. In this
+/// version a value of `TypeRef` is kept as written too.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum ValueKind<'a> {
@@ -109,17 +109,19 @@ pub enum ValueKind<'a> {
   },
   /// A list, of its elements.
   List(&'a [ValueId]),
-  /// A set, of its elements.
+  /// A set, of its elements, in written order: a set literal where a set is expected, an extern
+  /// set among them, each element coerced against the set's element type.
   Set(&'a [ValueId]),
-  /// A map, of its entries, each a key and a value.
+  /// A map, of its entries, each a key and a value, in written order: a map literal where a map is
+  /// expected, each key coerced against the map's key type and each value against its value type.
   Map(&'a [(ValueId, ValueId)]),
   /// An input object, of its fields, in the input object's order: each one its literal writes and
   /// the input object declares, one written twice twice, in written order, and each one it leaves
   /// out that has a default, a copy of the default; no absent one. A OneOf input object's fields
   /// left out are never filled.
   Object(&'a [ObjectEntry]),
-  /// A value kept as written: of a custom scalar, but `null`; of a type that names a type
-  /// parameter; or of a type that can take no value.
+  /// A value kept as written: of a custom scalar that is no collection, but `null`; of a type that
+  /// names a type parameter; or of a type that can take no value.
   Literal(Literal<'a>),
   /// A value that did not coerce or resolve. Only an analysis that is not ok has one, within the
   /// extent of the error that says why.
@@ -270,8 +272,8 @@ impl<'a> Value<'a> {
 
   /// What it is.
   //
-  // Coercion gives a value its shape. It makes no set, map or type value yet: a value of a type
-  // that would hold one is the `Literal` of its syntactic kind and its text.
+  // Coercion gives a value its shape. It makes no type value yet: a value of `TypeRef` is the
+  // `Literal` of its syntactic kind and its text.
   pub fn kind(&self) -> ValueKind<'a> {
     let model: &'a Model = self.model;
     let row = self.row();

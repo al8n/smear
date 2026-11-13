@@ -151,6 +151,13 @@ pub enum DiagnosticKind {
   /// A zero where `core`'s `NonZero` is expected, of any width, in any radix and with either sign,
   /// in a default or in a directive's argument. Reported at the literal, whose value is unresolved.
   NonZeroZero,
+  /// A collection literal out of its place. A `set!{…}` is a value of a set alone, and a
+  /// `map!{…}` of a map alone: one where a type that is no collection of its shape is expected,
+  /// but a custom scalar that is no collection, which keeps any literal, is reported at the
+  /// literal. And a set or a map, an extern one among them, takes its own literal and `null`
+  /// alone: any other literal is reported at the literal, with the collection's form in the help.
+  /// Either is unresolved, and nothing it holds is a value of its own.
+  CollectionLiteral,
 
   // -- smear's rules -----------------------------------------------------------------------------
   /// A package other than the root package writes a `schema` definition or a schema extension. A
@@ -244,6 +251,7 @@ impl DiagnosticKind {
     Self::UnsatisfiedBound,
     Self::WidthOverflow,
     Self::NonZeroZero,
+    Self::CollectionLiteral,
     Self::SchemaOutsideRoot,
     Self::OrphanExtension,
     Self::GenericEnum,
@@ -284,6 +292,7 @@ impl DiagnosticKind {
       Self::UnsatisfiedBound => Code::new("smear::graphqlx::unsatisfied-bound"),
       Self::WidthOverflow => Code::new("smear::graphqlx::width-overflow"),
       Self::NonZeroZero => Code::new("smear::graphqlx::nonzero-zero"),
+      Self::CollectionLiteral => Code::new("smear::graphqlx::collection-literal"),
       Self::SchemaOutsideRoot => Code::new("smear::graphqlx::schema-outside-root"),
       Self::OrphanExtension => Code::new("smear::graphqlx::orphan-extension"),
       Self::GenericEnum => Code::new("smear::graphqlx::generic-enum"),
@@ -324,6 +333,7 @@ impl DiagnosticKind {
       Self::UnsatisfiedBound => "unsatisfied bound",
       Self::WidthOverflow => "out of the type's range",
       Self::NonZeroZero => "zero where `NonZero` is expected",
+      Self::CollectionLiteral => "collection literal out of place",
       Self::SchemaOutsideRoot => "schema outside the root package",
       Self::OrphanExtension => "orphan extension",
       Self::GenericEnum => "generic enum",
@@ -364,6 +374,7 @@ impl DiagnosticKind {
       | Self::UnsatisfiedBound
       | Self::WidthOverflow
       | Self::NonZeroZero
+      | Self::CollectionLiteral
       | Self::SchemaOutsideRoot
       | Self::OrphanExtension
       | Self::GenericEnum

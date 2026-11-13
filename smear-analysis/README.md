@@ -27,9 +27,10 @@ and arguments as written, what it resolves to, and its type: the complete instan
 argument left out filled from its default and an alias such as `NonZeroU32` expanded, each type
 interned once, so that `==` on two type ids is type equality; every application with its type
 arguments and its arguments; every value, coerced to the type expected where it stands, each value
-nested in it one of its own, an input object's fields found by name and kept in its order, and a
-custom scalar's but `null` kept as written; and the schema, with its contributions, one for each
-schema item, its description, its roots, written or presumed, and its applications.
+nested in it one of its own, an input object's fields found by name and kept in its order, a set's
+elements and a map's entries, and a custom scalar's but `null` kept as written; and the schema, with
+its contributions, one for each schema item, its description, its roots, written or presumed, and
+its applications.
 `Model::satisfies` answers whether a type satisfies an interface or a marker, and
 `Model::satisfies_ty` whether it satisfies one interface type exactly, its arguments' `!` included:
 by declaration, read off the `implements` entries and the bounds the model holds, with `core`'s
@@ -48,9 +49,12 @@ significant digits within `Limits::max_value_steps`, and range-checked against i
 `smear::graphqlx::nonzero-zero` for a zero where `NonZero` is expected. An object literal's field
 the input object does not declare is `smear::schema::undefined-input-object-field`, a required field
 given `null` or left out is `smear::schema::missing-required-input-object-field`, and an input
-object its own package makes OneOf takes exactly one field, not `null`. An application's argument
-left out takes a copy of its default, and so does an object literal's field, but a OneOf input
-object's; a required argument left out is `smear::schema::missing-required-directive-argument`. A
+object its own package makes OneOf takes exactly one field, not `null`. A set takes a `set!{…}` and
+a map a `map!{…}`, and nothing else does but a custom scalar: any other literal where a collection
+is expected, and a collection literal anywhere else, is `smear::graphqlx::collection-literal`. An
+application's argument left out takes a copy of its default, and so does an object literal's field,
+but a OneOf input object's; a required argument left out is
+`smear::schema::missing-required-directive-argument`. A
 copy is counted before it is made, and a default whose copy would hold a copy of itself is not
 copied; the copies, the reads of one default's count by another's, the required arguments and
 fields left out, the lists a value written alone stands for where a list is expected and the

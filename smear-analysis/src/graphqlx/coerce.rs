@@ -24,21 +24,27 @@
 //!
 //! 1. A node whose type can take no value is kept as written, a `Literal`, and nothing is said: a
 //!    type that names a type parameter, which only an instantiation can check; the unresolved
-//!    type, an object, an interface, a union or a directive; and `NonZero` of what is no nullable
-//!    integer primitive at least one bit wide. The type is another rule's or phase's to refuse,
-//!    and that is asked before `null` is.
+//!    type, an object, an interface, a union or a directive; `NonZero` of what is no nullable
+//!    integer primitive at least one bit wide; and a collection of another count of type arguments
+//!    than its collection has, or one its own package makes both a set and a map. The type is
+//!    another rule's or phase's to refuse, and that is asked before `null` is.
 //! 2. `null` is `null` where its type is nullable, and does not fit where it is not.
 //! 3. By the type, without its `!`: a list takes a list, each element coerced against its
 //!    element, and any other node is a lone value, which stands for the one-element list that
 //!    holds it, a list for each level of list the type has more than the node, each level one row
-//!    at the node; `bool` a boolean; an integer primitive an integer in its width's range, read at
-//!    any length; `f32` and `f64` a float, or an integer, whose value is finite in that type;
-//!    `string` a string, cooked; `id` a string, or an integer in `i32`'s range, kept an integer;
-//!    `bytes` a string, its UTF-8 encoding, or a list of integers from 0 to 255, one value of its
-//!    bytes either way; `NonZero` of an integer primitive an integer in that primitive's range
-//!    that is not zero; an enum a path that names one of its values; an input object an object
-//!    literal, read as below. Any other scalar takes any literal, kept as written, a collection
-//!    among them in this version.
+//!    at the node; a set, a scalar its own package makes one, an extern one among them, a set
+//!    literal, each element coerced against the type's one argument, and a map a map literal, each
+//!    key coerced against the type's first argument and each value against its second, a key or
+//!    an element non-null there however it is written; `bool` a boolean; an integer primitive an
+//!    integer in its width's range, read at any length; `f32` and `f64` a float, or an integer,
+//!    whose value is finite in that type; `string` a string, cooked; `id` a string, or an integer
+//!    in `i32`'s range, kept an integer; `bytes` a string, its UTF-8 encoding, or a list of
+//!    integers from 0 to 255, one value of its bytes either way; `NonZero` of an integer primitive
+//!    an integer in that primitive's range that is not zero; an enum a path that names one of its
+//!    values; an input object an object literal, read as below. Any other scalar takes any
+//!    literal, kept as written, a set or a map literal among them, and so does `TypeRef` in this
+//!    version. A collection given any other literal but `null`, and a set or a map literal given to
+//!    what is no collection of its shape, does not fit, with `collection-literal`.
 //!
 //! An enum value's name is looked up among the values of the enum expected, every enum's values
 //! being kept by the enum and the name, the first of each name. A bare name is looked up there
@@ -176,7 +182,9 @@ use super::{
   id::{ApplicationId, DefId, MemberId, SourceId, Sym, TyId, TypeExprId, ValueId, dense},
   instantiate::{applies, binding, own_package},
   limits::Limits,
-  model::{Bytes, DefKind, LiteralKind, ModelBuilder, Primitive, Resolution, Shape, Text},
+  model::{
+    Bytes, Collection, DefKind, LiteralKind, ModelBuilder, Primitive, Resolution, Shape, Text,
+  },
   raw::{Radix, RawArgument, RawKind, RawNode, RawPath, RawTree, RawValues, UNREAD},
   resolve::{Position, Request, Resolved, Root, Scopes, Segment, Wanted},
   set::ROOT,
@@ -211,14 +219,28 @@ pub(crate) fn coerce(
     bytes: binding(declarations, builder, ALLOC, TYPE, b"bytes"),
   };
   let one_of_directive = binding(declarations, builder, CORE, DIRECTIVE, b"oneOf");
+  let set_directive = binding(declarations, builder, CORE, DIRECTIVE, b"set");
+  let map_directive = binding(declarations, builder, CORE, DIRECTIVE, b"map");
   // Every enum's values and every input object's fields, the first of each name: what an enum
   // value's name, and an object literal's field, is looked up by.
   let mut members: BTreeMap<(DefId, Sym), MemberId> = BTreeMap::new();
   // The input objects their own package applies `@oneOf` to, in id order.
   let mut one_of: Vec<DefId> = Vec::new();
+  // The collections their own package applies both `@set` and `@map` to, in id order, by the test
+  // instantiation and the collection arity rule read: each takes no value.
+  let mut both: Vec<DefId> = Vec::new();
   for index in 0..builder.def_count() {
     let def = DefId::new(index);
     let kind = builder.def_kind(def);
+    if kind == Some(DefKind::Scalar)
+      && builder.def_collection(def).is_some()
+      && let (Some(set), Some(map)) = (set_directive, map_directive)
+      && let Some(own) = own_package(declarations, def)
+      && applies(builder, sources, own, def, set)
+      && applies(builder, sources, own, def, map)
+    {
+      both.push(def);
+    }
     if !matches!(kind, Some(DefKind::Enum | DefKind::InputObject)) {
       continue;
     }
@@ -244,6 +266,7 @@ pub(crate) fn coerce(
     builtins,
     members,
     one_of,
+    both,
     defaulted: Vec::new(),
     required: Vec::new(),
     inputs: Vec::new(),
@@ -261,6 +284,7 @@ pub(crate) fn coerce(
     byte_strings: BTreeMap::new(),
     stack: Vec::new(),
     items: Vec::new(),
+    pairs: Vec::new(),
     children: Vec::new(),
     syms: Vec::new(),
     listed: Vec::new(),
@@ -490,7 +514,11 @@ enum Base {
   Enum(DefId),
   /// This input object.
   Object(DefId),
-  /// Any literal, kept as written: a custom scalar, a collection and `TypeRef`.
+  /// A set of this element.
+  Set(TyId),
+  /// A map from this key to this value.
+  Map(TyId, TyId),
+  /// Any literal, kept as written: a custom scalar that is no collection, and `TypeRef`.
   Kept,
 }
 
@@ -510,6 +538,11 @@ enum Class {
   /// An object literal against the input object `def`, its fields' rows of the trees starting at
   /// `first`: an `Object` row, then each field it sets against the field's type.
   Object { def: DefId, first: u32 },
+  /// A set literal against a set of this element: a `Set` row, then each element against it.
+  Set(TyId),
+  /// A map literal against a map from this key to this value: a `Map` row, then each key against
+  /// the key and each value against the value.
+  Map(TyId, TyId),
   /// Any other node against a named type: one row, its kind told by what the type takes.
   Leaf(Base),
 }
@@ -545,6 +578,9 @@ enum Why {
   OneOf { def: DefId, written: u32 },
   /// `null` for the one field a literal of the OneOf input object `def` writes.
   OneOfNull { def: DefId },
+  /// Another literal where the collection `expected` is expected; or, with none expected, a
+  /// collection literal where no collection of its shape is.
+  Collection { expected: Option<Collection> },
 }
 
 /// The code a node that does not fit is reported with.
@@ -620,6 +656,14 @@ impl Making {
   }
 }
 
+/// What a value that holds values is.
+#[derive(Clone, Copy)]
+enum Held {
+  List,
+  Set,
+  Map,
+}
+
 /// One step of making a tree's rows.
 #[derive(Clone, Copy)]
 enum Task {
@@ -627,8 +671,13 @@ enum Task {
   Make(Making),
   /// Make a node's row one unresolved row, and report why, where it is written.
   Refuse(Making, Why),
-  /// Give the list `list` the rows made since `from` among the open values' rows.
-  Close { list: ValueId, from: usize },
+  /// Give `value`, a list, a set or a map as `held` says, the rows made since `from` among the
+  /// open values' rows: a map's in pairs, each key and then its value.
+  Close {
+    value: ValueId,
+    from: usize,
+    held: Held,
+  },
   /// Give the input object `object` its entries: the open entries from `entries` on, each with
   /// its value, the rows made since `from` among the open values' rows, in the same order.
   CloseObject {
@@ -655,6 +704,9 @@ struct Coercion<'c, 'p, 'x> {
   members: BTreeMap<(DefId, Sym), MemberId>,
   /// The input objects their own package applies `core`'s `@oneOf` to, in id order.
   one_of: Vec<DefId>,
+  /// The collections their own package applies both `core`'s `@set` and its `@map` to, in id
+  /// order: each takes no value.
+  both: Vec<DefId>,
   /// Each input object's defaulted fields, each with its default's tree, one run each, in member
   /// order.
   defaulted: Vec<(MemberId, u32)>,
@@ -691,8 +743,11 @@ struct Coercion<'c, 'p, 'x> {
   byte_strings: BTreeMap<u32, Result<Bytes, Refused>>,
   /// What making the current tree has still to do.
   stack: Vec<Task>,
-  /// The rows made of the values that are open, lists and input objects, each one's after it.
+  /// The rows made of the values that are open, lists, sets, maps and input objects, each one's
+  /// after it.
   items: Vec<ValueId>,
+  /// The entries of the map being closed, each a key and its value.
+  pairs: Vec<(ValueId, ValueId)>,
   /// The children of the list being opened.
   children: Vec<u32>,
   /// The segments of the path being kept.
@@ -1092,22 +1147,13 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.add_rows(1, charged)?;
     match self.classify(raw.kind, ty) {
       Class::NoValue | Class::Null | Class::NotNull | Class::Leaf(_) => {}
-      Class::List(element) => {
-        let mut child = node.saturating_add(1);
-        while child < raw.after {
-          self.counting.push(Counted::Node {
-            node: child,
-            ty: Some(element),
-          });
-          let next = self
-            .raw
-            .nodes
-            .get(child as usize)
-            .map_or(raw.after, |held: &RawNode| held.after);
-          if next <= child {
-            break;
-          }
-          child = next;
+      Class::List(element) | Class::Set(element) => {
+        self.count_items(node, raw, (element, element));
+      }
+      Class::Map(key, value) => {
+        // A last key with no value is dropped, as the copy drops it.
+        if self.count_items(node, raw, (key, value)) % 2 == 1 {
+          let _ = self.counting.pop();
         }
       }
       Class::Lone(element) => {
@@ -1146,6 +1192,31 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
     }
     Ok(())
+  }
+
+  /// Pushes each child of `node`, whose node is `raw`, to be counted: those at even places against
+  /// `types.0`, and those at odd places against `types.1`. Answers how many it pushed.
+  fn count_items(&mut self, node: u32, raw: RawNode, types: (TyId, TyId)) -> u32 {
+    let mut pushed: u32 = 0;
+    let mut child = node.saturating_add(1);
+    while child < raw.after {
+      let ty = if pushed % 2 == 1 { types.1 } else { types.0 };
+      self.counting.push(Counted::Node {
+        node: child,
+        ty: Some(ty),
+      });
+      pushed = pushed.saturating_add(1);
+      let next = self
+        .raw
+        .nodes
+        .get(child as usize)
+        .map_or(raw.after, |held: &RawNode| held.after);
+      if next <= child {
+        break;
+      }
+      child = next;
+    }
+    pushed
   }
 
   /// The merge of `fields`, what an object literal sets, with the defaults of the input object
@@ -1353,12 +1424,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       match task {
         Task::Make(making) => self.make(making),
         Task::Refuse(making, why) => self.unfit(making, why),
-        Task::Close { list, from } => {
-          self
-            .builder
-            .set_list(list, self.items.get(from..).unwrap_or_default());
-          self.items.truncate(from);
-        }
+        Task::Close { value, from, held } => self.close(value, from, held),
         Task::CloseObject {
           object,
           from,
@@ -1404,38 +1470,20 @@ impl<'p> Coercion<'_, 'p, '_> {
         ty,
         mode,
       ),
-      Class::List(element) => {
-        let from = self.items.len();
-        self.stack.push(Task::Close { list: id, from });
-        self.children.clear();
-        let mut child = node.saturating_add(1);
-        while child < raw.after {
-          self.children.push(child);
-          let next = self
-            .raw
-            .nodes
-            .get(child as usize)
-            .map_or(raw.after, |held: &RawNode| held.after);
-          if next <= child {
-            break;
-          }
-          child = next;
-        }
-        self.stack.extend(
-          self
-            .children
-            .iter()
-            .rev()
-            .map(|&child: &u32| Task::Make(making.child(child, Some(element)))),
-        );
-      }
+      Class::List(element) => self.open_items(id, making, Held::List, (element, element)),
+      Class::Set(element) => self.open_items(id, making, Held::Set, (element, element)),
+      Class::Map(key, value) => self.open_items(id, making, Held::Map, (key, value)),
       Class::Lone(element) => {
         if mode.written() && source >= self.supplied && !self.charge(1) {
           self.path(id, raw.kind);
           self.lone_limit(at);
         } else {
           let from = self.items.len();
-          self.stack.push(Task::Close { list: id, from });
+          self.stack.push(Task::Close {
+            value: id,
+            from,
+            held: Held::List,
+          });
           self
             .stack
             .push(Task::Make(making.child(node, Some(element))));
@@ -1449,6 +1497,69 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
       }
     }
+  }
+
+  /// Pushes the task that closes `id`, the row of `making`'s node, a list, a set or a map as `held`
+  /// says, then a task for each of the node's children over it, so that the first is made first:
+  /// each against `types.0`; in a map, each key against `types.0` and each value against
+  /// `types.1`, a last key with no value dropped.
+  fn open_items(&mut self, id: ValueId, making: Making, held: Held, types: (TyId, TyId)) {
+    let Some(raw) = self.raw.nodes.get(making.node as usize).copied() else {
+      return;
+    };
+    let from = self.items.len();
+    self.stack.push(Task::Close {
+      value: id,
+      from,
+      held,
+    });
+    self.children.clear();
+    let mut child = making.node.saturating_add(1);
+    while child < raw.after {
+      self.children.push(child);
+      let next = self
+        .raw
+        .nodes
+        .get(child as usize)
+        .map_or(raw.after, |node: &RawNode| node.after);
+      if next <= child {
+        break;
+      }
+      child = next;
+    }
+    let (first, second) = types;
+    let made = match held {
+      Held::Map => self.children.len() - self.children.len() % 2,
+      Held::List | Held::Set => self.children.len(),
+    };
+    for (index, &child) in self.children.iter().enumerate().take(made).rev() {
+      let ty = if matches!(held, Held::Map) && index % 2 == 1 {
+        second
+      } else {
+        first
+      };
+      self.stack.push(Task::Make(making.child(child, Some(ty))));
+    }
+  }
+
+  /// Gives `value`, a list, a set or a map as `held` says, the rows made since `from` among the
+  /// open values' rows: a map's in pairs, each key and then its value.
+  fn close(&mut self, value: ValueId, from: usize, held: Held) {
+    let made = self.items.get(from..).unwrap_or_default();
+    match held {
+      Held::List => self.builder.set_list(value, made),
+      Held::Set => self.builder.set_set(value, made),
+      Held::Map => {
+        self.pairs.clear();
+        let mut rest = made;
+        while let [key, item, tail @ ..] = rest {
+          self.pairs.push((*key, *item));
+          rest = tail;
+        }
+        self.builder.set_map(value, &self.pairs);
+      }
+    }
+    self.items.truncate(from);
   }
 
   /// Makes `id`, the row of `making`'s node, an object literal against the input object `def`,
@@ -1826,6 +1937,8 @@ impl<'p> Coercion<'_, 'p, '_> {
     let class = match builder.ty_shape(ty) {
       Some(Shape::Named(def)) => match (self.base(def, ty), kind) {
         (Some(Base::Object(def)), RawKind::Object(first)) => Class::Object { def, first },
+        (Some(Base::Set(element)), RawKind::Set) => Class::Set(element),
+        (Some(Base::Map(key, value)), RawKind::Map) => Class::Map(key, value),
         (Some(base), _) => Class::Leaf(base),
         (None, _) => return Class::NoValue,
       },
@@ -1845,8 +1958,21 @@ impl<'p> Coercion<'_, 'p, '_> {
     class
   }
 
-  /// What the named type `ty`, of `def`, takes: `None` when it can take no value.
+  /// What the named type `ty`, of `def`, takes: `None` when it can take no value. A collection is
+  /// asked first: a set of its one argument, or a map from its first to its second, the type's
+  /// first argument non-null there however it is written; one of another count of arguments, or
+  /// one its own package makes both, takes no value, the collection's arity being another rule's.
   fn base(&self, def: DefId, ty: TyId) -> Option<Base> {
+    if let Some(collection) = self.builder.def_collection(def) {
+      if self.both.binary_search(&def).is_ok() {
+        return None;
+      }
+      return match (collection, self.builder.ty_args(ty)) {
+        (Collection::Set, &[element]) => Some(Base::Set(element)),
+        (Collection::Map, &[key, value]) => Some(Base::Map(key, value)),
+        _ => None,
+      };
+    }
     if let Some(primitive) = self.primitive(def) {
       return Some(match primitive {
         Primitive::Bool => Base::Bool,
@@ -1943,7 +2069,20 @@ impl<'p> Coercion<'_, 'p, '_> {
         self.builder.give_bytes(id, bytes);
         Ok(())
       }
-      _ => Err(refused(Why::Kind)),
+      // Every literal a base does not take: a collection takes its own literal alone, and a
+      // collection literal is a value of its collection alone.
+      _ => {
+        let expected = match base {
+          Base::Set(_) => Some(Collection::Set),
+          Base::Map(..) => Some(Collection::Map),
+          _ => None,
+        };
+        if expected.is_some() || matches!(kind, RawKind::Set | RawKind::Map) {
+          Err(refused(Why::Collection { expected }))
+        } else {
+          Err(refused(Why::Kind))
+        }
+      }
     }
   }
 
@@ -2584,6 +2723,31 @@ impl<'p> Coercion<'_, 'p, '_> {
         ),
         None,
       ),
+      Why::Collection { expected } => {
+        let (message, help) = match expected {
+          Some(Collection::Set) => (
+            format!("`{literal}` is no value of `{name}`, a set, which takes a set literal"),
+            Some(String::from("a set is written `set!{ … }`")),
+          ),
+          Some(Collection::Map) => (
+            format!("`{literal}` is no value of `{name}`, a map, which takes a map literal"),
+            Some(String::from("a map is written `map!{ key => value }`")),
+          ),
+          None if matches!(raw.kind, RawKind::Set) => (
+            format!("`{literal}` is a set literal, and `{name}` is no set"),
+            None,
+          ),
+          None => (
+            format!("`{literal}` is a map literal, and `{name}` is no map"),
+            None,
+          ),
+        };
+        (
+          Coded::Kind(DiagnosticKind::CollectionLiteral),
+          message,
+          help,
+        )
+      }
     };
     let mut report = match coded {
       Coded::Kind(kind) => Diagnostic::builder(kind.code(), at)

@@ -7,6 +7,7 @@
 # fails.
 DiagnosticKind::AmbiguousGlob = smear::graphqlx::ambiguous-glob
 DiagnosticKind::CollectionArity = smear::graphqlx::collection-arity
+DiagnosticKind::CollectionLiteral = smear::graphqlx::collection-literal
 DiagnosticKind::DuplicateFilePath = smear::graphqlx::duplicate-file-path
 DiagnosticKind::DuplicatePackageName = smear::graphqlx::duplicate-package-name
 DiagnosticKind::DuplicateTypeParameter = smear::graphqlx::duplicate-type-parameter

@@ -248,13 +248,16 @@ impl Analysis {
 ///   kept, and a required field given `null` or left out is `missing-required-input-object-field`,
 ///   each left out a step of [`Limits::max_value_steps`]; an input object its own package applies
 ///   `@oneOf` to takes exactly one field, and not `null`; and a field left out that has a default
-///   takes a copy of it, as an argument does, but a OneOf input object's. Any other scalar and a
-///   collection take any literal, kept as written, and so does a type that names a type parameter
-///   or can take no value, with nothing said. A prefix that names nothing is the resolver's to
-///   report. A value that does not fit is unresolved and reported where it is written, with
-///   GraphQL's `invalid-default-value` or `invalid-directive-argument-value`, but for a number out
-///   of the range of any width but the 32-bit signed one, or of `f32`, which is `width-overflow`,
-///   and zero for `NonZero`, which is `nonzero-zero`; a required argument given `null` is
+///   takes a copy of it, as an argument does, but a OneOf input object's. A set takes a set literal
+///   and a map a map literal, each element, key and value coerced against the collection's types,
+///   a key or an element never `null`; any other literal there, and a set or a map literal where no
+///   collection of its shape is expected, is `collection-literal`. Any other scalar takes any
+///   literal, kept as written, and so does a type that names a type parameter or can take no
+///   value, with nothing said. A prefix that names nothing is the resolver's to report. A value
+///   that does not fit is unresolved and reported where it is written, with GraphQL's
+///   `invalid-default-value` or `invalid-directive-argument-value`, but for a number out of the
+///   range of any width but the 32-bit signed one, or of `f32`, which is `width-overflow`, and
+///   zero for `NonZero`, which is `nonzero-zero`; a required argument given `null` is
 ///   `missing-required-directive-argument`, at its name. An application's arguments are in its
 ///   directive's order: each one written, and each one left out whose definition has a default, a
 ///   copy of the default filling it, each row of the copy not written and located at the default,

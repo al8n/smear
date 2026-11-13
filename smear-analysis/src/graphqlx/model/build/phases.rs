@@ -1,7 +1,6 @@
 //! What the phases after coercion write, and what the hand-built models of the tests write in one
 //! step: each definition's externs; the tiers of definitions and types; the values coercion does
-//! not make yet, sets, maps and type values; a value written whole, each over coercion's own
-//! writers; and marks.
+//! not make yet, type values; a value written whole, each over coercion's own writers; and marks.
 //!
 //! GATED ON HAVING A CALLER. The phases still to come are this module's callers, and until each
 //! lands the test-support door is its only caller: a method that no shipped build calls is dead
@@ -13,14 +12,14 @@ use tokora::diagnostic::Location;
 use crate::graphqlx::{
   id::{DefId, Sym, TyId, ValueId},
   model::{
-    table::{ExternRow, VALUE_MAP, VALUE_SET, VALUE_TYPE},
+    table::{ExternRow, VALUE_TYPE},
     ty::PathRoot,
     value::LiteralKind,
   },
   package::Tier,
 };
 
-use super::{ModelBuilder, append, grow, push_text};
+use super::{ModelBuilder, grow, push_text};
 
 impl ModelBuilder {
   /// Adds an `@extern` to `def`, after those it has: its `lang` and `type`, and its effective
@@ -81,25 +80,6 @@ impl ModelBuilder {
     let row = self.value_row(value);
     row.shape = VALUE_TYPE;
     row.def = def;
-  }
-
-  /// Makes `value` the set of `elements`, each appended after it.
-  pub fn set_set(&mut self, value: ValueId, elements: &[ValueId]) {
-    self.set_items(value, VALUE_SET, elements);
-  }
-
-  /// Makes `value` the map of `entries`, each a key and a value, each appended after it.
-  pub fn set_map(&mut self, value: ValueId, entries: &[(ValueId, ValueId)]) {
-    debug_assert!(
-      entries
-        .iter()
-        .all(|&(key, item): &(ValueId, ValueId)| key > value && item > value),
-      "what a value holds is appended after it"
-    );
-    let run = append(&mut self.model.map_entries, entries);
-    let row = self.value_row(value);
-    row.shape = VALUE_MAP;
-    row.run = run;
   }
 
   /// Marks, as an error reported at `at` does, every contribution and member whose extent holds

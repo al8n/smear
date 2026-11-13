@@ -393,9 +393,14 @@ All notable changes to Smear are documented in this file.
   `@oneOf` to takes exactly one field, and not `null`; and a field left out that has a default
   takes a copy of it, as an argument does, but a OneOf input object's, and is otherwise absent. A
   copy is counted before it is made, each default's count kept by its tree and its type, and a
-  default whose copy would hold a copy of itself is not copied, its argument or field absent. A
-  custom scalar's value but `null` is its `Literal`, and so, in this version, is a
-  collection's, and a value whose type names a type parameter or can take no value. A value that
+  default whose copy would hold a copy of itself is not copied, its argument or field absent. A set
+  takes a `set!{…}` and a map a `map!{…}`, as `ValueKind::Set` and `ValueKind::Map`, each element,
+  key and value coerced against the collection's types, a key or an element never `null`; any
+  other literal where a collection is expected, an extern one among them, and a collection
+  literal where no collection of its shape is, is the new `smear::graphqlx::collection-literal`. A
+  custom scalar's value but `null` is its `Literal`, a collection literal among them, and so, in
+  this version, is a `TypeRef`'s, and a value whose type names a type parameter or can take no
+  value. A value that
   does not fit is unresolved and reported where it is written, with GraphQL's
   `smear::schema::invalid-default-value` or `invalid-directive-argument-value`, but for a number out
   of the range of any width but the 32-bit signed one, or of `f32`, the new

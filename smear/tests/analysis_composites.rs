@@ -1,15 +1,16 @@
 //! The GraphQLx analyzer's composite values: an input object's value, its fields found by name and
 //! kept in the input object's order, with copies of the defaults of the fields it leaves out; the
 //! codes GraphQL gives an object literal's unknown and required fields; an input object its own
-//! package makes OneOf; and the count of a copy, which holds copies of defaults that reach other
-//! defaults, made before the copy and charged read by read.
+//! package makes OneOf; the count of a copy, which holds copies of defaults that reach other
+//! defaults, made before the copy and charged read by read; and a set and a map, each where its
+//! collection is expected and nowhere else.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationArgument, Cx, DefId, Diagnostic, Layout, Limits, MemberId, Model,
     Namespace, ObjectEntry, Package, PackageId, Packages, Path, PathRoot, SourceFile, SourceId,
-    Sym, Tier, ValueId, ValueKind, Visitor, analyze, test_support, visit,
+    Sym, Tier, TyKind, ValueId, ValueKind, Visitor, analyze, test_support, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -25,10 +26,12 @@ const UNDEFINED: &str = "smear::schema::undefined-input-object-field";
 const REQUIRED: &str = "smear::schema::missing-required-input-object-field";
 /// A bound of the limits passed.
 const LIMIT: &str = "smear::graphqlx::resource-limit";
+/// A collection literal out of its place.
+const COLLECTION: &str = "smear::graphqlx::collection-literal";
 
 /// The codes this phase reports values with. A program the other rules refuse, a cycle of
 /// defaults or a OneOf field with a default among them, is asserted on these alone.
-const PHASE: [&str; 5] = [DEFAULT, ARGUMENT, UNDEFINED, REQUIRED, LIMIT];
+const PHASE: [&str; 6] = [DEFAULT, ARGUMENT, UNDEFINED, REQUIRED, LIMIT, COLLECTION];
 
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_text(text: &str, limits: &Limits) -> Analysis {
@@ -1025,11 +1028,12 @@ fn a_default_that_needs_itself_costs_a_step() {
 }
 
 /// Object literals that set every field cost nothing to complete, in a default and in an
-/// argument. Refuses a charge for a written row.
+/// argument, and neither do sets and maps. Refuses a charge for a written row.
 #[test]
 fn written_objects_cost_no_step() {
   let text = "type Query {\n  x: Int\n}\ninput I {\n  a: Int = 1\n  b: Int!\n}\n\
-              input J {\n  x: I = { a: 2, b: 3 }\n  y: I = { b: 4, a: 5 }\n}\n\
+              input J {\n  x: I = { a: 2, b: 3 }\n  y: I = { b: 4, a: 5 }\n  \
+              s: HashSet<Int> = set!{1, 2}\n  m: HashMap<string, Int> = map!{\"a\" => 1}\n}\n\
               directive @d(i: I) on OBJECT\ntype T @d(i: { a: 6, b: 7 }) {\n  f: Int\n}\n";
   let analysis = analyze_text(text, &Limits::new().with_max_value_steps(0));
   assert!(
@@ -1037,4 +1041,298 @@ fn written_objects_cost_no_step() {
     "{:#?}",
     analysis.diagnostics()
   );
+}
+
+/// A set literal where a set is expected is a set of its elements, each coerced against the set's
+/// one argument, non-null there; a map literal where a map is expected a map of its entries, each
+/// key against the first argument and each value against the second. Refuses a key coerced against
+/// the value's type.
+#[test]
+fn a_set_literal_is_a_set_and_a_map_literal_a_map() {
+  let text = "type Query {\n  x: Int\n}\nscalar Bag<T> @set\n\
+              input H {\n  tags: HashSet<string> = set!{\"a\", \"b\"}\n  \
+              m: HashMap<string, Int> = map!{\"a\" => 1, \"b\" => null}\n  \
+              bt: BTreeSet<Int> = set!{1}\n  bm: BTreeMap<Int, string> = map!{1 => \"x\"}\n  \
+              bag: Bag<Int> = set!{2}\n  empty: HashSet<Int> = set!{}\n  \
+              none: HashMap<Int, Int> = map!{}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let tags = default(model, "H", "tags");
+  assert_eq!(shown(model, tags), "Set {String \"a\", String \"b\"}");
+  let TyKind::Named { args, .. } = model.ty(model.value(tags).ty()).kind() else {
+    panic!("`tags` has no named type");
+  };
+  let ValueKind::Set(elements) = model.value(tags).kind() else {
+    panic!("`tags` is no set");
+  };
+  for element in elements {
+    assert_eq!(model.value(*element).ty(), args[0]);
+  }
+  assert!(model.ty(args[0]).non_null());
+
+  let m = default(model, "H", "m");
+  assert_eq!(
+    shown(model, m),
+    "Map {String \"a\" => Int 1, String \"b\" => Null null}"
+  );
+  let ValueKind::Map(entries) = model.value(m).kind() else {
+    panic!("`m` is no map");
+  };
+  let ids: Vec<(u32, u32)> = entries
+    .iter()
+    .map(|&(key, item): &(ValueId, ValueId)| (key.get(), item.get()))
+    .collect();
+  let first = m.get();
+  assert_eq!(
+    ids,
+    [(first + 1, first + 2), (first + 3, first + 4)],
+    "the map, then each key and then its value"
+  );
+
+  for (field, held) in [
+    ("bt", "Set {Int 1}"),
+    ("bm", "Map {Int 1 => String \"x\"}"),
+    ("bag", "Set {Int 2}"),
+    ("empty", "Set {}"),
+    ("none", "Map {}"),
+  ] {
+    assert_eq!(shown_default(model, "H", field), held, "`{field}`");
+  }
+}
+
+/// A set's element and a map's key are never `null`, however the type writes them: `null` is
+/// refused with the site's code; a map's value is nullable as it is written. Refuses an element's
+/// nullness read off the argument as it is written, and a value's read off its key.
+#[test]
+fn a_collections_element_is_never_null() {
+  let text = "type Query {\n  x: Int\n}\ninput H {\n  s: HashSet<Int> = set!{null}\n  \
+              k: HashMap<Int, Int> = map!{null => 1}\n  \
+              v: HashMap<string, Int> = map!{\"a\" => null}\n  \
+              w: HashMap<string, Int!> = map!{\"a\" => null}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    sorted(found(&analysis)),
+    sorted(vec![
+      (DEFAULT, after(schema, text, "set!{", "null")),
+      (DEFAULT, after(schema, text, "map!{", "null")),
+      (
+        DEFAULT,
+        after(schema, text, "Int!> = map!{\"a\" => ", "null")
+      ),
+    ])
+  );
+  let model = analysis.model();
+  for (field, held) in [
+    ("s", "Set {?}"),
+    ("k", "Map {? => Int 1}"),
+    ("v", "Map {String \"a\" => Null null}"),
+    ("w", "Map {String \"a\" => ?}"),
+  ] {
+    assert_eq!(shown_default(model, "H", field), held, "`{field}`");
+  }
+}
+
+/// A collection takes its own literal and `null` alone, and a collection literal is a value of its
+/// collection alone: either way `collection-literal`, at the literal, and the value unresolved. A
+/// set literal where a list of `Int` is expected is a lone value that does not fit. Refuses the
+/// site's code for either direction.
+#[test]
+fn a_collection_takes_its_own_literal_and_no_other() {
+  let text = "type Query {\n  x: Int\n}\nenum Color {\n  RED\n}\ninput I {\n  a: Int\n}\n\
+              input H {\n  l: HashSet<Int> = [1]\n  i: HashSet<Int> = 1\n  s: HashSet<Int> = \"x\"\n  \
+              o: HashSet<Int> = {a: 1}\n  m: HashSet<Int> = map!{1 => 1}\n  \
+              hm: HashMap<Int, Int> = set!{1}\n  n: Int = set!{2}\n  st: String = set!{3}\n  \
+              e: Color = set!{4}\n  io: I = set!{5}\n  b: bytes = set!{6}\n  lone: [Int] = set!{7}\n  \
+              nul: HashSet<Int> = null\n  nn: HashSet<Int>! = null\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    sorted(found(&analysis)),
+    sorted(vec![
+      (COLLECTION, at(schema, text, "[1]", 0)),
+      (COLLECTION, after(schema, text, "i: HashSet<Int> = ", "1")),
+      (COLLECTION, at(schema, text, "\"x\"", 0)),
+      (COLLECTION, at(schema, text, "{a: 1}", 0)),
+      (COLLECTION, at(schema, text, "map!{1 => 1}", 0)),
+      (COLLECTION, at(schema, text, "set!{1}", 0)),
+      (COLLECTION, at(schema, text, "set!{2}", 0)),
+      (COLLECTION, at(schema, text, "set!{3}", 0)),
+      (COLLECTION, at(schema, text, "set!{4}", 0)),
+      (COLLECTION, at(schema, text, "set!{5}", 0)),
+      (COLLECTION, at(schema, text, "set!{6}", 0)),
+      (COLLECTION, at(schema, text, "set!{7}", 0)),
+      (DEFAULT, after(schema, text, "nn: HashSet<Int>! = ", "null")),
+    ])
+  );
+  let model = analysis.model();
+  for field in [
+    "l", "i", "s", "o", "m", "hm", "n", "st", "e", "io", "b", "nn",
+  ] {
+    assert_eq!(shown_default(model, "H", field), "?", "`{field}`");
+  }
+  assert_eq!(shown_default(model, "H", "lone"), "List [?]");
+  assert_eq!(shown_default(model, "H", "nul"), "Null null");
+  let list = analysis
+    .diagnostics()
+    .iter()
+    .find(|diagnostic: &&Diagnostic| diagnostic.primary() == at(schema, text, "[1]", 0))
+    .expect("the list's diagnostic");
+  assert_eq!(list.help(), Some("a set is written `set!{ … }`"));
+}
+
+/// A custom scalar that is no collection keeps a set or a map literal, as it keeps any literal,
+/// and nothing is said. Refuses a collection literal refused where no collection is expected, read
+/// onto a scalar that is no collection.
+#[test]
+fn a_custom_scalar_keeps_a_collection_literal() {
+  let text = "type Query {\n  x: Int\n}\nscalar Any\n\
+              input H {\n  s: Any = set!{1}\n  m: Any = map!{a => 1}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  assert_eq!(shown_default(model, "H", "s"), "Literal(Set) set!{1}");
+  assert_eq!(shown_default(model, "H", "m"), "Literal(Map) map!{a => 1}");
+}
+
+/// An extern collection is a collection: it takes its own literal, and no other. Refuses an extern
+/// collection kept as a custom scalar's literal.
+#[test]
+fn an_extern_collection_takes_its_literal_too() {
+  let text = "type Query {\n  x: Int\n}\n\
+              scalar IndexSet<T> @set @extern(lang: \"rust\", type: \"indexmap::IndexSet\")\n\
+              input H {\n  s: IndexSet<Int> = set!{1}\n  l: IndexSet<Int> = [1]\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found_of(&analysis, &PHASE),
+    [(COLLECTION, at(schema, text, "[1]", 0))]
+  );
+  assert_eq!(shown_default(analysis.model(), "H", "s"), "Set {Int 1}");
+}
+
+/// A collection whose type has another count of arguments than its collection, and one its own
+/// package makes both a set and a map, take no value: each literal is kept, and the collection's
+/// arity is the one diagnostic. Refuses a second diagnostic for the definition's mistake.
+#[test]
+fn a_collection_of_the_wrong_count_takes_no_value() {
+  let text = "type Query {\n  x: Int\n}\nscalar Bad<A, B> @set\nscalar Both<T> @set @map\n\
+              input H {\n  x: Bad<Int, Int> = set!{1}\n  y: Both<Int> = set!{1}\n  \
+              z: Both<Int> = map!{1 => 1}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let codes: Vec<&str> = found(&analysis)
+    .iter()
+    .map(|&(code, _): &(&'static str, Location)| code)
+    .collect();
+  assert_eq!(
+    codes,
+    [
+      "smear::graphqlx::collection-arity",
+      "smear::graphqlx::collection-arity",
+    ]
+  );
+  let model = analysis.model();
+  assert_eq!(shown_default(model, "H", "x"), "Literal(Set) set!{1}");
+  assert_eq!(shown_default(model, "H", "y"), "Literal(Set) set!{1}");
+  assert_eq!(shown_default(model, "H", "z"), "Literal(Map) map!{1 => 1}");
+}
+
+/// A copy of a set and a copy of a map are whole: three rows and four, the `1` under a list no
+/// literal writes, every row not written. The default's own `1` stands for a list, one step where
+/// it is written; the two copies are three and four: at eight all is filled, and at seven the
+/// map's copy is refused, the application past the budget. Refuses a count that misses the list a
+/// lone value stands for under a map.
+#[test]
+fn a_copy_of_a_collection_is_whole() {
+  let text = "type Query {\n  x: Int\n}\n\
+              directive @d(s: HashSet<Int> = set!{1, 2}, m: HashMap<string, [Int]> = map!{\"a\" => 1}) \
+              on OBJECT\ntype T @d {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(8));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let schema = schema_file(&analysis);
+  let arguments = arguments_of(model, "T");
+  let (s, m) = (arguments[0].value(), arguments[1].value());
+  assert_eq!(shown(model, s), "Set {Int 1, Int 2}");
+  assert_eq!(shown(model, m), "Map {String \"a\" => List [Int 1]}");
+  assert_eq!(m.get(), s.get() + 3);
+  for id in s.get()..m.get() + 4 {
+    assert!(!model.value(ValueId::new(id)).written(), "value {id}");
+  }
+  let list = ValueId::new(m.get() + 2);
+  assert_eq!(shown(model, list), "List [Int 1]");
+  assert_eq!(
+    model.value(list).location(),
+    after(schema, text, "\"a\" => ", "1")
+  );
+
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(7));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(LIMIT, after(schema, text, "type T @", "d"))]
+  );
+  let model = analysis.model();
+  let arguments = arguments_of(model, "T");
+  assert_eq!(arguments.len(), 1);
+  assert_eq!(model.member(arguments[0].argument()).name(), "s");
+}
+
+/// Composite values are numbered in the walk's order: an object before its entries' values, in
+/// the input object's order, a default's copy where its field stands; a set before its elements;
+/// a map before each key and then its value. `k` is the first id after `R`'s own two defaults.
+#[test]
+fn composite_values_are_numbered_in_the_walks_order() {
+  let text = "type Query {\n  x: Int\n}\ninput R {\n  min: Int = 0\n  max: Int\n  step: Int = 1\n}\n\
+              directive @d(r: R = { max: 9 }, s: HashSet<Int> = set!{1, 2}, \
+              m: HashMap<string, [Int]> = map!{\"a\" => 1}) on OBJECT\n\
+              type T @d(r: { step: 5, min: 2 }) {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let k = default(model, "R", "step").get() + 1;
+  let id = |offset: u32| -> ValueId { ValueId::new(k + offset) };
+  let values_of = |object: ValueId| -> Vec<u32> {
+    entries(model, object)
+      .iter()
+      .map(|entry: &ObjectEntry| entry.value().get())
+      .collect()
+  };
+
+  let d = model
+    .lookup(Namespace::Directive, "@^::app::d")
+    .expect("`@d`");
+  let defaults: Vec<u32> = model
+    .def(d)
+    .arguments()
+    .into_iter()
+    .map(|argument: MemberId| model.member(argument).default().expect("a default").get())
+    .collect();
+  assert_eq!(defaults, [k, k + 4, k + 7]);
+  assert_eq!(
+    shown(model, id(0)),
+    "Object {min= Int 0, max: Int 9, step= Int 1}"
+  );
+  assert_eq!(values_of(id(0)), [k + 1, k + 2, k + 3]);
+  assert_eq!(shown(model, id(4)), "Set {Int 1, Int 2}");
+  let ValueKind::Map(pairs) = model.value(id(7)).kind() else {
+    panic!("`m` is no map");
+  };
+  assert_eq!(pairs.to_vec(), [(id(8), id(9))]);
+  assert_eq!(shown(model, id(9)), "List [Int 1]");
+
+  let applied: Vec<u32> = arguments_of(model, "T")
+    .iter()
+    .map(|argument: &ApplicationArgument| argument.value().get())
+    .collect();
+  assert_eq!(applied, [k + 11, k + 14, k + 17]);
+  assert_eq!(values_of(id(11)), [k + 12, k + 13]);
+  assert_eq!(shown(model, id(14)), "Set {Int 1, Int 2}");
+  assert_eq!(shown(model, id(17)), "Map {String \"a\" => List [Int 1]}");
+
+  let reached = values(&analysis, Packages::All);
+  for (index, reached) in reached.iter().enumerate() {
+    assert_eq!(reached.get() as usize, index);
+  }
 }

@@ -84,8 +84,8 @@ use super::{
     DefRow, DescriptionRow, FloatRow, IntRow, KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED,
     LiteralRow, MemberRow, ModuleRow, NO_DEF, PackageRow, PathRow, Run, TyRow, TypeExprRow,
     TypeParamRow, UNSET_MODULE, UNSET_TY, VALUE_BOOL, VALUE_BYTES, VALUE_ENUM, VALUE_FLOAT,
-    VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_NULL, VALUE_OBJECT, VALUE_STRING, VALUE_UNRESOLVED,
-    ValueRow,
+    VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET,
+    VALUE_STRING, VALUE_UNRESOLVED, ValueRow,
   },
   ty::PathRoot,
   value::{LiteralKind, ObjectEntry},
@@ -939,6 +939,25 @@ impl ModelBuilder {
   /// Makes `value` the list of `elements`, each appended after it.
   pub fn set_list(&mut self, value: ValueId, elements: &[ValueId]) {
     self.set_items(value, VALUE_LIST, elements);
+  }
+
+  /// Makes `value` the set of `elements`, each appended after it.
+  pub fn set_set(&mut self, value: ValueId, elements: &[ValueId]) {
+    self.set_items(value, VALUE_SET, elements);
+  }
+
+  /// Makes `value` the map of `entries`, each a key and a value, each appended after it.
+  pub fn set_map(&mut self, value: ValueId, entries: &[(ValueId, ValueId)]) {
+    debug_assert!(
+      entries
+        .iter()
+        .all(|&(key, item): &(ValueId, ValueId)| key > value && item > value),
+      "what a value holds is appended after it"
+    );
+    let run = append(&mut self.model.map_entries, entries);
+    let row = self.value_row(value);
+    row.shape = VALUE_MAP;
+    row.run = run;
   }
 
   /// Makes `value` the input object of `entries`: each the input field it sets, where the field's
