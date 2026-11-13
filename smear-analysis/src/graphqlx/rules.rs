@@ -363,13 +363,13 @@ rule_set! {
   /// none; a member's type is of the kind its position takes; an object or an interface implements
   /// interfaces; no interface implements itself; a union's members are object types; a required
   /// argument or input field is not deprecated; a OneOf input object's fields are nullable and have
-  /// no default; and an input object takes `@oneOf` in its definition alone; and of every
-  /// application a supplied package writes, GraphQL's own rules: a directive stands where its
-  /// definition lists; and a directive that is not repeatable is applied once to a location, a
-  /// definition and its extensions being one; an application passes each argument once; and no
-  /// directive refers to itself, through the directives and types it names, a scalar that is no
-  /// collection hiding its type arguments; and a scalar of the built-in library takes no
-  /// `@specifiedBy`; and of the schema, GraphQL's own rules: a root operation type is an object
+  /// no default; and an input object takes `@oneOf` in its definition alone. And of the
+  /// directives and every application a supplied package writes, GraphQL's own rules: a directive
+  /// stands where its definition lists; a directive that is not repeatable is applied once to a
+  /// location, a definition and its extensions being one; an application passes each argument
+  /// once; no directive refers to itself, through the directives and types it names, a scalar that
+  /// is no collection hiding its type arguments; and a scalar of the built-in library takes no
+  /// `@specifiedBy`. And of the schema, GraphQL's own rules: a root operation type is an object
   /// type; the root operations have distinct types; and a schema extension extends a schema that
   /// is defined.
   pub(crate) struct Rules {

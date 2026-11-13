@@ -5,7 +5,11 @@
 //! built-in meaning. Each rule says nothing about what a phase already refused, marks what it
 //! reports, and quotes a name only as an excerpt. The fourth rule, that an enum takes no type
 //! parameter, is tested in `analysis_types`, beside the phase that types each use of the enum, and
-//! the rules after it, on what is judged of types, in `analysis_type_rules`.
+//! the rules after it, on what is judged of types, in `analysis_type_rules`. GraphQL's own rules on
+//! what a definition holds are tested in `analysis_definition_rules`, and those on directives and
+//! their applications in `analysis_directive_rules`; those on the schema, that a root operation
+//! type is an object type, that the roots have distinct types and that a schema extension extends
+//! a schema that is defined, are tested here.
 //!
 //! Then the rule set itself: every code a rule lists fires on a fixture; and the walk the rules
 //! ride, over an analyzed program of two packages, written out hook by hook.
