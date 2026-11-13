@@ -127,8 +127,10 @@
 //! directive's definition does not list is `smear::schema::unsupported-directive-location`; and
 //! one of a directive that is not repeatable, applied again where it is applied, a definition and
 //! its extensions being one location, is `smear::schema::duplicate-directive-use`; and an argument
-//! an application writes again is `smear::schema::duplicate-directive-argument-use`. A rule says
-//! nothing about a contribution a phase already refused something in.
+//! an application writes again is `smear::schema::duplicate-directive-argument-use`; and a
+//! directive that refers to itself, through the directives applied where it reaches and the types
+//! it names, is `smear::schema::self-referential-directive`. A rule says nothing about a
+//! contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

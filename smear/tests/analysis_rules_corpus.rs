@@ -520,6 +520,7 @@ fn each_walk_of_a_program_of_several_packages_reaches_what_the_model_says_once()
   assert_eq!(
     codes(&analysis),
     [
+      "smear::schema::self-referential-directive",
       "smear::graphqlx::unsatisfied-bound",
       "smear::schema::undefined-type",
       "smear::graphqlx::orphan-extension",
@@ -540,10 +541,13 @@ fn permuting_the_dependencies_changes_nothing_the_rules_report_or_mark() {
   let backward = analyze(&root, &[astro, geo], &Limits::new());
   // The case is not vacuous: the orphan rule reports a dependency's extension of the other's type
   // and of a built-in, the location rule the `@deprecated` that extension applies to a scalar,
-  // and the schema rule the dependency's schema extension, which its error marks.
+  // the self-reference rule `core`'s `@deprecated`, which that application puts on a cycle through
+  // `string`, in `core`'s source, and the schema rule the dependency's schema extension, which its
+  // error marks.
   assert_eq!(
     codes(&forward),
     [
+      "smear::schema::self-referential-directive",
       "smear::graphqlx::unsatisfied-bound",
       "smear::schema::undefined-type",
       "smear::graphqlx::orphan-extension",

@@ -566,4 +566,9 @@ pub(crate) mod schema {
   /// `DuplicateDirectiveArgumentUse`.
   pub(crate) const DUPLICATE_DIRECTIVE_ARGUMENT_USE: Code =
     Code::new("smear::schema::duplicate-directive-argument-use");
+
+  /// A directive lies on a cycle of the directives and types it names: `smear-schema`'s
+  /// `SelfReferentialDirective`.
+  pub(crate) const SELF_REFERENTIAL_DIRECTIVE: Code =
+    Code::new("smear::schema::self-referential-directive");
 }

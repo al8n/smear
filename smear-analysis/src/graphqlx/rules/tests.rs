@@ -76,7 +76,7 @@ rule_set! {
 #[test]
 fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   let table: &[(&str, &[Code])] = Rules::TABLE;
-  assert_eq!(table.len(), 23);
+  assert_eq!(table.len(), 24);
   assert_eq!(table[0].0, "DuplicateSchemaDefinition");
   assert_eq!(
     table[0].1,
@@ -210,6 +210,11 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   assert_eq!(
     table[22].1,
     &[Code::new("smear::schema::duplicate-directive-argument-use")]
+  );
+  assert_eq!(table[23].0, "SelfReferentialDirective");
+  assert_eq!(
+    table[23].1,
+    &[Code::new("smear::schema::self-referential-directive")]
   );
 }
 

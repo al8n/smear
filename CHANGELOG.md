@@ -422,8 +422,15 @@ All notable changes to Smear are documented in this file.
   definition and its extensions being one location, `core`'s own definition among them, is
   `duplicate-directive-use`, at its path, with a label at the first; and an argument an
   application writes again, its directive declaring it, is `duplicate-directive-argument-use`, at
-  its name, with a label at the first. A rule says nothing about a contribution a phase already
-  refused something in. On every GraphQL document of smear's corpora the analyzer
+  its name, with a label at the first; and a directive that refers to itself is
+  `self-referential-directive`, at its name, over one graph of the definitions, in which a
+  definition reaches the directives applied to it and, for a directive, to its arguments, or for
+  another definition to its input fields and enum values, and every definition a type in a
+  directive's arguments, an input field, those applications' type arguments or its own type
+  parameters' defaults names, a scalar that is no collection hiding its type arguments; a
+  directive of `core` that a program puts on such a cycle, as `scalar String @specifiedBy(…)` puts
+  `@specifiedBy`, is reported at its own name, in `core`'s source. A rule says nothing about a
+  contribution a phase already refused something in. On every GraphQL document of smear's corpora the analyzer
   is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
   divergence it allows. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models

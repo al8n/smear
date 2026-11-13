@@ -1,8 +1,8 @@
 //! The GraphQLx analyzer's rules on directive applications, each GraphQL's own with GraphQL's code:
 //! a directive stands where its definition lists; a directive that is not repeatable is applied
-//! once to a location; and an application passes each argument once. Each rule judges every
-//! application a supplied package writes, says nothing within what a phase refused, and quotes a
-//! name only as an excerpt.
+//! once to a location; an application passes each argument once; and no directive refers to
+//! itself. Each rule judges every application a supplied package writes, or every directive, says
+//! nothing within what a phase refused, and quotes a name only as an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -34,6 +34,9 @@ const ARGUMENT: &str = "smear::schema::duplicate-directive-argument-use";
 
 /// The code of an argument its directive does not declare, lowering's.
 const UNDECLARED: &str = "smear::schema::undefined-directive-argument";
+
+/// GraphQL's code for a directive that refers to itself.
+const SELF_REFERENTIAL: &str = "smear::schema::self-referential-directive";
 
 /// What GraphQL tells the author of a directive that is not repeatable applied twice to one
 /// location.
@@ -572,6 +575,164 @@ fn an_application_passes_each_argument_once() {
   );
 }
 
+/// Directives each on a cycle of its own: through its argument's input object, the fixture's own;
+/// through its own argument; through an extension of itself; two through each other; through an
+/// enum value, a scalar's own application and an input object's own; and a directive that applies
+/// one on a cycle and is not reached back.
+const CYCLES: &str = "type Query {\n  ok: Int\n}\n\
+                      directive @fixture(a: In) on INPUT_FIELD_DEFINITION\n\
+                      input In {\n  x: Int @fixture\n}\n\
+                      directive @own(a: Int @own) on ARGUMENT_DEFINITION\n\
+                      directive @ext on DIRECTIVE_DEFINITION\nextend directive @ext @ext\n\
+                      directive @p @q on DIRECTIVE_DEFINITION\ndirective @q @p on DIRECTIVE_DEFINITION\n\
+                      directive @v(a: Color) on ENUM_VALUE\nenum Color {\n  RED @v\n}\n\
+                      directive @s(a: Stamp) on SCALAR\nscalar Stamp @s\n\
+                      directive @a(a: Loop) on INPUT_FIELD_DEFINITION | DIRECTIVE_DEFINITION\n\
+                      input Loop {\n  l: Int @a\n}\ndirective @b @a on FIELD\n\
+                      directive @io(a: Box) on INPUT_OBJECT\ninput Box @io {\n  b: Int\n}\n";
+
+#[test]
+fn no_directive_refers_to_itself() {
+  let analysis = analyze_one(CYCLES);
+  let schema = schema_file(&analysis);
+  let on_cycle = |name: &str| -> (&'static str, Location, Option<Location>) {
+    (
+      SELF_REFERENTIAL,
+      named(schema, CYCLES, "directive @", name, 0),
+      None,
+    )
+  };
+  // `@b` reaches `@a`'s cycle, and is on none.
+  assert_eq!(
+    found(&analysis),
+    [
+      on_cycle("fixture"),
+      on_cycle("own"),
+      on_cycle("ext"),
+      on_cycle("p"),
+      on_cycle("q"),
+      on_cycle("v"),
+      on_cycle("s"),
+      on_cycle("a"),
+      on_cycle("io"),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis)[0],
+    "the directive `@fixture` refers to itself, through the directives and types it names"
+  );
+  // GraphQL's own phrase and help.
+  for diagnostic in analysis.diagnostics() {
+    assert_eq!(
+      diagnostic.primary_label(),
+      Some("directive definition refers to itself")
+    );
+    assert_eq!(
+      diagnostic.help(),
+      Some(
+        "a directive may not appear on its own definition or an extension of it, nor on any type \
+         or directive they name."
+      )
+    );
+  }
+}
+
+/// Directives on a cycle through the arguments of an input object, through a type parameter's
+/// default and through an application's type argument, and through a collection's arguments; and a
+/// directive whose argument is a scalar that is no collection, of the object that applies it, and
+/// whose field applies it too.
+const EDGES: &str = "type Query {\n  ok: Int\n}\n\
+                     directive @d(a: Box<In>) on INPUT_FIELD_DEFINITION\n\
+                     input Box<T> {\n  v: T\n}\ninput In {\n  x: Int @d\n}\n\
+                     directive @dflt(a: Fill) on INPUT_FIELD_DEFINITION\n\
+                     input Fill<T = Filled> {\n  v: T\n}\ninput Filled {\n  x: Int @dflt\n}\n\
+                     directive @e<T> on INPUT_OBJECT\n\
+                     directive @app(a: Holder) on INPUT_FIELD_DEFINITION\n\
+                     input Holder @e<Held> {\n  h: Int\n}\ninput Held {\n  x: Int @app\n}\n\
+                     directive @m(a: HashMap<string, Mapped>) on INPUT_FIELD_DEFINITION\n\
+                     input Mapped {\n  x: Int @m\n}\n\
+                     scalar Ref<T>\ndirective @r(a: Ref<User>) on FIELD_DEFINITION | OBJECT\n\
+                     type User @r {\n  name: String @r\n}\n";
+
+#[test]
+fn a_type_argument_a_default_and_an_applications_type_argument_are_edges() {
+  let analysis = analyze_one(EDGES);
+  let schema = schema_file(&analysis);
+  let on_cycle = |name: &str| -> (&'static str, Location, Option<Location>) {
+    (
+      SELF_REFERENTIAL,
+      named(schema, EDGES, "directive @", name, 0),
+      None,
+    )
+  };
+  // `Ref` hides its argument, so `@r` does not reach `User`; and an object's field is no part of
+  // the graph.
+  assert_eq!(
+    found(&analysis),
+    [
+      on_cycle("d"),
+      on_cycle("dflt"),
+      on_cycle("app"),
+      on_cycle("m"),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn a_built_in_directive_on_a_cycle_is_reported_at_its_own_name() {
+  // The root package's `scalar String` replaces `alloc`'s `string`, which `core`'s `@specifiedBy`
+  // takes as its `url`, and applies `@specifiedBy`: the cycle is reported at `@specifiedBy`'s own
+  // name, in `core`'s source, which the walk enters nothing of.
+  let text = "type Query {\n  ok: Int\n}\nscalar String @specifiedBy(url: \"u\")\n";
+  let analysis = analyze_one(text);
+  let model = analysis.model();
+  let specified_by = model.def(model.builtins().specified_by()).location();
+  assert_eq!(
+    found(&analysis),
+    [(SELF_REFERENTIAL, specified_by, None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let written = analysis
+    .sources()
+    .source(SourceId::new(specified_by.source()))
+    .package();
+  assert_eq!(model.package(written).name(), "core");
+  assert_eq!(
+    messages(&analysis),
+    ["the directive `@specifiedBy` refers to itself, through the directives and types it names"]
+  );
+
+  // `@deprecated` takes a `String` too: the root package's directive that applies it, and that
+  // `String` applies, puts both on one cycle, each reported at its own name.
+  let text = "type Query {\n  ok: Int\n}\ndirective @d on SCALAR | DIRECTIVE_DEFINITION\n\
+              extend directive @d @deprecated\nextend scalar String @d\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        SELF_REFERENTIAL,
+        model.def(model.builtins().deprecated()).location(),
+        None
+      ),
+      (
+        SELF_REFERENTIAL,
+        named(schema, text, "directive @", "d", 0),
+        None
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 /// A refusal of `code` is silent in a contribution that also holds the error `phase`, `together`,
 /// and is reported beside it when the error is in a sibling definition, `apart`.
 fn silent_beside(phase: &str, code: &str, together: &'static str, apart: &'static str) {
@@ -622,6 +783,16 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ndirective @d(a: Int) on OBJECT\ntype T @d(a: 1, a: 2) {\n  t: Int\n}\n\
      type U {\n  u: Missing\n}\n",
   );
+  // The directive's own contribution silences it. An error in another definition of its cycle
+  // does not, and the edge that definition writes counts all the same.
+  silent_beside(
+    UNDEFINED,
+    SELF_REFERENTIAL,
+    "type Query {\n  ok: Int\n}\ndirective @d(a: In, b: Missing) on INPUT_FIELD_DEFINITION\n\
+     input In {\n  x: Int @d\n}\n",
+    "type Query {\n  ok: Int\n}\ndirective @d(a: In) on INPUT_FIELD_DEFINITION\n\
+     input In {\n  x: Int @d\n  y: Missing\n}\n",
+  );
 }
 
 #[test]
@@ -641,6 +812,10 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
     format!(
       "type Query {{\n  ok: Int\n}}\ndirective @{name}({member}: Int) on OBJECT\n\
        type T @{name}({member}: 1, {member}: 2) {{\n  t: Int\n}}\n"
+    ),
+    format!(
+      "type Query {{\n  ok: Int\n}}\ndirective @{name}(a: In) on INPUT_FIELD_DEFINITION\n\
+       input In {{\n  x: Int @{name}\n}}\n"
     ),
   ];
   for text in &texts {

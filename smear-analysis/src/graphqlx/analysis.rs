@@ -298,7 +298,14 @@ impl Analysis {
 ///   location and the schema's definition and extensions one, is `duplicate-directive-use`, at its
 ///   path, with a label at the first. An argument an application writes again, the directive
 ///   declaring it, is `duplicate-directive-argument-use`, at its name, with a label at the first.
-///   A rule says nothing about a contribution a phase already refused something in.
+///   A directive on a cycle of what definitions reach is `self-referential-directive`, at its
+///   name: a definition reaches the directive of each application on it, and for a directive
+///   definition of each on its arguments, or for any other of each on its input fields and enum
+///   values; and every definition a type occurrence names at any depth, in a directive
+///   definition's arguments, in its input fields, in those applications' type arguments and in its
+///   own type parameters' defaults, a scalar that is no collection hiding its type arguments; a
+///   directive of `core` on such a cycle is reported in `core`'s source. A rule says nothing about
+///   a contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

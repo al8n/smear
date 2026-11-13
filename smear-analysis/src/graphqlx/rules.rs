@@ -52,6 +52,7 @@ mod orphan_extension;
 mod reserved_name;
 mod schema_outside_root;
 mod self_implementing_interface;
+mod self_referential_directive;
 mod type_ref_misuse;
 mod union_member_not_object;
 mod unsupported_directive_location;
@@ -68,7 +69,8 @@ use self::{
   one_of_field_not_nullable::OneOfFieldNotNullable,
   one_of_on_input_object_extension::OneOfOnInputObjectExtension, orphan_extension::OrphanExtension,
   reserved_name::ReservedName, schema_outside_root::SchemaOutsideRoot,
-  self_implementing_interface::SelfImplementingInterface, type_ref_misuse::TypeRefMisuse,
+  self_implementing_interface::SelfImplementingInterface,
+  self_referential_directive::SelfReferentialDirective, type_ref_misuse::TypeRefMisuse,
   union_member_not_object::UnionMemberNotObject,
   unsupported_directive_location::UnsupportedDirectiveLocation,
 };
@@ -357,7 +359,9 @@ rule_set! {
   /// no default; and an input object takes `@oneOf` in its definition alone; and of every
   /// application a supplied package writes, GraphQL's own rules: a directive stands where its
   /// definition lists; and a directive that is not repeatable is applied once to a location, a
-  /// definition and its extensions being one; and an application passes each argument once.
+  /// definition and its extensions being one; an application passes each argument once; and no
+  /// directive refers to itself, through the directives and types it names, a scalar that is no
+  /// collection hiding its type arguments.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -421,6 +425,8 @@ rule_set! {
       => [super::code::schema::DUPLICATE_DIRECTIVE_USE],
     duplicate_directive_argument_use: DuplicateDirectiveArgumentUse
       => [super::code::schema::DUPLICATE_DIRECTIVE_ARGUMENT_USE],
+    self_referential_directive: SelfReferentialDirective
+      => [super::code::schema::SELF_REFERENTIAL_DIRECTIVE],
   }
 }
 

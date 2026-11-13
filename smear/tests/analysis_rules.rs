@@ -107,6 +107,9 @@ const DUPLICATE_DIRECTIVE_USE: &str = "smear::schema::duplicate-directive-use";
 /// GraphQL's code for an application that passes an argument twice.
 const DUPLICATE_DIRECTIVE_ARGUMENT_USE: &str = "smear::schema::duplicate-directive-argument-use";
 
+/// GraphQL's code for a directive that refers to itself.
+const SELF_REFERENTIAL_DIRECTIVE: &str = "smear::schema::self-referential-directive";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1329,15 +1332,19 @@ fn what_gives_a_built_in_no_meaning_is_no_orphan_and_a_dependencys_extension_is_
 /// it, is no orphan, and nor is a directive it adds to a built-in. A `Flat` root package that adds
 /// more than directives to a built-in does meet the rule, as
 /// `the_root_adding_more_than_directives_to_a_built_in_is_an_orphan` shows.
+///
+/// `String` takes a directive of its own, and not `@d`: `@deprecated` takes a `String`, so `@d`
+/// applying `@deprecated` while `String` applied `@d` would put both on a cycle, which is the
+/// self-reference rule's.
 #[test]
 fn a_flat_package_extending_its_own_definitions_never_meets_the_orphan_rule() {
   let a = "type Query {\n  ok: Int\n}\ninterface Node {\n  id: ID\n}\nenum Color {\n  RED\n}\n\
            input Filter {\n  f: Int\n}\nunion Either = Query\nscalar Date\n\
-           directive @d on SCALAR | DIRECTIVE_DEFINITION\n";
+           directive @d on SCALAR | DIRECTIVE_DEFINITION\ndirective @s on SCALAR\n";
   let b = "extend type Query implements Node {\n  id: ID\n}\n\
            extend interface Node {\n  name: String\n}\nextend enum Color {\n  GREEN\n}\n\
            extend input Filter {\n  g: Int\n}\nextend union Either = Other\n\
-           extend scalar Date @d\nextend directive @d @deprecated\nextend scalar String @d\n\
+           extend scalar Date @d\nextend directive @d @deprecated\nextend scalar String @s\n\
            type Other {\n  ok: Int\n}\n";
   for files in [
     [("a.graphqlx", a), ("b.graphqlx", b)],
@@ -1664,6 +1671,10 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(DUPLICATE_DIRECTIVE_ARGUMENT_USE),
     an_application_that_passes_an_argument_twice,
   ),
+  (
+    Code::new(SELF_REFERENTIAL_DIRECTIVE),
+    a_directive_that_refers_to_itself,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1886,6 +1897,13 @@ fn a_directive_where_its_definition_does_not_list() -> Analysis {
 /// A directive that is not repeatable applied twice to one type.
 fn a_directive_that_is_not_repeatable_applied_twice() -> Analysis {
   analyze_one("directive @onObject on OBJECT\n     type Query @onObject @onObject { ok: Int }")
+}
+
+/// A directive that refers to itself, through the input object its argument takes.
+fn a_directive_that_refers_to_itself() -> Analysis {
+  analyze_one(
+    "type Query { ok: Int }\n     directive @d(a: In) on INPUT_FIELD_DEFINITION\n     input In { x: Int @d }",
+  )
 }
 
 /// An application that passes an argument twice.
