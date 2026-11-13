@@ -746,9 +746,11 @@ mod lossless {
   ///
   /// - object types: `Query`, `Change`, `Point`, `Line` and `Star` in the first set, `T` in the
   ///   fourth, `Query` in the fifth, `Query` and `Point` in the sixth, `Point` in the seventh;
+  /// - an interface, an enum and an input object: the first set's `Node`, `Color` and `Filter`;
   /// - scalars: `Late`; `X` and `Y`; `Real`; `Kept`, `X` twice and `same`;
   /// - directives: `mark`; `d` twice and `same`;
   /// - object type extensions: `Query`'s in the first set, `Point`'s in the seventh;
+  /// - an enum extension: the first set's `Color`'s;
   /// - schema definitions: one in the first set, two in the fifth, one in the sixth;
   /// - schema extensions: the first set's two;
   /// - fields: ten in the first set (`node`, `nodes`, `id`, `done`, `more`, `x`, `y`, `head`,
@@ -757,8 +759,8 @@ mod lossless {
   /// - enum values: `RED`, `GREEN` and `BLUE`;
   /// - modules: `outer`, `inner` and `other`.
   ///
-  /// No set written by hand holds a union or an extension of another kind, so those kinds have no
-  /// floor; the sweep prints what it held of each.
+  /// No set written by hand holds a union, or an extension of an interface, a union, an input
+  /// object or a scalar, so those kinds have no floor; the sweep prints what it held of each.
   const FLOORS: [(K, usize); 14] = [
     (K::ObjectTypeDefinition, 10),
     (K::InterfaceTypeDefinition, 1),
