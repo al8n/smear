@@ -10,7 +10,9 @@
 //! by `SourceMap::written_by`, the one answer instantiation reads too. A rule says nothing about a
 //! contribution a phase already refused something in, whose `has_errors()` is set: a diagnostic of
 //! its own within that contribution would repeat the phase's. It sees the phases' marks alone,
-//! since the rules' are applied once the walk has ended. `silenced` says it for an occurrence.
+//! since the rules' are applied once the walk has ended. `Silence` says it for an occurrence, and
+//! answers for a written root, which no contribution holds, from one look at the schema's
+//! contributions for the whole walk.
 //!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk
@@ -36,17 +38,38 @@ use self::{
 };
 use super::{Contribution, Cx, Model, TypeExprId, TypeExprKind, id::dense};
 
-/// Whether a rule says nothing at the occurrence the walk has reached in `type_expr`, `cx` saying
-/// where that is: a phase reported an error within the contribution that wrote it, or, for a
-/// written root, which no contribution holds, within one of the schema's contributions.
-fn silenced(cx: &Cx<'_>) -> bool {
-  match cx.contribution() {
-    Some(part) => part.has_errors(),
-    None => cx
-      .model()
-      .schema()
-      .contributions()
-      .any(|part: Contribution<'_>| part.has_errors()),
+/// Whether a rule says nothing at the occurrence the walk has reached in `type_expr`: a phase
+/// reported an error within the contribution that wrote it, or, for a written root, which no
+/// contribution holds, within one of the schema's contributions.
+///
+/// The second is one answer for the whole walk, since the phases' marks are all applied before it
+/// and the rules' after it. A rule that keeps one makes it in `begin`, so that it looks at the
+/// schema's contributions once, and at no occurrence.
+#[derive(Default)]
+struct Silence {
+  /// Whether a phase reported an error within one of the schema's contributions.
+  schema: bool,
+}
+
+impl Silence {
+  /// The silence of the walk `cx` begins.
+  fn of(cx: &Cx<'_>) -> Self {
+    Self {
+      schema: cx
+        .model()
+        .schema()
+        .contributions()
+        .any(|part: Contribution<'_>| part.has_errors()),
+    }
+  }
+
+  /// Whether a rule says nothing at the occurrence the walk has reached, `cx` saying where that
+  /// is: one look at the contribution that holds it.
+  fn silenced(&self, cx: &Cx<'_>) -> bool {
+    match cx.contribution() {
+      Some(part) => part.has_errors(),
+      None => self.schema,
+    }
   }
 }
 

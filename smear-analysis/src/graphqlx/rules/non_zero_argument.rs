@@ -20,7 +20,7 @@ use crate::graphqlx::{
   Cx, Diagnostic, DiagnosticKind, Primitive, TyKind, TypeExprId, TypeExprKind, Visitor,
 };
 
-use super::silenced;
+use super::Silence;
 
 /// What the rule tells the author of `NonZero` of what is no integer primitive.
 const INTEGER_HELP: &str = "write `NonZero` of an integer primitive, `iN` or `uN` with `N` at \
@@ -39,11 +39,19 @@ const NULLABLE_HELP: &str = "drop the `!` after the type argument: `NonZero<u32>
 /// reaches nothing else.
 ///
 /// It costs one look at each occurrence the walk reaches, and one at the type of each that names
-/// `NonZero`; it keeps nothing. Its message is static text.
+/// `NonZero`, and one look at the schema's contributions for the whole walk; it keeps a flag
+/// between two occurrences, and nothing between two walks. Its message is static text.
 #[derive(Default)]
-pub(super) struct NonZeroArgument;
+pub(super) struct NonZeroArgument {
+  /// Whether it says nothing at an occurrence.
+  silence: Silence,
+}
 
 impl Visitor for NonZeroArgument {
+  fn begin(&mut self, cx: &mut Cx<'_>) {
+    self.silence = Silence::of(cx);
+  }
+
   fn type_expr(&mut self, cx: &mut Cx<'_>, ty: TypeExprId) {
     let model = cx.model();
     let occurrence = model.type_expr(ty);
@@ -55,7 +63,7 @@ impl Visitor for NonZeroArgument {
     else {
       return;
     };
-    if named != non_zero || silenced(cx) {
+    if named != non_zero || self.silence.silenced(cx) {
       return;
     }
     // `NonZero` of its one argument, unless the occurrence has the unresolved type.

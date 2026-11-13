@@ -29,7 +29,7 @@ use crate::graphqlx::{
   Visitor, diagnostic::Excerpt,
 };
 
-use super::{Nesting, silenced};
+use super::{Nesting, Silence};
 
 /// Reports each marker that declares a field, each occurrence of a marker that is no outermost
 /// `implements` entry or bound's interface, and each `implements` entry of a scalar, an enum, an
@@ -42,18 +42,21 @@ use super::{Nesting, silenced};
 /// package wrote: the walk reaches nothing else, and a built-in package's marker is not judged.
 ///
 /// It costs one look at each definition the walk enters, and at each contribution of a marker, and
-/// one at each occurrence; it keeps one count between two occurrences, and nothing between two
-/// walks. Its messages quote a definition's name as an excerpt, so each is bounded whatever the
-/// name's length.
+/// one at each occurrence, and one look at the schema's contributions for the whole walk; it keeps
+/// a count and two flags between two occurrences, and nothing between two walks. Its messages
+/// quote a definition's name as an excerpt, so each is bounded whatever the name's length.
 #[derive(Default)]
 pub(super) struct MarkerMisuse {
   /// Where each occurrence stands in its tree.
   nesting: Nesting,
+  /// Whether it says nothing at an occurrence.
+  silence: Silence,
 }
 
 impl Visitor for MarkerMisuse {
-  fn begin(&mut self, _cx: &mut Cx<'_>) {
+  fn begin(&mut self, cx: &mut Cx<'_>) {
     self.nesting = Nesting::default();
+    self.silence = Silence::of(cx);
   }
 
   fn enter_def(&mut self, cx: &mut Cx<'_>, def: DefId) {
@@ -104,7 +107,7 @@ impl Visitor for MarkerMisuse {
   fn type_expr(&mut self, cx: &mut Cx<'_>, ty: TypeExprId) {
     let model = cx.model();
     let root = self.nesting.reach(model, ty).root;
-    if silenced(cx) {
+    if self.silence.silenced(cx) {
       return;
     }
     let occurrence = model.type_expr(ty);

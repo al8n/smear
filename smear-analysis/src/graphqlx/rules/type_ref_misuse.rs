@@ -21,7 +21,7 @@ use crate::graphqlx::{
   Cx, Diagnostic, DiagnosticKind, MemberId, MemberKind, Site, TypeExprId, TypeExprKind, Visitor,
 };
 
-use super::{Nesting, silenced};
+use super::{Nesting, Silence};
 
 /// Reports each occurrence of `TypeRef` that is not, under lists alone, the type of a directive
 /// definition's argument or of an input field.
@@ -31,23 +31,27 @@ use super::{Nesting, silenced};
 /// refused something in. It reports only what a supplied package wrote: the walk reaches nothing
 /// else.
 ///
-/// It costs one look at each occurrence the walk reaches, and keeps a count and a flag between two
-/// occurrences, and nothing between two walks. Its message is static text.
+/// It costs one look at each occurrence the walk reaches, and one look at the schema's
+/// contributions for the whole walk; it keeps a count and two flags between two occurrences, and
+/// nothing between two walks. Its message is static text.
 #[derive(Default)]
 pub(super) struct TypeRefMisuse {
   /// Where each occurrence stands in its tree.
   nesting: Nesting,
+  /// Whether it says nothing at an occurrence.
+  silence: Silence,
 }
 
 impl Visitor for TypeRefMisuse {
-  fn begin(&mut self, _cx: &mut Cx<'_>) {
+  fn begin(&mut self, cx: &mut Cx<'_>) {
     self.nesting = Nesting::default();
+    self.silence = Silence::of(cx);
   }
 
   fn type_expr(&mut self, cx: &mut Cx<'_>, ty: TypeExprId) {
     let model = cx.model();
     let place = self.nesting.reach(model, ty);
-    if silenced(cx) {
+    if self.silence.silenced(cx) {
       return;
     }
     let occurrence = model.type_expr(ty);

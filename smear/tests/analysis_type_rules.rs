@@ -39,6 +39,9 @@ const ARITY: &str = "smear::graphqlx::generic-arity";
 /// The code of a type name that names nothing.
 const UNDEFINED: &str = "smear::schema::undefined-type";
 
+/// The code of a root operation type that names nothing.
+const UNDEFINED_ROOT: &str = "smear::schema::undefined-root-operation-type";
+
 /// What the rule on `NonZero`'s argument says, whatever the argument is.
 const NONZERO_MESSAGE: &str = "`NonZero` takes an integer primitive at least one bit wide, written \
                                without `!`, as its type argument, and this one is not";
@@ -591,6 +594,16 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
       UNDEFINED,
     ),
     ("type F<T, T> {\n  x: Missing\n}\n", UNDEFINED),
+    // A written root, which no contribution holds, beside a phase's error in the schema's own
+    // contribution, and in another of the schema's contributions.
+    (
+      "interface M @marker\nschema {\n  query: M\n  mutation: Missing\n}\n",
+      UNDEFINED_ROOT,
+    ),
+    (
+      "interface M @marker\nschema {\n  query: M\n}\nextend schema {\n  mutation: Missing\n}\n",
+      UNDEFINED_ROOT,
+    ),
   ] {
     let analysis = analyze_one(text);
     assert_eq!(codes(&analysis), [expected], "{text}");
@@ -622,10 +635,42 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
       "type F<T, T> {\n  id: ID\n}\ntype G {\n  x: Missing\n}\n",
       DUPLICATE,
     ),
+    // A written root beside a phase's error in a definition, which is none of the schema's
+    // contributions.
+    (
+      "interface M @marker\nschema {\n  query: M\n}\ntype G {\n  x: Missing\n}\n",
+      MARKER,
+    ),
   ] {
     let analysis = analyze_one(text);
     assert_eq!(codes(&analysis), [rule, UNDEFINED], "{text}");
   }
+}
+
+#[test]
+fn a_wide_root_beside_many_schema_extensions_is_judged() {
+  // A root of many markers, beside many extensions of the schema that hold no error: each marker
+  // is reported. With one extension more that holds an error, the root says nothing but the
+  // phase's diagnostic. That each occurrence of the root costs one look, and not one for each of
+  // the schema's contributions, holds by construction, and is checked by reading: a test sees the
+  // diagnostics, not the work.
+  const WIDE: usize = 64;
+  let params: Vec<String> = (0..WIDE).map(|index: usize| format!("A{index}")).collect();
+  let mut text = format!(
+    "interface M @marker\ndirective @d repeatable on SCHEMA\ntype Root<{}> {{\n  id: ID\n}}\n\
+     schema {{\n  query: Root<{}>\n}}\n",
+    params.join(", "),
+    ["M"; WIDE].join(", ")
+  );
+  for _ in 0..WIDE {
+    text.push_str("extend schema @d\n");
+  }
+  let analysis = analyze_text(&text);
+  assert_eq!(codes(&analysis), [MARKER; WIDE]);
+
+  text.push_str("extend schema {\n  mutation: Missing\n}\n");
+  let analysis = analyze_text(&text);
+  assert_eq!(codes(&analysis), [UNDEFINED_ROOT]);
 }
 
 #[test]
