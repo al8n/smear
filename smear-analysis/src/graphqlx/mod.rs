@@ -30,7 +30,10 @@
 //! its applications. The phases that write the rest of it are still to come.
 //!
 //! [`analyze_with`] answers the same analysis with the parser the caller chose, a GraphQLx parser
-//! layer, and the [`Trees`] that layer kept beside it, one for each file it read.
+//! layer, and the [`Trees`] that layer kept beside it, one for each file it read. Each
+//! contribution, member and inline module answers its extent, where it is written in its file
+//! ([`Contribution::extent`], [`Member::extent`], [`Module::extent`]), and [`Trees::node`] answers
+//! the node of a kept tree that an extent was written as.
 //!
 //! ```
 //! use smear_analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};

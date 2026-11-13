@@ -225,21 +225,6 @@ impl Model {
       dense(self.applications.len()),
     )
   }
-
-  /// The extent of every contribution, each definition's and then the schema's, and then of every
-  /// member: what an error's mark is tested against.
-  #[cfg(feature = "test-support")]
-  pub(crate) fn extents(&self) -> Vec<tokora::diagnostic::Location> {
-    let mut extents: Vec<tokora::diagnostic::Location> =
-      Vec::with_capacity(self.contributions.len() + self.members.len());
-    for row in &self.contributions {
-      extents.push(row.extent);
-    }
-    for row in &self.members {
-      extents.push(row.extent);
-    }
-    extents
-  }
 }
 
 /// One package of the model.

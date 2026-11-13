@@ -190,7 +190,12 @@ All notable changes to Smear are documented in this file.
   built-in the root package replaces holds what the root package's definition
   writes, and the root package may add directives to a built-in by an extension.
   `Contribution::is_extension()` says whether a contribution is a definition or one of its
-  extensions. Every written type is a type occurrence, numbered in the order the
+  extensions. `Contribution::extent()`, `Member::extent()` and `Module::extent()` answer where
+  each contribution, member and inline module is written, in its own file, from its description,
+  or its first token, to its last token; a primitive `core` materialises answers the whole of
+  `core`'s package source, which has no span, and through `analyze_with` with a layer that keeps
+  a tree, `Trees::node` answers the node an extent was written as. Every written type is a type
+  occurrence, numbered in the order the
   model's walk reaches it, each before the types it nests: a type parameter's default, a bound,
   an `implements` entry, a union member, a member's type. It keeps its path as written, `Int`
   staying `Int`, and its written arguments, however many its definition has parameters, and its

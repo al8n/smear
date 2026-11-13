@@ -92,6 +92,18 @@ impl<'a> Member<'a> {
     self.row().location
   }
 
+  /// Where it is written, from its description, or its first token when it has none, to its last
+  /// token. Its source is its own, which for a member an extension contributed is the extension's.
+  ///
+  /// In an analysis made through [`analyze_with`](crate::graphqlx::analyze_with) with a layer that
+  /// keeps a tree, such as `smear-parser`'s lossless layer, the smallest node of its file's tree
+  /// that covers the extent is the node the member was written as, and
+  /// [`Trees::node`](crate::graphqlx::Trees::node) answers it.
+  #[inline]
+  pub fn extent(&self) -> Location {
+    self.row().extent
+  }
+
   /// Its description, if one is written.
   #[inline]
   pub fn description(&self) -> Option<Description<'a>> {

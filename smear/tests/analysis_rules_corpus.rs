@@ -593,7 +593,23 @@ fn tolerant(analysis: &Analysis, what: &str) {
       diagnostic.severity() == Severity::Error && !rules.contains(&diagnostic.code())
     })
     .collect::<Vec<&Diagnostic>>();
-  let extents = test_support::extents(analysis.model());
+  // Every contribution's extent, each definition's and then the schema's, and then every member's,
+  // read as a consumer reads them; the members' ids run from 0 to the count the test-support door
+  // answers, for no public range holds every member.
+  let model = analysis.model();
+  let (members, _, _, _) = test_support::counts(model);
+  let mut extents: Vec<Location> = Vec::new();
+  for def in model.defs() {
+    for part in model.def(def).contributions() {
+      extents.push(part.extent());
+    }
+  }
+  for part in model.schema().contributions() {
+    extents.push(part.extent());
+  }
+  for index in 0..members {
+    extents.push(model.member(MemberId::new(index)).extent());
+  }
   for rule in reported {
     for extent in &extents {
       if !holds(*extent, rule.primary()) {

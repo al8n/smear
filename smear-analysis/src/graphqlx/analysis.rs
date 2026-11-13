@@ -193,9 +193,10 @@ impl Analysis {
 ///
 /// Each error a phase or one of smear's rules reports marks, whether the ceiling keeps it or not,
 /// the contribution whose extent holds where it points, every member whose extent holds it, and
-/// through the contribution its definition: their `has_errors()` say so. An extent runs from the
-/// description, or the first keyword when there is none, to the last token, and an error that
-/// points at no definition, such as one at a package source, marks nothing. A syntax error marks
+/// through the contribution its definition: their `has_errors()` say so, and
+/// [`Contribution::extent`](super::Contribution::extent) and
+/// [`Member::extent`](super::Member::extent) say what each extent spans. An error that points at
+/// no definition, such as one at a package source, marks nothing. A syntax error marks
 /// nothing either. What the parser could not read has no image in its file's document, and so no
 /// contribution to mark; and a definition the parser read past a reported mistake stands in the
 /// document unmarked: its `has_errors()` does not speak of the syntax error, which is in the
@@ -450,7 +451,12 @@ impl<T> Trees<T> {
   /// source.
   ///
   /// `None` for a location with no span, for a source with no tree, and for a span that does not
-  /// lie inside its tree's text. An extent the analysis answers always has a span.
+  /// lie inside its tree's text. An extent the analysis answers has a span, unless it is that of a
+  /// primitive `core` materialises that no definition of the root package's replaces.
+  ///
+  /// Leading trivia lies outside a node, and trailing trivia can lie inside it, up to the next
+  /// token, so a node's range may hold a comment written for what follows. A tool that rewrites an
+  /// entity replaces its extent, never its node's range.
   pub fn node(&self, at: Location) -> Option<T::Node>
   where
     T: SyntaxTree,

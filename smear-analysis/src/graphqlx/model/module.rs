@@ -103,10 +103,18 @@ impl<'a> Module<'a> {
     self.row().location
   }
 
-  /// The extent of the inline `mod` that declares it, from its description, or its `mod`, to its
-  /// `}`; `None` exactly when its location is.
-  #[cfg(feature = "test-support")]
-  pub(crate) fn extent(&self) -> Option<Location> {
+  /// Where the inline `mod` that declares it is written, in that `mod`'s source: from its
+  /// description, or its `mod` when it has none, to its last token, the `}` that closes its body
+  /// where one is written. The first in source order, when two declare it, as for
+  /// [`location`](Self::location); `None` exactly when its location is, for a root module and for a
+  /// directory module.
+  ///
+  /// In an analysis made through [`analyze_with`](crate::graphqlx::analyze_with) with a layer that
+  /// keeps a tree, such as `smear-parser`'s lossless layer, the smallest node of its file's tree
+  /// that covers the extent is the node of that `mod`, and
+  /// [`Trees::node`](crate::graphqlx::Trees::node) answers it.
+  #[inline]
+  pub fn extent(&self) -> Option<Location> {
     self.row().extent
   }
 
