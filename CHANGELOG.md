@@ -4,6 +4,14 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-lexer`: `normalize_decimal_float` reads a decimal float literal's spelling, its `-`
+  included, as a binary float would hold it: `DecimalFloat::Zero`, `DecimalFloat::Overflow`, or
+  `DecimalFloat::Spelled`, a spelling `str::parse::<f64>` and `::<f32>` read exactly, written into
+  the caller's `[u8; NORMALIZED_FLOAT_LEN]`. It needs no allocator and sits behind no feature.
+  Those parsers stop reading an exponent's digits once it reaches 65 536, so a literal whose long
+  run of digits offsets a larger exponent is misread when handed to them as written: `0.`, 99 998
+  zeros and `1e999999` read as 1.0. The spelling keeps the first 800 significant digits and a
+  final `1` for a later digit that is not zero, so it rounds as the literal does.
 - `smear-parser`!: `lossless::runner::DiagnosticSource::collect_diagnostics_retaining` takes a
   second argument, `visit`, which is lent the span and the payload of each record the projection
   keeps at error severity, in emission order. 0.0.1 released the method with `retains` alone, and
