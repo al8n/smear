@@ -122,7 +122,10 @@ fn the_built_in_library_analyzes_with_no_diagnostic() {
 /// The three shapes the built-in library writes that no parser test holds exactly, each alone in a
 /// file of a root package, so that a failure names its shape: a bare generic scalar before a
 /// described definition; enum values spelled as GraphQL's directive locations and type kinds; and
-/// an interface with a directive and no fields before a described definition.
+/// an interface with a directive and no fields before a described definition. The interface
+/// applies `core`'s `@marker`, as the library's `MapKey` does, so it is the marker the library's
+/// is, which holds no field. The shape's own described directive is named otherwise, so that it
+/// does not take `@marker`'s name from `core`'s.
 #[test]
 fn each_shape_the_library_relies_on_parses_alone() {
   let shapes: [(&str, &str, &[&str]); 3] = [
@@ -144,8 +147,8 @@ fn each_shape_the_library_relies_on_parses_alone() {
     (
       "bodiless.graphqlx",
       "\"\"\"\nA marker.\n\"\"\"\ninterface MapKey @marker\n\n\"Tiers.\"\nenum Tier {\n  \
-       \"No allocator.\"\n  CORE\n}\n\n\"Marks.\"\ndirective @marker on INTERFACE\n",
-      &["MapKey", "Tier", "marker"],
+       \"No allocator.\"\n  CORE\n}\n\n\"Marks.\"\ndirective @mark on INTERFACE\n",
+      &["MapKey", "Tier", "mark"],
     ),
   ];
   for (path, text, declared) in shapes {

@@ -486,14 +486,33 @@ fn markers_and_collections_are_read_off_cores_directives() {
   );
 
   // The program's own directives of those names mean nothing: the meaning is `core`'s
-  // definitions', never a spelling's.
+  // definitions', never a spelling's. So `Mine` is no marker, and an interface that holds no field
+  // is GraphQL's own refusal, which says so.
   let text = "directive @marker on INTERFACE\ndirective @set on SCALAR\n\
               interface Mine @marker\nscalar Own<T> @set\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::schema::empty-fields-definition",
+      named(schema, text, "interface ", "Mine", 0),
+      None
+    )],
     "{:#?}",
     analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), ["the interface `Mine` holds no field"]);
+  assert_eq!(
+    analysis
+      .diagnostics()
+      .iter()
+      .next()
+      .and_then(|diagnostic: &Diagnostic| diagnostic.help()),
+    Some(
+      "an object or interface type must define at least one field. An interface that says what a \
+       type is and holds nothing is a marker, and takes `@marker`."
+    )
   );
   let model = analysis.model();
   assert_eq!(markers(model), ["MapKey"]);
