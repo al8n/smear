@@ -473,6 +473,36 @@ mod lossless {
     assert!(!parsed.recovery().is_complete());
   }
 
+  /// A text of nothing but what the lexer skips is not a document for the parser: the lossless
+  /// layer answers a tree with one syntax error, and a document with no item. The analyzer
+  /// accepts such a file before any layer sees it, so this is what a tool that parses one itself
+  /// is answered.
+  #[test]
+  fn a_blank_text_is_one_syntax_error_and_no_item() {
+    for text in [
+      "",
+      " \t\r\n",
+      ",,",
+      "\u{FEFF}",
+      "# nothing but a comment\n",
+      "\u{FEFF}# a comment\r\n ,\n",
+    ] {
+      let mut lent = 0usize;
+      let mut sink = from_fn(|_| {
+        lent += 1;
+        ControlFlow::Continue(())
+      });
+      let parsed = Lossless::new()
+        .type_system_document(text, &mut sink)
+        .expect("short enough for a tree");
+      assert_eq!(lent, 1, "{text:?}");
+      assert_eq!(parsed.error_count(), 1, "{text:?}");
+      assert!(!parsed.is_valid(), "{text:?}");
+      assert!(parsed.document().definitions().is_empty(), "{text:?}");
+      assert_eq!(parsed.tree().syntax().text().to_string(), text, "{text:?}");
+    }
+  }
+
   /// Every corpus entry named `valid_*`, as `(name, text)`, in name order.
   fn valid_corpus() -> Vec<(String, String)> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
