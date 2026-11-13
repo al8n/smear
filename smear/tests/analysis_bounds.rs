@@ -619,6 +619,23 @@ fn a_non_zero_integer_is_a_key() {
     "{:#?}",
     analysis.diagnostics()
   );
+
+  // That is for `MapKey` alone: a `NonZero` of an integer, which no rule refuses, fails any other
+  // bound it does not satisfy, as every type does.
+  let text = "interface Node {\n  id: ID\n}\nscalar P<T> where T: Node\n\
+              type Query {\n  p: P<NonZeroU32>\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      UNSATISFIED,
+      at(schema, text, "P<NonZeroU32>", 0),
+      Some(named(schema, text, "T: ", "Node", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
 }
 
 #[test]
@@ -1269,6 +1286,52 @@ fn a_bound_under_its_arguments_counts_as_an_instantiation() {
       at(schema, text, "S<Int>", 0),
       Some(at(schema, text, "C<T>", 0))
     )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn a_bound_under_its_arguments_nests_as_deep_as_it_is_built() {
+  // No type written here nests more than two levels deep, and `I<[Box<i32>]>`, which judging
+  // `S<Box<Int>>` derives, nests three: under a depth of two the occurrence is reported and keeps
+  // its type, and under three its bound is judged, and fails.
+  let text = "interface I<A> {\n  id: ID\n}\nscalar Box<X>\nscalar S<T> where T: I<[T]>\n\
+              type Query {\n  a: S<Box<Int>>\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_generic_depth(2));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(LIMIT, at(schema, text, "S<Box<Int>>", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert!(messages(&analysis)[0].contains("`Limits::max_generic_depth`, 2"));
+  assert_eq!(
+    field_shown(analysis.model(), "^::app::Query", "a"),
+    "S<Box<i32>>"
+  );
+  let analysis = analyze_text(text, &Limits::new().with_max_generic_depth(3));
+  assert_eq!(
+    found(&analysis),
+    [(
+      UNSATISFIED,
+      at(schema, text, "S<Box<Int>>", 0),
+      Some(at(schema, text, "I<[T]>", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A list the bound derives is checked as it is built: `[[Box<Box<i32>>]]` nests four levels
+  // deep, where everything written nests three.
+  let text = "interface I<A> {\n  id: ID\n}\nscalar Box<X>\nscalar S2<T> where T: I<[[T]]>\n\
+              type Query {\n  a: S2<Box<Box<Int>>>\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_generic_depth(3));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(LIMIT, at(schema, text, "S2<Box<Box<Int>>>", 0), None)],
     "{:#?}",
     analysis.diagnostics()
   );

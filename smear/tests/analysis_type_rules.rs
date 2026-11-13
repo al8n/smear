@@ -400,18 +400,45 @@ fn a_set_has_one_type_parameter_and_a_map_two() {
   );
 }
 
+#[test]
+fn another_supplied_packages_extension_is_the_orphan_rules_alone() {
+  // The root package's `@set` on a dependency's scalar of two type parameters, and the root
+  // package's field on a dependency's marker: what another package writes gives a definition
+  // nothing, so each is the orphan rule's alone, and neither the collection's nor the marker's.
+  for (theirs, ours) in [
+    ("scalar Pair<A, B>\n", "extend scalar ^::geo::Pair @set\n"),
+    (
+      "interface Mark @marker\n",
+      "extend interface ^::geo::Mark {\n  f: Int\n}\n",
+    ),
+  ] {
+    let root =
+      package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
+    let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
+    let analysis = analyze(&root, &[geo], &Limits::new());
+    assert_eq!(
+      codes(&analysis),
+      [ORPHAN],
+      "{ours}: {:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
+
 /// `TypeRef` where it may stand, a directive definition's argument, alone and in a list, and an
 /// input field; then where it may not: a type argument of a directive's argument, a collection's
 /// and another's, a field's type, a field's argument, an application's type argument, a union
-/// member and a default.
+/// member and a default; and an application's type argument where the application stands on a
+/// directive definition's argument and on an input field, whose member alone would admit it.
 const TYPE_REFS: &str = "directive @d(of: TypeRef, many: [TypeRef!]) on OBJECT\n\
                          input Binding {\n  type: TypeRef!\n}\nscalar Box<T>\n\
-                         directive @t<T> on OBJECT\n\
+                         directive @t<T> on OBJECT | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION\n\
                          directive @m(map: HashMap<string, TypeRef>) on OBJECT\n\
                          directive @b(boxed: [Box<TypeRef>]) on OBJECT\n\
                          type Field {\n  f: TypeRef\n}\ntype Argument {\n  f(a: TypeRef): Int\n}\n\
                          type Applied @t<TypeRef> {\n  id: ID\n}\nunion U = TypeRef\n\
-                         scalar P<T = TypeRef>\n";
+                         scalar P<T = TypeRef>\ndirective @e(x: Int @t<TypeRef>) on OBJECT\n\
+                         input In {\n  y: Int @t<TypeRef>\n}\n";
 
 #[test]
 fn type_ref_is_a_directive_arguments_type() {
@@ -435,6 +462,16 @@ fn type_ref_is_a_directive_arguments_type() {
       refused("@t<"),
       refused("U = "),
       refused("T = "),
+      (
+        TYPEREF,
+        named(schema, TYPE_REFS, "Int @t<", "TypeRef", 0),
+        None
+      ),
+      (
+        TYPEREF,
+        named(schema, TYPE_REFS, "Int @t<", "TypeRef", 1),
+        None
+      ),
     ],
     "{:#?}",
     analysis.diagnostics()
