@@ -883,28 +883,6 @@ jobs:
     - name: Run test
       run: cargo test --all-features --no-fail-fast -- --quiet
 
-    # THE PARSER LAYERS' RECORD, AND THE ONE STEP OF THIS JOB THAT CANNOT FAIL IT. The layers'
-    # compile-time pins (`smear-parser/src/layer/mod.rs`, `__pins`) are enforced by `Run test`
-    # above and their error codes by `coverage`; what neither shows is the compiler's own text,
-    # because a passing doctest prints nothing. `--nocapture` prints, for each pin and twin, what
-    # the compiler said of it, and one thread keeps each block's output in one piece. It records,
-    # so it does not gate.
-    - name: the parser layers' pins, with the compiler's text (recorded)
-      if: ${{ !cancelled() }}
-      continue-on-error: true
-      run: cargo test -p smear-parser --all-features --doc -- --nocapture --test-threads=1 layer::__pins
-
-    # THE LAYERS' MEASUREMENTS, RECORDED, AND NOT A GATE EITHER. Two kinds of test print what a
-    # run measures, and `Run test` captures what a passing test prints. The census of single
-    # mistakes prints its rows while `smear/tests/golden/layers_census.txt` and
-    # `smear/tests/goldenx/layers_census.txt` hold `UNRECORDED`, and compares nothing until they
-    # hold a census; and the bound on the records a produce-event ceiling lets a text keep prints
-    # the multiple each text reaches beside the weaker bound it asserts.
-    - name: the parser layers' census and record multiple (recorded)
-      if: ${{ !cancelled() }}
-      continue-on-error: true
-      run: cargo test -p smear --all-features --test layers_handover_graphqlx --test layers_handover_graphql --test layers_bounds -- --nocapture --test-threads=1 the_census_of_single_mistakes records_under_a_produce_event_ceiling
-
   # Build the documentation under `-D warnings`.
   #
   # An intra-doc link is a compile-time reference, not prose: it resolves against
