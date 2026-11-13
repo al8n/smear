@@ -44,7 +44,10 @@ mod lossless {
       Lossless, Recovery, Syntactic,
       ast::{TypeSystemDocument, TypeSystemItem},
       kinds::SyntaxKind as K,
-      lossless::{Parse, SyntaxNode, parse_document, parse_type_system_document},
+      lossless::{
+        Parse, SyntaxNode, parse_document, parse_document_with_limits, parse_type_system_document,
+        parse_type_system_document_with_limits,
+      },
     },
   };
   use tokora::emitter::Severity;
@@ -1045,6 +1048,190 @@ mod lossless {
         (1, 1),
         "{text} at the {root} root"
       );
+    }
+  }
+
+  // ── The braces hold whatever stops a skip ──────────────────────────────────────────────────
+
+  /// Texts whose skips take a `}` they did not open, read under the limits that can stop them.
+  ///
+  /// The first four are the review's: the round-two witness, the list that finds no stop and the
+  /// root's witness each inside a module, and a module inside a module. The fifth is the round-two
+  /// witness with a deeper run behind the `}`, so that a nesting ceiling can stop its skip after
+  /// the brace as well.
+  const UNDER_LIMITS: [&str; 5] = [
+    WITNESS,
+    "mod m { scalar A @d(a: 1 ( b: { c: 2 } }",
+    "mod m { ( type T { f: Int } ( } scalar S }",
+    "mod a { mod b { scalar A @d(( } } scalar B }",
+    "mod m { scalar A @d((( } mod n { ((( ))) )) scalar B }",
+  ];
+
+  /// `text` through both GraphQLx roots under `limits`, named `limit` in every message: each tree
+  /// spells its text, and every module in it is faithful to the braces as written.
+  fn faithful_under(text: &str, limits: LosslessLimits, limit: &str) {
+    for (root, parse) in [
+      ("mixed", parse_document_with_limits(text, limits)),
+      (
+        "type-system",
+        parse_type_system_document_with_limits(text, limits),
+      ),
+    ] {
+      let tree: SyntaxNode = parse.syntax();
+      assert_eq!(
+        tree.text().to_string(),
+        text,
+        "{text} at the {root} root under {limit}: the tree spells its text"
+      );
+      super::braces::faithful(&tree)
+        .unwrap_or_else(|why| panic!("{text} at the {root} root under {limit}: {why}"));
+    }
+  }
+
+  /// How many lexemes `text` is, each byte of trivia one of them: the tokens of its tree.
+  fn lexemes(text: &str) -> usize {
+    parse_document(text)
+      .syntax()
+      .descendants_with_tokens()
+      .filter(|element| element.as_token().is_some())
+      .count()
+  }
+
+  /// The most brackets of every kind open at once in `text`, counted as the lexer's tally counts
+  /// them: blind to which closer answers which opener, and never below zero.
+  fn deepest(text: &str) -> usize {
+    let mut open = 0usize;
+    let mut most = 0usize;
+    for c in text.chars() {
+      match c {
+        '(' | '[' | '{' | '<' => {
+          open += 1;
+          most = most.max(open);
+        }
+        ')' | ']' | '}' | '>' => open = open.saturating_sub(1),
+        _ => {}
+      }
+    }
+    most
+  }
+
+  /// The rule of the braces at every token budget, from none to one past the text's lexemes.
+  ///
+  /// `with_max_tokens(n)` lets the lexer produce `n` lexemes, every byte of trivia among them, and
+  /// refuses the next. In [`WITNESS`] the argument list takes its own `(` as lexeme 13 and peeks the
+  /// junk `(` at 14; the skip from there takes 15 and 16, then `m`'s `}` as 17, and lexes on to the
+  /// `)` that stops it, lexeme 27. So budgets 17 to 26 stop that skip after it has taken the `}`.
+  /// 1e4023b8 kept what the skip had taken, `m`'s `}` among it, so `m` held no `}` of its own; from
+  /// budget 19 on, where `mod` follows that `}` inside `m`, the walk of `support/braces.rs` fails on
+  /// it. Here the skip is taken back and `m` closes on its own `}`, which
+  /// [`a_limit_after_a_brace_the_skip_did_not_open_leaves_it_to_its_module`] pins at 17. The fifth
+  /// text reaches the same edge at budgets 17 to 35 and the fourth at 22 and 23. The second's `}` is
+  /// its last lexeme, so no budget stops its skip after it, and the third's junk is a module body's,
+  /// which the body's own skip takes.
+  #[test]
+  fn the_braces_hold_under_every_token_budget() {
+    for text in UNDER_LIMITS {
+      for max in 0..=lexemes(text) + 1 {
+        faithful_under(
+          text,
+          LosslessLimits::default().with_max_tokens(max),
+          &format!("max_tokens({max})"),
+        );
+      }
+    }
+  }
+
+  /// The same at every nesting ceiling, from none to one past the most brackets the text opens.
+  ///
+  /// The lexer's bracket tally refuses a bracket that would put more than the ceiling open, and a
+  /// skip that takes brackets can meet it. In the fifth text the tally reads 4 at the second junk
+  /// `(` and at `n`'s `{`, and 5, 6 and 7 at the three `(` behind it, all inside the skip from the
+  /// first junk `(`, so ceilings 4, 5 and 6 stop that skip after it has taken `m`'s `}`. In the
+  /// first four nothing a skip takes behind such a `}` opens more brackets than were open in front
+  /// of it, so no ceiling stops a skip there. The parse's own ceiling is the same number, and the
+  /// only frames in front of the skip are the module's body and the argument list.
+  #[test]
+  fn the_braces_hold_under_every_nesting_ceiling() {
+    for text in UNDER_LIMITS {
+      for max in 0..=deepest(text) + 1 {
+        faithful_under(
+          text,
+          LosslessLimits::with_max_nesting_depth(max),
+          &format!("max_nesting_depth({max})"),
+        );
+      }
+    }
+  }
+
+  /// The same at every produce-event budget up to four times the text's lexemes, room for what a
+  /// parse that takes a skip back lexes twice.
+  ///
+  /// This budget is the one no rollback refunds. A skip it stops after the `}` is taken back like
+  /// the others, and the second scan, which would have to lex again what the budget no longer pays
+  /// for, is refused before it takes anything, so the parse ends in front of the junk with every
+  /// module around it unclosed. In [`WITNESS`] nothing is lexed twice before the skip, so budgets
+  /// 17 to 26 stop it after the `}`, as they do with `max_tokens`.
+  #[test]
+  fn the_braces_hold_under_every_produce_event_budget() {
+    for text in UNDER_LIMITS {
+      for max in 0..=4 * lexemes(text) {
+        faithful_under(
+          text,
+          LosslessLimits::default().with_max_produce_events(max),
+          &format!("max_produce_events({max})"),
+        );
+      }
+    }
+  }
+
+  /// [`WITNESS`] at `with_max_tokens(17)`, the first budget at which 1e4023b8 broke the rule of the
+  /// braces. The limit stops the skip from the junk `(` as it reads lexeme 18, the space after the
+  /// `}` it has taken. 1e4023b8 kept that prefix: `m`'s `}` stood inside `A`, and `m`'s text read the
+  /// same with no `}` of its own. Here the skip is taken back and scanned again, the hole of the two
+  /// parentheses is kept in `A` in front of the `}`, the list leaves the `}`, and `m` closes on it.
+  /// The parse then reads the space again, meets the limit there, and reports it once.
+  #[test]
+  fn a_limit_after_a_brace_the_skip_did_not_open_leaves_it_to_its_module() {
+    let limits = LosslessLimits::default().with_max_tokens(17);
+    let brace = WITNESS.find('}').expect("the witness holds a `}`");
+    let refused: Range<usize> = brace + 1..brace + 2;
+    for (root, parse) in [
+      ("mixed", parse_document_with_limits(WITNESS, limits)),
+      (
+        "type-system",
+        parse_type_system_document_with_limits(WITNESS, limits),
+      ),
+    ] {
+      let tree: SyntaxNode = parse.syntax();
+      assert_eq!(tree.text().to_string(), WITNESS, "at the {root} root");
+      let m = module(&tree, "mod m");
+      assert_eq!(
+        m.text().to_string(),
+        "mod m { scalar A @d((( }",
+        "at the {root} root"
+      );
+      assert!(
+        holds_a_closing_brace(&m),
+        "at the {root} root: `m` holds no `}}` of its own"
+      );
+      assert_eq!(scalars(&m), ["scalar A @d((("], "at the {root} root");
+      let a = m
+        .children()
+        .find(|node: &SyntaxNode| node.kind() == K::ScalarTypeDefinition)
+        .expect("`A` is an item of `m`");
+      assert_eq!(
+        written(&a, K::Error),
+        ["(("],
+        "at the {root} root: the hole of the two parentheses"
+      );
+      let reports = parse
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| {
+          diagnostic.severity() == Severity::Error && diagnostic.span() == refused
+        })
+        .count();
+      assert_eq!(reports, 1, "at the {root} root: the limit's report");
     }
   }
 
