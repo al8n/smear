@@ -153,7 +153,9 @@ All notable changes to Smear are documented in this file.
   its id. `Builtins`' accessors answer a `DefId`. Two definitions of one name in one namespace of a
   module (`smear::schema::duplicate-type-name`, `duplicate-directive-definition`), a supplied name
   that begins with `__` (`reserved-type-name`, `reserved-directive-name`), and a type named as a
-  child module (`module-type-collision`) are reported. A file that holds only white space,
+  child module (`module-type-collision`) are reported; a type of the root package's root module
+  named as one of GraphQL's eight introspection types redefines it, as GraphQL says, and is
+  `redefined-built-in-type` and no reserved name. A file that holds only white space,
   commas, byte order marks and comments is accepted and declares nothing, before any parser
   layer reads it, so it has no entry in `Trees`; the lossless layer, handed such a text, answers a
   tree with one syntax error. `Limits::max_definitions` bounds every

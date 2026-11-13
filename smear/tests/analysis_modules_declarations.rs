@@ -476,6 +476,92 @@ fn a_supplied_name_that_begins_with_two_underscores_is_reserved() {
 }
 
 #[test]
+fn a_meta_types_name_in_the_root_module_redefines_a_built_in() {
+  // In a `Flat` root, all of whose files are its root module, a type named as one of GraphQL's
+  // introspection types redefines it, whatever its kind, and its name is not also reserved; a
+  // directive of that name is reserved; and a second type of the name is a duplicate and only that.
+  let text = "type Query {\n  ok: Int\n}\ntype __Type {\n  name: String\n}\n\
+              enum __TypeKind {\n  A\n}\ndirective @__Type on FIELD\n\
+              type __Type {\n  kind: String\n}\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        "smear::schema::redefined-built-in-type",
+        named(schema, text, "type ", "__Type", 0),
+        None
+      ),
+      (
+        "smear::schema::redefined-built-in-type",
+        named(schema, text, "enum ", "__TypeKind", 0),
+        None
+      ),
+      (
+        "smear::schema::reserved-directive-name",
+        named(schema, text, "directive @", "__Type", 0),
+        None
+      ),
+      (
+        "smear::schema::duplicate-type-name",
+        named(schema, text, "type ", "__Type", 1),
+        Some(named(schema, text, "type ", "__Type", 0)),
+      ),
+    ]
+  );
+  // GraphQL's phrase and help, and a message of the analyzer's own.
+  let first = analysis.diagnostics().iter().next().expect("a diagnostic");
+  assert_eq!(
+    first.to_string(),
+    "the type `__Type` redefines an introspection type"
+  );
+  assert_eq!(
+    first.primary_label(),
+    Some("redefinition of an introspection type")
+  );
+  assert_eq!(
+    first.help(),
+    Some(
+      "the `__`-prefixed introspection types are injected by every build and cannot be replaced."
+    )
+  );
+
+  // In a module that is no root module, and in a dependency, the name is reserved and redefines
+  // nothing: GraphQL's own document is the root package's root module alone.
+  let sub = "type __Type {\n  name: String\n}\n";
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[
+      ("schema.graphqlx", "type Query {\n  ok: Int\n}\n"),
+      ("sub/a.graphqlx", sub),
+    ],
+  )
+  .with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("geo.graphqlx", sub)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let sub_file = file(&analysis, 3, "sub/a.graphqlx");
+  let geo_file = file(&analysis, 4, "geo.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        "smear::schema::reserved-type-name",
+        named(sub_file, sub, "type ", "__Type", 0),
+        None
+      ),
+      (
+        "smear::schema::reserved-type-name",
+        named(geo_file, sub, "type ", "__Type", 0),
+        None
+      ),
+    ]
+  );
+}
+
+#[test]
 fn a_file_that_holds_only_what_the_lexer_skips_declares_nothing() {
   let root = package(
     "app",

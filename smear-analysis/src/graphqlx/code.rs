@@ -375,6 +375,11 @@ pub(crate) mod schema {
   /// A supplied package's type name begins with `__`: `smear-schema`'s `ReservedTypeName`.
   pub(crate) const RESERVED_TYPE_NAME: Code = Code::new("smear::schema::reserved-type-name");
 
+  /// A type of the root package's root module is named as one of GraphQL's introspection types:
+  /// `smear-schema`'s `RedefinedBuiltInType`.
+  pub(crate) const REDEFINED_BUILT_IN_TYPE: Code =
+    Code::new("smear::schema::redefined-built-in-type");
+
   /// A supplied package's directive name begins with `__`: `smear-schema`'s
   /// `ReservedDirectiveName`.
   pub(crate) const RESERVED_DIRECTIVE_NAME: Code =

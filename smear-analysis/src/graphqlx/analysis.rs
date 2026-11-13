@@ -124,9 +124,11 @@ impl Analysis {
 ///   as a GraphQL scalar (`Int`, `Float`, `String`, `Boolean`, `ID`) and a directive named as a
 ///   GraphQL specified directive replace the built-in of that name, which keeps its id. Two
 ///   definitions of one name in one namespace of one module, a supplied definition named with
-///   `__`, and a type named as a child module of its module are reported. The first definition a
-///   supplied package would add past [`Limits::max_definitions`] is reported, and nothing after it
-///   is collected.
+///   `__`, and a type named as a child module of its module are reported. A type of the root
+///   package's root module named as one of GraphQL's introspection types, `__Type` and the seven
+///   others, is `redefined-built-in-type`, as GraphQL reports it, and no reserved name. The first
+///   definition a supplied package would add past [`Limits::max_definitions`] is reported, and
+///   nothing after it is collected.
 /// - Builds every module's scope: its own declarations and child modules, then its explicit `use`
 ///   bindings, then its globs, then the prelude, the root modules of `core`, `alloc` and `std`
 ///   whatever the package's tier, then, where a module is wanted, the packages its package may
