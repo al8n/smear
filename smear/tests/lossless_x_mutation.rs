@@ -38,7 +38,9 @@
 //! Every re-parse, in whatever bucket it lands, is also held to the braces as written: each
 //! module of its tree closes on its own `}` or on none, as `support/braces.rs` defines it. The
 //! re-parses are the largest population of broken texts this suite builds, and the law fails if
-//! none of them held a module with an `Error` in it.
+//! none of them held a module with an `Error` in it. A module that is not faithful does not stop
+//! the law: it is counted, the first eight are printed, and they are asserted after every
+//! measured line is out, so a round that records the constants still reads all of them.
 
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -728,8 +730,12 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
   let mut tally = Tally::default();
   let mut pairs = 0usize;
   let mut lenient_bases = 0usize;
-  // Every re-parse, faithful or not, is held to the braces as written.
+  // Every re-parse, faithful or not, is held to the braces as written. A module that is not is
+  // counted and the first few kept, and the law goes on measuring: they are asserted only once
+  // every measured line is out.
   let mut modules = braces::Modules::default();
+  let mut misplaced = 0usize;
+  let mut first_misplaced: Vec<String> = Vec::new();
 
   for (name, source) in corpus() {
     for door in [Door::Mixed, Door::Executable, Door::TypeSystem] {
@@ -803,11 +809,21 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
             let text = mutated.text().to_string();
 
             let reparsed = door.parse(&text);
-            let held = braces::faithful(&reparsed).unwrap_or_else(|why| {
-              panic!("{name} [{door:?}] {} #{index}: {why}\n{text}", op.label())
-            });
-            modules.read += held.read;
-            modules.broken += held.broken;
+            match braces::faithful(&reparsed) {
+              Ok(held) => {
+                modules.read += held.read;
+                modules.broken += held.broken;
+              }
+              Err(why) => {
+                misplaced += 1;
+                if first_misplaced.len() < 8 {
+                  first_misplaced.push(std::format!(
+                    "{name} [{door:?}] {} #{index}: {why}\n{text}",
+                    op.label()
+                  ));
+                }
+              }
+            }
             let faithful = reparsed
               .children()
               .find(|child| child.kind() == door.container())
@@ -922,11 +938,13 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
   for (deleted, count) in &tally.strict_deletions {
     println!("STRICT {deleted} {count}");
   }
-  println!("BRACES modules={} broken={}", modules.read, modules.broken);
-  assert!(
-    modules.broken > 0,
-    "no re-parse held a module with an `Error` in it, so the braces were held over nothing broken"
+  println!(
+    "BRACES modules={} broken={} misplaced={misplaced}",
+    modules.read, modules.broken
   );
+  for misplacement in &first_misplaced {
+    println!("  {misplacement}");
+  }
 
   let mut classes: BTreeMap<String, usize> = BTreeMap::new();
   for violation in &tally.violations {
@@ -944,6 +962,16 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
   assert_eq!(
     found, OPEN,
     "the law's class -> instance map moved; a new class is a finding — name it"
+  );
+  // The braces next, and for the same reason. Every measured line is out by now, so a module that
+  // is not faithful hides none of them from a round that records them.
+  assert_eq!(
+    misplaced, 0,
+    "re-parses hold a module that is not faithful to the braces; the first are printed above"
+  );
+  assert!(
+    modules.broken > 0,
+    "no re-parse held a module with an `Error` in it, so the braces were held over nothing broken"
   );
   assert_eq!(pairs, PAIRS, "the (entry, door) population moved");
   assert_eq!(

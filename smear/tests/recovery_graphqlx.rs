@@ -123,6 +123,13 @@ mod lossless {
   }
 
   /// Whether a `}` is a direct child of `node`.
+  ///
+  /// Of a module, that is the module's own closer in every text this file asks it of, and it is
+  /// not in general: being a direct child is no proof that a brace is the module's own, and
+  /// `support/braces.rs` says why and tells the braces by count. An item that fails leaves the
+  /// tokens it took to the module, its `{` among them, but no production of an item fails after
+  /// taking a `}` of its own unless a refusal stops a `use` tree after its group, and none of these
+  /// texts has one.
   fn holds_a_closing_brace(node: &SyntaxNode) -> bool {
     node
       .children_with_tokens()

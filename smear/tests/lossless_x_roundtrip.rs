@@ -109,7 +109,11 @@ fn token_bytes(node: &SyntaxNode) -> (usize, usize) {
 #[test]
 fn every_corpus_entry_round_trips_through_every_root() {
   let mut checked = 0usize;
+  // A module that is not faithful to the braces is counted and the first few kept, so the sweep
+  // goes on and prints what it measured before the braces are asserted.
   let mut modules = braces::Modules::default();
+  let mut misplaced = 0usize;
+  let mut first_misplaced: Vec<String> = Vec::new();
   for entry in corpus_files() {
     let src = std::fs::read_to_string(&entry).unwrap();
     for (root, parse) in ROOTS {
@@ -120,10 +124,18 @@ fn every_corpus_entry_round_trips_through_every_root() {
         "{} through {root}: the tree does not re-print its source",
         entry.display()
       );
-      let held = braces::faithful(&tree.syntax())
-        .unwrap_or_else(|why| panic!("{} through {root}: {why}", entry.display()));
-      modules.read += held.read;
-      modules.broken += held.broken;
+      match braces::faithful(&tree.syntax()) {
+        Ok(held) => {
+          modules.read += held.read;
+          modules.broken += held.broken;
+        }
+        Err(why) => {
+          misplaced += 1;
+          if first_misplaced.len() < 8 {
+            first_misplaced.push(std::format!("{} through {root}: {why}", entry.display()));
+          }
+        }
+      }
       checked += 1;
     }
   }
@@ -132,7 +144,17 @@ fn every_corpus_entry_round_trips_through_every_root() {
     corpus_files().len() * ROOTS.len(),
     "the sweep did not run every entry through every root"
   );
-  println!("BRACES modules={} broken={}", modules.read, modules.broken);
+  println!(
+    "BRACES modules={} broken={} misplaced={misplaced}",
+    modules.read, modules.broken
+  );
+  for misplacement in &first_misplaced {
+    println!("  {misplacement}");
+  }
+  assert_eq!(
+    misplaced, 0,
+    "trees hold a module that is not faithful to the braces; the first are printed above"
+  );
   assert!(
     modules.broken > 0,
     "no tree held a module with an `Error` in it, so the braces were held over nothing broken"

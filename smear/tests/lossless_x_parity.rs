@@ -442,8 +442,11 @@ fn both_alternate_roots_agree_with_their_syntactic_counterparts() {
 fn both_suites_agree_on_every_padded_corpus_entry() {
   let mut skipped = Vec::new();
   let mut variants = 0usize;
-  // Every padded tree, the broken ones above all, is held to the braces as written.
+  // Every padded tree, the broken ones above all, is held to the braces as written. A module that
+  // is not faithful is counted and the first few kept, and asserted once the sweep has printed.
   let mut modules = braces::Modules::default();
+  let mut misplaced = 0usize;
+  let mut first_misplaced: Vec<String> = Vec::new();
 
   for entry in corpus_files() {
     let name = name_of(&entry);
@@ -455,10 +458,18 @@ fn both_suites_agree_on_every_padded_corpus_entry() {
     for (label, pad) in ALPHABET {
       let padded = inject(&src, &boundaries, pad);
       let lossless = parse_document(&padded);
-      let held = braces::faithful(&lossless.syntax())
-        .unwrap_or_else(|why| panic!("{name} padded with {label}: {why}"));
-      modules.read += held.read;
-      modules.broken += held.broken;
+      match braces::faithful(&lossless.syntax()) {
+        Ok(held) => {
+          modules.read += held.read;
+          modules.broken += held.broken;
+        }
+        Err(why) => {
+          misplaced += 1;
+          if first_misplaced.len() < 8 {
+            first_misplaced.push(std::format!("{name} padded with {label}: {why}"));
+          }
+        }
+      }
       let lossless_errs = lossless.has_errors();
       let syntactic_errs = syntactic_has_errors(&padded);
       assert_eq!(
@@ -486,6 +497,13 @@ fn both_suites_agree_on_every_padded_corpus_entry() {
     }
   }
 
+  println!(
+    "BRACES modules={} broken={} misplaced={misplaced}",
+    modules.read, modules.broken
+  );
+  for misplacement in &first_misplaced {
+    println!("  {misplacement}");
+  }
   assert_eq!(
     skipped, UNPADDABLE,
     "the set of unlexable corpus entries moved; pin the change on purpose"
@@ -495,7 +513,10 @@ fn both_suites_agree_on_every_padded_corpus_entry() {
     (corpus_files().len() - UNPADDABLE.len()) * ALPHABET.len(),
     "the padded sweep did not run one variant per lexable entry per ignorable form"
   );
-  println!("BRACES modules={} broken={}", modules.read, modules.broken);
+  assert_eq!(
+    misplaced, 0,
+    "padded trees hold a module that is not faithful to the braces; the first are printed above"
+  );
   assert!(
     modules.broken > 0,
     "no padded tree held a module with an `Error` in it, so the braces were held over nothing \

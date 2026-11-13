@@ -2,14 +2,24 @@
 //!
 //! While a brace is open, a closing brace is taken only by the production that owns it, and that
 //! rule is what makes a module's node faithful to the braces: counting braces alone from the
-//! node's own `{`, the count first returns to zero at the node's own `}`, which is the last token
-//! of the node that is no trivia, and a node with no `}` of its own never returns to zero.
+//! node's own `{`, the count returns to zero at most once, at the node's own `}`, which is the
+//! last token of the node that is no trivia; a node with no `}` of its own never returns to zero.
 //! [`faithful`] checks every module of a tree in one walk, so a sweep can afford it on every tree
 //! it builds, and answers how many modules it read and how many of them hold an `Error`: a sweep
 //! that never met a broken module witnessed nothing.
 //!
-//! Shared by the sweeps that parse broken texts: `lossless_x_mutation.rs`,
-//! `lossless_x_roundtrip.rs` and `lossless_x_parity.rs`.
+//! # The braces are told by count, never by parentage
+//!
+//! Being a direct child of a module's node does not make a brace the module's own. An item of a
+//! module that fails leaves its node unbuilt, and every token it had taken becomes a direct child
+//! of the module: a type whose fields failed leaves its fields' `{` there, beside the module's
+//! own. A `use` tree that a refusal stops after its group leaves the group's `}` there as well. So
+//! the module's own `{` is the first `{` anywhere in its node, which only the module's
+//! description, its `mod` and its name can stand in front of, and its own `}` is the one at which
+//! the count from that `{`, over every brace of the node at every depth, returns to zero.
+//!
+//! Shared by the sweeps that parse broken texts, `lossless_x_mutation.rs`,
+//! `lossless_x_roundtrip.rs` and `lossless_x_parity.rs`, and by `recovery_graphqlx.rs`.
 
 use rowan::{NodeOrToken, WalkEvent};
 use smear::parser::graphqlx::{kinds::SyntaxKind as K, lossless::SyntaxNode};
@@ -57,7 +67,7 @@ pub fn faithful(tree: &SyntaxNode) -> Result<Modules, String> {
         K::ModDefinition => {
           if let Some(around) = open.last().filter(|around: &&Open| around.closed) {
             return Err(std::format!(
-              "the module at {:?} holds a module after its own `}}`",
+              "the module at {:?} holds a module after its braces have closed",
               around.node.text_range()
             ));
           }
@@ -102,56 +112,35 @@ pub fn faithful(tree: &SyntaxNode) -> Result<Modules, String> {
           }
           continue;
         };
-        let at = innermost.node.text_range();
         if innermost.closed {
           return Err(std::format!(
-            "the module at {at:?} holds `{}` after its own `}}`",
-            token.text()
+            "the module at {:?} holds `{}` at {:?}, after its braces have closed",
+            innermost.node.text_range(),
+            token.text(),
+            token.text_range()
           ));
         }
-        let own: bool = token.parent().as_ref() == Some(&innermost.node);
         match kind {
           K::LBrace => {
-            match (own, innermost.base) {
-              (true, None) => innermost.base = Some(count),
-              (true, Some(_)) => {
-                return Err(std::format!(
-                  "the module at {at:?} holds a second `{{` of its own"
-                ));
-              }
-              (false, None) => {
-                return Err(std::format!(
-                  "the module at {at:?} holds a `{{` in front of its own"
-                ));
-              }
-              (false, Some(_)) => {}
+            // The first `{` of the node is the module's own, wherever the tree has put it.
+            if innermost.base.is_none() {
+              innermost.base = Some(count);
             }
             count += 1;
           }
           K::RBrace => {
+            let Some(base) = innermost.base else {
+              return Err(std::format!(
+                "the module at {:?} holds a `}}` at {:?}, in front of its `{{`",
+                innermost.node.text_range(),
+                token.text_range()
+              ));
+            };
             count -= 1;
-            match innermost.base {
-              None => {
-                return Err(std::format!(
-                  "the module at {at:?} holds a `}}` in front of its `{{`"
-                ));
-              }
-              Some(base) if count == base => {
-                if !own {
-                  return Err(std::format!(
-                    "the braces of the module at {at:?} close at a `}}` that is not its own, at \
-                     {:?}",
-                    token.text_range()
-                  ));
-                }
-                innermost.closed = true;
-              }
-              Some(_) if own => {
-                return Err(std::format!(
-                  "the module at {at:?} holds a `}}` of its own that closes none of its braces"
-                ));
-              }
-              Some(_) => {}
+            // The count from the module's `{` is back at zero: this is its own `}`, and nothing
+            // but trivia may follow it in the node.
+            if count == base {
+              innermost.closed = true;
             }
           }
           _ => {}
