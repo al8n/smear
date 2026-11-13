@@ -35,8 +35,8 @@ reports. Visitors compose at compile time: a tuple of up to twelve, an `Option` 
 a `Box` of one, and `()`. `analyze` runs smear's own rule set, which holds no rule yet, through the
 same walk, and an error that a phase or a rule reports marks the contributions, members and
 definitions that hold it, as their `has_errors()` says, whether the diagnostic ceiling keeps it or
-not. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and holds
-memory bounded by it.
+not. A syntax error marks nothing. A consumer's walk marks nothing, answers its own diagnostics
+under the same ceiling, and holds memory bounded by it.
 
 ## Feature flags
 

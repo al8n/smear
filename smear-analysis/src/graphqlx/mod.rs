@@ -76,10 +76,10 @@
 //! [`analyze`] runs smear's own rule set, which holds no rule yet, through the same walk over the
 //! supplied packages, once its phases have written the model. An error that a phase or one of those
 //! rules reports marks the contributions, members and definitions that hold where it points,
-//! whether the ceiling keeps the diagnostic or not, and their `has_errors()` says so. A consumer's
-//! walk marks nothing: it answers its own [`Diagnostics`] under the analysis's ceiling, which
-//! [`Diagnostics::merge`] joins with the analysis's, and holds memory bounded by that ceiling
-//! however much its visitor reports.
+//! whether the ceiling keeps the diagnostic or not, and their `has_errors()` says so. A syntax
+//! error marks nothing. A consumer's walk marks nothing: it answers its own [`Diagnostics`] under
+//! the analysis's ceiling, which [`Diagnostics::merge`] joins with the analysis's, and holds memory
+//! bounded by that ceiling however much its visitor reports.
 
 mod analysis;
 mod builtin;

@@ -187,10 +187,12 @@ impl Analysis {
 /// through the contribution its definition: their `has_errors()` say so. An extent runs from the
 /// description, or the first keyword when there is none, to the last token, and an error that
 /// points at no definition, such as one at a package source, marks nothing. A syntax error marks
-/// nothing either: a definition or an extension that holds one has no image in its file's
-/// document, so it is no contribution to mark. While smear's rules walk, a rule sees the phases'
-/// marks and no rule's: the rules' marks are applied once the walk has ended, so no rule sees
-/// another's, and the order the rules are composed in changes nothing.
+/// nothing either. What the parser could not read has no image in its file's document, and so no
+/// contribution to mark; and a definition the parser read past a reported mistake stands in the
+/// document unmarked: its `has_errors()` does not speak of the syntax error, which is in the
+/// diagnostics. While smear's rules walk, a rule sees the phases' marks and no rule's: the rules'
+/// marks are applied once the walk has ended, so no rule sees another's, and the order the rules
+/// are composed in changes nothing.
 ///
 /// # What it keeps
 ///

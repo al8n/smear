@@ -472,10 +472,11 @@ impl Reporter {
   /// Reports a parser's syntax error: hands it to the list and notes nothing, whether the reporter
   /// is marking or not.
   ///
-  /// A syntax error marks nothing in the model: a definition or an extension that holds one has
-  /// no image in the document its file answers, so it is no contribution to mark. And the marks
-  /// are a list the diagnostic ceiling does not bound, while a parser that recovers lends an error
-  /// for every mistake of a file: noted, a file's syntax errors would grow it with the file.
+  /// A syntax error marks nothing in the model. What the parser could not read has no image in
+  /// the document its file answers, and so no contribution to mark, and a definition the parser
+  /// read past a reported mistake stands in the document unmarked. And the marks are a list the
+  /// diagnostic ceiling does not bound, while a parser that recovers lends an error for every
+  /// mistake of a file: noted, a file's syntax errors would grow it with the file.
   pub(crate) fn report_syntax(&mut self, diagnostic: Diagnostic) {
     self.collector.report(diagnostic);
   }
