@@ -1806,8 +1806,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// out, a copy. Where it is written, its unknown fields are reported, a OneOf input object's
   /// count of fields, and the required fields it leaves out, before any default is filled; a
   /// default is asked for as [`ask`](Self::ask) says, and once the budget cannot pay, the literal
-  /// is reported once and its written fields alone are read on. In a copy each default's count is
-  /// kept exact, since the count the copy was made of read it, and is copied with nothing asked.
+  /// is reported once and its written fields alone are read on. In a copy each default it leaves
+  /// out is copied with nothing asked and no count read: the count the copy was charged for read
+  /// each of their counts and found it exact, so their rows are among those it paid for.
   fn object(&mut self, id: ValueId, making: Making, def: DefId, first: u32) {
     let Making {
       node, tree, mode, ..
@@ -1857,28 +1858,27 @@ impl<'p> Coercion<'_, 'p, '_> {
         continue;
       };
       let ty = self.member_type(field);
-      let copy = if mode.written() {
+      // In a copy nothing is asked and no count is read: the count the copy was charged for read
+      // this default's count, through this same reading of the literal, and it was exact, or no
+      // copy would be made. So its rows are among those already paid for.
+      if mode.written() {
         match self.ask(default, ty, library) {
-          Asked::Copy(_) => true,
-          Asked::Absent => false,
+          Asked::Copy(_) => {}
+          Asked::Absent => continue,
           Asked::Starved => {
             self.object_starved(at);
             merge.default = merge.default_end;
-            false
+            continue;
           }
         }
-      } else {
-        matches!(self.counts.get(&(default, ty)), Some(Count::Rows(_)))
-      };
-      if copy {
-        self.entries.push((field, None, ValueId::new(0)));
-        self.stack.push(Task::Make(Making {
-          node: default_tree.root,
-          ty,
-          tree: default_tree,
-          mode: Mode::Copied,
-        }));
       }
+      self.entries.push((field, None, ValueId::new(0)));
+      self.stack.push(Task::Make(Making {
+        node: default_tree.root,
+        ty,
+        tree: default_tree,
+        mode: Mode::Copied,
+      }));
     }
     if let Some(tail) = self.stack.get_mut(tasks..) {
       tail.reverse();
