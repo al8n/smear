@@ -874,12 +874,13 @@ impl LosslessLimits {
   /// keeps. A record kept at a span of its own is two B-tree entries keyed by that span, each
   /// with a group buffer, the payload's own buffer, and an entry of the emitter's log.
   ///
+  /// So it bounds the records' bytes too, because what one record holds is bounded whatever its
+  /// token: a lexer error keeps at most seventeen entries, the first sixteen faults of a string
+  /// literal or of a comment and one that counts the rest.
+  ///
   /// It does not bound the tree or the parse's own log of events, which grow with the text
   /// whether the text is valid or not: a diagnostic refused past the ceiling still costs its entry
-  /// of that log. Nor does it bound what one record holds. A lexer error keeps an entry for each
-  /// fault inside its token, so an unterminated string keeps one for every line break it runs
-  /// over, and that one record grows with its token, as the tree does. A caller that bounds a
-  /// parse's whole memory bounds the text's length.
+  /// of that log. A caller that bounds a parse's whole memory bounds the text's length.
   #[inline(always)]
   pub const fn max_diagnostics(&self) -> usize {
     self.diagnostics

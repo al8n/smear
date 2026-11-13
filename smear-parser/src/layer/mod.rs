@@ -407,11 +407,12 @@ impl<D: ?Sized> fmt::Debug for Syntactic<D> {
 /// nothing more. While a parse runs it holds a record for each error, warning and recovery hole
 /// it has found, up to its limits' [`max_diagnostics`](LosslessLimits::max_diagnostics), 32 768
 /// by default. Past that each further error is counted in [`error_count`](Parsed::error_count),
-/// and neither kept nor lent. So how many records a parse holds is bounded whatever the text.
-/// What one record holds is not: a lexer error keeps an entry for each fault inside its token.
+/// and neither kept nor lent. So how many records a parse holds is bounded whatever the text, and
+/// so are their bytes: a lexer error keeps at most seventeen entries however long its token, the
+/// first sixteen faults of a string literal or of a comment and one that counts the rest.
 ///
-/// The tree and the parse's own log of events are not bounded either: they grow with the text,
-/// and a caller bounds them by bounding its length.
+/// The tree and the parse's own log of events are not bounded: they grow with the text, and a
+/// caller bounds them by bounding its length.
 /// [`with_max_produce_events`](LosslessLimits::with_max_produce_events) bounds the lexing a text
 /// may buy.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]

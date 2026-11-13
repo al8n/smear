@@ -46,10 +46,33 @@ All notable changes to Smear are documented in this file.
   `DiagnosticSource::refused_errors` is a required method: an implementation outside smear must
   add it, answering 0 when its emitter has no ceiling. The lossless state grows by a word more,
   which every token the parser caches carries: with the brace count's, it is two words larger
-  than 0.0.1's. What the ceiling bounds is how many records a parse keeps. It does not bound the
-  tree, the parse's log of events, or what one record holds, a lexer error keeping an entry for
-  each fault inside its token: each grows with the text, and a caller that bounds a parse's
-  whole memory bounds the text's length.
+  than 0.0.1's. What the ceiling bounds is how many records a parse keeps, and with them their
+  bytes: a lexer error's record keeps at most seventeen entries however long its token, the first
+  sixteen faults of a string literal or of a comment and one that counts the rest. It does not
+  bound the tree or the parse's log of events, which grow with the text, and a caller that bounds
+  a parse's whole memory bounds the text's length.
+- `smear-lexer`: an inline string literal ends at its first line terminator, `\n`, `\r` or
+  `\r\n`, before it. It is refused with the errors of what came before and
+  `StringError::Unterminated`, and the terminator and the next line lex as they do anywhere
+  else: trivia in the lossless layer, skipped in the syntactic one. A `\` at the end of the line
+  is `StringError::IncompleteEscape`, and a `\u` escape takes no digit from the next line. The
+  literal used to run on to the next `"` or to the end of the text, with an error for each line
+  break, and the quotes after it paired up the other way. `StringError::UnexpectedLineTerminator`,
+  its three constructors and `SyntaxErrorKind::LineTerminatorInString` stay, and no lexer reports
+  them.
+- `smear-lexer`: a string literal's record keeps at most sixteen errors, inline or block: the first
+  sixteen in the order found, then, when `n` more were found, one `StringError::Omitted(n)` that
+  counts them. So a record holds at most seventeen entries however long its literal, where it
+  held one for each fault. `StringError::Omitted` is a new variant: it renders as "n more errors
+  in this string literal were found and not kept" and reports `SyntaxErrorKind::InvalidSyntax`.
+- `smear-lexer`: a comment in a byte source keeps at most sixteen errors the same way: an
+  `UnknownLexeme` for each of its first sixteen ill-formed sequences, then one error of the new
+  `LexerErrorData::Omitted(n)`, in either dialect, counting the rest and spanning from the first
+  of them to the last. It renders as "n more errors in this comment were found and not kept" and
+  reports `SyntaxErrorKind::InvalidSyntax`.
+- `smear-lexer`: a `\u` escape in a text source with fewer than four hex digits, before characters
+  of more than one byte, as in `"\u€€€€"`, no longer panics. The escape takes up to four
+  characters whole as its digits, and reports each one that is not hex at its own byte.
 - `smear-parser`!: `Recovery` counts at every module depth. 0.0.1 released it counting a
   document's top-level elements, so that `projected()` was the length of the document's
   definitions. GraphQLx's recovering type-system doors, and both layers, now count every item
