@@ -7,7 +7,7 @@
 //! panics on a refused program, and none reports within what a phase already refused.
 #![cfg(all(feature = "std", feature = "analysis"))]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use smear::{
   analysis::graphqlx::{
@@ -58,9 +58,14 @@ fn corpus() -> Vec<(PathBuf, Vec<u8>)> {
   files
 }
 
-/// An analysis of `text` as the one file of the `Flat` root package `app`, at tier `Std`. A file
-/// the type-system parser refuses is an analysis too, of the built-in library alone.
-fn analyzed(text: &[u8]) -> Analysis {
+/// An analysis of the corpus file at `path`, whose bytes are `text`, as the one file of the `Flat`
+/// root package `app`, at tier `Std`. A file the type-system parser refuses is an analysis too, of
+/// the built-in library alone.
+///
+/// The path is printed first: a panic inside the analysis cannot say which file it was reading,
+/// and the last line a failing test printed then does.
+fn analyzed(path: &Path, text: &[u8]) -> Analysis {
+  println!("{}", path.display());
   let root: Package<&[u8]> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
   analyze(&root, &[], &Limits::new())
@@ -364,7 +369,7 @@ fn census(analysis: &Analysis, what: &str) {
 #[test]
 fn each_walk_of_every_corpus_file_reaches_what_the_model_says_once() {
   for (path, text) in corpus() {
-    let analysis = analyzed(&text);
+    let analysis = analyzed(&path, &text);
     census(&analysis, &path.display().to_string());
   }
 }
@@ -564,7 +569,7 @@ fn tolerant(analysis: &Analysis, what: &str) {
 #[test]
 fn no_rule_repeats_a_phase_over_any_corpus_file() {
   for (path, text) in corpus() {
-    let analysis = analyzed(&text);
+    let analysis = analyzed(&path, &text);
     tolerant(&analysis, &path.display().to_string());
   }
 }
