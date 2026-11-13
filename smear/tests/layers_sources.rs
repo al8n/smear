@@ -14,8 +14,11 @@
 
 use std::path::PathBuf;
 
-/// The lexer's file, which holds every `DelegateStringError` impl.
-const LEXER: &str = "../smear-lexer/src/string_lexer/mod.rs";
+/// The lexer's sources. Any file under it may hold an impl of `DelegateStringError`.
+const LEXER: &str = "../smear-lexer/src";
+
+/// What an impl of `DelegateStringError` writes before its source.
+const IMPLEMENTED_FOR: &str = "DelegateStringError for ";
 
 /// Each dialect's layers.
 const LAYERS: [&str; 2] = [
@@ -27,7 +30,8 @@ const LAYERS: [&str; 2] = [
 /// the feature the entry stands under.
 type Row = (&'static str, &'static str, Option<&'static str>);
 
-/// The sources the syntactic lexers read, in the order the lexer implements them.
+/// The sources the syntactic lexers read, in the order the lexer's files, by path, implement
+/// them.
 const SOURCES: &[Row] = &[
   ("str", "str", None),
   ("[u8]", "[u8]", None),
@@ -68,20 +72,108 @@ fn text_of(file: &str) -> String {
   })
 }
 
-/// Every source the lexer implements `DelegateStringError` for, as its impl line names it.
-fn lexer_sources() -> Vec<String> {
-  const HEAD: &str = "impl DelegateStringError for ";
-  let mut sources = Vec::new();
-  for line in text_of(LEXER).lines() {
-    let line = line.trim();
-    if let Some(rest) = line.strip_prefix(HEAD) {
-      let source = rest.strip_suffix(" {").unwrap_or_else(|| {
-        panic!("the impl line {line:?} does not end in ` {{`, so its source cannot be read off it")
-      });
-      sources.push(String::from(source));
+/// Every `.rs` file under `dir`, a path relative to this package, in path order.
+fn rust_files(dir: &str) -> Vec<PathBuf> {
+  let mut files = Vec::new();
+  let mut pending = vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(dir)];
+  while let Some(next) = pending.pop() {
+    let entries = std::fs::read_dir(&next).unwrap_or_else(|error| {
+      panic!(
+        "{} is unreadable: {error}; a list read from a directory that is not there holds nothing",
+        next.display()
+      )
+    });
+    for entry in entries {
+      let path = entry.expect("a directory entry").path();
+      if path.is_dir() {
+        pending.push(path);
+      } else if path.extension().is_some_and(|ext| ext == "rs") {
+        files.push(path);
+      }
     }
   }
-  sources
+  files.sort();
+  files
+}
+
+/// `text` with every run of white space as one space, so that an impl reads the same however its
+/// lines are broken.
+fn flat(text: &str) -> String {
+  text.split_whitespace().collect::<Vec<&str>>().join(" ")
+}
+
+/// What the lexer's files say of `DelegateStringError`'s impls.
+struct LexerImpls {
+  /// The source of each impl the reader could read, in path order and then in text order.
+  sources: Vec<String>,
+  /// How many times the files write `DelegateStringError for` at all.
+  written: usize,
+}
+
+/// Reads every file of the lexer for the impls of `DelegateStringError`, whichever file holds one
+/// and whatever generics it has. A writing of `DelegateStringError for` that does not read as an
+/// impl is counted and gives no source, so the two numbers differ and the test that compares
+/// them fails, where skipping it would let a source go unseen.
+fn lexer_impls() -> LexerImpls {
+  let mut sources = Vec::new();
+  let mut written = 0usize;
+  for path in rust_files(LEXER) {
+    let text = std::fs::read_to_string(&path)
+      .unwrap_or_else(|error| panic!("{} is unreadable: {error}", path.display()));
+    let text = flat(&text);
+    for (at, _) in text.match_indices(IMPLEMENTED_FOR) {
+      written += 1;
+      if let Some(source) = implemented_source(&text, at) {
+        sources.push(source);
+      }
+    }
+  }
+  LexerImpls { sources, written }
+}
+
+/// The source of the impl whose `DelegateStringError for` stands at `at` in `text`, a text made
+/// [`flat`]: what stands between those words and the impl's `where` or `{`, when what stands
+/// before them is `impl` with its generics, if it has any. `None` for any other writing of the
+/// words.
+fn implemented_source(text: &str, at: usize) -> Option<String> {
+  let head = text[..at].trim_end();
+  let head = match head.strip_suffix('>') {
+    None => head,
+    Some(generics) => {
+      // Back to the `<` that opens the generics this `>` closes.
+      let mut depth = 1usize;
+      let mut open = None;
+      for (index, character) in generics.char_indices().rev() {
+        match character {
+          '>' => depth += 1,
+          '<' => {
+            depth -= 1;
+            if depth == 0 {
+              open = Some(index);
+              break;
+            }
+          }
+          _ => {}
+        }
+      }
+      generics[..open?].trim_end()
+    }
+  };
+  let before = head.strip_suffix("impl")?;
+  if before.ends_with(|character: char| character.is_alphanumeric() || character == '_') {
+    return None;
+  }
+  let rest = &text[at + IMPLEMENTED_FOR.len()..];
+  let header = &rest[..rest.find('{')?];
+  let source = match header.split_once(" where ") {
+    Some((source, _)) => source,
+    None => header,
+  }
+  .trim();
+  if source.is_empty() {
+    return None;
+  }
+  Some(String::from(source))
 }
 
 /// One entry of a `syntactic_layer!` invocation: the attribute lines above it, and its source.
@@ -156,7 +248,17 @@ fn attributes_of(feature: Option<&str>) -> Vec<String> {
 
 #[test]
 fn the_lexer_reads_exactly_the_sources_of_the_table() {
-  let found = lexer_sources();
+  let lexer = lexer_impls();
+  assert_eq!(
+    lexer.written,
+    lexer.sources.len(),
+    "the lexer's files write `DelegateStringError for` {} times, and {} of those read as the impl \
+     of a source: one is written in a form this test cannot read, which may be a source no layer \
+     has. Teach `implemented_source` the form, or reword what is no impl",
+    lexer.written,
+    lexer.sources.len()
+  );
+  let found = lexer.sources;
   let expected: Vec<String> = SOURCES
     .iter()
     .map(|row: &Row| String::from(row.0))
@@ -218,13 +320,46 @@ fn no_entry_is_a_reference_form() {
   }
 }
 
-/// The readers above read what is written: an entry line and an impl line each give their source,
-/// and a line that is neither is refused rather than skipped.
+/// The readers above read what is written: an entry line gives its source, an impl gives its
+/// source in each form an impl is written in, and the trait's words where no impl stands give
+/// none, so that the lexer's count and its sources differ where a silence would agree.
 #[test]
 fn the_readers_read_the_lines_they_are_given() {
-  let lexer = lexer_sources();
+  let lexer = lexer_impls().sources;
   assert!(lexer.contains(&String::from("str")));
   assert!(lexer.contains(&String::from("HipStr<'_>")));
+
+  // What the first `DelegateStringError for` of `written` gives, read as a file's text is.
+  let read = |written: &str| -> Option<String> {
+    let text = flat(written);
+    let at = text.find(IMPLEMENTED_FOR)?;
+    implemented_source(&text, at)
+  };
+  assert_eq!(
+    read("impl DelegateStringError for str {").as_deref(),
+    Some("str")
+  );
+  assert_eq!(
+    read("  impl<'a> DelegateStringError for Other<'a> {").as_deref(),
+    Some("Other<'a>"),
+    "generics after `impl`"
+  );
+  assert_eq!(
+    read("impl<'a, T: Bound<'a>> DelegateStringError\n  for Other<'a, T>\nwhere\n  T: Leaf,\n{")
+      .as_deref(),
+    Some("Other<'a, T>"),
+    "an impl broken over lines, with a `where` clause"
+  );
+  assert_eq!(
+    read("// a `T: DelegateStringError for ` that no impl writes {"),
+    None,
+    "the words with no `impl` before them"
+  );
+  assert_eq!(
+    read("simpl DelegateStringError for str {"),
+    None,
+    "the words after a name that only ends in `impl`"
+  );
 
   for file in LAYERS {
     let entries = layer_entries(file);
