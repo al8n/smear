@@ -43,8 +43,8 @@
 //! production that took its `{`, at its own loop's head or as its closing step; a body's skip,
 //! above the body's own count; a list opened by `(`, `[` or `<`, when the brace is one the list's
 //! own content opened; and a document root, which owns the braces no other production does. A
-//! recovery skip stops before a `}` it did not open, whatever else it has open, and a production
-//! that meets one where it wanted something else reports what it wanted and leaves it. So no item
+//! recovery skip keeps no `}` it did not open, whatever else it has open, and a production that
+//! meets one where it wanted something else reports what it wanted and leaves it. So no item
 //! takes the `}` of the module it stands in, and the end of a module does not depend on which
 //! production consumed the tokens before it, nor on how: `mod_body`'s `What the braces promise`
 //! says what that makes impossible.

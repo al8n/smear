@@ -231,9 +231,9 @@ pub(crate) const fn closes_enclosing_block(open_at: usize, now: usize) -> bool {
 /// The closers are in the set even though nothing starts with one — stopping *before* `]` is
 /// what lets an enclosing `list_value` close on its own delimiter instead of running to end of
 /// input. The skip stops at this only where its depth over every pair is zero, so a `]` inside
-/// nesting it opened is crossed rather than mistaken for the enclosing one. A `}` met while none
-/// of the skip's own braces is open ends it whatever its depth: see
-/// [`crate::lossless::recover::unexpected`].
+/// nesting it opened is crossed rather than mistaken for the enclosing one. No hole
+/// [`crate::lossless::recover::unexpected`] keeps holds a `}` met while none of the skip's own
+/// braces was open: see its docs.
 ///
 /// # One set, not one per position
 ///
@@ -329,8 +329,8 @@ fn keyword_of<T: DowncastRef<ContextualKeyword>>(token: &T) -> Option<Contextual
 ///
 /// The pair identity is a `u8` rather than a bespoke enum because a scan asks it one thing:
 /// whether it is `b'{'`. Both scans count every pair in one depth, blind to which closer answers
-/// which opener; [`crate::lossless::recover::unexpected`] also counts the braces it opens, and
-/// never takes a `}` it did not open.
+/// which opener; [`crate::lossless::recover::unexpected`] also watches the braces it opens, and
+/// keeps no hole holding a `}` it did not open.
 #[inline]
 fn delimiters(kind: &Kind) -> Balance<u8> {
   match kind {
