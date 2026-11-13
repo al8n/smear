@@ -987,6 +987,53 @@ fn a_later_copy_pays_a_step_to_read_its_count() {
   assert!(arguments_of(model, "U").is_empty());
 }
 
+/// A copy fills the defaults its own literals leave out for nothing past its rows: the count it was
+/// charged for read each of their counts and found it exact, so the copy reads none of them again.
+/// - In the first program the written default `{}` fills `x`, counting `x`'s default then, 1 step.
+///   The application's copy is counted, reading that kept count, 1, and is two rows, 2: 4 in all.
+/// - In the second `A.b`'s written `{}` fills `n`, 1. `@d.a`'s written `{}` counts `A.b`'s default,
+///   reading `n`'s, 1, and its copy is two rows, 2. The application's copy is counted, reading
+///   `A.b`'s, 1, and is three rows, 3: 8 in all. Its copy fills `b`, and that copy fills `n`.
+///
+/// At 4 and at 8 all is filled. One step below, the application's copy cannot be paid, so the
+/// application alone is past the budget, and has no argument. Refuses a step charged each time a
+/// copy fills a default, which the first program's copies pay once in all and the second's three
+/// times: 5 and 11, refused at 4 and at 8. A test cannot see a read that costs nothing; this one
+/// pins that a copy costs its rows and no more.
+#[test]
+fn a_copy_fills_its_own_defaults_for_nothing_past_its_rows() {
+  for (text, steps, filled) in [
+    (
+      "input I {\n  x: Int = 1\n}\ndirective @d(v: I = {}) on OBJECT\n\
+       type Query @d {\n  f: Int\n}\n",
+      4,
+      "Object {x= Int 1}",
+    ),
+    (
+      "input A {\n  b: B = {}\n}\ninput B {\n  n: Int = 1\n}\n\
+       directive @d(a: A = {}) on OBJECT\ntype Query @d {\n  f: Int\n}\n",
+      8,
+      "Object {b= Object {n= Int 1}}",
+    ),
+  ] {
+    let analysis = analyze_text(text, &Limits::new().with_max_value_steps(steps));
+    assert!(analysis.is_ok(), "{text}: {:#?}", analysis.diagnostics());
+    let model = analysis.model();
+    let arguments = arguments_of(model, "Query");
+    assert_eq!(arguments.len(), 1, "{text}");
+    assert_eq!(shown(model, arguments[0].value()), filled, "{text}");
+
+    let analysis = analyze_text(text, &Limits::new().with_max_value_steps(steps - 1));
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(LIMIT, after(schema, text, "type Query @", "d"))],
+      "{text}"
+    );
+    assert!(arguments_of(analysis.model(), "Query").is_empty(), "{text}");
+  }
+}
+
 /// Sixty-four input objects that each default two fields to `{}` of the next stand for about 2^64
 /// rows: each count is kept, and is never added up past the budget, so the analysis ends, every
 /// diagnostic is the budget's, and the application that asks for the whole has no argument.
