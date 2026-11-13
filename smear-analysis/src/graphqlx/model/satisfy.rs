@@ -18,7 +18,10 @@
 //! that has no type yet and a run out of its pool each answer `false` for the step that meets it,
 //! so the routine panics on no model.
 
-use std::{collections::BTreeMap, vec, vec::Vec};
+use std::{
+  collections::{BTreeMap, btree_map::Entry},
+  vec::Vec,
+};
 
 use crate::graphqlx::id::{DefId, TyId, TypeExprId};
 
@@ -100,6 +103,17 @@ pub(crate) enum Wanted {
   Type(TyId),
   /// An instantiation of this interface, whichever.
   Definition(DefId),
+}
+
+/// What comparing one pair of nodes found.
+#[derive(Clone, Copy)]
+enum Compared {
+  /// The two differ.
+  Differs,
+  /// The two are one, and nothing below them is compared for this pair.
+  Holds,
+  /// The two have one shape, and their children are compared next.
+  Descends,
 }
 
 impl Model {
@@ -345,6 +359,11 @@ impl Model {
   /// already paired is not descended again: met with the target it was paired with it is nothing
   /// more, and with another it is `false`. So a type that names a parameter twice at each level is
   /// compared in its distinct nodes, not walked as a tree.
+  ///
+  /// The pairs are compared a node first, then its arguments first to last, each with everything
+  /// below it before the next: a stack holds each pair being descended with the index of its next
+  /// pair of children, and a pair of children is taken only for the step that compares it. So no
+  /// step does more than one pair's work, however many arguments a node has.
   fn matches(
     &self,
     owner: DefId,
@@ -353,74 +372,125 @@ impl Model {
     env: &[TyId],
     steps: &mut Steps,
   ) -> Option<bool> {
-    let mut pending: Vec<(TyId, TyId)> = vec![(declared, goal)];
     // Each open node of `declared` met, with the node of `goal` it was paired with.
     let mut paired: BTreeMap<TyId, TyId> = BTreeMap::new();
-    while let Some((node, target)) = pending.pop() {
-      if !steps.take(1) {
-        return None;
+    // The pairs being descended, each with the index of its next pair of children.
+    let mut frames: Vec<(TyId, TyId, u32)> = Vec::new();
+    let mut next: Option<(TyId, TyId)> = Some((declared, goal));
+    loop {
+      if let Some((node, target)) = next {
+        if !steps.take(1) {
+          return None;
+        }
+        match self.compared(owner, node, target, env, &mut paired, steps)? {
+          Compared::Differs => return Some(false),
+          Compared::Holds => {}
+          Compared::Descends => frames.push((node, target, 0)),
+        }
       }
-      let (Some(&row), Some(&aim)) = (
-        self.tys.get(node.get() as usize),
-        self.tys.get(target.get() as usize),
-      ) else {
-        return Some(false);
+      // The next pair of children of the innermost pair being descended; none when it is done.
+      let Some(&(node, target, index)) = frames.last() else {
+        return Some(true);
       };
-      if row.closed {
-        if node == target {
-          continue;
+      next = self.children(node, target, index);
+      match next {
+        Some(_) => {
+          if let Some(frame) = frames.last_mut() {
+            frame.2 = index.saturating_add(1);
+          }
         }
-        return Some(false);
-      }
-      match paired.get(&node).copied() {
-        Some(before) if before == target => continue,
-        Some(_) => return Some(false),
         None => {
-          paired.insert(node, target);
+          frames.pop();
         }
-      }
-      match row.shape {
-        KIND_PARAM => {
-          if row.def != owner {
-            return Some(false);
-          }
-          let Some(&argument) = env.get(row.index as usize) else {
-            return Some(false);
-          };
-          let same = if row.non_null {
-            self.made_non_null(argument, target, aim, steps)?
-          } else {
-            argument == target
-          };
-          if !same {
-            return Some(false);
-          }
-        }
-        KIND_LIST => {
-          if aim.shape != KIND_LIST || aim.non_null != row.non_null {
-            return Some(false);
-          }
-          pending.push((row.element, aim.element));
-        }
-        KIND_NAMED => {
-          let args: &[TyId] = row.args.of(&self.ty_args);
-          let targets: &[TyId] = aim.args.of(&self.ty_args);
-          if aim.shape != KIND_NAMED
-            || aim.def != row.def
-            || aim.non_null != row.non_null
-            || args.len() != targets.len()
-          {
-            return Some(false);
-          }
-          // Pushed last to first, so they are compared first to last.
-          for pair in args.iter().copied().zip(targets.iter().copied()).rev() {
-            pending.push(pair);
-          }
-        }
-        _ => return Some(false),
       }
     }
-    Some(true)
+  }
+
+  /// Compares `node`, a node of a type that names parameters of `owner`, with `target` under
+  /// `env`: whether the pair holds, differs, or holds so far and is descended next. An open node
+  /// is paired with `target` as it is met, so that it is descended once.
+  fn compared(
+    &self,
+    owner: DefId,
+    node: TyId,
+    target: TyId,
+    env: &[TyId],
+    paired: &mut BTreeMap<TyId, TyId>,
+    steps: &mut Steps,
+  ) -> Option<Compared> {
+    let (Some(&row), Some(&aim)) = (
+      self.tys.get(node.get() as usize),
+      self.tys.get(target.get() as usize),
+    ) else {
+      return Some(Compared::Differs);
+    };
+    if row.closed {
+      return Some(if node == target {
+        Compared::Holds
+      } else {
+        Compared::Differs
+      });
+    }
+    match paired.entry(node) {
+      Entry::Occupied(before) => {
+        return Some(if *before.get() == target {
+          Compared::Holds
+        } else {
+          Compared::Differs
+        });
+      }
+      Entry::Vacant(slot) => {
+        slot.insert(target);
+      }
+    }
+    let compared = match row.shape {
+      KIND_PARAM => {
+        if row.def != owner {
+          return Some(Compared::Differs);
+        }
+        let Some(&argument) = env.get(row.index as usize) else {
+          return Some(Compared::Differs);
+        };
+        let same = if row.non_null {
+          self.made_non_null(argument, target, aim, steps)?
+        } else {
+          argument == target
+        };
+        if same {
+          Compared::Holds
+        } else {
+          Compared::Differs
+        }
+      }
+      KIND_LIST if aim.shape == KIND_LIST && aim.non_null == row.non_null => Compared::Descends,
+      KIND_NAMED
+        if aim.shape == KIND_NAMED
+          && aim.def == row.def
+          && aim.non_null == row.non_null
+          && row.args.of(&self.ty_args).len() == aim.args.of(&self.ty_args).len() =>
+      {
+        Compared::Descends
+      }
+      _ => Compared::Differs,
+    };
+    Some(compared)
+  }
+
+  /// The pair of children at `index` of `node` and `target`, which `compared` found to descend: a
+  /// list's element and the target's, or the two named types' arguments at `index`. `None` past
+  /// the last.
+  fn children(&self, node: TyId, target: TyId, index: u32) -> Option<(TyId, TyId)> {
+    let row = self.tys.get(node.get() as usize)?;
+    let aim = self.tys.get(target.get() as usize)?;
+    match row.shape {
+      KIND_LIST => (index == 0).then_some((row.element, aim.element)),
+      KIND_NAMED => {
+        let args: &[TyId] = row.args.of(&self.ty_args);
+        let targets: &[TyId] = aim.args.of(&self.ty_args);
+        Some((*args.get(index as usize)?, *targets.get(index as usize)?))
+      }
+      _ => None,
+    }
   }
 
   /// Whether `target`, whose row is `aim`, is `argument` made non-null: `argument` itself when it

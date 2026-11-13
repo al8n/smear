@@ -1161,6 +1161,38 @@ fn judging_stops_at_its_budget() {
 }
 
 #[test]
+fn a_mismatch_takes_a_step_for_each_pair_compared_up_to_it() {
+  // `Need<G<Int, Float>>` takes five steps: one for its bound, one for `G`'s entry, one for the
+  // entry's root pair, and one for each argument compared, the first, which holds, and the second,
+  // which differs. A matcher that paid for a node's arguments as it met the node would take six.
+  // That no step does more than one pair's work holds by construction, and is checked by reading:
+  // a test sees the steps, not the work.
+  let text = "interface I<A, B, C> {\n  id: ID\n}\n\
+              type G<T, U> implements I<T, U, T> {\n  id: ID\n}\n\
+              scalar Need<X> where X: I<Int, Int, Int>\n\
+              type Query {\n  need: Need<G<Int, Float>>\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_bound_steps(5));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      UNSATISFIED,
+      at(schema, text, "Need<G<Int, Float>>", 0),
+      Some(at(schema, text, "I<Int, Int, Int>", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let analysis = analyze_text(text, &Limits::new().with_max_bound_steps(4));
+  assert_eq!(
+    found(&analysis),
+    [(LIMIT, at(schema, text, "Need<G<Int, Float>>", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
 fn judging_has_a_budget_of_its_own() {
   // A substitution budget of 0 refuses no map: judging draws on its own.
   let text = program("type Query {\n  map: HashMap<string, Int>\n  page: Page<User>\n}\n");
