@@ -125,10 +125,31 @@ pub(super) fn max_digits(radix: Radix, width: u32) -> u64 {
   }
 }
 
+/// The most significant digits a decimal integer read in `u128` arithmetic can have: `10^38 - 1`
+/// is below `u128::MAX`, and one more digit may not be.
+pub(super) const U128_DIGITS: u64 = 38;
+
+/// The steps converting a decimal integer of `significant` significant digits costs: none when it
+/// has at most [`U128_DIGITS`], which `u128` arithmetic reads; otherwise an upper bound of the
+/// limb updates its conversion makes, its chunks of nine digits times the limbs of its result,
+/// `ceil(d / 9) × (d × 3322 / 32000 + 2)` for `d` significant digits, `3322 / 1000` being just
+/// above `log2(10)` and a limb 32 bits. A radix that is a power of two converts in one pass and
+/// costs nothing.
+pub(super) fn decimal_cost(significant: u64) -> u32 {
+  if significant <= U128_DIGITS {
+    return 0;
+  }
+  let chunks = significant.div_ceil(9);
+  let limbs = significant.saturating_mul(3322) / 32_000 + 2;
+  u32::try_from(chunks.saturating_mul(limbs)).unwrap_or(u32::MAX)
+}
+
 /// Appends to `out` the magnitude of `text`, an integer literal of `radix` that [`scan`] read with
 /// `significant` significant digits: little-endian, with no trailing zero byte, so zero is no byte.
-/// A radix that is a power of two packs its digits' bits from the last digit back; a decimal one
-/// is read nine digits at a time into little-endian `u32` limbs, `limbs` being their scratch.
+/// A radix that is a power of two packs its digits' bits from the last digit back. A decimal one
+/// of at most [`U128_DIGITS`] significant digits is read in `u128` arithmetic; a longer one nine
+/// digits at a time into little-endian `u32` limbs, `limbs` being their scratch, which is
+/// quadratic in its digits and which [`decimal_cost`] bounds.
 pub(super) fn magnitude(
   text: &[u8],
   radix: Radix,
@@ -168,6 +189,15 @@ pub(super) fn magnitude(
         let [low, ..] = held.to_le_bytes();
         out.push(low);
       }
+    }
+    None if significant <= U128_DIGITS => {
+      let mut value: u128 = 0;
+      for &byte in digits {
+        if let Some(next) = digit(byte, Radix::Decimal) {
+          value = value * 10 + u128::from(next);
+        }
+      }
+      out.extend_from_slice(&value.to_le_bytes());
     }
     None => {
       decimal(digits, limbs);

@@ -4,8 +4,8 @@
 use std::{string::String, vec::Vec};
 
 use super::{
-  Float, bit_length, decimal_float, fits, hex_float, is_power_of_two, magnitude, magnitude_float,
-  max_digits, scan,
+  Float, U128_DIGITS, bit_length, decimal_cost, decimal_float, fits, hex_float, is_power_of_two,
+  magnitude, magnitude_float, max_digits, scan,
 };
 use crate::graphqlx::raw::Radix;
 
@@ -130,6 +130,36 @@ fn a_decimal_integer_carries_into_a_new_limb() {
   assert_eq!(
     converted("340282366920938463463374607431768211455", Radix::Decimal),
     [255; 16]
+  );
+}
+
+#[test]
+fn a_decimal_integer_longer_than_u128_holds_costs_its_limb_updates() {
+  // `ceil(d / 9) × (d × 3322 / 32000 + 2)` past 38 digits, and nothing up to them.
+  let costs: [(u64, u32); 6] = [
+    (0, 0),
+    (38, 0),
+    (39, 30),
+    (78, 90),
+    (19_730, 4_495_650),
+    (u64::MAX, u32::MAX),
+  ];
+  for (digits, cost) in costs {
+    assert_eq!(decimal_cost(digits), cost, "{digits} digits");
+  }
+  // The most digits `u128` arithmetic reads, and what they spell; leading zeros are no digits.
+  let nines = "9".repeat(usize::try_from(U128_DIGITS).unwrap_or(0));
+  let mut expected: Vec<u8> = (10u128.pow(38) - 1).to_le_bytes().to_vec();
+  while expected.last() == Some(&0) {
+    expected.pop();
+  }
+  assert_eq!(converted(&nines, Radix::Decimal), expected);
+  assert_eq!(
+    converted(
+      "0000000000000000000000000000000000000000001",
+      Radix::Decimal
+    ),
+    [1]
   );
 }
 

@@ -37,10 +37,15 @@ fn analyze_text(text: &str, limits: &Limits) -> Analysis {
 
 /// The same, where the package's integer provider gives every width from 0 to 65536 bits.
 fn analyze_wide(text: &str) -> Analysis {
+  analyze_wide_with(text, &Limits::new())
+}
+
+/// The same, under `limits`.
+fn analyze_wide_with(text: &str, limits: &Limits) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)])
     .with_integers(IntegerProvider::numo());
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], limits)
 }
 
 /// The root package's one file, `schema.graphqlx`.
@@ -609,6 +614,54 @@ fn a_decimal_integer_of_any_length_is_converted_exactly() {
   magnitude.push(0x80);
   assert_eq!(c.magnitude(), magnitude.as_slice());
   assert!(c.is_negative());
+}
+
+/// `2^256 - 1`, 78 decimal digits: its conversion costs `ceil(78 / 9) × (78 × 3322 / 32000 + 2)`,
+/// nine chunks times ten limbs, 90 steps.
+const U256_MAX: &str =
+  "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+
+#[test]
+fn a_long_decimal_integer_is_charged_before_it_is_converted() {
+  let text = format!("type Query {{\n  x: Int\n}}\ninput W {{\n  a: u256 = {U256_MAX}\n}}\n");
+  // Under the default budget it is read.
+  let analysis = analyze_wide(&text);
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let ValueKind::Int(int) = model.value(default(model, "W", "a")).kind() else {
+    panic!("`2^256 - 1` is no integer");
+  };
+  assert_eq!(int.magnitude(), [0xff; 32]);
+
+  // At its charge it is read; one below, it is refused where it is written, and unresolved.
+  let analysis = analyze_wide_with(&text, &Limits::new().with_max_value_steps(90));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let analysis = analyze_wide_with(&text, &Limits::new().with_max_value_steps(89));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(LIMIT, after(schema, &text, "a: u256 = ", U256_MAX))]
+  );
+  assert_eq!(shown_default(analysis.model(), "W", "a"), "?");
+
+  // Thirty-eight digits are read in `u128` arithmetic, for nothing.
+  let short = "type Query {\n  x: Int\n}\ninput S {\n  \
+               a: u128 = 99999999999999999999999999999999999999\n}\n";
+  let analysis = analyze_text(short, &Limits::new().with_max_value_steps(0));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+}
+
+#[test]
+fn a_hexadecimal_integer_costs_nothing_to_convert() {
+  let ones = "f".repeat(64);
+  let text = format!("type Query {{\n  x: Int\n}}\ninput W {{\n  a: u256 = 0x{ones}\n}}\n");
+  let analysis = analyze_wide_with(&text, &Limits::new().with_max_value_steps(0));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let ValueKind::Int(int) = model.value(default(model, "W", "a")).kind() else {
+    panic!("`0xff…ff` is no integer");
+  };
+  assert_eq!(int.magnitude(), [0xff; 32]);
 }
 
 #[test]

@@ -87,7 +87,11 @@
 //! A written row is a written literal, which `Limits::max_source_bytes` bounds. What no literal
 //! writes is a step of `Limits::max_value_steps`: each list a written lone value stands for; each
 //! row of a copy, its whole count charged before its first row; and each required argument found
-//! left out. Past it a lone value is unresolved, and `resource-limit` where it is written; and an
+//! left out. So is the one reading that is more than linear: a decimal integer longer than `u128`
+//! holds, 38 significant digits, is converted nine digits at a time over a vector of limbs, and
+//! that is charged first, an upper bound of its limb updates; one the budget cannot pay for is
+//! `resource-limit` where it is written, and unresolved. A shorter one is read in `u128`
+//! arithmetic, and a hexadecimal, octal or binary one in one pass, each for nothing. Past it a lone value is unresolved, and `resource-limit` where it is written; and an
 //! application is `resource-limit` once, at its path, its written arguments still coerced, a copy
 //! made whole or not at all, and the rest of its directive's list not read. The built-in library's
 //! own values are charged nothing, and neither is a copy made for an application it writes; a copy
@@ -357,6 +361,9 @@ enum Why {
   /// A path that names no value of the enum `def`: `name`, its last segment, is none of its
   /// values.
   NoValue { def: DefId, name: Sym },
+  /// A decimal integer of `digits` significant digits whose conversion, `cost` steps, the budget
+  /// could not pay for.
+  Costly { digits: u64, cost: u32 },
 }
 
 /// A node that does not fit, and why: the node may be an element of the value being made.
@@ -387,8 +394,9 @@ struct Kept {
   cooked: Option<Option<Text>>,
   /// An integer as scanned; `None` inside for a text that is no integer of its radix.
   scanned: Option<Option<Scanned>>,
-  /// An integer's magnitude, once converted.
-  converted: Option<Converted>,
+  /// An integer's magnitude, once converted; `None` inside for a conversion the budget could not
+  /// pay for.
+  converted: Option<Option<Converted>>,
   /// An integer's row of the model's integer table.
   int: Option<u32>,
   /// What it reads as where a float is expected; `None` inside for a text no float reads.
@@ -1075,7 +1083,12 @@ impl<'p> Coercion<'_, 'p, '_> {
     if scanned.significant > number::max_digits(radix, range.width) {
       return Err(refused(out));
     }
-    let converted = self.converted(node, source, radix, scanned);
+    let Some(converted) = self.converted(node, source, radix, scanned) else {
+      return Err(refused(Why::Costly {
+        digits: scanned.significant,
+        cost: number::decimal_cost(scanned.significant),
+      }));
+    };
     if !number::fits(
       scanned.negative,
       converted.bits,
@@ -1168,7 +1181,10 @@ impl<'p> Coercion<'_, 'p, '_> {
     if scanned.significant > number::max_digits(radix, 8) {
       return Err(Why::ByteRange);
     }
-    let converted = self.converted(node, source, radix, scanned);
+    // At most four digits, which cost nothing to convert.
+    let Some(converted) = self.converted(node, source, radix, scanned) else {
+      return Err(Why::ByteRange);
+    };
     if !number::fits(scanned.negative, converted.bits, converted.power, false, 8) {
       return Err(Why::ByteRange);
     }
@@ -1409,10 +1425,26 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// `node`'s magnitude, an integer of `radix` scanned as `scanned`, converted once and kept.
-  fn converted(&mut self, node: u32, source: u32, radix: Radix, scanned: Scanned) -> Converted {
+  fn converted(
+    &mut self,
+    node: u32,
+    source: u32,
+    radix: Radix,
+    scanned: Scanned,
+  ) -> Option<Converted> {
     let slot = self.slot(node);
     if let Some(converted) = self.read(slot).converted {
       return converted;
+    }
+    // A long decimal integer's conversion is quadratic in its digits: it is paid for first, unless
+    // the built-in library writes it.
+    let cost = match radix {
+      Radix::Decimal => number::decimal_cost(scanned.significant),
+      Radix::Hex | Radix::Octal | Radix::Binary => 0,
+    };
+    if cost > 0 && source >= self.supplied && !self.charge(cost) {
+      self.update(slot, |kept: &mut Kept| kept.converted = Some(None));
+      return None;
     }
     let start = self.magnitudes.len();
     number::magnitude(
@@ -1429,8 +1461,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       bits: number::bit_length(magnitude),
       power: number::is_power_of_two(magnitude),
     };
-    self.update(slot, |kept: &mut Kept| kept.converted = Some(converted));
-    converted
+    self.update(slot, |kept: &mut Kept| {
+      kept.converted = Some(Some(converted))
+    });
+    Some(converted)
   }
 
   /// The magnitude `converted` holds.
@@ -1474,13 +1508,12 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       RawKind::Float { hex: true } => number::hex_float(self.written(node, source)),
       RawKind::Int(radix) => match self.scanned(node, source, radix) {
-        Some(scanned) if scanned.significant <= number::max_digits(radix, FLOAT_BITS) => {
-          let converted = self.converted(node, source, radix, scanned);
-          Some(number::magnitude_float(
-            scanned.negative,
-            self.magnitude(converted),
-          ))
-        }
+        // A hexadecimal, octal or binary integer, which costs nothing to convert.
+        Some(scanned) if scanned.significant <= number::max_digits(radix, FLOAT_BITS) => self
+          .converted(node, source, radix, scanned)
+          .map(|converted: Converted| {
+            number::magnitude_float(scanned.negative, self.magnitude(converted))
+          }),
         Some(_) => Some(Float {
           value: None,
           single: false,
@@ -1605,6 +1638,21 @@ impl<'p> Coercion<'_, 'p, '_> {
           None,
           format!("`{literal}` names no value of the enum `{name}`"),
           near,
+        )
+      }
+      Why::Costly { digits, cost } => {
+        let max = self.max_steps;
+        (
+          Some(DiagnosticKind::ResourceLimit),
+          format!(
+            "converting this decimal integer of {digits} digits takes {cost} steps, more than \
+             is left of `Limits::max_value_steps`, {max}, the steps the analysis may take to \
+             complete values"
+          ),
+          Some(String::from(
+            "raise the limit with `Limits::with_max_value_steps`, or write the integer in \
+             hexadecimal, which costs nothing to convert",
+          )),
         )
       }
     };

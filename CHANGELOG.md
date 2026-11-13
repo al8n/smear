@@ -295,7 +295,10 @@ All notable changes to Smear are documented in this file.
   `missing-required-directive-argument`, at the application's path, with a label at the argument.
   A new `Limits::max_value_steps`, 2^20 by default, bounds what no literal writes: the lists a
   value written alone stands for, each value of a copy, charged before the copy's first, and each
-  required argument found left out. Past it a value is `resource-limit` where it is written, and an
+  required argument found left out; and the one reading more than linear, the conversion of a
+  decimal integer of more than 38 significant digits, charged before it as
+  `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, past which the integer is
+  `resource-limit`; a hexadecimal, octal or binary integer costs nothing. Past it a value is `resource-limit` where it is written, and an
   application once, at its path, its written arguments kept and a copy made whole or not at all;
   the built-in library's own values cost nothing, and a copy made for an application it writes
   neither. Then smear's rules walk the model, each a visitor on

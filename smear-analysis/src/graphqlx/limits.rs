@@ -319,14 +319,19 @@ impl Limits {
   /// is one of: a value of a copy of a default, which fills an argument an application leaves out,
   /// each value nested in the default counting one; a list that a written value stands for where a
   /// list is expected, one for each level of list between the value and its type, as
-  /// `tags: [[Int]] = 1` stands for a list of a list of `1`; and a required argument an
-  /// application leaves out, which is reported. The built-in library's own values take none: its
+  /// `tags: [[Int]] = 1` stands for a list of a list of `1`; a required argument an application
+  /// leaves out, which is reported; and converting a decimal integer of more than 38 significant
+  /// digits, which `u128` cannot hold, to its value, charged before the conversion as an upper
+  /// bound of its work: `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of
+  /// nine digits times the 32-bit limbs of its value. A hexadecimal, octal or binary integer
+  /// converts in one pass and takes none. The built-in library's own values take none: its
   /// defaults where it writes them, and a copy made for an application it writes. A copy of one of
   /// its defaults made for an application a supplied package writes, a bare `@deprecated` among
   /// them, is charged.
   ///
   /// Past it, a written value whose lists cannot be paid for is `resource-limit` where it is
-  /// written, and is unresolved; and an application whose next argument left out cannot be paid
+  /// written, and is unresolved, and so is an integer whose conversion cannot be paid for; and an
+  /// application whose next argument left out cannot be paid
   /// for is `resource-limit` at its path, once, and is filled no further: what it writes is still
   /// coerced, an argument the budget kept from being filled is absent, a required one it kept from
   /// being reported is not reported, and a copy is made whole or not at all. At `0`, no default
