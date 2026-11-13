@@ -29,6 +29,9 @@
 //! contributions, one for each schema item, its description, its roots, written or presumed, and
 //! its applications. The phases that write the rest of it are still to come.
 //!
+//! [`analyze_with`] answers the same analysis with the parser the caller chose, a GraphQLx parser
+//! layer, and the [`Trees`] that layer kept beside it, one for each file it read.
+//!
 //! ```
 //! use smear_analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};
 //!
@@ -82,9 +85,10 @@
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and
-//! their `has_errors()` says so. A consumer's walk marks nothing: it answers its own
-//! [`Diagnostics`] under the analysis's ceiling, which [`Diagnostics::merge`] joins with the
-//! analysis's, and holds memory bounded by that ceiling however much its visitor reports.
+//! their `has_errors()` says so. A syntax error marks nothing. A consumer's walk marks nothing: it
+//! answers its own [`Diagnostics`] under the analysis's ceiling, which [`Diagnostics::merge`]
+//! joins with the analysis's, and holds memory bounded by that ceiling however much its visitor
+//! reports.
 
 mod analysis;
 mod builtin;
@@ -114,7 +118,7 @@ mod widths;
 #[doc(hidden)]
 pub mod test_support;
 
-pub use analysis::{Analysis, analyze};
+pub use analysis::{Analysis, Trees, TreesIntoIter, TreesIter, analyze, analyze_with};
 pub use code::DiagnosticKind;
 pub use diagnostic::{Diagnostic, DiagnosticBuilder, Diagnostics};
 pub use id::{

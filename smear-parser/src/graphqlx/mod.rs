@@ -45,6 +45,14 @@ pub mod lossless;
 /// GraphQLx syntactic productions over the concrete lexer.
 pub mod syntactic;
 
+mod layer;
+
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
+pub use layer::Lossless;
+pub use layer::{Layer, Syntactic};
+
+pub use crate::layer::{Parsed, Recovery, Rejected, Report};
+
 /// The GraphQLx dialect marker.
 ///
 /// This is a type-level tag used to brand AST carriers and parser contexts.

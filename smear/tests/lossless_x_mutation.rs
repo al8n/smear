@@ -34,6 +34,13 @@
 //! Every population and bucket below is asserted as a measured constant, and so is the exact
 //! class → instance map of what the law still finds — which is empty — so the mutation space
 //! cannot silently shrink into a gate that passes because it stopped looking.
+//!
+//! Every re-parse, in whatever bucket it lands, is also held to the braces as written: each
+//! module of its tree closes on its own `}` or on none, as `support/braces.rs` defines it. The
+//! re-parses are the largest population of broken texts this suite builds, and the law fails if
+//! none of them held a module with an `Error` in it. A module that is not faithful does not stop
+//! the law: it is counted, the first eight are printed, and they are asserted after every
+//! measured line is out, so a round that records the constants still reads all of them.
 
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -57,6 +64,9 @@ use smear::parser::{
   lossless::ast::CastNode,
 };
 use tokora::{Parse as _, Parser};
+
+#[path = "support/braces.rs"]
+mod braces;
 
 type SyntaxElement = rowan::NodeOrToken<SyntaxNode, rowan::SyntaxToken<GraphQLxLang>>;
 
@@ -588,70 +598,77 @@ const OPEN: &[(&str, usize)] = &[];
 
 /// The `(entry, door)` pairs the law runs over: every hole-free parse of every corpus entry under
 /// each of the three doors that builds that door's container.
-const PAIRS: usize = 348;
+const PAIRS: usize = 358;
 
 /// Of [`PAIRS`], the ones whose unmutated tree already lacks a lenient token — every mutation of
 /// them is compared against a restored text.
-const LENIENT_BASES: usize = 5;
+const LENIENT_BASES: usize = 9;
 
 /// Mutations tried, per door, per operation — the population, cell by cell.
 const TRIED: &[((&str, &str), usize)] = &[
-  (("executable", "delete"), 1650),
-  (("executable", "duplicate"), 1650),
-  (("executable", "retext"), 1932),
-  (("executable", "swap"), 882),
-  (("executable", "transplant"), 16_611),
-  (("mixed", "delete"), 4171),
-  (("mixed", "duplicate"), 4171),
-  (("mixed", "retext"), 5596),
-  (("mixed", "swap"), 2138),
-  (("mixed", "transplant"), 44_777),
-  (("type-system", "delete"), 2644),
-  (("type-system", "duplicate"), 2644),
-  (("type-system", "retext"), 3847),
-  (("type-system", "swap"), 1323),
-  (("type-system", "transplant"), 27_382),
+  (("executable", "delete"), 1667),
+  (("executable", "duplicate"), 1667),
+  (("executable", "retext"), 1942),
+  (("executable", "swap"), 890),
+  (("executable", "transplant"), 16_747),
+  (("mixed", "delete"), 4250),
+  (("mixed", "duplicate"), 4250),
+  (("mixed", "retext"), 5701),
+  (("mixed", "swap"), 2178),
+  (("mixed", "transplant"), 45_351),
+  (("type-system", "delete"), 2706),
+  (("type-system", "duplicate"), 2706),
+  (("type-system", "retext"), 3942),
+  (("type-system", "swap"), 1355),
+  (("type-system", "transplant"), 27_820),
 ];
 
 /// Mutations tried in total.
-const TRIED_TOTAL: usize = 121_418;
+const TRIED_TOTAL: usize = 123_172;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 107_256;
+const UNFAITHFUL: usize = 108_406;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 10_748;
+const EQUAL: usize = 10_764;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 2989;
+const BOTH_REFUSE: usize = 3413;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
-const LENIENT_EQUAL: usize = 312;
+const LENIENT_EQUAL: usize = 459;
 
 /// Skeleton-faithful with a lenient token missing, and both refusing the restored text.
-const LENIENT_BOTH_REFUSE: usize = 113;
+const LENIENT_BOTH_REFUSE: usize = 130;
 
 /// How many restorations each [`LENIENT`] row contributed to [`LENIENT_EQUAL`], in table order —
 /// the value witnesses this law finds.
 ///
-/// The ninth row (an extension's `>`) has none and cannot: the list is hole-free without it only
-/// at end of input, where the extension has no tail. Deleting a closer mid-document re-parses to a
-/// different skeleton, and only end of input keeps it faithful, so the tenth — a `use` group's
-/// `}` — is reached only by the entries whose last item ends on a group, and the next ten, the
-/// rest of the closers the report-and-build census added in round seven, have none from this
-/// corpus. Their values are pinned by `every_unclosed_closer_projects_what_the_closed_text_parses_to`
-/// and `nested_missing_closers_restore_innermost_first` instead. The last — a module's `}` — is
-/// reached the tenth's way, by the entries that end on a module, and by every faithful mutation of
-/// the one entry whose module never closes.
+/// A closer deleted mid-document re-parses to a different skeleton unless the list stops where it
+/// stood all the same: at the end of input, or, for a list opened by `(`, `[` or `<`, at a `}`
+/// that closes a block around the list. The ninth row (an extension's `>`) has none and cannot:
+/// its list is hole-free without the `>` only there, where the extension has no tail, so the
+/// restored text is refused too. The tenth — a `use` group's `}` — is reached only by the entries
+/// whose last item ends on a group. Of the next ten, the rest of the closers the report-and-build
+/// census added in round seven, three are reached — a type's generic arguments, a list type and a
+/// list value — by the entries that leave one of them unclosed in front of a `}`, every faithful
+/// mutation of which restores it, and by a closer deleted in front of the `}` of a block around
+/// its list. The other seven have none from this corpus: wherever one of their closers is
+/// deleted, the list reads on into what follows. Their values are pinned by
+/// `every_unclosed_closer_projects_what_the_closed_text_parses_to` and
+/// `nested_missing_closers_restore_innermost_first` instead. The last — a module's `}` — is reached
+/// the tenth's way, by the entries that end on a module, and by every faithful mutation of the one
+/// entry whose module never closes.
 const LENIENT_HITS: [usize; 21] = [
-  96, 94, 10, 6, 6, 2, 15, 12, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64,
+  98, 96, 10, 6, 6, 89, 15, 12, 0, 9, 0, 66, 2, 34, 0, 0, 0, 0, 0, 0, 64,
 ];
 
 /// How many restorations each row contributed to [`LENIENT_BOTH_REFUSE`] — restored texts the
-/// parser still rejects for another reason, and the projection refuses too. **Every row is
-/// exercised** in one of the two: a row with neither would be an exemption no mutation reaches.
+/// parser still rejects for another reason, and the projection refuses too. A row with none in
+/// either list is a position no one-child mutation of this corpus reaches, and its witness is its
+/// report-and-build probe alone.
 const LENIENT_REFUSED_HITS: [usize; 21] = [
-  8, 25, 4, 6, 4, 4, 2, 4, 2, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40,
+  8, 29, 4, 6, 4, 10, 2, 4, 2, 15, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 43,
 ];
 
 /// Every faithful **deletion of a token** the parser and the projection both refuse, as
@@ -713,6 +730,12 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
   let mut tally = Tally::default();
   let mut pairs = 0usize;
   let mut lenient_bases = 0usize;
+  // Every re-parse, faithful or not, is held to the braces as written. A module that is not is
+  // counted and the first few kept, and the law goes on measuring: they are asserted only once
+  // every measured line is out.
+  let mut modules = braces::Modules::default();
+  let mut misplaced = 0usize;
+  let mut first_misplaced: Vec<String> = Vec::new();
 
   for (name, source) in corpus() {
     for door in [Door::Mixed, Door::Executable, Door::TypeSystem] {
@@ -786,6 +809,21 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
             let text = mutated.text().to_string();
 
             let reparsed = door.parse(&text);
+            match braces::faithful(&reparsed) {
+              Ok(held) => {
+                modules.read += held.read;
+                modules.broken += held.broken;
+              }
+              Err(why) => {
+                misplaced += 1;
+                if first_misplaced.len() < 8 {
+                  first_misplaced.push(std::format!(
+                    "{name} [{door:?}] {} #{index}: {why}\n{text}",
+                    op.label()
+                  ));
+                }
+              }
+            }
             let faithful = reparsed
               .children()
               .find(|child| child.kind() == door.container())
@@ -900,6 +938,13 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
   for (deleted, count) in &tally.strict_deletions {
     println!("STRICT {deleted} {count}");
   }
+  println!(
+    "BRACES modules={} broken={} misplaced={misplaced}",
+    modules.read, modules.broken
+  );
+  for misplacement in &first_misplaced {
+    println!("  {misplacement}");
+  }
 
   let mut classes: BTreeMap<String, usize> = BTreeMap::new();
   for violation in &tally.violations {
@@ -917,6 +962,16 @@ fn the_projection_agrees_with_the_parser_under_every_one_child_mutation() {
   assert_eq!(
     found, OPEN,
     "the law's class -> instance map moved; a new class is a finding — name it"
+  );
+  // The braces next, and for the same reason. Every measured line is out by now, so a module that
+  // is not faithful hides none of them from a round that records them.
+  assert_eq!(
+    misplaced, 0,
+    "re-parses hold a module that is not faithful to the braces; the first are printed above"
+  );
+  assert!(
+    modules.broken > 0,
+    "no re-parse held a module with an `Error` in it, so the braces were held over nothing broken"
   );
   assert_eq!(pairs, PAIRS, "the (entry, door) population moved");
   assert_eq!(

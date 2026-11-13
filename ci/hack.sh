@@ -91,19 +91,22 @@ $CARGO $TOOLCHAIN hack clippy --each-feature --features alloc --ignore-unknown-f
   --keep-going --exclude-features std,default,rowan,bytes,bstr,hipstr,smol-bytes \
   --exclude-all-features || status=1
 
-# Pass 2b — `rowan_0_17` on `alloc` and without `std`, with each dialect and with the validator:
-# every rowan site of both dialects and every lossless test, compiled where the tower is absent.
+# Pass 2b — `rowan_0_17` on `alloc` and without `std`, with each dialect, with the validator and
+# with the analyzer: every rowan site of both dialects and every lossless test, compiled where the
+# tower is absent.
 #
 # The tower is gated on `std`, so here its modules are compiled out while the dialects, the
-# validator and the tests beside them are not. A rowan site that is missing its `std` names a
-# module that does not exist, or leaves an import or a constructor only the tower used dead under
-# `-D warnings`; no other row of any pass builds this configuration with a dialect on. `smear` and
-# `smear-parser` are the crates whose rowan sites sit beside dialect code, and `--include-features`
-# keeps each to its dialect rows, and `smear` to its validator row as well.
-echo "== pass 2b: rowan_0_17 on the alloc tier, with each dialect and the validator =="
+# validator, the analyzer and the tests beside them are not. A rowan site that is missing its `std`
+# names a module that does not exist, or leaves an import or a constructor only the tower used dead
+# under `-D warnings`; no other row of any pass builds this configuration with a dialect on. `smear`
+# and `smear-parser` are the crates whose rowan sites sit beside dialect code, and
+# `--include-features` keeps each to its dialect rows, and `smear` to its validator and analyzer
+# rows as well. The analyzer's row is the one that compiles a GraphQLx test's analyzer section with
+# the tower's feature on and its tier off.
+echo "== pass 2b: rowan_0_17 on the alloc tier, with each dialect, the validator and the analyzer =="
 # shellcheck disable=SC2086
 $CARGO $TOOLCHAIN hack clippy -p smear --each-feature --features alloc,rowan_0_17 --tests \
-  --keep-going --include-features graphql,graphqlx,validator \
+  --keep-going --include-features graphql,graphqlx,validator,analysis \
   --exclude-no-default-features --exclude-all-features || status=1
 # shellcheck disable=SC2086
 $CARGO $TOOLCHAIN hack clippy -p smear-parser --each-feature --features alloc,rowan_0_17 --tests \

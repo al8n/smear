@@ -4,8 +4,8 @@
 //!
 //! # What is here and what is in the substrate
 //!
-//! Everything below is **table**: the twenty-one head sets an "expected one of" diagnostic names,
-//! this dialect's three balanced pairs, its depth-zero restart predicate and its definition-start
+//! Everything below is **table**: the head sets an "expected one of" diagnostic names,
+//! this dialect's three balanced pairs, its restart predicate and its definition-start
 //! predicate. The *logic* — report, skip, attribute, guarantee progress — is
 //! [`crate::lossless::recover`]'s, shared with every dialect, and its module docs carry the
 //! reasoning about `sync_balanced`'s two no-progress cases and the termination rule that follows
@@ -183,15 +183,57 @@ pub(crate) const BLOCK_EXTENSION_TAIL_HEADS: &[Kind] = &[Kind::At, Kind::LBrace]
 /// The token kinds a `SchemaDefinition`'s root-operation block may begin with.
 pub(crate) const ROOT_OPERATION_TYPES_HEADS: &[Kind] = &[Kind::LBrace];
 
+/// The `)` a parenthesised list closes with: what such a list reports as expected where it
+/// stops short of one, at a `}` that belongs to a block around it. See
+/// [`closes_enclosing_block`].
+pub(crate) const PARENS_CLOSER_HEADS: &[Kind] = &[Kind::RParen];
+
+/// The `]` a list type or a list value closes with, reported as [`PARENS_CLOSER_HEADS`] is.
+pub(crate) const LIST_CLOSER_HEADS: &[Kind] = &[Kind::RBracket];
+
 pub(crate) use crate::lossless::recover::opener_span;
+
+/// Whether `kind` closes one of GraphQL's three delimiter pairs.
+///
+/// Asked where the grammar requires exactly one component — a type after a `:`, a value after
+/// an `=` — and the head starts none. A closer there is the closer of the block the position
+/// stands in, so it is reported and left for that block's own loop, where every other head is
+/// junk to consume. Consuming it would cost the block its end and everything after the block
+/// with it.
+#[inline]
+pub(crate) const fn is_closer(kind: Kind) -> bool {
+  matches!(kind, Kind::RParen | Kind::RBracket | Kind::RBrace)
+}
+
+/// Whether a `}` at the head of a list delimited by `(` or `[` belongs to a block around the
+/// list, and so is not the list's to consume.
+///
+/// `open_at` is the lexer's count of open braces right after the list's own opener was read,
+/// and `now` is the count at the committed position: the `}` at the head is only peeked, so it
+/// is not in `now` yet. The `}` closes a brace that was open before the list began exactly when
+/// one was (`open_at > 0`) and the list's own content has left none of its own open
+/// (`now <= open_at`). The list then reports its own closer as missing and returns, and the
+/// block's loop finds its `}` where it stands. Taking it as junk would cost the block its end,
+/// and hand the list everything after the block.
+///
+/// In the two other cases the `}` stays junk of the list. With no brace open before the list it
+/// closes nothing and is a stray; with more open now than then it closes a brace the list's own
+/// content opened. A `)` or `]` that is not the list's own is junk too, as it has always been:
+/// no count tells a stray one from an enclosing one.
+#[inline]
+pub(crate) const fn closes_enclosing_block(open_at: usize, now: usize) -> bool {
+  open_at > 0 && now <= open_at
+}
 
 /// Where a recovery is willing to stop: a token that could start something the caller knows
 /// how to parse, or a closer the enclosing shape knows how to consume.
 ///
 /// The closers are in the set even though nothing starts with one — stopping *before* `]` is
 /// what lets an enclosing `list_value` close on its own delimiter instead of running to end of
-/// input. `sync_balanced` consults this only at depth zero, so a `]` inside skipped nesting is
-/// crossed rather than mistaken for the enclosing one.
+/// input. The skip stops at this only where its depth over every pair is zero, so a `]` inside
+/// nesting it opened is crossed rather than mistaken for the enclosing one. No hole
+/// [`crate::lossless::recover::unexpected`] keeps holds a `}` met while none of the skip's own
+/// braces was open: see its docs.
 ///
 /// # One set, not one per position
 ///
@@ -283,11 +325,12 @@ fn keyword_of<T: DowncastRef<ContextualKeyword>>(token: &T) -> Option<Contextual
   crate::lossless::recover::keyword_of(token)
 }
 
-/// GraphQL's three delimiter pairs, for `sync_balanced`'s depth counting.
+/// GraphQL's three delimiter pairs, for the recovery scans' depth counting.
 ///
-/// The pair identity is a `u8` rather than a bespoke enum because the balanced scan is
-/// deliberately pair-blind — it counts depth and never checks that a closer matches its
-/// opener — so the identity is only ever compared for equality, and never by this suite.
+/// The pair identity is a `u8` rather than a bespoke enum because a scan asks it one thing:
+/// whether it is `b'{'`. Both scans count every pair in one depth, blind to which closer answers
+/// which opener; [`crate::lossless::recover::unexpected`] also watches the braces it opens, and
+/// keeps no hole holding a `}` it did not open.
 #[inline]
 fn delimiters(kind: &Kind) -> Balance<u8> {
   match kind {
@@ -348,7 +391,7 @@ lossless_production! {
   }
 
   /// Nothing that could start one of `expected` is here, and there is still input.
-  /// [`crate::lossless::recover::unexpected`] with this dialect's pairs and restart predicate.
+  /// [`crate::lossless::recover::unexpected`] with this dialect's pairs and its restart predicate.
   fn unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
     // #168's scan allowance. Read here rather than inside the substrate helper because the
     // committed side is `smear-lexer`'s token tally and `crate::lossless::recover` may not name

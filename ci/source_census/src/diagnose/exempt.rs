@@ -636,6 +636,20 @@ pub const EXEMPTIONS: &[Exemption] = &[
              without doing so.",
   },
   Exemption {
+    path: "smear::parser::graphql::Rejected",
+    kind: Kind::Verdict,
+    element: None,
+    issue: None,
+    reason: "Why the syntactic layer answers no document for a text: the fail-fast parse found a \
+             syntax error. It is the outcome of the parse and not its diagnostic. Every error the \
+             parse returned was lent to the caller's sink before this is answered, each one a \
+             dialect `Error`, which is a contract row, and this carries only their count. Answering \
+             the contract here as well would give one refusal a second primary location and a \
+             second code where a renderer should draw the errors it was already handed. Declared \
+             in `smear::parser::layer` and re-exported by both dialects; this is the path the \
+             census reaches it by first.",
+  },
+  Exemption {
     path: "smear::parser::lossless::runner::Diagnostic",
     kind: Kind::Verdict,
     element: None,

@@ -2135,27 +2135,38 @@ fn a_schema_missing_its_brace_in_a_module_chain_is_refused_in_the_first_module()
 /// syntactic door refuses it at its first `)`. A module with no `{` is reported and closed without a
 /// body, so the braceless chain is a run of sibling modules rather than a nest. Every door returns,
 /// and the tree keeps every byte.
+///
+/// What is counted is **bodies**. A refusal ends the document and every module on the way out
+/// still keeps its node, so the module the ceiling refused sits inside the ones around it, a
+/// header with no body: one node deeper than the parse ever descended.
 #[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 #[test]
 fn the_lossless_door_refuses_a_mod_chain_at_the_ceiling_and_returns() {
   use smear::parser::graphqlx::{
     kinds::SyntaxKind as K,
-    lossless::{Parse, parse_document},
+    lossless::{Parse, SyntaxNode, parse_document},
   };
 
-  /// How many modules enclose the deepest module, counting itself: the tree's record of how far
-  /// the parse recursed.
-  fn deepest(parse: &Parse) -> usize {
+  fn is_module(node: &SyntaxNode) -> bool {
+    node.kind() == K::ModDefinition
+  }
+
+  /// A module whose body the parse entered, which is one that holds its `{`.
+  fn has_body(node: &SyntaxNode) -> bool {
+    is_module(node)
+      && node
+        .children_with_tokens()
+        .any(|child| child.kind() == K::LBrace)
+  }
+
+  /// How many `counted` nodes enclose the deepest one, counting itself. Over [`has_body`] it is
+  /// the tree's record of how far the parse recursed.
+  fn deepest(parse: &Parse, counted: fn(&SyntaxNode) -> bool) -> usize {
     parse
       .syntax()
       .descendants()
-      .filter(|node| node.kind() == K::ModDefinition)
-      .map(|node| {
-        node
-          .ancestors()
-          .filter(|ancestor| ancestor.kind() == K::ModDefinition)
-          .count()
-      })
+      .filter(counted)
+      .map(|node| node.ancestors().filter(counted).count())
       .max()
       .unwrap_or(0)
   }
@@ -2166,19 +2177,19 @@ fn the_lossless_door_refuses_a_mod_chain_at_the_ceiling_and_returns() {
     inside.diagnostics().is_empty(),
     "inside the budget the ceiling must be silent"
   );
-  assert_eq!(deepest(&inside), MAX_NESTING_DEPTH);
+  assert_eq!(deepest(&inside, has_body), MAX_NESTING_DEPTH);
   let over = mod_chain(MAX_NESTING_DEPTH + 1);
   let parse = parse_document(&over);
   assert!(parse.has_errors(), "one past the ceiling must be refused");
   assert!(
-    deepest(&parse) <= MAX_NESTING_DEPTH,
+    deepest(&parse, has_body) <= MAX_NESTING_DEPTH,
     "the refusal must come before the parse descends past the ceiling"
   );
   let shallow = parse_document(&mod_bypass(MAX_NESTING_DEPTH + 8));
   assert!(
-    deepest(&shallow) <= MAX_NESTING_DEPTH,
-    "the bypass nested {} modules under a ceiling of {MAX_NESTING_DEPTH}",
-    deepest(&shallow)
+    deepest(&shallow, has_body) <= MAX_NESTING_DEPTH,
+    "the bypass entered {} nested bodies under a ceiling of {MAX_NESTING_DEPTH}",
+    deepest(&shallow, has_body)
   );
 
   for src in [
@@ -2204,7 +2215,7 @@ fn the_lossless_door_refuses_a_mod_chain_at_the_ceiling_and_returns() {
   assert!(parse.has_errors(), "body-less modules must be reported");
   assert_eq!(parse.syntax().text().to_string(), braceless);
   assert_eq!(
-    deepest(&parse),
+    deepest(&parse, is_module),
     1,
     "a module with no `{{` holds nothing, so the chain does not nest"
   );
@@ -2395,8 +2406,10 @@ fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
 ///   `lossless::runner::finish_root`'s note rather than here.
 /// * **Malformed bytes *before* the refusal.** The refusal's position is a function of the prefix,
 ///   so a prefix lexer error is an ordinary second diagnostic and not this property.
-/// * **A refusal below a production that catches.** No production in either dialect catches except
-///   the six document roots, and a production added later that does would need its own cell —
+/// * **A refusal below a production that catches.** The six document roots catch, and so does a
+///   GraphQLx module's body, which catches the ordinary failure of an item and returns a refusal
+///   to its root: the `mod_body` cell below is that one, a refusal under 256 bodies and still one
+///   diagnostic. A production added later that catches would need its own cell —
 ///   `depth::descend`'s note records that as the residual.
 /// * **Partial (`Sans-I/O`) input.** Both doors here are `Complete`.
 #[cfg(all(

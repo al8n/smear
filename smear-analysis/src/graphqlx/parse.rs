@@ -1,32 +1,35 @@
-//! Parsing: every file, with the GraphQLx syntactic parser, into the documents the model is lowered
+//! Parsing: every file, with a GraphQLx parser layer, into the documents the model is lowered
 //! from.
 //!
 //! The caller's text type is gone before this module is reached: a file is a `View`, text or
-//! bytes. A byte text that is UTF-8 is parsed as text, so only two parsers are compiled, one over
-//! `str` and one over `[u8]`, and the second only ever reads bytes that are not UTF-8.
+//! bytes. A byte text that is UTF-8 is parsed as text, so the layer reads `str` and nothing else.
+//! A byte text that is not UTF-8 is read by the syntactic layer over `[u8]`, whatever layer the
+//! analysis was given: such a text is a syntax error wherever its bad byte stands, so no layer has
+//! a document for it.
 //!
 //! A file that holds nothing but what the lexer skips, white space, commas, byte order marks and
-//! comments, is accepted here as a document with no item, before the parser sees it: the
+//! comments, is accepted here as a document with no item, before any layer sees it: the
 //! type-system document production wants one item at least, and a directory may hold a file that
-//! only documents it.
+//! only documents it. Such a file has no tree.
+//!
+//! The built-in packages' files are read by the syntactic layer under its default limits, whatever
+//! layer the analysis was given, and have no tree.
 
+use core::ops::ControlFlow;
 use std::{
   string::{String, ToString},
   vec::Vec,
 };
 
-use smear_parser::graphqlx::{
-  GraphQLx,
-  ast::TypeSystemDocument,
-  error::GraphqlxErrors,
-  syntactic::{GraphqlxLexer, type_system_document},
-};
+use smear_parser::graphqlx::{Layer, Report, Syntactic, ast::TypeSystemDocument};
 use tokora::{
-  Parse as _, Parser, SimpleSpan,
+  SimpleSpan,
   diagnostic::{Diagnose, DiagnoseExt, Location},
+  utils::IntoComponents,
 };
 
 use super::{
+  code::DiagnosticKind,
   diagnostic::{Diagnostic, Reporter},
   id::{SourceId, dense},
   set::{PackageView, ROOT},
@@ -71,14 +74,22 @@ impl<'a> Documents<'a> {
 /// Parses every file of `packages`, which are in id order and numbered by `sources`, reporting
 /// each file's syntax errors at that file.
 ///
-/// The built-in packages' files are always parsed. The supplied packages' files are parsed only
-/// when `supplied` is true: past the source size limit, none is.
-pub(crate) fn files<'a>(
+/// The built-in packages' files are always parsed, by the syntactic layer. The supplied packages'
+/// files are parsed only when `supplied` is true, past the source size limit none is, and each one
+/// that is text, or bytes that are UTF-8, is parsed by `parser`. What `parser` keeps for such a
+/// file goes into `trees`, in source order, when the caller keeps trees at all.
+pub(crate) fn files<'a, P>(
+  parser: &P,
   packages: &[PackageView<'a>],
   sources: &SourceMap,
   supplied: bool,
   reporter: &mut Reporter,
-) -> Documents<'a> {
+  mut trees: Option<&mut Vec<(SourceId, P::Tree)>>,
+) -> Documents<'a>
+where
+  P: Layer<'a>,
+{
+  let built_in = Syntactic::new();
   let mut entries: Vec<Option<Parsed<'a>>> = Vec::with_capacity(sources.len() as usize);
   for (index, package) in packages.iter().enumerate() {
     // The package source comes first, then the files in the order the map numbered them.
@@ -86,8 +97,14 @@ pub(crate) fn files<'a>(
     let first = sources.package_sources(index).start() + 1;
     for (offset, file) in package.files.iter().enumerate() {
       let source = SourceId::new(first + dense(offset));
-      let document = if index < ROOT || supplied {
-        parse(file.text, source, reporter)
+      let document = if index < ROOT {
+        parse(&built_in, file.text, source, reporter).0
+      } else if supplied {
+        let (document, tree) = parse(parser, file.text, source, reporter);
+        if let (Some(kept), Some(tree)) = (trees.as_deref_mut(), tree) {
+          kept.push((source, tree));
+        }
+        document
       } else {
         None
       };
@@ -97,75 +114,111 @@ pub(crate) fn files<'a>(
   Documents { entries }
 }
 
-/// Parses one file, reporting its syntax errors at `source`.
-fn parse<'a>(text: View<'a>, source: SourceId, reporter: &mut Reporter) -> Option<Parsed<'a>> {
-  match text {
-    View::Text(text) => parse_text(text, source, reporter).map(Parsed::Text),
-    View::Bytes(bytes) => match core::str::from_utf8(bytes) {
-      Ok(text) => parse_text(text, source, reporter).map(Parsed::Text),
-      Err(_) => parse_bytes(bytes, source, reporter).map(Parsed::Bytes),
-    },
-  }
-}
-
-/// The type-system document `text` holds, or `None` once its syntax errors are reported. A blank
-/// text holds a document with no item.
-fn parse_text<'a>(
-  text: &'a str,
+/// Parses one file with `parser`, reporting its syntax errors at `source`: the file's document, and
+/// what `parser` kept for it.
+///
+/// A blank text holds a document with no item, and a byte text that is not UTF-8 is read by the
+/// syntactic layer over its bytes; neither reaches `parser`, and neither has a tree.
+fn parse<'a, P>(
+  parser: &P,
+  text: View<'a>,
   source: SourceId,
   reporter: &mut Reporter,
-) -> Option<TypeSystemDocument<&'a str>> {
-  if blank(text.as_bytes()) {
-    return Some(TypeSystemDocument::<&'a str>::new(
-      SimpleSpan::new(0, text.len()),
-      Vec::new(),
-    ));
-  }
-  let parsed: Result<TypeSystemDocument<&'a str>, GraphqlxErrors<&'a str>> =
-    Parser::with_parser::<
-      '_,
-      GraphqlxLexer<'_, str>,
-      TypeSystemDocument<&str>,
-      GraphqlxErrors<&str>,
-      _,
-      GraphQLx,
-    >(type_system_document)
-    .parse_str(text);
-  match parsed {
-    Ok(document) => Some(document),
-    Err(errors) => {
-      for error in errors.iter() {
-        reporter.report(syntax(error, source));
+) -> (Option<Parsed<'a>>, Option<P::Tree>)
+where
+  P: Layer<'a>,
+{
+  let text: &'a str = match text {
+    View::Text(text) => text,
+    View::Bytes(bytes) => match core::str::from_utf8(bytes) {
+      Ok(text) => text,
+      Err(_) => {
+        return (
+          parse_bytes(bytes, source, reporter).map(Parsed::Bytes),
+          None,
+        );
       }
-      None
+    },
+  };
+  if blank(text.as_bytes()) {
+    let document = TypeSystemDocument::<&'a str>::new(SimpleSpan::new(0, text.len()), Vec::new());
+    return (Some(Parsed::Text(document)), None);
+  }
+  let mut sink = Syntax::new(reporter, source);
+  match parser.type_system_document(text, &mut sink) {
+    Ok(parsed) => {
+      let (document, _, _, tree) = parsed.into_components();
+      (Some(Parsed::Text(document)), Some(tree))
+    }
+    Err(_) => {
+      sink.unread();
+      (None, None)
     }
   }
 }
 
-/// The type-system document the bytes hold, or `None` once their syntax errors are reported.
+/// The type-system document the bytes hold, or `None` once their syntax errors are reported: the
+/// syntactic layer over `[u8]`, under its default limits.
 fn parse_bytes<'a>(
   bytes: &'a [u8],
   source: SourceId,
   reporter: &mut Reporter,
 ) -> Option<TypeSystemDocument<&'a [u8]>> {
-  let parsed: Result<TypeSystemDocument<&'a [u8]>, GraphqlxErrors<&'a [u8]>> =
-    Parser::with_parser::<
-      '_,
-      GraphqlxLexer<'_, [u8]>,
-      TypeSystemDocument<&[u8]>,
-      GraphqlxErrors<&[u8]>,
-      _,
-      GraphQLx,
-    >(type_system_document)
-    .parse_slice(bytes);
-  match parsed {
-    Ok(document) => Some(document),
-    Err(errors) => {
-      for error in errors.iter() {
-        reporter.report(syntax(error, source));
-      }
+  let mut sink = Syntax::new(reporter, source);
+  match Syntactic::new().type_system_document(bytes, &mut sink) {
+    Ok(parsed) => Some(parsed.into_components().0),
+    Err(_) => {
+      sink.unread();
       None
     }
+  }
+}
+
+/// Where a layer lends a file's syntax errors: each one becomes a diagnostic at the file, in the
+/// analysis's one list, and marks nothing.
+struct Syntax<'r> {
+  reporter: &'r mut Reporter,
+  source: SourceId,
+  /// How many errors the layer lent.
+  lent: usize,
+}
+
+impl<'r> Syntax<'r> {
+  /// The sink for the file `source`, reporting into `reporter`.
+  fn new(reporter: &'r mut Reporter, source: SourceId) -> Self {
+    Self {
+      reporter,
+      source,
+      lent: 0,
+    }
+  }
+
+  /// The layer answered no document for the file. When it lent no error either, reports at the
+  /// whole file that the file could not be read as a document, so that a file with no document
+  /// always has a diagnostic.
+  fn unread(self) {
+    if self.lent > 0 {
+      return;
+    }
+    let kind = DiagnosticKind::ResourceLimit;
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), Location::entire(self.source.get()))
+        .severity(kind.severity())
+        .message("the file could not be read as a document")
+        .primary_label(kind.title())
+        .help("supply the file in a form the parser can read: a shorter text")
+        .build(),
+    );
+  }
+}
+
+/// The adapter is sized in `E`: it hands each error on as `&dyn Diagnose`, which is the one
+/// conversion the analysis compiles, whatever the layer.
+impl<E: Diagnose> Report<E> for Syntax<'_> {
+  fn error(&mut self, error: &E) -> ControlFlow<()> {
+    self.lent = self.lent.saturating_add(1);
+    self.reporter.report_syntax(syntax(error, self.source));
+    ControlFlow::Continue(())
   }
 }
 

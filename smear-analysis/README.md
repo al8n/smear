@@ -27,6 +27,9 @@ one for each schema item, its description, its roots, written or presumed, and i
 It resolves every module's `use` items too, globs and string sources included, against scopes that
 end with the prelude and the packages each package may reach. The built-in packages, `core`,
 `alloc` and `std`, are one embedded GraphQLx file each, parsed on every analysis.
+`graphqlx::analyze_with` is the same analysis with the parser layer the caller passes, such as
+`smear-parser`'s lossless layer, which recovers, so the well-formed rest of a broken file is
+analyzed, and it answers `Trees` beside the `Analysis`: what that layer kept for each file it read.
 
 Rules are visitors. A `graphqlx::Visitor` implements the hooks it needs, one for each entity a walk
 enters, leaves or reaches, and `graphqlx::visit` walks an analysis's model for it over the packages
@@ -40,8 +43,8 @@ own definitions alone, an extension of another package's being
 `smear::graphqlx::orphan-extension`, but for the directives the root package adds to a definition
 of `core`, `alloc` or `std`. An error that a phase or a rule reports marks the contributions,
 members and definitions that hold it, as their `has_errors()` says, whether the diagnostic ceiling
-keeps it or not. A consumer's walk marks nothing, answers its own diagnostics under the same
-ceiling, and holds memory bounded by it.
+keeps it or not. A syntax error marks nothing. A consumer's walk marks nothing, answers its own
+diagnostics under the same ceiling, and holds memory bounded by it.
 
 ## Feature flags
 

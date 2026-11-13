@@ -427,6 +427,24 @@ const _: () = assert!(
    `with_max_nesting_depth` clamps the one use case it exists for."
 );
 
+// What each lexer state weighs, relative to tokora's own trackers so that it holds on every
+// target. tokora clones the state once for every token it caches, so a word added here is a word
+// per cached token. The syntactic lexers' state is the bracket tally and nothing else: the
+// lossless brace count costs them nothing, and a field added to the wrong type fails this.
+const _: () = assert!(
+  core::mem::size_of::<SyntacticLimits>() == core::mem::size_of::<RecursionLimiter>(),
+  "SyntacticLimits must stay exactly a RecursionLimiter: it is the state every syntactic token \
+   carries."
+);
+
+// The lossless state is the combined tracker and two words: the brace count and the durable
+// produce-event ceiling.
+const _: () = assert!(
+  core::mem::size_of::<LosslessLimits>()
+    == core::mem::size_of::<Limiter>() + 2 * core::mem::size_of::<usize>(),
+  "LosslessLimits must stay a Limiter and two words: every cached lossless token carries a copy."
+);
+
 /// The budget a **syntactic** lex runs under: nesting depth, and nothing else.
 ///
 /// This is [`Lexer::State`](tokora::Lexer::State) for
@@ -602,10 +620,34 @@ impl State for SyntacticLimits {
 /// assert_eq!(limits.max_tokens(), 1_000);
 /// assert_eq!(limits.max_produce_events(), 8_000);
 /// ```
+///
+/// # One count that is no budget
+///
+/// [`brace_depth`](Self::brace_depth) is a third value in the rewindable state, beside the two
+/// tallies: how many `{` are open at the state's position. It has no ceiling and nothing refuses
+/// on it. It is here because the state is what a recovery scan restores when it finds nothing and
+/// rewinds, and what the lexer resumes from, so a count kept anywhere else would count a brace
+/// twice across a rewind. The bracket tally cannot stand in for it: that one is pair-blind over
+/// every opener and closer, and a parser that asks which `}` ends a block needs braces alone.
+/// Every constructor starts it at zero, and a lossless door starts from the state it is given, so
+/// a state copied from a running lexer brings that lexer's count, and its tallies, with it.
+///
+/// # The records a parse keeps
+///
+/// A lossless parse records every error it finds, and by default nothing bounds how many: a text
+/// dense with errors is recorded error for error, so its records are bounded only by its size.
+/// For untrusted text the bound is the caller's own
+/// [`with_max_produce_events`](Self::with_max_produce_events): the records a parse keeps are a
+/// bounded multiple of the produce-events it may spend. A multiple and not one each, because a
+/// lexer error is one event and a recovery skips at least one token, but a report that consumes
+/// nothing can follow another at the same token, as a missing name and then a missing body do,
+/// as often as the grammar's nesting allows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LosslessLimits {
   /// The lexer's own two tallies: the rewindable token count and the bracket depth.
   limiter: Limiter,
+  /// How many `{` are open at this state's position — see [`brace_depth`](Self::brace_depth).
+  braces: usize,
   /// The **durable** produce-event ceiling a lossless parse door installs on the input.
   ///
   /// Configuration only: nothing here ever charges it. The cell it configures is tokora's
@@ -630,6 +672,7 @@ impl LosslessLimits {
         TokenLimiter::new(),
         RecursionLimiter::with_limitation(MAX_NESTING_DEPTH),
       ),
+      braces: 0,
       produce_events: usize::MAX,
     }
   }
@@ -639,6 +682,7 @@ impl LosslessLimits {
   pub const fn with_max_nesting_depth(max: usize) -> Self {
     Self {
       limiter: Limiter::with_trackers(TokenLimiter::new(), RecursionLimiter::with_limitation(max)),
+      braces: 0,
       produce_events: usize::MAX,
     }
   }
@@ -655,6 +699,7 @@ impl LosslessLimits {
   pub const fn unlimited() -> Self {
     Self {
       limiter: Limiter::with_trackers(TokenLimiter::new(), RecursionLimiter::unlimited()),
+      braces: 0,
       produce_events: usize::MAX,
     }
   }
@@ -672,6 +717,7 @@ impl LosslessLimits {
         TokenLimiter::with_limitation(max),
         *self.limiter.recursion(),
       ),
+      braces: self.braces,
       produce_events: self.produce_events,
     }
   }
@@ -691,6 +737,7 @@ impl LosslessLimits {
   pub const fn with_max_produce_events(self, max: usize) -> Self {
     Self {
       limiter: self.limiter,
+      braces: self.braces,
       produce_events: max,
     }
   }
@@ -762,9 +809,12 @@ impl LosslessLimits {
   ///
   /// Every lossless lexeme charges this tally before its rule runs, so the unit is the lexeme the
   /// scanner *tried* rather than the token it managed to produce. Rules reach the charge through
-  /// the five hooks in `smear-lexer`'s `handlers` module; input **no** rule matches reaches it
-  /// through `cst_default_error`, the logos `error(…)` callback, which is a charge route and not a
-  /// rule. But the tally is a field of this type, this type is
+  /// six handlers in `smear-lexer`'s `handlers` module — the four `tt_hook` forms, the
+  /// opening-bracket handler and the closing-bracket one — and a `{` or a `}` reaches the last two
+  /// through `open_brace` and `close_brace`, which count the brace and charge nothing of their
+  /// own. Input **no** rule matches reaches the charge through `cst_default_error`, the logos
+  /// `error(…)` callback, which is a charge route and not a rule. But the tally is a field of this
+  /// type, this type is
   /// [`Lexer::State`](tokora::Lexer::State), and lossless recovery scans ahead through tokora's
   /// `InputRef::sync_balanced`, whose no-match exit **restores the lexer state** along with the
   /// position, the dedup watermark and the emissions. Every charge that scan made comes back with
@@ -883,6 +933,50 @@ impl LosslessLimits {
     self.limiter.recursion().depth()
   }
 
+  /// How many `{` are open at this state's position.
+  ///
+  /// Every `{` the scanner matched adds one and every `}` takes one, never below zero: a `}`
+  /// with no brace open closes nothing. A brace inside a string or a comment is part of that
+  /// lexeme and is not counted. Both dialects' lossless lexers keep it.
+  ///
+  /// It is a count and no budget, so nothing refuses on it, and [`depth`](Self::depth) is not
+  /// it: that tally steps on every bracket of every kind. It lives in the rewindable state, so a
+  /// rewind takes it back with the position. Every constructor starts it at zero, and a lossless
+  /// door starts from the state it is given: a state copied from a running lexer brings that
+  /// lexer's count with it.
+  ///
+  /// ```
+  /// use smear_lexer::limits::LosslessLimits;
+  ///
+  /// // A state that has scanned nothing has no brace open, whatever its ceilings are.
+  /// assert_eq!(LosslessLimits::default().brace_depth(), 0);
+  /// assert_eq!(LosslessLimits::unlimited().with_max_tokens(8).brace_depth(), 0);
+  /// ```
+  #[inline(always)]
+  pub const fn brace_depth(&self) -> usize {
+    self.braces
+  }
+
+  /// Counts one `{`.
+  #[cfg(all(
+    any(feature = "std", feature = "alloc"),
+    any(feature = "graphql", feature = "graphqlx")
+  ))]
+  #[inline(always)]
+  pub(crate) const fn increase_brace_depth(&mut self) {
+    self.braces = self.braces.saturating_add(1);
+  }
+
+  /// Counts one `}`, which closes nothing when no brace is open.
+  #[cfg(all(
+    any(feature = "std", feature = "alloc"),
+    any(feature = "graphql", feature = "graphqlx")
+  ))]
+  #[inline(always)]
+  pub(crate) const fn decrease_brace_depth(&mut self) {
+    self.braces = self.braces.saturating_sub(1);
+  }
+
   /// The token half, for the handlers that step it.
   #[inline(always)]
   pub const fn token(&self) -> &TokenLimiter {
@@ -919,7 +1013,8 @@ impl LosslessLimits {
 /// [`max_produce_events`](LosslessLimits::max_produce_events) is seeded at `usize::MAX`, which is
 /// the documented default and tokora's own sentinel for *no ceiling* — so this is a total
 /// widening rather than a lossy one: a `Limiter` never held that number and this conversion
-/// invents nothing.
+/// invents nothing. [`brace_depth`](LosslessLimits::brace_depth) starts at zero, as it does in
+/// every constructor: a `Limiter` holds no brace count either.
 ///
 /// # Its partner is gone, and that is smear issue #193 round 2
 ///
@@ -965,6 +1060,7 @@ impl From<Limiter> for LosslessLimits {
   fn from(limiter: Limiter) -> Self {
     Self {
       limiter,
+      braces: 0,
       produce_events: usize::MAX,
     }
   }

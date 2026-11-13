@@ -347,7 +347,18 @@ impl Corpus {
       // That is the NEGATIVE direction of `|delta| <= refusals`, and it holds here: 925 <= 2 311.
       // `prefixes` — 9 300 truncations, the largest recovery population — did not move at all.
       Self::Perturbed => "7b5bd604e35cc8b3f93ebff09e07602773931cfc1358f1550c6fd732735bbe54",
-      Self::Malformed => "2b5f293717f54346007f48459a2f0bd8cde76ea9344a56fb4010599296dab1c7",
+      // Re-blessed when lossless recovery came to leave a closer to the block it closes. Four of
+      // the twenty-four entries move, and each for that reason: `bad_type` (a type missing in
+      // front of the variables' `)`), `bad_escape_in_string` and `number_garbage` (a value missing
+      // in front of the arguments' `)`, the string and the number being one error lexeme each,
+      // which no token comes of), and `unclosed_paren_then_brace` (an argument list that meets the
+      // selection set's `}`). Before, the closer went into an `Error` node and every token after
+      // it was the list's junk, to the end of the text; now it is reported once and left to the
+      // list or the block it closes, and what follows parses whole, so the tree keeps its closers
+      // and loses its `Error` nodes, and the diagnostics fall to one per mistake beside the
+      // lexer's own. The other twenty meet neither rule. `clean`, `perturbed` and `prefixes` did
+      // not move.
+      Self::Malformed => "3f76b3ea8a7c6e5230d9d40de261ef82ecd934978e9f167dfa32f4350b2b0aca",
       Self::Prefixes => "ab57d222a70151c1473072cb5b0d949719cc5c9958e0bd03fb1db96e9db30858",
     }
   }
