@@ -149,7 +149,10 @@ pub enum DiagnosticKind {
   /// an extension of another supplied package's type or directive is refused. A definition of
   /// `core`, `alloc` or `std`, a GraphQL built-in the root package replaces among them, is
   /// extended by the root package alone, and only with directives. Reported at the extension's
-  /// target path, with a label at the definition's name when the definition has a position.
+  /// target path, with a label at the definition's name when the definition has a position. The
+  /// root package's extension that adds more than directives to one of GraphQL's introspection
+  /// types, `__Type` and the seven others, is refused the same way under GraphQL's own code,
+  /// `smear::schema::introspection-type-extension`, as GraphQL refuses it.
   ///
   /// Nor may those directives say what the built-in is: in the root package's extension of a
   /// built-in it did not write, each application of `core`'s `@marker`, `@set` or `@map` is
@@ -424,4 +427,9 @@ pub(crate) mod schema {
   /// `DuplicateSchemaDefinition`.
   pub(crate) const DUPLICATE_SCHEMA_DEFINITION: Code =
     Code::new("smear::schema::duplicate-schema-definition");
+
+  /// The root package's extension adds more than directives to an introspection type:
+  /// `smear-schema`'s `IntrospectionTypeExtension`.
+  pub(crate) const INTROSPECTION_TYPE_EXTENSION: Code =
+    Code::new("smear::schema::introspection-type-extension");
 }

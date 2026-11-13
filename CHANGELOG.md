@@ -280,9 +280,12 @@ All notable changes to Smear are documented in this file.
   package defines is the new `smear::graphqlx::orphan-extension`, at its target path, with a
   label at the definition's name; and so is an extension of a definition of `core`, `alloc` or
   `std`, a GraphQL built-in the root package replaces among them, unless the root package writes it
-  and it adds directives and nothing else; in the root package's extension of a built-in it did not
-  write, each application of `core`'s `@marker`, `@set` or `@map` is `orphan-extension` too, at its
-  path, since what a built-in is is the language's to say. And an enum takes no type parameter: an
+  and it adds directives and nothing else, though the root package's that adds more to one of
+  GraphQL's introspection types keeps GraphQL's own code,
+  `smear::schema::introspection-type-extension`; in the root package's extension of a built-in it
+  did not write, each application of `core`'s `@marker`, `@set` or `@map` is `orphan-extension`
+  too, at its path, since what a built-in is is the language's to say. And an enum takes no type
+  parameter: an
   enum that declares one is the new `smear::graphqlx::generic-enum`, at its first type parameter's
   name, and each use of it is still typed. And a marker is used as a marker: one that declares a
   field, once, at the first its own package wrote; one named anywhere but as the outermost type of

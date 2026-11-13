@@ -88,7 +88,9 @@
 //! directive is `smear::graphqlx::orphan-extension`, and so is an extension of a definition of
 //! `core`, `alloc` or `std`, unless the root package writes it and it adds directives and nothing
 //! else, none of them `core`'s `@marker`, `@set` or `@map` unless it wrote the definition, a
-//! built-in it replaces. And an enum takes no type parameter: an enum that declares one is
+//! built-in it replaces; the root package's extension that adds more to one of GraphQL's
+//! introspection types keeps GraphQL's code, `smear::schema::introspection-type-extension`. And
+//! an enum takes no type parameter: an enum that declares one is
 //! `smear::graphqlx::generic-enum`, at its first type parameter's name. And a marker is used as a
 //! marker: one that declares a field, one named anywhere but as the outermost type of an
 //! `implements` entry or of a bound, and an `implements` entry of a scalar, an enum, an input

@@ -287,7 +287,10 @@ rule_set! {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
     schema_outside_root: SchemaOutsideRoot => [super::DiagnosticKind::SchemaOutsideRoot.code()],
-    orphan_extension: OrphanExtension => [super::DiagnosticKind::OrphanExtension.code()],
+    orphan_extension: OrphanExtension => [
+      super::DiagnosticKind::OrphanExtension.code(),
+      super::code::schema::INTROSPECTION_TYPE_EXTENSION,
+    ],
     generic_enum: GenericEnum => [super::DiagnosticKind::GenericEnum.code()],
     marker_misuse: MarkerMisuse => [super::DiagnosticKind::MarkerMisuse.code()],
     collection_arity: CollectionArity => [super::DiagnosticKind::CollectionArity.code()],

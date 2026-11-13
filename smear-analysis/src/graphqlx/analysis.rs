@@ -233,7 +233,9 @@ impl Analysis {
 ///   `orphan-extension`, at its target path, with a label at the definition's name; and so is an
 ///   extension of a definition of `core`, `alloc` or `std`, a GraphQL built-in the root package
 ///   replaces among them, unless the root package writes it and it adds directives and nothing
-///   else. In the root package's extension of a built-in it did not write, each application of
+///   else; the root package's that adds more to one of GraphQL's introspection types is GraphQL's
+///   own `introspection-type-extension`, at the same place and with the same label. In the root
+///   package's extension of a built-in it did not write, each application of
 ///   `core`'s `@marker`, `@set` or `@map` is `orphan-extension` too, at its path: what a built-in
 ///   is is the language's to say. An enum that declares a type parameter is `generic-enum`, at its
 ///   first type parameter's name. A marker that declares a field is `marker-misuse`, once, at the

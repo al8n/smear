@@ -31,6 +31,10 @@ const OUTSIDE: &str = "smear::graphqlx::schema-outside-root";
 /// The code for an extension of a definition its package may not extend.
 const ORPHAN: &str = "smear::graphqlx::orphan-extension";
 
+/// GraphQL's code for the root package's extension that adds more than directives to an
+/// introspection type, which the analyzer shares.
+const INTROSPECTION: &str = "smear::schema::introspection-type-extension";
+
 /// The code for an enum that declares a type parameter.
 const GENERIC_ENUM: &str = "smear::graphqlx::generic-enum";
 
@@ -70,6 +74,16 @@ const NOT_EVEN_THE_ROOT: &str = "only the root package extends a definition of `
 const MORE_THAN_DIRECTIVES: &str = "an extension of a definition of `core`, `alloc` or `std` adds \
                                     directives and nothing else: remove what this one adds beside \
                                     them";
+
+/// What GraphQL's own refusal tells the root package when it adds more than directives to an
+/// introspection type: `smear-schema`'s help, word for word.
+const INTROSPECTION_HELP: &str = "an extension may add directives to an introspection type and \
+                                  nothing else; the `__`-prefixed types are the introspection \
+                                  system the specification defines.";
+
+/// The primary label of GraphQL's own refusal of an extension that adds more than directives to an
+/// introspection type: `smear-schema`'s phrase, word for word.
+const INTROSPECTION_LABEL: &str = "introspection type extension adds more than directives";
 
 /// What the orphan rule tells the root package when its extension of a built-in applies `@marker`,
 /// `@set` or `@map`.
@@ -627,7 +641,8 @@ fn the_root_adds_directives_to_a_built_in() {
 fn the_root_adding_more_than_directives_to_a_built_in_is_an_orphan() {
   // An enum value to `Tier`, a field to `__Type`, and an `implements` entry to a scalar: to
   // `alloc`'s `string`; to `i32`, which has no position for a label to point at; and to `f64`,
-  // which the root package's own `Float` replaces.
+  // which the root package's own `Float` replaces. GraphQL refuses the field on `__Type` itself,
+  // and that refusal keeps GraphQL's code, message, label and help, at the same place.
   let text = "interface Marked @marker\n\
               extend enum Tier {\n  EXTRA\n}\n\
               extend type __Type {\n  extra: Int\n}\n\
@@ -643,7 +658,7 @@ fn the_root_adding_more_than_directives_to_a_built_in_is_an_orphan() {
     [
       (ORPHAN, at(schema, text, "Tier", 0), named("^::core::Tier")),
       (
-        ORPHAN,
+        INTROSPECTION,
         at(schema, text, "__Type", 0),
         named("^::core::__Type")
       ),
@@ -675,7 +690,7 @@ fn the_root_adding_more_than_directives_to_a_built_in_is_an_orphan() {
     messages(&analysis),
     [
       more("Tier", "core"),
-      more("__Type", "core"),
+      "this extension adds more than directives to the introspection type `__Type`".to_owned(),
       more("string", "alloc"),
       more("i32", "core"),
       more("f64", "core"),
@@ -687,15 +702,160 @@ fn the_root_adding_more_than_directives_to_a_built_in_is_an_orphan() {
     helps(&analysis),
     [
       Some(MORE_THAN_DIRECTIVES),
-      Some(MORE_THAN_DIRECTIVES),
+      Some(INTROSPECTION_HELP),
       Some(MORE_THAN_DIRECTIVES),
       Some(MORE_THAN_DIRECTIVES),
       Some(MORE_THAN_DIRECTIVES_TO_ITS_OWN),
     ]
   );
   for diagnostic in analysis.diagnostics() {
+    // GraphQL's own refusal has GraphQL's label.
+    if diagnostic.code() == Code::new(INTROSPECTION) {
+      assert_eq!(diagnostic.primary_label(), Some(INTROSPECTION_LABEL));
+      continue;
+    }
     assert_eq!(diagnostic.primary_label(), Some("orphan extension"));
   }
+}
+
+#[test]
+fn the_roots_extension_of_a_meta_type_keeps_graphqls_code() {
+  // A field on `__Type`, an enum value on `__TypeKind` and an `implements` entry on `__Schema`:
+  // each is GraphQL's own refusal, at the extension's target, labelled at the meta-type's name.
+  // `__Schema` has the one field `Face` declares, so the entry would be no other mistake.
+  let text = "type Query {\n  ok: Int\n}\ninterface Face {\n  description: String\n}\n\
+              extend type __Type {\n  extra: Int\n}\n\
+              extend enum __TypeKind {\n  EXTRA\n}\n\
+              extend type __Schema implements Face\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  let named = |name: &str| -> Option<Location> { Some(model.def(def(model, name)).location()) };
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        INTROSPECTION,
+        at(schema, text, "__Type", 0),
+        named("^::core::__Type")
+      ),
+      (
+        INTROSPECTION,
+        at(schema, text, "__TypeKind", 0),
+        named("^::core::__TypeKind")
+      ),
+      (
+        INTROSPECTION,
+        at(schema, text, "__Schema", 0),
+        named("^::core::__Schema")
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "this extension adds more than directives to the introspection type `__Type`",
+      "this extension adds more than directives to the introspection type `__TypeKind`",
+      "this extension adds more than directives to the introspection type `__Schema`",
+    ]
+  );
+  assert_eq!(helps(&analysis), [Some(INTROSPECTION_HELP); 3]);
+  for diagnostic in analysis.diagnostics() {
+    assert_eq!(diagnostic.primary_label(), Some(INTROSPECTION_LABEL));
+    assert_eq!(
+      diagnostic.label(0).map(|label| label.text()),
+      Some("the definition it extends")
+    );
+  }
+
+  // A directive alone is no refusal of either kind.
+  let analysis =
+    analyze_one("type Query {\n  ok: Int\n}\ndirective @x on OBJECT\nextend type __Type @x\n");
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // The same three written by a dependency are the orphan rule's, whatever they add.
+  let ours = "type Query {\n  ok: Int\n}\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let theirs = "interface Face {\n  description: String\n}\n\
+                extend type __Type {\n  extra: Int\n}\n\
+                extend enum __TypeKind {\n  EXTRA\n}\n\
+                extend type __Schema implements Face\n";
+  let dep = package("dep", Layout::Flat, &[("dep.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  let dep_file = file(&analysis, 4, "dep.graphqlx");
+  let model = analysis.model();
+  let named = |name: &str| -> Option<Location> { Some(model.def(def(model, name)).location()) };
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        ORPHAN,
+        at(dep_file, theirs, "__Type", 0),
+        named("^::core::__Type")
+      ),
+      (
+        ORPHAN,
+        at(dep_file, theirs, "__TypeKind", 0),
+        named("^::core::__TypeKind")
+      ),
+      (
+        ORPHAN,
+        at(dep_file, theirs, "__Schema", 0),
+        named("^::core::__Schema")
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A built-in that is no meta-type is the orphan rule's, from the root package too.
+  let text = "type Query {\n  ok: Int\n}\nextend enum Tier {\n  EXTRA\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  assert_eq!(
+    found(&analysis),
+    [(
+      ORPHAN,
+      at(schema, text, "Tier", 0),
+      Some(model.def(def(model, "^::core::Tier")).location())
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A dependency's own type named as GraphQL names its introspection types is no meta-type: the
+  // name is reserved where it is defined, and the root package's extension of it is an orphan.
+  let ours = "type Query {\n  ok: Int\n}\nextend type ^::dep::__Mine {\n  b: Int\n}\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let theirs = "type __Mine {\n  a: Int\n}\n";
+  let dep = package("dep", Layout::Flat, &[("dep.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  let schema = schema_file(&analysis);
+  let dep_file = file(&analysis, 4, "dep.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        ORPHAN,
+        at(schema, ours, "^::dep::__Mine", 0),
+        Some(at(dep_file, theirs, "__Mine", 0))
+      ),
+      (
+        "smear::schema::reserved-type-name",
+        at(dep_file, theirs, "__Mine", 0),
+        None
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
 }
 
 #[test]
@@ -1255,6 +1415,7 @@ const FIXTURES: &[(Code, Fixture)] = &[
   (Code::new(DUPLICATE), two_schema_definitions),
   (Code::new(OUTSIDE), a_dependencys_schema_definition),
   (Code::new(ORPHAN), an_extension_of_a_dependencys_type),
+  (Code::new(INTROSPECTION), a_field_added_to_a_meta_type),
   (Code::new(GENERIC_ENUM), a_generic_enum),
   (Code::new(MARKER_MISUSE), a_marker_as_a_fields_type),
   (Code::new(COLLECTION_ARITY), a_set_of_two_type_parameters),
@@ -1309,6 +1470,11 @@ fn an_extension_of_a_dependencys_type() -> Analysis {
     &[("geo.graphqlx", "type Point {\n  x: Int\n}\n")],
   );
   analyze(&root, &[geo], &Limits::new())
+}
+
+/// A root package that adds a field to `__Type`: `smear-schema`'s fixture for the kind.
+fn a_field_added_to_a_meta_type() -> Analysis {
+  analyze_one("type Query { ok: Int } extend type __Type { extra: Int }")
 }
 
 /// A root package that declares an enum with a type parameter.

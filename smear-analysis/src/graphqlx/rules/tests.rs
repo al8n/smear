@@ -90,7 +90,10 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   assert_eq!(table[2].0, "OrphanExtension");
   assert_eq!(
     table[2].1,
-    &[Code::new("smear::graphqlx::orphan-extension")]
+    &[
+      Code::new("smear::graphqlx::orphan-extension"),
+      Code::new("smear::schema::introspection-type-extension"),
+    ]
   );
   assert_eq!(table[3].0, "GenericEnum");
   assert_eq!(table[3].1, &[Code::new("smear::graphqlx::generic-enum")]);
