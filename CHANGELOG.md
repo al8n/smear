@@ -407,7 +407,7 @@ All notable changes to Smear are documented in this file.
   (#251).
 - `smear-schema`: `SchemaErrorKind::UnreadableText` is no longer reachable from
   a parsed document. The kind is kept.
-- Builds on tokora 0.13 and smol-bytes 0.2. Paths through the
+- Builds on tokora 0.13.1 and smol-bytes 0.2. Paths through the
   `smear::lexer::tokora` re-export follow the layout tokora adopted in 0.12. The
   `smol-bytes` feature of `smear`, `smear-lexer` and `smear-parser` now enables
   tokora's `smol-bytes_0_2` integration instead of `smol_bytes_0_1`, so the four
