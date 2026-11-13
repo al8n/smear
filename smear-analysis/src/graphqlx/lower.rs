@@ -1877,6 +1877,16 @@ impl Lowering<'_, '_> {
     );
   }
 
+  /// What a message writes before the name of `def`: `@` for a directive, as every message quotes
+  /// one, and nothing for a type.
+  fn sigil(&self, def: DefId) -> &'static str {
+    if self.builder.def_kind(def) == Some(DefKind::Directive) {
+      "@"
+    } else {
+      ""
+    }
+  }
+
   /// Reports the type parameter list written at `at` on `name`, the definition `def` that replaces
   /// a GraphQL built-in: the built-in keeps its identity, which has no type parameter. A directive
   /// is quoted with its `@`, as every message quotes one.
@@ -1888,11 +1898,7 @@ impl Lowering<'_, '_> {
   ) {
     let kind = DiagnosticKind::GenericArity;
     let written: &[u8] = name.name().source().as_ref();
-    let sigil = if self.builder.def_kind(def) == Some(DefKind::Directive) {
-      "@"
-    } else {
-      ""
-    };
+    let sigil = self.sigil(def);
     self.reporter.report(
       Diagnostic::builder(kind.code(), at)
         .severity(kind.severity())
@@ -1908,15 +1914,16 @@ impl Lowering<'_, '_> {
   }
 
   /// Reports the parameter list written at `at` on an extension of `def`, which names `written`
-  /// type parameters where `def` has `count`.
+  /// type parameters where `def` has `count`. A directive is quoted with its `@`.
   fn extension_arity(&mut self, def: DefId, at: Location, written: u32, count: u32) {
     let kind = DiagnosticKind::GenericArity;
     let definition = self.builder.def_location(def);
+    let sigil = self.sigil(def);
     let mut report = Diagnostic::builder(kind.code(), at)
       .severity(kind.severity())
       .message(format!(
-        "an extension's list names its target's type parameters by position, one name each: `{}` \
-         has {count}, and this list names {written}",
+        "an extension's list names its target's type parameters by position, one name each: \
+         `{sigil}{}` has {count}, and this list names {written}",
         Excerpt(self.builder.def_name(def))
       ))
       .primary_label("wrong number of type parameters named")

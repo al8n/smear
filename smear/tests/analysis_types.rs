@@ -296,6 +296,28 @@ fn an_extension_that_writes_a_list_writes_its_targets_count() {
     model.ty(model.type_expr(third).ty()).kind(),
     TyKind::Unresolved
   );
+
+  // A directive's extension that writes a list of another count, labelled at the directive's
+  // name, which the message quotes with its `@`, as every message quotes one.
+  let text = "directive @x on DIRECTIVE_DEFINITION\ndirective @tag<T> on OBJECT\n\
+              extend directive @tag<A, B> @x\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  let tag = model
+    .def(def(model, Namespace::Directive, "@^::app::tag"))
+    .location();
+  assert_eq!(
+    found(&analysis),
+    [(ARITY, at(schema, text, "<A, B>", 0), Some(tag))]
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "an extension's list names its target's type parameters by position, one name each: `@tag` \
+       has 1, and this list names 2"
+    ]
+  );
 }
 
 #[test]
@@ -1257,8 +1279,8 @@ fn too_many_and_too_few_arguments_are_refused_where_they_are_written() {
   assert_eq!(
     messages(&analysis),
     [
-      "`Page` takes 1 to 2 type arguments, and 3 are written",
-      "`Page` takes 1 to 2 type arguments, and 0 are written",
+      "`Page` takes at most 2 type arguments, and 3 are written",
+      "`Page` takes at least 1 type argument, and 0 are written",
     ]
   );
   // Each refused occurrence is unresolved and marks its member and the contribution; its sibling
@@ -1282,27 +1304,54 @@ fn too_many_and_too_few_arguments_are_refused_where_they_are_written() {
 
 #[test]
 fn a_count_says_what_the_definition_takes() {
-  // A definition of no type parameter, one that takes every type argument it has, one that takes
-  // a range, and a directive; one type argument written, and several.
+  // A count says the side of it that failed: a definition of no type parameter; one that takes
+  // every type argument it has, a directive among them; and two that take fewer than they have,
+  // written with too many and with too few. `R`'s `B` and `C` need each other, so `R<Int>` cannot
+  // be filled either, and `R` takes at least one type argument, not one to three.
   let text = "scalar Plain\nscalar Pair<A, B>\nscalar Page<T, C = Int>\n\
-              directive @tag<T> on OBJECT\n\
+              scalar R<A, B = C, C = B>\ndirective @tag<T> on OBJECT\n\
               type Query @tag<Int, Int> {\n  a: Plain<Int>\n  b: Pair<Int>\n  \
-              c: Page<Int, Int, Int>\n}\n";
+              c: Page<Int, Int, Int>\n  r: R\n}\n";
   let analysis = analyze_one(text);
   assert_eq!(
     messages(&analysis),
     [
+      "the default of `B` can never fill: a use that leaves `B` out leaves out the whole group of \
+       type parameters whose defaults need each other",
       "`@tag` takes 1 type argument, and 2 are written",
       "`Plain` takes no type argument, and 1 is written",
       "`Pair` takes 2 type arguments, and 1 is written",
-      "`Page` takes 1 to 2 type arguments, and 3 are written",
+      "`Page` takes at most 2 type arguments, and 3 are written",
+      "`R` takes at least 1 type argument, and 0 are written",
     ]
   );
   let codes: Vec<&str> = found(&analysis)
     .into_iter()
     .map(|(code, _, _): (&'static str, Location, Option<Location>)| code)
     .collect();
-  assert_eq!(codes, [ARITY, ARITY, ARITY, ARITY]);
+  assert_eq!(codes, [DEFAULT, ARITY, ARITY, ARITY, ARITY, ARITY]);
+  // What takes no type argument is told to remove them; every other count, to write one for each
+  // type parameter.
+  let count = "write a type argument for each type parameter, leaving out only trailing defaulted \
+               ones";
+  let helps: Vec<Option<&str>> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.help())
+    .collect();
+  assert_eq!(
+    helps,
+    [
+      Some(
+        "give this type parameter no default, and none to the type parameters written before it"
+      ),
+      Some(count),
+      Some("remove the type arguments"),
+      Some(count),
+      Some(count),
+      Some(count),
+    ]
+  );
 }
 
 #[test]
@@ -1343,8 +1392,8 @@ fn a_directives_type_arguments_are_counted() {
   assert_eq!(
     messages(&analysis),
     [
-      "`@tag` takes 1 to 2 type arguments, and 3 are written",
-      "`@tag` takes 1 to 2 type arguments, and 0 are written",
+      "`@tag` takes at most 2 type arguments, and 3 are written",
+      "`@tag` takes at least 1 type argument, and 0 are written",
     ]
   );
 }

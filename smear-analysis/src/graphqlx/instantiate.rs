@@ -531,7 +531,7 @@ fn groups(
   }
 }
 
-/// What a type argument count's report tells its author.
+/// What a count of type arguments tells its author, of a definition that has a type parameter.
 const COUNT_HELP: &str =
   "write a type argument for each type parameter, leaving out only trailing defaulted ones";
 
@@ -1371,9 +1371,9 @@ impl Typing<'_> {
       let count = self.builder.type_param_count(directive);
       let least = self.least(directive);
       if written > count || written < least {
-        let message = counted("@", self.builder.def_name(directive), count, least, written);
+        let (message, help) = counted("@", self.builder.def_name(directive), count, least, written);
         let defined = self.builder.def_location(directive);
-        self.report_arity(at, message, defined);
+        self.report_arity(at, message, help, defined);
       }
     }
   }
@@ -1381,20 +1381,20 @@ impl Typing<'_> {
   /// Reports a count of type arguments, written as `seen` says, that `def`, with `count` type
   /// parameters of which every one from `least` on has a default, does not take.
   fn report_count(&mut self, seen: Seen, def: DefId, count: u32, least: u32) {
-    let message = counted("", self.builder.def_name(def), count, least, seen.args);
+    let (message, help) = counted("", self.builder.def_name(def), count, least, seen.args);
     let defined = self.builder.def_location(def);
-    self.report_arity(seen.location, message, defined);
+    self.report_arity(seen.location, message, help, defined);
   }
 
-  /// Reports `generic-arity` at `at`, saying `message`, with a label at `defined`, the definition's
-  /// name, when it has a position.
-  fn report_arity(&mut self, at: Location, message: String, defined: Location) {
+  /// Reports `generic-arity` at `at`, saying `message` with `help`, with a label at `defined`, the
+  /// definition's name, when it has a position.
+  fn report_arity(&mut self, at: Location, message: String, help: &'static str, defined: Location) {
     let kind = DiagnosticKind::GenericArity;
     let mut report = Diagnostic::builder(kind.code(), at)
       .severity(kind.severity())
       .message(message)
       .primary_label(kind.title())
-      .help(COUNT_HELP);
+      .help(help);
     // A primitive `core` materialises has no position of its own to point at.
     if !defined.is_entire() {
       report = report.label(defined, "defined here");
@@ -1508,25 +1508,42 @@ impl Typing<'_> {
   }
 }
 
-/// What a count of type arguments says: how many type arguments `name`, written after `sigil`,
-/// takes, which is from `least` to `count`, and how many are written. It says what the definition
-/// takes, and so is true of a definition whose defaults are not all trailing too, whose defaults
-/// before its last parameter with none can never fill.
-fn counted(sigil: &str, name: &[u8], count: u32, least: u32, written: u32) -> String {
+/// What a count of type arguments says, and its help: how many type arguments `name`, written
+/// after `sigil`, takes, and how many, `written`, are. `name` has `count` type parameters and takes
+/// at least `least`, so `written` is above `count` or below `least`, and the message says the side
+/// of the count that failed: "at most" or "at least" where the two differ, and the one number
+/// where they are one. Each is true however the definition's defaults are written, where a range
+/// from `least` to `count` would not be: `scalar R<A, B = C, C = B>` takes at least one type
+/// argument, and a use that writes one cannot be filled either, its `B` and `C` needing each other.
+fn counted(
+  sigil: &str,
+  name: &[u8],
+  count: u32,
+  least: u32,
+  written: u32,
+) -> (String, &'static str) {
   let name = Excerpt(name);
   let verb = if written == 1 { "is" } else { "are" };
   if count == 0 {
-    return format!("`{sigil}{name}` takes no type argument, and {written} {verb} written");
-  }
-  if least < count {
-    return format!(
-      "`{sigil}{name}` takes {least} to {count} type arguments, and {written} {verb} written"
+    return (
+      format!("`{sigil}{name}` takes no type argument, and {written} {verb} written"),
+      "remove the type arguments",
     );
   }
-  let arguments = if count == 1 {
+  let (side, taken) = if least == count {
+    ("", count)
+  } else if written > count {
+    ("at most ", count)
+  } else {
+    ("at least ", least)
+  };
+  let arguments = if taken == 1 {
     "type argument"
   } else {
     "type arguments"
   };
-  format!("`{sigil}{name}` takes {count} {arguments}, and {written} {verb} written")
+  (
+    format!("`{sigil}{name}` takes {side}{taken} {arguments}, and {written} {verb} written"),
+    COUNT_HELP,
+  )
 }

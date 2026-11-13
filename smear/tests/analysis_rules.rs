@@ -729,12 +729,13 @@ fn a_dependency_extending_a_built_in_is_an_orphan() {
   );
 }
 
-/// What the orphan rule says of the root package's directive that would give `name`, a type of the
-/// built-in package `built_in`, a built-in meaning.
-fn meaning(name: &str, built_in: &str) -> String {
+/// What the orphan rule says of the root package's `@directive`, `core`'s `@marker`, `@set` or
+/// `@map`, applied to `what`, a definition of the built-in package `built_in` written as the
+/// message writes it: "type `NonZero`", "directive `@deprecated`".
+fn meaning(directive: &str, what: &str, built_in: &str) -> String {
   format!(
-    "package `app` gives the type `{name}` of the built-in package `{built_in}` a built-in \
-     meaning, which an extension cannot give"
+    "package `app` applies `@{directive}` to the {what} of the built-in package `{built_in}`, and \
+     what a built-in is cannot be changed by an extension"
   )
 }
 
@@ -772,9 +773,9 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
   assert_eq!(
     messages(&analysis),
     [
-      meaning("NonZero", "core"),
-      meaning("MapKey", "core"),
-      meaning("HashMap", "std"),
+      meaning("set", "type `NonZero`", "core"),
+      meaning("marker", "type `MapKey`", "core"),
+      meaning("set", "type `HashMap`", "std"),
     ]
   );
   assert_eq!(
@@ -819,13 +820,57 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
         "package `app` adds more than directives to the type `NonZero` of the built-in package \
          `core`"
       ),
-      meaning("NonZero", "core"),
+      meaning("set", "type `NonZero`", "core"),
     ]
   );
   assert_eq!(
     helps(&analysis),
     [Some(MORE_THAN_DIRECTIVES), Some(MEANING)]
   );
+
+  // `@set` on a directive could give it no meaning, and is refused all the same, once: what a
+  // built-in is cannot be changed by an extension, whatever the extension applies.
+  let text = "extend directive @deprecated @set\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  assert_eq!(
+    found(&analysis),
+    [(
+      ORPHAN,
+      at(schema, text, "set", 0),
+      Some(model.def(model.builtins().deprecated()).location())
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [meaning("set", "directive `@deprecated`", "core")]
+  );
+  assert_eq!(helps(&analysis), [Some(MEANING)]);
+
+  // Nor could `@marker` give a scalar one: refused once too.
+  let text = "extend scalar NonZero @marker\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  assert_eq!(
+    found(&analysis),
+    [(
+      ORPHAN,
+      at(schema, text, "marker", 0),
+      Some(model.def(model.builtins().non_zero()).location())
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [meaning("marker", "type `NonZero`", "core")]
+  );
+  assert_eq!(helps(&analysis), [Some(MEANING)]);
+  assert!(!model.def(model.builtins().non_zero()).is_marker());
 
   // `core`'s `@set` under a name a `use` item gives it is still `core`'s `@set`: the directive is
   // told by what the application resolved to.

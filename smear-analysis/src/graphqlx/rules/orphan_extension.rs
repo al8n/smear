@@ -50,8 +50,9 @@ use crate::graphqlx::{
 };
 
 /// Reports each extension of a definition that the package that wrote the extension may not
-/// extend, and each application in the root package's extension of a built-in that would give the
-/// built-in a built-in meaning.
+/// extend, and each application of `core`'s `@marker`, `@set` or `@map` in the root package's
+/// extension of a built-in it did not write, whether or not the directive could give that kind of
+/// definition a meaning.
 ///
 /// It reads a definition's contributions in the `enter_def` hook, and tells an extension from the
 /// definition's own contribution by what the model says of each, never by its place among them.
@@ -61,9 +62,9 @@ use crate::graphqlx::{
 ///
 /// It costs one visit of each contribution of each definition the walk enters, and, in the root
 /// package's extension of a built-in, one look at each application that extension writes; it keeps
-/// nothing between two walks. Its messages quote the definition's own name and the two packages'
-/// names, each as an excerpt, so each is bounded whatever the names' lengths, and none quotes a
-/// path.
+/// nothing between two walks. Its messages quote the definition's own name, the two packages'
+/// names and an applied directive's own name, each as an excerpt, so each is bounded whatever the
+/// names' lengths, and none quotes a path.
 #[derive(Default)]
 pub(super) struct OrphanExtension;
 
@@ -121,11 +122,15 @@ impl Visitor for OrphanExtension {
             if !meanings.contains(&directive) {
               continue;
             }
+            // Whether the directive could give this kind of definition a meaning or not: it is
+            // refused on every built-in.
+            let spelled = Excerpt(model.def(directive).name().as_bytes());
             let mut report = Diagnostic::builder(kind.code(), applied.path_location())
               .severity(kind.severity())
               .message(format!(
-                "package `{author}` gives the {noun} `{sigil}{name}` of the built-in package \
-                 `{owner}` a built-in meaning, which an extension cannot give"
+                "package `{author}` applies `@{spelled}` to the {noun} `{sigil}{name}` of the \
+                 built-in package `{owner}`, and what a built-in is cannot be changed by an \
+                 extension"
               ))
               .primary_label(kind.title())
               .help(
