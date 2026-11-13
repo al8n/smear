@@ -10,8 +10,11 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Layout, Limits, Package, SourceFile, SourceText, Tier, analyze, analyze_with,
+    Analysis, Diagnostic, Layout, Limits, Package, SourceFile, SourceText, Tier, analyze,
+    analyze_with,
   },
+  diagnostic::Diagnose,
+  lexer::{SyntaxErrorKind, limits::SyntacticLimits},
   parser::graphqlx::{Layer, Syntactic},
 };
 
@@ -37,9 +40,30 @@ fn one_file<S>(text: S) -> Package<S> {
     .with_files([SourceFile::new("schema.graphqlx", text)])
 }
 
+/// The depth of `layers_bounds.rs`'s nested text, past the default nesting ceiling of 24.
+const DEPTH: usize = 30;
+
+/// A ceiling the nested text is within.
+const RAISED: usize = 48;
+
+/// `layers_bounds.rs`'s `nested(30)`: a field's type nested `DEPTH` lists deep, between two
+/// scalars.
+fn nested() -> String {
+  format!(
+    "scalar A\ntype T {{ f: {}Int{} }}\nscalar Z\n",
+    "[".repeat(DEPTH),
+    "]".repeat(DEPTH)
+  )
+}
+
 /// `analyze` is `analyze_with` over the syntactic layer at its default limits, with what the layer
 /// kept dropped: over every package set written by hand, the three rules' fixtures among them, a
 /// set with a syntax error, and a set of byte texts.
+///
+/// And at those limits and no others: a text nested past the default nesting ceiling is refused
+/// with the resource-limit code, as the syntactic layer at its default limits refuses it, and
+/// under a raised ceiling the same text is not refused for its depth, so an `analyze` that read
+/// under other limits would part from one of the two.
 #[test]
 fn analyze_is_analyze_with_the_syntactic_layer() {
   for set in sets() {
@@ -64,6 +88,40 @@ fn analyze_is_analyze_with_the_syntactic_layer() {
   assert!(!alone.is_ok(), "the stray `}}` is refused");
   let with = analysis(&Syntactic::new(), &bytes, &[]);
   assert!(alone == with, "byte texts: {}", differ(&alone, &with));
+
+  let text = nested();
+  let deep = one_file(text.as_str());
+  let alone = analyze(&deep, &[], &Limits::new());
+  assert!(
+    too_deep(&alone),
+    "nested {DEPTH} deep, the text is not refused at the default ceiling: {:#?}",
+    alone.diagnostics()
+  );
+  let with = analysis(&Syntactic::new(), &deep, &[]);
+  assert!(
+    alone == with,
+    "nested past the default ceiling: {}",
+    differ(&alone, &with)
+  );
+  let raised = analysis(
+    &Syntactic::with_limits(SyntacticLimits::with_max_nesting_depth(RAISED)),
+    &deep,
+    &[],
+  );
+  assert!(
+    !too_deep(&raised) && alone != raised,
+    "under a ceiling of {RAISED} the text answers the analysis the default ceiling does: {:#?}",
+    raised.diagnostics()
+  );
+}
+
+/// Whether `analysis` holds a diagnostic of the resource-limit code, which a tripped nesting
+/// ceiling reports.
+fn too_deep(analysis: &Analysis) -> bool {
+  analysis
+    .diagnostics()
+    .iter()
+    .any(|diagnostic: &Diagnostic| diagnostic.code() == SyntaxErrorKind::ResourceLimit.code())
 }
 
 /// What the equality of two analyses reads, shown by what it tells apart. An analysis equals a
@@ -151,7 +209,7 @@ mod lossless {
   };
 
   use super::{
-    analysis, one_file,
+    RAISED, analysis, nested, one_file,
     view::{blank, corpus, differ, sets},
   };
 
@@ -245,9 +303,10 @@ mod lossless {
   /// syntactic analysis first holds a diagnostic of that rule's code, so equal analyses are equal
   /// rule diagnostics and marks.
   ///
-  /// Then every `valid_` corpus entry as the one file of a package, and the first ten again as
-  /// byte texts: compared whole where the syntactic analysis holds no syntax diagnostic, and held
-  /// to less where it holds one, as an entry that is an operation does under the type-system root.
+  /// Then every `valid_` corpus entry as the one file of a package: compared whole where the
+  /// syntactic analysis holds no syntax diagnostic, and held to less where it holds one, as an
+  /// entry that is an operation does under the type-system root. Then the entries again as byte
+  /// texts, in name order, until ten are compared whole.
   #[test]
   fn the_two_layers_answer_one_analysis() {
     let mut sets_compared = 0usize;
@@ -296,7 +355,10 @@ mod lossless {
       }
     }
     let (mut bytes_compared, mut bytes_held) = (0usize, 0usize);
-    for (name, text) in entries.iter().take(10) {
+    for (name, text) in &entries {
+      if bytes_compared == BYTE_TEXTS {
+        break;
+      }
       if one_entry(name, &one_file(text.as_bytes())) {
         bytes_compared += 1;
       } else {
@@ -320,10 +382,16 @@ mod lossless {
       compared >= 20,
       "only {compared} valid entries were compared whole"
     );
-    // Of the first ten entries in name order, `valid_document_type_system.graphqlx` is the one
-    // that holds no operation and no fragment.
-    assert!(bytes_compared >= 1, "no byte text was compared whole");
+    // At least 20 entries were compared whole as text, and a byte text that is UTF-8 is read as
+    // that text, so the walk compares `BYTE_TEXTS` of them before it runs out.
+    assert!(
+      bytes_compared >= BYTE_TEXTS,
+      "only {bytes_compared} byte texts were compared whole"
+    );
   }
+
+  /// How many `valid_` entries T8 compares whole again as byte texts.
+  const BYTE_TEXTS: usize = 10;
 
   /// The parts of a diagnostic a syntax error is read by: its code, where it points, its message,
   /// its primary label, its help, and each label's place and text. Places are spans alone: the
@@ -540,12 +608,6 @@ mod lossless {
     );
   }
 
-  /// The depth of `layers_bounds.rs`'s nested text, past the default nesting ceiling of 24.
-  const DEPTH: usize = 30;
-
-  /// A ceiling the nested text is within.
-  const RAISED: usize = 48;
-
   /// T14: a byte text that is not UTF-8 is read by the syntactic layer at its default limits,
   /// whatever layer the analysis is given, and has no tree.
   ///
@@ -556,12 +618,7 @@ mod lossless {
   /// first through every layer, and equals what `analyze` answers.
   #[test]
   fn a_byte_text_that_is_not_utf8_is_read_under_the_default_limits() {
-    let mut bytes: Vec<u8> = format!(
-      "scalar A\ntype T {{ f: {}Int{} }}\nscalar Z\n",
-      "[".repeat(DEPTH),
-      "]".repeat(DEPTH)
-    )
-    .into_bytes();
+    let mut bytes: Vec<u8> = nested().into_bytes();
     bytes.push(0xFF);
 
     let mut lent: Vec<GraphqlxError<&[u8]>> = Vec::new();

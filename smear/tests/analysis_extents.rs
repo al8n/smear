@@ -364,9 +364,10 @@ fn what_has_no_text_of_its_own_answers_no_span() {
 }
 
 /// A contribution's extent is in its own file: an extension in another file than its definition
-/// answers that file, and so do the members it contributes. A primitive the root package's
-/// `scalar Int` replaces answers the extent of that definition, in the root's file, from its
-/// description to its last token.
+/// answers that file, and so do the members it contributes. A GraphQL built-in the root package
+/// replaces answers the extent of the root package's definition, in the root's file, from its
+/// description, or its keyword when it has none, to its last token: the primitive `i32`, which
+/// `scalar Int` replaces, and `string` and `@deprecated`, which are no primitives.
 #[test]
 fn a_contribution_answers_its_own_files_extent() {
   let files = program();
@@ -415,6 +416,34 @@ fn a_contribution_answers_its_own_files_extent() {
     extents,
     [spanning(schema, REPLACES, "\"My Int.\"", "/int\")")],
     "`i32`, which the root package's `scalar Int` replaces"
+  );
+
+  // The same sentence's other arm: a replaced built-in that is no primitive, a type and a
+  // directive.
+  let string: Vec<Location> = model
+    .def(model.builtins().string())
+    .contributions()
+    .map(|part: Contribution<'_>| part.extent())
+    .collect::<Vec<Location>>();
+  assert_eq!(
+    string,
+    [spanning(schema, REPLACES, "scalar String", "String")],
+    "`string`, which the root package's `scalar String` replaces"
+  );
+  let deprecated: Vec<Location> = model
+    .def(model.builtins().deprecated())
+    .contributions()
+    .map(|part: Contribution<'_>| part.extent())
+    .collect::<Vec<Location>>();
+  assert_eq!(
+    deprecated,
+    [spanning(
+      schema,
+      REPLACES,
+      "\"My deprecation.\"",
+      "FIELD_DEFINITION"
+    )],
+    "`@deprecated`, which the root package's described `@deprecated` replaces"
   );
 }
 
@@ -630,12 +659,22 @@ mod lossless {
   }
 
   /// One extent the sweep held to its node: what the entity is, for a failure; the kind of node it
-  /// is written as; the extent's span; and the node `Trees::node` answers for the extent.
+  /// is written as; the extent's span; the node `Trees::node` answers for the extent; and whether
+  /// the analysis it is from holds a syntax diagnostic.
   struct Reached {
     what: String,
     kind: K,
     span: SimpleSpan,
     node: SyntaxNode,
+    broken: bool,
+  }
+
+  /// Whether `analysis` holds a diagnostic with a code of the parser's, `smear::syntax::…`.
+  fn holds_a_syntax_error(analysis: &Analysis) -> bool {
+    analysis
+      .diagnostics()
+      .iter()
+      .any(|diagnostic: &Diagnostic| diagnostic.code().as_str().starts_with("smear::syntax::"))
   }
 
   /// The extents of `analysis`, named `name`, each held to its node in `trees` and appended to
@@ -643,6 +682,7 @@ mod lossless {
   /// `mod` declares. An extent whose source has no tree is a built-in package's, and
   /// `Trees::node` answers it nothing; every other has a span, and a node.
   fn reach(name: &str, analysis: &Analysis, trees: &Trees<Parse>, all: &mut Vec<Reached>) {
+    let broken = holds_a_syntax_error(analysis);
     let model = analysis.model();
     let mut extents: Vec<(String, K, Location)> = Vec::new();
     for id in model.defs() {
@@ -696,6 +736,7 @@ mod lossless {
             kind,
             span,
             node,
+            broken,
           });
         }
         (_, None) => {
@@ -718,8 +759,8 @@ mod lossless {
   }
 
   /// Every extent the analyses through the lossless layer answer, of the package sets written by
-  /// hand and of every corpus entry, valid and invalid, as the one file of a package, each held
-  /// to its node.
+  /// hand, of every corpus entry, valid and invalid, and of the six broken texts, each written
+  /// after `type Query { ok: Int }`, each as the one file of a package, each held to its node.
   fn reached() -> Vec<Reached> {
     let mut all: Vec<Reached> = Vec::new();
     for set in sets() {
@@ -736,12 +777,24 @@ mod lossless {
       let (analysis, trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
       reach(&name, &analysis, &trees, &mut all);
     }
+    for broken in SIX {
+      let text = format!("{QUERY}\n{broken}");
+      let root = one_file(text.as_str());
+      let (analysis, trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+      reach(
+        &format!("`{broken}` after `{QUERY}`"),
+        &analysis,
+        &trees,
+        &mut all,
+      );
+    }
     all
   }
 
   /// For each kind of node the sweep reaches, the fewest extents of it the sweep must hold to a
   /// node: how many the package sets written by hand hold, every one in a supplied file that is
-  /// not blank, and so in a file the lossless layer keeps a tree of. The corpus adds to each.
+  /// not blank, and so in a file the lossless layer keeps a tree of. The corpus and the six broken
+  /// texts add to them.
   /// `sets` documents the sets; counted there:
   ///
   /// - object types: `Query`, `Change`, `Point`, `Line` and `Star` in the first set, `T` in the
@@ -796,15 +849,19 @@ mod lossless {
 
   /// T13: every extent names one node of its file's tree.
   ///
-  /// Through the lossless layer, over the package sets written by hand and every corpus entry,
-  /// valid and invalid: for every contribution, member and module whose extent has a span in a
-  /// file with a tree, `Trees::node` answers a node; the node is of the kind the entity is written
-  /// as; it starts where the extent starts, leading trivia lying outside it; and between the
-  /// extent's end and the node's end there is nothing but what the lexer skips. An extent in a
-  /// file with no tree is a built-in package's, and has no node.
+  /// Through the lossless layer, over the package sets written by hand, every corpus entry, valid
+  /// and invalid, and the six broken texts: for every contribution, member and module whose extent
+  /// has a span in a file with a tree, `Trees::node` answers a node; the node is of the kind the
+  /// entity is written as; it starts where the extent starts, leading trivia lying outside it; and
+  /// between the extent's end and the node's end there is nothing but what the lexer skips. An
+  /// extent in a file with no tree is a built-in package's, and has no node.
+  ///
+  /// And an extent is not its node's range: some node runs on past its extent, over the trivia
+  /// it closes on.
   #[test]
   fn every_extent_names_one_node_of_its_files_tree() {
     let all = reached();
+    let mut longer = 0usize;
     for entity in &all {
       let range = entity.node.text_range();
       let (start, end) = (usize::from(range.start()), usize::from(range.end()));
@@ -835,17 +892,33 @@ mod lossless {
         "{}: the node runs on past the extent over {tail:?}",
         entity.what
       );
+      if entity.span.end() < end {
+        longer += 1;
+      }
     }
     held_to_the_floors(&all, "every extent names one node");
+    println!(
+      "T13: {longer} of {} nodes run on past their extent",
+      all.len()
+    );
+    // `lossless_x_golden.rs`'s `CLOSES_ON_TRAILING_TRIVIA` records that an enum value closes on
+    // the trivia after it, inside its list: the first set's `RED` is one, its node holding the line
+    // break before `GREEN`.
+    assert!(
+      longer >= 1,
+      "no node runs on past its extent, so an extent could be its node's range"
+    );
   }
 
   /// T12: no definition, extension, schema item or member the model holds keeps a recovery hole:
   /// under the node of its extent there is no `Error` node and no `Gap` token. A module may hold
   /// one: it keeps its node around an item that broke inside it. Over the sweep of
-  /// `every_extent_names_one_node_of_its_files_tree`, and under its floors.
+  /// `every_extent_names_one_node_of_its_files_tree`, and under its floors, with a floor of its own
+  /// on the entities of the files that hold a syntax error, which the claim is about.
   #[test]
   fn no_definition_or_member_keeps_a_recovery_hole() {
     let all = reached();
+    let mut in_broken_files = 0usize;
     for entity in &all {
       if entity.kind == K::ModDefinition {
         continue;
@@ -859,8 +932,20 @@ mod lossless {
         entity.what,
         entity.node.text()
       );
+      if entity.broken {
+        in_broken_files += 1;
+      }
     }
     held_to_the_floors(&all, "no definition or member keeps a recovery hole");
+    println!(
+      "T12: {in_broken_files} definitions, extensions, schema items and members of files with a \
+       syntax error held to their nodes"
+    );
+    // The six broken texts: each keeps `Query`, its field `ok` and the scalar `S`.
+    assert!(
+      in_broken_files >= 18,
+      "only {in_broken_files} entities of files with a syntax error were held to their nodes"
+    );
   }
 
   /// Whether every error `analysis` holds is a syntax error.
@@ -923,11 +1008,47 @@ mod lossless {
     "type T { f: Box<> } scalar S",
   ];
 
+  /// `recovery_graphqlx.rs`'s `an_unclosed_list_keeps_the_definition_after_it`, its second text
+  /// with its type named `Query`: the list's error lies inside `Query`'s extent, and the
+  /// projection reads `Query` whole.
+  const UNCLOSED: &str = "type Query { f: [Int } scalar S";
+
+  /// Whether a syntax diagnostic of `analysis` points inside the extent of a contribution or a
+  /// member the model holds, where a parse step that reported through the marking path would mark
+  /// it.
+  fn an_error_inside_an_extent(analysis: &Analysis) -> bool {
+    let syntax: Vec<Location> = analysis
+      .diagnostics()
+      .iter()
+      .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str().starts_with("smear::syntax::"))
+      .map(|diagnostic: &Diagnostic| diagnostic.primary())
+      .collect::<Vec<Location>>();
+    let model = analysis.model();
+    let mut extents: Vec<Location> = Vec::new();
+    for id in model.defs() {
+      for part in model.def(id).contributions() {
+        extents.push(part.extent());
+      }
+      for member in members_of(model, id) {
+        extents.push(model.member(member).extent());
+      }
+    }
+    for part in model.schema().contributions() {
+      extents.push(part.extent());
+    }
+    extents
+      .iter()
+      .any(|extent: &Location| syntax.iter().any(|at: &Location| holds(*extent, *at)))
+  }
+
   /// T12: a syntax error marks nothing.
   ///
-  /// Through the lossless layer, over the invalid corpus and the six texts, each written after
-  /// `type Query { ok: Int }`: in every analysis whose errors are all syntax errors, no definition,
-  /// contribution or member has errors.
+  /// Through the lossless layer, over the invalid corpus, the six texts, each written after
+  /// `type Query { ok: Int }`, and the unclosed list: in every analysis whose errors are all
+  /// syntax errors, no definition, contribution or member has errors. In the six the error lies in
+  /// the definition the projection drops, where nothing could mark it; in the unclosed list it lies
+  /// inside the extent of a definition the model holds, so a syntax error that reached the marking
+  /// path would mark that definition.
   #[test]
   fn a_syntax_error_marks_nothing() {
     let mut texts: Vec<(String, String)> = corpus("invalid_");
@@ -937,7 +1058,8 @@ mod lossless {
         format!("{QUERY}\n{broken}"),
       ));
     }
-    let mut held = 0usize;
+    texts.push((String::from("the unclosed list"), String::from(UNCLOSED)));
+    let (mut held, mut inside) = (0usize, 0usize);
     for (name, text) in &texts {
       let root = one_file(text.as_str());
       let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
@@ -947,13 +1069,25 @@ mod lossless {
       if nothing_marked(&analysis, name) {
         held += 1;
       }
+      if an_error_inside_an_extent(&analysis) {
+        inside += 1;
+      }
     }
-    println!("T12: {held} analyses whose errors are all syntax errors hold a supplied definition");
-    // The six texts: each keeps `Query` and the scalar after its broken definition, and none
-    // names anything that does not resolve.
+    println!(
+      "T12: {held} analyses whose errors are all syntax errors hold a supplied definition, and in \
+       {inside} a syntax error lies inside an extent the model holds"
+    );
+    // The six texts and the unclosed list: each keeps `Query` and the scalar after its mistake,
+    // and none names anything that does not resolve.
     assert!(
-      held >= 6,
+      held >= SIX.len() + 1,
       "only {held} analyses with syntax errors alone hold a supplied definition"
+    );
+    // The unclosed list: `a_definition_read_past_a_mistake_holds_it_unmarked` holds that its error
+    // lies inside `Query`'s extent.
+    assert!(
+      inside >= 1,
+      "no syntax error lies inside an extent the model holds, so nothing here could be marked"
     );
   }
 
@@ -980,7 +1114,7 @@ mod lossless {
   /// asserted to lie anywhere.
   #[test]
   fn a_definition_read_past_a_mistake_holds_it_unmarked() {
-    let text = "type Query { f: [Int } scalar S";
+    let text = UNCLOSED;
     let root = one_file(text);
     let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
     assert!(

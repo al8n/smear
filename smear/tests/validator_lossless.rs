@@ -130,8 +130,9 @@ use extent::{ALPHABET, inject};
 
 /// The smallest number of `(document, trivia form)` pairs the sweep is allowed to compare.
 ///
-/// 31 fixtures x 2 documents x 9 forms.
-const COMPARISON_FLOOR: usize = 558;
+/// 32 fixtures x 2 documents x 9 forms: the sweep's own count is exactly `FIXTURES.len()` x 2 x 9,
+/// so this floor is what fails when the corpus loses a fixture.
+const COMPARISON_FLOOR: usize = 576;
 
 /// The smallest number of **diagnostics** the sweep is allowed to have compared.
 const DIAGNOSTIC_FLOOR: usize = 297;
@@ -918,13 +919,16 @@ type Lent<'s> = GraphqlLosslessErrorValue<&'s str>;
 
 /// `text` through the lossless layer and then the validator, each exit held to what may leave by
 /// it: the errors the layer lends number `error_count()`, and each has a code of the parser's; each
-/// finding in the validator's sink has a rule's code. Answers how many errors were lent, and how
-/// many findings the validator reported.
-fn exits(schema: &Schema, text: &str, budget: &Budget, rules: RuleSet) -> (usize, usize) {
+/// finding in the validator's sink has a rule's code; and when the layer projected nothing, the
+/// validator's sink holds nothing, since no rule fires over a document with no definition in it.
+/// Answers how many errors were lent, how many findings the validator reported, and whether the
+/// layer projected nothing.
+fn exits(schema: &Schema, text: &str, budget: &Budget, rules: RuleSet) -> (usize, usize, bool) {
   let mut lent: Vec<Lent<'_>> = Vec::new();
   let parsed = Lossless::new()
     .executable_document(text, &mut lent)
     .unwrap_or_else(|_| panic!("the lossless layer answers no document\n---\n{text}"));
+  let nothing = parsed.recovery().projected() == 0;
   assert_eq!(
     lent.len(),
     parsed.error_count(),
@@ -957,21 +961,29 @@ fn exits(schema: &Schema, text: &str, budget: &Budget, rules: RuleSet) -> (usize
       finding.rule().code().as_str()
     );
   }
-  (lent.len(), findings.len())
+  assert!(
+    !nothing || findings.is_empty(),
+    "the layer projected nothing, and the validator's sink holds {findings:#?}\n---\n{text}"
+  );
+  (lent.len(), findings.len(), nothing)
 }
 
 /// T15: a syntax error leaves by the layer's sink, and a finding by the validator's.
 ///
 /// Through the lossless layer, over each corpus document that fires a rule, which is a document
-/// and lends nothing, and over every truncation [`a_half_typed_document_still_gets_an_answer`]
-/// reads, so that both exits are seen to carry something: every error lent is counted by
-/// `error_count()` and has a code of the parser's, `smear::syntax::…`, and every diagnostic in the
-/// validator's sink has a rule's code, `smear::validation::…`.
+/// and lends nothing, over every truncation [`a_half_typed_document_still_gets_an_answer`] reads,
+/// and over the text [`nothing_projected_is_visible_in_the_recovery`] reads, so that both exits
+/// are seen to carry something: every error lent is counted by `error_count()` and has a code of
+/// the parser's, `smear::syntax::…`, and every diagnostic in the validator's sink has a rule's
+/// code, `smear::validation::…`. A rule's code is all a finding can carry, so a syntax error that
+/// reached the validator's sink would wear one; what tells it apart is a text the layer projects
+/// nothing of, which lends errors while the validator's sink holds nothing.
 #[test]
 fn syntax_errors_leave_by_the_layer_and_findings_by_the_validator() {
   let (mut truncations, mut lending, mut finding, mut both) = (0usize, 0usize, 0usize, 0usize);
+  let mut projected_nothing = 0usize;
   for (fixture, schema, budget, rules) in documents() {
-    let (lent, _) = exits(&schema, fixture.invalid, &budget, rules);
+    let (lent, _, _) = exits(&schema, fixture.invalid, &budget, rules);
     assert_eq!(
       lent, 0,
       "{:?}: a document of the rule corpus lent a syntax error\n---\n{}",
@@ -982,7 +994,7 @@ fn syntax_errors_leave_by_the_layer_and_findings_by_the_validator() {
         if cut == 0 || cut == source.len() {
           continue;
         }
-        let (lent, found) = exits(&schema, &source[..cut], &budget, rules);
+        let (lent, found, nothing) = exits(&schema, &source[..cut], &budget, rules);
         truncations += 1;
         if lent > 0 {
           lending += 1;
@@ -993,12 +1005,27 @@ fn syntax_errors_leave_by_the_layer_and_findings_by_the_validator() {
         if lent > 0 && found > 0 {
           both += 1;
         }
+        if nothing {
+          projected_nothing += 1;
+        }
       }
     }
   }
+  let source = "{ dog { name @ } }";
+  let (lent, _, nothing) = exits(&build(SCHEMA), source, &Budget::default(), RuleSet::ALL);
+  assert!(lent >= 1, "`{source}` lent no error");
+  if nothing {
+    projected_nothing += 1;
+  }
   println!(
     "T15: {truncations} truncations; {lending} lent an error, {finding} held a finding, {both} \
-     did both"
+     did both; {projected_nothing} texts projected nothing"
+  );
+  // `nothing_projected_is_visible_in_the_recovery` holds that the layer projects nothing of
+  // `{ dog { name @ } }`.
+  assert!(
+    projected_nothing >= 1,
+    "no text projected nothing, so the validator's sink was never held to be empty"
   );
   // `a_half_typed_document_still_gets_an_answer` holds these truncations to at least 1 000, and
   // at least 400 of them to a finding. A truncation lends no error only when it is a whole

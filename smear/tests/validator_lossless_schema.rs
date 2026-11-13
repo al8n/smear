@@ -229,7 +229,8 @@ impl Answer {
 type Read = (Answer, Recovery, bool, usize);
 
 /// `sdl` read by `parser`, and the schema built from the document it answers. The layer's own
-/// `Result` is answered as it is: a caller knows its layer.
+/// `Result` is answered as it is: a caller knows its layer. A refusal holds at least one reason:
+/// the builder never answers `Err` with an empty list.
 fn answer<'s, P: Layer<'s>>(parser: &P, sdl: &'s str) -> Result<Read, P::Failure> {
   let mut lent = 0usize;
   let mut sink = from_fn(|_: &P::Error| {
@@ -239,6 +240,12 @@ fn answer<'s, P: Layer<'s>>(parser: &P, sdl: &'s str) -> Result<Read, P::Failure
   let parsed = parser.type_system_document(sdl, &mut sink)?;
   let built =
     Answer::of(Schema::build(parsed.document()).map_err(|errors| errors.errors().to_vec()));
+  if let Answer::Refused(errors) = &built {
+    assert!(
+      !errors.is_empty(),
+      "the builder answered `Err` with no refusal in it\n---\n{sdl}"
+    );
+  }
   Ok((built, parsed.recovery(), parsed.is_valid(), lent))
 }
 
