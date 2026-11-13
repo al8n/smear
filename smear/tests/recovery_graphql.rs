@@ -146,6 +146,46 @@ mod lossless {
     assert_eq!(answer.definitions, 1);
   }
 
+  /// The external review's witness of its third round, and its kin, at both roots that hold a
+  /// type. The list has taken its own `(` and the second `(` is junk; the skip that takes it opens
+  /// a brace inside the parenthesis it opened, and the closer inside that brace closes that
+  /// parenthesis. The skip stops before the list's own `)`, the list closes on it, `A` keeps its
+  /// directive and `B` is read whole. A skip that kept its count of the other pairs in its
+  /// predicate, which tokora asks only outside the skip's braces, never saw that closer: it took
+  /// the list's `)` to clear the count, and the list read `scalar` as an argument's name and
+  /// failed at `B`.
+  ///
+  /// The closer is a `)` or a `]`, and in the third row it stands in a brace the skip opened
+  /// inside a brace the skip opened. In the last row a `)` in the skip's brace with none of the
+  /// other pairs open leaves the count at zero, and the skip goes on to the brace's own `}`,
+  /// where one depth over every pair fell to zero, ended the skip at `x` inside the brace, and
+  /// lost `A` to the list's failure on the `}` after it.
+  #[test]
+  fn a_skip_counts_its_pairs_inside_its_own_braces() {
+    for (text, a) in [
+      ("scalar A @d(( { ) } ) scalar B", "scalar A @d(( { ) } )"),
+      ("scalar A @d(( { ] } ) scalar B", "scalar A @d(( { ] } )"),
+      (
+        "scalar A @d(( { { ) } } ) scalar B",
+        "scalar A @d(( { { ) } } )",
+      ),
+      (
+        "scalar A @d(( { ) ) x } ) scalar B",
+        "scalar A @d(( { ) ) x } )",
+      ),
+    ] {
+      let answer = read(text);
+      assert!(answer.errors, "{text}");
+      assert_eq!(top_level_scalars(&answer.tree), [a, "scalar B"], "{text}");
+      let mixed: SyntaxNode = parse_document(text).syntax();
+      assert_eq!(
+        entries(&mixed, K::Document, K::ScalarTypeDefinition),
+        [a, "scalar B"],
+        "{text} at the mixed root"
+      );
+    }
+  }
+
   /// A variables definition that meets a `}` reports its `)` as missing and leaves the brace.
   /// No block of the grammar stands around an operation, so the brace here is one a failed
   /// definition left open: the root takes it as a stray, and reads the operation after it whole.

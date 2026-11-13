@@ -17,6 +17,10 @@
 
 use smear::parser::graphqlx::Syntactic;
 
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
+#[path = "support/braces.rs"]
+mod braces;
+
 /// A type whose field has no type, and a scalar after it.
 const MISSING_FIELD_TYPE: &str = "type T { f: } scalar S";
 
@@ -817,6 +821,75 @@ mod lossless {
       let m = module(&answer.tree, "mod m");
       assert_eq!(m.text().to_string(), own, "{text}");
       assert_eq!(scalars(&top(&answer.tree)), ["scalar X"], "{text}");
+    }
+  }
+
+  /// The document's own node, whichever root built it.
+  fn document_of(tree: &SyntaxNode) -> SyntaxNode {
+    tree
+      .children()
+      .find(|node: &SyntaxNode| matches!(node.kind(), K::Document | K::TypeSystemDocument))
+      .expect("the document's node")
+  }
+
+  /// The external review's witness of its third round, and its kin. The list has taken its own
+  /// `(` and the second `(` is junk; the skip that takes it opens a brace inside the parenthesis
+  /// it opened, and the closer inside that brace closes that parenthesis. The skip stops before
+  /// the list's own `)`, the list closes on it, `A` keeps its directive and `B` is read whole. A
+  /// skip that kept its count of the other pairs in its predicate, which tokora asks only outside
+  /// the skip's braces, never saw that closer: it took the list's `)` to clear the count, and the
+  /// list read `scalar` as an argument's name and failed at `B`.
+  ///
+  /// The closer is a `)`, a `]` or a `>`, and in the fourth row it stands in a brace the skip
+  /// opened inside a brace the skip opened. The last row is the other place this count parts from
+  /// one depth over every pair: a `)` in the skip's brace with none of the other pairs open
+  /// leaves the count at zero, and the skip goes on to the brace's own `}`. One depth over every
+  /// pair fell to zero at that `)` and ended the skip at `x`, inside the brace, and the list then
+  /// failed on the `}` after `x` and took `A` with it.
+  #[test]
+  fn a_skip_counts_its_pairs_inside_its_own_braces() {
+    for (text, a) in [
+      ("scalar A @d(( { ) } ) scalar B", "scalar A @d(( { ) } )"),
+      ("scalar A @d(( { ] } ) scalar B", "scalar A @d(( { ] } )"),
+      ("scalar A @d(( { > } ) scalar B", "scalar A @d(( { > } )"),
+      (
+        "scalar A @d(( { { ) } } ) scalar B",
+        "scalar A @d(( { { ) } } )",
+      ),
+      (
+        "scalar A @d(( { ) ) x } ) scalar B",
+        "scalar A @d(( { ) ) x } )",
+      ),
+    ] {
+      for (root, tree, _) in at_both_roots(text) {
+        assert_eq!(
+          scalars(&document_of(&tree)),
+          [a, "scalar B"],
+          "{text} at the {root} root"
+        );
+      }
+    }
+  }
+
+  /// The third round's witness inside a module: `B` is an item of `m`, and `m` is faithful to
+  /// the braces as written. The skip that lost `B` lost it here too, and the body's skip then took
+  /// `B` with the wreckage of `A`.
+  #[test]
+  fn a_skip_counts_its_pairs_inside_its_own_braces_in_a_module() {
+    let text = "mod m { scalar A @d(( { ) } ) scalar B }";
+    for (root, tree, _) in at_both_roots(text) {
+      assert_eq!(
+        scalars(&module(&tree, "mod m")),
+        ["scalar A @d(( { ) } )", "scalar B"],
+        "{text} at the {root} root"
+      );
+      let held = super::braces::faithful(&tree)
+        .unwrap_or_else(|why| panic!("{text} at the {root} root: {why}"));
+      assert_eq!(
+        (held.read, held.broken),
+        (1, 1),
+        "{text} at the {root} root"
+      );
     }
   }
 
