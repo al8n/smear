@@ -9,7 +9,10 @@ use core::{cmp::Ordering, ops::ControlFlow};
 
 use tokora::{SimpleSpan, span::AsSpan};
 
-use smear_parser::graphql::ast::VariableValue;
+use smear_parser::{
+  graphql::ast::VariableValue,
+  lexer::{DecimalFloat, NORMALIZED_FLOAT_LEN, normalize_decimal_float},
+};
 
 use super::{
   Diagnostic, Ledger, Meter, Rule, TypeId, Validator,
@@ -1421,9 +1424,17 @@ fn fits_id(spelling: &str) -> bool {
   fits_i32(spelling)
 }
 
-/// Whether a `Float` literal's spelling names a finite double.
+/// Whether a `Float` literal's spelling names a finite double: a zero, or the spelling
+/// `normalize_decimal_float` writes of it, read by `str::parse`. Not the literal as written, whose
+/// exponent past 655 359 `str::parse` misreads when the literal's digits offset it.
 fn is_finite(spelling: &str) -> bool {
-  spelling.parse::<f64>().is_ok_and(f64::is_finite)
+  let mut buffer = [0; NORMALIZED_FLOAT_LEN];
+  match normalize_decimal_float(spelling.as_bytes(), &mut buffer) {
+    Some(DecimalFloat::Zero { .. }) => true,
+    Some(DecimalFloat::Spelled(spelled)) => spelled.parse::<f64>().is_ok_and(f64::is_finite),
+    // Past every double, no decimal float, or a reading of a later lexer's.
+    _ => false,
+  }
 }
 
 #[cfg(test)]
@@ -1473,5 +1484,24 @@ mod tests {
     assert!(is_finite("1.0"));
     assert!(is_finite("-1.5e3"));
     assert!(!is_finite("1e400"));
+  }
+
+  #[test]
+  fn a_float_literals_exponent_is_read_whatever_its_digits_offset() {
+    // Enough zeros that an exponent past 655 359, the most `str::parse` reads exactly, is offset
+    // back into range; fewer under Miri, where each verdict is the same.
+    let zeros = "0".repeat(if cfg!(miri) { 997 } else { 99_998 });
+    // `0.`, the zeros, `1e999999`: 10^900000 when unshrunk, past every double, which `str::parse`
+    // alone reads as 1.0.
+    assert!(!is_finite(&std::format!("0.{zeros}1e999999")));
+    // `1`, the zeros and one more, `e-999999`: as far below, and so zero, which it reads as 1.0.
+    assert!(is_finite(&std::format!("1{zeros}0e-999999")));
+    // A first significant digit at each edge of a double's range, and a zero past any exponent.
+    assert!(is_finite("1e308"));
+    assert!(!is_finite("1e309"));
+    assert!(is_finite("1.7976931348623157e308"));
+    assert!(!is_finite("1.7976931348623159e308"));
+    assert!(is_finite("1e-999999"));
+    assert!(is_finite("-0.0e999999"));
   }
 }

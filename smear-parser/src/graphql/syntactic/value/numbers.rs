@@ -62,7 +62,11 @@ use tokora::SimpleSpan;
 use core::marker::PhantomData;
 
 #[cfg(feature = "materialized-numbers")]
-use smear_lexer::graphql::syntactic::{SyntacticLexer, SyntacticToken};
+use smear_lexer::{
+  DecimalFloat, NORMALIZED_FLOAT_LEN,
+  graphql::syntactic::{SyntacticLexer, SyntacticToken},
+  normalize_decimal_float,
+};
 #[cfg(feature = "materialized-numbers")]
 use tokora::Lexer;
 
@@ -665,21 +669,33 @@ fn is_int_literal(bytes: &[u8]) -> bool {
 
 /// Reads a GraphQL `FloatValue` (draft §2.9.2) out of its bytes.
 ///
-/// The conversion is `core`'s own, reached through a borrowed `&str` over the literal's bytes —
-/// so it is correctly rounded for a literal of any length, and it allocates nothing:
-/// `core::num::dec2flt`'s slow path is a fixed-size big integer on the stack. Rolling a
-/// mantissa-and-exponent conversion here instead would be double-rounded and therefore wrong on
-/// halfway cases, and truncating into a fixed buffer would put a second, invented length bound on
-/// the grammar.
+/// The conversion is `core`'s own, but not of the literal as written: `core` stops reading an
+/// exponent's digits once it reaches 65 536, so a literal whose digits offset a written exponent
+/// past 655 359 is misread, `0.`, 99 998 zeros and `1e999999` as 1.0. `smear-lexer`'s
+/// `normalize_decimal_float` reads the literal first, answers a zero and a value past every double
+/// itself, and spells any other as its significant digits under an exponent of at most three
+/// digits, for `core` to read. That spelling keeps the first 800 significant digits and a final
+/// `1` for a later digit that is not zero, and no halfway point between two doubles has more than
+/// 767, so the conversion stays correctly rounded for a literal of any length, the buffer bounding
+/// none. It allocates nothing: the buffer is on the stack, and so is the fixed-size big integer of
+/// `core::num::dec2flt`'s slow path. Rolling a mantissa-and-exponent conversion here instead would
+/// be double-rounded and therefore wrong on halfway cases.
 ///
 /// `None` means the literal does not name a finite double. `f64::from_str` reports an overflow as
 /// an infinity rather than as an error, and draft §3.5.2 admits only finite values, so the guard
 /// is [`f64::is_finite`] and not the parse's own `Result`.
 #[cfg(feature = "materialized-numbers")]
 fn parse_f64(bytes: &[u8]) -> Option<f64> {
-  let text = core::str::from_utf8(bytes).ok()?;
-  let value: f64 = text.parse().ok()?;
-  value.is_finite().then_some(value)
+  let mut buffer = [0; NORMALIZED_FLOAT_LEN];
+  match normalize_decimal_float(bytes, &mut buffer)? {
+    DecimalFloat::Zero { negative } => Some(if negative { -0.0 } else { 0.0 }),
+    DecimalFloat::Spelled(spelled) => {
+      let value: f64 = spelled.parse().ok()?;
+      value.is_finite().then_some(value)
+    }
+    // Past every double, or a reading of a later lexer's.
+    _ => None,
+  }
 }
 
 #[cfg(all(test, feature = "materialized-numbers"))]

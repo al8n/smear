@@ -9,9 +9,15 @@ All notable changes to Smear are documented in this file.
   `DecimalFloat::Spelled`, a spelling `str::parse::<f64>` and `::<f32>` read exactly, written into
   the caller's `[u8; NORMALIZED_FLOAT_LEN]`. It needs no allocator and sits behind no feature.
   Those parsers stop reading an exponent's digits once it reaches 65 536, so a literal whose long
-  run of digits offsets a larger exponent is misread when handed to them as written: `0.`, 99 998
-  zeros and `1e999999` read as 1.0. The spelling keeps the first 800 significant digits and a
-  final `1` for a later digit that is not zero, so it rounds as the literal does.
+  run of digits offsets a written exponent past 655 359 is misread when handed to them as written:
+  `0.`, 99 998 zeros and `1e999999` read as 1.0. The spelling keeps the first 800 significant
+  digits and a final `1` for a later digit that is not zero, so it rounds as the literal does.
+- `smear-parser`, `smear-schema` and `smear-compiler`: a `Float` literal is read through
+  `normalize_decimal_float`, and no longer by `str::parse` as written. Only a literal whose digits
+  offset a written exponent past 655 359 reads differently, now as its value: `0.`, 99 998 zeros
+  and `1e999999`, 10^900000, which read as 1.0, is past every double, so `Schema::build` and
+  `Rule::ValuesOfCorrectType` refuse it and the `materialized-numbers` conversion answers
+  `OutOfRange::Float`; and `1`, 99 999 zeros and `e-999999`, which read as 1.0, converts to 0.0.
 - `smear-parser`!: `lossless::runner::DiagnosticSource::collect_diagnostics_retaining` takes a
   second argument, `visit`, which is lent the span and the payload of each record the projection
   keeps at error severity, in emission order. 0.0.1 released the method with `retains` alone, and
