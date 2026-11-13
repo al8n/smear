@@ -92,7 +92,7 @@ impl Analysis {
 
   /// Whether nothing was refused: no diagnostic of
   /// [`Severity::Error`](tokora::diagnostic::Severity::Error) was reported, kept or dropped by the
-  /// ceiling.
+  /// ceiling, and no syntax error was counted that a parser did not lend.
   #[inline]
   pub fn is_ok(&self) -> bool {
     !self.diagnostics.has_errors()
@@ -253,6 +253,10 @@ pub fn analyze<S: SourceText>(
 /// and have no tree: the built-in packages' files, a byte text that is not UTF-8, and a text that
 /// holds nothing but white space, commas, byte order marks and comments. When the supplied sources
 /// are over [`Limits::max_source_bytes`], no supplied file is parsed at all.
+///
+/// A parser that keeps a bounded number of records, as the lossless layer does under its own
+/// limits, lends no more than it kept; the errors it found beyond them are counted, and the list
+/// is truncated.
 ///
 /// The trees borrow nothing of the packages at a concrete call: they are `Trees<()>` for
 /// [`Syntactic`], and a tree of the lossless layer holds no text of the caller's. A consumer generic

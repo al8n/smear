@@ -25,6 +25,17 @@ const DEFAULT_DIAGNOSTICS: u32 = 16_384;
 /// See [`Limits::max_near_miss_comparisons`].
 const DEFAULT_NEAR_MISS_COMPARISONS: u32 = 1 << 20;
 
+// The lossless parser's default ceiling on the diagnostics a parse keeps is at least twice this
+// analysis's default ceiling on diagnostics, so that a default analysis through the lossless layer
+// is handed a record for every error its list can show, and a recovery hole beside each. Neither
+// default moves without the other.
+const _: () = assert!(
+  smear_lexer::limits::LosslessLimits::new().max_diagnostics()
+    >= 2 * (DEFAULT_DIAGNOSTICS as usize),
+  "the lossless parser's default ceiling on kept diagnostics must be at least twice the \
+   analysis's default ceiling on diagnostics"
+);
+
 /// The bounds one analysis runs under.
 ///
 /// A package set is untrusted input, and the analysis bounds every resource such input could
@@ -247,6 +258,10 @@ impl Limits {
   /// Past it the greater ones are dropped, the list says it was truncated, and every error is
   /// still counted, so no dropped error changes the verdict. Which are kept depends on nothing but
   /// the diagnostics themselves, not on the order they were reported in.
+  ///
+  /// A parser that keeps a bounded number of records, as the lossless layer does under its own
+  /// limits, lends no more than it kept; the errors it found beyond them are counted, and the list
+  /// is truncated.
   ///
   /// The default is 16 384, smear-schema's ceiling on each of its two quadratic lists: more than
   /// an author reads, and a bound on memory against an input built to be refused many times over.

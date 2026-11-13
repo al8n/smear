@@ -159,7 +159,9 @@ All notable changes to Smear are documented in this file.
   moved back to the start of a character, unless that would leave nothing out, so no message
   grows with what it quotes. Every file is parsed with the GraphQLx syntactic parser, or,
   through `analyze_with`, with the parser layer the caller passes, its syntax errors reported at
-  that file. `Diagnostic::builder` is public, so a consumer's
+  that file. A parser that keeps a bounded number of records, as the lossless layer does under
+  its own limits, lends no more than it kept; the errors it found beyond them are counted, and
+  the list is truncated. `Diagnostic::builder` is public, so a consumer's
   findings join smear's in one ordered list, and `SourceMap::bind` pairs an analysis with the
   texts it was made from, finding each file again by its package and its path alone: it
   answers no text for a file whose path another file of its package has, for the files of a
