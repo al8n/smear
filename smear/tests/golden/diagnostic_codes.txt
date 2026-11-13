@@ -18,6 +18,7 @@ DiagnosticKind::ModuleDefinedTwice = smear::graphqlx::module-defined-twice
 DiagnosticKind::ModuleTypeCollision = smear::graphqlx::module-type-collision
 DiagnosticKind::ReservedPackageName = smear::graphqlx::reserved-package-name
 DiagnosticKind::ResourceLimit = smear::graphqlx::resource-limit
+DiagnosticKind::SchemaOutsideRoot = smear::graphqlx::schema-outside-root
 DiagnosticKind::ShadowedPrimitive = smear::graphqlx::shadowed-primitive
 DiagnosticKind::UnknownItem = smear::graphqlx::unknown-item
 DiagnosticKind::UnknownPackage = smear::graphqlx::unknown-package

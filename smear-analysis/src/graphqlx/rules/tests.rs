@@ -1,5 +1,5 @@
-//! The rule-set macro, over the empty set smear ships and over a set of two rules that only these
-//! tests declare.
+//! The rule-set macro, over the set smear ships and over a set of two rules that only these tests
+//! declare.
 
 use core::cell::RefCell;
 use std::{rc::Rc, vec::Vec};
@@ -71,10 +71,22 @@ rule_set! {
   }
 }
 
-/// The set smear ships holds no rule, and its table lists none.
+/// The set smear ships lists each of its rules by its type's name, in field order, with the codes
+/// it reports.
 #[test]
-fn the_set_smear_ships_holds_no_rule() {
-  assert!(Rules::TABLE.is_empty());
+fn the_set_smear_ships_lists_each_rule_with_its_codes() {
+  let table: &[(&str, &[Code])] = Rules::TABLE;
+  assert_eq!(table.len(), 2);
+  assert_eq!(table[0].0, "DuplicateSchemaDefinition");
+  assert_eq!(
+    table[0].1,
+    &[Code::new("smear::schema::duplicate-schema-definition")]
+  );
+  assert_eq!(table[1].0, "SchemaOutsideRoot");
+  assert_eq!(
+    table[1].1,
+    &[Code::new("smear::graphqlx::schema-outside-root")]
+  );
 }
 
 /// A set's table lists each rule by its type's name, in field order, with the codes it lists.

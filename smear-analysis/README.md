@@ -32,11 +32,13 @@ Rules are visitors. A `graphqlx::Visitor` implements the hooks it needs, one for
 enters, leaves or reaches, and `graphqlx::visit` walks an analysis's model for it over the packages
 `Packages` selects, handing each hook a `Cx` that says where the walk is and takes what the visitor
 reports. Visitors compose at compile time: a tuple of up to twelve, an `Option` of one, a `&mut` or
-a `Box` of one, and `()`. `analyze` runs smear's own rule set, which holds no rule yet, through the
-same walk, and an error that a phase or a rule reports marks the contributions, members and
-definitions that hold it, as their `has_errors()` says, whether the diagnostic ceiling keeps it or
-not. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and holds
-memory bounded by it.
+a `Box` of one, and `()`. `analyze` runs smear's own rules through the same walk: a program defines
+its schema at most once, each later schema definition of the root package being
+`smear::schema::duplicate-schema-definition`, and only the root package defines or extends it, a
+dependency's schema item being `smear::graphqlx::schema-outside-root`. An error that a phase or a
+rule reports marks the contributions, members and definitions that hold it, as their
+`has_errors()` says, whether the diagnostic ceiling keeps it or not. A consumer's walk marks
+nothing, answers its own diagnostics under the same ceiling, and holds memory bounded by it.
 
 ## Feature flags
 

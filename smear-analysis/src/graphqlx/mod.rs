@@ -70,13 +70,18 @@
 //! reports. Rules compose at compile time: a tuple of up to twelve visitors is a visitor, and so
 //! are an `Option` of one, a borrowed or boxed one, and `()`.
 //!
-//! [`analyze`] runs smear's own rule set, which holds no rule yet, through the same walk over the
-//! supplied packages, once its phases have written the model. An error that a phase or one of those
-//! rules reports marks the contributions, members and definitions that hold where it points,
-//! whether the ceiling keeps the diagnostic or not, and their `has_errors()` says so. A consumer's
-//! walk marks nothing: it answers its own [`Diagnostics`] under the analysis's ceiling, which
-//! [`Diagnostics::merge`] joins with the analysis's, and holds memory bounded by that ceiling
-//! however much its visitor reports.
+//! [`analyze`] runs smear's own rules through the same walk over the supplied packages, once its
+//! phases have written the model. A program defines its schema at most once: each schema
+//! definition the root package writes after its first is reported with GraphQL's own code,
+//! `smear::schema::duplicate-schema-definition`. And the schema is the root package's: a schema
+//! definition or extension a dependency writes is `smear::graphqlx::schema-outside-root`. A rule
+//! says nothing about a contribution a phase already refused something in.
+//!
+//! An error that a phase or one of those rules reports marks the contributions, members and
+//! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and
+//! their `has_errors()` says so. A consumer's walk marks nothing: it answers its own
+//! [`Diagnostics`] under the analysis's ceiling, which [`Diagnostics::merge`] joins with the
+//! analysis's, and holds memory bounded by that ceiling however much its visitor reports.
 
 mod analysis;
 mod builtin;

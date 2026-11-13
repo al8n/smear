@@ -169,6 +169,10 @@ impl Analysis {
 ///   root package's package source.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
+///   Each schema definition the root package writes after its first is
+///   `duplicate-schema-definition`, with a label at the first. Each schema definition and each
+///   schema extension a dependency writes is `schema-outside-root`, and no duplicate of the root
+///   package's. A rule says nothing about a contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

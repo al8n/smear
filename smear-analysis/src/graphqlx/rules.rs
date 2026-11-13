@@ -4,6 +4,25 @@
 //! is a named struct of them that `rule_set!` declares. The rule types are private. The macro also
 //! emits the set's table of each rule and the codes it reports, which the liveness test reads:
 //! every code a rule lists must fire on at least one fixture.
+//!
+//! A rule reads the model the phases wrote, through its public views, and reports through the
+//! context. Which package wrote a contribution is read off where the contribution is written
+//! (`written_by`). A rule says nothing about a contribution a phase already refused something in,
+//! whose `has_errors()` is set: a diagnostic of its own within that contribution would repeat the
+//! phase's. It sees the phases' marks alone, since the rules' are applied once the walk has ended.
+
+mod duplicate_schema_definition;
+mod schema_outside_root;
+
+use tokora::diagnostic::Location;
+
+use self::{
+  duplicate_schema_definition::DuplicateSchemaDefinition, schema_outside_root::SchemaOutsideRoot,
+};
+use super::{
+  id::{PackageId, SourceId},
+  source::SourceMap,
+};
 
 /// Declares a rule set: a struct with one field per rule, its `Visitor` impl, whose every hook
 /// calls each rule's in field order, and its table of each rule with the codes it reports.
@@ -154,8 +173,29 @@ macro_rules! rule_set {
 
 rule_set! {
   /// smear's own rules, which `analyze` runs over every supplied package once its phases have
-  /// written the model: none yet.
-  pub(crate) struct Rules {}
+  /// written the model: a program defines its schema at most once, and only the root package
+  /// defines or extends the schema.
+  pub(crate) struct Rules {
+    duplicate_schema_definition: DuplicateSchemaDefinition
+      => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
+    schema_outside_root: SchemaOutsideRoot => [super::DiagnosticKind::SchemaOutsideRoot.code()],
+  }
+}
+
+/// The package that wrote what is written at `at`: the package of the source `at` is in. For a
+/// contribution's location that is the package that wrote the contribution, which for an
+/// extension, and for a definition that replaces a built-in, need not be its definition's.
+///
+/// `None` when `at`'s source is none of `sources`', as a location of a model built by hand may be:
+/// a rule then reports nothing about what is written there. A package this answers is one of the
+/// model's, since an analysis's source map numbers the sources of its model's packages.
+fn written_by(sources: &SourceMap, at: Location) -> Option<PackageId> {
+  let source = SourceId::new(at.source());
+  if sources.sources().contains(source) {
+    Some(sources.source(source).package())
+  } else {
+    None
+  }
 }
 
 #[cfg(test)]
