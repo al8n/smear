@@ -802,3 +802,50 @@ fn a_spent_token_ceiling_refuses_a_whole_comment() {
     );
   }
 }
+
+/// A refusal's errors, projected: each `UnknownLexeme` as an [`Unknown`], and each `Omitted` as its
+/// span and its count.
+fn capped<State: core::fmt::Debug>(
+  errors: &LexerErrors<u8, State>,
+) -> (Vec<Unknown>, Vec<(Range<usize>, usize)>) {
+  let mut unknown = Vec::new();
+  let mut omitted = Vec::new();
+  for error in errors.iter() {
+    let span = error.span().start()..error.span().end();
+    match error.data() {
+      LexerErrorData::UnknownLexeme(Lexeme::Char(ch)) => {
+        unknown.push((span, ch.char(), ch.position()));
+      }
+      LexerErrorData::Omitted(count) => omitted.push((span, *count)),
+      other => panic!("expected an unknown lexeme or a count, got {other:?}"),
+    }
+  }
+  (unknown, omitted)
+}
+
+/// A comment of a thousand bytes that begin no UTF-8 sequence is refused, through both lexers,
+/// with an `UnknownLexeme` at each of the first sixteen and one `Omitted` counting the other 984,
+/// from the first of them to the last; and the next line lexes.
+#[test]
+fn a_comment_keeps_sixteen_errors_and_counts_the_rest() {
+  let mut doc = b"#".to_vec();
+  doc.resize(1 + 1000, 0xFF);
+  doc.extend_from_slice(b"\nx");
+  let kept: Vec<Unknown> = (1..17).map(|at| (at..at + 1, 0xFF, at)).collect();
+  let counted = vec![(17..1001, 984)];
+
+  let mut lexer = SyntacticLexer::<[u8]>::new(doc.as_slice());
+  let Some(Err(errors)) = lexer.lex() else {
+    panic!("the comment is refused");
+  };
+  assert_eq!(errors.len(), 17);
+  assert_eq!(capped(&errors), (kept.clone(), counted.clone()));
+  assert!(matches!(lexer.lex(), Some(Ok(_))), "the next line lexes");
+
+  let mut lexer = LosslessLexer::<&[u8]>::new(doc.as_slice());
+  let Some(Err(errors)) = lexer.lex() else {
+    panic!("the comment is refused");
+  };
+  assert_eq!(errors.len(), 17);
+  assert_eq!(capped(&errors), (kept, counted));
+}

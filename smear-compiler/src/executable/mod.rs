@@ -40,11 +40,10 @@
 //! - **A ledger's "off" must be a state.** [`Ledger::Off`] is closed under [`Ledger::take`]
 //!   because `u32::MAX` as a large number is a budget the first charge shrinks. That defect has
 //!   now been written four times in this repository under four different names.
-//! - **A state that must not be read must not exist.** [`Ledger::Off`] carries no number,
-//!   `LosslessInvalid::recovery` carries no [`Recovery`] when nothing was projected, and one
+//! - **A state that must not be read must not exist.** [`Ledger::Off`] carries no number, and one
 //!   `tripped` carries the whole of "a bound abandoned this run". Each replaced a value plus a
-//!   caveat — a maximum documented as an absence, a count documented as a floor, a flag documented
-//!   as needing a second flag read with it — and a caveat is only ever as good as the next reader.
+//!   caveat — a maximum documented as an absence, a flag documented as needing a second flag read
+//!   with it — and a caveat is only ever as good as the next reader.
 //! - **A charge is three facts, not one.** Where it sits, what dimension it prices, and what gates
 //!   it. The table on [`Validator::spend`] asks all three, and each time the question got sharper
 //!   it found sites the previous version could not see: a charge counting **selections** in front
@@ -119,10 +118,7 @@
 //!
 //! Everything else that grows is one element per node already charged (`push` inside a loop with
 //! its charge at the entrance), an `O(1)` `truncate` of a stack of integers, or a sort — `N log N`
-//! comparisons against `N` units, a bounded constant multiple. The parser's projection has no
-//! bulk-sizing site at all: every allocation there is one element per green node, and the lossless
-//! door prepays `units(max(source.len(), parse.green().text_len()))` in front of the whole
-//! projection.
+//! comparisons against `N` units, a bounded constant multiple.
 
 //! # Every charge whose quantity is a depth
 //!
@@ -302,7 +298,6 @@
 //!
 //! | discriminator | costs | what ran before it |
 //! |---|---|---|
-//! | length, in `verify_source` | two loads | the lossless door's `units(max(parse, source))` prepayment — **now below it** |
 //! | `len() > 1`, for 5.4.2 and 5.7.3 | one compare | the whole resolving path, including `spend_names` over every spelling — **now below it** |
 //! | a rule-set bit, for a resolved position | one mask | the field, condition and spread resolutions on every first visit — **now below them** |
 //! | `Visited::visit` | one stamp compare | the target condition's hash (nineteenth round) |
@@ -317,20 +312,11 @@
 //! be answered without the expensive step is not an instance.**
 //!
 //! - `Claim::Done` needs the memo's hash, and hashing the key *is* the lookup.
-//! - [`Recovery::is_complete`](smear_parser::graphql::lossless::Recovery::is_complete) needs the
-//!   walk: what was skipped is not knowable from a length.
 //! - `condition_applies` needs `Schema::sym`; there is no cheaper answer than hashing the name, and
 //!   the one unit a directive charged before examining it is already the floor.
 //! - `find_fragment` is a binary search, and emptiness is the only constant-time thing to ask about
 //!   it — which it does ask.
 //! - [`merges`] and `walks_values` **are** the discriminators; nothing precedes them.
-//!
-//! One thing the first row dissolved rather than reordered. The second round's finding was that the
-//! projection prepayment must be priced over *both* inputs, because `parse` and `source` are two
-//! parameters and pricing from one meant spending on the other. Once the lengths must agree before
-//! anything is priced, there is no maximum left to take: the two inputs are one number, and the
-//! defect that needed `max(..)` cannot be constructed. A cheap gate placed correctly can retire a
-//! question rather than answer it.
 //!
 //! # And a fifth way a repair goes wrong
 //!
@@ -341,7 +327,9 @@
 //! - a **gate** that skips more than its reader needs is a missing diagnostic;
 //! - an **allocation** ahead of its charge is a buffer nobody paid for;
 //! - a **repeat** introduced for one reader is a cost every other configuration pays;
-//! - a **diagnosis can name the right function and the repair still not call it**;
+//! - a **diagnosis can name the right function and the repair still not call it** — its instance,
+//!   the parser's whole-root check, is held by `smear/tests/validator_allocation.rs`'s
+//!   `the_whole_root_check_allocates_nothing`;
 //! - and a **repair's own reasoning can be applied to one instance of a set it did not
 //!   enumerate.**
 //!
@@ -397,14 +385,6 @@
 //! descent-only arm still carries the inner `check_arguments` call that reports 5.4.2 on a
 //! directive's arguments.
 //!
-//! The fourteenth round's own report identified `verify_source` as the reason the fail-fast
-//! projections never had the prefix defect — *"they open with `verify_source` over the whole green
-//! root, whose first comparison is of lengths"* — and then wrote a second whole-root check beside
-//! it, `parse.syntax().text() == source`, which materialises rowan's red cursor and allocates one
-//! node's worth of cursor data per element it walks past. Measured at zero against fourteen
-//! thousand for a fourteen-kilobyte document. The diagnosis was right and the repair did not use
-//! it; `smear/tests/validator_allocation.rs` now has the lossless door in its population, which is
-//! the gate that was not looking.
 //! - **A gate that under-charges is a bypass; a gate that SKIPS is a wrong answer.** Only the first
 //!   shows up as a number moving, and a budget test cannot see the second at all. So every gate owes
 //!   two answers: what does it skip, and does any consumer need it? `Scratch::reachable` had a
@@ -495,12 +475,12 @@ use values::ValueLocation;
 /// The verdict of a failed validation.
 ///
 /// Returned when the document was refused: because at least one diagnostic was emitted, or because
-/// a budget or a lossless door's pair check refused it. What the diagnostics *were* is the sink's
-/// business — this is the count, whether the sink returned `Break` ([`Invalid::stopped`]), and
-/// [`Invalid::refusal`], which names a budget or pair refusal.
+/// a [`Budget`] refused it, which is the one way a validation is refused other than by its
+/// findings. What the diagnostics *were* is the sink's business — this is the count, whether the
+/// sink returned `Break` ([`Invalid::stopped`]), and [`Invalid::refusal`], which names the refusal.
 ///
-/// This paragraph does not list them, and neither does any accessor below. [`Refusal`] is the one
-/// place they are enumerated, for the reason its own documentation gives.
+/// No accessor below lists the ways a validation is refused. [`Refusal`] is the one place they are
+/// enumerated, for the reason its own documentation gives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Invalid {
   emitted: u32,
@@ -508,12 +488,13 @@ pub struct Invalid {
   refusal: Option<Refusal>,
 }
 
-/// Why a validation was refused other than by its findings: a budget, or a lossless door's pair.
+/// Why a validation was refused other than by its findings: a budget, which is the one way there
+/// is.
 ///
 /// # Why this is a type and not a combination of flags
 ///
 /// An [`Invalid`] with [`Invalid::emitted`] zero is a verdict that examined less than the whole
-/// document, and there is more than one way to reach it; this type names which.
+/// document, and this type names how it was reached.
 ///
 /// It is `#[non_exhaustive]` so that another way to refuse costs a `match` arm at the call sites
 /// that care, not a sweep of every published sentence.
@@ -536,31 +517,6 @@ pub enum Refusal {
   /// fired. The document is **invalid**, not "unvalidated": the validator refuses rather than
   /// passing what it could not finish examining.
   Budget,
-  /// The lossless door was handed a `parse` and a `source` that do not describe one document.
-  ///
-  /// Nothing was projected and nothing was validated, so [`Invalid::emitted`] is always zero and
-  /// [`LosslessInvalid::recovery`](super::LosslessInvalid::recovery) is always `None`. Not a
-  /// resource problem, which is why it is not [`Refusal::Budget`].
-  SourceMismatch,
-  /// The lossless door was handed a parse whose tree is deeper than
-  /// `smear_parser::lossless::project::MAX_GREEN_DEPTH`.
-  ///
-  /// A refusal of the supplied tree, not of its bytes, which may agree with the source exactly, so
-  /// this is not [`Refusal::SourceMismatch`]. It is not [`Refusal::Budget`] either: the check runs
-  /// before the ledger opens and no [`Budget`] field reaches it. A parse of the same source through
-  /// the dialect's own door is never this deep. Nothing was projected and nothing was validated.
-  /// al8n/smear#198.
-  TooDeep,
-  /// The lossless door was handed a parse whose root is not the dialect's document root.
-  ///
-  /// No parse this crate's doors produce has one: the pair was minted through the public, generic
-  /// `finish_root`, which takes the root kind as an argument — outside the dialect's kind space, or
-  /// an in-space kind such as `Name`, answer alike. The bytes may agree exactly, so this is not
-  /// [`Refusal::SourceMismatch`]. Nothing was projected and nothing was validated. al8n/smear#218.
-  WrongRoot {
-    /// The root's raw kind, as the green tree stores it.
-    raw: u16,
-  },
 }
 
 impl Invalid {
@@ -612,67 +568,13 @@ impl Invalid {
     matches!(self.refusal, Some(Refusal::Budget))
   }
 
-  /// Returns the budget or pair refusal, when there was one.
+  /// Returns the refusal, when there was one.
   ///
-  /// `Some` names it — see [`Refusal`]. `None` means no budget tripped and no pair was refused; it
-  /// says nothing about the sink, which is [`Invalid::stopped`], or about whether the lossless
-  /// door's projection ran, which is
-  /// [`LosslessInvalid::recovery`](super::LosslessInvalid::recovery).
+  /// `Some` names it — see [`Refusal`]. `None` means no budget tripped; it says nothing about the
+  /// sink, which is [`Invalid::stopped`].
   #[inline]
   pub const fn refusal(&self) -> Option<Refusal> {
     self.refusal
-  }
-}
-
-/// The lossless door's constructor, and nothing else's.
-///
-/// Gated to its one caller rather than left ungated: without `rowan` there is no door that refuses
-/// before a [`Validator`] exists, so an ungated constructor is dead code in exactly the feature
-/// selection `cargo clippy --no-default-features -D warnings` builds.
-#[cfg(all(feature = "rowan_0_17", feature = "std"))]
-impl Invalid {
-  /// The verdict of a run a resource bound abandoned, with `emitted` diagnostics behind it and
-  /// `stopped` saying whether the sink asked to stop on one of them.
-  ///
-  /// `pub(crate)` and used by exactly one caller: the lossless door refuses **before** it projects,
-  /// so there is no [`Validator`] in existence to carry the flag out. The shape is the same one
-  /// `validate_charged` produces — `Err`, `budget_tripped`, and an `emitted` that may be zero.
-  pub(crate) const fn refused(emitted: u32, stopped: bool) -> Self {
-    Self {
-      emitted,
-      stopped,
-      refusal: Some(Refusal::Budget),
-    }
-  }
-
-  /// The verdict of a run whose parse is deeper than the projection-depth policy.
-  ///
-  /// Not a resource problem and not a mismatch: [`Invalid::budget_tripped`] reads `false`, nothing
-  /// is emitted, and [`Invalid::refusal`] names [`Refusal::TooDeep`].
-  pub(crate) const fn too_deep() -> Self {
-    Self {
-      emitted: 0,
-      stopped: false,
-      refusal: Some(Refusal::TooDeep),
-    }
-  }
-
-  /// The lossless door's other pre-projection refusal: a pair whose bytes disagree.
-  pub(crate) const fn unexamined() -> Self {
-    Self {
-      emitted: 0,
-      stopped: false,
-      refusal: Some(Refusal::SourceMismatch),
-    }
-  }
-
-  /// The pre-projection refusal of a parse whose root is not the dialect's document root.
-  pub(crate) const fn wrong_root(raw: u16) -> Self {
-    Self {
-      emitted: 0,
-      stopped: false,
-      refusal: Some(Refusal::WrongRoot { raw }),
-    }
   }
 }
 
@@ -683,22 +585,9 @@ impl core::fmt::Display for Invalid {
       // errors" would read as the opposite of what happened for all of them.
       return f.write_str(match self.refusal {
         Some(Refusal::Budget) => "resource budget exceeded before the document was fully examined",
-        Some(Refusal::SourceMismatch) => {
-          "the parse and the source are not the same document, so nothing was validated"
-        }
-        Some(Refusal::TooDeep) => {
-          "the parse nests deeper than a projection will descend, so nothing was validated"
-        }
-        Some(Refusal::WrongRoot { raw }) => {
-          return write!(
-            f,
-            "the parse's root has raw kind {raw}, which is not this dialect's document root, so \
-             the parse was minted outside its door and nothing was validated"
-          );
-        }
-        // Unreachable: `validate_charged` answers `Ok` for a zero count with no refusal, so this
-        // combination is not constructed. Rendered rather than asserted — a `Display` that panics
-        // is a worse answer than a vague one.
+        // Unreachable: `validate_executable_with` answers `Ok` for a zero count with no refusal, so
+        // this combination is not constructed. Rendered rather than asserted — a `Display` that
+        // panics is a worse answer than a vague one.
         None => "validation examined less than the whole document",
       });
     }
@@ -707,17 +596,10 @@ impl core::fmt::Display for Invalid {
     if self.stopped {
       f.write_str(" (validation stopped early)")?;
     }
-    match self.refusal {
-      Some(Refusal::Budget) => f.write_str(" (resource budget exceeded)")?,
-      Some(Refusal::SourceMismatch) => f.write_str(" (the parse and the source disagree)")?,
-      Some(Refusal::TooDeep) => f.write_str(" (the parse is too deeply nested)")?,
-      Some(Refusal::WrongRoot { raw }) => write!(
-        f,
-        " (the parse's root has raw kind {raw}, which is not this dialect's document root)"
-      )?,
-      None => {}
-    }
-    Ok(())
+    f.write_str(match self.refusal {
+      Some(Refusal::Budget) => " (resource budget exceeded)",
+      None => "",
+    })
   }
 }
 
@@ -837,36 +719,6 @@ where
   S: AsRef<[u8]> + Clone,
   K: Sink<S>,
 {
-  validate_charged(
-    schema,
-    document,
-    scratch,
-    budget,
-    rules,
-    sink,
-    Ledger::open(budget),
-  )
-}
-
-/// [`validate_executable_with`] continuing an already-opened [`Ledger`] rather than opening one.
-///
-/// The lossless door needs this. Its projection builds the whole AST **before** any rule exists to
-/// charge, so the ledger has to be opened before the [`Validator`] is and carried into it; a
-/// second, private ledger would be a second number for a caller to reason about and a second place
-/// for the two to disagree. See `lossless::validate_executable_lossless_with`.
-pub(crate) fn validate_charged<S, K>(
-  schema: &Schema,
-  document: &ExecutableDocument<S>,
-  scratch: &mut Scratch,
-  budget: &Budget,
-  rules: RuleSet,
-  sink: &mut K,
-  left: Ledger,
-) -> Result<(), Invalid>
-where
-  S: AsRef<[u8]> + Clone,
-  K: Sink<S>,
-{
   scratch.reset();
   let mut validator = Validator {
     schema,
@@ -893,7 +745,7 @@ where
     emitted: 0,
     stopped: false,
     work: Work::new(budget.merge_work()),
-    left,
+    left: Ledger::open(budget),
     generation: 0,
     tripped: false,
     blame: SimpleSpan::const_new(0, 0),
@@ -931,9 +783,9 @@ where
 /// program has now written that same defect four times: `Work::take`'s saturation, `Visits::take`,
 /// tokora's regime generation, and this. Repairing it as arithmetic repairs one of them.
 ///
-/// [`Ledger::Off`] is closed under [`Ledger::take`]: no sequence of charges, and no prepayment the
-/// lossless door subtracts before the validator exists, can turn it into [`Ledger::Left`]. That is
-/// the property, and it is a property of the type rather than of every call site that spends.
+/// [`Ledger::Off`] is closed under [`Ledger::take`]: no sequence of charges can turn it into
+/// [`Ledger::Left`]. That is the property, and it is a property of the type rather than of every
+/// call site that spends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Ledger {
   /// No bound. Every charge succeeds and changes nothing.
@@ -1460,8 +1312,7 @@ struct Validator<'a, 'd, S, K> {
   /// spending against.
   work: Work,
   /// What is left of [`Budget::validation_work`](super::Budget::validation_work), or
-  /// [`Ledger::Off`]. Charged by every pass that is not draft 5.3.2's engine, and pre-spent by the
-  /// lossless door's projection before this struct exists.
+  /// [`Ledger::Off`]. Charged by every pass that is not draft 5.3.2's engine.
   left: Ledger,
   /// Distinguishes one fragment expansion from the next without clearing a bitset per expansion.
   generation: u32,
@@ -1538,9 +1389,9 @@ where
   /// [`Budget::merge_work`](super::Budget::merge_work) of **zero** doing
   /// `O(definitions + fragments + condition bytes)` of work and allocation before its first
   /// charge — through the eight rounds of the branch that wrote it and thirteen of the branch that
-  /// read it. The same shape one axis over cleared the sibling lossless door as "out of scope by
-  /// API shape: it takes no `Budget`", which was true of the ledger question and silent about the
-  /// whole-root question that actually mattered.
+  /// read it. The same shape one axis over cleared the lossless door this crate then had as "out of
+  /// scope by API shape: it takes no `Budget`", which was true of the ledger question and silent
+  /// about the whole-root question that actually mattered.
   ///
   /// **A clearance must record which question it answers, and "out of scope" is not an answer to
   /// "is it bounded".** Each deferral row below therefore names where the answer was checked, and
@@ -1556,7 +1407,6 @@ where
   ///
   /// | charge | sits | dimension | gate |
   /// |---|---|---|---|
-  /// | projection (lossless door only) | before `project_*` | bytes of `max(source, parse text)` | none — it is the door |
   /// | prep, per operation | before the row is pushed | one node | none — builds what every rule reads |
   /// | prep, per fragment | before the row is pushed | one node | none — same |
   /// | `collect_definition_edges` | loop top, before `resolve` | depth | none — it is the traversal |
@@ -1592,7 +1442,6 @@ where
   /// | 5.3.2 merge engine | its own ledger, `build_merge_index` first | [`Budget::merge_work`](super::Budget::merge_work) | [`merges`] |
   /// | 5.3.2 conflict subject | before the clone | bytes | `FieldSelectionMerging` |
   /// | 5.5.2.3 possible objects | before **each word** the intersection reads | words | `FragmentSpreadIsPossible` && the types differ |
-  /// | projection + whole-root check (lossless) | before both | bytes of `max(source, parse text)` | none — it is the door |
   ///
   /// # And three populations every row answers for separately
   ///
@@ -3299,17 +3148,17 @@ mod tests {
   ///
   /// The property the four previous versions of this defect did not have. `u32::MAX` was the
   /// documented spelling of "never refuse" and was also just a number, so the first charge turned
-  /// it into a very large *finite* budget and the lossless door's prepayment turned it into a
-  /// smaller one again. Reachable at about 65,000 operations over a 65,000-selection fragment,
-  /// which is a document this suite is not going to build — so the property is asserted where it
-  /// lives, over the type, rather than inferred from one document that happens to be big enough.
+  /// it into a very large *finite* budget. Reachable at about 65,000 operations over a
+  /// 65,000-selection fragment, which is a document this suite is not going to build — so the
+  /// property is asserted where it lives, over the type, rather than inferred from one document
+  /// that happens to be big enough.
   #[test]
   fn an_absent_bound_is_closed_under_spending() {
     let off = Ledger::open(&Budget::default().with_validation_work(u32::MAX));
     assert_eq!(off, Ledger::Off);
 
     // Every charge shape that exists: a single unit, a whole default ceiling, the largest charge
-    // `units` can produce, and the prepayment the lossless door takes before a validator exists.
+    // `units` can produce, the whole of a `u32`, and nothing.
     let mut ledger = off;
     for charge in [
       1,

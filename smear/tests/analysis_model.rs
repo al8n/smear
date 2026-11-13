@@ -16,7 +16,7 @@ use smear::{
     Package, PackageId, PackageInfo, PackageKind, Path, PathRoot, Primitive, Resolution, Root,
     RootOperation, Schema, SourceId, Sym, Tier, Ty, TyId, TyKind, TypeBound, TypeExpr, TypeExprId,
     TypeExprKind, TypeParam, TypeParams, Value, ValueId, ValueKind, analyze,
-    test_support::{self, ModelBuilder},
+    test_support::ModelBuilder,
   },
   diagnostic::Location,
   lexer::tokora::SimpleSpan,
@@ -1277,11 +1277,8 @@ fn modules_answer_their_package_path_parent_children_kind_location_description_a
   assert!(vision.children().is_empty());
   assert_eq!(vision.kind(), ModuleKind::Inline);
   assert_eq!(vision.location(), Some(at(APP_MEDIA, 100, 106)));
-  assert_eq!(
-    test_support::module_extent(&model, VISION),
-    Some(at(APP_MEDIA, 90, 140))
-  );
-  assert_eq!(test_support::module_extent(&model, MEDIA), None);
+  assert_eq!(vision.extent(), Some(at(APP_MEDIA, 90, 140)));
+  assert_eq!(media.extent(), None);
   let description = vision.description().expect("the inline `mod` is described");
   assert_eq!(description.text(), "Vision.");
   assert_eq!(description.location(), at(APP_MEDIA, 90, 99));
@@ -1362,6 +1359,15 @@ fn a_definition_answers_every_accessor() {
     extensions,
     [false, true],
     "its definition, then its extension"
+  );
+  let extents: Vec<Location> = query
+    .contributions()
+    .map(|part: Contribution<'_>| part.extent())
+    .collect::<Vec<Location>>();
+  assert_eq!(
+    extents,
+    [at(APP_SCHEMA, 200, 300), at(APP_SCHEMA, 890, 960)],
+    "each contribution's extent, wider than the location it names"
   );
   let mut parts: Contributions<'_> = query.contributions();
   assert_eq!(
@@ -1458,6 +1464,15 @@ fn a_definition_answers_every_accessor() {
     contributed(i32_def),
     vec![(Location::entire(CORE_SOURCE), vec![], vec![], vec![], false)]
   );
+  let primitive: Vec<Location> = i32_def
+    .contributions()
+    .map(|part: Contribution<'_>| part.extent())
+    .collect::<Vec<Location>>();
+  assert_eq!(
+    primitive,
+    [Location::entire(CORE_SOURCE)],
+    "a primitive `core` materialises has no text of its own"
+  );
   assert!(model.def(MAP_KEY).is_marker());
   assert_eq!(model.def(TYPE_META).origin(), Origin::Compat);
   assert_eq!(model.def(TAGS).collection(), Some(Collection::Set));
@@ -1486,6 +1501,7 @@ fn a_member_answers_every_accessor() {
   assert_eq!(node.owner(), QUERY);
   assert_eq!(node.parent(), None);
   assert_eq!(node.location(), at(APP_SCHEMA, 250, 254));
+  assert_eq!(node.extent(), at(APP_SCHEMA, 250, 280));
   assert_eq!(node.description(), None);
   assert_eq!(node.ty(), Some(NODE_TYPE));
   assert_eq!(node.default(), None);
@@ -1498,6 +1514,7 @@ fn a_member_answers_every_accessor() {
   assert_eq!(argument.name(), "id");
   assert_eq!(argument.owner(), QUERY);
   assert_eq!(argument.parent(), Some(QUERY_NODE));
+  assert_eq!(argument.extent(), at(APP_SCHEMA, 255, 266));
   assert_eq!(argument.ty(), Some(NODE_ARG_TYPE));
   assert_eq!(argument.default(), Some(NODE_ARG_DEFAULT));
   assert!(argument.arguments().is_empty());
@@ -1510,10 +1527,12 @@ fn a_member_answers_every_accessor() {
   let reason = model.member(REASON);
   assert_eq!(reason.kind(), MemberKind::Argument);
   assert_eq!(reason.parent(), None);
+  assert_eq!(reason.extent(), at(CORE_LIB, 41, 85));
   assert_eq!(reason.default(), Some(REASON_DEFAULT));
   assert_eq!(model.member(CACHE_TAGS).default(), Some(CACHE_TAGS_DEFAULT));
   assert_eq!(model.member(FILTER_COLOR).default(), Some(COLOR_DEFAULT));
   assert_eq!(model.member(FILTER_TAGS).kind(), MemberKind::InputField);
+  assert_eq!(model.member(FILTER_TAGS).extent(), at(APP_SCHEMA, 510, 514));
   assert_eq!(model.member(PAGE_ITEMS).ty(), Some(ITEMS_TYPE));
   assert_eq!(model.member(NODE_ID).ty(), Some(NODE_ID_TYPE));
   assert_eq!(model.member(CACHE_TTL).ty(), Some(TTL_TYPE));
@@ -1527,6 +1546,7 @@ fn a_member_answers_every_accessor() {
 
   let red = model.member(RED);
   assert_eq!(red.kind(), MemberKind::EnumValue);
+  assert_eq!(red.extent(), at(APP_SCHEMA, 410, 413));
   assert_eq!(red.ty(), None);
   assert_eq!(red.default(), None);
   assert_eq!(model.member(GREEN).ty(), None);
@@ -2061,6 +2081,7 @@ fn the_schema_answers_its_roots_applications_description_and_contributions() {
   assert_eq!(parts.len(), 1);
   let part: Contribution<'_> = parts.next().expect("the schema has its definition");
   assert_eq!(part.location(), at(APP_SCHEMA, 1000, 1006));
+  assert_eq!(part.extent(), at(APP_SCHEMA, 990, 1100));
   assert!(!part.is_extension());
   assert!(part.members().is_empty());
   assert!(part.implements().is_empty());

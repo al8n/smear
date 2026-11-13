@@ -147,7 +147,8 @@ where
   let mut sink = Syntax::new(reporter, source);
   match parser.type_system_document(text, &mut sink) {
     Ok(parsed) => {
-      let (document, _, _, tree) = parsed.into_components();
+      let (document, _, errors, tree) = parsed.into_components();
+      sink.found(errors);
       (Some(Parsed::Text(document)), Some(tree))
     }
     Err(_) => {
@@ -209,6 +210,16 @@ impl<'r> Syntax<'r> {
         .help("supply the file in a form the parser can read: a shorter text")
         .build(),
     );
+  }
+
+  /// The layer answered a document for the file, and found `errors` syntax errors in it. Those it
+  /// did not lend, which a layer that keeps a bounded number of records refuses past its ceiling,
+  /// are counted as errors of the analysis, and they truncate its list.
+  ///
+  /// Exact because this sink never breaks: a layer lends it every error it kept, so `errors` less
+  /// what it was lent is what the layer did not lend.
+  fn found(self, errors: usize) {
+    self.reporter.count_unlent(errors.saturating_sub(self.lent));
   }
 }
 

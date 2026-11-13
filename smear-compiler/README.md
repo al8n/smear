@@ -30,13 +30,14 @@ rendering and the caller of the §3 build. A name that misdescribes its contents
 |---------|-------------|---------|
 | `alloc` | The validator, without the standard library: the rules, `Scratch` and `Budget`, the sinks and the diagnostics. `std` gives the same API; with neither, the crate is `no_std` and re-exports only `smear-schema`'s core items as `schema`. Implied by no feature | |
 | `std` | Standard library support, and with it the validator; it does not turn `alloc` on. Off, the crate is `no_std` | ✓ |
-| `rowan_0_17` | The lossless door — the same rules over a rowan CST, by projection. Implies no tier; the door needs `std` | |
 | `introspection` | Re-exports `smear-schema`'s draft §4 construction door and its error type. Needs `std` or `alloc`, which it does not imply | |
 
-No feature but `default` switches a tier on, `introspection` and `rowan_0_17` included, so a
-`default-features = false` consumer names `std` or `alloc` itself, and names `std` beside
-`rowan_0_17`, which the lossless tower needs. `rowan` is an alias for it, for the current version
-of the crate: it enables `rowan_0_17` and nothing else.
+No feature but `default` switches a tier on, `introspection` included, so a
+`default-features = false` consumer names `std` or `alloc` itself.
+
+The validator reads the document either of `smear-parser`'s parser layers answers, or one the
+caller builds. The lossless layer, which recovers and keeps the tree, is `smear-parser`'s, behind
+its `rowan_0_17` and `std` features; this crate declares no feature for it.
 
 ## Part of the Smear Ecosystem
 

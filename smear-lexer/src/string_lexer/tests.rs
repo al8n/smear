@@ -16,12 +16,18 @@
 //! and its `src/json/tests.rs` holds these conversions to that writer over a corpus that overlaps
 //! this one — so a drift here has two gates to get past, and neither of them is this file.
 
-use std::{borrow::Cow, vec::Vec};
+use std::{borrow::Cow, format, vec::Vec};
 
-use tokora::{SimpleSpan, utils::Lexeme};
+use tokora::{
+  SimpleSpan,
+  utils::{Lexeme, PositionedChar},
+};
 
 use super::{LitBlockStr, LitComplexInlineStr, LitInlineStr, LitStr};
-use crate::error::StringError;
+use crate::{
+  SyntaxErrorKind,
+  error::{InvalidUnicodeHexDigits, StringError, UnicodeError},
+};
 
 /// Cooks a literal the way a consumer would: lex it, then convert.
 fn cook(literal: &str) -> Cow<'_, str> {
@@ -494,4 +500,105 @@ fn a_dangling_backslash_reads_alike_from_text_and_bytes() {
     bytes.as_slice(),
     &[StringError::IncompleteEscape(SimpleSpan::new(1, 2))]
   );
+}
+
+/// A `\u` before characters of three bytes each takes four of them whole, as its digits: the
+/// escape's token ends on a character boundary, at the closing quote, and each digit is reported at
+/// its own byte. The text source counted those characters as bytes, and ended the token inside the
+/// second one, which its sub-lexer refuses with a panic.
+#[test]
+fn a_fixed_unicode_escape_before_wide_characters_takes_them_whole() {
+  let errors = LitStr::try_from("\"\\u€€€€\"").expect_err("no hex digit");
+  let digits = InvalidUnicodeHexDigits::from([
+    PositionedChar::with_position('€', 3),
+    PositionedChar::with_position('€', 6),
+    PositionedChar::with_position('€', 9),
+    PositionedChar::with_position('€', 12),
+  ]);
+  assert_eq!(
+    errors.as_slice(),
+    &[StringError::Unicode(
+      UnicodeError::invalid_fixed_unicode_escape_sequence(digits, SimpleSpan::new(1, 15))
+    )]
+  );
+
+  // One wide character before the quote: the escape takes it and the quote, as it takes any two
+  // characters, and the literal is then unterminated.
+  let errors = LitStr::try_from("\"\\u€\"").expect_err("no hex digit");
+  let digits = InvalidUnicodeHexDigits::from([
+    PositionedChar::with_position('€', 3),
+    PositionedChar::with_position('"', 6),
+  ]);
+  assert_eq!(
+    errors.as_slice(),
+    &[
+      StringError::Unicode(UnicodeError::invalid_fixed_unicode_escape_sequence(
+        digits,
+        SimpleSpan::new(1, 7)
+      )),
+      StringError::unterminated_inline_string(),
+    ]
+  );
+}
+
+/// A literal's record keeps its first sixteen errors, in the order found, and one entry counting
+/// the rest, exactly, through either door: a thousand unknown escapes are sixteen and 984 more, and
+/// one escape more makes it 985. A literal its line or the input ends closes its record with
+/// `Unterminated` after the count, where no cap reaches it.
+#[test]
+fn an_inline_literal_keeps_sixteen_errors_and_counts_the_rest() {
+  for (literal, omitted, unterminated) in [
+    (format!("\"{}\"", "\\q".repeat(1000)), 984, false),
+    (format!("\"{}\"", "\\q".repeat(1001)), 985, false),
+    (format!("\"{}", "\\q".repeat(1000)), 984, true),
+    (format!("\"{}\nx", "\\q".repeat(1000)), 984, true),
+  ] {
+    let len = if unterminated { 18 } else { 17 };
+
+    let text = LitStr::try_from(literal.as_str()).expect_err("unknown escapes");
+    assert_eq!(text.len(), len, "{omitted}");
+    assert!(
+      text[..16]
+        .iter()
+        .all(|error| error.kind() == SyntaxErrorKind::UnknownEscape),
+      "{omitted}: {:?}",
+      &text[..16]
+    );
+    assert_eq!(text[16], StringError::Omitted(omitted));
+    if unterminated {
+      assert_eq!(text[17], StringError::unterminated_inline_string());
+    }
+
+    let bytes = LitStr::try_from(literal.as_bytes()).expect_err("unknown escapes");
+    assert_eq!(bytes.len(), len, "{omitted}");
+    assert!(
+      bytes[..16]
+        .iter()
+        .all(|error| error.kind() == SyntaxErrorKind::UnknownEscape),
+      "{omitted}: {:?}",
+      &bytes[..16]
+    );
+    assert_eq!(bytes[16], StringError::Omitted(omitted));
+    if unterminated {
+      assert_eq!(bytes[17], StringError::unterminated_inline_string());
+    }
+  }
+}
+
+/// A block literal in a byte source whose content is a thousand bytes that begin no UTF-8 sequence
+/// keeps the first sixteen, each at its own byte, and counts the other 984.
+#[test]
+fn a_block_literal_keeps_sixteen_errors_and_counts_the_rest() {
+  let mut literal = b"\"\"\"".to_vec();
+  literal.resize(3 + 1000, 0xFF);
+  literal.extend_from_slice(b"\"\"\"");
+  let errors = LitStr::try_from(literal.as_slice()).expect_err("not UTF-8");
+  assert_eq!(errors.len(), 17);
+  for (at, error) in errors[..16].iter().enumerate() {
+    assert_eq!(
+      *error,
+      StringError::UnsupportedCharacter(Lexeme::Range(SimpleSpan::new(3 + at, 4 + at)))
+    );
+  }
+  assert_eq!(errors[16], StringError::Omitted(984));
 }

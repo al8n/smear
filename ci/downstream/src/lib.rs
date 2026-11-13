@@ -18,8 +18,6 @@
 
 #[cfg(feature = "uses-compiler-introspection")]
 pub mod compiler_introspection;
-#[cfg(feature = "uses-compiler-rowan")]
-pub mod compiler_rowan;
 #[cfg(feature = "uses-lexer-bytes")]
 pub mod lexer_bytes;
 #[cfg(feature = "uses-lexer-graphql")]

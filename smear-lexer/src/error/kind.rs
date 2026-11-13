@@ -47,9 +47,14 @@ pub enum SyntaxErrorKind {
   InvalidNumber,
 
   // -- the lexer: strings ---------------------------------------------------------------------
-  /// A string literal the input ends inside.
+  /// A string literal the input ends inside, or a single-line one whose line ends before its
+  /// closing `"`.
   UnterminatedString,
   /// A line feed or carriage return inside a single-line string literal.
+  ///
+  /// The lexer never reports it — a single-line string ends at its first line terminator, as
+  /// [`UnterminatedString`](Self::UnterminatedString) — so only a `StringError` a caller builds
+  /// reads as it.
   LineTerminatorInString,
   /// A string literal that does not open with `"` or `"""`.
   ///
@@ -58,7 +63,7 @@ pub enum SyntaxErrorKind {
   UnopenedString,
   /// A backslash followed by a character draft §2.9.4 defines no escape for.
   UnknownEscape,
-  /// A backslash that no character follows.
+  /// A backslash that no character follows — in a single-line string, none on its line.
   IncompleteEscape,
   /// A `\u` escape that is not four hex digits, or a `\u{…}` escape that is unclosed, empty, longer
   /// than six digits or not hexadecimal.
@@ -110,7 +115,10 @@ pub enum SyntaxErrorKind {
   ResourceLimit,
 
   // -- anything else ----------------------------------------------------------------------------
-  /// A refusal no kind above names: an error built from a free-form message.
+  /// A refusal no kind above names: an error built from a free-form message, or the entry that
+  /// counts what a string literal's or a comment's record did not keep. That entry follows the
+  /// errors the record kept, so a parse never reports it as a refusal's kind, which is the first
+  /// error's; the lexer's own API hands it out.
   InvalidSyntax,
 }
 
@@ -224,7 +232,10 @@ impl SyntaxErrorKind {
       ),
       Self::UnterminatedSpread => Some("a spread is written with exactly three dots: `...`"),
       Self::LeadingZero => Some("an integer part may start with `0` only when it is exactly `0`"),
-      Self::UnterminatedString => Some("close the string with the delimiter that opened it"),
+      Self::UnterminatedString => Some(
+        "close the string with the delimiter that opened it; an inline string ends with its \
+         line, so text that spans lines needs a block string (`\"\"\"`)",
+      ),
       Self::LineTerminatorInString => Some(
         "use a block string (`\"\"\"`) for text that spans lines, or write the line break as `\\n`",
       ),

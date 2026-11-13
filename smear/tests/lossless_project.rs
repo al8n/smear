@@ -282,10 +282,11 @@ fn executable_oracle(src: &str) -> Result<ExecutableDocument<&str>, GraphqlError
 /// `project_executable_document` is the AST the executable parser builds — and the **recovering**
 /// door is the same value again whenever nothing had to be recovered.
 ///
-/// The second half is what makes this gate load-bearing for the validator: `validate_executable_lossless`
-/// goes through the recovering door, not the fail-fast one, so an equality proved only of the
-/// fail-fast door would be proved of code the validator never calls. The two are compared here,
-/// over the same padded corpus, and the recovery is required to report itself complete.
+/// The second half is what makes this gate load-bearing for the lossless layer: the document
+/// `Lossless` answers is the recovering walk's over its own tree, not the fail-fast door's, so an
+/// equality proved only of the fail-fast door would be proved of code the layer never runs. The two
+/// are compared here, over the same padded corpus, and the recovery is required to report itself
+/// complete.
 #[test]
 fn the_executable_projection_equals_the_parse_over_the_shared_corpus() {
   // Every `valid_` entry the executable root accepts, discovered rather than listed: an entry
@@ -374,9 +375,9 @@ fn type_system_oracle(src: &str) -> Result<TypeSystemDocument<&str>, GraphqlErro
 /// the same value again whenever nothing had to be recovered.
 ///
 /// [`the_executable_projection_equals_the_parse_over_the_shared_corpus`]'s mirror, and load-bearing
-/// for the validator in the same way: `validate_schema_lossless` goes through the recovering door,
-/// so an equality proved only of the fail-fast one would be proved of code the validator never
-/// calls. It is also the value-level statement `validator_lossless_schema.rs` stands on — that gate
+/// for the lossless layer in the same way: its type-system documents are the recovering walk's, so
+/// an equality proved only of the fail-fast door would be proved of code the layer never runs. It
+/// is also the value-level statement `validator_lossless_schema.rs` stands on — that gate
 /// compares draft §3 *refusals*, which say nothing about the parts of a document no rule blames,
 /// and this one compares every span of every node.
 #[test]
@@ -476,6 +477,31 @@ fn each_root_refuses_the_other_two() {
   assert!(project_executable_document(&executable_parse, executable).is_ok());
   assert!(project_type_system_document(&executable_parse, executable).is_err());
   assert!(project(&executable_parse, executable).is_err());
+}
+
+/// The recovering SDL projection skips a root of another kind rather than reading it.
+///
+/// A mixed parse holds a `Document` node, not a `TypeSystemDocument` one. The fail-fast SDL
+/// projection refuses it, as [`each_root_refuses_the_other_two`] holds; the recovering one falls
+/// back on the tree's own root, where the one child is a `Document` node with no SDL image, so it
+/// answers no definition and counts that child skipped, and never reads a mixed root's definitions
+/// as an SDL document's.
+#[test]
+fn the_recovering_sdl_door_skips_a_root_of_another_kind() {
+  let sdl = "type Query { ok: Int }";
+  let mixed = parse_document(sdl);
+  assert!(!mixed.has_errors());
+  let (document, recovery) =
+    project_type_system_document_recovered(&mixed, sdl).expect("the pair is the same document");
+  assert!(
+    document.definitions().is_empty(),
+    "the recovering walk read a mixed root's definitions"
+  );
+  assert_eq!(recovery.projected(), 0);
+  assert!(
+    recovery.skipped() > 0,
+    "the mixed root is not counted skipped"
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1355,13 +1381,13 @@ fn the_invalid_half_is_a_census_rather_than_a_wall_of_refusals() {
   );
 }
 
-/// A **direct** consumer of the recovering projector — no validator, no `smear-compiler` door —
-/// cannot obtain an AST it can mistake for the whole document.
+/// A consumer of the recovering projector cannot obtain an AST it can mistake for the whole
+/// document.
 ///
-/// The door check used to live at the door. `validate_executable_lossless` and
-/// `validate_schema_lossless` each called `verify_parse` themselves, which is airtight for a
-/// caller that goes through them and says nothing about the caller that does not: these two
-/// projections are `pub`, and projecting a pair is the whole reason they exist.
+/// The projector verifies its own pair, whoever calls it. These two projections are `pub`, they
+/// are the road of a caller that kept a `Parse`, and projecting a pair is the whole reason they
+/// exist; a check made anywhere else would be airtight for the callers that go through it and say
+/// nothing about the ones that do not.
 ///
 /// # Why `skipped` could not carry it
 ///

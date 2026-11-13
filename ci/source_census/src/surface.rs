@@ -41,7 +41,7 @@ use syn::{Item, UseTree, Visibility};
 
 /// One module of the crate under census, with the items written in it.
 pub struct Module {
-  /// `["smear", "validator", "lossless"]`.
+  /// `["smear", "parser", "graphql", "lossless"]`.
   pub path: Vec<String>,
   /// The file the module's body was read from. Inline modules share their parent's.
   pub file: PathBuf,

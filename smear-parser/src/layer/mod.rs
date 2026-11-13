@@ -2,9 +2,9 @@
 //! hands the syntax errors it found.
 //!
 //! The syntactic layer stops at a document's first syntax error and keeps nothing beside the
-//! document. The lossless layer recovers, lends every syntax error to the caller's sink, and keeps
-//! the tree. Both answer the same AST: a consumer that is handed a document never learns which
-//! layer made it, and a consumer that is handed text takes the layer as a value.
+//! document. The lossless layer recovers, lends every syntax error it kept to the caller's sink,
+//! and keeps the tree. Both answer the same AST: a consumer that is handed a document never learns
+//! which layer made it, and a consumer that is handed text takes the layer as a value.
 //!
 //! Each dialect module declares its own `Layer` trait, implements it for the two values typed by
 //! its dialect, and names them `Syntactic` and `Lossless`. The trait is sealed for each layer and
@@ -249,13 +249,17 @@ impl<D, T> Parsed<D, T> {
     self.recovery
   }
 
-  /// How many syntax errors the parse found: how many a sink that never breaks is lent.
+  /// How many syntax errors the parse found.
   ///
-  /// It is not how many a sink took: a sink that breaks takes fewer, and the count stays.
+  /// A sink that never breaks is lent that many, less the ones the lossless layer found past its
+  /// limits' ceiling on kept diagnostics,
+  /// [`max_diagnostics`](smear_lexer::limits::LosslessLimits::max_diagnostics): those are counted
+  /// and lent to nobody, one for each refused record, whatever it held. It is not how many a sink
+  /// took: a sink that breaks takes fewer, and the count stays.
   ///
   /// It counts errors, where a kept tree counts records: one record of the lossless tree can hold
   /// several errors. So for the lossless layer the count is never less than the number of the
-  /// tree's error diagnostics, and it is zero exactly when the tree has none.
+  /// tree's error diagnostics, and it is zero exactly when the tree's `has_errors()` is false.
   #[inline]
   pub const fn error_count(&self) -> usize {
     self.errors
@@ -389,22 +393,29 @@ impl<D: ?Sized> fmt::Debug for Syntactic<D> {
   }
 }
 
-/// The lossless layer of the dialect `D`: recovers, lends every syntax error to the caller's sink,
-/// and keeps the tree.
+/// The lossless layer of the dialect `D`: recovers, lends every syntax error it kept to the
+/// caller's sink, and keeps the tree.
 ///
 /// `D` is the dialect's brand, and each dialect names its own instance `Lossless`. The value holds
-/// the lexer's [`LosslessLimits`], which bound how deep a parse descends and how much work a text
-/// may buy. A text is read as `str`: a tree holds text only, so a caller that holds bytes decodes
-/// them first.
+/// the lexer's [`LosslessLimits`], which bound how deep a parse descends, how much work a text may
+/// buy, and how many diagnostics a parse keeps. A text is read as `str`: a tree holds text only,
+/// so a caller that holds bytes decodes them first.
 ///
 /// # Memory, and untrusted text
 ///
 /// An error is lent by reference and never copied, so an answer keeps what its tree keeps and
-/// nothing more. While a parse runs it holds one record for each error it has found, and nothing
-/// bounds their number but the text: a text dense with errors is recorded error for error. For
-/// untrusted text the bound is the caller's own
-/// [`with_max_produce_events`](LosslessLimits::with_max_produce_events): the records a parse
-/// keeps are a bounded multiple of the lexical items it is allowed to produce.
+/// nothing more. While a parse runs it holds a record for each error, warning and recovery hole
+/// it has found, up to its limits' [`max_diagnostics`](LosslessLimits::max_diagnostics), 32 768
+/// by default. Past that each further error is counted in [`error_count`](Parsed::error_count),
+/// and neither kept nor lent. So how many records a parse holds is bounded whatever the text, and
+/// so are their bytes: a lexer error keeps at most eighteen entries however long its token, which
+/// only a string literal's reaches, with its first sixteen faults, one that counts the rest, and
+/// the `Unterminated` that ends it where its line or the text does.
+///
+/// The tree and the parse's own log of events are not bounded: they grow with the text, and a
+/// caller bounds them by bounding its length.
+/// [`with_max_produce_events`](LosslessLimits::with_max_produce_events) bounds the lexing a text
+/// may buy.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[cfg_attr(docsrs, doc(cfg(all(feature = "rowan_0_17", feature = "std"))))]
 pub struct Lossless<D: ?Sized> {

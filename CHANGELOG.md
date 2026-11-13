@@ -25,10 +25,58 @@ All notable changes to Smear are documented in this file.
   before any scan for a text past `Refused::MAX_SOURCE_LEN`. It lends every error its tree keeps
   at error severity but a token-budget member the grammar wrote, one `invalid-syntax` error for
   such a record that holds none, and its token-budget refusal, once and last; a recovery hole and
-  a warning are not lent. `error_count()` is how many errors a sink that never breaks is lent: for
-  the lossless layer it is zero exactly when the tree's `has_errors()` is false, and never less
-  than the number of the tree's error diagnostics. `Recovery` now lives in `layer`, and
-  `lossless::project::Recovery`, where 0.0.1 released it, re-exports it.
+  a warning are not lent. `error_count()` is how many errors the parse found: a sink that never
+  breaks is lent that many, less the error records the lossless layer refused past its limits'
+  ceiling on kept diagnostics, which it counts one for each. For the lossless layer the count is
+  zero exactly when the tree's `has_errors()` is false, and never less than the number of the
+  tree's error diagnostics. `Recovery` now lives in `layer`, and `lossless::project::Recovery`,
+  where 0.0.1 released it, re-exports it.
+- `smear-lexer` and `smear-parser`!: a ceiling on the diagnostics a lossless parse keeps.
+  `LosslessLimits::max_diagnostics()` is the most records a lossless parse keeps, errors,
+  warnings and recovery holes together: the first it records, none dropped later to make room.
+  It is 32 768 by default, `LosslessLimits::with_max_diagnostics(max)` sets it, `usize::MAX` is
+  no ceiling, and `0` keeps nothing. Every lossless door and the lossless layer run under it:
+  each door reads it off the limits it is handed and makes the parse's recording emitter with it.
+  Past it the parse goes on, and its tree, its document and its recovery are what they would
+  have been; a further error is counted and not kept, and a further warning or recovery hole is
+  dropped. 0.0.1 released the doors keeping every record: a caller that wants them all passes
+  `LosslessLimits::new().with_max_diagnostics(usize::MAX)` to a `_with_limits` door or to
+  `Lossless::with_limits`. `lossless::runner::Parse::refused_errors()` answers how many errors a
+  parse refused, and `Parse::has_errors()` counts them, whatever its list holds.
+  `DiagnosticSource::refused_errors` is a required method: an implementation outside smear must
+  add it, answering 0 when its emitter has no ceiling. The lossless state grows by a word more,
+  which every token the parser caches carries: with the brace count's, it is two words larger
+  than 0.0.1's. What the ceiling bounds is how many records a parse keeps, and with them their
+  bytes: a lexer error's record keeps at most eighteen entries however long its token, which only
+  a string literal's reaches, with its first sixteen faults, one that counts the rest, and the
+  `Unterminated` that ends it where its line or the text does. It does not bound the tree or the
+  parse's log of events, which grow with the text, and a caller that bounds a parse's whole
+  memory bounds the text's length.
+- `smear-lexer`: an inline string literal ends at its first line terminator, `\n`, `\r` or
+  `\r\n`, before it. It is refused with the errors of what came before and
+  `StringError::Unterminated`, and the terminator and the next line lex as they do anywhere
+  else: trivia in the lossless layer, skipped in the syntactic one. A `\` at the end of the line
+  is `StringError::IncompleteEscape`, and a `\u` escape takes no digit from the next line. The
+  literal used to run on to the next `"` or to the end of the text, with an error for each line
+  break, and the quotes after it paired up the other way. `StringError::UnexpectedLineTerminator`,
+  its three constructors and `SyntaxErrorKind::LineTerminatorInString` stay, and no lexer reports
+  them. `SyntaxErrorKind::UnterminatedString`'s help now says that an inline string ends with its
+  line, and that text spanning lines needs a block string.
+- `smear-lexer`: a string literal's record keeps at most sixteen errors, inline or block: the first
+  sixteen in the order found, then, when `n` more were found, one `StringError::Omitted(n)` that
+  counts them. A literal its line or the input ends still closes its record with
+  `StringError::Unterminated`, which the count never takes, because it is why the token ends
+  where it does. So a record holds at most eighteen entries however long its literal, where it
+  held one for each fault. `StringError::Omitted` is a new variant: it renders as "n more errors
+  in this string literal were found and not kept" and reports `SyntaxErrorKind::InvalidSyntax`.
+- `smear-lexer`: a comment in a byte source keeps at most sixteen errors the same way: an
+  `UnknownLexeme` for each of its first sixteen ill-formed sequences, then one error of the new
+  `LexerErrorData::Omitted(n)`, in either dialect, counting the rest and spanning from the first
+  of them to the last. It renders as "n more errors in this comment were found and not kept" and
+  reports `SyntaxErrorKind::InvalidSyntax`.
+- `smear-lexer`: a `\u` escape in a text source with fewer than four hex digits, before characters
+  of more than one byte, as in `"\u€€€€"`, no longer panics. The escape takes up to four
+  characters whole as its digits, and reports each one that is not hex at its own byte.
 - `smear-parser`!: `Recovery` counts at every module depth. 0.0.1 released it counting a
   document's top-level elements, so that `projected()` was the length of the document's
   definitions. GraphQLx's recovering type-system doors, and both layers, now count every item
@@ -37,6 +85,30 @@ All notable changes to Smear are documented in this file.
   counting one with nothing inside it counted. So in GraphQLx a document that holds an inline
   module counts more than its top-level items. GraphQL has no modules, and its counts keep their
   meaning.
+- `smear-compiler`! and `smear`!: the validator's lossless doors are removed. A document comes
+  from a parser layer, and the one validator reads it:
+  `Lossless::new().executable_document(text, &mut syntax)`, then `validate_executable` or
+  `validate_executable_with` on `parsed.document()`;
+  `Lossless::new().type_system_document(text, &mut syntax)`, then
+  `Schema::build(parsed.document())`. Syntax errors leave by the layer's sink and findings by the
+  validator's; `parsed.is_valid()` and `parsed.recovery()` are the layer's, whatever the
+  validator answers. Removed, each released in 0.0.1:
+  - `validate_executable_lossless`, `validate_executable_lossless_with` and
+    `validate_executable_lossless_verified_with`. A caller that kept a `Parse` projects it with
+    `project_executable_document_recovered` and validates the document;
+  - `validate_schema_lossless`. A caller reads the text with the `Lossless` layer's
+    `type_system_document`, or, having kept a `Parse`, projects it with
+    `project_type_system_document_recovered`, and builds the schema from the document;
+  - `LosslessInvalid` and `LosslessSchemaErrors`;
+  - the re-exports `Recovery` and `Verified`, which are `smear_parser::graphql::Recovery` and
+    `smear_parser::graphql::lossless::Verified`;
+  - `Refusal::SourceMismatch`, `Refusal::TooDeep` and `Refusal::WrongRoot`: no pair reaches the
+    validator, and `Refusal::Budget` is the one refusal left;
+  - `smear-compiler`'s `rowan` feature: the lossless layer is `smear-parser`'s, and `smear`'s
+    `rowan_0_17` no longer forwards to `smear-compiler`.
+
+  `Budget::validation_work` prices validation alone: a lossless parse and its projection are
+  bounded by the layer's `LosslessLimits`.
 - `smear-parser`: lossless recovery leaves a closing delimiter to the block it closes, in both
   dialects, and while a brace is open only the production that owns a closing brace takes it. A
   type or a value missing in front of a closer is reported and the closer left, so the block
@@ -105,7 +177,11 @@ All notable changes to Smear are documented in this file.
   type parameter: a `Model` of the packages, the `Diagnostics` and a `SourceMap`.
   `graphqlx::analyze_with` is the same entrance with the parser layer the caller passes, and it
   answers beside the `Analysis` a `Trees`: what that layer kept for each supplied file it read,
-  by source id, found by `get` and `node` and walked by `TreesIter` and `TreesIntoIter`. Packages
+  by source id, found by `get` and `node` and walked by `TreesIter` and `TreesIntoIter`.
+  `Analysis` and `Model` implement `PartialEq`, and `SourceMap` `PartialEq` and `Eq`: two
+  analyses are equal when their models, every row and every id, their diagnostics, their source
+  maps and the diagnostic ceilings they were made under are, and for a package set no layer
+  reports a syntax error for, every parser layer answers an equal analysis. Packages
   and sources are numbered deterministically, whatever order they are passed in. The package
   set's file paths, package names, dependencies and total size are checked, under the new
   `smear::graphqlx` codes `DiagnosticKind` lists; a message quotes a name or a path whole when
@@ -113,7 +189,9 @@ All notable changes to Smear are documented in this file.
   moved back to the start of a character, unless that would leave nothing out, so no message
   grows with what it quotes. Every file is parsed with the GraphQLx syntactic parser, or,
   through `analyze_with`, with the parser layer the caller passes, its syntax errors reported at
-  that file. `Diagnostic::builder` is public, so a consumer's
+  that file. A parser that keeps a bounded number of records, as the lossless layer does under
+  its own limits, lends no more than it kept; the errors it found beyond them are counted, and
+  the list is truncated. `Diagnostic::builder` is public, so a consumer's
   findings join smear's in one ordered list, and `SourceMap::bind` pairs an analysis with the
   texts it was made from, finding each file again by its package and its path alone: it
   answers no text for a file whose path another file of its package has, for the files of a
@@ -202,7 +280,13 @@ All notable changes to Smear are documented in this file.
   writes, and the root package may add directives to a built-in by an extension; it declares no
   type parameter, since the built-in keeps its identity, and a list it writes is `generic-arity`.
   `Contribution::is_extension()` says whether a contribution is a definition or one of its
-  extensions. Every written type is a type occurrence, numbered in the order the
+  extensions. `Contribution::extent()`, `Member::extent()` and `Module::extent()` answer where
+  each contribution, member and inline module is written, in its own file, from its description,
+  or its first token, to its last token; the own contribution of a primitive `core` materialises,
+  when no definition of the root package's replaces it, answers the whole of `core`'s package
+  source, which has no span; and through `analyze_with` with a layer that keeps a tree,
+  `Trees::node` answers the node an extent in a file the layer read was written as. Every written
+  type is a type occurrence, numbered in the order the
   model's walk reaches it, each before the types it nests: a type parameter's default, a bound,
   an `implements` entry, a union member, a member's type. It keeps its path as written, `Int`
   staying `Int`, and its written arguments, however many its definition has parameters, and its
@@ -304,7 +388,7 @@ All notable changes to Smear are documented in this file.
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models
   it builds, for `smear`'s own tests; it is not API.
-- `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features
+- `smear`!, `smear-lexer`! and `smear-parser`!: the five features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`
   and `rowan` become `bytes_1`, `bstr_1`, `hipstr_0_8`, `smol-bytes_0_2` and
@@ -316,18 +400,20 @@ All notable changes to Smear are documented in this file.
   its old key (`smear/dep:bytes` style, or a `[patch]`) must respell it.
 - `smear-lexer`: string literals in byte sources (`[u8]`, `Bytes`, `BStr`,
   `HipByt`) must be well-formed UTF-8. Ill-formed content is refused with
-  `StringError::UnsupportedCharacter`, carrying each sequence's span.
+  `StringError::UnsupportedCharacter`, carrying each sequence's span, for the
+  first sixteen sequences, and `StringError::Omitted` counts the rest.
   `LitStr::try_from(&[u8])` refuses likewise. `str` and `HipStr` sources are
   unchanged (#246).
 - `smear-lexer`: comments in byte sources (`[u8]`, `Bytes`, `BStr`, `HipByt`)
   must be well-formed UTF-8. Both the syntactic and the lossless lexer refuse an
   ill-formed comment with one `LexerErrorData::UnknownLexeme` per ill-formed
-  sequence, at that sequence's span, and consume the whole comment; the lossless
-  error token covers the whole comment. `str` and `HipStr` sources are unchanged
-  (#251).
+  sequence, at that sequence's span, for the first sixteen, and one
+  `LexerErrorData::Omitted` counting the rest, and consume the whole comment;
+  the lossless error token covers the whole comment. `str` and `HipStr` sources
+  are unchanged (#251).
 - `smear-schema`: `SchemaErrorKind::UnreadableText` is no longer reachable from
   a parsed document. The kind is kept.
-- Builds on tokora 0.13 and smol-bytes 0.2. Paths through the
+- Builds on tokora 0.13.1 and smol-bytes 0.2. Paths through the
   `smear::lexer::tokora` re-export follow the layout tokora adopted in 0.12. The
   `smol-bytes` feature of `smear`, `smear-lexer` and `smear-parser` now enables
   tokora's `smol-bytes_0_2` integration instead of `smol_bytes_0_1`, so the four
@@ -622,7 +708,7 @@ All notable changes to Smear are documented in this file.
   capability feature (`graphql`, `graphqlx`, `parser`, `validator`, `proto`,
   `introspection`, …) never switches a tier on, so such a consumer names `std`
   or `alloc` itself; with neither the build compiles and lacks those items.
-- `smear`!, `smear-lexer`, `smear-parser`! and `smear-compiler`!: a feature
+- `smear`!, `smear-lexer` and `smear-parser`!: a feature
   that enables an optional dependency implies no tier. `bytes_1`, `hipstr_0_8`
   and `smol-bytes_0_2` do not imply `alloc`, although each of those crates
   links `alloc` itself, and `rowan_0_17` no longer implies `std`. So a

@@ -32,7 +32,7 @@ invalid_object_field_missing_colon.graphqlx: lossless 4 first smear::syntax::une
 invalid_top_level_junk.graphqlx: lossless 1 first smear::syntax::unexpected-token at 21..22; syntactic 1 first smear::syntax::unexpected-token at 21..22; code same, span same, message differs
 invalid_unterminated_brace.graphqlx: lossless 1 first smear::syntax::unclosed-delimiter at 7..8; syntactic 1 first smear::syntax::unclosed-delimiter at 7..8; code same, span same, message same
 invalid_unterminated_bracket.graphqlx: lossless 9 first smear::syntax::unexpected-token at 0..1; syntactic 1 first smear::syntax::unexpected-token at 0..1; code same, span same, message differs
-invalid_unterminated_string.graphqlx: lossless 6 first smear::syntax::unexpected-token at 0..1; syntactic 1 first smear::syntax::unexpected-token at 0..1; code same, span same, message differs
+invalid_unterminated_string.graphqlx: lossless 7 first smear::syntax::unexpected-token at 0..1; syntactic 1 first smear::syntax::unexpected-token at 0..1; code same, span same, message differs
 invalid_x_bodiless_extension_with_generics.graphqlx: lossless 1 first smear::syntax::unexpected-end-of-input at 21..21; syntactic 1 first smear::syntax::unexpected-end-of-input at 20..20; code same, span differs, message differs
 invalid_x_described_use.graphqlx: lossless 1 first smear::syntax::unexpected-token at 6..9; syntactic 1 first smear::syntax::unexpected-token at 6..9; code same, span same, message differs
 invalid_x_empty_definition_generics.graphqlx: lossless 1 first smear::syntax::unexpected-token at 7..8; syntactic 1 first smear::syntax::invalid-syntax at 6..8; code differs, span differs, message differs

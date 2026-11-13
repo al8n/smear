@@ -3,7 +3,7 @@ use tokora::{
   logos::{Lexer, Logos, Source},
 };
 
-use crate::error::{StringError, StringErrors};
+use crate::error::{LexemeErrors, StringError, StringErrors};
 
 use super::{
   super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainBlockStr,
@@ -172,9 +172,7 @@ where
     None => {
       // EOF without closing """ — bump to end of input and report.
       lexer.bump(body_bytes.len());
-      let mut errs = StringErrors::default();
-      errs.push(StringError::unterminated_block_string());
-      Err(errs)
+      Err(LexemeErrors::new().into_unterminated(StringError::unterminated_block_string()))
     }
   }
 }

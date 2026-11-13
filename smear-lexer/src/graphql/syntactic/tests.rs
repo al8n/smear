@@ -130,8 +130,8 @@ fn test_incomplete_unicode_and_eof() {
 }
 
 #[test]
-fn test_unexpected_line_terminator() {
-  tests::test_unexpected_line_terminator::<StrSyntacticToken<'_>>();
+fn test_inline_string_ends_at_its_line() {
+  tests::test_inline_string_ends_at_its_line::<StrSyntacticToken<'_>>();
 }
 
 #[test]

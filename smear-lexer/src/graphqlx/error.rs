@@ -313,6 +313,17 @@ pub enum LexerErrorData<Char = char, StateError = ()> {
   State(StateError),
   /// Not a valid UTF-8 source.
   InvalidUtf8(core::str::Utf8Error),
+  /// How many more errors a comment held than its refusal keeps: N more errors in this comment
+  /// were found and not kept.
+  ///
+  /// A comment in a byte source is refused with one [`UnknownLexeme`](Self::UnknownLexeme) for each
+  /// ill-formed sequence of its body, the first sixteen (`MAX_LEXEME_ERRORS`, a crate constant) in
+  /// order. Each sequence past them is counted and not stored, and when any was, one error with
+  /// this data closes the refusal, spanning from the first sequence it counts to the last. So the
+  /// refusal holds at most seventeen errors, however long the comment is. It reports
+  /// [`InvalidSyntax`](SyntaxErrorKind::InvalidSyntax).
+  #[from(skip)]
+  Omitted(usize),
   /// Other error.
   Other(Cow<'static, str>),
 }
@@ -351,7 +362,7 @@ impl<Char, StateError> LexerErrorData<Char, StateError> {
       Self::UnterminatedSpreadOperator => SyntaxErrorKind::UnterminatedSpread,
       Self::State(_) => SyntaxErrorKind::ResourceLimit,
       Self::InvalidUtf8(_) => SyntaxErrorKind::InvalidUtf8,
-      Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
+      Self::Omitted(_) | Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
     }
   }
 
@@ -376,6 +387,11 @@ impl<Char, StateError> LexerErrorData<Char, StateError> {
         f.write_str("not exactly one ")?;
         f.write_str(what)
       }
+      Self::Omitted(1) => f.write_str("1 more error in this comment was found and not kept"),
+      Self::Omitted(count) => write!(
+        f,
+        "{count} more errors in this comment were found and not kept"
+      ),
       Self::Other(message) => f.write_str(message),
       Self::UnexpectedLexeme(_)
       | Self::UnknownLexeme(_)
@@ -660,6 +676,26 @@ impl<Char, StateError> LexerErrors<Char, StateError> {
   #[inline]
   pub fn with_capacity(capacity: usize) -> Self {
     Self(std::vec::Vec::with_capacity(capacity))
+  }
+
+  /// The refusal of a comment whose body is not well-formed UTF-8, built from its ill-formed
+  /// sequences in order, each as its absolute span and its first byte: an
+  /// [`UnknownLexeme`](LexerErrorData::UnknownLexeme) at each of the first sixteen, and when there
+  /// were more, one [`Omitted`](LexerErrorData::Omitted) counting them, from the first of them to
+  /// the last. Empty when the body is well-formed.
+  pub(crate) fn ill_formed_comment(sequences: impl IntoIterator<Item = (Span, Char)>) -> Self {
+    let mut errs = LexemeErrors::new();
+    let mut omitted: Option<Span> = None;
+    for (span, ch) in sequences {
+      if !errs.push(LexerError::unknown_char(span, ch, span.start())) {
+        omitted = Some(omitted.map_or(span, |first: Span| Span::new(first.start(), span.end())));
+      }
+    }
+    Self(
+      errs.finish(|count| {
+        LexerError::new(omitted.unwrap_or_default(), LexerErrorData::Omitted(count))
+      }),
+    )
   }
 }
 

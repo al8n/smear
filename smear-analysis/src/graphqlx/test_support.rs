@@ -13,12 +13,11 @@ use std::{
   vec::Vec,
 };
 
-use tokora::diagnostic::{Code, Location};
+use tokora::diagnostic::Code;
 
 use super::{
   Visitor,
   analysis::{Analysis, resolve_door},
-  id::ModuleId,
   limits::Limits,
   model::Model,
   package::Package,
@@ -50,26 +49,11 @@ pub fn conclude<V: Visitor + ?Sized>(model: Model, limits: &Limits, rules: &mut 
 /// test reads.
 pub const RULES: &[(&str, &[Code])] = Rules::TABLE;
 
-/// The extent of the inline `mod` that declares `module`, from its description, or its `mod`, to
-/// its `}`: what the model keeps crate-private until extents are public, for the tests that check
-/// what the module tree records.
-pub fn module_extent(model: &Model, module: ModuleId) -> Option<Location> {
-  model.module(module).extent()
-}
-
 /// How many members, type occurrences, values and applications `model` holds, in that order: the
 /// lengths of the four tables whose ids the public model answers no whole range of, for the tests
 /// that check a walk reaches every row of each.
 pub fn counts(model: &Model) -> (u32, u32, u32, u32) {
   model.counts()
-}
-
-/// The extent of every contribution of `model`, each definition's and then the schema's, and then
-/// of every member, each from its description, or its first token, to its last token: what the
-/// model keeps crate-private until extents are public, for the tests that check which extents
-/// hold where a diagnostic points.
-pub fn extents(model: &Model) -> Vec<Location> {
-  model.extents()
 }
 
 /// What `path` names, written in the module `module` of `root` beside `dependencies`, where

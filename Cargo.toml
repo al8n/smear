@@ -87,7 +87,7 @@ bytes_1 = { package = "bytes", version = "1", default-features = false }
 smol-bytes_0_2 = { package = "smol-bytes", version = "0.2", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
 
-tokora = { version = "0.13", default-features = false, features = ["logos", "unstable-raw", "combinators"] }
+tokora = { version = "0.13.1", default-features = false, features = ["logos", "unstable-raw", "combinators"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }

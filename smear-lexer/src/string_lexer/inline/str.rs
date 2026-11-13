@@ -7,9 +7,8 @@ use tokora::{
 
 type Span = SimpleSpan;
 
-use crate::{
-  error::{InvalidUnicodeHexDigits, StringError, StringErrors, UnicodeError},
-  hints::LineTerminatorHint,
+use crate::error::{
+  InvalidUnicodeHexDigits, LexemeErrors, StringError, StringErrors, UnicodeError,
 };
 
 use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInlineStr};
@@ -22,7 +21,7 @@ use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInl
 )]
 pub(crate) enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
-  #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
+  #[regex(r#"\\[^"\\/bfnrtu\r\n]"#, handle_invalid_escaped_character)]
   EscapedCharacter,
 
   #[regex(r#"\\u[0-9A-Fa-f]{4}"#, handle_fixed_width_escape_unicode)]
@@ -44,15 +43,10 @@ pub(crate) enum StringToken {
   #[token("\"")]
   Quote,
 
-  #[regex(r#"\r\n|\n|\r"#, |lexer| {
-    match lexer.slice() {
-      "\r\n" => LineTerminatorHint::CarriageReturnNewLine,
-      "\n"   => LineTerminatorHint::NewLine,
-      "\r"   => LineTerminatorHint::CarriageReturn,
-      _ => unreachable!("regex matched unexpected line terminator"),
-    }
-  })]
-  LineTerminator(LineTerminatorHint),
+  /// A line feed or a carriage return, which ends the literal before it: an inline string is one
+  /// line.
+  #[regex(r"[\r\n]")]
+  LineTerminator,
 
   /// Any run of allowed string characters:
   /// all Unicode scalars except: quote, backslash, and line terminators.
@@ -64,10 +58,11 @@ pub(crate) enum StringToken {
 ///
 /// Every scalar other than `"`, `\`, CR and LF is
 /// [`StringCharacters`](StringToken::StringCharacters), those four have rules
-/// of their own, and `\\[^"\\/bfnrtu]` takes a backslash before any scalar. So
-/// the one shape that reaches this is a lone `\` at the end of input, and it is
-/// [`StringError::IncompleteEscape`] at the backslash's byte — what the byte
-/// twin of this grammar answers for the same input.
+/// of their own, and `\\[^"\\/bfnrtu\r\n]` takes a backslash before any other
+/// scalar. So the one shape that reaches this is a `\` at the end of the input
+/// or of its line, and it is [`StringError::IncompleteEscape`] at the
+/// backslash's byte — what the byte twin of this grammar answers for the same
+/// input.
 ///
 /// Anything else reaching here would be a grammar change, and answers the
 /// default rather than a position this has not established.
@@ -138,118 +133,57 @@ fn handle_fixed_width_escape_unicode(
   Ok(())
 }
 
+/// The callback of the bare `\u` rule: a fixed-width escape whose four hex digits are not all
+/// there.
+///
+/// It takes up to four characters after the `\u` into the escape's token, as its digits, and none
+/// from the next line, where the literal has ended. The token is measured in bytes and each
+/// character is taken whole, so a digit spelled in more than one byte moves the token's end by its
+/// whole width, and each digit that is not hex is reported at its own byte. Counting characters as
+/// bytes would end the token inside a character, which the sub-lexer refuses with a panic.
 #[inline]
 fn handle_invalid_escaped_unicode(
   lexer: &mut Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
-  let remainder = lexer.remainder();
-  let mut idx = 0;
+  let span = lexer.span();
 
-  let chars = {
-    let mut buf = ['\0'; 4];
-    for (i, c) in remainder.chars().enumerate().take(4) {
-      buf[i] = c;
-      idx += 1;
-    }
-    buf
-  };
+  // Each character taken, with its byte offset after the `\u`.
+  let mut buf = [('\0', 0usize); 4];
+  let mut count = 0usize;
+  let digits = lexer
+    .remainder()
+    .char_indices()
+    .take_while(|&(_, c): &(usize, char)| c != '\r' && c != '\n')
+    .take(4);
+  for (index, (offset, c)) in digits.enumerate() {
+    buf[index] = (c, offset);
+    count = index + 1;
+  }
+  let taken = &buf[..count];
+  let len = taken
+    .last()
+    .map_or(0, |&(c, offset): &(char, usize)| offset + c.len_utf8());
+  lexer.bump(len);
 
-  if idx != 4 && chars[..idx].iter().all(|c| c.is_ascii_hexdigit()) {
-    let span = lexer.span();
-    lexer.bump(idx);
+  // Four hex digits are the fixed-width rule's, so digits that are all hex here are too few.
+  if taken
+    .iter()
+    .all(|&(c, _): &(char, usize)| c.is_ascii_hexdigit())
+  {
     return Err(
-      UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(Span::new(
-        span.start,
-        span.end + idx,
-      )))
-      .into(),
+      UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into())).into(),
     );
   }
 
-  Err(StringError::Unicode(match &chars[..idx] {
-    [a, b, c, d] => {
-      // we already know they aren't all hex digits
-      let span = lexer.span();
-      lexer.bump(4);
-
-      let mut invalid_digits = InvalidUnicodeHexDigits::default();
-
-      if !a.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*a, span.end));
-      }
-
-      if !b.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*b, span.end + 1));
-      }
-
-      if !c.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*c, span.end + 2));
-      }
-
-      if !d.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*d, span.end + 3));
-      }
-
-      UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into())
+  let mut invalid_digits = InvalidUnicodeHexDigits::default();
+  for &(c, offset) in taken {
+    if !c.is_ascii_hexdigit() {
+      invalid_digits.push_fixed(PositionedChar::with_position(c, span.end + offset));
     }
-    [a, b, c] => {
-      let span = lexer.span();
-      lexer.bump(3);
-
-      let mut invalid_digits = InvalidUnicodeHexDigits::default();
-      if !a.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*a, span.end));
-      }
-
-      if !b.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*b, span.end + 1));
-      }
-
-      if !c.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*c, span.end + 2));
-      }
-
-      if invalid_digits.is_empty() {
-        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into()))
-      } else {
-        UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into())
-      }
-    }
-    [a, b] => {
-      let span = lexer.span();
-      lexer.bump(2);
-
-      let mut invalid_digits = InvalidUnicodeHexDigits::default();
-      if !a.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*a, span.end));
-      }
-
-      if !b.is_ascii_hexdigit() {
-        invalid_digits.push_fixed(PositionedChar::with_position(*b, span.end + 1));
-      }
-
-      if invalid_digits.is_empty() {
-        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into()))
-      } else {
-        UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into())
-      }
-    }
-    [a] => {
-      let span = lexer.span();
-      lexer.bump(1);
-
-      if a.is_ascii_hexdigit() {
-        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into()))
-      } else {
-        UnicodeError::invalid_fixed_unicode_escape_sequence(
-          PositionedChar::with_position(*a, span.end).into(),
-          lexer.span().into(),
-        )
-      }
-    }
-    [] => UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into())),
-    _ => unreachable!("impossible array length"),
-  }))
+  }
+  Err(
+    UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into()).into(),
+  )
 }
 
 #[inline(always)]
@@ -368,7 +302,7 @@ where
   let remainder = lexer.remainder();
   let mut string_lexer = StringToken::lexer(remainder.as_ref());
 
-  let mut errs = StringErrors::default();
+  let mut errs = LexemeErrors::new();
 
   let mut num_escapes = 0;
   let mut num_unicodes = 0;
@@ -378,7 +312,7 @@ where
       Ok(StringToken::Quote) => {
         lexer.bump(string_lexer.span().end);
         if !errs.is_empty() {
-          return Err(errs);
+          return Err(errs.into_string_errors());
         }
 
         let src = lexer.slice();
@@ -387,16 +321,11 @@ where
           _ => LitComplexInlineStr::new(src, string_lexer.extras).into(),
         });
       }
-      Ok(StringToken::LineTerminator(lt)) => {
-        let pos = lexer_span.end + string_lexer.span().start;
-        let err = match lt {
-          LineTerminatorHint::NewLine => StringError::unexpected_new_line('\n', pos),
-          LineTerminatorHint::CarriageReturn => StringError::unexpected_carriage_return('\r', pos),
-          LineTerminatorHint::CarriageReturnNewLine => {
-            StringError::unexpected_carriage_return_new_line((pos..pos + 2).into())
-          }
-        };
-        errs.push(err);
+      Ok(StringToken::LineTerminator) => {
+        // The literal ends where its line does, and the caller lexes the terminator as it does
+        // anywhere else.
+        lexer.bump(string_lexer.span().start);
+        return Err(errs.into_unterminated(StringError::unterminated_inline_string()));
       }
       Ok(StringToken::StringCharacters) => {
         // Plain content normalizes byte-for-byte
@@ -418,6 +347,5 @@ where
   }
 
   lexer.bump(string_lexer.span().end);
-  errs.push(StringError::unterminated_inline_string());
-  Err(errs)
+  Err(errs.into_unterminated(StringError::unterminated_inline_string()))
 }

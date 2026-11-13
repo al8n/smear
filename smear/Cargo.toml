@@ -186,7 +186,7 @@ materialized-numbers = ["parser", "graphql", "smear-parser/materialized-numbers"
 # This says nothing against the feature — it is a headline capability and its 37 integration
 # targets run under `cargo test` like everything else. It is only that ONE tool cannot see it.
 rowan = ["rowan_0_17"]
-rowan_0_17 = ["smear-parser/rowan_0_17", "smear-compiler?/rowan_0_17", "tokora/rowan_0_17", "parser"]
+rowan_0_17 = ["smear-parser/rowan_0_17", "tokora/rowan_0_17", "parser"]
 
 # Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
 # trivia-injection gate can prove its corpus reached every production instead of asserting
@@ -604,6 +604,18 @@ harness = false
 # above are written on, so it was taken deliberately; a `validator_comparison` number is not
 # comparable across that commit, nor across the one that made those containers a `Vec` in every
 # configuration.
+#
+# WHAT REMOVING THE VALIDATOR'S LOSSLESS DOORS CHANGED ABOUT `validator_comparison`'s LOSSLESS
+# ROWS, recorded for the same reason. Its end-to-end rows, `smear/parse_and_validate_lossless` and
+# `schema_build/<workload>/smear_lossless`, time the same task on either side of that commit, from
+# a text to a validated document or a built schema, and across it they are the measurement of the
+# lossless road: before it, the lossless parse, then the door's check that the parse and the text
+# were one document, then its projection, and on the executable row a prepayment for that
+# projection out of `validation_work`; after it, the lossless layer's parse and its projection of
+# its own tree, with no pair to check and nothing prepaid. `smear/validate_lossless` times a
+# `Parse` kept from outside the timed region, projected by the recovering projection, which still
+# checks the pair, and then validated, with nothing prepaid. `smear/parse_lossless` times the same
+# parse it did.
 
 [[bench]]
 name = "apollo_comparison"

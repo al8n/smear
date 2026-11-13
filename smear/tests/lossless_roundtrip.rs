@@ -36,11 +36,13 @@
 //! - [`every_byte_is_carried_by_a_token`] re-derives the source from the **tokens** rather than
 //!   from `SyntaxText`, and counts the gap-tiled regions — because "every byte survived" and "the
 //!   grammar accounted for every byte" are different claims, and over this corpus they have
-//!   different answers. Exactly one entry, `invalid_unterminated_string.graphql`, round-trips
-//!   through a `Gap` token rather than through committed ones: its unterminated string is a lexer
-//!   error, so the lexer hands back no token for that region at all and the sink's fallback is
-//!   what keeps the bytes. Mis-wiring the profile's gap kind to an ordinary trivia kind leaves the
-//!   equality above green and reds this census, which is the measurement that earns it its place.
+//!   different answers. Four entries round-trip through a `Gap` token rather than through
+//!   committed ones, wholly or in part: the three `invalid_lex_*` entries, whose whole source is a
+//!   lexer error, and `invalid_unterminated_string.graphql`, whose unterminated string is one
+//!   between committed tokens. The lexer hands back no token for such a region at all, and the
+//!   sink's fallback is what keeps the bytes. Mis-wiring the profile's gap kind to an ordinary
+//!   trivia kind leaves the equality above green and reds this census, which is the measurement
+//!   that earns it its place.
 //! - [`all_three_roots_round_trip_every_corpus_entry`] is the only test here that reds when a
 //!   driver stops draining what its production left behind.
 //!
@@ -104,9 +106,10 @@ use smear::parser::{
 /// The three `invalid_lex_*` entries are the strongest form of the claim this gate makes. Their
 /// whole source is refused, so the tree carries **no committed token at all** and the round-trip
 /// rests entirely on the tiling — the state tokora's zero-token wall refused outright until
-/// `2bbca21`. `invalid_unterminated_string.graphql` is the mixed case: nine tokens, then a tiled
-/// tail. Gate 1's `both_suites_agree_across_the_lexer_grammar_error_boundary` is where that
-/// distinction is asserted; here they are simply four regions the grammar did not cover.
+/// `2bbca21`. `invalid_unterminated_string.graphql` is the mixed case: nine tokens, a tiled
+/// string and three tokens more. Gate 1's
+/// `both_suites_agree_across_the_lexer_grammar_error_boundary` is where that distinction is
+/// asserted; here they are simply four regions the grammar did not cover.
 const GAP_TILED_ENTRIES: &[&str] = &[
   "invalid_lex_illegal_character.graphql",
   "invalid_lex_unterminated_block_string.graphql",
