@@ -561,9 +561,11 @@ let text = String::from("type T { f: Int }");
 let _ = Syntactic::new().type_system_document(&text, &mut ());
 ```
 
-`String` is `AsRef<str>` and `AsRef<[u8]>`, so `as_ref` names no source:
+`String` is `AsRef<str>` and `AsRef<[u8]>`, so `as_ref` names no source. The compiler says so
+twice: first as E0284, for the slice of a source it cannot name, then as E0283, for the impls it
+cannot choose between, and rustdoc asks only that the code a fence names be among those it emits:
 
-```compile_fail,E0283
+```compile_fail,E0284
 use smear_parser::graphqlx::Syntactic;
 
 let text = String::from("type T { f: Int }");

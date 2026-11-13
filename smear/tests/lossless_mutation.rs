@@ -560,62 +560,67 @@ const OPEN: &[(&str, usize)] = &[];
 
 /// The `(entry, door)` pairs the law runs over: every hole-free parse of every corpus entry under
 /// each of the three doors that builds that door's container.
-const PAIRS: usize = 155;
+const PAIRS: usize = 161;
 
 /// Of [`PAIRS`], the ones whose unmutated tree already lacks a lenient token — every mutation of
 /// them is compared against a restored text.
-const LENIENT_BASES: usize = 2;
+const LENIENT_BASES: usize = 4;
 
 /// Mutations tried, per door, per operation — the population, cell by cell.
 const TRIED: &[((&str, &str), usize)] = &[
-  (("executable", "delete"), 748),
-  (("executable", "duplicate"), 748),
-  (("executable", "retext"), 829),
-  (("executable", "swap"), 410),
-  (("executable", "transplant"), 7375),
-  (("mixed", "delete"), 1691),
-  (("mixed", "duplicate"), 1691),
-  (("mixed", "retext"), 2409),
-  (("mixed", "swap"), 954),
-  (("mixed", "transplant"), 16_847),
-  (("type-system", "delete"), 885),
-  (("type-system", "duplicate"), 885),
-  (("type-system", "retext"), 1480),
-  (("type-system", "swap"), 509),
-  (("type-system", "transplant"), 8428),
+  (("executable", "delete"), 765),
+  (("executable", "duplicate"), 765),
+  (("executable", "retext"), 839),
+  (("executable", "swap"), 418),
+  (("executable", "transplant"), 7511),
+  (("mixed", "delete"), 1729),
+  (("mixed", "duplicate"), 1729),
+  (("mixed", "retext"), 2459),
+  (("mixed", "swap"), 974),
+  (("mixed", "transplant"), 17_079),
+  (("type-system", "delete"), 906),
+  (("type-system", "duplicate"), 906),
+  (("type-system", "retext"), 1520),
+  (("type-system", "swap"), 521),
+  (("type-system", "transplant"), 8524),
 ];
 
 /// Mutations tried in total.
-const TRIED_TOTAL: usize = 45_889;
+const TRIED_TOTAL: usize = 46_645;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 39_723;
+const UNFAITHFUL: usize = 40_177;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 4461;
+const EQUAL: usize = 4469;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 1505;
+const BOTH_REFUSE: usize = 1728;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
-const LENIENT_EQUAL: usize = 149;
+const LENIENT_EQUAL: usize = 212;
 
 /// Skeleton-faithful with a lenient token missing, and both refusing the restored text.
-const LENIENT_BOTH_REFUSE: usize = 51;
+const LENIENT_BOTH_REFUSE: usize = 59;
 
 /// How many restorations each [`LENIENT`] row contributed to [`LENIENT_EQUAL`], in table order —
 /// the value witnesses this law finds.
 ///
-/// The last five — the closers the report-and-build census adds beyond the corpus's own unclosed
-/// brace — have none from this corpus: deleting a closer mid-document re-parses to a different
-/// skeleton, and only end of input keeps it faithful. Their values are pinned by
-/// `lossless_project.rs`'s `every_unclosed_closer_projects_what_the_closed_text_parses_to` and by
+/// A closer deleted mid-document re-parses to a different skeleton unless the list stops where it
+/// stood all the same: at the end of input, or, for a list opened by `(` or `[`, at a `}` that
+/// closes a block around the list. Of the last five — the closers the report-and-build census adds
+/// beyond the corpus's own unclosed brace — two are reached that way: a list value, by the entry
+/// that leaves one unclosed in front of the selection set's `}`, every faithful mutation of which
+/// restores it, and a list type, deleted in front of the `}` of the fields around it. The other
+/// three have none from this corpus: wherever one of their closers is deleted, the list reads on
+/// into what follows. Their values are pinned by `lossless_project.rs`'s
+/// `every_unclosed_closer_projects_what_the_closed_text_parses_to` and by
 /// `nested_missing_closers_restore_innermost_first` below instead.
-const LENIENT_HITS: [usize; 13] = [54, 58, 4, 4, 4, 2, 9, 14, 0, 0, 0, 0, 0];
+const LENIENT_HITS: [usize; 13] = [56, 58, 4, 4, 4, 67, 9, 14, 2, 34, 0, 0, 0];
 
 /// How many restorations each row contributed to [`LENIENT_BOTH_REFUSE`] — restored texts the
 /// parser still rejects for another reason, and the projection refuses too.
-const LENIENT_REFUSED_HITS: [usize; 13] = [4, 16, 2, 4, 2, 4, 13, 6, 0, 0, 0, 0, 0];
+const LENIENT_REFUSED_HITS: [usize; 13] = [4, 18, 2, 4, 2, 10, 13, 6, 0, 0, 0, 0, 0];
 
 /// Every faithful **deletion of a token** the parser and the projection both refuse, as
 /// `(parent token-kind text, count)` — the census that enumerates the leniency criterion.

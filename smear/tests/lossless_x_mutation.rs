@@ -588,70 +588,77 @@ const OPEN: &[(&str, usize)] = &[];
 
 /// The `(entry, door)` pairs the law runs over: every hole-free parse of every corpus entry under
 /// each of the three doors that builds that door's container.
-const PAIRS: usize = 348;
+const PAIRS: usize = 358;
 
 /// Of [`PAIRS`], the ones whose unmutated tree already lacks a lenient token — every mutation of
 /// them is compared against a restored text.
-const LENIENT_BASES: usize = 5;
+const LENIENT_BASES: usize = 9;
 
 /// Mutations tried, per door, per operation — the population, cell by cell.
 const TRIED: &[((&str, &str), usize)] = &[
-  (("executable", "delete"), 1650),
-  (("executable", "duplicate"), 1650),
-  (("executable", "retext"), 1932),
-  (("executable", "swap"), 882),
-  (("executable", "transplant"), 16_611),
-  (("mixed", "delete"), 4171),
-  (("mixed", "duplicate"), 4171),
-  (("mixed", "retext"), 5596),
-  (("mixed", "swap"), 2138),
-  (("mixed", "transplant"), 44_777),
-  (("type-system", "delete"), 2644),
-  (("type-system", "duplicate"), 2644),
-  (("type-system", "retext"), 3847),
-  (("type-system", "swap"), 1323),
-  (("type-system", "transplant"), 27_382),
+  (("executable", "delete"), 1667),
+  (("executable", "duplicate"), 1667),
+  (("executable", "retext"), 1942),
+  (("executable", "swap"), 890),
+  (("executable", "transplant"), 16_747),
+  (("mixed", "delete"), 4250),
+  (("mixed", "duplicate"), 4250),
+  (("mixed", "retext"), 5701),
+  (("mixed", "swap"), 2178),
+  (("mixed", "transplant"), 45_351),
+  (("type-system", "delete"), 2706),
+  (("type-system", "duplicate"), 2706),
+  (("type-system", "retext"), 3942),
+  (("type-system", "swap"), 1355),
+  (("type-system", "transplant"), 27_820),
 ];
 
 /// Mutations tried in total.
-const TRIED_TOTAL: usize = 121_418;
+const TRIED_TOTAL: usize = 123_172;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 107_256;
+const UNFAITHFUL: usize = 108_406;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 10_748;
+const EQUAL: usize = 10_764;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 2989;
+const BOTH_REFUSE: usize = 3413;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
-const LENIENT_EQUAL: usize = 312;
+const LENIENT_EQUAL: usize = 459;
 
 /// Skeleton-faithful with a lenient token missing, and both refusing the restored text.
-const LENIENT_BOTH_REFUSE: usize = 113;
+const LENIENT_BOTH_REFUSE: usize = 130;
 
 /// How many restorations each [`LENIENT`] row contributed to [`LENIENT_EQUAL`], in table order —
 /// the value witnesses this law finds.
 ///
-/// The ninth row (an extension's `>`) has none and cannot: the list is hole-free without it only
-/// at end of input, where the extension has no tail. Deleting a closer mid-document re-parses to a
-/// different skeleton, and only end of input keeps it faithful, so the tenth — a `use` group's
-/// `}` — is reached only by the entries whose last item ends on a group, and the next ten, the
-/// rest of the closers the report-and-build census added in round seven, have none from this
-/// corpus. Their values are pinned by `every_unclosed_closer_projects_what_the_closed_text_parses_to`
-/// and `nested_missing_closers_restore_innermost_first` instead. The last — a module's `}` — is
-/// reached the tenth's way, by the entries that end on a module, and by every faithful mutation of
-/// the one entry whose module never closes.
+/// A closer deleted mid-document re-parses to a different skeleton unless the list stops where it
+/// stood all the same: at the end of input, or, for a list opened by `(`, `[` or `<`, at a `}`
+/// that closes a block around the list. The ninth row (an extension's `>`) has none and cannot:
+/// its list is hole-free without the `>` only there, where the extension has no tail, so the
+/// restored text is refused too. The tenth — a `use` group's `}` — is reached only by the entries
+/// whose last item ends on a group. Of the next ten, the rest of the closers the report-and-build
+/// census added in round seven, three are reached — a type's generic arguments, a list type and a
+/// list value — by the entries that leave one of them unclosed in front of a `}`, every faithful
+/// mutation of which restores it, and by a closer deleted in front of the `}` of a block around
+/// its list. The other seven have none from this corpus: wherever one of their closers is
+/// deleted, the list reads on into what follows. Their values are pinned by
+/// `every_unclosed_closer_projects_what_the_closed_text_parses_to` and
+/// `nested_missing_closers_restore_innermost_first` instead. The last — a module's `}` — is reached
+/// the tenth's way, by the entries that end on a module, and by every faithful mutation of the one
+/// entry whose module never closes.
 const LENIENT_HITS: [usize; 21] = [
-  96, 94, 10, 6, 6, 2, 15, 12, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64,
+  98, 96, 10, 6, 6, 89, 15, 12, 0, 9, 0, 66, 2, 34, 0, 0, 0, 0, 0, 0, 64,
 ];
 
 /// How many restorations each row contributed to [`LENIENT_BOTH_REFUSE`] — restored texts the
-/// parser still rejects for another reason, and the projection refuses too. **Every row is
-/// exercised** in one of the two: a row with neither would be an exemption no mutation reaches.
+/// parser still rejects for another reason, and the projection refuses too. A row with none in
+/// either list is a position no one-child mutation of this corpus reaches, and its witness is its
+/// report-and-build probe alone.
 const LENIENT_REFUSED_HITS: [usize; 21] = [
-  8, 25, 4, 6, 4, 4, 2, 4, 2, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40,
+  8, 29, 4, 6, 4, 10, 2, 4, 2, 15, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 43,
 ];
 
 /// Every faithful **deletion of a token** the parser and the projection both refuse, as
