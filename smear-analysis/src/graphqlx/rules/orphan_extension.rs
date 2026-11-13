@@ -32,7 +32,8 @@
 use std::{format, string::String};
 
 use crate::graphqlx::{
-  Cx, DefId, DefKind, Diagnostic, DiagnosticKind, PackageKind, Visitor, diagnostic::Excerpt,
+  Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, PackageKind, Visitor,
+  diagnostic::Excerpt,
 };
 
 use super::written_by;
@@ -58,6 +59,7 @@ impl Visitor for OrphanExtension {
     let sources = cx.sources();
     let definition = model.def(def);
     let home = model.module(definition.module()).package();
+    let root = model.root_package();
     let kind = DiagnosticKind::OrphanExtension;
     for part in definition.contributions() {
       if !part.is_extension() || part.has_errors() {
@@ -71,7 +73,7 @@ impl Visitor for OrphanExtension {
       }
       let owner = model.package(home);
       let built_in = owner.kind() == PackageKind::BuiltIn;
-      let by_root = writer == model.root_package();
+      let by_root = writer == root;
       let directives_alone = part.members().is_empty()
         && part.implements().is_empty()
         && part.union_members().is_empty();
@@ -105,17 +107,38 @@ impl Visitor for OrphanExtension {
             "package `{author}` extends the {noun} `{sigil}{name}` of the built-in package \
              `{owner}`, which only the root package extends"
           ),
-          "only the root package extends a definition of `core`, `alloc` or `std`, and only to \
-           add directives: remove this extension, or write it in the root package",
+          // The root package may write this extension in its place only when it adds directives
+          // alone.
+          if directives_alone {
+            "only the root package extends a definition of `core`, `alloc` or `std`, and only to \
+             add directives: remove this extension, or write it in the root package"
+          } else {
+            "only the root package extends a definition of `core`, `alloc` or `std`, and only to \
+             add directives: remove this extension"
+          },
         )
       } else {
+        // A GraphQL built-in the root package replaces has the root package's definition for its
+        // own contribution, its first, and that definition may write what this extension adds.
+        let replaced = definition
+          .contributions()
+          .next()
+          .is_some_and(|own: Contribution<'_>| {
+            !own.is_extension() && written_by(sources, own.location()) == Some(root)
+          });
         (
           format!(
             "package `{author}` adds more than directives to the {noun} `{sigil}{name}` of the \
              built-in package `{owner}`"
           ),
-          "an extension of a definition of `core`, `alloc` or `std` adds directives and nothing \
-           else: remove what this one adds beside them",
+          if replaced {
+            "an extension of a definition of `core`, `alloc` or `std` adds directives and nothing \
+             else, and this package's own definition replaces the built-in: write what this one \
+             adds in the definition itself"
+          } else {
+            "an extension of a definition of `core`, `alloc` or `std` adds directives and nothing \
+             else: remove what this one adds beside them"
+          },
         )
       };
       let mut report = Diagnostic::builder(kind.code(), part.location())
