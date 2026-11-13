@@ -8,11 +8,13 @@ mod kind;
 mod string;
 mod traits;
 
-/// How many errors the record of one lexeme keeps: of a string literal, inline or block.
+/// How many errors the record of one lexeme keeps: of a string literal, inline or block, and of a
+/// comment in a byte source.
 ///
 /// Past these, each further fault in that lexeme is counted and not stored, and the count closes
 /// the record as one more entry, so a record holds at most seventeen however long its lexeme is.
-/// [`StringError::Omitted`] is that entry for a string literal.
+/// [`StringError::Omitted`] is that entry for a string literal, and each dialect's
+/// `LexerErrorData::Omitted` for a comment.
 pub(crate) const MAX_LEXEME_ERRORS: usize = 16;
 
 /// The errors a lexer finds in one lexeme, as its record keeps them: the first

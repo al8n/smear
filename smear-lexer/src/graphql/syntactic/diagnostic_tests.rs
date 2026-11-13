@@ -279,6 +279,25 @@ fn the_count_of_what_a_record_did_not_keep_renders_its_sentence_at_the_value() {
   }
 }
 
+/// The error that counts what a comment's refusal did not keep is never its first either, so its
+/// sentence is read at the value too.
+#[test]
+fn the_count_of_what_a_comments_refusal_did_not_keep_renders_its_sentence_at_the_value() {
+  for (count, message) in [
+    (1, "1 more error in this comment was found and not kept"),
+    (
+      984,
+      "984 more errors in this comment were found and not kept",
+    ),
+  ] {
+    let error = LexerError::<u8, RecursionLimitExceeded>::new(
+      SimpleSpan::new(17, 1001),
+      LexerErrorData::Omitted(count),
+    );
+    assert_refusal!(error, message, SyntaxErrorKind::InvalidSyntax, message);
+  }
+}
+
 #[test]
 fn a_byte_source_refuses_an_ill_formed_string_as_invalid_utf8() {
   let src: &[u8] = b"\"a\xffb\"";
