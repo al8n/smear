@@ -58,7 +58,9 @@ may be `@marker`, `@set` or `@map` unless the root package wrote that definition
 no type parameter, an enum that declares one being `smear::graphqlx::generic-enum`; and a marker
 declares no field, is named only as the outermost type of an `implements` entry or of a bound, and
 is all a scalar, an enum, an input object or a union implements, each other use being
-`smear::graphqlx::marker-misuse`. An error that a
+`smear::graphqlx::marker-misuse`; and a set has one type parameter and a map two, a scalar its own
+package makes a collection with another count, or makes both, being
+`smear::graphqlx::collection-arity`. An error that a
 phase or a rule reports marks the contributions, members and definitions that hold it, as their
 `has_errors()` says, whether the diagnostic ceiling keeps it or not. A consumer's walk marks
 nothing, answers its own diagnostics under the same ceiling, and holds memory bounded by it.

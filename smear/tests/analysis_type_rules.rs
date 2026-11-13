@@ -1,7 +1,7 @@
 //! The GraphQLx analyzer's rules on what is judged of types: a marker has no field, is named only
 //! in `implements` and in bounds, and is what a scalar, an enum, an input object or a union
-//! implements. Each rule says nothing within what a phase refused, and quotes a name only as an
-//! excerpt.
+//! implements; and a set has one type parameter and a map two. Each rule says nothing within what
+//! a phase refused, and quotes a name only as an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -14,6 +14,12 @@ use smear::{
 
 /// The code of a marker used as a marker may not be.
 const MARKER: &str = "smear::graphqlx::marker-misuse";
+
+/// The code of a collection whose count of type parameters it has not.
+const COLLECTION: &str = "smear::graphqlx::collection-arity";
+
+/// The code of an extension its package may not write, which the orphan rule reports.
+const ORPHAN: &str = "smear::graphqlx::orphan-extension";
 
 /// The code of a type name that names nothing.
 const UNDEFINED: &str = "smear::schema::undefined-type";
@@ -246,6 +252,81 @@ fn a_generic_marker_is_a_marker() {
 }
 
 #[test]
+fn a_set_has_one_type_parameter_and_a_map_two() {
+  // A set of one and a map of two say nothing; a set of none and of two, and a map of one and of
+  // three, are refused at the application; a scalar that applies both is refused once, at the
+  // later; an object is not this rule's; and the root package's `@set` on `alloc`'s `string` is the
+  // orphan rule's alone.
+  let text = "scalar S1<T> @set\nscalar M2<K, V> @map\nscalar S0 @set\nscalar S2<A, B> @set\n\
+              scalar M1<K> @map\nscalar M3<A, B, C> @map\nscalar Both<K, V> @set @map\n\
+              type Obj @set {\n  x: Int\n}\nextend scalar String @set\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  let refused = |directive: &str, nth: usize, scalar: &str| {
+    (
+      COLLECTION,
+      named(schema, text, "@", directive, nth),
+      Some(named(schema, text, "scalar ", scalar, 0)),
+    )
+  };
+  assert_eq!(
+    found(&analysis),
+    [
+      refused("set", 1, "S0"),
+      refused("set", 2, "S2"),
+      refused("map", 1, "M1"),
+      refused("map", 2, "M3"),
+      refused("map", 3, "Both"),
+      (
+        ORPHAN,
+        named(schema, text, "@", "set", 5),
+        Some(model.def(model.builtins().string()).location())
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis)[..5],
+    [
+      "the scalar `S0` applies `@set`, which makes a scalar of 1 type parameter a set, and it \
+       declares 0",
+      "the scalar `S2` applies `@set`, which makes a scalar of 1 type parameter a set, and it \
+       declares 2",
+      "the scalar `M1` applies `@map`, which makes a scalar of 2 type parameters a map, and it \
+       declares 1",
+      "the scalar `M3` applies `@map`, which makes a scalar of 2 type parameters a map, and it \
+       declares 3",
+      "the scalar `Both` applies both `@set` and `@map`, and a scalar is a set or a map, not both",
+    ]
+  );
+
+  // The root package's own `String` replaces the built-in, so its `@set` is its own package's, no
+  // orphan, and judged here: the replacement declares no type parameter.
+  let text = "scalar String\nextend scalar String @set\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      COLLECTION,
+      named(schema, text, "@", "set", 0),
+      Some(named(schema, text, "scalar ", "String", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the scalar `string` applies `@set`, which makes a scalar of 1 type parameter a set, and it \
+      declares 0"
+    ]
+  );
+}
+
+#[test]
 fn a_rule_says_nothing_where_a_phase_spoke() {
   // Each refusal beside a phase's error in the same definition: the phase's diagnostic alone.
   for (text, expected) in [
@@ -258,18 +339,32 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
       "interface Node {\n  id: ID\n}\nscalar S implements Node @missing\n",
       "smear::schema::undefined-directive",
     ),
+    (
+      "scalar S0 @set @missing\n",
+      "smear::schema::undefined-directive",
+    ),
   ] {
     let analysis = analyze_one(text);
     assert_eq!(codes(&analysis), [expected], "{text}");
   }
   // Beside one in a sibling definition: both.
-  for text in [
-    "interface M @marker\ntype F {\n  m: M\n}\ntype G {\n  x: Missing\n}\n",
-    "interface Mk @marker {\n  a: Int\n}\ntype G {\n  x: Missing\n}\n",
-    "interface Node {\n  id: ID\n}\nscalar S implements Node\ntype G {\n  x: Missing\n}\n",
+  for (text, rule) in [
+    (
+      "interface M @marker\ntype F {\n  m: M\n}\ntype G {\n  x: Missing\n}\n",
+      MARKER,
+    ),
+    (
+      "interface Mk @marker {\n  a: Int\n}\ntype G {\n  x: Missing\n}\n",
+      MARKER,
+    ),
+    (
+      "interface Node {\n  id: ID\n}\nscalar S implements Node\ntype G {\n  x: Missing\n}\n",
+      MARKER,
+    ),
+    ("scalar S0 @set\ntype G {\n  x: Missing\n}\n", COLLECTION),
   ] {
     let analysis = analyze_one(text);
-    assert_eq!(codes(&analysis), [MARKER, UNDEFINED], "{text}");
+    assert_eq!(codes(&analysis), [rule, UNDEFINED], "{text}");
   }
 }
 
@@ -288,6 +383,18 @@ fn long_names_in_the_rules_are_quoted_as_excerpts() {
       "the marker `{}` is named here, and a marker is named only in an `implements` list or as a \
        bound's interface",
       quoted("M")
+    )]
+  );
+
+  // A set named with four kilobytes, of no type parameter.
+  let name = "S".repeat(4096);
+  let analysis = analyze_text(&format!("scalar {name} @set\n"));
+  assert_eq!(
+    messages(&analysis),
+    [format!(
+      "the scalar `{}` applies `@set`, which makes a scalar of 1 type parameter a set, and it \
+       declares 0",
+      quoted("S")
     )]
   );
 }

@@ -37,6 +37,9 @@ const GENERIC_ENUM: &str = "smear::graphqlx::generic-enum";
 /// The code for a marker used as a marker may not be.
 const MARKER_MISUSE: &str = "smear::graphqlx::marker-misuse";
 
+/// The code for a collection whose count of type parameters it has not.
+const COLLECTION_ARITY: &str = "smear::graphqlx::collection-arity";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -935,22 +938,29 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
 
 #[test]
 fn what_gives_a_built_in_no_meaning_is_no_orphan_and_a_dependencys_extension_is_one() {
-  // The root package's own directive named `set`, and another of its own, on built-ins; and
-  // `@set` on a GraphQL built-in the root package replaces, which is the root package's own.
-  for text in [
-    "directive @set on SCALAR\nextend scalar NonZero @set\ndirective @x on SCALAR\n\
-     extend scalar String @x\n",
-    "scalar String\nextend scalar String @set\n",
-  ] {
-    let analysis = analyze_one(text);
-    assert!(
-      analysis.diagnostics().is_empty(),
-      "{text}: {:#?}",
-      analysis.diagnostics()
-    );
-    let model = analysis.model();
-    assert_eq!(model.def(model.builtins().non_zero()).collection(), None);
-  }
+  // The root package's own directive named `set`, and another of its own, on built-ins.
+  let text = "directive @set on SCALAR\nextend scalar NonZero @set\ndirective @x on SCALAR\n\
+              extend scalar String @x\n";
+  let analysis = analyze_one(text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert_eq!(model.def(model.builtins().non_zero()).collection(), None);
+
+  // `@set` on a GraphQL built-in the root package replaces, which is the root package's own: no
+  // orphan. The replaced built-in declares no type parameter, and a set has one: that is the rule
+  // on a collection's type parameters' to say.
+  let analysis = analyze_one("scalar String\nextend scalar String @set\n");
+  let codes: Vec<&str> = found(&analysis)
+    .into_iter()
+    .map(|(code, _, _): (&'static str, Location, Option<Location>)| code)
+    .collect();
+  assert_eq!(codes, [COLLECTION_ARITY], "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  assert_eq!(model.def(model.builtins().non_zero()).collection(), None);
 
   // An extension a phase already refused something in is left alone.
   let text = "extend scalar NonZero @set @missing\n";
@@ -1238,6 +1248,7 @@ const FIXTURES: &[(Code, Fixture)] = &[
   (Code::new(ORPHAN), an_extension_of_a_dependencys_type),
   (Code::new(GENERIC_ENUM), a_generic_enum),
   (Code::new(MARKER_MISUSE), a_marker_as_a_fields_type),
+  (Code::new(COLLECTION_ARITY), a_set_of_two_type_parameters),
 ];
 
 /// A root package that defines its schema twice.
@@ -1293,6 +1304,11 @@ fn a_generic_enum() -> Analysis {
 /// A root package that types a field with a marker.
 fn a_marker_as_a_fields_type() -> Analysis {
   analyze_one("interface Marked @marker\ntype Query {\n  marked: Marked\n}\n")
+}
+
+/// A root package that makes a scalar of two type parameters a set.
+fn a_set_of_two_type_parameters() -> Analysis {
+  analyze_one("scalar Pair<A, B> @set\n")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

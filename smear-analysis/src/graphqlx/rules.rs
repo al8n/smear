@@ -17,6 +17,7 @@
 //! descends the written arguments of an occurrence that names a type parameter, or nothing, and
 //! the public kind does not answer them.
 
+mod collection_arity;
 mod duplicate_schema_definition;
 mod generic_enum;
 mod marker_misuse;
@@ -24,8 +25,8 @@ mod orphan_extension;
 mod schema_outside_root;
 
 use self::{
-  duplicate_schema_definition::DuplicateSchemaDefinition, generic_enum::GenericEnum,
-  marker_misuse::MarkerMisuse, orphan_extension::OrphanExtension,
+  collection_arity::CollectionArity, duplicate_schema_definition::DuplicateSchemaDefinition,
+  generic_enum::GenericEnum, marker_misuse::MarkerMisuse, orphan_extension::OrphanExtension,
   schema_outside_root::SchemaOutsideRoot,
 };
 use super::{Contribution, Cx, Model, TypeExprId, TypeExprKind, id::dense};
@@ -206,8 +207,9 @@ rule_set! {
   /// written the model: a program defines its schema at most once; only the root package defines
   /// or extends the schema; a package extends its own definitions alone, but for the directives
   /// the root package adds to a built-in, none of which may give it a built-in meaning; an enum
-  /// takes no type parameter; and a marker has no field and is named only in `implements` and in
-  /// bounds, and a scalar, an enum, an input object or a union implements markers alone.
+  /// takes no type parameter; a marker has no field and is named only in `implements` and in
+  /// bounds, and a scalar, an enum, an input object or a union implements markers alone; and a set
+  /// has one type parameter and a map two.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -215,6 +217,7 @@ rule_set! {
     orphan_extension: OrphanExtension => [super::DiagnosticKind::OrphanExtension.code()],
     generic_enum: GenericEnum => [super::DiagnosticKind::GenericEnum.code()],
     marker_misuse: MarkerMisuse => [super::DiagnosticKind::MarkerMisuse.code()],
+    collection_arity: CollectionArity => [super::DiagnosticKind::CollectionArity.code()],
   }
 }
 

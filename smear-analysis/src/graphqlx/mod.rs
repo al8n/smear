@@ -89,8 +89,10 @@
 //! `smear::graphqlx::generic-enum`, at its first type parameter's name. And a marker is used as a
 //! marker: one that declares a field, one named anywhere but as the outermost type of an
 //! `implements` entry or of a bound, and an `implements` entry of a scalar, an enum, an input
-//! object or a union that names what is no marker, are each `smear::graphqlx::marker-misuse`. A
-//! rule says nothing about a contribution a phase already refused something in.
+//! object or a union that names what is no marker, are each `smear::graphqlx::marker-misuse`. And
+//! a set has one type parameter and a map two: a scalar its own package makes a collection with
+//! another count, or makes both, is `smear::graphqlx::collection-arity`. A rule says nothing about
+//! a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

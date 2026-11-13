@@ -35,6 +35,9 @@ const ORPHAN: &str = "smear::graphqlx::orphan-extension";
 /// The code of an enum that declares a type parameter, which a rule reports.
 const GENERIC_ENUM: &str = "smear::graphqlx::generic-enum";
 
+/// The code of a collection whose count of type parameters it has not, which a rule reports.
+const COLLECTION: &str = "smear::graphqlx::collection-arity";
+
 /// What the rule says of an enum named `name` that declares a type parameter.
 fn generic_enum(name: &str) -> String {
   format!(
@@ -449,15 +452,21 @@ fn collections(model: &Model) -> Vec<(&str, Collection)> {
 fn markers_and_collections_are_read_off_cores_directives() {
   // `core`'s directives, on the library's definitions and on the program's: a marker, and one an
   // extension of the definition's own package makes; a set, a map, and a scalar that applies both,
-  // which is the first; an interface that applies nothing, and an object that applies `@set`,
-  // which neither is.
+  // which is the first, and which the rule on a collection's type parameters refuses, at the later;
+  // an interface that applies nothing, and an object that applies `@set`, which neither is.
   let text = "interface Ord @marker\ninterface Node {\n  id: ID\n}\ninterface Plain\n\
               extend interface Plain @marker\n\
               scalar Bag<T> @set\nscalar Dict<K, V> @map\nscalar Both<K, V> @map @set\n\
               type Obj @set {\n  x: Int\n}\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      COLLECTION,
+      named(schema, text, "@", "set", 1),
+      Some(named(schema, text, "scalar ", "Both", 0))
+    )],
     "{:#?}",
     analysis.diagnostics()
   );
@@ -584,11 +593,18 @@ fn markers_and_collections_are_read_off_cores_directives() {
   assert_eq!(model.def(bag).collection(), Some(Collection::Set));
 
   // A GraphQL built-in the root package replaces is the root package's own: its extension there
-  // gives it its meaning, and is no orphan. The next part's rule judges a set of no parameter.
+  // gives it its meaning, and is no orphan. A set of no type parameter is the rule on a
+  // collection's type parameters' to refuse, at the `@set`.
   let text = "scalar String\nextend scalar String @set\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      COLLECTION,
+      named(schema, text, "@", "set", 0),
+      Some(named(schema, text, "scalar ", "String", 0))
+    )],
     "{:#?}",
     analysis.diagnostics()
   );

@@ -6,6 +6,7 @@
 # validator,introspection,analysis --test diagnostic_codes`, which rewrites this and then
 # fails.
 DiagnosticKind::AmbiguousGlob = smear::graphqlx::ambiguous-glob
+DiagnosticKind::CollectionArity = smear::graphqlx::collection-arity
 DiagnosticKind::DuplicateFilePath = smear::graphqlx::duplicate-file-path
 DiagnosticKind::DuplicatePackageName = smear::graphqlx::duplicate-package-name
 DiagnosticKind::FilePathUse = smear::graphqlx::file-path-use

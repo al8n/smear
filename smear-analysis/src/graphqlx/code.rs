@@ -164,6 +164,14 @@ pub enum DiagnosticKind {
   /// object or a union implements markers only: an entry of its `implements` that names what is no
   /// marker is reported where it is written.
   MarkerMisuse,
+  /// A scalar whose own package makes it a collection with a count of type parameters the
+  /// collection does not have: `core`'s `@set` makes a scalar of one type parameter a set, and
+  /// `@map` one of two a map. The first application of `@set` on a scalar that has not exactly
+  /// one, or of `@map` on one that has not exactly two, is reported at its path, with a label at
+  /// the scalar's name; one that applies both is reported once, at the later of the two, whatever
+  /// its count. An application another package writes gives the scalar no meaning, and is not
+  /// judged here.
+  CollectionArity,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -200,6 +208,7 @@ impl DiagnosticKind {
     Self::OrphanExtension,
     Self::GenericEnum,
     Self::MarkerMisuse,
+    Self::CollectionArity,
     Self::ResourceLimit,
   ];
 
@@ -234,6 +243,7 @@ impl DiagnosticKind {
       Self::OrphanExtension => Code::new("smear::graphqlx::orphan-extension"),
       Self::GenericEnum => Code::new("smear::graphqlx::generic-enum"),
       Self::MarkerMisuse => Code::new("smear::graphqlx::marker-misuse"),
+      Self::CollectionArity => Code::new("smear::graphqlx::collection-arity"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -268,6 +278,7 @@ impl DiagnosticKind {
       Self::OrphanExtension => "orphan extension",
       Self::GenericEnum => "generic enum",
       Self::MarkerMisuse => "marker misused",
+      Self::CollectionArity => "wrong number of a collection's type parameters",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -302,6 +313,7 @@ impl DiagnosticKind {
       | Self::OrphanExtension
       | Self::GenericEnum
       | Self::MarkerMisuse
+      | Self::CollectionArity
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }

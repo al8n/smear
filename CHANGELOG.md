@@ -214,7 +214,10 @@ All notable changes to Smear are documented in this file.
   field, once, at the first its own package wrote; one named anywhere but as the outermost type of
   an `implements` entry or of a bound, a type argument and a list's element included; and an
   `implements` entry of a scalar, an enum, an input object or a union that names what is no marker,
-  are each the new `smear::graphqlx::marker-misuse`. A rule says nothing about a contribution a
+  are each the new `smear::graphqlx::marker-misuse`. And a set has one type parameter and a map
+  two: the first `@set` of a scalar its own package writes that has not exactly one, or `@map` not
+  exactly two, is the new `smear::graphqlx::collection-arity`, at the application, and a scalar
+  that applies both is so once, at the later. A rule says nothing about a contribution a
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the
   models it builds, for `smear`'s own tests; it is not API.
