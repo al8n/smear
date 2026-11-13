@@ -93,6 +93,9 @@ const UNION_MEMBER_NOT_OBJECT: &str = "smear::schema::union-member-not-object";
 const DEPRECATED_REQUIRED_ARGUMENT: &str = "smear::schema::deprecated-required-argument";
 const DEPRECATED_REQUIRED_INPUT_FIELD: &str = "smear::schema::deprecated-required-input-field";
 
+/// GraphQL's codes for the three mistakes of a OneOf input object.
+const ONE_OF_FIELD_NOT_NULLABLE: &str = "smear::schema::one-of-field-not-nullable";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1527,6 +1530,10 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(DEPRECATED_REQUIRED_INPUT_FIELD),
     a_deprecated_required_input_field,
   ),
+  (
+    Code::new(ONE_OF_FIELD_NOT_NULLABLE),
+    a_one_of_field_that_is_non_null,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1724,6 +1731,11 @@ fn a_deprecated_required_argument() -> Analysis {
 /// A required input field that is deprecated.
 fn a_deprecated_required_input_field() -> Analysis {
   analyze_one("type Query { ok: Int } input In { a: Int! @deprecated }")
+}
+
+/// A OneOf input object's field that is non-null.
+fn a_one_of_field_that_is_non_null() -> Analysis {
+  analyze_one("type Query { ok: Int } input In @oneOf { a: Int! }")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

@@ -326,8 +326,10 @@ All notable changes to Smear are documented in this file.
   is `self-implementing-interface`; and a union member that names what is no object type is
   `union-member-not-object`; and an argument or an input field written non-null, with no default,
   that applies `core`'s `@deprecated`, told by its definition and not its spelling, is
-  `deprecated-required-argument` or `deprecated-required-input-field`. A rule says nothing about a
-  contribution a phase already refused something in. On every GraphQL document of smear's corpora the analyzer
+  `deprecated-required-argument` or `deprecated-required-input-field`; and an input object is OneOf
+  when the package that wrote it applies `core`'s `@oneOf` to it, in its definition or in an
+  extension of its own, and a field of one written non-null is `one-of-field-not-nullable`. A rule
+  says nothing about a contribution a phase already refused something in. On every GraphQL document of smear's corpora the analyzer
   is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
   divergence it allows. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models

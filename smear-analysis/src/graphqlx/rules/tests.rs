@@ -76,7 +76,7 @@ rule_set! {
 #[test]
 fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   let table: &[(&str, &[Code])] = Rules::TABLE;
-  assert_eq!(table.len(), 17);
+  assert_eq!(table.len(), 18);
   assert_eq!(table[0].0, "DuplicateSchemaDefinition");
   assert_eq!(
     table[0].1,
@@ -180,6 +180,11 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
       Code::new("smear::schema::deprecated-required-argument"),
       Code::new("smear::schema::deprecated-required-input-field"),
     ]
+  );
+  assert_eq!(table[17].0, "OneOfFieldNotNullable");
+  assert_eq!(
+    table[17].1,
+    &[Code::new("smear::schema::one-of-field-not-nullable")]
   );
 }
 

@@ -2,8 +2,9 @@
 //! code: a member's name does not begin with two underscores; a definition's members have distinct
 //! names, and so have a field's arguments; a definition that holds members holds one at least; a
 //! member's type is of the kind its position takes; an object or an interface implements
-//! interfaces; no interface implements itself; a union's members are object types; and a required
-//! argument or input field is not deprecated. Each rule judges what a supplied
+//! interfaces; no interface implements itself; a union's members are object types; a required
+//! argument or input field is not deprecated; and a OneOf input object's fields are nullable. Each
+//! rule judges what a supplied
 //! package's definition holds, says nothing within what a phase refused, and quotes a name only as
 //! an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -64,6 +65,9 @@ const UNDEFINED_MEMBER: &str = "smear::schema::undefined-union-member";
 /// GraphQL's codes for a required argument and a required input field that are deprecated.
 const DEPRECATED_ARGUMENT: &str = "smear::schema::deprecated-required-argument";
 const DEPRECATED_INPUT_FIELD: &str = "smear::schema::deprecated-required-input-field";
+
+/// GraphQL's codes for the three mistakes of a OneOf input object.
+const ONE_OF_NON_NULL: &str = "smear::schema::one-of-field-not-nullable";
 
 /// The code of a marker used as a marker may not be, which L3's rule reports.
 const MARKER: &str = "smear::graphqlx::marker-misuse";
@@ -975,6 +979,42 @@ fn a_required_argument_or_input_field_is_not_deprecated() {
   );
 }
 
+/// A OneOf input object with a field of each shape, and a generic one whose field is a type
+/// parameter.
+const ONE_OF: &str = "type Query {\n  ok: Int\n}\n\
+                      input A @oneOf {\n  a: Int!\n  b: Int = 1\n  c: Int! = 2\n  d: [Int!]\n}\n\
+                      input Choice<T> @oneOf {\n  x: T\n}\n";
+
+#[test]
+fn a_one_of_input_objects_fields_are_nullable_and_have_no_default() {
+  let analysis = analyze_one(ONE_OF);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (ONE_OF_NON_NULL, named(schema, ONE_OF, "  ", "a", 0), None),
+      (ONE_OF_NON_NULL, named(schema, ONE_OF, "  ", "c", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis)[0],
+    "the field `a` of the OneOf input object `A` is non-null"
+  );
+  let first = analysis.diagnostics().iter().next().expect("a diagnostic");
+  assert_eq!(
+    (first.primary_label(), first.help()),
+    (
+      Some("field of a @oneOf input object is non-null"),
+      Some(
+        "every field of a `@oneOf` input object is one of the alternatives, so each one has to \
+         be nullable."
+      )
+    )
+  );
+}
+
 /// A refusal of `code` is silent in a contribution that also holds a phase's error, `together`,
 /// and is reported beside it when the error is in a sibling definition, `apart`. The phase's error
 /// is an undefined type.
@@ -1049,6 +1089,11 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ntype T {\n  f(a: Int! @deprecated, x: Missing): Int\n}\n",
     "type Query {\n  ok: Int\n}\ntype T {\n  f(a: Int! @deprecated): Int\n}\ntype U {\n  x: Missing\n}\n",
   );
+  silent_beside_a_phase(
+    ONE_OF_NON_NULL,
+    "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int!\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int!\n}\ninput U {\n  x: Missing\n}\n",
+  );
   // An error in an interface's own contribution silences it, and not the other interface of its
   // ring.
   let text = "type Query {\n  ok: Int\n}\ninterface A implements B {\n  id: ID\n  x: Missing\n}\n\
@@ -1095,6 +1140,7 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
     format!(
       "type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  f({plain}: Int! @deprecated): Int\n}}\n"
     ),
+    format!("type Query {{\n  ok: Int\n}}\ninput {owner} @oneOf {{\n  {plain}: Int!\n}}\n"),
   ];
   for text in &texts {
     let analysis = analyze_text(text);

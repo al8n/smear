@@ -537,4 +537,8 @@ pub(crate) mod schema {
   /// `DeprecatedRequiredInputField`.
   pub(crate) const DEPRECATED_REQUIRED_INPUT_FIELD: Code =
     Code::new("smear::schema::deprecated-required-input-field");
+
+  /// A OneOf input object's field is written non-null: `smear-schema`'s `OneOfFieldNotNullable`.
+  pub(crate) const ONE_OF_FIELD_NOT_NULLABLE: Code =
+    Code::new("smear::schema::one-of-field-not-nullable");
 }

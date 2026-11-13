@@ -275,8 +275,10 @@ impl Analysis {
 ///   union member that names what is no object type is `union-member-not-object`, at the member.
 ///   An argument or an input field written non-null, with no default, that applies `core`'s
 ///   `@deprecated` is `deprecated-required-argument` or `deprecated-required-input-field`, at its
-///   name, with a label at the `@deprecated`. A rule says nothing about a contribution a phase
-///   already refused something in.
+///   name, with a label at the `@deprecated`. An input object is OneOf when the package that
+///   wrote it applies `core`'s `@oneOf` to it, in its definition or in an extension of its own,
+///   and a field of one that is written non-null is `one-of-field-not-nullable`, at its name. A
+///   rule says nothing about a contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

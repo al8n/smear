@@ -17,7 +17,9 @@
 //! GraphQL's own rules over what a definition holds judge the definitions a supplied package
 //! wrote, a GraphQL built-in the root package replaces among them, as `supplied` answers once for
 //! each definition: what a package adds to a definition of `core`, `alloc` or `std` is the orphan
-//! rule's alone, as GraphQL judges no member of a built-in type.
+//! rule's alone, as GraphQL judges no member of a built-in type. An input object is a OneOf input
+//! object when the package that wrote it applies `core`'s `@oneOf` to it, as `one_of` answers once
+//! for each input object.
 //!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk
@@ -37,6 +39,7 @@ mod implements_non_interface;
 mod marker_misuse;
 mod member_type_kind;
 mod non_zero_argument;
+mod one_of_field_not_nullable;
 mod orphan_extension;
 mod reserved_name;
 mod schema_outside_root;
@@ -50,13 +53,14 @@ use self::{
   duplicate_type_parameter::DuplicateTypeParameter, empty_definition::EmptyDefinition,
   generic_enum::GenericEnum, implements_non_interface::ImplementsNonInterface,
   marker_misuse::MarkerMisuse, member_type_kind::MemberTypeKind,
-  non_zero_argument::NonZeroArgument, orphan_extension::OrphanExtension,
-  reserved_name::ReservedName, schema_outside_root::SchemaOutsideRoot,
-  self_implementing_interface::SelfImplementingInterface, type_ref_misuse::TypeRefMisuse,
-  union_member_not_object::UnionMemberNotObject,
+  non_zero_argument::NonZeroArgument, one_of_field_not_nullable::OneOfFieldNotNullable,
+  orphan_extension::OrphanExtension, reserved_name::ReservedName,
+  schema_outside_root::SchemaOutsideRoot, self_implementing_interface::SelfImplementingInterface,
+  type_ref_misuse::TypeRefMisuse, union_member_not_object::UnionMemberNotObject,
 };
 use super::{
-  Contribution, Cx, DefId, Model, PackageId, PackageKind, TypeExprId, TypeExprKind, id::dense,
+  ApplicationId, Contribution, Cx, DefId, DefKind, Model, PackageId, PackageKind, Resolution,
+  TypeExprId, TypeExprKind, id::dense,
 };
 
 /// The definition `def`'s own contribution, its first, which is no extension, and the package that
@@ -81,6 +85,26 @@ fn own_contribution<'a>(cx: &Cx<'a>, def: DefId) -> Option<(Contribution<'a>, Pa
 fn supplied(cx: &Cx<'_>, def: DefId) -> bool {
   own_contribution(cx, def).is_some_and(|(_, writer): (Contribution<'_>, PackageId)| {
     cx.model().package(writer).kind() != PackageKind::BuiltIn
+  })
+}
+
+/// Whether the input object `def` is a OneOf input object: the package that wrote it applies
+/// `core`'s `@oneOf` to it, in its definition or in an extension of its own.
+fn one_of(cx: &Cx<'_>, def: DefId) -> bool {
+  let model = cx.model();
+  let definition = model.def(def);
+  if definition.kind() != DefKind::InputObject {
+    return false;
+  }
+  let Some((_, writer)) = own_contribution(cx, def) else {
+    return false;
+  };
+  let one_of = model.builtins().one_of();
+  let sources = cx.sources();
+  definition.applications().iter().any(|id: &ApplicationId| {
+    let application = model.application(*id);
+    matches!(application.directive(), Resolution::Resolved(directive) if directive == one_of)
+      && sources.written_by(application.path_location()) == Some(writer)
   })
 }
 
@@ -314,8 +338,8 @@ rule_set! {
   /// name does not begin with `__`; a definition's members have distinct names, and so have a
   /// field's arguments; a definition that holds members holds one at least, a marker holding
   /// none; a member's type is of the kind its position takes; an object or an interface implements
-  /// interfaces; no interface implements itself; a union's members are object types; and a required
-  /// argument or input field is not deprecated.
+  /// interfaces; no interface implements itself; a union's members are object types; a required
+  /// argument or input field is not deprecated; and a OneOf input object's fields are nullable.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -367,6 +391,8 @@ rule_set! {
       super::code::schema::DEPRECATED_REQUIRED_ARGUMENT,
       super::code::schema::DEPRECATED_REQUIRED_INPUT_FIELD,
     ],
+    one_of_field_not_nullable: OneOfFieldNotNullable
+      => [super::code::schema::ONE_OF_FIELD_NOT_NULLABLE],
   }
 }
 
