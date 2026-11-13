@@ -831,6 +831,16 @@ impl ModelBuilder {
     Bytes(append(&mut self.model.magnitudes, bytes))
   }
 
+  /// The text `text` keeps: `""` for a run that is not this builder's.
+  pub(crate) fn kept_text(&self, text: Text) -> &str {
+    text.0.text(&self.model.text)
+  }
+
+  /// The byte string `bytes` keeps: none for a run that is not this builder's.
+  pub(crate) fn kept_bytes(&self, bytes: Bytes) -> &[u8] {
+    bytes.0.of(&self.model.magnitudes)
+  }
+
   /// Appends an integer: negative when `negative`, of absolute value `magnitude`, little-endian,
   /// written as `text`. Trailing zero bytes of `magnitude` are not kept, so zero is no bytes, and
   /// zero is never negative. Answers its row of the integer table, which any number of values may

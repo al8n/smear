@@ -156,7 +156,11 @@ pub enum DiagnosticKind {
   /// but a custom scalar that is no collection, which keeps any literal, is reported at the
   /// literal. And a set or a map, an extern one among them, takes its own literal and `null`
   /// alone: any other literal is reported at the literal, with the collection's form in the help.
-  /// Either is unresolved, and nothing it holds is a value of its own.
+  /// Either is unresolved, and nothing it holds is a value of its own. Or a set literal that holds
+  /// one element twice, or a map literal that holds one key twice, two being one when their
+  /// coerced values are, `1` and `0x1` one integer and `"4"` and `4` one `id`: reported at the
+  /// later occurrence, with a label at the first, where the literal is written; the literal keeps
+  /// everything it holds.
   CollectionLiteral,
 
   // -- smear's rules -----------------------------------------------------------------------------

@@ -397,7 +397,10 @@ All notable changes to Smear are documented in this file.
   takes a `set!{…}` and a map a `map!{…}`, as `ValueKind::Set` and `ValueKind::Map`, each element,
   key and value coerced against the collection's types, a key or an element never `null`; any
   other literal where a collection is expected, an extern one among them, and a collection
-  literal where no collection of its shape is, is the new `smear::graphqlx::collection-literal`. A
+  literal where no collection of its shape is, is the new `smear::graphqlx::collection-literal`;
+  and so is a set literal that holds one element twice, or a map literal one key twice, two being
+  one when their coerced values are, `1` and `0x1` one integer and `"4"` and `4` one `id`, at the
+  later occurrence, the literal keeping everything it holds. A
   custom scalar's value but `null` is its `Literal`, a collection literal among them, and so, in
   this version, is a `TypeRef`'s, and a value whose type names a type parameter or can take no
   value. A value that

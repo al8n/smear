@@ -712,6 +712,16 @@ fn long_spellings_are_quoted_as_excerpts() {
   for diagnostic in analysis.diagnostics() {
     assert!(diagnostic.to_string().len() < 1024);
   }
+
+  // A string of four kilobytes that a set holds twice.
+  let text = format!(
+    "type Query {{\n  x: Int\n}}\ninput J {{\n  s: HashSet<string> = set!{{\"{long}\", \"{long}\"}}\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  assert_eq!(found_of(&analysis, &[COLLECTION]).len(), 1);
+  for diagnostic in analysis.diagnostics() {
+    assert!(diagnostic.to_string().len() < 1024);
+  }
 }
 
 /// A field the literal leaves out takes a copy of its default, with no name, not written, located
@@ -1335,4 +1345,251 @@ fn composite_values_are_numbered_in_the_walks_order() {
   for (index, reached) in reached.iter().enumerate() {
     assert_eq!(reached.get() as usize, index);
   }
+}
+
+/// K's own three: a set that holds one element twice and a map that holds one key twice, told by
+/// their coerced values, are each `collection-literal` at the later occurrence, labelled at the
+/// first, and each still holds both. Refuses a comparison of spellings, and a duplicate dropped.
+#[test]
+fn a_set_holds_no_element_twice_and_a_map_no_key_twice() {
+  let text = "type Query {\n  x: Int\n}\ninput H {\n  tags: HashSet<string> = set!{\"a\", \"a\"}\n  \
+              codes: HashMap<i32, string> = map!{1 => \"x\", 0x1 => \"y\"}\n  \
+              ids: HashMap<id, string> = map!{\"4\" => \"x\", 4 => \"y\"}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let later = [
+    at(schema, text, "\"a\"", 1),
+    at(schema, text, "0x1", 0),
+    after(schema, text, "\"x\", ", "4"),
+  ];
+  let first = [
+    at(schema, text, "\"a\"", 0),
+    after(schema, text, "map!{", "1"),
+    at(schema, text, "\"4\"", 0),
+  ];
+  assert_eq!(found(&analysis), later.map(|at: Location| (COLLECTION, at)));
+  for (diagnostic, first) in analysis.diagnostics().iter().zip(first) {
+    assert_eq!(
+      diagnostic.label(0).map(|label| label.location()),
+      Some(first)
+    );
+  }
+  let model = analysis.model();
+  assert_eq!(
+    shown_default(model, "H", "tags"),
+    "Set {String \"a\", String \"a\"}"
+  );
+  assert_eq!(
+    shown_default(model, "H", "codes"),
+    "Map {Int 1 => String \"x\", Int 0x1 => String \"y\"}"
+  );
+  assert_eq!(
+    shown_default(model, "H", "ids"),
+    "Map {String \"4\" => String \"x\", Int 4 => String \"y\"}"
+  );
+}
+
+/// Two elements are one when their values are, whatever spells them: an integer in any radix,
+/// `-0` and `0`; a string's cooked text; an `id`'s identifier, a string's or an integer's decimal
+/// digits; a boolean; an enum value's member; a float's value, `-0.0` and `0.0` one, and an `f32`'s
+/// value rounded to `f32`; a byte string's bytes; a `NonZero`'s integer. Refuses a comparison of
+/// texts, and an `id` told apart by the literal that spells it.
+#[test]
+fn the_same_value_is_told_by_its_value() {
+  for (ty, literal, twice) in [
+    ("HashSet<Int>", "set!{1, 0x1, 0b1, 0_1}", 3),
+    ("HashSet<Int>", "set!{-0, 0}", 1),
+    (
+      "HashSet<string>",
+      "set!{\"a\", \"\\u0061\", \"\"\"a\"\"\"}",
+      2,
+    ),
+    ("HashSet<id>", "set!{\"4\", 4, 0x4}", 2),
+    ("HashSet<id>", "set!{\"04\", 4}", 0),
+    ("HashSet<Boolean>", "set!{true, true}", 1),
+    ("HashSet<Color>", "set!{RED, Color::RED}", 1),
+    ("Floats<f64>", "set!{1.0, 1, 1e0, 0x1p0}", 3),
+    ("Floats<f64>", "set!{0.0, -0.0}", 1),
+    ("Floats<f32>", "set!{0.1, 0.10000000149}", 1),
+    ("Floats<f64>", "set!{0.1, 0.10000000149}", 0),
+    ("Floats<bytes>", "set!{\"ab\", [0x61, 0x62]}", 1),
+    ("HashSet<NonZeroU32>", "set!{1, 0x1}", 1),
+  ] {
+    let text = format!(
+      "type Query {{\n  x: Int\n}}\nenum Color {{\n  RED\n}}\nscalar Floats<T> @set\n\
+       input H {{\n  s: {ty} = {literal}\n}}\n"
+    );
+    let analysis = analyze_text(&text, &Limits::new());
+    let found = found(&analysis);
+    assert!(
+      found
+        .iter()
+        .all(|&(code, _): &(&'static str, Location)| code == COLLECTION),
+      "{text}: {found:?}"
+    );
+    assert_eq!(found.len(), twice, "{text}");
+  }
+}
+
+/// What has no value of its own is never held twice: a custom scalar's literal, a list, an input
+/// object, and what did not fit. Refuses a comparison of what is kept as written, and of what did
+/// not fit.
+#[test]
+fn what_has_no_identity_is_never_held_twice() {
+  let text = "type Query {\n  x: Int\n}\nscalar Any\nscalar Things<T> @set\ninput I {\n  a: Int\n}\n\
+              input H {\n  c: Things<Any> = set!{1, 1}\n  l: Things<[Int]> = set!{[1], [1]}\n  \
+              o: Things<I> = set!{{}, {}}\n  x: HashSet<Int> = set!{\"x\", \"x\"}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (DEFAULT, at(schema, text, "\"x\"", 0)),
+      (DEFAULT, at(schema, text, "\"x\"", 1)),
+    ]
+  );
+}
+
+/// Each later occurrence is reported at itself, labelled at the first. Refuses a label at the
+/// occurrence before.
+#[test]
+fn each_later_occurrence_is_reported_at_the_first() {
+  let text = "type Query {\n  x: Int\n}\ninput H {\n  s: HashSet<Int> = set!{1, 2, 1, 1}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (COLLECTION, after(schema, text, "2, ", "1")),
+      (COLLECTION, after(schema, text, "2, 1, ", "1")),
+    ]
+  );
+  let first = after(schema, text, "set!{", "1");
+  for diagnostic in analysis.diagnostics() {
+    assert_eq!(
+      diagnostic.label(0).map(|label| label.location()),
+      Some(first)
+    );
+  }
+}
+
+/// A set of two hundred elements is searched by the kernel's sort, and finds its one duplicate,
+/// the 150th, which the third holds already. Refuses a scan that stops at 64.
+#[test]
+fn a_wide_literal_finds_its_duplicates_too() {
+  let mut items: Vec<String> = (0..200u32)
+    .map(|item: u32| (item * 10).to_string())
+    .collect();
+  items[149] = items[2].clone();
+  let text = format!(
+    "type Query {{\n  x: Int\n}}\ninput H {{\n  s: HashSet<Int> = set!{{{}}}\n}}\n",
+    items.join(", ")
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let before = format!("{{{}, ", items[..149].join(", "));
+  assert_eq!(
+    found(&analysis),
+    [(COLLECTION, after(schema, &text, &before, "20"))]
+  );
+}
+
+/// A map's values are not compared. Refuses a value taken for a key.
+#[test]
+fn a_maps_values_are_not_compared() {
+  let text = "type Query {\n  x: Int\n}\ninput H {\n  m: HashMap<Int, string> = map!{1 => \"x\", 2 => \"x\"}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// A default that holds an element twice is reported where it is written, once, and its twenty
+/// copies say nothing. Refuses a report at each copy.
+#[test]
+fn a_copy_rechecks_no_duplicate() {
+  let applied = "@d ".repeat(20);
+  let text = format!(
+    "type Query {{\n  x: Int\n}}\ndirective @d(s: HashSet<Int> = set!{{1, 1}}) repeatable on OBJECT\n\
+     type T {applied}{{\n  f: Int\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(COLLECTION, after(schema, &text, "{1, ", "1"))]
+  );
+  let model = analysis.model();
+  for &application in model.def(type_def(model, "T")).applications() {
+    let arguments = model.application(application).arguments();
+    assert_eq!(shown(model, arguments[0].value()), "Set {Int 1, Int 1}");
+  }
+}
+
+/// Passing a package's files, or the dependencies, in another order changes no composite value,
+/// no entry and no diagnostic: a dependency's input object whose defaults fill an object the root
+/// writes, a set with a duplicate and an unknown field among them.
+#[test]
+fn reversing_files_and_dependencies_changes_no_composite_value_and_no_diagnostic() {
+  let a = "type Query {\n  x: Int\n}\ninput I {\n  r: ^::one::Range = { max: 9 }\n  \
+           s: HashSet<Int> = set!{1, 1}\n}\ninput K {\n  o: ^::two::Other = {}\n}\n";
+  let b = "input J {\n  i: I = { y: 1 }\n}\n\
+           directive @tag(r: ^::one::Range = {}) repeatable on OBJECT\n\
+           type T @tag @tag(r: { min: 2 }) {\n  f: Int\n}\n";
+  let one = "input Range {\n  min: Int = 0\n  max: Int\n  step: Int = 1\n}\n";
+  let two = "input Other {\n  o: Int = 5\n}\n";
+  let mut rendered: Vec<String> = Vec::new();
+  for (files, reversed) in [
+    ([("a.graphqlx", a), ("b.graphqlx", b)], false),
+    ([("b.graphqlx", b), ("a.graphqlx", a)], true),
+  ] {
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files(files.map(|(path, text): (&str, &str)| SourceFile::new(path, text)))
+      .with_dependencies(["one", "two"]);
+    let one: Package<&str> = Package::new("one", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("one.graphqlx", one)]);
+    let two: Package<&str> = Package::new("two", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("two.graphqlx", two)]);
+    let dependencies = if reversed { [two, one] } else { [one, two] };
+    let analysis = analyze(&root, &dependencies, &Limits::new());
+    let model = analysis.model();
+    let mut text = String::new();
+    let (_, _, count, _) = test_support::counts(model);
+    for index in 0..count {
+      let value = model.value(ValueId::new(index));
+      text.push_str(&format!(
+        "value {index} {} {} {} {:?}\n",
+        shown(model, value.id()),
+        value.ty().get(),
+        value.written(),
+        value.location()
+      ));
+      if let ValueKind::Object(entries) = value.kind() {
+        for entry in entries {
+          text.push_str(&format!(
+            "  entry {} {:?} {}\n",
+            entry.field().get(),
+            entry.name(),
+            entry.value().get()
+          ));
+        }
+      }
+    }
+    for diagnostic in analysis.diagnostics() {
+      text.push_str(&format!(
+        "{} {:?} {diagnostic}\n",
+        diagnostic.code().as_str(),
+        diagnostic.primary()
+      ));
+    }
+    assert_eq!(
+      found_of(&analysis, &[UNDEFINED, COLLECTION]).len(),
+      2,
+      "{text}"
+    );
+    rendered.push(text);
+  }
+  assert_eq!(rendered[0], rendered[1]);
 }

@@ -110,10 +110,12 @@ pub enum ValueKind<'a> {
   /// A list, of its elements.
   List(&'a [ValueId]),
   /// A set, of its elements, in written order: a set literal where a set is expected, an extern
-  /// set among them, each element coerced against the set's element type.
+  /// set among them, each element coerced against the set's element type. An element written
+  /// twice is held twice, and reported where it is written.
   Set(&'a [ValueId]),
   /// A map, of its entries, each a key and a value, in written order: a map literal where a map is
   /// expected, each key coerced against the map's key type and each value against its value type.
+  /// A key written twice is held twice, and reported where it is written.
   Map(&'a [(ValueId, ValueId)]),
   /// An input object, of its fields, in the input object's order: each one its literal writes and
   /// the input object declares, one written twice twice, in written order, and each one it leaves

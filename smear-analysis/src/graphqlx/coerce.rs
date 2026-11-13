@@ -46,6 +46,17 @@
 //!    version. A collection given any other literal but `null`, and a set or a map literal given to
 //!    what is no collection of its shape, does not fit, with `collection-literal`.
 //!
+//! A set literal that holds one element twice, and a map literal that holds one key twice, is
+//! `collection-literal`, where it is written, at the later occurrence, with a label at the first;
+//! it keeps every element and every entry. Two are one when their coerced values are: a boolean
+//! by its value; an integer by its sign and its magnitude, `-0` being `0`; a float by its bits,
+//! `-0.0` being `0.0`, an `f32` by its value rounded to `f32`; a string by its cooked text; an
+//! `id` by its identifier, an integer's being its decimal digits, so that `"4"` and `4` are one; a
+//! byte string by its bytes; an enum value by its member. What has no value of its own, a custom
+//! scalar's literal, a list, a set, a map, an input object, and what did not fit, is compared with
+//! nothing, and so are a map's values. Each identity is rendered once, and the duplicates are
+//! found by the shared kernel. A copy compares nothing: its default was judged where it is written.
+//!
 //! An enum value's name is looked up among the values of the enum expected, every enum's values
 //! being kept by the enum and the name, the first of each name. A bare name is looked up there
 //! and nothing else, no scope and no parameter. A qualified one's segments but the last are
@@ -169,6 +180,7 @@ use std::{
 };
 
 use smear_lexer::decode_string_value;
+use smear_semantics::duplicates::Duplicates;
 use tokora::{
   SimpleSpan,
   diagnostic::{Code, Location},
@@ -284,7 +296,11 @@ pub(crate) fn coerce(
     byte_strings: BTreeMap::new(),
     stack: Vec::new(),
     items: Vec::new(),
+    idents: Vec::new(),
     pairs: Vec::new(),
+    key_bytes: Vec::new(),
+    keyed: Vec::new(),
+    twice: Vec::new(),
     children: Vec::new(),
     syms: Vec::new(),
     listed: Vec::new(),
@@ -601,6 +617,35 @@ struct Refused {
   why: Why,
 }
 
+/// What tells a value that fits from another of its type, for a set's elements and a map's keys:
+/// two values of one type are one when their identities render alike. A value that is no leaf,
+/// a custom scalar's, and one that did not fit have none.
+#[derive(Clone, Copy)]
+enum Ident {
+  Bool(bool),
+  /// An integer: its sign, kept for a magnitude that is not zero alone, so that `-0` is `0`, and
+  /// its magnitude, a run of the phase's own.
+  Int {
+    negative: bool,
+    start: u32,
+    len: u32,
+  },
+  /// An `id`'s integer, read as its decimal digits, so that it is one with the string of them.
+  Decimal {
+    negative: bool,
+    start: u32,
+    len: u32,
+  },
+  /// A float's bits: an `f64`'s, or, for `f32`, those of the `f64` rounded to `f32`; `-0.0` is
+  /// `0.0`.
+  Float(u64),
+  /// A string's cooked text, or an `id`'s.
+  Text(Text),
+  Bytes(Bytes),
+  /// An enum value.
+  Member(MemberId),
+}
+
 /// An integer's magnitude once converted: its run of the phase's own magnitudes, its bit length,
 /// and whether it is a power of two.
 #[derive(Clone, Copy)]
@@ -672,11 +717,13 @@ enum Task {
   /// Make a node's row one unresolved row, and report why, where it is written.
   Refuse(Making, Why),
   /// Give `value`, a list, a set or a map as `held` says, the rows made since `from` among the
-  /// open values' rows: a map's in pairs, each key and then its value.
+  /// open values' rows: a map's in pairs, each key and then its value. A set or a map written in
+  /// the source `check` is first searched for an element or a key held twice.
   Close {
     value: ValueId,
     from: usize,
     held: Held,
+    check: Option<u32>,
   },
   /// Give the input object `object` its entries: the open entries from `entries` on, each with
   /// its value, the rows made since `from` among the open values' rows, in the same order.
@@ -746,8 +793,17 @@ struct Coercion<'c, 'p, 'x> {
   /// The rows made of the values that are open, lists, sets, maps and input objects, each one's
   /// after it.
   items: Vec<ValueId>,
+  /// Beside each of `items`, the row's identity, when it has one, and its node.
+  idents: Vec<(Option<Ident>, u32)>,
   /// The entries of the map being closed, each a key and its value.
   pairs: Vec<(ValueId, ValueId)>,
+  /// The identities of the set or the map being searched, rendered.
+  key_bytes: Vec<u8>,
+  /// Each element or key of the set or the map being searched that has an identity: its run of
+  /// `key_bytes`, and its node.
+  keyed: Vec<(u32, u32, u32)>,
+  /// Each element or key held twice, and the first that holds it: their nodes.
+  twice: Vec<(u32, u32)>,
   /// The children of the list being opened.
   children: Vec<u32>,
   /// The segments of the path being kept.
@@ -1424,7 +1480,12 @@ impl<'p> Coercion<'_, 'p, '_> {
       match task {
         Task::Make(making) => self.make(making),
         Task::Refuse(making, why) => self.unfit(making, why),
-        Task::Close { value, from, held } => self.close(value, from, held),
+        Task::Close {
+          value,
+          from,
+          held,
+          check,
+        } => self.close(value, from, held, check),
         Task::CloseObject {
           object,
           from,
@@ -1434,6 +1495,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     let value = self.items.get(base).copied();
     self.items.truncate(base);
+    self.idents.truncate(base);
     value
   }
 
@@ -1451,7 +1513,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     };
     let source = tree.source;
     let at = Location::new(source, raw.span);
-    let id = self.push(at, mode);
+    let id = self.push(at, mode, node);
     if let Some(ty) = ty {
       self.builder.set_value_ty(id, ty);
     }
@@ -1483,6 +1545,7 @@ impl<'p> Coercion<'_, 'p, '_> {
             value: id,
             from,
             held: Held::List,
+            check: None,
           });
           self
             .stack
@@ -1492,8 +1555,13 @@ impl<'p> Coercion<'_, 'p, '_> {
       Class::Object { def, first } => self.object(id, making, def, first),
       Class::Leaf(base) => {
         self.path(id, raw.kind);
-        if let Err(refused) = self.leaf(id, node, tree, base) {
-          self.refuse(refused, source, ty, mode);
+        match self.leaf(id, node, tree, base) {
+          Ok(ident) => {
+            if let Some(last) = self.idents.last_mut() {
+              last.0 = ident;
+            }
+          }
+          Err(refused) => self.refuse(refused, source, ty, mode),
         }
       }
     }
@@ -1508,10 +1576,15 @@ impl<'p> Coercion<'_, 'p, '_> {
       return;
     };
     let from = self.items.len();
+    let check = match held {
+      Held::Set | Held::Map if making.mode.written() => Some(making.tree.source),
+      Held::List | Held::Set | Held::Map => None,
+    };
     self.stack.push(Task::Close {
       value: id,
       from,
       held,
+      check,
     });
     self.children.clear();
     let mut child = making.node.saturating_add(1);
@@ -1543,8 +1616,12 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Gives `value`, a list, a set or a map as `held` says, the rows made since `from` among the
-  /// open values' rows: a map's in pairs, each key and then its value.
-  fn close(&mut self, value: ValueId, from: usize, held: Held) {
+  /// open values' rows: a map's in pairs, each key and then its value. A set or a map written in
+  /// the source `check` is first searched for an element, or a key, held twice.
+  fn close(&mut self, value: ValueId, from: usize, held: Held, check: Option<u32>) {
+    if let Some(source) = check {
+      self.held_twice(from, held, source);
+    }
     let made = self.items.get(from..).unwrap_or_default();
     match held {
       Held::List => self.builder.set_list(value, made),
@@ -1560,6 +1637,137 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
     }
     self.items.truncate(from);
+    self.idents.truncate(from);
+  }
+
+  /// Reports each element of the set, or each key of the map, as `held` says, whose rows are those
+  /// made since `from` among the open values' rows, written in the source `source`, that an
+  /// earlier one holds already: at the later, with a label at the first. Each identity is rendered
+  /// once into one buffer, and the shared kernel finds the first of each key, by a scan up to its
+  /// narrow width and by one sort above it. An element or a key with no identity is compared with
+  /// nothing.
+  fn held_twice(&mut self, from: usize, held: Held, source: u32) {
+    self.key_bytes.clear();
+    self.keyed.clear();
+    self.twice.clear();
+    let step = match held {
+      Held::Map => 2,
+      Held::List | Held::Set => 1,
+    };
+    let mut at = from;
+    while let Some(&(ident, node)) = self.idents.get(at) {
+      at = at.saturating_add(step);
+      let Some(ident) = ident else {
+        continue;
+      };
+      let start = dense(self.key_bytes.len());
+      self.render(ident);
+      self.keyed.push((start, dense(self.key_bytes.len()), node));
+    }
+    {
+      // The keys borrow the buffer: the pairs are gathered first, and reported after.
+      let keys: &[u8] = &self.key_bytes;
+      let keyed: &[(u32, u32, u32)] = &self.keyed;
+      let mut duplicates: Duplicates<&[u8]> =
+        Duplicates::over(keyed.len(), |position: usize| key_at(keys, keyed, position));
+      for (position, &(_, _, node)) in keyed.iter().enumerate() {
+        if let Some(first) = duplicates.first(position, key_at(keys, keyed, position))
+          && let Some(&(_, _, held_first)) = keyed.get(first)
+        {
+          self.twice.push((node, held_first));
+        }
+      }
+    }
+    for index in 0..self.twice.len() {
+      if let Some(&(later, first)) = self.twice.get(index) {
+        self.held_again(later, first, held, source);
+      }
+    }
+  }
+
+  /// Appends `ident`'s canonical bytes to the buffer of keys: a boolean as one byte; an integer as
+  /// its sign and its magnitude; an `id`'s integer as its decimal digits, `-` first below zero;
+  /// a float as its bits; a text or a byte string as its bytes; an enum value as its member.
+  fn render(&mut self, ident: Ident) {
+    match ident {
+      Ident::Bool(flag) => self.key_bytes.push(u8::from(flag)),
+      Ident::Int {
+        negative,
+        start,
+        len,
+      } => {
+        self.key_bytes.push(u8::from(negative));
+        let magnitude = run_of(&self.magnitudes, start, len);
+        self.key_bytes.extend_from_slice(magnitude);
+      }
+      Ident::Decimal {
+        negative,
+        start,
+        len,
+      } => {
+        // An `id`'s integer is in `i32`'s range: at most four bytes, eleven characters.
+        let mut value: u64 = 0;
+        for (place, byte) in run_of(&self.magnitudes, start, len)
+          .iter()
+          .enumerate()
+          .take(8)
+        {
+          value |= u64::from(*byte) << (8 * place);
+        }
+        if negative {
+          self.key_bytes.push(b'-');
+        }
+        let digits = self.key_bytes.len();
+        loop {
+          self
+            .key_bytes
+            .push(b'0'.saturating_add(u8::try_from(value % 10).unwrap_or_default()));
+          value /= 10;
+          if value == 0 {
+            break;
+          }
+        }
+        if let Some(written) = self.key_bytes.get_mut(digits..) {
+          written.reverse();
+        }
+      }
+      Ident::Float(bits) => self.key_bytes.extend_from_slice(&bits.to_le_bytes()),
+      Ident::Text(text) => self
+        .key_bytes
+        .extend_from_slice(self.builder.kept_text(text).as_bytes()),
+      Ident::Bytes(bytes) => self
+        .key_bytes
+        .extend_from_slice(self.builder.kept_bytes(bytes)),
+      Ident::Member(member) => self
+        .key_bytes
+        .extend_from_slice(&member.get().to_le_bytes()),
+    }
+  }
+
+  /// Reports the element or the key of node `later`, of a set or a map as `held` says, written in
+  /// the source `source`, that the one of node `first` holds already.
+  fn held_again(&mut self, later: u32, first: u32, held: Held, source: u32) {
+    let (Some(at), Some(before)) = (
+      self.raw.nodes.get(later as usize).copied(),
+      self.raw.nodes.get(first as usize).copied(),
+    ) else {
+      return;
+    };
+    let literal = Excerpt(self.raw.text(source, at.span));
+    let message = match held {
+      Held::Map => format!("this map holds the key `{literal}` twice"),
+      Held::List | Held::Set => format!("this set holds `{literal}` twice"),
+    };
+    let kind = DiagnosticKind::CollectionLiteral;
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), Location::new(source, at.span))
+        .severity(kind.severity())
+        .message(message)
+        .primary_label(kind.title())
+        .label(Location::new(source, before.span), "first held here")
+        .help("a set holds each element once, and a map each key once")
+        .build(),
+    );
   }
 
   /// Makes `id`, the row of `making`'s node, an object literal against the input object `def`,
@@ -1887,18 +2095,19 @@ impl<'p> Coercion<'_, 'p, '_> {
     let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
       return;
     };
-    let id = self.push(Location::new(tree.source, raw.span), mode);
+    let id = self.push(Location::new(tree.source, raw.span), mode, node);
     if let Some(ty) = ty {
       self.builder.set_value_ty(id, ty);
     }
     self.refuse(Refused { node, why }, tree.source, ty, mode);
   }
 
-  /// Appends a row located at `at`, made as `mode` says, to the model's values and to the open
-  /// values' rows: its id. A copy's rows are tallied.
-  fn push(&mut self, at: Location, mode: Mode) -> ValueId {
+  /// Appends the row of `node`, located at `at`, made as `mode` says, to the model's values and to
+  /// the open values' rows, with no identity yet: its id. A copy's rows are tallied.
+  fn push(&mut self, at: Location, mode: Mode, node: u32) -> ValueId {
     let id = self.builder.push_value(at, mode.written());
     self.items.push(id);
+    self.idents.push((None, node));
     if !mode.written() {
       self.copied = self.copied.saturating_add(1);
     }
@@ -1922,6 +2131,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         .unwrap_or_default(),
     );
     self.items.truncate(from);
+    self.idents.truncate(from);
     self.entries.truncate(entries);
   }
 
@@ -2039,35 +2249,64 @@ impl<'p> Coercion<'_, 'p, '_> {
       .map(|&(primitive, _): &(Primitive, DefId)| primitive)
   }
 
-  /// Makes `id`, the row of `node`, of `tree`, what `base` takes of it.
-  fn leaf(&mut self, id: ValueId, node: u32, tree: RawTree, base: Base) -> Result<(), Refused> {
+  /// Makes `id`, the row of `node`, of `tree`, what `base` takes of it. Answers its identity, when
+  /// it has one.
+  fn leaf(
+    &mut self,
+    id: ValueId,
+    node: u32,
+    tree: RawTree,
+    base: Base,
+  ) -> Result<Option<Ident>, Refused> {
     let source = tree.source;
     let kind = self.kind(node);
     let refused = move |why: Why| Refused { node, why };
     match (base, kind) {
       (Base::Kept, _) => {
         self.literal(id, node, source);
-        Ok(())
+        Ok(None)
       }
       (Base::Enum(def), RawKind::Path(row)) => self.enum_value(id, node, row, def, tree),
       (Base::Bool, RawKind::Boolean(flag)) => {
         self.builder.set_bool(id, flag);
-        Ok(())
+        Ok(Some(Ident::Bool(flag)))
       }
       (Base::String | Base::Id, RawKind::String) => {
         let text = self.cooked(node, source).ok_or(refused(Why::Kind))?;
         self.builder.give_string(id, text);
-        Ok(())
+        Ok(Some(Ident::Text(text)))
       }
-      (Base::Int(range), RawKind::Int(radix)) => self.int(id, node, source, radix, range),
-      (Base::Id, RawKind::Int(radix)) => self.int(id, node, source, radix, ID_RANGE),
+      (Base::Int(range), RawKind::Int(radix)) => {
+        let (negative, converted) = self.int(id, node, source, radix, range)?;
+        Ok(Some(Ident::Int {
+          negative: negative && converted.len != 0,
+          start: converted.start,
+          len: converted.len,
+        }))
+      }
+      (Base::Id, RawKind::Int(radix)) => {
+        let (negative, converted) = self.int(id, node, source, radix, ID_RANGE)?;
+        Ok(Some(Ident::Decimal {
+          negative: negative && converted.len != 0,
+          start: converted.start,
+          len: converted.len,
+        }))
+      }
       (Base::Float { single }, RawKind::Float { .. } | RawKind::Int(_)) => {
-        self.float(id, node, source, single)
+        let value = self.float(id, node, source, single)?;
+        // Adding `0.0` makes `-0.0` `0.0`, and leaves every other value as it is; an `f32`'s value
+        // is finite in `f32`, as coercion checked.
+        let bits = if single {
+          u64::from(((value as f32) + 0.0).to_bits())
+        } else {
+          (value + 0.0).to_bits()
+        };
+        Ok(Some(Ident::Float(bits)))
       }
       (Base::Bytes, RawKind::String | RawKind::List) => {
         let bytes = self.bytes(node, source)?;
         self.builder.give_bytes(id, bytes);
-        Ok(())
+        Ok(Some(Ident::Bytes(bytes)))
       }
       // Every literal a base does not take: a collection takes its own literal alone, and a
       // collection literal is a value of its collection alone.
@@ -2087,7 +2326,8 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Makes `id` the integer `node` is, of `radix`, when it is in `range`. Its digits are counted
-  /// first, and a count past what the width holds refuses it unconverted.
+  /// first, and a count past what the width holds refuses it unconverted. Answers whether it is
+  /// written below zero, and its magnitude.
   fn int(
     &mut self,
     id: ValueId,
@@ -2095,7 +2335,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     source: u32,
     radix: Radix,
     range: Range,
-  ) -> Result<(), Refused> {
+  ) -> Result<(bool, Converted), Refused> {
     let refused = move |why: Why| Refused { node, why };
     let scanned = self
       .scanned(node, source, radix)
@@ -2124,12 +2364,12 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     let row = self.int_row(node, source, scanned.negative, converted);
     self.builder.give_int(id, row);
-    Ok(())
+    Ok((scanned.negative, converted))
   }
 
   /// Makes `id` the float `node`, a float or an integer, reads as, when it is finite in `f32`
-  /// when `single` and in `f64` otherwise.
-  fn float(&mut self, id: ValueId, node: u32, source: u32, single: bool) -> Result<(), Refused> {
+  /// when `single` and in `f64` otherwise. Answers the float.
+  fn float(&mut self, id: ValueId, node: u32, source: u32, single: bool) -> Result<f64, Refused> {
     let refused = move |why: Why| Refused { node, why };
     let read = self.float_read(node, source).ok_or(refused(Why::Kind))?;
     let value = if single {
@@ -2142,7 +2382,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     };
     let row = self.float_row(node, source, value);
     self.builder.give_float(id, row);
-    Ok(())
+    Ok(value)
   }
 
   /// The bytes `node`, a string or a list, is as a `bytes` value, kept: a string's cooked text's
@@ -2218,7 +2458,8 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// bare name is looked up under `def` and nothing else. A qualified one's segments but the last
   /// are resolved once, as a type, where the value is written, and must name `def`: another enum,
   /// a parameter, `NonZero` or a module does not fit, and a prefix the resolver refused leaves the
-  /// value unresolved and says nothing more, the resolver having said why.
+  /// value unresolved and says nothing more, the resolver having said why. Answers the value's
+  /// identity, its member, when it names one.
   fn enum_value(
     &mut self,
     id: ValueId,
@@ -2226,7 +2467,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     row: u32,
     def: DefId,
     tree: RawTree,
-  ) -> Result<(), Refused> {
+  ) -> Result<Option<Ident>, Refused> {
     let refused = move |why: Why| Refused { node, why };
     let Some(path) = self.raw.paths.get(row as usize).copied() else {
       return Err(refused(Why::Kind));
@@ -2246,7 +2487,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       match self.prefix(row, path, tree) {
         Resolved::Def(found) if found == def => {}
-        Resolved::Unresolved => return Ok(()),
+        Resolved::Unresolved => return Ok(None),
         Resolved::Def(_) | Resolved::NonZero { .. } | Resolved::Module(_) | Resolved::Param(_) => {
           return Err(refused(Why::Kind));
         }
@@ -2255,7 +2496,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     match self.members.get(&(def, last)) {
       Some(&member) => {
         self.builder.set_enum(id, def, member);
-        Ok(())
+        Ok(Some(Ident::Member(member)))
       }
       None => Err(refused(Why::NoValue { def, name: last })),
     }
@@ -2782,6 +3023,22 @@ impl<'p> Coercion<'_, 'p, '_> {
         .build(),
     );
   }
+}
+
+/// The key at `position` of `keyed`, its run of `keys`: none past either.
+fn key_at<'k>(keys: &'k [u8], keyed: &[(u32, u32, u32)], position: usize) -> &'k [u8] {
+  keyed
+    .get(position)
+    .and_then(|&(start, end, _): &(u32, u32, u32)| keys.get(start as usize..end as usize))
+    .unwrap_or_default()
+}
+
+/// The run of `pool` from `start`, `len` bytes long: none past it.
+fn run_of(pool: &[u8], start: u32, len: u32) -> &[u8] {
+  let start = start as usize;
+  pool
+    .get(start..start.saturating_add(len as usize))
+    .unwrap_or_default()
 }
 
 /// What `range` holds, as a formula: a width is the one number it writes.
