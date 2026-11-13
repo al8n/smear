@@ -53,6 +53,13 @@ const NONZERO_ARGUMENT: &str = "smear::graphqlx::nonzero-argument";
 /// The code for a type parameter with the name of an earlier one.
 const DUPLICATE_TYPE_PARAMETER: &str = "smear::graphqlx::duplicate-type-parameter";
 
+/// GraphQL's codes for a member whose name begins with `__`, by what the member is.
+const RESERVED_FIELD_NAME: &str = "smear::schema::reserved-field-name";
+const RESERVED_ARGUMENT_NAME: &str = "smear::schema::reserved-argument-name";
+const RESERVED_ENUM_VALUE_NAME: &str = "smear::schema::reserved-enum-value-name";
+const RESERVED_INPUT_FIELD_NAME: &str = "smear::schema::reserved-input-field-name";
+const RESERVED_DIRECTIVE_ARGUMENT_NAME: &str = "smear::schema::reserved-directive-argument-name";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1425,6 +1432,20 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(DUPLICATE_TYPE_PARAMETER),
     two_type_parameters_of_one_name,
   ),
+  (Code::new(RESERVED_FIELD_NAME), a_reserved_field_name),
+  (Code::new(RESERVED_ARGUMENT_NAME), a_reserved_argument_name),
+  (
+    Code::new(RESERVED_ENUM_VALUE_NAME),
+    a_reserved_enum_value_name,
+  ),
+  (
+    Code::new(RESERVED_INPUT_FIELD_NAME),
+    a_reserved_input_field_name,
+  ),
+  (
+    Code::new(RESERVED_DIRECTIVE_ARGUMENT_NAME),
+    a_reserved_directive_argument_name,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1505,6 +1526,33 @@ fn a_non_zero_float() -> Analysis {
 /// A root package that declares two type parameters of one name.
 fn two_type_parameters_of_one_name() -> Analysis {
   analyze_one("scalar Pair<T, T>\n")
+}
+
+// GraphQL's own refusals, each `smear-schema`'s fixture for its kind, copied as text.
+
+/// A field whose name begins with `__`.
+fn a_reserved_field_name() -> Analysis {
+  analyze_one("type Query { ok: Int __mine: Int }")
+}
+
+/// A field's argument whose name begins with `__`.
+fn a_reserved_argument_name() -> Analysis {
+  analyze_one("type Query { ok(__a: Int): Int }")
+}
+
+/// An enum value whose name begins with `__`.
+fn a_reserved_enum_value_name() -> Analysis {
+  analyze_one("type Query { ok: Int } enum E { __A }")
+}
+
+/// An input field whose name begins with `__`.
+fn a_reserved_input_field_name() -> Analysis {
+  analyze_one("type Query { ok: Int } input In { __a: Int }")
+}
+
+/// A directive's argument whose name begins with `__`.
+fn a_reserved_directive_argument_name() -> Analysis {
+  analyze_one("type Query { ok: Int } directive @d(__a: Int) on FIELD")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

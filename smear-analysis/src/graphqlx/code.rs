@@ -437,4 +437,24 @@ pub(crate) mod schema {
   /// `smear-schema`'s `IntrospectionTypeExtension`.
   pub(crate) const INTROSPECTION_TYPE_EXTENSION: Code =
     Code::new("smear::schema::introspection-type-extension");
+
+  /// A field's name begins with `__`: `smear-schema`'s `ReservedFieldName`.
+  pub(crate) const RESERVED_FIELD_NAME: Code = Code::new("smear::schema::reserved-field-name");
+
+  /// A field's argument's name begins with `__`: `smear-schema`'s `ReservedArgumentName`.
+  pub(crate) const RESERVED_ARGUMENT_NAME: Code =
+    Code::new("smear::schema::reserved-argument-name");
+
+  /// An enum value's name begins with `__`: `smear-schema`'s `ReservedEnumValueName`.
+  pub(crate) const RESERVED_ENUM_VALUE_NAME: Code =
+    Code::new("smear::schema::reserved-enum-value-name");
+
+  /// An input field's name begins with `__`: `smear-schema`'s `ReservedInputFieldName`.
+  pub(crate) const RESERVED_INPUT_FIELD_NAME: Code =
+    Code::new("smear::schema::reserved-input-field-name");
+
+  /// A directive definition's argument's name begins with `__`: `smear-schema`'s
+  /// `ReservedDirectiveArgumentName`.
+  pub(crate) const RESERVED_DIRECTIVE_ARGUMENT_NAME: Code =
+    Code::new("smear::schema::reserved-directive-argument-name");
 }

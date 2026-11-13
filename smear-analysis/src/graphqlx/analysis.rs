@@ -253,8 +253,12 @@ impl Analysis {
 ///   without `!` is `nonzero-argument`, where it is written, with a label at the argument. A type
 ///   parameter with the name of an earlier one of its definition, and a name an extension's own
 ///   list gives after it gave it to an earlier one, is `duplicate-type-parameter`, at that name,
-///   with a label at the first of that name. A rule says nothing about a contribution a phase
-///   already refused something in.
+///   with a label at the first of that name. GraphQL's own rules judge what a definition a
+///   supplied package wrote holds, a GraphQL built-in the root package replaces among them, with
+///   GraphQL's codes: a member whose name begins with `__` is `reserved-field-name`,
+///   `reserved-argument-name`, `reserved-enum-value-name`, `reserved-input-field-name` or
+///   `reserved-directive-argument-name`, by what it is, at its name. A rule says nothing about a
+///   contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

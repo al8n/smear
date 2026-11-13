@@ -14,6 +14,11 @@
 //! answers for a written root, which no contribution holds, from one look at the schema's
 //! contributions for the whole walk.
 //!
+//! GraphQL's own rules over what a definition holds judge the definitions a supplied package
+//! wrote, a GraphQL built-in the root package replaces among them, as `supplied` answers once for
+//! each definition: what a package adds to a definition of `core`, `alloc` or `std` is the orphan
+//! rule's alone, as GraphQL judges no member of a built-in type.
+//!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk
 //! descends the written arguments of an occurrence that names a type parameter, or nothing, and
@@ -27,6 +32,7 @@ mod generic_enum;
 mod marker_misuse;
 mod non_zero_argument;
 mod orphan_extension;
+mod reserved_name;
 mod schema_outside_root;
 mod type_ref_misuse;
 
@@ -34,10 +40,12 @@ use self::{
   collection_arity::CollectionArity, duplicate_schema_definition::DuplicateSchemaDefinition,
   duplicate_type_parameter::DuplicateTypeParameter, generic_enum::GenericEnum,
   marker_misuse::MarkerMisuse, non_zero_argument::NonZeroArgument,
-  orphan_extension::OrphanExtension, schema_outside_root::SchemaOutsideRoot,
-  type_ref_misuse::TypeRefMisuse,
+  orphan_extension::OrphanExtension, reserved_name::ReservedName,
+  schema_outside_root::SchemaOutsideRoot, type_ref_misuse::TypeRefMisuse,
 };
-use super::{Contribution, Cx, DefId, Model, PackageId, TypeExprId, TypeExprKind, id::dense};
+use super::{
+  Contribution, Cx, DefId, Model, PackageId, PackageKind, TypeExprId, TypeExprKind, id::dense,
+};
 
 /// The definition `def`'s own contribution, its first, which is no extension, and the package that
 /// wrote it, read off where it is written: the package that wrote the definition, whose
@@ -54,6 +62,14 @@ fn own_contribution<'a>(cx: &Cx<'a>, def: DefId) -> Option<(Contribution<'a>, Pa
     .filter(|part: &Contribution<'a>| !part.is_extension())?;
   let writer = cx.sources().written_by(own.location())?;
   Some((own, writer))
+}
+
+/// Whether a supplied package wrote `def`: its own contribution, its first, is no built-in
+/// package's. A GraphQL built-in the root package replaces is the root package's.
+fn supplied(cx: &Cx<'_>, def: DefId) -> bool {
+  own_contribution(cx, def).is_some_and(|(_, writer): (Contribution<'_>, PackageId)| {
+    cx.model().package(writer).kind() != PackageKind::BuiltIn
+  })
 }
 
 /// Whether a rule says nothing at the occurrence the walk has reached in `type_expr`: a phase
@@ -280,9 +296,10 @@ rule_set! {
   /// takes no type parameter; a marker has no field and is named only in `implements` and in
   /// bounds, and a scalar, an enum, an input object or a union implements markers alone; a set has
   /// one type parameter and a map two; `TypeRef` stands only in a directive's arguments;
-  /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; and
-  /// a definition's type parameters have distinct names, and so do the names an extension's own
-  /// list gives them.
+  /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; a
+  /// definition's type parameters have distinct names, and so do the names an extension's own list
+  /// gives them; and of the definitions a supplied package wrote, GraphQL's own rules: a member's
+  /// name does not begin with `__`.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -298,6 +315,13 @@ rule_set! {
     non_zero_argument: NonZeroArgument => [super::DiagnosticKind::NonZeroArgument.code()],
     duplicate_type_parameter: DuplicateTypeParameter
       => [super::DiagnosticKind::DuplicateTypeParameter.code()],
+    reserved_name: ReservedName => [
+      super::code::schema::RESERVED_FIELD_NAME,
+      super::code::schema::RESERVED_ARGUMENT_NAME,
+      super::code::schema::RESERVED_ENUM_VALUE_NAME,
+      super::code::schema::RESERVED_INPUT_FIELD_NAME,
+      super::code::schema::RESERVED_DIRECTIVE_ARGUMENT_NAME,
+    ],
   }
 }
 
