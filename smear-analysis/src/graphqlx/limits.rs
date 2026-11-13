@@ -297,8 +297,9 @@ impl Limits {
   ///
   /// The default is 2^20: sixteen steps for each of the instantiations
   /// [`max_instantiations`](Self::max_instantiations) admits at its default. `Sorted<User>`, of
-  /// `type Sorted<T> where T: Comparable<T>`, takes five: one for the bound, two to put `User` into
-  /// `Comparable<T>`, and two for `User`'s `implements` entries.
+  /// `type Sorted<T> where T: Comparable<T>` and a `User` that implements two interfaces, takes
+  /// five: one for the bound, two to put `User` into `Comparable<T>`, and two for `User`'s
+  /// `implements` entries.
   #[inline]
   pub const fn max_bound_steps(&self) -> u32 {
     self.max_bound_steps

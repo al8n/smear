@@ -33,7 +33,8 @@ use super::own_contribution;
 ///
 /// It reads a definition's own contribution and its type parameters, and each extension and the
 /// names its own list writes, in the `enter_def` hook. It says nothing about a list in a
-/// contribution a phase refused something in, nor about a built-in package's definition.
+/// contribution a phase refused something in, nor about the own list of a built-in package's
+/// definition: an extension a supplied package writes of a built-in is judged as any other.
 ///
 /// It costs one look at each definition the walk enters and at each of its contributions, and one
 /// sort of each list of two names or more, in a buffer it keeps and clears, which holds one list

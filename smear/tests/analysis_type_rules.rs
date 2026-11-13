@@ -675,6 +675,22 @@ fn an_extensions_list_names_each_type_parameter_once() {
   let analysis = analyze_one("type P<A, B> {\n  a: A\n}\nextend type P<U, U, V> {\n  b: U\n}\n");
   assert_eq!(codes(&analysis), [ARITY], "{:#?}", analysis.diagnostics());
 
+  // The root package's extension of a built-in, which adds a directive and nothing else, is
+  // judged as any other.
+  let text = "directive @x on SCALAR\nextend scalar HashMap<K, K> @x\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DUPLICATE,
+      named(schema, text, ", ", "K", 0),
+      Some(named(schema, text, "HashMap<", "K", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
   // An extension a dependency writes of its own type, in a file of its own.
   let theirs = "extend type P<U, U> {\n  b: U\n}\n";
   let geo = package(

@@ -216,10 +216,10 @@ impl Analysis {
 ///   [`Model::satisfies_ty`](super::Model::satisfies_ty) answers. An occurrence that names a
 ///   parameter of the definition it is written in is judged through that parameter's bounds, and
 ///   an instantiation only a fill derives is not judged. The first bound that fails is
-///   `unsatisfied-bound`, at each occurrence of the type, which keeps its type; but for a bound of
-///   `core`'s `MapKey` that a `NonZero` fails, which goes on to the next: that `NonZero` holds what
-///   is no integer primitive, and `nonzero-argument` refuses it where it is written. A directive
-///   application's type arguments are not judged against its directive's bounds. Each type is
+///   `unsatisfied-bound`, at each occurrence of the type, which keeps its type. A bound of `core`'s
+///   `MapKey` that a `NonZero` fails is passed over: that `NonZero` holds what is no integer
+///   primitive, and `nonzero-argument` refuses it where it is written. A directive application's
+///   type arguments are not judged against its directive's bounds. Each type is
 ///   judged once, whatever its nullness, within [`Limits::max_bound_steps`]; an occurrence whose
 ///   bounds that budget, or a type they derive past [`Limits::max_generic_depth`] or
 ///   [`Limits::max_instantiations`], kept from being judged is `resource-limit`, and keeps its

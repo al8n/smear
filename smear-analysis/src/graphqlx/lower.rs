@@ -14,12 +14,12 @@
 //! mistake, one diagnostic. Every other extension is a contribution of its target, after the
 //! definition's own, by source id and position wherever each is written: named where its target
 //! path is written, and spanning from its `extend` to its last token. The parameter names an
-//! extension writes name its target's parameters by position, and are no rows of their own. A
-//! list of them names every one of its target's parameters: a list of another length is
-//! `generic-arity`, at the list, with a label at the definition's name, and the extension still
-//! contributes what it writes. An extension that writes no list names none of its target's
-//! parameters, whatever their count, and a name in it resolves as any other name of its module
-//! does.
+//! extension writes name its target's parameters by position, and are no type parameters of their
+//! own: each is kept with its extension, for the rule that judges them distinct. A list of them
+//! names every one of its target's parameters: a list of another length is `generic-arity`, at the
+//! list, with a label at the definition's name, and the extension still contributes what it writes.
+//! An extension that writes no list names none of its target's parameters, whatever their count,
+//! and a name in it resolves as any other name of its module does.
 //!
 //! # The definitions
 //!
