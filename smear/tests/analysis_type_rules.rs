@@ -286,7 +286,7 @@ fn only_a_marker_is_implemented_by_a_scalar_an_enum_an_input_or_a_union() {
 fn a_type_parameter_is_no_marker_to_implement() {
   // A scalar and an input object that implement their own type parameter are each refused at the
   // entry. An object that does is not this rule's: whether an object's entry names an interface is
-  // GraphQL's own rule.
+  // GraphQL's own rule, which refuses it with its own code.
   let text = "scalar S<T> implements T\ninput In<T> implements T {\n  x: Int\n}\n\
               type O<T> implements T {\n  id: ID\n}\n";
   let analysis = analyze_one(text);
@@ -304,6 +304,11 @@ fn a_type_parameter_is_no_marker_to_implement() {
         named(schema, text, "In<T> implements ", "T", 0),
         None
       ),
+      (
+        "smear::schema::implements-non-interface",
+        named(schema, text, "O<T> implements ", "T", 0),
+        None
+      ),
     ],
     "{:#?}",
     analysis.diagnostics()
@@ -315,6 +320,7 @@ fn a_type_parameter_is_no_marker_to_implement() {
        implements markers alone",
       "the input object `In` implements its type parameter `T`, which is no marker, and an input \
        object implements markers alone",
+      "the type `O` implements its type parameter `T`, and a type parameter is no interface",
     ]
   );
 }

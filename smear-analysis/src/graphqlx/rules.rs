@@ -32,6 +32,7 @@ mod duplicate_schema_definition;
 mod duplicate_type_parameter;
 mod empty_definition;
 mod generic_enum;
+mod implements_non_interface;
 mod marker_misuse;
 mod member_type_kind;
 mod non_zero_argument;
@@ -44,7 +45,8 @@ use self::{
   collection_arity::CollectionArity, duplicate_member::DuplicateMember,
   duplicate_schema_definition::DuplicateSchemaDefinition,
   duplicate_type_parameter::DuplicateTypeParameter, empty_definition::EmptyDefinition,
-  generic_enum::GenericEnum, marker_misuse::MarkerMisuse, member_type_kind::MemberTypeKind,
+  generic_enum::GenericEnum, implements_non_interface::ImplementsNonInterface,
+  marker_misuse::MarkerMisuse, member_type_kind::MemberTypeKind,
   non_zero_argument::NonZeroArgument, orphan_extension::OrphanExtension,
   reserved_name::ReservedName, schema_outside_root::SchemaOutsideRoot,
   type_ref_misuse::TypeRefMisuse,
@@ -307,7 +309,8 @@ rule_set! {
   /// gives them; and of the definitions a supplied package wrote, GraphQL's own rules: a member's
   /// name does not begin with `__`; a definition's members have distinct names, and so have a
   /// field's arguments; a definition that holds members holds one at least, a marker holding
-  /// none; and a member's type is of the kind its position takes.
+  /// none; a member's type is of the kind its position takes; and an object or an interface
+  /// implements interfaces.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -349,6 +352,8 @@ rule_set! {
       super::code::schema::INPUT_FIELD_TYPE_NOT_INPUT_TYPE,
       super::code::schema::DIRECTIVE_ARGUMENT_TYPE_NOT_INPUT_TYPE,
     ],
+    implements_non_interface: ImplementsNonInterface
+      => [super::code::schema::IMPLEMENTS_NON_INTERFACE],
   }
 }
 

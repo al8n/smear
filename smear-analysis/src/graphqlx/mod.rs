@@ -110,8 +110,10 @@
 //! code of its list; and a definition that holds members and holds none, its extensions'
 //! counted, is `smear::schema::empty-fields-definition`, or the code of its kind, a marker
 //! holding none; and a member typed by a definition of a kind its position does not take is
-//! `smear::schema::field-type-not-output-type`, or the code of its position. A rule says nothing
-//! about a contribution a phase already refused something in.
+//! `smear::schema::field-type-not-output-type`, or the code of its position; and an `implements`
+//! entry of an object or an interface that names what is no interface is
+//! `smear::schema::implements-non-interface`. A rule says nothing about a contribution a phase
+//! already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

@@ -513,4 +513,9 @@ pub(crate) mod schema {
   /// union: `smear-schema`'s `DirectiveArgumentTypeNotInputType`.
   pub(crate) const DIRECTIVE_ARGUMENT_TYPE_NOT_INPUT_TYPE: Code =
     Code::new("smear::schema::directive-argument-type-not-input-type");
+
+  /// An object's or an interface's `implements` entry names what is no interface:
+  /// `smear-schema`'s `ImplementsNonInterface`.
+  pub(crate) const IMPLEMENTS_NON_INTERFACE: Code =
+    Code::new("smear::schema::implements-non-interface");
 }

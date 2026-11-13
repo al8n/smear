@@ -80,6 +80,9 @@ const INPUT_FIELD_TYPE_NOT_INPUT_TYPE: &str = "smear::schema::input-field-type-n
 const DIRECTIVE_ARGUMENT_TYPE_NOT_INPUT_TYPE: &str =
   "smear::schema::directive-argument-type-not-input-type";
 
+/// GraphQL's code for an `implements` entry that names what is no interface.
+const IMPLEMENTS_NON_INTERFACE: &str = "smear::schema::implements-non-interface";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1497,6 +1500,10 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(DIRECTIVE_ARGUMENT_TYPE_NOT_INPUT_TYPE),
     a_directives_argument_typed_by_an_object,
   ),
+  (
+    Code::new(IMPLEMENTS_NON_INTERFACE),
+    an_object_implementing_an_object,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1669,6 +1676,11 @@ fn an_input_field_typed_by_an_object() -> Analysis {
 /// A directive's argument typed by an object.
 fn a_directives_argument_typed_by_an_object() -> Analysis {
   analyze_one("type Query { ok: Int } directive @d(a: Query) on FIELD")
+}
+
+/// An object that implements an object.
+fn an_object_implementing_an_object() -> Analysis {
+  analyze_one("type Query { ok: Int } type Thing { a: Int } type Other implements Thing { a: Int }")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

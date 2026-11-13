@@ -1,7 +1,8 @@
 //! The GraphQLx analyzer's rules on what a definition holds, each GraphQL's own with GraphQL's
 //! code: a member's name does not begin with two underscores; a definition's members have distinct
-//! names, and so have a field's arguments; a definition that holds members holds one at least; and
-//! a member's type is of the kind its position takes. Each rule judges what a supplied
+//! names, and so have a field's arguments; a definition that holds members holds one at least; a
+//! member's type is of the kind its position takes; and an object or an interface implements
+//! interfaces. Each rule judges what a supplied
 //! package's definition holds, says nothing within what a phase refused, and quotes a name only as
 //! an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -46,6 +47,12 @@ const FIELD_TYPE: &str = "smear::schema::field-type-not-output-type";
 const ARGUMENT_TYPE: &str = "smear::schema::argument-type-not-input-type";
 const INPUT_FIELD_TYPE: &str = "smear::schema::input-field-type-not-input-type";
 const DIRECTIVE_ARGUMENT_TYPE: &str = "smear::schema::directive-argument-type-not-input-type";
+
+/// GraphQL's code for an `implements` entry that names what is no interface.
+const IMPLEMENTS: &str = "smear::schema::implements-non-interface";
+
+/// The code of a marker used as a marker may not be, which L3's rule reports.
+const MARKER: &str = "smear::graphqlx::marker-misuse";
 
 /// The code of an `implements` entry that names nothing, a phase's.
 const UNDEFINED_INTERFACE: &str = "smear::schema::undefined-implements-interface";
@@ -677,6 +684,73 @@ fn what_this_part_leaves_to_instantiations_is_accepted() {
   );
 }
 
+/// An object, a scalar, an enum, a union, an input object, interfaces and a marker; then objects
+/// and an interface that implement each of what is no interface, a type parameter and an alias;
+/// an extension's entry; and entries that are interfaces, one with an argument, and a marker.
+const IMPLEMENTS_SITES: &str = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\nscalar Sca\n\
+                                enum Enu {\n  V\n}\nunion Uni = Obj\ninput Inp {\n  i: Int\n}\n\
+                                interface Node {\n  id: ID\n}\ninterface Gen<X> {\n  id: ID\n}\n\
+                                interface Mark @marker\n\
+                                type A1 implements Obj {\n  id: ID\n}\n\
+                                type A2 implements Sca {\n  id: ID\n}\n\
+                                type A3 implements Enu {\n  id: ID\n}\n\
+                                type A4 implements Uni {\n  id: ID\n}\n\
+                                type A5 implements Inp {\n  id: ID\n}\n\
+                                interface I1 implements Obj {\n  id: ID\n}\n\
+                                type O<T> implements T {\n  id: ID\n}\n\
+                                type N implements NonZeroU32 {\n  id: ID\n}\n\
+                                type E {\n  id: ID\n}\nextend type E implements Obj\n\
+                                type Good implements Node & Gen<ID> & Mark {\n  id: ID\n}\n\
+                                scalar S implements Obj\n";
+
+#[test]
+fn an_object_or_an_interface_implements_interfaces() {
+  let text = IMPLEMENTS_SITES;
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let entry = |before: &str, name: &str| -> (&'static str, Location, Option<Location>) {
+    (IMPLEMENTS, named(schema, text, before, name, 0), None)
+  };
+  assert_eq!(
+    found(&analysis),
+    [
+      entry("A1 implements ", "Obj"),
+      entry("A2 implements ", "Sca"),
+      entry("A3 implements ", "Enu"),
+      entry("A4 implements ", "Uni"),
+      entry("A5 implements ", "Inp"),
+      entry("I1 implements ", "Obj"),
+      entry("O<T> implements ", "T"),
+      entry("N implements ", "NonZeroU32"),
+      entry("E implements ", "Obj"),
+      // A scalar implements markers alone, which is the marker rule's, and not this rule's.
+      (MARKER, named(schema, text, "S implements ", "Obj", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis)[..9],
+    [
+      "the type `A1` implements `Obj`, which is an object type and no interface",
+      "the type `A2` implements `Sca`, which is a scalar and no interface",
+      "the type `A3` implements `Enu`, which is an enum and no interface",
+      "the type `A4` implements `Uni`, which is a union and no interface",
+      "the type `A5` implements `Inp`, which is an input object and no interface",
+      "the interface `I1` implements `Obj`, which is an object type and no interface",
+      "the type `O` implements its type parameter `T`, and a type parameter is no interface",
+      "the type `N` implements `NonZero`, which is a scalar and no interface",
+      "the type `E` implements `Obj`, which is an object type and no interface",
+    ]
+  );
+  let first = analysis.diagnostics().iter().next().expect("a diagnostic");
+  assert_eq!(
+    first.primary_label(),
+    Some("implemented type is not an interface")
+  );
+  assert_eq!(first.help(), None);
+}
+
 /// A refusal of `code` is silent in a contribution that also holds a phase's error, `together`,
 /// and is reported beside it when the error is in a sibling definition, `apart`. The phase's error
 /// is an undefined type.
@@ -733,6 +807,13 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype T {\n  f: In\n}\n\
      type U {\n  x: Missing\n}\n",
   );
+  silent_beside_a_phase(
+    IMPLEMENTS,
+    "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
+     type T implements Obj {\n  id: ID\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\ntype T implements Obj {\n  id: ID\n}\n\
+     type U {\n  x: Missing\n}\n",
+  );
 }
 
 #[test]
@@ -746,6 +827,10 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
     format!("type Query {{\n  ok: Int\n}}\ntype {owner}\n"),
     format!(
       "type Query {{\n  ok: Int\n}}\ninput In {{\n  i: Int\n}}\ntype {owner} {{\n  {plain}: In\n}}\n"
+    ),
+    format!(
+      "type Query {{\n  ok: Int\n}}\ntype {plain} {{\n  o: Int\n}}\n\
+       type {owner} implements {plain} {{\n  id: ID\n}}\n"
     ),
   ];
   for text in &texts {
