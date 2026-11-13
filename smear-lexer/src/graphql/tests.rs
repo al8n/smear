@@ -1457,11 +1457,9 @@ where
     .unwrap_unterminated();
   assert_eq!(err1.hint(), &LitStrDelimiterHint::Quote);
 
-  // The literal ends at its line, before the line terminator, whatever closes the next line.
-  let mut lexer = Token::test_lexer(
-    r#""escaped
-  new line""#,
-  );
+  // The literal ends at its line, before the line terminator, whatever closes the next line. The
+  // input is spelled with escapes, so the space that ends the first line cannot be trimmed away.
+  let mut lexer = Token::test_lexer("\"escaped \n  new line\"");
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
