@@ -437,10 +437,13 @@ impl<'a> Def<'a> {
     self.row().intrinsic
   }
 
-  /// Whether it is a marker: an interface `core`'s `@marker` makes one, with no field, which only
-  /// `implements` and bounds may name. Only an application the package that wrote the definition
-  /// writes makes it one, in its definition or in an extension of its own: an extension another
-  /// package writes says nothing of what the definition is.
+  /// Whether it is a marker: an interface `core`'s `@marker` makes one, which declares no field,
+  /// and which only `implements` and bounds may name. Only an application the package that wrote
+  /// the definition writes makes it one, in its definition or in an extension of its own: an
+  /// extension another package writes says nothing of what the definition is. A marker that
+  /// declares a field is a marker all the same: the field is
+  /// [`MarkerMisuse`](crate::graphqlx::DiagnosticKind::MarkerMisuse), which the marker's
+  /// `has_errors()` says.
   #[inline]
   pub fn is_marker(&self) -> bool {
     self.row().marker
@@ -449,7 +452,10 @@ impl<'a> Def<'a> {
   /// The collection it stands for, through `core`'s `@set` or `@map`, if any: the first of the two
   /// that the package that wrote the definition applies to it, in its definition or in an
   /// extension of its own. An extension another package writes says nothing of what the definition
-  /// is.
+  /// is. A scalar with another count of type parameters than its collection has, or that applies
+  /// both, stands for the first all the same: its application is
+  /// [`CollectionArity`](crate::graphqlx::DiagnosticKind::CollectionArity), which the scalar's
+  /// `has_errors()` says.
   #[inline]
   pub fn collection(&self) -> Option<Collection> {
     self.row().collection

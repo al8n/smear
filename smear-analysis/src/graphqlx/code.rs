@@ -132,6 +132,10 @@ pub enum DiagnosticKind {
   /// occurrence that writes such an instantiation is reported where it is written, once, for the
   /// first of the definition's bounds that fails, with a label at the bound and one at the type
   /// argument, written or filled from a default. The occurrence keeps its type.
+  ///
+  /// A bound of `MapKey` that a `NonZero` fails is passed over: that `NonZero` holds what is no
+  /// integer primitive, and is [`NonZeroArgument`](Self::NonZeroArgument) where it is written. A
+  /// directive application's type arguments are not judged against its directive's bounds.
   UnsatisfiedBound,
 
   // -- smear's rules -----------------------------------------------------------------------------

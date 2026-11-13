@@ -27,12 +27,12 @@
 //! # A bound, under an instantiation's arguments
 //!
 //! For each bound of the definition, in the order they are written: its interface type, with the
-//! instantiation's arguments in place of the definition's type parameters, each taken as it is, its
-//! `!` included; and the argument for the bounded parameter, which must satisfy that interface type,
-//! read off what the argument declares by the routine `Model::satisfies_ty` answers with. The first
-//! bound that fails is the verdict, and no other is looked at. A map's or a set's bound on its key
-//! that a `NonZero` fails is not one: `NonZero` of an integer is a key, and the rule that refuses a
-//! `NonZero` of anything else says so where it is written.
+//! instantiation's arguments in place of the definition's type parameters, each taken as it is,
+//! its `!` included; and the argument for the bounded parameter, which must satisfy that interface
+//! type, read off what the argument declares by the routine `Model::satisfies_ty` answers with.
+//! The first bound that fails is the verdict, and no other is looked at. A map's or a set's bound
+//! on its key that a `NonZero` fails is not one: `NonZero` of an integer is a key, and the rule
+//! that refuses a `NonZero` of anything else says so where it is written.
 //!
 //! A bound's interface type that names a parameter is rebuilt from its interned type, node by node,
 //! its arguments before it, each distinct node once; a type it derives is completed as an
@@ -67,7 +67,7 @@ use crate::graphqlx::{
   code::DiagnosticKind,
   diagnostic::{Diagnostic, Excerpt},
   id::{DefId, TyId, TypeExprId, dense},
-  model::{DefKind, Keys, Shape, Steps, TypeBound, Written},
+  model::{DefKind, Keys, Occurrence, Shape, Steps, TypeBound, Written},
 };
 
 use super::{Limit, Typing};
@@ -171,7 +171,7 @@ impl Typing<'_> {
     let Written::Named(def) = occurrence.written else {
       return;
     };
-    // An occurrence whose type is the unresolved one is skipped: whoever left it so reported it.
+    // Every occurrence has a type once the fourth step has ended: `None`, no type yet, is not met.
     let Some(ty) = occurrence.ty else {
       return;
     };
@@ -179,6 +179,7 @@ impl Typing<'_> {
     if self.builder.def_bounds(def).is_empty() {
       return;
     }
+    // An occurrence whose type is the unresolved one is skipped: whoever left it so reported it.
     match self.builder.ty_shape(ty) {
       Some(Shape::Named(named)) if named == def => {}
       _ => return,
@@ -466,10 +467,10 @@ impl Typing<'_> {
       Some(argument) => self
         .builder
         .occurrence(argument)
-        .map(|typed| (typed.location, "the type argument")),
+        .map(|typed: Occurrence<'_>| (typed.location, "the type argument")),
       None => default
         .and_then(|root: TypeExprId| self.builder.occurrence(root))
-        .map(|filled| (filled.location, "filled from this default")),
+        .map(|filled: Occurrence<'_>| (filled.location, "filled from this default")),
     };
     let help = match self
       .builder
@@ -532,6 +533,9 @@ impl Typing<'_> {
         ),
         "raise the bound with `Limits::with_max_instantiations`, or instantiate fewer types",
       ),
+      // The match's arm alone: `instantiation()` refuses a type for its depth or for the count of
+      // instantiations, and never for this limit, which counts filling and which judging never
+      // draws on. No program reaches it.
       Stop::Built(Limit::Substitutions) => (
         format!(
           "the bounds of this instantiation could not be judged within \

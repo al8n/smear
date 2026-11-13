@@ -43,7 +43,7 @@
 mod phases;
 mod read;
 
-pub(crate) use read::{Shape, Written};
+pub(crate) use read::{Occurrence, Shape, Written};
 
 use std::{boxed::Box, collections::BTreeMap, string::String, vec, vec::Vec};
 

@@ -1415,7 +1415,8 @@ const CLOSED: &str = "enum Color {\n  RED\n}\n\
 /// default that names a later parameter; a type parameter of the definition the use is written in;
 /// and a non-null argument.
 const NAMING: &str = "interface I<A> {\n  id: ID\n}\ninterface I2<A, B> {\n  id: ID\n}\n\
-                      scalar Keys<E> @set\nscalar Box2<X, Y = [X]>\nscalar Box3<X, Y = Z, Z = [X]>\n\
+                      scalar Keys<E> @set\nscalar Box2<X, Y = [X]>\n\
+                      scalar Box3<X, Y = Z, Z = [X]>\n\
                       scalar L<T> where T: I<[T]>\nscalar K2<T> where T: I<Keys<T>>\n\
                       scalar Tw<T> where T: I2<T, T>\nscalar Fd<T> where T: I<Box2<T>>\n\
                       scalar Fw<T> where T: I<Box3<T>>\n\
