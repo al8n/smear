@@ -161,9 +161,11 @@ lossless_production! {
   /// `floor` is the lexer's count of open braces once the body's own `{` is read, and every turn
   /// asks the count before anything else:
   ///
-  /// 1. **Below `floor`:** an item consumed the `}` that closed this body, so the body is over.
-  ///    Nothing is consumed and nothing is reported — the item that took the brace reported — and
-  ///    the module's node holds no `}` of its own.
+  /// 1. **Below `floor`:** a guard, which no text reaches. While a brace is open only the
+  ///    production that owns a closing brace takes it, so nothing the body reaches brings the
+  ///    count below `floor`. Were a production ever to take this body's `}`, the guard would end
+  ///    the body there, consuming nothing and reporting nothing, rather than let it adopt what
+  ///    follows; the module's node would then hold no `}` of its own.
   /// 2. **A `}` at the head with exactly `floor` open:** the body's closer. The head is only
   ///    peeked, so it is not in the count yet.
   /// 3. **A `}` at the head with more open:** it closes a brace that junk or a failed item left
@@ -172,8 +174,19 @@ lossless_production! {
   ///    limit, a spent token budget — also answers a peek with nothing, and is not an end of
   ///    input: there the body returns the terminal error and reports nothing of its own.
   ///
-  /// The count is asked again right after an item fails and before anything is skipped: a body
-  /// that is over skips nothing, because what stands at the head is no longer inside it.
+  /// The count is asked again right after an item fails and before anything is skipped, the same
+  /// guard on the same terms: a body that were over would skip nothing, because what stood at the
+  /// head would no longer be inside it.
+  ///
+  /// # What the braces promise
+  ///
+  /// From the commit of the body's `{` until the body returns, the count is never below `floor`.
+  /// A production the body reaches, entered at a count, never leaves the count below it, and one
+  /// that took a `{` takes back with its own `}` that one at most; the body's skips take a `}`
+  /// only above `floor`, and its closer at `floor`. So every module's node is faithful to the
+  /// braces as written: counting braces alone from the node's `{`, the count first returns to
+  /// zero at the node's own `}`, which is its last token that is no trivia, and a node with no `}`
+  /// of its own never returns to zero.
   ///
   /// # What a turn does with an item
   ///
@@ -199,7 +212,7 @@ lossless_production! {
     let floor: usize = inp.state().brace_depth();
     loop {
       let before: usize = inp.span().end();
-      // Rule 1, before the head is looked at: what stands there is outside a body that is over.
+      // Rule 1, the guard, before the head is looked at. See `Where the body ends`.
       if inp.state().brace_depth() < floor {
         return Ok(());
       }
@@ -230,8 +243,7 @@ lossless_production! {
           match turn {
             RootTurn::Parsed { .. } => {}
             RootTurn::EndsTheDocument { error } => return Err(error),
-            // Reported where it failed. Rule 1 again before anything is skipped: an item that
-            // took this body's `}` with it has left nothing of the body to skip.
+            // Reported where it failed. Rule 1's guard again, before anything is skipped.
             RootTurn::Recoverable { .. } => {
               if inp.state().brace_depth() >= floor {
                 recover::resync_to_mod_item::<Src, Ctx>(inp, floor)?;
