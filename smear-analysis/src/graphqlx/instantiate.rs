@@ -878,7 +878,7 @@ impl Typing<'_> {
             ..visit
           });
           match visit.owner {
-            None => self.push(child, None),
+            None => self.push(Of::Occurrence(child), None),
             // A node of a default fails at once, and takes the occurrence its tree fills with it.
             Some(owner) => {
               if let Err(reason) = self.enter(child, owner) {
