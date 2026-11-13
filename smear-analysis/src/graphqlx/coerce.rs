@@ -62,8 +62,8 @@
 //! What is read of a literal is read once and kept outside the tree, in a row the node's one slot
 //! indexes: its text, kept in the model's text arena; a string's cooked text; an integer's count
 //! of significant digits, its magnitude once its digits could fit the width asked, and its row; a
-//! float's verdict and its row; a byte string; a literal's row; a path's segments, and what its
-//! prefix names.
+//! float's verdict and its row; a literal's row; a path's segments, and what its prefix names. A
+//! byte string, which only a `bytes` value reads, is kept in a table of its own, by node.
 //!
 //! # An application's arguments
 //!
@@ -188,6 +188,7 @@ pub(crate) fn coerce(
     limbs: Vec::new(),
     scratch: String::new(),
     octets: Vec::new(),
+    byte_strings: BTreeMap::new(),
     stack: Vec::new(),
     items: Vec::new(),
     children: Vec::new(),
@@ -405,9 +406,12 @@ struct Kept {
   float_row: Option<u32>,
   /// Its row of the model's literal table.
   literal: Option<u32>,
-  /// Its bytes as a `bytes` value, in the model's byte pool, or why it is none.
-  bytes: Option<Result<Bytes, Refused>>,
 }
+
+// A row for each literal read, so its size is a cost per written literal: about 112 bytes, a few
+// times the node's 32, since a node read for any kind has room for what every kind reads. What only
+// a rare kind reads lives in a table of its own: a `bytes` value's bytes.
+const _: () = assert!(core::mem::size_of::<Kept>() <= 128);
 
 /// One step of making a tree's rows.
 #[derive(Clone, Copy)]
@@ -448,6 +452,9 @@ struct Coercion<'c, 'p, 'x> {
   scratch: String,
   /// The bytes of the list being read as a `bytes` value.
   octets: Vec<u8>,
+  /// Each node read as a `bytes` value, by its index: its bytes in the model's byte pool, or why
+  /// it is none.
+  byte_strings: BTreeMap<u32, Result<Bytes, Refused>>,
   /// What making the current tree has still to do.
   stack: Vec<Task>,
   /// The rows made of the lists that are open, each list's after it.
@@ -1124,12 +1131,11 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// The bytes `node`, a string or a list, is as a `bytes` value, kept: a string's cooked text's
   /// UTF-8 encoding, or a list's elements, each an integer from 0 to 255.
   fn bytes(&mut self, node: u32, source: u32) -> Result<Bytes, Refused> {
-    let slot = self.slot(node);
-    if let Some(bytes) = self.read(slot).bytes {
+    if let Some(&bytes) = self.byte_strings.get(&node) {
       return bytes;
     }
     let bytes = self.read_bytes(node, source);
-    self.update(slot, |kept: &mut Kept| kept.bytes = Some(bytes));
+    self.byte_strings.insert(node, bytes);
     bytes
   }
 
