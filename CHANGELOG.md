@@ -37,6 +37,28 @@ All notable changes to Smear are documented in this file.
   counting one with nothing inside it counted. So in GraphQLx a document that holds an inline
   module counts more than its top-level items. GraphQL has no modules, and its counts keep their
   meaning.
+- `smear-compiler`! and `smear`!: the validator's lossless doors are removed. A document comes
+  from a parser layer, and the one validator reads it:
+  `Lossless::new().executable_document(text, &mut syntax)`, then `validate_executable` or
+  `validate_executable_with` on `parsed.document()`;
+  `Lossless::new().type_system_document(text, &mut syntax)`, then
+  `Schema::build(parsed.document())`. Syntax errors leave by the layer's sink and findings by the
+  validator's; `parsed.is_valid()` and `parsed.recovery()` are the layer's, whatever the
+  validator answers. Removed, each released in 0.0.1:
+  - `validate_executable_lossless`, `validate_executable_lossless_with` and
+    `validate_executable_lossless_verified_with`. A caller that kept a `Parse` projects it with
+    `project_executable_document_recovered` and validates the document;
+  - `validate_schema_lossless`;
+  - `LosslessInvalid` and `LosslessSchemaErrors`;
+  - the re-exports `Recovery` and `Verified`, which are `smear_parser::graphql::Recovery` and
+    `smear_parser::graphql::lossless::Verified`;
+  - `Refusal::SourceMismatch`, `Refusal::TooDeep` and `Refusal::WrongRoot`: no pair reaches the
+    validator, and `Refusal::Budget` is the one refusal left;
+  - `smear-compiler`'s `rowan` feature: the lossless layer is `smear-parser`'s, and `smear`'s
+    `rowan_0_17` no longer forwards to `smear-compiler`.
+
+  `Budget::validation_work` prices validation alone: a lossless parse and its projection are
+  bounded by the layer's `LosslessLimits`.
 - `smear-parser`: lossless recovery leaves a closing delimiter to the block it closes, in both
   dialects, and while a brace is open only the production that owns a closing brace takes it. A
   type or a value missing in front of a closer is reported and the closer left, so the block
@@ -238,7 +260,7 @@ All notable changes to Smear are documented in this file.
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the
   models it builds, for `smear`'s own tests; it is not API.
-- `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features
+- `smear`!, `smear-lexer`! and `smear-parser`!: the five features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`
   and `rowan` become `bytes_1`, `bstr_1`, `hipstr_0_8`, `smol-bytes_0_2` and
@@ -556,7 +578,7 @@ All notable changes to Smear are documented in this file.
   capability feature (`graphql`, `graphqlx`, `parser`, `validator`, `proto`,
   `introspection`, …) never switches a tier on, so such a consumer names `std`
   or `alloc` itself; with neither the build compiles and lacks those items.
-- `smear`!, `smear-lexer`, `smear-parser`! and `smear-compiler`!: a feature
+- `smear`!, `smear-lexer` and `smear-parser`!: a feature
   that enables an optional dependency implies no tier. `bytes_1`, `hipstr_0_8`
   and `smol-bytes_0_2` do not imply `alloc`, although each of those crates
   links `alloc` itself, and `rowan_0_17` no longer implies `std`. So a

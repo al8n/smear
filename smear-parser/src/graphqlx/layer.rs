@@ -34,7 +34,8 @@ pub type Syntactic = crate::layer::Syntactic<GraphQLx>;
 /// The lossless layer of GraphQLx.
 ///
 /// It recovers, lends every syntax error to the caller's sink, and keeps the tree. It reads `str`:
-/// a tree holds text only, so a caller that holds bytes decodes them first.
+/// a tree holds text only, so a caller that holds bytes decodes them first, and reading byte
+/// sources is al8n/smear#121.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[cfg_attr(docsrs, doc(cfg(all(feature = "rowan_0_17", feature = "std"))))]
 pub type Lossless = crate::layer::Lossless<GraphQLx>;
@@ -163,6 +164,8 @@ syntactic_layer! {
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 impl sealed::Sealed<'_, str> for Lossless {}
 
+/// The lossless layer reads `str` alone, because a projection answers an AST that borrows the
+/// text; reading byte sources is al8n/smear#121.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 impl<'src> Layer<'src, str> for Lossless {
   type Error = lossless::GraphqlxLosslessErrorValue<&'src str>;

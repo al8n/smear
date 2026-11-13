@@ -51,17 +51,14 @@ use super::schema::{PackedType, Range32, TypeId};
 ///   duplicates, and the tree steps a node resolution walks. Depth alone does not bound the engine
 ///   — breadth times fragment reuse does — so this is the knob that caps that rule's worst case.
 /// - [`validation_work`](Budget::validation_work) bounds **every other pass**, as one running
-///   total that includes the projection the lossless door runs before any rule does. One unit is
-///   one node examined; one more is charged per eight bytes of every document-chosen name a pass
-///   reads, because a name has no length ceiling and where two names differ decides what comparing
-///   them costs.
+///   total. One unit is one node examined; one more is charged per eight bytes of every
+///   document-chosen name a pass reads, because a name has no length ceiling and where two names
+///   differ decides what comparing them costs.
 ///
-///   It is the *whole call* for [`validate_executable`](super::validate_executable) and for the
-///   lossless door's **verified** entry point. It is not, on a lossless entry point handed a
-///   `parse` and a `source` that nothing has paired: showing that those two describe one document
-///   is `O(tokens)` and precedes the ledger, because deciding it requires finishing a comparison
-///   that a bound would have to be able to stop. `smear_compiler::lossless` says which door is
-///   which and why the choice is a type rather than a trade-off. al8n/smear#198.
+///   It is the *whole call* for [`validate_executable`](super::validate_executable), and it bounds
+///   validation and nothing else. The parse that made the document, by either of `smear-parser`'s
+///   parser layers, ran before the call and under that layer's own limits: a server that takes
+///   untrusted text through the lossless layer bounds that work with the layer's `LosslessLimits`.
 ///
 /// A document that exceeds any of the three is **refused**, with
 /// [`Rule::MergeDepthBudget`](super::Rule::MergeDepthBudget),
@@ -86,9 +83,8 @@ use super::schema::{PackedType, Range32, TypeId};
 /// sets the knob, not the rules.
 ///
 /// It is a **state** and not a large number. The validator turns it into one the moment the budget
-/// is read, so no charge, and no prepayment the lossless door subtracts before validation starts,
-/// can wear it down into a merely-large finite budget. That is the fourth counter in this
-/// repository to need saying: a maximum is not an absence.
+/// is read, so no charge can wear it down into a merely-large finite budget. That is the fourth
+/// counter in this repository to need saying: a maximum is not an absence.
 ///
 /// The same sentence is **not** made here about [`merge_depth`](Budget::merge_depth) and
 /// [`merge_work`](Budget::merge_work). Their engine reads them itself, and what a maximum means
@@ -1493,8 +1489,7 @@ pub(crate) fn reset_bits(words: &mut Vec<u64>, bits: usize) {
 /// Pricing it was the alternative. Stamping removes it instead: a walk advances a counter, and a
 /// mark from an earlier walk is stale because its number is. There is no clear to charge for, no
 /// gate to get wrong, and nothing left at this site for a later round to find one level in — which
-/// is the move that has actually ended things on this branch, from `Ledger::Off` to
-/// `Option<Recovery>`.
+/// is the move that has actually ended things on this branch, as `Ledger::Off` did.
 ///
 /// Draft 5.3.2's engine already does this, one axis over: `Validator::generation` distinguishes one
 /// fragment *expansion* from the next without clearing a bitset per expansion. This is the same

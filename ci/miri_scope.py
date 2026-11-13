@@ -277,9 +277,9 @@ MIRI_IGNORE_BUDGET = sum(MIRI_DECLARED_IGNORES.values())
 # ADDING A PACKAGE IS A DECISION WITH A COST, because feature unification is over the SELECTED
 # packages and that is the mechanism #77 turned on: `smear-smoke` enabling `rowan` is how the
 # entire lossless tower entered a Miri cell that nobody widened. Checked for each of the four:
-# `smear-lexer` declares no `rowan` feature at all; `smear-parser` and `smear-compiler` do declare
-# one but it is not in their `default` and these scripts pass no `--features`, so the resolve
-# leaves it off; `graphql-proto` declares only `std`. `smear-semantics`, added since, declares its
+# `smear-lexer` and `smear-compiler` declare no `rowan` feature at all; `smear-parser` declares one
+# but it is not in its `default` and these scripts pass no `--features`, so the resolve leaves it
+# off; `graphql-proto` declares only `std`. `smear-semantics`, added since, declares its
 # two tiers and nothing else and depends on nothing. `smear-analysis`, added when its first lib unit
 # tests were, declares no `rowan` feature and takes `smear-parser` with `graphqlx` and without
 # `rowan`. This file's own feature-set guard prints what actually resolved, so none of that is

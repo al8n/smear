@@ -186,7 +186,7 @@ materialized-numbers = ["parser", "graphql", "smear-parser/materialized-numbers"
 # This says nothing against the feature — it is a headline capability and its 37 integration
 # targets run under `cargo test` like everything else. It is only that ONE tool cannot see it.
 rowan = ["rowan_0_17"]
-rowan_0_17 = ["smear-parser/rowan_0_17", "smear-compiler?/rowan_0_17", "tokora/rowan_0_17", "parser"]
+rowan_0_17 = ["smear-parser/rowan_0_17", "tokora/rowan_0_17", "parser"]
 
 # Instruments both dialects' lossless productions with a per-node-kind hit counter, so each
 # trivia-injection gate can prove its corpus reached every production instead of asserting

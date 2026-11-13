@@ -18,9 +18,10 @@ to run FROM THE MEMBERS, which are the superset, and check against the umbrella.
         or F is in EXEMPT with a written reason
 
 TRANSITIVE, not direct. `smear`'s `lossless-coverage = ["rowan_0_17", …]` reaches
-`smear-compiler/rowan_0_17` through `rowan_0_17 -> smear-compiler?/rowan_0_17`, and a check that
-only read the umbrella's direct `member/feature` entries would call that unreachable. What the gate
-asks is whether SOME feature of `smear` turns M/F on, which is the question a dependent asks.
+`smear-parser/rowan_0_17` through `lossless-coverage -> rowan_0_17 -> smear-parser/rowan_0_17`, and
+a check that only read the umbrella's direct `member/feature` entries would call that unreachable.
+What the gate asks is whether SOME feature of `smear` turns M/F on, which is the question a
+dependent asks.
 
 BOTH SIDES COME OUT OF `cargo metadata`. Nothing here is hardcoded except the umbrella's name and
 the exemption table, and no count is written down anywhere: a census whose expected number is a

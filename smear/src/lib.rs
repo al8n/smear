@@ -326,7 +326,7 @@ pub mod __private {
 // it was unreachable and after the split it was silent.
 //
 // WHAT THIS FENCE DOES NOT COVER, stated because a claim wider than what it holds is the defect it
-// was built against. It covers MEMBER features — the 39 `cargo metadata` reports across the six
+// was built against. It covers MEMBER features — every one `cargo metadata` reports across the six
 // crates smear re-exports and `smear-semantics`, which it asserts without mounting. Several `smear`
 // features ALSO forward to third-party ones: `bytes_1` forwards `tokora/bytes_1`, and
 // `impl Source for bytes::Bytes` comes from tokora, not from `smear-lexer`. Measured on this tree:
@@ -487,10 +487,6 @@ const _: () = {
   assert!(
     smear_compiler::__features::INTROSPECTION == cfg!(feature = "introspection"),
     "`smear-compiler/introspection` and `smear/introspection` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/introspection` too, or stop enabling\n     `smear-compiler/introspection`."
-  );
-  assert!(
-    smear_compiler::__features::ROWAN_0_17 == cfg!(feature = "rowan_0_17"),
-    "`smear-compiler/rowan_0_17` and `smear/rowan_0_17` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/rowan_0_17` too, or stop enabling\n     `smear-compiler/rowan_0_17`."
   );
   assert!(
     smear_compiler::__features::STD == cfg!(feature = "std"),

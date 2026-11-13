@@ -20,8 +20,8 @@
 //!    ever close, and it must say what forces it.
 //! 4. **A stale exemption fails.** An entry that matches nothing in the crate is an error, not a
 //!    no-op. That is what forces the table to shrink when #121 and #103 widen their doors: the day
-//!    `validate_schema_lossless` stops taking `&str`, this table stops matching and the census
-//!    goes red until the line is deleted.
+//!    #103 has `Schema::from_introspection` stop taking `&str`, this table stops matching and the
+//!    census goes red until the line is deleted.
 //!
 //!    **It has fired, and the twelve rows it took out came back as a different kind.**
 //!    al8n/smear#121 widened the twelve public lossless parse doors to a source-generic bound;
@@ -134,58 +134,21 @@ const LOSSLESS_PROJECTION: &str = "A projection re-slices the caller's own buffe
 
 /// Everything the census finds on `main` and does not fail on, each with its argument.
 ///
-/// The three sites al8n/smear#122 names as the calibration answer are the first three groups. They
-/// are recorded rather than fixed because #121 and #103 own them, and because a census whose known
-/// answer is invisible in its own output cannot be checked against that answer.
+/// al8n/smear#122 named three sites as the calibration answer, and two of them are the first two
+/// groups. They are recorded rather than fixed because #103 and #121 own them, and because a
+/// census whose known answer is invisible in its own output cannot be checked against that answer.
+/// The third, the validator's lossless doors, is in no group because it is in no crate: the doors
+/// were removed, a lossless document comes from `smear-parser`'s `Lossless` layer, and a layer's
+/// public entries take their text as `&'src Src` for a type parameter `Src`, which names no
+/// concrete text type, so the rule acquits it before its first test.
 ///
 /// One of those groups has since been answered rather than carried, and the shape of the answer is
 /// worth reading off the table. al8n/smear#121 gave the parse doors a wide sibling each and left
-/// the projections and the two validator doors in front of them narrow, because what pins those is
-/// the type of what they hand **back** rather than the type of what they take. So the parse-door
-/// group is `Structural` beside a door with no narrowing at all, and the projection group is still
-/// `Tracked`; they are the same issue answering two different questions, and each reason below
-/// says which.
+/// the projections narrow, because what pins those is the type of what they hand **back** rather
+/// than the type of what they take. So the parse-door group is `Structural` beside a door with no
+/// narrowing at all, and the projection group is still `Tracked`; they are the same issue
+/// answering two different questions, and each reason below says which.
 pub const EXEMPTIONS: &[Exemption] = &[
-  // ── §5 lossless, the validator doors — al8n/smear#121 ────────────────────────────────────────
-  Exemption {
-    module: "smear::validator::lossless",
-    entry: "validate_executable_lossless",
-    param: "*",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: "The lossless twin of `validate_executable<S, K> where S: AsRef<[u8]> + Clone, \
-             K: Sink<S>`, narrowed to `&'src str` at both the source parameter and the sink's \
-             source type. #121 settled the boundary question: it binds at materialisation, not at \
-             a door, and every lossless PARSE door is source-generic now. What holds this one is \
-             its output — the projection hands back a `Document<&'src str>` borrowing this buffer, \
-             so the parameter is the AST's source type and widening it is a change to the \
-             projection's contract. Stated, with the mechanism, in `smear-compiler/src/lossless.rs`'s \
-             header; recorded here because the narrowing is real and is not an oversight.",
-  },
-  Exemption {
-    module: "smear::validator::lossless",
-    entry: "validate_executable_lossless_with",
-    param: "*",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: "`validate_executable_lossless`'s `rules` sibling, and narrowed identically — the \
-             same `&'src str` source and the same `Sink<&'src str>`, for the reason that entry \
-             now carries. Recorded separately because widening one door and not the other would \
-             leave the asymmetry in place under a shrinking table.",
-  },
-  Exemption {
-    module: "smear::validator::lossless",
-    entry: "validate_schema_lossless",
-    param: "*",
-    kind: Kind::Tracked,
-    issue: Some(121),
-    reason: "The §3 door `Schema::build<S>(&TypeSystemDocument<S>) where S: AsRef<[u8]>` is \
-             generic; this lossless door in front of it is not. Nothing in its signature carries \
-             a source type — `&Parse` is a rowan tree — so the `&str` is the document itself. \
-             Held by the same thing as its §5 sibling: the projection it runs first hands back a \
-             `TypeSystemDocument<&'src str>`, so this parameter is that AST's source type. #121's \
-             answer and the mechanism are in `smear-compiler/src/lossless.rs`'s header.",
-  },
   // ── §4 introspection — al8n/smear#103 ────────────────────────────────────────────────────────
   Exemption {
     module: "smear::validator::schema::introspection",
