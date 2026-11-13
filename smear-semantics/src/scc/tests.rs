@@ -87,8 +87,8 @@ fn no_nodes_is_an_empty_answer() {
   assert!(components(0, |_, _| {}).is_empty(), "a graph with no nodes");
 }
 
-/// A node no cycle passes through is a component of its own, with an edge to itself or without
-/// one, and two nodes that reach each other share one, named by the lesser.
+/// A node that shares a component with no other node is named by itself, with an edge to itself
+/// or without one, and two nodes that reach each other share one, named by the lesser.
 #[test]
 fn a_self_edge_is_its_own_component_and_a_pair_that_reach_each_other_share_one() {
   assert_eq!(groups(&[&[0], &[]]), [0, 1]);

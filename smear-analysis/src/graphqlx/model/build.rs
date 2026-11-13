@@ -26,10 +26,10 @@
 //! Lowering resolves each type occurrence and each application as it appends it. The later phases
 //! write onto rows already appended, and read what is written so far through `read`, which never
 //! indexes past a table: instantiation gives definitions their built-in meaning and occurrences
-//! their types, interning each type where it first needs it, and adds instantiations; the judging
-//! of bounds, still to come, adds satisfactions; coercion gives values their shapes and types; the
-//! tier phase gives definitions and types their tiers. What none of them wrote keeps the neutral
-//! value its row was appended with, which the accessors document.
+//! their types, interning each type where it first needs it, and adds instantiations; no phase
+//! adds a satisfaction yet; coercion gives values their shapes and types; the tier phase gives
+//! definitions and types their tiers. What none of them wrote keeps the neutral value its row was
+//! appended with, which the accessors document.
 //!
 //! # The checks
 //!
@@ -606,8 +606,10 @@ impl ModelBuilder {
 
   /// Notes that `type_expr`, resolved to `core`'s `NonZero`, is an alias of it, `NonZeroU32` and
   /// its kin, naming `NonZero` of the primitive whose definition is `primitive`. The row holds the
-  /// path as written and no argument, as a renamed `NonZero` does too: only this note tells the two
-  /// apart. Noted in id order, as lowering appends occurrences.
+  /// path and the arguments as written, none unless the alias is written with some, which
+  /// instantiation refuses, as a renamed `NonZero`'s row does too: only this note tells the two
+  /// apart, and an alias written with arguments is noted all the same. Noted in id order, as
+  /// lowering appends occurrences.
   pub(crate) fn note_non_zero(&mut self, type_expr: TypeExprId, primitive: DefId) {
     debug_assert!(
       self

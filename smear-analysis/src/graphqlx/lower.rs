@@ -73,9 +73,10 @@
 //! extension's own names, each naming its target's parameter at the same position. A path that
 //! names nothing leaves its occurrence unresolved, with its path and its arguments, once name
 //! resolution has reported it with the code of its place. An alias such as `NonZeroU32` names
-//! `core`'s `NonZero`, with its path as written and no argument, as a `NonZero` a `use` item
-//! renames does too; the primitive the alias spells is noted beside the row, for instantiation,
-//! which alone tells the two apart. No type is interned: an occurrence's type is instantiation's.
+//! `core`'s `NonZero`, with its path and its arguments as written, none unless it is written with
+//! some, as a `NonZero` a `use` item renames does too; the primitive the alias spells is noted
+//! beside the row, whatever is written with it, for instantiation, which alone tells the two apart
+//! and refuses an alias's arguments. No type is interned: an occurrence's type is instantiation's.
 //!
 //! A bound is its definition's own: a `where` predicate whose left side is one of the definition's
 //! type parameters, written with no argument, gives each interface it names as a bound of that
@@ -899,7 +900,7 @@ impl Lowering<'_, '_> {
       return;
     };
     if at.replaces {
-      self.replaced_generics(Location::new(at.source, *generics.span()), name);
+      self.replaced_generics(Location::new(at.source, *generics.span()), at.def, name);
       return;
     }
     for parameter in generics.params() {
@@ -1876,16 +1877,28 @@ impl Lowering<'_, '_> {
     );
   }
 
-  /// Reports the type parameter list written at `at` on `name`, a definition that replaces a
-  /// GraphQL built-in: the built-in keeps its identity, which has no type parameter.
-  fn replaced_generics<S: AsRef<[u8]>>(&mut self, at: Location, name: &DefinitionName<S>) {
+  /// Reports the type parameter list written at `at` on `name`, the definition `def` that replaces
+  /// a GraphQL built-in: the built-in keeps its identity, which has no type parameter. A directive
+  /// is quoted with its `@`, as every message quotes one.
+  fn replaced_generics<S: AsRef<[u8]>>(
+    &mut self,
+    at: Location,
+    def: DefId,
+    name: &DefinitionName<S>,
+  ) {
     let kind = DiagnosticKind::GenericArity;
     let written: &[u8] = name.name().source().as_ref();
+    let sigil = if self.builder.def_kind(def) == Some(DefKind::Directive) {
+      "@"
+    } else {
+      ""
+    };
     self.reporter.report(
       Diagnostic::builder(kind.code(), at)
         .severity(kind.severity())
         .message(format!(
-          "`{}` replaces a GraphQL built-in and keeps its identity, which has no type parameter",
+          "`{sigil}{}` replaces a GraphQL built-in and keeps its identity, which has no type \
+           parameter",
           Excerpt(written)
         ))
         .primary_label("a built-in has no type parameter")

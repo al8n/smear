@@ -82,8 +82,9 @@ pub enum TypeExprKind<'a> {
     def: DefId,
     /// The parameter's position: its index among the definition's type parameters. An extension
     /// names its target's parameters by position, so a name it gives past them has a position
-    /// past them too: the extension's list is refused where it is written, and the occurrence's
-    /// type is the unresolved one.
+    /// past them too; and a definition that replaces a GraphQL built-in declares no parameter, so
+    /// a name its refused list gives has a position no parameter has. Each such list is refused
+    /// where it is written, and the occurrence's type is the unresolved one.
     index: u32,
   },
   /// A list.
@@ -193,8 +194,7 @@ impl Model {
   /// [`Def::implements`](super::Def::implements) lists only what is written; this answers whether
   /// the type may stand where the interface is required.
   //
-  // The next part of the type phase, which judges bounds, records them. Until it lands nothing
-  // does, and every pair answers `false`.
+  // No phase records a satisfaction yet, so every pair answers `false`.
   #[inline]
   pub fn satisfies(&self, ty: TyId, interface: DefId) -> bool {
     self.satisfactions.binary_search(&(ty, interface)).is_ok()

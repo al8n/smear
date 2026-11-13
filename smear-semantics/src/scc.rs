@@ -133,9 +133,9 @@ pub fn on_cycle(
 ///
 /// The answer has length `nodes`. Entry `n` is the least node of the component that holds `n`, so
 /// two nodes share a component exactly when their entries are equal, and an entry equals its own
-/// index exactly for the least node of its component. A node no cycle passes through is a
-/// component of its own, whether or not it has an edge to itself: a caller that needs to tell the
-/// two apart reads it off its edges.
+/// index exactly for the least node of its component. A node that shares a component with no
+/// other node is named by itself whether or not it has an edge to itself, which puts it on a cycle
+/// of one: a caller that needs to tell the two apart reads it off its edges.
 ///
 /// The rows and the walk are [`on_cycle`]'s: the edges are counted, then written into compressed
 /// rows, and Tarjan's algorithm runs over them with an explicit descent, so no graph, however

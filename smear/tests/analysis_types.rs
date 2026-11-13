@@ -356,19 +356,31 @@ fn a_replaced_built_in_declares_no_type_parameter() {
     found(&analysis),
     [(ARITY, at(schema, text, "<T>", 0), None)]
   );
+  assert_eq!(
+    messages(&analysis),
+    ["`String` replaces a GraphQL built-in and keeps its identity, which has no type parameter"]
+  );
   let model = analysis.model();
   let string = model.builtins().string();
   assert_eq!(model.def(string).type_params().count(), 0);
   assert!(model.def(string).bounds().is_empty());
 
   // A replaced directive's argument that names the parameter it lists names a position no
-  // parameter has, and its type is the unresolved one.
+  // parameter has, and its type is the unresolved one. The message writes the directive with its
+  // `@`.
   let text = "directive @deprecated<R>(reason: R) on FIELD_DEFINITION\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
   assert_eq!(
     found(&analysis),
     [(ARITY, at(schema, text, "<R>", 0), None)]
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@deprecated` replaces a GraphQL built-in and keeps its identity, which has no type \
+       parameter"
+    ]
   );
   let model = analysis.model();
   let deprecated = model.builtins().deprecated();
