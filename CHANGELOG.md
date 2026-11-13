@@ -498,7 +498,13 @@ All notable changes to Smear are documented in this file.
   `@repr` on the schema whose `for` is absent or `null`, one at a position that writes `for`, and
   one whose `lang`, or on the schema whose `for` and `lang`, an earlier one there has, are each the
   new `smear::graphqlx::repr-misuse`. The model keeps `@repr` as its applications, with their
-  typed arguments, read through `Builtins::repr`. A rule says nothing about a contribution a
+  typed arguments, read through `Builtins::repr`. And a package uses nothing above the tier it
+  declares: below `std`, a list in a `core` package, an occurrence of another package's definition
+  that needs more, counting the defaults it leaves out and capped at that package's tier,
+  `core`'s `@heap` on a field, an argument or an input field of a `core` package, and an extern's
+  `tier` above its package's are each the new `smear::graphqlx::tier`, where it is written; a use
+  of the package's own definition is not, what raises it being reported where it is written. A
+  rule says nothing about a contribution a
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models
   it builds, for `smear`'s own tests; it is not API.

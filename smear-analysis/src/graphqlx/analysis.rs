@@ -357,8 +357,16 @@ impl Analysis {
 ///   on the schema whose `for` is absent or `null` is `repr-misuse`, at its path, and so is one on
 ///   a field, an argument or an input field that writes `for`, at `for`'s name; and so is an
 ///   `@repr` whose `lang` an earlier one of its position has, or on the schema whose `for` and
-///   `lang` an earlier one of the schema's has, at its path, with a label at the earlier. A rule
-///   says nothing about a contribution a phase already refused something in.
+///   `lang` an earlier one of the schema's has, at its path, with a label at the earlier. Below
+///   `std`, a package uses nothing above the tier it declares, `tier` where it is written: a list
+///   in a `core` package; an occurrence of another package's definition that needs more, counting
+///   the defaults it leaves out and capped at that package's tier, a label at a default that
+///   raised it; `core`'s `@heap` on a field, an argument or an input field of a `core` package;
+///   and an extern's `tier` above its package's, at that `tier`. A use of a definition of the
+///   package's own is not reported, what raises it being reported where it is written; a
+///   directive's argument types and an application's type arguments are judged as every other
+///   occurrence is. A rule says nothing about a contribution a phase already refused something
+///   in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

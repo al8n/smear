@@ -114,7 +114,10 @@ defines, once for each language, an extern whose `lang` an earlier one of its sc
 `@extern` the root package writes on a GraphQL built-in its own definition replaces, being
 `smear::graphqlx::extern-misuse`; and `@repr` writes `for` on the schema alone, where it names a
 type, and chooses once for each language at a position and for each type and language on the
-schema, anything else being `smear::graphqlx::repr-misuse`. An
+schema, anything else being `smear::graphqlx::repr-misuse`; and a package uses nothing above the
+tier it declares, a list in a `core` package, another package's definition that needs more, `@heap`
+in a `core` package and an extern's `tier` above its package's each being `smear::graphqlx::tier`,
+where it is written. An
 error that a phase or a rule reports marks the contributions, members and definitions that hold it,
 as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error marks
 nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and

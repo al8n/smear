@@ -456,6 +456,10 @@ impl<'a> Def<'a> {
   /// types, each type's as [`Ty::tier`](crate::graphqlx::Ty::tier) answers; a field, an argument
   /// or an input field that applies `core`'s `@heap` requires `alloc` at least. Definitions that
   /// hold one another share the greatest tier any of them reaches.
+  ///
+  /// In an analysis that [`is_ok`](crate::graphqlx::Analysis::is_ok), it is at most its package's
+  /// [`tier`](crate::graphqlx::PackageInfo::tier), a meta-type aside: a use above a package's
+  /// tier is [`Tier`](crate::graphqlx::DiagnosticKind::Tier).
   #[inline]
   pub fn tier(&self) -> Tier {
     self.row().tier

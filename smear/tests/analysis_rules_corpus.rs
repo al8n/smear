@@ -1049,4 +1049,18 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
     ["smear::schema::invalid-directive-argument-value"]
   );
   tolerant(&analysis, "a position's `for` beside a value refused");
+
+  // A `core` root package's `String` beside a type that names nothing, in one contribution: the
+  // resolver's diagnostic alone.
+  let root: Package<&str> =
+    Package::new("app", Layout::Flat, Tier::Core).with_files([SourceFile::new(
+      "schema.graphqlx",
+      "type Query {\n  x: Missing\n  s: String\n}\n",
+    )]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(codes(&analysis), ["smear::schema::undefined-type"]);
+  tolerant(
+    &analysis,
+    "a use above the tier beside a type that names nothing",
+  );
 }

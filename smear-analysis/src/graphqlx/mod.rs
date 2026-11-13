@@ -121,8 +121,12 @@
 //! scalar has, and an `@extern` the root package writes on a GraphQL built-in its own definition
 //! replaces, are each `smear::graphqlx::extern-misuse`. And `@repr` writes `for` on the schema
 //! alone, where it names a type, and chooses once for each language at a position and for each
-//! type and language on the schema: anything else is `smear::graphqlx::repr-misuse`. A rule says
-//! nothing about a contribution a phase already refused something in.
+//! type and language on the schema: anything else is `smear::graphqlx::repr-misuse`. And a
+//! package uses nothing above the tier it declares: a list in a `core` package, another package's
+//! definition that needs more, `@heap` in a `core` package and an extern's `tier` above its
+//! package's are each `smear::graphqlx::tier`, where they are written, so that in an analysis
+//! that is ok every definition requires at most its package's tier. A rule says nothing about a
+//! contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

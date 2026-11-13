@@ -2,10 +2,17 @@
 //! `core`, `alloc` and `std` that holds everything it uses.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
-use smear::analysis::graphqlx::{
-  Analysis, DefId, IntegerProvider, Layout, Limits, MemberId, Model, Namespace, Package,
-  PackageKind, SourceFile, Tier, TypeExprId, analyze, test_support,
+use smear::{
+  analysis::graphqlx::{
+    Analysis, DefId, Diagnostic, IntegerProvider, Layout, Limits, MemberId, Model, Namespace,
+    Package, PackageId, PackageKind, SourceFile, SourceId, Tier, TypeExprId, analyze, test_support,
+  },
+  diagnostic::{Diagnose, Location},
+  lexer::tokora::SimpleSpan,
 };
+
+/// The code for a use above the tier its package declares.
+const TIER: &str = "smear::graphqlx::tier";
 
 /// A package named `name`, `Flat`, at `tier`, holding `files`, `(path, text)`.
 fn package<'a>(name: &'a str, tier: Tier, files: &[(&'a str, &'a str)]) -> Package<&'a str> {
@@ -24,6 +31,64 @@ fn analyze_text(text: &str) -> Analysis {
     &[],
     &Limits::new(),
   )
+}
+
+/// An analysis of the root package `app`, `Flat`, at `tier`, holding the one file
+/// `schema.graphqlx`.
+fn analyze_at(text: &str, tier: Tier) -> Analysis {
+  analyze(
+    &package("app", tier, &[("schema.graphqlx", text)]),
+    &[],
+    &Limits::new(),
+  )
+}
+
+/// The id of the file at `path` in the package `package`.
+fn file(analysis: &Analysis, package: u32, path: &str) -> SourceId {
+  let sources = analysis.sources();
+  analysis
+    .model()
+    .package(PackageId::new(package))
+    .sources()
+    .into_iter()
+    .find(|id: &SourceId| sources.source(*id).path() == path)
+    .unwrap_or_else(|| panic!("no file `{path}` in package {package}"))
+}
+
+/// Where the `nth` occurrence, counting from 0, of `needle` is in `text`, the file `source`.
+fn at(source: SourceId, text: &str, needle: &str, nth: usize) -> Location {
+  let start = text
+    .match_indices(needle)
+    .nth(nth)
+    .map(|(start, _): (usize, &str)| start)
+    .unwrap_or_else(|| panic!("`{needle}` does not occur {} times", nth + 1));
+  Location::new(source.get(), SimpleSpan::new(start, start + needle.len()))
+}
+
+/// Each diagnostic whose code is `code`: its primary location and its first label's location, in
+/// the list's order.
+fn found(analysis: &Analysis, code: &str) -> Vec<(Location, Option<Location>)> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() == code)
+    .map(|diagnostic: &Diagnostic| {
+      (
+        diagnostic.primary(),
+        diagnostic.label(0).map(|label| label.location()),
+      )
+    })
+    .collect()
+}
+
+/// The message of each diagnostic whose code is `code`, in the list's order.
+fn messages(analysis: &Analysis, code: &str) -> Vec<String> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() == code)
+    .map(|diagnostic: &Diagnostic| diagnostic.to_string())
+    .collect()
 }
 
 /// Asserts that `analysis` says nothing.
@@ -312,4 +377,357 @@ fn reversing_files_and_dependencies_changes_no_tier() {
   assert_eq!(tier_of(model, "^::geo::Point"), Tier::Std);
   assert_eq!(tier_of(model, "^::app::Query"), Tier::Std);
   assert_eq!(rendered(&one), rendered(&two));
+}
+
+/// What a list says, for a package declared at `core`.
+const LIST: &str = "a list needs `alloc`, and package `app` is declared at tier `core`";
+
+/// A name above the tier its package declares is refused where it is written: at `core`,
+/// `String`, `bytes` and `ID` need `alloc` and `HashMap` `std`; at `alloc`, `HashMap` alone; at
+/// `std`, nothing. Refuses resolution answering at every tier with nothing said, as it still
+/// answers.
+#[test]
+fn a_name_above_the_packages_tier_is_refused_where_it_is_written() {
+  let text =
+    "type Query {\n  x: Int\n  s: String\n  t: bytes\n  u: ID\n  h: HashMap<i32, i32>\n}\n";
+  let analysis = analyze_at(text, Tier::Core);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [
+      (at(schema, text, "String", 0), None),
+      (at(schema, text, "bytes", 0), None),
+      (at(schema, text, "ID", 0), None),
+      (at(schema, text, "HashMap<i32, i32>", 0), None),
+    ]
+  );
+  assert_eq!(
+    messages(&analysis, TIER),
+    [
+      "`string` needs `alloc`, and package `app` is declared at tier `core`",
+      "`bytes` needs `alloc`, and package `app` is declared at tier `core`",
+      "`id` needs `alloc`, and package `app` is declared at tier `core`",
+      "`HashMap` needs `std`, and package `app` is declared at tier `core`",
+    ]
+  );
+  let analysis = analyze_at(text, Tier::Alloc);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [(at(schema, text, "HashMap<i32, i32>", 0), None)]
+  );
+  assert_eq!(
+    messages(&analysis, TIER),
+    ["`HashMap` needs `std`, and package `app` is declared at tier `alloc`"]
+  );
+  quiet(&analyze_at(text, Tier::Std));
+}
+
+/// Every spelling of one name is refused once, where it is written: `HashMap`, `std::HashMap`,
+/// `^::std::HashMap`, and a second name a `use` gives it. A `use` nothing uses says nothing.
+/// Refuses a check by spelling.
+#[test]
+fn every_spelling_of_a_name_is_one_refusal() {
+  let text = "use std::HashMap as M\nuse std::HashSet\ntype Query {\n  x: Int\n  \
+              a: HashMap<i32, i32>\n  b: std::HashMap<i32, i32>\n  c: ^::std::HashMap<i32, i32>\n  \
+              d: M<i32, i32>\n}\n";
+  let analysis = analyze_at(text, Tier::Core);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [
+      (at(schema, text, "HashMap<i32, i32>", 0), None),
+      (at(schema, text, "std::HashMap<i32, i32>", 0), None),
+      (at(schema, text, "^::std::HashMap<i32, i32>", 0), None),
+      (at(schema, text, "M<i32, i32>", 0), None),
+    ]
+  );
+}
+
+/// A list needs `alloc`, each level of it, and what it holds is judged as well: `[Int]` once,
+/// `[[Int]]` twice, `[String]` twice. Refuses a list judged by its element alone.
+#[test]
+fn a_list_needs_alloc() {
+  let text = "type Query {\n  x: Int\n  a: [Int]\n  b: [[Int]]\n  c: [String]\n}\n";
+  let analysis = analyze_at(text, Tier::Core);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [
+      (at(schema, text, "[Int]", 0), None),
+      (at(schema, text, "[[Int]]", 0), None),
+      (at(schema, text, "[Int]", 1), None),
+      (at(schema, text, "[String]", 0), None),
+      (at(schema, text, "String", 0), None),
+    ]
+  );
+  assert_eq!(
+    messages(&analysis, TIER),
+    [
+      LIST,
+      LIST,
+      LIST,
+      LIST,
+      "`string` needs `alloc`, and package `app` is declared at tier `core`",
+    ]
+  );
+}
+
+/// A definition of the package's own is reported at what raises it, and not at its uses: one
+/// report, at `string`. Refuses a cause reported at every use.
+#[test]
+fn a_packages_own_definition_is_reported_at_its_cause_alone() {
+  let text = "type Query {\n  x: Int\n  t: T\n  u: T\n}\ntype T {\n  s: string\n}\n";
+  let analysis = analyze_at(text, Tier::Core);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [(at(schema, text, "string", 0), None)]
+  );
+}
+
+/// Another package's definition that needs more than the root package declares is refused at each
+/// use; the dependency, declared at `alloc`, says nothing of its own. Refuses a dependency's
+/// definition taken for the root package's own.
+#[test]
+fn another_packages_definition_is_judged_at_each_use() {
+  let theirs = "type X {\n  s: string\n}\n";
+  let ours = "type Query {\n  x: Int\n  a: ^::dep::X\n  b: ^::dep::X\n}\n";
+  let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let dep = package("dep", Tier::Alloc, &[("dep.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [
+      (at(schema, ours, "^::dep::X", 0), None),
+      (at(schema, ours, "^::dep::X", 1), None),
+    ]
+  );
+  assert_eq!(
+    messages(&analysis, TIER),
+    ["`X` needs `alloc`, and package `app` is declared at tier `core`"; 2]
+  );
+}
+
+/// A dependency's own mistake is reported once, in the dependency: what a definition needs past
+/// its package's tier is not asked of its uses. Refuses the need taken uncapped.
+#[test]
+fn a_dependencys_own_mistake_is_reported_once() {
+  let theirs = "type X {\n  s: string\n}\n";
+  let ours = "type Query {\n  x: Int\n  a: ^::dep::X\n  b: ^::dep::X\n}\n";
+  let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let dep = package("dep", Tier::Core, &[("dep.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  let dep_file = file(&analysis, 4, "dep.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [(at(dep_file, theirs, "string", 0), None)]
+  );
+  assert_eq!(
+    messages(&analysis, TIER),
+    ["`string` needs `alloc`, and package `dep` is declared at tier `core`"]
+  );
+}
+
+/// A use that leaves a type argument to a default needs what the default needs: `^::dep::P` is
+/// refused, with a label at its default `string`, and `^::dep::P<Int>` is not. Refuses the filled
+/// slots ignored, and a default reported as the root package's own writing.
+#[test]
+fn a_slot_filled_from_a_default_is_counted_at_the_use() {
+  let theirs = "type P<T = string> {\n  v: T\n}\n";
+  let ours = "type Query {\n  x: Int\n  p: ^::dep::P\n  q: ^::dep::P<Int>\n}\n";
+  let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let dep = package("dep", Tier::Std, &[("dep.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  let dep_file = file(&analysis, 4, "dep.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [(
+      at(schema, ours, "^::dep::P", 0),
+      Some(at(dep_file, theirs, "string", 0))
+    )]
+  );
+  assert_eq!(
+    messages(&analysis, TIER),
+    ["`P` needs `alloc`, and package `app` is declared at tier `core`"]
+  );
+}
+
+/// A slot filled from a default needs what the default needs of its own, a parameter it names
+/// counting as `core`, and never the argument the slot ends up holding: `^::dep::P2<string>` is
+/// refused once, at its written `string`, and `^::dep::P3` once, labelled at `T`'s default.
+/// Refuses the substituted argument read as the default's need, which reports `P2` too.
+#[test]
+fn a_default_that_names_a_parameter_adds_nothing_of_its_own() {
+  let theirs = "type P2<T, U = T> {\n  v: U\n}\ntype P3<T = string, U = T> {\n  v: U\n}\n";
+  let ours = "type Query {\n  x: Int\n  p: ^::dep::P2<string>\n  q: ^::dep::P2<Int>\n  \
+              r: ^::dep::P3\n}\n";
+  let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let dep = package("dep", Tier::Std, &[("dep.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  let dep_file = file(&analysis, 4, "dep.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [
+      (at(schema, ours, "string", 0), None),
+      (
+        at(schema, ours, "^::dep::P3", 0),
+        Some(at(dep_file, theirs, "string", 0))
+      ),
+    ]
+  );
+}
+
+/// `@heap` in a `core` package is refused at its path, on a field, a field's argument and an input
+/// field; on a directive definition's argument it raises nothing, and says nothing; and in an
+/// `alloc` package nothing is said.
+#[test]
+fn heap_in_a_core_package_is_refused() {
+  let text = "type Query {\n  x: Int\n  a: i64 @heap\n  b(n: i64 @heap): Int\n}\n\
+              input I {\n  c: i64 @heap\n}\ndirective @d(n: i64 @heap) on OBJECT\n";
+  let analysis = analyze_at(text, Tier::Core);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [
+      (at(schema, text, "heap", 0), None),
+      (at(schema, text, "heap", 1), None),
+      (at(schema, text, "heap", 2), None),
+    ]
+  );
+  assert_eq!(
+    messages(&analysis, TIER),
+    ["`@heap` keeps this value on the heap, which needs `alloc`, and package `app` is declared \
+       at tier `core`"; 3]
+  );
+  quiet(&analyze_at(text, Tier::Alloc));
+}
+
+/// An extern whose `tier` is above the tier of the package that declares its scalar is refused at
+/// that `tier`; one within it, a `core` scalar used by its own package, and a `std` package's
+/// `CORE` say nothing.
+#[test]
+fn an_extern_tier_above_its_package_is_refused_at_its_tier() {
+  let theirs = "scalar S @extern(lang: \"rust\", type: \"s\", tier: ALLOC)\n\
+                scalar C @extern(lang: \"rust\", type: \"c\", tier: CORE)\n\
+                type Uses {\n  s: S\n  c: C\n}\n";
+  let ours =
+    "type Query {\n  x: Int\n}\nscalar R @extern(lang: \"rust\", type: \"r\", tier: CORE)\n";
+  let root = package("app", Tier::Std, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
+  let geo = package("geo", Tier::Core, &[("geo.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let geo_file = file(&analysis, 4, "geo.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [(at(geo_file, theirs, "ALLOC", 0), None)]
+  );
+  assert_eq!(
+    messages(&analysis, TIER),
+    [
+      "this `@extern` says its host type needs `alloc`, and package `geo`, which declares the \
+       scalar, is declared at tier `core`"
+    ]
+  );
+}
+
+/// A directive definition writes its types as any definition does, until the owner rules on the
+/// exemption: at `core`, its arguments' `string!`, its list and the list's `string!`, its type
+/// parameter's default and an application's type argument are each refused; applying a directive
+/// is not, nor `@heap` on a directive's argument. Refuses an occurrence passed over for where it
+/// stands.
+#[test]
+fn a_directive_writes_its_types_as_any_definition_does() {
+  let text = "type Query {\n  x: Int\n}\n\
+              directive @doc(text: string!, tags: [string!]) on FIELD_DEFINITION\n\
+              directive @g<T = string> on OBJECT\n\
+              type Q @g<String> {\n  y: Int @doc(text: \"x\")\n}\n\
+              directive @h(n: i64 @heap) on OBJECT\n";
+  let analysis = analyze_at(text, Tier::Core);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [
+      (at(schema, text, "string!", 0), None),
+      (at(schema, text, "[string!]", 0), None),
+      (at(schema, text, "string!", 1), None),
+      (at(schema, text, "string", 2), None),
+      (at(schema, text, "String", 0), None),
+    ]
+  );
+}
+
+/// The rule says nothing within what a phase refused: the resolver's diagnostic alone.
+#[test]
+fn the_tier_rule_says_nothing_where_a_phase_spoke() {
+  let analysis = analyze_at("type Query {\n  x: Strin\n  s: String\n}\n", Tier::Core);
+  let codes: Vec<&str> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.code().as_str())
+    .collect();
+  assert_eq!(codes, ["smear::schema::undefined-type"]);
+}
+
+/// In an analysis that is ok, every definition's tier is at most its package's: at `core`,
+/// primitives, `NonZero`, an enum and an extern of `CORE`; at `alloc`, strings and lists; at
+/// `std`, a `HashMap`; the meta-types and the library's definitions their tags.
+#[test]
+fn every_definition_is_within_its_packages_tier_in_an_ok_analysis() {
+  for (text, tier) in [
+    (
+      "type Query {\n  x: Int\n  n: NonZeroU32\n  e: E\n  m: M\n}\nenum E {\n  A\n}\n\
+       scalar M @extern(lang: \"rust\", type: \"m\", tier: CORE)\n",
+      Tier::Core,
+    ),
+    (
+      "type Query {\n  x: Int\n  s: String\n  l: [Int]\n}\n",
+      Tier::Alloc,
+    ),
+    ("type Query {\n  h: HashMap<i32, i32>\n}\n", Tier::Std),
+  ] {
+    let analysis = analyze_at(text, tier);
+    quiet(&analysis);
+    let model = analysis.model();
+    for id in model.defs() {
+      let definition = model.def(id);
+      let package = model.package(model.module(definition.module()).package());
+      assert!(
+        definition.tier() <= package.tier(),
+        "{text}: {}",
+        definition.name()
+      );
+    }
+  }
+}
+
+/// A message quotes a definition's name and a `lang` only as excerpts.
+#[test]
+fn long_names_are_quoted_as_excerpts() {
+  let long = "E".repeat(4096);
+  let theirs = format!("type {long} {{\n  s: string\n}}\n");
+  let ours = format!("type Query {{\n  x: Int\n  y: ^::geo::{long}\n}}\n");
+  let root =
+    package("app", Tier::Core, &[("schema.graphqlx", ours.as_str())]).with_dependencies(["geo"]);
+  let geo = package("geo", Tier::Alloc, &[("geo.graphqlx", theirs.as_str())]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let written = messages(&analysis, TIER);
+  assert_eq!(written.len(), 1, "{written:#?}");
+  for message in written {
+    assert!(message.len() < 1024 && message.contains('…'), "{message}");
+  }
+
+  let lang = "l".repeat(4096);
+  let text = format!(
+    "type Query {{\n  x: Int\n}}\n\
+     scalar M @extern(lang: \"{lang}\", type: \"a\") @extern(lang: \"{lang}\", type: \"b\")\n"
+  );
+  let analysis = analyze_at(&text, Tier::Std);
+  let written = messages(&analysis, "smear::graphqlx::extern-misuse");
+  assert_eq!(written.len(), 1, "{written:#?}");
+  for message in written {
+    assert!(message.len() < 1024 && message.contains('…'), "{message}");
+  }
 }

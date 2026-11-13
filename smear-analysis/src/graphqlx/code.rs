@@ -237,6 +237,15 @@ pub enum DiagnosticKind {
   /// `@repr` whose `lang`, or whose `for` and `lang`, an earlier one there has is reported at its
   /// path, with a label at the earlier.
   ReprMisuse,
+  /// A use above the tier the package that writes it declares, the least of `core`, `alloc` and
+  /// `std` its definitions may need. Below `std`: a list in a `core` package, reported where it is
+  /// written; an occurrence of another package's definition that needs more, counting the
+  /// defaults it leaves out and capped at that package's own tier, reported where it is written,
+  /// with a label at a default that raised it; `core`'s `@heap` on a field, an argument or an input
+  /// field in a `core` package, at its path; and an extern whose `tier` is above the tier of the
+  /// package that declares its scalar, at that `tier`. A use of a definition of the package's own
+  /// is not reported: what raises that definition is, where the package wrote it.
+  Tier,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -282,6 +291,7 @@ impl DiagnosticKind {
     Self::DuplicateTypeParameter,
     Self::ExternMisuse,
     Self::ReprMisuse,
+    Self::Tier,
     Self::ResourceLimit,
   ];
 
@@ -325,6 +335,7 @@ impl DiagnosticKind {
       Self::DuplicateTypeParameter => Code::new("smear::graphqlx::duplicate-type-parameter"),
       Self::ExternMisuse => Code::new("smear::graphqlx::extern-misuse"),
       Self::ReprMisuse => Code::new("smear::graphqlx::repr-misuse"),
+      Self::Tier => Code::new("smear::graphqlx::tier"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -368,6 +379,7 @@ impl DiagnosticKind {
       Self::DuplicateTypeParameter => "duplicate type parameter",
       Self::ExternMisuse => "`@extern` misused",
       Self::ReprMisuse => "`@repr` misused",
+      Self::Tier => "above the package's tier",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -411,6 +423,7 @@ impl DiagnosticKind {
       | Self::DuplicateTypeParameter
       | Self::ExternMisuse
       | Self::ReprMisuse
+      | Self::Tier
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }
