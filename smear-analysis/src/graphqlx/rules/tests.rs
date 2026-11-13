@@ -76,7 +76,7 @@ rule_set! {
 #[test]
 fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   let table: &[(&str, &[Code])] = Rules::TABLE;
-  assert_eq!(table.len(), 20);
+  assert_eq!(table.len(), 21);
   assert_eq!(table[0].0, "DuplicateSchemaDefinition");
   assert_eq!(
     table[0].1,
@@ -195,6 +195,11 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   assert_eq!(
     table[19].1,
     &[Code::new("smear::schema::one-of-on-input-object-extension")]
+  );
+  assert_eq!(table[20].0, "UnsupportedDirectiveLocation");
+  assert_eq!(
+    table[20].1,
+    &[Code::new("smear::schema::unsupported-directive-location")]
   );
 }
 

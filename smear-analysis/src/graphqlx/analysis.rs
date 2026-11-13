@@ -288,8 +288,13 @@ impl Analysis {
 ///   wrote it applies `core`'s `@oneOf` to it, in its definition or in an extension of its own,
 ///   and a field of one that is written non-null is `one-of-field-not-nullable`, and one that
 ///   declares a default `one-of-field-has-default`, at its name. Each application of `@oneOf` in
-///   an extension of an input object is `one-of-on-input-object-extension`, at its path. A rule
-///   says nothing about a contribution a phase already refused something in.
+///   an extension of an input object is `one-of-on-input-object-extension`, at its path.
+///   GraphQL's own rules on directives judge every application a supplied package writes, with
+///   GraphQL's codes: an application at a location its directive's definition does not list, the
+///   schema, a kind of definition, a directive definition, a field, an argument, an input field or
+///   an enum value, is `unsupported-directive-location`, at its path, with a label at the
+///   directive's definition. A rule says nothing about a contribution a phase already refused
+///   something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

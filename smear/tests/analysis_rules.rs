@@ -98,6 +98,9 @@ const ONE_OF_FIELD_NOT_NULLABLE: &str = "smear::schema::one-of-field-not-nullabl
 const ONE_OF_FIELD_HAS_DEFAULT: &str = "smear::schema::one-of-field-has-default";
 const ONE_OF_ON_INPUT_OBJECT_EXTENSION: &str = "smear::schema::one-of-on-input-object-extension";
 
+/// GraphQL's code for a directive applied where its definition does not list.
+const UNSUPPORTED_DIRECTIVE_LOCATION: &str = "smear::schema::unsupported-directive-location";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -134,6 +137,10 @@ const INTROSPECTION_LABEL: &str = "introspection type extension adds more than d
 /// `@set` or `@map`.
 const MEANING: &str = "`@marker`, `@set` and `@map` say what a definition is, and what a built-in \
                        is is the language's to say: remove this directive";
+
+/// What GraphQL tells the author of a directive applied where its definition does not list:
+/// `smear-schema`'s help, word for word.
+const LOCATION_HELP: &str = "add the location to the directive's definition, or move the usage.";
 
 /// What the orphan rule tells the root package when it adds more than directives to a built-in its
 /// own definition replaces, which may write what the extension adds.
@@ -1049,48 +1056,76 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
     [Some(MORE_THAN_DIRECTIVES), Some(MEANING)]
   );
 
-  // `@set` on a directive could give it no meaning, and is refused all the same, once: what a
-  // built-in is cannot be changed by an extension, whatever the extension applies.
+  // `@set` on a directive could give it no meaning, and the orphan rule refuses it all the same,
+  // once: what a built-in is cannot be changed by an extension, whatever the extension applies.
+  // `@set` stands on a scalar alone, so the rule on directive locations refuses it too, at the same
+  // path.
   let text = "extend directive @deprecated @set\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
   let model = analysis.model();
   assert_eq!(
     found(&analysis),
-    [(
-      ORPHAN,
-      at(schema, text, "set", 0),
-      Some(model.def(model.builtins().deprecated()).location())
-    )],
+    [
+      (
+        ORPHAN,
+        at(schema, text, "set", 0),
+        Some(model.def(model.builtins().deprecated()).location())
+      ),
+      (
+        UNSUPPORTED_DIRECTIVE_LOCATION,
+        at(schema, text, "set", 0),
+        Some(model.def(model.builtins().set()).location())
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
   assert_eq!(
     messages(&analysis),
-    [meaning("set", "directive `@deprecated`", "core")]
+    [
+      meaning("set", "directive `@deprecated`", "core"),
+      String::from(
+        "the directive `@set` is applied to a directive definition, and its definition does not \
+         list `DIRECTIVE_DEFINITION`"
+      ),
+    ]
   );
-  assert_eq!(helps(&analysis), [Some(MEANING)]);
+  assert_eq!(helps(&analysis), [Some(MEANING), Some(LOCATION_HELP)]);
 
-  // Nor could `@marker` give a scalar one: refused once too.
+  // Nor could `@marker` give a scalar one: the orphan rule refuses it once too, and the rule on
+  // directive locations beside it, as `@marker` stands on an interface alone.
   let text = "extend scalar NonZero @marker\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
   let model = analysis.model();
   assert_eq!(
     found(&analysis),
-    [(
-      ORPHAN,
-      at(schema, text, "marker", 0),
-      Some(model.def(model.builtins().non_zero()).location())
-    )],
+    [
+      (
+        ORPHAN,
+        at(schema, text, "marker", 0),
+        Some(model.def(model.builtins().non_zero()).location())
+      ),
+      (
+        UNSUPPORTED_DIRECTIVE_LOCATION,
+        at(schema, text, "marker", 0),
+        Some(model.def(model.builtins().marker()).location())
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
   assert_eq!(
     messages(&analysis),
-    [meaning("marker", "type `NonZero`", "core")]
+    [
+      meaning("marker", "type `NonZero`", "core"),
+      String::from(
+        "the directive `@marker` is applied to a scalar, and its definition does not list `SCALAR`"
+      ),
+    ]
   );
-  assert_eq!(helps(&analysis), [Some(MEANING)]);
+  assert_eq!(helps(&analysis), [Some(MEANING), Some(LOCATION_HELP)]);
   assert!(!model.def(model.builtins().non_zero()).is_marker());
 
   // `core`'s `@set` under a name a `use` item gives it is still `core`'s `@set`: the directive is
@@ -1544,6 +1579,10 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(ONE_OF_ON_INPUT_OBJECT_EXTENSION),
     a_one_of_that_an_extension_provides,
   ),
+  (
+    Code::new(UNSUPPORTED_DIRECTIVE_LOCATION),
+    a_directive_where_its_definition_does_not_list,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1756,6 +1795,11 @@ fn a_one_of_field_with_a_default() -> Analysis {
 /// An extension that applies `@oneOf` to an input object.
 fn a_one_of_that_an_extension_provides() -> Analysis {
   analyze_one("type Query { ok: Int } input In { a: Int } extend input In @oneOf")
+}
+
+/// A directive applied where its definition does not list.
+fn a_directive_where_its_definition_does_not_list() -> Analysis {
+  analyze_one("directive @onEnum on ENUM\n     type Query @onEnum { ok: Int }")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

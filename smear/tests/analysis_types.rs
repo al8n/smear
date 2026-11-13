@@ -38,6 +38,9 @@ const GENERIC_ENUM: &str = "smear::graphqlx::generic-enum";
 /// The code of a collection whose count of type parameters it has not, which a rule reports.
 const COLLECTION: &str = "smear::graphqlx::collection-arity";
 
+/// GraphQL's code for a directive applied where its definition does not list.
+const LOCATION: &str = "smear::schema::unsupported-directive-location";
+
 /// What the rule says of an enum named `name` that declares a type parameter.
 fn generic_enum(name: &str) -> String {
   format!(
@@ -453,24 +456,32 @@ fn markers_and_collections_are_read_off_cores_directives() {
   // `core`'s directives, on the library's definitions and on the program's: a marker, and one an
   // extension of the definition's own package makes; a set, a map, and a scalar that applies both,
   // which is the first, and which the rule on a collection's type parameters refuses, at the later;
-  // an interface that applies nothing, and an object that applies `@set`, which neither is.
+  // an interface that applies nothing, and an object that applies `@set`, which neither is, and
+  // where `@set`, which stands on a scalar alone, is refused by the rule on directive locations.
   let text = "interface Ord @marker\ninterface Node {\n  id: ID\n}\ninterface Plain\n\
               extend interface Plain @marker\n\
               scalar Bag<T> @set\nscalar Dict<K, V> @map\nscalar Both<K, V> @map @set\n\
               type Obj @set {\n  x: Int\n}\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
+  let model = analysis.model();
   assert_eq!(
     found(&analysis),
-    [(
-      COLLECTION,
-      named(schema, text, "@", "set", 1),
-      Some(named(schema, text, "scalar ", "Both", 0))
-    )],
+    [
+      (
+        COLLECTION,
+        named(schema, text, "@", "set", 1),
+        Some(named(schema, text, "scalar ", "Both", 0))
+      ),
+      (
+        LOCATION,
+        named(schema, text, "@", "set", 2),
+        Some(model.def(model.builtins().set()).location())
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
-  let model = analysis.model();
   assert_eq!(markers(model), ["MapKey", "Ord", "Plain"]);
   assert_eq!(
     collections(model),

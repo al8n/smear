@@ -171,7 +171,6 @@ const ALLOWED: &[Allowed] = &[
   every("smear::schema::circular-non-null-input-field", CYCLES),
   every("smear::schema::circular-one-of-input-field", CYCLES),
   every("smear::schema::input-object-default-value-cycle", CYCLES),
-  every("smear::schema::unsupported-directive-location", PART_2_3),
   every("smear::schema::duplicate-directive-use", PART_2_3),
   every("smear::schema::duplicate-directive-argument-use", PART_2_3),
   every("smear::schema::self-referential-directive", PART_2_3),

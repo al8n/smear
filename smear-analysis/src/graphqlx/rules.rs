@@ -21,6 +21,10 @@
 //! object when the package that wrote it applies `core`'s `@oneOf` to it, as `one_of` answers once
 //! for each input object.
 //!
+//! GraphQL's own rules over directive applications judge every application a supplied package
+//! writes, on any definition, a built-in's included: the root package's `extend scalar String @x`
+//! is the root package's to answer for, whatever `String` is.
+//!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk
 //! descends the written arguments of an occurrence that names a type parameter, or nothing, and
@@ -48,6 +52,7 @@ mod schema_outside_root;
 mod self_implementing_interface;
 mod type_ref_misuse;
 mod union_member_not_object;
+mod unsupported_directive_location;
 
 use self::{
   collection_arity::CollectionArity, deprecated_required::DeprecatedRequired,
@@ -61,6 +66,7 @@ use self::{
   reserved_name::ReservedName, schema_outside_root::SchemaOutsideRoot,
   self_implementing_interface::SelfImplementingInterface, type_ref_misuse::TypeRefMisuse,
   union_member_not_object::UnionMemberNotObject,
+  unsupported_directive_location::UnsupportedDirectiveLocation,
 };
 use super::{
   ApplicationId, Contribution, Cx, DefId, DefKind, Model, PackageId, PackageKind, Resolution,
@@ -344,7 +350,9 @@ rule_set! {
   /// none; a member's type is of the kind its position takes; an object or an interface implements
   /// interfaces; no interface implements itself; a union's members are object types; a required
   /// argument or input field is not deprecated; a OneOf input object's fields are nullable and have
-  /// no default; and an input object takes `@oneOf` in its definition alone.
+  /// no default; and an input object takes `@oneOf` in its definition alone; and of every
+  /// application a supplied package writes, GraphQL's own rules: a directive stands where its
+  /// definition lists.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -402,6 +410,8 @@ rule_set! {
       => [super::code::schema::ONE_OF_FIELD_HAS_DEFAULT],
     one_of_on_input_object_extension: OneOfOnInputObjectExtension
       => [super::code::schema::ONE_OF_ON_INPUT_OBJECT_EXTENSION],
+    unsupported_directive_location: UnsupportedDirectiveLocation
+      => [super::code::schema::UNSUPPORTED_DIRECTIVE_LOCATION],
   }
 }
 

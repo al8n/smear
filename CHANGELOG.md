@@ -414,8 +414,11 @@ All notable changes to Smear are documented in this file.
   when the package that wrote it applies `core`'s `@oneOf` to it, in its definition or in an
   extension of its own, and a field of one written non-null is `one-of-field-not-nullable`, and one
   that declares a default `one-of-field-has-default`; and each `@oneOf` an extension of an input
-  object applies is `one-of-on-input-object-extension`. A rule says nothing about a contribution a
-  phase already refused something in. On every GraphQL document of smear's corpora the analyzer
+  object applies is `one-of-on-input-object-extension`. And every application a supplied package
+  writes keeps GraphQL's own rules on directives, with GraphQL's codes: one at a location its
+  directive's definition does not list, a built-in's own directive or a program's, is
+  `smear::schema::unsupported-directive-location`, at its path, with a label at the directive's
+  definition. A rule says nothing about a contribution a phase already refused something in. On every GraphQL document of smear's corpora the analyzer
   is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
   divergence it allows. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models

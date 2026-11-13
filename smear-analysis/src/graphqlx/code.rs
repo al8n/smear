@@ -551,4 +551,9 @@ pub(crate) mod schema {
   /// `OneOfOnInputObjectExtension`.
   pub(crate) const ONE_OF_ON_INPUT_OBJECT_EXTENSION: Code =
     Code::new("smear::schema::one-of-on-input-object-extension");
+
+  /// A directive is applied at a location its definition does not list: `smear-schema`'s
+  /// `UnsupportedDirectiveLocation`.
+  pub(crate) const UNSUPPORTED_DIRECTIVE_LOCATION: Code =
+    Code::new("smear::schema::unsupported-directive-location");
 }

@@ -51,6 +51,9 @@ const INPUT_FIELD_TYPE: &str = "smear::schema::input-field-type-not-input-type";
 /// GraphQL's code of a union member that is no object type.
 const UNION_MEMBER: &str = "smear::schema::union-member-not-object";
 
+/// GraphQL's code of a directive applied where its definition does not list.
+const LOCATION: &str = "smear::schema::unsupported-directive-location";
+
 /// What the rule on `NonZero`'s argument says, whatever the argument is.
 const NONZERO_MESSAGE: &str = "`NonZero` takes an integer primitive at least one bit wide, written \
                                without `!`, as its type argument, and this one is not";
@@ -349,8 +352,8 @@ fn a_generic_marker_is_a_marker() {
 fn a_set_has_one_type_parameter_and_a_map_two() {
   // A set of one and a map of two say nothing; a set of none and of two, and a map of one and of
   // three, are refused at the application; a scalar that applies both is refused once, at the
-  // later; an object is not this rule's; and the root package's `@set` on `alloc`'s `string` is the
-  // orphan rule's alone.
+  // later; an object is not this rule's, and `@set` on one is the rule on directive locations'; and
+  // the root package's `@set` on `alloc`'s `string` is the orphan rule's alone.
   let text = "scalar S1<T> @set\nscalar M2<K, V> @map\nscalar S0 @set\nscalar S2<A, B> @set\n\
               scalar M1<K> @map\nscalar M3<A, B, C> @map\nscalar Both<K, V> @set @map\n\
               type Obj @set {\n  x: Int\n}\nextend scalar String @set\n";
@@ -372,6 +375,11 @@ fn a_set_has_one_type_parameter_and_a_map_two() {
       refused("map", 1, "M1"),
       refused("map", 2, "M3"),
       refused("map", 3, "Both"),
+      (
+        LOCATION,
+        named(schema, text, "@", "set", 4),
+        Some(model.def(model.builtins().set()).location())
+      ),
       (
         ORPHAN,
         named(schema, text, "@", "set", 5),

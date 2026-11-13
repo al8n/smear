@@ -524,6 +524,7 @@ fn each_walk_of_a_program_of_several_packages_reaches_what_the_model_says_once()
       "smear::schema::undefined-type",
       "smear::graphqlx::orphan-extension",
       "smear::graphqlx::orphan-extension",
+      "smear::schema::unsupported-directive-location",
       "smear::graphqlx::schema-outside-root",
     ]
   );
@@ -538,8 +539,8 @@ fn permuting_the_dependencies_changes_nothing_the_rules_report_or_mark() {
   let forward = analyze(&root, &[geo.clone(), astro.clone()], &Limits::new());
   let backward = analyze(&root, &[astro, geo], &Limits::new());
   // The case is not vacuous: the orphan rule reports a dependency's extension of the other's type
-  // and of a built-in, and the schema rule the dependency's schema extension, which its error
-  // marks.
+  // and of a built-in, the location rule the `@deprecated` that extension applies to a scalar,
+  // and the schema rule the dependency's schema extension, which its error marks.
   assert_eq!(
     codes(&forward),
     [
@@ -547,6 +548,7 @@ fn permuting_the_dependencies_changes_nothing_the_rules_report_or_mark() {
       "smear::schema::undefined-type",
       "smear::graphqlx::orphan-extension",
       "smear::graphqlx::orphan-extension",
+      "smear::schema::unsupported-directive-location",
       "smear::graphqlx::schema-outside-root",
     ]
   );
