@@ -68,20 +68,27 @@
 //! # An application's arguments
 //!
 //! Before the walk, each directive's arguments that an application leaving them out does something
-//! about are listed once, in member order: one with a default, with the count of rows a copy of it
-//! makes, counted once through the same classifier that makes the rows, its written nodes walked
-//! and a lone value counted from its type's levels of list, and saturating at
-//! `Limits::max_value_steps` plus one; and one required, written non-null with no default. A later
-//! argument of a name an earlier one has is not listed, since no application can write it. An
-//! application merges its written arguments, which lowering kept in its directive's order, with
-//! that list, by the argument each sets. A written argument is coerced as written, and a required
-//! one given `null` is `missing-required-directive-argument`, at its name, and nothing more. A
-//! listed argument left out takes a copy of its default: the default's tree coerced again against
-//! the argument's type, silently, each row not written and located at the node it copies, what was
-//! read of the literal shared; a node that does not fit is unresolved, and the default's own
-//! diagnostic, where it is written, says why once. A required one left out is
-//! `missing-required-directive-argument`, at the application's path, with a label at the argument.
-//! An argument neither written, defaulted nor required is absent.
+//! about are listed once, in member order: one with a default, with its default's tree; and one
+//! required, written non-null with no default. A later argument of a name an earlier one has is not
+//! listed, since no application can write it. An application merges its written arguments, which
+//! lowering kept in its directive's order, with that list, by the argument each sets. A written
+//! argument is coerced as written, and a required one given `null` is
+//! `missing-required-directive-argument`, at its name, and nothing more. A listed argument left
+//! out takes a copy of its default: the default's tree coerced again against the argument's type,
+//! silently, each row not written and located at the node it copies, what was read of the literal
+//! shared; a node that does not fit is unresolved, and the default's own diagnostic, where it is
+//! written, says why once. A required one left out is `missing-required-directive-argument`, at the
+//! application's path, with a label at the argument. An argument neither written, defaulted nor
+//! required is absent.
+//!
+//! # The count of a copy
+//!
+//! A copy's rows are counted before its first row is made, and the count is what is charged. A
+//! default is counted the first time a copy of it is asked for, and never before, and the count is
+//! kept by the default's tree and the type it is counted against, so a default nothing asks for is
+//! never counted and one asked for again is counted once. The count goes through the same
+//! classifier that makes the rows: its written nodes walked, and a lone value counted from its
+//! type's levels of list, saturating at `Limits::max_value_steps` plus one.
 //!
 //! # What bounds it
 //!
@@ -198,6 +205,7 @@ pub(crate) fn coerce(
     syms: Vec::new(),
     listed: Vec::new(),
     runs: Vec::new(),
+    counts: BTreeMap::new(),
     counting: Vec::new(),
     levels: BTreeMap::new(),
     chain: Vec::new(),
@@ -286,9 +294,8 @@ impl Mode {
 #[derive(Clone, Copy)]
 struct Listed {
   argument: MemberId,
-  /// Its default's tree, and how many rows a copy of it makes; `None` for a required argument with
-  /// no default.
-  default: Option<(u32, u32)>,
+  /// Its default's tree; `None` for a required argument with no default.
+  default: Option<u32>,
 }
 
 /// The range of an integer type: the integer primitive `width` bits wide, signed when `signed`,
@@ -472,6 +479,9 @@ struct Coercion<'c, 'p, 'x> {
   /// Each directive that has such arguments, with its run of `listed`, by `DefId`: what an
   /// application looks its directive's run up by.
   runs: Vec<(DefId, u32, u32)>,
+  /// Each default counted so far, by its tree and the type it is counted against: how many rows a
+  /// copy of it makes.
+  counts: BTreeMap<(u32, Option<TyId>), u32>,
   /// The nodes being counted, each with the type it is counted against.
   counting: Vec<(u32, Option<TyId>)>,
   /// How many levels of list each list type read so far is: what a lone value's count reads.
@@ -589,36 +599,39 @@ impl<'p> Coercion<'_, 'p, '_> {
     at: Location,
     library: bool,
   ) -> bool {
-    let cost = left.default.map_or(1, |(_, count): (u32, u32)| count);
-    if !library && !self.charge(cost) {
+    let Some(tree) = left.default else {
+      if !library && !self.charge(1) {
+        self.starved(at);
+        return false;
+      }
+      self.missing(application, left.argument, at);
+      return true;
+    };
+    let ty = self.member_type(left.argument);
+    let count = self.count(tree, ty);
+    if !library && !self.charge(count) {
       self.starved(at);
       return false;
     }
-    match left.default {
-      Some((tree, count)) => {
-        let before = self.builder.value_count();
-        let ty = self.member_type(left.argument);
-        if let Some(value) = self.value(tree, ty, Mode::Copied) {
-          // A count past the budget is saturated, and only a copy the library's application asks
-          // for, which is not charged, is made then.
-          debug_assert!(
-            count > self.max_steps || self.builder.value_count().saturating_sub(before) == count,
-            "a copy makes the rows it was counted to"
-          );
-          self
-            .builder
-            .push_application_argument(application, left.argument, None, value);
-        }
-      }
-      None => self.missing(application, left.argument, at),
+    let before = self.builder.value_count();
+    if let Some(value) = self.value(tree, ty, Mode::Copied) {
+      // A count past the budget is saturated, and only a copy the library's application asks for,
+      // which is not charged, is made then.
+      debug_assert!(
+        count > self.max_steps || self.builder.value_count().saturating_sub(before) == count,
+        "a copy makes the rows it was counted to"
+      );
+      self
+        .builder
+        .push_application_argument(application, left.argument, None, value);
     }
     true
   }
 
-  /// Lists each directive's arguments that an application leaving them out does something about,
-  /// each with its default's count of rows: one with a default, and one required, written non-null
-  /// with no default. A later argument of a name an earlier one has is not listed: no application
-  /// can write it.
+  /// Lists each directive's arguments that an application leaving them out does something about:
+  /// one with a default, with its default's tree, and one required, written non-null with no
+  /// default. A later argument of a name an earlier one has is not listed: no application can
+  /// write it.
   fn list_arguments(&mut self) {
     let mut names: BTreeSet<Sym> = BTreeSet::new();
     for index in 0..self.builder.def_count() {
@@ -635,15 +648,12 @@ impl<'p> Coercion<'_, 'p, '_> {
         if !names.insert(name) {
           continue;
         }
-        let (ty, non_null) = self.member_occurrence(argument);
+        let (_, non_null) = self.member_occurrence(argument);
         match self.raw.defaults.get(&argument).copied() {
-          Some(tree) => {
-            let count = self.count(tree, ty);
-            self.listed.push(Listed {
-              argument,
-              default: Some((tree, count)),
-            });
-          }
+          Some(tree) => self.listed.push(Listed {
+            argument,
+            default: Some(tree),
+          }),
           None if non_null => self.listed.push(Listed {
             argument,
             default: None,
@@ -663,8 +673,19 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// list against a list type; and for a lone value, one for each level of list its type has
   /// left and one for the value, counted from the type and not row by row. The walk visits written
   /// nodes alone, and stops once the count passes `Limits::max_value_steps`, which no charge can
-  /// pay: the count then saturates at that limit plus one.
+  /// pay: the count then saturates at that limit plus one. It is made the first time it is asked
+  /// for and kept, by the tree and the type.
   fn count(&mut self, tree: u32, ty: Option<TyId>) -> u32 {
+    if let Some(&rows) = self.counts.get(&(tree, ty)) {
+      return rows;
+    }
+    let rows = self.walk_count(tree, ty);
+    self.counts.insert((tree, ty), rows);
+    rows
+  }
+
+  /// The count of the tree `tree` against `ty`, as [`count`](Self::count) answers it, walked.
+  fn walk_count(&mut self, tree: u32, ty: Option<TyId>) -> u32 {
     let Some(tree) = self.raw.trees.get(tree as usize).copied() else {
       return 0;
     };

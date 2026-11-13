@@ -1424,9 +1424,9 @@ fn a_lone_values_count_is_its_types_levels() {
   );
   assert!(arguments_of(analysis.model(), "T").is_empty());
 
-  // A default no application asks for is counted and never charged: at zero, nothing is said. A
-  // test sees the count's value through a charge alone, so this pins that no charge is made, and
-  // cannot see that the count stops at the limit plus one.
+  // A default no application asks for is never counted, and nothing is charged for it: at zero,
+  // nothing is said. A test sees a count through a charge alone, so this pins that no charge is
+  // made, and cannot see that no count is made.
   let unasked = "type Query {\n  x: Int\n}\n\
                  directive @d(m: [[[Int]]] = [[[1]], [[2]]]) on OBJECT\n";
   let analysis = analyze_text(unasked, &Limits::new().with_max_value_steps(0));
