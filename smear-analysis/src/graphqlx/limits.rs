@@ -18,6 +18,8 @@ const DEFAULT_GLOBS: u32 = 64;
 const DEFAULT_GENERIC_DEPTH: u32 = 64;
 /// See [`Limits::max_instantiations`].
 const DEFAULT_INSTANTIATIONS: u32 = 1 << 16;
+/// See [`Limits::max_substitutions`].
+const DEFAULT_SUBSTITUTIONS: u32 = 1 << 20;
 /// See [`Limits::max_source_bytes`].
 const DEFAULT_SOURCE_BYTES: u32 = 1 << 26;
 /// See [`Limits::max_diagnostics`].
@@ -30,10 +32,11 @@ const DEFAULT_NEAR_MISS_COMPARISONS: u32 = 1 << 20;
 /// A package set is untrusted input, and the analysis bounds every resource such input could
 /// otherwise grow without limit: the number of definitions and of modules, how deep modules, `use`
 /// trees and type arguments nest, how long a path is, how many rounds the glob fixpoint runs, how
-/// many modules one module's globs name, how many instantiations it records, and how many bytes of
-/// source it reads. A bound that is passed is reported as `smear::graphqlx::resource-limit`, never
-/// as a panic. Two bounds are not refusals: the diagnostic ceiling and the near-miss budget limit
-/// what the analysis says, not what it accepts.
+/// many modules one module's globs name, how many instantiations it records, how many steps of
+/// substitution it takes, and how many bytes of source it reads. A bound that is passed is
+/// reported as `smear::graphqlx::resource-limit`, never as a panic. Two bounds are not refusals:
+/// the diagnostic ceiling and the near-miss budget limit what the analysis says, not what it
+/// accepts.
 ///
 /// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
 /// is always declared whole and every package has its root module: see
@@ -64,6 +67,7 @@ pub struct Limits {
   max_globs: u32,
   max_generic_depth: u32,
   max_instantiations: u32,
+  max_substitutions: u32,
   max_source_bytes: u32,
   max_diagnostics: u32,
   max_near_miss_comparisons: u32,
@@ -92,6 +96,7 @@ impl Limits {
       max_globs: DEFAULT_GLOBS,
       max_generic_depth: DEFAULT_GENERIC_DEPTH,
       max_instantiations: DEFAULT_INSTANTIATIONS,
+      max_substitutions: DEFAULT_SUBSTITUTIONS,
       max_source_bytes: DEFAULT_SOURCE_BYTES,
       max_diagnostics: DEFAULT_DIAGNOSTICS,
       max_near_miss_comparisons: DEFAULT_NEAR_MISS_COMPARISONS,
@@ -228,6 +233,27 @@ impl Limits {
     self.max_instantiations
   }
 
+  /// How many steps of substitution the analysis may take, over the whole analysis.
+  ///
+  /// Substitution puts types in place of a generic definition's type parameters. Filling the type
+  /// arguments a use leaves out is substitution: a set of written arguments filled for the first
+  /// time takes one step for each argument left out, and one for each type occurrence of a default
+  /// that the filling walks, whether the type that occurrence yields is new or not. A set of
+  /// arguments filled once is not filled again, whichever use asks for it.
+  ///
+  /// Past it, each type occurrence whose type would take one more step is reported where it is
+  /// written, and its type is the unresolved one.
+  ///
+  /// The default is 2^20: sixteen steps for each of the instantiations
+  /// [`max_instantiations`](Self::max_instantiations) admits at its default, which no program
+  /// written by hand approaches. An instantiation is counted once however many steps deriving it
+  /// takes, so this is the bound on that work: a default of many types, filled for many distinct
+  /// uses, is walked once for each.
+  #[inline]
+  pub const fn max_substitutions(&self) -> u32 {
+    self.max_substitutions
+  }
+
   /// How many bytes of source text the supplied packages may hold together. The built-in
   /// packages' own text is smear's and does not count.
   ///
@@ -338,6 +364,14 @@ impl Limits {
   #[must_use]
   pub const fn with_max_instantiations(mut self, max: u32) -> Self {
     self.max_instantiations = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_substitutions`](Self::max_substitutions) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_substitutions(mut self, max: u32) -> Self {
+    self.max_substitutions = max;
     self
   }
 
