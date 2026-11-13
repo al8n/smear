@@ -165,6 +165,39 @@ limited_roots! {
   gqlx_document_with_limits => smear::parser::graphqlx::lossless::parse_document_with_limits,
 }
 
+/// The `*_with_limits` twin of a root that keeps every record its parse makes, with a `roots!`
+/// root's signature: for a cell that counts more diagnostics than the default ceiling on kept
+/// diagnostics lets a parse keep.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+macro_rules! every_record_roots {
+  ($($name:ident => $path:path),+ $(,)?) => {
+    $(
+      fn $name(src: &str) -> (usize, usize) {
+        let parse = $path(
+          src,
+          smear::lexer::limits::LosslessLimits::new().with_max_diagnostics(usize::MAX),
+        );
+        (
+          parse.diagnostics().len(),
+          parse.syntax().text().to_string().len(),
+        )
+      }
+    )+
+  };
+}
+
+#[cfg(feature = "graphql")]
+every_record_roots! {
+  gql_document_keeping_every_record =>
+    smear::parser::graphql::lossless::parse_document_with_limits,
+}
+
+#[cfg(feature = "graphqlx")]
+every_record_roots! {
+  gqlx_document_keeping_every_record =>
+    smear::parser::graphqlx::lossless::parse_document_with_limits,
+}
+
 /// What `max_tokens_does_not_bound_the_work_the_scan_allowance_does` reads off one parse.
 ///
 /// `items` is the token count of the tree the parse produced. Under no ceiling that is the
@@ -584,6 +617,13 @@ fn token_length_does_not_reopen_the_guard() {
 /// constant `beyond <= k / 8` derived from `! `, which commits a bang and a space per refusal
 /// (`m = 2`), against a dense `!!!!` suffix that commits one and doubles the count at k = 33 000.
 /// A future revision that re-derives a burn from one shape would be repeating that.
+///
+/// # Every record is kept
+///
+/// The cells read the document root through its `*_with_limits` door under no ceiling on kept
+/// diagnostics. At `k` = 33 000 and 80 000 the error run alone is more errors than the default
+/// ceiling, 32 768, lets a parse keep, and the gate that the run still reports, `diagnostics >= k`,
+/// reads the records the parse kept.
 #[test]
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 #[allow(clippy::vec_init_then_push)]
@@ -607,14 +647,14 @@ fn an_error_run_no_longer_burns_the_scan_allowance() {
   #[cfg(feature = "graphql")]
   cells.push((
     "gql",
-    gql_document,
+    gql_document_keeping_every_record,
     "-",
     &[("!", 1), ("@", 1), (":", 1), ("! ", 2), ("@ ", 2)],
   ));
   #[cfg(feature = "graphqlx")]
   cells.push((
     "gqlx",
-    gqlx_document,
+    gqlx_document_keeping_every_record,
     // The atom that used to burn here, kept because running it is how its absence is measured.
     // `-?(?&frac)(?&exp)?` routes through `tt_hook_and_then_into_errors`, whose handler returns
     // `Err` even when its suffix check passes, so it was charged to `spent` and never committed:

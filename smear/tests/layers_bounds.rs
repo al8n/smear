@@ -178,8 +178,8 @@ macro_rules! dialect {
         assert!(read < starts.len(), "the ceiling falls inside the text");
       }
 
-      /// Until a parse has a ceiling on the records it keeps, the bound for untrusted text is the
-      /// produce-event ceiling: a text dense with errors keeps a bounded multiple of it.
+      /// A produce-event ceiling bounds the records a parse keeps too, whatever its ceiling on kept
+      /// diagnostics is: a text dense with errors keeps a bounded multiple of it.
       ///
       /// The multiple is not one. A lexer error is an event and a recovery skips a token, but
       /// reports that consume nothing between two events are bounded only by how deep the

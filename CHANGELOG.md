@@ -25,10 +25,31 @@ All notable changes to Smear are documented in this file.
   before any scan for a text past `Refused::MAX_SOURCE_LEN`. It lends every error its tree keeps
   at error severity but a token-budget member the grammar wrote, one `invalid-syntax` error for
   such a record that holds none, and its token-budget refusal, once and last; a recovery hole and
-  a warning are not lent. `error_count()` is how many errors a sink that never breaks is lent: for
-  the lossless layer it is zero exactly when the tree's `has_errors()` is false, and never less
-  than the number of the tree's error diagnostics. `Recovery` now lives in `layer`, and
-  `lossless::project::Recovery`, where 0.0.1 released it, re-exports it.
+  a warning are not lent. `error_count()` is how many errors the parse found: a sink that never
+  breaks is lent that many, less the error records the lossless layer refused past its limits'
+  ceiling on kept diagnostics, which it counts one for each. For the lossless layer the count is
+  zero exactly when the tree's `has_errors()` is false, and never less than the number of the
+  tree's error diagnostics. `Recovery` now lives in `layer`, and `lossless::project::Recovery`,
+  where 0.0.1 released it, re-exports it.
+- `smear-lexer` and `smear-parser`!: a ceiling on the diagnostics a lossless parse keeps.
+  `LosslessLimits::max_diagnostics()` is the most records a lossless parse keeps, errors,
+  warnings and recovery holes together: the first it records, none dropped later to make room.
+  It is 32 768 by default, `LosslessLimits::with_max_diagnostics(max)` sets it, `usize::MAX` is
+  no ceiling, and `0` keeps nothing. Every lossless door and the lossless layer run under it:
+  each door reads it off the limits it is handed and makes the parse's recording emitter with it.
+  Past it the parse goes on, and its tree, its document and its recovery are what they would
+  have been; a further error is counted and not kept, and a further warning or recovery hole is
+  dropped. 0.0.1 released the doors keeping every record: a caller that wants them all passes
+  `LosslessLimits::new().with_max_diagnostics(usize::MAX)` to a `_with_limits` door or to
+  `Lossless::with_limits`. `lossless::runner::Parse::refused_errors()` answers how many errors a
+  parse refused, and `Parse::has_errors()` counts them, whatever its list holds.
+  `DiagnosticSource::refused_errors` is a required method: an implementation outside smear must
+  add it, answering 0 when its emitter has no ceiling. The lossless state grows by a word more,
+  which every token the parser caches carries: with the brace count's, it is two words larger
+  than 0.0.1's. What the ceiling bounds is how many records a parse keeps. It does not bound the
+  tree, the parse's log of events, or what one record holds, a lexer error keeping an entry for
+  each fault inside its token: each grows with the text, and a caller that bounds a parse's
+  whole memory bounds the text's length.
 - `smear-parser`!: `Recovery` counts at every module depth. 0.0.1 released it counting a
   document's top-level elements, so that `projected()` was the length of the document's
   definitions. GraphQLx's recovering type-system doors, and both layers, now count every item
