@@ -136,7 +136,8 @@ All notable changes to Smear are documented in this file.
   extension by position, in scope; one that names nothing is reported with the code of its place
   and stays unresolved. A `where` predicate bounds one of its definition's own type parameters;
   any other left side, and any `where` clause on an extension, is the new
-  `smear::graphqlx::invalid-bound`. Every directive application, on a definition, an extension, a
+  `smear::graphqlx::invalid-bound`, and so is a right side that names no interface, which is kept
+  as written. Every directive application, on a definition, an extension, a
   member or an argument, is numbered in the walk's order too, with its directive's path as
   written and resolved where it is written; one whose directive names nothing keeps no type
   argument and no argument. The others keep their type arguments, each an occurrence, and the

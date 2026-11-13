@@ -158,7 +158,8 @@ impl Analysis {
 ///   extension's own names naming its target's by position; one that names nothing is reported,
 ///   with the code of its place, and stays unresolved. A bound is a definition's own type
 ///   parameter's: any other left side of a `where` predicate, and any `where` clause on an
-///   extension, is `invalid-bound`. An application whose directive resolves keeps its type
+///   extension, is `invalid-bound`; and so is a right side that names no interface, the bound
+///   still recorded as written. An application whose directive resolves keeps its type
 ///   arguments and the arguments its directive declares, in the directive's order, an argument
 ///   written twice twice; one it does not declare is `undefined-directive-argument`, with the
 ///   nearest name it does declare in its help. A value is kept as written, its syntactic kind and

@@ -90,7 +90,9 @@ pub enum DiagnosticKind {
   /// A `where` predicate whose left side is not one of its definition's own type parameters,
   /// written with no type argument, or any `where` clause on an extension: the model holds a bound
   /// only on a definition's own parameter, under the definition. Reported at the predicate's left
-  /// side, or at the extension's clause, and nothing of it is in the model.
+  /// side, or at the extension's clause, and nothing of it is in the model. Or a bound whose right
+  /// side names no interface: a definition of another kind, an alias such as `NonZeroU32`, or a
+  /// type parameter. Reported at the right side, and the bound is in the model as written.
   InvalidBound,
 
   // -- Types -------------------------------------------------------------------------------------

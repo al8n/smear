@@ -81,7 +81,10 @@
 //! A bound is its definition's own: a `where` predicate whose left side is one of the definition's
 //! type parameters, written with no argument, gives each interface it names as a bound of that
 //! parameter, located at the predicate. Any other left side, and any `where` clause on an
-//! extension, is `invalid-bound`, and nothing of it is lowered.
+//! extension, is `invalid-bound`, and nothing of it is lowered. A right side is an interface, a
+//! marker among them, with or without type arguments: once its occurrence is appended, one that
+//! names a definition of another kind, an alias such as `NonZeroU32` or a type parameter is
+//! `invalid-bound` too, at the right side, and the bound is still recorded, as written.
 //!
 //! An application keeps its directive's path as written, and its directive is resolved where it
 //! is written, as a type is. One whose directive names nothing stays, unresolved, with no type
@@ -166,7 +169,7 @@ use super::{
   },
   model::{
     DefKind, DirectiveLocation, LiteralKind, MemberKind, ModelBuilder, PathRoot, Root,
-    RootOperation,
+    RootOperation, Written,
   },
   resolve::{self, Position, Request, Resolved, Scopes, Wanted},
   set::{PackageView, ROOT},
@@ -1469,6 +1472,7 @@ impl Lowering<'_, '_> {
       let location = Location::new(source, *predicate.span());
       for bound in predicate.bounds() {
         let interface = self.type_path(part.site, bound, Position::Type);
+        self.bound_interface(interface);
         self
           .builder
           .push_bound(part.def, parameter, interface, location);
@@ -1861,6 +1865,31 @@ impl Lowering<'_, '_> {
       )),
       // `PathRoot` is `#[non_exhaustive]`.
       _ => None,
+    }
+  }
+
+  /// Refuses `interface`, the occurrence a bound's right side is, where it is written, unless it
+  /// names an interface, a marker among them: a definition of another kind, an alias such as
+  /// `NonZeroU32` and a type parameter are `invalid-bound`. One whose path names nothing was
+  /// reported by name resolution. The bound is recorded either way.
+  fn bound_interface(&mut self, interface: TypeExprId) {
+    let Some(occurrence) = self.builder.occurrence(interface) else {
+      return;
+    };
+    let at = occurrence.location;
+    let refused = match occurrence.written {
+      Written::Named(def) => self.builder.def_kind(def) != Some(DefKind::Interface),
+      Written::Param { .. } | Written::List(_) => true,
+      Written::Unresolved => false,
+    };
+    if refused {
+      self.invalid_bound(
+        at,
+        "a bound's right side is an interface or a marker, which the type parameter must \
+         implement",
+        "name an interface, as `where T: Node` does, or an interface with type arguments, as \
+         `where T: Comparable<T>` does",
+      );
     }
   }
 
