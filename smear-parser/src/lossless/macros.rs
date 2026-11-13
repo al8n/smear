@@ -375,7 +375,7 @@ macro_rules! lossless_drivers {
           // The `'inp` is **named**, threaded from `src`, for the reason the trivia driver
           // records: elided, it varies independently of the error type and the closure `E0521`s.
           //
-          // The same state the shipped doors seed, and the same two ceilings read off it. A
+          // The same state the shipped doors seed, and the same ceilings read off it. A
           // driver that left the context defaulted would run at tokora's `PARSE_DEFAULT_DEPTH`
           // and an unlimited token budget instead of this dialect's, which is a different budget
           // from the one every shipped entry point uses and therefore a driver that no longer
@@ -826,11 +826,11 @@ pub(crate) use lossless_production;
 /// ends it — `Default`, a sealed trait and a purity comment are all things this crate can satisfy
 /// from inside. What ends it is the principle this macro exists to make true: **the report is made
 /// by code that chose every type it runs over.** The expansion fixes the lexer, the grammar brand,
-/// the error container, the cache and the profile to that dialect's own, reads both budgets off
-/// `limits` itself, and keeps its emission private to the module it lands in. The one thing a
-/// caller still supplies is the parser — and a parser can reach only
-/// [`drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped), which **stops and never
-/// emits**.
+/// the error container, the cache and the profile to that dialect's own, reads the two budgets
+/// and the ceiling on kept diagnostics off `limits` itself, and keeps its emission private to the
+/// module it lands in. The one thing a caller still supplies is the parser — and a parser can
+/// reach only [`drain_unless_stopped`](crate::lossless::depth::drain_unless_stopped), which
+/// **stops and never emits**.
 ///
 /// # One door per dialect, and coherence is what says so
 ///
@@ -942,14 +942,14 @@ macro_rules! lossless_door {
     /// returns the [`Parse`]. The driver's own `Result` is dropped here; see
     /// `The driver's Result is dropped here` below.
     ///
-    /// # Every type is this function's choice, and both budgets are read here
+    /// # Every type is this function's choice, and three numbers are read here
     ///
     /// The lexer, the grammar brand, the error container, the emitter, the cache and the profile
     /// are all named above — a caller supplies the source, the limits and the parser, and none of
-    /// those can carry a diagnostic anywhere. `limits.parse_ceiling()` and
-    /// `limits.max_produce_events()` are read **here** rather than passed in, so no door can forget
-    /// one or vary it; that is what makes "every door installs the same ceiling" a fact about one
-    /// line instead of a check over six.
+    /// those can carry a diagnostic anywhere. `limits.parse_ceiling()`,
+    /// `limits.max_produce_events()` and `limits.max_diagnostics()` are read **here** rather than
+    /// passed in, so no door can forget one or vary it; that is what makes "every door installs
+    /// the same ceilings" a fact about one statement instead of a check over six.
     ///
     /// # It takes `&str`, and the two door families reach it differently
     ///
@@ -1040,7 +1040,7 @@ macro_rules! lossless_door {
     ///
     /// # What is lent, and in what order
     ///
-    /// `lend` is called once for each typed syntax error of the finished parse, by shared
+    /// `lend` is called once for each typed syntax error the finished parse keeps, by shared
     /// reference, before this function returns and never afterwards:
     ///
     /// 1. for each record the finished parse **keeps** at error severity, in emission order: each
@@ -1049,10 +1049,14 @@ macro_rules! lossless_door {
     ///    `invalid syntax` error at the record's span, so that a kept record always lends;
     /// 2. then, when the durable budget refused an item, the door's own refusal, once, last.
     ///
-    /// A record the classifier below drops is not lent, and a recovery hole, which has no payload,
-    /// is never lent. So an error is lent exactly when the finished parse has an error-severity
-    /// diagnostic for it, and `lend` is called at all exactly when
-    /// [`has_errors`](crate::lossless::runner::Parse::has_errors) is true.
+    /// A kept record is one of the first `limits.max_diagnostics()` the parse emitted. An error
+    /// emitted past them is refused by the emitter before the door sees it: it is not lent, it has
+    /// no diagnostic, and the finished parse counts it in
+    /// [`refused_errors`](crate::lossless::runner::Parse::refused_errors). A record the classifier
+    /// below drops is not lent, and a recovery hole, which has no payload, is never lent. So `lend`
+    /// is called for every error the finished parse has a diagnostic for, and
+    /// [`has_errors`](crate::lossless::runner::Parse::has_errors) is true exactly when `lend` was
+    /// called or an error was refused.
     ///
     /// **`lend` reads the verdict and cannot change it.** It is handed shared borrows after every
     /// root has run and after the classifier has decided each record, so what it does with them
@@ -1081,7 +1085,7 @@ macro_rules! lossless_door {
       // smear mint left to call: round 5 deleted `lossless_context` rather than widen it, and
       // three chained tokora calls are what replaced it.
       let context = ::tokora::input::InputContext::new(
-        <LosslessEmitter<'inp> as ::core::default::Default>::default(),
+        <LosslessEmitter<'inp>>::with_max_diagnostics(limits.max_diagnostics()),
         ::tokora::cache::DefaultCache::<$crate::$dm::$dl::Lexer<'inp, str>>::default(),
       )
       .with_recursion_limiter(::tokora::state::RecursionLimiter::with_limitation(

@@ -42,10 +42,11 @@
 //! 1. **A source-generic family applied to a concrete text type** — convict. The set of
 //!    "source-generic families" is *derived from the crate*, never listed: any generic type or
 //!    trait that is anywhere applied to a type parameter carrying a source bound owns a source
-//!    position at that argument index. `validate_executable<S, K>(…) where S: AsRef<[u8]>,
-//!    K: Sink<S>` is what makes `Sink`'s first argument a source position, which is what makes
-//!    `K: Sink<&'src str>` in `validate_executable_lossless` a narrowing — stated by the crate
-//!    about itself.
+//!    position at that argument index. `validate_executable<S, K>(…, &ExecutableDocument<S>, …)
+//!    where S: AsRef<[u8]> + Clone` is what makes `ExecutableDocument`'s first argument a source
+//!    position, which is what makes the `ExecutableDocument<&'src str>` that
+//!    `project_executable_document_recovered` returns a narrowing of its `source` — stated by the
+//!    crate about itself.
 //! 2. **The parameter's name is in the source lexicon** — convict. This is name evidence and it is
 //!    deliberately *conviction-only*: being in the lexicon adds a finding, being absent from it
 //!    never removes one. A vocabulary that could acquit would be a hand-maintained list of what to
@@ -73,8 +74,8 @@
 //! |---|---|---|---|
 //! | `Executor::start` | `operation: Option<&str>` | 3 — `&mut self` is `Executor<'a, S, V>`, and `Executor`'s first type argument is a source position | **datum** |
 //! | `Executor::handle_field_error` | `message: &str` | 3 — same receiver | **datum** |
-//! | `validate_executable_lossless` | `source: &'src str` | 1 — `K: Sink<&'src str>`, and `Sink`'s first argument is a source position | **narrowed** |
-//! | `validate_schema_lossless` | `source: &str` | 2, then 4 — `&Parse` is a rowan tree and carries no source type, so nothing is in hand | **narrowed** |
+//! | `project_executable_document_recovered` | `source: &'src str` | 1 — its return holds `ExecutableDocument<&'src str>`, a source position | **narrowed** |
+//! | `verify_parse` | `source: &str` | 2, then 4 — `&Parse` is a rowan tree and carries no source type, and the return holds none | **narrowed** |
 //! | `Schema::from_introspection` | `response: &str` | 2, then 4 — an associated function with nothing else in the signature | **narrowed** |
 //! | `Schema::sym` | `bytes: &[u8]` | step 1 — a byte view constrains nobody | **neutral** |
 //!

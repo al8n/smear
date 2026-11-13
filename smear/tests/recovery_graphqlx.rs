@@ -12,8 +12,9 @@
 //! costs that item alone.
 //!
 //! Every text the lossless tests read is also held to round-trip. Nothing here asserts what a
-//! layer lends its sink, which `layers_handover_graphqlx.rs` holds: where a test counts what a
-//! mistake costs, it counts the error diagnostics of the tree.
+//! layer lends its sink, which `layers_handover_graphqlx.rs` holds, but the codes of a string its
+//! line ends, which tell the lexer's error from the parser's: where a test counts what a mistake
+//! costs, it counts the error diagnostics of the tree.
 
 use smear::parser::graphqlx::Syntactic;
 
@@ -39,14 +40,15 @@ mod lossless {
   use core::ops::Range;
 
   use smear::{
+    diagnostic::Diagnose,
     lexer::limits::LosslessLimits,
     parser::graphqlx::{
       Lossless, Recovery, Syntactic,
       ast::{TypeSystemDocument, TypeSystemItem},
       kinds::SyntaxKind as K,
       lossless::{
-        Parse, SyntaxNode, parse_document, parse_document_with_limits, parse_type_system_document,
-        parse_type_system_document_with_limits,
+        GraphqlxLosslessErrorValue, Parse, SyntaxNode, parse_document, parse_document_with_limits,
+        parse_type_system_document, parse_type_system_document_with_limits,
       },
     },
   };
@@ -624,6 +626,114 @@ mod lossless {
       .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
       .collect();
     assert_eq!(operations, ["query R { g }"]);
+  }
+
+  // ── A string its line ends ─────────────────────────────────────────────────────────────────
+
+  /// A type whose first field's deprecation reason has no closing quote on its line, and two
+  /// fields after it, the second deprecated with a reason of its own.
+  const UNCLOSED_REASON: &str = "type Query {\n  a: String @deprecated(reason: \"oops)\n  \
+                                 b: Int\n  c: String @deprecated(reason: \"fine\")\n}\n";
+
+  /// The codes of the errors the lossless layer lends a sink for `text`, in the order it lends
+  /// them.
+  fn codes(text: &str) -> Vec<String> {
+    let mut lent: Vec<GraphqlxLosslessErrorValue<&str>> = Vec::new();
+    let _ = Lossless::new()
+      .type_system_document(text, &mut lent)
+      .expect("short enough for a tree");
+    lent
+      .iter()
+      .map(|error| error.code().as_str().to_string())
+      .collect()
+  }
+
+  /// The tokens of `kind` anywhere in `tree`, each as it is written.
+  fn tokens(tree: &SyntaxNode, kind: K) -> Vec<String> {
+    tree
+      .descendants_with_tokens()
+      .filter_map(|element| element.into_token())
+      .filter(|token| token.kind() == kind)
+      .map(|token| token.text().to_string())
+      .collect()
+  }
+
+  /// GraphQL's twin, through this dialect's layer: an inline string ends at its line, so the second
+  /// line's literal is `"oops)` alone, the one gap and the first error, the lexer's. The lines
+  /// after it are tokens again, so `"fine"` is a string with both its quotes and no token but a
+  /// line break runs over a line's end.
+  ///
+  /// The `(` the broken line leaves open still costs what an unclosed argument list costs, which
+  /// the lexer cannot mend: the list reads `b` as the reason's value and `Int` as the name of an
+  /// argument whose `:` is missing at `c`, so `b` and `c` are not fields of `Query`. Those are the
+  /// parser's errors, after the lexer's.
+  #[test]
+  fn a_string_its_line_ends_leaves_the_lines_after_it_to_the_grammar() {
+    let answer = read(UNCLOSED_REASON);
+    assert!(answer.errors);
+    assert_eq!(gaps(&answer.tree), [(String::from("\"oops)"), 45..51)]);
+    assert_eq!(tokens(&answer.tree, K::InlineString), ["\"fine\""]);
+    for token in answer
+      .tree
+      .descendants_with_tokens()
+      .filter_map(|element| element.into_token())
+    {
+      assert!(
+        token.kind() == K::Newline || !token.text().contains('\n'),
+        "{token:?} runs over a line's end"
+      );
+    }
+
+    let codes = codes(UNCLOSED_REASON);
+    assert_eq!(
+      codes.first().map(String::as_str),
+      Some("smear::syntax::unterminated-string"),
+      "{codes:?}"
+    );
+    assert!(
+      codes.len() > 1
+        && codes[1..]
+          .iter()
+          .all(|code| code != "smear::syntax::unterminated-string"),
+      "the parser's errors follow the lexer's one: {codes:?}"
+    );
+  }
+
+  /// The same broken line in a type that closes after it. The argument list meets the type's
+  /// `}`, reports it as the value that is missing and as its own `)`, and leaves it, so the type
+  /// closes on it and the definition after it is read whole. The literal used to run to the end of
+  /// the text, the brace and the next definition with it.
+  #[test]
+  fn a_string_its_line_ends_keeps_the_definition_after_it() {
+    let text = "type Query {\n  a: String @deprecated(reason: \"oops)\n}\n\
+                type Mutation {\n  b: Int\n}\n";
+    let answer = read(text);
+    assert!(answer.errors);
+    assert_eq!(gaps(&answer.tree), [(String::from("\"oops)"), 45..51)]);
+    let types: Vec<String> = top(&answer.tree)
+      .children()
+      .filter(|node: &SyntaxNode| node.kind() == K::ObjectTypeDefinition)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect();
+    assert_eq!(
+      types,
+      [
+        "type Query {\n  a: String @deprecated(reason: \"oops)\n}",
+        "type Mutation {\n  b: Int\n}"
+      ]
+    );
+    assert_eq!(
+      written(&answer.tree, K::FieldDefinition),
+      ["a: String @deprecated(reason: \"oops)", "b: Int"]
+    );
+    assert_eq!(
+      codes(text),
+      [
+        "smear::syntax::unterminated-string",
+        "smear::syntax::unexpected-token",
+        "smear::syntax::unexpected-token"
+      ]
+    );
   }
 
   #[test]

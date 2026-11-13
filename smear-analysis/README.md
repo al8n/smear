@@ -55,7 +55,9 @@ prelude and the packages each package may reach. The built-in packages, `core`, 
 are one embedded GraphQLx file each, parsed on every analysis. `graphqlx::analyze_with` is the same
 analysis with the parser layer the caller passes, such as `smear-parser`'s lossless layer, which
 recovers, so the well-formed rest of a broken file is analyzed, and it answers `Trees` beside the
-`Analysis`: what that layer kept for each file it read.
+`Analysis`: what that layer kept for each file it read. Each contribution, member and inline module
+answers its extent, where it is written in its file, and `Trees::node` answers the node of a kept
+tree that an extent was written as.
 
 Rules are visitors. A `graphqlx::Visitor` implements the hooks it needs, one for each entity a walk
 enters, leaves or reaches, and `graphqlx::visit` walks an analysis's model for it over the packages

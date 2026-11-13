@@ -83,26 +83,36 @@ pinning sub-clauses that a single fixture per rule would leave unreached.
 
 Compared with `apollo-parser`, `graphql-parser`, `async-graphql-parser` and `cynic-parser`:
 
-### One validator, reached three ways
+### One validator, reached two ways
 
 Validation is not a separate tool bolted on after parsing. Draft §3 runs inside `Schema::build`, so a
 malformed schema is refused once at startup rather than rediscovered on every request, and there is
-exactly one implementation of it behind three entrances:
+exactly one implementation of it behind two entrances:
 
 - **SDL** — `Schema::build`, over a parsed `TypeSystemDocument`.
 - **An introspection response** — `Schema::from_introspection` renders a draft §4 response as SDL and
   hands it to the same builder.
-- **A lossless CST** — `validate_schema_lossless` projects the tree and hands *that* to the same
-  builder, which is what lets an editor validate a schema it is in the middle of typing.
 
-The three do not carry identical guarantees, and the difference is worth knowing before you pick one.
+The two do not carry identical guarantees, and the difference is worth knowing before you pick one.
 An introspection response has no field for applied directives, so the directive-*usage* checks have
 nothing to run on through that door — the type-structure rules run identically, the usage rules
-cannot. The lossless doors recover per definition and return a `Recovery`; a caller that ignores it is
-reading a partial verdict as a total one.
+cannot.
 
-For executable documents, `validate_executable` and its lossless twin `validate_executable_lossless`
-run the same complete §5 rule set, and `RuleSet` selects any subset of it.
+For executable documents, `validate_executable` runs the complete §5 rule set, and
+`validate_executable_with` runs any subset of it that a `RuleSet` selects.
+
+A document comes from either of the parser's two layers, `Syntactic` or `Lossless`, and the
+validator reads it the same way whichever one answered. The syntactic layer stops at a text's first
+syntax error; the lossless layer recovers, which is what lets an editor validate a schema or a query
+somebody is still typing. The two kinds of error leave by two exits, and nothing merges them: syntax
+errors by the sink the layer is handed, findings by the validator's sink or the builder's
+`SchemaErrors`.
+
+A document from the lossless layer holds the well-formed part of its text. `parsed.is_valid()` says
+whether the text was a document, and `parsed.recovery()` how much of the text the document covers;
+a caller that reads the validator's verdict alone is reading a partial verdict as a total one. The
+validator's `Budget` prices validation and nothing before it, so a server that takes untrusted text
+through the lossless layer bounds the parse with the layer's own limits, `LosslessLimits`.
 
 ### Two token streams, two tree shapes
 
@@ -145,16 +155,19 @@ refused, while bytes can. A source that is not UTF-8 yields `Err(Refused::NonUtf
 valid_up_to, source_len })` and no `Parse` at all: no empty tree to reprint, and nothing for a
 consumer that pairs a parse with a source to be handed.
 
-**This is not yet true of the whole crate.** The lossless **projection**, the two lossless
-validator doors in front of it and the introspection door take `&str`; so does the one method of
-`proto`'s value trait that hands a driver the name of a variable. The projection's reason is stated
-in `smear-compiler/src/lossless.rs`'s header, and it is about what those doors hand *back*: a
-projection returns an AST borrowing the caller's buffer, so the parameter is the AST's source type.
-The narrowings are not folklore either way: `cargo run -p source-census -- --verbose` walks the
-public surface and prints every one with a written reason — at this commit, 42 narrowed parameters
-out of 804, of which 22 are tracked against issues [#121], [#103] and [#139] as things to widen
-rather than accepted shapes, and 13 are structural. Twelve of the thirteen are the lossless parse
-doors above, recorded as narrow because they are, beside the `_from` siblings that are not.
+**This is not yet true of the whole crate.** The lossless **projection** takes `&str`, and so the
+lossless parser layer, which answers its document through the projection, reads `str` alone. The
+introspection door takes `&str` too, and so does the one method of `proto`'s value trait that hands
+a driver the name of a variable. The projection's reason is stated in the parser's own projection
+headers — "Why `source` is a parameter, and why it stays `&str`" in
+`smear-parser/src/graphqlx/lossless/project.rs`, and "Why `source` is a parameter, and why the pair
+is checked" in its GraphQL twin — and it is about what a projection hands *back*: an AST borrowing
+the caller's buffer, so the parameter is the AST's source type. The narrowings are not folklore
+either way: `cargo run -p source-census -- --verbose` walks the public surface and prints every one
+with a written reason, and counts them on its summary line — the narrowed parameters, those tracked
+against issues [#121], [#103] and [#139] as things to widen rather than accepted shapes, and the
+structural ones, among them the lossless parse doors above, recorded as narrow because they are,
+beside the `_from` siblings that are not.
 
 ### A diagnostic contract, not a `Display` string
 
@@ -324,7 +337,7 @@ parser cannot exist without it, and a gate that can only ever be on is not a gat
 | `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator`; needs `std` or `alloc`, which it does not imply. Adds no third-party dependency | |
 | `analysis` | `smear::analysis` — the GraphQLx schema analyzer: GraphQLx packages in, a resolved model and its diagnostics out, and rules as visitors over the model, smear's own and a consumer's. Implies `parser` and `graphqlx`; needs `std` or `alloc`, which it does not imply. Adds no third-party dependency | |
 | `materialized-numbers` | A second set of GraphQL value productions whose `Int` and `Float` leaves carry a number instead of a source slice. One tree, generic over the integer: `Int` is `i32` — the width draft §3.5.1 specifies — or `i64`, the reading that takes §2.9.1's unbounded grammar at its word and accepts literals the specification does not; a refusal names which. `Float` is `f64` at both, because draft §3.5.2 says `Float` **is** IEEE 754 double precision. **Numbers only** — strings keep their slice, because materialisation is required to allocate nothing the slice parser did not already allocate. Implies `parser` and `graphql`; adds no dependency, leaves the slice AST and the slice parser untouched, and keeps the slice parser available for the literals neither width can hold | |
-| `rowan_0_17` | The lossless CST tower, over `rowan` 0.17, and with `validator` the lossless validation doors. Implies `parser` and no tier; the tower needs `std` | |
+| `rowan_0_17` | The lossless CST tower, over `rowan` 0.17. Implies `parser` and no tier; the tower needs `std` | |
 | `bytes_1` | Support the `bytes::Bytes` source type, from `bytes` 1. Implies no tier | |
 | `bstr_1` | Support the `bstr::BStr` source type, from `bstr` 1. Implies no tier | |
 | `hipstr_0_8` | Support the `hipstr::{HipStr, HipByt}` source types, from `hipstr` 0.8. Implies no tier | |

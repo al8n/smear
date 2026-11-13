@@ -33,7 +33,16 @@ use super::{
 /// It has no type parameter and no lifetime: it is the same type whatever text type the packages
 /// were supplied in, and it borrows nothing from them. The model and the diagnostics are complete
 /// whatever was refused; [`is_ok`](Self::is_ok) is the verdict.
-#[derive(Debug, Clone)]
+///
+/// Two analyses are equal when their models, their diagnostics (the list, the error count and
+/// whether the list is truncated), their source maps and the diagnostic ceilings they were made
+/// under are equal. So two analyses of one package set made under two ceilings are unequal, even
+/// when neither list was truncated: a walk over each keeps to its own ceiling. The models are
+/// compared as [`Model`]'s equality says, every row and every id, which is the question to ask of
+/// two analyses of the same packages: [`analyze_with`] says when two parser layers answer equal
+/// ones. It is `PartialEq` and not `Eq` because a float value is compared as an `f64` is; no
+/// literal spells a NaN, so an analysis is equal to itself.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Analysis {
   model: Model,
   diagnostics: Diagnostics,
@@ -84,7 +93,7 @@ impl Analysis {
 
   /// Whether nothing was refused: no diagnostic of
   /// [`Severity::Error`](tokora::diagnostic::Severity::Error) was reported, kept or dropped by the
-  /// ceiling.
+  /// ceiling, and no syntax error was counted that a parser did not lend.
   #[inline]
   pub fn is_ok(&self) -> bool {
     !self.diagnostics.has_errors()
@@ -284,9 +293,10 @@ impl Analysis {
 ///
 /// Each error a phase or one of smear's rules reports marks, whether the ceiling keeps it or not,
 /// the contribution whose extent holds where it points, every member whose extent holds it, and
-/// through the contribution its definition: their `has_errors()` say so. An extent runs from the
-/// description, or the first keyword when there is none, to the last token, and an error that
-/// points at no definition, such as one at a package source, marks nothing. A syntax error marks
+/// through the contribution its definition: their `has_errors()` say so, and
+/// [`Contribution::extent`](super::Contribution::extent) and
+/// [`Member::extent`](super::Member::extent) say what each extent spans. An error that points at
+/// no definition, such as one at a package source, marks nothing. A syntax error marks
 /// nothing either. What the parser could not read has no image in its file's document, and so no
 /// contribution to mark; and a definition the parser read past a reported mistake stands in the
 /// document unmarked: its `has_errors()` does not speak of the syntax error, which is in the
@@ -335,9 +345,19 @@ pub fn analyze<S: SourceText>(
 /// holds nothing but white space, commas, byte order marks and comments. When the supplied sources
 /// are over [`Limits::max_source_bytes`], no supplied file is parsed at all.
 ///
+/// A parser that keeps a bounded number of records, as the lossless layer does under its own
+/// limits, lends no more than it kept; the errors it found beyond them are counted, and the list
+/// is truncated.
+///
 /// The trees borrow nothing of the packages at a concrete call: they are `Trees<()>` for
 /// [`Syntactic`], and a tree of the lossless layer holds no text of the caller's. A consumer generic
 /// over the layer that keeps the trees past the packages bounds `P::Tree: 'static`.
+///
+/// For a package set no layer reports a syntax error for, every layer answers an equal
+/// [`Analysis`], the rules' diagnostics and marks included: the layers hand the same phases the
+/// same documents in the same order. Where a layer reports a syntax error, the package ids and the
+/// source ids are still those every other layer answers, and nothing else is promised. The trees
+/// are beside the analysis, and no part of its equality.
 pub fn analyze_with<'a, P, S>(
   parser: &P,
   root: &'a Package<S>,
@@ -551,7 +571,13 @@ impl<T> Trees<T> {
   /// source.
   ///
   /// `None` for a location with no span, for a source with no tree, and for a span that does not
-  /// lie inside its tree's text. An extent the analysis answers always has a span.
+  /// lie inside its tree's text. An extent the analysis answers has a span, but for one: the own
+  /// contribution of a primitive `core` materialises, when no definition of the root package's
+  /// replaces it, answers the whole of `core`'s package source.
+  ///
+  /// Leading trivia lies outside a node, and trailing trivia can lie inside it, up to the next
+  /// token, so a node's range may hold a comment written for what follows. A tool that rewrites an
+  /// entity replaces its extent, never its node's range.
   pub fn node(&self, at: Location) -> Option<T::Node>
   where
     T: SyntaxTree,

@@ -587,18 +587,21 @@ fn read_the_whole_contract(subject: &dyn Diagnose, sink: &mut StackBuffer<512>) 
   black_box(sink.len());
 }
 
-/// The lossless door's whole-root check allocates nothing, and the red tree is what it used to be.
+/// The parser's whole-root check, `verify_parse`, allocates nothing, and the red tree is what it
+/// used to be.
 ///
-/// # The gate that was not looking
+/// # What is measured
 ///
-/// Everything above measures `validate_executable` — the syntactic door. The **lossless** door was
-/// never in this file's population, which is why `verify_parse` could spend one rowan cursor
-/// allocation per element on every call for a round without any gate noticing: same diagnostics,
-/// same verdicts, only the allocator sees it. That is the shape
-/// `a_warm_schema_build_allocates_only_for_the_schema` exists against, one door over.
+/// Everything above measures the validator. This measures the check `smear-parser` makes that a
+/// `(parse, source)` pair is one document, which `Verified::new` and the recovering projections
+/// make before they read a pair. A check that read the pair through the red tree would spend one
+/// rowan cursor allocation per element on every call: same answers, and only the allocator sees
+/// it. That is the shape `a_warm_schema_build_allocates_only_for_the_schema` exists against, one
+/// subject over.
 ///
-/// The subject is `verify_parse` itself rather than the door, because the door legitimately
-/// allocates — it projects an AST — while this helper is public, holds no budget, and must not.
+/// The subject is `verify_parse` itself rather than a projection, because a projection
+/// legitimately allocates — it builds an AST — while this helper is public, holds no budget, and
+/// must not.
 ///
 /// # What the zero means now that the walk is not a recursion
 ///

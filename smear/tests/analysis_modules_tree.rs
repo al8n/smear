@@ -6,7 +6,7 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, DefId, Diagnostic, DiagnosticKind, Layout, Limits, Model, Module, ModuleId,
-    ModuleKind, Package, PackageId, SourceFile, SourceId, Sym, Tier, analyze, test_support,
+    ModuleKind, Package, PackageId, SourceFile, SourceId, Sym, Tier, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -159,7 +159,7 @@ fn a_directory_package_has_a_module_per_directory_and_its_files_share_it() {
     let module: Module<'_> = model.module(id);
     assert_eq!(module.location(), None);
     assert_eq!(module.description(), None);
-    assert_eq!(test_support::module_extent(model, id), None);
+    assert_eq!(module.extent(), None);
   }
 }
 
@@ -226,7 +226,7 @@ fn an_inline_mod_declares_a_child_of_the_module_it_is_written_in() {
       Some(mod_name(a, NESTED, "outer", 0))
     );
     assert_eq!(
-      test_support::module_extent(model, outer),
+      model.module(outer).extent(),
       Some(Location::new(a.get(), SimpleSpan::new(0, outer_end)))
     );
     assert_eq!(
@@ -234,7 +234,7 @@ fn an_inline_mod_declares_a_child_of_the_module_it_is_written_in() {
       Some(mod_name(a, NESTED, "inner", 0))
     );
     assert_eq!(
-      test_support::module_extent(model, inner),
+      model.module(inner).extent(),
       Some(Location::new(
         a.get(),
         SimpleSpan::new(inner_start, inner_end)

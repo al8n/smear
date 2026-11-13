@@ -66,6 +66,9 @@ mod comment_utf8_tests;
 #[cfg(test)]
 mod diagnostic_tests;
 
+#[cfg(test)]
+mod string_bounds_tests;
+
 /// The error data type for lexing based on syntactic token with `char` source.
 pub type SyntacticLexerErrorData = error::LexerErrorData<char, RecursionLimitExceeded>;
 /// The error type for lexing based on syntactic token with `char` source.
@@ -1316,7 +1319,8 @@ where
   /// `CHECK_UTF8` is `true` for a byte source, whose comments must be well-formed UTF-8
   /// (smear#251), and `false` for a text source, which pays nothing for it. With `true` the one
   /// scan that finds the terminator also checks the body, and an ill-formed body is still skipped
-  /// whole: the answer is one `UnknownLexeme` per sequence [`IllFormedUtf8`] yields, built by
+  /// whole: the answer is one `UnknownLexeme` per sequence [`IllFormedUtf8`] yields, up to
+  /// sixteen, and one `Omitted` counting the rest, built by
   /// [`refuse_comment`](Self::refuse_comment). Mirrors the GraphQL lexer's of the same name.
   #[inline(always)]
   fn skip_comment<const CHECK_UTF8: bool>(
@@ -1347,10 +1351,11 @@ where
   /// end: its line terminator, or the end of input.
   ///
   /// `first` is the first ill-formed sequence `walk` yielded, and the rest of `walk` yields the
-  /// others, all relative to the body, which starts one byte past the `#` at the cursor. Each
-  /// becomes an `UnknownLexeme` at its sequence's span, carrying the source's own unit at the
-  /// sequence's first byte, read as the unknown-byte arm reads one. Out of line and cold, so the
-  /// `#` arm's hot path stays the scan and one branch.
+  /// others, all relative to the body, which starts one byte past the `#` at the cursor. Each of
+  /// the first sixteen becomes an `UnknownLexeme` at its sequence's span, carrying the source's own
+  /// unit at the sequence's first byte, read as the unknown-byte arm reads one, and one `Omitted`
+  /// counts the rest. Out of line and cold, so the `#` arm's hot path stays the scan and one
+  /// branch.
   #[cold]
   #[inline(never)]
   fn refuse_comment(
@@ -1359,20 +1364,16 @@ where
     mut walk: IllFormedUtf8<'_, true>,
   ) -> LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded> {
     let body = self.cursor + 1;
-    let mut errs = LexerErrors::default();
-    for bad in core::iter::once(first).chain(walk.by_ref()) {
+    let src = &self.src;
+    let sequences = core::iter::once(first).chain(walk.by_ref()).map(|bad| {
       let start = body + bad.start;
-      let ch = self
-        .src
+      let ch = src
         .slice(&start..)
         .and_then(|tail| tail.iter().next())
         .expect("an ill-formed sequence starts at a byte of the source");
-      errs.push(LexerError::unknown_char(
-        SimpleSpan::new(start, body + bad.end),
-        ch,
-        start,
-      ));
-    }
+      (SimpleSpan::new(start, body + bad.end), ch)
+    });
+    let errs = LexerErrors::ill_formed_comment(sequences);
     self.cursor = body + walk.body_len();
     errs
   }

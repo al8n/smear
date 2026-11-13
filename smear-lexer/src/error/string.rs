@@ -11,7 +11,7 @@ type Span = SimpleSpan;
 
 use crate::hints::{LineTerminatorHint, LitStrDelimiterHint, UnpairedSurrogateHint};
 
-use super::{LengthError, SyntaxErrorKind};
+use super::{LengthError, LexemeErrors, SyntaxErrorKind};
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
 enum InvalidUnicodeHexDigitsRepr<Char = char> {
@@ -665,16 +665,20 @@ pub enum StringError<Char = char> {
   ///
   /// Only a byte source (`[u8]`, `Bytes`, `BStr`, `HipByt`, smol-bytes' `Bytes`) can hold one,
   /// and its lexer reports each ill-formed sequence in an inline or block literal as one of
-  /// these. The span is the sequence's maximal subpart: the bytes up to where they stop being a
-  /// prefix of any valid sequence, at least one.
+  /// these, up to the record's sixteen ([`Omitted`](Self::Omitted) counts the rest). The span is
+  /// the sequence's maximal subpart: the bytes up to where they stop being a prefix of any valid
+  /// sequence, at least one.
   #[from(skip)]
   UnsupportedCharacter(Lexeme<Char>),
-  /// An unexpected line terminator in a string literal.
+  /// A line terminator inside an inline string literal.
+  ///
+  /// smear's lexers do not report it: an inline string ends at its first line terminator, before
+  /// it, and is [`Unterminated`](Self::Unterminated) there. Only a caller builds one.
   UnexpectedLineTerminator(UnexpectedLexeme<Char, LineTerminatorHint>),
   /// An unexpected escaped character in a string literal.
   UnexpectedEscapedCharacter(EscapedCharacter<Char>),
-  /// A backslash that no character follows: the input ends right after it, or (byte sources only)
-  /// the bytes after it are not well-formed UTF-8.
+  /// A backslash that no character follows: the input ends right after it, an inline string's
+  /// line does, or (byte sources only) the bytes after it are not well-formed UTF-8.
   ///
   /// The span is the backslash's single byte. Ill-formed bytes after it are reported on their own,
   /// as [`UnsupportedCharacter`](Self::UnsupportedCharacter), when they are no prefix of any
@@ -688,6 +692,17 @@ pub enum StringError<Char = char> {
   Unterminated(UnexpectedEnd<LitStrDelimiterHint>),
   /// A unicode error in a string literal.
   Unicode(UnicodeError<Char>),
+  /// How many more errors the literal held than its record keeps: N more errors in this string
+  /// literal were found and not kept.
+  ///
+  /// The lexers keep a literal's first sixteen errors (`MAX_LEXEME_ERRORS`, a crate constant) in
+  /// the order found. Each fault past them is counted and not stored, and when any was, this entry
+  /// follows the sixteen. A literal its line or the input ends is closed by
+  /// [`Unterminated`](Self::Unterminated) after it, which no count takes, because it says why the
+  /// literal's token ends where it does. So a record holds at most eighteen entries, however long
+  /// its literal is. It reports [`InvalidSyntax`](SyntaxErrorKind::InvalidSyntax).
+  #[from(skip)]
+  Omitted(usize),
   /// Any other error in a string literal.
   Other(Cow<'static, str>),
 }
@@ -714,7 +729,7 @@ impl<Char> StringError<Char> {
       Self::Unopened(_) => SyntaxErrorKind::UnopenedString,
       Self::Unterminated(_) => SyntaxErrorKind::UnterminatedString,
       Self::Unicode(error) => error.kind(),
-      Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
+      Self::Omitted(_) | Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
     }
   }
 
@@ -748,6 +763,9 @@ impl<Char> StringError<Char> {
   }
 
   /// Creates an unexpected new line error.
+  ///
+  /// smear's lexers do not report one; see
+  /// [`UnexpectedLineTerminator`](Self::UnexpectedLineTerminator).
   #[inline]
   pub const fn unexpected_new_line(ch: Char, position: usize) -> Self {
     Self::UnexpectedLineTerminator(UnexpectedLexeme::from_positioned_char(
@@ -757,6 +775,9 @@ impl<Char> StringError<Char> {
   }
 
   /// Creates an unexpected carriage return error.
+  ///
+  /// smear's lexers do not report one; see
+  /// [`UnexpectedLineTerminator`](Self::UnexpectedLineTerminator).
   #[inline]
   pub const fn unexpected_carriage_return(ch: Char, position: usize) -> Self {
     Self::UnexpectedLineTerminator(UnexpectedLexeme::from_positioned_char(
@@ -766,6 +787,9 @@ impl<Char> StringError<Char> {
   }
 
   /// Creates an unexpected carriage return + new line error.
+  ///
+  /// smear's lexers do not report one; see
+  /// [`UnexpectedLineTerminator`](Self::UnexpectedLineTerminator).
   #[inline]
   pub const fn unexpected_carriage_return_new_line(span: Span) -> Self {
     Self::UnexpectedLineTerminator(UnexpectedLexeme::from_range_const(
@@ -805,14 +829,39 @@ impl<Char> StringError<Char> {
       Self::Unicode(unicode) => {
         unicode.bump(n);
       }
-      Self::Other(_) | Self::Unterminated(_) => {}
+      Self::Other(_) | Self::Unterminated(_) | Self::Omitted(_) => {}
     };
 
     self
   }
 }
 
+impl<Char> LexemeErrors<StringError<Char>> {
+  /// The record of a literal that ends at its closing delimiter: the errors kept, closed by
+  /// [`StringError::Omitted`] when more were found.
+  #[inline]
+  pub(crate) fn into_string_errors(self) -> StringErrors<Char> {
+    StringErrors(self.finish(StringError::Omitted))
+  }
+
+  /// The record of a literal its line or the input ends: [`into_string_errors`]'s, and after it
+  /// `unterminated`. The cap never counts that one away, because it is why the literal's token
+  /// ends where it does.
+  ///
+  /// [`into_string_errors`]: Self::into_string_errors
+  #[inline]
+  pub(crate) fn into_unterminated(self, unterminated: StringError<Char>) -> StringErrors<Char> {
+    let mut errors = self.finish(StringError::Omitted);
+    errors.push(unterminated);
+    StringErrors(errors)
+  }
+}
+
 /// A container for storing multiple string errors.
+///
+/// The record smear's lexers refuse a string literal with holds at most eighteen: the literal's
+/// first sixteen errors, [`StringError::Omitted`] counting the rest when there were more, and
+/// [`StringError::Unterminated`] when the literal's line or the input ends it.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, From, Into, Deref, DerefMut, AsMut, AsRef)]
 pub struct StringErrors<Char = char>(std::vec::Vec<StringError<Char>>);
 

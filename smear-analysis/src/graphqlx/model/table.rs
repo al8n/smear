@@ -98,15 +98,18 @@ pub(super) const VALUE_UNRESOLVED: u8 = 12;
 /// `ValueKind::Bytes`: `run` is the bytes, in the model's byte pool.
 pub(super) const VALUE_BYTES: u8 = 13;
 
+// Every row type below derives `PartialEq` and none derives `Eq`: a `Model` is compared whole,
+// by its derive, and it holds floats.
+
 /// A description: its cooked text, in the text arena, and where it is written.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct DescriptionRow {
   pub(super) text: Run,
   pub(super) location: Location,
 }
 
 /// A path as written: its root, its segments in the model's path pool, and where it is written.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct PathRow {
   pub(super) root: PathRoot,
   pub(super) segments: Run,
@@ -114,7 +117,7 @@ pub(super) struct PathRow {
 }
 
 /// One package. Appended by `analyze`, in [`PackageId`] order.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct PackageRow {
   /// The name, in the text arena.
   pub(super) name: Run,
@@ -135,7 +138,7 @@ pub(super) struct PackageRow {
 pub(super) const UNSET_MODULE: ModuleId = ModuleId::new(u32::MAX);
 
 /// One module. Appended by the module tree, in [`ModuleId`] order.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ModuleRow {
   pub(super) package: PackageId,
   pub(super) parent: Option<ModuleId>,
@@ -154,7 +157,7 @@ pub(super) struct ModuleRow {
 }
 
 /// One type or directive definition. Appended by item collection, in [`DefId`] order.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct DefRow {
   pub(super) kind: DefKind,
   pub(super) name: Sym,
@@ -194,7 +197,7 @@ pub(super) struct DefRow {
 
 /// The definition of a definition, one of its extensions, or one of the schema's: what one
 /// written item contributed. Appended with its owner, in contribution order.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ContributionRow {
   /// Where a definition's name, or an extension's target, is written; for one of the schema's, its
   /// first keyword.
@@ -221,7 +224,7 @@ pub(super) struct ContributionRow {
 }
 
 /// One type parameter of a definition.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct TypeParamRow {
   pub(super) name: Sym,
   pub(super) location: Location,
@@ -229,7 +232,7 @@ pub(super) struct TypeParamRow {
 }
 
 /// One `@extern` of a definition, resolved.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ExternRow {
   /// Its `lang`, in the text arena.
   pub(super) lang: Run,
@@ -240,7 +243,7 @@ pub(super) struct ExternRow {
 }
 
 /// A second name a module gives a definition: `Int` for `i32`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct AliasRow {
   pub(super) module: ModuleId,
   pub(super) name: Sym,
@@ -248,7 +251,7 @@ pub(super) struct AliasRow {
 }
 
 /// One member. Appended by item collection, in [`MemberId`] order.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct MemberRow {
   pub(super) kind: MemberKind,
   pub(super) name: Sym,
@@ -271,7 +274,7 @@ pub(super) struct MemberRow {
 }
 
 /// One written type occurrence. Appended in the walk's order, an occurrence before what it nests.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct TypeExprRow {
   /// One of the `KIND_*` constants.
   pub(super) shape: u8,
@@ -296,7 +299,7 @@ pub(super) struct TypeExprRow {
 pub(super) const UNSET_TY: TyId = TyId::new(u32::MAX);
 
 /// One type, interned. Appended by interning, a type's arguments before the type.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct TyRow {
   /// One of the `KIND_*` constants.
   pub(super) shape: u8,
@@ -320,7 +323,7 @@ pub(super) struct TyRow {
 }
 
 /// One value occurrence. Appended in the walk's order, a value before what it holds.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ValueRow {
   /// One of the `VALUE_*` constants.
   pub(super) shape: u8,
@@ -344,7 +347,7 @@ pub(super) struct ValueRow {
 }
 
 /// An integer literal's value.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct IntRow {
   /// Below zero; never set for a zero magnitude.
   pub(super) negative: bool,
@@ -355,7 +358,7 @@ pub(super) struct IntRow {
 }
 
 /// A float literal's value.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct FloatRow {
   pub(super) value: f64,
   /// The literal as written, in the text arena.
@@ -363,7 +366,7 @@ pub(super) struct FloatRow {
 }
 
 /// A literal kept as written.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct LiteralRow {
   pub(super) kind: LiteralKind,
   /// The literal as written, in the text arena.
@@ -371,7 +374,7 @@ pub(super) struct LiteralRow {
 }
 
 /// One directive application. Appended in the walk's order.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ApplicationRow {
   pub(super) directive: Resolution<DefId>,
   /// Its type arguments as written, in the model's application type-argument pool.
@@ -384,7 +387,7 @@ pub(super) struct ApplicationRow {
 }
 
 /// The schema: there is one per model, whether a schema definition is written or not.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(super) struct SchemaRow {
   /// The query, mutation and subscription roots, in that order.
   pub(super) roots: [Option<Root>; 3],
@@ -397,7 +400,7 @@ pub(super) struct SchemaRow {
 
 /// The built-in definitions a consumer keys on, found by name in the built-in packages when the
 /// model is finished.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(super) struct BuiltinsRow {
   /// In the order of [`BUILTIN_DIRECTIVES`].
   pub(super) directives: [Option<DefId>; 11],

@@ -149,7 +149,6 @@ PROBES = (
   ("schema-build", "smear-schema", "build", ("parser", "graphql"), ()),
   ("schema-introspection", "smear-schema", "introspection",
    ("parser", "graphql", "validator"), ()),
-  ("compiler-rowan", "smear-compiler", "rowan_0_17", ("parser", "graphql", "validator"), ()),
   ("compiler-introspection", "smear-compiler", "introspection",
    ("parser", "graphql", "validator"), ()),
 )

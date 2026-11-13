@@ -20,21 +20,8 @@
 //! - [`validate_executable`] — the draft §5 rules over a
 //!   parsed executable document, reported into the caller's
 //!   [`Sink`] and worked out in the caller's
-//!   [`Scratch`].
-#![cfg_attr(
-  all(feature = "rowan_0_17", feature = "std"),
-  doc = "- [`validate_executable_lossless`] — the \
-         same rules over a lossless rowan CST, by projecting it to that same AST rather than by \
-         being a second validator. The IDE door: it recovers per definition, so a document \
-         somebody is still typing is validated as far as it is well-formed, and the \
-         [`Recovery`] it returns says how far that was.\n\
-         - [`validate_schema_lossless`] — the same \
-         again for SDL, and the reason an editor validating a schema through the CST gets the \
-         draft §3 refusals rather than nothing. It projects and calls \
-         [`Schema::build`], so §3 has one implementation reached \
-         three ways, and it recovers and reports a \
-         [`Recovery`] for the same reason its executable twin does."
-)]
+//!   [`Scratch`]. The document is the one either of `smear-parser`'s parser layers answered, or one
+//!   the caller built, and a syntax error never reaches the sink: it leaves by the layer's own.
 //!
 //! The links here are bare, and they were crate-absolute until the split. While this was
 //! `smear::validator`, a module whose declaration carried an outer doc comment, they had to be:
@@ -167,8 +154,6 @@ pub use smear_schema as schema;
 mod diagnostic;
 #[cfg(any(feature = "std", feature = "alloc"))]
 mod executable;
-#[cfg(all(feature = "rowan_0_17", feature = "std"))]
-mod lossless;
 #[cfg(any(feature = "std", feature = "alloc"))]
 mod rule;
 #[cfg(any(feature = "std", feature = "alloc"))]
@@ -182,14 +167,6 @@ pub use diagnostic::{Context, Diagnostic, DiagnosticDisplay, MergeConflict};
 #[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use executable::{Invalid, Refusal, validate_executable, validate_executable_with};
-
-#[cfg(all(feature = "rowan_0_17", feature = "std"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "rowan_0_17", feature = "std"))))]
-pub use lossless::{
-  LosslessInvalid, LosslessSchemaErrors, Recovery, Verified, validate_executable_lossless,
-  validate_executable_lossless_verified_with, validate_executable_lossless_with,
-  validate_schema_lossless,
-};
 #[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use rule::{Rule, RuleSet};
@@ -232,8 +209,6 @@ pub mod __features {
   pub const ALLOC: bool = cfg!(feature = "alloc");
   /// `introspection`, as this crate resolved it.
   pub const INTROSPECTION: bool = cfg!(feature = "introspection");
-  /// `rowan_0_17`, as this crate resolved it.
-  pub const ROWAN_0_17: bool = cfg!(feature = "rowan_0_17");
   /// `std`, as this crate resolved it.
   pub const STD: bool = cfg!(feature = "std");
 }

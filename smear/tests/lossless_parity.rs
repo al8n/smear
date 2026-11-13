@@ -370,9 +370,9 @@ const ALPHABET: &[(&str, &str)] = &[
 /// Injection is defined at *token* boundaries, so a source the lexer refuses byte for byte has no
 /// boundaries to inject at. Four entries are in that state: the three of
 /// [`LEXER_ERROR_ENTRIES`], whose whole source is one lexer error, and
-/// `invalid_unterminated_string.graphql`, whose unterminated string swallows the remainder of the
-/// file after nine tokens have already been lexed. `token_boundaries` answers `None` on any source
-/// with a lexer error anywhere, so partial lexability does not rescue the last one.
+/// `invalid_unterminated_string.graphql`, whose unterminated string is a lexer error between nine
+/// tokens and three more. `token_boundaries` answers `None` on any source with a lexer error
+/// anywhere, so partial lexability does not rescue the last one.
 ///
 /// Pinned as a set rather than skipped silently. A **new** unlexable entry is a corpus decision
 /// somebody should have to make on purpose. Note the count that did *not* move: the corpus went
@@ -408,9 +408,9 @@ const LEXER_ERROR_ENTRIES: &[&str] = &[
 ///
 /// The contrast that keeps [`LEXER_ERROR_ENTRIES`] honest. This one has carried a lexer error
 /// since Task 11 and is classified [`Channel::Lexer`] exactly like the three above — but nine
-/// tokens lex before the unterminated string swallows the rest, so `saw_token` was always true and
-/// it never met the zero-token wall. "Has a lexer error" and "has no lexable byte" are different
-/// claims, and this is the entry that separates them.
+/// tokens lex before the unterminated string, and three after it, so `saw_token` was always true
+/// and it never met the zero-token wall. "Has a lexer error" and "has no lexable byte" are
+/// different claims, and this is the entry that separates them.
 const LEXES_THEN_FAILS: &str = "invalid_unterminated_string.graphql";
 
 /// Every token boundary in `src`: offset 0, the end of each token, and therefore `src.len()`.

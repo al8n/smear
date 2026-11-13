@@ -552,6 +552,8 @@ fn same_string_error(byte: &StringError<u8>, str_: &StringError<char>) -> bool {
     // no `Char` -- same concrete type either side.
     (StringError::Unterminated(b), StringError::Unterminated(s)) => b == s,
     (StringError::Unicode(b), StringError::Unicode(s)) => same_unicode_error(b, s),
+    // `Omitted` counts the errors past the record's sixteen, and a count carries no `Char`.
+    (StringError::Omitted(b), StringError::Omitted(s)) => b == s,
     (StringError::Other(b), StringError::Other(s)) => b == s,
     // `Unopened` (`UnexpectedLexeme<Option<Char>, _>`) is structurally
     // unreachable from `SyntacticLexer::lex()` (the only entry into

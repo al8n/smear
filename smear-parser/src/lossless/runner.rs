@@ -75,6 +75,7 @@ impl Diagnostic {
 pub struct Parse<L: rowan_0_17::Language> {
   green: rowan_0_17::GreenNode,
   diagnostics: std::vec::Vec<Diagnostic>,
+  refused_errors: usize,
   // `PhantomData<fn() -> L>`, not `PhantomData<L>`: the covariant function-pointer form keeps
   // `Parse` `Send`/`Sync` regardless of `L` and imposes no `L`-shaped drop obligation. A bare
   // `PhantomData<L>` would make `Parse` inherit auto-traits from a marker type it never holds.
@@ -92,10 +93,12 @@ impl<L: rowan_0_17::Language> Parse<L> {
   const fn from_parts(
     green: rowan_0_17::GreenNode,
     diagnostics: std::vec::Vec<Diagnostic>,
+    refused_errors: usize,
   ) -> Self {
     Self {
       green,
       diagnostics,
+      refused_errors,
       language: core::marker::PhantomData,
     }
   }
@@ -116,13 +119,35 @@ impl<L: rowan_0_17::Language> Parse<L> {
     &self.green
   }
 
-  /// Every diagnostic the parse recorded, in emission order — errors, warnings and recovery
-  /// holes alike.
+  /// The diagnostics the parse **kept**, in emission order — errors, warnings and recovery holes
+  /// alike: at most the ceiling the parse ran under, and the door's own budget refusal beside
+  /// them. An error refused past that ceiling has none; [`refused_errors`](Self::refused_errors)
+  /// counts it.
   pub fn diagnostics(&self) -> &[Diagnostic] {
     &self.diagnostics
   }
 
-  /// Whether any grammar **error** was reported.
+  /// The errors the parse found past its ceiling on kept diagnostics, and did not keep.
+  ///
+  /// [`diagnostics`](Self::diagnostics) holds none of them, and [`has_errors`](Self::has_errors)
+  /// counts them. A door's ceiling is the `LosslessLimits::max_diagnostics` of the limits it ran
+  /// under.
+  ///
+  /// It counts error emissions, one for each, whatever each held. A refused record's payload is
+  /// dropped before anything reads it, so the members it held are unknown; and a record that held
+  /// nothing but the door's own budget variant, which the door drops when it is kept, is counted
+  /// when it is refused.
+  ///
+  /// It is 0 unless the parse recorded as many diagnostics as its ceiling allows.
+  /// `diagnostics()` can then hold fewer, because the door drops a recorded record that holds
+  /// nothing but its own budget variant. A caller that shows a parse's diagnostics shows that the
+  /// list is cut when this is not 0.
+  pub fn refused_errors(&self) -> usize {
+    self.refused_errors
+  }
+
+  /// Whether the parse found an **error**: one it kept a diagnostic for, or one it refused past
+  /// its ceiling and counted in [`refused_errors`](Self::refused_errors).
   ///
   /// This is the verdict the acceptance-parity gate compares against `syntactic`: both suites
   /// must agree here for every input, though their diagnostic *sets* need not match.
@@ -138,10 +163,11 @@ impl<L: rowan_0_17::Language> Parse<L> {
   /// yields a value for this to have to qualify. So there is no state here to report, and no
   /// empty-but-not-empty tree for a consumer to tell apart from a genuine parse of `""`.
   pub fn has_errors(&self) -> bool {
-    self
-      .diagnostics
-      .iter()
-      .any(|d| d.severity == Severity::Error)
+    self.refused_errors > 0
+      || self
+        .diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Error)
   }
 
   /// The node an extent belongs to: the smallest node whose range covers `span`, or the parent of
@@ -264,7 +290,8 @@ impl core::fmt::Display for MintError {
 // moves. `Display` carries the refusal's own message instead, so nothing is lost to a reader.
 impl core::error::Error for MintError {}
 
-/// Materialize `cst` at `root` and collect its diagnostics.
+/// Materialize `cst` at `root` and collect its diagnostics, and the count of errors its emitter
+/// refused past a ceiling on what it keeps.
 ///
 /// The public materialiser for a [`Cst`] its caller built, and the fallible contract for one:
 /// every refusal comes back as a [`MintError`]. Inside this crate its one caller is
@@ -478,7 +505,9 @@ where
   // refused has a stream to fix, not diagnostics to route.
   let green = green.map_err(|refusal| MintError { space, refusal })?;
 
-  Ok(Parse::from_parts(green, emitter.collect_diagnostics()))
+  let refused = emitter.refused_errors();
+  let diagnostics = emitter.collect_diagnostics();
+  Ok(Parse::from_parts(green, diagnostics, refused))
 }
 
 /// [`finish_root`] with the refusal turned into a panic, for a [`Cst`] this crate built itself.
@@ -660,12 +689,13 @@ where
   let mut diagnostics = emitter.collect_diagnostics_retaining(retains, visit);
   diagnostics.extend(append_error_at.map(Diagnostic::error_at));
 
-  Parse::from_parts(green, diagnostics)
+  Parse::from_parts(green, diagnostics, emitter.refused_errors())
 }
 
 /// The emitter half of a lossless context, reduced to what the two finishing functions ask of it:
 /// [`finish_root`] the projection, `finish_parsed_root_with` the projection with the door's
-/// variant classified out.
+/// variant classified out, and both the count of errors the emitter refused past a ceiling on
+/// what it keeps.
 ///
 /// # Why a trait rather than naming `Verbose<Err, SimpleSpan, Brand>`
 ///
@@ -676,9 +706,10 @@ where
 /// way: it pins the emitter's shape, so a dialect that ever needed a different recording emitter
 /// could not use the shared runner at all.
 ///
-/// Two methods, and both are the projection `Parse` needs — one of them filtered by a classifier
-/// the caller supplies, and lending each error payload it keeps to a visitor on the way. The
-/// blanket impl below covers `Verbose` for every error and brand, so no dialect writes an impl.
+/// Three methods. Two are the projection `Parse` needs — one of them filtered by a classifier the
+/// caller supplies, and lending each error payload it keeps to a visitor on the way — and the
+/// third is the count of errors the emitter refused, which no projection holds. The blanket impl
+/// below covers `Verbose` for every error and brand, so no dialect writes an impl.
 pub trait DiagnosticSource {
   /// The **typed** payload this emitter records, before the projection below throws it away.
   ///
@@ -752,6 +783,15 @@ pub trait DiagnosticSource {
     retains: impl Fn(&Self::Payload) -> bool,
     visit: impl FnMut(SimpleSpan, &Self::Payload),
   ) -> std::vec::Vec<Diagnostic>;
+
+  /// How many error emissions the emitter refused past a ceiling on what it keeps: counted, and
+  /// not kept, so no projection of this trait holds a diagnostic for them.
+  ///
+  /// Every implementation answers it, and an emitter with no such ceiling answers 0. The two
+  /// finishing functions carry it into the [`Parse`] they build, whose
+  /// [`refused_errors`](Parse::refused_errors) answers it and whose
+  /// [`has_errors`](Parse::has_errors) reads it.
+  fn refused_errors(&self) -> usize;
 }
 
 impl<Err, Brand: ?Sized> DiagnosticSource
@@ -796,5 +836,10 @@ impl<Err, Brand: ?Sized> DiagnosticSource
         },
       })
       .collect()
+  }
+
+  fn refused_errors(&self) -> usize {
+    // The inherent function, named by its path: this trait's method has its name.
+    tokora::emitter::Verbose::refused_errors(self)
   }
 }

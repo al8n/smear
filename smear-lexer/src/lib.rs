@@ -126,7 +126,7 @@ pub mod punctuator;
 ///   [`StringError::UnsupportedCharacter`](crate::error::StringError::UnsupportedCharacter), a
 ///   comment with
 ///   [`LexerErrorData::UnknownLexeme`](graphql::error::LexerErrorData::UnknownLexeme), one per
-///   ill-formed sequence
+///   ill-formed sequence up to sixteen, and then one entry that counts the rest
 /// - `bytes::Bytes`: For shared ownership (requires the `bytes_1` feature); a byte source like `&[u8]`
 ///
 /// # Modules

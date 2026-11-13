@@ -33,8 +33,9 @@ pub type Syntactic = crate::layer::Syntactic<GraphQLx>;
 
 /// The lossless layer of GraphQLx.
 ///
-/// It recovers, lends every syntax error to the caller's sink, and keeps the tree. It reads `str`:
-/// a tree holds text only, so a caller that holds bytes decodes them first.
+/// It recovers, lends every syntax error it kept to the caller's sink, and keeps the tree. It
+/// reads `str`: a tree holds text only, so a caller that holds bytes decodes them first, and
+/// reading byte sources is al8n/smear#121.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[cfg_attr(docsrs, doc(cfg(all(feature = "rowan_0_17", feature = "std"))))]
 pub type Lossless = crate::layer::Lossless<GraphQLx>;
@@ -63,7 +64,7 @@ pub trait Layer<'src, Src: ?Sized = str>: sealed::Sealed<'src, Src> {
 
   /// Parses `source` as a type-system document.
   ///
-  /// Lends `report` every syntax error it found. Answers the items that have an AST image, how
+  /// Lends `report` every syntax error it kept. Answers the items that have an AST image, how
   /// much of the text they cover, how many errors there were, and what the layer kept; or why it
   /// answers no document.
   fn type_system_document<K>(
@@ -163,6 +164,8 @@ syntactic_layer! {
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 impl sealed::Sealed<'_, str> for Lossless {}
 
+/// The lossless layer reads `str` alone, because a projection answers an AST that borrows the
+/// text; reading byte sources is al8n/smear#121.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 impl<'src> Layer<'src, str> for Lossless {
   type Error = lossless::GraphqlxLosslessErrorValue<&'src str>;
@@ -171,17 +174,19 @@ impl<'src> Layer<'src, str> for Lossless {
 
   // The three laws of a sink, from this body and the door's.
   //
-  // 1. The count is of the door's calls, one for each error it lends, and `report` is handed each
-  //    of them until it breaks: a sink that never breaks is called exactly `error_count()` times.
+  // 1. The count is of the door's calls, one for each error it lends, and of the error records
+  //    the parse refused past its ceiling on kept diagnostics, which the tree answers as
+  //    `refused_errors()`. `report` is handed each lent error until it breaks, so a sink that
+  //    never breaks is called exactly `error_count()` times, less the refused ones.
   // 2. The count does not read what `report` answers, so a sink that breaks changes neither it
   //    nor the verdict `Parsed` draws from it. A break ends the hand-over and nothing else: the
   //    parse had ended before the first error was lent.
   // 3. The door lends at least one error for each error diagnostic of the tree it answers, and
   //    none beside them: a record it keeps lends each member that is not a budget member, or one
   //    error made for it when it holds none; a record it drops lends nothing; and its own budget
-  //    refusal is one lent error beside the one diagnostic it appends. So the count is zero
-  //    exactly when the tree's `has_errors()` is false, and it is never less than the number of
-  //    the tree's error diagnostics.
+  //    refusal is one lent error beside the one diagnostic it appends. The tree's `has_errors()`
+  //    reads the refused errors beside the kept diagnostics, so the count is zero exactly when it
+  //    is false. The count is still never less than the number of the tree's error diagnostics.
   fn type_system_document<K>(
     &self,
     source: &'src str,
@@ -207,6 +212,7 @@ impl<'src> Layer<'src, str> for Lossless {
         }
       },
     );
+    let errors = errors.saturating_add(parse.refused_errors());
     let (document, recovery) = lossless::project::project_own_type_system_document(&parse, source);
     Ok(Parsed::new(document, recovery, errors, parse))
   }

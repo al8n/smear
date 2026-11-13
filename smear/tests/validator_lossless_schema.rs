@@ -1,21 +1,24 @@
 #![cfg(all(feature = "validator", feature = "rowan_0_17", feature = "std"))]
 
-//! The differential gate for the validator's lossless **schema** door.
+//! The schema builder's differential, written once over the GraphQL parser layer.
 //!
 //! # The claim, and the instrument
 //!
-//! `validate_schema_lossless(parse_type_system_document(sdl), sdl) ==
-//! Schema::build(type_system_document(sdl))` — **the same answer**, as a value. Refused, it is the
-//! same `Vec<SchemaError>`: [`SchemaError`] derives [`PartialEq`] over its kind, its subject, its
-//! owner, its span, its related span and its document index, and the comparison is `assert_eq!`
-//! over the whole vector, so order is in it too. Built, it is the same `Schema`, compared through
-//! its `Debug` rendering because that is the whole of what the type publishes about itself.
+//! [`answer`] reads an SDL with a parser layer and builds the schema of the document the layer
+//! answers. Over the same SDL, `answer(&Syntactic::new(), …)` and `answer(&Lossless::new(), …)`
+//! answer **the same answer**, as a value. Refused, it is the same `Vec<SchemaError>`:
+//! [`SchemaError`] derives [`PartialEq`] over its kind, its subject, its owner, its span, its
+//! related span and its document index, and the comparison is `assert_eq!` over the whole vector,
+//! so order is in it too. Built, it is the same `Schema`, compared through its `Debug` rendering
+//! because that is the whole of what the type publishes about itself. Beside it the two layers
+//! answer the same verdicts: the SDL is a document to both, neither lends an error, and both
+//! recoveries are complete and equal.
 //!
-//! The two doors are one builder by construction — the lossless one projects the CST to the
-//! `TypeSystemDocument` and calls `Schema::build` — so what this gate actually measures is the
-//! **projection**: that the AST reached through the tree is the AST reached through the parser, at
-//! every byte a refusal can point at. That is the single most likely place for a silent defect,
-//! because both paths produce *a* span and only a comparison shows they differ.
+//! There is one builder, and nothing in it knows which layer made its document, so what this gate
+//! actually measures is the lossless layer's **projection**: that the AST reached through the tree
+//! is the AST the syntactic layer answers, at every byte a refusal can point at. That is the single
+//! most likely place for a silent defect, because both paths produce *a* span and only a
+//! comparison shows they differ.
 //!
 //! `tests/validator_lossless.rs` is this file's twin one section of the specification over, and
 //! everything below is deliberately shaped like it: same corpus module, same trivia alphabet, same
@@ -63,45 +66,44 @@
 //!    plants the span perturbation at **each** fixture's own refusal site rather than at whichever
 //!    one the author picked, and requires the comparison to notice every time. It is this file's
 //!    stand-in for `validator_lossless.rs`'s per-rule drop: draft §3 has no `RuleSet` to switch a
-//!    rule off with, because both doors reach the rules through one `Schema::build`, so the only
-//!    thing that *can* differ between the doors is the document — which is what is perturbed.
+//!    rule off with, because both layers' documents reach the rules through one `Schema::build`, so
+//!    the only thing that *can* differ between them is the document — which is what is perturbed.
 //! 3. **A corpus that produces nothing to compare.** [`the_agreement_is_not_vacuous`] counts the
-//!    refusals and the distinct kinds each door actually produced, separately, and floors both.
-//! 4. **A door nobody can reach with a broken document.** [`a_half_typed_schema_still_gets_an_answer`]
-//!    truncates every corpus entry at every token boundary and requires the door to keep
-//!    answering — which is the entire reason the lossless leg exists.
+//!    refusals and the distinct kinds each layer's document actually produced, separately, and
+//!    floors both.
+//! 4. **A layer nobody can reach with a broken document.**
+//!    [`a_half_typed_schema_still_gets_an_answer`] truncates every corpus entry at every token
+//!    boundary and requires the lossless layer to keep answering — which is the entire reason it
+//!    exists.
 //!
 //! # One refusal an editor cannot underline
 //!
 //! [`POSITIONLESS`] records it: `MissingQueryRootOperationType` is reported at `0..0` with the
 //! subject `query`, because "this document has no query root" is a statement about the document
-//! and not about any span in it. Both doors report it identically — it is `Schema::build`'s
-//! answer, and that is the only thing this file has an opinion about — but a consumer rendering
-//! §3 into an editor's gutter has nothing to attach it to. Named here rather than left to be
-//! rediscovered, and checked rather than described: 57 of the 58 fixtures blame real bytes, and
-//! the census reds if a second one stops doing so.
+//! and not about any span in it. Both layers' documents are refused with it identically — it is
+//! `Schema::build`'s answer, and that is the only thing this file has an opinion about — but a
+//! consumer rendering §3 into an editor's gutter has nothing to attach it to. Named here rather
+//! than left to be rediscovered, and checked rather than described: 57 of the 58 fixtures blame
+//! real bytes, and the census reds if a second one stops doing so.
 //!
 //! # What is deliberately not compared
 //!
-//! An SDL the **syntactic** parser rejects. It has no AST, so `Schema::build` has no input, so
-//! there is no second value for a differential to hold against. That case is the lossless door's
-//! own — see the recovery tests at the bottom of this file, which pin it against stated
-//! expectations rather than against an oracle that does not exist.
+//! An SDL the **syntactic** layer rejects. It answers no document, so `Schema::build` has no input
+//! of its, and there is no second value for a differential to hold against. That case is the
+//! lossless layer's own — see the recovery tests at the bottom of this file, which pin it against
+//! stated expectations rather than against an oracle that does not exist.
 
 #![allow(missing_docs)]
 
+use core::ops::ControlFlow;
 use std::{collections::BTreeSet, string::String, vec::Vec};
 
 use smear::{
-  lexer::tokora::{Parse as _, Parser},
-  parser::graphql::{
-    GraphQL,
-    ast::TypeSystemDocument,
-    error::GraphqlErrors,
-    lossless::parse_type_system_document,
-    syntactic::{GraphqlLexer, type_system_document},
+  parser::{
+    graphql::{Layer, Lossless, Recovery, Syntactic, lossless::parse_type_system_document},
+    layer::from_fn,
   },
-  validator::{Recovery, Refusal, Schema, SchemaError, SchemaErrorKind, validate_schema_lossless},
+  validator::{Schema, SchemaError, SchemaErrorKind},
 };
 
 // The two corpora, shared with `validator_schema.rs` (which owns the census that keeps the §3 half
@@ -154,7 +156,7 @@ const KIND_FLOOR: usize = 58;
 /// specification's whole menagerie — six type kinds, extensions of none, `@oneOf`, list and
 /// non-null wrappers, arguments with defaults, a repeatable directive — and the one-field root the
 /// two schema-override fixtures share. Small because the corpus is, and it is not the only
-/// statement about the accepted direction: [`the_two_doors_agree_over_the_parser_corpus`] runs
+/// statement about the accepted direction: [`the_two_layers_agree_over_the_parser_corpus`] runs
 /// every SDL shape the parser's own corpus has through the same comparison, and
 /// `lossless_project.rs` compares the projected AST against the parsed one as a **value** over
 /// that corpus, which is the stronger claim and the one that would catch a dropped field.
@@ -183,20 +185,20 @@ const DISCRIMINATING_FLOOR: usize = 464;
 ///
 /// One entry, and it is a real limit of what an editor can render: "this document has no query
 /// root" is not a claim about any span in it, and `Schema::build` reports it at `0..0` with the
-/// subject `query`. That is trunk's behaviour, reproduced here rather than corrected — the door
-/// under test hands the same document to the same builder, so a span invented on this side would
-/// be a divergence between the two doors, which is the one thing this file exists to refuse.
+/// subject `query`. That is trunk's behaviour, reproduced here rather than corrected — both layers
+/// hand their documents to the same builder, so a span invented for one of them would be a
+/// divergence between the two, which is the one thing this file exists to refuse.
 const POSITIONLESS: &[SchemaErrorKind] = &[SchemaErrorKind::MissingQueryRootOperationType];
 
 // ---------------------------------------------------------------------------------------------
-// the two doors
+// the one harness, over the layer
 // ---------------------------------------------------------------------------------------------
 
-/// What a door answered about one SDL.
+/// What the builder answered about one SDL.
 ///
-/// One value rather than a `Result`, so a door that *built* a schema the other door *refused* is
-/// caught by the same `assert_eq!` as a door that refused it differently, instead of by a second
-/// assertion somebody has to remember to write.
+/// One value rather than a `Result`, so a layer whose document *built* a schema the other layer's
+/// document was *refused* is caught by the same `assert_eq!` as two documents refused
+/// differently, instead of by a second assertion somebody has to remember to write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Answer {
   /// The SDL is a schema, rendered as everything the type publishes about itself.
@@ -221,52 +223,35 @@ impl Answer {
   }
 }
 
-/// The syntactic door: parse to an AST, build the schema from the AST.
-fn syntactic(sdl: &str) -> Answer {
-  let document = Parser::with_parser::<
-    GraphqlLexer<'_, str>,
-    TypeSystemDocument<&str>,
-    GraphqlErrors<&str>,
-    _,
-    GraphQL,
-  >(type_system_document)
-  .parse_str(sdl)
-  .unwrap_or_else(|errors| panic!("the syntactic parser rejects it: {errors:?}\n---\n{sdl}"));
+/// What a parser layer and the builder answer for one SDL: the builder's answer, how much of the
+/// text the layer's document covers, whether the text was a document to the layer, and how many
+/// errors the layer lent.
+type Read = (Answer, Recovery, bool, usize);
 
-  Answer::of(Schema::build(&document).map_err(|errors| errors.errors().to_vec()))
+/// `sdl` read by `parser`, and the schema built from the document it answers. The layer's own
+/// `Result` is answered as it is: a caller knows its layer. A refusal holds at least one reason:
+/// the builder never answers `Err` with an empty list.
+fn answer<'s, P: Layer<'s>>(parser: &P, sdl: &'s str) -> Result<Read, P::Failure> {
+  let mut lent = 0usize;
+  let mut sink = from_fn(|_: &P::Error| {
+    lent += 1;
+    ControlFlow::Continue(())
+  });
+  let parsed = parser.type_system_document(sdl, &mut sink)?;
+  let built =
+    Answer::of(Schema::build(parsed.document()).map_err(|errors| errors.errors().to_vec()));
+  if let Answer::Refused(errors) = &built {
+    assert!(
+      !errors.is_empty(),
+      "the builder answered `Err` with no refusal in it\n---\n{sdl}"
+    );
+  }
+  Ok((built, parsed.recovery(), parsed.is_valid(), lent))
 }
 
-/// The lossless door: parse to a CST, hand the CST and its text to the validator.
-fn lossless(sdl: &str) -> (Answer, Recovery) {
-  let parse = parse_type_system_document(sdl);
-  match validate_schema_lossless(&parse, sdl) {
-    Ok((schema, recovery)) => (Answer::of(Ok(schema)), recovery),
-    Err(refused) => {
-      let recovery = refused
-        .recovery()
-        .expect("the pair matches, so the build was asked");
-      let errors = refused
-        .errors()
-        .expect("the pair matches, so the build was asked")
-        .errors()
-        .to_vec();
-      assert!(
-        !errors.is_empty(),
-        "the lossless door returned `Err` with no refusals in it\n---\n{sdl}"
-      );
-      // The `Err` arm's own accessors agree with each other, so a caller reading either one is
-      // reading the same verdict.
-      assert_eq!(
-        refused
-          .errors()
-          .expect("the pair matches, so the build was asked")
-          .len(),
-        errors.len(),
-        "the refusal list and its length disagree\n---\n{sdl}"
-      );
-      (Answer::of(Err(errors)), recovery)
-    }
-  }
+/// What a layer answered for `sdl`, which the caller knows is a document to that layer.
+fn answered<F>(read: Result<Read, F>, sdl: &str) -> Read {
+  read.unwrap_or_else(|_| panic!("the layer answers no document\n---\n{sdl}"))
 }
 
 /// `assert_eq!` over two answers, with a message a human can read when the `Built` arm differs.
@@ -281,8 +266,8 @@ fn assert_same(expected: &Answer, actual: &Answer, context: &str, sdl: &str) {
           .unwrap_or_else(|| left.lines().count().min(right.lines().count()));
         let show = |text: &String| text.lines().nth(at).unwrap_or("<end>").to_string();
         panic!(
-          "{context}: the two doors built different schemas; first difference at line {at}\n  \
-           syntactic: {}\n  lossless:  {}\n---\n{sdl}",
+          "{context}: the two layers' documents built different schemas; first difference at \
+           line {at}\n  syntactic: {}\n  lossless:  {}\n---\n{sdl}",
           show(left),
           show(right)
         );
@@ -290,9 +275,40 @@ fn assert_same(expected: &Answer, actual: &Answer, context: &str, sdl: &str) {
     }
     _ => assert_eq!(
       expected, actual,
-      "{context}: the two doors disagree\n---\n{sdl}"
+      "{context}: the two layers disagree\n---\n{sdl}"
     ),
   }
+}
+
+/// That the two layers read `padded` alike, as a document each, and answer the same: each a valid
+/// document, nothing lent, both recoveries complete and equal, and the builder's answer the same.
+/// Answers the syntactic layer's answer.
+fn agree(padded: &str, context: &str) -> Answer {
+  let (expected, syntactic, syntactic_valid, syntactic_lent) =
+    answered(answer(&Syntactic::new(), padded), padded);
+  let (actual, lossless, lossless_valid, lossless_lent) =
+    answered(answer(&Lossless::new(), padded), padded);
+  assert!(
+    syntactic_valid && lossless_valid,
+    "{context}: a layer calls the SDL invalid\n---\n{padded}"
+  );
+  assert_eq!(
+    (syntactic_lent, lossless_lent),
+    (0, 0),
+    "{context}: a layer lent a syntax error\n---\n{padded}"
+  );
+  assert!(
+    syntactic.is_complete() && lossless.is_complete(),
+    "{context}: a layer's document leaves out {} element(s) of an SDL both read whole\n---\n\
+     {padded}",
+    lossless.skipped()
+  );
+  assert_eq!(
+    lossless, syntactic,
+    "{context}: the two layers count two recoveries\n---\n{padded}"
+  );
+  assert_same(&expected, &actual, context, padded);
+  expected
 }
 
 /// Every token boundary in `sdl`, read off the lossless tree rather than from a second lexer.
@@ -342,35 +358,34 @@ fn accepted_documents() -> Vec<&'static str> {
   out
 }
 
+/// The builder's answer for `sdl` read by the syntactic layer, which the caller knows is a
+/// document to it.
+fn syntactic_answer(sdl: &str) -> Answer {
+  answered(answer(&Syntactic::new(), sdl), sdl).0
+}
+
+/// The builder's answer for `sdl` read by the lossless layer, and how much of `sdl` its document
+/// covers.
+fn lossless_answer(sdl: &str) -> (Answer, Recovery) {
+  let (built, recovery, _, _) = answered(answer(&Lossless::new(), sdl), sdl);
+  (built, recovery)
+}
+
 // ---------------------------------------------------------------------------------------------
 // the core assertion
 // ---------------------------------------------------------------------------------------------
 
-/// The two doors produce the same answer, as values, over the whole refusal corpus.
+/// The two layers answer the same verdicts and the builder the same answer, as values, over the
+/// whole refusal corpus.
 #[test]
-fn the_two_doors_agree() {
+fn the_two_layers_agree() {
   let mut compared = 0usize;
   let mut refusals = 0usize;
   let mut kinds: BTreeSet<SchemaErrorKind> = BTreeSet::new();
 
   for (kind, sdl, _) in refused_documents() {
     for (form, padded) in forms(sdl) {
-      let expected = syntactic(&padded);
-      let (actual, recovery) = lossless(&padded);
-
-      assert!(
-        recovery.is_complete(),
-        "{kind:?} ({form}): the projection dropped {} top-level element(s) of an SDL the \
-         syntactic parser accepts\n---\n{padded}",
-        recovery.skipped()
-      );
-      assert_same(
-        &expected,
-        &actual,
-        &std::format!("{kind:?} ({form})"),
-        &padded,
-      );
-
+      let expected = agree(&padded, &std::format!("{kind:?} ({form})"));
       refusals += expected.refusals().len();
       kinds.extend(expected.refusals().iter().map(SchemaError::kind));
       compared += 1;
@@ -397,34 +412,22 @@ fn the_two_doors_agree() {
   );
 }
 
-/// The two doors build the **same schema** out of every SDL that is one.
+/// The two layers' documents build the **same schema** out of every SDL that is one.
 ///
 /// The direction a refusal-only differential cannot see, and the one an editor spends most of its
 /// time in: an SDL that builds. A projection that quietly dropped a field, an argument default or
 /// a directive location would produce no refusal at all on either side and pass every assertion
 /// above.
 #[test]
-fn the_two_doors_build_the_same_schema() {
+fn the_two_layers_build_the_same_schema() {
   let mut compared = 0usize;
 
   for sdl in accepted_documents() {
     for (form, padded) in forms(sdl) {
-      let expected = syntactic(&padded);
+      let expected = agree(&padded, &std::format!("accepted ({form})"));
       assert!(
         matches!(expected, Answer::Built(_)),
         "({form}) an SDL the §5 corpus validates against is not a schema\n---\n{padded}"
-      );
-      let (actual, recovery) = lossless(&padded);
-      assert!(
-        recovery.is_complete(),
-        "({form}): the projection dropped {} top-level element(s) of a clean SDL\n---\n{padded}",
-        recovery.skipped()
-      );
-      assert_same(
-        &expected,
-        &actual,
-        &std::format!("accepted ({form})"),
-        &padded,
       );
       compared += 1;
     }
@@ -436,7 +439,7 @@ fn the_two_doors_build_the_same_schema() {
   );
 }
 
-/// The two doors agree over every SDL shape the **parser's** own corpus has.
+/// The two layers agree over every SDL shape the **parser's** own corpus has.
 ///
 /// The refusal corpus is one small SDL per §3 kind, so it is broad in rules and narrow in syntax:
 /// no descriptions, no block strings, barely an extension, and no value shape a default can hold.
@@ -444,20 +447,20 @@ fn the_two_doors_build_the_same_schema() {
 /// `lossless_trivia.rs` and `syntactic_span_extent.rs` all read, and it exists to cover the
 /// grammar — so running it through this comparison is what puts a directive on an enum value, a
 /// const object in an input field's default and a description on an argument in front of the two
-/// doors.
+/// layers.
 ///
 /// Every entry is a **fragment** of a schema rather than a schema — none of them defines a query
 /// root, and without one every answer would be the same positionless
 /// [`MissingQueryRootOperationType`](SchemaErrorKind::MissingQueryRootOperationType) and the sweep
 /// would compare 252 copies of a span at `0..0`. So each entry is prefixed with a root, once, and
 /// what is compared is the answer about the whole. The prefix is a constant, so every offset in
-/// the entry is shifted by the same amount through both doors and nothing about the comparison
+/// the entry is shifted by the same amount through both layers and nothing about the comparison
 /// changes.
 ///
 /// The entries the SDL root rejects are filtered out, not listed, so an entry added to the corpus
 /// later joins this sweep without anybody editing a table.
 #[test]
-fn the_two_doors_agree_over_the_parser_corpus() {
+fn the_two_layers_agree_over_the_parser_corpus() {
   let mut compared = 0usize;
   let mut refusals = 0usize;
   let mut built = 0usize;
@@ -467,23 +470,13 @@ fn the_two_doors_agree_over_the_parser_corpus() {
     for (form, padded) in forms(&sdl) {
       // Padding can turn an entry the SDL root took into one it does not; skip those rather than
       // assert, because which trivia a production tolerates is `lossless_trivia.rs`'s contract.
-      let parse = parse_type_system_document(&padded);
-      if parse.has_errors() {
+      // The lossless layer says so: it answers `is_valid()` false exactly when its tree has
+      // errors. On every entry kept, the syntactic layer must answer a document too.
+      let (_, _, valid, _) = answered(answer(&Lossless::new(), &padded), &padded);
+      if !valid {
         continue;
       }
-      let expected = syntactic(&padded);
-      let (actual, recovery) = lossless(&padded);
-      assert!(
-        recovery.is_complete(),
-        "{name} ({form}): the projection dropped {} element(s) of a clean SDL\n---\n{padded}",
-        recovery.skipped()
-      );
-      assert_same(
-        &expected,
-        &actual,
-        &std::format!("{name} ({form})"),
-        &padded,
-      );
+      let expected = agree(&padded, &std::format!("{name} ({form})"));
 
       match &expected {
         Answer::Built(_) => built += 1,
@@ -552,19 +545,19 @@ fn parser_corpus() -> Vec<(String, String)> {
 }
 
 /// The query root prefixed to each parser-corpus entry. A constant, so every offset in the entry
-/// moves by the same amount through both doors.
+/// moves by the same amount through both layers.
 const ROOTED: &str = "type Query { ok: Int }\n";
 
 // ---------------------------------------------------------------------------------------------
 // non-vacuity
 // ---------------------------------------------------------------------------------------------
 
-/// The corpus produces refusals on **both** sides, and reaches every kind through both doors.
+/// The corpus produces refusals through **both** layers, and reaches every kind through both.
 ///
-/// [`the_two_doors_agree`] counts what the syntactic door produced, which is the right thing to
-/// floor when the two are equal. This one counts them separately, so a lossless door that silently
-/// refused nothing could not hide behind an equality that happened to hold because both sides were
-/// empty.
+/// [`the_two_layers_agree`] counts what the syntactic layer's document produced, which is the
+/// right thing to floor when the two are equal. This one counts them separately, so a lossless
+/// layer whose document silently refused nothing could not hide behind an equality that happened
+/// to hold because both sides were empty.
 #[test]
 fn the_agreement_is_not_vacuous() {
   let mut syntactic_total = 0usize;
@@ -575,8 +568,8 @@ fn the_agreement_is_not_vacuous() {
 
   for (_, sdl, _) in refused_documents() {
     for (_, padded) in forms(sdl) {
-      let expected = syntactic(&padded);
-      let (actual, _) = lossless(&padded);
+      let expected = syntactic_answer(&padded);
+      let (actual, _) = lossless_answer(&padded);
       syntactic_total += expected.refusals().len();
       lossless_total += actual.refusals().len();
       syntactic_kinds.extend(expected.refusals().iter().map(SchemaError::kind));
@@ -589,17 +582,17 @@ fn the_agreement_is_not_vacuous() {
 
   assert!(
     syntactic_total >= REFUSAL_FLOOR,
-    "the syntactic door produced only {syntactic_total} refusals over the corpus"
+    "the syntactic layer's documents produced only {syntactic_total} refusals over the corpus"
   );
   assert!(
     lossless_total >= REFUSAL_FLOOR,
-    "the lossless door produced only {lossless_total} refusals over the corpus"
+    "the lossless layer's documents produced only {lossless_total} refusals over the corpus"
   );
   assert_eq!(syntactic_total, lossless_total);
   assert_eq!(syntactic_kinds, lossless_kinds);
   assert!(
     syntactic_kinds.len() >= KIND_FLOOR,
-    "the corpus reaches only {} kinds through the doors, floor is {KIND_FLOOR}",
+    "the corpus reaches only {} kinds through the layers, floor is {KIND_FLOOR}",
     syntactic_kinds.len()
   );
   assert_eq!(
@@ -624,22 +617,22 @@ fn the_comparison_can_answer_no() {
   let shifted = " type Query { ok: Nope }";
   let renamed = "type Query { ok: Missing }";
 
-  let a = syntactic(compact);
+  let a = syntactic_answer(compact);
   assert!(!a.refusals().is_empty(), "the control SDL is a schema");
 
   // The positive leg first, so "everything is unequal" cannot be why the rest passes.
-  let (again, recovery) = lossless(compact);
+  let (again, recovery) = lossless_answer(compact);
   assert_eq!(a, again);
   assert!(recovery.is_complete());
 
-  let (b, _) = lossless(shifted);
+  let (b, _) = lossless_answer(shifted);
   assert_ne!(
     a, b,
     "the same SDL one byte later compares equal, so spans are not being compared and this gate \
      cannot see a span defect at all"
   );
 
-  let (c, _) = lossless(renamed);
+  let (c, _) = lossless_answer(renamed);
   assert_ne!(
     a, c,
     "two SDL differing only in a type name compare equal, so subjects are not being compared"
@@ -647,7 +640,7 @@ fn the_comparison_can_answer_no() {
 
   // Order. A fixture with two refusals is what makes this reachable.
   let multi = "type Query { ok: Nope other: AlsoNope }";
-  let ordered = syntactic(multi);
+  let ordered = syntactic_answer(multi);
   assert!(
     ordered.refusals().len() >= 2,
     "the order control needs an SDL with at least two refusals, got {}",
@@ -658,15 +651,15 @@ fn the_comparison_can_answer_no() {
   assert_ne!(
     ordered,
     Answer::Refused(reversed),
-    "the same refusals in the opposite order compare equal, so the doors could disagree on order \
-     and this gate would not say so"
+    "the same refusals in the opposite order compare equal, so the layers could disagree on \
+     order and this gate would not say so"
   );
 
-  // And the `Built`/`Refused` seam, so a door that built what the other refused is caught by the
-  // same comparison rather than slipping between two of them.
+  // And the `Built`/`Refused` seam, so a layer whose document built what the other's refused is
+  // caught by the same comparison rather than slipping between two of them.
   assert_ne!(
     a,
-    syntactic("type Query { ok: Int }"),
+    syntactic_answer("type Query { ok: Int }"),
     "a refused answer compares equal to a built one"
   );
 }
@@ -678,18 +671,18 @@ fn the_comparison_can_answer_no() {
 /// For **every** fixture in the corpus, shifting the lossless side one byte reds the comparison.
 ///
 /// `validator_lossless.rs`'s per-rule control switches a rule off on one side; draft §3 has no
-/// `RuleSet` to do that with, because both doors reach every rule through one `Schema::build`. The
-/// only thing that can differ between these two doors is the **document** the builder is handed,
-/// so the perturbation is a document one — and it is planted at each fixture's own refusal site
-/// rather than at whichever one an author picked, which is what makes it a census instead of an
-/// anecdote.
+/// `RuleSet` to do that with, because both layers' documents reach every rule through one
+/// `Schema::build`. The only thing that can differ between them is the **document** the builder
+/// is handed, so the perturbation is a document one — and it is planted at each fixture's own
+/// refusal site rather than at whichever one an author picked, which is what makes it a census
+/// instead of an anecdote.
 #[test]
 fn a_one_byte_shift_is_caught_for_every_fixture() {
   let mut caught = 0usize;
   let mut excused: BTreeSet<SchemaErrorKind> = BTreeSet::new();
 
   for (kind, sdl, _) in refused_documents() {
-    let expected = syntactic(sdl);
+    let expected = syntactic_answer(sdl);
 
     // A fixture whose every refusal is a zero-width whole-document one has nothing for a shift to
     // move, so it cannot be perturbed this way. Excused, and only if the excuse was written down.
@@ -712,10 +705,10 @@ fn a_one_byte_shift_is_caught_for_every_fixture() {
     }
 
     let shifted = std::format!(" {sdl}");
-    let (perturbed, _) = lossless(&shifted);
+    let (perturbed, _) = lossless_answer(&shifted);
     assert_ne!(
       expected, perturbed,
-      "{kind:?}: the lossless door read an SDL one byte later and the comparison still \
+      "{kind:?}: the lossless layer read an SDL one byte later and the comparison still \
        agreed\n---\n{sdl}"
     );
     caught += 1;
@@ -733,9 +726,10 @@ fn a_one_byte_shift_is_caught_for_every_fixture() {
 // spans
 // ---------------------------------------------------------------------------------------------
 
-/// A refusal through the lossless door points at the same **bytes**, and the padding moves it.
+/// A refusal of the lossless layer's document points at the same **bytes**, and the padding moves
+/// it.
 ///
-/// [`the_two_doors_agree`] already compares spans, because they are fields of the value it
+/// [`the_two_layers_agree`] already compares spans, because they are fields of the value it
 /// compares. This adds the two things an `assert_eq!` cannot say on its own: that the offsets
 /// address the text they claim to (the slices are read out and compared), and that the padded
 /// corpus actually moved them — a sweep in which every form produced identical offsets would be
@@ -744,18 +738,18 @@ fn a_one_byte_shift_is_caught_for_every_fixture() {
 /// The related span is read out too. It is the second half of a duplicate-and-original refusal and
 /// nothing else in this file would notice if it pointed somewhere else.
 #[test]
-fn a_refusal_points_at_the_same_bytes_through_both_doors() {
+fn a_refusal_points_at_the_same_bytes_through_both_layers() {
   let mut checked = 0usize;
   let mut related_checked = 0usize;
   let mut moved = 0usize;
 
   for (kind, sdl, _) in refused_documents() {
-    let compact: Vec<_> = syntactic(sdl).refusals().to_vec();
+    let compact: Vec<_> = syntactic_answer(sdl).refusals().to_vec();
     assert!(!compact.is_empty(), "{kind:?}: the fixture is a schema");
 
     for (form, padded) in forms(sdl) {
-      let expected = syntactic(&padded);
-      let (actual, _) = lossless(&padded);
+      let expected = syntactic_answer(&padded);
+      let (actual, _) = lossless_answer(&padded);
       let (expected, actual) = (expected.refusals(), actual.refusals());
       assert_eq!(expected.len(), actual.len(), "{kind:?} ({form})");
 
@@ -768,7 +762,7 @@ fn a_refusal_points_at_the_same_bytes_through_both_doors() {
         assert_eq!(
           text(left),
           text(right),
-          "{kind:?} ({form}) #{index}: the two doors blame different bytes"
+          "{kind:?} ({form}) #{index}: the two layers' documents are blamed at different bytes"
         );
         assert!(
           text(left).is_some(),
@@ -783,7 +777,7 @@ fn a_refusal_points_at_the_same_bytes_through_both_doors() {
           assert_eq!(
             related(a),
             related(b),
-            "{kind:?} ({form}) #{index}: the two doors' related spans blame different bytes"
+            "{kind:?} ({form}) #{index}: the two layers' related spans blame different bytes"
           );
           assert!(related(a).is_some());
           related_checked += 1;
@@ -791,7 +785,8 @@ fn a_refusal_points_at_the_same_bytes_through_both_doors() {
           assert_eq!(
             left.related().is_some(),
             right.related().is_some(),
-            "{kind:?} ({form}) #{index}: one door carries a related span and the other does not"
+            "{kind:?} ({form}) #{index}: one layer's refusal carries a related span and the \
+             other's does not"
           );
         }
       }
@@ -836,7 +831,7 @@ fn the_padding_is_load_bearing() {
       if form == "compact" {
         continue;
       }
-      for error in syntactic(&padded).refusals() {
+      for error in syntactic_answer(&padded).refusals() {
         total += 1;
         let start = error.span().start();
         let end = error.span().end();
@@ -862,19 +857,19 @@ fn is_ignorable(c: char) -> bool {
 }
 
 // ---------------------------------------------------------------------------------------------
-// the recovering half — what the syntactic door has no answer for
+// the recovering half — what the syntactic layer has no answer for
 // ---------------------------------------------------------------------------------------------
 
 /// An SDL somebody is still typing gets §3 run over the part that is well-formed.
 ///
-/// The reason the lossless leg exists, measured rather than asserted: every corpus SDL is
-/// truncated at every token boundary and pushed through the door, and the run records how many of
-/// those broken documents still produced a refusal. A door that refused them all would compile,
+/// The reason the lossless layer exists, measured rather than asserted: every corpus SDL is
+/// truncated at every token boundary and read through it, and the run records how many of those
+/// broken documents still produced a refusal. A layer that answered none of them would compile,
 /// pass every other test in this file, and be useless.
 #[test]
 fn a_half_typed_schema_still_gets_an_answer() {
   let mut truncations = 0usize;
-  let mut answered = 0usize;
+  let mut answered_with_a_refusal = 0usize;
   let mut recovered_partially = 0usize;
 
   for (_, sdl, _) in refused_documents() {
@@ -883,10 +878,10 @@ fn a_half_typed_schema_still_gets_an_answer() {
         continue;
       }
       let half = &sdl[..cut];
-      let (answer, recovery) = lossless(half);
+      let (built, recovery) = lossless_answer(half);
       truncations += 1;
-      if !answer.refusals().is_empty() {
-        answered += 1;
+      if !built.refusals().is_empty() {
+        answered_with_a_refusal += 1;
       }
       if recovery.projected() > 0 && !recovery.is_complete() {
         recovered_partially += 1;
@@ -899,9 +894,9 @@ fn a_half_typed_schema_still_gets_an_answer() {
   // where a truncated document breaks, and that is not this file's contract to pin.
   assert!(truncations >= 1_300, "only {truncations} truncations");
   assert!(
-    answered >= 850,
-    "only {answered} of {truncations} half-typed SDL produced a refusal; the door is refusing the \
-     case it exists for"
+    answered_with_a_refusal >= 850,
+    "only {answered_with_a_refusal} of {truncations} half-typed SDL produced a refusal; the \
+     layer is refusing the case it exists for"
   );
   assert!(
     recovered_partially >= 300,
@@ -915,12 +910,13 @@ fn a_half_typed_schema_still_gets_an_answer() {
 fn a_broken_definition_does_not_cost_the_good_ones() {
   // The first type is complete and wrong; the second has no field type yet.
   let sdl = "type Query { ok: Nope }\ntype Half { f: }";
-  let (answer, recovery) = lossless(sdl);
+  let (built, recovery, valid, lent) = answered(answer(&Lossless::new(), sdl), sdl);
 
+  assert!(!valid && lent >= 1, "the SDL is not a document");
   assert_eq!(recovery.projected(), 1);
   assert!(!recovery.is_complete());
 
-  let refusals = answer.refusals();
+  let refusals = built.refusals();
   assert_eq!(refusals.len(), 1);
   assert_eq!(refusals[0].kind(), SchemaErrorKind::UndefinedType);
   let span = refusals[0].span();
@@ -936,23 +932,25 @@ fn a_broken_definition_does_not_cost_the_good_ones() {
 #[test]
 fn a_dropped_definition_can_invent_a_refusal() {
   let sdl = "type Query { ok: Nope }\ntype Nope { a: }";
-  let (answer, recovery) = lossless(sdl);
+  let (built, recovery, valid, lent) = answered(answer(&Lossless::new(), sdl), sdl);
 
+  assert!(!valid && lent >= 1, "the SDL is not a document");
   assert_eq!(recovery.projected(), 1, "only `Query` survives");
   assert!(!recovery.is_complete());
   assert!(
-    answer
+    built
       .refusals()
       .iter()
       .any(|error| error.kind() == SchemaErrorKind::UndefinedType),
     "the artifact this test documents did not appear: {:#?}",
-    answer.refusals()
+    built.refusals()
   );
 
   // And the same SDL with the second type intact builds, so the refusal above is the recovery's
   // and not the document's.
   let whole = "type Query { ok: Nope }\ntype Nope { a: Int }";
-  let (clean, recovery) = lossless(whole);
+  let (clean, recovery, valid, _) = answered(answer(&Lossless::new(), whole), whole);
+  assert!(valid, "the whole SDL is a document");
   assert!(recovery.is_complete());
   assert!(matches!(clean, Answer::Built(_)), "{:#?}", clean.refusals());
 }
@@ -961,255 +959,66 @@ fn a_dropped_definition_can_invent_a_refusal() {
 ///
 /// The §3 twin of `validator_lossless.rs`'s "nothing projected is visible in the recovery", and
 /// the more dangerous half: this one is a real, internally consistent `Schema` that an editor can
-/// go on to validate operations against, and the only thing that says it is missing a type is the
-/// [`Recovery`].
+/// go on to validate operations against, and what says it is missing a type is the layer's own
+/// two answers, the [`Recovery`] and `is_valid()` false, never the builder's.
 #[test]
 fn a_clean_verdict_over_a_partial_projection_is_a_smaller_schema() {
   let sdl = "type Query { ok: Int }\ntype Half { f: }";
-  let (answer, recovery) = lossless(sdl);
+  let (built, recovery, valid, lent) = answered(answer(&Lossless::new(), sdl), sdl);
 
+  assert!(matches!(built, Answer::Built(_)), "{:#?}", built.refusals());
   assert!(
-    matches!(answer, Answer::Built(_)),
-    "{:#?}",
-    answer.refusals()
+    !valid && lent >= 1,
+    "the builder's `Ok` is not the text's verdict"
   );
   assert_eq!(recovery.projected(), 1);
   assert_eq!(recovery.skipped(), 1);
   assert!(!recovery.is_complete());
 
-  // `Half` is not in it, and nothing in the verdict said so.
-  let (schema, _) = validate_schema_lossless(&parse_type_system_document(sdl), sdl)
-    .expect("the projected half is a schema");
+  // `Half` is not in it, and nothing in the builder's verdict said so.
+  let parsed = Lossless::new()
+    .type_system_document(sdl, &mut ())
+    .expect("short enough for a tree");
+  let schema = Schema::build(parsed.document()).expect("the projected half is a schema");
   assert!(schema.type_by_name(b"Half").is_none());
   assert!(schema.type_by_name(b"Query").is_some());
 }
 
 /// Nothing projected is **not** reported as a clean document.
 ///
-/// Where the executable door answers `Ok` with an empty sink over a document it never saw, this
-/// one refuses: an empty type-system document has no query root, so `Schema::build` says
+/// Where the executable validator answers `Ok` with an empty sink over a lossless document with
+/// nothing in it, the builder refuses: an empty type-system document has no query root, so
+/// `Schema::build` says
 /// [`MissingQueryRootOperationType`](SchemaErrorKind::MissingQueryRootOperationType). That is the
-/// better failure direction and it is not this door's doing — it falls out of §3 being a
+/// better failure direction and it is not the layer's doing — it falls out of §3 being a
 /// whole-document pass — so it is pinned here rather than claimed.
 #[test]
 fn nothing_projected_is_visible_in_the_recovery() {
   let sdl = "type Query { ok: }";
-  let parse = parse_type_system_document(sdl);
-  assert!(parse.has_errors());
+  let (built, recovery, valid, lent) = answered(answer(&Lossless::new(), sdl), sdl);
 
-  let refused = validate_schema_lossless(&parse, sdl).expect_err("an empty document is no schema");
-  assert_eq!(
-    refused
-      .recovery()
-      .expect("the pair matches, so the build was asked")
-      .projected(),
-    0
-  );
-  assert!(
-    !refused
-      .recovery()
-      .expect("the pair matches, so the build was asked")
-      .is_complete()
-  );
-  assert_eq!(
-    refused
-      .errors()
-      .expect("the pair matches, so the build was asked")
-      .kinds(),
-    [SchemaErrorKind::MissingQueryRootOperationType]
-  );
+  assert!(!valid && lent >= 1, "the SDL is not a document");
+  assert_eq!(recovery.projected(), 0);
+  assert!(!recovery.is_complete());
+  let kinds: Vec<SchemaErrorKind> = built
+    .refusals()
+    .iter()
+    .map(SchemaError::kind)
+    .collect::<Vec<SchemaErrorKind>>();
+  assert_eq!(kinds, [SchemaErrorKind::MissingQueryRootOperationType]);
 }
 
-/// Executable syntax in an SDL parse is rubble the recovery steps over.
+/// Executable syntax in an SDL text is rubble the recovery steps over.
 #[test]
 fn executable_syntax_is_skipped_not_fatal() {
   let sdl = "type Query { ok: Int } query Q { ok }";
-  let (answer, recovery) = lossless(sdl);
+  let (built, recovery, valid, lent) = answered(answer(&Lossless::new(), sdl), sdl);
 
+  assert!(!valid && lent >= 1, "the SDL is not a document");
   assert_eq!(recovery.projected(), 1, "the type should survive");
   assert!(
     recovery.skipped() > 0,
     "the operation should be dropped rather than projected"
   );
-  assert!(
-    matches!(answer, Answer::Built(_)),
-    "{:#?}",
-    answer.refusals()
-  );
-}
-
-/// The `(parse, source)` pair is verified as a **whole root**, and the SDL door verifies it too.
-///
-/// The executable door got this check first, and this one was cleared out of that sweep — "no
-/// `Budget`, so out of scope". True of the ledger question and silent about this one: a `source`
-/// that is the parse's text **plus trailing SDL** projects every stale definition, reports a
-/// complete recovery, and lets `Schema::build` answer `Ok` for the prefix while the appended
-/// definitions are silently absent. A schema built from part of its own SDL.
-///
-/// Both doors now make the same whole-root check, and so does the recovering projector itself, so a
-/// consumer using it directly cannot be handed a stale prefix either. al8n/smear#198.
-#[test]
-fn a_mismatched_pair_builds_nothing_and_says_so() {
-  let check = |parsed: &str, given: &str| {
-    let parse = parse_type_system_document(parsed);
-    assert!(!parse.has_errors());
-    let refused = validate_schema_lossless(&parse, given)
-      .err()
-      .unwrap_or_else(|| panic!("a parse of {parsed:?} against {given:?} built a schema"));
-    assert_eq!(
-      refused.refusal(),
-      Some(Refusal::SourceMismatch),
-      "{refused}"
-    );
-    // The build was never asked, so there are no §3 refusals to read — and no empty list standing
-    // in for them either.
-    assert_eq!(refused.errors(), None);
-    assert_eq!(refused.recovery(), None);
-    assert_eq!(
-      refused.to_string(),
-      "the parse and the source are not the same document, so nothing was built"
-    );
-  };
-
-  // Same length, different bytes: caught before this change too, by each definition's own check.
-  check("type Query { ok: Int }", "type Query { no: Int }");
-
-  // **The prefix.** Every definition of the parse matches the source at its own range, so the
-  // per-definition check sees nothing wrong — and `type Extra` is never built from.
-  check(
-    "type Query { ok: Int }",
-    "type Query { ok: Int } type Extra { n: Int }",
-  );
-
-  // And the pair that matches still builds, so the check has not simply refused everything.
-  let sdl = "type Query { ok: Int }";
-  let (_schema, recovery) = validate_schema_lossless(&parse_type_system_document(sdl), sdl)
-    .expect("a matching pair builds");
-  assert!(recovery.is_complete());
-}
-
-/// The fail-fast projection refuses the SDL root's other half, and the recovering one skips it.
-///
-/// A mixed parse holds a `Document` node, not a `TypeSystemDocument` one, so the SDL root's
-/// projection has nothing to read — which is the refusal `project_type_system_document` documents
-/// and the reason the door takes a parse from `parse_type_system_document` rather than any parse.
-#[test]
-fn a_mixed_parse_is_not_an_sdl_parse() {
-  use smear::parser::graphql::lossless::{parse_document, project_type_system_document};
-
-  let sdl = "type Query { ok: Int }";
-  let mixed = parse_document(sdl);
-  assert!(!mixed.has_errors());
-  assert!(
-    project_type_system_document(&mixed, sdl).is_err(),
-    "the SDL projection read a mixed root"
-  );
-
-  // And through the door, the recovering walk falls back to the tree's own root, where the one
-  // child is a `Document` node with no SDL image — so it is skipped rather than mis-read.
-  let refused = validate_schema_lossless(&mixed, sdl).expect_err("nothing projected is no schema");
-  assert_eq!(
-    refused
-      .recovery()
-      .expect("the pair matches, so the build was asked")
-      .projected(),
-    0
-  );
-  assert!(
-    refused
-      .recovery()
-      .expect("the pair matches, so the build was asked")
-      .skipped()
-      > 0
-  );
-}
-
-/// A `Parse` minted through the public, generic `finish_root` from a `Cst` whose profile admits every
-/// raw kind, over root raw kind `root` — the one public route to this dialect's `Parse` that skips
-/// its kind validator. The closure consumes nothing, so a non-empty source is tiled as one gap
-/// token under the root. The same construction as `lossless_project.rs`'s minted-root cell.
-fn foreign_root_parse<'a>(src: &'a str, root: u16) -> smear::parser::graphql::lossless::Parse {
-  use rowan::Language;
-  use smear::{
-    lexer::tokora::{
-      InputRef, SimpleSpan,
-      cache::DefaultCache,
-      cst::{CstProfile, KindValidator, Sink, parse_lossless},
-      emitter::Verbose,
-    },
-    parser::{
-      graphql::{
-        kinds::{GraphQLLang, SyntaxKind as K},
-        lossless::{Brand, GraphqlLosslessErrors, Lexer, LexerState},
-      },
-      lossless::runner::finish_root,
-    },
-  };
-
-  type Lx<'a> = Lexer<'a, str>;
-  type Em<'a> = Verbose<GraphqlLosslessErrors<&'a str>, SimpleSpan, Brand>;
-  type Ctx<'a> = (Sink<'a, Lx<'a>, Em<'a>>, DefaultCache<'a, Lx<'a>>);
-
-  fn unmapped<T>(_: &T) -> u16 {
-    0
-  }
-
-  let profile = CstProfile::new(
-    unmapped as fn(&_) -> u16,
-    KindValidator::accept_all(),
-    GraphQLLang::kind_to_raw(K::Error).0,
-    GraphQLLang::kind_to_raw(K::Gap).0,
-  );
-  let (cst, _) = parse_lossless::<Lx<'a>, Brand, Em<'a>, DefaultCache<'a, Lx<'a>>, (), _>(
-    src,
-    LexerState::default(),
-    Em::new(),
-    profile,
-    DefaultCache::<'a, Lx<'a>>::default(),
-    |_: &mut InputRef<'a, '_, Lx<'a>, Ctx<'a>, Brand>| Ok(()),
-  );
-  finish_root::<GraphQLLang, Lx<'a>, Em<'a>>(cst, root, "a permissive profile")
-    .expect("the permissive profile admits the root")
-}
-
-/// A `Parse` whose root is not the dialect's document root builds nothing and says so, under its
-/// own name.
-///
-/// The recovering projector refuses it as `Unverified::WrongRoot` (al8n/smear#218, Codex rounds 2
-/// and 4), and this door keeps the reason — `LosslessSchemaErrors::WrongRoot` with the raw value —
-/// rather than reporting a mismatch (Codex round 3). Two roots: raw 60000, outside the kind space,
-/// and `Name`, inside it and not a document. Before, an empty such parse projected as a complete
-/// `Recovery::new(0, 0)` and `Schema::build` was asked about nothing.
-#[test]
-fn a_parse_over_a_wrong_root_builds_nothing_and_says_so() {
-  use rowan::Language;
-  use smear::parser::graphql::kinds::{GraphQLLang, SyntaxKind as K};
-
-  for root in [GraphQLLang::kind_to_raw(K::Name).0, 60_000] {
-    for source in ["", "type Query { ok: Int }"] {
-      let parse = foreign_root_parse(source, root);
-      let refused = validate_schema_lossless(&parse, source)
-        .err()
-        .unwrap_or_else(|| panic!("{root} {source:?}: a wrong root built a schema"));
-      assert_eq!(
-        refused,
-        smear::validator::LosslessSchemaErrors::WrongRoot { raw: root },
-        "{root} {source:?}"
-      );
-      assert_eq!(
-        refused.refusal(),
-        Some(Refusal::WrongRoot { raw: root }),
-        "{root} {source:?}"
-      );
-      assert_eq!(
-        refused.to_string(),
-        std::format!(
-          "the parse's root has raw kind {root}, which is not this dialect's document root, so \
-           the parse was minted outside its door and nothing was built"
-        )
-      );
-      assert_eq!(refused.errors(), None);
-      assert_eq!(refused.recovery(), None);
-    }
-  }
+  assert!(matches!(built, Answer::Built(_)), "{:#?}", built.refusals());
 }

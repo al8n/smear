@@ -60,7 +60,8 @@ where
 /// moves the token's end. So the token is the whole comment whether the callback runs or the token
 /// ceiling refuses the comment first, and an ill-formed comment is one error token that keeps the
 /// rest of its line from being lexed as GraphQL. The errors are one `UnknownLexeme` per sequence
-/// [`IllFormedUtf8`] yields: the syntactic lexer's errors, at the same spans.
+/// [`IllFormedUtf8`] yields, up to sixteen, and one `Omitted` counting the rest: the syntactic
+/// lexer's errors, at the same spans.
 #[allow(clippy::result_large_err)]
 #[inline]
 pub(crate) fn comment<'a, S, T, Extras>(
@@ -75,14 +76,12 @@ where
   let base = lexer.span().start + 1;
   let slice = lexer.slice();
   let body = &slice.as_ref()[1..];
-  let mut errs = LexerErrors::default();
-  for bad in IllFormedUtf8::new(body) {
-    errs.push(LexerError::unknown_char(
+  let errs = LexerErrors::ill_formed_comment(IllFormedUtf8::new(body).map(|bad| {
+    (
       SimpleSpan::new(base + bad.start, base + bad.end),
       body[bad.start],
-      base + bad.start,
-    ));
-  }
+    )
+  }));
   if errs.is_empty() {
     Ok(lexer.slice())
   } else {

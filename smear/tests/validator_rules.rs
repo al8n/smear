@@ -22,8 +22,9 @@
 //! # Where the table lives
 //!
 //! `tests/support/validator_corpus.rs`, since `validator_lossless.rs` reads the same thirty
-//! documents to compare the syntactic and lossless doors over them. The floor below is still what
-//! says a rule has an entry there, so the corpus and the census did not come apart in the move.
+//! documents to compare what the syntactic and lossless parser layers answer for them. The floor
+//! below is still what says a rule has an entry there, so the corpus and the census did not come
+//! apart in the move.
 
 // Every fixture and assertion below calls into `smear::validator`, which does not exist in the
 // crate's API surface with the feature off. This file did not gate itself to that dependency —
@@ -172,16 +173,10 @@ fn sorted(rules: &[Rule]) -> Vec<Rule> {
 /// missing from the table. One entry, and the entry names what would delete it.
 const UNFIREABLE: &[(Rule, &str)] = &[(
   Rule::ValidationWorkBudget,
-  "fireable, and deliberately not fixtured here. Every reader of this table runs each fixture \
-   through BOTH doors and compares them diagnostic for diagnostic, and this is the one rule the \
-   two doors cannot agree on at the boundary: the lossless door charges its projection before it \
-   projects, so at a budget low enough to make the syntactic door refuse mid-walk, the lossless \
-   door has already refused at the whole document\'s span. That is not a drift between two \
-   implementations of a rule — it is one door doing strictly more work and being charged for it — \
-   and a fixture whose two halves disagree by construction would be a differential asserting the \
-   opposite of what it exists to assert. `validator_work.rs` fires the rule through each door \
-   separately and pins both: the refusal, the wall clock, the rule-filtered-out verdict, and the \
-   `Recovery` a refused projection reports.",
+  "fireable, and fired elsewhere: `validator_work.rs` drives it at many budgets, over documents \
+   built to reach the sites that charge the ledger, so an entry here would pin one lowered knob \
+   beside them. A corpus entry with a lowered `validation_work` in its `budget` field would \
+   delete this one.",
 )];
 
 #[test]
