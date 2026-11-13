@@ -53,17 +53,18 @@
 //!
 //! `sync_balanced`'s no-match exit **rewinds the whole scan**: the position, the lexer state, the
 //! dedup watermark and every emission come back off, and the drained cache prefix comes back too,
-//! "at the cost of re-lexing those tokens on the next read". Both helpers here then advance by
-//! exactly one token and the enclosing loop asks again. A tail containing no restart point is
-//! therefore walked once per token in it — **Θ(n²)**, measured at ×4.0 per doubling on twelve
-//! shapes across both dialects and all six document roots, 24.6 s for 72 KB.
+//! "at the cost of re-lexing those tokens on the next read". Each of the three helpers here that
+//! scans then advances by exactly one token and the enclosing loop asks again. A tail containing
+//! no restart point is therefore walked once per token in it — **Θ(n²)**, measured at ×4.0 per
+//! doubling on twelve shapes across both dialects and all six document roots, 24.6 s for 72 KB.
 //!
 //! A *matching* scan has none of that shape: it commits, so what it crossed is never re-crossed
 //! and the cost is amortised. The defect is exactly the no-match branch repeating, and it repeats
-//! in **both** helpers — [`unexpected`] over a tail of punctuation the wide `is_sync_point` set
-//! does not name, [`resync_to`] over a tail whose definition heads all sit at depth ≥ 1, where the
-//! scan never consults its predicate. `[ type ] ` repeated is the second one alone; `( type ) ` is
-//! both at once.
+//! in **each** of the three — [`unexpected`] over a tail of punctuation the wide `is_sync_point`
+//! set does not name, [`resync_to`] over a tail whose definition heads all sit at depth ≥ 1, where
+//! the scan never consults its predicate, and [`resync_to_closing`] over a module's body whose item
+//! heads all sit inside a brace the scan has crossed. `[ type ] ` repeated is the second one alone;
+//! `( type ) ` is the first two at once; a body of `{ type } ` repeated is the third.
 //!
 //! ## What is bounded, and why it is not the scan
 //!
@@ -897,6 +898,12 @@ where
 /// A scan that finds nothing rewinds, and what it counted is forgotten with it. A caller that
 /// derives `left` from state the rewind restores — a lexer's own count of open delimiters — reads
 /// the right number again on its next call, less whatever the one consumed token closed.
+///
+/// # The allowance is the caller's bound
+///
+/// One call costs at most one scan and one token, and nothing here bounds a loop of calls: a
+/// caller that loops on it with `allowance_exhausted` false pays one scan, as far as the end of
+/// the text, for every call, so the flag is that caller's bound on the work its loop can buy.
 pub fn resync_to_closing<'inp, L, Ctx, Lang>(
   inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
   delimiters: fn(&<L::Token as Token<'inp>>::Kind) -> Balance<u8>,

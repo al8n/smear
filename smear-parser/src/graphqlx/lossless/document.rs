@@ -47,7 +47,9 @@
 //! resynchronised past, inside the body, so the module keeps its other items and its node. An
 //! item whose failure ends the document is never caught here: the error is returned, the
 //! module's node is still built around what the body had completed, and the root above records
-//! the stop. Junk between two items is reported once and skipped as one run.
+//! the stop. Junk between two items is reported once and skipped as one run when an item's head
+//! or the body's `}` follows it and the scan allowance is open; `recover::skip_mod_junk` says
+//! what holds otherwise.
 //!
 //! # One mark, two branches, and that is what forces the ordering
 //!
@@ -111,13 +113,15 @@ lossless_production! {
   ///
   /// # The node is built whatever ended the body
   ///
-  /// A body returns `Err` only for a failure that ends the document — it catches every other one
-  /// itself. Letting that `Err` out of the node's closure would leave the node unbuilt, and the
-  /// items the body had completed would be children of whatever is around the module: of the
-  /// document, for a top-level module, where they read as top-level definitions. So the error is
-  /// kept while the node closes around what was parsed, and raised again behind it. An enclosing
-  /// module does the same one level up, so every module on the way out keeps its node and the
-  /// document still ends.
+  /// Under the emitter every door installs, which records a report and goes on, a body returns
+  /// `Err` only for a failure that ends the document — it catches every other one itself. An
+  /// emitter that refused a report would send that report's `Err` out of the body as well, and it
+  /// is kept the same way. Letting an `Err` out of the node's closure would leave the node
+  /// unbuilt, and the items the body had completed would be children of whatever is around the
+  /// module: of the document, for a top-level module, where they read as top-level definitions.
+  /// So the error is kept while the node closes around what was parsed, and raised again behind
+  /// it. An enclosing module does the same one level up, so every module on the way out keeps its
+  /// node and the document still ends.
   fn mod_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
     let mut ended: Option<super::Error<'inp, Src, Ctx>> = None;
     node_at(
@@ -182,9 +186,10 @@ lossless_production! {
   ///
   /// Every turn either returns or leaves the committed end of the input further on than it found
   /// it. The end is read before the turn and after it, and a turn that moved nothing is followed
-  /// by one token taken into an `Error` node; where no token can be taken the input is at its
-  /// end, and the next turn returns. The input is finite, so the loop ends, and nothing in that
-  /// argument rests on what an item's production or a skip happens to consume.
+  /// by one token taken into an `Error` node. Where no token can be taken, either the input is at
+  /// its end, and the next turn returns, or the scanner has stopped, and the take returns the
+  /// terminal error, which the body returns at once. The input is finite, so the loop ends, and
+  /// nothing in that argument rests on what an item's production or a skip happens to consume.
   fn mod_body<'inp, Src, Ctx>(inp) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;

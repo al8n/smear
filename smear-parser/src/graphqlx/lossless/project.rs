@@ -437,8 +437,8 @@
 //! so no extent is unknowable. The refusal comes from the doors' own verification, and
 //! `a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended` pins it there. The one cover
 //! of an unwalked subtree is `recovered_mod`'s, of an element it skips: it asks the substrate's
-//! [`node_extent`](crate::lossless::project::node_extent), which descends that subtree once, and
-//! adds nothing to the module's span where that refuses.
+//! [`node_extent`], which descends that subtree once, and adds nothing to the module's span where
+//! that refuses.
 //!
 //! ## A walk is its production transcribed
 //!

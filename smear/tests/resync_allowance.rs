@@ -7,10 +7,11 @@
 
 //! The recovery scan allowance — smear issue #168.
 //!
-//! `recover::unexpected` and `recover::resync_to` both scan through `sync_balanced`, whose
-//! no-match exit rewinds the whole scan; the caller then advances one token and asks again, so a
-//! tail with no restart point is walked once per token in it. `lossless/recover.rs`'s
-//! `scan_allowance_exhausted` bounds the waste. This file is that guard's gate.
+//! `recover::unexpected`, `recover::resync_to` and `recover::resync_to_closing` each scan through
+//! `sync_balanced`, whose no-match exit rewinds the whole scan; the caller then advances one token
+//! and asks again, so a tail with no restart point is walked once per token in it.
+//! `lossless/recover.rs`'s `scan_allowance_exhausted` bounds the waste. This file is that guard's
+//! gate.
 //!
 //! # Why the linearity assertions are on `spent` and not on the clock
 //!

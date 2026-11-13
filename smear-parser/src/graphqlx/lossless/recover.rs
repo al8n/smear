@@ -641,6 +641,21 @@ lossless_production! {
   /// body is delimited by. `floor` is how many braces were open once the body's own `{` was read.
   /// The braces open above it now are the ones the wreckage opened and did not close, and the
   /// scan spends that many `}` on the wreckage before anything can restart the body.
+  ///
+  /// # What the skip does not promise
+  ///
+  /// Which `}` ends the body is the brace count's to say, in the body itself, and never this
+  /// skip's: so nothing below can put an item in the wrong module, and what it costs is
+  /// diagnostics.
+  ///
+  /// - **A skip that does not scan.** Under an exhausted scan allowance, or after a scan that ran
+  ///   to the end of the text without finding a restart point, one token is taken into an
+  ///   `Error` node and the body's next turn starts from the token after it. An item keyword
+  ///   inside the wreckage can then start an item, and the item stands in the module the braces
+  ///   say it does.
+  /// - **A string inside parentheses.** The scan balances braces alone, so a string between a
+  ///   `(` and its `)` is a restart point like any other: the next turn reads it as a
+  ///   description, and the rest of the parenthesised run is junk of its own.
   fn resync_to_mod_item<'inp, Src, Ctx>(inp, floor: usize) {
     // One read of the lexer's state serves both numbers, and it is read here rather than inside
     // the substrate helper for the reason `resync_to_definition` gives: the state is
@@ -661,13 +676,16 @@ lossless_production! {
     )
   }
 
-  /// Something that starts no item stands between two items of a module's body. **One report for
-  /// the whole run**, at its first token, and then [`resync_to_mod_item`] skips to the body's next
-  /// restart point.
+  /// Something that starts no item stands between two items of a module's body. **One report**,
+  /// at the run's first token, and then [`resync_to_mod_item`] skips to the body's next restart
+  /// point.
   ///
-  /// A run of junk therefore costs one diagnostic and one `Error` node where a report for each
-  /// token would cost one of each per token. A `}` that closes a brace the junk opened is part of
-  /// the run: `floor` is what tells it from the body's own.
+  /// When the head of an item or the body's `}` follows the run and the scan allowance is open,
+  /// the whole run costs that one diagnostic and one `Error` node, where a report for each token
+  /// would cost one of each per token. A `}` that closes a brace the junk opened is part of the
+  /// run: `floor` is what tells it from the body's own. Otherwise the skip takes one token and the
+  /// next turn reports again, so the run costs a report per token: [`resync_to_mod_item`] says
+  /// when that happens, and why it misplaces nothing.
   fn skip_mod_junk<'inp, Src, Ctx>(inp, floor: usize) {
     crate::lossless::recover::report_unexpected(inp, MOD_ITEM_HEADS)?;
     resync_to_mod_item::<Src, Ctx>(inp, floor)

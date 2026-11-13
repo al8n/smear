@@ -16,9 +16,12 @@
 //!
 //! # What each shape isolates
 //!
-//! Both lossless recovery helpers scan through [`tokora::InputRef::sync_balanced`], whose
-//! no-match exit **rewinds the whole scan**. A caller that then advances one token and asks
-//! again pays for the tail once per token, which was the Θ(n²).
+//! The three lossless recovery helpers that scan go through
+//! [`tokora::InputRef::sync_balanced`], whose no-match exit **rewinds the whole scan**. A caller
+//! that then advances one token and asks again pays for the tail once per token, which was the
+//! Θ(n²). The shapes below reach two of them, `recover::unexpected` and `recover::resync_to`; the
+//! third, `recover::resync_to_closing`, is a module body's, and its gate is in
+//! `tests/resync_allowance.rs`, with no curve here.
 //!
 //! Since the scan allowance landed these curves read ×1.5 – ×2.2 instead of ×4.0, and the
 //! diagnostic counts are unchanged from the ones taken before it. The shapes are kept because a

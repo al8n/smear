@@ -606,15 +606,6 @@ impl State for SyntacticLimits {
 /// at all, so the number is inert there; `max_tokens` is the ceiling that surface honours, and
 /// `smear/tests/lossless_ceiling_doors.rs` is the gate on it.
 ///
-/// # One count that is no budget
-///
-/// [`brace_depth`](Self::brace_depth) is a third value in the rewindable state, beside the two
-/// tallies: how many `{` are open at the state's position. It has no ceiling and nothing refuses
-/// on it. It is here because the state is what a recovery scan restores when it finds nothing and
-/// rewinds, and what the lexer resumes from, so a count kept anywhere else would count a brace
-/// twice across a rewind. The bracket tally cannot stand in for it: that one is pair-blind over
-/// every opener and closer, and a parser that asks which `}` ends a block needs braces alone.
-///
 /// ```
 /// use smear_lexer::limits::{LosslessLimits, MAX_NESTING_DEPTH};
 ///
@@ -629,6 +620,28 @@ impl State for SyntacticLimits {
 /// assert_eq!(limits.max_tokens(), 1_000);
 /// assert_eq!(limits.max_produce_events(), 8_000);
 /// ```
+///
+/// # One count that is no budget
+///
+/// [`brace_depth`](Self::brace_depth) is a third value in the rewindable state, beside the two
+/// tallies: how many `{` are open at the state's position. It has no ceiling and nothing refuses
+/// on it. It is here because the state is what a recovery scan restores when it finds nothing and
+/// rewinds, and what the lexer resumes from, so a count kept anywhere else would count a brace
+/// twice across a rewind. The bracket tally cannot stand in for it: that one is pair-blind over
+/// every opener and closer, and a parser that asks which `}` ends a block needs braces alone.
+/// Every constructor starts it at zero, and a lossless door starts from the state it is given, so
+/// a state copied from a running lexer brings that lexer's count, and its tallies, with it.
+///
+/// # The records a parse keeps
+///
+/// A lossless parse records every error it finds, and by default nothing bounds how many: a text
+/// dense with errors is recorded error for error, so its records are bounded only by its size.
+/// For untrusted text the bound is the caller's own
+/// [`with_max_produce_events`](Self::with_max_produce_events): the records a parse keeps are a
+/// bounded multiple of the produce-events it may spend. A multiple and not one each, because a
+/// lexer error is one event and a recovery skips at least one token, but a report that consumes
+/// nothing can follow another at the same token, as a missing name and then a missing body do,
+/// as often as the grammar's nesting allows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LosslessLimits {
   /// The lexer's own two tallies: the rewindable token count and the bracket depth.
@@ -928,7 +941,9 @@ impl LosslessLimits {
   ///
   /// It is a count and no budget, so nothing refuses on it, and [`depth`](Self::depth) is not
   /// it: that tally steps on every bracket of every kind. It lives in the rewindable state, so a
-  /// rewind takes it back with the position.
+  /// rewind takes it back with the position. Every constructor starts it at zero, and a lossless
+  /// door starts from the state it is given: a state copied from a running lexer brings that
+  /// lexer's count with it.
   ///
   /// ```
   /// use smear_lexer::limits::LosslessLimits;
