@@ -78,7 +78,8 @@ impl ObjectEntry {
 /// which only an instantiation can check; and a value whose expected type can take none, an output
 /// type or a path that names nothing among them, which is another rule's or phase's to refuse. A
 /// value under a generic directive's application with complete type arguments is coerced against
-/// its type under them.
+/// its type under them, and so is a field's value of an instantiation of a generic input object,
+/// under its type's arguments.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum ValueKind<'a> {

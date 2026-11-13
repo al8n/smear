@@ -1,15 +1,17 @@
 //! The GraphQLx analyzer's values under type arguments, and what they rest on: a directive
 //! application's complete type arguments, typed as an occurrence of its directive would be, its
 //! written type arguments first and its directive's defaults filling the rest; its directive's
-//! bounds, judged at it by those arguments; and its arguments, each read under them, written or a
-//! copy of its default, the copy's count judging whether it fits and paying for each node.
+//! bounds, judged at it by those arguments; its arguments, each read under them, written or a
+//! copy of its default, the copy's count judging whether it fits and paying for each node; and a
+//! generic input object's fields, read under its type's arguments, a copy that does not fit them
+//! reported by the written literal whose type a rebuild made.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, ApplicationId, DefId, Diagnostic, Layout, Limits, Model, Namespace, ObjectEntry,
-    Package, PackageId, SourceFile, SourceId, Tier, TyId, TyKind, ValueId, ValueKind, analyze,
-    test_support,
+    Analysis, ApplicationId, DefId, Diagnostic, Layout, Limits, MemberId, Model, Namespace,
+    ObjectEntry, Package, PackageId, SourceFile, SourceId, Tier, TyId, TyKind, ValueId, ValueKind,
+    analyze, test_support,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -759,4 +761,175 @@ fn an_application_inside_a_generic_definition_keeps_its_literals() {
   assert_eq!(argument_shown(model, "G", 0, "b"), "Literal(Int) 2");
   assert_eq!(argument_ty(model, "G", 0, "a"), "G#0");
   assert_eq!(argument_ty(model, "G", 0, "b"), "G#0");
+}
+
+/// The member named `name` among `members`.
+fn member_named(
+  model: &Model,
+  members: impl IntoIterator<Item = MemberId>,
+  name: &str,
+) -> MemberId {
+  members
+    .into_iter()
+    .find(|id: &MemberId| model.member(*id).name() == name)
+    .unwrap_or_else(|| panic!("no member `{name}`"))
+}
+
+/// The default of the input field `name` of the root package's input object `owner`.
+fn input_default(model: &Model, owner: &str, name: &str) -> ValueId {
+  let field = member_named(
+    model,
+    model.def(type_def(model, owner)).input_fields(),
+    name,
+  );
+  model.member(field).default().expect("a default")
+}
+
+/// The default of the argument `argument` of the field `field` of the root package's type `owner`.
+fn argument_default(model: &Model, owner: &str, field: &str, argument: &str) -> ValueId {
+  let field = member_named(model, model.def(type_def(model, owner)).fields(), field);
+  let argument = member_named(model, model.member(field).arguments(), argument);
+  model.member(argument).default().expect("a default")
+}
+
+/// A default a literal of a generic input object leaves out is copied under the object's type
+/// arguments: `[1]` against `[Int]` under `In<Int>`. Refuses a copy against the written type.
+#[test]
+fn a_generic_fields_default_is_copied_under_the_objects_arguments() {
+  let text = "type Query {\n  x: Int\n}\ninput In<T> {\n  v: [T] = [1]\n}\n\
+              input H {\n  x: In<Int> = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  quiet(&analysis);
+  let model = analysis.model();
+  let x = input_default(model, "H", "x");
+  assert_eq!(valued(model, x), "Object {v= List [Int 1]}");
+  let ValueKind::Object(entries) = model.value(x).kind() else {
+    panic!("no object");
+  };
+  assert_eq!(shown(model, model.value(entries[0].value()).ty()), "[i32]");
+  assert_eq!(shown(model, model.value(x).ty()), "In<i32>");
+}
+
+/// "Required" is read under the object's type arguments: `In<Int!>` requires `v`, given `null` or
+/// left out, and `In<Int>` does not. Refuses "required" read off the written `!`.
+#[test]
+fn required_is_read_under_the_objects_arguments() {
+  let text = "type Query {\n  x: Int\n}\ninput In<T> {\n  v: T\n}\n\
+              input H {\n  a: In<Int!> = {}\n  b: In<Int> = {}\n  c: In<Int!> = { v: null }\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let required = "smear::schema::missing-required-input-object-field";
+  assert_eq!(
+    found(&analysis),
+    [
+      (required, after(schema, text, "a: In<Int!> = ", "{}")),
+      (required, at(schema, text, "null", 0)),
+    ]
+  );
+}
+
+/// A field that may be required, a bare nullable type parameter, costs a step each time a written
+/// literal leaves it out, whatever its type turns out to be: three, and one for rebuilding `T`,
+/// four. At three the literal is `resource-limit`. Refuses entries walked for nothing.
+#[test]
+fn a_field_that_may_be_required_costs_a_step_when_left_out() {
+  let text = "type Query {\n  x: Int\n}\ninput In<T> {\n  a: T\n  b: T\n  c: T\n}\n\
+              input H {\n  x: In<Int> = {}\n}\n";
+  quiet(&analyze_text(text, &Limits::new().with_max_value_steps(4)));
+  let short = analyze_text(text, &Limits::new().with_max_value_steps(3));
+  let schema = schema_file(&short);
+  assert_eq!(found(&short), [(LIMIT, at(schema, text, "{}", 0))]);
+}
+
+/// A literal whose type a rebuild made reports the copy of a default it leaves out that does not
+/// fit: `@w<String>(a: {})` gives `{}` the type `Box<String>`, under which `Box`'s `1` does not
+/// fit, reported once at `{}`, labelled at the `1`. Refuses a copy silent under a derived type.
+#[test]
+fn a_copy_inside_a_written_argument_is_judged_at_its_literal() {
+  let text = "type Query @w<String>(a: {}) {\n  x: Int\n}\ninput Box<U> {\n  v: U = 1\n}\n\
+              directive @w<T>(a: Box<T>) on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let literal = at(schema, text, "{}", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, literal)]);
+  let report = the(&analysis, DEFAULT, literal);
+  assert_eq!(
+    report.to_string(),
+    "this literal leaves out `v`, whose default `1` does not fit the type `v` takes under these \
+     type arguments"
+  );
+  assert_eq!(
+    labels(report),
+    [(after(schema, text, "U = ", "1"), "this default")]
+  );
+  assert_eq!(
+    argument_shown(analysis.model(), "Query", 0, "a"),
+    "Object {v= ?}"
+  );
+}
+
+/// A literal under derived arguments, a field's type rebuilt under the enclosing literal's, reports
+/// its copy that does not fit, though no application is near and no occurrence writes its type:
+/// `Box<String>` is derived from `Wrap<String>`. Refuses a silent `Unresolved` copy in an ok
+/// analysis.
+#[test]
+fn a_literal_under_derived_arguments_reports_its_copy() {
+  let text = "type Query {\n  x: Int\n}\ninput Box<U> {\n  v: U = 1\n}\n\
+              input Wrap<W> {\n  w: Box<W>\n}\ninput H {\n  h: Wrap<String> = { w: {} }\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let literal = after(schema, text, "{ w: ", "{}");
+  assert_eq!(found(&analysis), [(DEFAULT, literal)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, literal)),
+    [(after(schema, text, "U = ", "1"), "this default")]
+  );
+  let model = analysis.model();
+  assert_eq!(
+    valued(model, input_default(model, "H", "h")),
+    "Object {w: Object {v= ?}}"
+  );
+}
+
+/// A field's default read again under other type arguments is a count of its own, not a cycle:
+/// `P.f` under `Q` reads `Q.p`, which reads `P.f` under `R`, and the fill ends. Its answer does not
+/// change with the order the definitions are written in. Refuses a stop by field, which poisons
+/// `P.f` under `R` and leaves `f` absent.
+#[test]
+fn a_field_read_again_under_other_arguments_is_no_cycle() {
+  let forward = "type Query {\n  x(y: P<Q> = {}): Int\n}\ninput P<T> {\n  f: T = {}\n}\n\
+                 input Q {\n  p: P<R> = {}\n}\ninput R {\n  z: Int = 1\n}\n";
+  let backward = "input R {\n  z: Int = 1\n}\ninput Q {\n  p: P<R> = {}\n}\n\
+                  input P<T> {\n  f: T = {}\n}\ntype Query {\n  x(y: P<Q> = {}): Int\n}\n";
+  for text in [forward, backward] {
+    let analysis = analyze_text(text, &Limits::new());
+    quiet(&analysis);
+    let model = analysis.model();
+    assert_eq!(
+      valued(model, argument_default(model, "Query", "x", "y")),
+      "Object {f= Object {p= Object {f= Object {z= Int 1}}}}"
+    );
+  }
+}
+
+/// A default that fills itself under growing type arguments ends where a type it would read passes
+/// `Limits::max_generic_depth`: `resource-limit` at the literal that asks, and the field absent.
+/// Refuses a count that never ends.
+#[test]
+fn growing_arguments_end_at_the_depth_limit() {
+  let text = "type Query {\n  f(x: G<Int> = {}): Int\n}\ninput G<T> {\n  g: G<[T]> = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let literal = at(schema, text, "{}", 0);
+  assert_eq!(found_of(&analysis, &[DEFAULT, LIMIT]), [(LIMIT, literal)]);
+  assert_eq!(
+    the(&analysis, LIMIT, literal).to_string(),
+    "the fields this literal leaves out take a type that, under these type arguments, nests \
+     deeper than `Limits::max_generic_depth`, 64, admits"
+  );
+  let model = analysis.model();
+  assert_eq!(
+    valued(model, argument_default(model, "Query", "f", "x")),
+    "Object {}"
+  );
 }

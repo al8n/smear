@@ -880,24 +880,24 @@ fn a_one_of_objects_fields_are_never_filled() {
   );
 }
 
-/// A generic input object's field is coerced against the type it is written with, which names a
-/// parameter: it keeps its literal, typed with the parameter, and nothing is said. Refuses a field
-/// read under its object's arguments.
+/// A generic input object's field is read under its object's type arguments: `v` takes an `Int`
+/// under `In<i32>`, typed as `n`'s `Int` is, and `1` is no `String` under `In<String>`. Refuses a
+/// field coerced against the type it is written with, which keeps its literal.
 #[test]
-fn a_generic_input_objects_field_keeps_its_literal() {
+fn a_generic_input_objects_field_is_read_under_its_arguments() {
   let text = "type Query {\n  x: Int\n}\ninput In<T> {\n  v: T\n  n: Int = 1\n}\n\
-              input H {\n  x: In<i32> = { v: 1 }\n}\n";
+              input H {\n  x: In<i32> = { v: 1 }\n  y: In<String> = { v: 1 }\n}\n";
   let analysis = analyze_text(text, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(DEFAULT, after(schema, text, "y: In<String> = { v: ", "1"))]
+  );
   let model = analysis.model();
   let x = default(model, "H", "x");
-  assert_eq!(shown(model, x), "Object {v: Literal(Int) 1, n= Int 1}");
-  let v = entries(model, x)[0].value();
-  let written = model
-    .member(input_field(model, "In", "v"))
-    .ty()
-    .expect("`v` has a type");
-  assert_eq!(model.value(v).ty(), model.type_expr(written).ty());
+  assert_eq!(shown(model, x), "Object {v: Int 1, n= Int 1}");
+  let [v, n] = [entries(model, x)[0].value(), entries(model, x)[1].value()];
+  assert_eq!(model.value(v).ty(), model.value(n).ty());
 }
 
 /// A later field of a name an earlier field has is never asked for, though it is required; the

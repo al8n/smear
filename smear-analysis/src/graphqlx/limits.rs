@@ -353,7 +353,9 @@ impl Limits {
   /// under type arguments looks at, its root included, once for each written type and
   /// instantiation; a node of a count made under a type its default is not written against; an
   /// argument that may be required, a bare nullable type parameter of its directive, that an
-  /// application with complete type arguments leaves out; and converting a decimal integer of more
+  /// application with complete type arguments leaves out, and a field that may be required that a
+  /// written object literal of a generic input object leaves out; and converting a decimal integer
+  /// of more
   /// than 38 significant digits, the most `u128` arithmetic reads whatever they spell, to its
   /// value, charged before the conversion as an upper bound of its work:
   /// `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine digits times

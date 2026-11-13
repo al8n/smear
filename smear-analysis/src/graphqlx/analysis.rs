@@ -280,7 +280,11 @@ impl Analysis {
 ///   as a bare nullable type parameter required where they make it non-null; a copy that does not
 ///   fit the type they give it is `invalid-default-value`, once for the application, at its path,
 ///   labelled at the default, its count paying a step for each node and judging the copy as a
-///   written value is judged. A copy is
+///   written value is judged. An object literal of a generic input object's instantiation reads
+///   its fields' types under its type arguments likewise, a field written as a bare nullable type
+///   parameter required where they make it non-null; a copy it makes that does not fit is
+///   `invalid-default-value` at the literal, once, when a rebuild made the literal's own type, and
+///   is left to the instantiation's check otherwise. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
 ///   copy of itself is not copied: the argument, or the field, is absent. Each row of a copy, each
 ///   read of another default's count while counting, each read of a count made already for a

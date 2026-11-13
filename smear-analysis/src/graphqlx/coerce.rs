@@ -149,6 +149,13 @@
 //! parameters is still open, and its value a `Literal`. An application with no complete type
 //! arguments is read as written.
 //!
+//! An object literal against an instantiation of a generic input object, `In<i32>`, reads each
+//! field's type under that type's arguments, in both modes and in the count alike: a field it sets,
+//! a default it leaves out, and its required fields, a field written as a bare nullable type
+//! parameter of its input object with no default required where its type under them is non-null,
+//! a step each time a written literal leaves it out. A field is found by its definition and its
+//! name, whatever the arguments.
+//!
 //! A type that cannot be built under the arguments, past `Limits::max_generic_depth` or
 //! `Limits::max_instantiations`, or whose rebuild is past `Limits::max_value_steps`, makes a
 //! written value one unresolved row, typed with the type the argument is written with, with
@@ -162,9 +169,19 @@
 //! leaves out, a OneOf literal of other than one field or of `null` for its one, a set or a map
 //! literal that holds an element or a key twice, and a judged count it reads that does not fit. A
 //! count that is not judged fits: its default was judged where it is written. The copy is made all
-//! the same, silently. An application whose type arguments rebuilt the type of an argument it
-//! leaves out reports a copy of it that does not fit, the first in its directive's order: one
-//! `invalid-default-value`, at its path, labelled at the default.
+//! the same, silently, and who reports it is told by the written node that asked for it:
+//!
+//! - an application whose type arguments rebuilt the type of an argument it leaves out reports
+//!   the first such copy that does not fit, in its directive's order: one `invalid-default-value`,
+//!   at its path, labelled at the default;
+//! - a written object literal whose type a rebuild made, a field's or an argument's type rebuilt,
+//!   or an element of one, reports the first copy of a default it leaves out that does not fit, in
+//!   its input object's order: one `invalid-default-value`, at the literal, labelled at the
+//!   default;
+//! - a written object literal whose type a written occurrence gave is silent: that occurrence's
+//!   instantiation is checked where it is written.
+//!
+//! A copy reports nothing: whether it fits reaches whoever asked for its outermost count.
 //!
 //! # The count of a copy
 //!
@@ -526,6 +543,8 @@ enum Count {
   Past,
   /// It reads its own count: its copy would hold a copy of itself.
   Poisoned,
+  /// A type it reads under type arguments passes this limit, and cannot be built.
+  Unbuilt(Limit),
 }
 
 /// One entry of a count's stack.
@@ -575,6 +594,8 @@ enum Asked {
   Absent,
   /// The budget cannot pay: the asker is past it.
   Starved,
+  /// A type its count reads under type arguments passes this limit: the asker is past it.
+  Unbuilt(Limit),
 }
 
 /// Where a merge of an object literal's fields with its input object's defaults has got to: the
@@ -716,6 +737,8 @@ enum Why {
   /// Another literal where the collection `expected` is expected; or, with none expected, a
   /// collection literal where no collection of its shape is.
   Collection { expected: Option<Collection> },
+  /// A type it takes under type arguments that cannot be built, as this says.
+  Unbuilt(Stop),
 }
 
 /// The code a node that does not fit is reported with.
@@ -806,13 +829,16 @@ struct Kept {
 // a rare kind reads lives in a table of its own: a `bytes` value's bytes.
 const _: () = assert!(core::mem::size_of::<Kept>() <= 128);
 
-/// A node to make: the node, the type it is made against, the tree it is of, and how.
+/// A node to make: the node, the type it is made against, the tree it is of, and how; and whether
+/// a rebuild under type arguments made its type, or the type of a value it is held in, which says
+/// who reports a copy of a default an object literal of it leaves out that does not fit.
 #[derive(Clone, Copy)]
 struct Making {
   node: u32,
   ty: Option<TyId>,
   tree: RawTree,
   mode: Mode,
+  rebuilt: bool,
 }
 
 impl Making {
@@ -881,8 +907,10 @@ struct Coercion<'c, 'p, 'x> {
   /// Each input object's defaulted fields, each with its default's tree, one run each, in member
   /// order.
   defaulted: Vec<(MemberId, u32)>,
-  /// Each input object's required fields, one run each, in member order.
-  required: Vec<MemberId>,
+  /// Each input object's required fields, one run each, in member order: each field, and whether
+  /// it may be required, a bare nullable type parameter of its input object, required where its
+  /// type under the object's arguments is non-null.
+  required: Vec<(MemberId, bool)>,
   /// Each input object that has a defaulted or a required field, with its runs, by `DefId`.
   inputs: Vec<Input>,
   /// The fields each object literal read so far sets, one run each, sorted by the field.
@@ -971,7 +999,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   fn member(&mut self, member: MemberId) {
     if let Some(&tree) = self.raw.defaults.get(&member) {
       let ty = self.member_type(member);
-      if let Some(value) = self.value(tree, ty, Mode::Written(Site::Default)) {
+      if let Some(value) = self.value(tree, ty, Mode::Written(Site::Default), false) {
         self.builder.set_member_default(member, value);
       }
     }
@@ -1221,9 +1249,13 @@ impl<'p> Coercion<'_, 'p, '_> {
         self.starved(at, Stop::Steps);
         return false;
       }
+      Asked::Unbuilt(limit) => {
+        self.starved(at, Stop::Built(limit));
+        return false;
+      }
     };
     let before = self.builder.value_count();
-    if let Some(value) = self.value(tree, ty, Mode::Copied) {
+    if let Some(value) = self.value(tree, ty, Mode::Copied, false) {
       debug_assert_eq!(
         self.builder.value_count().saturating_sub(before),
         rows,
@@ -1276,8 +1308,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Lists each input object's fields that an object literal leaving them out does something
   /// about, in member order: each field with a default, with its default's tree, but for a OneOf
   /// input object, whose fields left out are never filled; and each required field, written
-  /// non-null with no default. A later field of a name an earlier one has is not listed: no literal
-  /// can set it.
+  /// non-null with no default, and each that may be required, written as a bare nullable type
+  /// parameter of its input object with no default, marked. A later field of a name an earlier one
+  /// has is not listed: no literal can set it.
   fn list_fields(&mut self) {
     let mut names: BTreeSet<Sym> = BTreeSet::new();
     for index in 0..self.builder.def_count() {
@@ -1300,7 +1333,8 @@ impl<'p> Coercion<'_, 'p, '_> {
         match self.raw.defaults.get(&field).copied() {
           Some(tree) if !one_of => self.defaulted.push((field, tree)),
           Some(_) => {}
-          None if non_null => self.required.push(field),
+          None if non_null => self.required.push((field, false)),
+          None if self.bare_param(field, def) => self.required.push((field, true)),
           None => {}
         }
       }
@@ -1349,6 +1383,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
       }
       Count::Past => Asked::Starved,
+      Count::Unbuilt(limit) => Asked::Unbuilt(limit),
       // A count asked for is never one being made: a count makes no copy and asks for none.
       Count::Poisoned | Count::Counting => {
         if !library && !self.charge(1) {
@@ -1425,7 +1460,7 @@ impl<'p> Coercion<'_, 'p, '_> {
             self.add_rows(rows, charged)
           }
           Some(Count::Counting | Count::Poisoned) => Err(Count::Poisoned),
-          Some(Count::Past) => Err(Count::Past),
+          Some(verdict @ (Count::Past | Count::Unbuilt(_))) => Err(verdict),
           None => {
             self.open(tree, ty, judged);
             Ok(())
@@ -1564,17 +1599,21 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       Class::Object { def, first } => {
         let fields = self.fields_of(node, def, first);
-        if judged && !self.object_fits(def, fields, charged)? {
+        // Each field's type is read under the object's type arguments, as the copy reads it.
+        let env = ty.map(|ty: TyId| (ty, def));
+        if judged && !self.object_fits(def, fields, charged, env)? {
           self.misfit();
         }
         let mut merge = self.merge(def, fields);
         while let Some(next) = self.next(&mut merge) {
           match next {
             Next::Set(set) => {
-              let ty = self.member_type(set.field);
+              let expected = self
+                .under(set.field, env, !charged)
+                .map_err(unbuilt_count)?;
               self.counting.push(Counted::Node {
                 node: set.node,
-                ty,
+                ty: expected.ty,
                 slot: None,
               });
             }
@@ -1583,11 +1622,11 @@ impl<'p> Coercion<'_, 'p, '_> {
               if charged && !self.charge(1) {
                 return Err(Count::Past);
               }
-              let ty = self.member_type(field);
+              let expected = self.under(field, env, !charged).map_err(unbuilt_count)?;
               self.counting.push(Counted::Fill {
                 tree,
-                ty,
-                judged: false,
+                ty: expected.ty,
+                judged: expected.rebuilt,
               });
             }
           }
@@ -1631,10 +1670,17 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Whether the object literal of the input object `def` that sets `fields` is refused nothing
-  /// where it is written, as a judged count reads it: no field `def` does not declare; for a OneOf
-  /// input object, one field, not `null`; and every required field set, each passed left out a
-  /// step, the first that is missing ending the walk.
-  fn object_fits(&mut self, def: DefId, fields: Fields, charged: bool) -> Result<bool, Count> {
+  /// where it is written, as a judged count reads it, its fields' types under `env`: no field `def`
+  /// does not declare; for a OneOf input object, one field, not `null`; and every required field
+  /// set, each passed left out a step, one that may be required read under `env`, the first that is
+  /// missing ending the walk.
+  fn object_fits(
+    &mut self,
+    def: DefId,
+    fields: Fields,
+    charged: bool,
+    env: Option<(TyId, DefId)>,
+  ) -> Result<bool, Count> {
     if fields.written > fields.len {
       return Ok(false);
     }
@@ -1654,7 +1700,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     let set_end = fields.start.saturating_add(fields.len);
     let mut set = fields.start;
     for row in start..end {
-      let Some(&field) = self.required.get(row as usize) else {
+      let Some(&(field, maybe)) = self.required.get(row as usize) else {
         break;
       };
       while set < set_end
@@ -1669,6 +1715,14 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       if charged && !self.charge(1) {
         return Err(Count::Past);
+      }
+      if maybe
+        && !self
+          .under(field, env, !charged)
+          .map_err(unbuilt_count)?
+          .non_null
+      {
+        continue;
       }
       return Ok(false);
     }
@@ -1940,6 +1994,36 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
   }
 
+  /// Reports, at the object literal `at` that leaves `field` out, whose type a rebuild under type
+  /// arguments made, that the copy of its default, whose tree is `tree`, does not fit the type
+  /// those arguments give it, labelled at the default: the one diagnostic of that copy.
+  fn unfit_field(&mut self, at: Location, field: MemberId, tree: u32) {
+    let Some(RawTree { root, source, .. }) = self.raw.trees.get(tree as usize).copied() else {
+      return;
+    };
+    let Some(node) = self.raw.nodes.get(root as usize).copied() else {
+      return;
+    };
+    let name: &[u8] = match self.builder.member_name(field) {
+      Some(sym) => self.builder.spelling(sym),
+      None => b"",
+    };
+    let name = Excerpt(name);
+    let message = format!(
+      "this literal leaves out `{name}`, whose default `{}` does not fit the type `{name}` takes \
+       under these type arguments",
+      Excerpt(self.raw.text(source, node.span))
+    );
+    let (code, label) = Site::Default.refusal();
+    self.reporter.report(
+      Diagnostic::builder(code, at)
+        .message(message)
+        .primary_label(label)
+        .label(Location::new(source, node.span), "this default")
+        .build(),
+    );
+  }
+
   /// Reports, at the path `at` of an application that leaves `argument` out, that the copy of its
   /// default, whose tree is `tree`, does not fit the type the application's type arguments give
   /// it, labelled at the default: the one diagnostic of that copy.
@@ -2003,7 +2087,12 @@ impl<'p> Coercion<'_, 'p, '_> {
     let value = if required && null {
       self.null_for_required(application, argument, ty)
     } else {
-      self.value(argument.tree, ty, Mode::Written(Site::Argument))
+      self.value(
+        argument.tree,
+        ty,
+        Mode::Written(Site::Argument),
+        expected.rebuilt,
+      )
     };
     if let Some(value) = value {
       self.builder.push_application_argument(
@@ -2070,9 +2159,10 @@ impl<'p> Coercion<'_, 'p, '_> {
     Some(id)
   }
 
-  /// Makes the rows of the tree `tree` against `ty`, as `mode` says: the value, then what it
-  /// holds, in pre-order. Answers the value's id, `None` for a tree lowering did not make.
-  fn value(&mut self, tree: u32, ty: Option<TyId>, mode: Mode) -> Option<ValueId> {
+  /// Makes the rows of the tree `tree` against `ty`, as `mode` says, `rebuilt` when a rebuild under
+  /// type arguments made `ty`: the value, then what it holds, in pre-order. Answers the value's id,
+  /// `None` for a tree lowering did not make.
+  fn value(&mut self, tree: u32, ty: Option<TyId>, mode: Mode, rebuilt: bool) -> Option<ValueId> {
     let tree = self.raw.trees.get(tree as usize).copied()?;
     let base = self.items.len();
     self.stack.push(Task::Make(Making {
@@ -2080,6 +2170,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       ty,
       tree,
       mode,
+      rebuilt,
     }));
     while let Some(task) = self.stack.pop() {
       match task {
@@ -2112,6 +2203,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       ty,
       tree,
       mode,
+      ..
     } = making;
     let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
       return;
@@ -2397,6 +2489,8 @@ impl<'p> Coercion<'_, 'p, '_> {
     let fields = self.fields_of(node, def, first);
     let one_of = self.one_of.binary_search(&def).is_ok();
     let mut merge = self.merge(def, fields);
+    // Each field's type is read under the object's type arguments.
+    let env = making.ty.map(|ty: TyId| (ty, def));
     if mode.written() {
       self.unknown_fields(node, def, first, source);
       if one_of && fields.written != 1 {
@@ -2406,7 +2500,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         };
         self.refuse(Refused { node, why }, source, making.ty, mode);
       }
-      if !self.required_left_out(def, fields, at, library) {
+      if !self.required_left_out(def, fields, at, library, env) {
         merge.default = merge.default_end;
       }
     }
@@ -2420,10 +2514,12 @@ impl<'p> Coercion<'_, 'p, '_> {
     // The entries' tasks are pushed in order, then reversed, so that the first is made first.
     let tasks = self.stack.len();
     let alone = one_of && fields.written == 1;
+    // Whether a copy that does not fit under the object's type arguments is reported: once for it.
+    let mut reported = false;
     while let Some(next) = self.next(&mut merge) {
       let (field, default) = match next {
         Next::Set(set) => {
-          let task = self.entry_task(making, def, set, alone);
+          let task = self.entry_task(making, def, set, alone, env);
           self.stack.push(task);
           continue;
         }
@@ -2432,16 +2528,40 @@ impl<'p> Coercion<'_, 'p, '_> {
       let Some(default_tree) = self.raw.trees.get(default as usize).copied() else {
         continue;
       };
-      let ty = self.member_type(field);
+      // In a copy the type is the one its count read, and read already: the count would have
+      // stopped at a type that cannot be built, and no copy would be made.
+      let expected = match self.under(field, env, library) {
+        Ok(expected) => expected,
+        Err(stop) => {
+          if mode.written() {
+            self.object_starved(at, stop);
+            merge.default = merge.default_end;
+          }
+          continue;
+        }
+      };
+      let ty = expected.ty;
       // In a copy nothing is asked and no count is read: the count the copy was charged for read
       // this default's count, through this same reading of the literal, and it was exact, or no
       // copy would be made. So its rows are among those already paid for.
       if mode.written() {
-        match self.ask(default, ty, library, false) {
-          Asked::Copy { .. } => {}
+        match self.ask(default, ty, library, expected.rebuilt) {
+          Asked::Copy { fits, .. } => {
+            // A literal whose type a rebuild made reports its copy that does not fit; one whose
+            // type a written occurrence gave leaves it to that occurrence's instantiation.
+            if !fits && making.rebuilt && !reported {
+              reported = true;
+              self.unfit_field(at, field, default);
+            }
+          }
           Asked::Absent => continue,
           Asked::Starved => {
             self.object_starved(at, Stop::Steps);
+            merge.default = merge.default_end;
+            continue;
+          }
+          Asked::Unbuilt(limit) => {
+            self.object_starved(at, Stop::Built(limit));
             merge.default = merge.default_end;
             continue;
           }
@@ -2453,6 +2573,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         ty,
         tree: default_tree,
         mode: Mode::Copied,
+        rebuilt: false,
       }));
     }
     if let Some(tail) = self.stack.get_mut(tasks..) {
@@ -2461,18 +2582,40 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// The task that makes the value of `set`, a field an object literal of the input object `def`,
-  /// made as `making` says, sets, and its entry, now open: the field's value against its type; or,
-  /// for `null`, one unresolved row when the field is required, or when it is the one field,
-  /// `alone`, of a OneOf input object's literal.
-  fn entry_task(&mut self, making: Making, def: DefId, set: SetField, alone: bool) -> Task {
+  /// made as `making` says, sets, and its entry, now open: the field's value against its type under
+  /// `env`; or, for `null`, one unresolved row when the field is required there, or when it is the
+  /// one field, `alone`, of a OneOf input object's literal. A type that cannot be built under `env`
+  /// makes the value one unresolved row, typed with the type the field is written with.
+  fn entry_task(
+    &mut self,
+    making: Making,
+    def: DefId,
+    set: SetField,
+    alone: bool,
+    env: Option<(TyId, DefId)>,
+  ) -> Task {
     let name = Location::new(making.tree.source, set.name);
     self.entries.push((set.field, Some(name), ValueId::new(0)));
-    let (ty, non_null) = self.member_occurrence(set.field);
-    let value = making.child(set.node, ty);
+    let library = making.tree.source < self.supplied;
+    let expected = match self.under(set.field, env, library) {
+      Ok(expected) => expected,
+      Err(stop) => {
+        let written = self.member_type(set.field);
+        let value = Making {
+          rebuilt: false,
+          ..making.child(set.node, written)
+        };
+        return Task::Refuse(value, Why::Unbuilt(stop));
+      }
+    };
+    let value = Making {
+      rebuilt: expected.rebuilt,
+      ..making.child(set.node, expected.ty)
+    };
     if !matches!(self.kind(set.node), RawKind::Null) {
       return Task::Make(value);
     }
-    if non_null && !self.raw.defaults.contains_key(&set.field) {
+    if expected.non_null && !self.raw.defaults.contains_key(&set.field) {
       return Task::Refuse(
         value,
         Why::Required {
@@ -2607,9 +2750,17 @@ impl<'p> Coercion<'_, 'p, '_> {
 
   /// Reports each required field of the input object `def` that the object literal at `at`
   /// leaves out, its fields set being `fields`, each a step charged first, but where the built-in
-  /// library writes it, `library`. Answers `false`, once it has reported the literal past the
-  /// budget, when the budget cannot pay: the rest is not read.
-  fn required_left_out(&mut self, def: DefId, fields: Fields, at: Location, library: bool) -> bool {
+  /// library writes it, `library`; one that may be required is reported when its type under `env`
+  /// is non-null. Answers `false`, once it has reported the literal past the budget, when the
+  /// budget cannot pay, or a type cannot be built under `env`: the rest is not read.
+  fn required_left_out(
+    &mut self,
+    def: DefId,
+    fields: Fields,
+    at: Location,
+    library: bool,
+    env: Option<(TyId, DefId)>,
+  ) -> bool {
     let Some(input) = self.input(def) else {
       return true;
     };
@@ -2617,7 +2768,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     let set_end = fields.start.saturating_add(fields.len);
     let mut set = fields.start;
     for row in start..end {
-      let Some(&field) = self.required.get(row as usize) else {
+      let Some(&(field, maybe)) = self.required.get(row as usize) else {
         break;
       };
       // The fields it sets are in member order too: pass those before this one.
@@ -2634,6 +2785,16 @@ impl<'p> Coercion<'_, 'p, '_> {
       if !library && !self.charge(1) {
         self.object_starved(at, Stop::Steps);
         return false;
+      }
+      if maybe {
+        match self.under(field, env, library) {
+          Ok(expected) if !expected.non_null => continue,
+          Ok(_) => {}
+          Err(stop) => {
+            self.object_starved(at, stop);
+            return false;
+          }
+        }
       }
       self.missing_field(def, field, at);
     }
@@ -2696,6 +2857,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       ty,
       tree,
       mode,
+      ..
     } = making;
     let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
       return;
@@ -3679,6 +3841,14 @@ impl<'p> Coercion<'_, 'p, '_> {
           help,
         )
       }
+      Why::Unbuilt(stop) => {
+        let (message, help) = self.stopped(stop, "this value takes");
+        (
+          Coded::Kind(DiagnosticKind::ResourceLimit),
+          message,
+          Some(String::from(help)),
+        )
+      }
     };
     let mut report = match coded {
       Coded::Kind(kind) => Diagnostic::builder(kind.code(), at)
@@ -3712,6 +3882,14 @@ impl<'p> Coercion<'_, 'p, '_> {
         .help("raise the limit with `Limits::with_max_value_steps`, or write the lists")
         .build(),
     );
+  }
+}
+
+/// The verdict of a count that reads a type `stop` kept from being built under type arguments.
+fn unbuilt_count(stop: Stop) -> Count {
+  match stop {
+    Stop::Steps => Count::Past,
+    Stop::Built(limit) => Count::Unbuilt(limit),
   }
 }
 
