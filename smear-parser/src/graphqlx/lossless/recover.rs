@@ -22,7 +22,10 @@
 //!
 //! The wrappers at the bottom exist so a production still writes
 //! `unexpected::<Src, Ctx>(inp, VALUE_HEADS)` rather than a five-argument call naming this
-//! dialect's tables at every site. They add no behaviour, exactly as `trivia.rs`'s do.
+//! dialect's tables at every site. They add no behaviour, exactly as `trivia.rs`'s do — with the
+//! two a module's body adds to the set: `skip_mod_junk` is the substrate's report followed by its
+//! resync, one call where the body would write two, and `skip_one` is the one-token step every
+//! helper there falls back to, spelled where a loop can take it by itself.
 
 use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
 use tokora::{
@@ -268,6 +271,16 @@ pub(crate) const MOD_ITEM_HEADS: &[Kind] =
 /// the block *after* it.
 pub(crate) const UNION_MEMBERS_HEADS: &[Kind] = &[Kind::Equal];
 
+/// The `)` a parenthesised list closes with: what such a list reports as expected where it stops
+/// short of one, at a `}` that belongs to a block around it. See [`closes_enclosing_block`].
+pub(crate) const PARENS_CLOSER_HEADS: &[Kind] = &[Kind::RParen];
+
+/// The `]` a list type or a list value closes with, reported as [`PARENS_CLOSER_HEADS`] is.
+pub(crate) const LIST_CLOSER_HEADS: &[Kind] = &[Kind::RBracket];
+
+/// The `>` a generic list closes with, reported as [`PARENS_CLOSER_HEADS`] is.
+pub(crate) const ANGLE_CLOSER_HEADS: &[Kind] = &[Kind::RAngle];
+
 /// Whether `kind` can begin a value.
 ///
 /// [`VALUE_HEADS`] as a predicate. The two are kept in step by
@@ -306,6 +319,40 @@ pub(crate) const fn starts_type(kind: Kind) -> bool {
     kind,
     Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret | Kind::LBracket
   )
+}
+
+/// Whether `kind` closes one of this dialect's four delimiter pairs.
+///
+/// Asked where the grammar requires exactly one component — a type after a `:`, a value after an
+/// `=` — and the head starts none. A closer there is the closer of the block the position stands
+/// in, so it is reported and left for that block's own loop, where every other head is junk to
+/// consume. Consuming it would cost the block its end and everything after the block with it.
+#[inline]
+pub(crate) const fn is_closer(kind: Kind) -> bool {
+  matches!(
+    kind,
+    Kind::RParen | Kind::RBracket | Kind::RBrace | Kind::RAngle
+  )
+}
+
+/// Whether a `}` at the head of a list delimited by `(`, `[` or `<` belongs to a block around the
+/// list, and so is not the list's to consume.
+///
+/// `open_at` is the lexer's count of open braces right after the list's own opener was read, and
+/// `now` is the count at the committed position: the `}` at the head is only peeked, so it is not
+/// in `now` yet. The `}` closes a brace that was open before the list began exactly when one was
+/// (`open_at > 0`) and the list's own content has left none of its own open (`now <= open_at`).
+/// The list then reports its own closer as missing and returns, and the block's loop finds its `}`
+/// where it stands. Taking it as junk would cost the block its end, and hand the list everything
+/// after the block.
+///
+/// In the two other cases the `}` stays junk of the list. With no brace open before the list it
+/// closes nothing and is a stray; with more open now than then it closes a brace the list's own
+/// content opened. A `)`, `]` or `>` that is not the list's own is junk too, as it has always
+/// been: no count tells a stray one from an enclosing one.
+#[inline]
+pub(crate) const fn closes_enclosing_block(open_at: usize, now: usize) -> bool {
+  open_at > 0 && now <= open_at
 }
 
 // `starts_description` — the one two-kind test every described position makes. Generated from
@@ -425,6 +472,63 @@ fn delimiters(kind: &Kind) -> Balance<u8> {
   }
 }
 
+/// Whether `keyword` opens an item of a module's body: a `use` item, a module, a type-system
+/// definition or an extension.
+///
+/// The SDL root's entries, which is what a body holds. An executable definition's keyword is not
+/// among them, so a query or a fragment in a body is junk between two items.
+#[inline]
+pub(crate) const fn starts_mod_item(keyword: Option<Keyword>) -> bool {
+  matches!(
+    keyword,
+    Some(
+      Keyword::Use
+        | Keyword::Mod
+        | Keyword::Extend
+        | Keyword::Schema
+        | Keyword::Directive
+        | Keyword::Scalar
+        | Keyword::Type
+        | Keyword::Interface
+        | Keyword::Union
+        | Keyword::Enum
+        | Keyword::Input
+    )
+  )
+}
+
+/// Where a module's body is willing to restart after an item failed or junk stood between two:
+/// the head of an item — a description's string, or a keyword of [`starts_mod_item`] — or a `}`.
+///
+/// The `}` is in the set so that the scan stops **before** the body's closer instead of running
+/// past it. Whether a `}` at hand *is* the body's closer is not this predicate's to say: the body
+/// decides it by the lexer's count of open braces, and
+/// [`resync_to_closing`](crate::lossless::recover::resync_to_closing) keeps a `}` that closes
+/// wreckage from ever being asked.
+#[inline]
+fn is_mod_restart_point(kind: Kind, keyword: Option<Keyword>) -> bool {
+  match kind {
+    Kind::InlineString | Kind::BlockString | Kind::RBrace => true,
+    Kind::Identifier => starts_mod_item(keyword),
+    _ => false,
+  }
+}
+
+/// The one pair a module's body is delimited by, for the scan that resynchronises inside one.
+///
+/// **Braces alone, where [`delimiters`] has four pairs.** A body follows the braces as written,
+/// by the lexer's own count of them, and the scan has to agree with that count token for token.
+/// With the other three pairs neutral, an unclosed `(`, `[` or `<` in the wreckage hides no item
+/// head from the predicate and no `)`, `]` or `>` can close a brace.
+#[inline]
+fn braces(kind: &Kind) -> Balance<u8> {
+  match kind {
+    Kind::LBrace => Balance::Open(b'{'),
+    Kind::RBrace => Balance::Close(b'{'),
+    _ => Balance::Neutral,
+  }
+}
+
 // ---------------------------------------------------------------------------------------------
 // The wrappers. Each one binds this dialect's tables to `crate::lossless::recover`'s logic and adds
 // nothing else; the `lossless_production!` bundle is what makes them nameable from a production
@@ -528,5 +632,57 @@ lossless_production! {
       K::Error.raw(),
       exhausted,
     )
+  }
+
+  /// An item of a module's body returned `Err`: skip its wreckage and stop **before** the body's
+  /// next restart point — the head of an item, or the `}` that ends the body.
+  ///
+  /// [`crate::lossless::recover::resync_to_closing`], which reports nothing, with the one pair a
+  /// body is delimited by. `floor` is how many braces were open once the body's own `{` was read.
+  /// The braces open above it now are the ones the wreckage opened and did not close, and the
+  /// scan spends that many `}` on the wreckage before anything can restart the body.
+  fn resync_to_mod_item<'inp, Src, Ctx>(inp, floor: usize) {
+    // One read of the lexer's state serves both numbers, and it is read here rather than inside
+    // the substrate helper for the reason `resync_to_definition` gives: the state is
+    // `smear-lexer`'s, and `crate::lossless::recover` may not name that crate. It is the state at
+    // the committed position, so a head that is only peeked is in neither number.
+    let state: super::LexerState = inp.state();
+    let exhausted: bool = crate::lossless::recover::scan_allowance_exhausted(
+      inp.token_budget().spent(),
+      state.token().tokens(),
+    );
+    crate::lossless::recover::resync_to_closing(
+      inp,
+      braces,
+      |t| is_mod_restart_point(kind_of(t), keyword_of(t)),
+      state.brace_depth().saturating_sub(floor),
+      K::Error.raw(),
+      exhausted,
+    )
+  }
+
+  /// Something that starts no item stands between two items of a module's body. **One report for
+  /// the whole run**, at its first token, and then [`resync_to_mod_item`] skips to the body's next
+  /// restart point.
+  ///
+  /// A run of junk therefore costs one diagnostic and one `Error` node where a report for each
+  /// token would cost one of each per token. A `}` that closes a brace the junk opened is part of
+  /// the run: `floor` is what tells it from the body's own.
+  fn skip_mod_junk<'inp, Src, Ctx>(inp, floor: usize) {
+    crate::lossless::recover::report_unexpected(inp, MOD_ITEM_HEADS)?;
+    resync_to_mod_item::<Src, Ctx>(inp, floor)
+  }
+
+  /// One token, whatever it is, into an `Error` node, and nothing at the end of input.
+  ///
+  /// What a loop does when a turn of it has left the input where it found it, so that its
+  /// termination rests on the position and not on what any production happens to consume.
+  fn skip_one<'inp, Src, Ctx>(inp) {
+    let mark = inp.cst_mark();
+    if inp.try_expect_or_stop(|_| true)?.is_some() {
+      inp.cst_start_at(mark, K::Error.raw());
+      inp.cst_finish(K::Error.raw());
+    }
+    Ok(())
   }
 }

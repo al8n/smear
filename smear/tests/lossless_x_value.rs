@@ -763,11 +763,27 @@ fn every_named_type_head_actually_opens_a_type() {
     );
   }
 
-  for src in [")", "!", "$x", "1", "<Int>", "::Int"] {
+  for src in ["!", "$x", "1", "<Int>", "::Int"] {
     assert_eq!(
       kinds!(parse_type_ref, src),
       vec![K::Root, K::Error],
       "{src:?} is not a type head and must recover"
     );
+  }
+
+  // A closing delimiter is no type head either, and it is the one head a type position leaves: it
+  // is the closer of the block the position stands in, so it is reported and no `Error` node takes
+  // it. The value table above keeps `)` in its list, because `value` itself consumes every head.
+  for src in [")", "]", "}", ">"] {
+    assert_eq!(
+      kinds!(parse_type_ref, src),
+      vec![K::Root],
+      "{src:?} closes a block and must be left for it"
+    );
+    assert!(
+      parse_type_ref(src).has_errors(),
+      "{src:?} stands where a type should and must be reported"
+    );
+    assert_eq!(parse_type_ref(src).syntax().text().to_string(), src);
   }
 }

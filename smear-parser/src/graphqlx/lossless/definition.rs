@@ -80,9 +80,9 @@ use super::{
   generic::{definition_name, optional_where_clause},
   recover,
   recover::{
-    DESCRIBED_MEMBER_HEADS, FIELDS_BLOCK_HEADS, NAME_HEADS, OPERATION_TYPE_HEADS, PATH_HEADS,
-    ROOT_OPERATION_TYPES_HEADS, TYPE_SYSTEM_DEFINITION_HEADS, UNION_MEMBERS_HEADS, opener_span,
-    starts_description,
+    DESCRIBED_MEMBER_HEADS, FIELDS_BLOCK_HEADS, NAME_HEADS, OPERATION_TYPE_HEADS,
+    PARENS_CLOSER_HEADS, PATH_HEADS, ROOT_OPERATION_TYPES_HEADS, TYPE_SYSTEM_DEFINITION_HEADS,
+    UNION_MEMBERS_HEADS, closes_enclosing_block, opener_span, starts_description,
   },
   trivia::{eat_if, expect, peek_as, peek_kind},
   ty::{type_path, type_ref},
@@ -129,7 +129,8 @@ lossless_production! {
   /// `( InputValueDefinition+ )`
   ///
   /// `arguments`' loop with a different member and the opposite emptiness ruling: `syntactic/`
-  /// accepts the lenient `()` for `Arguments` and rejects it here.
+  /// accepts the lenient `()` for `Arguments` and rejects it here. It leaves a `}` of a block
+  /// around it as `arguments` does.
   fn arguments_definition<'inp, Src, Ctx>(inp) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
@@ -138,6 +139,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LParen)?;
         let open = opener_span(inp.span().end());
+        let open_at: usize = inp.state().brace_depth();
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::RParen) {
           recover::report_unexpected::<Src, Ctx>(inp, DESCRIBED_MEMBER_HEADS)?;
         }
@@ -147,6 +149,9 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
+            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+              return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
+            }
             Some(Kind::Identifier | Kind::InlineString | Kind::BlockString) => {
               input_value_definition::<Src, Ctx>(inp)?
             }

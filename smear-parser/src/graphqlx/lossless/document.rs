@@ -32,10 +32,22 @@
 //!
 //! A body is the one recursive position here. It opens through `descend` before it reads its `{`,
 //! so the parse's own nesting budget counts every level whatever the lexer's tally reads, and it
-//! is entered only once its `{` has been peeked. Each turn of the body's loop runs an item, whose
-//! head the item's own production consumes, or skips a head that starts no item through
-//! `recover::unexpected`, which consumes at least one token; an item that returns `Err` unwinds to
-//! the document root, which stays the only place a resync happens.
+//! is entered only once its `{` has been peeked.
+//!
+//! **A body follows the braces as written.** The lossless lexer counts the braces that are open,
+//! in the state a rewind takes back, and a body lasts exactly while as many are open as were once
+//! its own `{` was read. A `}` at the head with that many open is the body's closer; a `}` with
+//! more open closes a brace that junk or a failed item left behind, and is junk itself. Nothing
+//! else moves the count, so the end of a module does not depend on which production consumed the
+//! tokens before it, nor on how.
+//!
+//! **A body recovers its own items**, as a document root does. Each item runs through the
+//! substrate's `depth::judge_turn`, which takes the trip baseline for that item and answers the
+//! verdict a root's turn records. An item that fails with an ordinary syntax error is
+//! resynchronised past, inside the body, so the module keeps its other items and its node. An
+//! item whose failure ends the document is never caught here: the error is returned, the
+//! module's node is still built around what the body had completed, and the root above records
+//! the stop. Junk between two items is reported once and skipped as one run.
 //!
 //! # One mark, two branches, and that is what forces the ordering
 //!
@@ -75,7 +87,8 @@ use super::{
   recover,
   recover::{
     DEFINITION_HEADS, DESCRIBED_DEFINITION_HEADS, EXECUTABLE_ENTRY_HEADS, MOD_BODY_HEADS,
-    MOD_ITEM_HEADS, NAME_HEADS, TYPE_SYSTEM_ENTRY_HEADS, opener_span, starts_description,
+    NAME_HEADS, TYPE_SYSTEM_ENTRY_HEADS, is_closer, opener_span, starts_description,
+    starts_mod_item,
   },
   trivia::{eat_if, expect, peek_as, peek_kind},
   use_tree::use_definition,
@@ -84,31 +97,6 @@ use super::{
 use crate::lossless::depth::{self, RootTurn};
 
 use crate::lossless::lossless_production;
-
-/// Whether `keyword` opens an item of a module's body: a `use` item, a module, a type-system
-/// definition or an extension.
-///
-/// The SDL root's entries, which is what a body holds. An executable definition's keyword is not
-/// among them, so a query or a fragment in a body is skipped as a head that starts no item.
-#[inline]
-const fn starts_mod_item(keyword: Option<Keyword>) -> bool {
-  matches!(
-    keyword,
-    Some(
-      Keyword::Use
-        | Keyword::Mod
-        | Keyword::Extend
-        | Keyword::Schema
-        | Keyword::Directive
-        | Keyword::Scalar
-        | Keyword::Type
-        | Keyword::Interface
-        | Keyword::Union
-        | Keyword::Enum
-        | Keyword::Input
-    )
-  )
-}
 
 lossless_production! {
   dialect = graphqlx::lossless;
@@ -121,7 +109,18 @@ lossless_production! {
   ///
   /// A missing name and a missing body are each reported without consuming, so whatever stands
   /// there is still the next entry's.
+  ///
+  /// # The node is built whatever ended the body
+  ///
+  /// A body returns `Err` only for a failure that ends the document — it catches every other one
+  /// itself. Letting that `Err` out of the node's closure would leave the node unbuilt, and the
+  /// items the body had completed would be children of whatever is around the module: of the
+  /// document, for a top-level module, where they read as top-level definitions. So the error is
+  /// kept while the node closes around what was parsed, and raised again behind it. An enclosing
+  /// module does the same one level up, so every module on the way out keeps its node and the
+  /// document still ends.
   fn mod_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+    let mut ended: Option<super::Error<'inp, Src, Ctx>> = None;
     node_at(
       mark,
       K::ModDefinition.raw(),
@@ -134,12 +133,17 @@ lossless_production! {
         }
         // The `{` is confirmed here, before the body is entered.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
-          return mod_body::<Src, Ctx>(inp);
+          ended = mod_body::<Src, Ctx>(inp).err();
+          return Ok(());
         }
         recover::report_unexpected::<Src, Ctx>(inp, MOD_BODY_HEADS)
       },
     )
-    .parse_input(inp)
+    .parse_input(inp)?;
+    match ended {
+      Some(error) => Err(error),
+      None => Ok(()),
+    }
   }
 
   /// `{ ModItem* }` — a module's body. Opens no node: the braces and the items are children of the
@@ -148,29 +152,95 @@ lossless_production! {
   /// **Precondition: the head is a `{` its caller has peeked.** The frame is taken first, so the
   /// nesting budget counts every body before its `{` is read. An empty body is legal — a module
   /// with nothing in it is a namespace — so nothing is reported for one.
+  ///
+  /// # Where the body ends
+  ///
+  /// `floor` is the lexer's count of open braces once the body's own `{` is read, and every turn
+  /// asks the count before anything else:
+  ///
+  /// 1. **Below `floor`:** an item consumed the `}` that closed this body, so the body is over.
+  ///    Nothing is consumed and nothing is reported — the item that took the brace reported — and
+  ///    the module's node holds no `}` of its own.
+  /// 2. **A `}` at the head with exactly `floor` open:** the body's closer. The head is only
+  ///    peeked, so it is not in the count yet.
+  /// 3. **A `}` at the head with more open:** it closes a brace that junk or a failed item left
+  ///    open, and is junk.
+  /// 4. **End of input:** the body is reported unclosed. A scanner that has stopped — a lexer
+  ///    limit, a spent token budget — also answers a peek with nothing, and is not an end of
+  ///    input: there the body returns the terminal error and reports nothing of its own.
+  ///
+  /// The count is asked again right after an item fails and before anything is skipped: a body
+  /// that is over skips nothing, because what stands at the head is no longer inside it.
+  ///
+  /// # What a turn does with an item
+  ///
+  /// An item that parsed is kept. One that failed with an ordinary error has reported itself, and
+  /// its wreckage is skipped to the next item's head or to the body's `}`. One whose failure ends
+  /// the document is returned as it is, never caught: the root above judges it again over its own
+  /// baseline and records the stop.
+  ///
+  /// # Termination
+  ///
+  /// Every turn either returns or leaves the committed end of the input further on than it found
+  /// it. The end is read before the turn and after it, and a turn that moved nothing is followed
+  /// by one token taken into an `Error` node; where no token can be taken the input is at its
+  /// end, and the next turn returns. The input is finite, so the loop ends, and nothing in that
+  /// argument rests on what an item's production or a skip happens to consume.
   fn mod_body<'inp, Src, Ctx>(inp) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     expect::<Src, Ctx>(inp, Kind::LBrace)?;
     let open = opener_span(inp.span().end());
+    // Read once the body's own `{` is committed, so it is at least one.
+    let floor: usize = inp.state().brace_depth();
     loop {
-      if eat_if::<Src, Ctx>(inp, Kind::RBrace)? {
+      let before: usize = inp.span().end();
+      // Rule 1, before the head is looked at: what stands there is outside a body that is over.
+      if inp.state().brace_depth() < floor {
         return Ok(());
       }
-      match peek_kind::<Src, Ctx>(inp)? {
-        None => return recover::unclosed_object::<Src, Ctx>(inp, open),
-        Some(Kind::InlineString | Kind::BlockString) => type_system_item::<Src, Ctx>(inp)?,
-        Some(Kind::Identifier) => {
-          if starts_mod_item(peek_as::<Src, Ctx, Keyword>(inp)?) {
-            type_system_item::<Src, Ctx>(inp)?
-          } else {
-            // An executable definition's keyword, or any other name. Consumes at least one token,
-            // which is this loop's termination argument.
-            recover::unexpected::<Src, Ctx>(inp, MOD_ITEM_HEADS)?
+      let head: Option<Kind> = peek_kind::<Src, Ctx>(inp)?;
+      let starts_item: bool = match head {
+        Some(Kind::InlineString | Kind::BlockString) => true,
+        Some(Kind::Identifier) => starts_mod_item(peek_as::<Src, Ctx, Keyword>(inp)?),
+        _ => false,
+      };
+      match head {
+        // A peek answers `None` at the end of the input and at a scanner that has stopped alike.
+        // The read tells them apart: it declines at a real end, and at a stop it returns the
+        // terminal error, which ends the document here instead of reporting an unclosed body at
+        // every module on the way out.
+        None => {
+          eat_if::<Src, Ctx>(inp, Kind::RBrace)?;
+          return recover::unclosed_object::<Src, Ctx>(inp, open);
+        }
+        // The state is the committed position's, and this `}` is only peeked: with `floor` braces
+        // open it is the one that closes the body.
+        Some(Kind::RBrace) if inp.state().brace_depth() == floor => {
+          return expect::<Src, Ctx>(inp, Kind::RBrace);
+        }
+        Some(_) if starts_item => {
+          // The verdict is all this loop reads. The trip term beside it is the root's to record.
+          let (turn, _tripped): (RootTurn<(), super::Error<'inp, Src, Ctx>>, bool) =
+            depth::judge_turn(inp, type_system_item::<Src, Ctx>);
+          match turn {
+            RootTurn::Parsed { .. } => {}
+            RootTurn::EndsTheDocument { error } => return Err(error),
+            // Reported where it failed. Rule 1 again before anything is skipped: an item that
+            // took this body's `}` with it has left nothing of the body to skip.
+            RootTurn::Recoverable { .. } => {
+              if inp.state().brace_depth() >= floor {
+                recover::resync_to_mod_item::<Src, Ctx>(inp, floor)?;
+              }
+            }
           }
         }
-        // A punctuator no item starts with. Consumes at least one token, as above.
-        Some(_) => recover::unexpected::<Src, Ctx>(inp, MOD_ITEM_HEADS)?,
+        // A name or a punctuator that starts no item, or a `}` with more than `floor` open.
+        Some(_) => recover::skip_mod_junk::<Src, Ctx>(inp, floor)?,
+      }
+      // Progress by position: see `Termination`.
+      if inp.span().end() == before {
+        recover::skip_one::<Src, Ctx>(inp)?;
       }
     }
   }
@@ -299,15 +369,25 @@ lossless_production! {
         type_system_extension::<Src, Ctx>(inp, extend_mark)
       }
       Some(_) => type_system_definition_at::<Src, Ctx>(inp, mark),
-      None => recover::unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS),
+      None => {
+        // After a description, a closing delimiter is the closer of the body this item stands
+        // in: reported and left, so a module ends where it was written. The description was this
+        // turn's progress. With nothing consumed the head is skipped whatever it is, because the
+        // roots' loops end only if every turn consumes.
+        if described && peek_kind::<Src, Ctx>(inp)?.is_some_and(is_closer) {
+          return recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS);
+        }
+        recover::unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS)
+      }
     }
   }
 
   /// `DocumentItem+` — the mixed root [`super::parse_document`] parses.
   ///
   /// The empty form is reported: `syntactic/` rejects an empty input, and gate 1 compares verdicts.
-  /// A failed entry is caught and resynchronised past, which is the only place in this suite that
-  /// happens — every production below returns `Err` and lets it unwind to here.
+  /// A failed entry is caught and resynchronised past. A module's body does the same for its own
+  /// items; every other production below returns `Err` and lets it unwind to the nearest of the
+  /// two.
   ///
   /// **Except a nesting refusal, which is a resource refusal rather than a syntax error and ends
   /// the document.** Resynchronising past one re-reads the abandoned nest at the document level

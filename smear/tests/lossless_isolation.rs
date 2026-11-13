@@ -546,9 +546,16 @@ fn the_substrate_names_no_dialect() {
 /// `pub(crate)`, and its only callers are the two dialect projections: the `recover.rs` shape a
 /// fifth time. One gate on the module rather than one per item, which is why a hoist of some
 /// thirty items moves this count by one.
+///
+/// **23 with the module body's recovery**: `lossless/depth.rs`'s `judge_turn`, the verdict
+/// `root_turn` records, split out of it so that a block which recovers its own items can ask for
+/// the verdict without a root's slot. It is the retracted cluster's shape and belongs to that
+/// family: `pub(crate)`, with `root_turn` and one dialect's module body as its only callers, so
+/// with no dialect in the crate `root_turn` is gated away and it is dead. It names no dialect —
+/// the block that calls it is the dialect's — which is why it can be here at all.
 const SUBSTRATE_FEATURE_GATE: &str = r#"#[cfg(any(feature = "graphql", feature = "graphqlx"))]"#;
 /// How many times [`SUBSTRATE_FEATURE_GATE`] occurs.
-const SUBSTRATE_FEATURE_GATES: usize = 22;
+const SUBSTRATE_FEATURE_GATES: usize = 23;
 
 #[test]
 fn every_dialect_word_in_the_substrate_is_prose_or_the_one_feature_gate() {

@@ -62,8 +62,8 @@ use super::{
   directive::directives,
   recover,
   recover::{
-    DESCRIBED_DEFINITION_HEADS, EXECUTABLE_DEFINITION_HEADS, NAME_HEADS, VARIABLE_DEFINITION_HEADS,
-    opener_span,
+    DESCRIBED_DEFINITION_HEADS, EXECUTABLE_DEFINITION_HEADS, NAME_HEADS, PARENS_CLOSER_HEADS,
+    VARIABLE_DEFINITION_HEADS, closes_enclosing_block, opener_span,
   },
   selection::{selection_set, type_condition},
   trivia::{eat_if, expect, peek_as, peek_kind},
@@ -127,6 +127,13 @@ lossless_production! {
   /// rejects the empty `()` here ("one-or-more, so an empty `()` errors") where it accepts it
   /// for `Arguments`. Gate 1 compares the two suites' verdicts input by input, so the two
   /// rulings are followed one production at a time rather than unified into a house rule.
+  ///
+  /// # A `}` that closes a brace open before the list
+  ///
+  /// It is left where it stands, by [`closes_enclosing_block`], as every other `(` list leaves
+  /// it. No block of the grammar stands around an operation, so a brace open here was left open
+  /// by a definition that failed before this one: the `}` is then a stray for the root to
+  /// report, and what follows it is still read as definitions instead of as this list's junk.
   fn variables_definition<'inp, Src, Ctx>(inp) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
@@ -135,6 +142,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LParen)?;
         let open = opener_span(inp.span().end());
+        let open_at: usize = inp.state().brace_depth();
         // The report consumes nothing, so the `)` is still the loop's to eat; checked here
         // rather than after the loop, where the diagnostic would point past the closer it is
         // about.
@@ -147,6 +155,9 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
+            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+              return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
+            }
             // A string head is the definition's description — `VariableDefinition` carries a
             // `Description?` like every other executable definition does.
             Some(Kind::Dollar | Kind::InlineString | Kind::BlockString) => {

@@ -1,0 +1,518 @@
+#![cfg(all(
+  any(feature = "std", feature = "alloc"),
+  feature = "graphqlx",
+  feature = "parser"
+))]
+
+//! Recovery in GraphQLx's parser layers: what stands beside a broken item is kept, where it stands.
+//!
+//! The syntactic layer is fail-fast and answers no document for a broken text. The lossless layer
+//! recovers, and these tests hold it to where the recovery puts what it keeps: an item of a module
+//! stays an item of that module, a definition after a module stays outside it, and one broken item
+//! costs that item alone.
+//!
+//! Every text the lossless tests read is also held to round-trip. Nothing here asserts what a
+//! layer lends its sink or how many errors it counts.
+
+use smear::parser::graphqlx::Syntactic;
+
+/// A type whose field has no type, and a scalar after it.
+const MISSING_FIELD_TYPE: &str = "type T { f: } scalar S";
+
+#[test]
+fn the_syntactic_layer_answers_no_document_for_a_broken_text() {
+  assert!(
+    Syntactic::new()
+      .type_system_document(MISSING_FIELD_TYPE, &mut ())
+      .is_err(),
+    "the syntactic layer stops at the first syntax error"
+  );
+}
+
+#[cfg(all(feature = "rowan_0_17", feature = "std"))]
+mod lossless {
+  use smear::{
+    lexer::limits::LosslessLimits,
+    parser::graphqlx::{
+      Lossless, Recovery, Syntactic,
+      ast::{TypeSystemDocument, TypeSystemItem},
+      kinds::SyntaxKind as K,
+      lossless::SyntaxNode,
+    },
+  };
+
+  use super::MISSING_FIELD_TYPE;
+
+  /// What the lossless layer answered for one text.
+  struct Read<'a> {
+    tree: SyntaxNode,
+    document: TypeSystemDocument<&'a str>,
+    recovery: Recovery,
+    errors: bool,
+  }
+
+  /// `text` through the lossless layer at its default limits.
+  fn read(text: &str) -> Read<'_> {
+    read_with(&Lossless::new(), text)
+  }
+
+  /// `text` through `layer`, held to round-trip.
+  fn read_with<'a>(layer: &Lossless, text: &'a str) -> Read<'a> {
+    let parsed = layer
+      .type_system_document(text, &mut ())
+      .expect("short enough for a tree");
+    let tree: SyntaxNode = parsed.tree().syntax();
+    assert_eq!(tree.text().to_string(), text, "the tree spells its text");
+    Read {
+      tree,
+      document: parsed.document().clone(),
+      recovery: parsed.recovery(),
+      errors: parsed.tree().has_errors(),
+    }
+  }
+
+  /// The document's own node.
+  fn top(tree: &SyntaxNode) -> SyntaxNode {
+    tree
+      .children()
+      .find(|node: &SyntaxNode| node.kind() == K::TypeSystemDocument)
+      .expect("the document's node")
+  }
+
+  /// The first module, anywhere in `tree`, whose text opens with `opens`.
+  fn module(tree: &SyntaxNode, opens: &str) -> SyntaxNode {
+    tree
+      .descendants()
+      .find(|node: &SyntaxNode| {
+        node.kind() == K::ModDefinition && node.text().to_string().starts_with(opens)
+      })
+      .unwrap_or_else(|| panic!("no module opens with `{opens}`"))
+  }
+
+  /// The scalars that are direct children of `node`, each as it is written.
+  fn scalars(node: &SyntaxNode) -> Vec<String> {
+    node
+      .children()
+      .filter(|child: &SyntaxNode| child.kind() == K::ScalarTypeDefinition)
+      .map(|child: SyntaxNode| child.text().to_string().trim().to_string())
+      .collect()
+  }
+
+  /// The kinds of the nodes that are direct children of `node`.
+  fn kinds(node: &SyntaxNode) -> Vec<K> {
+    node
+      .children()
+      .map(|child: SyntaxNode| child.kind())
+      .collect()
+  }
+
+  /// Whether a `}` is a direct child of `node`.
+  fn holds_a_closing_brace(node: &SyntaxNode) -> bool {
+    node
+      .children_with_tokens()
+      .any(|element| element.kind() == K::RBrace)
+  }
+
+  /// The items of the module `item` is.
+  fn items<'d, 'a>(item: &'d TypeSystemItem<&'a str>) -> &'d [TypeSystemItem<&'a str>] {
+    match item {
+      TypeSystemItem::Mod(module) => module.items(),
+      _ => panic!("the item is no module"),
+    }
+  }
+
+  // ── The review's regression, and the other routes to it ────────────────────────────────────
+
+  #[test]
+  fn a_broken_item_leaves_the_modules_other_items_in_the_module() {
+    let answer = read("mod m { scalar X type T { f } }");
+    assert!(answer.errors);
+
+    let document = top(&answer.tree);
+    assert_eq!(kinds(&document), [K::ModDefinition]);
+    assert_eq!(scalars(&module(&answer.tree, "mod m")), ["scalar X"]);
+    assert!(scalars(&document).is_empty(), "X is declared at the top");
+
+    let definitions = answer.document.definitions();
+    assert_eq!(definitions.len(), 1);
+    let inside = items(&definitions[0]);
+    assert_eq!(inside.len(), 1);
+    assert!(matches!(inside[0], TypeSystemItem::Definition(_)));
+    assert_eq!(answer.recovery.projected(), 2);
+    assert!(!answer.recovery.is_complete());
+  }
+
+  #[test]
+  fn junk_with_braces_does_not_close_the_module() {
+    for text in [
+      "mod m { query Q { f } scalar X }",
+      "mod m { tpye T { f: Int } scalar X }",
+    ] {
+      let answer = read(text);
+      assert!(answer.errors, "{text}");
+      assert_eq!(kinds(&top(&answer.tree)), [K::ModDefinition], "{text}");
+      assert_eq!(
+        scalars(&module(&answer.tree, "mod m")),
+        ["scalar X"],
+        "{text}"
+      );
+      assert_eq!(answer.recovery, Recovery::new(2, 1), "{text}");
+    }
+  }
+
+  #[test]
+  fn a_refusal_inside_a_module_keeps_the_module_around_what_it_completed() {
+    for (what, limits, text) in [
+      (
+        "the nesting ceiling",
+        LosslessLimits::with_max_nesting_depth(4),
+        "mod m { scalar A type T { f: [[[[[[Int]]]]]] } scalar Z }",
+      ),
+      (
+        "the token budget",
+        LosslessLimits::default().with_max_tokens(16),
+        "mod m { scalar A scalar B scalar C scalar D scalar Z }",
+      ),
+    ] {
+      let answer = read_with(&Lossless::with_limits(limits), text);
+      assert!(answer.errors, "{what}");
+
+      let inside = scalars(&module(&answer.tree, "mod m"));
+      assert_eq!(
+        inside.first().map(String::as_str),
+        Some("scalar A"),
+        "{what}: the item completed before the refusal is in the module"
+      );
+      let everywhere = answer
+        .tree
+        .descendants()
+        .filter(|node: &SyntaxNode| node.kind() == K::ScalarTypeDefinition)
+        .count();
+      assert_eq!(
+        inside.len(),
+        everywhere,
+        "{what}: an item stands outside the module"
+      );
+      assert!(
+        !inside.iter().any(|scalar: &String| scalar == "scalar Z"),
+        "{what}: the document went on past the refusal"
+      );
+    }
+  }
+
+  // ── The reverse direction ──────────────────────────────────────────────────────────────────
+
+  #[test]
+  fn a_closer_after_a_description_still_closes_the_module() {
+    let answer = read("mod m { \"doc\" } scalar Y");
+    assert!(answer.errors);
+    assert!(scalars(&module(&answer.tree, "mod m")).is_empty());
+    assert_eq!(scalars(&top(&answer.tree)), ["scalar Y"]);
+    assert_eq!(answer.document.definitions().len(), 2);
+    assert!(items(&answer.document.definitions()[0]).is_empty());
+  }
+
+  #[test]
+  fn a_closer_after_extend_still_closes_the_module() {
+    let answer = read("mod m { extend } scalar Y");
+    assert!(answer.errors);
+    assert!(scalars(&module(&answer.tree, "mod m")).is_empty());
+    assert_eq!(scalars(&top(&answer.tree)), ["scalar Y"]);
+    assert_eq!(answer.document.definitions().len(), 2);
+    assert!(items(&answer.document.definitions()[0]).is_empty());
+  }
+
+  // ── Depth and counting ─────────────────────────────────────────────────────────────────────
+
+  #[test]
+  fn a_broken_item_in_a_nested_module_costs_only_that_item() {
+    let answer = read(
+      "mod a { scalar A1 mod b { scalar B1 mod c { scalar C1 type T { f } scalar C2 } scalar B2 } \
+       scalar A2 }",
+    );
+    assert!(answer.errors);
+    assert_eq!(
+      scalars(&module(&answer.tree, "mod a")),
+      ["scalar A1", "scalar A2"]
+    );
+    assert_eq!(
+      scalars(&module(&answer.tree, "mod b")),
+      ["scalar B1", "scalar B2"]
+    );
+    assert_eq!(
+      scalars(&module(&answer.tree, "mod c")),
+      ["scalar C1", "scalar C2"]
+    );
+    assert!(scalars(&top(&answer.tree)).is_empty());
+    // Three modules and six scalars.
+    assert_eq!(answer.recovery.projected(), 9);
+    assert!(!answer.recovery.is_complete());
+  }
+
+  #[test]
+  fn a_keyword_named_field_in_wreckage_restarts_nothing() {
+    let answer = read("mod m { type T { f type: Int } scalar W }");
+    assert!(answer.errors);
+    assert_eq!(kinds(&top(&answer.tree)), [K::ModDefinition]);
+    assert_eq!(scalars(&module(&answer.tree, "mod m")), ["scalar W"]);
+    assert!(
+      !answer
+        .tree
+        .descendants()
+        .any(|node: SyntaxNode| node.kind() == K::ObjectTypeDefinition),
+      "the `type` inside the wreckage started a definition"
+    );
+  }
+
+  #[test]
+  fn a_module_with_a_broken_header_is_one_skipped_element() {
+    let answer = read("mod { scalar S } scalar Z");
+    assert!(answer.errors);
+    // The tree keeps the scalar where it was written. The document has no place for it: a
+    // module with no name is no item, and what is inside it is not counted.
+    assert_eq!(scalars(&module(&answer.tree, "mod {")), ["scalar S"]);
+    assert_eq!(scalars(&top(&answer.tree)), ["scalar Z"]);
+    assert_eq!(answer.document.definitions().len(), 1);
+    assert_eq!(answer.recovery, Recovery::new(1, 1));
+  }
+
+  #[test]
+  fn recovery_counts_every_item_at_every_depth() {
+    let text = "use ^::dep::Id mod m { scalar X mod n { scalar Y } } scalar Z";
+    let lossless = read(text);
+    assert!(!lossless.errors);
+    let syntactic = Syntactic::new()
+      .type_system_document(text, &mut ())
+      .expect("the syntactic layer reads the document");
+    // The `use` item, two modules and three scalars.
+    assert_eq!(lossless.recovery, Recovery::new(6, 0));
+    assert_eq!(lossless.recovery, syntactic.recovery());
+  }
+
+  #[test]
+  fn skipped_counts_inside_modules() {
+    for (what, text, recovery) in [
+      (
+        "an item that does not project",
+        "mod m { scalar X extend type T }",
+        Recovery::new(2, 1),
+      ),
+      (
+        "a recovery hole",
+        "mod m { scalar X ! }",
+        Recovery::new(2, 1),
+      ),
+      (
+        "a nested module whose header does not project",
+        "mod m { scalar X mod { scalar S } }",
+        Recovery::new(2, 1),
+      ),
+      (
+        "a token that is no item",
+        "mod m { \"doc\" }",
+        Recovery::new(1, 1),
+      ),
+    ] {
+      let answer = read(text);
+      assert!(answer.errors, "{what}");
+      assert_eq!(answer.document.definitions().len(), 1, "{what}");
+      assert_eq!(answer.recovery, recovery, "{what}");
+    }
+  }
+
+  // ── A missing component, and the definition after it ───────────────────────────────────────
+
+  #[test]
+  fn a_missing_field_type_keeps_the_definition_after_it() {
+    for text in [
+      MISSING_FIELD_TYPE,
+      // An argument's type, an argument's value, a default, a list's element type and a generic
+      // list's first argument.
+      "type T { f(a: ): Int } scalar S",
+      "type T @d(a: ) { f: Int } scalar S",
+      "input I { a: Int = } scalar S",
+      "type T { f: [] } scalar S",
+      "type T { f: Box<> } scalar S",
+    ] {
+      let answer = read(text);
+      assert!(answer.errors, "{text}");
+      assert_eq!(scalars(&top(&answer.tree)), ["scalar S"], "{text}");
+      assert_eq!(answer.document.definitions().len(), 1, "{text}");
+      assert_eq!(answer.recovery, Recovery::new(1, 1), "{text}");
+    }
+  }
+
+  // ── Brackets that are not closed, and braces that do not balance ───────────────────────────
+
+  #[test]
+  fn an_unclosed_parenthesis_inside_a_module_does_not_move_its_end() {
+    let answer = read("mod m { type T { f(a: Int: Int } scalar Y } scalar Z");
+    assert!(answer.errors);
+    assert_eq!(scalars(&module(&answer.tree, "mod m")), ["scalar Y"]);
+    assert_eq!(scalars(&top(&answer.tree)), ["scalar Z"]);
+  }
+
+  #[test]
+  fn an_unclosed_angle_between_items_does_not_move_the_modules_end() {
+    let answer = read("mod m { < scalar X } scalar Z");
+    assert!(answer.errors);
+    assert_eq!(scalars(&module(&answer.tree, "mod m")), ["scalar X"]);
+    assert_eq!(scalars(&top(&answer.tree)), ["scalar Z"]);
+  }
+
+  #[test]
+  fn an_unclosed_bracket_between_items_does_not_move_the_modules_end() {
+    let answer = read("mod m { [ scalar X } scalar Z");
+    assert!(answer.errors);
+    assert_eq!(scalars(&module(&answer.tree, "mod m")), ["scalar X"]);
+    assert_eq!(scalars(&top(&answer.tree)), ["scalar Z"]);
+  }
+
+  #[test]
+  fn an_unclosed_angle_in_a_type_keeps_the_next_item_in_the_module_and_the_next_definition_out() {
+    let answer = read("mod m { type T { f: Box<Int } scalar Y } scalar Z");
+    assert!(answer.errors);
+    assert_eq!(scalars(&module(&answer.tree, "mod m")), ["scalar Y"]);
+    assert_eq!(scalars(&top(&answer.tree)), ["scalar Z"]);
+    // The list's `>` has no image, so `T` is kept too: the module, `T`, `Y` and `Z`.
+    assert_eq!(answer.recovery, Recovery::new(4, 0));
+  }
+
+  #[test]
+  fn an_unclosed_bracket_in_a_type_keeps_the_next_item_in_the_module_and_the_next_definition_out() {
+    let answer = read("mod m { type T { f: [Int } scalar Y } scalar Z");
+    assert!(answer.errors);
+    assert_eq!(scalars(&module(&answer.tree, "mod m")), ["scalar Y"]);
+    assert_eq!(scalars(&top(&answer.tree)), ["scalar Z"]);
+    assert_eq!(answer.recovery, Recovery::new(4, 0));
+  }
+
+  #[test]
+  fn an_unclosed_list_keeps_the_definition_after_it() {
+    for text in [
+      "type T { f: Box<Int } scalar S",
+      "type T { f: [Int } scalar S",
+      "type T { f: Int @d(a: 1 } scalar S",
+      "type T { f: Int @d(a: [1 } scalar S",
+    ] {
+      let answer = read(text);
+      assert!(answer.errors, "{text}");
+      assert_eq!(scalars(&top(&answer.tree)), ["scalar S"], "{text}");
+      // A closer has no image, so `T` is kept beside `S`.
+      assert_eq!(answer.recovery, Recovery::new(2, 0), "{text}");
+    }
+  }
+
+  #[test]
+  fn a_stray_closing_parenthesis_in_a_broken_item_does_not_end_the_module_early() {
+    let answer = read("mod m { type T { ) f } scalar W } scalar Z");
+    assert!(answer.errors);
+    assert_eq!(scalars(&module(&answer.tree, "mod m")), ["scalar W"]);
+    assert_eq!(scalars(&top(&answer.tree)), ["scalar Z"]);
+  }
+
+  #[test]
+  fn a_body_whose_brace_an_item_closed_is_over() {
+    // The two `(` are junk of the argument list, and the scan that skips them is blind to which
+    // closer answers which opener: it takes both `}` for theirs. The second was the module's.
+    let answer = read("mod m { type T { f(a: Int ( ( } } ) scalar W");
+    assert!(answer.errors);
+    let m = module(&answer.tree, "mod m");
+    assert!(
+      !holds_a_closing_brace(&m),
+      "the module took a `}}` of its own"
+    );
+    assert!(scalars(&m).is_empty());
+    assert_eq!(scalars(&top(&answer.tree)), ["scalar W"]);
+  }
+
+  #[test]
+  fn unbalanced_braces_are_read_as_written() {
+    // A `}` missing: the module's own closes `T`, and what follows is read inside the module.
+    let text = "mod m { type T { f: Int scalar Y } scalar Z";
+    let answer = read(text);
+    assert!(answer.errors);
+    let m = module(&answer.tree, "mod m");
+    assert_eq!(usize::from(m.text_range().end()), text.len());
+    assert_eq!(scalars(&m), ["scalar Z"]);
+    assert_eq!(kinds(&top(&answer.tree)), [K::ModDefinition]);
+
+    // A `}` too many: the module ends at the first, and the second is a stray at the top.
+    let answer = read("mod m { scalar X } } scalar Z");
+    assert!(answer.errors);
+    assert_eq!(scalars(&module(&answer.tree, "mod m")), ["scalar X"]);
+    assert_eq!(scalars(&top(&answer.tree)), ["scalar Z"]);
+    assert_eq!(answer.recovery, Recovery::new(3, 1));
+  }
+
+  #[test]
+  fn a_scan_that_finds_nothing_gives_the_brace_count_back() {
+    // Each skip crosses braces and finds no item to restart at, so it rewinds. A count that
+    // outlived a rewind would read a brace fewer and take the last `}` for the module's own.
+    let text = "mod m { type T { f { a } }";
+    let answer = read(text);
+    assert!(answer.errors);
+    let m = module(&answer.tree, "mod m");
+    assert!(!holds_a_closing_brace(&m));
+    assert_eq!(usize::from(m.text_range().end()), text.len());
+  }
+
+  #[test]
+  fn a_module_of_nothing_but_brackets_and_junk_ends() {
+    let mut bodies: Vec<String> = [") ] > ( [ <", "( [ < ) ] >", "< ( [ > ) ]", "{", "{ { {"]
+      .iter()
+      .map(|body: &&str| (*body).to_string())
+      .collect();
+    bodies.push("! ".repeat(10_000));
+    for body in &bodies {
+      let text = format!("mod m {{ {body}");
+      // `read` holds the round trip; the parse returning at all is the rest of the claim.
+      assert!(read(&text).errors, "{}", &text[..text.len().min(32)]);
+    }
+  }
+
+  // ── Through the analyzer ───────────────────────────────────────────────────────────────────
+
+  #[cfg(feature = "analysis")]
+  mod analysis {
+    use smear::{
+      analysis::graphqlx::{
+        DefId, Layout, Limits, Model, ModuleId, Package, SourceFile, Tier, analyze_with,
+      },
+      parser::graphqlx::Lossless,
+    };
+
+    /// The names of the definitions `module` holds, in id order.
+    fn names(model: &Model, module: ModuleId) -> Vec<&str> {
+      model
+        .module(module)
+        .defs()
+        .into_iter()
+        .map(|id: DefId| model.def(id).name())
+        .collect()
+    }
+
+    #[test]
+    fn a_broken_module_never_declares_its_items_at_the_files_root() {
+      for (text, name, in_the_module) in [
+        ("mod m { scalar X type T { f } }", "X", true),
+        // A name the root must not gain whatever a module may do with it.
+        ("mod m { scalar Int type T { f } }", "Int", false),
+      ] {
+        let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+          .with_files([SourceFile::new("schema.graphqlx", text)]);
+        let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+        let model: &Model = analysis.model();
+        let app_root: ModuleId = model.package(model.root_package()).root_module();
+        assert!(
+          !names(model, app_root).contains(&name),
+          "{text}: the file's root declares `{name}`"
+        );
+        if in_the_module {
+          let m: ModuleId = model.module_by_path("^::app::m").expect("the `mod m`");
+          assert_eq!(names(model, m), [name], "{text}");
+        }
+      }
+    }
+  }
+}

@@ -388,6 +388,55 @@ fn every_graphqlx_census_shape_stays_linear() {
   }
 }
 
+/// A module whose items all fail, where no skip the body makes finds an item to restart at.
+///
+/// `{ type } ` is the body's own census shape, as `[ type ] ` is the root's. The `{` starts no
+/// item and is junk; the `type` names nothing and fails at the `}` behind it. Every skip the body
+/// then makes balances braces, so each later `type` stands at depth one where the restart
+/// predicate is never asked, and the skip runs to the end of the text, finds nothing and rewinds.
+/// That is a walk of the tail for every item in it, which the allowance bounds here as it does at
+/// the root: the body's skip reads the same meter through the same guard.
+///
+/// A prefix opens the module, so this is its own doubling rather than a row of
+/// [`assert_linear`]'s, with that function's floor and its gate.
+#[test]
+#[cfg(feature = "graphqlx")]
+fn a_module_whose_items_all_fail_stays_linear() {
+  const N: usize = 2_000;
+  const UNIT: &str = "{ type } ";
+  let module = |items: usize| -> String { format!("mod m {{ {}", UNIT.repeat(items)) };
+  let roots: [Root; 2] = [
+    ("gqlx/document", gqlx_document),
+    ("gqlx/type-system", gqlx_type_system),
+  ];
+  for (root_name, root) in roots {
+    let (small_src, large_src): (String, String) = (module(N), module(N * 2));
+    let small = run(root, &small_src);
+    let large = run(root, &large_src);
+    assert_eq!(small.covered, small_src.len(), "{root_name}");
+    assert_eq!(large.covered, large_src.len(), "{root_name}");
+    assert!(
+      small.peak_spent > 10_000 && large.peak_spent > 10_000,
+      "{root_name}: peak spend was {} / {}, so the body's skip barely ran and the ratio below \
+       would pass vacuously",
+      small.peak_spent,
+      large.peak_spent
+    );
+    let ratio = large.peak_spent as f64 / small.peak_spent as f64;
+    println!(
+      "  {root_name:<16} mod body       spent {:>9} -> {:>9}  x{ratio:.2}   (refusals {} -> {})",
+      small.peak_spent, large.peak_spent, small.refusals, large.refusals
+    );
+    assert!(
+      ratio < 2.6,
+      "{root_name}: lexer items produced grew x{ratio:.2} for a module of twice the items \
+       ({} -> {}). The body's skip is walking the tail once per failed item.",
+      small.peak_spent,
+      large.peak_spent
+    );
+  }
+}
+
 /// Token **length** is an axis, and the first census had one value of it.
 ///
 /// Every shape above is built from one-byte atoms, so all of them hold the parse's bytes and its
@@ -1304,9 +1353,10 @@ fn max_tokens_does_not_bound_the_work_the_scan_allowance_does() {
 ///   the GraphQL `&str` parser, so what it reaches is **that** callback and no other; the charge
 ///   is one shared line now and the four `the_graphql{,x}_{str,slice}_error_callback_charges_…`
 ///   cells below are the pin on each copy of it.
-/// - `decrease_recursion_depth_and_increase_token` — the closing-bracket handler, `}`, `]`, `)`
-///   and GraphQLx's `>`. `]` is the row. Unlike the callback this route was already covered
-///   incidentally: planting its charge away also reds
+/// - `decrease_recursion_depth_and_increase_token` — the closing-bracket handler: `]`, `)` and
+///   GraphQLx's `>` name it in their rules, and `}` reaches it through `close_brace`, which
+///   counts the brace and then calls it. `]` and `}` are the rows, one for each way in. Unlike the
+///   callback this route was already covered incidentally: planting its charge away also reds
 ///   `max_tokens_does_not_bound_the_work_the_scan_allowance_does` on `committed + SETTLE >= items`
 ///   (committed 9 999 against 12 000 lexemes) and `every_refusal_commits_at_least_one_item` on a
 ///   zero gap. Both messages are about where a recovery call sat, and neither names a charge. The
@@ -1356,6 +1406,14 @@ fn a_token_ceiling_stops_the_lex_one_lexeme_past_itself() {
        runs no `check()` of its own, which is also why this row reading the same 101 as `-` is \
        what says the refusal is tokora's post-scan check rather than `smear-lexer`'s pre-charge \
        one",
+    ),
+    (
+      "}",
+      CEILING + 1,
+      4_000,
+      "a `}` has stopped being charged. Its rule names `close_brace`, which counts the brace and \
+       then calls `decrease_recursion_depth_and_increase_token` for the charge: either \
+       `close_brace` has stopped calling it, or the `}` rule names a handler that charges nothing",
     ),
   ] {
     let src = atom.repeat(4_000);

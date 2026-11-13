@@ -34,7 +34,7 @@
 //! * [`diagnose`] — the diagnostic contract's four checks and what each of them derives.
 //! * [`diagnose::probe`] — why D2 hands the trait question to `rustc` instead of answering it.
 //! * [`diagnose::exempt`] — the types recorded as outside the contract, and their arguments.
-//! * [`roots`] — who calls the two functions that mint and spend a document root's verdict.
+//! * [`roots`] — who calls the functions that judge, mint and spend a document root's verdict.
 //!
 //! # What makes this gate non-vacuous
 //!

@@ -112,6 +112,11 @@
 //! granularity of the attempt it judges — **one entry** — because the baseline is a value whose
 //! *placement* is the whole verdict and a misplaced one is silent.
 //!
+//! The reading is `judge_turn`, which `root_turn` calls and then records in the root's slot. A
+//! block that recovers its own items — a module's body — calls `judge_turn` for each item and has
+//! no slot: it resynchronises past an ordinary failure, and **returns** a failure that ends the
+//! document, so the root above it judges that one again and records the stop.
+//!
 //! The trait is still read, and beside rather than under: a **scanner** stop moves no descent
 //! counter, and tokora's scanner-side witness is withdrawn for cause (al8n/tokora#311). Each term
 //! is alone on a population, and `smear-parser/src/graphql/lossless/tests.rs` reddens separately
@@ -140,8 +145,8 @@
 //!
 //! # The verdict machinery and the descent it judges are crate-private — smear PR #189, round 5
 //!
-//! `drain_unless_stopped`, `root_turn`, `RootStop`, `RootTurn` and `descend` are `pub(crate)`.
-//! They were
+//! `drain_unless_stopped`, `root_turn`, `judge_turn`, `RootStop`, `RootTurn` and `descend` are
+//! `pub(crate)`. All but `judge_turn`, which was split out of `root_turn` afterwards, were
 //! public, on the reading that this substrate is dialect-generic and that a consumer assembling
 //! its own document root is one of the things it is for. Four adversarial rounds found four
 //! defects and **every one of them was on that surface**: a verdict re-derived over the whole
@@ -241,8 +246,9 @@
 //! itself and move the resource-trip counter. That is tokora's published API, not smear's, and
 //! narrowing anything here does not reach it. It is recorded rather than closed because with the
 //! machinery above crate-private it costs nothing: **smear publishes no reader of that counter.**
-//! `root_turn` is the only thing in this crate that turns a counter movement into a verdict, and
-//! it is `pub(crate)`; nothing a consumer can reach draws a conclusion from a trip it took by
+//! `judge_turn` is the only thing in this crate that turns a counter movement into a verdict —
+//! `root_turn` is that verdict written to a root's slot — and both are `pub(crate)`; nothing a
+//! consumer can reach draws a conclusion from a trip it took by
 //! hand. The defect the four rounds found was never "the counter moved" — it was "the counter
 //! moved and a *published* reader spent that movement against an unrelated failure." Retracting
 //! the reader is what removes the second half, and the second half is the whole cost.
@@ -513,8 +519,9 @@ where
 /// and each round only changed *which* material the hand-written spelling read: a `Cow`
 /// discriminator, then a dedicated variant, then [`MaybeTerminal`] over that variant. All three
 /// are things a caller writes. This enum moves the decision itself into [`root_turn`] and leaves
-/// the root with a value to match on, so the six catch sites — and the seventh a later dialect
-/// adds — copy a **call** rather than a predicate.
+/// the root with a value to match on, so the six roots, the one block that catches below them
+/// through [`judge_turn`], and whatever a later dialect adds copy a **call** rather than a
+/// predicate.
 ///
 /// # One type at two scales, because it is one question
 ///
@@ -784,14 +791,19 @@ impl RootStop {
 /// say where it belongs, and the placement is silent when it is wrong. A root that never holds one
 /// cannot hoist one, take it after the attempt it is judging, or carry it into a second loop.
 ///
-/// # No production below a root catches, and this does not depend on that
+/// # One production below a root catches, and never a failure that ends the document
 ///
 /// The granularity floor tokora documents is that a trip *caught inside the attempt* followed by
-/// an ordinary failure in the same attempt is re-raised as the trip. No production in either
-/// dialect catches — the six catch sites are the roots themselves — so the floor is not reached
-/// today. It fails **closed** when it is: an ordinary failure sharing its entry with a swallowed
-/// refusal ends the document, which is the direction that costs a suffix rather than the direction
-/// that costs the whole amplification back.
+/// an ordinary failure in the same attempt is re-raised as the trip. The six roots catch, and so
+/// does one production below them: a module's body, in the dialect that has modules, catches the
+/// failure of one of its items so that the module keeps its other items. It asks [`judge_turn`]
+/// for each item and catches the **recoverable** arm alone. A failure that ends the document is
+/// returned, unwinds to the root, and is judged there a second time by this function, whose
+/// baseline spans the whole top-level entry and therefore sees the same trip. So no trip is
+/// caught below a root and the floor is not reached. It fails **closed** if it ever is: an
+/// ordinary failure sharing its entry with a swallowed refusal ends the document, which is the
+/// direction that costs a suffix rather than the direction that costs the whole amplification
+/// back.
 #[inline]
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) fn root_turn<'inp, 'closure, L, Ctx, Lang, T, Entry>(
@@ -807,28 +819,72 @@ where
   Entry:
     FnOnce(&mut InputRef<'inp, 'closure, L, Ctx, Lang>) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>,
 {
-  // PER ENTRY, INSIDE THE CALL, AND NOT A PARAMETER. See this function's `The baseline is taken
-  // here` note: hoisting one of these out of a root loop compiles, degrades into a
-  // session-absolute read, and ends a document that was fine with no test failing.
+  let (turn, tripped) = judge_turn(inp, entry);
+  // ASSIGNED HERE, NOT AT THE ARM — and the trip beside it, LATCHED. See `RootStop::record` for
+  // why one of the two may not be a latch and the other may not be an assignment.
+  stop.record(matches!(turn, RootTurn::EndsTheDocument { .. }), tripped);
+  turn
+}
+
+/// Runs one entry and says what its outcome means for the document, beside whether the attempt
+/// tripped a resource budget: [`root_turn`]'s verdict, with no slot to record it in.
+///
+/// [`root_turn`] is this and one write, and its notes on the two terms and on where the baseline
+/// is taken are this function's. The second caller is a block that recovers its own items — a
+/// module's body, which has no [`RootStop`]: the slot belongs to the root, and a root lends it to
+/// nothing below itself. Such a block matches the verdict as a root does, with one difference
+/// that is the whole reason it may hold one: on [`RootTurn::EndsTheDocument`] it **returns the
+/// error** rather than recording a stop. The failure then reaches the root's own turn, whose
+/// baseline was taken before the block began, and the root records it.
+///
+/// # A baseline inside an open baseline disturbs neither
+///
+/// A block's item runs inside the root's attempt, so this function takes a baseline while the
+/// root's is still open. Both are **reads**: tokora's `trip_snapshot` copies the session's trip
+/// counter and `tripped_during_attempt` compares the counter with that copy, and neither writes
+/// anything. The counter only rises, so a trip inside the item moves it past both copies and
+/// both readings answer `true`, while a trip before the item began is behind this copy and ahead
+/// of the root's, and answers `false` here and `true` there — which is each attempt's own
+/// answer.
+///
+/// # The trip term is answered as well as the verdict
+///
+/// The verdict folds it in on the failing path only. [`root_turn`] needs it on every path, for
+/// the latch the drain above the root subtracts.
+#[inline]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) fn judge_turn<'inp, 'closure, L, Ctx, Lang, T, Entry>(
+  inp: &mut InputRef<'inp, 'closure, L, Ctx, Lang>,
+  entry: Entry,
+) -> (RootTurn<T, ErrorOf<'inp, L, Ctx, Lang>>, bool)
+where
+  Lang: ?Sized,
+  L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseContext<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: MaybeTerminal,
+  Entry:
+    FnOnce(&mut InputRef<'inp, 'closure, L, Ctx, Lang>) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>,
+{
+  // PER ENTRY, INSIDE THE CALL, AND NOT A PARAMETER. See `root_turn`'s `The baseline is taken
+  // here` note: hoisting one of these out of a loop compiles, degrades into a session-absolute
+  // read, and ends a document that was fine with no test failing.
   let since = inp.trip_snapshot();
   let out = entry(inp);
   // READ UNCONDITIONALLY, INCLUDING ON `Ok`. The verdict below only needs it on the failing path,
-  // and the slot needs it on every path: an entry that tripped, CAUGHT the refusal and returned
-  // `Ok` has still judged that trip, and recording that is what stops the drain above this root
-  // from judging it a second time — smear PR #189, round 4. It costs a nonce compare and a `u64`
-  // compare per entry, against an entry that has already parsed a whole definition.
+  // and a root's slot needs it on every path: an entry that tripped, CAUGHT the refusal and
+  // returned `Ok` has still judged that trip, and recording that is what stops the drain above
+  // the root from judging it a second time — smear PR #189, round 4. It costs a nonce compare and
+  // a `u64` compare per entry, against an entry that has already parsed a whole definition.
   let tripped = inp.tripped_during_attempt(since);
-  // BOTH TERMS. Neither covers the other — the note above enumerates the population each one is
-  // alone on.
+  // BOTH TERMS. Neither covers the other — `root_turn`'s note enumerates the population each one
+  // is alone on.
   let ends_the_document = out.as_ref().is_err_and(|e| e.is_terminal() || tripped);
-  // ASSIGNED HERE, NOT AT THE ARM — and the trip beside it, LATCHED. See `RootStop::record` for
-  // why one of the two may not be a latch and the other may not be an assignment.
-  stop.record(ends_the_document, tripped);
-  match out {
+  let turn = match out {
     Ok(parsed) => RootTurn::Parsed { parsed },
     Err(error) if ends_the_document => RootTurn::EndsTheDocument { error },
     Err(error) => RootTurn::Recoverable { error },
-  }
+  };
+  (turn, tripped)
 }
 
 /// Runs a document root, then drains whatever it left uncommitted — unless the root said its
@@ -1405,8 +1461,9 @@ where
 /// trip's.
 ///
 /// The one thing a cell would have bought and this does not is a record for a production that
-/// **catches** the refusal and carries on. No production in either dialect does — the six catch
-/// sites are the document roots, and all six now stop — but a dialect added later could, and its
+/// **catches** the refusal and carries on. No production in either dialect does — the six roots
+/// catch and all six stop on one, and a module's body, which catches the ordinary failure of an
+/// item, returns a refusal to its root instead — but a dialect added later could, and its
 /// loop would re-descend and refuse again rather than reading a latch. That is the residual, and
 /// what bounds it has changed: tokora's resource-trip counter **is** the durable cell this section
 /// says smear cannot write, published read-only, and `root_turn` reads it. A catch site that goes

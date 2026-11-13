@@ -67,7 +67,7 @@ use rowan::{GreenNodeBuilder, Language};
 use smear::parser::{
   graphqlx::{
     GraphQLx,
-    ast::{Document, ExecutableDocument, TypeSystemDocument},
+    ast::{Document, ExecutableDocument, TypeSystemDocument, TypeSystemItem},
     error::GraphqlxErrors,
     kinds::{GraphQLxLang, SyntaxKind as K},
     lossless::{
@@ -457,9 +457,9 @@ fn the_type_system_projection_equals_the_parse_over_the_shared_corpus() {
         recovery.skipped()
       );
       assert_eq!(
-        recovery.projected() as usize,
-        expected.definitions().len(),
-        "{name} ({form}): the recovery counted a different number of entries"
+        recovery.projected(),
+        items_at_every_depth(&expected),
+        "{name} ({form}): the recovery did not count every item at every module depth"
       );
       assert_eq!(
         recovered, expected,
@@ -475,6 +475,28 @@ fn the_type_system_projection_equals_the_parse_over_the_shared_corpus() {
     entries.len() * (ALPHABET.len() + 1),
     "the sweep did not run every form over every entry"
   );
+}
+
+/// How many items `document` holds at every module depth, an inline module counting one beside
+/// the items inside it: what [`Recovery::projected`] is over a parse nothing was skipped in.
+///
+/// A worklist, as the projection's own module walk is.
+fn items_at_every_depth(document: &TypeSystemDocument<&str>) -> u32 {
+  let mut count = 0u32;
+  let mut pending: Vec<&[TypeSystemItem<&str>]> = Vec::new();
+  let mut current: &[TypeSystemItem<&str>] = document.definitions();
+  loop {
+    for item in current {
+      count = count.saturating_add(1);
+      if let TypeSystemItem::Mod(module) = item {
+        pending.push(module.items());
+      }
+    }
+    match pending.pop() {
+      Some(next) => current = next,
+      None => return count,
+    }
+  }
 }
 
 /// The three roots refuse each other's trees rather than filtering them.
@@ -1810,9 +1832,9 @@ fn the_lost_node_class_refuses() {
 
 #[test]
 fn the_recovered_in_place_class_refuses() {
-  // `type T { f: }` keeps its field-definition node and hangs an `Error` hole where the type
+  // `type T { f: ! }` keeps its field-definition node and hangs an `Error` hole where the type
   // should be. The hole is the refusal.
-  let kind = refuse(&entry("invalid_missing_field_type.graphqlx"));
+  let kind = refuse("type T { f: ! }");
   assert_eq!(
     kind,
     ProjectErrorKind::UnexpectedChild {
@@ -2166,10 +2188,9 @@ fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
 
 #[test]
 fn a_missing_constituent_refuses() {
-  // No corpus entry reaches this at a *type* position: every shape the recovery produces either
-  // keeps the constituent or leaves an `Error` hole, which is refused earlier. So the witness is
-  // synthetic — a field definition with a name and no type, the shape a future recovery change
-  // could start emitting.
+  // A field definition with a name and no type: the shape the parser builds for a type missing
+  // in front of a closer, which it reports and leaves (`invalid_missing_field_type`). The tree is
+  // written out here, so the refusal is pinned at the projection whatever the parser builds.
   let text = "type T{f:}";
   let mut tree = Tree::new();
   tree.open(K::Document);
@@ -3567,7 +3588,7 @@ fn a_dangling_separator_refuses_in_every_separated_walk() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// the report-and-build table, 71/71
+// the report-and-build table, 83/83
 // ---------------------------------------------------------------------------------------------
 
 /// Which door a probe goes through.
@@ -3595,6 +3616,9 @@ enum Absent {
 /// family it is (`report` for a `recover::report_unexpected::<…>` call, `unclosed` for a
 /// `recover::unclosed_*::<…>` one), a probe that reaches it with a hole-free tree, the root, what
 /// the projection answers, and what the site leaves out.
+///
+/// One site builds no hole and still has no hole-free probe, and its row answers `hole`: see the
+/// `executable.rs` report row for a variables definition.
 type Site = (
   &'static str,
   &'static str,
@@ -3714,6 +3738,14 @@ const SITES: &[Site] = &[
     Absent::Not,
   ),
   (
+    "document.rs",
+    "report",
+    "mod m { \"d\" }",
+    Root::Mixed,
+    "UnexpectedChild ModDefinition InlineString",
+    Absent::Imaged,
+  ),
+  (
     "executable.rs",
     "report",
     "query Q() { f }",
@@ -3735,6 +3767,17 @@ const SITES: &[Site] = &[
     "query Q($a: Int",
     Root::Executable,
     "UnexpectedChild ExecutableDocument Name",
+    Absent::Token(K::VariablesDefinition, ")"),
+  ),
+  // The one site no hole-free text reaches. No block of the grammar stands around an operation,
+  // so the brace open in front of this list is one a failed definition left, and the `}` the list
+  // leaves is a stray the root then takes into an `Error`.
+  (
+    "executable.rs",
+    "report",
+    "type T { f query Q($a: Int }",
+    Root::Mixed,
+    "hole",
     Absent::Token(K::VariablesDefinition, ")"),
   ),
   (
@@ -3820,6 +3863,14 @@ const SITES: &[Site] = &[
   (
     "generic.rs",
     "report",
+    "mod m { type T<A }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::DefinitionTypeGenerics, ">"),
+  ),
+  (
+    "generic.rs",
+    "report",
     "fragment <> F on T { f }",
     Root::Mixed,
     "MissingChild ExecutableDefinitionTypeGenerics",
@@ -3829,6 +3880,14 @@ const SITES: &[Site] = &[
     "generic.rs",
     "unclosed",
     "extend type T<A",
+    Root::Mixed,
+    "MissingChild ObjectTypeExtension",
+    Absent::Token(K::ExtensionTypeGenerics, ">"),
+  ),
+  (
+    "generic.rs",
+    "report",
+    "mod m { extend type T<A }",
     Root::Mixed,
     "MissingChild ObjectTypeExtension",
     Absent::Token(K::ExtensionTypeGenerics, ">"),
@@ -3919,6 +3978,16 @@ const SITES: &[Site] = &[
     "type T { f(a: Int",
     Root::Mixed,
     "UnexpectedChild Document Name",
+    Absent::Token(K::ArgumentsDefinition, ")"),
+  ),
+  // A field wants its `:` after the list and fails without one, so the hole-free probe is the
+  // other definition that takes arguments: a directive's, inside a module for the brace.
+  (
+    "definition.rs",
+    "report",
+    "mod m { directive @d(a: Int }",
+    Root::Mixed,
+    "MissingChild DirectiveDefinition",
     Absent::Token(K::ArgumentsDefinition, ")"),
   ),
   (
@@ -4122,6 +4191,14 @@ const SITES: &[Site] = &[
     Absent::Imaged,
   ),
   (
+    "extension.rs",
+    "report",
+    "mod m { extend }",
+    Root::Mixed,
+    "UnexpectedChild ModDefinition Name",
+    Absent::Imaged,
+  ),
+  (
     "value.rs",
     "report",
     "type T { f(a: Int = $v): Int }",
@@ -4131,8 +4208,24 @@ const SITES: &[Site] = &[
   ),
   (
     "value.rs",
+    "report",
+    "{ f(a: ) }",
+    Root::Mixed,
+    "MissingChild Argument",
+    Absent::Imaged,
+  ),
+  (
+    "value.rs",
     "unclosed",
     "{ f(a: [1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ListValue, "]"),
+  ),
+  (
+    "value.rs",
+    "report",
+    "{ f(a: [1 }",
     Root::Mixed,
     "Ok",
     Absent::Token(K::ListValue, "]"),
@@ -4162,9 +4255,25 @@ const SITES: &[Site] = &[
     Absent::Token(K::Arguments, ")"),
   ),
   (
+    "directive.rs",
+    "report",
+    "{ f(a: 1 }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::Arguments, ")"),
+  ),
+  (
     "ty.rs",
     "unclosed",
     "type T { f: A<B",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::TypeGenerics, ">"),
+  ),
+  (
+    "ty.rs",
+    "report",
+    "type T { f: A<B }",
     Root::Mixed,
     "Ok",
     Absent::Token(K::TypeGenerics, ">"),
@@ -4176,6 +4285,22 @@ const SITES: &[Site] = &[
     Root::Mixed,
     "Ok",
     Absent::Token(K::ListType, "]"),
+  ),
+  (
+    "ty.rs",
+    "report",
+    "type T { f: [Int }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ListType, "]"),
+  ),
+  (
+    "ty.rs",
+    "report",
+    "type T { f: }",
+    Root::Mixed,
+    "MissingChild FieldDefinition",
+    Absent::Imaged,
   ),
 ];
 
@@ -4358,12 +4483,13 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (54, 17),
+    (66, 17),
     "the two families' populations"
   );
 
   // Each probe: the parser reported, the tree is hole-free — the site is a report-and-build one
-  // and not a hole — and the projection answers what the table says.
+  // and not a hole — and the projection answers what the table says. The one row that answers
+  // `hole` is measured like the rest: its tree carries one, made by the root and not by the site.
   let mut lenient = 0;
   for (file, family, text, root, expected, _) in SITES {
     let (errors, got) = site_answer(text, *root);
@@ -4405,8 +4531,13 @@ fn every_report_and_build_site_has_a_measured_answer() {
       }
     }
   }
+  // A set: two sites can leave the same token out of the same node — a list that runs to the end
+  // of input and one that stops at the `}` of a block around it — and each pair is derived once
+  // however many probes witness it.
   derived.sort();
+  derived.dedup();
   unwitnessed.sort();
+  unwitnessed.dedup();
   println!("DERIVED {derived:?}\nUNWITNESSED {unwitnessed:?}");
   assert_eq!(
     derived,
@@ -4424,12 +4555,17 @@ fn every_report_and_build_site_has_a_measured_answer() {
 }
 
 /// How many of [`SITES`]' probes project.
-const PROJECTING_SITES: usize = 16;
+const PROJECTING_SITES: usize = 21;
 
-/// Image-less tokens a site can leave out whose probe is **not** a witness — none: even the three
-/// closers whose definition is lost at end of input leave their list in the tree, an orphan child
-/// of the document, which is a hole-free witness by the criterion's letter.
-const UNWITNESSED: &[(&str, &str)] = &[];
+/// Image-less tokens a site can leave out whose probe is **not** a witness.
+///
+/// One: the `)` of a variables definition that stops at a `}` open before it. No block of the
+/// grammar stands around an operation, so that probe's tree always carries the `Error` the root
+/// makes of the stray `}`. The pair is in the header's table all the same, witnessed by the site
+/// that leaves the same `)` out at the end of input: even the three closers whose definition is
+/// lost there leave their list in the tree, an orphan child of the document, which is a hole-free
+/// witness by the criterion's letter.
+const UNWITNESSED: &[(&str, &str)] = &[("VariablesDefinition", ")")];
 
 // ---------------------------------------------------------------------------------------------
 // the separated atoms, and where they refuse
@@ -4912,15 +5048,16 @@ fn every_walk_is_a_transcription() {
     0,
     "a wildcard arm that covers what it drops"
   );
-  // The two loops over a child iterator that remain are not walks: the cursor's own trivia skip,
-  // and the recovering door's pass over the root, which counts what it skips rather than
-  // projecting a production. The cursor is the substrate's since al8n/smear#217/#218 hoisted it,
-  // so its loop is counted where it now lives — the substrate's `walk` module — and the two still
-  // sum to the two this census has always found.
+  // The three loops over a child iterator that remain are not walks: the cursor's own trivia
+  // skip; the recovering door's pass over the root, which counts what it skips rather than
+  // projecting a production; and the kind check that door makes of a module's direct children,
+  // which reads no kind's meaning and projects nothing. The cursor is the substrate's since
+  // al8n/smear#217/#218 hoisted it, so its loop is counted where it now lives — the substrate's
+  // `walk` module — beside the two here.
   assert_eq!(
     count("for element in"),
-    1,
-    "a child loop outside the cursor"
+    2,
+    "a child loop that is neither the root pass nor a module's kind check"
   );
   let substrate = std::fs::read_to_string(
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../smear-parser/src/lossless/project.rs"),
@@ -4976,10 +5113,11 @@ fn a_directive_definition_without_its_on_projects_what_the_text_with_it_parses_t
 #[test]
 fn an_extension_argument_list_without_its_closer_answers_what_the_text_with_it_does() {
   // `(ExtensionTypeGenerics, >)` meets the criterion — no image, and the list is built hole-free
-  // without it — but only at end of input: any other token after the names is recovered as an
-  // `Error` node. So the extension is always tail-less, and the leniency changes no answer: the
-  // projection refuses at the extension, exactly as it does for the text with the `>` restored,
-  // and the recovering door counts it skipped either way.
+  // without it — but only at end of input or in front of the `}` of a module around the
+  // extension: any other token after the names is recovered as an `Error` node. So the extension
+  // is always tail-less, and the leniency changes no answer: the projection refuses at the
+  // extension, exactly as it does for the text with the `>` restored, and the recovering door
+  // counts it skipped either way.
   for src in ["extend type T<A", "extend type T<A>"] {
     let parse = parse_document(src);
     assert!(parse.has_errors(), "{src}");

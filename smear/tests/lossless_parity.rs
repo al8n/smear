@@ -1111,7 +1111,7 @@ fn the_two_suites_agree_on_where_a_description_may_appear() {
 ///
 /// The control set below is what makes that precise, and it was found by mutation: replacing the
 /// control source with `type T { x: }` changed nothing, because that input **keeps** its
-/// `ObjectTypeDefinition` — the missing type recovers in place as an `Error` child and no `Err`
+/// `ObjectTypeDefinition` — the missing type is reported where it should stand and no `Err`
 /// ever unwinds. The node is lost only when a production returns `Err` that propagates past the
 /// `node_at` holding the mark. Asserting both halves is what stops this test degenerating into
 /// "some erroring inputs lack the node", which would be true of `{ f }` as well.

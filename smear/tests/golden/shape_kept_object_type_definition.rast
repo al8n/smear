@@ -8,9 +8,8 @@ Root@0..13
       FieldsDefinition@7..13
         LBrace@7..8 "{"
         Space@8..9 " "
-        FieldDefinition@9..13
+        FieldDefinition@9..12
           Name@9..10 "x"
           Colon@10..11 ":"
           Space@11..12 " "
-          Error@12..13
-            RBrace@12..13 "}"
+        RBrace@12..13 "}"

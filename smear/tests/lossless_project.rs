@@ -978,9 +978,9 @@ fn the_lost_node_class_refuses() {
 
 #[test]
 fn the_recovered_in_place_class_refuses() {
-  // `type T { x: }` keeps its field-definition node and hangs an `Error` hole where the type
+  // `type T { x: ! }` keeps its field-definition node and hangs an `Error` hole where the type
   // should be. The hole is the refusal.
-  let kind = refuse("type T { x: }");
+  let kind = refuse("type T { x: ! }");
   assert_eq!(
     kind,
     ProjectErrorKind::UnexpectedChild {
@@ -1153,9 +1153,9 @@ fn a_divergence_in_bytes_no_constructor_reads_refuses() {
 
 #[test]
 fn a_missing_constituent_refuses() {
-  // No corpus entry reaches this: every shape the recovery produces either keeps the constituent
-  // or leaves an `Error` hole, which is refused earlier. So the witness is synthetic — a field
-  // definition with a name and no type, the shape a future recovery change could start emitting.
+  // A field definition with a name and no type: the shape the parser builds for a type missing
+  // in front of a closer, which it reports and leaves (`invalid_missing_field_type`). The tree is
+  // written out here, so the refusal is pinned at the projection whatever the parser builds.
   let text = "type T{f:}";
   let mut tree = Tree::new();
   tree.open(K::Document);
@@ -3346,6 +3346,9 @@ enum Absent {
 /// for a `recover::report_unexpected::<…>` call, `unclosed` for a `recover::unclosed_*::<…>` one), a
 /// probe that reaches it with a hole-free tree, the root, what the projection answers, and what
 /// the site leaves out.
+///
+/// Two sites build no hole and still have no hole-free probe, and their rows answer `hole`: the
+/// `report` rows for a variables definition and for an arguments definition.
 type Site = (
   &'static str,
   &'static str,
@@ -3477,6 +3480,17 @@ const SITES: &[Site] = &[
     "UnexpectedChild Root OperationType",
     Absent::Token(K::VariablesDefinition, ")"),
   ),
+  // No hole-free text reaches this site. No block of the grammar stands around an operation, so
+  // the brace open in front of this list is one a failed definition left, and the `}` the list
+  // leaves is a stray the root then takes into an `Error`.
+  (
+    "executable.rs",
+    "report",
+    "type T { f query Q($a: Int }",
+    Root::Mixed,
+    "hole",
+    Absent::Token(K::VariablesDefinition, ")"),
+  ),
   (
     "executable.rs",
     "report",
@@ -3555,6 +3569,17 @@ const SITES: &[Site] = &[
     "type T { f(a: Int",
     Root::Mixed,
     "UnexpectedChild Document Name",
+    Absent::Token(K::ArgumentsDefinition, ")"),
+  ),
+  // No hole-free text reaches this site either. Inside a block the list is a field's, and a field
+  // fails for want of its `:` once the list has stopped, so the definition is lost and the `}`
+  // the list left is the root's. A directive's list stands in no block.
+  (
+    "definition.rs",
+    "report",
+    "type T { f(a: Int }",
+    Root::Mixed,
+    "hole",
     Absent::Token(K::ArgumentsDefinition, ")"),
   ),
   (
@@ -3726,6 +3751,14 @@ const SITES: &[Site] = &[
     Absent::Token(K::Arguments, ")"),
   ),
   (
+    "directive.rs",
+    "report",
+    "{ f(a: 1 }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::Arguments, ")"),
+  ),
+  (
     "ty.rs",
     "unclosed",
     "type T { f: [Int",
@@ -3734,9 +3767,33 @@ const SITES: &[Site] = &[
     Absent::Token(K::ListType, "]"),
   ),
   (
+    "ty.rs",
+    "report",
+    "type T { f: [Int }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ListType, "]"),
+  ),
+  (
+    "ty.rs",
+    "report",
+    "type T { f: }",
+    Root::Mixed,
+    "MissingChild FieldDefinition",
+    Absent::Imaged,
+  ),
+  (
     "value.rs",
     "unclosed",
     "{ f(a: [1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ListValue, "]"),
+  ),
+  (
+    "value.rs",
+    "report",
+    "{ f(a: [1 }",
     Root::Mixed,
     "Ok",
     Absent::Token(K::ListValue, "]"),
@@ -3756,6 +3813,14 @@ const SITES: &[Site] = &[
     Root::Mixed,
     "UnexpectedChild DefaultValue Variable",
     Absent::Not,
+  ),
+  (
+    "value.rs",
+    "report",
+    "{ f(a: ) }",
+    Root::Mixed,
+    "MissingChild Argument",
+    Absent::Imaged,
   ),
 ];
 
@@ -3879,10 +3944,16 @@ const FAMILIES: [(&str, &[&str]); 2] = [
 ];
 
 /// How many of [`SITES`]' probes project.
-const PROJECTING_SITES: usize = 11;
+const PROJECTING_SITES: usize = 14;
 
 /// Image-less tokens a site can leave out whose probe is **not** a witness.
-const UNWITNESSED: &[(&str, &str)] = &[];
+///
+/// Two: the `)` of an arguments definition and of a variables definition, where the list stops
+/// at a `}` open before it. Each of those probes carries the `Error` the root makes of that `}`:
+/// the field around the first list fails for want of its `:`, and no block of the grammar stands
+/// around the second. Both pairs are in the header's table all the same, witnessed by the site
+/// that leaves the same `)` out at the end of input.
+const UNWITNESSED: &[(&str, &str)] = &[("ArgumentsDefinition", ")"), ("VariablesDefinition", ")")];
 
 #[test]
 fn every_report_and_build_site_has_a_measured_answer() {
@@ -3937,13 +4008,14 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (39, 11),
+    (46, 11),
     "the two families' populations"
   );
 
   // Each probe: the parser reported, the tree is hole-free, and the projection answers what the
-  // table says. Every mismatch is collected before the assertion, so a moved answer names all of
-  // its siblings at once.
+  // table says. The two rows that answer `hole` are measured like the rest: their trees carry
+  // one, made by the root and not by the site. Every mismatch is collected before the assertion,
+  // so a moved answer names all of its siblings at once.
   let mut lenient = 0;
   let mut moved = Vec::new();
   for (file, family, text, root, expected, _) in SITES {
@@ -3981,8 +4053,13 @@ fn every_report_and_build_site_has_a_measured_answer() {
       }
     }
   }
+  // A set: two sites can leave the same token out of the same node — a list that runs to the end
+  // of input and one that stops at the `}` of a block around it — and each pair is derived once
+  // however many probes witness it.
   derived.sort();
+  derived.dedup();
   unwitnessed.sort();
+  unwitnessed.dedup();
   println!("DERIVED {derived:?}\nUNWITNESSED {unwitnessed:?}");
   assert_eq!(
     derived,
