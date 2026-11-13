@@ -24,7 +24,8 @@
 //!   skipped ≥1 token it reports the region once through `emit_skipped_region`, and the sink wraps
 //!   those tokens in the profile's `error_kind` **automatically** — no explicit `node` call. Its
 //!   depth is blind to which closer answers which opener, so [`unexpected`] hands it braces alone
-//!   and counts the other pairs in its predicate: a skip there never takes a `}` it did not open.
+//!   and counts the other pairs in its classifier, which tokora asks for every token a skip takes:
+//!   a skip there never takes a `}` it did not open.
 //! - `sync_balanced` **makes no progress in two cases**, and both are reachable here. A no-match
 //!   run to end of input "commits nothing and returns `Ok(None)`, leaving no trace"; and a
 //!   *successful* sync whose predicate matches the very first token returns
@@ -307,6 +308,8 @@
 //! would make a refusal observable on documents the guard never refuses on, which is precisely the
 //! unguarded equivalence `the_guard_did_not_change_the_answer` exists to hold.
 
+use core::cell::Cell;
+
 use tokora::{
   InputRef, Lexer, ParseContext, SimpleSpan, Token,
   emitter::{CstEmitter, FromUnclosed},
@@ -472,11 +475,22 @@ where
 /// Braces are counted apart from the other pairs. The scan's own depth counts braces alone, so its
 /// predicate is asked at every token outside the braces the skip itself opened, and a `}` met
 /// there closes a brace that was open before the skip began: the skip ends before it, whatever
-/// else it has open. The other pairs keep their count among themselves, blind to which closer
-/// answers which opener: inside one the skip opened nothing is a restart point, and with none open
-/// `is_sync_point` decides, an opener that is no restart point opening one. A `{` met with none of
+/// else it has open. The other pairs keep one count among themselves, blind to which closer
+/// answers which opener, and the classifier keeps it: tokora asks the classifier once for every
+/// token the skip takes, inside the braces the skip opened as well as outside them, where it asks
+/// the predicate outside them alone. So a `)` inside a brace the skip opened closes a `(` the skip
+/// opened in front of that brace. The predicate reads the count: while one of those pairs is open
+/// nothing is a restart point, and with none open `is_sync_point` decides. A `{` met with none of
 /// them open is what `is_sync_point` says, a restart point in both dialects; met inside one, it is
 /// an opener the skip follows to its own `}`.
+///
+/// Against the scan this was when one depth counted every pair, the brace depth and the count add
+/// up to that depth at every token until the two scans part, and they part in two places alone.
+/// At a `}` met outside the skip's braces with another pair open, this scan stops, where the other
+/// took a brace it did not open. At a `)`, `]` or `>` met inside a brace the skip opened with none
+/// of the other pairs open, the count stays at zero and the brace stays open to its own `}`, where
+/// the other depth fell and could end the skip at a restart point inside that brace, its `{` left
+/// open behind it.
 ///
 /// So the skip closes no brace that was open before it. The fallback is another matter: a `}` at
 /// the head stops the scan before it has taken anything, and the fallback then takes that `}`. A
@@ -520,31 +534,31 @@ where
   let hole = if allowance_exhausted {
     None
   } else {
-    // How many of the other pairs the skip has opened and not closed, outside its braces.
-    let mut open: usize = 0;
+    // How many of the other pairs the skip has opened and not closed. The classifier keeps it,
+    // since tokora asks it once for every token the skip takes, inside the braces the skip opened
+    // as well as outside them; the predicate only reads it.
+    let open: Cell<usize> = Cell::new(0);
     inp.sync_balanced(
-      // Braces alone: the scan's depth is how many braces the skip itself has opened.
+      // The scan's depth counts braces alone. An opener or a closer of the other pairs steps
+      // `open` instead, and is neutral to the depth.
       |kind: &<L::Token as Token<'inp>>::Kind| match delimiters(kind) {
         Balance::Open(b'{') => Balance::Open(b'{'),
         Balance::Close(b'{') => Balance::Close(b'{'),
-        _ => Balance::Neutral,
+        Balance::Open(_) => {
+          open.set(open.get().saturating_add(1));
+          Balance::Neutral
+        }
+        Balance::Close(_) => {
+          open.set(open.get().saturating_sub(1));
+          Balance::Neutral
+        }
+        Balance::Neutral => Balance::Neutral,
       },
-      // Asked at every token outside the braces the skip opened.
-      |t| {
-        let balance: Balance<u8> = delimiters(&<L::Token as Token<'inp>>::kind(t.data));
-        // A brace the skip did not open closes here: the skip ends before it.
-        if matches!(balance, Balance::Close(b'{')) {
-          return true;
-        }
-        if open == 0 && is_sync_point(t.data) {
-          return true;
-        }
-        match balance {
-          Balance::Open(b'{') | Balance::Neutral => {}
-          Balance::Open(_) => open = open.saturating_add(1),
-          Balance::Close(_) => open = open.saturating_sub(1),
-        }
-        false
+      // Asked only outside the braces the skip opened, so a `}` here closes a brace the skip did
+      // not open: the skip ends before it.
+      |t| match delimiters(&<L::Token as Token<'inp>>::kind(t.data)) {
+        Balance::Close(b'{') => true,
+        _ => open.get() == 0 && is_sync_point(t.data),
       },
     )?
   };
