@@ -1043,6 +1043,7 @@ impl ModelBuilder {
         location: path_location,
       },
       arguments: Run::default(),
+      ty: UNSET_TY,
     });
     id
   }
@@ -1056,6 +1057,16 @@ impl ModelBuilder {
   pub fn set_application_type_args(&mut self, application: ApplicationId, args: &[TypeExprId]) {
     let args = append(&mut self.model.application_type_args, args);
     self.model.applications[application.get() as usize].type_args = args;
+  }
+
+  /// Gives `application` its type: its directive's instantiation, whose arguments are its complete
+  /// type arguments, or the unresolved type when they could not be completed.
+  pub(crate) fn set_application_ty(&mut self, application: ApplicationId, ty: TyId) {
+    debug_assert!(
+      (ty.get() as usize) < self.model.tys.len(),
+      "a type is interned before an application is given it"
+    );
+    self.model.applications[application.get() as usize].ty = ty;
   }
 
   /// Adds an argument to `application`, after those it has: the directive definition's

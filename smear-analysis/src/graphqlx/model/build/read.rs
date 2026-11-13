@@ -213,6 +213,15 @@ impl ModelBuilder {
     Some((row.directive, row.type_args.len, row.path.location))
   }
 
+  /// The type arguments the application `id` writes, in order: none for an id the builder did not
+  /// issue.
+  pub(crate) fn application_type_args(&self, id: ApplicationId) -> &[TypeExprId] {
+    match self.model.applications.get(id.get() as usize) {
+      Some(row) => row.type_args.of(&self.model.application_type_args),
+      None => &[],
+    }
+  }
+
   /// How many type occurrences the model holds.
   pub(crate) fn type_expr_count(&self) -> u32 {
     dense(self.model.type_exprs.len())

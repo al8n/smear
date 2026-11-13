@@ -215,8 +215,13 @@ impl Analysis {
 ///   `resource-limit`, each where it is written, and the built-in library is typed whatever the
 ///   limits. An occurrence that cannot be typed, or that holds one that cannot, has the one
 ///   unresolved type. Each closed type an occurrence of a generic definition resolves to is one of
-///   the definition's instantiations. Last, an application writes no more type arguments than its
+///   the definition's instantiations. An application writes no more type arguments than its
 ///   directive has parameters and no fewer than it takes, or it is `generic-arity`, at its path.
+///   Last, once every occurrence's bounds are judged, an application of a directive that has a
+///   type parameter, written with a count its directive takes, has its complete type arguments,
+///   filled as an occurrence of its directive would be, on the same limits, a level above its type
+///   arguments: a default that cannot fill one is `generic-arity`, and a limit `resource-limit`,
+///   each at its path.
 /// - Judges the bounds of every written occurrence of a definition that has one, by its complete
 ///   type, a slot a default filled included: for each bound in its definition's order, the
 ///   argument for the bounded parameter, without its own `!`, must satisfy the bound's interface

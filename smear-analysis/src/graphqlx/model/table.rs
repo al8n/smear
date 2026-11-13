@@ -384,6 +384,11 @@ pub(super) struct ApplicationRow {
   pub(super) path: PathRow,
   /// Its arguments, in the model's argument pool.
   pub(super) arguments: Run,
+  /// Its type: its directive's instantiation, a named type of the directive whose arguments are
+  /// its complete type arguments, or the unresolved type when they could not be completed.
+  /// [`UNSET_TY`] for a directive of no type parameter, one that did not resolve, and one whose
+  /// count of type arguments was refused.
+  pub(super) ty: TyId,
 }
 
 /// The schema: there is one per model, whether a schema definition is written or not.

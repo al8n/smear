@@ -36,13 +36,14 @@ use crate::graphqlx::{
 };
 
 use super::{
-  Model, PackageKind,
+  Model, PackageKind, Resolution,
   member::MemberKind,
   module::ModuleKind,
   schema::Root,
   table::{
     ApplicationRow, ContributionRow, DefRow, KIND_LIST, KIND_NAMED, KIND_UNRESOLVED, MemberRow,
-    ModuleRow, PackageRow, Run, UNSET_MODULE, VALUE_LIST, VALUE_MAP, VALUE_OBJECT, VALUE_SET,
+    ModuleRow, PackageRow, Run, UNSET_MODULE, UNSET_TY, VALUE_LIST, VALUE_MAP, VALUE_OBJECT,
+    VALUE_SET,
   },
 };
 
@@ -592,7 +593,8 @@ impl Cursor {
   }
 
   /// Reaches `application`, then its type arguments, then each argument's value, its arguments in
-  /// the order of its directive's: the argument each sets never goes back.
+  /// the order of its directive's: the argument each sets never goes back. Its type, when it has
+  /// one, is the unresolved type or a named type of the directive it applies.
   fn application(&mut self, model: &Model, application: ApplicationId) {
     let index = application.get();
     assert_eq!(
@@ -601,6 +603,17 @@ impl Cursor {
     );
     self.applications += 1;
     let row = &model.applications[index as usize];
+    if row.ty != UNSET_TY {
+      let ty = &model.tys[row.ty.get() as usize];
+      let applied = match row.directive {
+        Resolution::Resolved(directive) => ty.shape == KIND_NAMED && ty.def == directive,
+        Resolution::Unresolved => false,
+      };
+      assert!(
+        applied || ty.shape == KIND_UNRESOLVED,
+        "application {index}'s type is the unresolved type or a named type of its directive"
+      );
+    }
     for arg in row.type_args.of(&model.application_type_args) {
       self.type_expr(model, *arg);
     }

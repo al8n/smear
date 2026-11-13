@@ -2,8 +2,12 @@
 
 use tokora::diagnostic::Location;
 
+#[cfg(feature = "test-support")]
+use crate::graphqlx::id::TyId;
 use crate::graphqlx::id::{ApplicationId, DefId, MemberId, TypeExprId, ValueId};
 
+#[cfg(feature = "test-support")]
+use super::table::KIND_NAMED;
 use super::{Model, table::ApplicationRow, ty::Path};
 
 /// What a written name resolved to, or that it did not resolve.
@@ -70,6 +74,19 @@ impl Model {
       self.applications.len()
     );
     Application { model: self, id }
+  }
+
+  /// The complete type arguments of the application `id`: the arguments of its directive's
+  /// instantiation, which its row holds, and none when it holds none, or the unresolved type.
+  #[cfg(feature = "test-support")]
+  pub(crate) fn type_arguments(&self, id: ApplicationId) -> &[TyId] {
+    let Some(row) = self.applications.get(id.get() as usize) else {
+      return &[];
+    };
+    match self.tys.get(row.ty.get() as usize) {
+      Some(ty) if ty.shape == KIND_NAMED => ty.args.of(&self.ty_args),
+      _ => &[],
+    }
   }
 }
 

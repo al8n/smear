@@ -3,9 +3,9 @@
 //! type, and judges the bounds of every instantiation the program writes.
 //!
 //! It reads no document: it reads the rows lowering wrote, through the builder, and writes onto
-//! them. It does five things, in this order: built-in meaning; each definition's defaults; every
+//! them. It does six things, in this order: built-in meaning; each definition's defaults; every
 //! occurrence's type; every application's count of type arguments; the bounds of every written
-//! instantiation, which the `bounds` module holds.
+//! instantiation, which the `bounds` module holds; every application's complete type arguments.
 //!
 //! # Built-in meaning
 //!
@@ -71,8 +71,9 @@
 //!
 //! # Filling what is left out
 //!
-//! An occurrence that leaves arguments out asks the fill table first: for each definition and the
-//! types of the slots its occurrences write, the complete type, or why it could not be built. On a
+//! An occurrence that leaves arguments out, an application among them, asks the fill table first:
+//! for each definition and the types of the slots its occurrences write, the complete type, or why
+//! it could not be built. On a
 //! miss it pays a step of substitution for each slot it leaves out, then fills its empty slots in
 //! index order. Filling a slot types the written tree of that parameter's default, substituted for
 //! the occurrence: every node of the tree costs a step, and a parameter in it reads the
@@ -94,13 +95,27 @@
 //! made once. A type that nests deeper than `Limits::max_generic_depth`, a list counting a level,
 //! and an instantiation of a generic definition past `Limits::max_instantiations`, both nullnesses
 //! counting once, are refused; an occurrence that cannot be built for a limit is `resource-limit`
-//! where it is written. The built-in library is typed whatever the limits, and fills nothing.
+//! where it is written, and an application at its path. The built-in library is typed whatever the
+//! limits, and fills nothing.
 //!
 //! # Applications
 //!
 //! An application whose directive resolved writes no more type arguments than the directive has
 //! type parameters, and no fewer than it takes, or it is `generic-arity`, at its path. Its type
 //! arguments are occurrences the walk types.
+//!
+//! Once every written instantiation's bounds are judged, each application whose count its
+//! directive takes, of a directive with a type parameter, has its complete type arguments, in id
+//! order: it is typed as an occurrence of its directive would be, with no `!`, its written type
+//! arguments' types its first slots and the slots it leaves out filled from their defaults, a
+//! default that names a parameter written after it filled first. Its type is the directive's named
+//! type with every slot, one level deeper than its deepest type argument, depth-checked and counted
+//! as an instantiation is; its complete type arguments are that type's arguments, and it is no
+//! instantiation the program writes. It reports at its path, naming the directive with its `@`: a
+//! default that cannot fill a slot, `generic-arity`, with a label at the default; past a limit,
+//! `resource-limit`. Its type is then the unresolved type, as it is when a written type argument is
+//! unresolved. Completing them last leaves every occurrence's type and every verdict on an
+//! occurrence's bounds as they would be with no application.
 //!
 //! # Bounds
 //!
@@ -143,7 +158,7 @@ mod bounds;
 /// sources `sources` numbers, with the type services and budgets of `types`, reporting into
 /// `reporter`: each definition's built-in meaning, then its defaults, checked where they are
 /// written, then every occurrence's type, then every application's count of type arguments, then
-/// the bounds of every written instantiation.
+/// the bounds of every written instantiation, then every application's complete type arguments.
 pub(crate) fn instantiate(
   declarations: &Declarations<'_, '_>,
   sources: &SourceMap,
@@ -179,6 +194,7 @@ pub(crate) fn instantiate(
   typing.trees();
   typing.applications();
   typing.bounds(keys);
+  typing.complete_applications();
 }
 
 /// Gives each definition its built-in meaning: an interface its own package applies `core`'s
@@ -595,13 +611,24 @@ enum Frame {
   Fill(Fill),
 }
 
-/// An occurrence being typed.
+/// What a frame of the walk types.
+#[derive(Clone, Copy)]
+enum Of {
+  /// A type occurrence.
+  Occurrence(TypeExprId),
+  /// A directive application, typed as an occurrence of its directive would be: its written type
+  /// arguments, typed before it, are its first slots.
+  Application(ApplicationId),
+}
+
+/// An occurrence being typed, or an application.
 #[derive(Clone, Copy)]
 struct Visit {
-  /// The occurrence.
-  id: TypeExprId,
-  /// Where its results start on the value stack: one for each written child typed, and, once an
-  /// occurrence of a definition misses the fill table, one slot for each type parameter.
+  /// What it types.
+  of: Of,
+  /// Where its results start on the value stack: one for each written child typed, an
+  /// application's written type arguments, and, once an occurrence of a definition misses the
+  /// fill table, one slot for each type parameter.
   start: u32,
   /// Its next written child to type.
   next: u32,
@@ -636,17 +663,19 @@ struct Fill {
   key: (DefId, u32, u32),
 }
 
-/// What typing reads of one occurrence's row.
+/// What typing reads of one occurrence's row, or of an application's.
 #[derive(Clone, Copy)]
 struct Seen {
-  /// What it names.
+  /// What it names: an application, its directive.
   written: Written,
   /// How many arguments it writes.
   args: u32,
-  /// Whether it is written non-null.
+  /// Whether it is written non-null: an application is not.
   non_null: bool,
-  /// Where it is written.
+  /// Where it is written: an application, where its directive's path is.
   location: Location,
+  /// Whether it is an application, whose reports name its directive with its `@`.
+  application: bool,
 }
 
 /// The walk that types every occurrence, and what it keeps from one tree to the next.
@@ -701,7 +730,12 @@ impl Typing<'_> {
   fn tree(&mut self, root: TypeExprId) {
     self.frames.clear();
     self.values.clear();
-    self.push(root, None);
+    self.push(Of::Occurrence(root), None);
+    self.walk();
+  }
+
+  /// Takes the walk's steps until its stack is empty.
+  fn walk(&mut self) {
     while let Some(&frame) = self.frames.last() {
       match frame {
         Frame::Visit(visit) => self.visit(visit),
@@ -710,16 +744,16 @@ impl Typing<'_> {
     }
     debug_assert!(
       self.progress.is_empty(),
-      "every fill a tree starts ends with it"
+      "every fill a walk starts ends with it"
     );
   }
 
-  /// Pushes the frame of `id`: typed for its own sake when `owner` is `None`, and otherwise a node
+  /// Pushes the frame of `of`: typed for its own sake when `owner` is `None`, and otherwise a node
   /// of a default substituted for the occurrence at `owner` on the frame stack.
-  fn push(&mut self, id: TypeExprId, owner: Option<u32>) {
+  fn push(&mut self, of: Of, owner: Option<u32>) {
     let start = dense(self.values.len());
     self.frames.push(Frame::Visit(Visit {
-      id,
+      of,
       start,
       next: 0,
       owner,
@@ -732,7 +766,7 @@ impl Typing<'_> {
   fn enter(&mut self, id: TypeExprId, owner: u32) -> Result<(), Reason> {
     self.charge(1)?;
     self.admit(id, owner)?;
-    self.push(id, Some(owner));
+    self.push(Of::Occurrence(id), Some(owner));
     Ok(())
   }
 
@@ -776,7 +810,7 @@ impl Typing<'_> {
     let Some(Frame::Visit(visit)) = self.frames.get(at as usize) else {
       return None;
     };
-    match self.seen(visit.id)?.written {
+    match self.seen_of(visit.of)?.written {
       Written::Named(def) => Some(def),
       Written::Param { .. } | Written::List(_) | Written::Unresolved => None,
     }
@@ -790,11 +824,36 @@ impl Typing<'_> {
       args: dense(occurrence.args.len()),
       non_null: occurrence.non_null,
       location: occurrence.location,
+      application: false,
     })
   }
 
-  /// The written child of `id` at `next`: its argument there, or, for a list, its element.
-  fn child(&self, id: TypeExprId, next: u32) -> Option<TypeExprId> {
+  /// What typing reads of what a frame types: an occurrence's row, or an application's, which
+  /// names its directive, nullable, at its path.
+  fn seen_of(&self, of: Of) -> Option<Seen> {
+    let application = match of {
+      Of::Occurrence(id) => return self.seen(id),
+      Of::Application(application) => application,
+    };
+    let (Resolution::Resolved(directive), args, location) = self.builder.applied(application)?
+    else {
+      return None;
+    };
+    Some(Seen {
+      written: Written::Named(directive),
+      args,
+      non_null: false,
+      location,
+      application: true,
+    })
+  }
+
+  /// The written child of what `of` types at `next`: an occurrence's argument there, or, for a
+  /// list, its element. An application has none: its written type arguments are typed before it.
+  fn child(&self, of: Of, next: u32) -> Option<TypeExprId> {
+    let Of::Occurrence(id) = of else {
+      return None;
+    };
     let occurrence = self.builder.occurrence(id)?;
     match occurrence.written {
       Written::List(element) => (next == 0).then_some(element),
@@ -807,7 +866,7 @@ impl Typing<'_> {
   /// Takes the next step of `visit`, the frame on top of the stack.
   fn visit(&mut self, visit: Visit) {
     match visit.step {
-      Step::Children => match self.child(visit.id, visit.next) {
+      Step::Children => match self.child(visit.of, visit.next) {
         Some(child) => {
           self.set_top(Visit {
             next: visit.next.saturating_add(1),
@@ -839,7 +898,7 @@ impl Typing<'_> {
 
   /// Completes `visit`, every written child of which is typed, by what it names.
   fn finish(&mut self, visit: Visit) {
-    let Some(seen) = self.seen(visit.id) else {
+    let Some(seen) = self.seen_of(visit.of) else {
       return self.unusable(visit);
     };
     match seen.written {
@@ -851,9 +910,13 @@ impl Typing<'_> {
         None => self.param(visit, seen, def, index),
         Some(_) => self.read(visit, index),
       },
-      Written::Named(def) => match self.builder.non_zero_of(visit.id) {
-        Some(primitive) => self.alias(visit, seen, def, primitive),
-        None => self.named(visit, seen, def),
+      // An application names a directive, which is no alias.
+      Written::Named(def) => match visit.of {
+        Of::Occurrence(id) => match self.builder.non_zero_of(id) {
+          Some(primitive) => self.alias(visit, seen, def, primitive),
+          None => self.named(visit, seen, def),
+        },
+        Of::Application(_) => self.named(visit, seen, def),
       },
     }
   }
@@ -876,7 +939,7 @@ impl Typing<'_> {
   fn limited(&mut self, visit: Visit, seen: Seen, limit: Limit) {
     match visit.owner {
       None => {
-        self.report_limit(seen.location, limit);
+        self.report_limit(seen, limit);
         let ty = self.unresolved();
         self.done(ty);
       }
@@ -930,7 +993,9 @@ impl Typing<'_> {
     };
     match (self.slot(owner, index), visit.step) {
       (Some(ty), _) => {
-        let non_null = self.seen(visit.id).is_some_and(|seen: Seen| seen.non_null);
+        let non_null = self
+          .seen_of(visit.of)
+          .is_some_and(|seen: Seen| seen.non_null);
         let ty = if non_null { self.non_null_of(ty) } else { ty };
         self.done(ty);
       }
@@ -1073,7 +1138,7 @@ impl Typing<'_> {
   /// Fills the next empty slot of `visit`, which missed the fill table, from `order` on in index
   /// order; completes it once every slot is filled.
   fn order(&mut self, visit: Visit, order: u32) {
-    let Some(seen) = self.seen(visit.id) else {
+    let Some(seen) = self.seen_of(visit.of) else {
       return self.unusable(visit);
     };
     let Written::Named(def) = seen.written else {
@@ -1104,7 +1169,7 @@ impl Typing<'_> {
     let Some(Frame::Visit(visit)) = self.frames.get(at as usize).copied() else {
       return Err(Reason::Unusable);
     };
-    let seen = self.seen(visit.id).ok_or(Reason::Unusable)?;
+    let seen = self.seen_of(visit.of).ok_or(Reason::Unusable)?;
     let Written::Named(def) = seen.written else {
       return Err(Reason::Unusable);
     };
@@ -1198,14 +1263,16 @@ impl Typing<'_> {
 
   /// Completes `visit`, an occurrence of the generic definition `def` whose instantiation is
   /// `nullable`: its own type is that, or that type's non-null form, and when it is typed for its
-  /// own sake and names no type parameter, that type is one of `def`'s instantiations.
+  /// own sake and names no type parameter, that type is one of `def`'s instantiations. An
+  /// application's is no instantiation the program writes: those are its occurrences' types.
   fn typed(&mut self, visit: Visit, seen: Seen, def: DefId, nullable: TyId) {
     let ty = if seen.non_null {
       self.non_null_of(nullable)
     } else {
       nullable
     };
-    if visit.owner.is_none() && self.builder.ty_closed(ty) {
+    if visit.owner.is_none() && matches!(visit.of, Of::Occurrence(_)) && self.builder.ty_closed(ty)
+    {
       self.builder.push_instantiation(def, ty);
     }
     self.done(ty);
@@ -1241,7 +1308,7 @@ impl Typing<'_> {
       let Some(Frame::Visit(visit)) = self.frames.last().copied() else {
         return;
       };
-      let seen = self.seen(visit.id);
+      let seen = self.seen_of(visit.of);
       let def = match seen {
         Some(Seen {
           written: Written::Named(def),
@@ -1303,15 +1370,18 @@ impl Typing<'_> {
     }
   }
 
-  /// Completes the occurrence on top of the stack with `ty`: its row is given it when it is typed
-  /// for its own sake, and `ty` is left on the value stack for what holds it, or for the fill whose
-  /// default it is.
+  /// Completes the occurrence or the application on top of the stack with `ty`: its row is given
+  /// it when it is typed for its own sake, and `ty` is left on the value stack for what holds it,
+  /// or for the fill whose default it is.
   fn done(&mut self, ty: TyId) {
     let Some(Frame::Visit(visit)) = self.frames.pop() else {
       return;
     };
     if visit.owner.is_none() {
-      self.builder.set_type_expr_ty(visit.id, ty);
+      match visit.of {
+        Of::Occurrence(id) => self.builder.set_type_expr_ty(id, ty),
+        Of::Application(application) => self.builder.set_application_ty(application, ty),
+      }
     }
     self.values.truncate(visit.start as usize);
     self.values.push(Some(ty));
@@ -1330,6 +1400,41 @@ impl Typing<'_> {
   /// The least number of type arguments `def` takes.
   fn least(&self, def: DefId) -> u32 {
     self.least.get(def.get() as usize).copied().unwrap_or(0)
+  }
+
+  /// Completes the type arguments of every application whose directive resolved and has a type
+  /// parameter, and whose count its directive takes, in id order: typed as an occurrence of its
+  /// directive would be, its written type arguments' types its first slots, the slots it leaves out
+  /// filled from their defaults, its type the directive's named type with every slot, given to the
+  /// application. It reports at the application's path, as an occurrence does where it is written.
+  fn complete_applications(&mut self) {
+    for index in 0..self.builder.application_count() {
+      let application = ApplicationId::new(index);
+      let Some((Resolution::Resolved(directive), written, at)) = self.builder.applied(application)
+      else {
+        continue;
+      };
+      let count = self.builder.type_param_count(directive);
+      // Nothing to complete, or a count `applications` reported.
+      if count == 0 || written > count || written < self.least(directive) {
+        continue;
+      }
+      // What the last tree typed left.
+      self.library = at.source() < self.supplied;
+      self.in_default = false;
+      self.frames.clear();
+      self.values.clear();
+      self.push(Of::Application(application), None);
+      // Its written type arguments' types, each typed as an occurrence, are its first slots.
+      for &arg in self.builder.application_type_args(application) {
+        let typed = self
+          .builder
+          .occurrence(arg)
+          .and_then(|occurrence| occurrence.ty);
+        self.values.push(typed);
+      }
+      self.walk();
+    }
   }
 
   /// Checks every application's count of type arguments against its directive's type parameters.
@@ -1353,7 +1458,13 @@ impl Typing<'_> {
   /// Reports a count of type arguments, written as `seen` says, that `def`, with `count` type
   /// parameters of which every one from `least` on has a default, does not take.
   fn report_count(&mut self, seen: Seen, def: DefId, count: u32, least: u32) {
-    let (message, help) = counted("", self.builder.def_name(def), count, least, seen.args);
+    let (message, help) = counted(
+      sigil(seen),
+      self.builder.def_name(def),
+      count,
+      least,
+      seen.args,
+    );
     let defined = self.builder.def_location(def);
     self.report_arity(seen.location, message, help, defined);
   }
@@ -1394,11 +1505,12 @@ impl Typing<'_> {
   /// default of the slot its order had reached.
   fn report_failure(&mut self, seen: Seen, def: DefId, failure: Failure) {
     let cycle = match failure.reason {
-      Reason::Limit(limit) => return self.report_limit(seen.location, limit),
+      Reason::Limit(limit) => return self.report_limit(seen, limit),
       Reason::Cycle => true,
       Reason::Unusable => false,
     };
     let param = self.builder.type_param(def, failure.param);
+    let sigil = sigil(seen);
     let name = Excerpt(self.builder.def_name(def));
     let spelled = Excerpt(match param {
       Some((sym, _, _)) => self.builder.spelling(sym),
@@ -1422,7 +1534,7 @@ impl Typing<'_> {
       return;
     }
     let message = format!(
-      "`{name}` is written without a type argument for `{spelled}`, and the default of \
+      "`{sigil}{name}` is written without a type argument for `{spelled}`, and the default of \
        `{spelled}` cannot fill it here"
     );
     let default = param
@@ -1441,20 +1553,31 @@ impl Typing<'_> {
     self.reporter.report(report.build());
   }
 
-  /// Reports, at `at`, a type that cannot be built because it passes `limit`.
-  fn report_limit(&mut self, at: Location, limit: Limit) {
+  /// Reports, where `seen` is written, a type that cannot be built because it passes `limit`: an
+  /// occurrence's, or an application's, which names its directive.
+  fn report_limit(&mut self, seen: Seen, limit: Limit) {
     let limits = self.types.limits();
+    let (what, above) = match seen.written {
+      Written::Named(directive) if seen.application => (
+        format!(
+          "this application of `@{}`",
+          Excerpt(self.builder.def_name(directive))
+        ),
+        ", an application being typed a level above its type arguments",
+      ),
+      _ => (String::from("this type"), ""),
+    };
     let (message, help) = match limit {
       Limit::Depth => (
         format!(
-          "this type nests deeper than `Limits::max_generic_depth`, {}, admits",
+          "{what} nests deeper than `Limits::max_generic_depth`, {}, admits{above}",
           limits.max_generic_depth()
         ),
         "raise the bound with `Limits::with_max_generic_depth`, or nest types less deeply",
       ),
       Limit::Instantiations => (
         format!(
-          "this type is one more instantiation of a generic definition than \
+          "{what} is one more instantiation of a generic definition than \
            `Limits::max_instantiations`, {}, admits",
           limits.max_instantiations()
         ),
@@ -1462,7 +1585,7 @@ impl Typing<'_> {
       ),
       Limit::Substitutions => (
         format!(
-          "filling the type arguments this type leaves out takes more steps of substitution than \
+          "filling the type arguments {what} leaves out takes more steps of substitution than \
            `Limits::max_substitutions`, {}, admits",
           limits.max_substitutions()
         ),
@@ -1471,7 +1594,7 @@ impl Typing<'_> {
     };
     let kind = DiagnosticKind::ResourceLimit;
     self.reporter.report(
-      Diagnostic::builder(kind.code(), at)
+      Diagnostic::builder(kind.code(), seen.location)
         .severity(kind.severity())
         .message(message)
         .primary_label(kind.title())
@@ -1479,6 +1602,12 @@ impl Typing<'_> {
         .build(),
     );
   }
+}
+
+/// What names the definition `seen` names in a report: `@` before a directive an application
+/// applies, as it is written there, and nothing before a type.
+fn sigil(seen: Seen) -> &'static str {
+  if seen.application { "@" } else { "" }
 }
 
 /// What a count of type arguments says, and its help: how many type arguments `name`, written

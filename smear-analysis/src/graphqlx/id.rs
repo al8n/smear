@@ -140,7 +140,9 @@ model_id! {
   /// default, an alias's argument) is interned where the walk first needs it. A type that judging
   /// a bound derives, the bound's interface with an instantiation's arguments in place, comes after
   /// every occurrence's type, in the order the walk reaches the occurrences, its arguments before
-  /// it.
+  /// it. After those come the types that completing each directive application's type arguments
+  /// derives, application by application: the arguments its directive's defaults fill, then its
+  /// type, its directive with every type argument.
   TyId
 }
 

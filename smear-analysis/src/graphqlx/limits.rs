@@ -243,9 +243,12 @@ impl Limits {
   /// two.
   ///
   /// A type deeper than this is reported at each occurrence that would have it, which is then the
-  /// unresolved type; but for a bound put under an instantiation's arguments, which would nest
-  /// deeper than this: each occurrence of the instantiation is reported where it is written, and
-  /// keeps its type. The built-in library's types are built whatever the bound, so `0`, which
+  /// unresolved type, and at each directive application whose type would, at its path: an
+  /// application is typed as an occurrence of its directive, a level above its type arguments, so
+  /// `@d<[Int]>` is two deep. But a bound put under an instantiation's arguments that would nest
+  /// deeper than this is reported at each occurrence of the instantiation, where it is written, and
+  /// the occurrence keeps its type. The built-in library's types are built whatever the bound, so
+  /// `0`, which
   /// refuses every list and every type with an argument a supplied package writes, reports nothing
   /// inside it.
   ///
@@ -260,14 +263,16 @@ impl Limits {
 
   /// How many distinct instantiations of generic definitions the analysis may intern: each
   /// definition of at least one type parameter with each list of arguments, those the program
-  /// writes, those filling its defaults derives and those a bound derives when it is put under an
-  /// instantiation's arguments together, a type that names a type parameter included. An
+  /// writes, those filling its defaults derives, those a bound derives when it is put under an
+  /// instantiation's arguments, and each directive application's type, its directive with its
+  /// complete type arguments, together, a type that names a type parameter included. An
   /// instantiation written nullable and non-null counts once.
   ///
   /// Past it, each occurrence that would need one more is reported where it is written, and is the
-  /// unresolved type; one already interned is still built. An occurrence whose bounds, put under
-  /// its arguments, would need one more is reported where it is written too, and keeps its type.
-  /// The built-in library's are not counted.
+  /// unresolved type; one already interned is still built. An application that would need one
+  /// more is reported at its path, and its type arguments are not completed. An occurrence whose
+  /// bounds, put under its arguments, would need one more is reported where it is written too, and
+  /// keeps its type. The built-in library's are not counted.
   ///
   /// The default is 2^16. A program writes hundreds of instantiations; derived ones can double per
   /// level of a chain of defaults, or of an `implements` chain, and this bound is what keeps that
@@ -280,15 +285,17 @@ impl Limits {
   /// How many steps of substitution the analysis may take, over the whole analysis.
   ///
   /// Substitution puts types in place of a generic definition's type parameters. Filling the type
-  /// arguments a use leaves out is substitution: a set of written arguments filled for the first
-  /// time takes one step for each argument left out, and one for each type occurrence of a default
-  /// that the filling walks, whether the type that occurrence yields is new or not. A set of
-  /// arguments filled once is not filled again, whichever use asks for it. Judging a bound puts an
-  /// instantiation's arguments in place of the parameters the bound names too, and draws on
+  /// arguments a use leaves out is substitution, a directive application's left-out type
+  /// arguments included: a set of written arguments filled for the first time takes one step for
+  /// each argument left out, and one for each type occurrence of a default that the filling walks,
+  /// whether the type that occurrence yields is new or not. A set of arguments filled once is not
+  /// filled again, whichever use asks for it. Judging a bound puts an instantiation's arguments in
+  /// place of the parameters the bound names too, and draws on
   /// [`max_bound_steps`](Self::max_bound_steps), never on this bound.
   ///
   /// Past it, each type occurrence whose type would take one more step is reported where it is
-  /// written, and its type is the unresolved one.
+  /// written, and its type is the unresolved one; an application is reported at its path, and its
+  /// type arguments are not completed.
   ///
   /// The default is 2^20: sixteen steps for each of the instantiations
   /// [`max_instantiations`](Self::max_instantiations) admits at its default, which no program
