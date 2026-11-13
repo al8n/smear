@@ -669,12 +669,15 @@ pub enum StringError<Char = char> {
   /// prefix of any valid sequence, at least one.
   #[from(skip)]
   UnsupportedCharacter(Lexeme<Char>),
-  /// An unexpected line terminator in a string literal.
+  /// A line terminator inside an inline string literal.
+  ///
+  /// smear's lexers do not report it: an inline string ends at its first line terminator, before
+  /// it, and is [`Unterminated`](Self::Unterminated) there. Only a caller builds one.
   UnexpectedLineTerminator(UnexpectedLexeme<Char, LineTerminatorHint>),
   /// An unexpected escaped character in a string literal.
   UnexpectedEscapedCharacter(EscapedCharacter<Char>),
-  /// A backslash that no character follows: the input ends right after it, or (byte sources only)
-  /// the bytes after it are not well-formed UTF-8.
+  /// A backslash that no character follows: the input ends right after it, an inline string's
+  /// line does, or (byte sources only) the bytes after it are not well-formed UTF-8.
   ///
   /// The span is the backslash's single byte. Ill-formed bytes after it are reported on their own,
   /// as [`UnsupportedCharacter`](Self::UnsupportedCharacter), when they are no prefix of any
@@ -748,6 +751,9 @@ impl<Char> StringError<Char> {
   }
 
   /// Creates an unexpected new line error.
+  ///
+  /// smear's lexers do not report one; see
+  /// [`UnexpectedLineTerminator`](Self::UnexpectedLineTerminator).
   #[inline]
   pub const fn unexpected_new_line(ch: Char, position: usize) -> Self {
     Self::UnexpectedLineTerminator(UnexpectedLexeme::from_positioned_char(
@@ -757,6 +763,9 @@ impl<Char> StringError<Char> {
   }
 
   /// Creates an unexpected carriage return error.
+  ///
+  /// smear's lexers do not report one; see
+  /// [`UnexpectedLineTerminator`](Self::UnexpectedLineTerminator).
   #[inline]
   pub const fn unexpected_carriage_return(ch: Char, position: usize) -> Self {
     Self::UnexpectedLineTerminator(UnexpectedLexeme::from_positioned_char(
@@ -766,6 +775,9 @@ impl<Char> StringError<Char> {
   }
 
   /// Creates an unexpected carriage return + new line error.
+  ///
+  /// smear's lexers do not report one; see
+  /// [`UnexpectedLineTerminator`](Self::UnexpectedLineTerminator).
   #[inline]
   pub const fn unexpected_carriage_return_new_line(span: Span) -> Self {
     Self::UnexpectedLineTerminator(UnexpectedLexeme::from_range_const(

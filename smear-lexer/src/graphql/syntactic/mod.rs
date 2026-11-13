@@ -1246,3 +1246,6 @@ mod comment_utf8_tests;
 
 #[cfg(test)]
 mod diagnostic_tests;
+
+#[cfg(test)]
+mod string_bounds_tests;

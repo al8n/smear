@@ -47,9 +47,14 @@ pub enum SyntaxErrorKind {
   InvalidNumber,
 
   // -- the lexer: strings ---------------------------------------------------------------------
-  /// A string literal the input ends inside.
+  /// A string literal the input ends inside, or a single-line one whose line ends before its
+  /// closing `"`.
   UnterminatedString,
   /// A line feed or carriage return inside a single-line string literal.
+  ///
+  /// The lexer never reports it — a single-line string ends at its first line terminator, as
+  /// [`UnterminatedString`](Self::UnterminatedString) — so only a `StringError` a caller builds
+  /// reads as it.
   LineTerminatorInString,
   /// A string literal that does not open with `"` or `"""`.
   ///
@@ -58,7 +63,7 @@ pub enum SyntaxErrorKind {
   UnopenedString,
   /// A backslash followed by a character draft §2.9.4 defines no escape for.
   UnknownEscape,
-  /// A backslash that no character follows.
+  /// A backslash that no character follows — in a single-line string, none on its line.
   IncompleteEscape,
   /// A `\u` escape that is not four hex digits, or a `\u{…}` escape that is unclosed, empty, longer
   /// than six digits or not hexadecimal.

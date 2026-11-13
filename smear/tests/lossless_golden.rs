@@ -90,7 +90,7 @@
 //! measured what that costs — an `expect` that skips trivia on its accepting branch as well as
 //! before it moves trailing placement across the whole corpus while round-trip, the gap census, the
 //! parity gate, the injection gate and the projection differential all stay green. So the sentence
-//! is now [`CLOSES_ON_TRAILING_TRIVIA`], twenty-eight pairings re-derived on every run by
+//! is now [`CLOSES_ON_TRAILING_TRIVIA`], twenty-nine pairings re-derived on every run by
 //! [`only_the_recorded_nodes_close_on_their_trailing_trivia`], which is the trailing twin of the
 //! leading census and is the one gate here that a bless cannot launder.
 //!
@@ -101,8 +101,8 @@
 //! moment. tokora `60f27a3` is what made that true; before it, a run with nothing lexable after it
 //! landed **outside** `Document` as a `Gap` child of `Root`, while the identical run mid-document
 //! landed inside. Four goldens were pinned against that asymmetry as pending re-blesses. Exactly
-//! one of them moved when the fix landed — `invalid_unterminated_string`, whose `Gap@9..26` is now
-//! six levels deeper, inside the `Argument` its last committed token sits in — and the other three
+//! one of them moved when the fix landed — `invalid_unterminated_string`, whose gap is now six
+//! levels deeper, inside the `Argument` its last committed token sits in — and the other three
 //! did not, because the rule's fallback clause governs them rather than an exemption.
 //!
 //! What replaces that pending note is the rule itself, pinned in two directions:
@@ -205,7 +205,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// Every `parent > node` pairing where a node closes *after* the trivia behind it, so that the
 /// trivia lands inside the node's range instead of beside it.
 ///
-/// **Twenty-eight entries where [`OPENS_ON_LEADING_TRIVIA`] has one, and the asymmetry is the
+/// **Twenty-nine entries where [`OPENS_ON_LEADING_TRIVIA`] has one, and the asymmetry is the
 /// mechanism rather than a defect count.** An atom commits the trivia it crosses to whichever node
 /// is open at that moment. A production that is *about* to open a node crosses the trivia in front
 /// of it first, at a dispatch peek made before the mark, so leading trivia lands outside — which is
@@ -233,7 +233,11 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 ///   `invalid_unterminated_bracket` (`{\n  f(a: [1, 2 }`): the list never gets its `]`. It stops
 ///   at the `}` of the selection set around it and leaves that brace where it stands, so what it
 ///   holds past its last element is the space it crossed to find the brace. That is the rule this
-///   file's header records for a `FieldDefinition` with no type, one level up.
+///   file's header records for a `FieldDefinition` with no type, one level up. `Arguments >
+///   Argument` is the same stop one level higher, and its witness is `invalid_unterminated_string`
+///   (`{\n  f(a: "unterminated)\n}`): the string ends at its line, so the argument has a gap where
+///   its value would be, and the peek for that value crosses the line break and finds the `}`. It
+///   reports the brace and leaves it, so the argument holds the line break.
 ///
 /// `Root > Document` is in both lists, and for one reason: `Document` spans the whole source, so a
 /// file that begins or ends with trivia has nowhere else to put it.
@@ -250,6 +254,7 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 /// computes a span. The array is what makes the sentence fail when it stops being true.
 const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "Argument > ListValue",
+  "Arguments > Argument",
   "ArgumentsDefinition > InputValueDefinition",
   "DirectiveDefinition > DirectiveLocations",
   "Directives > Directive",
@@ -1082,7 +1087,7 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
 /// `FieldDefinition > NamedType`, `Argument > IntValue` — and list pairings vanished, because
 /// trivia eaten by the `expect` that ends an element never reaches the loop peek that used to leave
 /// it inside the preceding sibling. So the failure is reported as the two differences rather than
-/// as two twenty-eight-element vectors: which half moved is what tells a reader whether a
+/// as two twenty-nine-element vectors: which half moved is what tells a reader whether a
 /// production gained a probe or lost one.
 #[test]
 fn only_the_recorded_nodes_close_on_their_trailing_trivia() {

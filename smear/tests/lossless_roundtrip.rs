@@ -104,9 +104,10 @@ use smear::parser::{
 /// The three `invalid_lex_*` entries are the strongest form of the claim this gate makes. Their
 /// whole source is refused, so the tree carries **no committed token at all** and the round-trip
 /// rests entirely on the tiling — the state tokora's zero-token wall refused outright until
-/// `2bbca21`. `invalid_unterminated_string.graphql` is the mixed case: nine tokens, then a tiled
-/// tail. Gate 1's `both_suites_agree_across_the_lexer_grammar_error_boundary` is where that
-/// distinction is asserted; here they are simply four regions the grammar did not cover.
+/// `2bbca21`. `invalid_unterminated_string.graphql` is the mixed case: nine tokens, a tiled
+/// string and three tokens more. Gate 1's
+/// `both_suites_agree_across_the_lexer_grammar_error_boundary` is where that distinction is
+/// asserted; here they are simply four regions the grammar did not cover.
 const GAP_TILED_ENTRIES: &[&str] = &[
   "invalid_lex_illegal_character.graphql",
   "invalid_lex_unterminated_block_string.graphql",

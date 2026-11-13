@@ -7,10 +7,7 @@ use tokora::{
 
 type Span = SimpleSpan;
 
-use crate::{
-  error::{InvalidUnicodeHexDigits, StringError, StringErrors, UnicodeError},
-  hints::LineTerminatorHint,
-};
+use crate::error::{InvalidUnicodeHexDigits, StringError, StringErrors, UnicodeError};
 
 use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInlineStr};
 
@@ -22,7 +19,7 @@ use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInl
 )]
 pub(crate) enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
-  #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
+  #[regex(r#"\\[^"\\/bfnrtu\r\n]"#, handle_invalid_escaped_character)]
   EscapedCharacter,
 
   #[regex(r#"\\u[0-9A-Fa-f]{4}"#, handle_fixed_width_escape_unicode)]
@@ -44,15 +41,10 @@ pub(crate) enum StringToken {
   #[token("\"")]
   Quote,
 
-  #[regex(r#"\r\n|\n|\r"#, |lexer| {
-    match lexer.slice() {
-      "\r\n" => LineTerminatorHint::CarriageReturnNewLine,
-      "\n"   => LineTerminatorHint::NewLine,
-      "\r"   => LineTerminatorHint::CarriageReturn,
-      _ => unreachable!("regex matched unexpected line terminator"),
-    }
-  })]
-  LineTerminator(LineTerminatorHint),
+  /// A line feed or a carriage return, which ends the literal before it: an inline string is one
+  /// line.
+  #[regex(r"[\r\n]")]
+  LineTerminator,
 
   /// Any run of allowed string characters:
   /// all Unicode scalars except: quote, backslash, and line terminators.
@@ -64,10 +56,11 @@ pub(crate) enum StringToken {
 ///
 /// Every scalar other than `"`, `\`, CR and LF is
 /// [`StringCharacters`](StringToken::StringCharacters), those four have rules
-/// of their own, and `\\[^"\\/bfnrtu]` takes a backslash before any scalar. So
-/// the one shape that reaches this is a lone `\` at the end of input, and it is
-/// [`StringError::IncompleteEscape`] at the backslash's byte — what the byte
-/// twin of this grammar answers for the same input.
+/// of their own, and `\\[^"\\/bfnrtu\r\n]` takes a backslash before any other
+/// scalar. So the one shape that reaches this is a `\` at the end of the input
+/// or of its line, and it is [`StringError::IncompleteEscape`] at the
+/// backslash's byte — what the byte twin of this grammar answers for the same
+/// input.
 ///
 /// Anything else reaching here would be a grammar change, and answers the
 /// default rather than a position this has not established.
@@ -141,11 +134,11 @@ fn handle_fixed_width_escape_unicode(
 /// The callback of the bare `\u` rule: a fixed-width escape whose four hex digits are not all
 /// there.
 ///
-/// It takes up to four characters after the `\u` into the escape's token, as its digits. The token
-/// is measured in bytes and each character is taken whole, so a digit spelled in more than one
-/// byte moves the token's end by its whole width, and each digit that is not hex is reported at
-/// its own byte. Counting characters as bytes would end the token inside a character, which the
-/// sub-lexer refuses with a panic.
+/// It takes up to four characters after the `\u` into the escape's token, as its digits, and none
+/// from the next line, where the literal has ended. The token is measured in bytes and each
+/// character is taken whole, so a digit spelled in more than one byte moves the token's end by its
+/// whole width, and each digit that is not hex is reported at its own byte. Counting characters as
+/// bytes would end the token inside a character, which the sub-lexer refuses with a panic.
 #[inline]
 fn handle_invalid_escaped_unicode(
   lexer: &mut Lexer<'_, StringToken>,
@@ -155,7 +148,12 @@ fn handle_invalid_escaped_unicode(
   // Each character taken, with its byte offset after the `\u`.
   let mut buf = [('\0', 0usize); 4];
   let mut count = 0usize;
-  for (index, (offset, c)) in lexer.remainder().char_indices().take(4).enumerate() {
+  let digits = lexer
+    .remainder()
+    .char_indices()
+    .take_while(|&(_, c): &(usize, char)| c != '\r' && c != '\n')
+    .take(4);
+  for (index, (offset, c)) in digits.enumerate() {
     buf[index] = (c, offset);
     count = index + 1;
   }
@@ -321,16 +319,12 @@ where
           _ => LitComplexInlineStr::new(src, string_lexer.extras).into(),
         });
       }
-      Ok(StringToken::LineTerminator(lt)) => {
-        let pos = lexer_span.end + string_lexer.span().start;
-        let err = match lt {
-          LineTerminatorHint::NewLine => StringError::unexpected_new_line('\n', pos),
-          LineTerminatorHint::CarriageReturn => StringError::unexpected_carriage_return('\r', pos),
-          LineTerminatorHint::CarriageReturnNewLine => {
-            StringError::unexpected_carriage_return_new_line((pos..pos + 2).into())
-          }
-        };
-        errs.push(err);
+      Ok(StringToken::LineTerminator) => {
+        // The literal ends where its line does, and the caller lexes the terminator as it does
+        // anywhere else.
+        lexer.bump(string_lexer.span().start);
+        errs.push(StringError::unterminated_inline_string());
+        return Err(errs);
       }
       Ok(StringToken::StringCharacters) => {
         // Plain content normalizes byte-for-byte

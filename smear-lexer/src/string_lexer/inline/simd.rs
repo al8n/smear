@@ -14,7 +14,7 @@
 //!   match stopped-at byte:
 //!     '"'  → done (plain or complex)
 //!     '\\' → handle escape inline
-//!     '\r' | '\n' → push error, continue
+//!     '\r' | '\n' → unterminated: the literal ends before its line does
 //!     0x80..=0xFF (byte source only) → validate the non-ASCII run, continue
 //! ```
 //!
@@ -81,7 +81,8 @@ fn try_parse_low_surrogate(remainder: &[u8]) -> Option<u32> {
 ///
 /// `abs_backslash` — absolute position of the leading `\`.
 ///
-/// Returns `(bytes_consumed_from_src_pos, capacity_delta)`.
+/// Returns `(bytes_consumed_from_src_pos, capacity_delta)`. Like the sub-lexer's `\u` callbacks,
+/// it takes nothing from the next line, where the literal has ended.
 #[inline]
 fn handle_fixed_unicode(
   src: &[u8],
@@ -89,7 +90,11 @@ fn handle_fixed_unicode(
   abs_backslash: usize,
   errs: &mut StringErrors<u8>,
 ) -> (usize, usize) {
-  let available = (src.len() - src_pos).min(4);
+  let available = src[src_pos..]
+    .iter()
+    .take(4)
+    .position(|&b: &u8| b == b'\r' || b == b'\n')
+    .unwrap_or_else(|| (src.len() - src_pos).min(4));
 
   if available == 0 {
     let span = Span::new(abs_backslash, abs_backslash + 2);
@@ -165,7 +170,9 @@ fn handle_fixed_unicode(
 ///
 /// `abs_backslash` — absolute position of the leading `\`.
 ///
-/// Returns `(bytes_consumed_from_src_pos, capacity_delta)`.
+/// Returns `(bytes_consumed_from_src_pos, capacity_delta)`. A `"`, `\`, CR or LF before the `}`
+/// leaves the escape unclosed and is not consumed, as the sub-lexer's `braced_escape_close`
+/// decides, so the scan never runs past the literal's line, nor past a quote that may end it.
 #[inline]
 fn handle_braced_unicode(
   src: &[u8],
@@ -182,6 +189,11 @@ fn handle_braced_unicode(
   let mut all_hex = true;
 
   for (i, &b) in rest.iter().enumerate() {
+    if matches!(b, b'"' | b'\\' | b'\r' | b'\n') {
+      let span = Span::new(abs_backslash, abs_backslash + 3 + i);
+      errs.push(UnicodeError::unclosed_braced_unicode_escape(span).into());
+      return (i, 0);
+    }
     if b == b'}' {
       let consumed = i + 1; // content bytes + '}'
       let abs_end = abs_backslash + 3 + i + 1;
@@ -244,6 +256,9 @@ fn handle_braced_unicode(
 /// - `Err((consumed, errors))` — unterminated string or validation errors.
 ///   Both callers discard the payload and delegate the whole literal to the
 ///   Logos sub-lexer, which builds the errors they report.
+///
+/// A literal ends at its first line terminator, unterminated and before it: the
+/// scan stops there, as the sub-lexer does, and no escape takes the terminator.
 ///
 /// # `CHECK_UTF8`
 ///
@@ -347,6 +362,14 @@ pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
             }
             pos += consumed;
           }
+          // A backslash at the end of its line escapes nothing. The terminator stays, for the
+          // next turn of the loop to end the literal at.
+          b'\r' | b'\n' => {
+            errs_mut!().push(StringError::IncompleteEscape(Span::new(
+              abs_backslash,
+              abs_backslash + 1,
+            )));
+          }
           other => {
             errs_mut!().push(StringError::unexpected_escaped_character(
               Span::new(abs_backslash, offset + pos + 1),
@@ -357,22 +380,11 @@ pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
           }
         }
       }
-      b'\r' => {
-        let abs = offset + pos;
-        if pos + 1 < src.len() && src[pos + 1] == b'\n' {
-          errs_mut!().push(StringError::unexpected_carriage_return_new_line(Span::new(
-            abs,
-            abs + 2,
-          )));
-          pos += 2;
-        } else {
-          errs_mut!().push(StringError::unexpected_carriage_return(b'\r', abs));
-          pos += 1;
-        }
-      }
-      b'\n' => {
-        errs_mut!().push(StringError::unexpected_new_line(b'\n', offset + pos));
-        pos += 1;
+      // An inline string ends at its line: the literal stops before the terminator, which the
+      // caller lexes as it does anywhere else.
+      b'\r' | b'\n' => {
+        errs_mut!().push(StringError::unterminated_inline_string());
+        return Err((pos, errs.unwrap_or_default()));
       }
       // Guarded by the const, so a text source's scan keeps the arm below as its
       // only fallback: there `skip_until` stops at the four needles and nowhere

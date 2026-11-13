@@ -7,10 +7,7 @@ use tokora::{
 
 type Span = SimpleSpan;
 
-use crate::{
-  error::{InvalidUnicodeHexDigits, StringError, StringErrors, UnicodeError},
-  hints::LineTerminatorHint,
-};
+use crate::error::{InvalidUnicodeHexDigits, StringError, StringErrors, UnicodeError};
 
 use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInlineStr};
 
@@ -27,7 +24,7 @@ use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInl
 )]
 pub(crate) enum StringToken {
   #[regex(r#"\\["\\/bfnrt]"#)]
-  #[regex(r#"\\[^"\\/bfnrtu]"#, handle_invalid_escaped_character)]
+  #[regex(r#"\\[^"\\/bfnrtu\r\n]"#, handle_invalid_escaped_character)]
   EscapedCharacter,
 
   #[regex(r#"\\u[0-9A-Fa-f]{4}"#, handle_unicode_escape)]
@@ -49,15 +46,10 @@ pub(crate) enum StringToken {
   #[token("\"")]
   Quote,
 
-  #[regex(r#"\r\n|\n|\r"#, |lexer| {
-    match lexer.slice() {
-      b"\r\n" => LineTerminatorHint::CarriageReturnNewLine,
-      b"\n"   => LineTerminatorHint::NewLine,
-      b"\r"   => LineTerminatorHint::CarriageReturn,
-      _ => unreachable!("regex matched unexpected line terminator"),
-    }
-  })]
-  LineTerminator(LineTerminatorHint),
+  /// A line feed or a carriage return, which ends the literal before it: an inline string is one
+  /// line.
+  #[regex(r"[\r\n]")]
+  LineTerminator,
 
   /// Any run of allowed string characters: all Unicode scalars except quote,
   /// backslash and the line terminators, each spelled as well-formed UTF-8.
@@ -82,13 +74,15 @@ pub(crate) enum StringToken {
 ///   ends where the bytes stop being a prefix of any valid sequence: the
 ///   maximal subpart [`core::str::Utf8Error::error_len`] measures, or the rest
 ///   of the input when it ends inside one — at least one byte either way.
-/// - **A lone `\` at the end of input.** Every escape rule needs a second byte.
-/// - **A `\` before bytes that are not a scalar.** `\\[^"\\/bfnrtu]` takes any
-///   scalar after the backslash, so only ill-formed bytes are left over, and
-///   the error token runs from the backslash to where they stop being a prefix
-///   of a valid sequence. That is the backslash alone when the next byte is no
-///   prefix of any sequence, and that byte then gets an `UnsupportedCharacter`
-///   of its own; a truncated prefix is swallowed into the backslash's token.
+/// - **A `\` at the end of the input or of its line.** Every escape rule needs
+///   a second byte, and none takes a line terminator, where the literal ends.
+/// - **A `\` before bytes that are not a scalar.** `\\[^"\\/bfnrtu\r\n]` takes
+///   any other scalar after the backslash, so only ill-formed bytes are left
+///   over, and the error token runs from the backslash to where they stop being
+///   a prefix of a valid sequence. That is the backslash alone when the next
+///   byte is no prefix of any sequence, and that byte then gets an
+///   `UnsupportedCharacter` of its own; a truncated prefix is swallowed into the
+///   backslash's token.
 ///
 /// Both backslash shapes answer [`StringError::IncompleteEscape`] at the
 /// backslash's own byte — never at the error token, which a swallowed prefix
@@ -205,8 +199,13 @@ fn handle_invalid_escaped_unicode(
   // We are at b"\\u" with no/partial hex after.
   let remainder = lexer.remainder();
 
-  // Gather up to 4 following bytes (not decoding UTF-8; we only need ASCII-hex)
-  let take = remainder.len().min(4);
+  // Gather up to 4 following bytes (not decoding UTF-8; we only need ASCII-hex), and none from
+  // the next line, where the literal has ended.
+  let take = remainder
+    .iter()
+    .take(4)
+    .position(|&b: &u8| b == b'\r' || b == b'\n')
+    .unwrap_or_else(|| remainder.len().min(4));
   let mut buf = [0u8; 4];
   buf[..take].copy_from_slice(&remainder[..take]);
 
@@ -444,16 +443,12 @@ where
           _ => LitComplexInlineStr::new(src, string_lexer.extras).into(),
         });
       }
-      Ok(StringToken::LineTerminator(lt)) => {
-        let pos = base_span.end + string_lexer.span().start;
-        let err = match lt {
-          LineTerminatorHint::NewLine => StringError::unexpected_new_line(b'\n', pos),
-          LineTerminatorHint::CarriageReturn => StringError::unexpected_carriage_return(b'\r', pos),
-          LineTerminatorHint::CarriageReturnNewLine => {
-            StringError::unexpected_carriage_return_new_line((pos..pos + 2).into())
-          }
-        };
-        errs.push(err);
+      Ok(StringToken::LineTerminator) => {
+        // The literal ends where its line does, and the caller lexes the terminator as it does
+        // anywhere else.
+        lexer.bump(string_lexer.span().start);
+        errs.push(StringError::unterminated_inline_string());
+        return Err(errs);
       }
       Ok(StringToken::StringCharacters) => {
         // Plain content normalizes byte-for-byte: the class matched well-formed UTF-8 only, so

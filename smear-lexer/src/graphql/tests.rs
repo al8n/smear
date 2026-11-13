@@ -8,9 +8,7 @@ use crate::{
     error::{DecimalError, FloatError, LexerErrorData, LexerErrors},
     syntactic::{SyntacticLexer, SyntacticToken},
   },
-  hints::{
-    ExponentHint, FloatHint, LineTerminatorHint, LitStrDelimiterHint, UnpairedSurrogateHint,
-  },
+  hints::{ExponentHint, FloatHint, LitStrDelimiterHint, UnpairedSurrogateHint},
 };
 
 /// The frozen syntactic error type these tests assert against. The SIMD
@@ -1459,33 +1457,22 @@ where
     .unwrap_unterminated();
   assert_eq!(err1.hint(), &LitStrDelimiterHint::Quote);
 
+  // The literal ends at its line, before the line terminator, whatever closes the next line.
   let mut lexer = Token::test_lexer(
-    r#""escaped 
+    r#""escaped
   new line""#,
   );
   let mut errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 1);
   let err = errs.pop().unwrap();
-  assert_eq!(err.span(), SimpleSpan::new(0, 21));
-  let err1 = err
-    .into_data()
-    .unwrap_string()
-    .pop()
-    .unwrap()
-    .unwrap_unexpected_line_terminator();
-  match err1.hint() {
-    LineTerminatorHint::NewLine => {
-      assert_eq!(err1.lexeme().unwrap_char_ref().char_ref(), &'\n');
-      assert_eq!(err1.lexeme().unwrap_char_ref().position(), 9);
-    }
-    LineTerminatorHint::CarriageReturn => {
-      assert_eq!(err1.lexeme().unwrap_char_ref().char_ref(), &'\r');
-      assert_eq!(err1.lexeme().unwrap_char_ref().position(), 9);
-    }
-    LineTerminatorHint::CarriageReturnNewLine => {
-      assert_eq!(err1.lexeme().unwrap_range(), SimpleSpan::new(9, 11));
-    }
-  }
+  assert_eq!(err.span(), SimpleSpan::new(0, 9));
+  let errs = err.into_data().unwrap_string();
+  assert_eq!(errs.len(), 1, "{errs:?}");
+  assert_eq!(
+    errs[0].unwrap_unterminated_ref().hint(),
+    &LitStrDelimiterHint::Quote
+  );
+  assert_eq!(lexer.span(), 0..9);
 
   let mut lexer = Token::test_lexer(r#""hello✨"#);
   let mut errs = lexer.next().unwrap().unwrap_err();
@@ -1561,52 +1548,41 @@ where
   assert_eq!(lexer.span(), 0..3);
 }
 
-pub(super) fn test_unexpected_line_terminator<'a, Token>()
+/// An inline string ends at its first line terminator, before it: the literal holds the one error
+/// that it is unterminated, and lexing goes on with the next line. There the last line's `"` opens
+/// a literal of its own, which the input ends inside.
+pub(super) fn test_inline_string_ends_at_its_line<'a, Token>()
 where
   Token: TestToken<'a> + core::fmt::Debug,
 {
-  let mut lexer = Token::test_lexer(
-    r#""
-hello
-""#,
-  );
+  for src in ["\"\nhello\n\"", "\"\rhello\r\"", "\"\r\nhello\r\n\""] {
+    let mut lexer = Token::test_lexer(src);
 
-  let mut errs = lexer.next().unwrap().unwrap_err();
-  assert_eq!(errs.len(), 1);
-  let errs = errs.pop().unwrap().into_data().unwrap_string();
-  assert_eq!(errs.len(), 2, "Expected 2 errors, got {errs:?}");
+    let mut errs = lexer.next().unwrap().unwrap_err();
+    assert_eq!(errs.len(), 1, "{src:?}");
+    let err = errs.pop().unwrap();
+    assert_eq!(err.span(), SimpleSpan::new(0, 1), "{src:?}");
+    let errs = err.into_data().unwrap_string();
+    assert_eq!(errs.len(), 1, "{src:?}: {errs:?}");
+    assert_eq!(
+      errs[0].unwrap_unterminated_ref().hint(),
+      &LitStrDelimiterHint::Quote,
+      "{src:?}"
+    );
+    assert_eq!(lexer.span(), 0..1, "{src:?}");
 
-  let err1 = errs[0].unwrap_unexpected_line_terminator_ref();
-  match err1.hint() {
-    LineTerminatorHint::NewLine => {
-      assert_eq!(err1.lexeme().unwrap_char_ref().char_ref(), &'\n');
-      assert_eq!(err1.lexeme().unwrap_char_ref().position(), 1);
-    }
-    LineTerminatorHint::CarriageReturn => {
-      assert_eq!(err1.lexeme().unwrap_char_ref().char_ref(), &'\r');
-      assert_eq!(err1.lexeme().unwrap_char_ref().position(), 1);
-    }
-    LineTerminatorHint::CarriageReturnNewLine => {
-      assert_eq!(err1.lexeme().unwrap_range(), SimpleSpan::new(1, 3));
-    }
+    assert!(matches!(lexer.next(), Some(Ok(_))), "{src:?}");
+    assert_eq!(lexer.slice(), "hello", "{src:?}");
+
+    let mut errs = lexer.next().unwrap().unwrap_err();
+    let err = errs.pop().unwrap();
+    assert_eq!(
+      err.span(),
+      SimpleSpan::new(src.len() - 1, src.len()),
+      "{src:?}"
+    );
+    assert_eq!(lexer.next(), None, "{src:?}");
   }
-  assert_eq!(lexer.span(), 0..9);
-
-  let err2 = errs[1].unwrap_unexpected_line_terminator_ref();
-  match err2.hint() {
-    LineTerminatorHint::NewLine => {
-      assert_eq!(err2.lexeme().unwrap_char_ref().char_ref(), &'\n');
-      assert_eq!(err2.lexeme().unwrap_char_ref().position(), 7);
-    }
-    LineTerminatorHint::CarriageReturn => {
-      assert_eq!(err2.lexeme().unwrap_char_ref().char_ref(), &'\r');
-      assert_eq!(err2.lexeme().unwrap_char_ref().position(), 7);
-    }
-    LineTerminatorHint::CarriageReturnNewLine => {
-      assert_eq!(err2.lexeme().unwrap_range(), SimpleSpan::new(7, 9));
-    }
-  }
-  assert_eq!(lexer.span(), 0..9);
 }
 
 pub(super) fn test_unexpected_escaped<'a, Token>()

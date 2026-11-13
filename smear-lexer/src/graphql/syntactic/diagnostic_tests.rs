@@ -4,11 +4,20 @@
 use std::string::{String, ToString};
 
 use tokora::{
-  Lexer as _,
+  Lexer as _, SimpleSpan,
   diagnostic::{Diagnose, Location},
+  state::RecursionLimitExceeded,
 };
 
-use crate::{SyntaxErrorKind, graphql::syntactic::SyntacticLexer, limits::SyntacticLimits};
+use crate::{
+  SyntaxErrorKind,
+  error::StringError,
+  graphql::{
+    error::{LexerError, LexerErrorData},
+    syntactic::SyntacticLexer,
+  },
+  limits::SyntacticLimits,
+};
 
 /// Whether `text` names a source position: a `[0-9]+..[0-9]+` range, or a word one is spelled
 /// with.
@@ -133,20 +142,21 @@ fn every_lexical_refusal_renders_its_own_sentence_under_its_own_code() {
       SyntaxErrorKind::UnterminatedString,
       "unterminated block string, expected a closing `\"\"\"`",
     ),
+    // A single-line string ends at its first line terminator, unterminated there.
     (
       "\"\nhello\n\"",
-      SyntaxErrorKind::LineTerminatorInString,
-      "line feed in a single-line string",
+      SyntaxErrorKind::UnterminatedString,
+      "unterminated string, expected a closing `\"`",
     ),
     (
       "\"a\rb\"",
-      SyntaxErrorKind::LineTerminatorInString,
-      "carriage return in a single-line string",
+      SyntaxErrorKind::UnterminatedString,
+      "unterminated string, expected a closing `\"`",
     ),
     (
       "\"a\r\nb\"",
-      SyntaxErrorKind::LineTerminatorInString,
-      "line break in a single-line string",
+      SyntaxErrorKind::UnterminatedString,
+      "unterminated string, expected a closing `\"`",
     ),
     (
       r#""a\qb""#,
@@ -213,6 +223,37 @@ fn every_lexical_refusal_renders_its_own_sentence_under_its_own_code() {
   for (src, kind, message) in CASES {
     let error = first_error!(SyntacticLexer::<str>::new(src), src);
     assert_refusal!(error, src, *kind, *message);
+  }
+}
+
+/// The lexer reports no line terminator inside a string, which ends a single-line string instead,
+/// so the sentences of an error a caller builds with one are read at the value.
+#[test]
+fn a_line_terminator_in_a_string_renders_its_sentence_at_the_value() {
+  for (error, message) in [
+    (
+      StringError::unexpected_new_line('\n', 2),
+      "line feed in a single-line string",
+    ),
+    (
+      StringError::unexpected_carriage_return('\r', 2),
+      "carriage return in a single-line string",
+    ),
+    (
+      StringError::unexpected_carriage_return_new_line(SimpleSpan::new(2, 4)),
+      "line break in a single-line string",
+    ),
+  ] {
+    let error = LexerError::<char, RecursionLimitExceeded>::new(
+      SimpleSpan::new(0, 4),
+      LexerErrorData::String(error.into()),
+    );
+    assert_refusal!(
+      error,
+      message,
+      SyntaxErrorKind::LineTerminatorInString,
+      message
+    );
   }
 }
 
