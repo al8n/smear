@@ -69,8 +69,9 @@
 //!
 //! Before the walk, each directive's arguments that an application leaving them out does something
 //! about are listed once, in member order: one with a default, with the count of rows a copy of it
-//! makes, counted once through the same classifier that makes the rows; and one required, written
-//! non-null with no default. A later argument of a name an earlier one has is not listed, since no
+//! makes, counted once through the same classifier that makes the rows, its written nodes walked
+//! and a lone value counted from its type's levels of list, and saturating at
+//! `Limits::max_value_steps` plus one; and one required, written non-null with no default. A later argument of a name an earlier one has is not listed, since no
 //! application can write it. An application merges its written arguments, which lowering kept in
 //! its directive's order, with that list, by the argument each sets. A written argument is coerced
 //! as written, and a required one given `null` is `missing-required-directive-argument`, at its
@@ -190,6 +191,8 @@ pub(crate) fn coerce(
     listed: Vec::new(),
     runs: Vec::new(),
     counting: Vec::new(),
+    levels: BTreeMap::new(),
+    chain: Vec::new(),
   };
   coercion.list_arguments();
   for index in 0..coercion.builder.def_count() {
@@ -453,6 +456,10 @@ struct Coercion<'c, 'p, 'x> {
   runs: Vec<(DefId, u32, u32)>,
   /// The nodes being counted, each with the type it is counted against.
   counting: Vec<(u32, Option<TyId>)>,
+  /// How many levels of list each list type read so far is: what a lone value's count reads.
+  levels: BTreeMap<TyId, u32>,
+  /// The list types whose levels are being read.
+  chain: Vec<TyId>,
 }
 
 impl<'p> Coercion<'_, 'p, '_> {
@@ -574,9 +581,10 @@ impl<'p> Coercion<'_, 'p, '_> {
         let before = self.builder.value_count();
         let ty = self.member_type(left.argument);
         if let Some(value) = self.value(tree, ty, Mode::Copied) {
-          debug_assert_eq!(
-            self.builder.value_count().saturating_sub(before),
-            count,
+          // A count past the budget is saturated, and only a copy the library's application asks
+          // for, which is not charged, is made then.
+          debug_assert!(
+            count > self.max_steps || self.builder.value_count().saturating_sub(before) == count,
             "a copy makes the rows it was counted to"
           );
           self
@@ -633,16 +641,24 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// How many rows coercing the tree `tree` against `ty` makes, as a copy makes them, told by
-  /// [`classify`](Self::classify) alone: one for each node it reaches, the elements of a list
-  /// against a list type, and one more for each level a lone value stands for.
+  /// [`classify`](Self::classify) alone: one for each written node it reaches, the elements of a
+  /// list against a list type; and for a lone value, one for each level of list its type has
+  /// left and one for the value, counted from the type and not row by row. The walk visits written
+  /// nodes alone, and stops once the count passes `Limits::max_value_steps`, which no charge can
+  /// pay: the count then saturates at that limit plus one.
   fn count(&mut self, tree: u32, ty: Option<TyId>) -> u32 {
     let Some(tree) = self.raw.trees.get(tree as usize).copied() else {
       return 0;
     };
+    let cap = self.max_steps.saturating_add(1);
     let mut rows: u32 = 0;
     self.counting.clear();
     self.counting.push((tree.root, ty));
     while let Some((node, ty)) = self.counting.pop() {
+      if rows >= cap {
+        self.counting.clear();
+        return cap;
+      }
       let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
         continue;
       };
@@ -663,11 +679,39 @@ impl<'p> Coercion<'_, 'p, '_> {
             child = next;
           }
         }
-        Class::Lone(element) => self.counting.push((node, Some(element))),
+        Class::Lone(element) => {
+          let levels = self.list_levels(element);
+          rows = rows.saturating_add(levels).saturating_add(1);
+        }
         Class::NoValue | Class::Null | Class::NotNull | Class::Leaf(_) => {}
       }
     }
-    rows
+    rows.min(cap)
+  }
+
+  /// How many levels of list `ty` is before its element is no list: 0 for a type that is no list.
+  /// Each list type's count is kept once read, so the types of one program are walked once in all.
+  fn list_levels(&mut self, ty: TyId) -> u32 {
+    self.chain.clear();
+    let mut at = ty;
+    let mut levels = loop {
+      if let Some(&levels) = self.levels.get(&at) {
+        break levels;
+      }
+      match self.builder.ty_shape(at) {
+        // An element is interned before its list, so the walk goes down and ends.
+        Some(Shape::List(element)) if element < at => {
+          self.chain.push(at);
+          at = element;
+        }
+        _ => break 0,
+      }
+    };
+    while let Some(list) = self.chain.pop() {
+      levels = levels.saturating_add(1);
+      self.levels.insert(list, levels);
+    }
+    levels
   }
 
   /// Reports `argument`, required, as left out by `application`, whose path is at `at`, with a

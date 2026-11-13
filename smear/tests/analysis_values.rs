@@ -1246,6 +1246,40 @@ fn a_copy_costs_a_step_a_row() {
 }
 
 #[test]
+fn a_lone_values_count_is_its_types_levels() {
+  // `[1, 2]` against `[[[Int]]]`: the default, written, pays a step for each list its two lone
+  // elements stand for, four; its copy for `T` is the outer list and, for each element, its two
+  // lists and itself, seven rows, counted from the type's levels of list. At eleven both are paid;
+  // at ten the copy is refused whole. This pins the count's value through its charge. It cannot
+  // see that the count walks the two written elements and no row of the lists they stand for.
+  let text = "type Query {\n  x: Int\n}\ndirective @d(m: [[[Int]]] = [1, 2]) on OBJECT\n\
+              type T @d {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(11));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  assert_eq!(
+    shown(model, arguments_of(model, "T")[0].value()),
+    "List [List [List [Int 1]], List [List [Int 2]]]"
+  );
+
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(10));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(LIMIT, after(schema, text, "type T @", "d"))]
+  );
+  assert!(arguments_of(analysis.model(), "T").is_empty());
+
+  // A default no application asks for is counted and never charged: at zero, nothing is said. A
+  // test sees the count's value through a charge alone, so this pins that no charge is made, and
+  // cannot see that the count stops at the limit plus one.
+  let unasked = "type Query {\n  x: Int\n}\n\
+                 directive @d(m: [[[Int]]] = [[[1]], [[2]]]) on OBJECT\n";
+  let analysis = analyze_text(unasked, &Limits::new().with_max_value_steps(0));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+}
+
+#[test]
 fn a_required_argument_left_out_costs_a_step() {
   let text =
     "directive @must(a: Int!) repeatable on OBJECT\ntype T @must @must @must {\n  f: Int\n}\n";
