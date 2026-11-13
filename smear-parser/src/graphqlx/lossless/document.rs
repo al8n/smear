@@ -35,11 +35,19 @@
 //! is entered only once its `{` has been peeked.
 //!
 //! **A body follows the braces as written.** The lossless lexer counts the braces that are open,
-//! in the state a rewind takes back, and a body lasts exactly while as many are open as were once
-//! its own `{` was read. A `}` at the head with that many open is the body's closer; a `}` with
-//! more open closes a brace that junk or a failed item left behind, and is junk itself. Nothing
-//! else moves the count, so the end of a module does not depend on which production consumed the
-//! tokens before it, nor on how.
+//! in the state a rewind takes back, and a body lasts while as many are open as were once its own
+//! `{` was read. A `}` at the head with that many open is the body's closer; a `}` with more open
+//! closes a brace that junk or a failed item left behind, and is junk itself.
+//!
+//! **While a brace is open, a closing brace is taken only by the production that owns it**: the
+//! production that took its `{`, at its own loop's head or as its closing step; a body's skip,
+//! above the body's own count; a list opened by `(`, `[` or `<`, when the brace is one the list's
+//! own content opened; and a document root, which owns the braces no other production does. A
+//! recovery skip stops before a `}` it did not open, whatever else it has open, and a production
+//! that meets one where it wanted something else reports what it wanted and leaves it. So no item
+//! takes the `}` of the module it stands in, and the end of a module does not depend on which
+//! production consumed the tokens before it, nor on how: `mod_body`'s `What the braces promise`
+//! says what that makes impossible.
 //!
 //! **A body recovers its own items**, as a document root does. Each item runs through the
 //! substrate's `depth::judge_turn`, which takes the trip baseline for that item and answers the
@@ -186,7 +194,9 @@ lossless_production! {
   /// only above `floor`, and its closer at `floor`. So every module's node is faithful to the
   /// braces as written: counting braces alone from the node's `{`, the count first returns to
   /// zero at the node's own `}`, which is its last token that is no trivia, and a node with no `}`
-  /// of its own never returns to zero.
+  /// of its own never returns to zero. `smear`'s `tests/support/braces.rs` states that as a check,
+  /// and the sweeps that parse broken texts hold every tree they build to it: the one-child
+  /// mutation law's re-parses, the corpus through every root, and the padded corpus.
   ///
   /// # What a turn does with an item
   ///

@@ -22,7 +22,9 @@
 //! - `sync_balanced(classifier, pred)` — **two** args: `classifier` names which kinds open and
 //!   close pairs (`Balance`), `pred` is the depth-0 sync predicate. On a **successful** sync that
 //!   skipped ≥1 token it reports the region once through `emit_skipped_region`, and the sink wraps
-//!   those tokens in the profile's `error_kind` **automatically** — no explicit `node` call.
+//!   those tokens in the profile's `error_kind` **automatically** — no explicit `node` call. Its
+//!   depth is blind to which closer answers which opener, so [`unexpected`] hands it braces alone
+//!   and counts the other pairs in its predicate: a skip there never takes a `}` it did not open.
 //! - `sync_balanced` **makes no progress in two cases**, and both are reachable here. A no-match
 //!   run to end of input "commits nothing and returns `Ok(None)`, leaving no trace"; and a
 //!   *successful* sync whose predicate matches the very first token returns

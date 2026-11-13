@@ -5,7 +5,7 @@
 //! # What is here and what is in the substrate
 //!
 //! Everything below is **table**: the head sets an "expected one of" diagnostic names,
-//! this dialect's three balanced pairs, its depth-zero restart predicate and its definition-start
+//! this dialect's three balanced pairs, its restart predicate and its definition-start
 //! predicate. The *logic* — report, skip, attribute, guarantee progress — is
 //! [`crate::lossless::recover`]'s, shared with every dialect, and its module docs carry the
 //! reasoning about `sync_balanced`'s two no-progress cases and the termination rule that follows
@@ -230,8 +230,10 @@ pub(crate) const fn closes_enclosing_block(open_at: usize, now: usize) -> bool {
 ///
 /// The closers are in the set even though nothing starts with one — stopping *before* `]` is
 /// what lets an enclosing `list_value` close on its own delimiter instead of running to end of
-/// input. `sync_balanced` consults this only at depth zero, so a `]` inside skipped nesting is
-/// crossed rather than mistaken for the enclosing one.
+/// input. The skip asks this only with none of the pairs it opened still open, so a `]` inside
+/// nesting it opened is crossed rather than mistaken for the enclosing one. A `}` it did not open
+/// ends it before this is asked, whatever it has open: see
+/// [`crate::lossless::recover::unexpected`].
 ///
 /// # One set, not one per position
 ///
@@ -323,11 +325,12 @@ fn keyword_of<T: DowncastRef<ContextualKeyword>>(token: &T) -> Option<Contextual
   crate::lossless::recover::keyword_of(token)
 }
 
-/// GraphQL's three delimiter pairs, for `sync_balanced`'s depth counting.
+/// GraphQL's three delimiter pairs, for the recovery scans' depth counting.
 ///
-/// The pair identity is a `u8` rather than a bespoke enum because the balanced scan is
-/// deliberately pair-blind — it counts depth and never checks that a closer matches its
-/// opener — so the identity is only ever compared for equality, and never by this suite.
+/// The pair identity is a `u8` rather than a bespoke enum because a scan asks it one thing:
+/// whether it is `b'{'`. [`crate::lossless::recover::unexpected`] counts that pair apart from the
+/// others and never takes a `}` it did not open. Among the other two, and in the roots' resync,
+/// the count is pair-blind: it never checks that a closer matches its opener.
 #[inline]
 fn delimiters(kind: &Kind) -> Balance<u8> {
   match kind {
@@ -388,7 +391,8 @@ lossless_production! {
   }
 
   /// Nothing that could start one of `expected` is here, and there is still input.
-  /// [`crate::lossless::recover::unexpected`] with this dialect's pairs and restart predicate.
+  /// [`crate::lossless::recover::unexpected`] with this dialect's pairs, its braces counted apart,
+  /// and its restart predicate.
   fn unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
     // #168's scan allowance. Read here rather than inside the substrate helper because the
     // committed side is `smear-lexer`'s token tally and `crate::lossless::recover` may not name

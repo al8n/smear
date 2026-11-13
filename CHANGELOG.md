@@ -38,19 +38,24 @@ All notable changes to Smear are documented in this file.
   module counts more than its top-level items. GraphQL has no modules, and its counts keep their
   meaning.
 - `smear-parser`: lossless recovery leaves a closing delimiter to the block it closes, in both
-  dialects. A type or a value missing in front of one is reported and the delimiter left, so the
-  block closes on it and the definition after the block is read whole; and a list opened by `(`,
-  `[` or, in GraphQLx, `<` that meets a `}` closing a brace open before it reports its own closer
-  missing and stops there. The trees and the diagnostics of broken documents change accordingly.
+  dialects, and while a brace is open only the production that owns a closing brace takes it. A
+  type or a value missing in front of a closer is reported and the closer left, so the block
+  closes on it and the definition after the block is read whole; a list opened by `(`, `[` or,
+  in GraphQLx, `<` that meets a `}` closing a brace open before it reports its own closer missing
+  and stops there; and the skip over junk stops before a `}` it did not open, whatever `(`, `[`
+  or `<` it has open, where it took a `}` for the closer of any opener it had open. That skip is
+  `lossless::recover::unexpected`'s, which 0.0.1 released: it now counts the pair whose identity
+  in its `delimiters` table is `b'{'` apart from the others, and a table with no such pair skips
+  as it did. The trees and the diagnostics of broken documents change accordingly.
 - `smear-parser`: in GraphQLx, a module's body recovers its own items. An item that fails costs
   itself, and the module keeps its other items and its node; the body ends at the `}` the braces
-  as written give it; junk between two items is reported once and skipped as one run when an
-  item or the body's `}` follows it; a refusal that ends the document inside a module still
-  leaves every module around it its node; and a `}` after a description or an `extend` inside a
-  module is left to close the module. The recovering type-system doors descend into the modules
-  whose header reads, keep every item there that projects, and cover what they skip inside a
-  module with that module's span; when nothing is skipped they answer what the fail-fast door
-  answers.
+  as written give it, which no item inside it can take; junk between two items is reported once
+  and skipped as one run when an item or the body's `}` follows it; a refusal that ends the
+  document inside a module still leaves every module around it its node; and a `}` after a
+  description or an `extend` inside a module is left to close the module. The recovering
+  type-system doors descend into the modules whose header reads, keep every item there that
+  projects, and cover what they skip inside a module with that module's span; when nothing is
+  skipped they answer what the fail-fast door answers.
 - `smear-parser`: `lossless::recover::resync_to_closing`, a public helper beside `resync_to`,
   skips wreckage that left delimiters open: it spends its first `left` closers on the wreckage and
   stops before the next restart point outside it. One call costs at most one scan and one token;
