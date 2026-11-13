@@ -1,6 +1,7 @@
-//! How far a string literal reaches, through both of this dialect's lexers and both kinds of
-//! source: an inline string ends at its first line terminator, before it, and the next line lexes
-//! as it would anywhere else.
+//! How far a string literal reaches and how much its record holds, through both of this dialect's
+//! lexers and both kinds of source: an inline string ends at its first line terminator, before it,
+//! and the next line lexes as it would anywhere else; and a literal's record keeps its first
+//! sixteen errors and one entry counting the rest.
 
 use std::{format, string::String, vec, vec::Vec};
 
@@ -8,6 +9,7 @@ use tokora::{Lexer as _, SimpleSpan};
 
 use crate::{
   SyntaxErrorKind,
+  error::StringError,
   graphql::{error::LexerErrorData, lossless::LosslessLexer, syntactic::SyntacticLexer},
 };
 
@@ -151,5 +153,102 @@ fn what_a_line_held_stays_in_its_literals_record() {
       let last = items.last().expect("the next line's name");
       assert_eq!(text(src, last.0), "x", "{lexer}: {src:?}");
     }
+  }
+}
+
+/// A refused literal's record: the kinds of the errors it holds, in order, and the count its last
+/// entry holds when that entry is the one that counts the rest.
+type Record = (Vec<SyntaxErrorKind>, Option<usize>);
+
+/// The record of the string literal a lexer's input opens with, which it refuses.
+macro_rules! first_record {
+  ($lexer:expr) => {{
+    let mut lexer = $lexer;
+    let errors = match lexer.lex() {
+      Some(Err(errors)) => errors,
+      other => panic!("expected a refusal, got {other:?}"),
+    };
+    let [error] = errors.as_slice() else {
+      panic!("one lexer error per refusal, got {errors:?}");
+    };
+    let LexerErrorData::String(errs) = error.data() else {
+      panic!("a string literal's refusal, got {error:?}");
+    };
+    let omitted = match errs.last() {
+      Some(StringError::Omitted(count)) => Some(*count),
+      _ => None,
+    };
+    let record: Record = (errs.iter().map(|e| e.kind()).collect(), omitted);
+    record
+  }};
+}
+
+/// The record each of this dialect's four lexers refuses the literal `src` opens with, with the
+/// lexer's name.
+fn every_first_record(src: &str) -> [(&'static str, Record); 4] {
+  [
+    (
+      "syntactic text",
+      first_record!(SyntacticLexer::<str>::new(src)),
+    ),
+    (
+      "syntactic bytes",
+      first_record!(SyntacticLexer::<[u8]>::new(src.as_bytes())),
+    ),
+    (
+      "lossless text",
+      first_record!(LosslessLexer::<&str>::new(src)),
+    ),
+    (
+      "lossless bytes",
+      first_record!(LosslessLexer::<&[u8]>::new(src.as_bytes())),
+    ),
+  ]
+}
+
+/// A literal's record keeps its first sixteen errors and closes with one entry counting the rest,
+/// exactly, through every lexer: a thousand unknown escapes are sixteen and 984 more, and one fault
+/// more, an escape or the missing closing quote, makes it 985.
+#[test]
+fn a_literal_keeps_sixteen_errors_and_counts_the_rest() {
+  let sixteen = vec![SyntaxErrorKind::UnknownEscape; 16];
+  for (src, omitted) in [
+    (format!("\"{}\"", "\\q".repeat(1000)), 984),
+    (format!("\"{}\"", "\\q".repeat(1001)), 985),
+    (format!("\"{}", "\\q".repeat(1000)), 985),
+  ] {
+    for (lexer, (kinds, count)) in every_first_record(&src) {
+      assert_eq!(kinds.len(), 17, "{lexer}: {omitted}");
+      assert_eq!(kinds[..16], sixteen[..], "{lexer}: {omitted}");
+      assert_eq!(count, Some(omitted), "{lexer}");
+    }
+  }
+}
+
+/// A block literal in a byte source whose content is a thousand bytes that begin no UTF-8 sequence
+/// keeps sixteen of them and counts the other 984, through both byte lexers.
+#[test]
+fn a_block_literal_keeps_sixteen_errors_and_counts_the_rest() {
+  let mut src = b"\"\"\"".to_vec();
+  src.resize(3 + 1000, 0xFF);
+  src.extend_from_slice(b"\"\"\"");
+  for (lexer, (kinds, count)) in [
+    (
+      "syntactic bytes",
+      first_record!(SyntacticLexer::<[u8]>::new(src.as_slice())),
+    ),
+    (
+      "lossless bytes",
+      first_record!(LosslessLexer::<&[u8]>::new(src.as_slice())),
+    ),
+  ] {
+    assert_eq!(kinds.len(), 17, "{lexer}");
+    assert!(
+      kinds[..16]
+        .iter()
+        .all(|kind| *kind == SyntaxErrorKind::InvalidUtf8),
+      "{lexer}: {kinds:?}"
+    );
+    assert_eq!(count, Some(984), "{lexer}");
   }
 }

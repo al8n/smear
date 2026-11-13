@@ -11,7 +11,7 @@ type Span = SimpleSpan;
 
 use crate::hints::{LineTerminatorHint, LitStrDelimiterHint, UnpairedSurrogateHint};
 
-use super::{LengthError, SyntaxErrorKind};
+use super::{LengthError, LexemeErrors, SyntaxErrorKind};
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
 enum InvalidUnicodeHexDigitsRepr<Char = char> {
@@ -665,8 +665,9 @@ pub enum StringError<Char = char> {
   ///
   /// Only a byte source (`[u8]`, `Bytes`, `BStr`, `HipByt`, smol-bytes' `Bytes`) can hold one,
   /// and its lexer reports each ill-formed sequence in an inline or block literal as one of
-  /// these. The span is the sequence's maximal subpart: the bytes up to where they stop being a
-  /// prefix of any valid sequence, at least one.
+  /// these, up to the record's sixteen ([`Omitted`](Self::Omitted) counts the rest). The span is
+  /// the sequence's maximal subpart: the bytes up to where they stop being a prefix of any valid
+  /// sequence, at least one.
   #[from(skip)]
   UnsupportedCharacter(Lexeme<Char>),
   /// A line terminator inside an inline string literal.
@@ -691,6 +692,15 @@ pub enum StringError<Char = char> {
   Unterminated(UnexpectedEnd<LitStrDelimiterHint>),
   /// A unicode error in a string literal.
   Unicode(UnicodeError<Char>),
+  /// How many more errors the literal held than its record keeps: N more errors in this string
+  /// literal were found and not kept.
+  ///
+  /// The lexers keep a literal's first sixteen errors (`MAX_LEXEME_ERRORS`, a crate constant) in
+  /// the order found. Each fault past them is counted and not stored, and when any was, this entry
+  /// closes the record, after the sixteen. So a record holds at most seventeen entries, however
+  /// long its literal is. It reports [`InvalidSyntax`](SyntaxErrorKind::InvalidSyntax).
+  #[from(skip)]
+  Omitted(usize),
   /// Any other error in a string literal.
   Other(Cow<'static, str>),
 }
@@ -717,7 +727,7 @@ impl<Char> StringError<Char> {
       Self::Unopened(_) => SyntaxErrorKind::UnopenedString,
       Self::Unterminated(_) => SyntaxErrorKind::UnterminatedString,
       Self::Unicode(error) => error.kind(),
-      Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
+      Self::Omitted(_) | Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
     }
   }
 
@@ -817,14 +827,26 @@ impl<Char> StringError<Char> {
       Self::Unicode(unicode) => {
         unicode.bump(n);
       }
-      Self::Other(_) | Self::Unterminated(_) => {}
+      Self::Other(_) | Self::Unterminated(_) | Self::Omitted(_) => {}
     };
 
     self
   }
 }
 
+impl<Char> LexemeErrors<StringError<Char>> {
+  /// The literal's record: the errors kept, closed by [`StringError::Omitted`] when more were
+  /// found.
+  #[inline]
+  pub(crate) fn into_string_errors(self) -> StringErrors<Char> {
+    StringErrors(self.finish(StringError::Omitted))
+  }
+}
+
 /// A container for storing multiple string errors.
+///
+/// The record smear's lexers refuse a string literal with holds at most seventeen: the literal's
+/// first sixteen errors, and [`StringError::Omitted`] counting the rest when there were more.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, From, Into, Deref, DerefMut, AsMut, AsRef)]
 pub struct StringErrors<Char = char>(std::vec::Vec<StringError<Char>>);
 

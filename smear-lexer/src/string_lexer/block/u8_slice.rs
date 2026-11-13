@@ -6,7 +6,7 @@ use tokora::{
 };
 
 use crate::{
-  error::{StringError, StringErrors},
+  error::{LexemeErrors, StringError, StringErrors},
   utf8::IllFormedUtf8,
 };
 
@@ -99,9 +99,11 @@ where
 ///
 /// A terminated literal whose content is not well-formed UTF-8 is refused with
 /// one [`StringError::UnsupportedCharacter`] per ill-formed sequence, each at
-/// its absolute span. The sequences are [`IllFormedUtf8`]'s, the same walk
-/// `skip_block_str_from_bytes::<true>` refuses on, which is what keeps
-/// delegation's `expect_err` true for a block literal.
+/// its absolute span, up to the sixteen a record keeps, and then
+/// [`StringError::Omitted`] counting the rest. The sequences are
+/// [`IllFormedUtf8`]'s, the same walk `skip_block_str_from_bytes::<true>`
+/// refuses on, which is what keeps delegation's `expect_err` true for a block
+/// literal.
 #[inline]
 pub(crate) fn lex_block_str_from_bytes<'a, S, T>(
   lexer: &mut SealedWrapper<Lexer<'a, T>>,
@@ -126,14 +128,14 @@ where
 
       let content = &remainder_bytes[..start];
 
-      let mut errs = StringErrors::default();
+      let mut errs = LexemeErrors::new();
       for bad in IllFormedUtf8::new(content) {
         errs.push(StringError::UnsupportedCharacter(Lexeme::Range(
           SimpleSpan::new(base + bad.start, base + bad.end),
         )));
       }
       if !errs.is_empty() {
-        return Err(errs);
+        return Err(errs.into_string_errors());
       }
 
       let extras = line_facts(content);
@@ -163,9 +165,9 @@ where
     }
     None => {
       lexer.bump(remainder_bytes.len());
-      let mut errs = StringErrors::default();
+      let mut errs = LexemeErrors::new();
       errs.push(StringError::unterminated_block_string());
-      Err(errs)
+      Err(errs.into_string_errors())
     }
   }
 }
@@ -245,9 +247,9 @@ pub(crate) fn skip_block_str_from_bytes<const CHECK_UTF8: bool>(
       )
     }
     None => {
-      let mut errs = StringErrors::default();
+      let mut errs = LexemeErrors::new();
       errs.push(StringError::unterminated_block_string());
-      Err((read, errs))
+      Err((read, errs.into_string_errors()))
     }
   }
 }

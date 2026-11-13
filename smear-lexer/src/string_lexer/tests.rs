@@ -16,7 +16,7 @@
 //! and its `src/json/tests.rs` holds these conversions to that writer over a corpus that overlaps
 //! this one — so a drift here has two gates to get past, and neither of them is this file.
 
-use std::{borrow::Cow, vec::Vec};
+use std::{borrow::Cow, format, vec::Vec};
 
 use tokora::{
   SimpleSpan,
@@ -24,7 +24,10 @@ use tokora::{
 };
 
 use super::{LitBlockStr, LitComplexInlineStr, LitInlineStr, LitStr};
-use crate::error::{InvalidUnicodeHexDigits, StringError, UnicodeError};
+use crate::{
+  SyntaxErrorKind,
+  error::{InvalidUnicodeHexDigits, StringError, UnicodeError},
+};
 
 /// Cooks a literal the way a consumer would: lex it, then convert.
 fn cook(literal: &str) -> Cow<'_, str> {
@@ -536,4 +539,56 @@ fn a_fixed_unicode_escape_before_wide_characters_takes_them_whole() {
       StringError::unterminated_inline_string(),
     ]
   );
+}
+
+/// A literal's record keeps its first sixteen errors, in the order found, and closes with one entry
+/// counting the rest, exactly, through either door: a thousand unknown escapes are sixteen and 984
+/// more, and one fault more, an escape or the missing closing quote, makes it 985.
+#[test]
+fn an_inline_literal_keeps_sixteen_errors_and_counts_the_rest() {
+  for (literal, omitted) in [
+    (format!("\"{}\"", "\\q".repeat(1000)), 984),
+    (format!("\"{}\"", "\\q".repeat(1001)), 985),
+    (format!("\"{}", "\\q".repeat(1000)), 985),
+  ] {
+    let text = LitStr::try_from(literal.as_str()).expect_err("unknown escapes");
+    assert_eq!(text.len(), 17, "{omitted}");
+    assert!(
+      text[..16]
+        .iter()
+        .all(|error| error.kind() == SyntaxErrorKind::UnknownEscape),
+      "{omitted}: {:?}",
+      &text[..16]
+    );
+    assert_eq!(text[16], StringError::Omitted(omitted));
+
+    let bytes = LitStr::try_from(literal.as_bytes()).expect_err("unknown escapes");
+    assert_eq!(bytes.len(), 17, "{omitted}");
+    assert!(
+      bytes[..16]
+        .iter()
+        .all(|error| error.kind() == SyntaxErrorKind::UnknownEscape),
+      "{omitted}: {:?}",
+      &bytes[..16]
+    );
+    assert_eq!(bytes[16], StringError::Omitted(omitted));
+  }
+}
+
+/// A block literal in a byte source whose content is a thousand bytes that begin no UTF-8 sequence
+/// keeps the first sixteen, each at its own byte, and counts the other 984.
+#[test]
+fn a_block_literal_keeps_sixteen_errors_and_counts_the_rest() {
+  let mut literal = b"\"\"\"".to_vec();
+  literal.resize(3 + 1000, 0xFF);
+  literal.extend_from_slice(b"\"\"\"");
+  let errors = LitStr::try_from(literal.as_slice()).expect_err("not UTF-8");
+  assert_eq!(errors.len(), 17);
+  for (at, error) in errors[..16].iter().enumerate() {
+    assert_eq!(
+      *error,
+      StringError::UnsupportedCharacter(Lexeme::Range(SimpleSpan::new(3 + at, 4 + at)))
+    );
+  }
+  assert_eq!(errors[16], StringError::Omitted(984));
 }

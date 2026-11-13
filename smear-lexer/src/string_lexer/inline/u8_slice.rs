@@ -7,7 +7,9 @@ use tokora::{
 
 type Span = SimpleSpan;
 
-use crate::error::{InvalidUnicodeHexDigits, StringError, StringErrors, UnicodeError};
+use crate::error::{
+  InvalidUnicodeHexDigits, LexemeErrors, StringError, StringErrors, UnicodeError,
+};
 
 use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInlineStr};
 
@@ -425,7 +427,7 @@ where
   let remainder = lexer.remainder();
   let mut string_lexer = StringToken::lexer(remainder.as_ref());
 
-  let mut errs = StringErrors::default();
+  let mut errs = LexemeErrors::new();
   let mut num_unicodes = 0;
   let mut num_escapes = 0;
 
@@ -435,7 +437,7 @@ where
         // Consume closing quote in the outer lexer by the inner span end
         lexer.bump(string_lexer.span().end);
         if !errs.is_empty() {
-          return Err(errs);
+          return Err(errs.into_string_errors());
         }
         let src = lexer.slice();
         return Ok(match (num_escapes != 0, num_unicodes != 0) {
@@ -448,7 +450,7 @@ where
         // anywhere else.
         lexer.bump(string_lexer.span().start);
         errs.push(StringError::unterminated_inline_string());
-        return Err(errs);
+        return Err(errs.into_string_errors());
       }
       Ok(StringToken::StringCharacters) => {
         // Plain content normalizes byte-for-byte: the class matched well-formed UTF-8 only, so
@@ -474,5 +476,5 @@ where
   // No closing quote
   lexer.bump(string_lexer.span().end);
   errs.push(StringError::unterminated_inline_string());
-  Err(errs)
+  Err(errs.into_string_errors())
 }
