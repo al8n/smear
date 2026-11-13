@@ -54,6 +54,8 @@
 //!   its index; written with type arguments, it is `generic-arity`.
 //! - An alias such as `NonZeroU32` is `NonZero` of the primitive it spells, told by what lowering
 //!   noted of it and never by its spelling; written with type arguments, it is `generic-arity`.
+//!   The primitive is its one slot, made what the same type written as an argument would be, so
+//!   the alias and the form it spells are one type whatever `NonZero` is.
 //! - An occurrence of a definition writes no more type arguments than the definition has type
 //!   parameters, and no fewer than it takes, three numbers compared, or it is `generic-arity`.
 //!   Its written arguments' types are its first slots, a collection's key or element made non-null
@@ -912,6 +914,26 @@ impl Typing<'_> {
     self.values.get(position).copied().flatten()
   }
 
+  /// Makes slot 0 of the occurrence of `def` whose slots start at `start` on the value stack its
+  /// non-null form, when `def` stands for a collection and the slot holds a type: a set's element
+  /// and a map's key are non-null however they are written or filled, so `HashSet<string>` and
+  /// `HashSet<string!>` are one type. Every slot 0 a collection's occurrence has passes through
+  /// here, written, an alias's or filled, before the fill table is asked and before anything reads
+  /// it.
+  fn key_non_null(&mut self, def: DefId, start: u32) {
+    if self.builder.def_collection(def).is_none() {
+      return;
+    }
+    let at = start as usize;
+    let Some(Some(key)) = self.values.get(at).copied() else {
+      return;
+    };
+    let key = self.non_null_of(key);
+    if let Some(slot) = self.values.get_mut(at) {
+      *slot = Some(key);
+    }
+  }
+
   /// Completes `visit`, an alias such as `NonZeroU32`: `non_zero`, `core`'s `NonZero`, of the
   /// primitive whose definition is `primitive`, interned here, before the alias's own type.
   fn alias(&mut self, visit: Visit, seen: Seen, non_zero: DefId, primitive: DefId) {
@@ -932,6 +954,8 @@ impl Typing<'_> {
     let slot = self.builder.intern_named(primitive, &[], false);
     self.values.truncate(visit.start as usize);
     self.values.push(Some(slot));
+    // The alias's slot is a written argument in all but its spelling.
+    self.key_non_null(non_zero, visit.start);
     self.complete(visit, seen, non_zero, false);
   }
 
@@ -961,14 +985,8 @@ impl Typing<'_> {
     }
     // A collection's key or element is non-null however it is written, before the fill table is
     // asked and before any default reads it.
-    if seen.args != 0
-      && self.builder.def_collection(def).is_some()
-      && let Some(Some(key)) = self.values.get(start).copied()
-    {
-      let key = self.non_null_of(key);
-      if let Some(slot) = self.values.get_mut(start) {
-        *slot = Some(key);
-      }
+    if seen.args != 0 {
+      self.key_non_null(def, visit.start);
     }
     if seen.args < count {
       return self.lookup(visit, seen, def, count);
@@ -1071,19 +1089,19 @@ impl Typing<'_> {
     let ty = self.values.pop().flatten();
     self.frames.pop();
     self.progress.remove(&fill.key);
-    let Some(mut ty) = ty else {
+    let Some(ty) = ty else {
       return self.fail(fill.frame, Reason::Unusable);
     };
-    // A collection's key or element filled from a default is non-null before anything reads it.
-    if fill.slot == 0 && self.builder.def_collection(fill.key.0).is_some() {
-      ty = self.non_null_of(ty);
-    }
     let Some(Frame::Visit(visit)) = self.frames.get(fill.frame as usize).copied() else {
       return;
     };
     let position = (visit.start as usize).saturating_add(fill.slot as usize);
     if let Some(slot) = self.values.get_mut(position) {
       *slot = Some(ty);
+    }
+    // A collection's key or element filled from a default is non-null before anything reads it.
+    if fill.slot == 0 {
+      self.key_non_null(fill.key.0, visit.start);
     }
   }
 

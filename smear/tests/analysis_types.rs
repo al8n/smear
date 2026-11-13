@@ -1109,6 +1109,34 @@ fn an_alias_takes_no_argument() {
   assert_eq!(shown(model, model.type_expr(args[0]).ty()), "u8");
 }
 
+/// The external review's program: the root package extends `core`'s `NonZero` with `@set`, then
+/// writes the alias and the form it spells, in each order.
+const NON_ZERO_SET: [&str; 2] = [
+  "extend scalar NonZero @set\ntype Query {\n  a: NonZeroU32\n  b: NonZero<u32>\n}\n",
+  "extend scalar NonZero @set\ntype Query {\n  b: NonZero<u32>\n  a: NonZeroU32\n}\n",
+];
+
+#[test]
+fn an_alias_and_the_form_it_spells_are_one_type_when_non_zero_is_extended() {
+  // The alias's slot is made what a written argument is, so the two are one type and one
+  // instantiation: with room for one instantiation, both are built.
+  for text in NON_ZERO_SET {
+    for limits in [Limits::new(), Limits::new().with_max_instantiations(1)] {
+      let analysis = analyze_text(text, &limits);
+      assert!(
+        analysis.diagnostics().is_empty(),
+        "{text}: {:#?}",
+        analysis.diagnostics()
+      );
+      let model = analysis.model();
+      let a = field_type(model, "^::app::Query", "a");
+      assert_eq!(field_type(model, "^::app::Query", "b"), a, "{text}");
+      // The extension makes `NonZero` a set, whose element is non-null in its type.
+      assert_eq!(shown(model, a), "NonZero<u32!>", "{text}");
+    }
+  }
+}
+
 #[test]
 fn too_many_and_too_few_arguments_are_refused_where_they_are_written() {
   let text = "type Page<T, C = Int> {\n  a: T\n}\n\
