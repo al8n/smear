@@ -1191,7 +1191,8 @@ fn an_ok_analysis_under_type_arguments_has_no_unresolved_value() {
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let mut reached = Values::default();
-  let _ = visit(&analysis, Packages::All, &mut reached);
+  let _ = visit(&analysis, Packages::Supplied, &mut reached);
+  assert!(!reached.ids.is_empty());
   for id in reached.ids {
     let value = model.value(id);
     match value.kind() {
