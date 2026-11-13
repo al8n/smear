@@ -65,11 +65,32 @@
 //! float's verdict and its row; a byte string; a literal's row; a path's segments, and what its
 //! prefix names.
 //!
+//! # An application's arguments
+//!
+//! Before the walk, each directive's arguments that an application leaving them out does something
+//! about are listed once, in member order: one with a default, with the count of rows a copy of it
+//! makes, counted once through the same classifier that makes the rows; and one required, written
+//! non-null with no default. A later argument of a name an earlier one has is not listed, since no
+//! application can write it. An application merges its written arguments, which lowering kept in
+//! its directive's order, with that list, by the argument each sets. A written argument is coerced
+//! as written, and a required one given `null` is `missing-required-directive-argument`, at its
+//! name, and nothing more. A listed argument left out takes a copy of its default: the default's
+//! tree coerced again against the argument's type, silently, each row not written and located at
+//! the node it copies, what was read of the literal shared; a node that does not fit is
+//! unresolved, and the default's own diagnostic, where it is written, says why once. A required one
+//! left out is `missing-required-directive-argument`, at the application's path, with a label at
+//! the argument. An argument neither written, defaulted nor required is absent.
+//!
 //! # What bounds it
 //!
-//! A written row is a written literal, which `Limits::max_source_bytes` bounds. Each list a lone
-//! value stands for is a step of `Limits::max_value_steps`: past it, the value is unresolved, and
-//! `resource-limit` where it is written. The built-in library's own values are charged nothing.
+//! A written row is a written literal, which `Limits::max_source_bytes` bounds. What no literal
+//! writes is a step of `Limits::max_value_steps`: each list a written lone value stands for; each
+//! row of a copy, its whole count charged before its first row; and each required argument found
+//! left out. Past it a lone value is unresolved, and `resource-limit` where it is written; and an
+//! application is `resource-limit` once, at its path, its written arguments still coerced, a copy
+//! made whole or not at all, and the rest of its directive's list not read. The built-in library's
+//! own values are charged nothing, and neither is a copy made for an application it writes; a copy
+//! of one of its defaults made for an application a supplied package writes is charged.
 //!
 //! # The arenas
 //!
@@ -78,7 +99,12 @@
 //! `u32` addresses, is reported once, as `resource-limit`, at the whole of the root package's
 //! package source: otherwise the model would answer a wrong spelling with no diagnostic.
 
-use std::{collections::BTreeMap, format, string::String, vec::Vec};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  format,
+  string::String,
+  vec::Vec,
+};
 
 use smear_lexer::decode_string_value;
 use tokora::{
@@ -161,7 +187,11 @@ pub(crate) fn coerce(
     items: Vec::new(),
     children: Vec::new(),
     syms: Vec::new(),
+    listed: Vec::new(),
+    runs: Vec::new(),
+    counting: Vec::new(),
   };
+  coercion.list_arguments();
   for index in 0..coercion.builder.def_count() {
     let def = DefId::new(index);
     let count = coercion.builder.def_applications(def).len();
@@ -220,6 +250,34 @@ impl Site {
       ),
     }
   }
+}
+
+/// How a tree is coerced.
+#[derive(Clone, Copy)]
+enum Mode {
+  /// Where it is written, at this site: its rows are written, what does not fit is reported, and
+  /// the lists a lone value stands for are charged.
+  Written(Site),
+  /// As a copy of a default, for an application that leaves its argument out: its rows are not
+  /// written, and nothing is reported, charged or searched for, the copy's whole count having been
+  /// charged before its first row.
+  Copied,
+}
+
+impl Mode {
+  /// Whether the rows made are written.
+  fn written(self) -> bool {
+    matches!(self, Self::Written(_))
+  }
+}
+
+/// A directive's argument that an application leaving it out does something about.
+#[derive(Clone, Copy)]
+struct Listed {
+  argument: MemberId,
+  /// Its default's tree, and how many rows a copy of it makes; `None` for a required argument with
+  /// no default.
+  default: Option<(u32, u32)>,
 }
 
 /// The range of an integer type: the integer primitive `width` bits wide, signed when `signed`,
@@ -387,6 +445,14 @@ struct Coercion<'c, 'p, 'x> {
   children: Vec<u32>,
   /// The segments of the path being kept.
   syms: Vec<Sym>,
+  /// Each directive's arguments that an application leaving them out does something about: one
+  /// run per directive, in member order.
+  listed: Vec<Listed>,
+  /// Each directive that has such arguments, with its run of `listed`, by `DefId`: what an
+  /// application looks its directive's run up by.
+  runs: Vec<(DefId, u32, u32)>,
+  /// The nodes being counted, each with the type it is counted against.
+  counting: Vec<(u32, Option<TyId>)>,
 }
 
 impl<'p> Coercion<'_, 'p, '_> {
@@ -394,7 +460,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   fn member(&mut self, member: MemberId) {
     if let Some(&tree) = self.raw.defaults.get(&member) {
       let ty = self.member_type(member);
-      if let Some(value) = self.value(tree, ty, Site::Default) {
+      if let Some(value) = self.value(tree, ty, Mode::Written(Site::Default)) {
         self.builder.set_member_default(member, value);
       }
     }
@@ -424,20 +490,228 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.member_occurrence(member).0
   }
 
-  /// The arguments `application` writes, in the order lowering kept them, which is its directive's:
-  /// its run of the written arguments, found by one binary search. An application whose directive
-  /// did not resolve has none.
+  /// The arguments of `application`, in its directive's order: its written run, found by one binary
+  /// search, merged with its directive's listed run. A written argument is coerced as written. A
+  /// listed one it leaves out is filled with a copy of its default, or, required, reported left
+  /// out, each charged first, but on an application the built-in library writes. Once a charge
+  /// fails the application is reported once, at its path, and its written run alone is read on. An
+  /// application whose directive did not resolve has no argument.
   fn application(&mut self, application: ApplicationId) {
-    let mut next = self
+    let mut written = self
       .raw
       .arguments
       .partition_point(|argument: &RawArgument| argument.application < application);
-    while let Some(&argument) = self.raw.arguments.get(next)
-      && argument.application == application
-    {
-      self.written_argument(application, argument);
-      next += 1;
+    let (directive, at) = match self.builder.applied(application) {
+      Some((Resolution::Resolved(def), _, at)) => (Some(def), at),
+      _ => (None, Location::entire(0)),
+    };
+    let (mut listed, end) = directive
+      .and_then(|def: DefId| {
+        self
+          .runs
+          .binary_search_by_key(&def, |&(owner, _, _): &(DefId, u32, u32)| owner)
+          .ok()
+      })
+      .and_then(|row: usize| self.runs.get(row).copied())
+      .map_or((0, 0), |(_, start, end): (DefId, u32, u32)| {
+        (start as usize, end as usize)
+      });
+    let library = at.source() < self.supplied;
+    let mut starved = false;
+    loop {
+      let next_written = self
+        .raw
+        .arguments
+        .get(written)
+        .copied()
+        .filter(|argument: &RawArgument| argument.application == application);
+      let next_listed = if starved || listed >= end {
+        None
+      } else {
+        self.listed.get(listed).copied()
+      };
+      match (next_written, next_listed) {
+        (None, None) => break,
+        (Some(argument), None) => {
+          self.written_argument(application, argument);
+          written += 1;
+        }
+        (Some(argument), Some(left)) if argument.argument <= left.argument => {
+          if argument.argument == left.argument {
+            listed += 1;
+          }
+          self.written_argument(application, argument);
+          written += 1;
+        }
+        (_, Some(left)) => {
+          listed += 1;
+          if !self.left_out(application, left, at, library) {
+            starved = true;
+          }
+        }
+      }
     }
+  }
+
+  /// Does what `left`, an argument `application` leaves out, asks, the application's path at `at`
+  /// and written by the built-in library when `library`: a copy of its default, its count of rows
+  /// charged first, or, required, a report that it is left out, a step charged first. Answers
+  /// `false`, and reports the application once, when the budget cannot pay.
+  fn left_out(
+    &mut self,
+    application: ApplicationId,
+    left: Listed,
+    at: Location,
+    library: bool,
+  ) -> bool {
+    let cost = left.default.map_or(1, |(_, count): (u32, u32)| count);
+    if !library && !self.charge(cost) {
+      self.starved(at);
+      return false;
+    }
+    match left.default {
+      Some((tree, count)) => {
+        let before = self.builder.value_count();
+        let ty = self.member_type(left.argument);
+        if let Some(value) = self.value(tree, ty, Mode::Copied) {
+          debug_assert_eq!(
+            self.builder.value_count().saturating_sub(before),
+            count,
+            "a copy makes the rows it was counted to"
+          );
+          self
+            .builder
+            .push_application_argument(application, left.argument, None, value);
+        }
+      }
+      None => self.missing(application, left.argument, at),
+    }
+    true
+  }
+
+  /// Lists each directive's arguments that an application leaving them out does something about,
+  /// each with its default's count of rows: one with a default, and one required, written non-null
+  /// with no default. A later argument of a name an earlier one has is not listed: no application
+  /// can write it.
+  fn list_arguments(&mut self) {
+    let mut names: BTreeSet<Sym> = BTreeSet::new();
+    for index in 0..self.builder.def_count() {
+      let def = DefId::new(index);
+      if self.builder.def_kind(def) != Some(DefKind::Directive) {
+        continue;
+      }
+      let start = dense(self.listed.len());
+      names.clear();
+      for argument in self.builder.def_members(def) {
+        let Some(name) = self.builder.member_name(argument) else {
+          continue;
+        };
+        if !names.insert(name) {
+          continue;
+        }
+        let (ty, non_null) = self.member_occurrence(argument);
+        match self.raw.defaults.get(&argument).copied() {
+          Some(tree) => {
+            let count = self.count(tree, ty);
+            self.listed.push(Listed {
+              argument,
+              default: Some((tree, count)),
+            });
+          }
+          None if non_null => self.listed.push(Listed {
+            argument,
+            default: None,
+          }),
+          None => {}
+        }
+      }
+      let end = dense(self.listed.len());
+      if end > start {
+        self.runs.push((def, start, end));
+      }
+    }
+  }
+
+  /// How many rows coercing the tree `tree` against `ty` makes, as a copy makes them, told by
+  /// [`classify`](Self::classify) alone: one for each node it reaches, the elements of a list
+  /// against a list type, and one more for each level a lone value stands for.
+  fn count(&mut self, tree: u32, ty: Option<TyId>) -> u32 {
+    let Some(tree) = self.raw.trees.get(tree as usize).copied() else {
+      return 0;
+    };
+    let mut rows: u32 = 0;
+    self.counting.clear();
+    self.counting.push((tree.root, ty));
+    while let Some((node, ty)) = self.counting.pop() {
+      let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
+        continue;
+      };
+      rows = rows.saturating_add(1);
+      match self.classify(raw.kind, ty) {
+        Class::List(element) => {
+          let mut child = node.saturating_add(1);
+          while child < raw.after {
+            self.counting.push((child, Some(element)));
+            let next = self
+              .raw
+              .nodes
+              .get(child as usize)
+              .map_or(raw.after, |held: &RawNode| held.after);
+            if next <= child {
+              break;
+            }
+            child = next;
+          }
+        }
+        Class::Lone(element) => self.counting.push((node, Some(element))),
+        Class::NoValue | Class::Null | Class::NotNull | Class::Leaf(_) => {}
+      }
+    }
+    rows
+  }
+
+  /// Reports `argument`, required, as left out by `application`, whose path is at `at`, with a
+  /// label at the argument's declaration.
+  fn missing(&mut self, application: ApplicationId, argument: MemberId, at: Location) {
+    let directive: &[u8] = match self.builder.applied(application) {
+      Some((Resolution::Resolved(def), _, _)) => self.builder.def_name(def),
+      _ => b"",
+    };
+    let name: &[u8] = match self.builder.member_name(argument) {
+      Some(sym) => self.builder.spelling(sym),
+      None => b"",
+    };
+    let message = format!(
+      "`@{}` requires its argument `{}`, and this application leaves it out",
+      Excerpt(directive),
+      Excerpt(name)
+    );
+    let mut report = Diagnostic::builder(schema::MISSING_REQUIRED_DIRECTIVE_ARGUMENT, at)
+      .message(message)
+      .primary_label("missing required directive argument");
+    if let Some(declared) = self.builder.member_location(argument)
+      && !declared.is_entire()
+    {
+      report = report.label(declared, "required here");
+    }
+    self.reporter.report(report.build());
+  }
+
+  /// Reports that the arguments the application whose path is at `at` leaves out are past the
+  /// budget.
+  fn starved(&mut self, at: Location) {
+    let kind = DiagnosticKind::ResourceLimit;
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), at)
+        .severity(kind.severity())
+        .message(
+          "the arguments this application leaves out pass `Limits::max_value_steps`, the steps \
+           the analysis may take to complete values, and are not filled",
+        )
+        .primary_label(kind.title())
+        .help("raise the limit with `Limits::with_max_value_steps`, or write the arguments")
+        .build(),
+    );
   }
 
   /// The argument `argument` of `application`, as written: its value coerced against the
@@ -455,7 +729,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     let value = if required && null {
       self.null_for_required(application, argument, ty)
     } else {
-      self.value(argument.tree, ty, Site::Argument)
+      self.value(argument.tree, ty, Mode::Written(Site::Argument))
     };
     if let Some(value) = value {
       self.builder.push_application_argument(
@@ -506,9 +780,9 @@ impl<'p> Coercion<'_, 'p, '_> {
     Some(id)
   }
 
-  /// Makes the rows of the tree `tree` against `ty`, written at `site`: the value, then what it
+  /// Makes the rows of the tree `tree` against `ty`, as `mode` says: the value, then what it
   /// holds, in pre-order. Answers the value's id, `None` for a tree lowering did not make.
-  fn value(&mut self, tree: u32, ty: Option<TyId>, site: Site) -> Option<ValueId> {
+  fn value(&mut self, tree: u32, ty: Option<TyId>, mode: Mode) -> Option<ValueId> {
     let tree = self.raw.trees.get(tree as usize).copied()?;
     let base = self.items.len();
     self.stack.push(Task::Make {
@@ -517,7 +791,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     });
     while let Some(task) = self.stack.pop() {
       match task {
-        Task::Make { node, ty } => self.make(node, ty, tree, site),
+        Task::Make { node, ty } => self.make(node, ty, tree, mode),
         Task::Close { list, from } => {
           self
             .builder
@@ -531,15 +805,15 @@ impl<'p> Coercion<'_, 'p, '_> {
     value
   }
 
-  /// Makes the row of `node`, of `tree`, written at `site`, against `ty`, and pushes what it
-  /// holds: the row's id goes to the open lists' rows.
-  fn make(&mut self, node: u32, ty: Option<TyId>, tree: RawTree, site: Site) {
+  /// Makes the row of `node`, of `tree`, against `ty`, as `mode` says, and pushes what it holds:
+  /// the row's id goes to the open lists' rows.
+  fn make(&mut self, node: u32, ty: Option<TyId>, tree: RawTree, mode: Mode) {
     let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
       return;
     };
     let source = tree.source;
     let at = Location::new(source, raw.span);
-    let id = self.builder.push_value(at, true);
+    let id = self.builder.push_value(at, mode.written());
     self.items.push(id);
     if let Some(ty) = ty {
       self.builder.set_value_ty(id, ty);
@@ -557,7 +831,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         },
         source,
         ty,
-        site,
+        mode,
       ),
       Class::List(element) => {
         let from = self.items.len();
@@ -584,7 +858,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           }));
       }
       Class::Lone(element) => {
-        if source >= self.supplied && !self.charge(1) {
+        if mode.written() && source >= self.supplied && !self.charge(1) {
           self.path(id, raw.kind);
           self.lone_limit(at);
         } else {
@@ -599,7 +873,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       Class::Leaf(base) => {
         self.path(id, raw.kind);
         if let Err(refused) = self.leaf(id, node, tree, base) {
-          self.refuse(refused, source, ty, site);
+          self.refuse(refused, source, ty, mode);
         }
       }
     }
@@ -1200,10 +1474,14 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
   }
 
-  /// Reports `refused`, a node written in the source `source` at `site`, that does not fit, the
-  /// value it stands in being expected of `ty`. A path whose root lowering does not know says
-  /// nothing: lowering reported it.
-  fn refuse(&mut self, refused: Refused, source: u32, ty: Option<TyId>, site: Site) {
+  /// Reports `refused`, a node written in the source `source`, that does not fit, the value it
+  /// stands in being expected of `ty`, when `mode` is written; a copy says nothing and searches for
+  /// no near miss. A path whose root lowering does not know says nothing either: lowering reported
+  /// it.
+  fn refuse(&mut self, refused: Refused, source: u32, ty: Option<TyId>, mode: Mode) {
+    let Mode::Written(site) = mode else {
+      return;
+    };
     let Some(raw) = self.raw.nodes.get(refused.node as usize).copied() else {
       return;
     };

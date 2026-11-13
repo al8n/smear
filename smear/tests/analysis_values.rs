@@ -7,9 +7,9 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, ApplicationArgument, Cx, DefId, Diagnostic, IntegerProvider, Layout, Limits,
-    MemberId, Model, Namespace, Package, PackageId, Packages, Path, PathRoot, SourceFile, SourceId,
-    Sym, Tier, TyId, TyKind, ValueId, ValueKind, Visitor, analyze, visit,
+    Analysis, ApplicationArgument, ApplicationId, Cx, DefId, Diagnostic, IntegerProvider, Layout,
+    Limits, MemberId, Model, Namespace, Package, PackageId, Packages, Path, PathRoot, SourceFile,
+    SourceId, Sym, Tier, TyId, TyKind, ValueId, ValueKind, Visitor, analyze, test_support, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -957,29 +957,425 @@ fn a_required_argument_is_reported_once() {
   let text = "directive @need(a: Int!, b: Int! = 1, c: Int) on OBJECT\n\
               type T @need(a: null) {\n  f: Int\n}\n\
               type U @need(a: 1, b: null) {\n  f: Int\n}\n\
-              type V @need(a: 1) {\n  f: Int\n}\n";
+              type V @need(a: 1) {\n  f: Int\n}\n\
+              type W @need {\n  f: Int\n}\n";
   let analysis = analyze_text(text, &Limits::new());
   let schema = schema_file(&analysis);
   // A required argument given `null` is left out, at its name, and its value is not refused too;
-  // one with a default is not required, and `null` does not fit its type.
+  // one with a default is not required, and `null` does not fit its type; one left out is
+  // reported at the application's path, with a label at its declaration.
   assert_eq!(
     found(&analysis),
     [
       (MISSING, after(schema, text, "type T @need(", "a")),
       (ARGUMENT, after(schema, text, "b: ", "null")),
+      (MISSING, after(schema, text, "type W @", "need")),
     ]
+  );
+  let left_out = analysis
+    .diagnostics()
+    .iter()
+    .last()
+    .expect("three diagnostics");
+  assert_eq!(
+    left_out.label(0).map(|label| label.location()),
+    Some(after(schema, text, "@need(", "a"))
   );
   let model = analysis.model();
   assert_eq!(shown(model, arguments_of(model, "T")[0].value()), "?");
-  assert_eq!(arguments_of(model, "V").len(), 1);
+  // `b`, which has a default, fills `V` and `W`; `c` is absent.
+  let filled: Vec<&str> = arguments_of(model, "W")
+    .iter()
+    .map(|argument: &ApplicationArgument| model.member(argument.argument()).name())
+    .collect();
+  assert_eq!(filled, ["b"]);
+  assert_eq!(arguments_of(model, "V").len(), 2);
 }
 
 #[test]
-fn deprecated_refuses_null() {
-  let text = "type T {\n  f: Int @deprecated(reason: null)\n}\n";
+fn deprecated_takes_its_default_reason_and_refuses_null() {
+  let text = "type T {\n  f: Int @deprecated\n  g: Int @deprecated(reason: null)\n}\n";
   let analysis = analyze_text(text, &Limits::new());
   let schema = schema_file(&analysis);
   assert_eq!(found(&analysis), [(ARGUMENT, at(schema, text, "null", 0))]);
+  let model = analysis.model();
+  let f = model
+    .def(type_def(model, "T"))
+    .fields()
+    .into_iter()
+    .next()
+    .expect("`f`");
+  let application = model.application(model.member(f).applications()[0]);
+  let [reason] = application.arguments() else {
+    panic!("a bare `@deprecated` has one argument");
+  };
+  assert!(!reason.written());
+  assert_eq!(reason.name_location(), None);
+  let value = model.value(reason.value());
+  assert_eq!(value.kind(), ValueKind::String("No longer supported"));
+  assert!(!value.written());
+  // It is located where the default is written, in `core`'s source.
+  let source = analysis
+    .sources()
+    .source(SourceId::new(value.location().source()));
+  assert_eq!(source.package(), PackageId::new(0));
+}
+
+/// The program of a directive with two defaults and an argument with neither.
+const TAG: &str = "directive @tag(name: String = \"none\", level: Int = 1, note: String) \
+                   repeatable on OBJECT | SCHEMA\n";
+
+#[test]
+fn a_default_fills_an_argument_left_out() {
+  let text = format!("{TAG}type T @tag(level: 2) {{\n  f: Int\n}}\n");
+  let analysis = analyze_text(&text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let schema = schema_file(&analysis);
+  let arguments = arguments_of(model, "T");
+  let names: Vec<&str> = arguments
+    .iter()
+    .map(|argument: &ApplicationArgument| model.member(argument.argument()).name())
+    .collect();
+  // `name` first, in the directive's order; `note` is absent.
+  assert_eq!(names, ["name", "level"]);
+  assert_eq!(arguments[0].name_location(), None);
+  assert!(!arguments[0].written());
+  let name = model.value(arguments[0].value());
+  assert_eq!(name.kind(), ValueKind::String("none"));
+  assert!(!name.written());
+  assert_eq!(name.location(), at(schema, &text, "\"none\"", 0));
+  assert!(arguments[1].written());
+}
+
+#[test]
+fn each_application_has_its_own_copy() {
+  let text = format!("{TAG}type A @tag {{\n  f: Int\n}}\ntype B @tag {{\n  f: Int\n}}\n");
+  let analysis = analyze_text(&text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let tag = model
+    .lookup(Namespace::Directive, "@^::app::tag")
+    .expect("`@tag`");
+  let own = model
+    .member(
+      model
+        .def(tag)
+        .arguments()
+        .into_iter()
+        .next()
+        .expect("`name`"),
+    )
+    .default()
+    .expect("a default");
+  let a = arguments_of(model, "A")[0].value();
+  let b = arguments_of(model, "B")[0].value();
+  assert!(own != a && own != b && a != b);
+  for copy in [a, b] {
+    assert_eq!(shown(model, copy), shown(model, own));
+    assert_eq!(model.value(copy).location(), model.value(own).location());
+    assert_eq!(model.value(copy).ty(), model.value(own).ty());
+  }
+}
+
+#[test]
+fn a_copy_is_whole() {
+  let text = "directive @d(m: [[Int]] = [1, [2, 3]]) on OBJECT\ntype T @d {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let schema = schema_file(&analysis);
+  let copy = arguments_of(model, "T")[0].value();
+  assert_eq!(
+    shown(model, copy),
+    "List [List [Int 1], List [Int 2, Int 3]]"
+  );
+  // Six rows, none written, each at its node of the default; the `1` under a list no literal
+  // writes, at the `1`.
+  let rows: Vec<ValueId> = (copy.get()..copy.get() + 6).map(ValueId::new).collect();
+  for id in &rows {
+    assert!(!model.value(*id).written());
+  }
+  let one = after(schema, text, "= [", "1");
+  assert_eq!(
+    model.value(rows[0]).location(),
+    at(schema, text, "[1, [2, 3]]", 0)
+  );
+  assert_eq!(model.value(rows[1]).location(), one);
+  assert_eq!(model.value(rows[2]).location(), one);
+  assert_eq!(
+    model.value(rows[3]).location(),
+    at(schema, text, "[2, 3]", 0)
+  );
+}
+
+#[test]
+fn a_copy_is_made_before_its_default_is_reached() {
+  let text = "type T @d {\n  f: Int\n}\ndirective @d(n: Int = 1) on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let copy = arguments_of(model, "T")[0].value();
+  let d = model
+    .lookup(Namespace::Directive, "@^::app::d")
+    .expect("`@d`");
+  let own = model
+    .member(model.def(d).arguments().into_iter().next().expect("`n`"))
+    .default()
+    .expect("a default");
+  assert!(copy < own);
+  assert_eq!(shown(model, copy), "Int 1");
+}
+
+#[test]
+fn a_dependencys_default_fills_the_roots_application() {
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new(
+      "schema.graphqlx",
+      "type T @^::dep::tag {\n  f: Int\n}\n",
+    )])
+    .with_dependencies(["dep"]);
+  let dep: Package<&str> =
+    Package::new("dep", Layout::Flat, Tier::Std).with_files([SourceFile::new(
+      "dep.graphqlx",
+      "directive @tag(name: String = \"dep\") on OBJECT\n",
+    )]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let copy = arguments_of(model, "T")[0].value();
+  let source = analysis
+    .sources()
+    .source(SourceId::new(model.value(copy).location().source()));
+  assert_eq!(source.path(), "dep.graphqlx");
+  assert!(values(&analysis, Packages::Root).contains(&copy));
+}
+
+#[test]
+fn a_default_that_does_not_fit_is_reported_once() {
+  let applied = "@bad ".repeat(100);
+  let text = format!(
+    "directive @bad(n: Int = \"x\") repeatable on OBJECT\ntype T {applied}{{\n  f: Int\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(found(&analysis), [(DEFAULT, at(schema, &text, "\"x\"", 0))]);
+  let model = analysis.model();
+  let applications = model.def(type_def(model, "T")).applications();
+  assert_eq!(applications.len(), 100);
+  for &application in applications {
+    let arguments = model.application(application).arguments();
+    assert_eq!(arguments.len(), 1);
+    assert_eq!(shown(model, arguments[0].value()), "?");
+  }
+}
+
+#[test]
+fn a_defaults_prefix_is_reported_once_whoever_asks_first() {
+  let directive = "directive @e(c: Color = Missing::RED) on OBJECT\n";
+  let applied = "type T @e {\n  f: Int\n}\n";
+  for text in [
+    format!("enum Color {{\n  RED\n}}\n{applied}{directive}"),
+    format!("enum Color {{\n  RED\n}}\n{directive}{applied}"),
+  ] {
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(
+        "smear::graphqlx::unresolved-path",
+        at(schema, &text, "Missing", 0)
+      )]
+    );
+  }
+}
+
+#[test]
+fn a_later_argument_of_a_name_already_taken_is_not_asked_for() {
+  let text = "directive @twice(a: Int, a: Int!) on OBJECT\ntype T @twice {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let codes: Vec<&str> = found(&analysis)
+    .iter()
+    .map(|&(code, _): &(&str, Location)| code)
+    .collect();
+  assert!(!codes.contains(&MISSING), "{codes:?}");
+}
+
+#[test]
+fn a_copy_spends_no_near_miss() {
+  let text = "enum Color {\n  RED\n  GREEN\n}\ntype T @e {\n  f: Int\n}\n\
+              directive @e(c: Color = REDD) on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_near_miss_comparisons(2));
+  let schema = schema_file(&analysis);
+  assert_eq!(found(&analysis), [(DEFAULT, at(schema, text, "REDD", 0))]);
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(diagnostic.help(), Some("did you mean `RED`?"));
+}
+
+#[test]
+fn a_copy_costs_a_step_a_row() {
+  let applied = "@tag ".repeat(100);
+  let text = format!(
+    "directive @tag(names: [String] = [\"a\", \"b\"]) repeatable on OBJECT\n\
+     type T {applied}{{\n  f: Int\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new().with_max_value_steps(300));
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+
+  let analysis = analyze_text(&text, &Limits::new().with_max_value_steps(299));
+  let schema = schema_file(&analysis);
+  // The last application the walk reaches, alone, is starved, whole: it has no `names`.
+  assert_eq!(found(&analysis), [(LIMIT, at(schema, &text, "tag", 100))]);
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert!(diagnostic.to_string().contains("Limits::max_value_steps"));
+  let model = analysis.model();
+  let applications = model.def(type_def(model, "T")).applications();
+  for (index, &application) in applications.iter().enumerate() {
+    let arguments = model.application(application).arguments();
+    let expected = usize::from(index + 1 < applications.len());
+    assert_eq!(arguments.len(), expected, "application {index}");
+  }
+}
+
+#[test]
+fn a_required_argument_left_out_costs_a_step() {
+  let text =
+    "directive @must(a: Int!) repeatable on OBJECT\ntype T @must @must @must {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(2));
+  let codes: Vec<&str> = found(&analysis)
+    .iter()
+    .map(|&(code, _): &(&str, Location)| code)
+    .collect();
+  assert_eq!(codes, [MISSING, MISSING, LIMIT]);
+}
+
+#[test]
+fn at_zero_no_default_fills() {
+  let text = "type T {\n  f: Int @deprecated\n  g: Int @deprecated(reason: \"x\")\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(0));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(LIMIT, at(schema, text, "deprecated", 0))]
+  );
+}
+
+#[test]
+fn a_starved_application_keeps_its_written_arguments() {
+  let text = format!("{TAG}type T @tag(level: 2) {{\n  f: Int\n}}\n");
+  let analysis = analyze_text(&text, &Limits::new().with_max_value_steps(0));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(LIMIT, after(schema, &text, "type T @", "tag"))]
+  );
+  let model = analysis.model();
+  let arguments = arguments_of(model, "T");
+  assert_eq!(arguments.len(), 1);
+  assert_eq!(model.member(arguments[0].argument()).name(), "level");
+  assert_eq!(shown(model, arguments[0].value()), "Int 2");
+}
+
+#[test]
+fn values_are_numbered_in_the_walks_order() {
+  let text = format!(
+    "{TAG}type Q @tag(level: 2) {{\n  f(a: [[Int]] = 3, b: [Int] = [4, 5]): Int\n}}\n\
+     schema @tag(level: 6) {{\n  query: Q\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  // The walk reaches every value, in id order, from 0.
+  let reached = values(&analysis, Packages::All);
+  for (index, id) in reached.iter().enumerate() {
+    assert_eq!(id.get() as usize, index);
+  }
+  // In `@tag(level: 2)` the copy of `name` comes before the written `2`.
+  let arguments = arguments_of(model, "Q");
+  assert!(arguments[0].value() < arguments[1].value());
+  assert!(!arguments[0].written() && arguments[1].written());
+  // A lone value's lists come first, the outermost first; a list before its elements.
+  let q = model.def(type_def(model, "Q"));
+  let f = q.fields().into_iter().next().expect("`f`");
+  let defaults: Vec<ValueId> = model
+    .member(f)
+    .arguments()
+    .into_iter()
+    .map(|argument: MemberId| model.member(argument).default().expect("a default"))
+    .collect();
+  assert_eq!(defaults[1].get(), defaults[0].get() + 3);
+  assert!(arguments[1].value() < defaults[0]);
+  // The schema's application is last.
+  let schema = model.schema().applications()[0];
+  let last = model.application(schema).arguments()[1].value();
+  assert_eq!(Some(&last), reached.last());
+}
+
+#[test]
+fn reversing_files_and_dependencies_changes_no_value_and_no_diagnostic() {
+  let a = "directive @tag(name: String = \"none\") repeatable on OBJECT\nenum Color {\n  RED\n}\n\
+           mod m {\n  enum Hue {\n    BLUE\n  }\n}\n\
+           input I {\n  c: m::Hue = m::Hue::BLUE\n  x: Int = \"bad\"\n  l: [Color] = RED\n}\n";
+  let b = "type T @tag @^::one::mark @^::two::flag {\n  f(n: Int = 1.5): Int\n}\n\
+           type U @tag(name: \"u\") @^::one::mark(level: 300) {\n  g: Int\n}\n";
+  let one = "directive @mark(level: u8 = 7) repeatable on OBJECT\n";
+  let two = "directive @flag(on: Boolean = true) on OBJECT\n";
+  let mut rendered: Vec<String> = Vec::new();
+  for (files, reversed) in [
+    ([("a.graphqlx", a), ("b.graphqlx", b)], false),
+    ([("b.graphqlx", b), ("a.graphqlx", a)], true),
+  ] {
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files(files.map(|(path, text): (&str, &str)| SourceFile::new(path, text)))
+      .with_dependencies(["one", "two"]);
+    let one: Package<&str> = Package::new("one", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("one.graphqlx", one)]);
+    let two: Package<&str> = Package::new("two", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("two.graphqlx", two)]);
+    let dependencies = if reversed { [two, one] } else { [one, two] };
+    let analysis = analyze(&root, &dependencies, &Limits::new());
+    let model = analysis.model();
+    let mut text = String::new();
+    let (_, _, count, applications) = test_support::counts(model);
+    for index in 0..count {
+      let value = model.value(ValueId::new(index));
+      text.push_str(&format!(
+        "value {index} {} {} {} {:?}\n",
+        shown(model, value.id()),
+        value.ty().get(),
+        value.written(),
+        value.location()
+      ));
+    }
+    for index in 0..applications {
+      for argument in model.application(ApplicationId::new(index)).arguments() {
+        text.push_str(&format!(
+          "application {index} {} {:?} {}\n",
+          argument.argument().get(),
+          argument.name_location(),
+          argument.value().get()
+        ));
+      }
+    }
+    for diagnostic in analysis.diagnostics() {
+      text.push_str(&format!(
+        "{} {:?} {diagnostic}\n",
+        diagnostic.code().as_str(),
+        diagnostic.primary()
+      ));
+    }
+    assert_eq!(analysis.diagnostics().len(), 3, "{text}");
+    rendered.push(text);
+  }
+  assert_eq!(rendered[0], rendered[1]);
 }
 
 #[test]
@@ -1096,6 +1492,16 @@ fn long_spellings_are_quoted_as_excerpts() {
     .map(|&(code, _): &(&str, Location)| code)
     .collect();
   assert_eq!(codes, [MISSING]);
+  for diagnostic in analysis.diagnostics() {
+    assert!(diagnostic.to_string().len() < 1024);
+  }
+
+  // The same, the argument left out.
+  let text = format!(
+    "directive @{directive}({argument}: Int!) on OBJECT\ntype T @{directive} {{\n  f: Int\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  assert_eq!(analysis.diagnostics().len(), 1);
   for diagnostic in analysis.diagnostics() {
     assert!(diagnostic.to_string().len() < 1024);
   }

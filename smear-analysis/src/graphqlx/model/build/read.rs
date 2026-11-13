@@ -136,6 +136,20 @@ impl ModelBuilder {
       .map(|row: &MemberRow| row.name)
   }
 
+  /// Where `member`'s name is written.
+  pub(crate) fn member_location(&self, member: MemberId) -> Option<Location> {
+    self
+      .model
+      .members
+      .get(member.get() as usize)
+      .map(|row: &MemberRow| row.location)
+  }
+
+  /// How many values the model holds.
+  pub(crate) fn value_count(&self) -> u32 {
+    dense(self.model.values.len())
+  }
+
   /// The type occurrence `member`'s type is written as: none for an enum value.
   pub(crate) fn member_ty(&self, member: MemberId) -> Option<TypeExprId> {
     self

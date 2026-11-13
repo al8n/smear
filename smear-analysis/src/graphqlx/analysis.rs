@@ -239,7 +239,14 @@ impl Analysis {
 ///   `invalid-directive-argument-value`, but for a number out of the range of any width but the
 ///   32-bit signed one, or of `f32`, which is `width-overflow`, and zero for `NonZero`, which is
 ///   `nonzero-zero`; a required argument given `null` is `missing-required-directive-argument`,
-///   at its name. Last, names and texts past what the model's `u32` offsets address, which only a
+///   at its name. An application's arguments are in its directive's order: each one written, and
+///   each one left out whose definition has a default, a copy of the default filling it, each row
+///   of the copy not written and located at the default, and silent, the default's own diagnostic
+///   saying once what does not fit; a required argument left out is
+///   `missing-required-directive-argument`, at the application's path. Each row of a copy, and each
+///   required argument found left out, is a step of [`Limits::max_value_steps`]: past it the
+///   application is `resource-limit` once, at its path, and filled no further. Last, names and
+///   texts past what the model's `u32` offsets address, which only a
 ///   [`Limits::max_source_bytes`] far above its default admits, are reported at the root package's
 ///   package source.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package

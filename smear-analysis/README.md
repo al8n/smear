@@ -44,8 +44,11 @@ written, and judging is bounded by `Limits::max_bound_steps`. A value that does 
 expected of it is refused where it is written, with GraphQL's `smear::schema::invalid-default-value`
 or `invalid-directive-argument-value`, an integer read at any length and range-checked against its
 width, `smear::graphqlx::width-overflow` past any width but the 32-bit signed one or past `f32`, and
-`smear::graphqlx::nonzero-zero` for a zero where `NonZero` is expected; the lists a value written
-alone stands for where a list is expected are bounded by `Limits::max_value_steps`. It resolves
+`smear::graphqlx::nonzero-zero` for a zero where `NonZero` is expected. An application's argument
+left out takes a copy of its default, and a required one left out is
+`smear::schema::missing-required-directive-argument`; the copies, the required arguments left out
+and the lists a value written alone stands for where a list is expected are bounded by
+`Limits::max_value_steps`. It resolves
 every module's `use` items too, globs and string sources included, against scopes that end with the
 prelude and the packages each package may reach. The built-in packages, `core`, `alloc` and `std`,
 are one embedded GraphQLx file each, parsed on every analysis. `graphqlx::analyze_with` is the same analysis with the parser

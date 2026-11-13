@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, ApplicationId, Contribution, Cx, DefId, Diagnostic, Layout, Limits, MemberId,
-    ModuleId, Package, PackageId, PackageKind, Packages, SourceFile, SourceId, Tier, TypeExprId,
-    ValueId, Visitor, analyze,
+    Analysis, ApplicationId, Contribution, Cx, DefId, Diagnostic, Layout, Limits, MemberId, Model,
+    ModuleId, ObjectEntry, Package, PackageId, PackageKind, Packages, SourceFile, SourceId, Tier,
+    TypeExprId, ValueId, ValueKind, Visitor, analyze,
     test_support::{self, RULES},
     visit,
   },
@@ -70,6 +70,28 @@ fn analyzed(path: &Path, text: &[u8]) -> Analysis {
   let root: Package<&[u8]> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
   analyze(&root, &[], &Limits::new())
+}
+
+#[test]
+fn an_ok_corpus_file_has_no_unresolved_value() {
+  for (path, text) in corpus() {
+    let analysis = analyzed(&path, &text);
+    if !analysis.is_ok() {
+      continue;
+    }
+    let model = analysis.model();
+    let (_, _, values, _) = test_support::counts(model);
+    for index in 0..values {
+      assert!(
+        !matches!(
+          model.value(ValueId::new(index)).kind(),
+          ValueKind::Unresolved
+        ),
+        "{}: value {index} is unresolved",
+        path.display()
+      );
+    }
+  }
 }
 
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
@@ -224,18 +246,19 @@ struct Reach {
 
 /// What a walk of `analysis` over `packages` must reach, read off the model.
 ///
-/// A member, a type occurrence, a value and an application are each reached exactly when the walk
-/// covers the package that wrote it, which is the package of the source its own location is in;
-/// a definition, when the walk covers one of its contributions; and a module and a package, when
-/// the walk covers the package or one of the definitions it holds is entered. The rows of the four
-/// tables the public model answers no range of are numbered from 0 to the counts the test-support
-/// door answers, so over every package this is each table whole.
+/// A member, a type occurrence and an application are each reached exactly when the walk covers
+/// the package that wrote it, which is the package of the source its own location is in; a value,
+/// when the walk covers the package that wrote its owner, the member whose default holds it or the
+/// application whose argument holds it; a definition, when the walk covers one of its
+/// contributions; and a module and a package, when the walk covers the package or one of the
+/// definitions it holds is entered. The rows of the four tables the public model answers no range
+/// of are numbered from 0 to the counts the test-support door answers, so over every package this
+/// is each table whole.
 ///
-/// It holds because nothing the analyzer writes yet is located outside the item that wrote it. A
-/// value a default fills is to be a copy located where the default is written, which may be
-/// another package's source than that of the application the copy fills: once coercion makes such
-/// copies, a value's own location stops saying who wrote it, and this must read the application
-/// that holds the copy instead.
+/// A value is read by its owner because a copy of a default that fills an application's argument
+/// is located where the default is written, which may be another package's source than the
+/// application's: its own location does not say who wrote it. Each value's owner is read off the
+/// model, and every value has exactly one.
 fn must_reach(analysis: &Analysis, packages: Packages) -> Reach {
   let model = analysis.model();
   let sources = analysis.sources();
@@ -295,9 +318,96 @@ fn must_reach(analysis: &Analysis, packages: Packages) -> Reach {
     applications: (0..applications)
       .filter(|index: &u32| wrote(model.application(ApplicationId::new(*index)).location()))
       .collect::<Vec<u32>>(),
-    values: (0..values)
-      .filter(|index: &u32| wrote(model.value(ValueId::new(*index)).location()))
+    values: owners(model, values)
+      .into_iter()
+      .enumerate()
+      .filter(|&(_, owner): &(usize, Location)| wrote(owner))
+      .map(|(index, _): (usize, Location)| u32::try_from(index).expect("a value id"))
       .collect::<Vec<u32>>(),
+  }
+}
+
+/// Where the owner of each of the `count` values of `model` is: the member whose default holds it,
+/// or the application whose argument holds it. Each definition's applications, then each of its
+/// direct members, right after each its arguments, a member's default and then its applications;
+/// then the schema's applications; and under each the values it holds.
+///
+/// # Panics
+///
+/// If a value has two owners, or none.
+fn owners(model: &Model, count: u32) -> Vec<Location> {
+  let mut owner: Vec<Option<Location>> = vec![None; count as usize];
+  for def in model.defs() {
+    let definition = model.def(def);
+    for &application in definition.applications() {
+      own_arguments(model, &mut owner, application);
+    }
+    let direct = [
+      definition.fields(),
+      definition.input_fields(),
+      definition.enum_values(),
+      definition.arguments(),
+    ];
+    for member in direct.into_iter().flatten() {
+      own_member(model, &mut owner, member);
+      for argument in model.member(member).arguments() {
+        own_member(model, &mut owner, argument);
+      }
+    }
+  }
+  for &application in model.schema().applications() {
+    own_arguments(model, &mut owner, application);
+  }
+  owner
+    .into_iter()
+    .enumerate()
+    .map(|(index, at): (usize, Option<Location>)| {
+      at.unwrap_or_else(|| panic!("value {index} has no owner"))
+    })
+    .collect()
+}
+
+/// Gives `member`'s default, and its applications' arguments, their owners.
+fn own_member(model: &Model, owner: &mut [Option<Location>], member: MemberId) {
+  let held = model.member(member);
+  if let Some(default) = held.default() {
+    own(model, owner, default, held.location());
+  }
+  for &application in held.applications() {
+    own_arguments(model, owner, application);
+  }
+}
+
+/// Gives `application`'s arguments their owner, `application`.
+fn own_arguments(model: &Model, owner: &mut [Option<Location>], application: ApplicationId) {
+  let applied = model.application(application);
+  for argument in applied.arguments() {
+    own(model, owner, argument.value(), applied.location());
+  }
+}
+
+/// Gives `root`, and every value it holds, the owner written at `at`.
+fn own(model: &Model, owner: &mut [Option<Location>], root: ValueId, at: Location) {
+  let mut stack: Vec<ValueId> = vec![root];
+  while let Some(id) = stack.pop() {
+    let slot = owner
+      .get_mut(id.get() as usize)
+      .unwrap_or_else(|| panic!("value {} is past the model's values", id.get()));
+    assert!(slot.is_none(), "value {} has two owners", id.get());
+    *slot = Some(at);
+    match model.value(id).kind() {
+      ValueKind::List(items) | ValueKind::Set(items) => stack.extend(items.iter().copied()),
+      ValueKind::Map(entries) => {
+        for &(key, item) in entries {
+          stack.push(key);
+          stack.push(item);
+        }
+      }
+      ValueKind::Object(entries) => {
+        stack.extend(entries.iter().map(|entry: &ObjectEntry| entry.value()));
+      }
+      _ => {}
+    }
   }
 }
 

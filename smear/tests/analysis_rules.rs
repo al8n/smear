@@ -1429,7 +1429,9 @@ const ORDER: &[&str] = &[
   "type_expr +2 Implements",
   "application +0",
   "value +1 ApplicationArgument in +0",
+  // The extension's bare `@tag` has its `name`, a copy of its default.
   "application +1",
+  "value +2 ApplicationArgument in +1",
   "enter_member +2",
   "type_expr +3 MemberType",
   "exit_member +2",
@@ -1437,7 +1439,7 @@ const ORDER: &[&str] = &[
   "type_expr +4 MemberType",
   "enter_member +6",
   "type_expr +5 MemberType",
-  "value +2 Default",
+  "value +3 Default",
   "exit_member +6",
   "exit_member +3",
   "enter_member +4",
@@ -1464,7 +1466,7 @@ const ORDER: &[&str] = &[
   "schema",
   "type_expr +10 RootOperation",
   "application +2",
-  "value +3 ApplicationArgument in +2",
+  "value +4 ApplicationArgument in +2",
   "end",
 ];
 

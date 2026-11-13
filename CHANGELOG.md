@@ -288,9 +288,17 @@ All notable changes to Smear are documented in this file.
   signed one, or of `f32`, the new `smear::graphqlx::width-overflow`, and a zero where `NonZero` is
   expected, the new `smear::graphqlx::nonzero-zero`; a required argument given `null` is
   `smear::schema::missing-required-directive-argument`, at its name. A row made of a written path
-  keeps its path. A new `Limits::max_value_steps`, 2^20 by default, bounds the lists a value written
-  alone stands for: past it the value is `resource-limit` where it is written, and the built-in
-  library's own values cost nothing. Then smear's rules walk the model, each a visitor on
+  keeps its path. An application has its arguments in its directive's order: each one written,
+  and each one left out whose definition has a default, which a copy of the default fills, each
+  of its values not `written()` and located at the default, the copy silent and the default's own
+  diagnostic saying once what does not fit; a required argument left out is
+  `missing-required-directive-argument`, at the application's path, with a label at the argument.
+  A new `Limits::max_value_steps`, 2^20 by default, bounds what no literal writes: the lists a
+  value written alone stands for, each value of a copy, charged before the copy's first, and each
+  required argument found left out. Past it a value is `resource-limit` where it is written, and an
+  application once, at its path, its written arguments kept and a copy made whole or not at all;
+  the built-in library's own values cost nothing, and a copy made for an application it writes
+  neither. Then smear's rules walk the model, each a visitor on
   the public trait. A program defines its schema at most once: each schema definition the root
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
   code, with a label at the first. And the schema is the root package's: each schema definition

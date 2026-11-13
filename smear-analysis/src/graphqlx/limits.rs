@@ -47,7 +47,8 @@ const DEFAULT_NEAR_MISS_COMPARISONS: u32 = 1 << 20;
 /// is always declared whole and every package has its root module, and that the built-in library's
 /// types are built whatever the generic depth, instantiation and substitution bounds are, its
 /// bounds cost nothing to judge, since it writes no instantiation of a definition with a bound,
-/// and its own values cost nothing to complete where it writes them: see
+/// and its own values cost nothing to complete, where it writes them and in a copy made for an
+/// application it writes: see
 /// [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_generic_depth`],
 /// [`Limits::max_instantiations`], [`Limits::max_substitutions`], [`Limits::max_bound_steps`] and
 /// [`Limits::max_value_steps`].
