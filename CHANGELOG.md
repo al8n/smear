@@ -378,9 +378,10 @@ All notable changes to Smear are documented in this file.
   location: `null` where the type is nullable; a list's elements each against its element, and any
   other value where a list is expected the one-element list that holds it, a list for each level;
   a boolean; an integer of any length, range-checked against its width by smear itself, in every
-  radix; a float, or an integer, finite in `f32` or `f64`, `f32`'s range judged on the literal
-  itself, and a decimal one's exponent read at any size; a string, cooked; for `id` a string, or an
-  integer in `i32`'s range; for `bytes` a string's UTF-8 encoding or a list of integers from 0 to
+  radix; a float, or an integer, rounded once to `f32` or `f64` and finite there, an `f32` never
+  read off its `f64`, and a decimal one's exponent read at any size; a string, cooked; for `id` a
+  string, or an integer in `i32`'s range; for `bytes` a string's UTF-8 encoding or a list of
+  integers from 0 to
   255, either one `ValueKind::Bytes`, a new kind; for `NonZero` an integer that is not zero; and for
   an enum one of its values, as `ValueKind::Enum`, a bare name looked up under the enum expected
   alone, and a qualified one whose prefix names that enum where the value is written, through any

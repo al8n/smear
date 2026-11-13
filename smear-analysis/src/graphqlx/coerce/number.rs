@@ -6,18 +6,16 @@
 //! one scan: its significant digits are counted; a count past what the width expected can hold
 //! refuses it whatever the digits are; and only then is its magnitude computed, little-endian,
 //! from the last digit back for a radix that is a power of two and nine decimal digits at a time
-//! otherwise. A float is rounded to nearest, a tie to even, and its range in `f32` is judged on
-//! its exact value, never through its `f64`.
+//! otherwise. A float is rounded to nearest, a tie to even, to an `f64` and, apart, to an `f32`,
+//! each once from its exact value: an `f32` read off the `f64` would round twice, and a value
+//! within half an `f64` step of the midpoint of two `f32`s would round to the wrong one. Its range
+//! in `f32` is whether its `f32` is finite.
 
 use std::vec::Vec;
 
 use smear_lexer::{DecimalFloat, NORMALIZED_FLOAT_LEN, normalize_decimal_float};
 
 use crate::graphqlx::raw::Radix;
-
-/// The bits of `f32`'s greatest exponent that make a value round to infinity: the 25 leading bits
-/// of `0x1.ffffffp127`, the least value out of `f32`'s range, all set.
-const SINGLE_EDGE: u64 = (1 << 25) - 1;
 
 /// An integer literal as scanned, before it is converted.
 #[derive(Clone, Copy)]
@@ -33,9 +31,10 @@ pub(super) struct Scanned {
 pub(super) struct Float {
   /// The nearest `f64`, when it is finite.
   pub(super) value: Option<f64>,
-  /// Whether its exact value is below `0x1.ffffffp127` in magnitude, the least that `f32` rounds
-  /// to infinity: whether it is in `f32`'s range.
-  pub(super) single: bool,
+  /// The nearest `f32`, rounded once from the exact value and never from the `f64`, when it is
+  /// finite: when the exact value is below `0x1.ffffffp127` in magnitude, the least that `f32`
+  /// rounds to infinity, which is to say in `f32`'s range.
+  pub(super) single: Option<f32>,
 }
 
 /// How many values a digit of `radix` takes.
@@ -300,9 +299,9 @@ pub(super) fn fits(negative: bool, bits: u64, power: bool, signed: bool, width: 
 
 /// What `text`, a decimal float or integer literal, reads as where a float is expected: zero, a
 /// value past every `f64`, or the spelling `normalize_decimal_float` writes of it, read by
-/// `str::parse` as an `f64` and, apart, as an `f32`. The literal is not handed to `str::parse` as
-/// written, which misreads a written exponent past 655 359 that the literal's digits offset. `None`
-/// for a text that is no decimal float.
+/// `str::parse` as an `f64` and, apart, as an `f32`, each rounded once from the literal. The
+/// literal is not handed to `str::parse` as written, which misreads a written exponent past
+/// 655 359 that the literal's digits offset. `None` for a text that is no decimal float.
 pub(super) fn decimal_float(text: &[u8]) -> Option<Float> {
   let mut buffer = [0; NORMALIZED_FLOAT_LEN];
   let spelled = match normalize_decimal_float(text, &mut buffer)? {
@@ -310,13 +309,13 @@ pub(super) fn decimal_float(text: &[u8]) -> Option<Float> {
     DecimalFloat::Zero { negative } => {
       return Some(Float {
         value: Some(if negative { -0.0 } else { 0.0 }),
-        single: true,
+        single: Some(if negative { -0.0 } else { 0.0 }),
       });
     }
     DecimalFloat::Overflow { .. } => {
       return Some(Float {
         value: None,
-        single: false,
+        single: None,
       });
     }
     // A reading of a later lexer's, whose value this coercion cannot tell: refused.
@@ -326,7 +325,7 @@ pub(super) fn decimal_float(text: &[u8]) -> Option<Float> {
   let single = spelled.parse::<f32>().ok()?;
   Some(Float {
     value: wide.is_finite().then_some(wide),
-    single: single.is_finite(),
+    single: single.is_finite().then_some(single),
   })
 }
 
@@ -420,23 +419,22 @@ pub(super) fn magnitude_float(negative: bool, magnitude: &[u8]) -> Float {
 
 /// The float `mantissa × 2^exp2`, below zero when `negative`, more than that by a little when
 /// `sticky`: the mantissa is shifted left until its top bit is set, so that the value's leading
-/// bit stands for `2^e`, `e` being the exponent plus 63. Its range in `f32` is judged then, on that
-/// exact value; its `f64` is rounded after.
+/// bit stands for `2^e`, `e` being the exponent plus 63. Its `f64` and its `f32` are each rounded
+/// from that exact value.
 fn round(negative: bool, mantissa: u64, exp2: i64, sticky: bool) -> Float {
   let sign: u64 = if negative { 1 << 63 } else { 0 };
   if mantissa == 0 {
     return Float {
       value: Some(f64::from_bits(sign)),
-      single: true,
+      single: Some(if negative { -0.0 } else { 0.0 }),
     };
   }
   let shift = mantissa.leading_zeros();
   let normal = mantissa << shift;
   let e = exp2.saturating_sub(i64::from(shift)).saturating_add(63);
-  let single = e < 127 || (e == 127 && normal >> 39 != SINGLE_EDGE);
   Float {
     value: wide(sign, normal, e, sticky),
-    single,
+    single: narrow(negative, normal, e, sticky),
   }
 }
 
@@ -476,6 +474,47 @@ fn wide(sign: u64, normal: u64, e: i64, sticky: bool) -> Option<f64> {
   // A carry out of a subnormal's 52 bits is the least normal number: `q` is then `1 << 52`, whose
   // set bit is the exponent field's 1.
   Some(f64::from_bits(sign | q))
+}
+
+/// The `f32`, below zero when `negative`, whose value is `normal`, which has its top bit set, its
+/// leading bit standing for `2^e`, and a little more when `sticky`: `None` when it is not finite,
+/// which is when the value is `0x1.ffffffp127` or more in magnitude. It is rounded once, as
+/// [`wide`] rounds the `f64`.
+///
+/// At `e` of -126 or more it is normal: the top 24 bits, rounded by the 40 below them and the
+/// sticky bit, a carry out of them adding one to `e`. Below, it is subnormal: shifted right by
+/// `-126 - e` more, rounded over everything shifted out. A shift of 64 leaves only the rounding,
+/// and a longer one is zero; both are taken apart before any shift.
+fn narrow(negative: bool, normal: u64, e: i64, sticky: bool) -> Option<f32> {
+  let sign: u32 = if negative { 1 << 31 } else { 0 };
+  if e > 127 {
+    return None;
+  }
+  if e >= -126 {
+    let mut q = nearest(normal, 40, sticky);
+    let mut e = e;
+    if q == 1 << 24 {
+      q >>= 1;
+      e += 1;
+    }
+    if e > 127 {
+      return None;
+    }
+    let field = u32::try_from(e + 127).ok()?;
+    let q = u32::try_from(q).ok()?;
+    return Some(f32::from_bits(sign | (field << 23) | (q & ((1 << 23) - 1))));
+  }
+  let shift = (-86i64).saturating_sub(e);
+  let q = match shift {
+    ..=63 => nearest(normal, u32::try_from(shift).ok()?, sticky),
+    // All of it is shifted out: it rounds up to the least subnormal when it is above half of
+    // it, and a tie goes to zero, which is even.
+    64 => u64::from(normal > 1 << 63 || (normal == 1 << 63 && sticky)),
+    _ => 0,
+  };
+  // A carry out of a subnormal's 23 bits is the least normal number: `q` is then `1 << 23`, whose
+  // set bit is the exponent field's 1.
+  Some(f32::from_bits(sign | u32::try_from(q).ok()?))
 }
 
 /// `value` shifted right by `shift`, 1 to 63 bits, rounded to nearest by the bits shifted out and

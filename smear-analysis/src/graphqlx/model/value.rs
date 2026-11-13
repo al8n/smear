@@ -189,7 +189,8 @@ fn small(magnitude: &[u8]) -> Option<u128> {
   Some(value)
 }
 
-/// A float value: the nearest `f64`, and the literal as written.
+/// A float value: the literal rounded once to the type it was coerced against, and the literal as
+/// written.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FloatValue<'a> {
   value: f64,
@@ -197,7 +198,10 @@ pub struct FloatValue<'a> {
 }
 
 impl<'a> FloatValue<'a> {
-  /// The nearest `f64` to the literal.
+  /// Its value as an `f64`: the nearest `f64` to the literal; or, for a value of `f32`, the nearest
+  /// `f32` to the literal, widened, which is exact. An `f32` is never the nearest `f64` rounded
+  /// again: `1.0000000596046448` is `1 + 2^-23` as an `f32`, though its nearest `f64`,
+  /// `1 + 2^-24`, rounds to `1.0`.
   #[inline]
   pub const fn to_f64(self) -> f64 {
     self.value

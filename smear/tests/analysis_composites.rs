@@ -1392,8 +1392,8 @@ fn a_set_holds_no_element_twice_and_a_map_no_key_twice() {
 /// Two elements are one when their values are, whatever spells them: an integer in any radix,
 /// `-0` and `0`; a string's cooked text; an `id`'s identifier, a string's or an integer's decimal
 /// digits; a boolean; an enum value's member; a float's value, `-0.0` and `0.0` one, and an `f32`'s
-/// value rounded to `f32`; a byte string's bytes; a `NonZero`'s integer. Refuses a comparison of
-/// texts, and an `id` told apart by the literal that spells it.
+/// literal rounded once to `f32`; a byte string's bytes; a `NonZero`'s integer. Refuses a
+/// comparison of texts, and an `id` told apart by the literal that spells it.
 #[test]
 fn the_same_value_is_told_by_its_value() {
   for (ty, literal, twice) in [
@@ -1418,6 +1418,114 @@ fn the_same_value_is_told_by_its_value() {
     let text = format!(
       "type Query {{\n  x: Int\n}}\nenum Color {{\n  RED\n}}\nscalar Floats<T> @set\n\
        input H {{\n  s: {ty} = {literal}\n}}\n"
+    );
+    let analysis = analyze_text(&text, &Limits::new());
+    let found = found(&analysis);
+    assert!(
+      found
+        .iter()
+        .all(|&(code, _): &(&'static str, Location)| code == COLLECTION),
+      "{text}: {found:?}"
+    );
+    assert_eq!(found.len(), twice, "{text}");
+  }
+}
+
+/// An `f32` element, and an `f32` key, is told by its literal rounded once to `f32`, never by its
+/// nearest `f64` rounded again.
+///
+/// `1.0000000596046448` is `1 + 2^-24 + 2.4609375 × 10^-17`. In binary `1 + 2^-24` is `1.` then 23
+/// zeros and a one: the midpoint of `1.0` and `1 + 2^-23`, the next `f32`. The literal is above
+/// it, so it rounds once to `1 + 2^-23`, which is `1.00000011920928955078125` exactly. An `f64`
+/// holds 52 bits after the point, and the excess is below half a step of them, `2^-53`, about
+/// `1.1 × 10^-16`: the nearest `f64` is the midpoint itself, and a tie rounds to `1.0`, the `f32`
+/// whose last bit is even. So:
+/// - beside `1.0` it is no duplicate: `1 + 2^-23` and `1.0` are two `f32`s;
+/// - beside `1.00000011920928955078125` it is one: both are `1 + 2^-23`, and the second is
+///   reported, labelled at the first;
+/// - as a key of a map the verdicts are the same;
+/// - and the model holds `1 + 2^-23` for it, the `f32` widened.
+///
+/// Refuses an identity read off the `f64`, which reports the first and misses the second.
+#[test]
+fn an_f32_is_told_by_its_literal_rounded_once() {
+  // What the standard parser, which rounds once to each type, makes of the literal.
+  let wide: f64 = "1.0000000596046448".parse().expect("a float");
+  let single: f32 = "1.0000000596046448".parse().expect("a float");
+  assert_eq!(wide.to_bits(), 0x3ff0_0000_1000_0000, "`1 + 2^-24`");
+  assert_eq!(single.to_bits(), 0x3f80_0001, "`1 + 2^-23`");
+  let above = f64::from(single);
+  let held = "1.00000011920928955078125";
+  for (ty, literal, twice) in [
+    ("Floats<f32>", "set!{1.0000000596046448, 1.0}", false),
+    (
+      "Floats<f32>",
+      "set!{1.0000000596046448, 1.00000011920928955078125}",
+      true,
+    ),
+    (
+      "Pairs<f32, Int>",
+      "map!{1.0000000596046448 => 1, 1.0 => 2}",
+      false,
+    ),
+    (
+      "Pairs<f32, Int>",
+      "map!{1.0000000596046448 => 1, 1.00000011920928955078125 => 2}",
+      true,
+    ),
+  ] {
+    let text = format!(
+      "type Query {{\n  x: Int\n}}\nscalar Floats<T> @set\nscalar Pairs<K, V> @map\n\
+       input H {{\n  s: {ty} = {literal}\n}}\n"
+    );
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let expected = if twice {
+      vec![(COLLECTION, after(schema, &text, ", ", held))]
+    } else {
+      Vec::new()
+    };
+    assert_eq!(found(&analysis), expected, "{text}");
+    let first = after(schema, &text, "{", "1.0000000596046448");
+    for diagnostic in analysis.diagnostics() {
+      assert_eq!(
+        diagnostic.label(0).map(|label| label.location()),
+        Some(first),
+        "{text}"
+      );
+    }
+    let model = analysis.model();
+    let elements: Vec<ValueId> = match model.value(default(model, "H", "s")).kind() {
+      ValueKind::Set(items) => items.to_vec(),
+      ValueKind::Map(entries) => entries
+        .iter()
+        .map(|&(key, _): &(ValueId, ValueId)| key)
+        .collect(),
+      other => panic!("`{literal}` is no set and no map: {other:?}"),
+    };
+    let ValueKind::Float(float) = model.value(elements[0]).kind() else {
+      panic!("`1.0000000596046448` is no float in {text}");
+    };
+    assert_eq!(float.to_f64().to_bits(), above.to_bits(), "{text}");
+  }
+}
+
+/// A hexadecimal float, and an integer where `f32` is expected, are rounded once to `f32` too.
+/// `0x1.0000010000000001p0` is `1 + 2^-24 + 2^-64`, just above the midpoint of `1.0` and
+/// `1 + 2^-23`; `0x1000001000000001` is `2^60 + 2^36 + 1`, just above `2^60 + 2^36`, the midpoint
+/// of `2^60` and `2^60 + 2^37`. Each is above its midpoint by less than half an `f64` step there,
+/// `2^-53` and `2^7`, so each one's nearest `f64` is the midpoint, which a tie rounds to the even
+/// `f32` below. Rounded once, each is the `f32` above: the first is no `1.0`, and the second is
+/// `0x1000002000000000`, `2^60 + 2^37`. Refuses an identity read off the `f64`.
+#[test]
+fn an_f32_written_in_hexadecimal_is_rounded_once_too() {
+  for (literal, twice) in [
+    ("set!{0x1.0000010000000001p0, 1.0}", 0),
+    ("set!{0x1000001000000001, 0x1000002000000000}", 1),
+  ] {
+    let text = format!(
+      "type Query {{\n  x: Int\n}}\nscalar Floats<T> @set\n\
+       input H {{\n  s: Floats<f32> = {literal}\n}}\n"
     );
     let analysis = analyze_text(&text, &Limits::new());
     let found = found(&analysis);

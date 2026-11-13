@@ -703,24 +703,27 @@ fn floats_are_checked_against_their_width() {
     ]
   );
   let model = analysis.model();
-  for (name, written) in [
-    ("a", "1.5"),
-    ("b", "1e308"),
-    ("c", "1e-400"),
-    ("e", "3.4028234e38"),
-    ("g", "340282356779733661637539395458142568447.0"),
+  // A value of `f64` is the nearest `f64` to its literal, and a value of `f32` the nearest `f32`,
+  // widened, which is exact: `e` and `g` are both `f32::MAX`, `0x1.fffffep127`. `g` is one less
+  // than `0x1.ffffffp127`, the midpoint of `f32::MAX` and `2^128`, and its nearest `f64` is that
+  // midpoint, which an `f32` read off the `f64` would round to infinity.
+  for (name, written, value) in [
+    ("a", "1.5", 1.5f64),
+    ("b", "1e308", 1e308),
+    ("c", "1e-400", 0.0),
+    ("e", "3.4028234e38", f64::from(f32::MAX)),
+    (
+      "g",
+      "340282356779733661637539395458142568447.0",
+      f64::from(f32::MAX),
+    ),
   ] {
     let ValueKind::Float(float) = model.value(default(model, "F", name)).kind() else {
       panic!("`{written}` is no float");
     };
-    let nearest: f64 = written.parse().expect("a float");
-    assert_eq!(float.to_f64().to_bits(), nearest.to_bits(), "`{written}`");
+    assert_eq!(float.to_f64().to_bits(), value.to_bits(), "`{written}`");
     assert_eq!(float.text(), written);
   }
-  let ValueKind::Float(zero) = model.value(default(model, "F", "c")).kind() else {
-    panic!("`1e-400` is no float");
-  };
-  assert_eq!(zero.to_f64().to_bits(), 0);
 }
 
 #[test]

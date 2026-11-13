@@ -37,26 +37,28 @@
 //!    key coerced against the type's first argument and each value against its second, a key or
 //!    an element non-null there however it is written; `bool` a boolean; an integer primitive an
 //!    integer in its width's range, read at any length; `f32` and `f64` a float, or an integer,
-//!    whose value is finite in that type; `string` a string, cooked; `id` a string, or an integer
-//!    in `i32`'s range, kept an integer; `bytes` a string, its UTF-8 encoding, or a list of
-//!    integers from 0 to 255, one value of its bytes either way; `NonZero` of an integer primitive
-//!    an integer in that primitive's range that is not zero; an enum a path that names one of its
-//!    values; `core`'s `TypeRef` a path that names a definition, and an input object an object
-//!    literal, each read as below. Any other scalar takes any literal, kept as written, a set or a
-//!    map literal among them. A collection given any other literal but `null`, and a set or a map
+//!    whose value, the literal rounded once to that type, is finite, an `f32` kept widened to an
+//!    `f64`, which is exact; `string` a string, cooked; `id` a string, or an integer in `i32`'s
+//!    range, kept an integer; `bytes` a string, its UTF-8 encoding, or a list of integers from 0
+//!    to 255, one value of its bytes either way; `NonZero` of an integer primitive an integer in
+//!    that primitive's range that is not zero; an enum a path that names one of its values;
+//!    `core`'s `TypeRef` a path that names a definition, and an input object an object literal,
+//!    each read as below. Any other scalar takes any literal, kept as written, a set or a map
+//!    literal among them. A collection given any other literal but `null`, and a set or a map
 //!    literal given to what is no collection of its shape, does not fit, with
 //!    `collection-literal`.
 //!
 //! A set literal that holds one element twice, and a map literal that holds one key twice, is
 //! `collection-literal`, where it is written, at the later occurrence, with a label at the first;
 //! it keeps every element and every entry. Two are one when their coerced values are: a boolean
-//! by its value; an integer by its sign and its magnitude, `-0` being `0`; a float by its bits,
-//! `-0.0` being `0.0`, an `f32` by its value rounded to `f32`; a string by its cooked text; an
-//! `id` by its identifier, an integer's being its decimal digits, so that `"4"` and `4` are one; a
-//! byte string by its bytes; an enum value by its member. What has no value of its own, a custom
-//! scalar's literal, a list, a set, a map, an input object, and what did not fit, is compared with
-//! nothing, and so are a map's values. Each identity is rendered once, and the duplicates are
-//! found by the shared kernel. A copy compares nothing: its default was judged where it is written.
+//! by its value; an integer by its sign and its magnitude, `-0` being `0`; a float by the bits of
+//! its value in its type, `-0.0` being `0.0`, so that an `f32` is told by its literal rounded once
+//! to `f32` and never by its `f64` rounded again; a string by its cooked text; an `id` by its
+//! identifier, an integer's being its decimal digits, so that `"4"` and `4` are one; a byte string
+//! by its bytes; an enum value by its member. What has no value of its own, a custom scalar's
+//! literal, a list, a set, a map, an input object, and what did not fit, is compared with nothing,
+//! and so are a map's values. Each identity is rendered once, and the duplicates are found by the
+//! shared kernel. A copy compares nothing: its default was judged where it is written.
 //!
 //! An enum value's name is looked up among the values of the enum expected, every enum's values
 //! being kept by the enum and the name, the first of each name. A bare name is looked up there
@@ -110,10 +112,10 @@
 //! What is read of a literal is read once and kept outside the tree, in a row the node's one slot
 //! indexes: its text, kept in the model's text arena; a string's cooked text; an integer's count
 //! of significant digits, its magnitude once its digits could fit the width asked, and its row; a
-//! float's verdict and its row; a literal's row; a path's segments, what its prefix names, and
-//! what the whole of it names as a type. A byte string, which only a `bytes` value reads, is kept
-//! in a table of its own, by node. An object literal's fields are kept by the literal and the input
-//! object.
+//! float's verdict and its row for each of `f64` and `f32`, whose values differ; a literal's row;
+//! a path's segments, what its prefix names, and what the whole of it names as a type. A byte
+//! string, which only a `bytes` value reads, is kept in a table of its own, by node. An object
+//! literal's fields are kept by the literal and the input object.
 //!
 //! # An application's arguments
 //!
@@ -651,8 +653,8 @@ enum Ident {
     start: u32,
     len: u32,
   },
-  /// A float's bits: an `f64`'s, or, for `f32`, those of the `f64` rounded to `f32`; `-0.0` is
-  /// `0.0`.
+  /// A float's bits, of its value in its type: an `f64`'s, or an `f32`'s, the literal rounded once
+  /// to `f32`; `-0.0` is `0.0`.
   Float(u64),
   /// A string's cooked text, or an `id`'s.
   Text(Text),
@@ -689,13 +691,15 @@ struct Kept {
   int: Option<u32>,
   /// What it reads as where a float is expected; `None` inside for a text no float reads.
   float: Option<Option<Float>>,
-  /// Its row of the model's float table.
+  /// Its row of the model's float table as an `f64`.
   float_row: Option<u32>,
+  /// Its row of the model's float table as an `f32`, of the `f32`'s value.
+  single_row: Option<u32>,
   /// Its row of the model's literal table.
   literal: Option<u32>,
 }
 
-// A row for each literal read, so its size is a cost per written literal: about 112 bytes, a few
+// A row for each literal read, so its size is a cost per written literal: about 120 bytes, a few
 // times the node's 32, since a node read for any kind has room for what every kind reads. What only
 // a rare kind reads lives in a table of its own: a `bytes` value's bytes.
 const _: () = assert!(core::mem::size_of::<Kept>() <= 128);
@@ -2312,14 +2316,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         }))
       }
       (Base::Float { single }, RawKind::Float { .. } | RawKind::Int(_)) => {
-        let value = self.float(id, node, source, single)?;
-        // Adding `0.0` makes `-0.0` `0.0`, and leaves every other value as it is; an `f32`'s value
-        // is finite in `f32`, as coercion checked.
-        let bits = if single {
-          u64::from(((value as f32) + 0.0).to_bits())
-        } else {
-          (value + 0.0).to_bits()
-        };
+        let bits = self.float(id, node, source, single)?;
         Ok(Some(Ident::Float(bits)))
       }
       (Base::Bytes, RawKind::String | RawKind::List) => {
@@ -2386,22 +2383,24 @@ impl<'p> Coercion<'_, 'p, '_> {
     Ok((scanned.negative, converted))
   }
 
-  /// Makes `id` the float `node`, a float or an integer, reads as, when it is finite in `f32`
-  /// when `single` and in `f64` otherwise. Answers the float.
-  fn float(&mut self, id: ValueId, node: u32, source: u32, single: bool) -> Result<f64, Refused> {
+  /// Makes `id` the float `node`, a float or an integer, reads as in `f32` when `single` and in
+  /// `f64` otherwise, when it is finite there: an `f32` is the literal rounded once to `f32`, never
+  /// its `f64` rounded again, and is kept widened to an `f64`, which is exact. Answers its
+  /// identity: the bits of its value in its type, `-0.0` made `0.0`.
+  fn float(&mut self, id: ValueId, node: u32, source: u32, single: bool) -> Result<u64, Refused> {
     let refused = move |why: Why| Refused { node, why };
     let read = self.float_read(node, source).ok_or(refused(Why::Kind))?;
-    let value = if single {
-      if !read.single {
-        return Err(refused(Why::Single));
-      }
-      read.value.ok_or(refused(Why::Single))?
-    } else {
-      read.value.ok_or(refused(Why::Infinite))?
-    };
-    let row = self.float_row(node, source, value);
+    // Adding `0.0` makes `-0.0` `0.0`, and leaves every other value as it is.
+    if single {
+      let narrow = read.single.ok_or(refused(Why::Single))?;
+      let row = self.float_row(node, source, f64::from(narrow), true);
+      self.builder.give_float(id, row);
+      return Ok(u64::from((narrow + 0.0).to_bits()));
+    }
+    let value = read.value.ok_or(refused(Why::Infinite))?;
+    let row = self.float_row(node, source, value, false);
     self.builder.give_float(id, row);
-    Ok(value)
+    Ok((value + 0.0).to_bits())
   }
 
   /// The bytes `node`, a string or a list, is as a `bytes` value, kept: a string's cooked text's
@@ -2859,7 +2858,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           }),
         Some(_) => Some(Float {
           value: None,
-          single: false,
+          single: None,
         }),
         None => None,
       },
@@ -2869,16 +2868,29 @@ impl<'p> Coercion<'_, 'p, '_> {
     read
   }
 
-  /// `node`'s row of the model's float table, of `value`: made the first time a type it fits asks,
-  /// and kept.
-  fn float_row(&mut self, node: u32, source: u32, value: f64) -> u32 {
+  /// `node`'s row of the model's float table, of `value`, its value in `f32` when `single` and in
+  /// `f64` otherwise: made the first time a type of that width it fits asks, and kept, one row for
+  /// each width.
+  fn float_row(&mut self, node: u32, source: u32, value: f64, single: bool) -> u32 {
     let slot = self.slot(node);
-    if let Some(row) = self.read(slot).float_row {
+    let kept = self.read(slot);
+    let made = if single {
+      kept.single_row
+    } else {
+      kept.float_row
+    };
+    if let Some(row) = made {
       return row;
     }
     let text = self.text(node, source);
     let row = self.builder.push_float(value, text);
-    self.update(slot, |kept: &mut Kept| kept.float_row = Some(row));
+    self.update(slot, |kept: &mut Kept| {
+      if single {
+        kept.single_row = Some(row);
+      } else {
+        kept.float_row = Some(row);
+      }
+    });
     row
   }
 

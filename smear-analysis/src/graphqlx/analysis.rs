@@ -237,11 +237,12 @@ impl Analysis {
 ///   expected the one-element list that holds it, a list for each level, each list a step of
 ///   [`Limits::max_value_steps`]; a boolean; an integer in its width's range, read at any length, a
 ///   decimal one of more than 38 significant digits converted within the same budget; a float, or
-///   an integer, finite in `f32` or `f64`; a string, cooked; for `id` a string or an integer in
-///   `i32`'s range; for `bytes` a string's UTF-8 encoding or a list of integers from 0 to 255; for
-///   `NonZero` an integer that is not zero; for an enum one of its values, a bare name looked up
-///   under that enum alone, and a qualified one whose prefix names that enum where the value is
-///   written, through any path or alias, the nearest value in its help when it names none; for an
+///   an integer, rounded once to `f32` or `f64` and finite there; a string, cooked; for `id` a
+///   string or an integer in `i32`'s range; for `bytes` a string's UTF-8 encoding or a list of
+///   integers from 0 to 255; for `NonZero` an integer that is not zero; for an enum one of its
+///   values, a bare name looked up under that enum alone, and a qualified one whose prefix names
+///   that enum where the value is written, through any path or alias, the nearest value in its
+///   help when it names none; for an
 ///   input object an object literal, whose fields are found by name and kept in the input object's
 ///   order, one written twice twice, each coerced against its field's type: a field it does not
 ///   declare is `undefined-input-object-field`, with the nearest field in its help, and is not

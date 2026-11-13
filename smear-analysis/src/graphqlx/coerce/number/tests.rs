@@ -389,7 +389,7 @@ fn a_hexadecimal_floats_exponent_is_decimal() {
   assert!(hex_float(b"0x1p").is_none());
   // Thirty digits saturate: up, no `f64` and out of `f32`; down, zero.
   let up = hex_float(joined("0x1p", &"9".repeat(30)).as_bytes()).expect("a hexadecimal float");
-  assert!(up.value.is_none() && !up.single);
+  assert!(up.value.is_none() && up.single.is_none());
   assert_eq!(
     bits(hex_float(joined("0x1p-", &"9".repeat(30)).as_bytes())),
     Some(0)
@@ -404,25 +404,72 @@ fn a_hexadecimal_floats_exponent_is_decimal() {
 
 #[test]
 fn a_floats_range_in_f32_is_judged_on_its_exact_value() {
-  let cases: [(&str, bool); 7] = [
-    ("0x1.fffffep127", true),
-    ("0x1.fffffefffffffp127", true),
+  // Each one's `f32`, by its bits: `f32::MAX` is `0x1.fffffep127`, and `0x1.ffffffp127`, the
+  // midpoint of it and `2^128`, is the least value that rounds to infinity.
+  let cases: [(&str, Option<u32>); 7] = [
+    ("0x1.fffffep127", Some(0x7f7f_ffff)),
+    ("0x1.fffffefffffffp127", Some(0x7f7f_ffff)),
     // Below the tie, though its `f64` rounds up onto it.
-    ("0x1.fffffeffffffffp127", true),
-    ("0x1.ffffffp127", false),
-    ("-0x1.ffffffp127", false),
-    ("0x1p128", false),
-    ("0x1p-200", true),
+    ("0x1.fffffeffffffffp127", Some(0x7f7f_ffff)),
+    ("0x1.ffffffp127", None),
+    ("-0x1.ffffffp127", None),
+    ("0x1p128", None),
+    ("0x1p-200", Some(0)),
   ];
   for (text, single) in cases {
     let read = hex_float(text.as_bytes()).expect("a hexadecimal float");
-    assert_eq!(read.single, single, "`{text}`");
+    assert_eq!(read.single.map(f32::to_bits), single, "`{text}`");
   }
+  assert_eq!(f32::MAX.to_bits(), 0x7f7f_ffff);
   // The `f64` of the third is `0x1.ffffffp127`, which a verdict on the `f64` would refuse.
   assert_eq!(
     bits(hex_float(b"0x1.fffffeffffffffp127")),
     Some(0x47ef_ffff_f000_0000)
   );
+}
+
+#[test]
+fn an_f32_is_rounded_once_from_the_exact_value() {
+  // Each of the first three is just above the midpoint of two `f32`s, by less than half an `f64`
+  // step there, so its nearest `f64` is the midpoint itself, which a tie would round to the even
+  // `f32` below; rounded once, it is the `f32` above. `1.0000000596046448` is
+  // `1 + 2^-24 + 2.4609375 × 10^-17`, above `1 + 2^-24`, between `1.0` and `1 + 2^-23`, by less
+  // than `2^-53`.
+  let decimal = decimal_float(b"1.0000000596046448").expect("a decimal float");
+  assert_eq!(decimal.value.map(f64::to_bits), Some(0x3ff0_0000_1000_0000));
+  assert_eq!(decimal.single.map(f32::to_bits), Some(0x3f80_0001));
+  // `1 + 2^-24 + 2^-64`: its seventeenth digit is past the sixteen kept, and is the sticky bit.
+  let hex = hex_float(b"0x1.0000010000000001p0").expect("a hexadecimal float");
+  assert_eq!(hex.value.map(f64::to_bits), Some(0x3ff0_0000_1000_0000));
+  assert_eq!(hex.single.map(f32::to_bits), Some(0x3f80_0001));
+  // `2^60 + 2^36 + 1`, above `2^60 + 2^36`, between `2^60` and `2^60 + 2^37`, by less than `2^7`.
+  let integer = magnitude_float(false, &converted("0x1000001000000001", Radix::Hex));
+  assert_eq!(integer.value.map(f64::to_bits), Some(0x43b0_0000_1000_0000));
+  assert_eq!(integer.single.map(f32::to_bits), Some(0x5d80_0001));
+  // The midpoint itself goes to the even one, `1.0`; and below zero the sign is set.
+  let tie = hex_float(b"0x1.000001p0").expect("a hexadecimal float");
+  assert_eq!(tie.single.map(f32::to_bits), Some(0x3f80_0000));
+  let negative = decimal_float(b"-1.0000000596046448").expect("a decimal float");
+  assert_eq!(negative.single.map(f32::to_bits), Some(0xbf80_0001));
+  // One less than `0x1.ffffffp127`, the midpoint of `f32::MAX` and `2^128`: `f32::MAX`, though its
+  // `f64` is that midpoint, which would round to infinity.
+  let edge = decimal_float(b"340282356779733661637539395458142568447.0").expect("a decimal float");
+  assert_eq!(edge.value.map(f64::to_bits), Some(0x47ef_ffff_f000_0000));
+  assert_eq!(edge.single.map(f32::to_bits), Some(0x7f7f_ffff));
+  // The subnormals: the least, `2^-149`; the tie below it, which goes to zero; a value above that
+  // tie; and the tie between the greatest subnormal and the least normal value, which carries
+  // into the least normal value, `f32::MIN_POSITIVE`, the even one.
+  let subnormals: [(&str, u32); 4] = [
+    ("0x1p-149", 1),
+    ("0x1p-150", 0),
+    ("0x1.0000000000001p-150", 1),
+    ("0x1.fffffep-127", 0x0080_0000),
+  ];
+  for (text, expected) in subnormals {
+    let read = hex_float(text.as_bytes()).expect("a hexadecimal float");
+    assert_eq!(read.single.map(f32::to_bits), Some(expected), "`{text}`");
+  }
+  assert_eq!(f32::MIN_POSITIVE.to_bits(), 0x0080_0000);
 }
 
 #[test]
@@ -437,7 +484,7 @@ fn an_integer_where_a_float_is_expected_is_rounded_as_a_float_is() {
   for (text, radix, expected) in cases {
     let read = magnitude_float(false, &converted(text, radix));
     assert_eq!(read.value.map(f64::to_bits), Some(expected), "`{text}`");
-    assert!(read.single, "`{text}` fits `f32`");
+    assert!(read.single.is_some(), "`{text}` fits `f32`");
   }
   // `2^64 + 2^11` is a tie its top 53 bits break to even; a byte below the top eight that is not
   // zero is the sticky bit, which breaks it up: `2^64 + 2^11 + 1` is `2^64 + 2^12`.
@@ -482,7 +529,7 @@ fn a_decimal_float_is_read_by_the_standard_parser() {
   for (text, finite, single) in ranges {
     let read = decimal_float(text.as_bytes()).expect("a decimal float");
     assert_eq!(read.value.is_some(), finite, "`{text}` as `f64`");
-    assert_eq!(read.single, single, "`{text}` in `f32`");
+    assert_eq!(read.single.is_some(), single, "`{text}` in `f32`");
   }
 }
 
@@ -497,13 +544,17 @@ fn a_decimal_floats_exponent_is_read_whatever_its_digits_offset() {
   let codex = joined(&joined("0.", &zeros), "1e999999");
   let read = decimal_float(codex.as_bytes()).expect("a decimal float");
   assert!(read.value.is_none(), "past every `f64`");
-  assert!(!read.single, "past every `f32`");
+  assert!(read.single.is_none(), "past every `f32`");
   // `1`, the zeros and one more, `e-999999` is as far below every float, and zero in each; the
   // standard parser alone reads it as 1.0 too.
   let reverse = joined(&joined("1", &zeros), "0e-999999");
   let read = decimal_float(reverse.as_bytes()).expect("a decimal float");
   assert_eq!(read.value.map(f64::to_bits), Some(0));
-  assert!(read.single, "zero is in `f32`'s range");
+  assert_eq!(
+    read.single.map(f32::to_bits),
+    Some(0),
+    "zero is in `f32`'s range"
+  );
   // The same digits under an exponent that offsets them: 1.0 each way, in both.
   for text in [
     joined(&joined(&joined("0.", &zeros), "1e"), &count),
@@ -511,7 +562,7 @@ fn a_decimal_floats_exponent_is_read_whatever_its_digits_offset() {
   ] {
     let read = decimal_float(text.as_bytes()).expect("a decimal float");
     assert_eq!(read.value.map(f64::to_bits), Some(1f64.to_bits()));
-    assert!(read.single);
+    assert_eq!(read.single.map(f32::to_bits), Some(1f32.to_bits()));
   }
   // A first significant digit at each edge: 10^308 and 10^-400 are spelled, 10^309 is past every
   // float and 10^-401 is zero; `f32`'s range ends between 10^38 and 10^39.
@@ -527,7 +578,7 @@ fn a_decimal_floats_exponent_is_read_whatever_its_digits_offset() {
   for (text, wide, single) in edges {
     let read = decimal_float(text.as_bytes()).expect("a decimal float");
     assert_eq!(read.value.map(f64::to_bits), wide, "`{text}` as `f64`");
-    assert_eq!(read.single, single, "`{text}` in `f32`");
+    assert_eq!(read.single.is_some(), single, "`{text}` in `f32`");
   }
   // The greatest finite and the least subnormal `f64` read exactly.
   let max = decimal_float(b"1.7976931348623157e308").expect("a decimal float");
