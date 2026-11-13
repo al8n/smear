@@ -22,6 +22,8 @@ const DEFAULT_INSTANTIATIONS: u32 = 1 << 16;
 const DEFAULT_SUBSTITUTIONS: u32 = 1 << 20;
 /// See [`Limits::max_bound_steps`].
 const DEFAULT_BOUND_STEPS: u32 = 1 << 20;
+/// See [`Limits::max_value_steps`].
+const DEFAULT_VALUE_STEPS: u32 = 1 << 20;
 /// See [`Limits::max_source_bytes`].
 const DEFAULT_SOURCE_BYTES: u32 = 1 << 26;
 /// See [`Limits::max_diagnostics`].
@@ -75,6 +77,7 @@ pub struct Limits {
   max_instantiations: u32,
   max_substitutions: u32,
   max_bound_steps: u32,
+  max_value_steps: u32,
   max_source_bytes: u32,
   max_diagnostics: u32,
   max_near_miss_comparisons: u32,
@@ -105,6 +108,7 @@ impl Limits {
       max_instantiations: DEFAULT_INSTANTIATIONS,
       max_substitutions: DEFAULT_SUBSTITUTIONS,
       max_bound_steps: DEFAULT_BOUND_STEPS,
+      max_value_steps: DEFAULT_VALUE_STEPS,
       max_source_bytes: DEFAULT_SOURCE_BYTES,
       max_diagnostics: DEFAULT_DIAGNOSTICS,
       max_near_miss_comparisons: DEFAULT_NEAR_MISS_COMPARISONS,
@@ -305,6 +309,33 @@ impl Limits {
     self.max_bound_steps
   }
 
+  /// How many steps the analysis may take to complete values beyond what is written, over the
+  /// whole analysis.
+  ///
+  /// A written value takes none: [`max_source_bytes`](Self::max_source_bytes) bounds those. A step
+  /// is one of: a value of a copy of a default, which fills an argument an application leaves out,
+  /// each value nested in the default counting one; a list that a written value stands for where a
+  /// list is expected, one for each level of list between the value and its type, as
+  /// `tags: [[Int]] = 1` stands for a list of a list of `1`; and a required argument an
+  /// application leaves out, which is reported. The built-in library's own values take none: its
+  /// defaults where it writes them, and a copy made for an application it writes. A copy of one of
+  /// its defaults made for an application a supplied package writes, a bare `@deprecated` among
+  /// them, is charged.
+  ///
+  /// Past it, a written value whose lists cannot be paid for is `resource-limit` where it is
+  /// written, and is unresolved; and an application whose next argument left out cannot be paid
+  /// for is `resource-limit` at its path, once, and is filled no further: what it writes is still
+  /// coerced, an argument the budget kept from being filled is absent, a required one it kept from
+  /// being reported is not reported, and a copy is made whole or not at all. At `0`, no default
+  /// fills an argument and no written value stands for a list.
+  ///
+  /// The default is 2^20: one copied value for each of a million applications, so a program of a
+  /// hundred thousand applications that each leave eight defaults out stays inside it.
+  #[inline]
+  pub const fn max_value_steps(&self) -> u32 {
+    self.max_value_steps
+  }
+
   /// How many bytes of source text the supplied packages may hold together. The built-in
   /// packages' own text is smear's and does not count.
   ///
@@ -431,6 +462,14 @@ impl Limits {
   #[must_use]
   pub const fn with_max_bound_steps(mut self, max: u32) -> Self {
     self.max_bound_steps = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_value_steps`](Self::max_value_steps) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_value_steps(mut self, max: u32) -> Self {
+    self.max_value_steps = max;
     self
   }
 
