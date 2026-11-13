@@ -42,9 +42,10 @@ All notable changes to Smear are documented in this file.
   type or a value missing in front of a closer is reported and the closer left, so the block
   closes on it and the definition after the block is read whole; a list opened by `(`, `[` or,
   in GraphQLx, `<` that meets a `}` closing a brace open before it reports its own closer missing
-  and stops there; and the skip over junk keeps no `}` it did not open: where its hole held one,
-  taken for the closer of a `(`, `[` or `<` it had open, it keeps the hole in front of the first
-  such `}`, and everywhere else it keeps what it kept before. That skip is
+  and stops there; and the skip over junk keeps no `}` it did not open: where what it committed
+  held one, taken for the closer of a `(`, `[` or `<` it had open, it keeps what stands in front
+  of the first such `}`, whether a restart point, a limit or an error stopped it, and everywhere
+  else it keeps what it kept before. That skip is
   `lossless::recover::unexpected`'s, which 0.0.1 released: it now also watches the braces it
   opens, the pair whose identity in its `delimiters` table is `b'{'`, and a table with no such
   pair skips as it did. The trees and the diagnostics of broken documents change accordingly.

@@ -23,8 +23,8 @@
 //!   close pairs (`Balance`), `pred` is the depth-0 sync predicate. On a **successful** sync that
 //!   skipped ≥1 token it reports the region once through `emit_skipped_region`, and the sink wraps
 //!   those tokens in the profile's `error_kind` **automatically** — no explicit `node` call.
-//!   [`unexpected`] runs it inside an attempt and declines a hole holding a `}` the scan did not
-//!   open, then scans again with one stop more: see its docs.
+//!   [`unexpected`] runs it inside an attempt and declines it where what it committed holds a `}`
+//!   the scan did not open, then scans again with one stop more: see its docs.
 //! - `sync_balanced` **makes no progress in two cases**, and both are reachable here. A no-match
 //!   run to end of input "commits nothing and returns `Ok(None)`, leaving no trace"; and a
 //!   *successful* sync whose predicate matches the very first token returns
@@ -130,9 +130,9 @@
 //! `Lexer::state_mut`, a lexer touching its own bracket counter), the lossless tree's only
 //! speculation is four single-token probes and the attempt [`unexpected`] runs its skip in, and
 //! the remainder is the failed scan this guard exists to bound. That attempt is declined only
-//! where the skip's hole holds a `}` the skip did not open, and a declined one is a failed scan in
-//! all but name: it gives back what the skip crossed, to be lexed again, and the guard charges it
-//! as one. This exception is the mechanism, not a leak in it.
+//! where what the skip committed holds a `}` the skip did not open, and a declined one is a failed
+//! scan in all but name: it gives back what the skip crossed, to be lexed again, and the guard
+//! charges it as one. This exception is the mechanism, not a leak in it.
 //!
 //! **Exception 2 — lexer errors. Closed, and named here because the arithmetic it drove is still
 //! quoted below.** tokora charges `spent` for *every* item the lexer hands back, errors included
@@ -485,25 +485,34 @@ where
 ///   taken by the fallback, whether or not the skip stepped over such a `}`;
 /// - where it found one and its hole holds no such `}`: the same hole;
 /// - where it found one and its hole holds such a `}`: the prefix of that hole in front of the
-///   first of them. It is never empty.
+///   first of them. It is never empty;
+/// - where a limit or an error stopped it: what it committed, a prefix of the text from its first
+///   token, if that holds no such `}`; if it holds one, the prefix in front of the first of them,
+///   or nothing where the durable produce-event budget stopped it, and the parse meets the same
+///   stop again where it next reads that far.
 ///
-/// So it keeps something other than the skip's answer only where the skip kept a hole holding a
-/// `}` it had not opened, and no hole it keeps holds one.
+/// So it keeps something other than the skip's answer only where the skip committed a `}` it had
+/// not opened, and nothing it commits holds one, whatever stops it.
 ///
 /// # Two scans and an attempt
 ///
 /// The skip runs inside a tokora attempt, with a classifier that hands tokora each of the dialect's
 /// answers unchanged and watches the braces beside them: how many the skip has taken and not
-/// closed, and whether it took a `}` while that count was zero. Where the skip matched having taken
-/// something and that happened, the attempt is declined, which takes back everything the skip did:
-/// the position, the lexer state with its tallies, the emissions with the hole's note, the `Error`
-/// node the sink wrapped round the hole, the dedup watermark and the cache. A second scan then runs
-/// from the same token, the same depth kept by its own classifier, with one stop more: a `}` met
-/// while none of its own braces is open. Up to the first `}` the skip did not open, the two take
-/// the same tokens and the second stops nowhere the skip did not, so the second stops at that `}`
-/// and keeps the prefix. The prefix is not empty because a `}` at the head is a restart point in
-/// both dialects' tables, where the skip stops before taking anything. Every other answer of the
-/// skip is kept as it came, a stop at a limit and an error among them.
+/// closed, and whether it took a `}` while that count was zero. Where that happened and the skip
+/// committed something, so that the input's committed end stands past where the skip began, the
+/// attempt is declined, which takes back everything the skip did: the position, the lexer state
+/// with its tallies, the emissions with the hole's note or a limit's report, the `Error` node the
+/// sink wrapped round the hole, the dedup watermark, the poison boundary and the cache. A run that
+/// found nothing rewound itself and leaves the committed end where it was, so it is kept. A second
+/// scan then runs from the same token, the same depth kept by its own classifier, with one stop
+/// more: a `}` met while none of its own braces is open. Up to the first `}` the skip did not open,
+/// the two take the same tokens and the second stops nowhere the skip did not, so the second stops
+/// at that `}`. The skip had taken that `}`, so neither a limit of the lexer's own, whose tallies
+/// come back with the lexer state, nor an error stops the second scan before it: they stand
+/// further on. Only the durable produce-event budget, which no rollback refunds, can, and it
+/// refuses the second scan before it takes anything. The prefix in front of a restart point is not
+/// empty because a `}` at the head is a restart point in both dialects' tables, where the skip
+/// stops before taking anything.
 ///
 /// The allowance flag is read once and governs both scans: an exhausted allowance runs neither. A
 /// declined attempt costs what a failed scan costs, and the guard reads it the same way: `spent`
@@ -558,7 +567,8 @@ where
     let open_braces: Cell<usize> = Cell::new(0);
     let foreign: Cell<bool> = Cell::new(false);
     let kept = inp.attempt(|inp| {
-      match inp.sync_balanced(
+      let start = inp.span().end();
+      let answer = inp.sync_balanced(
         |kind: &<L::Token as Token<'inp>>::Kind| -> Balance<u8> {
           let class = delimiters(kind);
           match class {
@@ -574,11 +584,14 @@ where
           class
         },
         |t| is_sync_point(t.data),
-      ) {
-        // A hole holding a `}` the skip did not open: the attempt takes back all the skip did.
-        Ok(Some(hole)) if hole.skipped() > 0 && foreign.get() => None,
-        // Every other answer stands as it came, an error among them with what it committed.
-        answer => Some(answer),
+      );
+      // Nothing the skip commits holds a `}` it did not open, whatever stopped it: where the input
+      // stands past where the skip began, at a restart point, a limit or an error, and the skip
+      // took such a `}`, the attempt takes back all the skip did.
+      if foreign.get() && inp.span().end() > start {
+        None
+      } else {
+        Some(answer)
       }
     });
     match kept {
