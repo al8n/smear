@@ -12,12 +12,14 @@
 //! phase's. It sees the phases' marks alone, since the rules' are applied once the walk has ended.
 
 mod duplicate_schema_definition;
+mod orphan_extension;
 mod schema_outside_root;
 
 use tokora::diagnostic::Location;
 
 use self::{
-  duplicate_schema_definition::DuplicateSchemaDefinition, schema_outside_root::SchemaOutsideRoot,
+  duplicate_schema_definition::DuplicateSchemaDefinition, orphan_extension::OrphanExtension,
+  schema_outside_root::SchemaOutsideRoot,
 };
 use super::{
   id::{PackageId, SourceId},
@@ -173,12 +175,14 @@ macro_rules! rule_set {
 
 rule_set! {
   /// smear's own rules, which `analyze` runs over every supplied package once its phases have
-  /// written the model: a program defines its schema at most once, and only the root package
-  /// defines or extends the schema.
+  /// written the model: a program defines its schema at most once; only the root package defines
+  /// or extends the schema; and a package extends its own definitions alone, but for the
+  /// directives the root package adds to a built-in.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
     schema_outside_root: SchemaOutsideRoot => [super::DiagnosticKind::SchemaOutsideRoot.code()],
+    orphan_extension: OrphanExtension => [super::DiagnosticKind::OrphanExtension.code()],
   }
 }
 

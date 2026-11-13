@@ -149,10 +149,15 @@ All notable changes to Smear are documented in this file.
   package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
   code, with a label at the first. And the schema is the root package's: each schema definition
   and each schema extension a dependency writes is the new
-  `smear::graphqlx::schema-outside-root`, and no duplicate of the root package's. A rule says
-  nothing about a contribution a phase already refused something in. A new `test-support`
-  feature, which `smear/test-support` forwards, compiles a hidden door to the crate-private
-  model builder, and to analyses of the models it builds, for `smear`'s own tests; it is not API.
+  `smear::graphqlx::schema-outside-root`, and no duplicate of the root package's. And a package
+  extends its own definitions alone: an extension of a type or directive another supplied
+  package defines is the new `smear::graphqlx::orphan-extension`, at its target path, with a
+  label at the definition's name; and so is an extension of a definition of `core`, `alloc` or
+  `std`, a GraphQL built-in the root package replaces among them, unless the root package
+  writes it and it adds directives and nothing else. A rule says nothing about a contribution a
+  phase already refused something in. A new `test-support` feature, which `smear/test-support`
+  forwards, compiles a hidden door to the crate-private model builder, and to analyses of the
+  models it builds, for `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`!, `smear-parser`! and `smear-compiler`!: the five features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`

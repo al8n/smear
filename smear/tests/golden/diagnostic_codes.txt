@@ -16,6 +16,7 @@ DiagnosticKind::InvalidPackageName = smear::graphqlx::invalid-package-name
 DiagnosticKind::MissingDependency = smear::graphqlx::missing-dependency
 DiagnosticKind::ModuleDefinedTwice = smear::graphqlx::module-defined-twice
 DiagnosticKind::ModuleTypeCollision = smear::graphqlx::module-type-collision
+DiagnosticKind::OrphanExtension = smear::graphqlx::orphan-extension
 DiagnosticKind::ReservedPackageName = smear::graphqlx::reserved-package-name
 DiagnosticKind::ResourceLimit = smear::graphqlx::resource-limit
 DiagnosticKind::SchemaOutsideRoot = smear::graphqlx::schema-outside-root

@@ -76,7 +76,7 @@ rule_set! {
 #[test]
 fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   let table: &[(&str, &[Code])] = Rules::TABLE;
-  assert_eq!(table.len(), 2);
+  assert_eq!(table.len(), 3);
   assert_eq!(table[0].0, "DuplicateSchemaDefinition");
   assert_eq!(
     table[0].1,
@@ -86,6 +86,11 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   assert_eq!(
     table[1].1,
     &[Code::new("smear::graphqlx::schema-outside-root")]
+  );
+  assert_eq!(table[2].0, "OrphanExtension");
+  assert_eq!(
+    table[2].1,
+    &[Code::new("smear::graphqlx::orphan-extension")]
   );
 }
 

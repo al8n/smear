@@ -172,7 +172,11 @@ impl Analysis {
 ///   Each schema definition the root package writes after its first is
 ///   `duplicate-schema-definition`, with a label at the first. Each schema definition and each
 ///   schema extension a dependency writes is `schema-outside-root`, and no duplicate of the root
-///   package's. A rule says nothing about a contribution a phase already refused something in.
+///   package's. An extension of a definition another supplied package defines is
+///   `orphan-extension`, at its target path, with a label at the definition's name; and so is an
+///   extension of a definition of `core`, `alloc` or `std`, a GraphQL built-in the root package
+///   replaces among them, unless the root package writes it and it adds directives and nothing
+///   else. A rule says nothing about a contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

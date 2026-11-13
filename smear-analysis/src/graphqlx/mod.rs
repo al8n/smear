@@ -73,9 +73,12 @@
 //! [`analyze`] runs smear's own rules through the same walk over the supplied packages, once its
 //! phases have written the model. A program defines its schema at most once: each schema
 //! definition the root package writes after its first is reported with GraphQL's own code,
-//! `smear::schema::duplicate-schema-definition`. And the schema is the root package's: a schema
-//! definition or extension a dependency writes is `smear::graphqlx::schema-outside-root`. A rule
-//! says nothing about a contribution a phase already refused something in.
+//! `smear::schema::duplicate-schema-definition`. The schema is the root package's: a schema
+//! definition or extension a dependency writes is `smear::graphqlx::schema-outside-root`. And a
+//! package extends its own definitions alone: an extension of another package's type or directive
+//! is `smear::graphqlx::orphan-extension`, and so is an extension of a definition of `core`,
+//! `alloc` or `std`, unless the root package writes it and it adds directives and nothing else. A
+//! rule says nothing about a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

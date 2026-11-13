@@ -99,6 +99,13 @@ pub enum DiagnosticKind {
   /// extends it. Reported at the item's first keyword, `schema` or `extend`; the item gives the
   /// schema nothing.
   SchemaOutsideRoot,
+  /// An extension of a definition the package that writes it may not extend. A package extends
+  /// its own definitions alone, so that a definition is the same in every program that holds it:
+  /// an extension of another supplied package's type or directive is refused. A definition of
+  /// `core`, `alloc` or `std`, a GraphQL built-in the root package replaces among them, is
+  /// extended by the root package alone, and only with directives. Reported at the extension's
+  /// target path, with a label at the definition's name when the definition has a position.
+  OrphanExtension,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -129,6 +136,7 @@ impl DiagnosticKind {
     Self::ShadowedPrimitive,
     Self::InvalidBound,
     Self::SchemaOutsideRoot,
+    Self::OrphanExtension,
     Self::ResourceLimit,
   ];
 
@@ -157,6 +165,7 @@ impl DiagnosticKind {
       Self::ShadowedPrimitive => Code::new("smear::graphqlx::shadowed-primitive"),
       Self::InvalidBound => Code::new("smear::graphqlx::invalid-bound"),
       Self::SchemaOutsideRoot => Code::new("smear::graphqlx::schema-outside-root"),
+      Self::OrphanExtension => Code::new("smear::graphqlx::orphan-extension"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -185,6 +194,7 @@ impl DiagnosticKind {
       Self::ShadowedPrimitive => "declaration shadows a primitive",
       Self::InvalidBound => "invalid bound",
       Self::SchemaOutsideRoot => "schema outside the root package",
+      Self::OrphanExtension => "orphan extension",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -213,6 +223,7 @@ impl DiagnosticKind {
       | Self::UseNameCollision
       | Self::InvalidBound
       | Self::SchemaOutsideRoot
+      | Self::OrphanExtension
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }
