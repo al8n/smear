@@ -1,6 +1,6 @@
 //! The excerpt through which smear's diagnostics quote a spelling: where it cuts, what it writes
 //! for bytes that are not UTF-8, and the most it writes. And the reporters: which of them notes
-//! where errors point.
+//! where errors point, and how they count the syntax errors a parser did not lend.
 
 use std::{
   format,
@@ -288,4 +288,47 @@ fn a_syntax_error_is_counted_and_notes_no_mark() {
   let (diagnostics, marks) = consumer.finish();
   assert!(marks.is_empty());
   assert_eq!(diagnostics.error_count(), 1);
+}
+
+/// The syntax errors a parser found and did not lend are counted, have no diagnostic, so they
+/// truncate the list, and note no mark, whichever reporter counts them; counting none changes
+/// nothing.
+#[test]
+fn unlent_errors_are_counted_and_truncate_the_list() {
+  let syntax = Location::new(4, SimpleSpan::new(2, 5));
+
+  let mut marking = Reporter::new(8);
+  marking.report_syntax(error(syntax));
+  marking.count_unlent(0);
+  let (diagnostics, marks) = marking.finish();
+  assert!(marks.is_empty());
+  assert_eq!(diagnostics.error_count(), 1);
+  assert_eq!(diagnostics.len(), 1);
+  assert!(
+    !diagnostics.truncated(),
+    "counting no unlent error truncated the list"
+  );
+
+  let mut marking = Reporter::new(8);
+  marking.report_syntax(error(syntax));
+  marking.count_unlent(3);
+  assert!(
+    marking.take_marks().is_empty(),
+    "an unlent error noted a mark"
+  );
+  let (diagnostics, marks) = marking.finish();
+  assert!(marks.is_empty());
+  assert_eq!(diagnostics.error_count(), 4);
+  assert_eq!(diagnostics.len(), 1);
+  assert!(diagnostics.truncated());
+  assert!(diagnostics.has_errors());
+
+  let mut consumer = Reporter::without_marks(8);
+  consumer.count_unlent(2);
+  let (diagnostics, marks) = consumer.finish();
+  assert!(marks.is_empty());
+  assert!(diagnostics.is_empty());
+  assert!(diagnostics.truncated());
+  assert_eq!(diagnostics.error_count(), 2);
+  assert!(diagnostics.has_errors());
 }

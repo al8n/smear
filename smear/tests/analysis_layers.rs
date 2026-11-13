@@ -1,8 +1,9 @@
 //! One analysis, whichever GraphQLx parser layer reads the files: `analyze` is `analyze_with` over
 //! the syntactic layer; the equality two analyses are compared by can answer no; the two layers
 //! answer equal analyses wherever neither reports a syntax error; every error the lossless layer
-//! lends is one diagnostic at its file; two broken definitions cost themselves and nothing else;
-//! and which files never reach a layer and have no tree.
+//! lends is one diagnostic at its file; the errors it found past its ceiling on kept diagnostics
+//! and did not lend are counted and truncate the list; two broken definitions cost themselves and
+//! nothing else; and which files never reach a layer and have no tree.
 //!
 //! Analyses are compared with `==` and a failure names where they part, through `differ`: the
 //! `Debug` of an analysis is every table of its model, the built-in library's included.
@@ -692,5 +693,62 @@ mod lossless {
     // The sets hold 17 supplied files that are not blank: six, two, one, three, then one, two
     // and two.
     assert!(held >= 17, "only {held} trees were held to their files");
+  }
+
+  /// A layer that keeps a bounded number of records lends no more than it kept, and the analysis
+  /// counts the errors it found beyond them. The file is 64 characters no token starts with and
+  /// then a whole definition. Through `Lossless::new()` it has 64 syntax diagnostics and a list
+  /// that is not truncated; through the layer under ceilings of 8 and of 0 on kept diagnostics,
+  /// its syntax diagnostics are exactly the ceiling's, the list is truncated, the analysis counts
+  /// every error the whole reading counts and is not ok, and the file still has its tree.
+  #[test]
+  fn errors_the_layer_did_not_lend_are_counted_and_truncate_the_list() {
+    let text = format!("{}type Query {{ ok: Int }}", "? ".repeat(64));
+    let root = one_file(text.as_str());
+
+    let (whole, _) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+    assert!(
+      !whole.diagnostics().truncated(),
+      "the whole reading's list is truncated"
+    );
+    assert_eq!(
+      syntax_diagnostics(&whole),
+      64,
+      "the premise that each `?` is one syntax error does not hold: {:#?}",
+      whole.diagnostics()
+    );
+
+    for ceiling in [8usize, 0] {
+      let layer = Lossless::with_limits(LosslessLimits::new().with_max_diagnostics(ceiling));
+      let (analysis, trees) = analyze_with(&layer, &root, &[], &Limits::new());
+      let syntax = syntax_diagnostics(&analysis);
+      println!(
+        "a ceiling of {ceiling}: {syntax} syntax diagnostics, {} errors counted where the whole \
+         reading counts {}",
+        analysis.diagnostics().error_count(),
+        whole.diagnostics().error_count()
+      );
+      assert_eq!(
+        syntax, ceiling,
+        "a ceiling of {ceiling}: the syntax diagnostics are not the ceiling's"
+      );
+      assert!(
+        analysis.diagnostics().truncated(),
+        "a ceiling of {ceiling}: the list is not truncated"
+      );
+      assert_eq!(
+        analysis.diagnostics().error_count(),
+        whole.diagnostics().error_count(),
+        "a ceiling of {ceiling}: the analysis counts fewer errors than the layer found"
+      );
+      assert!(
+        !analysis.is_ok(),
+        "a ceiling of {ceiling}: the analysis calls the file clean"
+      );
+      assert!(
+        trees.get(the_file(&analysis)).is_some(),
+        "a ceiling of {ceiling}: the file has no tree"
+      );
+    }
   }
 }
