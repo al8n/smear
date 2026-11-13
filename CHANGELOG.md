@@ -400,15 +400,17 @@ All notable changes to Smear are documented in this file.
   its old key (`smear/dep:bytes` style, or a `[patch]`) must respell it.
 - `smear-lexer`: string literals in byte sources (`[u8]`, `Bytes`, `BStr`,
   `HipByt`) must be well-formed UTF-8. Ill-formed content is refused with
-  `StringError::UnsupportedCharacter`, carrying each sequence's span.
+  `StringError::UnsupportedCharacter`, carrying each sequence's span, for the
+  first sixteen sequences, and `StringError::Omitted` counts the rest.
   `LitStr::try_from(&[u8])` refuses likewise. `str` and `HipStr` sources are
   unchanged (#246).
 - `smear-lexer`: comments in byte sources (`[u8]`, `Bytes`, `BStr`, `HipByt`)
   must be well-formed UTF-8. Both the syntactic and the lossless lexer refuse an
   ill-formed comment with one `LexerErrorData::UnknownLexeme` per ill-formed
-  sequence, at that sequence's span, and consume the whole comment; the lossless
-  error token covers the whole comment. `str` and `HipStr` sources are unchanged
-  (#251).
+  sequence, at that sequence's span, for the first sixteen, and one
+  `LexerErrorData::Omitted` counting the rest, and consume the whole comment;
+  the lossless error token covers the whole comment. `str` and `HipStr` sources
+  are unchanged (#251).
 - `smear-schema`: `SchemaErrorKind::UnreadableText` is no longer reachable from
   a parsed document. The kind is kept.
 - Builds on tokora 0.13.1 and smol-bytes 0.2. Paths through the

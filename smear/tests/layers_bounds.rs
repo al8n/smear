@@ -423,8 +423,11 @@ macro_rules! dialect {
       /// lexemes under a ceiling of 0, under the default and under no ceiling, and 80 000 under
       /// the default and under no ceiling. The records' share is the peak at the default less the
       /// peak at 0, and it stays within `RECORD_BOUND` for each record. Two strict inequalities
-      /// hold what no estimate can break: at 40 000 bad lexemes the default already holds less
-      /// than no ceiling does, and 40 000 more cost less under it than without it.
+      /// follow. The second holds what no estimate can break: 40 000 more bad lexemes cost less
+      /// under the default than without a ceiling. The first, that at 40 000 the default already
+      /// holds less than no ceiling does, rests also on the peak falling after the ceiling is
+      /// reached, where the log, the tree and every kept record are alive together, which a run
+      /// measures and no reading proves.
       #[cfg(all(feature = "rowan_0_17", feature = "std"))]
       #[test]
       fn the_records_kept_at_the_default_stay_within_their_memory() {

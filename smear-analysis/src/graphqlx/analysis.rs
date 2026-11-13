@@ -35,7 +35,7 @@ use super::{
 /// whatever was refused; [`is_ok`](Self::is_ok) is the verdict.
 ///
 /// Two analyses are equal when their models, their diagnostics (the list, the error count and
-/// whether the ceiling dropped any), their source maps and the diagnostic ceilings they were made
+/// whether the list is truncated), their source maps and the diagnostic ceilings they were made
 /// under are equal. So two analyses of one package set made under two ceilings are unequal, even
 /// when neither list was truncated: a walk over each keeps to its own ceiling. The models are
 /// compared as [`Model`]'s equality says, every row and every id, which is the question to ask of

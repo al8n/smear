@@ -115,7 +115,10 @@ pub enum SyntaxErrorKind {
   ResourceLimit,
 
   // -- anything else ----------------------------------------------------------------------------
-  /// A refusal no kind above names: an error built from a free-form message.
+  /// A refusal no kind above names: an error built from a free-form message, or the entry that
+  /// counts what a string literal's or a comment's record did not keep. That entry follows the
+  /// errors the record kept, so a parse never reports it as a refusal's kind, which is the first
+  /// error's; the lexer's own API hands it out.
   InvalidSyntax,
 }
 

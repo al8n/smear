@@ -611,8 +611,10 @@ mod lossless {
   /// Derived from the texts the error modules can write, none of which quotes the input:
   ///
   /// - a kind's own phrase, `SyntaxErrorKind::message`, of which the longest is 42 bytes;
-  /// - a lexer error's sentence: a kind's phrase, or a fixed sentence of
-  ///   `smear-lexer/src/error/describe.rs`, of which the longest is 63 bytes, or a kind's phrase,
+  /// - a lexer error's sentence: a kind's phrase; a fixed sentence of
+  ///   `smear-lexer/src/error/describe.rs`, of which the longest is 63 bytes; the count of what a
+  ///   record did not keep, a `usize` of at most 20 digits and a fixed 59 bytes for a string
+  ///   literal (52 for a comment, in the dialect's own `error.rs`): 79 bytes; or a kind's phrase,
   ///   `, expected ` and one of that file's hints, of which the longest is 28 bytes: 81 bytes at
   ///   most;
   /// - a parser error's sentence, `unexpected <found>, expected <expectation>`: 11 bytes, the

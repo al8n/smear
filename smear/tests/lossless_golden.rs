@@ -325,14 +325,15 @@ const SHAPE_CASES: &[(&str, &str)] = &[
     "type A { f: Int } ??? type B { g: Int }",
   ),
   // The line above, truncated at the run — and the pair is the point. An unlexable run *after*
-  // real committed input is the one class tokora `60f27a3` moves, and a sweep of the 94 trees that
-  // predate this one found the corpus carried exactly one member of it,
-  // `invalid_unterminated_string`, with every other gap mid-document. So the property the fix
-  // exists to establish had no witness here: two streams that share a prefix through the token a
-  // run trails must place that run in the **same** node, including when one of them simply stops
-  // there. Before the fix these two disagreed — `Document > Gap` against `Root > Gap` — and every
-  // gate in this suite stayed green, because gates 1 and 3 see a verdict and a string. Their
-  // goldens now agree line for line up to the truncation, and a regression separates them again.
+  // real committed input is the one class tokora `60f27a3` moves. A sweep of the 94 trees that
+  // predate this one found the corpus carried one member of it, `invalid_unterminated_string`,
+  // whose string then ran to the end of the text; an inline string now ends at its line, so that
+  // gap is mid-document too, and the corpus carries none. So the property the fix exists to
+  // establish has no witness there: two streams that share a prefix through the token a run trails
+  // must place that run in the **same** node, including when one of them simply stops there.
+  // Before the fix these two disagreed — `Document > Gap` against `Root > Gap` — and every gate in
+  // this suite stayed green, because gates 1 and 3 see a verdict and a string. Their goldens now
+  // agree line for line up to the truncation, and a regression separates them again.
   ("top_level_recovery_at_eof", "type A { f: Int } ???"),
   // Trivia in front of a *retro-wrap* probe, in both of the positions that have one: the `!` that
   // turns a type into a `NonNullType`, and the `:` that turns a name into an `Alias`. Added
@@ -1156,8 +1157,8 @@ fn only_the_recorded_nodes_close_on_their_trailing_trivia() {
     "a source whose every node ends on a real token must answer with no pairing at all, or this \
      census cannot tell an attachment from a node boundary"
   );
-  // The recovery witness, named here because it is the one entry in the array no valid source
-  // produces. If the corpus loses `invalid_unterminated_bracket`, `Argument > ListValue` vanishes
+  // The recovery witness of `Argument > ListValue`, named here because no valid source produces
+  // that entry. If the corpus loses `invalid_unterminated_bracket`, `Argument > ListValue` vanishes
   // and the difference above reports it without saying why.
   assert!(
     pairings("{\n  f(a: [1, 2 }\n").contains(&"Argument > ListValue".to_string()),
