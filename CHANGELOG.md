@@ -309,8 +309,12 @@ All notable changes to Smear are documented in this file.
   wrote holds keeps GraphQL's own rules, with GraphQL's codes, a GraphQL built-in the root package
   replaces among those definitions: a member whose name begins with `__` is
   `smear::schema::reserved-field-name`, `reserved-argument-name`, `reserved-enum-value-name`,
-  `reserved-input-field-name` or `reserved-directive-argument-name`, by what it is. A rule says
-  nothing about a contribution a phase already refused something in. On every GraphQL document of smear's corpora the analyzer
+  `reserved-input-field-name` or `reserved-directive-argument-name`, by what it is; and a member
+  whose name an earlier member of its list has, a definition's own members and its extensions'
+  being one list and a field's arguments another, is `duplicate-field-name`,
+  `duplicate-argument-name`, `duplicate-enum-value`, `duplicate-input-field-name` or
+  `duplicate-directive-argument-name`, with a label at the first. A rule says nothing about a
+  contribution a phase already refused something in. On every GraphQL document of smear's corpora the analyzer
   is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
   divergence it allows. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models

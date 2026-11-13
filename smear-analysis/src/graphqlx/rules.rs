@@ -24,8 +24,10 @@
 //! descends the written arguments of an occurrence that names a type parameter, or nothing, and
 //! the public kind does not answer them. `DuplicateTypeParameter` reads another,
 //! `Def::extension_params`: the names an extension's own list writes, which no public view holds.
+//! `DuplicateMember` reads `IdRange::start`, to name the member at a position of a list.
 
 mod collection_arity;
+mod duplicate_member;
 mod duplicate_schema_definition;
 mod duplicate_type_parameter;
 mod generic_enum;
@@ -37,7 +39,8 @@ mod schema_outside_root;
 mod type_ref_misuse;
 
 use self::{
-  collection_arity::CollectionArity, duplicate_schema_definition::DuplicateSchemaDefinition,
+  collection_arity::CollectionArity, duplicate_member::DuplicateMember,
+  duplicate_schema_definition::DuplicateSchemaDefinition,
   duplicate_type_parameter::DuplicateTypeParameter, generic_enum::GenericEnum,
   marker_misuse::MarkerMisuse, non_zero_argument::NonZeroArgument,
   orphan_extension::OrphanExtension, reserved_name::ReservedName,
@@ -299,7 +302,8 @@ rule_set! {
   /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; a
   /// definition's type parameters have distinct names, and so do the names an extension's own list
   /// gives them; and of the definitions a supplied package wrote, GraphQL's own rules: a member's
-  /// name does not begin with `__`.
+  /// name does not begin with `__`; and a definition's members have distinct names, and so have a
+  /// field's arguments.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -321,6 +325,13 @@ rule_set! {
       super::code::schema::RESERVED_ENUM_VALUE_NAME,
       super::code::schema::RESERVED_INPUT_FIELD_NAME,
       super::code::schema::RESERVED_DIRECTIVE_ARGUMENT_NAME,
+    ],
+    duplicate_member: DuplicateMember => [
+      super::code::schema::DUPLICATE_FIELD_NAME,
+      super::code::schema::DUPLICATE_ARGUMENT_NAME,
+      super::code::schema::DUPLICATE_ENUM_VALUE,
+      super::code::schema::DUPLICATE_INPUT_FIELD_NAME,
+      super::code::schema::DUPLICATE_DIRECTIVE_ARGUMENT_NAME,
     ],
   }
 }

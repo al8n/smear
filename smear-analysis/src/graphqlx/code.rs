@@ -457,4 +457,26 @@ pub(crate) mod schema {
   /// `ReservedDirectiveArgumentName`.
   pub(crate) const RESERVED_DIRECTIVE_ARGUMENT_NAME: Code =
     Code::new("smear::schema::reserved-directive-argument-name");
+
+  /// An object's or an interface's field has the name of an earlier field: `smear-schema`'s
+  /// `DuplicateFieldName`.
+  pub(crate) const DUPLICATE_FIELD_NAME: Code = Code::new("smear::schema::duplicate-field-name");
+
+  /// A field's argument has the name of an earlier argument: `smear-schema`'s
+  /// `DuplicateArgumentName`.
+  pub(crate) const DUPLICATE_ARGUMENT_NAME: Code =
+    Code::new("smear::schema::duplicate-argument-name");
+
+  /// An enum value has the name of an earlier value: `smear-schema`'s `DuplicateEnumValue`.
+  pub(crate) const DUPLICATE_ENUM_VALUE: Code = Code::new("smear::schema::duplicate-enum-value");
+
+  /// An input object's field has the name of an earlier field: `smear-schema`'s
+  /// `DuplicateInputFieldName`.
+  pub(crate) const DUPLICATE_INPUT_FIELD_NAME: Code =
+    Code::new("smear::schema::duplicate-input-field-name");
+
+  /// A directive definition's argument has the name of an earlier argument: `smear-schema`'s
+  /// `DuplicateDirectiveArgumentName`.
+  pub(crate) const DUPLICATE_DIRECTIVE_ARGUMENT_NAME: Code =
+    Code::new("smear::schema::duplicate-directive-argument-name");
 }

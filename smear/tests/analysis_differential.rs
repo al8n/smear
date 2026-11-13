@@ -87,6 +87,21 @@ const fn every(code: &'static str, reason: &'static str) -> Allowed {
   }
 }
 
+/// A row that allows `code` to diverge in `document` alone, where `smear-schema` reports a mistake
+/// in a contribution that also holds a phase's error, beside which the rule is silent.
+const fn beside_a_phase(code: &'static str, document: &'static str) -> Allowed {
+  Allowed {
+    code,
+    document: Some(document),
+    reason: BESIDE_A_PHASE,
+  }
+}
+
+/// Why a row of `[Z31]`'s class exists.
+const BESIDE_A_PHASE: &str = "[Z31]: the contribution that holds the mistake also names an \
+                              undefined type, interface or directive, and a rule says nothing \
+                              where a phase refused";
+
 /// Why a row of the capacity ceilings exists.
 const CEILING: &str =
   "[Z6]: a capacity ceiling of smear-schema's representation, which GraphQLx does not have";
@@ -159,11 +174,6 @@ const ALLOWED: &[Allowed] = &[
   every("smear::schema::circular-non-null-input-field", CYCLES),
   every("smear::schema::circular-one-of-input-field", CYCLES),
   every("smear::schema::input-object-default-value-cycle", CYCLES),
-  every("smear::schema::duplicate-field-name", PART_2_2),
-  every("smear::schema::duplicate-argument-name", PART_2_2),
-  every("smear::schema::duplicate-enum-value", PART_2_2),
-  every("smear::schema::duplicate-input-field-name", PART_2_2),
-  every("smear::schema::duplicate-directive-argument-name", PART_2_2),
   every("smear::schema::empty-fields-definition", PART_2_2),
   every("smear::schema::empty-union-members", PART_2_2),
   every("smear::schema::empty-enum-values", PART_2_2),
@@ -198,6 +208,22 @@ const ALLOWED: &[Allowed] = &[
     reason: "[Z40]: the document defines `Type1` twice, and smear-schema drops the second \
              definition unread where the analyzer reads both",
   },
+  beside_a_phase(
+    "smear::schema::duplicate-field-name",
+    "kitchen-sink.graphql",
+  ),
+  beside_a_phase(
+    "smear::schema::duplicate-field-name",
+    "kitchen-sink_canonical.graphql",
+  ),
+  beside_a_phase(
+    "smear::schema::duplicate-field-name",
+    "schema_kitchen_sink.graphql",
+  ),
+  beside_a_phase(
+    "smear::schema::duplicate-field-name",
+    "schema-derivatives-perpfutures.graphql",
+  ),
 ];
 
 /// GraphQL's type-system document of `text`, or `None` when GraphQL's parser refuses it.

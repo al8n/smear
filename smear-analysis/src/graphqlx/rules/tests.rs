@@ -76,7 +76,7 @@ rule_set! {
 #[test]
 fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   let table: &[(&str, &[Code])] = Rules::TABLE;
-  assert_eq!(table.len(), 10);
+  assert_eq!(table.len(), 11);
   assert_eq!(table[0].0, "DuplicateSchemaDefinition");
   assert_eq!(
     table[0].1,
@@ -125,6 +125,17 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
       Code::new("smear::schema::reserved-enum-value-name"),
       Code::new("smear::schema::reserved-input-field-name"),
       Code::new("smear::schema::reserved-directive-argument-name"),
+    ]
+  );
+  assert_eq!(table[10].0, "DuplicateMember");
+  assert_eq!(
+    table[10].1,
+    &[
+      Code::new("smear::schema::duplicate-field-name"),
+      Code::new("smear::schema::duplicate-argument-name"),
+      Code::new("smear::schema::duplicate-enum-value"),
+      Code::new("smear::schema::duplicate-input-field-name"),
+      Code::new("smear::schema::duplicate-directive-argument-name"),
     ]
   );
 }

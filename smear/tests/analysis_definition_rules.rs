@@ -1,5 +1,6 @@
 //! The GraphQLx analyzer's rules on what a definition holds, each GraphQL's own with GraphQL's
-//! code: a member's name does not begin with two underscores. Each rule judges what a supplied
+//! code: a member's name does not begin with two underscores, and a definition's members have
+//! distinct names, and so have a field's arguments. Each rule judges what a supplied
 //! package's definition holds, says nothing within what a phase refused, and quotes a name only as
 //! an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -25,6 +26,13 @@ const RESERVED_ARGUMENT: &str = "smear::schema::reserved-argument-name";
 const RESERVED_ENUM_VALUE: &str = "smear::schema::reserved-enum-value-name";
 const RESERVED_INPUT_FIELD: &str = "smear::schema::reserved-input-field-name";
 const RESERVED_DIRECTIVE_ARGUMENT: &str = "smear::schema::reserved-directive-argument-name";
+
+/// GraphQL's codes for a member whose name an earlier member of its list has, by the list.
+const DUPLICATE_FIELD: &str = "smear::schema::duplicate-field-name";
+const DUPLICATE_ARGUMENT: &str = "smear::schema::duplicate-argument-name";
+const DUPLICATE_ENUM_VALUE: &str = "smear::schema::duplicate-enum-value";
+const DUPLICATE_INPUT_FIELD: &str = "smear::schema::duplicate-input-field-name";
+const DUPLICATE_DIRECTIVE_ARGUMENT: &str = "smear::schema::duplicate-directive-argument-name";
 
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
 fn package(
@@ -238,6 +246,169 @@ fn a_replaced_built_in_is_judged_and_a_built_ins_extension_is_not() {
   );
 }
 
+/// Each of the five lists with a name written twice, and a name written three times; beside two
+/// fields that each take an argument of one name, and a field that takes an argument of its own
+/// name.
+const DUPLICATES: &str = "type Query {\n  ok: Int\n}\n\
+                          type T {\n  dupf: Int\n  dupf: String\n  \
+                          g(dupa: Int, dupa: String): Int\n  h(a: Int): Int\n  k(a: Int): Int\n  \
+                          a(a: Int): Int\n}\n\
+                          enum E {\n  DUPV\n  DUPV\n}\ninput In {\n  dupi: Int\n  dupi: String\n}\n\
+                          directive @d(dupd: Int, dupd: String) on FIELD\n\
+                          type Thrice {\n  three: Int\n  three: Int\n  three: Int\n}\n";
+
+#[test]
+fn a_member_is_declared_once() {
+  let analysis = analyze_one(DUPLICATES);
+  let schema = schema_file(&analysis);
+  let twice = |code: &'static str, name: &str| -> (&'static str, Location, Option<Location>) {
+    (
+      code,
+      at(schema, DUPLICATES, name, 1),
+      Some(at(schema, DUPLICATES, name, 0)),
+    )
+  };
+  assert_eq!(
+    found(&analysis),
+    [
+      twice(DUPLICATE_FIELD, "dupf"),
+      twice(DUPLICATE_ARGUMENT, "dupa"),
+      twice(DUPLICATE_ENUM_VALUE, "DUPV"),
+      twice(DUPLICATE_INPUT_FIELD, "dupi"),
+      twice(DUPLICATE_DIRECTIVE_ARGUMENT, "dupd"),
+      twice(DUPLICATE_FIELD, "three"),
+      // The third is labelled at the first, not at the second.
+      (
+        DUPLICATE_FIELD,
+        at(schema, DUPLICATES, "three", 2),
+        Some(at(schema, DUPLICATES, "three", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis)[..5],
+    [
+      "`T` declares the field `dupf` again",
+      "the field `g` of `T` declares the argument `dupa` again",
+      "the enum `E` declares the value `DUPV` again",
+      "`In` declares the input field `dupi` again",
+      "the directive `@d` declares the argument `dupd` again",
+    ]
+  );
+  // GraphQL's own phrases, for the member and for the first of its name, and no help.
+  let phrases: Vec<(Option<&str>, Option<&str>)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| {
+      (
+        diagnostic.primary_label(),
+        diagnostic.label(0).map(|label| label.text()),
+      )
+    })
+    .collect();
+  assert_eq!(
+    phrases[..5],
+    [
+      (Some("duplicate field"), Some("first defined here")),
+      (Some("duplicate argument"), Some("first declared here")),
+      (Some("duplicate enum value"), Some("first defined here")),
+      (Some("duplicate input field"), Some("first defined here")),
+      (
+        Some("duplicate directive argument"),
+        Some("first declared here")
+      ),
+    ]
+  );
+  for diagnostic in analysis.diagnostics() {
+    assert_eq!(diagnostic.help(), None);
+  }
+}
+
+#[test]
+fn an_extension_repeats_no_member_of_its_definition() {
+  // In one file: each repetition is reported in the extension, labelled in the definition.
+  let text = "type Query {\n  ok: Int\n}\ntype T {\n  fa: Int\n}\nextend type T {\n  fa: String\n}\n\
+              enum E {\n  VA\n}\nextend enum E {\n  VA\n}\n\
+              input In {\n  ia: Int\n}\nextend input In {\n  ia: String\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let again = |code: &'static str, name: &str| -> (&'static str, Location, Option<Location>) {
+    (
+      code,
+      at(schema, text, name, 1),
+      Some(at(schema, text, name, 0)),
+    )
+  };
+  assert_eq!(
+    found(&analysis),
+    [
+      again(DUPLICATE_FIELD, "fa"),
+      again(DUPLICATE_ENUM_VALUE, "VA"),
+      again(DUPLICATE_INPUT_FIELD, "ia"),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // In a second file of a `Flat` package, the label is in the first file.
+  let first = "type Query {\n  ok: Int\n}\ntype T {\n  fa: Int\n}\n";
+  let second = "extend type T {\n  fa: String\n}\n";
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[("a.graphqlx", first), ("b.graphqlx", second)],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  let a = file(&analysis, 3, "a.graphqlx");
+  let b = file(&analysis, 3, "b.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(
+      DUPLICATE_FIELD,
+      at(b, second, "fa", 0),
+      Some(at(a, first, "fa", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn a_wide_list_reports_as_a_narrow_one() {
+  // Sixty-six fields, past the width a list is scanned at, the last named as the first.
+  let mut text = String::from("type Query {\n  ok: Int\n}\ntype Wide {\n");
+  for index in 0..65 {
+    text.push_str(&format!("  f{index}: Int\n"));
+  }
+  text.push_str("  f0: String\n}\n");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DUPLICATE_FIELD,
+      at(schema, &text, "f0", 1),
+      Some(at(schema, &text, "f0", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn two_definitions_of_one_name_are_two_definitions() {
+  let analysis =
+    analyze_one("type Query {\n  ok: Int\n}\ntype T {\n  a: Int\n}\ntype T {\n  a: Int\n}\n");
+  assert_eq!(
+    codes(&analysis),
+    ["smear::schema::duplicate-type-name"],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 /// A refusal of `code` is silent in a contribution that also holds a phase's error, `together`,
 /// and is reported beside it when the error is in a sibling definition, `apart`.
 fn silent_beside_a_phase(code: &str, together: &'static str, apart: &'static str) {
@@ -268,15 +439,23 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ntype T {\n  __f: Int\n  x: Missing\n}\n",
     "type Query {\n  ok: Int\n}\ntype T {\n  __f: Int\n}\ntype U {\n  x: Missing\n}\n",
   );
+  // The later member's contribution silences it; the first's does not.
+  silent_beside_a_phase(
+    DUPLICATE_FIELD,
+    "type Query {\n  ok: Int\n}\ntype T {\n  a: Int\n}\nextend type T {\n  a: Int\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ntype T {\n  a: Int\n  x: Missing\n}\nextend type T {\n  a: Int\n}\n",
+  );
 }
 
 #[test]
 fn long_names_in_these_rules_are_quoted_as_excerpts() {
   let owner = "T".repeat(4096);
   let member = format!("__{}", "f".repeat(4096));
-  let texts = [format!(
-    "type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  {member}: Int\n}}\n"
-  )];
+  let plain = "m".repeat(4096);
+  let texts = [
+    format!("type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  {member}: Int\n}}\n"),
+    format!("type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  {plain}: Int\n  {plain}: Int\n}}\n"),
+  ];
   for text in &texts {
     let analysis = analyze_text(text);
     let messages = messages(&analysis);

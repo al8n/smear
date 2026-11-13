@@ -60,6 +60,13 @@ const RESERVED_ENUM_VALUE_NAME: &str = "smear::schema::reserved-enum-value-name"
 const RESERVED_INPUT_FIELD_NAME: &str = "smear::schema::reserved-input-field-name";
 const RESERVED_DIRECTIVE_ARGUMENT_NAME: &str = "smear::schema::reserved-directive-argument-name";
 
+/// GraphQL's codes for a member whose name an earlier member of its list has, by the list.
+const DUPLICATE_FIELD_NAME: &str = "smear::schema::duplicate-field-name";
+const DUPLICATE_ARGUMENT_NAME: &str = "smear::schema::duplicate-argument-name";
+const DUPLICATE_ENUM_VALUE: &str = "smear::schema::duplicate-enum-value";
+const DUPLICATE_INPUT_FIELD_NAME: &str = "smear::schema::duplicate-input-field-name";
+const DUPLICATE_DIRECTIVE_ARGUMENT_NAME: &str = "smear::schema::duplicate-directive-argument-name";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1446,6 +1453,17 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(RESERVED_DIRECTIVE_ARGUMENT_NAME),
     a_reserved_directive_argument_name,
   ),
+  (Code::new(DUPLICATE_FIELD_NAME), a_duplicate_field),
+  (Code::new(DUPLICATE_ARGUMENT_NAME), a_duplicate_argument),
+  (Code::new(DUPLICATE_ENUM_VALUE), a_duplicate_enum_value),
+  (
+    Code::new(DUPLICATE_INPUT_FIELD_NAME),
+    a_duplicate_input_field,
+  ),
+  (
+    Code::new(DUPLICATE_DIRECTIVE_ARGUMENT_NAME),
+    a_duplicate_directive_argument,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1553,6 +1571,31 @@ fn a_reserved_input_field_name() -> Analysis {
 /// A directive's argument whose name begins with `__`.
 fn a_reserved_directive_argument_name() -> Analysis {
   analyze_one("type Query { ok: Int } directive @d(__a: Int) on FIELD")
+}
+
+/// A field declared twice.
+fn a_duplicate_field() -> Analysis {
+  analyze_one("type Query { ok: Int dup: Int dup: String }")
+}
+
+/// A field's argument declared twice.
+fn a_duplicate_argument() -> Analysis {
+  analyze_one("type Query { ok(a: Int, a: String): Int }")
+}
+
+/// An enum value declared twice.
+fn a_duplicate_enum_value() -> Analysis {
+  analyze_one("type Query { ok: Int } enum E { A A }")
+}
+
+/// An input field declared twice.
+fn a_duplicate_input_field() -> Analysis {
+  analyze_one("type Query { ok: Int } input In { a: Int a: String }")
+}
+
+/// A directive's argument declared twice.
+fn a_duplicate_directive_argument() -> Analysis {
+  analyze_one("type Query { ok: Int } directive @d(a: Int, a: String) on FIELD")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

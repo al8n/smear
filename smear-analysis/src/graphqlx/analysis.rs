@@ -257,8 +257,12 @@ impl Analysis {
 ///   supplied package wrote holds, a GraphQL built-in the root package replaces among them, with
 ///   GraphQL's codes: a member whose name begins with `__` is `reserved-field-name`,
 ///   `reserved-argument-name`, `reserved-enum-value-name`, `reserved-input-field-name` or
-///   `reserved-directive-argument-name`, by what it is, at its name. A rule says nothing about a
-///   contribution a phase already refused something in.
+///   `reserved-directive-argument-name`, by what it is, at its name. A member whose name an
+///   earlier member of its list has, the definition's own and its extensions' members being one
+///   list and each field's arguments another, is `duplicate-field-name`,
+///   `duplicate-argument-name`, `duplicate-enum-value`, `duplicate-input-field-name` or
+///   `duplicate-directive-argument-name`, at its name, with a label at the first. A rule says
+///   nothing about a contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

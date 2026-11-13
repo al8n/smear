@@ -105,8 +105,10 @@
 //! so do the names an extension's own list gives them: a type parameter with the name of an
 //! earlier one is `smear::graphqlx::duplicate-type-parameter`. And what a definition a supplied
 //! package wrote holds keeps GraphQL's own rules, with GraphQL's codes: a member whose name begins
-//! with `__` is `smear::schema::reserved-field-name`, or the code of what else it is. A rule says
-//! nothing about a contribution a phase already refused something in.
+//! with `__` is `smear::schema::reserved-field-name`, or the code of what else it is; and a member
+//! whose name an earlier member of its list has is `smear::schema::duplicate-field-name`, or the
+//! code of its list. A rule says nothing about a contribution a phase already refused something
+//! in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and
