@@ -724,6 +724,40 @@ fn floats_are_checked_against_their_width() {
 }
 
 #[test]
+fn a_floats_exponent_is_read_whatever_its_digits_offset() {
+  // Exponents past 655 359, the most the standard parser reads exactly, offset back by zeros: it
+  // alone reads both of the first two literals as 1.0.
+  let zeros = "0".repeat(99_998);
+  // 10^900000, past every float.
+  let codex = format!("0.{zeros}1e999999");
+  // 10^-900000, zero in each.
+  let reverse = format!("1{zeros}0e-999999");
+  // 1.0, each way.
+  let up = format!("0.{zeros}1e99999");
+  let down = format!("1{zeros}0e-99999");
+  let text = format!(
+    "type Query {{\n  x: Int\n}}\ninput O {{\n  a: f64 = {codex}\n  b: f32 = {codex}\n  \
+     c: f64 = {reverse}\n  d: f32 = {reverse}\n  e: f64 = {up}\n  f: f32 = {down}\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (DEFAULT, after(schema, &text, "a: f64 = ", &codex)),
+      (WIDTH, after(schema, &text, "b: f32 = ", &codex)),
+    ]
+  );
+  let model = analysis.model();
+  for (name, value) in [("c", 0f64), ("d", 0.0), ("e", 1.0), ("f", 1.0)] {
+    let ValueKind::Float(float) = model.value(default(model, "O", name)).kind() else {
+      panic!("`O.{name}` is no float");
+    };
+    assert_eq!(float.to_f64().to_bits(), value.to_bits(), "`O.{name}`");
+  }
+}
+
+#[test]
 fn an_integer_literal_is_a_float() {
   let long = "1".repeat(400);
   let text = format!("input G {{\n  f: Float = 1\n  g: Float = 0x10\n  h: Float = {long}\n}}\n");

@@ -9,7 +9,9 @@
 //! otherwise. A float is rounded to nearest, a tie to even, and its range in `f32` is judged on
 //! its exact value, never through its `f64`.
 
-use std::{string::String, vec::Vec};
+use std::vec::Vec;
+
+use smear_lexer::{DecimalFloat, NORMALIZED_FLOAT_LEN, normalize_decimal_float};
 
 use crate::graphqlx::raw::Radix;
 
@@ -296,22 +298,32 @@ pub(super) fn fits(negative: bool, bits: u64, power: bool, signed: bool, width: 
   }
 }
 
-/// What `text`, a decimal float or integer literal, reads as where a float is expected: the text
-/// without its `_`, which `scratch` holds, read by `str::parse` as an `f64` and, apart, as an
-/// `f32`. `None` for a text `str::parse` refuses.
-pub(super) fn decimal_float(text: &[u8], scratch: &mut String) -> Option<Float> {
-  scratch.clear();
-  for &byte in text {
-    if byte == b'_' {
-      continue;
+/// What `text`, a decimal float or integer literal, reads as where a float is expected: zero, a
+/// value past every `f64`, or the spelling `normalize_decimal_float` writes of it, read by
+/// `str::parse` as an `f64` and, apart, as an `f32`. The literal is not handed to `str::parse` as
+/// written, which misreads a written exponent past 65 535 that the literal's digits offset. `None`
+/// for a text that is no decimal float.
+pub(super) fn decimal_float(text: &[u8]) -> Option<Float> {
+  let mut buffer = [0; NORMALIZED_FLOAT_LEN];
+  let spelled = match normalize_decimal_float(text, &mut buffer)? {
+    DecimalFloat::Spelled(spelled) => spelled,
+    DecimalFloat::Zero { negative } => {
+      return Some(Float {
+        value: Some(if negative { -0.0 } else { 0.0 }),
+        single: true,
+      });
     }
-    if !byte.is_ascii() {
-      return None;
+    DecimalFloat::Overflow { .. } => {
+      return Some(Float {
+        value: None,
+        single: false,
+      });
     }
-    scratch.push(char::from(byte));
-  }
-  let wide = scratch.parse::<f64>().ok()?;
-  let single = scratch.parse::<f32>().ok()?;
+    // A reading of a later lexer's, whose value this coercion cannot tell: refused.
+    _ => return None,
+  };
+  let wide = spelled.parse::<f64>().ok()?;
+  let single = spelled.parse::<f32>().ok()?;
   Some(Float {
     value: wide.is_finite().then_some(wide),
     single: single.is_finite(),

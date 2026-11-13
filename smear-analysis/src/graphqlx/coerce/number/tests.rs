@@ -1,7 +1,10 @@
 //! Reading numbers: integers of every radix against widths at their edges, and floats rounded bit
 //! by bit, each against values written by hand.
 
-use std::{string::String, vec::Vec};
+use std::{
+  string::{String, ToString},
+  vec::Vec,
+};
 
 use super::{
   Float, U128_DIGITS, bit_length, decimal_cost, decimal_float, fits, hex_float, is_power_of_two,
@@ -444,7 +447,6 @@ fn an_integer_where_a_float_is_expected_is_rounded_as_a_float_is() {
 
 #[test]
 fn a_decimal_float_is_read_by_the_standard_parser() {
-  let mut scratch = String::new();
   // Values an `f64` holds exactly, `_` skipped.
   let exact: [(&str, u64); 5] = [
     ("1.5", 0x3ff8_0000_0000_0000),
@@ -458,7 +460,7 @@ fn a_decimal_float_is_read_by_the_standard_parser() {
     ),
   ];
   for (text, expected) in exact {
-    let read = decimal_float(text.as_bytes(), &mut scratch).expect("a decimal float");
+    let read = decimal_float(text.as_bytes()).expect("a decimal float");
     assert_eq!(read.value.map(f64::to_bits), Some(expected), "`{text}`");
   }
   // Whether each is finite as an `f64`, and in `f32`'s range, each read by its own parse.
@@ -471,8 +473,58 @@ fn a_decimal_float_is_read_by_the_standard_parser() {
     ("340282356779733661637539395458142568448.0", true, false),
   ];
   for (text, finite, single) in ranges {
-    let read = decimal_float(text.as_bytes(), &mut scratch).expect("a decimal float");
+    let read = decimal_float(text.as_bytes()).expect("a decimal float");
     assert_eq!(read.value.is_some(), finite, "`{text}` as `f64`");
     assert_eq!(read.single, single, "`{text}` in `f32`");
   }
+}
+
+#[test]
+fn a_decimal_floats_exponent_is_read_whatever_its_digits_offset() {
+  // Enough zeros that an exponent past 655 359, the most the standard parser reads exactly, is
+  // offset back into range; fewer under Miri, where each verdict is the same.
+  let zeros = "0".repeat(if cfg!(miri) { 997 } else { 99_998 });
+  let count = (zeros.len() + 1).to_string();
+  // `0.`, the zeros, `1e999999` is 10^900000 when unshrunk, past every `f64` and `f32`; the
+  // standard parser alone reads it as 1.0.
+  let codex = joined(&joined("0.", &zeros), "1e999999");
+  let read = decimal_float(codex.as_bytes()).expect("a decimal float");
+  assert!(read.value.is_none(), "past every `f64`");
+  assert!(!read.single, "past every `f32`");
+  // `1`, the zeros and one more, `e-999999` is as far below every float, and zero in each; the
+  // standard parser alone reads it as 1.0 too.
+  let reverse = joined(&joined("1", &zeros), "0e-999999");
+  let read = decimal_float(reverse.as_bytes()).expect("a decimal float");
+  assert_eq!(read.value.map(f64::to_bits), Some(0));
+  assert!(read.single, "zero is in `f32`'s range");
+  // The same digits under an exponent that offsets them: 1.0 each way, in both.
+  for text in [
+    joined(&joined(&joined("0.", &zeros), "1e"), &count),
+    joined(&joined(&joined("1", &zeros), "0e-"), &count),
+  ] {
+    let read = decimal_float(text.as_bytes()).expect("a decimal float");
+    assert_eq!(read.value.map(f64::to_bits), Some(1f64.to_bits()));
+    assert!(read.single);
+  }
+  // A first significant digit at each edge: 10^308 and 10^-400 are spelled, 10^309 is past every
+  // float and 10^-401 is zero; `f32`'s range ends between 10^38 and 10^39.
+  let edges: [(&str, Option<u64>, bool); 7] = [
+    ("1e308", Some(1e308f64.to_bits()), false),
+    ("1e309", None, false),
+    ("1e-400", Some(0), true),
+    ("1e-401", Some(0), true),
+    ("1e38", Some(1e38f64.to_bits()), true),
+    ("1e39", Some(1e39f64.to_bits()), false),
+    ("-0.0e999999", Some((-0f64).to_bits()), true),
+  ];
+  for (text, wide, single) in edges {
+    let read = decimal_float(text.as_bytes()).expect("a decimal float");
+    assert_eq!(read.value.map(f64::to_bits), wide, "`{text}` as `f64`");
+    assert_eq!(read.single, single, "`{text}` in `f32`");
+  }
+  // The greatest finite and the least subnormal `f64` read exactly.
+  let max = decimal_float(b"1.7976931348623157e308").expect("a decimal float");
+  assert_eq!(max.value.map(f64::to_bits), Some(f64::MAX.to_bits()));
+  let least = decimal_float(b"5e-324").expect("a decimal float");
+  assert_eq!(least.value.map(f64::to_bits), Some(1));
 }

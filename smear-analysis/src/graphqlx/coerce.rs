@@ -448,7 +448,7 @@ struct Coercion<'c, 'p, 'x> {
   magnitudes: Vec<u8>,
   /// The limbs of the decimal integer being converted.
   limbs: Vec<u32>,
-  /// The text being cooked or read.
+  /// The text being cooked.
   scratch: String,
   /// The bytes of the list being read as a `bytes` value.
   octets: Vec<u8>,
@@ -1502,8 +1502,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// What `node`, a float or an integer, reads as where a float is expected, kept: a decimal one
-  /// by the standard parser, a hexadecimal float by its top 64 bits, and a hexadecimal, octal or
-  /// binary integer by its magnitude, when it is no longer than `FLOAT_BITS` bits could be.
+  /// by the standard parser, its exponent read first, a hexadecimal float by its top 64 bits, and
+  /// a hexadecimal, octal or binary integer by its magnitude, when it is no longer than
+  /// `FLOAT_BITS` bits could be.
   fn float_read(&mut self, node: u32, source: u32) -> Option<Float> {
     let slot = self.slot(node);
     if let Some(read) = self.read(slot).float {
@@ -1511,7 +1512,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     let read = match self.kind(node) {
       RawKind::Float { hex: false } | RawKind::Int(Radix::Decimal) => {
-        number::decimal_float(self.written(node, source), &mut self.scratch)
+        number::decimal_float(self.written(node, source))
       }
       RawKind::Float { hex: true } => number::hex_float(self.written(node, source)),
       RawKind::Int(radix) => match self.scanned(node, source, radix) {
