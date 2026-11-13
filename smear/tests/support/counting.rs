@@ -10,13 +10,15 @@
 //! instruments that disagree about a repair while both report green.
 //!
 //! What the move costs, stated because it is not free: a reader of `validator_allocation.rs` now
-//! opens one more file to see what its numbers mean, and an edit here changes a `cargo test` gate
-//! and a `cargo bench` gate at once. That second half is the point rather than the price — the
-//! instrument is shared *so that* it cannot be changed for one reader only — but it does mean this
-//! file is load-bearing for two targets and its own header is the only place that says so.
+//! opens one more file to see what its numbers mean, and an edit here changes two `cargo test`
+//! gates and a `cargo bench` gate at once. That second half is the point rather than the price —
+//! the instrument is shared *so that* it cannot be changed for one reader only — but it does mean
+//! this file is load-bearing for three targets and its own header is the only place that says so:
+//! `tests/validator_allocation.rs`, the memory cell of `tests/layers_bounds.rs`, and
+//! `benches/solo/peak_alloc.rs`.
 //!
-//! Reached by `#[path]` from both, because cargo compiles neither `tests/support/` nor
-//! `benches/solo/perf/` into a library: this is source included into two binaries, so each gets
+//! Reached by `#[path]` from all three, because cargo compiles neither `tests/support/` nor
+//! `benches/solo/perf/` into a library: this is source included into three binaries, so each gets
 //! its own `#[global_allocator]` and none can perturb another.
 //!
 //! # What it measures, and the one thing it does not

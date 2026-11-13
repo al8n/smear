@@ -7,7 +7,9 @@
 //! What GraphQL's parser layers lend their sink, over the corpus, and the three laws that tie the
 //! hand-over to the answer:
 //!
-//! 1. a sink that never breaks is called exactly `error_count()` times;
+//! 1. a sink that never breaks is called exactly `error_count()` times, less the errors the
+//!    lossless layer refused past its ceiling on kept diagnostics, which its tree counts as
+//!    `refused_errors()`;
 //! 2. `is_valid()` is true exactly when `error_count()` is zero, whatever the sink did;
 //! 3. for the lossless layer, `is_valid()` is true exactly when its tree's `has_errors()` is
 //!    false.
@@ -103,7 +105,11 @@ mod lossless {
     diagnostic::Diagnose,
     lexer::{SyntaxErrorKind, limits::LosslessLimits},
     parser::{
-      graphql::{Lossless, Syntactic, error::GraphqlError, lossless::GraphqlLosslessErrorValue},
+      graphql::{
+        Lossless, Syntactic,
+        error::GraphqlError,
+        lossless::{GraphqlLosslessErrorValue, Parse},
+      },
       layer::from_fn,
     },
   };
@@ -177,6 +183,136 @@ mod lossless {
     assert!(
       valid >= 20 && broken >= 20,
       "{valid} valid and {broken} broken readings; the laws are held over too few of one"
+    );
+  }
+
+  /// How many of a tree's diagnostics are errors.
+  fn error_diagnostics(tree: &Parse) -> usize {
+    tree
+      .diagnostics()
+      .iter()
+      .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+      .count()
+  }
+
+  /// `answer!`'s reading under ceilings of 0, 1 and 2 on kept diagnostics, beside the same
+  /// reading under no ceiling: the three laws, and the answer the ceiling leaves as it was. Answers
+  /// how many of the three ceilings refused an error.
+  macro_rules! under_ceilings {
+    ($method:ident, $name:expr, $kind:expr, $text:expr) => {{
+      let whole = Lossless::with_limits(LosslessLimits::new().with_max_diagnostics(usize::MAX))
+        .$method($text, &mut ())
+        .expect("a corpus text is short enough for a tree");
+      let mut refusing = 0usize;
+      for ceiling in [0usize, 1, 2] {
+        let mut lent: Vec<Lent<'_>> = Vec::new();
+        let parsed = Lossless::with_limits(LosslessLimits::new().with_max_diagnostics(ceiling))
+          .$method($text, &mut lent)
+          .expect("a corpus text is short enough for a tree");
+        let refused = parsed.tree().refused_errors();
+        assert_eq!(
+          lent.len() + refused,
+          parsed.error_count(),
+          "{} as a {}, ceiling {ceiling}: a sink that never breaks was not called `error_count()` \
+           times less the refused errors",
+          $name,
+          $kind
+        );
+        assert_eq!(
+          parsed.is_valid(),
+          parsed.error_count() == 0,
+          "{} as a {}, ceiling {ceiling}: the verdict is not the count's",
+          $name,
+          $kind
+        );
+        assert_eq!(
+          parsed.is_valid(),
+          !parsed.tree().has_errors(),
+          "{} as a {}, ceiling {ceiling}: the verdict is not the tree's",
+          $name,
+          $kind
+        );
+        assert_eq!(
+          parsed.is_valid(),
+          whole.is_valid(),
+          "{} as a {}, ceiling {ceiling}: the ceiling moved the verdict",
+          $name,
+          $kind
+        );
+        assert_eq!(
+          parsed.tree().green(),
+          whole.tree().green(),
+          "{} as a {}, ceiling {ceiling}: the ceiling moved the tree",
+          $name,
+          $kind
+        );
+        assert_eq!(
+          parsed.document(),
+          whole.document(),
+          "{} as a {}, ceiling {ceiling}: the ceiling moved the document",
+          $name,
+          $kind
+        );
+        assert_eq!(
+          parsed.recovery(),
+          whole.recovery(),
+          "{} as a {}, ceiling {ceiling}: the ceiling moved the recovery",
+          $name,
+          $kind
+        );
+        let kept = parsed.tree().diagnostics();
+        let all = whole.tree().diagnostics();
+        assert!(
+          kept.len() <= ceiling && kept.len() <= all.len(),
+          "{} as a {}, ceiling {ceiling}: the tree keeps {} diagnostics, of the whole parse's {}",
+          $name,
+          $kind,
+          kept.len(),
+          all.len()
+        );
+        assert_eq!(
+          kept,
+          &all[..kept.len()],
+          "{} as a {}, ceiling {ceiling}: the diagnostics kept are not the first the whole parse \
+           keeps",
+          $name,
+          $kind
+        );
+        assert_eq!(
+          refused,
+          error_diagnostics(whole.tree()).saturating_sub(error_diagnostics(parsed.tree())),
+          "{} as a {}, ceiling {ceiling}: the errors refused are not the whole parse's error \
+           diagnostics less the tree's",
+          $name,
+          $kind
+        );
+        if refused > 0 {
+          refusing += 1;
+        }
+      }
+      refusing
+    }};
+  }
+
+  /// The three laws under a ceiling on kept diagnostics, over the whole corpus read as both
+  /// document kinds, at ceilings of 0, 1 and 2, beside the same reading under no ceiling. Law 1
+  /// counts what the tree refused. The verdict, the tree, the document and the recovery are the
+  /// whole parse's; the tree keeps at most the ceiling's diagnostics, and they are the first the
+  /// whole parse keeps; and what it refused is the whole parse's error diagnostics less its own.
+  ///
+  /// The floor: the test above holds at least 20 broken readings, and at a ceiling of 0 each of
+  /// them refuses an error, so at least 20 pairs of a reading and a ceiling refuse one.
+  #[test]
+  fn the_laws_hold_and_the_answer_stays_under_a_ceiling_on_kept_records() {
+    let mut refusing = 0usize;
+    for (name, text) in corpus("") {
+      refusing += under_ceilings!(type_system_document, name, "schema", text.as_str());
+      refusing += under_ceilings!(executable_document, name, "query", text.as_str());
+    }
+    println!("{refusing} pairs of a corpus reading and a ceiling refused an error");
+    assert!(
+      refusing >= 20,
+      "only {refusing} pairs of a corpus reading and a ceiling refused an error"
     );
   }
 

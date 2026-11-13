@@ -5465,6 +5465,89 @@ fn foreign_root_parse<'a>(src: &'a str, root: u16) -> smear::parser::graphqlx::l
     .expect("the permissive profile admits the root")
 }
 
+/// The count of refused errors leaves through the public `finish_root` too, by the road
+/// [`foreign_root_parse`] takes. A root emits one error, an empty container at `0..0`, into a
+/// recording emitter the caller made: with a ceiling of 0 the error is counted and not kept, so
+/// the `Parse` keeps no diagnostic and still has an error; with no ceiling it is kept.
+#[test]
+fn finish_root_carries_the_errors_its_emitter_refused() {
+  use smear::parser::{
+    graphqlx::lossless::{Brand, GraphqlxLosslessErrors, Lexer, LexerState},
+    lossless::runner::finish_root,
+  };
+  use tokora::{
+    InputRef, SimpleSpan,
+    cache::DefaultCache,
+    cst::{CstProfile, KindValidator, Sink, parse_lossless},
+    emitter::Verbose,
+    span::Spanned,
+  };
+
+  type Lx<'a> = Lexer<'a, str>;
+  type Em<'a> = Verbose<GraphqlxLosslessErrors<&'a str>, SimpleSpan, Brand>;
+  type Ctx<'a> = (Sink<'a, Lx<'a>, Em<'a>>, DefaultCache<'a, Lx<'a>>);
+
+  fn unmapped<T>(_: &T) -> u16 {
+    0
+  }
+
+  /// `src` under a root that emits one error and consumes nothing, recorded by `emitter`, and
+  /// minted through `finish_root`.
+  fn minted<'a>(src: &'a str, emitter: Em<'a>) -> smear::parser::graphqlx::lossless::Parse {
+    let profile = CstProfile::new(
+      unmapped as fn(&_) -> u16,
+      KindValidator::accept_all(),
+      GraphQLxLang::kind_to_raw(K::Error).0,
+      GraphQLxLang::kind_to_raw(K::Gap).0,
+    );
+    let (cst, _) = parse_lossless::<Lx<'a>, Brand, Em<'a>, DefaultCache<'a, Lx<'a>>, (), _>(
+      src,
+      LexerState::default(),
+      emitter,
+      profile,
+      DefaultCache::<'a, Lx<'a>>::default(),
+      |inp: &mut InputRef<'a, '_, Lx<'a>, Ctx<'a>, Brand>| {
+        let _ = inp.emit_error(Spanned::new(
+          SimpleSpan::new(0, 0),
+          GraphqlxLosslessErrors::<&'a str>::default(),
+        ));
+        Ok(())
+      },
+    );
+    finish_root::<GraphQLxLang, Lx<'a>, Em<'a>>(
+      cst,
+      GraphQLxLang::kind_to_raw(K::TypeSystemDocument).0,
+      "a permissive profile",
+    )
+    .expect("the permissive profile admits the root")
+  }
+
+  let refused = minted("x", Em::with_max_diagnostics(0));
+  assert!(
+    refused.diagnostics().is_empty(),
+    "a ceiling of 0 kept a diagnostic: {:?}",
+    refused.diagnostics()
+  );
+  assert_eq!(
+    refused.refused_errors(),
+    1,
+    "the error the emitter refused is not in the parse"
+  );
+  assert!(
+    refused.has_errors(),
+    "a parse whose one error was refused reads as clean"
+  );
+
+  let kept = minted("x", Em::new());
+  assert_eq!(
+    kept.diagnostics().len(),
+    1,
+    "with no ceiling the error is not kept"
+  );
+  assert_eq!(kept.refused_errors(), 0);
+  assert!(kept.has_errors());
+}
+
 /// **Codex rounds 2 and 4 on al8n/smear#217/#218.** A `Parse` whose root is not this dialect's
 /// document root is refused by every projection door — never projected, never reported complete.
 ///
