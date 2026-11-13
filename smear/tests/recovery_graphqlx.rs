@@ -220,6 +220,10 @@ mod lossless {
         !inside.iter().any(|scalar: &String| scalar == "scalar Z"),
         "{what}: the document went on past the refusal"
       );
+      // The module never closes, and nothing but what the refusal left unread follows it.
+      let held =
+        super::braces::faithful(&answer.tree).unwrap_or_else(|why| panic!("{what}: {why}"));
+      assert_eq!(held.read, 1, "{what}");
     }
   }
 
@@ -279,6 +283,10 @@ mod lossless {
       answer.reports, 4,
       "one report for each `)` and one for the refusal"
     );
+    // Three modules that never close, one inside the other, and the refused one inside them, with
+    // nothing but what the refusal left unread after them.
+    let held = super::braces::faithful(&answer.tree).unwrap_or_else(|why| panic!("{why}"));
+    assert_eq!(held.read, 4);
   }
 
   // ── The reverse direction ──────────────────────────────────────────────────────────────────
@@ -650,6 +658,9 @@ mod lossless {
     assert_eq!(usize::from(m.text_range().end()), text.len());
     assert_eq!(scalars(&m), ["scalar Z"]);
     assert_eq!(kinds(&top(&answer.tree)), [K::ModDefinition]);
+    // The module never closes, at the end of the text.
+    let held = super::braces::faithful(&answer.tree).unwrap_or_else(|why| panic!("{why}"));
+    assert_eq!(held.read, 1);
 
     // A `}` too many: the module ends at the first, and the second is a stray at the top.
     let answer = read("mod m { scalar X } } scalar Z");
@@ -657,6 +668,8 @@ mod lossless {
     assert_eq!(scalars(&module(&answer.tree, "mod m")), ["scalar X"]);
     assert_eq!(scalars(&top(&answer.tree)), ["scalar Z"]);
     assert_eq!(answer.recovery, Recovery::new(3, 1));
+    let held = super::braces::faithful(&answer.tree).unwrap_or_else(|why| panic!("{why}"));
+    assert_eq!(held.read, 1);
   }
 
   #[test]
@@ -839,22 +852,21 @@ mod lossless {
       .expect("the document's node")
   }
 
-  /// The external review's witness of its third round, and its kin. The list has taken its own
-  /// `(` and the second `(` is junk; the skip that takes it opens a brace inside the parenthesis
-  /// it opened, and the closer inside that brace closes that parenthesis. The skip stops before
-  /// the list's own `)`, the list closes on it, `A` keeps its directive and `B` is read whole. A
-  /// skip that kept its count of the other pairs in its predicate, which tokora asks only outside
-  /// the skip's braces, never saw that closer: it took the list's `)` to clear the count, and the
-  /// list read `scalar` as an argument's name and failed at `B`.
+  /// The witnesses of the review's third and fourth rounds, and the third's kin. The list has taken
+  /// its own `(` and the second `(` is junk; the skip that takes it opens a brace, and closers
+  /// inside that brace close the parentheses the skip opened. One depth over every pair, the skip's
+  /// count, comes back to zero exactly before the list's own `)`, so the skip stops there, the list
+  /// closes on it, `A` keeps its directive and `B` is read whole.
   ///
-  /// The closer is a `)`, a `]` or a `>`, and in the fourth row it stands in a brace the skip
-  /// opened inside a brace the skip opened. The last row is the other place this count parts from
-  /// one depth over every pair: a `)` in the skip's brace with none of the other pairs open
-  /// leaves the count at zero, and the skip goes on to the brace's own `}`. One depth over every
-  /// pair fell to zero at that `)` and ended the skip at `x`, inside the brace, and the list then
-  /// failed on the `}` after `x` and took `A` with it.
+  /// Two versions of the scan lost `B` here, each by taking the list's own `)` to bring a count of
+  /// its own to zero, after which the list read `scalar` as an argument's name and failed at `B`.
+  /// The scan of round two (005e784c) counted the other pairs only outside its braces and never
+  /// saw the closer inside one: the first four rows refuse it, the closer a `)`, a `]` or a `>`,
+  /// and in the fourth a brace inside a brace. The scan of round three (fc85192c) counted them
+  /// inside its braces too but let the count saturate there, so the `( (` after the brace raised
+  /// it past one depth: the last row refuses it.
   #[test]
-  fn a_skip_counts_its_pairs_inside_its_own_braces() {
+  fn a_skip_keeps_the_lists_own_closer() {
     for (text, a) in [
       ("scalar A @d(( { ) } ) scalar B", "scalar A @d(( { ) } )"),
       ("scalar A @d(( { ] } ) scalar B", "scalar A @d(( { ] } )"),
@@ -864,8 +876,8 @@ mod lossless {
         "scalar A @d(( { { ) } } )",
       ),
       (
-        "scalar A @d(( { ) ) x } ) scalar B",
-        "scalar A @d(( { ) ) x } )",
+        "scalar A @d(( { ) ) ( ( } ) ) scalar B",
+        "scalar A @d(( { ) ) ( ( } ) )",
       ),
     ] {
       for (root, tree, _) in at_both_roots(text) {
@@ -878,25 +890,61 @@ mod lossless {
     }
   }
 
-  /// The third round's witness inside a module: `B` is an item of `m`, and `m` is faithful to
-  /// the braces as written. The skip that lost `B` lost it here too, and the body's skip then took
-  /// `B` with the wreckage of `A`.
+  /// The two witnesses of [`a_skip_keeps_the_lists_own_closer`] that each lost `B`, inside a
+  /// module: `B` is an item of `m`, and `m` is faithful to the braces as written. A scan that lost
+  /// `B` lost it here too, the body's skip taking it after the list's failure.
   #[test]
-  fn a_skip_counts_its_pairs_inside_its_own_braces_in_a_module() {
-    let text = "mod m { scalar A @d(( { ) } ) scalar B }";
-    for (root, tree, _) in at_both_roots(text) {
-      assert_eq!(
-        scalars(&module(&tree, "mod m")),
-        ["scalar A @d(( { ) } )", "scalar B"],
-        "{text} at the {root} root"
-      );
-      let held = super::braces::faithful(&tree)
-        .unwrap_or_else(|why| panic!("{text} at the {root} root: {why}"));
-      assert_eq!(
-        (held.read, held.broken),
-        (1, 1),
-        "{text} at the {root} root"
-      );
+  fn a_skip_keeps_the_lists_own_closer_in_a_module() {
+    for (text, a) in [
+      (
+        "mod m { scalar A @d(( { ) } ) scalar B }",
+        "scalar A @d(( { ) } )",
+      ),
+      (
+        "mod m { scalar A @d(( { ) ) ( ( } ) ) scalar B }",
+        "scalar A @d(( { ) ) ( ( } ) )",
+      ),
+    ] {
+      for (root, tree, _) in at_both_roots(text) {
+        assert_eq!(
+          scalars(&module(&tree, "mod m")),
+          [a, "scalar B"],
+          "{text} at the {root} root"
+        );
+        let held = super::braces::faithful(&tree)
+          .unwrap_or_else(|why| panic!("{text} at the {root} root: {why}"));
+        assert_eq!(
+          (held.read, held.broken),
+          (1, 1),
+          "{text} at the {root} root"
+        );
+      }
+    }
+  }
+
+  /// One depth over every pair can come back to zero inside a brace the skip opened, a `)` closing
+  /// the `{`, and the skip then stops at the next restart point there, the brace left open behind
+  /// it, as the scan before the rule of the braces did and as this one does on purpose. At a root
+  /// that keeps what the brace holds: the skip stops at `scalar B`, the root reads `B`, takes the
+  /// stray `}` and reads `C`. A scan that never stopped inside a brace it opened (fc85192c) took
+  /// `scalar B }` into its hole, and lost `B`.
+  ///
+  /// The same stop in an argument list is the old answer, kept on purpose and pinned here: the skip
+  /// stops at `x` inside its brace, the list reads `x` as an argument's name and fails on the `}`
+  /// after it, `A` is lost with it, and the root reads `B` after skipping to it.
+  #[test]
+  fn a_skip_stops_inside_a_brace_it_opened_as_it_always_did() {
+    for (text, kept) in [
+      ("( { ) ) scalar B } scalar C", &["scalar B", "scalar C"][..]),
+      ("scalar A @d(( { ) ) x } ) scalar B", &["scalar B"][..]),
+    ] {
+      for (root, tree, _) in at_both_roots(text) {
+        assert_eq!(
+          scalars(&document_of(&tree)),
+          kept,
+          "{text} at the {root} root"
+        );
+      }
     }
   }
 

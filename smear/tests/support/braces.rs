@@ -18,10 +18,18 @@
 //! description, its `mod` and its name can stand in front of, and its own `}` is the one at which
 //! the count from that `{`, over every brace of the node at every depth, returns to zero.
 //!
+//! # A module that never closes ends the text
+//!
+//! A body ends at its own `}`, at the end of the text, or at a refusal that ends the document, and
+//! nothing else ends it. So a module whose `{` was read and whose count never comes back to zero
+//! stands at the end of the text, or in front of what a refusal left unread, which is a gap tile:
+//! once the walk has left such a module, every later token is trivia or a gap. A real token after
+//! it is how a body that returned early would look, and is named with the module it follows.
+//!
 //! Shared by the sweeps that parse broken texts, `lossless_x_mutation.rs`,
 //! `lossless_x_roundtrip.rs` and `lossless_x_parity.rs`, and by `recovery_graphqlx.rs`.
 
-use rowan::{NodeOrToken, WalkEvent};
+use rowan::{NodeOrToken, TextRange, WalkEvent};
 use smear::parser::graphqlx::{kinds::SyntaxKind as K, lossless::SyntaxNode};
 
 /// What a walk read: how many modules, and how many of those hold an `Error` node.
@@ -61,6 +69,8 @@ pub fn faithful(tree: &SyntaxNode) -> Result<Modules, String> {
   let mut modules = Modules::default();
   let mut open: Vec<Open> = Vec::new();
   let mut count: i64 = 0;
+  // The first module the walk has left with its `{` read and its count never back at zero.
+  let mut unclosed: Option<TextRange> = None;
   for event in tree.preorder_with_tokens() {
     match event {
       WalkEvent::Enter(NodeOrToken::Node(node)) => match node.kind() {
@@ -91,6 +101,9 @@ pub fn faithful(tree: &SyntaxNode) -> Result<Modules, String> {
             .pop()
             .expect("a module the walk leaves is one it entered");
           modules.read += 1;
+          if done.base.is_some() && !done.closed && unclosed.is_none() {
+            unclosed = Some(done.node.text_range());
+          }
           if done.broken {
             modules.broken += 1;
             if let Some(around) = open.last_mut() {
@@ -103,6 +116,15 @@ pub fn faithful(tree: &SyntaxNode) -> Result<Modules, String> {
         let kind: K = token.kind();
         if is_trivia(kind) {
           continue;
+        }
+        if let Some(left) = unclosed
+          && kind != K::Gap
+        {
+          return Err(std::format!(
+            "the module at {left:?} never closes its braces, and `{}` at {:?} follows it",
+            token.text(),
+            token.text_range()
+          ));
         }
         let Some(innermost) = open.last_mut() else {
           match kind {

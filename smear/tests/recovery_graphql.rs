@@ -146,22 +146,35 @@ mod lossless {
     assert_eq!(answer.definitions, 1);
   }
 
-  /// The external review's witness of its third round, and its kin, at both roots that hold a
-  /// type. The list has taken its own `(` and the second `(` is junk; the skip that takes it opens
-  /// a brace inside the parenthesis it opened, and the closer inside that brace closes that
-  /// parenthesis. The skip stops before the list's own `)`, the list closes on it, `A` keeps its
-  /// directive and `B` is read whole. A skip that kept its count of the other pairs in its
-  /// predicate, which tokora asks only outside the skip's braces, never saw that closer: it took
-  /// the list's `)` to clear the count, and the list read `scalar` as an argument's name and
-  /// failed at `B`.
+  /// The scalars `text` keeps at the type-system root, through the layer, and at the mixed root,
+  /// through the door: each must be `kept`.
+  fn keeps_at_both_roots(text: &str, kept: &[&str]) {
+    let answer = read(text);
+    assert!(answer.errors, "{text}");
+    assert_eq!(top_level_scalars(&answer.tree), kept, "{text}");
+    let mixed: SyntaxNode = parse_document(text).syntax();
+    assert_eq!(
+      entries(&mixed, K::Document, K::ScalarTypeDefinition),
+      kept,
+      "{text} at the mixed root"
+    );
+  }
+
+  /// The witnesses of the review's third and fourth rounds, and the third's kin, at both roots
+  /// that hold a type. The list has taken its own `(` and the second `(` is junk; the skip that
+  /// takes it opens a brace, and closers inside that brace close the parentheses the skip opened.
+  /// One depth over every pair, the skip's count, comes back to zero exactly before the list's own
+  /// `)`, so the skip stops there, the list closes on it, `A` keeps its directive and `B` is read
+  /// whole.
   ///
-  /// The closer is a `)` or a `]`, and in the third row it stands in a brace the skip opened
-  /// inside a brace the skip opened. In the last row a `)` in the skip's brace with none of the
-  /// other pairs open leaves the count at zero, and the skip goes on to the brace's own `}`,
-  /// where one depth over every pair fell to zero, ended the skip at `x` inside the brace, and
-  /// lost `A` to the list's failure on the `}` after it.
+  /// Two versions of the scan lost `B` here, each by taking the list's own `)` to bring a count of
+  /// its own to zero, after which the list read `scalar` as an argument's name and failed at `B`.
+  /// The scan of round two (005e784c) counted the other pairs only outside its braces: the first
+  /// three rows refuse it, the closer a `)` or a `]`, and in the third a brace inside a brace. The
+  /// scan of round three (fc85192c) let its count of the other pairs saturate inside the brace,
+  /// so the `( (` after it raised the count past one depth: the last row refuses it.
   #[test]
-  fn a_skip_counts_its_pairs_inside_its_own_braces() {
+  fn a_skip_keeps_the_lists_own_closer() {
     for (text, a) in [
       ("scalar A @d(( { ) } ) scalar B", "scalar A @d(( { ) } )"),
       ("scalar A @d(( { ] } ) scalar B", "scalar A @d(( { ] } )"),
@@ -170,20 +183,27 @@ mod lossless {
         "scalar A @d(( { { ) } } )",
       ),
       (
-        "scalar A @d(( { ) ) x } ) scalar B",
-        "scalar A @d(( { ) ) x } )",
+        "scalar A @d(( { ) ) ( ( } ) ) scalar B",
+        "scalar A @d(( { ) ) ( ( } ) )",
       ),
     ] {
-      let answer = read(text);
-      assert!(answer.errors, "{text}");
-      assert_eq!(top_level_scalars(&answer.tree), [a, "scalar B"], "{text}");
-      let mixed: SyntaxNode = parse_document(text).syntax();
-      assert_eq!(
-        entries(&mixed, K::Document, K::ScalarTypeDefinition),
-        [a, "scalar B"],
-        "{text} at the mixed root"
-      );
+      keeps_at_both_roots(text, &[a, "scalar B"]);
     }
+  }
+
+  /// One depth over every pair can come back to zero inside a brace the skip opened, and the skip
+  /// then stops at the next restart point there, the brace left open behind it, as the scan before
+  /// the rule of the braces did and as this one does on purpose. At a root that keeps `B` and `C`:
+  /// the root reads `B`, takes the stray `}` and reads `C`. A scan that never stopped inside a
+  /// brace it opened (fc85192c) took `scalar B }` into its hole and lost `B`.
+  ///
+  /// In an argument list the same stop is the old answer, kept on purpose and pinned here: the
+  /// skip stops at `x` inside its brace, the list reads `x` as an argument's name and fails on the
+  /// `}` after it, `A` is lost with it, and the root reads `B` after skipping to it.
+  #[test]
+  fn a_skip_stops_inside_a_brace_it_opened_as_it_always_did() {
+    keeps_at_both_roots("( { ) ) scalar B } scalar C", &["scalar B", "scalar C"]);
+    keeps_at_both_roots("scalar A @d(( { ) ) x } ) scalar B", &["scalar B"]);
   }
 
   /// A variables definition that meets a `}` reports its `)` as missing and leaves the brace.
