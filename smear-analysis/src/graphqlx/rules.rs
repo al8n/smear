@@ -30,6 +30,7 @@ mod generic_enum;
 mod marker_misuse;
 mod non_zero_argument;
 mod orphan_extension;
+mod repr_misuse;
 mod schema_outside_root;
 mod type_ref_misuse;
 
@@ -37,8 +38,8 @@ use self::{
   collection_arity::CollectionArity, duplicate_schema_definition::DuplicateSchemaDefinition,
   duplicate_type_parameter::DuplicateTypeParameter, extern_misuse::ExternMisuse,
   generic_enum::GenericEnum, marker_misuse::MarkerMisuse, non_zero_argument::NonZeroArgument,
-  orphan_extension::OrphanExtension, schema_outside_root::SchemaOutsideRoot,
-  type_ref_misuse::TypeRefMisuse,
+  orphan_extension::OrphanExtension, repr_misuse::ReprMisuse,
+  schema_outside_root::SchemaOutsideRoot, type_ref_misuse::TypeRefMisuse,
 };
 use super::{Contribution, Cx, DefId, Model, PackageId, TypeExprId, TypeExprKind, id::dense};
 
@@ -285,8 +286,9 @@ rule_set! {
   /// markers alone; a set has one type parameter and a map two; `TypeRef` stands only in a
   /// directive's arguments; `NonZero`'s argument is an integer primitive at least one bit wide,
   /// written without `!`; a definition's type parameters have distinct names, and so do the names
-  /// an extension's own list gives them; and `@extern` binds a scalar its own package defines,
-  /// once for each language.
+  /// an extension's own list gives them; `@extern` binds a scalar its own package defines, once
+  /// for each language; and `@repr` writes `for` on the schema alone, and chooses once for each
+  /// language at a position and for each type and language on the schema.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -300,6 +302,7 @@ rule_set! {
     duplicate_type_parameter: DuplicateTypeParameter
       => [super::DiagnosticKind::DuplicateTypeParameter.code()],
     extern_misuse: ExternMisuse => [super::DiagnosticKind::ExternMisuse.code()],
+    repr_misuse: ReprMisuse => [super::DiagnosticKind::ReprMisuse.code()],
   }
 }
 

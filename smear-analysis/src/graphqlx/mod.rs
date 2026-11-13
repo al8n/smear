@@ -118,8 +118,10 @@
 //! earlier one is `smear::graphqlx::duplicate-type-parameter`. And `@extern` binds a scalar its
 //! own package defines, once for each language: an extern whose `lang` an earlier one of its
 //! scalar has, and an `@extern` the root package writes on a GraphQL built-in its own definition
-//! replaces, are each `smear::graphqlx::extern-misuse`. A rule says nothing about a contribution a
-//! phase already refused something in.
+//! replaces, are each `smear::graphqlx::extern-misuse`. And `@repr` writes `for` on the schema
+//! alone, where it names a type, and chooses once for each language at a position and for each
+//! type and language on the schema: anything else is `smear::graphqlx::repr-misuse`. A rule says
+//! nothing about a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

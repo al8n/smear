@@ -27,6 +27,7 @@ DiagnosticKind::ModuleTypeCollision = smear::graphqlx::module-type-collision
 DiagnosticKind::NonZeroArgument = smear::graphqlx::nonzero-argument
 DiagnosticKind::NonZeroZero = smear::graphqlx::nonzero-zero
 DiagnosticKind::OrphanExtension = smear::graphqlx::orphan-extension
+DiagnosticKind::ReprMisuse = smear::graphqlx::repr-misuse
 DiagnosticKind::ReservedPackageName = smear::graphqlx::reserved-package-name
 DiagnosticKind::ResourceLimit = smear::graphqlx::resource-limit
 DiagnosticKind::SchemaOutsideRoot = smear::graphqlx::schema-outside-root

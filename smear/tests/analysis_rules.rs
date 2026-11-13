@@ -53,6 +53,9 @@ const DUPLICATE_TYPE_PARAMETER: &str = "smear::graphqlx::duplicate-type-paramete
 /// The code for `@extern` misused.
 const EXTERN_MISUSE: &str = "smear::graphqlx::extern-misuse";
 
+/// The code for `@repr` misused.
+const REPR_MISUSE: &str = "smear::graphqlx::repr-misuse";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1363,6 +1366,7 @@ const FIXTURES: &[(Code, Fixture)] = &[
     two_type_parameters_of_one_name,
   ),
   (Code::new(EXTERN_MISUSE), one_language_bound_twice),
+  (Code::new(REPR_MISUSE), a_for_on_a_field),
 ];
 
 /// A root package that defines its schema twice.
@@ -1446,6 +1450,11 @@ fn one_language_bound_twice() -> Analysis {
     "type Query {\n  x: Int\n}\n\
      scalar M @extern(lang: \"rust\", type: \"a\") @extern(lang: \"rust\", type: \"b\")\n",
   )
+}
+
+/// A root package whose field's `@repr` writes `for`, which is the schema's alone.
+fn a_for_on_a_field() -> Analysis {
+  analyze_one("type Query {\n  x: Int @repr(lang: \"rust\", type: \"i64\", for: Int)\n}\n")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

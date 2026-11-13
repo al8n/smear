@@ -230,6 +230,13 @@ pub enum DiagnosticKind {
   /// definition or its extension, is reported at its path, a built-in's host type being given by
   /// `@repr(for: …)` on the schema alone.
   ExternMisuse,
+  /// `core`'s `@repr` misused. `for` names the type the schema chooses a default host type for: an
+  /// `@repr` on the schema whose `for` is absent or `null` is reported at its path, and one on a
+  /// field, an argument or an input field that writes `for` at `for`'s name. A position chooses
+  /// its host type once in each language, and the schema once for each type and language: an
+  /// `@repr` whose `lang`, or whose `for` and `lang`, an earlier one there has is reported at its
+  /// path, with a label at the earlier.
+  ReprMisuse,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -274,6 +281,7 @@ impl DiagnosticKind {
     Self::NonZeroArgument,
     Self::DuplicateTypeParameter,
     Self::ExternMisuse,
+    Self::ReprMisuse,
     Self::ResourceLimit,
   ];
 
@@ -316,6 +324,7 @@ impl DiagnosticKind {
       Self::NonZeroArgument => Code::new("smear::graphqlx::nonzero-argument"),
       Self::DuplicateTypeParameter => Code::new("smear::graphqlx::duplicate-type-parameter"),
       Self::ExternMisuse => Code::new("smear::graphqlx::extern-misuse"),
+      Self::ReprMisuse => Code::new("smear::graphqlx::repr-misuse"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -358,6 +367,7 @@ impl DiagnosticKind {
       Self::NonZeroArgument => "invalid `NonZero` argument",
       Self::DuplicateTypeParameter => "duplicate type parameter",
       Self::ExternMisuse => "`@extern` misused",
+      Self::ReprMisuse => "`@repr` misused",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -400,6 +410,7 @@ impl DiagnosticKind {
       | Self::NonZeroArgument
       | Self::DuplicateTypeParameter
       | Self::ExternMisuse
+      | Self::ReprMisuse
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }

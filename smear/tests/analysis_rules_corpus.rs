@@ -1033,4 +1033,20 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
     ["smear::schema::invalid-directive-argument-value"]
   );
   tolerant(&analysis, "a language bound twice beside a value refused");
+
+  // A field's `@repr` that writes `for`, whose `lang` did not coerce: coercion's diagnostic alone.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[(
+      "schema.graphqlx",
+      "type Query {\n  x: Int @repr(lang: 1, type: \"i64\", for: Int)\n}\n",
+    )],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(
+    codes(&analysis),
+    ["smear::schema::invalid-directive-argument-value"]
+  );
+  tolerant(&analysis, "a position's `for` beside a value refused");
 }

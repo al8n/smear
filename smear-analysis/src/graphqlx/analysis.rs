@@ -343,8 +343,12 @@ impl Analysis {
 ///   with a label at the first of that name. An extern of a scalar whose `lang` an earlier extern
 ///   of the scalar has, the cooked strings compared, is `extern-misuse`, at its `@extern`'s path,
 ///   with a label at the earlier's; and so is each `@extern` the root package writes on a GraphQL
-///   built-in its own definition replaces, in that definition or its own extension. A rule says
-///   nothing about a contribution a phase already refused something in.
+///   built-in its own definition replaces, in that definition or its own extension. An `@repr`
+///   on the schema whose `for` is absent or `null` is `repr-misuse`, at its path, and so is one on
+///   a field, an argument or an input field that writes `for`, at `for`'s name; and so is an
+///   `@repr` whose `lang` an earlier one of its position has, or on the schema whose `for` and
+///   `lang` an earlier one of the schema's has, at its path, with a label at the earlier. A rule
+///   says nothing about a contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

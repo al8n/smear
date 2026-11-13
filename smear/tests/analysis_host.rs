@@ -4,8 +4,9 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Collection, DefId, Diagnostic, Extern, Layout, Limits, Model, Namespace, Package,
-    PackageId, SourceFile, SourceId, Tier, ValueId, ValueKind, analyze,
+    Analysis, ApplicationArgument, ApplicationId, Collection, DefId, Diagnostic, Extern, Layout,
+    Limits, Model, Namespace, Package, PackageId, Resolution, SourceFile, SourceId, Tier, ValueId,
+    ValueKind, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -21,6 +22,8 @@ const COLLECTION: &str = "smear::graphqlx::collection-literal";
 const EXTERN_MISUSE: &str = "smear::graphqlx::extern-misuse";
 /// The code for an extension of a definition its package may not extend.
 const ORPHAN: &str = "smear::graphqlx::orphan-extension";
+/// The code for `@repr` misused.
+const REPR_MISUSE: &str = "smear::graphqlx::repr-misuse";
 
 /// A package named `name`, `Flat`, at `tier`, holding `files`, `(path, text)`.
 fn package<'a>(name: &'a str, tier: Tier, files: &[(&'a str, &'a str)]) -> Package<&'a str> {
@@ -108,6 +111,24 @@ fn externs<'m>(model: &'m Model, name: &str) -> Vec<(&'m str, &'m str, Tier)> {
     .def(type_def(model, name))
     .externs()
     .map(|bound: Extern<'m>| (bound.lang(), bound.r#type(), bound.tier()))
+    .collect()
+}
+
+/// The arguments of `application`, each as its name and its value: a string quoted, and a type
+/// value as the name of the definition it names.
+fn shown_arguments(model: &Model, application: ApplicationId) -> Vec<String> {
+  model
+    .application(application)
+    .arguments()
+    .iter()
+    .map(|argument: &ApplicationArgument| {
+      let name = model.member(argument.argument()).name();
+      match model.value(argument.value()).kind() {
+        ValueKind::String(text) => format!("{name}: {text:?}"),
+        ValueKind::Type { def, .. } => format!("{name}: {}", model.def(def).name()),
+        other => format!("{name}: {other:?}"),
+      }
+    })
     .collect()
 }
 
@@ -503,5 +524,197 @@ fn extern_misuse_says_nothing_where_a_phase_spoke() {
   assert_eq!(
     externs(analysis.model(), "^::app::M"),
     [("rust", "a", Tier::Std), ("rust", "b", Tier::Std)]
+  );
+}
+
+/// On the schema, `@repr` names with `for` the type it chooses for: one whose `for` is absent or
+/// `null` is `repr-misuse`, at its path; one that names a type says nothing, in a schema definition
+/// and in the root package's schema extension. Refuses `for` left unchecked, and `null` taken for a
+/// type.
+#[test]
+fn repr_on_the_schema_names_its_type_with_for() {
+  let text = "schema @repr(lang: \"rust\", type: \"x\") @repr(for: null, lang: \"rust\", type: \"y\") \
+              {\n  query: Query\n}\ntype Query {\n  x: Int\n}\n";
+  let analysis = analyze_text(text);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    labelled(&analysis, &[REPR_MISUSE]),
+    [
+      (REPR_MISUSE, at(schema, text, "repr", 0), None),
+      (REPR_MISUSE, at(schema, text, "repr", 1), None),
+    ]
+  );
+
+  let analysis = analyze_text(
+    "schema @repr(for: bytes, lang: \"rust\", type: \"smol_bytes::Bytes\") {\n  query: Query\n}\n\
+     type Query {\n  x: Int\n}\nextend schema @repr(for: string, lang: \"rust\", type: \"String\")\n",
+  );
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// `for` is written on the schema alone: an `@repr` that writes it on a field, a field's argument,
+/// a directive definition's argument or an input field, `null` included, is `repr-misuse`, at
+/// `for`'s name. Refuses a check of the schema alone.
+#[test]
+fn for_is_written_on_the_schema_alone() {
+  let text = "type Query {\n  a: Int @repr(lang: \"rust\", type: \"i32\", for: Int)\n  \
+              b(x: Int @repr(lang: \"rust\", type: \"i32\", for: Int)): Int\n  \
+              c: Int @repr(lang: \"rust\", type: \"i32\", for: null)\n}\n\
+              directive @d(y: Int @repr(lang: \"rust\", type: \"i32\", for: Int)) on OBJECT\n\
+              input I {\n  z: Int @repr(lang: \"rust\", type: \"i32\", for: Int)\n}\n";
+  let analysis = analyze_text(text);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  let expected: Vec<(&str, Location, Option<Location>)> = (0..5)
+    .map(|nth: usize| (REPR_MISUSE, at(schema, text, "for", nth), None))
+    .collect();
+  assert_eq!(labelled(&analysis, &[REPR_MISUSE]), expected);
+}
+
+/// A position chooses its host type once in each language: the later of two `@repr`s of one
+/// `lang` on one field is `repr-misuse`, at its path, labelled at the earlier's. A field and its
+/// argument are two positions, and `rust` and `typescript` two languages. Refuses a field and its
+/// argument taken for one position.
+#[test]
+fn a_positions_lang_is_written_once() {
+  let text = "type Query {\n  \
+              a: Int @repr(lang: \"rust\", type: \"i32\") @repr(lang: \"rust\", type: \"i64\")\n  \
+              b(x: Int @repr(lang: \"rust\", type: \"i32\")): Int @repr(lang: \"rust\", type: \"i32\")\n  \
+              c: Int @repr(lang: \"rust\", type: \"i32\") @repr(lang: \"typescript\", type: \"number\")\n}\n";
+  let analysis = analyze_text(text);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    labelled(&analysis, &[REPR_MISUSE]),
+    [(
+      REPR_MISUSE,
+      at(schema, text, "repr", 1),
+      Some(at(schema, text, "repr", 0))
+    )]
+  );
+}
+
+/// The schema chooses once for each type and language: the later of two `@repr`s of one `for` and
+/// one `lang`, across the schema definition and the root package's extension, is `repr-misuse`,
+/// at its path, labelled at the earlier's; `String` and `string` name one type. A pair that
+/// differs in either says nothing. Refuses a pair told by its spelling, and `lang` alone made
+/// unique on the schema.
+#[test]
+fn the_schemas_for_and_lang_are_written_once() {
+  let text = "schema @repr(for: bytes, lang: \"rust\", type: \"a\") {\n  query: Query\n}\n\
+              type Query {\n  x: Int\n}\nextend schema @repr(for: bytes, lang: \"rust\", type: \"b\")\n";
+  let analysis = analyze_text(text);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    labelled(&analysis, &[REPR_MISUSE]),
+    [(
+      REPR_MISUSE,
+      at(schema, text, "repr", 1),
+      Some(at(schema, text, "repr", 0))
+    )]
+  );
+
+  let analysis = analyze_text(
+    "schema @repr(for: bytes, lang: \"rust\", type: \"a\") @repr(for: string, lang: \"rust\", \
+     type: \"b\") @repr(for: bytes, lang: \"typescript\", type: \"c\") {\n  query: Query\n}\n\
+     type Query {\n  x: Int\n}\n",
+  );
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  let text = "schema @repr(for: String, lang: \"rust\", type: \"a\") @repr(for: string, lang: \
+              \"rust\", type: \"b\") {\n  query: Query\n}\ntype Query {\n  x: Int\n}\n";
+  let analysis = analyze_text(text);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    labelled(&analysis, &[REPR_MISUSE]),
+    [(
+      REPR_MISUSE,
+      at(schema, text, "repr", 1),
+      Some(at(schema, text, "repr", 0))
+    )]
+  );
+}
+
+/// `@repr` is read off its applications, found by `Builtins::repr`: a field's answers its typed
+/// `lang` and `type`, and the schema's its `for` as the type value of the definition it names.
+/// Refuses a model that lost what the applications hold.
+#[test]
+fn repr_is_read_off_its_applications() {
+  let analysis = analyze_text(
+    "schema @repr(for: bytes, lang: \"rust\", type: \"smol_bytes::Bytes\") {\n  query: Query\n}\n\
+     type Query {\n  x: Int @repr(lang: \"rust\", type: \"i64\")\n}\n",
+  );
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  let repr = model.builtins().repr();
+  let field = model
+    .def(type_def(model, "^::app::Query"))
+    .fields()
+    .into_iter()
+    .next()
+    .expect("the field `x`");
+  let on_field = model.member(field).applications()[0];
+  assert_eq!(
+    model.application(on_field).directive(),
+    Resolution::Resolved(repr)
+  );
+  assert_eq!(
+    shown_arguments(model, on_field),
+    ["lang: \"rust\"", "type: \"i64\""]
+  );
+  let on_schema = model.schema().applications()[0];
+  assert_eq!(
+    model.application(on_schema).directive(),
+    Resolution::Resolved(repr)
+  );
+  assert_eq!(
+    shown_arguments(model, on_schema),
+    [
+      "lang: \"rust\"",
+      "type: \"smol_bytes::Bytes\"",
+      "for: bytes"
+    ]
+  );
+}
+
+/// Where `@repr` may stand is not this rule's: on an object type and on an enum value it says
+/// nothing.
+#[test]
+fn repr_where_it_may_not_stand_is_not_this_rules() {
+  let analysis = analyze_text(
+    "type Query {\n  x: Int\n}\ntype Q @repr(lang: \"rust\", type: \"x\") {\n  y: Int\n}\n\
+     enum E {\n  A @repr(lang: \"rust\", type: \"x\")\n}\n",
+  );
+  assert!(labelled(&analysis, &[REPR_MISUSE]).is_empty());
+}
+
+/// Sixty-five `@repr`s on one field, of distinct `lang`s but the last, which is the third's: one
+/// diagnostic, at the last, labelled at the third. Refuses a search that stops at sixty-four.
+#[test]
+fn sixty_five_reprs_find_their_duplicate() {
+  let mut reprs: Vec<String> = (0..64)
+    .map(|k: usize| format!("@repr(lang: \"l{k}\", type: \"t\")"))
+    .collect();
+  reprs.push(String::from("@repr(lang: \"l2\", type: \"t\")"));
+  let text = format!("type Query {{\n  x: Int {}\n}}\n", reprs.join(" "));
+  let analysis = analyze_text(&text);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    labelled(&analysis, &[REPR_MISUSE]),
+    [(
+      REPR_MISUSE,
+      at(schema, &text, "repr", 64),
+      Some(at(schema, &text, "repr", 2))
+    )]
   );
 }

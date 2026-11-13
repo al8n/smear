@@ -486,7 +486,12 @@ All notable changes to Smear are documented in this file.
   package defines, once for each language: an extern whose `lang` an earlier extern of its scalar
   has, the cooked strings compared, and an `@extern` the root package writes on a GraphQL built-in
   its own definition replaces, are each the new `smear::graphqlx::extern-misuse`, at the
-  `@extern`'s path. A rule says nothing about a contribution a
+  `@extern`'s path. And `@repr` writes `for` on the schema alone, where it names a type, and
+  chooses once for each language at a position and for each type and language on the schema: an
+  `@repr` on the schema whose `for` is absent or `null`, one at a position that writes `for`, and
+  one whose `lang`, or on the schema whose `for` and `lang`, an earlier one there has, are each the
+  new `smear::graphqlx::repr-misuse`. The model keeps `@repr` as its applications, with their
+  typed arguments, read through `Builtins::repr`. A rule says nothing about a contribution a
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models
   it builds, for `smear`'s own tests; it is not API.
