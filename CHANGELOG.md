@@ -177,7 +177,13 @@ All notable changes to Smear are documented in this file.
   `generic-default`; and an application's count of type arguments is checked against its
   directive's. An occurrence that cannot be typed, or holds one that cannot, has the unresolved
   type. `Model::instantiations` lists the closed types a generic definition's written occurrences
-  resolve to. A new `Limits::max_substitutions`, 2^20 by default, bounds the steps of substitution
+  resolve to. `Model::satisfies` answers whether a type satisfies an interface or a marker, and the
+  new `Model::satisfies_ty` whether it satisfies one interface type exactly, the `!` of its
+  arguments included, both read off what the model holds and nothing stored: by declaration,
+  through the `implements` entries of a named type's definition under its arguments and the bounds
+  of a type parameter, with `core`'s `MapKey` satisfied intrinsically by every integer primitive,
+  `bool`, `string`, `id`, every enum and `NonZero` of an integer primitive. A new
+  `Limits::max_substitutions`, 2^20 by default, bounds the steps of substitution
   filling defaults takes, and `Limits::max_generic_depth`, a list counting a level, and
   `Limits::max_instantiations`, every distinct instantiation counting once whatever its nullness,
   are enforced: each occurrence past one is `resource-limit` where it is written, and the built-in

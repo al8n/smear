@@ -11,6 +11,7 @@ use crate::graphqlx::{
 
 use super::{
   Model,
+  satisfy::{Steps, Wanted},
   table::{KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED, PathRow, TyRow, TypeExprRow},
 };
 
@@ -187,17 +188,67 @@ impl Model {
       .of(&self.instantiations)
   }
 
-  /// Whether `ty` satisfies the interface or marker `interface`: through an `implements` it
-  /// declares, or intrinsically, as every integer primitive, `bool`, `string`, `id` and every enum
-  /// satisfies `core`'s `MapKey`.
+  /// Whether `ty` satisfies the interface or marker `interface`: for an interface that takes type
+  /// parameters, whether it satisfies some instantiation of it, whichever.
+  /// [`satisfies_ty`](Self::satisfies_ty) asks about one instantiation, exactly. For an interface
+  /// that takes none, a marker among them, the two are one question: `satisfies(ty,
+  /// model.builtins().map_key())` is whether `ty` may be a map's key or a set's element.
+  ///
+  /// Satisfaction is by declaration:
+  ///
+  /// - non-null is transparent on `ty`: `User!` satisfies what `User` does;
+  /// - a list, and the unresolved type, satisfy nothing;
+  /// - a named type satisfies what it is; each interface its definition's `implements` entries
+  ///   write, every contribution's, with its own arguments in place of the definition's type
+  ///   parameters; and `core`'s `MapKey` intrinsically when it is an integer primitive, `bool`,
+  ///   `string`, `id`, an enum, or `NonZero` of an integer primitive, each told by its definition
+  ///   and never by a spelling;
+  /// - a type parameter satisfies each interface one of its definition's bounds on it names, and
+  ///   each interface that bound's interface declares, with the bound's arguments in place of the
+  ///   interface's parameters;
+  /// - an interface that an interface declares is satisfied only by a type that declares it too,
+  ///   as GraphQL's rule on transitive interfaces asks of every type that implements an interface.
   ///
   /// [`Def::implements`](super::Def::implements) lists only what is written; this answers whether
-  /// the type may stand where the interface is required.
-  //
-  // No phase records a satisfaction yet, so every pair answers `false`.
+  /// the type may stand where the interface is required. Nothing is stored: a call costs the
+  /// `implements` entries of the type's definition, or for a type parameter its definition's bounds
+  /// and the entries of each bound's interface.
   #[inline]
   pub fn satisfies(&self, ty: TyId, interface: DefId) -> bool {
-    self.satisfactions.binary_search(&(ty, interface)).is_ok()
+    self
+      .judge(
+        &self.keys(),
+        ty,
+        Wanted::Definition(interface),
+        &mut Steps::uncounted(),
+      )
+      .unwrap_or(false)
+  }
+
+  /// Whether `ty` satisfies the interface type `interface`, exactly: an interface with its every
+  /// type argument, compared as one type, the `!` of each of its arguments included. `User`, which
+  /// declares `Comparable<User>`, satisfies `Comparable<User>` and not `Comparable<User!>`.
+  ///
+  /// It answers as [`satisfies`](Self::satisfies) does, with each interface type a definition
+  /// declares, or a bound names, compared with `interface`: a named type's `implements` entry is
+  /// compared with its type's own arguments in place of its definition's type parameters, and a
+  /// bound's interface's entry with the bound's arguments in place. An `interface` that is no
+  /// interface type, or a non-null one, which no `implements` entry and no bound writes, is
+  /// satisfied by nothing.
+  ///
+  /// Nothing is stored: a call costs the `implements` entries of the type's definition, or for a
+  /// type parameter its definition's bounds and the entries of each bound's interface, and for an
+  /// entry that names a type parameter, the distinct nodes of its type, each compared once.
+  #[inline]
+  pub fn satisfies_ty(&self, ty: TyId, interface: TyId) -> bool {
+    self
+      .judge(
+        &self.keys(),
+        ty,
+        Wanted::Type(interface),
+        &mut Steps::uncounted(),
+      )
+      .unwrap_or(false)
   }
 }
 

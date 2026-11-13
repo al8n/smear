@@ -29,7 +29,8 @@
 //! complete instantiation with defaults filled and an alias expanded, each type interned once;
 //! every application with its type arguments and its arguments, and every value as written; and the
 //! schema, with its contributions, one for each schema item, its description, its roots, written or
-//! presumed, and its applications. The phases that write the rest of it, satisfaction, values and
+//! presumed, and its applications. [`Model::satisfies`] and [`Model::satisfies_ty`] answer what a
+//! type satisfies, read off what it declares. The phases that write the rest of it, values and
 //! tiers, are still to come.
 //!
 //! ```

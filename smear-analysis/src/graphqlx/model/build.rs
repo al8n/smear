@@ -26,10 +26,11 @@
 //! Lowering resolves each type occurrence and each application as it appends it. The later phases
 //! write onto rows already appended, and read what is written so far through `read`, which never
 //! indexes past a table: instantiation gives definitions their built-in meaning and occurrences
-//! their types, interning each type where it first needs it, and adds instantiations; no phase
-//! adds a satisfaction yet; coercion gives values their shapes and types; the tier phase gives
-//! definitions and types their tiers. What none of them wrote keeps the neutral value its row was
-//! appended with, which the accessors document.
+//! their types, interning each type where it first needs it, and adds instantiations; coercion
+//! gives values their shapes and types; the tier phase gives definitions and types their tiers.
+//! What none of them wrote keeps the neutral value its row was appended with, which the accessors
+//! document. What a type satisfies is no row: it is read off the rows, by the finished model and
+//! by a phase alike.
 //!
 //! # The checks
 //!
@@ -911,9 +912,9 @@ impl ModelBuilder {
   /// The finished model.
   ///
   /// It derives what is derived: each module's children and definitions, each definition's
-  /// instantiations, the sorted lookup tables and the built-ins. It gives every type occurrence and
-  /// value no phase gave a type the one unresolved type, and applies the marks. Under
-  /// `debug_assertions` it then checks every table's order.
+  /// instantiations, the sorted table of second names and the built-ins. It gives every type
+  /// occurrence and value no phase gave a type the one unresolved type, and applies the marks.
+  /// Under `debug_assertions` it then checks every table's order.
   pub fn finish(mut self) -> Model {
     self.fill_types();
     self.derive_modules();
@@ -1061,12 +1062,10 @@ impl ModelBuilder {
     }
   }
 
-  /// The sorted tables a lookup searches: the satisfactions, each once, and the aliases, by module,
-  /// then the namespace of the definition each names, then name, the first added kept when a
-  /// module gives one name twice in one namespace.
+  /// The sorted table a lookup searches: the aliases, by module, then the namespace of the
+  /// definition each names, then name, the first added kept when a module gives one name twice in
+  /// one namespace.
   fn derive_lookups(&mut self) {
-    self.model.satisfactions.sort_unstable();
-    self.model.satisfactions.dedup();
     let defs: &[DefRow] = &self.model.defs;
     let aliases: &mut Vec<AliasRow> = &mut self.model.aliases;
     // The sort is stable, so among aliases with one key the first added stays first, and is kept.

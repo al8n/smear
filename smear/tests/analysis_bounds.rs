@@ -1,11 +1,12 @@
 //! The GraphQLx analyzer's bounds: a bound's right side is an interface, which lowering checks
-//! where the bound is written.
+//! where the bound is written; and what a type satisfies, by definition and exactly, which the
+//! model reads off what the type declares.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, DefId, Diagnostic, Layout, Limits, Model, Namespace, Package, PackageId, SourceFile,
-    SourceId, Tier, analyze,
+    Analysis, DefId, Diagnostic, Layout, Limits, MemberId, Model, Namespace, Package, PackageId,
+    SourceFile, SourceId, Tier, TyId, TyKind, TypeExprId, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -110,6 +111,132 @@ fn messages(analysis: &Analysis) -> Vec<String> {
     .iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .collect()
+}
+
+/// The type `id`, written out: a definition's name, with its arguments in `<>` when it has any; a
+/// type parameter as its definition's name, `#` and its index; a list in `[]`; the unresolved type
+/// as `?`; and `!` after a type that is non-null.
+fn shown(model: &Model, id: TyId) -> String {
+  let ty = model.ty(id);
+  let mut text = match ty.kind() {
+    TyKind::Named { def, args, .. } => {
+      let name = model.def(def).name();
+      if args.is_empty() {
+        String::from(name)
+      } else {
+        let args: Vec<String> = args.iter().map(|arg: &TyId| shown(model, *arg)).collect();
+        format!("{name}<{}>", args.join(", "))
+      }
+    }
+    TyKind::Param { def, index, .. } => format!("{}#{index}", model.def(def).name()),
+    TyKind::List { element, .. } => format!("[{}]", shown(model, element)),
+    _ => String::from("?"),
+  };
+  if ty.non_null() {
+    text.push('!');
+  }
+  text
+}
+
+/// The occurrence that is the type of the field `field` of the definition the canonical name
+/// `owner` names.
+fn field_occurrence(model: &Model, owner: &str, field: &str) -> TypeExprId {
+  let member = model
+    .def(def(model, owner))
+    .fields()
+    .into_iter()
+    .find(|id: &MemberId| model.member(*id).name() == field)
+    .unwrap_or_else(|| panic!("no field `{field}` in `{owner}`"));
+  model.member(member).ty().expect("a field has a type")
+}
+
+/// The type of the field `field` of the definition the canonical name `owner` names.
+fn field_type(model: &Model, owner: &str, field: &str) -> TyId {
+  model.type_expr(field_occurrence(model, owner, field)).ty()
+}
+
+/// `Node`, `Comparable` and `Ord`, which declares `Comparable`; `User`, which declares `Node` and
+/// `Comparable<User>`, and `Other`, which declares `Comparable<User>` too; a definition whose
+/// parameter is bounded by `Ord`; and a type whose fields have every type the accessors are asked
+/// about.
+const ASKED: &str = "interface Node {\n  id: ID\n}\n\
+                     interface Comparable<X> {\n  compare(other: X): Int\n}\n\
+                     interface Ord<X> implements Comparable<X> {\n  compare(other: X): Int\n}\n\
+                     type User implements Node & Comparable<User> {\n  id: ID\n  \
+                     compare(other: User): Int\n}\n\
+                     type Other implements Comparable<User> {\n  compare(other: User): Int\n}\n\
+                     type Outer<U> where U: Ord<U> {\n  u: U\n  ord: Ord<U>\n  \
+                     cmp: Comparable<U>\n}\n\
+                     type Probe {\n  user: User\n  sure: User!\n  other: Other\n  node: Node\n  \
+                     int: Int\n  name: String!\n  float: Float\n  alias: NonZeroU32\n  \
+                     generic: NonZero<u32>\n  float_key: NonZero<f64>\n  users: [User]\n  \
+                     by_user: Comparable<User>\n  by_other: Comparable<Other>\n  \
+                     by_sure: Comparable<User!>\n}\n";
+
+#[test]
+fn satisfies_answers_by_definition_and_satisfies_ty_exactly() {
+  let analysis = analyze_one(ASKED);
+  let model = analysis.model();
+  let probe = |field: &str| -> TyId { field_type(model, "^::app::Probe", field) };
+  // Each type is the one meant.
+  for (field, written) in [
+    ("sure", "User!"),
+    ("name", "string!"),
+    ("float", "f64"),
+    ("alias", "NonZero<u32>"),
+    ("float_key", "NonZero<f64>"),
+    ("by_sure", "Comparable<User!>"),
+  ] {
+    assert_eq!(shown(model, probe(field)), written, "{field}");
+  }
+  let node = def(model, "^::app::Node");
+  let comparable = def(model, "^::app::Comparable");
+  let ord = def(model, "^::app::Ord");
+  let map_key = model.builtins().map_key();
+
+  // By definition, some instantiation of `Comparable`: each declares one.
+  assert!(model.satisfies(probe("user"), comparable));
+  assert!(model.satisfies(probe("other"), comparable));
+  // Exactly: `User` declares `Comparable<User>`, and `Other` declares it too, and not
+  // `Comparable<Other>`.
+  assert!(model.satisfies_ty(probe("user"), probe("by_user")));
+  assert!(model.satisfies_ty(probe("other"), probe("by_user")));
+  assert!(!model.satisfies_ty(probe("other"), probe("by_other")));
+  // The `!` of an argument is part of the interface type: `User` does not declare
+  // `Comparable<User!>`.
+  assert!(!model.satisfies_ty(probe("user"), probe("by_sure")));
+  // Non-null is transparent on the type asked about.
+  assert!(model.satisfies_ty(probe("sure"), probe("by_user")));
+  assert!(model.satisfies(probe("sure"), node));
+  // An interface satisfies itself.
+  assert!(model.satisfies(probe("node"), node));
+  assert!(model.satisfies_ty(probe("by_user"), probe("by_user")));
+
+  // `MapKey`, intrinsically: an integer and `string`, whatever their nullness, and no float.
+  assert!(model.satisfies(probe("int"), map_key));
+  assert!(model.satisfies(probe("name"), map_key));
+  assert!(!model.satisfies(probe("float"), map_key));
+  // `NonZero` of an integer, read off both its spellings, which are one type; and not of a float.
+  assert_eq!(probe("alias"), probe("generic"));
+  assert!(model.satisfies(probe("alias"), map_key));
+  assert!(!model.satisfies(probe("float_key"), map_key));
+  // A list satisfies nothing.
+  assert!(!model.satisfies(probe("users"), node));
+
+  // `Outer`'s parameter satisfies its bound, `Ord`, exactly `Ord<U>`; and what `Ord` declares,
+  // `Comparable`, exactly `Comparable<U>`; and not `Node`.
+  let u = field_type(model, "^::app::Outer", "u");
+  assert_eq!(shown(model, u), "Outer#0");
+  assert!(model.satisfies(u, ord));
+  assert!(model.satisfies_ty(u, field_type(model, "^::app::Outer", "ord")));
+  assert!(model.satisfies(u, comparable));
+  assert!(model.satisfies_ty(u, field_type(model, "^::app::Outer", "cmp")));
+  assert!(!model.satisfies(u, node));
+
+  // What is no interface on the right is satisfied by nothing, the type itself included.
+  let user = def(model, "^::app::User");
+  assert!(!model.satisfies(probe("user"), user));
+  assert!(!model.satisfies_ty(probe("user"), probe("user")));
 }
 
 #[test]

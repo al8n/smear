@@ -1,5 +1,5 @@
-//! What the phases after instantiation write: each definition's externs and the satisfactions;
-//! the tiers of definitions and types; the shapes and types coercion gives values; and marks.
+//! What the phases after instantiation write: each definition's externs; the tiers of definitions
+//! and types; the shapes and types coercion gives values; and marks.
 //!
 //! GATED ON HAVING A CALLER. The phases still to come are this module's callers, and until each
 //! lands the test-support door is its only caller: a method that no shipped build calls is dead
@@ -34,12 +34,6 @@ impl ModelBuilder {
       &mut row.externs,
       ExternRow { lang, ty, tier },
     );
-  }
-
-  /// Records that `ty` satisfies `interface`, declared or intrinsic. Satisfactions are added in
-  /// any order, and each is kept once.
-  pub fn push_satisfaction(&mut self, ty: TyId, interface: DefId) {
-    self.model.satisfactions.push((ty, interface));
   }
 
   /// Gives `ty` the tier it requires.

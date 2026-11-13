@@ -12,6 +12,7 @@ mod member;
 mod module;
 mod name;
 mod order;
+mod satisfy;
 mod schema;
 mod table;
 mod ty;
@@ -81,8 +82,6 @@ pub struct Model {
   externs: Vec<ExternRow>,
   /// Every generic definition's closed instantiations, one run per definition.
   instantiations: Vec<TyId>,
-  /// Every `(type, interface)` pair the type satisfies, sorted.
-  satisfactions: Vec<(TyId, DefId)>,
   /// Every second name, sorted by module, then the namespace of the definition it names, then
   /// name.
   aliases: Vec<AliasRow>,
@@ -156,7 +155,6 @@ impl Model {
       locations: Vec::new(),
       externs: Vec::new(),
       instantiations: Vec::new(),
-      satisfactions: Vec::new(),
       aliases: Vec::new(),
       members: Vec::new(),
       member_applications: Vec::new(),

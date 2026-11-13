@@ -27,7 +27,12 @@ and arguments as written, what it resolves to, and its type: the complete instan
 argument left out filled from its default and an alias such as `NonZeroU32` expanded, each type
 interned once, so that `==` on two type ids is type equality; every application with its type
 arguments and its arguments, and every value as written; and the schema, with its contributions, one
-for each schema item, its description, its roots, written or presumed, and its applications. Each
+for each schema item, its description, its roots, written or presumed, and its applications.
+`Model::satisfies` answers whether a type satisfies an interface or a marker, and
+`Model::satisfies_ty` whether it satisfies one interface type exactly, its arguments' `!`
+included: by declaration, read off the `implements` entries and the bounds the model holds, with
+`core`'s `MapKey` satisfied intrinsically by every integer primitive, `bool`, `string`, `id`, every
+enum and `NonZero` of an integer primitive. Each
 definition's type parameter defaults are checked where they are written, and each use's count of
 type arguments where it is written. Filling defaults is bounded by `Limits::max_substitutions`, and
 the types it derives by `Limits::max_generic_depth` and `Limits::max_instantiations`. It resolves
