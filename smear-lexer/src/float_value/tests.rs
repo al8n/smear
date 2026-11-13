@@ -157,10 +157,13 @@ fn the_edges_of_each_type_are_read_exactly() {
   assert_eq!(floats(b"3.4028235e38").1, f32::MAX.to_bits());
   assert_eq!(floats(b"1e-45").1, 1);
   // A first significant digit at each edge: 10^308 is finite in `f64`, 10^38 in `f32`, and 10^39
-  // is past `f32`; 10^-400 is zero in both.
+  // is past `f32`; 10^-325 is below half of `f64`'s least subnormal and 10^-46 below half of
+  // `f32`'s, so each is zero there; 10^-400 is zero in both.
   assert_eq!(floats(b"1e308").0, 1e308f64.to_bits());
   assert_eq!(floats(b"1e38").1, 1e38f32.to_bits());
   assert_eq!(floats(b"1e39").1, f32::INFINITY.to_bits());
+  assert_eq!(floats(b"1e-325").0, 0);
+  assert_eq!(floats(b"1e-46").1, 0);
   assert_eq!(floats(b"1e-400"), (0, 0));
 }
 
