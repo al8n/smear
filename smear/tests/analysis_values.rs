@@ -757,6 +757,54 @@ fn a_floats_exponent_is_read_whatever_its_digits_offset() {
   }
 }
 
+/// The first 308 digits of `2^1024 - 2^970`, the least integer that rounds to infinity as a double:
+/// with a final `2` it is that integer, and with a final `1` it is the greatest that rounds to
+/// `f64::MAX`.
+const EDGE_HEAD: &str = concat!(
+  "17976931348623158079372897140530341507993413271003782693617377898044496829276",
+  "47509466490179775872070963302864166928879109465555478519404026306574886715058",
+  "20681908902000708383676273854845817711531764475730270069855571366959622842914",
+  "81986083493647529271907416844436551070434271155969950809304288017790417449779",
+);
+
+#[test]
+fn an_integer_where_a_float_is_expected_is_refused_past_a_doubles_range() {
+  // The greatest integer that rounds to `f64::MAX`, the least that rounds to infinity, 10^308 and
+  // 10^309, as defaults and as a directive's argument: what `smear-schema` and `smear-compiler`
+  // answer for the same literals.
+  let below = format!("{EDGE_HEAD}1");
+  let edge = format!("{EDGE_HEAD}2");
+  let ten_308 = format!("1{}", "0".repeat(308));
+  let ten_309 = format!("{ten_308}0");
+  let text = format!(
+    "type Query {{\n  x: Int\n}}\ninput E {{\n  a: Float = {below}\n  b: Float = {edge}\n  \
+     c: Float = {ten_308}\n  d: Float = {ten_309}\n}}\ndirective @d(x: Float) on OBJECT\n\
+     type T @d(x: {below}) {{\n  f: Int\n}}\ntype U @d(x: {edge}) {{\n  f: Int\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (DEFAULT, after(schema, &text, "b: Float = ", &edge)),
+      (DEFAULT, after(schema, &text, "d: Float = ", &ten_309)),
+      (ARGUMENT, after(schema, &text, "type U @d(x: ", &edge)),
+    ]
+  );
+  let model = analysis.model();
+  for (name, value) in [("a", f64::MAX), ("c", 1e308)] {
+    let ValueKind::Float(float) = model.value(default(model, "E", name)).kind() else {
+      panic!("`E.{name}` is no float");
+    };
+    assert_eq!(float.to_f64().to_bits(), value.to_bits(), "`E.{name}`");
+  }
+  let arguments = arguments_of(model, "T");
+  let ValueKind::Float(float) = model.value(arguments[0].value()).kind() else {
+    panic!("`T`'s `@d(x:)` is no float");
+  };
+  assert_eq!(float.to_f64().to_bits(), f64::MAX.to_bits());
+}
+
 #[test]
 fn an_integer_literal_is_a_float() {
   let long = "1".repeat(400);
