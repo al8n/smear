@@ -325,6 +325,13 @@ All notable changes to Smear are documented in this file.
   sequence, at that sequence's span, and consume the whole comment; the lossless
   error token covers the whole comment. `str` and `HipStr` sources are unchanged
   (#251).
+- `smear-schema`!: an extension of an introspection type adds directives and nothing else, which
+  is a verdict change of a published crate. A document that extends one of the eight
+  `__`-prefixed introspection types with a member, an `implements` entry, a union member or an
+  enum value built in 0.0.1, and is refused now as the new
+  `SchemaErrorKind::IntrospectionTypeExtension`, at the type the extension names, code
+  `smear::schema::introspection-type-extension`. The refused extension contributes nothing, its
+  directives included. An extension that adds directives alone still builds.
 - `smear-schema`: `SchemaErrorKind::UnreadableText` is no longer reachable from
   a parsed document. The kind is kept.
 - Builds on tokora 0.13 and smol-bytes 0.2. Paths through the

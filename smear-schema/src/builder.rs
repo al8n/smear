@@ -3652,6 +3652,28 @@ impl SchemaBuilder {
         );
         continue;
       }
+      // Draft §3 reserves the `__`-prefixed names for "the introspection system as defined by this
+      // specification", and what an extension adds to one of its types beside directives changes
+      // that system. Such an extension contributes nothing, its directives included, as one of the
+      // wrong kind contributes nothing. A type a document defines under an introspection type's
+      // name is not injected, so this reads the injected types alone.
+      let directives_alone = extension.implements.is_empty()
+        && extension.fields.is_empty()
+        && extension.input_fields.is_empty()
+        && extension.members.is_empty()
+        && extension.enum_values.is_empty();
+      if !directives_alone
+        && self.types[index].built_in
+        && is_reserved(self.text(target.sym).as_bytes())
+      {
+        let subject = self.text(target.sym).to_owned();
+        self.push(
+          SchemaErrorKind::IntrospectionTypeExtension,
+          &subject,
+          target,
+        );
+        continue;
+      }
       // Draft §3.10.3(5): "the `@oneOf` directive must not be provided by an Input Object type
       // extension". Here and not in `validate_types` because this is the last moment the
       // provenance exists: one line further down the extension's directives join the definition's
