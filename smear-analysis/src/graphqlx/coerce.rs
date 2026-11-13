@@ -760,13 +760,14 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// budget.
   fn starved(&mut self, at: Location) {
     let kind = DiagnosticKind::ResourceLimit;
+    let max = self.max_steps;
     self.reporter.report(
       Diagnostic::builder(kind.code(), at)
         .severity(kind.severity())
-        .message(
-          "the arguments this application leaves out pass `Limits::max_value_steps`, the steps \
-           the analysis may take to complete values, and are not filled",
-        )
+        .message(format!(
+          "the arguments this application leaves out pass `Limits::max_value_steps`, {max}, the \
+           steps the analysis may take to complete values, and are not filled"
+        ))
         .primary_label(kind.title())
         .help("raise the limit with `Limits::with_max_value_steps`, or write the arguments")
         .build(),
@@ -1607,7 +1608,8 @@ impl<'p> Coercion<'_, 'p, '_> {
         Some(width),
         format!("`{literal}` is out of the range of `{name}`, a 32-bit float"),
         Some(String::from(
-          "a 32-bit float holds the finite values below 2^128 in magnitude",
+          "a 32-bit float holds the values below 2^128 - 2^103 in magnitude; one of that \
+           magnitude or more rounds to infinity",
         )),
       ),
       Why::Zero => (
@@ -1681,13 +1683,14 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Reports that the lists a value written at `at` stands for are past the budget.
   fn lone_limit(&mut self, at: Location) {
     let kind = DiagnosticKind::ResourceLimit;
+    let max = self.max_steps;
     self.reporter.report(
       Diagnostic::builder(kind.code(), at)
         .severity(kind.severity())
-        .message(
+        .message(format!(
           "the lists this value stands for, written where a list is expected, pass \
-           `Limits::max_value_steps`, the steps the analysis may take to complete values",
-        )
+           `Limits::max_value_steps`, {max}, the steps the analysis may take to complete values"
+        ))
         .primary_label(kind.title())
         .help("raise the limit with `Limits::with_max_value_steps`, or write the lists")
         .build(),
