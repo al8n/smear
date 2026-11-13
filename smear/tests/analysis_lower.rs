@@ -1103,6 +1103,115 @@ fn a_built_in_is_extended_by_the_root() {
 }
 
 #[test]
+fn an_alias_names_no_definition_to_extend() {
+  // `NonZeroU32` spells `NonZero<u32>`, and is no definition of its own: there is nothing to
+  // extend. `NonZero` is a definition, and its extension is one of its contributions.
+  let text = "directive @x on SCALAR\nextend scalar NonZeroU32 @x\nextend scalar NonZero @x\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::schema::undefined-extension-target",
+      named(schema, text, "extend scalar ", "NonZeroU32", 0),
+      None
+    )]
+  );
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    diagnostic.to_string(),
+    "`extend scalar` names `NonZeroU32`, a spelling of `NonZero<u32>`, which is no definition of \
+     its own"
+  );
+  assert_eq!(
+    diagnostic.help(),
+    Some("an alias has nothing to extend: extend `NonZero` to reach every width.")
+  );
+  let model = analysis.model();
+  let non_zero = def(model, Namespace::Type, "^::core::NonZero");
+  let parts: Vec<(Location, bool, Vec<String>)> = model
+    .def(non_zero)
+    .contributions()
+    .map(|part: Contribution<'_>| {
+      (
+        part.location(),
+        part.is_extension(),
+        applications(model, part.applications()),
+      )
+    })
+    .collect();
+  assert_eq!(parts.len(), 2);
+  assert_eq!(
+    (parts[1].0, parts[1].1, parts[1].2.clone()),
+    (
+      named(schema, text, "extend scalar ", "NonZero", 0),
+      true,
+      vec![String::from("@x=x")]
+    )
+  );
+  assert!(parts[0].2.is_empty());
+
+  // A path with a root reaches no alias: name resolution finds no definition of that name in
+  // `core`'s root module, and refuses it there; nothing joins `NonZero`.
+  let text = "directive @x on SCALAR\nextend scalar ^::core::NonZeroU32 @x\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let codes: Vec<(&str, Location)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
+    .collect();
+  assert_eq!(
+    codes,
+    [(
+      "smear::graphqlx::unresolved-path",
+      named(schema, text, "^::core::", "NonZeroU32", 0)
+    )]
+  );
+  let model = analysis.model();
+  let non_zero = def(model, Namespace::Type, "^::core::NonZero");
+  assert_eq!(model.def(non_zero).contributions().count(), 1);
+}
+
+#[test]
+fn an_alias_occurrence_keeps_its_spelling_and_names_non_zero() {
+  let text = "type T {\n  a: NonZeroU32!\n  b: [NonZeroI8]\n}\n";
+  let analysis = analyze_one(text);
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let schema = schema_file(&analysis);
+  let t = def(model, Namespace::Type, "^::app::T");
+  // The path as written, naming `NonZero`, with no argument written: the instantiation is
+  // instantiation's.
+  assert_eq!(
+    member_types(model, model.def(t).fields()),
+    ["NonZeroU32=NonZero!", "[NonZeroI8=NonZero]"]
+  );
+  let a = model
+    .member(ids(model.def(t).fields())[0])
+    .ty()
+    .expect("typed");
+  let TypeExprKind::Named {
+    def: named_def,
+    args,
+    ..
+  } = model.type_expr(a).kind()
+  else {
+    panic!("`NonZeroU32` names `NonZero`");
+  };
+  assert_eq!(named_def, def(model, Namespace::Type, "^::core::NonZero"));
+  assert!(args.is_empty());
+  assert_eq!(
+    model.type_expr(a).path_location(),
+    Some(named(schema, text, "a: ", "NonZeroU32", 0))
+  );
+}
+
+#[test]
 fn a_mismatched_extension_of_a_long_name_quotes_an_excerpt() {
   let name = "E".repeat(4096);
   let text = format!("enum {name} {{\n  A\n}}\nextend type {name} {{\n  f: Int\n}}\n");

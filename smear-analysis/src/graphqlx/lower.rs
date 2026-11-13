@@ -7,7 +7,10 @@
 //! directive`, with no generic parameter in scope. A target that names nothing is reported by name
 //! resolution, where it is written. A target that names a definition of another kind than the
 //! extension's keyword is reported as `extension-kind-mismatch`, at the target, with a label at the
-//! definition. Either way the extension contributes nothing and nothing inside it is lowered: one
+//! definition. A target that is an alias, `NonZeroU32` and its kin, spells an instantiation of
+//! `core`'s `NonZero` and is no definition of its own: it is reported at the target, with GraphQL's
+//! `undefined-extension-target` when it is one segment with no root and `unresolved-path`
+//! otherwise. Each way the extension contributes nothing and nothing inside it is lowered: one
 //! mistake, one diagnostic. Every other extension is a contribution of its target, after the
 //! definition's own, by source id and position wherever each is written: named where its target
 //! path is written, and spanning from its `extend` to its last token. The parameter names an
@@ -140,7 +143,7 @@ use smear_parser::graphqlx::ast::{
 use tokora::{SimpleSpan, diagnostic::Location, span::AsSpan};
 
 use super::{
-  builtin::TYPE,
+  builtin::{TYPE, spelled},
   code::{DiagnosticKind, schema},
   collect::{Items, unknown_item},
   declare::{Binding, Declaration, Declarations, Entry, Item},
@@ -494,18 +497,22 @@ impl Lowering<'_, '_> {
       position: Position::ExtensionTarget,
       params: &[],
     };
+    let location = Location::new(source.get(), *path.span());
     let target = match self
       .scopes
       .resolve(&*self.builder, self.reporter, &request, path)
     {
       Resolved::Def(def) => def,
-      // `NonZeroU32` and its kin name `core`'s `NonZero`.
-      Resolved::NonZero { non_zero, .. } => non_zero,
+      // `NonZeroU32` and its kin spell an instantiation of `core`'s `NonZero`, and are no
+      // definitions of their own: there is nothing to extend.
+      Resolved::NonZero { primitive, .. } => {
+        self.alias(declarations, keyword, path, primitive, location);
+        return None;
+      }
       // Name resolution has reported a target that names nothing. A type or a directive is
       // wanted, which no module is, and no parameter is in scope.
       Resolved::Module(_) | Resolved::Param(_) | Resolved::Unresolved => return None,
     };
-    let location = Location::new(source.get(), *path.span());
     let found = declarations.defs.get(target.get() as usize)?.kind;
     if found != keyword {
       let definition = self.builder.def_location(target);
@@ -518,6 +525,50 @@ impl Lowering<'_, '_> {
       location,
       extent: Location::new(source.get(), *item.span()),
     })
+  }
+
+  /// Reports an extension whose keyword extends a definition of the kind `keyword`, while its
+  /// target `path`, written at `at`, is an alias: a spelling of `core`'s `NonZero` of the
+  /// primitive whose definition is `primitive`, which is no definition of its own. A name of one
+  /// segment with no root keeps GraphQL's code for a target that names no definition.
+  fn alias<S: AsRef<[u8]>>(
+    &mut self,
+    declarations: &Declarations<'_, '_>,
+    keyword: DefKind,
+    path: &Path<S>,
+    primitive: DefId,
+    at: Location,
+  ) {
+    let name: &[u8] = match path.segments().last() {
+      Some(last) => last.source().as_ref(),
+      None => &[],
+    };
+    // The primitives `core` materialises are the first definitions, each at its own index.
+    let instance = match declarations.primitives.get(primitive.get() as usize) {
+      Some(&(written, def)) if def == primitive => format!("NonZero<{}>", spelled(written)),
+      _ => String::from("NonZero"),
+    };
+    let (code, title) = if path.root().is_relative() && path.segments().len() == 1 {
+      (
+        schema::UNDEFINED_EXTENSION_TARGET,
+        "extension target is not defined",
+      )
+    } else {
+      let kind = DiagnosticKind::UnresolvedPath;
+      (kind.code(), kind.title())
+    };
+    self.reporter.report(
+      Diagnostic::builder(code, at)
+        .message(format!(
+          "`extend {}` names `{}`, a spelling of `{}`, which is no definition of its own",
+          keyword_of(keyword),
+          Excerpt(name),
+          Excerpt(instance.as_bytes())
+        ))
+        .primary_label(title)
+        .help("an alias has nothing to extend: extend `NonZero` to reach every width.")
+        .build(),
+    );
   }
 
   /// Reports an extension whose keyword extends a definition of the kind `keyword`, while its

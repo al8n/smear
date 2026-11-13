@@ -109,8 +109,10 @@ All notable changes to Smear are documented in this file.
   it is written, of the namespace wanted, within `Limits::max_near_miss_comparisons` names
   looked at over the whole analysis. Lowering then writes what each definition holds beyond its
   identity. Each extension's target is resolved where the extension is written; one that names a
-  definition of another kind than its keyword is `smear::schema::extension-kind-mismatch`, and it
-  and one that names nothing contribute nothing. A definition holds its contributions, its own,
+  definition of another kind than its keyword is `smear::schema::extension-kind-mismatch`, one
+  that is an alias such as `NonZeroU32`, which spells an instantiation of `NonZero` and is no
+  definition of its own, is `smear::schema::undefined-extension-target`, and these and one that
+  names nothing contribute nothing. A definition holds its contributions, its own,
   named where its name is written, then each extension's, by source and position, named where
   its target path is written; its type parameters; a directive definition's locations and whether
   it is `repeatable`; and its members, the direct members of each contribution in turn as written
