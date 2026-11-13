@@ -174,10 +174,6 @@ const ALLOWED: &[Allowed] = &[
   every("smear::schema::circular-non-null-input-field", CYCLES),
   every("smear::schema::circular-one-of-input-field", CYCLES),
   every("smear::schema::input-object-default-value-cycle", CYCLES),
-  every("smear::schema::empty-fields-definition", PART_2_2),
-  every("smear::schema::empty-union-members", PART_2_2),
-  every("smear::schema::empty-enum-values", PART_2_2),
-  every("smear::schema::empty-input-fields", PART_2_2),
   every("smear::schema::field-type-not-output-type", PART_2_2),
   every("smear::schema::argument-type-not-input-type", PART_2_2),
   every("smear::schema::input-field-type-not-input-type", PART_2_2),
@@ -223,6 +219,34 @@ const ALLOWED: &[Allowed] = &[
   beside_a_phase(
     "smear::schema::duplicate-field-name",
     "schema-derivatives-perpfutures.graphql",
+  ),
+  beside_a_phase(
+    "smear::schema::empty-fields-definition",
+    "implements.graphql",
+  ),
+  beside_a_phase(
+    "smear::schema::empty-fields-definition",
+    "implements_amp.graphql",
+  ),
+  beside_a_phase(
+    "smear::schema::empty-fields-definition",
+    "implements_amp_canonical.graphql",
+  ),
+  beside_a_phase(
+    "smear::schema::empty-fields-definition",
+    "implements_interface.graphql",
+  ),
+  beside_a_phase(
+    "smear::schema::empty-fields-definition",
+    "omen-subgraph_schema.graphql",
+  ),
+  beside_a_phase(
+    "smear::schema::empty-fields-definition",
+    "pancake-subgraph_subgraphs_pairs_schema.graphql",
+  ),
+  beside_a_phase(
+    "smear::schema::empty-fields-definition",
+    "pancake-subgraph_subgraphs_pancake-squad_schema.graphql",
   ),
 ];
 

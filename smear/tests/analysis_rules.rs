@@ -67,6 +67,12 @@ const DUPLICATE_ENUM_VALUE: &str = "smear::schema::duplicate-enum-value";
 const DUPLICATE_INPUT_FIELD_NAME: &str = "smear::schema::duplicate-input-field-name";
 const DUPLICATE_DIRECTIVE_ARGUMENT_NAME: &str = "smear::schema::duplicate-directive-argument-name";
 
+/// GraphQL's codes for a definition that holds members and holds none, by its kind.
+const EMPTY_FIELDS_DEFINITION: &str = "smear::schema::empty-fields-definition";
+const EMPTY_UNION_MEMBERS: &str = "smear::schema::empty-union-members";
+const EMPTY_ENUM_VALUES: &str = "smear::schema::empty-enum-values";
+const EMPTY_INPUT_FIELDS: &str = "smear::schema::empty-input-fields";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1464,6 +1470,10 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(DUPLICATE_DIRECTIVE_ARGUMENT_NAME),
     a_duplicate_directive_argument,
   ),
+  (Code::new(EMPTY_FIELDS_DEFINITION), an_empty_type),
+  (Code::new(EMPTY_UNION_MEMBERS), an_empty_union),
+  (Code::new(EMPTY_ENUM_VALUES), an_empty_enum),
+  (Code::new(EMPTY_INPUT_FIELDS), an_empty_input_object),
 ];
 
 /// A root package that defines its schema twice.
@@ -1596,6 +1606,26 @@ fn a_duplicate_input_field() -> Analysis {
 /// A directive's argument declared twice.
 fn a_duplicate_directive_argument() -> Analysis {
   analyze_one("type Query { ok: Int } directive @d(a: Int, a: String) on FIELD")
+}
+
+/// An object type with no field.
+fn an_empty_type() -> Analysis {
+  analyze_one("type Query { ok: Int } type Empty")
+}
+
+/// A union with no member.
+fn an_empty_union() -> Analysis {
+  analyze_one("type Query { ok: Int } union U")
+}
+
+/// An enum with no value.
+fn an_empty_enum() -> Analysis {
+  analyze_one("type Query { ok: Int } enum E")
+}
+
+/// An input object with no field.
+fn an_empty_input_object() -> Analysis {
+  analyze_one("type Query { ok: Int } input In")
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

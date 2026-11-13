@@ -313,7 +313,10 @@ All notable changes to Smear are documented in this file.
   whose name an earlier member of its list has, a definition's own members and its extensions'
   being one list and a field's arguments another, is `duplicate-field-name`,
   `duplicate-argument-name`, `duplicate-enum-value`, `duplicate-input-field-name` or
-  `duplicate-directive-argument-name`, with a label at the first. A rule says nothing about a
+  `duplicate-directive-argument-name`, with a label at the first; and an object, or an interface
+  that is no marker, with no field, a union with no member, an enum with no value and an input
+  object with no field, its extensions' members counted, is `empty-fields-definition`,
+  `empty-union-members`, `empty-enum-values` or `empty-input-fields`. A rule says nothing about a
   contribution a phase already refused something in. On every GraphQL document of smear's corpora the analyzer
   is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
   divergence it allows. A new `test-support` feature, which `smear/test-support`

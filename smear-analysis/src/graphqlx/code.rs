@@ -479,4 +479,18 @@ pub(crate) mod schema {
   /// `DuplicateDirectiveArgumentName`.
   pub(crate) const DUPLICATE_DIRECTIVE_ARGUMENT_NAME: Code =
     Code::new("smear::schema::duplicate-directive-argument-name");
+
+  /// An object, or an interface that is no marker, holds no field: `smear-schema`'s
+  /// `EmptyFieldsDefinition`.
+  pub(crate) const EMPTY_FIELDS_DEFINITION: Code =
+    Code::new("smear::schema::empty-fields-definition");
+
+  /// A union holds no member: `smear-schema`'s `EmptyUnionMembers`.
+  pub(crate) const EMPTY_UNION_MEMBERS: Code = Code::new("smear::schema::empty-union-members");
+
+  /// An enum holds no value: `smear-schema`'s `EmptyEnumValues`.
+  pub(crate) const EMPTY_ENUM_VALUES: Code = Code::new("smear::schema::empty-enum-values");
+
+  /// An input object holds no field: `smear-schema`'s `EmptyInputFields`.
+  pub(crate) const EMPTY_INPUT_FIELDS: Code = Code::new("smear::schema::empty-input-fields");
 }

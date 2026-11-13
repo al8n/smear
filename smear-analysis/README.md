@@ -71,7 +71,9 @@ do the names an extension's own list gives them, a type parameter with the name 
 being `smear::graphqlx::duplicate-type-parameter`. And what a definition a supplied package
 wrote holds keeps GraphQL's own rules, with GraphQL's codes: a member whose name begins with `__` is
 `smear::schema::reserved-field-name`, or the code of what else it is, and a member whose name an
-earlier member of its list has is `smear::schema::duplicate-field-name`, or the code of its list. An
+earlier member of its list has is `smear::schema::duplicate-field-name`, or the code of its list,
+and a definition that holds members and holds none, its extensions' counted, is
+`smear::schema::empty-fields-definition`, or the code of its kind, a marker holding none. An
 error that a phase or a rule reports marks the contributions, members and definitions that hold it,
 as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error marks
 nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and

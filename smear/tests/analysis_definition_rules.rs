@@ -1,6 +1,7 @@
 //! The GraphQLx analyzer's rules on what a definition holds, each GraphQL's own with GraphQL's
-//! code: a member's name does not begin with two underscores, and a definition's members have
-//! distinct names, and so have a field's arguments. Each rule judges what a supplied
+//! code: a member's name does not begin with two underscores; a definition's members have distinct
+//! names, and so have a field's arguments; and a definition that holds members holds one at least.
+//! Each rule judges what a supplied
 //! package's definition holds, says nothing within what a phase refused, and quotes a name only as
 //! an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -33,6 +34,26 @@ const DUPLICATE_ARGUMENT: &str = "smear::schema::duplicate-argument-name";
 const DUPLICATE_ENUM_VALUE: &str = "smear::schema::duplicate-enum-value";
 const DUPLICATE_INPUT_FIELD: &str = "smear::schema::duplicate-input-field-name";
 const DUPLICATE_DIRECTIVE_ARGUMENT: &str = "smear::schema::duplicate-directive-argument-name";
+
+/// GraphQL's codes for a definition that holds members and holds none, by its kind.
+const EMPTY_FIELDS: &str = "smear::schema::empty-fields-definition";
+const EMPTY_UNION: &str = "smear::schema::empty-union-members";
+const EMPTY_ENUM: &str = "smear::schema::empty-enum-values";
+const EMPTY_INPUT: &str = "smear::schema::empty-input-fields";
+
+/// The code of an `implements` entry that names nothing, a phase's.
+const UNDEFINED_INTERFACE: &str = "smear::schema::undefined-implements-interface";
+
+/// The code of an extension its package may not write, the orphan rule's.
+const ORPHAN: &str = "smear::graphqlx::orphan-extension";
+
+/// What GraphQL tells the author of an object or an interface with no field.
+const FIELDS_HELP: &str = "an object or interface type must define at least one field.";
+
+/// What the analyzer tells the author of an interface with no field that is no marker.
+const INTERFACE_HELP: &str = "an object or interface type must define at least one field. An \
+                              interface that says what a type is and holds nothing is a marker, \
+                              and takes `@marker`.";
 
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
 fn package(
@@ -86,6 +107,24 @@ fn at(source: SourceId, text: &str, needle: &str, nth: usize) -> Location {
     .map(|(start, _): (usize, &str)| start)
     .unwrap_or_else(|| panic!("`{needle}` does not occur {} times", nth + 1));
   Location::new(source.get(), SimpleSpan::new(start, start + needle.len()))
+}
+
+/// Where the `nth`, counting from 0, of the names `name` written right after `before` is in `text`,
+/// the file `source`: a name, so one followed by no letter, digit or `_`.
+fn named(source: SourceId, text: &str, before: &str, name: &str, nth: usize) -> Location {
+  let written = format!("{before}{name}");
+  let start = text
+    .match_indices(written.as_str())
+    .map(|(start, _): (usize, &str)| start + before.len())
+    .filter(|start: &usize| {
+      text[start + name.len()..]
+        .chars()
+        .next()
+        .is_none_or(|next: char| !(next.is_ascii_alphanumeric() || next == '_'))
+    })
+    .nth(nth)
+    .unwrap_or_else(|| panic!("`{written}` does not occur {} times", nth + 1));
+  Location::new(source.get(), SimpleSpan::new(start, start + name.len()))
 }
 
 /// Each diagnostic's code, primary location, and first label's location, in the list's order.
@@ -409,20 +448,130 @@ fn two_definitions_of_one_name_are_two_definitions() {
   );
 }
 
+/// One definition of each kind that holds members, each holding none, and a generic one; beside a
+/// scalar and a directive with no argument, which hold no members.
+const EMPTY: &str = "type Query {\n  ok: Int\n}\ntype T\ninterface I\nunion U\nenum E\ninput In\n\
+                     type Box<B>\nscalar S\ndirective @d on OBJECT\n";
+
+#[test]
+fn a_definition_that_holds_members_holds_one() {
+  let analysis = analyze_one(EMPTY);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (EMPTY_FIELDS, named(schema, EMPTY, "type ", "T", 0), None),
+      (
+        EMPTY_FIELDS,
+        named(schema, EMPTY, "interface ", "I", 0),
+        None
+      ),
+      (EMPTY_UNION, named(schema, EMPTY, "union ", "U", 0), None),
+      (EMPTY_ENUM, named(schema, EMPTY, "enum ", "E", 0), None),
+      (EMPTY_INPUT, named(schema, EMPTY, "input ", "In", 0), None),
+      (EMPTY_FIELDS, named(schema, EMPTY, "type ", "Box", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the type `T` holds no field",
+      "the interface `I` holds no field",
+      "the union `U` holds no member type",
+      "the enum `E` holds no value",
+      "the input object `In` holds no field",
+      "the type `Box` holds no field",
+    ]
+  );
+  let words: Vec<(Option<&str>, Option<&str>)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| (diagnostic.primary_label(), diagnostic.help()))
+    .collect();
+  assert_eq!(
+    words,
+    [
+      (Some("type defines no fields"), Some(FIELDS_HELP)),
+      (Some("type defines no fields"), Some(INTERFACE_HELP)),
+      (Some("union declares no member types"), None),
+      (Some("enum defines no values"), None),
+      (Some("input object defines no fields"), None),
+      (Some("type defines no fields"), Some(FIELDS_HELP)),
+    ]
+  );
+}
+
+#[test]
+fn a_marker_and_an_extended_definition_are_not_empty() {
+  // A marker; an interface its own package's extension makes one; a type and a union whose every
+  // member an extension of their own package adds.
+  let analysis = analyze_one(
+    "type Query {\n  ok: Int\n}\ninterface M @marker\ninterface P\nextend interface P @marker\n\
+     type T\nextend type T {\n  a: Int\n}\nunion U\nextend union U = Query\n",
+  );
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // What another package's extension adds counts, as GraphQL judges the merged type; and its
+  // `@marker` makes no marker, so an interface it is applied to is still empty.
+  let ours = "type Query {\n  ok: Int\n}\nextend type ^::geo::Point {\n  x: Int\n}\n\
+              extend interface ^::geo::Face @marker\n";
+  let theirs = "type Point\ninterface Face\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let schema = schema_file(&analysis);
+  let geo_file = file(&analysis, 4, "geo.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        ORPHAN,
+        at(schema, ours, "^::geo::Point", 0),
+        Some(named(geo_file, theirs, "type ", "Point", 0))
+      ),
+      (
+        ORPHAN,
+        at(schema, ours, "^::geo::Face", 0),
+        Some(named(geo_file, theirs, "interface ", "Face", 0))
+      ),
+      (
+        EMPTY_FIELDS,
+        named(geo_file, theirs, "interface ", "Face", 0),
+        None
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 /// A refusal of `code` is silent in a contribution that also holds a phase's error, `together`,
-/// and is reported beside it when the error is in a sibling definition, `apart`.
+/// and is reported beside it when the error is in a sibling definition, `apart`. The phase's error
+/// is an undefined type.
 fn silent_beside_a_phase(code: &str, together: &'static str, apart: &'static str) {
+  silent_beside(UNDEFINED, code, together, apart);
+}
+
+/// A refusal of `code` is silent in a contribution that also holds the error `phase`, `together`,
+/// and is reported beside it when the error is in a sibling definition, `apart`.
+fn silent_beside(phase: &str, code: &str, together: &'static str, apart: &'static str) {
   let analysis = analyze_one(together);
   assert_eq!(
     codes(&analysis),
-    [UNDEFINED],
+    [phase],
     "`{code}` beside a phase's error: {:#?}",
     analysis.diagnostics()
   );
   let analysis = analyze_one(apart);
   let mut reported = codes(&analysis);
   reported.sort_unstable();
-  let mut expected = [code, UNDEFINED];
+  let mut expected = [code, phase];
   expected.sort_unstable();
   assert_eq!(
     reported,
@@ -445,6 +594,13 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ntype T {\n  a: Int\n}\nextend type T {\n  a: Int\n  x: Missing\n}\n",
     "type Query {\n  ok: Int\n}\ntype T {\n  a: Int\n  x: Missing\n}\nextend type T {\n  a: Int\n}\n",
   );
+  // An empty type whose `implements` entry names nothing.
+  silent_beside(
+    UNDEFINED_INTERFACE,
+    EMPTY_FIELDS,
+    "type Query {\n  ok: Int\n}\ntype T implements Missing\n",
+    "type Query {\n  ok: Int\n}\ntype T\ntype U implements Missing {\n  a: Int\n}\n",
+  );
 }
 
 #[test]
@@ -455,6 +611,7 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
   let texts = [
     format!("type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  {member}: Int\n}}\n"),
     format!("type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  {plain}: Int\n  {plain}: Int\n}}\n"),
+    format!("type Query {{\n  ok: Int\n}}\ntype {owner}\n"),
   ];
   for text in &texts {
     let analysis = analyze_text(text);

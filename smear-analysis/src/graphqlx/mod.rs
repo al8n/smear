@@ -107,8 +107,9 @@
 //! package wrote holds keeps GraphQL's own rules, with GraphQL's codes: a member whose name begins
 //! with `__` is `smear::schema::reserved-field-name`, or the code of what else it is; and a member
 //! whose name an earlier member of its list has is `smear::schema::duplicate-field-name`, or the
-//! code of its list. A rule says nothing about a contribution a phase already refused something
-//! in.
+//! code of its list; and a definition that holds members and holds none, its extensions'
+//! counted, is `smear::schema::empty-fields-definition`, or the code of its kind, a marker
+//! holding none. A rule says nothing about a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

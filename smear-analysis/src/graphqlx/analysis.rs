@@ -261,8 +261,12 @@ impl Analysis {
 ///   earlier member of its list has, the definition's own and its extensions' members being one
 ///   list and each field's arguments another, is `duplicate-field-name`,
 ///   `duplicate-argument-name`, `duplicate-enum-value`, `duplicate-input-field-name` or
-///   `duplicate-directive-argument-name`, at its name, with a label at the first. A rule says
-///   nothing about a contribution a phase already refused something in.
+///   `duplicate-directive-argument-name`, at its name, with a label at the first. An object, or
+///   an interface that is no marker, with no field, a union with no member, an enum with no value
+///   and an input object with no field, its extensions' members counted, is
+///   `empty-fields-definition`, `empty-union-members`, `empty-enum-values` or
+///   `empty-input-fields`, at its name. A rule says nothing about a contribution a phase already
+///   refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///
