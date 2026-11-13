@@ -120,7 +120,8 @@ fn every_radix_reads_its_digits() {
 
 #[test]
 fn a_decimal_integer_carries_into_a_new_limb() {
-  // Nine digits are one limb; the tenth multiplies it past `u32`, and the carry adds a limb.
+  // Up to 38 digits, `u128` arithmetic reads the value: 2^32, 2^32 - 1 and 2^64, each at the edge
+  // of a limb.
   assert_eq!(converted("4294967296", Radix::Decimal), [0, 0, 0, 0, 1]);
   assert_eq!(
     converted("4294967295", Radix::Decimal),
@@ -130,9 +131,15 @@ fn a_decimal_integer_carries_into_a_new_limb() {
     converted("18446744073709551616", Radix::Decimal),
     [0, 0, 0, 0, 0, 0, 0, 0, 1]
   );
+  // Past 38, nine digits at a time multiply the limbs: `u128::MAX` fills four, and 2^128, one
+  // more, carries into a fifth.
   assert_eq!(
     converted("340282366920938463463374607431768211455", Radix::Decimal),
     [255; 16]
+  );
+  assert_eq!(
+    converted("340282366920938463463374607431768211456", Radix::Decimal),
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
   );
 }
 
