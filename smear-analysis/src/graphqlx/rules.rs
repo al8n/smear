@@ -53,6 +53,7 @@ mod reserved_name;
 mod schema_outside_root;
 mod self_implementing_interface;
 mod self_referential_directive;
+mod specified_by_on_built_in_scalar;
 mod type_ref_misuse;
 mod union_member_not_object;
 mod unsupported_directive_location;
@@ -70,7 +71,8 @@ use self::{
   one_of_on_input_object_extension::OneOfOnInputObjectExtension, orphan_extension::OrphanExtension,
   reserved_name::ReservedName, schema_outside_root::SchemaOutsideRoot,
   self_implementing_interface::SelfImplementingInterface,
-  self_referential_directive::SelfReferentialDirective, type_ref_misuse::TypeRefMisuse,
+  self_referential_directive::SelfReferentialDirective,
+  specified_by_on_built_in_scalar::SpecifiedByOnBuiltInScalar, type_ref_misuse::TypeRefMisuse,
   union_member_not_object::UnionMemberNotObject,
   unsupported_directive_location::UnsupportedDirectiveLocation,
 };
@@ -361,7 +363,8 @@ rule_set! {
   /// definition lists; and a directive that is not repeatable is applied once to a location, a
   /// definition and its extensions being one; an application passes each argument once; and no
   /// directive refers to itself, through the directives and types it names, a scalar that is no
-  /// collection hiding its type arguments.
+  /// collection hiding its type arguments; and a scalar of the built-in library takes no
+  /// `@specifiedBy`.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -427,6 +430,8 @@ rule_set! {
       => [super::code::schema::DUPLICATE_DIRECTIVE_ARGUMENT_USE],
     self_referential_directive: SelfReferentialDirective
       => [super::code::schema::SELF_REFERENTIAL_DIRECTIVE],
+    specified_by_on_built_in_scalar: SpecifiedByOnBuiltInScalar
+      => [super::code::schema::SPECIFIED_BY_ON_BUILT_IN_SCALAR],
   }
 }
 

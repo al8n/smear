@@ -110,6 +110,9 @@ const DUPLICATE_DIRECTIVE_ARGUMENT_USE: &str = "smear::schema::duplicate-directi
 /// GraphQL's code for a directive that refers to itself.
 const SELF_REFERENTIAL_DIRECTIVE: &str = "smear::schema::self-referential-directive";
 
+/// GraphQL's code for `@specifiedBy` on a built-in scalar.
+const SPECIFIED_BY_ON_BUILT_IN_SCALAR: &str = "smear::schema::specified-by-on-built-in-scalar";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -1675,6 +1678,10 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(SELF_REFERENTIAL_DIRECTIVE),
     a_directive_that_refers_to_itself,
   ),
+  (
+    Code::new(SPECIFIED_BY_ON_BUILT_IN_SCALAR),
+    a_built_in_scalar_specified_by_a_url,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -1904,6 +1911,11 @@ fn a_directive_that_refers_to_itself() -> Analysis {
   analyze_one(
     "type Query { ok: Int }\n     directive @d(a: In) on INPUT_FIELD_DEFINITION\n     input In { x: Int @d }",
   )
+}
+
+/// `@specifiedBy` on `Int`, which the root package spells out.
+fn a_built_in_scalar_specified_by_a_url() -> Analysis {
+  analyze_one("type Query { ok: Int } scalar Int @specifiedBy(url: \"https://example.invalid\")")
 }
 
 /// An application that passes an argument twice.

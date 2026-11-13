@@ -508,9 +508,12 @@ fn each_walk_of_a_program_of_several_packages_reaches_what_the_model_says_once()
   assert_eq!(codes(&analysis), ["smear::graphqlx::orphan-extension"]);
   census(&analysis, "a dependency and an orphan extension");
 
+  // The `@specifiedBy` the root package's `Int` applies is GraphQL's own refusal: the replacement
+  // is the built-in `i32`, which takes none.
   let analysis = replaced_and_extended_built_ins();
-  assert!(
-    analysis.diagnostics().is_empty(),
+  assert_eq!(
+    codes(&analysis),
+    ["smear::schema::specified-by-on-built-in-scalar"],
     "{:#?}",
     analysis.diagnostics()
   );

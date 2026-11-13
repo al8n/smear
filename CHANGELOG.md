@@ -429,7 +429,11 @@ All notable changes to Smear are documented in this file.
   directive's arguments, an input field, those applications' type arguments or its own type
   parameters' defaults names, a scalar that is no collection hiding its type arguments; a
   directive of `core` that a program puts on such a cycle, as `scalar String @specifiedBy(…)` puts
-  `@specifiedBy`, is reported at its own name, in `core`'s source. A rule says nothing about a
+  `@specifiedBy`, is reported at its own name, in `core`'s source; and `core`'s `@specifiedBy`
+  on a scalar of the built-in library, by its definition or by an extension, is
+  `specified-by-on-built-in-scalar`, at its path: GraphQL's five, which the root package's own
+  `scalar Int` replaces and keeps, and every other scalar of the library, `u64`, `bytes` and
+  `HashMap` among them, which the language specifies itself. A rule says nothing about a
   contribution a phase already refused something in. On every GraphQL document of smear's corpora the analyzer
   is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
   divergence it allows. A new `test-support` feature, which `smear/test-support`

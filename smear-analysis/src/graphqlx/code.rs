@@ -571,4 +571,9 @@ pub(crate) mod schema {
   /// `SelfReferentialDirective`.
   pub(crate) const SELF_REFERENTIAL_DIRECTIVE: Code =
     Code::new("smear::schema::self-referential-directive");
+
+  /// `core`'s `@specifiedBy` is applied to a scalar of the built-in library: `smear-schema`'s
+  /// `SpecifiedByOnBuiltInScalar`.
+  pub(crate) const SPECIFIED_BY_ON_BUILT_IN_SCALAR: Code =
+    Code::new("smear::schema::specified-by-on-built-in-scalar");
 }

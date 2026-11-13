@@ -1,8 +1,9 @@
 //! The GraphQLx analyzer's rules on directive applications, each GraphQL's own with GraphQL's code:
 //! a directive stands where its definition lists; a directive that is not repeatable is applied
-//! once to a location; an application passes each argument once; and no directive refers to
-//! itself. Each rule judges every application a supplied package writes, or every directive, says
-//! nothing within what a phase refused, and quotes a name only as an excerpt.
+//! once to a location; an application passes each argument once; no directive refers to itself;
+//! and a built-in scalar takes no `@specifiedBy`. Each rule judges every application a supplied
+//! package writes, or every directive, says nothing within what a phase refused, and quotes a name
+//! only as an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -16,6 +17,9 @@ use smear::{
 
 /// The code of a type name that names nothing, a phase's.
 const UNDEFINED: &str = "smear::schema::undefined-type";
+
+/// The code of a directive's name that names nothing, a phase's.
+const UNDEFINED_DIRECTIVE: &str = "smear::schema::undefined-directive";
 
 /// The code of an extension its package may not write, the orphan rule's.
 const ORPHAN: &str = "smear::graphqlx::orphan-extension";
@@ -37,6 +41,17 @@ const UNDECLARED: &str = "smear::schema::undefined-directive-argument";
 
 /// GraphQL's code for a directive that refers to itself.
 const SELF_REFERENTIAL: &str = "smear::schema::self-referential-directive";
+
+/// GraphQL's code for `@specifiedBy` on a built-in scalar.
+const SPECIFIED_BY: &str = "smear::schema::specified-by-on-built-in-scalar";
+
+/// What GraphQL tells the author of `@specifiedBy` on one of GraphQL's own scalars.
+const SPECIFIED_BY_HELP: &str = "a built-in scalar is specified by the GraphQL specification \
+                                 itself, so it takes no specification URL; drop the `@specifiedBy`.";
+
+/// What the analyzer tells the author of `@specifiedBy` on another scalar of the built-in library.
+const SPECIFIED_BY_LANGUAGE_HELP: &str = "a built-in scalar is specified by the language itself, so \
+                                          it takes no specification URL; drop the `@specifiedBy`.";
 
 /// What GraphQL tells the author of a directive that is not repeatable applied twice to one
 /// location.
@@ -686,14 +701,23 @@ fn a_type_argument_a_default_and_an_applications_type_argument_are_edges() {
 fn a_built_in_directive_on_a_cycle_is_reported_at_its_own_name() {
   // The root package's `scalar String` replaces `alloc`'s `string`, which `core`'s `@specifiedBy`
   // takes as its `url`, and applies `@specifiedBy`: the cycle is reported at `@specifiedBy`'s own
-  // name, in `core`'s source, which the walk enters nothing of.
+  // name, in `core`'s source, which the walk enters nothing of. The application itself is the
+  // `@specifiedBy` a built-in scalar takes none of.
   let text = "type Query {\n  ok: Int\n}\nscalar String @specifiedBy(url: \"u\")\n";
   let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
   let model = analysis.model();
   let specified_by = model.def(model.builtins().specified_by()).location();
   assert_eq!(
     found(&analysis),
-    [(SELF_REFERENTIAL, specified_by, None)],
+    [
+      (SELF_REFERENTIAL, specified_by, None),
+      (
+        SPECIFIED_BY,
+        named(schema, text, "@", "specifiedBy", 0),
+        None
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
@@ -703,8 +727,8 @@ fn a_built_in_directive_on_a_cycle_is_reported_at_its_own_name() {
     .package();
   assert_eq!(model.package(written).name(), "core");
   assert_eq!(
-    messages(&analysis),
-    ["the directive `@specifiedBy` refers to itself, through the directives and types it names"]
+    messages(&analysis)[0],
+    "the directive `@specifiedBy` refers to itself, through the directives and types it names"
   );
 
   // `@deprecated` takes a `String` too: the root package's directive that applies it, and that
@@ -728,6 +752,77 @@ fn a_built_in_directive_on_a_cycle_is_reported_at_its_own_name() {
         None
       ),
     ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// `@specifiedBy` on the root package's own `Int`, which replaces `i32` and keeps its identity; on
+/// `f64` and on `u64`, each by an extension, the root package also typing a field `u64`; and on a
+/// scalar of the package's own.
+const SPECIFIED: &str = "type Query {\n  ok: Int\n  big: u64\n}\n\
+                         scalar Int @specifiedBy(url: \"u\")\n\
+                         extend scalar Float @specifiedBy(url: \"u\")\n\
+                         extend scalar u64 @specifiedBy(url: \"u\")\n\
+                         scalar Date @specifiedBy(url: \"u\")\n";
+
+#[test]
+fn a_built_in_scalar_takes_no_specified_by() {
+  let analysis = analyze_one(SPECIFIED);
+  let schema = schema_file(&analysis);
+  let applied = |nth: usize| -> (&'static str, Location, Option<Location>) {
+    (
+      SPECIFIED_BY,
+      named(schema, SPECIFIED, "@", "specifiedBy", nth),
+      None,
+    )
+  };
+  assert_eq!(
+    found(&analysis),
+    [applied(0), applied(1), applied(2)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  // Each names the scalar by its own name; GraphQL's own help for two of GraphQL's five, and the
+  // analyzer's for another scalar of the library.
+  let on = |name: &str| -> String {
+    format!(
+      "`@specifiedBy` is applied to the built-in scalar `{name}`, which takes no specification URL"
+    )
+  };
+  assert_eq!(messages(&analysis), [on("i32"), on("f64"), on("u64")]);
+  let helps: Vec<Option<&str>> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.help())
+    .collect();
+  assert_eq!(
+    helps,
+    [
+      Some(SPECIFIED_BY_HELP),
+      Some(SPECIFIED_BY_HELP),
+      Some(SPECIFIED_BY_LANGUAGE_HELP)
+    ]
+  );
+  for diagnostic in analysis.diagnostics() {
+    assert_eq!(
+      diagnostic.primary_label(),
+      Some("@specifiedBy is applied to a built-in scalar")
+    );
+  }
+
+  // In a module that is no root module, `scalar Int` is a scalar of the package's own.
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[
+      ("schema.graphqlx", "type Query {\n  ok: Int\n}\n"),
+      ("m/a.graphqlx", "scalar Int @specifiedBy(url: \"u\")\n"),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
     "{:#?}",
     analysis.diagnostics()
   );
@@ -792,6 +887,13 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
      input In {\n  x: Int @d\n}\n",
     "type Query {\n  ok: Int\n}\ndirective @d(a: In) on INPUT_FIELD_DEFINITION\n\
      input In {\n  x: Int @d\n  y: Missing\n}\n",
+  );
+  silent_beside(
+    UNDEFINED_DIRECTIVE,
+    SPECIFIED_BY,
+    "type Query {\n  ok: Int\n}\nextend scalar Float @specifiedBy(url: \"u\") @missing\n",
+    "type Query {\n  ok: Int\n}\nextend scalar Float @specifiedBy(url: \"u\")\n\
+     type U @missing {\n  u: Int\n}\n",
   );
 }
 

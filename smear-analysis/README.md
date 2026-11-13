@@ -93,11 +93,12 @@ of a directive that is not repeatable, applied again where it is applied, a defi
 extensions being one location, is `smear::schema::duplicate-directive-use`, and an argument an
 application writes again is `smear::schema::duplicate-directive-argument-use`, and a directive
 that refers to itself, through the directives applied where it reaches and the types it names, is
-`smear::schema::self-referential-directive`. An
-error that a phase or a rule reports marks the contributions, members and definitions that hold it,
-as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error marks
-nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and
-holds memory bounded by it.
+`smear::schema::self-referential-directive`, and `core`'s `@specifiedBy` on a scalar of the
+built-in library, not only on GraphQL's five, is `smear::schema::specified-by-on-built-in-scalar`.
+An error that a phase or a rule reports marks the contributions, members and definitions that hold
+it, as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error
+marks nothing. A consumer's walk marks nothing, answers its own diagnostics under the same
+ceiling, and holds memory bounded by it.
 
 On every GraphQL document of smear's corpora the analyzer is held to `smear-schema`'s verdict, code
 for code, by a differential test that lists each divergence it allows and why.

@@ -304,8 +304,10 @@ impl Analysis {
 ///   values; and every definition a type occurrence names at any depth, in a directive
 ///   definition's arguments, in its input fields, in those applications' type arguments and in its
 ///   own type parameters' defaults, a scalar that is no collection hiding its type arguments; a
-///   directive of `core` on such a cycle is reported in `core`'s source. A rule says nothing about
-///   a contribution a phase already refused something in.
+///   directive of `core` on such a cycle is reported in `core`'s source. Each application of
+///   `core`'s `@specifiedBy` on a scalar of the built-in library, a GraphQL scalar the root
+///   package replaces among them, is `specified-by-on-built-in-scalar`, at its path. A rule says
+///   nothing about a contribution a phase already refused something in.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

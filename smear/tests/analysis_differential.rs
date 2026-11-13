@@ -171,7 +171,6 @@ const ALLOWED: &[Allowed] = &[
   every("smear::schema::circular-non-null-input-field", CYCLES),
   every("smear::schema::circular-one-of-input-field", CYCLES),
   every("smear::schema::input-object-default-value-cycle", CYCLES),
-  every("smear::schema::specified-by-on-built-in-scalar", PART_2_3),
   every("smear::schema::root-operation-type-not-object", PART_2_3),
   every("smear::schema::shared-root-operation-type", PART_2_3),
   every("smear::schema::schema-extension-without-schema", PART_2_3),
@@ -712,6 +711,43 @@ fn every_shared_code_a_rule_lists_is_one_of_smear_schemas() {
         "the rule `{rule}` lists `{code}`, which is no code of smear-schema's"
       );
     }
+  }
+}
+
+/// W's test 10: a root package that replaces a built-in scalar and applies `@specifiedBy` to it, and
+/// one that extends a built-in scalar with `@specifiedBy`, are refused in both dialects with M5's
+/// code alone, once.
+#[test]
+fn a_built_in_replaced_and_extended_is_refused_with_m5s_code_in_both_dialects() {
+  for text in [
+    "type Query { ok: Int } scalar Int @specifiedBy(url: \"https://example.invalid\")",
+    "type Query { ok: Int } extend scalar Float @specifiedBy(url: \"https://example.invalid\")",
+  ] {
+    let document = parsed(text).unwrap_or_else(|| panic!("GraphQL's parser refuses `{text}`"));
+    let Err(errors) = Schema::build(&document) else {
+      panic!("smear-schema builds `{text}`");
+    };
+    let graphql: Vec<&str> = errors
+      .errors()
+      .iter()
+      .map(|error: &SchemaError| error.kind().code().as_str())
+      .collect();
+    assert_eq!(
+      graphql,
+      ["smear::schema::specified-by-on-built-in-scalar"],
+      "{text}"
+    );
+    let analysis = analyzed(text);
+    let mut graphqlx: Vec<&str> = Vec::new();
+    for diagnostic in analysis.diagnostics() {
+      graphqlx.push(diagnostic.code().as_str());
+    }
+    assert_eq!(
+      graphqlx,
+      ["smear::schema::specified-by-on-built-in-scalar"],
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
   }
 }
 

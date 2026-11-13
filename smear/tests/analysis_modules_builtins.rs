@@ -450,10 +450,23 @@ fn a_root_module_replaces_graphql_built_ins_and_they_keep_their_ids() {
   .with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", ELSEWHERE)]);
   let analysis = analyze(&root, &[geo], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  // The one diagnostic is GraphQL's own refusal of the `@specifiedBy` the root's `Int` applies: the
+  // replacement is the built-in, which takes none.
+  let found: Vec<(&str, Location)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
+    .collect();
+  assert_eq!(
+    found,
+    [(
+      "smear::schema::specified-by-on-built-in-scalar",
+      at(schema, REPLACES, "specifiedBy", 0)
+    )]
+  );
   let model = analysis.model();
   let builtins = model.builtins();
-  let schema = file(&analysis, 3, "schema.graphqlx");
 
   // `Int` is `i32`'s, which is materialised although no type position writes it.
   let int = builtins

@@ -10,10 +10,10 @@ use core::ops::Range;
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Contribution, DefId, IdRange, Layout, Limits, MemberId, Model, ModuleKind, Namespace,
-    Package, PackageId, Primitive, SourceFile, SourceId, Tier, analyze,
+    Analysis, Contribution, DefId, Diagnostic, IdRange, Layout, Limits, MemberId, Model,
+    ModuleKind, Namespace, Package, PackageId, Primitive, SourceFile, SourceId, Tier, analyze,
   },
-  diagnostic::Location,
+  diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
 };
 
@@ -400,7 +400,14 @@ fn a_contribution_answers_its_own_files_extent() {
   .with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", ELSEWHERE)]);
   let analysis = analyze(&root, &[geo], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  // The one diagnostic is GraphQL's own refusal of the `@specifiedBy` the root's `Int` applies; no
+  // extent depends on what an error marks.
+  let codes: Vec<&str> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.code().as_str())
+    .collect();
+  assert_eq!(codes, ["smear::schema::specified-by-on-built-in-scalar"]);
   let model = analysis.model();
   let schema = file(&analysis, "app", "schema.graphqlx");
   let int = model
