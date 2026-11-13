@@ -4,6 +4,33 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-parser`!: `lossless::runner::DiagnosticSource::collect_diagnostics_retaining` takes a
+  second argument, `visit`, which is lent the span and the payload of each record the projection
+  keeps at error severity, in emission order. 0.0.1 released the method with `retains` alone, and
+  the trait is not sealed: an implementation outside the crate must take the argument, and a
+  caller that wants nothing lent passes `|_, _| {}`.
+- `smear-parser`: each dialect's `Layer` trait, which its two parser layers implement, is sealed
+  for each layer and source: its supertrait is crate-private and takes the trait's own lifetime
+  and source. No other crate can implement `graphql::Layer` or `graphqlx::Layer`, for a layer
+  value of a brand of its own or for smear's layers over a source of its own.
+- `smear-parser`: `layer::SyntaxTree`, which the lossless tree implements, has a seal of its own,
+  so no other crate can implement it.
+- `smear-parser`: the syntactic layer implements its dialect's `Layer` once for each source its
+  lexer reads, and for no other type: `str` and `[u8]`, and behind their features `BStr`,
+  `Bytes`, `HipStr`, `HipByt` and the four smol-bytes forms. A reference to one, `&str` as the
+  source itself, is not a source the layer reads.
+- `smear-parser`: the lossless layer lends every syntax error to the caller's sink before its
+  method returns: each error of each record its tree keeps at error severity, one
+  `invalid-syntax` error for such a record that holds none, and its token-budget refusal, once
+  and last. A recovery hole and a warning are not lent. `Parsed::error_count()` is how many
+  errors a sink that never breaks is lent, whatever the sink took: for the lossless layer it is
+  zero exactly when the tree's `has_errors()` is false, and never less than the number of the
+  tree's error diagnostics, since one record can hold several errors.
+- `smear-analysis`: `graphqlx::Trees`, which `graphqlx::analyze_with` answers beside the
+  `Analysis`, holds what the caller's parser layer kept for each supplied file it read, by
+  source id. A file of nothing but white space, commas, byte order marks and comments is
+  accepted before any layer reads it and has no entry; the lossless layer, handed such a text,
+  answers a tree with one syntax error. A syntax error marks nothing in the model.
 - `smear-lexer`!: both dialects' `LexerErrors` and `StringErrors` keep their errors in a `Vec`
   in every configuration, where they held them in a one-slot `SmallVec` while the `smallvec`
   feature was on, as it was by default. A token's `Result` no longer carries room for a whole
