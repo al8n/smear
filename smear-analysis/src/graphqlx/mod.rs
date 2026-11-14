@@ -42,7 +42,11 @@
 //! member type twice: each later one is `smear::schema::duplicate-implements-interface` or
 //! `smear::schema::duplicate-union-member`. And a definition of any kind implements what the
 //! interfaces it implements implement, under the type arguments its entries give them: one it
-//! omits is `smear::schema::missing-transitive-interface`. A value that does not fit its type is
+//! omits is `smear::schema::missing-transitive-interface`. An object or an interface declares each
+//! field of the interfaces it implements, of a subtype of its type under those arguments,
+//! deprecated only where it is: anything else is `smear::schema::missing-interface-field`,
+//! `smear::schema::invalid-interface-field-type` or
+//! `smear::schema::interface-field-not-deprecated`. A value that does not fit its type is
 //! refused where it is written, a
 //! generic directive's arguments and a generic input object's fields read under their type
 //! arguments, and a default fills each argument and each input field a value leaves out; a value

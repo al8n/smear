@@ -25,9 +25,27 @@ const ORPHAN: &str = "smear::graphqlx::orphan-extension";
 const TRANSITIVE: &str = "smear::schema::missing-transitive-interface";
 /// A bound of the limits passed.
 const LIMIT: &str = "smear::graphqlx::resource-limit";
+/// GraphQL's code for an interface's field a definition does not declare.
+const MISSING_FIELD: &str = "smear::schema::missing-interface-field";
+/// GraphQL's code for a field whose type is no subtype of the interface's.
+const FIELD_TYPE: &str = "smear::schema::invalid-interface-field-type";
+/// GraphQL's code for a deprecated field implementing one that is not.
+const NOT_DEPRECATED: &str = "smear::schema::interface-field-not-deprecated";
+/// The resolver's code for a type name that names nothing.
+const UNDEFINED_TYPE: &str = "smear::schema::undefined-type";
+/// L3's code for a marker misused.
+const MARKER_MISUSE: &str = "smear::graphqlx::marker-misuse";
 
 /// The codes this phase reports. A program another rule refuses is asserted on these alone.
-const PHASE: [&str; 4] = [DUPLICATE, MEMBER, TRANSITIVE, LIMIT];
+const PHASE: [&str; 7] = [
+  DUPLICATE,
+  MEMBER,
+  TRANSITIVE,
+  MISSING_FIELD,
+  FIELD_TYPE,
+  NOT_DEPRECATED,
+  LIMIT,
+];
 
 /// What labels a missing interface's report at the entry that implements it.
 const IMPLEMENTED_HERE: &str = "implemented here, by an interface it implements";
@@ -623,4 +641,393 @@ fn duplicates_as_written_cost_nothing() {
       (MEMBER, named(schema, text, "| ", "A", 0))
     ]
   );
+}
+
+/// GraphQL's own documents: a field the type omits, at its `I`, labelled at the interface's `b`; a
+/// field of another type, at the type's field; and a deprecated field implementing one that is not,
+/// labelled at the interface's. One code each.
+#[test]
+fn graphqls_field_fixtures_are_refused_once() {
+  let text = "type Query { ok: Int } interface I { a: Int b: Int } type T implements I { a: Int }";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let entry = named(schema, text, "implements ", "I", 0);
+  assert_eq!(found(&analysis), [(MISSING_FIELD, entry)]);
+  let report = the(&analysis, MISSING_FIELD, entry);
+  assert_eq!(
+    report.to_string(),
+    "`T` implements `I`, which declares the field `b`, and `T` declares no field `b`"
+  );
+  assert_eq!(
+    labels(report),
+    [(named(schema, text, "Int ", "b", 0), "the interface's field")]
+  );
+
+  let text = "type Query { ok: Int } interface I { a: Int } type T implements I { a: String }";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let field = named(schema, text, "{ ", "a", 1);
+  assert_eq!(found(&analysis), [(FIELD_TYPE, field)]);
+  let report = the(&analysis, FIELD_TYPE, field);
+  assert_eq!(
+    report.to_string(),
+    "the type of `T`'s field `a` is no subtype of the type `I` declares for it"
+  );
+  assert_eq!(
+    labels(report),
+    [
+      (named(schema, text, "a: ", "String", 0), "this type"),
+      (
+        named(schema, text, "{ a: ", "Int", 0),
+        "the type the interface declares"
+      ),
+    ]
+  );
+
+  let text =
+    "type Query { ok: Int } interface I { a: Int } type T implements I { a: Int @deprecated }";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let field = named(schema, text, "{ ", "a", 1);
+  assert_eq!(found(&analysis), [(NOT_DEPRECATED, field)]);
+  assert_eq!(
+    labels(the(&analysis, NOT_DEPRECATED, field)),
+    [(
+      named(schema, text, "{ ", "a", 0),
+      "the interface's field, not deprecated"
+    )]
+  );
+}
+
+/// A field is found by its name, whatever the order, in the definition's own extension too; a field
+/// written twice is found as the first of its name, which is the one compared: `V`'s fits and `W`'s
+/// does not. Refuses fields paired by position, and the last of a name compared.
+#[test]
+fn a_field_is_found_by_its_name() {
+  let text = "type Query {\n  x: Int\n}\ninterface I {\n  a: Int\n  b: String\n}\n\
+              type T implements I {\n  b: String\n  a: Int\n}\n\
+              type U implements I {\n  a: Int\n}\nextend type U {\n  b: String\n}\n\
+              type V implements I {\n  a: Int\n  b: String\n  a: String\n}\n\
+              type W implements I {\n  a: String\n  b: String\n  a: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found_of(&analysis, &PHASE),
+    [(
+      FIELD_TYPE,
+      named(schema, text, "W implements I {\n  ", "a", 0)
+    )]
+  );
+}
+
+/// A field's type is a subtype of the interface's as GraphQL reads it: `[User!]!` of `[Node]`,
+/// `User!` of `Node`, the interface `Named` that implements `Node` of `Node`, and the member `User`
+/// of the union `U` hold; `Node` of `Node!`, `[Node]` of `Node`, `Post`, which implements nothing,
+/// of `Node`, and `Node` of `U`, which is no member, each do not. Refuses non-null or lists read the
+/// wrong way, and a union told by what is no member.
+#[test]
+fn field_types_are_covariant_as_in_graphql() {
+  let text = "type Query {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
+              interface Named implements Node {\n  id: ID\n}\n\
+              type User implements Node {\n  id: ID\n}\ntype Post {\n  id: ID\n}\n\
+              union U = User | Post\n\
+              interface I {\n  f1: [Node]\n  f2: Node\n  f3: Node\n  f4: U\n}\n\
+              type T implements I {\n  f1: [User!]!\n  f2: User!\n  f3: Named\n  f4: User\n}\n\
+              interface J {\n  g1: Node!\n  g2: Node\n  g3: Node\n  g4: U\n}\n\
+              type S implements J {\n  g1: Node\n  g2: [Node]\n  g3: Post\n  g4: Node\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let fields: Vec<(&str, Location)> = ["g1", "g2", "g3", "g4"]
+    .into_iter()
+    .map(|name: &str| (FIELD_TYPE, named(schema, text, "  ", name, 1)))
+    .collect();
+  assert_eq!(found(&analysis), fields);
+}
+
+/// A named type is covariant in its type arguments, through collections too: `Page<User>` of
+/// `Page<Node>` and `HashMap<string, User>` of `HashMap<string, Node>` hold; `Page<Int>` of
+/// `Page<Node>`, and `Page<User>` of `Page<User!>`, do not. Refuses invariance, and a `!` of an
+/// argument read through.
+#[test]
+fn an_instantiation_is_covariant_in_its_arguments() {
+  let text = "type Query {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
+              type User implements Node {\n  id: ID\n}\ntype Page<T> {\n  items: [T]\n}\n\
+              interface I {\n  a: Page<Node>\n  b: HashMap<string, Node>\n  c: Page<Node>\n  \
+              d: Page<User!>\n}\n\
+              type T implements I {\n  a: Page<User>\n  b: HashMap<string, User>\n  c: Page<Int>\n  \
+              d: Page<User>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (FIELD_TYPE, named(schema, text, "  ", "c", 1)),
+      (FIELD_TYPE, named(schema, text, "  ", "d", 1))
+    ]
+  );
+}
+
+/// What a type declares is read under its own arguments: `Box<T>` implements `Container<T>`, so
+/// `Box<User>` is a subtype of `Container<Node>` and `Box<Int>` is not. Refuses a type's entries
+/// read as written.
+#[test]
+fn a_declared_interface_is_read_under_the_types_arguments() {
+  let text = "type Query {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
+              type User implements Node {\n  id: ID\n}\ninterface Container<X> {\n  item: X\n}\n\
+              type Box<T> implements Container<T> {\n  item: T\n}\n\
+              interface I {\n  a: Container<Node>\n  b: Container<Node>\n}\n\
+              type T implements I {\n  a: Box<User>\n  b: Box<Int>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(FIELD_TYPE, named(schema, text, "  ", "b", 1))]
+  );
+}
+
+/// A generic union's members are read under its arguments: `User` is a member of
+/// `Either<User, Post>`, and `Node` is none. Refuses the members read as written.
+#[test]
+fn a_generic_unions_members_are_read_under_its_arguments() {
+  let text = "type Query {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
+              type User implements Node {\n  id: ID\n}\ntype Post {\n  id: ID\n}\n\
+              union Either<A, B> = A | B\n\
+              interface I {\n  a: Either<User, Post>\n  b: Either<User, Post>\n}\n\
+              type T implements I {\n  a: User\n  b: Node\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(FIELD_TYPE, named(schema, text, "  ", "b", 1))]
+  );
+}
+
+/// A generic definition is judged once, where it is written: a type parameter is a subtype of
+/// itself and of its bounds alone. K's `Sorted`, `first: T` for `first: Comparable<T>`, holds on
+/// the strength of its bound; `Ordered`'s holds through its bound's interface `Ord`, which
+/// implements `Comparable<X>`; `Bare`, with no bound, is refused at `first`; and `Two`'s `x: T` is
+/// no subtype of `U`. Refuses a parameter compared with no bound, and one bound step too few.
+#[test]
+fn a_type_parameter_is_a_subtype_of_itself_and_its_bounds() {
+  let text = "type Query {\n  x: Int\n}\ninterface Comparable<X> {\n  compare(other: X): Int\n}\n\
+              interface Ord<X> implements Comparable<X> {\n  compare(other: X): Int\n}\n\
+              interface HasFirst<X> {\n  first: Comparable<X>\n}\n\
+              type Sorted<T> implements HasFirst<T> where T: Comparable<T> {\n  first: T\n}\n\
+              type Ordered<T> implements HasFirst<T> where T: Ord<T> {\n  first: T\n}\n\
+              type Bare<T> implements HasFirst<T> {\n  first: T\n}\n\
+              interface HasX<X> {\n  x: X\n}\ntype Two<T, U> implements HasX<U> {\n  x: T\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found_of(&analysis, &PHASE),
+    [
+      (
+        FIELD_TYPE,
+        named(
+          schema,
+          text,
+          "Bare<T> implements HasFirst<T> {\n  ",
+          "first",
+          0
+        )
+      ),
+      (FIELD_TYPE, named(schema, text, "HasX<U> {\n  ", "x", 0)),
+    ]
+  );
+}
+
+/// An interface's field is read under the entry's arguments: `Node<ID>`'s `id` is `ID`, which
+/// `User`'s is, and `Node<String>`'s is `String`, which `S`'s `ID` is not.
+#[test]
+fn a_member_is_read_under_the_entrys_arguments() {
+  let text = "type Query {\n  x: Int\n}\ninterface Node<T> {\n  id: T\n}\n\
+              type User implements Node<ID> {\n  id: ID\n}\n\
+              type S implements Node<String> {\n  id: ID\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      FIELD_TYPE,
+      named(schema, text, "Node<String> {\n  ", "id", 0)
+    )]
+  );
+}
+
+/// Putting the entry's arguments into an interface's field draws on the implementation budget
+/// alone: under no substitution step, nothing is said. `User`'s check takes the field, one step;
+/// rebuilding `T` under `Node<ID>`, one; and the pair of `ID` and `ID`, one: three. At three
+/// nothing is said, and at two the check stops at `Node<ID>`. Refuses the rebuild charged to
+/// `Limits::max_substitutions`.
+#[test]
+fn substituting_a_member_draws_on_the_implementation_budget_alone() {
+  let text = "type Query {\n  x: Int\n}\ninterface Node<T> {\n  id: T\n}\n\
+              type User implements Node<ID> {\n  id: ID\n}\n";
+  quiet(&analyze_text(
+    text,
+    &Limits::new().with_max_substitutions(0),
+  ));
+  quiet(&analyze_text(
+    text,
+    &Limits::new().with_max_implementation_steps(3),
+  ));
+  let short = analyze_text(text, &Limits::new().with_max_implementation_steps(2));
+  let schema = schema_file(&short);
+  assert_eq!(found(&short), [(LIMIT, at(schema, text, "Node<ID>", 0))]);
+}
+
+/// A pair of types is compared once for the whole phase, and each look at it is a step. `User`'s
+/// check takes its field and the pair of `ID` and `ID`, two; `T`'s `a` its field, the pair of
+/// `[User]` and `[Node]`, the pair of their elements and `User`'s one entry, four; and `b` its field
+/// and a look at the pair answered already, two: eight. At eight nothing is said, and at seven `T`'s
+/// check stops at `I`. Refuses a pair answered again, which passes eight.
+#[test]
+fn a_pair_is_compared_once() {
+  let text = "type Query {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
+              type User implements Node {\n  id: ID\n}\n\
+              interface I {\n  a: [Node]\n  b: [Node]\n}\n\
+              type T implements I {\n  a: [User]\n  b: [User]\n}\n";
+  quiet(&analyze_text(
+    text,
+    &Limits::new().with_max_implementation_steps(8),
+  ));
+  let short = analyze_text(text, &Limits::new().with_max_implementation_steps(7));
+  let schema = schema_file(&short);
+  assert_eq!(
+    found(&short),
+    [(LIMIT, named(schema, text, "implements ", "I", 0))]
+  );
+}
+
+/// An interface's field's type is rebuilt once for each entry type: `User`'s check takes two; `A`'s
+/// the field, rebuilding `X` under `Container<User>` and the pair, three; and `B`'s the field and
+/// the pair, the rebuild remembered, two: seven. At seven nothing is said, and at six `B`'s check
+/// stops at its `Container<User>`. Refuses a rebuild made again for each implementing type.
+#[test]
+fn a_member_type_is_rebuilt_once_for_each_entry_type() {
+  let text = "type Query {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
+              type User implements Node {\n  id: ID\n}\ninterface Container<X> {\n  item: X\n}\n\
+              type A implements Container<User> {\n  item: User\n}\n\
+              type B implements Container<User> {\n  item: User\n}\n";
+  quiet(&analyze_text(
+    text,
+    &Limits::new().with_max_implementation_steps(7),
+  ));
+  let short = analyze_text(text, &Limits::new().with_max_implementation_steps(6));
+  let schema = schema_file(&short);
+  assert_eq!(
+    found(&short),
+    [(LIMIT, at(schema, text, "Container<User>", 1))]
+  );
+}
+
+/// A valid GraphQL document can meet the budget, which checking implementations needs on accepted
+/// programs: 16 interfaces of one field in a complete chain, `I(j)` costing each of its `j - 1`
+/// roots' entries and the root's field and pair, `(j - 1)(j + 2) / 2`, 800 in all; and eight objects
+/// that implement all 16, 152 each: 2,016. At 2,016 nothing is said, and at 2,015 `T8`'s last root,
+/// `I16`, is `resource-limit`. Refuses a field compared for nothing.
+#[test]
+fn a_valid_graphql_document_can_meet_the_implementation_budget() {
+  let text = chain(false);
+  quiet(&analyze_text(
+    &text,
+    &Limits::new().with_max_implementation_steps(2016),
+  ));
+  let short = analyze_text(&text, &Limits::new().with_max_implementation_steps(2015));
+  let schema = schema_file(&short);
+  assert_eq!(
+    found(&short),
+    [(LIMIT, named(schema, &text, "& ", "I16", 7))]
+  );
+  quiet(&analyze_text(&text, &Limits::new()));
+}
+
+/// A type that names nothing is the resolver's alone: `f: Missing` for `f: Node`, and an
+/// interface's `g: Gone` for `g: Node`, are each compared with nothing.
+#[test]
+fn an_unresolved_type_is_judged_by_nothing_here() {
+  let text = "type Query {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
+              interface I {\n  f: Node\n  g: Gone\n}\n\
+              type T implements I {\n  f: Missing\n  g: Node\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (UNDEFINED_TYPE, at(schema, text, "Gone", 0)),
+      (UNDEFINED_TYPE, at(schema, text, "Missing", 0))
+    ]
+  );
+}
+
+/// A marker's fields are `marker-misuse`'s, at the marker: a type that implements it declares none
+/// of them, and nothing of this phase is said.
+#[test]
+fn a_marker_has_no_field_to_implement() {
+  let text = "type Query {\n  x: Int\n}\ninterface M @marker {\n  a: Int\n}\n\
+              type T implements M {\n  x: Int\n}\n";
+  assert_eq!(codes(&analyze_text(text, &Limits::new())), [MARKER_MISUSE]);
+}
+
+/// Deprecation is told by the directive an application resolved to: the root package's own
+/// `@deprecated` replaces `core`'s and keeps its definition, and deprecates; a dependency's own
+/// directive named `deprecated` does not. Refuses a name compared.
+#[test]
+fn deprecation_is_told_by_the_directive() {
+  let text = "directive @deprecated(reason: String) on FIELD_DEFINITION\n\
+              type Query {\n  x: Int\n}\ninterface I {\n  a: Int\n}\n\
+              type T implements I {\n  a: Int @deprecated\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      NOT_DEPRECATED,
+      named(schema, text, "T implements I {\n  ", "a", 0)
+    )]
+  );
+
+  let theirs = "directive @deprecated on FIELD_DEFINITION\n";
+  let ours = "type Query {\n  x: Int\n}\ninterface I {\n  a: Int\n}\n\
+              type T implements I {\n  a: Int @^::dep::deprecated\n}\n";
+  let root = package("app", &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let dep = package("dep", &[("dep.graphqlx", theirs)]);
+  quiet(&analyze(&root, &[dep], &Limits::new()));
+}
+
+/// A definition and a field, each named with four kilobytes, are quoted as excerpts: the message
+/// stays short.
+#[test]
+fn long_names_are_quoted_as_excerpts() {
+  let long = "N".repeat(4096);
+  let text = format!(
+    "type Query {{\n  x: Int\n}}\ninterface I{long} {{\n  f{long}: Int\n}}\n\
+     type T implements I{long} {{\n  x: Int\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  assert_eq!(codes(&analysis), [MISSING_FIELD]);
+  for diagnostic in analysis.diagnostics() {
+    let message = diagnostic.to_string();
+    assert!(message.len() < 1024, "{message}");
+    assert!(message.contains('…'), "{message}");
+  }
+}
+
+/// A pair that fails only because a pair it asks is open, being answered further up, is not
+/// remembered as failing: it is judged afresh when asked again. `D` is a subtype of `I<U>` through
+/// its `I<Good>`; asked first, `f` meets `W<D>` against `U`, which asks `D` against `I<U>` again
+/// while that is open, and fails there, so `g`, asked next, judges `W<D>` against `U` afresh and
+/// finds that it holds. Either order says nothing. Refuses a failure remembered under an open
+/// assumption, which refuses `g` when `f` is written first.
+#[test]
+fn a_pair_that_held_by_another_route_is_judged_again() {
+  for fields in ["f: I<U>\n  g: U", "g: U\n  f: I<U>"] {
+    let text = format!(
+      "type Query {{\n  x: Int\n}}\ninterface I<X> {{\n  a: Int\n}}\ntype W<Z> {{\n  a: Int\n}}\n\
+       type Good {{\n  a: Int\n}}\nunion U = W<I<U>> | Good\n\
+       type D implements I<W<D>> & I<Good> {{\n  a: Int\n}}\n\
+       interface J {{\n  {fields}\n}}\ntype T implements J {{\n  f: D\n  g: W<D>\n}}\n"
+    );
+    quiet(&analyze_text(&text, &Limits::new()));
+  }
 }

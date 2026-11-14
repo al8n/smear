@@ -534,6 +534,22 @@ pub(crate) mod schema {
   pub(crate) const MISSING_TRANSITIVE_INTERFACE: Code =
     Code::new("smear::schema::missing-transitive-interface");
 
+  /// A definition declares no field named as a field of an interface it implements:
+  /// `smear-schema`'s `MissingInterfaceField`.
+  pub(crate) const MISSING_INTERFACE_FIELD: Code =
+    Code::new("smear::schema::missing-interface-field");
+
+  /// A field's type is no subtype of the type an interface it implements declares for its field,
+  /// under the type arguments of the definition's entry: `smear-schema`'s
+  /// `InvalidInterfaceFieldType`.
+  pub(crate) const INVALID_INTERFACE_FIELD_TYPE: Code =
+    Code::new("smear::schema::invalid-interface-field-type");
+
+  /// A deprecated field implements an interface's field that is not: `smear-schema`'s
+  /// `InterfaceFieldNotDeprecated`.
+  pub(crate) const INTERFACE_FIELD_NOT_DEPRECATED: Code =
+    Code::new("smear::schema::interface-field-not-deprecated");
+
   /// A union's member is the type an earlier member of its is, as written: `smear-schema`'s
   /// `DuplicateUnionMember`.
   pub(crate) const DUPLICATE_UNION_MEMBER: Code =

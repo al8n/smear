@@ -1125,7 +1125,7 @@ fn a_flat_package_extending_its_own_definitions_never_meets_the_orphan_rule() {
   let a = "type Query {\n  ok: Int\n}\ninterface Node {\n  id: ID\n}\nenum Color {\n  RED\n}\n\
            input Filter {\n  f: Int\n}\nunion Either = Query\nscalar Date\n\
            directive @d on SCALAR | DIRECTIVE_DEFINITION\n";
-  let b = "extend type Query implements Node {\n  id: ID\n}\n\
+  let b = "extend type Query implements Node {\n  id: ID\n  name: String\n}\n\
            extend interface Node {\n  name: String\n}\nextend enum Color {\n  GREEN\n}\n\
            extend input Filter {\n  g: Int\n}\nextend union Either = Other\n\
            extend scalar Date @d\nextend directive @d @deprecated\nextend scalar String @d\n\

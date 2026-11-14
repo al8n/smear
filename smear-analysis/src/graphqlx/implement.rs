@@ -43,16 +43,38 @@
 //! object and no interface owes the markers alone. With `interface Ord<X> implements
 //! Comparable<X>`, `type Lazy implements Ord<Lazy>` must write `Comparable<Lazy>` too.
 //!
+//! Then, when the definition is an object or an interface and the root's interface no marker,
+//! whose fields are `marker-misuse`'s, each field the interface's own package writes, in order, a
+//! field written twice checked twice:
+//!
+//! - the definition declares a field of its name, the first of its own fields of that name, or it
+//!   is `smear::schema::missing-interface-field`, at the root's entry, labelled at the interface's
+//!   field;
+//! - that field's type is a subtype of the interface's field's type under the root's arguments,
+//!   as the `subtype` module says, covariant through lists, non-null and type arguments, or it is
+//!   `smear::schema::invalid-interface-field-type`, at the field's name;
+//! - and a deprecated field implements a deprecated one, told by what its applications resolved
+//!   to, `core`'s `@deprecated` or the root package's own that replaces it, or it is
+//!   `smear::schema::interface-field-not-deprecated`, at the field's name, labelled at the
+//!   interface's.
+//!
+//! Each is judged whatever the others found, in `smear-schema`'s order. A generic definition is
+//! judged once, where it is written: a type parameter is a subtype of itself and of its bounds
+//! alone.
+//!
 //! # What it costs, and what bounds it
 //!
 //! A definition's own entries and members are written, and each is read once: one scan of the
 //! shared kernel, or one sort when the list is wide, finds the duplicates and the roots. Every
 //! other step is paid from `Limits::max_implementation_steps`, a budget of its own, since the
 //! check is needed on every accepted program and costs it the square of a definition's entries:
-//! each entry looked at of an interface the check reads, whoever wrote it, and each node of a type
-//! rebuilt under an entry's arguments, a rebuild remembered by the type and the arguments' named
-//! type costing nothing more. On a program the check accepts, each root costs its interface's
-//! entries, and no more. What a rebuild derives is checked against `Limits::max_generic_depth` and
+//! each entry looked at of an interface the check reads, whoever wrote it; each field of an
+//! interface looked at; each pair of types the relation looks at, one answered before included,
+//! and each entry, bound and member it looks at to answer one; and each node of a type rebuilt
+//! under an entry's arguments, a rebuild remembered by the type and the arguments' named type
+//! costing nothing more. On a program the check accepts, each root costs its interface's entries
+//! and its fields, and no more. The definition's own fields are indexed by name once, at its first
+//! root whose fields are compared, and whether a field is deprecated is read once. What a rebuild derives is checked against `Limits::max_generic_depth` and
 //! counted toward `Limits::max_instantiations`; nothing draws on `Limits::max_substitutions` or
 //! `Limits::max_bound_steps`. A check a limit stops is `resource-limit` once, at the root it was
 //! checking, naming the limit, and nothing more is said of that definition.
@@ -72,15 +94,20 @@ use smear_semantics::duplicates::Duplicates;
 use tokora::diagnostic::Location;
 
 use super::{
+  builtin::{CORE, DIRECTIVE},
   code::{DiagnosticKind, schema},
   declare::Declarations,
   diagnostic::{Diagnostic, DiagnosticBuilder, Excerpt, Reporter},
-  id::{DefId, PackageId, TyId, TypeExprId},
-  instantiate::own_package,
-  model::{DefKind, ModelBuilder, Occurrence, Shape},
+  id::{ApplicationId, DefId, MemberId, PackageId, Sym, TyId, TypeExprId},
+  instantiate::{binding, own_package},
+  model::{DefKind, ModelBuilder, Occurrence, Resolution, Shape},
   source::SourceMap,
   types::{Counter, Limit, Stop, Types},
 };
+
+use subtype::{Alternative, Answer, Frame};
+
+mod subtype;
 
 /// Checks what each definition `builder` holds says it is, whose declarations are `declarations`
 /// and whose sources `sources` numbers, with the type services of `types`, reporting into
@@ -98,6 +125,8 @@ pub(crate) fn implement(
   for index in 0..count {
     owners.push(own_package(declarations, DefId::new(index)));
   }
+  // `core`'s `@deprecated`, by its definition: a root package's own replaces it and keeps its id.
+  let deprecated = binding(declarations, builder, CORE, DIRECTIVE, b"deprecated");
   let steps = Counter::new(types.limits().max_implementation_steps());
   let mut implementing = Implementing {
     builder,
@@ -105,8 +134,13 @@ pub(crate) fn implement(
     types,
     sources,
     owners,
+    deprecated,
     steps,
     rebuilds: BTreeMap::new(),
+    deprecations: BTreeMap::new(),
+    pairs: BTreeMap::new(),
+    frames: Vec::new(),
+    alternatives: Vec::new(),
     entries: Vec::new(),
     members: Vec::new(),
     twice: Vec::new(),
@@ -116,6 +150,8 @@ pub(crate) fn implement(
     reached: BTreeSet::new(),
     expanded: BTreeSet::new(),
     frontier: Vec::new(),
+    fields: Vec::new(),
+    indexed: false,
   };
   implementing.definitions();
 }
@@ -135,6 +171,8 @@ enum List {
 struct Root {
   /// The definition being checked.
   def: DefId,
+  /// The entry.
+  entry: TypeExprId,
   /// Where the entry is written.
   at: Location,
   /// The entry's type, a named type of `interface`.
@@ -152,11 +190,22 @@ struct Implementing<'p> {
   sources: &'p SourceMap,
   /// Each definition's own package, by `DefId`: the package that wrote it.
   owners: Vec<Option<PackageId>>,
+  /// `core`'s `@deprecated`, which a member that applies it is deprecated by.
+  deprecated: Option<DefId>,
   /// `Limits::max_implementation_steps`: every step of the phase.
   steps: Counter,
   /// Each type rebuilt under a named type's arguments, by the two, with what it became, what
   /// stopped it included: a second asks nothing.
   rebuilds: BTreeMap<(TyId, TyId), Result<Option<TyId>, Stop>>,
+  /// Whether each field compared applies `@deprecated`, by the field: read once.
+  deprecations: BTreeMap<MemberId, bool>,
+  /// Each pair of types the relation answered, by the pair, or marked open while its frame is on
+  /// the stack.
+  pairs: BTreeMap<(TyId, TyId), Answer>,
+  /// The relation's frames, one for each pair being answered.
+  frames: Vec<Frame>,
+  /// The alternatives of the frames on the stack, each frame's a run.
+  alternatives: Vec<Alternative>,
   /// The definition being checked's own entries whose types resolved, in order, each with its
   /// type.
   entries: Vec<(TypeExprId, TyId)>,
@@ -177,6 +226,10 @@ struct Implementing<'p> {
   expanded: BTreeSet<DefId>,
   /// The interface types whose entries its check has still to read.
   frontier: Vec<TyId>,
+  /// Its own fields, by name and then id, so that the first of a name is the one found.
+  fields: Vec<(Sym, MemberId)>,
+  /// Whether `fields` holds them: built at its first root whose fields are compared.
+  indexed: bool,
 }
 
 impl Implementing<'_> {
@@ -265,15 +318,27 @@ impl Implementing<'_> {
     self.declared.dedup();
     self.reached.clear();
     self.expanded.clear();
+    self.indexed = false;
     for index in 0..self.roots.len() {
       let Some(&root) = self.roots.get(index) else {
         break;
       };
-      if let Err(stop) = self.transitive(root, wide) {
+      if let Err(stop) = self.root(root, wide) {
         self.report_stopped(root, stop);
         return;
       }
     }
+  }
+
+  /// Checks the definition `root` is a root of against it, `wide` when the definition is an object
+  /// or an interface: what the root's interface implements, and then, when the definition is an
+  /// object or an interface and the interface no marker, the interface's fields.
+  fn root(&mut self, root: Root, wide: bool) -> Result<(), Stop> {
+    self.transitive(root, wide)?;
+    if wide && !self.builder.def_marker(root.interface) {
+      self.fields(root)?;
+    }
+    Ok(())
   }
 
   /// Gathers the roots of `def`, `wide` when it is an object or an interface: each of its own
@@ -301,6 +366,7 @@ impl Implementing<'_> {
       if self.rooted.insert(ty) {
         self.roots.push(Root {
           def,
+          entry,
           at,
           ty,
           interface,
@@ -367,6 +433,127 @@ impl Implementing<'_> {
       }
     }
     Ok(())
+  }
+
+  /// Checks that the definition `root` is a root of declares each field of the root's interface its
+  /// own package writes: found by name, the first of the definition's own fields of that name; of
+  /// a type that is a subtype of the interface's under the root's arguments; and deprecated only
+  /// where the interface's is. Each field of the interface looked at is a step, whoever wrote it,
+  /// and a field written twice in the interface is checked twice.
+  fn fields(&mut self, root: Root) -> Result<(), Stop> {
+    if !self.indexed {
+      self.index_fields(root.def);
+    }
+    let own = self.owner(root.interface);
+    for field in self.builder.def_members(root.interface) {
+      if !self.steps.charge(1) {
+        return Err(Stop::Steps);
+      }
+      let (Some(name), Some(declared)) = (
+        self.builder.member_name(field),
+        self.builder.member_location(field),
+      ) else {
+        continue;
+      };
+      if own.is_none() || self.sources.written_by(declared) != own {
+        continue;
+      }
+      let Some(implementing) = self.field_named(name) else {
+        self.report_missing_field(root, field, declared);
+        continue;
+      };
+      // The interface's field's type under the root's arguments: one that cannot be rebuilt there
+      // is left to whoever refused those arguments, and the field is judged no further.
+      let wanted = match self.member_type(field) {
+        Some(open) => match self.rebuilt(open, root.ty, root.interface)? {
+          Some(wanted) => Some(wanted),
+          None => continue,
+        },
+        None => None,
+      };
+      if let (Some(written), Some(wanted)) = (self.member_type(implementing), wanted)
+        && !self.subtype(written, wanted)?
+      {
+        self.report_field_type(root, field, implementing);
+      }
+      if self.is_deprecated(implementing) && !self.is_deprecated(field) {
+        self.report_not_deprecated(root, field, implementing);
+      }
+    }
+    Ok(())
+  }
+
+  /// Indexes the fields of `def` its own package writes, by name and then id.
+  fn index_fields(&mut self, def: DefId) {
+    self.fields.clear();
+    let own = self.owner(def);
+    for member in self.builder.def_members(def) {
+      let (Some(name), Some(at)) = (
+        self.builder.member_name(member),
+        self.builder.member_location(member),
+      ) else {
+        continue;
+      };
+      if own.is_some() && self.sources.written_by(at) == own {
+        self.fields.push((name, member));
+      }
+    }
+    self.fields.sort_unstable();
+    self.indexed = true;
+  }
+
+  /// The first of the definition being checked's own fields named `name`.
+  fn field_named(&self, name: Sym) -> Option<MemberId> {
+    let at = self
+      .fields
+      .partition_point(|&(written, _): &(Sym, MemberId)| written < name);
+    match self.fields.get(at) {
+      Some(&(written, member)) if written == name => Some(member),
+      _ => None,
+    }
+  }
+
+  /// Whether `member` applies `core`'s `@deprecated`, told by the definition its applications
+  /// resolved to and never by a spelling: read once, and kept.
+  fn is_deprecated(&mut self, member: MemberId) -> bool {
+    let Some(wanted) = self.deprecated else {
+      return false;
+    };
+    if let Some(&known) = self.deprecations.get(&member) {
+      return known;
+    }
+    let builder: &ModelBuilder = &*self.builder;
+    let found = builder
+      .member_applications(member)
+      .iter()
+      .any(|application: &ApplicationId| {
+        matches!(
+          builder.applied(*application),
+          Some((Resolution::Resolved(directive), _, _)) if directive == wanted
+        )
+      });
+    self.deprecations.insert(member, found);
+    found
+  }
+
+  /// The type `member`'s occurrence has.
+  fn member_type(&self, member: MemberId) -> Option<TyId> {
+    let written = self.builder.member_ty(member)?;
+    self.builder.occurrence(written)?.ty
+  }
+
+  /// Where `member`'s type is written.
+  fn type_location(&self, member: MemberId) -> Option<Location> {
+    let written = self.builder.member_ty(member)?;
+    self.located(written)
+  }
+
+  /// The name `member` is written with.
+  fn member_spelling(&self, member: MemberId) -> &[u8] {
+    match self.builder.member_name(member) {
+      Some(name) => self.builder.spelling(name),
+      None => &[],
+    }
   }
 
   /// `open`, a type written in `def` that may name its type parameters, under `ty`, a named type
@@ -452,6 +639,90 @@ impl Implementing<'_> {
       )
       .build(),
     );
+  }
+
+  /// Reports that the definition `root` is a root of declares no field named as `field`, a field
+  /// of the root's interface whose name is written at `declared`: at the root's entry, labelled
+  /// there.
+  fn report_missing_field(&mut self, root: Root, field: MemberId, declared: Location) {
+    let owner = Excerpt(self.builder.def_name(root.def));
+    let interface = Excerpt(self.builder.def_name(root.interface));
+    let name = Excerpt(self.member_spelling(field));
+    let report = Diagnostic::builder(schema::MISSING_INTERFACE_FIELD, root.at)
+      .message(format!(
+        "`{owner}` implements `{interface}`, which declares the field `{name}`, and `{owner}` \
+         declares no field `{name}`"
+      ))
+      .primary_label("missing interface field")
+      .help("declare the field on this definition, with a type the interface's field accepts");
+    self
+      .reporter
+      .report(labelled(report, declared, "the interface's field").build());
+  }
+
+  /// Reports that the type of `implementing`, the field of the definition `root` is a root of, is
+  /// no subtype of the type `field`, the root's interface's field, declares under the root's
+  /// arguments: at its name, labelled at both types and, when the root's entry writes type
+  /// arguments, at the entry.
+  fn report_field_type(&mut self, root: Root, field: MemberId, implementing: MemberId) {
+    let Some(at) = self.builder.member_location(implementing) else {
+      return;
+    };
+    let owner = Excerpt(self.builder.def_name(root.def));
+    let interface = Excerpt(self.builder.def_name(root.interface));
+    let name = Excerpt(self.member_spelling(implementing));
+    let mut report = Diagnostic::builder(schema::INVALID_INTERFACE_FIELD_TYPE, at)
+      .message(format!(
+        "the type of `{owner}`'s field `{name}` is no subtype of the type `{interface}` declares \
+         for it"
+      ))
+      .primary_label("invalid interface field type")
+      .help(
+        "give the field the type the interface declares, its non-null form, or a subtype of it",
+      );
+    if let Some(written) = self.type_location(implementing) {
+      report = labelled(report, written, "this type");
+    }
+    if let Some(declared) = self.type_location(field) {
+      report = labelled(report, declared, "the type the interface declares");
+    }
+    if self.writes_arguments(root.entry) {
+      report = labelled(report, root.at, "under these type arguments");
+    }
+    self.reporter.report(report.build());
+  }
+
+  /// Reports that `implementing`, the field of the definition `root` is a root of, is deprecated,
+  /// and `field`, the root's interface's field it implements, is not: at its name, labelled at the
+  /// interface's field.
+  fn report_not_deprecated(&mut self, root: Root, field: MemberId, implementing: MemberId) {
+    let (Some(at), Some(declared)) = (
+      self.builder.member_location(implementing),
+      self.builder.member_location(field),
+    ) else {
+      return;
+    };
+    let owner = Excerpt(self.builder.def_name(root.def));
+    let interface = Excerpt(self.builder.def_name(root.interface));
+    let name = Excerpt(self.member_spelling(implementing));
+    let report = Diagnostic::builder(schema::INTERFACE_FIELD_NOT_DEPRECATED, at)
+      .message(format!(
+        "`{owner}`'s field `{name}` is deprecated, and `{interface}`'s field `{name}`, which it \
+         implements, is not"
+      ))
+      .primary_label("interface field not deprecated")
+      .help("deprecate the interface's field too, or remove the deprecation here");
+    self
+      .reporter
+      .report(labelled(report, declared, "the interface's field, not deprecated").build());
+  }
+
+  /// Whether the type occurrence `id` writes type arguments.
+  fn writes_arguments(&self, id: TypeExprId) -> bool {
+    self
+      .builder
+      .occurrence(id)
+      .is_some_and(|occurrence: Occurrence<'_>| !occurrence.args.is_empty())
   }
 
   /// Reports, at the root `root`, that `stop` stopped the check of its definition there.

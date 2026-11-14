@@ -148,8 +148,9 @@ model_id! {
   /// in the order its walk first needs each; then those that checking the values of each closed
   /// instantiation the program writes derives, in the order of its occurrences. Last come those
   /// that checking implementations derives, definition by definition in id order, each entry it
-  /// checks in turn: the `implements` entries of the interfaces it reads, under the type arguments
-  /// that reach them, in the order first needed, each type's arguments before it.
+  /// checks in turn: the `implements` entries of the interfaces it reads, then the interface's
+  /// fields' types, and the entries and union members comparing them reads, each under the type
+  /// arguments that reach it, in the order first needed, each type's arguments before it.
   TyId
 }
 

@@ -328,9 +328,20 @@ impl Analysis {
 ///   `smear::schema::missing-transitive-interface`, at the definition's entry, with a label at the
 ///   entry that implements it, once for each interface type missing; and what a missing interface
 ///   implements is owed too, each definition read once for the definition checked. What an entry
-///   names besides is another rule's to refuse. Each entry of an interface looked at, whoever wrote
-///   it, and each node of a type read under type arguments, once for each type and arguments, is a
-///   step of [`Limits::max_implementation_steps`]; such a type is depth-checked against
+///   names besides is another rule's to refuse. Then, for an object or an interface and an
+///   interface that is no marker, each field the interface's own package writes: the first of the
+///   definition's own fields of its name, or else `smear::schema::missing-interface-field` at the
+///   entry; of a type that is a subtype of the interface's field's under the entry's type
+///   arguments, or else `smear::schema::invalid-interface-field-type` at its name, a subtype read
+///   as GraphQL's, a list of subtypes, a non-null form, a type that implements the interface or is
+///   a member of the union, and covariant in every type argument, a type parameter a subtype of
+///   itself and of its bounds alone; and deprecated, by `core`'s `@deprecated` or the root
+///   package's own, only where the interface's is, or else
+///   `smear::schema::interface-field-not-deprecated` at its name. Each entry and field of an
+///   interface looked at, whoever wrote it, each pair of types compared and each entry, bound and
+///   member looked at to compare them, and each node of a type read under type arguments, once for
+///   each type and arguments, is a step of [`Limits::max_implementation_steps`]; such a type is
+///   depth-checked against
 ///   [`Limits::max_generic_depth`] and counted toward [`Limits::max_instantiations`]. A check one
 ///   of them stops is `resource-limit`, once, at the entry it was checking, naming the limit, and
 ///   nothing more is said of the definition.
