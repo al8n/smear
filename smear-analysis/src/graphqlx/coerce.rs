@@ -207,8 +207,11 @@
 //! under the application's open type arguments, names them, written or copied from its
 //! directive's default. So is an argument such an application leaves out with no default, whose
 //! type there is a bare nullable type parameter of the definition: whether it is required is each
-//! instantiation's to say. A generic directive's own arguments' defaults are judged where its
-//! applications leave them out, and recorded nowhere. When the walk has ended, each type
+//! instantiation's to say. `null` written for an argument required under the application's open
+//! type arguments, its type there non-null, is required under every instantiation of them: it is
+//! refused where it is written, once, and recorded nowhere. A generic directive's own arguments'
+//! defaults are judged where its applications leave them out, and recorded nowhere. When the walk
+//! has ended, each type
 //! occurrence a supplied package writes, in id order, whose type is a closed named type of a
 //! definition with recorded rows, and then each application a supplied package writes, in id
 //! order, whose type is a closed instantiation of its directive, asks that instantiation's
@@ -2764,9 +2767,6 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
     };
     let (ty, non_null) = (expected.ty, expected.non_null);
-    if applying.env.is_some() {
-      self.record(argument.tree, ty, Site::Argument);
-    }
     let required = non_null && !self.raw.defaults.contains_key(&argument.argument);
     let null = self
       .raw
@@ -2775,8 +2775,14 @@ impl<'p> Coercion<'_, 'p, '_> {
       .and_then(|tree: &RawTree| self.raw.nodes.get(tree.root as usize))
       .is_some_and(|node: &RawNode| matches!(node.kind, RawKind::Null));
     let value = if required && null {
+      // Required under the application's own arguments, open or not, is required under every
+      // instantiation of them: refused here once, and recorded nowhere, so that no instantiation
+      // reports it again.
       self.null_for_required(application, argument, ty)
     } else {
+      if applying.env.is_some() {
+        self.record(argument.tree, ty, Site::Argument);
+      }
       self.value(argument.tree, ty, Mode::Written(Site::Argument))
     };
     if let Some(value) = value {
