@@ -927,6 +927,63 @@ fn a_literal_under_derived_arguments_reports_its_copy() {
   );
 }
 
+/// A literal whose type a type parameter's default filled reports its copy that does not fit,
+/// though no rebuild made its type: `Dict<String>`'s value type is `V`'s default `In<K>` filled
+/// under `K = string!`, `In<string!>`, which no type occurrence writes, so no instantiation's check
+/// reads it. `{}` leaves out `In`'s `1`, which `string!` does not take: one
+/// `invalid-default-value`, at `{}`, labelled at the `1`, and the analysis is not ok. Refuses an ok
+/// analysis that holds an unresolved copy.
+#[test]
+fn a_literal_under_a_filled_type_reports_its_copy() {
+  let text = "type Query {\n  x: Int\n}\ninput In<T> {\n  a: T = 1\n}\n\
+              scalar Dict<K, V = In<K>> @map\n\
+              input H {\n  h: Dict<String> = map!{ \"k\" => {} }\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let literal = at(schema, text, "{}", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, literal)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, literal)),
+    [(after(schema, text, "T = ", "1"), "this default")]
+  );
+  assert!(!analysis.is_ok());
+  let model = analysis.model();
+  let ValueKind::Map(&[(key, value)]) = model.value(input_default(model, "H", "h")).kind() else {
+    panic!("`h` is no map of one entry");
+  };
+  assert_eq!(valued(model, key), "String \"k\"");
+  assert_eq!(valued(model, value), "Object {a= ?}");
+}
+
+/// A literal whose type a type occurrence writes leaves its copy that does not fit to that
+/// occurrence's check, which reports it once, where the type is written, labelled at the value:
+/// `W`'s `In<String!>` is the `In<string!>` a fill gives `Dict<String>`'s value, and `Y`'s
+/// `Box<String>` the type a rebuild gives `@w<String>`'s literal. Refuses a second report, at the
+/// literal.
+#[test]
+fn a_literal_whose_type_is_written_leaves_its_copy_to_that_occurrence() {
+  let filled = "type Query {\n  x: Int\n}\ninput In<T> {\n  a: T = 1\n}\n\
+                scalar Dict<K, V = In<K>> @map\n\
+                input H {\n  h: Dict<String> = map!{ \"k\" => {} }\n}\n\
+                input W {\n  w: In<String!>\n}\n";
+  let rebuilt = "type Query @w<String>(a: {}) {\n  x: Int\n}\ninput Box<U> {\n  v: U = 1\n}\n\
+                 directive @w<T>(a: Box<T>) on OBJECT\ninput Y {\n  y: Box<String>\n}\n";
+  for (text, written, before) in [
+    (filled, "In<String!>", "T = "),
+    (rebuilt, "Box<String>", "U = "),
+  ] {
+    let analysis = analyze_text(text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let occurrence = at(schema, text, written, 0);
+    assert_eq!(found(&analysis), [(DEFAULT, occurrence)], "{text}");
+    assert_eq!(
+      labels(the(&analysis, DEFAULT, occurrence)),
+      [(after(schema, text, before, "1"), "this value")],
+      "{text}"
+    );
+  }
+}
+
 /// A field's default read again under other type arguments is a count of its own, not a cycle:
 /// `P.f` under `Q` reads `Q.p`, which reads `P.f` under `R`, and the fill ends. Its answer does not
 /// change with the order the definitions are written in. Refuses a stop by field, which poisons
@@ -1428,15 +1485,16 @@ fn names_param(model: &Model, id: TyId) -> bool {
 
 /// An ok analysis under type arguments holds no unresolved value, and keeps a literal only where
 /// its type names a type parameter: an application's arguments, written and copied, an object
-/// literal's fields and its copies, a nested literal's whose type a rebuild made, and the values
-/// each instantiation checks.
+/// literal's fields and its copies, a nested literal's whose type a rebuild made, a map's value
+/// whose type a type parameter's default filled, and the values each instantiation checks.
 #[test]
 fn an_ok_analysis_under_type_arguments_has_no_unresolved_value() {
   let text = "type Query @d<Int>(a: 1) @d<String>(a: \"s\") {\n  x(i: In<Int> = { v: 2 }): Int\n  \
               g: G<Int>\n}\ndirective @d<T>(a: T, l: [T] = []) repeatable on OBJECT\n\
               input In<T> {\n  v: T\n  w: [T] = [4]\n  b: Box<T> = {}\n}\n\
               input Box<U> {\n  u: U = 5\n}\ninput Wrap<W> {\n  w: Box<W>\n}\n\
-              input H {\n  h: Wrap<Int> = { w: {} }\n}\n\
+              input H {\n  h: Wrap<Int> = { w: {} }\n  m: Dict<Int> = map!{ 1 => {} }\n}\n\
+              scalar Dict<K, V = Box<K>> @map\n\
               type G<T> @d<T>(a: 6) {\n  f(y: T = 7): Int\n}\n";
   let analysis = analyze_text(text, &Limits::new());
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
@@ -1460,6 +1518,10 @@ fn an_ok_analysis_under_type_arguments_has_no_unresolved_value() {
     valued(model, input_default(model, "H", "h")),
     "Object {w: Object {u= Int 5}}"
   );
+  let ValueKind::Map(&[(_, value)]) = model.value(input_default(model, "H", "m")).kind() else {
+    panic!("`m` is no map of one entry");
+  };
+  assert_eq!(valued(model, value), "Object {u= Int 5}");
 }
 
 /// The analysis of a generic directive applied with a default that does not fit, and of a generic
