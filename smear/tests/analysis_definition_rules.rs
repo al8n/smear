@@ -2376,6 +2376,42 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
        deprecated input field `w` of `W` required"
     ]
   );
+
+  // Where a default fills the slot, at the application's path; and where an `implements` entry
+  // passes the element on, at the entry. Each once, and `S<Int>` adds nothing.
+  let deprecated_message = "`T`, the element of the set `S`, is non-null in every instantiation, \
+                            and here it makes the deprecated argument `v` of the directive `@d` \
+                            required";
+  let text = "type Query {\n  s: S<Int>\n}\n\
+              directive @d<X, Y = X>(v: Y @deprecated) on SCALAR\nscalar S<T> @set @d<T>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      named(schema, text, "@", "d", 1),
+      Some(at(schema, text, "deprecated", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [deprecated_message]);
+  let text = "type Query {\n  s: S<Int>\n}\ndirective @d<X>(v: X @deprecated) on INTERFACE\n\
+              interface Mk<X> @marker @d<X>\nscalar S<T> implements Mk<T> @set\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      at(schema, text, "Mk<T>", 0),
+      Some(at(schema, text, "deprecated", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [deprecated_message]);
 }
 
 /// A OneOf input object with a field of each shape, and a generic one whose field is a type
