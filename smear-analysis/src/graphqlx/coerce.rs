@@ -2797,7 +2797,7 @@ impl<'p> Coercion<'_, 'p, '_> {
 
   /// The value of the tree `tree`, written where it takes a type that `stop` kept from being read
   /// under type arguments: one unresolved row at its root, typed `ty`, the type it is written
-  /// against, and `resource-limit` at it.
+  /// against, with the path its root is written as when it is one, and `resource-limit` at it.
   fn unbuilt_value(&mut self, tree: u32, ty: Option<TyId>, stop: Stop) -> Option<ValueId> {
     let RawTree { root, source, .. } = self.raw.trees.get(tree as usize).copied()?;
     let node = self.raw.nodes.get(root as usize).copied()?;
@@ -2806,6 +2806,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     if let Some(ty) = ty {
       self.builder.set_value_ty(id, ty);
     }
+    self.path(id, node.kind);
     let (message, help) = self.stopped(stop, "this value takes");
     self.limit(at, message, help);
     Some(id)
@@ -3554,8 +3555,9 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.limit(at, message, help);
   }
 
-  /// Makes the row of `making`'s node one unresolved row, typed with its type, and reports why,
-  /// `why`, where it is written: it holds nothing.
+  /// Makes the row of `making`'s node one unresolved row, typed with its type, with the path the
+  /// node is written as when it is one, and reports why, `why`, where it is written: it holds
+  /// nothing.
   fn unfit(&mut self, making: Making, why: Why) {
     let Making {
       node,
@@ -3571,6 +3573,8 @@ impl<'p> Coercion<'_, 'p, '_> {
     if let Some(ty) = ty {
       self.builder.set_value_ty(id, ty);
     }
+    // A row of a written path keeps its path, whatever it becomes.
+    self.path(id, raw.kind);
     self.refuse(Refused { node, why }, tree.source, ty, mode);
   }
 
