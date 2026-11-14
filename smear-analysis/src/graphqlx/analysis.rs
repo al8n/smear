@@ -14,7 +14,7 @@ use super::{
   bind, check, coerce, collect, declare,
   diagnostic::{Diagnostics, Reporter},
   id::{PackageId, SourceId},
-  instantiate,
+  implement, instantiate,
   limits::Limits,
   lower,
   model::{Model, ModelBuilder, PackageKind},
@@ -314,6 +314,12 @@ impl Analysis {
 ///   `@extern` whose `lang`, `type` or `tier` did not coerce binds nothing, and so does one another
 ///   package writes, and one on a built-in, a GraphQL built-in the root package replaces among
 ///   them. An extern holds the strings coercion kept, and binding writes no text.
+/// - Checks what each definition says it is, in id order, reading of it what its own package
+///   writes, its own extensions included: an `implements` entry of the type an earlier entry of
+///   the definition has is `smear::schema::duplicate-implements-interface`, and a union's member
+///   of the type an earlier member has `smear::schema::duplicate-union-member`, each at the later,
+///   with a label at the first, every later one reported. Two instantiations of one interface are
+///   two types, and an entry or a member that did not resolve is compared with nothing.
 /// - Gives every definition and every type the tier it requires, last, once every type is
 ///   interned: a built-in keeps its package's tag; a scalar a supplied package defines requires
 ///   its externs' greatest tier, `core` with none; an enum and a directive `core`; an object or an
@@ -560,6 +566,7 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut reporter,
   );
   bind::bind(&declarations, &sources, &mut builder);
+  implement::implement(&declarations, &sources, &mut builder, &mut reporter);
   tiers::tiers(&declarations, &mut builder);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())

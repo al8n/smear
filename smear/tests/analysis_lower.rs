@@ -819,14 +819,16 @@ fn a_replaced_directive_has_the_roots_arguments() {
   );
 }
 
-/// A definition of every kind that has extensions, each extended once below it.
+/// A definition of every kind that has extensions, each extended once below it, and `Other`, the
+/// member the union's extension adds.
 const EXTENDED: &str = "type Query {\n  a: Int\n}\nextend type Query {\n  b(x: Int): Int\n}\n\
                         interface Node {\n  id: ID\n}\nextend interface Node {\n  name: String\n}\n\
                         input Filter {\n  f: Int\n}\nextend input Filter {\n  g: Int\n}\n\
                         enum Color {\n  RED\n}\nextend enum Color {\n  GREEN\n}\n\
                         scalar Date\nextend scalar Date @specifiedBy(url: \"https://example.com\")\n\
-                        union Either = Query\nextend union Either = Query\n\
-                        directive @d on FIELD\nextend directive @d @deprecated\n";
+                        union Either = Query\nextend union Either = Other\n\
+                        directive @d on FIELD\nextend directive @d @deprecated\n\
+                        type Other {\n  a: Int\n}\n";
 
 #[test]
 fn an_extension_is_a_contribution_of_its_target() {

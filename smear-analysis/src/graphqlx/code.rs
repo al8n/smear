@@ -522,4 +522,14 @@ pub(crate) mod schema {
   /// `smear-schema`'s `MissingRequiredInputObjectField`.
   pub(crate) const MISSING_REQUIRED_INPUT_OBJECT_FIELD: Code =
     Code::new("smear::schema::missing-required-input-object-field");
+
+  /// A definition's `implements` entry is the type an earlier entry of its is, as written:
+  /// `smear-schema`'s `DuplicateImplementsInterface`.
+  pub(crate) const DUPLICATE_IMPLEMENTS_INTERFACE: Code =
+    Code::new("smear::schema::duplicate-implements-interface");
+
+  /// A union's member is the type an earlier member of its is, as written: `smear-schema`'s
+  /// `DuplicateUnionMember`.
+  pub(crate) const DUPLICATE_UNION_MEMBER: Code =
+    Code::new("smear::schema::duplicate-union-member");
 }

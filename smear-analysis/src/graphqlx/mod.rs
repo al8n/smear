@@ -38,7 +38,10 @@
 //! instantiation the program writes has its bounds judged so: a type argument that does not
 //! satisfy a bound of its definition is `smear::graphqlx::unsatisfied-bound`, where the
 //! instantiation is written, and so is each directive application, by its complete type
-//! arguments, at its path. A value that does not fit its type is refused where it is written, a
+//! arguments, at its path. No definition implements one interface type twice, nor has a union one
+//! member type twice: each later one is `smear::schema::duplicate-implements-interface` or
+//! `smear::schema::duplicate-union-member`. A value that does not fit its type is refused where it
+//! is written, a
 //! generic directive's arguments and a generic input object's fields read under their type
 //! arguments, and a default fills each argument and each input field a value leaves out; a value
 //! of a generic type definition whose type names its type parameters is checked at each closed
@@ -146,6 +149,7 @@ mod collect;
 mod declare;
 mod diagnostic;
 mod id;
+mod implement;
 mod instantiate;
 mod limits;
 mod lower;

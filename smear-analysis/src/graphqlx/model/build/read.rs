@@ -301,6 +301,15 @@ impl ModelBuilder {
       .max()
   }
 
+  /// The `implements` entries of `def`, every contribution's, in order: none for a definition that
+  /// writes none, and for an id the builder did not issue.
+  pub(crate) fn def_implements(&self, def: DefId) -> &[TypeExprId] {
+    match self.model.defs.get(def.get() as usize) {
+      Some(row) => row.implements.of(&self.model.implements),
+      None => &[],
+    }
+  }
+
   /// The union members of `def`, every contribution's, in order: none for a definition of any
   /// other kind, and for an id the builder did not issue.
   pub(crate) fn def_union_members(&self, def: DefId) -> &[TypeExprId] {
