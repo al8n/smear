@@ -129,8 +129,10 @@ pub enum ValueKind<'a> {
   /// A value kept as written: of a custom scalar that is no collection, but `null`; of a type that
   /// still names a type parameter; or of a type that can take no value.
   Literal(Literal<'a>),
-  /// A value that did not coerce or resolve. Only an analysis that is not ok has one, within the
-  /// extent of the error that says why.
+  /// A value that did not coerce or resolve. Only an analysis that is not ok has one. It lies
+  /// within the extent of the error that says why, but for a copy of a default: its error is where
+  /// the default is written, or at the application, the literal or the instantiation's occurrence
+  /// whose type arguments it does not fit, which may stand in another definition.
   Unresolved,
 }
 

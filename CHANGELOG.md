@@ -480,8 +480,9 @@ All notable changes to Smear are documented in this file.
   `duplicate-union-member` at the occurrence. A new `Limits::max_implementation_steps`, 2^20 by
   default, bounds the check, which costs the square of a definition's entries on programs it
   accepts: each entry, field, argument and union member looked at, each pair of types compared and
-  each node of a type rebuilt under type arguments is a step, and past it the definition's check,
-  or an instantiation's, is `resource-limit` once where it was checking. Then every definition and
+  each node of a type rebuilt under type arguments is a step, and past it a definition's check is
+  `resource-limit` once, at the entry it was checking, and an instantiation's at each occurrence of
+  it. Then every definition and
   every type is given the tier it requires, which
   `Def::tier()` and `Ty::tier()` answer: a built-in keeps its package's tag; a scalar a supplied
   package defines requires its externs' greatest tier, `core` with none; an enum and a directive

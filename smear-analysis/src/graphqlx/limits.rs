@@ -364,7 +364,8 @@ impl Limits {
   /// which is not made; a list that a written value stands for where a list is expected, one for
   /// each level of list between the value and its type, as `tags: [[Int]] = 1` stands for a list
   /// of a list of `1`; a required argument an application leaves out, and a required field an
-  /// object literal leaves out, each of which is reported; a node a rebuild of a member's type
+  /// object literal leaves out, each found left out, reported where it is written and not in a
+  /// count; a node a rebuild of a member's type
   /// under type arguments looks at, its root included, once for each written type and
   /// instantiation; a node of a count made under a type its default is not written against, and an
   /// identity of a set's element or of a map's key that such a count renders to search them for
