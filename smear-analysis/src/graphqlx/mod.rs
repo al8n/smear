@@ -160,6 +160,7 @@ pub use model::{
   Value, ValueKind,
 };
 pub use package::{IntegerProvider, Layout, Package, SourceFile, Tier};
+pub use rules::UnboundedInstantiation;
 pub use source::{Bound, Source, SourceMap};
 pub use text::SourceText;
 pub use visitor::{Cx, Packages, Site, Visitor, visit};

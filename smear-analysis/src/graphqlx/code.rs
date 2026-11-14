@@ -2,7 +2,9 @@
 
 use tokora::diagnostic::{Code, Severity};
 
-/// Every kind of diagnostic the GraphQLx analysis reports under its own family, `smear::graphqlx`.
+/// Every kind of diagnostic of the GraphQLx analysis's own family, `smear::graphqlx`: the analysis
+/// reports each of them but one, [`UnboundedInstantiation`](Self::UnboundedInstantiation), which
+/// the rule a backend composes reports.
 ///
 /// A diagnostic's [`code`](Self::code) is what a consumer keys off: a rule is waived by filtering
 /// its code out, and the code never changes when the message is reworded. A file that does not
@@ -197,6 +199,21 @@ pub enum DiagnosticKind {
   /// name, with a label at the first of that name.
   DuplicateTypeParameter,
 
+  // -- The rule a backend composes ---------------------------------------------------------------
+  /// A generic definition that reaches itself with a type argument that grows, so that a backend
+  /// that makes one copy per instantiation would need an endless family of them. Reported at each
+  /// written type occurrence, in a member's type, an `implements` entry, a union member or a
+  /// directive application's type argument, whose type is an instantiation that grows, with a label
+  /// at the type argument that grows where the occurrence writes it, or at the default that fills
+  /// it; at each such occurrence whose type holds one only in what defaults filled, with a label at
+  /// the default that filled the first argument that holds one; and at the path of each directive
+  /// application whose type argument grows, with a label at that type argument.
+  ///
+  /// [`analyze`](crate::graphqlx::analyze) never reports it: only
+  /// [`UnboundedInstantiation`](crate::graphqlx::UnboundedInstantiation), the rule a backend
+  /// composes into its own walk, does.
+  UnboundedInstantiation,
+
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
   ResourceLimit,
@@ -236,6 +253,7 @@ impl DiagnosticKind {
     Self::TypeRefMisuse,
     Self::NonZeroArgument,
     Self::DuplicateTypeParameter,
+    Self::UnboundedInstantiation,
     Self::ResourceLimit,
   ];
 
@@ -274,6 +292,7 @@ impl DiagnosticKind {
       Self::TypeRefMisuse => Code::new("smear::graphqlx::typeref-misuse"),
       Self::NonZeroArgument => Code::new("smear::graphqlx::nonzero-argument"),
       Self::DuplicateTypeParameter => Code::new("smear::graphqlx::duplicate-type-parameter"),
+      Self::UnboundedInstantiation => Code::new("smear::graphqlx::unbounded-instantiation"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -312,6 +331,7 @@ impl DiagnosticKind {
       Self::TypeRefMisuse => "`TypeRef` where it may not stand",
       Self::NonZeroArgument => "invalid `NonZero` argument",
       Self::DuplicateTypeParameter => "duplicate type parameter",
+      Self::UnboundedInstantiation => "unbounded instantiation",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -350,6 +370,7 @@ impl DiagnosticKind {
       | Self::TypeRefMisuse
       | Self::NonZeroArgument
       | Self::DuplicateTypeParameter
+      | Self::UnboundedInstantiation
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }

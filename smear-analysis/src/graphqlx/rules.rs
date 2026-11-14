@@ -1,8 +1,8 @@
 //! smear's own rules: what `analyze` runs, after its phases, through the one driver.
 //!
 //! A rule is one type in one file, implementing the public `Visitor` and nothing else, and the set
-//! is a named struct of them that `rule_set!` declares. The rule types are private. The macro also
-//! emits the set's table of each rule and the codes it reports, which the liveness test reads:
+//! is a named struct of them that `rule_set!` declares. The set's rule types are private. The macro
+//! also emits the set's table of each rule and the codes it reports, which the liveness test reads:
 //! every code a rule lists must fire on at least one fixture.
 //!
 //! A rule reads the model the phases wrote, through its public views, and reports through the
@@ -19,6 +19,9 @@
 //! arguments of an occurrence that names a type parameter, or nothing, which the kind does not
 //! answer. `DuplicateTypeParameter` reads one crate-private accessor, `Def::extension_params`:
 //! the names an extension's own list writes, which no public view holds.
+//!
+//! One rule is in no set: `UnboundedInstantiation`, which is public, which `analyze` never runs,
+//! and which a backend composes into its own walk. It reads the public model alone.
 
 mod collection_arity;
 mod duplicate_schema_definition;
@@ -29,6 +32,7 @@ mod non_zero_argument;
 mod orphan_extension;
 mod schema_outside_root;
 mod type_ref_misuse;
+mod unbounded_instantiation;
 
 use self::{
   collection_arity::CollectionArity, duplicate_schema_definition::DuplicateSchemaDefinition,
@@ -38,6 +42,8 @@ use self::{
   type_ref_misuse::TypeRefMisuse,
 };
 use super::{Contribution, Cx, DefId, Model, PackageId, TypeExprId, TypeExprKind, id::dense};
+
+pub use self::unbounded_instantiation::UnboundedInstantiation;
 
 /// The definition `def`'s own contribution, its first, which is no extension, and the package that
 /// wrote it, read off where it is written: the package that wrote the definition, whose
