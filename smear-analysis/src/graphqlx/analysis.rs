@@ -135,9 +135,11 @@ impl Analysis {
 ///   as a GraphQL scalar (`Int`, `Float`, `String`, `Boolean`, `ID`) and a directive named as a
 ///   GraphQL specified directive replace the built-in of that name, which keeps its id. Two
 ///   definitions of one name in one namespace of one module, a supplied definition named with
-///   `__`, and a type named as a child module of its module are reported. The first definition a
-///   supplied package would add past [`Limits::max_definitions`] is reported, and nothing after it
-///   is collected.
+///   `__`, and a type named as a child module of its module are reported. A type of the root
+///   package's root module named as one of GraphQL's introspection types, `__Type` and the seven
+///   others, is `redefined-built-in-type`, as GraphQL reports it, and no reserved name. The first
+///   definition a supplied package would add past [`Limits::max_definitions`] is reported, and
+///   nothing after it is collected.
 /// - Builds every module's scope: its own declarations and child modules, then its explicit `use`
 ///   bindings, then its globs, then the prelude, the root modules of `core`, `alloc` and `std`
 ///   whatever the package's tier, then, where a module is wanted, the packages its package may
@@ -381,7 +383,9 @@ impl Analysis {
 ///   `orphan-extension`, at its target path, with a label at the definition's name; and so is an
 ///   extension of a definition of `core`, `alloc` or `std`, a GraphQL built-in the root package
 ///   replaces among them, unless the root package writes it and it adds directives and nothing
-///   else. In the root package's extension of a built-in it did not write, each application of
+///   else; the root package's that adds more to one of GraphQL's introspection types is GraphQL's
+///   own `introspection-type-extension`, at the same place and with the same label. In the root
+///   package's extension of a built-in it did not write, each application of
 ///   `core`'s `@marker`, `@set` or `@map` is `orphan-extension` too, at its path: what a built-in
 ///   is is the language's to say; and so is each of `core`'s `@extern`, a built-in's host type
 ///   being given by `@repr(for: …)` on the schema alone. An enum that declares a type parameter is
@@ -402,23 +406,81 @@ impl Analysis {
 ///   with a label at the first of that name. An extern of a scalar whose `lang` an earlier extern
 ///   of the scalar has, the cooked strings compared, is `extern-misuse`, at its `@extern`'s path,
 ///   with a label at the earlier's; and so is each `@extern` the root package writes on a GraphQL
-///   built-in its own definition replaces, in that definition or its own extension. An `@repr`
-///   on the schema whose `for` is absent or `null` is `repr-misuse`, at its path, and so is one on
-///   a field, an argument or an input field that writes `for`, at `for`'s name; and so is an
-///   `@repr` whose `lang` an earlier one of its position has, or on the schema whose `for` and
-///   `lang` an earlier one of the schema's has, at its path, with a label at the earlier. Below
-///   `std`, a package uses nothing above the tier it declares, `tier` where it is written: a list
-///   in a `core` package; an occurrence of another package's definition that needs more, counting
-///   the defaults it leaves out and capped at that package's tier, a label at a default that
-///   raised it; `core`'s `@heap` on a field, an argument or an input field of a `core` package;
-///   and an extern's `tier` above its package's, at that `tier`. A use of a definition of the
-///   package's own is not reported, what raises it being reported where it is written.
-///   Compile-time metadata counts nowhere and is not judged: every type occurrence under a
-///   directive definition, its arguments' types and its type parameters' defaults and bounds, and
-///   every type argument of an application of any directive, the written ones and those its
-///   directive's defaults fill. The exemption is shallow: an input object a directive's argument
-///   names is a definition like any other, and its fields are judged where they are written. A
-///   rule says nothing about a contribution a phase already refused something in.
+///   built-in its own definition replaces, in that definition or its own extension. An `@repr` on
+///   the schema whose `for` is absent or `null` is `repr-misuse`, at its path, and so is one on a
+///   field, an argument or an input field that writes `for`, at `for`'s name; and so is an `@repr`
+///   whose `lang` an earlier one of its position has, or on the schema whose `for` and `lang` an
+///   earlier one of the schema's has, at its path, with a label at the earlier. Below `std`, a
+///   package uses nothing above the tier it declares, `tier` where it is written: a list in a
+///   `core` package; an occurrence of another package's definition that needs more, counting the
+///   defaults it leaves out and capped at that package's tier, a label at a default that raised it;
+///   `core`'s `@heap` on a field, an argument or an input field of a `core` package; and an
+///   extern's `tier` above its package's, at that `tier`. A use of a definition of the package's
+///   own is not reported, what raises it being reported where it is written. Compile-time metadata
+///   counts nowhere and is not judged: every type occurrence under a directive definition, its
+///   arguments' types and its type parameters' defaults and bounds, and every type argument of an
+///   application of any directive, the written ones and those its directive's defaults fill. The
+///   exemption is shallow: an input object a directive's argument names is a definition like any
+///   other, and its fields are judged where they are written. GraphQL's own rules judge what a
+///   definition a supplied package wrote holds, a GraphQL built-in the root package replaces among
+///   them, with GraphQL's codes: a member whose name begins with `__` is `reserved-field-name`,
+///   `reserved-argument-name`, `reserved-enum-value-name`, `reserved-input-field-name` or
+///   `reserved-directive-argument-name`, by what it is, at its name. A member whose name an
+///   earlier member of its list has, the definition's own and its extensions' members being one
+///   list and each field's arguments another, is `duplicate-field-name`,
+///   `duplicate-argument-name`, `duplicate-enum-value`, `duplicate-input-field-name` or
+///   `duplicate-directive-argument-name`, at its name, with a label at the first. An object, or
+///   an interface that is no marker, with no field, a union with no member, an enum with no value
+///   and an input object with no field, its extensions' members counted, is
+///   `empty-fields-definition`, `empty-union-members`, `empty-enum-values` or
+///   `empty-input-fields`, at its name. A field whose type's base, under its lists, is an input
+///   object is `field-type-not-output-type`, and an argument, an input field or a directive's
+///   argument whose base is an object, an interface or a union is `argument-type-not-input-type`,
+///   `input-field-type-not-input-type` or `directive-argument-type-not-input-type`, at the base.
+///   An `implements` entry of an object or an interface that names what is no interface, a type
+///   parameter among them, is `implements-non-interface`, at the entry. An interface on a cycle
+///   of `implements` entries, of any length, is `self-implementing-interface`, at its name. A
+///   union member that names what is no object type is `union-member-not-object`, at the member.
+///   An argument or an input field written non-null, with no default, that applies `core`'s
+///   `@deprecated` is `deprecated-required-argument` or `deprecated-required-input-field`, at its
+///   name, with a label at the `@deprecated`. An input object is OneOf when the package that
+///   wrote it applies `core`'s `@oneOf` to it, in its definition or in an extension of its own,
+///   and a field of one that is written non-null is `one-of-field-not-nullable`, and one that
+///   declares a default `one-of-field-has-default`, at its name. Each application of `@oneOf` in
+///   an extension of an input object is `one-of-on-input-object-extension`, at its path.
+///   GraphQL's own rules on directives judge every application a supplied package writes, with
+///   GraphQL's codes: an application at a location its directive's definition does not list, the
+///   schema, a kind of definition, a directive definition, a field, an argument, an input field or
+///   an enum value, is `unsupported-directive-location`, at its path, with a label at the
+///   directive's definition. An application of a directive that is not `repeatable`, which an
+///   earlier application to the same location applies, a definition and its extensions being one
+///   location and the schema's definition and extensions one, is `duplicate-directive-use`, at its
+///   path, with a label at the first. An argument an application writes again, the directive
+///   declaring it, is `duplicate-directive-argument-use`, at its name, with a label at the first.
+///   A directive on a cycle of what definitions reach is `self-referential-directive`, at its
+///   name: a definition reaches the directive of each application on it, and for a directive
+///   definition of each on its arguments, or for any other of each on its input fields and enum
+///   values; and every definition a type occurrence names at any depth, in a directive
+///   definition's arguments, in its input fields, in those applications' type arguments and in its
+///   own type parameters' defaults, a scalar that is no collection hiding its type arguments; a
+///   directive of `core` on such a cycle is reported in `core`'s source. Each application of
+///   `core`'s `@specifiedBy` on a scalar of the built-in library, a GraphQL scalar the root
+///   package replaces among them, is `specified-by-on-built-in-scalar`, at its path. GraphQL's
+///   own rules on the schema judge its roots: a written root whose type names a definition that is
+///   no object type, an alias such as `NonZeroU32` among them, is
+///   `root-operation-type-not-object`, at the type. Of the roots that are object types, presumed
+///   or written, one that is one type with an earlier one, in the order query, mutation and
+///   subscription, is `shared-root-operation-type`, at a written root's type, with a label at the
+///   other. When the root package writes no schema definition and no query root is presumed, each
+///   schema extension it writes is `schema-extension-without-schema`, at its `extend`. A schema
+///   with no query root, neither written nor presumed, is `missing-query-root-operation-type`, once:
+///   at the `schema` of the root package's first schema definition, silent when a phase refused
+///   something in it, or with none at the root package's package source, where it marks nothing.
+///   So a root package with no query root is not ok, as in GraphQL, and a consumer that analyzes a
+///   library as the root package filters that code. A rule says nothing about a contribution a
+///   phase already refused something in, and the two rules on the roots' types,
+///   `root-operation-type-not-object` and `shared-root-operation-type`, say nothing while any of
+///   the schema's contributions holds a phase's error.
 ///
 /// Every supplied package is checked, parsed and walked, whether anything reaches it or not.
 ///

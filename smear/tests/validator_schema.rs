@@ -440,6 +440,21 @@ const BRANCHES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     "type Query { ok: Int } directive @d on DIRECTIVE_DEFINITION extend directive @d @d",
     &[SchemaErrorKind::SelfReferentialDirective],
   ),
+  // -- §3.3, what an extension adds to an introspection type -----------------------------------
+  //
+  // The census row adds a field. These add an enum value and an `implements` entry, the other two
+  // members an introspection type's extension can write: none of the eight is a union or an input
+  // object, whose extensions are a kind mismatch first.
+  (
+    SchemaErrorKind::IntrospectionTypeExtension,
+    "type Query { ok: Int } extend enum __TypeKind { EXTRA }",
+    &[SchemaErrorKind::IntrospectionTypeExtension],
+  ),
+  (
+    SchemaErrorKind::IntrospectionTypeExtension,
+    "type Query { ok: Int } interface I { a: Int } extend type __Schema implements I",
+    &[SchemaErrorKind::IntrospectionTypeExtension],
+  ),
 ];
 
 /// Every branch row fires exactly what it says, and every one names a kind the census already
@@ -2107,6 +2122,35 @@ fn introspection_is_part_of_every_schema() {
   assert_eq!(schema.enum_values_of(kind_enum).len(), 8);
 }
 
+/// An extension may add directives to an introspection type and nothing else. One that adds a
+/// member is refused once, at the type it names, and contributes nothing, its directives included.
+#[test]
+fn an_introspection_type_takes_directives_by_extension_and_nothing_else() {
+  built("type Query { ok: Int } directive @x on OBJECT extend type __Type @x");
+
+  let sdl = "type Query { ok: Int } extend type __Type { extra: Int }";
+  let errors = refused(sdl);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::IntrospectionTypeExtension]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.subject(), "__Type");
+  assert_eq!(error.primary(), occurrence(&[sdl], 0, "__Type", 0));
+  assert_eq!(error.labels(), 0);
+  assert_eq!(error.related(), None);
+
+  // The extension contributes nothing, so the directive it applies, which nothing defines, is not
+  // read.
+  let errors = refused("type Query { ok: Int } extend type __Type @nope { extra: Int }");
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::IntrospectionTypeExtension]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+}
+
 #[test]
 fn builtin_sdl_parses() {
   // The builder `expect()`s these; this is the standing guard on that expectation.
@@ -2489,14 +2533,23 @@ fn no_related_label_points_into_a_built_in() {
   assert_eq!(error.related(), None);
   assert_eq!(error.related_document(), None);
 
-  // A field that an extension of the injected `__Type` repeats.
+  // A field that an extension of the injected `__Type` would repeat. No extension adds a member to
+  // an injected type, so none repeats one, and the half above is the one place left where a
+  // related position would fall in a built-in: this extension is refused whole, at the type it
+  // names, with no label.
   let sdl = "type Query { ok: Int } extend type __Type { name: String }";
   let errors = refused(sdl);
-  assert_eq!(errors.kinds(), vec![SchemaErrorKind::DuplicateFieldName]);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::IntrospectionTypeExtension]
+  );
   assert_eq!(errors.len(), 1, "{errors}");
   let error = &errors.errors()[0];
-  assert_eq!(error.to_string(), "duplicate field: `__Type.name`");
-  assert_eq!(error.primary(), occurrence(&[sdl], 0, "name", 0));
+  assert_eq!(
+    error.to_string(),
+    "introspection type extension adds more than directives: `__Type`"
+  );
+  assert_eq!(error.primary(), occurrence(&[sdl], 0, "__Type", 0));
   assert_eq!(error.labels(), 0);
   assert_eq!(error.label(0), None);
   assert_eq!(error.related(), None);

@@ -76,7 +76,7 @@ rule_set! {
 #[test]
 fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   let table: &[(&str, &[Code])] = Rules::TABLE;
-  assert_eq!(table.len(), 12);
+  assert_eq!(table.len(), 32);
   assert_eq!(table[0].0, "DuplicateSchemaDefinition");
   assert_eq!(
     table[0].1,
@@ -90,7 +90,10 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   assert_eq!(table[2].0, "OrphanExtension");
   assert_eq!(
     table[2].1,
-    &[Code::new("smear::graphqlx::orphan-extension")]
+    &[
+      Code::new("smear::graphqlx::orphan-extension"),
+      Code::new("smear::schema::introspection-type-extension"),
+    ]
   );
   assert_eq!(table[3].0, "GenericEnum");
   assert_eq!(table[3].1, &[Code::new("smear::graphqlx::generic-enum")]);
@@ -113,12 +116,139 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
     table[8].1,
     &[Code::new("smear::graphqlx::duplicate-type-parameter")]
   );
-  assert_eq!(table[9].0, "ExternMisuse");
-  assert_eq!(table[9].1, &[Code::new("smear::graphqlx::extern-misuse")]);
-  assert_eq!(table[10].0, "ReprMisuse");
-  assert_eq!(table[10].1, &[Code::new("smear::graphqlx::repr-misuse")]);
-  assert_eq!(table[11].0, "TierViolation");
-  assert_eq!(table[11].1, &[Code::new("smear::graphqlx::tier")]);
+  assert_eq!(table[9].0, "ReservedName");
+  assert_eq!(
+    table[9].1,
+    &[
+      Code::new("smear::schema::reserved-field-name"),
+      Code::new("smear::schema::reserved-argument-name"),
+      Code::new("smear::schema::reserved-enum-value-name"),
+      Code::new("smear::schema::reserved-input-field-name"),
+      Code::new("smear::schema::reserved-directive-argument-name"),
+    ]
+  );
+  assert_eq!(table[10].0, "DuplicateMember");
+  assert_eq!(
+    table[10].1,
+    &[
+      Code::new("smear::schema::duplicate-field-name"),
+      Code::new("smear::schema::duplicate-argument-name"),
+      Code::new("smear::schema::duplicate-enum-value"),
+      Code::new("smear::schema::duplicate-input-field-name"),
+      Code::new("smear::schema::duplicate-directive-argument-name"),
+    ]
+  );
+  assert_eq!(table[11].0, "EmptyDefinition");
+  assert_eq!(
+    table[11].1,
+    &[
+      Code::new("smear::schema::empty-fields-definition"),
+      Code::new("smear::schema::empty-union-members"),
+      Code::new("smear::schema::empty-enum-values"),
+      Code::new("smear::schema::empty-input-fields"),
+    ]
+  );
+  assert_eq!(table[12].0, "MemberTypeKind");
+  assert_eq!(
+    table[12].1,
+    &[
+      Code::new("smear::schema::field-type-not-output-type"),
+      Code::new("smear::schema::argument-type-not-input-type"),
+      Code::new("smear::schema::input-field-type-not-input-type"),
+      Code::new("smear::schema::directive-argument-type-not-input-type"),
+    ]
+  );
+  assert_eq!(table[13].0, "ImplementsNonInterface");
+  assert_eq!(
+    table[13].1,
+    &[Code::new("smear::schema::implements-non-interface")]
+  );
+  assert_eq!(table[14].0, "SelfImplementingInterface");
+  assert_eq!(
+    table[14].1,
+    &[Code::new("smear::schema::self-implementing-interface")]
+  );
+  assert_eq!(table[15].0, "UnionMemberNotObject");
+  assert_eq!(
+    table[15].1,
+    &[Code::new("smear::schema::union-member-not-object")]
+  );
+  assert_eq!(table[16].0, "DeprecatedRequired");
+  assert_eq!(
+    table[16].1,
+    &[
+      Code::new("smear::schema::deprecated-required-argument"),
+      Code::new("smear::schema::deprecated-required-input-field"),
+    ]
+  );
+  assert_eq!(table[17].0, "OneOfFieldNotNullable");
+  assert_eq!(
+    table[17].1,
+    &[Code::new("smear::schema::one-of-field-not-nullable")]
+  );
+  assert_eq!(table[18].0, "OneOfFieldHasDefault");
+  assert_eq!(
+    table[18].1,
+    &[Code::new("smear::schema::one-of-field-has-default")]
+  );
+  assert_eq!(table[19].0, "OneOfOnInputObjectExtension");
+  assert_eq!(
+    table[19].1,
+    &[Code::new("smear::schema::one-of-on-input-object-extension")]
+  );
+  assert_eq!(table[20].0, "UnsupportedDirectiveLocation");
+  assert_eq!(
+    table[20].1,
+    &[Code::new("smear::schema::unsupported-directive-location")]
+  );
+  assert_eq!(table[21].0, "DuplicateDirectiveUse");
+  assert_eq!(
+    table[21].1,
+    &[Code::new("smear::schema::duplicate-directive-use")]
+  );
+  assert_eq!(table[22].0, "DuplicateDirectiveArgumentUse");
+  assert_eq!(
+    table[22].1,
+    &[Code::new("smear::schema::duplicate-directive-argument-use")]
+  );
+  assert_eq!(table[23].0, "SelfReferentialDirective");
+  assert_eq!(
+    table[23].1,
+    &[Code::new("smear::schema::self-referential-directive")]
+  );
+  assert_eq!(table[24].0, "SpecifiedByOnBuiltInScalar");
+  assert_eq!(
+    table[24].1,
+    &[Code::new("smear::schema::specified-by-on-built-in-scalar")]
+  );
+  assert_eq!(table[25].0, "RootOperationTypeNotObject");
+  assert_eq!(
+    table[25].1,
+    &[Code::new("smear::schema::root-operation-type-not-object")]
+  );
+  assert_eq!(table[26].0, "SharedRootOperationType");
+  assert_eq!(
+    table[26].1,
+    &[Code::new("smear::schema::shared-root-operation-type")]
+  );
+  assert_eq!(table[27].0, "SchemaExtensionWithoutSchema");
+  assert_eq!(
+    table[27].1,
+    &[Code::new("smear::schema::schema-extension-without-schema")]
+  );
+  assert_eq!(table[28].0, "MissingQueryRootOperationType");
+  assert_eq!(
+    table[28].1,
+    &[Code::new(
+      "smear::schema::missing-query-root-operation-type"
+    )]
+  );
+  assert_eq!(table[29].0, "ExternMisuse");
+  assert_eq!(table[29].1, &[Code::new("smear::graphqlx::extern-misuse")]);
+  assert_eq!(table[30].0, "ReprMisuse");
+  assert_eq!(table[30].1, &[Code::new("smear::graphqlx::repr-misuse")]);
+  assert_eq!(table[31].0, "TierViolation");
+  assert_eq!(table[31].1, &[Code::new("smear::graphqlx::tier")]);
 }
 
 /// A set's table lists each rule by its type's name, in field order, with the codes it lists.

@@ -29,8 +29,11 @@
 //! namespace of one module, in one file or in two, keep their ids, and the first binds the name;
 //! the second is reported with the code GraphQL's rule has in `smear-schema`, with a label at the
 //! first. A supplied package's definition whose name begins with `__`, which introspection
-//! reserves, is reported with `smear-schema`'s code too. A type that a module names as one of its
-//! child modules is `smear::graphqlx::module-type-collision`.
+//! reserves, is reported with `smear-schema`'s code too. A type of the root package's root module
+//! named as one of GraphQL's eight introspection types is the one exception: it redefines a
+//! built-in, and is reported as `smear-schema` reports it, with `redefined-built-in-type`, and not
+//! as a reserved name. A type that a module names as one of its child modules is
+//! `smear::graphqlx::module-type-collision`.
 
 use std::{collections::BTreeMap, format, string::String, vec, vec::Vec};
 
@@ -380,8 +383,21 @@ pub(crate) fn declarations<'d, 'a>(
       if found.kind != DefKind::Directive {
         types.insert((module, found.name), at);
       }
-      if tree.node(found.placed.module).package >= ROOT && found.name.starts_with(b"__") {
-        reserved(reporter, found);
+      let node = tree.node(found.placed.module);
+      if node.package >= ROOT && found.name.starts_with(b"__") {
+        // GraphQL's own document is the root package's root module, where a type of a meta-type's
+        // name is a second definition of GraphQL's introspection type.
+        if node.package == ROOT
+          && node.parent.is_none()
+          && found.kind != DefKind::Directive
+          && META_TYPES
+            .iter()
+            .any(|meta: &&str| meta.as_bytes() == found.name)
+        {
+          redefined(reporter, found);
+        } else {
+          reserved(reporter, found);
+        }
       }
     }
     start += len;
@@ -571,6 +587,24 @@ fn reserved(reporter: &mut Reporter, found: &Found<'_>) {
   reporter.report(
     builder
       .help("a name beginning with `__` is reserved for introspection; rename it.")
+      .build(),
+  );
+}
+
+/// Reports `found`, a type of the root package's root module named as one of GraphQL's
+/// introspection types, which it would redefine.
+fn redefined(reporter: &mut Reporter, found: &Found<'_>) {
+  reporter.report(
+    Diagnostic::builder(schema::REDEFINED_BUILT_IN_TYPE, found.location)
+      .message(format!(
+        "the type `{}` redefines an introspection type",
+        Excerpt(found.name)
+      ))
+      .primary_label("redefinition of an introspection type")
+      .help(
+        "the `__`-prefixed introspection types are injected by every build and cannot be \
+         replaced.",
+      )
       .build(),
   );
 }

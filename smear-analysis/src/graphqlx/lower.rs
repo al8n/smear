@@ -44,10 +44,10 @@
 //! So a definition's direct members come before every argument of its fields, which is the
 //! `MemberId` order. A member is named where its name is written, and spans from its description,
 //! or its first token, to its last token. A description is cooked as a definition's is: absent
-//! when none is written, and empty when an empty one is. A name that is not UTF-8, which only a
-//! document of bytes could hold, has each such sequence replaced by U+FFFD, as a definition's name
-//! has. A directive definition's arguments are also kept by their directive and their names, the
-//! first of each name, for the applications that name them.
+//! when none is written, and empty when an empty one is. A name is cooked as a definition's name
+//! is, each sequence that is not UTF-8 replaced by U+FFFD, which no document lowering reads holds:
+//! every one is of text. A directive definition's arguments are also kept by their directive and
+//! their names, the first of each name, for the applications that name them.
 //!
 //! A kind of definition this lowering does not know, which only a parser newer than the analyzer
 //! makes, is reported as `unknown-item`, once per file, and nothing of it is lowered.
@@ -458,7 +458,6 @@ impl Lowering<'_, '_, '_> {
     for entry in &declarations.extensions {
       let joined = match declarations.items.get(entry.item.source.get() as usize) {
         Some(Some(Items::Text(items))) => self.target(declarations, items, *entry),
-        Some(Some(Items::Bytes(items))) => self.target(declarations, items, *entry),
         // An extension is an item of a source the walk read.
         Some(None) | None => None,
       };
@@ -693,11 +692,9 @@ impl Lowering<'_, '_, '_> {
 
   /// Walks `item`, which `at` writes, for `step`, as the parser that made its document read it.
   fn walk(&mut self, declarations: &Declarations<'_, '_>, item: Item, at: Writer, step: Step) {
-    match declarations.items.get(item.source.get() as usize) {
-      Some(Some(Items::Text(items))) => self.written(items, item.index, at, step),
-      Some(Some(Items::Bytes(items))) => self.written(items, item.index, at, step),
-      // A declaration's item is one of a source the walk read.
-      Some(None) | None => {}
+    // A declaration's item is one of a source the walk read.
+    if let Some(Some(Items::Text(items))) = declarations.items.get(item.source.get() as usize) {
+      self.written(items, item.index, at, step);
     }
   }
 
@@ -1099,11 +1096,9 @@ impl Lowering<'_, '_, '_> {
     item: Item,
     names: &mut Vec<&'d [u8]>,
   ) {
-    match declarations.items.get(item.source.get() as usize) {
-      Some(Some(Items::Text(items))) => self.names_in(items, item, names),
-      Some(Some(Items::Bytes(items))) => self.names_in(items, item, names),
-      // A contribution's item is one of a source the walk read.
-      Some(None) | None => {}
+    // A contribution's item is one of a source the walk read.
+    if let Some(Some(Items::Text(items))) = declarations.items.get(item.source.get() as usize) {
+      self.names_in(items, item, names);
     }
   }
 
@@ -1139,11 +1134,10 @@ impl Lowering<'_, '_, '_> {
 
   /// Walks the item `part` addresses for `step`, as the parser that made its document read it.
   fn visit(&mut self, declarations: &Declarations<'_, '_>, part: Part<'_>, step: Occurrences) {
-    match declarations.items.get(part.item.source.get() as usize) {
-      Some(Some(Items::Text(items))) => self.occurrences_in(items, part, step),
-      Some(Some(Items::Bytes(items))) => self.occurrences_in(items, part, step),
-      // A contribution's item is one of a source the walk read.
-      Some(None) | None => {}
+    // A contribution's item is one of a source the walk read.
+    if let Some(Some(Items::Text(items))) = declarations.items.get(part.item.source.get() as usize)
+    {
+      self.occurrences_in(items, part, step);
     }
   }
 
@@ -2066,7 +2060,6 @@ impl Lowering<'_, '_, '_> {
     for entry in &declarations.schemas {
       let part = match declarations.items.get(entry.item.source.get() as usize) {
         Some(Some(Items::Text(items))) => self.schema_part(items, *entry),
-        Some(Some(Items::Bytes(items))) => self.schema_part(items, *entry),
         // A schema item is one of a source the walk read.
         Some(None) | None => None,
       };
@@ -2197,11 +2190,10 @@ impl Lowering<'_, '_, '_> {
     entry: Entry,
     kept: &mut [Option<Kept>; 3],
   ) {
-    match declarations.items.get(entry.item.source.get() as usize) {
-      Some(Some(Items::Text(items))) => self.roots_in(items, part, entry, kept),
-      Some(Some(Items::Bytes(items))) => self.roots_in(items, part, entry, kept),
-      // A schema item is one of a source the walk read.
-      Some(None) | None => {}
+    // A schema item is one of a source the walk read.
+    if let Some(Some(Items::Text(items))) = declarations.items.get(entry.item.source.get() as usize)
+    {
+      self.roots_in(items, part, entry, kept);
     }
   }
 
@@ -2257,7 +2249,6 @@ impl Lowering<'_, '_, '_> {
   ) -> Option<TypeExprId> {
     match declarations.items.get(entry.item.source.get() as usize) {
       Some(Some(Items::Text(items))) => self.root_in(items, entry, index),
-      Some(Some(Items::Bytes(items))) => self.root_in(items, entry, index),
       // A schema item is one of a source the walk read.
       Some(None) | None => None,
     }
@@ -2292,11 +2283,10 @@ impl Lowering<'_, '_, '_> {
     entry: Entry,
     contribution: u32,
   ) {
-    match declarations.items.get(entry.item.source.get() as usize) {
-      Some(Some(Items::Text(items))) => self.applications_in(items, entry, contribution),
-      Some(Some(Items::Bytes(items))) => self.applications_in(items, entry, contribution),
-      // A schema item is one of a source the walk read.
-      Some(None) | None => {}
+    // A schema item is one of a source the walk read.
+    if let Some(Some(Items::Text(items))) = declarations.items.get(entry.item.source.get() as usize)
+    {
+      self.applications_in(items, entry, contribution);
     }
   }
 

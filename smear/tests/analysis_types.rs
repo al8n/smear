@@ -38,6 +38,30 @@ const GENERIC_ENUM: &str = "smear::graphqlx::generic-enum";
 /// The code of a collection whose count of type parameters it has not, which a rule reports.
 const COLLECTION: &str = "smear::graphqlx::collection-arity";
 
+/// GraphQL's code for a directive applied where its definition does not list.
+const LOCATION: &str = "smear::schema::unsupported-directive-location";
+
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// Whether `analysis` reports nothing but that its program has no query root.
+fn clean(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics.len() - reported(analysis).len();
+  diagnostics.len() == waived && diagnostics.error_count() == waived
+}
+
 /// What the rule says of an enum named `name` that declares a type parameter.
 fn generic_enum(name: &str) -> String {
   format!(
@@ -141,11 +165,11 @@ fn member_names(model: &Model, range: IdRange<MemberId>) -> Vec<&str> {
     .collect()
 }
 
-/// Each diagnostic's code, primary location, and first label's location, in the list's order.
+/// Each diagnostic's code, primary location, and first label's location, in the list's order, but
+/// for the missing query root.
 fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| {
       (
         diagnostic.code().as_str(),
@@ -156,11 +180,10 @@ fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)>
     .collect()
 }
 
-/// Each diagnostic's message, in the list's order.
+/// Each diagnostic's message, in the list's order, but for the missing query root.
 fn messages(analysis: &Analysis) -> Vec<String> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .collect()
 }
@@ -262,9 +285,8 @@ fn an_extension_that_writes_a_list_writes_its_targets_count() {
       (ARITY, at(schema, text, "<T>", 0), Some(plain)),
     ]
   );
-  let message = analysis
-    .diagnostics()
-    .iter()
+  let message = reported(&analysis)
+    .into_iter()
     .next()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string());
   assert_eq!(
@@ -330,11 +352,7 @@ fn an_extension_with_no_list_names_none_of_its_targets_parameters() {
   let text = "directive @k on OBJECT\nscalar T\ntype Page<T> {\n  a: T\n}\n\
               extend type Page @k\nextend type Page {\n  b: Int\n  c: T\n}\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let page = def(model, Namespace::Type, "^::app::Page");
   let scalar = def(model, Namespace::Type, "^::app::T");
@@ -453,24 +471,32 @@ fn markers_and_collections_are_read_off_cores_directives() {
   // `core`'s directives, on the library's definitions and on the program's: a marker, and one an
   // extension of the definition's own package makes; a set, a map, and a scalar that applies both,
   // which is the first, and which the rule on a collection's type parameters refuses, at the later;
-  // an interface that applies nothing, and an object that applies `@set`, which neither is.
+  // an interface that applies nothing, and an object that applies `@set`, which neither is, and
+  // where `@set`, which stands on a scalar alone, is refused by the rule on directive locations.
   let text = "interface Ord @marker\ninterface Node {\n  id: ID\n}\ninterface Plain\n\
               extend interface Plain @marker\n\
               scalar Bag<T> @set\nscalar Dict<K, V> @map\nscalar Both<K, V> @map @set\n\
               type Obj @set {\n  x: Int\n}\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
+  let model = analysis.model();
   assert_eq!(
     found(&analysis),
-    [(
-      COLLECTION,
-      named(schema, text, "@", "set", 1),
-      Some(named(schema, text, "scalar ", "Both", 0))
-    )],
+    [
+      (
+        COLLECTION,
+        named(schema, text, "@", "set", 1),
+        Some(named(schema, text, "scalar ", "Both", 0))
+      ),
+      (
+        LOCATION,
+        named(schema, text, "@", "set", 2),
+        Some(model.def(model.builtins().set()).location())
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
-  let model = analysis.model();
   assert_eq!(markers(model), ["MapKey", "Ord", "Plain"]);
   assert_eq!(
     collections(model),
@@ -486,14 +512,32 @@ fn markers_and_collections_are_read_off_cores_directives() {
   );
 
   // The program's own directives of those names mean nothing: the meaning is `core`'s
-  // definitions', never a spelling's.
+  // definitions', never a spelling's. So `Mine` is no marker, and an interface that holds no field
+  // is GraphQL's own refusal, which says so.
   let text = "directive @marker on INTERFACE\ndirective @set on SCALAR\n\
               interface Mine @marker\nscalar Own<T> @set\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::schema::empty-fields-definition",
+      named(schema, text, "interface ", "Mine", 0),
+      None
+    )],
     "{:#?}",
     analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), ["the interface `Mine` holds no field"]);
+  assert_eq!(
+    reported(&analysis)
+      .into_iter()
+      .next()
+      .and_then(|diagnostic: &Diagnostic| diagnostic.help()),
+    Some(
+      "an object or interface type must define at least one field. An interface that says what a \
+       type is and holds nothing is a marker, and takes `@marker`."
+    )
   );
   let model = analysis.model();
   assert_eq!(markers(model), ["MapKey"]);
@@ -560,7 +604,7 @@ fn markers_and_collections_are_read_off_cores_directives() {
       reversed,
     );
     assert!(
-      analysis.diagnostics().is_empty(),
+      clean(&analysis),
       "files reversed: {reversed}: {:#?}",
       analysis.diagnostics()
     );
@@ -583,11 +627,7 @@ fn markers_and_collections_are_read_off_cores_directives() {
     ],
   );
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let bag = def(model, Namespace::Type, "^::app::Bag");
   assert_eq!(model.def(bag).collection(), Some(Collection::Set));
@@ -705,9 +745,8 @@ fn a_group_of_defaults_that_need_each_other_is_refused_once_at_its_lowest_parame
       ],
       "files reversed: {reversed}"
     );
-    let messages: Vec<String> = analysis
-      .diagnostics()
-      .iter()
+    let messages: Vec<String> = reported(&analysis)
+      .into_iter()
       .map(|diagnostic: &Diagnostic| diagnostic.to_string())
       .collect();
     assert_eq!(
@@ -749,11 +788,7 @@ fn one_type_has_one_id_however_it_is_spelled() {
   let a = "type A {\n  x: Int\n  y: [Int!]!\n}\n";
   let b = "type B {\n  x: i32\n  y: [Int!]!\n  z: [i32!]!\n}\n";
   let analysis = analyze_two(a, b, false);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let int = field_type(model, "^::app::A", "x");
   assert_eq!(field_type(model, "^::app::B", "x"), int);
@@ -770,11 +805,7 @@ fn a_parameter_is_its_definitions() {
   // and `T!` are two types too.
   let text = "type Box<T> {\n  a: T\n  b: T!\n  c: T\n}\ntype Other<T> {\n  a: T\n}\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let boxed = field_type(model, "^::app::Box", "a");
   assert_ne!(field_type(model, "^::app::Other", "a"), boxed);
@@ -789,11 +820,7 @@ fn types_are_interned_arguments_first_in_the_walks_order() {
   let text = "scalar A<X, Y>\nscalar B<Z>\nscalar C\nscalar D\n\
               type T {\n  f: A<B<C>, D>\n  g: Int\n}\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let f = field_type(model, "^::app::T", "f");
   let TyKind::Named { args, .. } = model.ty(f).kind() else {
@@ -1728,11 +1755,7 @@ fn the_built_in_library_is_built_whatever_the_limits() {
     .with_max_implementation_steps(0);
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
   let analysis = analyze(&root, &[], &limits);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   // `core`'s lists have their types.
   assert_eq!(
     field_shown(analysis.model(), "^::core::__Schema", "types"),
@@ -1889,11 +1912,7 @@ fn a_bounds_interface_is_typed_as_any_occurrence() {
   let text = "interface Comparable<X> {\n  id: ID\n}\n\
               type Page<T> where T: Comparable<T> {\n  item: T\n}\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let page = def(model, Namespace::Type, "^::app::Page");
   let comparable = def(model, Namespace::Type, "^::app::Comparable");
@@ -1918,11 +1937,7 @@ fn a_bounds_interface_is_typed_as_any_occurrence() {
 fn the_built_in_library_instantiates_with_no_diagnostic() {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert!(!holds_unresolved(&analysis));
   let model = analysis.model();
   assert_eq!(

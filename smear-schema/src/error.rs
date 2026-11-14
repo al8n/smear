@@ -76,8 +76,22 @@ pub enum SchemaErrorKind {
   /// A built-in scalar spelled out is still the specification's, though, so it takes no
   /// `@specifiedBy`: that is [`SpecifiedByOnBuiltInScalar`](Self::SpecifiedByOnBuiltInScalar).
   /// The introspection types are `__`-prefixed and injected unconditionally, so a definition of
-  /// one is a genuine collision.
+  /// one is a genuine collision. An extension of one may add directives and nothing else: one that
+  /// adds more is [`IntrospectionTypeExtension`](Self::IntrospectionTypeExtension).
   RedefinedBuiltInType,
+  /// An extension of an introspection type adds more than directives (draft §3.3).
+  ///
+  /// The draft reserves the `__`-prefixed names for "the introspection system as defined by this
+  /// specification", and a field, an input field, an enum value, a union member or an `implements`
+  /// entry that an extension adds to one of its types changes that system. An extension that adds
+  /// directives alone is accepted. The refused extension contributes nothing, its directives
+  /// included, as an extension of the wrong kind contributes nothing.
+  ///
+  /// The subject is the type's name and the span is the extension's, where it names the type. A
+  /// document that defines a type of an introspection type's name is
+  /// [`RedefinedBuiltInType`](Self::RedefinedBuiltInType), and an extension of that definition is
+  /// not this.
+  IntrospectionTypeExtension,
   /// A user-defined type name begins with `__` (draft §3.3, "Reserved Names").
   ReservedTypeName,
   /// A type reference names a type the document does not define (draft §3.4).
@@ -441,6 +455,7 @@ impl SchemaErrorKind {
     Self::ExtensionKindMismatch,
     Self::SchemaExtensionWithoutSchema,
     Self::RedefinedBuiltInType,
+    Self::IntrospectionTypeExtension,
     Self::ReservedTypeName,
     Self::UndefinedType,
     Self::TypeReferenceTooDeep,
@@ -522,6 +537,7 @@ impl SchemaErrorKind {
       Self::ExtensionKindMismatch => "extension does not match the kind of the type it extends",
       Self::SchemaExtensionWithoutSchema => "schema extension has no schema to extend",
       Self::RedefinedBuiltInType => "redefinition of an introspection type",
+      Self::IntrospectionTypeExtension => "introspection type extension adds more than directives",
       Self::ReservedTypeName => "type name is reserved for introspection",
       Self::UndefinedType => "undefined type",
       Self::TypeReferenceTooDeep => "type reference nests too deeply",
@@ -635,6 +651,7 @@ impl SchemaErrorKind {
         Code::new("smear::schema::schema-extension-without-schema")
       }
       Self::RedefinedBuiltInType => Code::new("smear::schema::redefined-built-in-type"),
+      Self::IntrospectionTypeExtension => Code::new("smear::schema::introspection-type-extension"),
       Self::ReservedTypeName => Code::new("smear::schema::reserved-type-name"),
       Self::UndefinedType => Code::new("smear::schema::undefined-type"),
       Self::TypeReferenceTooDeep => Code::new("smear::schema::type-reference-too-deep"),
@@ -758,6 +775,7 @@ impl SchemaErrorKind {
       | Self::ExtensionKindMismatch
       | Self::SchemaExtensionWithoutSchema
       | Self::RedefinedBuiltInType
+      | Self::IntrospectionTypeExtension
       | Self::ReservedTypeName
       | Self::UndefinedType
       | Self::TypeReferenceTooDeep
@@ -862,6 +880,9 @@ impl SchemaErrorKind {
       ),
       Self::RedefinedBuiltInType => Some(
         "the `__`-prefixed introspection types are injected by every build and cannot be replaced.",
+      ),
+      Self::IntrospectionTypeExtension => Some(
+        "an extension may add directives to an introspection type and nothing else; the `__`-prefixed types are the introspection system the specification defines.",
       ),
       Self::ReservedTypeName => {
         Some("a name beginning with `__` is reserved for introspection; rename it.")
@@ -1046,6 +1067,7 @@ impl SchemaErrorKind {
       | Self::UndefinedExtensionTarget
       | Self::SchemaExtensionWithoutSchema
       | Self::RedefinedBuiltInType
+      | Self::IntrospectionTypeExtension
       | Self::ReservedTypeName
       | Self::UndefinedType
       | Self::TypeReferenceTooDeep

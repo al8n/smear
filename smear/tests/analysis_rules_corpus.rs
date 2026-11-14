@@ -745,9 +745,12 @@ fn each_walk_of_a_program_of_several_packages_reaches_what_the_model_says_once()
   assert_eq!(codes(&analysis), ["smear::graphqlx::orphan-extension"]);
   census(&analysis, "a dependency and an orphan extension");
 
+  // The `@specifiedBy` the root package's `Int` applies is GraphQL's own refusal: the replacement
+  // is the built-in `i32`, which takes none.
   let analysis = replaced_and_extended_built_ins();
-  assert!(
-    analysis.diagnostics().is_empty(),
+  assert_eq!(
+    codes(&analysis),
+    ["smear::schema::specified-by-on-built-in-scalar"],
     "{:#?}",
     analysis.diagnostics()
   );
@@ -757,10 +760,12 @@ fn each_walk_of_a_program_of_several_packages_reaches_what_the_model_says_once()
   assert_eq!(
     codes(&analysis),
     [
+      "smear::schema::self-referential-directive",
       "smear::graphqlx::unsatisfied-bound",
       "smear::schema::undefined-type",
       "smear::graphqlx::orphan-extension",
       "smear::graphqlx::orphan-extension",
+      "smear::schema::unsupported-directive-location",
       "smear::graphqlx::schema-outside-root",
     ]
   );
@@ -775,15 +780,19 @@ fn permuting_the_dependencies_changes_nothing_the_rules_report_or_mark() {
   let forward = analyze(&root, &[geo.clone(), astro.clone()], &Limits::new());
   let backward = analyze(&root, &[astro, geo], &Limits::new());
   // The case is not vacuous: the orphan rule reports a dependency's extension of the other's type
-  // and of a built-in, and the schema rule the dependency's schema extension, which its error
-  // marks.
+  // and of a built-in, the location rule the `@deprecated` that extension applies to a scalar,
+  // the self-reference rule `core`'s `@deprecated`, which that application puts on a cycle through
+  // `string`, in `core`'s source, and the schema rule the dependency's schema extension, which its
+  // error marks.
   assert_eq!(
     codes(&forward),
     [
+      "smear::schema::self-referential-directive",
       "smear::graphqlx::unsatisfied-bound",
       "smear::schema::undefined-type",
       "smear::graphqlx::orphan-extension",
       "smear::graphqlx::orphan-extension",
+      "smear::schema::unsupported-directive-location",
       "smear::graphqlx::schema-outside-root",
     ]
   );
@@ -879,13 +888,11 @@ fn a_rule_fired(analysis: &Analysis) -> bool {
 
 /// Tolerance, over every corpus file: no rule panics on one, and none repeats a phase.
 ///
-/// No corpus file makes a rule fire: each is the one file of a `Flat` root package, with no
-/// dependency beside it; none defines the schema twice, adds more than directives to a built-in or
-/// applies `@marker`, `@set` or `@map` anywhere; none declares an enum with a type parameter, or
-/// two type parameters of one name; none names a marker, `TypeRef` or `NonZero`, and every
-/// interface a scalar, an enum, an input object or a union of the corpus implements names nothing.
-/// So over the corpus this pins that no rule panics, and nothing more. It prints on how many files
-/// a rule fired, which shows the first file that makes one fire.
+/// Rules speak on corpus files: GraphQL's own rules over what a definition holds refuse what the
+/// GraphQL documents of the schema fixtures hold, such as an enum value declared twice, and those
+/// documents also hold what phases refuse. What this pins is that no rule's diagnostic lies within
+/// an extent that also holds a phase's error, over files on which rules do speak, and that no rule
+/// panics. It prints on how many files a rule fired.
 #[test]
 fn no_rule_repeats_a_phase_over_any_corpus_file() {
   let files = corpus();

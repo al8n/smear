@@ -263,15 +263,17 @@ fn merge_keeps_both_lists_whole_in_one_order_and_adds_their_counts() {
   assert_eq!(owned, listed(&ours));
 }
 
-/// A root package with one file that does not parse, beside a dependency that takes a built-in's
-/// name.
+/// A root package with one file that does not parse and one that gives it a query root, beside a
+/// dependency that takes a built-in's name.
 ///
 /// The analysis checks the package set before it parses, so the dependency's diagnostic is reported
-/// first; but the root's file numbers before the dependency's package source, so the syntax error
+/// first; but the root's files number before the dependency's package source, so the syntax error
 /// is the lesser of the two.
 fn refused_twice(limits: &Limits) -> Analysis {
-  let root = Package::new("app", Layout::Directory, Tier::Std)
-    .with_files([SourceFile::new("a.graphqlx", "type A {\n")]);
+  let root = Package::new("app", Layout::Directory, Tier::Std).with_files([
+    SourceFile::new("a.graphqlx", "type A {\n"),
+    SourceFile::new("b.graphqlx", "type Query {\n  ok: Int\n}\n"),
+  ]);
   let dependencies = [Package::new("core", Layout::Directory, Tier::Std)
     .with_files([SourceFile::new("c.graphqlx", "scalar C\n")])];
   analyze(&root, &dependencies, limits)
