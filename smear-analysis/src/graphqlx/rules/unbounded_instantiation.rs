@@ -196,11 +196,6 @@ impl Visitor for UnboundedInstantiation {
       TypeExprKind::Param { .. } | TypeExprKind::List { .. } | TypeExprKind::Unresolved => &[],
     };
     let name = Excerpt(model.def(def).name().as_bytes());
-    let help = format!(
-      "every instantiation of `{name}` needs this one, with a larger type argument, so a backend \
-       that makes one copy per instantiation cannot finish; pass the type parameter itself, or a \
-       type that names none"
-    );
     if found.marked {
       let label = match written.get(found.index as usize) {
         Some(&argument) => Some((model.type_expr(argument).location(), WRITTEN)),
@@ -209,6 +204,11 @@ impl Visitor for UnboundedInstantiation {
           .map(|default: TypeExprId| (model.type_expr(default).location(), FILLED)),
       };
       let message = format!("an instantiation of `{name}` that grows without end");
+      let help = format!(
+        "every instantiation of `{name}` needs this one, with a larger type argument, so a backend \
+         that makes one copy per instantiation cannot finish; pass the type parameter itself, or a \
+         type that names none"
+      );
       report(cx, occurrence.location(), message, help, label);
       return;
     }
@@ -223,6 +223,14 @@ impl Visitor for UnboundedInstantiation {
       .default
       .map(|default: TypeExprId| (model.type_expr(default).location(), HELD));
     let message = format!("an instantiation of `{name}` whose default grows without end");
+    // Not the marked case's help: the growth is an instantiation the default holds, which need not
+    // be of this occurrence's definition, and the argument that holds it is one the occurrence
+    // leaves out.
+    let help = format!(
+      "this occurrence leaves out a type argument of `{name}` whose default holds an instantiation \
+       that grows without end, so a backend that makes one copy per instantiation cannot finish; \
+       write the type argument the default fills, or change the default"
+    );
     report(cx, occurrence.location(), message, help, label);
   }
 
@@ -243,11 +251,6 @@ impl Visitor for UnboundedInstantiation {
     };
     let written = applied.type_args();
     let name = Excerpt(model.def(directive).name().as_bytes());
-    let help = format!(
-      "every instantiation of the definition this application stands on needs `@{name}` with a \
-       larger type argument, so a backend that makes one copy per instantiation cannot finish; \
-       pass the type parameter itself, or a type that names none"
-    );
     if found.marked {
       let label = match written.get(found.index as usize) {
         Some(&argument) => Some((model.type_expr(argument).location(), WRITTEN)),
@@ -256,6 +259,11 @@ impl Visitor for UnboundedInstantiation {
           .map(|default: TypeExprId| (model.type_expr(default).location(), FILLED)),
       };
       let message = format!("an application of `@{name}` that grows without end");
+      let help = format!(
+        "every instantiation of the definition this application stands on needs `@{name}` with a \
+         larger type argument, so a backend that makes one copy per instantiation cannot finish; \
+         pass the type parameter itself, or a type that names none"
+      );
       report(cx, applied.path_location(), message, help, label);
       return;
     }
@@ -271,6 +279,13 @@ impl Visitor for UnboundedInstantiation {
       .default
       .map(|default: TypeExprId| (model.type_expr(default).location(), HELD));
     let message = format!("an application of `@{name}` whose default grows without end");
+    // Not the marked case's help, for the same reason: the argument that holds the growth is one
+    // the application leaves out.
+    let help = format!(
+      "this application leaves out a type argument of `@{name}` whose default holds an \
+       instantiation that grows without end, so a backend that makes one copy per instantiation \
+       cannot finish; write the type argument the default fills, or change the default"
+    );
     report(cx, applied.path_location(), message, help, label);
   }
 }

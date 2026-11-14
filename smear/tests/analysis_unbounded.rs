@@ -37,6 +37,15 @@ fn analyze_one(text: &'static str) -> Analysis {
   analyze(&root, &[], &Limits::new())
 }
 
+/// An analysis of the root package `app`'s one file `text`, which `analyze` accepts: a program it
+/// refuses fails here and not at what a test expects of the rule, so that the rule is never pinned
+/// on a program `analyze` turns away.
+fn accepted(text: &'static str) -> Analysis {
+  let analysis = analyze_one(text);
+  assert!(analysis.is_ok(), "{text}\n{:#?}", analysis.diagnostics());
+  analysis
+}
+
 /// The id of the file at `path` in the package `package`.
 fn file(analysis: &Analysis, package: u32, path: &str) -> SourceId {
   let sources = analysis.sources();
@@ -401,6 +410,46 @@ fn growth_inside_a_filled_default_is_reported_at_the_use() {
   }
 }
 
+/// `P<X>` is `P<X, Q<[X]>>`. `P` needs nothing, its two fields being bare parameters, and the growth
+/// is `Q`'s, which the default fills in. The report is at the occurrence that leaves the argument
+/// out, labelled at the default, and its help says what the author can do: write the type argument
+/// the default fills, or change the default. The marked case's help, to pass the type parameter
+/// itself, is no advice here, since the occurrence passes it already: a held case that keeps it
+/// fails here.
+#[test]
+fn a_held_growth_is_helped_by_writing_the_argument_or_changing_the_default() {
+  let text = "type P<T, U = Q<[T]>> { v: T  w: U }\ntype Q<X> { p: P<X> }\n\
+              type Query { x: Int }\n";
+  let analysis = accepted(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      at(schema, text, "P<X>", 0),
+      Some(at(schema, text, "Q<[T]>", 0))
+    )]
+  );
+
+  let diagnostics = visit(&analysis, Packages::All, &mut UnboundedInstantiation::new());
+  let diagnostic = diagnostics.iter().next().expect("one diagnostic");
+  assert_eq!(
+    diagnostic.to_string(),
+    "an instantiation of `P` whose default grows without end"
+  );
+  assert_eq!(
+    diagnostic.label(0).map(|label: Label<'_>| label.text()),
+    Some("this default holds a type argument that wraps a type parameter it reaches again")
+  );
+  assert_eq!(
+    diagnostic.help(),
+    Some(
+      "this occurrence leaves out a type argument of `P` whose default holds an instantiation \
+       that grows without end, so a backend that makes one copy per instantiation cannot finish; \
+       write the type argument the default fills, or change the default"
+    )
+  );
+}
+
 /// With two parameters left out, the label is at the default that filled the first argument that
 /// holds the growth, `V`'s, and not at `U`'s, the first left out: a label at the first parameter
 /// left out fails here.
@@ -470,12 +519,14 @@ fn an_application_that_grows_through_a_filled_default_is_refused_at_the_applicat
 /// `@d<Int>`, which holds `H<[Int]>`, whose field is `G<[Int]>`, and so on without end. No
 /// occurrence is written with the type `H<[T]>`, so the report is at the application's path,
 /// labelled at the default that holds it, and nothing is reported at `G<U>`. A rule that reports
-/// only an application whose type is itself marked fails here.
+/// only an application whose type is itself marked fails here. The application passes the type
+/// parameter itself already, so its help is not the marked case's advice to pass it: it says to
+/// write the type argument the default fills, or to change the default.
 #[test]
 fn an_application_whose_filled_default_holds_a_growth_is_refused_at_the_application() {
   let text = "directive @d<A, B = H<[A]>> on OBJECT\ntype H<U> { g: G<U> }\n\
               type G<T> @d<T> { v: T }\ntype Query { x: Int }\n";
-  let analysis = analyze_one(text);
+  let analysis = accepted(text);
   let schema = schema_file(&analysis);
   assert_eq!(
     unbounded(&analysis, Packages::All),
@@ -494,6 +545,14 @@ fn an_application_whose_filled_default_holds_a_growth_is_refused_at_the_applicat
   assert_eq!(
     diagnostic.label(0).map(|label: Label<'_>| label.text()),
     Some("this default holds a type argument that wraps a type parameter it reaches again")
+  );
+  assert_eq!(
+    diagnostic.help(),
+    Some(
+      "this application leaves out a type argument of `@d` whose default holds an \
+       instantiation that grows without end, so a backend that makes one copy per instantiation \
+       cannot finish; write the type argument the default fills, or change the default"
+    )
   );
 }
 
