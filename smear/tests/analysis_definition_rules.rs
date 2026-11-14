@@ -1382,6 +1382,100 @@ fn what_a_scalars_argument_holds_passes_its_parameters_on() {
 }
 
 #[test]
+fn an_implements_entry_passes_its_interfaces_parameters_on() {
+  // `@d<X>` puts `Tagged`'s parameter in a directive's argument, so `Direct`'s entry `Tagged<Obj>`
+  // is refused at `Obj`, labelled at that `X`. `Holds`'s `T` is given to it in `Holds`'s entry, so
+  // `Holds<Obj>`, which implements `Tagged<Obj>`, is refused under the same code, labelled at the
+  // entry. An implementing type declares each field itself, but not its interface's applications:
+  // an entry that passed nothing on accepted `Holds<Obj>`.
+  let text = "type Query {\n  h: Holds<Obj>\n  d: Direct\n}\ntype Obj {\n  x: Int\n}\n\
+              directive @d<V>(v: V) on INTERFACE\ninterface Tagged<X> @d<X> {\n  a: Int\n}\n\
+              type Holds<T> implements Tagged<T> {\n  a: Int\n}\n\
+              type Direct implements Tagged<Obj> {\n  a: Int\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "Holds<", "Obj", 0),
+        Some(at(schema, text, "Tagged<T>", 0))
+      ),
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "Tagged<", "Obj", 0),
+        Some(named(schema, text, "@d<", "X", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Holds` takes the object type `Obj` for its type parameter `T`, which stands as a directive \
+       argument's type, and a directive's argument's type is an input type",
+      "`Tagged` takes the object type `Obj` for its type parameter `X`, which stands as a \
+       directive argument's type, and a directive's argument's type is an input type",
+    ]
+  );
+
+  // Nor the `@deprecated` of its fields' arguments: `I<Int!>` makes `a` required, written in
+  // `H2`'s entry and substituted in `H<Int!>`, whose own `f` deprecates nothing.
+  let text = "type Query {\n  h: H<Int!>\n  h2: H2\n}\n\
+              interface I<X> {\n  f(a: X @deprecated): Int\n}\n\
+              type H<T> implements I<T> {\n  f(a: T): Int\n}\n\
+              type H2 implements I<Int!> {\n  f(a: Int!): Int\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "H<", "Int!", 0),
+        Some(at(schema, text, "I<T>", 0))
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "I<", "Int!", 0),
+        Some(named(schema, text, "(a: ", "X", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`H` takes a non-null type for its type parameter `T`, which makes a deprecated argument \
+       required",
+      "`I` takes a non-null type for its type parameter `X`, which makes a deprecated argument \
+       required",
+    ]
+  );
+
+  // The twins pass both forms: an input object where the object was, and a nullable `Int`.
+  for text in [
+    "type Query {\n  h: Holds<In>\n  d: Direct\n}\ninput In {\n  i: Int\n}\n\
+     directive @d<V>(v: V) on INTERFACE\ninterface Tagged<X> @d<X> {\n  a: Int\n}\n\
+     type Holds<T> implements Tagged<T> {\n  a: Int\n}\n\
+     type Direct implements Tagged<In> {\n  a: Int\n}\n",
+    "type Query {\n  h: H<Int>\n  h2: H2\n}\ninterface I<X> {\n  f(a: X @deprecated): Int\n}\n\
+     type H<T> implements I<T> {\n  f(a: T): Int\n}\n\
+     type H2 implements I<Int> {\n  f(a: Int): Int\n}\n",
+  ] {
+    let analysis = analyze_text(text);
+    assert!(
+      analysis.diagnostics().is_empty(),
+      "{text}\n{:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
+
+#[test]
 fn a_type_given_to_many_parameters_is_one_node() {
   // `D.d`'s complete type is `H<Tup<T>, G1<Tup<T>>, G2<Tup<T>>>`: `Tup<T>` is given to three
   // slots, and is one node of the table with an edge from each, walked once. A test cannot see

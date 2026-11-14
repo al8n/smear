@@ -34,10 +34,11 @@
 //! stands: the table of `positions::Positions`, found once for the walk, in `begin`, by each rule
 //! that reads it, over every package's definitions, so that a dependency's generic definition
 //! used by the root package is judged by what all its contributions write. A parameter stands
-//! where its definition's members, union members and applications put it, through lists and
-//! collections, and where each definition it is passed to puts that definition's parameter. Such a
-//! rule judges every written occurrence and every application, each type once, and what the slots
-//! an occurrence leaves to their defaults derive, at the occurrence, through `positions::Derived`.
+//! where its definition's members, union members, `implements` entries and applications put it,
+//! through lists and collections, and where each definition it is passed to puts that definition's
+//! parameter, a scalar's and an interface's among them. Such a rule judges every written occurrence
+//! and every application, each type once, and what the slots an occurrence leaves to their
+//! defaults derive, at the occurrence, through `positions::Derived`.
 //! `MemberTypeKind` is one, for the kinds its places take, `TypeRefMisuse` another, for the
 //! parameters an operation's argument reaches, `OneOfFieldNotNullable` a third, for the
 //! parameters that are a OneOf's field's whole type, which `positions::Positions::of` tells from

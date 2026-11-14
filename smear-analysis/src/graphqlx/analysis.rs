@@ -461,12 +461,12 @@ impl Analysis {
 ///   the way to the one of the wrong kind, with a label at the default that fills a slot the
 ///   occurrence leaves out. The same codes judge each instantiation the walk reaches, every written
 ///   type occurrence and every directive application by its complete type arguments: a type
-///   parameter stands where its definition's members, union members and applications put it,
-///   through lists and collections and wherever a definition it is passed to puts that
-///   definition's parameter, and the first argument that is not of the class each place it stands
-///   in takes is refused at the argument, or at the occurrence for one a default fills, with a
-///   label where the parameter stands; else what the slots the occurrence leaves to their defaults
-///   derive, and no occurrence writes, is judged so at the occurrence.
+///   parameter stands where its definition's members, union members, `implements` entries and
+///   applications put it, through lists and collections and wherever a definition it is passed to
+///   puts that definition's parameter, and the first argument that is not of the class each place
+///   it stands in takes is refused at the argument, or at the occurrence for one a default fills,
+///   with a label where the parameter stands; else what the slots the occurrence leaves to their
+///   defaults derive, and no occurrence writes, is judged so at the occurrence.
 ///   An `implements` entry of an object or an interface that names what is no interface, a type
 ///   parameter among them, is `implements-non-interface`, at the entry. An interface on a cycle
 ///   of `implements` entries, of any length, is `self-implementing-interface`, at its name. A

@@ -26,11 +26,14 @@
 //! scalar's own parameter does: with `scalar Ref<T> @d<T>`, the `T` of `type Box<T> { v: Ref<T> }`
 //! stands wherever `@d`'s parameter stands, and not as a field's type. What its argument passes on
 //! is passed on all the same: `Ref<Page<T>>` puts its `T` where `Page`'s parameter stands. An enum
-//! hides its arguments: it takes no type parameter. A union member and an application's type, the
-//! directive's instantiation, pass a parameter on and put it nowhere themselves. An `implements`
-//! entry, a bound and a parameter's default put it nowhere: the implementing type declares each
-//! field itself, a bound's argument is judged where it is written, and what a default gives is
-//! judged where an occurrence leaves its slot out.
+//! hides its arguments: it takes no type parameter. A union member, an `implements` entry and an
+//! application's type, the directive's instantiation, pass a parameter on and put it nowhere
+//! themselves. An implementing type declares each field itself, but neither its interface's
+//! applications nor the `@deprecated` of its fields' arguments, which put the interface's
+//! parameters in places too: with `interface Tagged<X> @d<X>`, the `T` of
+//! `type Holds<T> implements Tagged<T>` stands wherever `@d`'s parameter stands. A bound and a
+//! parameter's default put it nowhere: a bound's argument is judged where it is written, and what a
+//! default gives is judged where an occurrence leaves its slot out.
 //!
 //! The table is a graph whose nodes are the slots, one for each type parameter of each definition,
 //! and the open types the roots reach, each interned type once: a type entered before is passed
@@ -81,15 +84,15 @@
 //!
 //! # What it costs
 //!
-//! [`Positions::of`] looks once at each member and union member, and at each application, whose
-//! closed type it passes over at once and whose arguments its defaults fill it enters once for
-//! each type and count of written arguments; enters each open type the roots reach once, reading
-//! its arguments once; and spreads each place to each node once, reading each edge once for each
-//! place its source gains, and each argument of a named type of an input object once more, for
-//! what an operation's argument reaches: linear in the slots, the written type arguments, the open
-//! types the roots reach and their arguments, with a logarithm for each lookup of an ordered map.
-//! A type given to many slots is one node with an edge from each, never a walk of what it holds
-//! for each. What a value holds is one more worklist over the input fields, as linear.
+//! [`Positions::of`] looks once at each member, union member and `implements` entry, and at each
+//! application, whose closed type it passes over at once and whose arguments its defaults fill it
+//! enters once for each type and count of written arguments; enters each open type the roots reach
+//! once, reading its arguments once; and spreads each place to each node once, reading each edge
+//! once for each place its source gains, and each argument of a named type of an input object once
+//! more, for what an operation's argument reaches: linear in the slots, the written type arguments,
+//! the open types the roots reach and their arguments, with a logarithm for each lookup of an
+//! ordered map. A type given to many slots is one node with an edge from each, never a walk of what
+//! it holds for each. What a value holds is one more worklist over the input fields, as linear.
 //! [`Fits`] judges each pair of a type and a class asked about once, with an explicit stack, a
 //! type's children before it, and keeps with a type that does not fit the way down to what does
 //! not, made in one step from its child's; and answers each pair of a written occurrence and a
@@ -484,9 +487,9 @@ struct Graph<'b> {
 }
 
 impl Graph<'_> {
-  /// Enters the roots of `def`, of `model`: its applications, its union members, and each member's
-  /// applications and type, a field's arguments' after the field's. `sources` tells whether it is
-  /// a OneOf input object.
+  /// Enters the roots of `def`, of `model`: its applications, its union members, each member's
+  /// applications and type, a field's arguments' after the field's, and its `implements` entries.
+  /// `sources` tells whether it is a OneOf input object.
   fn def(&mut self, model: &Model, sources: &SourceMap, def: DefId) {
     let definition = model.def(def);
     for application in definition.applications() {
@@ -508,6 +511,13 @@ impl Graph<'_> {
       for argument in model.member(member).arguments() {
         self.member(model, argument, one_of);
       }
+    }
+    // An entry gives no place of its own, as a union member gives none: it passes the interface's
+    // parameters on. Last, so that a type it shares with a member is entered for the member, whose
+    // witness its edges carry.
+    for entry in definition.implements() {
+      let occurrence = model.type_expr(*entry);
+      self.enter(model, occurrence.ty(), occurrence.location());
     }
   }
 

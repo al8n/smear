@@ -589,8 +589,9 @@ All notable changes to Smear are documented in this file.
   fills a slot left out: `f(a: HashMap<string, User>)` is `argument-type-not-input-type` at
   `User`; and at each instantiation the same codes judge what it gives each type parameter where
   the parameter stands, every written type occurrence and every directive application by its
-  complete type arguments, a parameter standing where its definition's members, union members and
-  applications put it, through lists, collections and the definitions it is passed to:
+  complete type arguments, a parameter standing where its definition's members, union members,
+  `implements` entries and applications put it, through lists, collections and the definitions it
+  is passed to, a scalar and an interface among them:
   `Page<Input>` of `type Page<T> { items: [T] }` is `field-type-not-output-type` at `Input`, with a
   label at `[T]`; and what the slots an occurrence leaves to their defaults derive, which no
   occurrence writes, is judged at the occurrence: `Conn<Input>` of `type Conn<N, E = Edge<N>>` is
