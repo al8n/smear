@@ -1,7 +1,9 @@
 //! The GraphQLx analyzer's rules on what a definition holds, each GraphQL's own with GraphQL's
 //! code: a member's name does not begin with two underscores; a definition's members have distinct
 //! names, and so have a field's arguments; a definition that holds members holds one at least; a
-//! member's type is of the kind its position takes; an object or an interface implements
+//! member's type is of the kind its position takes, and so are a collection's arguments there and
+//! what each instantiation gives a type parameter where it stands; an object or an interface
+//! implements
 //! interfaces; no interface implements itself; a union's members are object types; a required
 //! argument or input field is not deprecated; a OneOf input object's fields are nullable and have
 //! no default; and an input object takes `@oneOf` in its definition alone. Each rule judges what a
@@ -830,6 +832,400 @@ fn a_collections_arguments_take_the_kind_of_its_place() {
   );
 }
 
+/// Generic definitions whose type parameters stand in each place: directly, through a list,
+/// through another definition, in an extension's field, from a default, and in a directive's
+/// argument; then instantiations of each that give a parameter what its place does not take.
+const INSTANTIATIONS: &str = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\ninput In {\n  i: Int\n}\n\
+                              input Filter<T> {\n  eq: T\n  any: [T!]\n}\n\
+                              type Page<T> {\n  items: [T]\n  at(cursor: T): Int\n}\n\
+                              type Outer<U> {\n  p: Page<U>\n}\ntype Def<T = In> {\n  d: T\n}\n\
+                              directive @tagged<V>(value: V) on OBJECT\n\
+                              interface Node<X> {\n  id: X\n}\n\
+                              type Holds implements Node<In> {\n  id: In\n}\n\
+                              scalar Pair<A, B = Obj> @map\ninput Box<T> {\n  v: T\n}\n\
+                              type Uses @tagged<Obj> {\n  f(where: Filter<Obj>): Int\n  \
+                              p: Page<In>\n  q: Page<Obj>\n  o: Outer<In>\n  x: Def\n  \
+                              g(b: Box<Pair<string>>): Int\n}\n";
+
+/// Instantiations of the same definitions that give each parameter what its places take, or that
+/// leave a parameter that stands nowhere to its default; and a parameter given to another
+/// definition, inside a generic definition nothing instantiates.
+const FITTING: &str = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\ninput In {\n  i: Int\n}\n\
+                       input Filter<T> {\n  eq: T\n}\ntype Page<T> {\n  items: [T]\n  at(cursor: T): Int\n}\n\
+                       type Edge<N> {\n  node: N\n}\ntype Conn<N, E = Edge<N>> {\n  edges: [E]\n}\n\
+                       type G<T> {\n  f(w: Filter<T>): Int\n}\nscalar Ref<R>\n\
+                       directive @tagged<V>(value: V) on OBJECT\ntype R<T = In> {\n  r: Int\n}\n\
+                       type Uses @tagged<Int> {\n  a(f: Filter<Int>): Int\n  b(f: Filter<In>): Int\n  \
+                       c: Page<Int>\n  d: Conn<In, Obj>\n  e(r: Ref<Obj>): Int\n  r: Ref<In>\n  s: R\n}\n";
+
+#[test]
+fn an_instantiations_arguments_fit_where_its_parameters_stand() {
+  let analysis = analyze_one(INSTANTIATIONS);
+  let schema = schema_file(&analysis);
+  let text = INSTANTIATIONS;
+  assert_eq!(
+    found(&analysis),
+    [
+      // An `implements` entry is an instantiation; the field that implements it is the base
+      // check's, each true.
+      (
+        FIELD_TYPE,
+        named(schema, text, "implements Node<", "In", 0),
+        Some(named(schema, text, "id: ", "X", 0))
+      ),
+      (FIELD_TYPE, named(schema, text, "id: ", "In", 0), None),
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "@tagged<", "Obj", 0),
+        Some(named(schema, text, "value: ", "V", 0))
+      ),
+      // Labelled where the parameter first stands, the field `eq`.
+      (
+        INPUT_FIELD_TYPE,
+        named(schema, text, "Filter<", "Obj", 0),
+        Some(named(schema, text, "eq: ", "T", 0))
+      ),
+      // A field's type comes before a field argument's.
+      (
+        FIELD_TYPE,
+        named(schema, text, "p: Page<", "In", 0),
+        Some(at(schema, text, "[T]", 0))
+      ),
+      (
+        ARGUMENT_TYPE,
+        named(schema, text, "q: Page<", "Obj", 0),
+        Some(named(schema, text, "cursor: ", "T", 0))
+      ),
+      // `Outer`'s parameter stands where `Page`'s does, passed on at `Page<U>`.
+      (
+        FIELD_TYPE,
+        named(schema, text, "o: Outer<", "In", 0),
+        Some(at(schema, text, "Page<U>", 0))
+      ),
+      // A default fills it: at the occurrence.
+      (
+        FIELD_TYPE,
+        named(schema, text, "x: ", "Def", 0),
+        Some(named(schema, text, "d: ", "T", 0))
+      ),
+      // A collection a default completes: at the deepest written occurrence.
+      (
+        INPUT_FIELD_TYPE,
+        at(schema, text, "Pair<string>", 0),
+        Some(named(schema, text, "v: ", "T", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let messages = messages(&analysis);
+  assert_eq!(
+    messages[2],
+    "`@tagged` takes the object type `Obj` for its type parameter `V`, which stands as a \
+     directive argument's type, and a directive's argument's type is an input type"
+  );
+  assert_eq!(
+    messages[3],
+    "`Filter` takes the object type `Obj` for its type parameter `T`, which stands as an input \
+     field's type, and an input field's type is an input type"
+  );
+  assert_eq!(
+    messages[6],
+    "`Outer` takes the input object `In` for its type parameter `U`, which stands as a field's \
+     type, and a field's type is an output type"
+  );
+  assert_eq!(
+    messages[7],
+    "`Def` takes, from the default of `T`, the input object `In` for its type parameter `T`, \
+     which stands as a field's type, and a field's type is an output type"
+  );
+  assert_eq!(
+    messages[8],
+    "`Box` takes, for its type parameter `T`, which stands as an input field's type, a \
+     collection whose argument is the object type `Obj`, and an input field's type is an input \
+     type"
+  );
+  // The labels after the first: where the parameter stands, then the default that fills it.
+  let labels: Vec<Vec<(Location, &str)>> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| {
+      (0..diagnostic.labels())
+        .filter_map(|index: usize| diagnostic.label(index))
+        .map(|label| (label.location(), label.text()))
+        .collect()
+    })
+    .collect();
+  assert_eq!(
+    labels[7],
+    [
+      (named(schema, text, "d: ", "T", 0), "`T` stands here"),
+      (
+        named(schema, text, "T = ", "In", 0),
+        "filled from this default"
+      ),
+    ]
+  );
+  assert_eq!(
+    labels[8],
+    [
+      (named(schema, text, "v: ", "T", 0), "`T` stands here"),
+      (
+        named(schema, text, "B = ", "Obj", 0),
+        "filled from this default"
+      ),
+    ]
+  );
+  // GraphQL's phrase and help, as the base check gives them for the place's code.
+  let outer = analysis
+    .diagnostics()
+    .iter()
+    .nth(6)
+    .expect("seven diagnostics");
+  assert_eq!(
+    (outer.primary_label(), outer.help()),
+    (
+      Some("field type is not an output type"),
+      Some(
+        "a field's type must be a scalar, object, interface, union or enum; an input object \
+         appears only in argument and input-field positions."
+      )
+    )
+  );
+
+  let analysis = analyze_one(FITTING);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn what_a_default_derives_is_judged_where_it_is_derived() {
+  // `Conn<In>` is `Conn<In, Edge<In>>`, whose `Edge<In>` no occurrence writes: it is judged at
+  // each occurrence that derives it, a type's fill judged by the type and its count of written
+  // arguments alone, so `Other<In>`, which derives the same type, is refused too.
+  let text = "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+              type Conn<N, E = Edge<N>> {\n  edges: [E]\n}\ntype Other<N, F = Edge<N>> {\n  f: F\n}\n\
+              type Uses {\n  a: Conn<In>\n  b: Conn<In>\n  c: Other<In>\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  let node = Some(named(schema, text, "node: ", "N", 0));
+  assert_eq!(
+    found(&analysis),
+    [
+      (FIELD_TYPE, at(schema, text, "Conn<In>", 0), node),
+      (FIELD_TYPE, at(schema, text, "Conn<In>", 1), node),
+      (FIELD_TYPE, at(schema, text, "Other<In>", 0), node),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let messages = messages(&analysis);
+  assert_eq!(
+    messages[0],
+    "the default of `E` of `Conn` makes `Edge` take the input object `In` for its type parameter \
+     `N`, which stands as a field's type, and a field's type is an output type"
+  );
+  assert_eq!(
+    messages[2],
+    "the default of `F` of `Other` makes `Edge` take the input object `In` for its type \
+     parameter `N`, which stands as a field's type, and a field's type is an output type"
+  );
+  let defaults: Vec<Option<Location>> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.label(1).map(|label| label.location()))
+    .collect();
+  assert_eq!(
+    defaults,
+    [
+      Some(named(schema, text, "E = ", "Edge<N>", 0)),
+      Some(named(schema, text, "E = ", "Edge<N>", 0)),
+      Some(named(schema, text, "F = ", "Edge<N>", 0)),
+    ]
+  );
+
+  // A default that is written closed is an occurrence: judged where it is written, once, and not
+  // at each use, whichever of the use and the default the walk reaches first.
+  for text in [
+    "type Query {\n  u: Uses\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+     type Uses {\n  a: Conn2<Int>\n  b: Conn2<Int>\n}\ntype Conn2<N, E = Edge<In>> {\n  e: [E]\n  \
+     n: N\n}\n",
+    "type Query {\n  u: Uses\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+     type Conn2<N, E = Edge<In>> {\n  e: [E]\n  n: N\n}\ntype Uses {\n  a: Conn2<Int>\n  \
+     b: Conn2<Int>\n}\n",
+  ] {
+    let analysis = analyze_text(text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(
+        FIELD_TYPE,
+        named(schema, text, "Edge<", "In", 0),
+        Some(named(schema, text, "node: ", "N", 0))
+      )],
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  }
+
+  // A slot the occurrence writes is judged where it is written, and the default never derives
+  // what the occurrence writes; nor is a type a field writes judged again where a fill derives it.
+  for (text, at_in) in [
+    (
+      "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+       type Conn<N, E = Edge<N>> {\n  edges: [E]\n}\ntype Uses {\n  a: Conn<In, Edge<In>>\n}\n",
+      "a: Conn<In, Edge<",
+    ),
+    (
+      "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+       type Conn<N, E = Edge<N>> {\n  edges: [E]\n}\ntype Uses {\n  a: Conn<In>\n  e: Edge<In>\n}\n",
+      "e: Edge<",
+    ),
+  ] {
+    let analysis = analyze_text(text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(
+        FIELD_TYPE,
+        named(schema, text, at_in, "In", 0),
+        Some(named(schema, text, "node: ", "N", 0))
+      )],
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
+
+#[test]
+fn an_application_is_an_instantiation_of_its_directive() {
+  let text = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
+              directive @tagged<V>(value: V) on OBJECT\ndirective @plain<V> on OBJECT\n\
+              directive @dd<V = Obj>(value: V) on OBJECT\n\
+              type A @tagged<Obj> {\n  a: Int\n}\ntype B @tagged<Int> @plain<Obj> {\n  b: Int\n}\n\
+              type C @dd {\n  c: Int\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "@tagged<", "Obj", 0),
+        Some(named(schema, text, "value: ", "V", 0))
+      ),
+      // A default fills it: at the application's path.
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "C @", "dd", 0),
+        Some(named(schema, text, "value: ", "V", 1))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis)[1],
+    "`@dd` takes, from the default of `V`, the object type `Obj` for its type parameter `V`, \
+     which stands as a directive argument's type, and a directive's argument's type is an input \
+     type"
+  );
+  let filled = analysis
+    .diagnostics()
+    .iter()
+    .nth(1)
+    .expect("two diagnostics");
+  assert_eq!(
+    filled
+      .label(1)
+      .map(|label| (label.location(), label.text())),
+    Some((
+      named(schema, text, "V = ", "Obj", 0),
+      "filled from this default"
+    ))
+  );
+}
+
+#[test]
+fn a_type_given_to_many_parameters_is_one_node() {
+  // `D.d`'s complete type is `H<Tup<T>, G1<Tup<T>>, G2<Tup<T>>>`: `Tup<T>` is given to three
+  // slots, and is one node of the table with an edge from each, walked once. A test cannot see
+  // the work, which the table bounds by construction; it pins what the table answers through it.
+  let text = "type Query {\n  d: D<In>\n}\ninput In {\n  i: Int\n}\ntype Tup<A> {\n  a: A\n}\n\
+              type G1<X> {\n  g: X\n}\ntype G2<X> {\n  g: X\n}\n\
+              type H<A, B1 = G1<A>, B2 = G2<A>> {\n  h: Int\n}\ntype D<T> {\n  d: H<Tup<T>>\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      FIELD_TYPE,
+      named(schema, text, "D<", "In", 0),
+      Some(at(schema, text, "H<Tup<T>>", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn instantiations_are_judged_across_files_modules_and_packages() {
+  // An extension in another file uses a generic type of a module; an extension in a third file
+  // adds a field argument to it; a dependency's generic input object is used by the root package.
+  const B: &str = "extend type Uses {\n  p: ~::m::Page<In>\n}\n";
+  const MORE: &str = "extend type Page<U> {\n  at(cursor: U): Int\n}\n";
+  const PAGE: &str = "type Page<T> {\n  items: [T]\n}\n";
+  const SCHEMA: &str = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\ninput In {\n  i: Int\n}\n\
+                        type Uses {\n  q: ~::m::Page<Obj>\n  f(w: ^::geo::Filter<Obj>): Int\n}\n";
+  const GEO: &str = "input Filter<T> {\n  eq: T\n}\n";
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[
+      ("b.graphqlx", B),
+      ("m/more.graphqlx", MORE),
+      ("m/page.graphqlx", PAGE),
+      ("schema.graphqlx", SCHEMA),
+    ],
+  )
+  .with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("geo.graphqlx", GEO)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let b = file(&analysis, 3, "b.graphqlx");
+  let more = file(&analysis, 3, "m/more.graphqlx");
+  let page = file(&analysis, 3, "m/page.graphqlx");
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  let geo = file(&analysis, 4, "geo.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      // In the extension's file; where `Page`'s parameter stands, in its own file.
+      (
+        FIELD_TYPE,
+        named(b, B, "Page<", "In", 0),
+        Some(at(page, PAGE, "[T]", 0))
+      ),
+      // The argument another file's extension adds.
+      (
+        ARGUMENT_TYPE,
+        named(schema, SCHEMA, "m::Page<", "Obj", 0),
+        Some(named(more, MORE, "cursor: ", "U", 0))
+      ),
+      // In the root package's source, labelled in the dependency's.
+      (
+        INPUT_FIELD_TYPE,
+        named(schema, SCHEMA, "Filter<", "Obj", 0),
+        Some(named(geo, GEO, "eq: ", "T", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 /// An object, a scalar, an enum, a union, an input object, interfaces and a marker; then objects
 /// and an interface that implement each of what is no interface, a type parameter and an alias;
 /// an extension's entry; and entries that are interfaces, one with an argument, and a marker.
@@ -1288,6 +1684,38 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype T {\n  f: In\n}\n\
      type U {\n  x: Missing\n}\n",
   );
+  // A collection's argument, an instantiation's in a member's type, an application's, and what a
+  // fill derives.
+  silent_beside_a_phase(
+    ARGUMENT_TYPE,
+    "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
+     type T {\n  f(m: HashMap<string, Obj>): Int\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
+     type T {\n  f(m: HashMap<string, Obj>): Int\n}\ntype U {\n  x: Missing\n}\n",
+  );
+  silent_beside_a_phase(
+    FIELD_TYPE,
+    "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Page<P> {\n  items: [P]\n}\n\
+     type T {\n  p: Page<In>\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Page<P> {\n  items: [P]\n}\n\
+     type T {\n  p: Page<In>\n}\ntype U {\n  x: Missing\n}\n",
+  );
+  silent_beside_a_phase(
+    DIRECTIVE_ARGUMENT_TYPE,
+    "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
+     directive @tagged<V>(value: V) on OBJECT\ntype T @tagged<Obj> {\n  t: Int\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
+     directive @tagged<V>(value: V) on OBJECT\ntype T @tagged<Obj> {\n  t: Int\n}\n\
+     type U {\n  x: Missing\n}\n",
+  );
+  silent_beside_a_phase(
+    FIELD_TYPE,
+    "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+     type Conn<N, E = Edge<N>> {\n  edges: [E]\n}\ntype T {\n  c: Conn<In>\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+     type Conn<N, E = Edge<N>> {\n  edges: [E]\n}\ntype T {\n  c: Conn<In>\n}\n\
+     type U {\n  x: Missing\n}\n",
+  );
   silent_beside_a_phase(
     IMPLEMENTS,
     "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
@@ -1350,7 +1778,15 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
   let owner = "T".repeat(4096);
   let member = format!("__{}", "f".repeat(4096));
   let plain = "m".repeat(4096);
+  let param = "P".repeat(4096);
   let texts = [
+    format!(
+      "type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  f({plain}: HashMap<string, {owner}>): Int\n}}\n"
+    ),
+    format!(
+      "type Query {{\n  ok: Int\n}}\ninput In {{\n  i: Int\n}}\n\
+       type {owner}<{param}> {{\n  {plain}: {param}\n}}\ntype U {{\n  u: {owner}<In>\n}}\n"
+    ),
     format!("type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  {member}: Int\n}}\n"),
     format!("type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  {plain}: Int\n  {plain}: Int\n}}\n"),
     format!("type Query {{\n  ok: Int\n}}\ntype {owner}\n"),

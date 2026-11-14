@@ -148,8 +148,8 @@
 //! `@heap` in a `core` package and an extern's `tier` above its package's are each
 //! `smear::graphqlx::tier`, where they are written, so that in an analysis that is ok every
 //! definition requires at most its package's tier. What a directive definition writes and an
-//! application's type arguments are compile-time metadata, and are not judged, an input object a
-//! directive's argument names being judged where it is written. And what a definition a supplied
+//! application's type arguments are compile-time metadata, and are not judged for their tiers, an
+//! input object a directive's argument names being judged where it is written. And what a definition a supplied
 //! package wrote holds keeps GraphQL's own rules, with GraphQL's codes: a member whose name begins
 //! with `__` is `smear::schema::reserved-field-name`, or the code of what else it is; and a member
 //! whose name an earlier member of its list has is `smear::schema::duplicate-field-name`, or the
@@ -157,8 +157,11 @@
 //! is `smear::schema::empty-fields-definition`, or the code of its kind, a marker holding none; and
 //! a member typed by a definition of a kind its position does not take is
 //! `smear::schema::field-type-not-output-type`, or the code of its position, and so is one typed by
-//! a collection that holds one, a set or a map being of the kinds of its arguments; and an
-//! `implements`
+//! a collection that holds one, a set or a map being of the kinds of its arguments, and so is an
+//! instantiation, or a directive application, that gives a type parameter a type of a kind where
+//! the parameter stands does not take, a parameter standing where its definition and each
+//! definition it is passed to put it, what a default fills judged at the occurrence that leaves
+//! the slot out; and an `implements`
 //! entry of an object or an interface that names what is no interface is
 //! `smear::schema::implements-non-interface`; and an interface on a cycle of `implements` entries
 //! is `smear::schema::self-implementing-interface`; and a union member that is no object type is

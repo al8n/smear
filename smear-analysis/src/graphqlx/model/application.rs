@@ -2,13 +2,13 @@
 
 use tokora::diagnostic::Location;
 
-#[cfg(feature = "test-support")]
-use crate::graphqlx::id::TyId;
-use crate::graphqlx::id::{ApplicationId, DefId, MemberId, TypeExprId, ValueId};
+use crate::graphqlx::id::{ApplicationId, DefId, MemberId, TyId, TypeExprId, ValueId};
 
-#[cfg(feature = "test-support")]
-use super::table::KIND_NAMED;
-use super::{Model, table::ApplicationRow, ty::Path};
+use super::{
+  Model,
+  table::{ApplicationRow, KIND_NAMED},
+  ty::Path,
+};
 
 /// What a written name resolved to, or that it did not resolve.
 ///
@@ -120,6 +120,24 @@ impl<'a> Application<'a> {
   pub fn type_args(&self) -> &'a [TypeExprId] {
     let model: &'a Model = self.model;
     self.row().type_args.of(&model.application_type_args)
+  }
+
+  /// Its type: its directive's instantiation, a named type of the directive with every type
+  /// argument, the written ones and those its defaults fill; `None` for a directive of no type
+  /// parameter, one that did not resolve, and a count of type arguments that was refused, and when
+  /// the arguments could not be completed.
+  //
+  // Crate-private: what an application is as a type is no part of the public model yet. The rules
+  // on what an instantiation's arguments take read it. A candidate public accessor for the model's
+  // review.
+  #[inline]
+  pub(crate) fn ty(&self) -> Option<TyId> {
+    let model: &'a Model = self.model;
+    let ty = self.row().ty;
+    match model.tys.get(ty.get() as usize) {
+      Some(row) if row.shape == KIND_NAMED => Some(ty),
+      _ => None,
+    }
   }
 
   /// Where the whole application is written, from its `@` to its last token.

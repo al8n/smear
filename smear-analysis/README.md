@@ -138,8 +138,8 @@ anything else being `smear::graphqlx::repr-misuse`; and a package uses nothing a
 declares, a list in a `core` package, another package's definition that needs more, `@heap` in a
 `core` package and an extern's `tier` above its package's each being `smear::graphqlx::tier`, where
 it is written, but for compile-time metadata, which counts nowhere: a directive definition's types
-and an application's type arguments are not judged, though an input object a directive's argument
-names is, where it is written. And what a definition a supplied package wrote holds keeps GraphQL's
+and an application's type arguments are not judged for their tiers, though an input object a
+directive's argument names is, where it is written. And what a definition a supplied package wrote holds keeps GraphQL's
 own rules, with GraphQL's codes: a member whose name begins with `__` is
 `smear::schema::reserved-field-name`, or the code of what else it is, and a member whose name an
 earlier member of its list has is `smear::schema::duplicate-field-name`, or the code of its list,
@@ -147,8 +147,11 @@ and a definition that holds members and holds none, its extensions' counted, is
 `smear::schema::empty-fields-definition`, or the code of its kind, a marker holding none, and a
 member typed by a definition of a kind its position does not take is
 `smear::schema::field-type-not-output-type`, or the code of its position, and so is one typed by a
-collection that holds one, a set or a map being of the kinds of its arguments, and an `implements`
-entry of an object or an interface that names what is no interface is
+collection that holds one, a set or a map being of the kinds of its arguments, and so is an
+instantiation, or a directive application, that gives a type parameter a type of a kind where the
+parameter stands does not take, a parameter standing where its definition and each definition it is
+passed to put it, what a default fills judged at the occurrence that leaves the slot out, and an
+`implements` entry of an object or an interface that names what is no interface is
 `smear::schema::implements-non-interface`, and an interface on a cycle of `implements` entries is
 `smear::schema::self-implementing-interface`, and a union member that is no object type is
 `smear::schema::union-member-not-object`, and a required argument or input field that applies

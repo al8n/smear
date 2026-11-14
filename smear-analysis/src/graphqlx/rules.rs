@@ -30,6 +30,17 @@
 //! package has none, and a consumer that analyzes one waives that code by filtering it, since the
 //! analysis keeps GraphQL's rule on the query root and exposes no waiver.
 //!
+//! A rule that judges what an instantiation gives a type parameter reads where each type parameter
+//! stands: the table of `positions::Positions`, found once for the walk, in `begin`, by each rule
+//! that reads it, over every package's definitions, so that a dependency's generic definition
+//! used by the root package is judged by what all its contributions write. A parameter stands
+//! where its definition's members, union members and applications put it, through lists and
+//! collections, and where each definition it is passed to puts that definition's parameter. Such a
+//! rule judges every written occurrence and every application, each type once, and what the slots
+//! an occurrence leaves to their defaults derive, at the occurrence, through `positions::Derived`.
+//! `MemberTypeKind` is one, and reads one crate-private accessor, `Application::ty`, an
+//! application's complete type, its directive's instantiation.
+//!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk
 //! descends the written arguments of an occurrence that names a type parameter, or nothing, and
@@ -378,7 +389,8 @@ rule_set! {
   /// of the definitions a supplied package wrote, GraphQL's own rules: a member's name does not
   /// begin with `__`; a definition's members have distinct names, and so have a field's arguments;
   /// a definition that holds members holds one at least, a marker holding none; a member's type is
-  /// of the kind its position takes, and so are a collection's arguments there; an object or an interface implements interfaces; no interface
+  /// of the kind its position takes, and so are a collection's arguments there, and at each
+  /// instantiation what it gives a type parameter where the parameter stands; an object or an interface implements interfaces; no interface
   /// implements itself; a union's members are object types; a required argument or input field is
   /// not deprecated; a OneOf input object's fields are nullable and have no default; and an input
   /// object takes `@oneOf` in its definition alone. And of the directives and every application a

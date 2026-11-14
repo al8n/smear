@@ -562,7 +562,14 @@ All notable changes to Smear are documented in this file.
   holding such a type, its complete type's arguments read through the collections and lists they
   hold, at the deepest occurrence that writes the way to it, with a label at the default that
   fills a slot left out: `f(a: HashMap<string, User>)` is `argument-type-not-input-type` at
-  `User`; and an `implements` entry of an object or
+  `User`; and at each instantiation the same codes judge what it gives each type parameter where
+  the parameter stands, every written type occurrence and every directive application by its
+  complete type arguments, a parameter standing where its definition's members, union members and
+  applications put it, through lists, collections and the definitions it is passed to:
+  `Page<Input>` of `type Page<T> { items: [T] }` is `field-type-not-output-type` at `Input`, with a
+  label at `[T]`; and what the slots an occurrence leaves to their defaults derive, which no
+  occurrence writes, is judged at the occurrence: `Conn<Input>` of `type Conn<N, E = Edge<N>>` is
+  refused when `Edge`'s `N` stands in a field; and an `implements` entry of an object or
   an interface that names what is no interface, a type parameter among them, is
   `implements-non-interface`; and an interface on a cycle of `implements` entries, of any length,
   is `self-implementing-interface`; and a union member that names what is no object type is

@@ -1,4 +1,5 @@
-//! Types of the right kind: a member's type is of the kind its position takes.
+//! Types of the right kind: a member's type is of the kind its position takes, and so is what an
+//! instantiation gives a type parameter where the parameter stands.
 //!
 //! GraphQL refuses a field whose type is an input object, and an argument, a directive's argument
 //! or an input field whose type is an object, an interface or a union: a field's type is an output
@@ -14,58 +15,124 @@
 //! stand where it stands and are judged here, its complete type's, through every collection and
 //! list it holds: `HashMap<string, User>` is no input type. One of a kind the position does not
 //! take is reported at the deepest occurrence that writes the way to it; one in a slot the
-//! occurrence leaves to its default, at the occurrence, with a label at the default. A generic
-//! definition that is no collection is judged here by its kind alone, whatever its arguments. A
-//! type parameter is a type of every position, and so is a path that names nothing, which name
+//! occurrence leaves to its default, at the occurrence, with a label at the default. A type
+//! parameter is a type of every position, and so is a path that names nothing, which name
 //! resolution refused. A marker is an interface: one as an argument's type is this rule's refusal,
 //! and the marker rule's beside it.
 //!
-//! A member is judged when a supplied package wrote its definition, a GraphQL built-in the root
-//! package replaces among them.
+//! The same rule is met after substitution. A type parameter stands where its definition puts it,
+//! through lists, collections and the definitions it is passed to, as the table of where each
+//! type parameter stands answers; so each instantiation, every written type occurrence wherever it
+//! stands, a type parameter's default, a bound and an `implements` entry among them, and every
+//! directive application, by its directive's complete instantiation, gives each type parameter a
+//! type of the class each place it stands in takes. The first argument, in order, that does not
+//! fit a place its parameter stands in, the places taken as a field's type, a field argument's,
+//! an input field's and a directive argument's, is reported under that place's code: at the
+//! argument as written, down to the leaf of a collection, or at the occurrence, an application at
+//! its path, for an argument a default fills; with a label where the parameter stands, and one at
+//! the default that fills it. Each type is judged once, and reported at each occurrence of it.
+//! Else, what the slots an occurrence leaves to their defaults derive is judged the same way, at
+//! the occurrence: `Conn<In>` of `type Conn<N, E = Edge<N>>`, whose `E` is `Edge<In>`, whose
+//! `node: N` is then an input object in a field. A type the occurrence writes, or that an
+//! occurrence of the program writes, is passed over there: it is judged where it is written.
 //!
-//! The rule reads the public model and nothing else.
+//! A member is judged when a supplied package wrote its definition, a GraphQL built-in the root
+//! package replaces among them, and so is a member's type occurrence; every other occurrence and
+//! application the walk reaches is judged where it is written.
+//!
+//! The rule reads the public model, and one crate-private accessor, `Application::ty`: an
+//! application's complete type, its directive's instantiation.
 
-use std::{format, string::String};
+use std::{collections::BTreeMap, format, string::String};
 
-use tokora::diagnostic::Code;
+use tokora::diagnostic::{Code, Location};
 
 use crate::graphqlx::{
-  Contribution, Cx, DefId, DefKind, Diagnostic, Member, MemberId, MemberKind, Model, TypeExprKind,
-  Visitor,
+  ApplicationId, Contribution, Cx, DefId, DefKind, Diagnostic, Member, MemberId, MemberKind, Model,
+  Site, TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
   code::schema,
   diagnostic::Excerpt,
-  positions::{Class, Fits, default_of, named},
+  id::dense,
+  positions::{Class, Derived, Fill, Fits, Place, Positions, default_of, named, parameter},
 };
 
-use super::supplied;
+use super::{Silence, supplied};
+
+/// The places this rule judges an instantiation's arguments at, in the order it reads them.
+const PLACES: [Place; 4] = [
+  Place::Field,
+  Place::Argument,
+  Place::InputField,
+  Place::DirectiveArgument,
+];
 
 /// Reports each member of a definition a supplied package wrote whose type's base, under its
-/// lists, names a definition its position does not take, or a collection that holds one.
+/// lists, names a definition its position does not take, or a collection that holds one; and each
+/// occurrence and application whose type gives a type parameter, or whose fill gives one, a type
+/// of a kind where the parameter stands does not take.
 ///
-/// It reads who wrote each definition in the `enter_def` hook, and each member's type in the
-/// `enter_member` hook, a field's arguments among them. It says nothing about a member whose
-/// contribution has its `has_errors()` set: a phase already refused something in it, and a second
-/// diagnostic within it would repeat the phase's.
+/// It finds where each type parameter stands in the `begin` hook, reads who wrote each definition
+/// in the `enter_def` hook, each member's type in the `enter_member` hook, a field's arguments
+/// among them, each occurrence in the `type_expr` hook and each application in the `application`
+/// hook. It says nothing about a member, an occurrence or an application whose contribution has its
+/// `has_errors()` set, or for a written root one of the schema's: a phase already refused something
+/// in it, and a second diagnostic within it would repeat the phase's.
 ///
-/// It costs one answer of who wrote each definition the walk enters, and for each member one look
-/// at its type and one step for each list its type writes, with no recursion; for a member whose
-/// base is a collection, one answer of whether its type fits, each type and class judged once for
-/// the walk, and a report follows one path down the type. It keeps, between two hooks, whether a
-/// supplied package wrote the definition the walk is in, and for the walk what it judged of each
-/// type. Its messages quote names as excerpts, so each is bounded whatever the names' lengths, and
-/// print no type.
+/// It costs, once per walk, the table of where each type parameter stands, which is linear in the
+/// slots, the open types the members, union members and applications reach and their arguments,
+/// and one look at the schema's contributions. For each member, one look at its type and one step
+/// for each list its type writes; for each occurrence and application, one look at its type and,
+/// once for each distinct type, a verdict that reads each argument against each place its slot
+/// stands in, each type and class judged once for the walk; and once for each distinct type and
+/// count of written arguments, the types its fill derives, each once. A report follows one path
+/// down a type. Nothing recurses. It keeps, between two hooks, whether a supplied package wrote
+/// the definition the walk is in, and for the walk the table, the silence and its verdicts, each
+/// keyed by the model's ids. Its messages quote names as excerpts, so each is bounded whatever the
+/// names' lengths, and print no type.
 #[derive(Default)]
 pub(super) struct MemberTypeKind {
   /// Whether a supplied package wrote the definition the walk is in.
   judged: bool,
+  /// Whether it says nothing at an occurrence.
+  silence: Silence,
+  /// Where each type parameter stands.
+  positions: Positions,
   /// Whether the types it asked about fit the classes their positions take.
   fits: Fits,
+  /// Each type's own verdict, judged once: the first of its arguments that does not fit a place
+  /// its slot stands in.
+  verdicts: BTreeMap<TyId, Option<Own>>,
+  /// What each type's fills derive, judged once for each count of written arguments.
+  derived: Derived<Own>,
+}
+
+/// A type's own failure: the first of its arguments, in order, that does not fit a place its slot
+/// stands in, with that place.
+#[derive(Clone, Copy)]
+struct Own {
+  /// The slot of the argument.
+  slot: u32,
+  /// The place it does not fit.
+  place: Place,
+}
+
+/// What an occurrence or an application is refused for.
+#[derive(Clone, Copy)]
+enum Found {
+  /// Its type's own failure.
+  Own(Own),
+  /// A failure among what its fill derives.
+  Derived(Fill<Own>),
 }
 
 impl Visitor for MemberTypeKind {
-  fn begin(&mut self, _cx: &mut Cx<'_>) {
+  fn begin(&mut self, cx: &mut Cx<'_>) {
     self.judged = false;
+    self.silence = Silence::of(cx);
+    self.positions = Positions::of(cx.model());
     self.fits = Fits::default();
+    self.verdicts = BTreeMap::new();
+    self.derived = Derived::default();
   }
 
   fn enter_def(&mut self, cx: &mut Cx<'_>, def: DefId) {
@@ -103,12 +170,13 @@ impl Visitor for MemberTypeKind {
       // A collection is a scalar, which the base check never refuses: its arguments are judged.
       let Some(misfit) = self
         .fits
-        .misfit(model, base.ty(), position.class(), base.id())
+        .misfit(model, base.ty(), position.class(), Some(base.id()))
       else {
         return;
       };
       let leaf = model.def(misfit.leaf);
-      let mut report = Diagnostic::builder(position.code(), model.type_expr(misfit.at).location())
+      let at = misfit.at.unwrap_or(base.id());
+      let mut report = Diagnostic::builder(position.code(), model.type_expr(at).location())
         .message(format!(
           "{} is typed by the collection `{}`, whose argument is {} `{}`, and {}",
           what(model, written, position),
@@ -151,6 +219,249 @@ impl Visitor for MemberTypeKind {
         .build(),
     );
   }
+
+  fn type_expr(&mut self, cx: &mut Cx<'_>, ty: TypeExprId) {
+    // A member's type is judged as its member is.
+    if cx.site() == Some(Site::MemberType) && !self.judged {
+      return;
+    }
+    if self.silence.silenced(cx) {
+      return;
+    }
+    let model = cx.model();
+    let occurrence = model.type_expr(ty);
+    let TypeExprKind::Named { args: written, .. } = occurrence.kind() else {
+      return;
+    };
+    let complete = occurrence.ty();
+    let Some(found) = self.judge(model, complete, dense(written.len())) else {
+      return;
+    };
+    if let Some(report) = self.report(model, found, complete, written, occurrence.location()) {
+      cx.report(report);
+    }
+  }
+
+  fn application(&mut self, cx: &mut Cx<'_>, application: ApplicationId) {
+    if cx
+      .contribution()
+      .is_some_and(|part: Contribution<'_>| part.has_errors())
+    {
+      return;
+    }
+    let model = cx.model();
+    let applied = model.application(application);
+    let Some(complete) = applied.ty() else {
+      return;
+    };
+    let written = applied.type_args();
+    let Some(found) = self.judge(model, complete, dense(written.len())) else {
+      return;
+    };
+    if let Some(report) = self.report(model, found, complete, written, applied.path_location()) {
+      cx.report(report);
+    }
+  }
+}
+
+impl MemberTypeKind {
+  /// What an occurrence or an application whose type is `ty`, of `model`, and that writes
+  /// `written` type arguments is refused for: its type's own failure, else one among what its
+  /// fill derives.
+  fn judge(&mut self, model: &Model, ty: TyId, written: u32) -> Option<Found> {
+    let TyKind::Named { args, .. } = model.ty(ty).kind() else {
+      return None;
+    };
+    if args.is_empty() {
+      return None;
+    }
+    let Self {
+      positions,
+      fits,
+      verdicts,
+      derived,
+      ..
+    } = self;
+    if let Some(own) = verdict(model, positions, fits, verdicts, ty) {
+      return Some(Found::Own(own));
+    }
+    derived
+      .verdict(model, ty, written, |next: TyId| {
+        verdict(model, positions, fits, verdicts, next)
+      })
+      .map(Found::Derived)
+  }
+
+  /// The diagnostic of `found`, for an occurrence or an application whose type is `ty`, of `model`,
+  /// that writes the type arguments `written`, `whole` being where it is written: the occurrence,
+  /// or an application's path.
+  fn report(
+    &mut self,
+    model: &Model,
+    found: Found,
+    ty: TyId,
+    written: &[TypeExprId],
+    whole: Location,
+  ) -> Option<Diagnostic> {
+    let TyKind::Named { def, args } = model.ty(ty).kind() else {
+      return None;
+    };
+    let definition = Excerpt(model.def(def).name().as_bytes());
+    // A directive is named as it is applied.
+    let sign = if model.def(def).kind() == DefKind::Directive {
+      "@"
+    } else {
+      ""
+    };
+    match found {
+      Found::Own(Own { slot, place }) => {
+        let position = Position::at(place);
+        let given = written.get(slot as usize).copied();
+        let argument = *args.get(slot as usize)?;
+        let misfit = self.fits.misfit(model, argument, place.class(), given)?;
+        let name = Excerpt(parameter(model, def, slot).as_bytes());
+        let lead = match given {
+          Some(_) => format!("`{sign}{definition}` takes"),
+          None => format!("`{sign}{definition}` takes, from the default of `{name}`,"),
+        };
+        let message = phrase(
+          model,
+          &lead,
+          misfit.leaf,
+          misfit.nested && given.is_some(),
+          misfit.nested,
+          &name,
+          position,
+        );
+        let at = match (given, misfit.at) {
+          (Some(_), Some(at)) => model.type_expr(at).location(),
+          _ => whole,
+        };
+        let mut report = Diagnostic::builder(position.code(), at)
+          .message(message)
+          .primary_label(position.label());
+        if let Some(witness) = self.positions.witness(def, slot, place) {
+          report = report.label(witness, format!("`{name}` stands here"));
+        }
+        if given.is_none()
+          && let Some(default) = default_of(model, def, slot)
+        {
+          report = report.label(default, "filled from this default");
+        }
+        if let Some(default) = misfit
+          .filled
+          .and_then(|(collection, index): (DefId, u32)| default_of(model, collection, index))
+        {
+          report = report.label(default, "filled from this default");
+        }
+        Some(report.help(position.help()).build())
+      }
+      Found::Derived(Fill {
+        slot: filled,
+        ty: derived,
+        verdict: Own { slot, place },
+      }) => {
+        let position = Position::at(place);
+        let TyKind::Named {
+          def: derived_def,
+          args: derived_args,
+        } = model.ty(derived).kind()
+        else {
+          return None;
+        };
+        let argument = *derived_args.get(slot as usize)?;
+        let misfit = self.fits.misfit(model, argument, place.class(), None)?;
+        let name = Excerpt(parameter(model, derived_def, slot).as_bytes());
+        let lead = format!(
+          "the default of `{}` of `{sign}{definition}` makes `{}` take",
+          Excerpt(parameter(model, def, filled).as_bytes()),
+          Excerpt(model.def(derived_def).name().as_bytes())
+        );
+        let message = phrase(
+          model,
+          &lead,
+          misfit.leaf,
+          false,
+          misfit.nested,
+          &name,
+          position,
+        );
+        let mut report = Diagnostic::builder(position.code(), whole)
+          .message(message)
+          .primary_label(position.label());
+        if let Some(witness) = self.positions.witness(derived_def, slot, place) {
+          report = report.label(witness, format!("`{name}` stands here"));
+        }
+        if let Some(default) = default_of(model, def, filled) {
+          report = report.label(default, "filled from this default");
+        }
+        Some(report.help(position.help()).build())
+      }
+    }
+  }
+}
+
+/// The first argument of `ty`, of `model`, in order, that does not fit a place its slot stands in
+/// by `positions`, places read in [`PLACES`]' order, `fits` judging each type once and `verdicts`
+/// keeping each type's answer.
+fn verdict(
+  model: &Model,
+  positions: &Positions,
+  fits: &mut Fits,
+  verdicts: &mut BTreeMap<TyId, Option<Own>>,
+  ty: TyId,
+) -> Option<Own> {
+  if let Some(kept) = verdicts.get(&ty) {
+    return *kept;
+  }
+  let mut found: Option<Own> = None;
+  if let TyKind::Named { def, args } = model.ty(ty).kind() {
+    'arguments: for (slot, argument) in args.iter().enumerate() {
+      let slot = dense(slot);
+      for place in PLACES {
+        if positions.witness(def, slot, place).is_some()
+          && !fits.fits(model, *argument, place.class())
+        {
+          found = Some(Own { slot, place });
+          break 'arguments;
+        }
+      }
+    }
+  }
+  verdicts.insert(ty, found);
+  found
+}
+
+/// The message for an argument a type parameter `name` takes that does not fit where it stands in
+/// `position`, of `model`: `lead`, which names who takes it, then what does not fit, of the
+/// definition `leaf`, named before the parameter, or after it when `after` is set, as lying in a
+/// collection when `nested` is set.
+fn phrase(
+  model: &Model,
+  lead: &str,
+  leaf: DefId,
+  after: bool,
+  nested: bool,
+  name: &Excerpt<'_>,
+  position: Position,
+) -> String {
+  let leaf = model.def(leaf);
+  let kind = named(leaf.kind());
+  let leaf = Excerpt(leaf.name().as_bytes());
+  let thing = if nested {
+    format!("a collection whose argument is {kind} `{leaf}`")
+  } else {
+    format!("{kind} `{leaf}`")
+  };
+  let stands = position.stands();
+  let takes = position.takes();
+  if after {
+    format!(
+      "{lead}, for its type parameter `{name}`, which stands as {stands}, {thing}, and {takes}"
+    )
+  } else {
+    format!("{lead} {thing} for its type parameter `{name}`, which stands as {stands}, and {takes}")
+  }
 }
 
 /// The four positions whose types the rule judges, each with its class and GraphQL's words.
@@ -178,6 +489,16 @@ impl Position {
     }
   }
 
+  /// The position a type parameter stands in at `place`.
+  fn at(place: Place) -> Self {
+    match place {
+      Place::Field => Self::Field,
+      Place::Argument => Self::Argument,
+      Place::InputField => Self::InputField,
+      Place::DirectiveArgument => Self::DirectiveArgument,
+    }
+  }
+
   /// GraphQL's code for a type of a kind the position does not take.
   fn code(self) -> Code {
     match self {
@@ -193,6 +514,16 @@ impl Position {
     match self {
       Self::Field => Class::Output,
       Self::Argument | Self::DirectiveArgument | Self::InputField => Class::Input,
+    }
+  }
+
+  /// What a type parameter that stands there stands as, in a message.
+  fn stands(self) -> &'static str {
+    match self {
+      Self::Field => "a field's type",
+      Self::Argument => "a field argument's type",
+      Self::DirectiveArgument => "a directive argument's type",
+      Self::InputField => "an input field's type",
     }
   }
 
