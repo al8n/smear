@@ -65,7 +65,9 @@
 //! - and each argument of the field the interface's field does not declare is not required, or it
 //!   is `smear::schema::unexpected-required-argument`, at its name, labelled at the interface's
 //!   field. Required is written non-null with no default, as GraphQL reads it: an argument typed
-//!   by a bare type parameter is not, whatever an instantiation makes of it.
+//!   by the definition's own type parameter, bare and written nullable, with no default, is not,
+//!   here, and each instantiation the program writes is judged for what it makes of it, as the
+//!   section on what an instantiation makes required says.
 //!
 //! Each is judged whatever the others found, in `smear-schema`'s order. A generic definition is
 //! judged once, where it is written: a type parameter is a subtype of itself and of its bounds
@@ -86,6 +88,19 @@
 //! nullnesses sharing one verdict, and a verdict a limit stopped is `resource-limit` at each
 //! occurrence of it, but at an entry a definition's check stopped at, which said so.
 //!
+//! # What an instantiation makes required
+//!
+//! With those occurrences, each occurrence of a definition one of whose fields adds such an
+//! argument: one whose type gives the argument's type parameter a non-null type makes the
+//! argument required, and is `smear::schema::unexpected-required-argument` at the occurrence,
+//! labelled at the argument and at the interface's field, at most once for an occurrence.
+//! `Page<Int!>` of `type Page<T> implements Paged { items(after: T): [Int] }` is one, and so is
+//! `Page` of `type Page<T = Int!>`, whose default makes it so. Each type is judged once, a step
+//! for each such argument it looks at, and one a limit stopped is `resource-limit` at each
+//! occurrence of it. An instantiation that only a fill or a substitution derives is not judged:
+//! `Outer<Int!>` of `type Outer<U> { p: Page<U> }` makes a `Page<Int!>` that no occurrence writes,
+//! as no derived instantiation is judged here.
+//!
 //! # What it costs, and what bounds it
 //!
 //! A definition's own entries and members are written, and each is read once: one scan of the
@@ -96,7 +111,8 @@
 //! interface looked at, and each argument of it or of the field that implements it; each pair of
 //! types the relation looks at, one answered before included,
 //! and each entry, bound and member it looks at to answer one; each distinct written entry and
-//! member a verdict reads; and each node of a type rebuilt under an entry's arguments, a rebuild
+//! member a verdict reads; each argument a field adds that a written instantiation's type is read
+//! for, once for each type; and each node of a type rebuilt under an entry's arguments, a rebuild
 //! remembered by the type and the arguments' named type costing nothing more. A listed
 //! definition's own entries and members are read once, when an occurrence first asks about it,
 //! and a verdict looked up costs nothing. On a program the check accepts, each root costs its interface's entries
@@ -189,6 +205,8 @@ pub(crate) fn implement(
     distinct: Vec::new(),
     under: Vec::new(),
     verdicts: BTreeMap::new(),
+    latent: Vec::new(),
+    made: BTreeMap::new(),
   };
   implementing.definitions();
   implementing.occurrences();
@@ -235,6 +253,36 @@ enum Verdict {
     entries: Option<(TypeExprId, TypeExprId)>,
     members: Option<(TypeExprId, TypeExprId)>,
   },
+  /// A limit stopped it before it was known.
+  Stopped(Stop),
+}
+
+/// An argument of a definition's field, beside those of the interface's field it implements, that
+/// is typed by the definition's own type parameter, written nullable, with no default: not
+/// required as written, and required in each instantiation that gives the parameter a non-null
+/// type.
+#[derive(Clone, Copy)]
+struct Latent {
+  /// The definition.
+  def: DefId,
+  /// The index of its type parameter that types the argument.
+  index: u32,
+  /// The argument.
+  argument: MemberId,
+  /// The interface's field, which does not declare it.
+  field: MemberId,
+  /// The interface.
+  interface: DefId,
+}
+
+/// What an instantiation makes required of the arguments its definition's fields add beside their
+/// interfaces' fields'.
+#[derive(Clone, Copy)]
+enum Made {
+  /// None of them.
+  Nothing,
+  /// The first it makes required: its index among the latent arguments.
+  Required(u32),
   /// A limit stopped it before it was known.
   Stopped(Stop),
 }
@@ -307,6 +355,13 @@ struct Implementing<'p> {
   /// Each type an occurrence of a listed definition has, and the nullable form of each written
   /// non-null, by the type, with its verdict.
   verdicts: BTreeMap<TyId, Verdict>,
+  /// The arguments the definitions' fields add beside their interfaces' fields', typed by the
+  /// definition's own type parameter written nullable, with no default, in the order the
+  /// definitions are checked: each definition's are one run.
+  latent: Vec<Latent>,
+  /// Each type an occurrence of a definition with latent arguments has, with what it makes
+  /// required.
+  made: BTreeMap<TyId, Made>,
 }
 
 impl Implementing<'_> {
@@ -603,11 +658,42 @@ impl Implementing<'_> {
       let Some(name) = self.builder.member_name(argument) else {
         continue;
       };
-      if self.argument_named(declared, name).is_none() && self.required(argument) {
+      if self.argument_named(declared, name).is_some() {
+        continue;
+      }
+      if self.required(argument) {
         self.report_unexpected(root, field, argument);
+      } else if let Some(index) = self.latent_parameter(root.def, argument) {
+        // Not required here, and required wherever an instantiation gives `index` a non-null
+        // type: each written one is judged with the occurrences.
+        self.latent.push(Latent {
+          def: root.def,
+          index,
+          argument,
+          field,
+          interface: root.interface,
+        });
       }
     }
     Ok(())
+  }
+
+  /// The index of `def`'s type parameter that types `argument`, bare and written nullable, when
+  /// the argument has no default: an argument an instantiation's non-null argument makes
+  /// required.
+  fn latent_parameter(&self, def: DefId, argument: MemberId) -> Option<u32> {
+    if self.builder.member_default(argument).is_some() {
+      return None;
+    }
+    let written = self.builder.member_ty(argument)?;
+    let occurrence = self.builder.occurrence(written)?;
+    if occurrence.non_null {
+      return None;
+    }
+    match self.builder.ty_shape(occurrence.ty?)? {
+      Shape::Param { def: owner, index } if owner == def => Some(index),
+      _ => None,
+    }
   }
 
   /// The run of `argument_names` that indexes the arguments of `field` by name: built the first
@@ -777,6 +863,7 @@ impl Implementing<'_> {
     if !matches!(self.builder.ty_shape(ty), Some(Shape::Named(named)) if named == def) {
       return;
     }
+    self.required_by(at, ty, def);
     let Some(listed) = self.listed(def) else {
       return;
     };
@@ -795,6 +882,101 @@ impl Implementing<'_> {
         }
       }
     }
+  }
+
+  /// Reports, at `at`, an occurrence of `ty`, an instantiation of `def`, the first argument a field
+  /// of `def` adds beside its interface's field's that `ty` makes required, or the stop that left it
+  /// unknown: what `made` keeps for the type, made the first time it is asked.
+  fn required_by(&mut self, at: Location, ty: TyId, def: DefId) {
+    // The run of `def`'s latent arguments: most definitions have none, and are passed by at once.
+    let from = self
+      .latent
+      .partition_point(|latent: &Latent| latent.def < def);
+    let to = self
+      .latent
+      .partition_point(|latent: &Latent| latent.def <= def);
+    if from == to {
+      return;
+    }
+    let made = match self.made.get(&ty) {
+      Some(&known) => known,
+      None => {
+        let found = self.make(ty, from, to);
+        self.made.insert(ty, found);
+        found
+      }
+    };
+    match made {
+      Made::Nothing => {}
+      Made::Required(index) => self.report_made_required(at, index),
+      Made::Stopped(stop) => {
+        let subject = format!(
+          "the arguments `{}`'s fields require under the type arguments it is instantiated with \
+           here",
+          Excerpt(self.builder.def_name(def))
+        );
+        self.report_limit(at, &subject, stop);
+      }
+    }
+  }
+
+  /// What `ty`, an instantiation of the definition whose latent arguments are those from `from` to
+  /// `to`, makes required: the first of them whose type parameter it gives a non-null type, each
+  /// looked at a step.
+  fn make(&mut self, ty: TyId, from: usize, to: usize) -> Made {
+    let run = self.latent.get(from..to).unwrap_or(&[]);
+    let args = self.builder.ty_args(ty);
+    for (offset, latent) in run.iter().enumerate() {
+      if !self.steps.charge(1) {
+        return Made::Stopped(Stop::Steps);
+      }
+      if args
+        .get(latent.index as usize)
+        .is_some_and(|argument: &TyId| self.builder.ty_non_null(*argument))
+      {
+        return Made::Required(dense(from.saturating_add(offset)));
+      }
+    }
+    Made::Nothing
+  }
+
+  /// Reports, at `at`, an occurrence of an instantiation, that it makes the latent argument at
+  /// `index` required: labelled at the argument and at the interface's field that does not declare
+  /// it.
+  fn report_made_required(&mut self, at: Location, index: u32) {
+    let Some(&Latent {
+      def,
+      argument,
+      field,
+      interface,
+      ..
+    }) = self.latent.get(index as usize)
+    else {
+      return;
+    };
+    let (Some(written), Some(declared)) = (
+      self.builder.member_location(argument),
+      self.builder.member_location(field),
+    ) else {
+      return;
+    };
+    let owner = Excerpt(self.builder.def_name(def));
+    let interface = Excerpt(self.builder.def_name(interface));
+    let named = Excerpt(self.member_spelling(field));
+    let name = Excerpt(self.member_spelling(argument));
+    let report = Diagnostic::builder(schema::UNEXPECTED_REQUIRED_ARGUMENT, at)
+      .message(format!(
+        "under the type arguments given here, `{owner}`'s field `{named}` requires the argument \
+         `{name}`, which `{interface}`'s field `{named}` does not declare"
+      ))
+      .primary_label("unexpected required argument")
+      .label(written, "required under these type arguments")
+      .help(
+        "make the argument nullable, give it a default, or declare it on the interface's field",
+      );
+    self
+      .reporter
+      .report(labelled(report, declared, "the interface's field").build());
   }
 
   /// Whether `def` is listed, and its distinct written entries and members if it is: read the

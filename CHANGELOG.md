@@ -487,7 +487,11 @@ All notable changes to Smear are documented in this file.
   `smear::schema::missing-interface-field`, `invalid-interface-field-type`,
   `interface-field-not-deprecated`, `missing-interface-field-argument`,
   `invalid-interface-field-argument-type` or `unexpected-required-argument`, where `smear-schema`
-  reports each. Last, each instantiation the program writes of a definition whose entries or
+  reports each; and each instantiation the program writes that gives a non-null type to the type
+  parameter typing such an argument, written bare and nullable with no default, makes it required,
+  and is `unexpected-required-argument` at the occurrence: `Page<Int!>` of
+  `type Page<T> implements Paged { items(after: T): [Int] }`. Last, each instantiation the program
+  writes of a definition whose entries or
   members name its type parameters, an open one included, has no two of them that are one type
   under its arguments, `Either<User, User>` of `union Either<A, B> = A | B` being
   `duplicate-union-member` at the occurrence. A new `Limits::max_implementation_steps`, 2^20 by

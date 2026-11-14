@@ -91,7 +91,9 @@ exactly its type and requiring no other. The refusals are `smear-schema`'s nine 
 `smear::schema::duplicate-implements-interface`, `duplicate-union-member`,
 `missing-transitive-interface`, `missing-interface-field`, `invalid-interface-field-type`,
 `interface-field-not-deprecated`, `missing-interface-field-argument`,
-`invalid-interface-field-argument-type` and `unexpected-required-argument`, and the steps the check
+`invalid-interface-field-argument-type` and `unexpected-required-argument`, the last also at each
+instantiation the program writes that makes an argument typed by a bare type parameter non-null,
+and the steps the check
 takes are bounded by `Limits::max_implementation_steps`, a budget of its own, which a valid GraphQL
 document can meet. Every definition and every type has the tier it requires, the
 least of `core`, `alloc` and `std` that holds what it uses: a built-in its package's tag, a scalar

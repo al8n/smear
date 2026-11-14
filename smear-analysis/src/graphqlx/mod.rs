@@ -55,7 +55,9 @@
 //! `smear::schema::interface-field-not-deprecated`,
 //! `smear::schema::missing-interface-field-argument`,
 //! `smear::schema::invalid-interface-field-argument-type` or
-//! `smear::schema::unexpected-required-argument`. A value that does not fit its type is
+//! `smear::schema::unexpected-required-argument`, the last also at each instantiation the program
+//! writes that makes such an argument, typed by a bare type parameter, non-null. A value that does
+//! not fit its type is
 //! refused where it is written, a generic directive's arguments and a generic input object's
 //! fields read under their type arguments, and a default fills each argument and each input field
 //! a value leaves out, but where its copy would hold a copy of itself or the value budget cannot

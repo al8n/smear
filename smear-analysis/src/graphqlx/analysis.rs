@@ -370,7 +370,13 @@ impl Analysis {
 ///   `duplicate-implements-interface` or `duplicate-union-member` at the occurrence, labelled at
 ///   the two. Each type is judged once, both nullnesses sharing the verdict, and one a limit stops
 ///   is `resource-limit` at each occurrence of it, but at an entry whose definition's check
-///   stopped there; an instantiation only a fill derives is not judged.
+///   stopped there; an instantiation only a fill derives is not judged. With them, every type
+///   occurrence of a definition one of whose fields adds an argument its interface's field does
+///   not declare, typed by the definition's type parameter bare and written nullable, with no
+///   default: one whose type gives that parameter a non-null type makes the argument required, and
+///   is `unexpected-required-argument` at the occurrence, labelled at the argument and at the
+///   interface's field, each type judged once, a step for each such argument; an instantiation
+///   only a fill or a substitution derives is not judged.
 /// - Gives every definition and every type the tier it requires, last, once every type is
 ///   interned: a built-in keeps its package's tag; a scalar a supplied package defines requires
 ///   its externs' greatest tier, `core` with none; an enum and a directive `core`; an object or an
