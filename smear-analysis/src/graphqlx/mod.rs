@@ -258,14 +258,21 @@
 //!
 //! # Limits
 //!
-//! [`Limits`] bounds what the analysis builds from the supplied texts, and from their files'
-//! directories, and what it spends on them: a bound passed stops that work, is reported as
-//! `smear::graphqlx::resource-limit`, and the analysis goes on, but for the diagnostic ceiling and
-//! the near-miss budget, which limit what the analysis says and not what it accepts. What a
-//! caller supplies beside the texts is the caller's to bound: how many packages and files, how
-//! many dependencies each names, and how long their names and paths are. The analysis reads each
-//! of those, sorts each package's files by path and the packages and their dependencies by name,
-//! and keeps a copy of every package's name and every file's path.
+//! [`Limits`] bounds what the analysis builds and spends once it has numbered what it was given: a
+//! bound passed stops that work, is reported as `smear::graphqlx::resource-limit`, and the
+//! analysis goes on, but for the diagnostic ceiling and the near-miss budget, which limit what the
+//! analysis says and not what it accepts.
+//!
+//! Before any bound applies, the diagnostic ceiling aside, the analysis reads what the caller
+//! supplied, to number and order it. It sorts each package's files by path, and orders two files
+//! that share a path, which the package set refuses, by their texts, so that no id depends on the
+//! order the caller passed them in. It sorts the dependencies by name, and orders two that share a
+//! name, which the package set refuses too, by everything they hold, their files' texts included.
+//! It sorts each package's declared dependencies, copies every package's name and every file's
+//! path, checks each name and each path, and resolves each declared dependency; only then does it
+//! sum the texts' lengths against [`max_source_bytes`](Limits::max_source_bytes). That work grows
+//! with everything the caller supplies, texts included, and only the caller can bound it.
+//! [`SourceMap::bind`] numbers and orders the packages it is given the same way.
 //!
 //! Each bound is a `u32` count, and `0` admits none of what it counts, but that every package has
 //! its root module and the built-in library is always declared whole, its types built whatever the
@@ -287,7 +294,7 @@
 //! | [`max_bound_steps`](Limits::max_bound_steps) | 2^20 | The steps judging bounds takes | Every written instantiation of a definition with a bound is reported, a `HashMap` among them |
 //! | [`max_value_steps`](Limits::max_value_steps) | 2^20 | The steps completing values beyond what is written takes | No default fills what a supplied package leaves out, no value it writes stands for a list, and no decimal integer of more than 38 significant digits is read |
 //! | [`max_implementation_steps`](Limits::max_implementation_steps) | 2^20 | The steps checking implementations takes | Each check that would take a step stops and is reported, a definition's at the entry it was checking |
-//! | [`max_source_bytes`](Limits::max_source_bytes) | 2^26, 64 MiB | The bytes of the supplied files' texts, together; not their paths | No byte of a supplied text |
+//! | [`max_source_bytes`](Limits::max_source_bytes) | 2^26, 64 MiB | The bytes of the supplied files' texts, together; not their paths | No byte of a supplied text is parsed |
 //! | [`max_diagnostics`](Limits::max_diagnostics) | 16 384 | The diagnostics one analysis keeps, the least of them | None is kept, and every error is still counted |
 //! | [`max_near_miss_comparisons`](Limits::max_near_miss_comparisons) | 2^20 | The names looked at, and the globbed modules read, looking for a "did you mean" suggestion | No suggestion |
 //!

@@ -63,13 +63,15 @@ argument that grows, for a backend that makes one copy per instantiation.
 
 ## Limits
 
-What the analysis builds from the supplied texts, and from their files' directories, and what it
-spends on them, is bounded by
+What the analysis builds and spends once it has numbered the packages it is given is bounded by
 [`graphqlx::Limits`](https://docs.rs/smear-analysis/latest/smear_analysis/graphqlx/struct.Limits.html):
 a bound passed stops that work, is reported as `smear::graphqlx::resource-limit`, and the analysis
 goes on, but for the diagnostic ceiling and the near-miss budget, which limit what the analysis says
-and not what it accepts. What a caller supplies beside the texts is the caller's to bound: how many
-packages and files, how many dependencies each names, and how long their names and paths are.
+and not what it accepts. Numbering and ordering the packages comes first, under no bound but the
+diagnostic ceiling: each package's files are sorted by path, two files that share a path are
+ordered by their texts, two packages that share a name by everything they hold, and every name and
+path is copied and checked. That work grows with everything the caller supplies, texts included,
+and only the caller can bound it.
 
 ## Feature flags
 

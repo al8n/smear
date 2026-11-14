@@ -46,21 +46,26 @@ const _: () = assert!(
 
 /// The bounds one analysis runs under.
 ///
-/// A package set is untrusted input, and these bounds hold what the analysis builds from the
-/// packages' texts, and from their files' directories, and what it spends on them: the number of
-/// definitions and of modules, how deep modules, `use` trees and types nest, how many segments a
-/// path a scope resolves has, how many rounds the glob fixpoint runs, how many modules one module's
-/// globs name, how many instantiations of generic definitions it interns, how many steps of
-/// substitution it takes, how many steps judging bounds takes, how many steps completing values
-/// takes, how many steps checking implementations takes, and how many bytes the supplied texts
-/// hold. A bound that is passed stops that work, is reported as `smear::graphqlx::resource-limit`,
-/// and the analysis goes on. Two bounds are not refusals: the diagnostic ceiling and the near-miss
-/// budget limit what the analysis says, not what it accepts.
+/// A package set is untrusted input, and these bounds hold what the analysis builds and spends
+/// once it has numbered the package set: the number of definitions and of modules, how deep
+/// modules, `use` trees and types nest, how many segments a path a scope resolves has, how many
+/// rounds the glob fixpoint runs, how many modules one module's globs name, how many instantiations
+/// of generic definitions it interns, how many steps of substitution it takes, how many steps
+/// judging bounds takes, how many steps completing values takes, how many steps checking
+/// implementations takes, and how many bytes the supplied texts hold. A bound that is passed stops
+/// that work, is reported as `smear::graphqlx::resource-limit`, and the analysis goes on. Two
+/// bounds are not refusals: the diagnostic ceiling and the near-miss budget limit what the analysis
+/// says, not what it accepts.
 ///
-/// What a caller supplies beside the texts is the caller's to bound: how many packages and files,
-/// how many dependencies each names, and how long their names and paths are. The analysis reads
-/// each of those, sorts each package's files by path and the packages and their dependencies by
-/// name, and keeps a copy of every package's name and every file's path.
+/// Before any bound applies, the diagnostic ceiling aside, the analysis reads what the caller
+/// supplied, to number and order it. It sorts each package's files by path, and orders two files
+/// that share a path, which the package set refuses, by their texts, so that no id depends on the
+/// order the caller passed them in. It sorts the dependencies by name, and orders two that share a
+/// name, which the package set refuses too, by everything they hold, their files' texts included.
+/// It sorts each package's declared dependencies, copies every package's name and every file's
+/// path, checks each name and each path, and resolves each declared dependency; only then does it
+/// sum the texts' lengths against [`max_source_bytes`](Limits::max_source_bytes). That work grows
+/// with everything the caller supplies, texts included, and only the caller can bound it.
 ///
 /// The parser's own ceilings are not among these bounds: how deep brackets nest, how many tokens a
 /// parse lexes, and how many diagnostics it keeps. They belong to the parser value:
@@ -481,12 +486,16 @@ impl Limits {
   /// How many bytes of text the supplied files may hold together. Their paths and their packages'
   /// names do not count, nor does the built-in packages' own text, which is smear's.
   ///
-  /// Past it, the package set is refused at the root package and no supplied file is parsed.
+  /// It is checked once the package set is numbered and its names and paths are checked, and it
+  /// bounds what comes after: the parsing of the supplied files, and everything built from their
+  /// texts. Past it, the package set is refused at the root package and no supplied file is
+  /// parsed, so nothing is built from a supplied text; the built-in library is still analyzed, and
+  /// the packages' sources and directory modules are still numbered. It does not bound the
+  /// numbering and ordering before it, which can read the supplied texts themselves, as [`Limits`]
+  /// says.
   ///
-  /// The default is 2^26, 64 MiB: far more than any package set written by hand, and the bound on
-  /// the texts the analysis reads. What a caller supplies beside them, how many files and packages
-  /// and how long their paths and names are, is the caller's to bound. Because the bound is a
-  /// `u32`, every byte offset into an accepted package set's texts fits one.
+  /// The default is 2^26, 64 MiB: far more than any package set written by hand. Because the bound
+  /// is a `u32`, every byte offset into an accepted package set's texts fits one.
   #[inline]
   pub const fn max_source_bytes(&self) -> u32 {
     self.max_source_bytes
