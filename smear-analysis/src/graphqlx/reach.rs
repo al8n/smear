@@ -39,8 +39,10 @@
 //! [`Reach::of`] looks once at each input object's fields; enters each type in the closure of
 //! their complete types once, reading its arguments once; and walks the reversed edges once. A
 //! query is answered once for each type asked, with an explicit stack, each type under it once,
-//! and kept. Every table is keyed by the model's ids, in ordered maps and sorted lists, with a
-//! logarithm for each lookup. Nothing recurses.
+//! and kept, with the definition the type names under its lists, a list's made in one step from its
+//! element's: a report that names it reads that kept answer, and walks no list. Every table is
+//! keyed by the model's ids, in ordered maps and sorted lists, with a logarithm for each lookup.
+//! Nothing recurses.
 
 use std::{collections::BTreeMap, vec::Vec};
 
@@ -59,9 +61,18 @@ pub(crate) struct Reach {
   /// found first.
   tainted: BTreeMap<DefId, MemberId>,
   /// Each type asked about, with its answer.
-  asked: BTreeMap<TyId, Option<MemberId>>,
+  asked: BTreeMap<TyId, Answer>,
   /// The types still to answer, each with whether its children were pushed above it.
   stack: Vec<(TyId, bool)>,
+}
+
+/// What [`Reach`] answers for a type, made once from its children's answers.
+#[derive(Clone, Copy, Default)]
+struct Answer {
+  /// The input field of type `TypeRef` a value of it can hold, the first the walk found.
+  field: Option<MemberId>,
+  /// The definition it names under its lists, when it names one: what a report names.
+  named: Option<DefId>,
 }
 
 impl Reach {
@@ -195,6 +206,20 @@ impl Reach {
     positions: &Positions,
     ty: TyId,
   ) -> Option<MemberId> {
+    self.answer(model, positions, ty).field
+  }
+
+  /// The definition `ty`, of `model`, names under its lists, when it names one: kept with what a
+  /// value of it can reach, so a report that names it after [`type_ref`](Self::type_ref) answered
+  /// the type reads one kept answer, and walks none of its lists.
+  pub(crate) fn named(&mut self, model: &Model, positions: &Positions, ty: TyId) -> Option<DefId> {
+    self.answer(model, positions, ty).named
+  }
+
+  /// What `ty`, of `model`, answers, `positions` saying which arguments of an input object a value
+  /// of it holds: made once for the walk, with an explicit stack, each type under it that is not
+  /// answered yet before it, and kept.
+  fn answer(&mut self, model: &Model, positions: &Positions, ty: TyId) -> Answer {
     if let Some(answer) = self.asked.get(&ty) {
       return *answer;
     }
@@ -211,12 +236,13 @@ impl Reach {
             self.stack.push((element, false));
             continue;
           }
-          self.asked.get(&element).copied().flatten()
+          // A list holds what its element holds, and names what its element names.
+          self.asked.get(&element).copied().unwrap_or_default()
         }
         TyKind::Named { def, args } => {
           let definition = model.def(def);
           let input = definition.kind() == DefKind::InputObject;
-          if input && let Some(field) = self.tainted.get(&def) {
+          let field = if input && let Some(field) = self.tainted.get(&def) {
             Some(*field)
           } else if definition.collection().is_some() || input {
             // What a value of it holds: each argument of a collection, and each argument of an
@@ -235,16 +261,22 @@ impl Reach {
               .iter()
               .enumerate()
               .filter(|&(index, _): &(usize, &TyId)| held(index))
-              .find_map(|(_, arg): (usize, &TyId)| self.asked.get(arg).copied().flatten())
+              .find_map(|(_, arg): (usize, &TyId)| {
+                self.asked.get(arg).and_then(|answer: &Answer| answer.field)
+              })
           } else {
             None
+          };
+          Answer {
+            field,
+            named: Some(def),
           }
         }
-        TyKind::Param { .. } | TyKind::Unresolved => None,
+        TyKind::Param { .. } | TyKind::Unresolved => Answer::default(),
       };
       self.asked.insert(next, answer);
     }
-    self.asked.get(&ty).copied().flatten()
+    self.asked.get(&ty).copied().unwrap_or_default()
   }
 }
 

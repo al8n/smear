@@ -842,12 +842,13 @@ fn a_report_reads_what_a_chain_of_lists_names_once() {
   // each field of `Query` that leaves `Q`'s parameters to their defaults is refused, at its
   // occurrence, naming `Binding`, which the last argument names under its lists, and labelled where
   // the last parameter is reached, at `Binding`'s `type` and at the last default. What a list
-  // names under its lists is kept for the walk once a report reads it, so each list is walked once
-  // for the walk, whichever report names it. The depth and the count of fields vary, and each
-  // program runs again under a diagnostic ceiling of zero, which keeps no report and still builds
-  // and counts each. A test sees the diagnostics, not the work, which holds by construction: a
-  // report walks only the lists no report read before. Walked again for each report, the largest
-  // program here would read its 3,000 lists for each of its 3,000 fields, 9 million steps.
+  // names under its lists is kept for the walk beside what a value of it can reach, which the
+  // verdict asks once for each type, so each list is walked once for the walk, whichever report
+  // names it. The depth and the count of fields vary, and each program runs again under a
+  // diagnostic ceiling of zero, which keeps no report and still builds and counts each. A test sees
+  // the diagnostics, not the work, which holds by construction: a report reads the answer its
+  // verdict kept, and walks no list. Walked again for each report, the largest program here would
+  // read its 3,000 lists for each of its 3,000 fields, 9 million steps.
   const DEPTH: usize = 3_000;
   const FIELDS: usize = 3_000;
   // `Q` is a level deeper than its last argument, which is as deep as the lists, past the default
