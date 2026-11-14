@@ -321,6 +321,33 @@ fn a_replaced_built_in_is_judged_and_a_built_ins_extension_is_not() {
     "{:#?}",
     analysis.diagnostics()
   );
+
+  // A built-in's extension is judged by none of these rules, whatever it adds: a field `__Type`
+  // already has, a field typed by an input object, a required argument that is deprecated, an
+  // argument typed by an object, and an entry that names an object. Each extension is GraphQL's
+  // one refusal of it, and nothing more.
+  let text = "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Obj {\n  o: Int\n}\n\
+              extend type __Type {\n  name: String\n  bad: In\n  \
+              f(a: Int! @deprecated, o: Obj): Int\n}\nextend type __Schema implements Obj\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        INTROSPECTION,
+        at(schema, text, "__Type", 0),
+        Some(definition(&analysis, "^::core::__Type"))
+      ),
+      (
+        INTROSPECTION,
+        at(schema, text, "__Schema", 0),
+        Some(definition(&analysis, "^::core::__Schema"))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
 }
 
 /// Each of the five lists with a name written twice, and a name written three times; beside two
@@ -1141,6 +1168,12 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     RESERVED_FIELD,
     "type Query {\n  ok: Int\n}\ntype T {\n  __f: Int\n  x: Missing\n}\n",
     "type Query {\n  ok: Int\n}\ntype T {\n  __f: Int\n}\ntype U {\n  x: Missing\n}\n",
+  );
+  // A field's arguments are judged as the walk enters the field, by its contribution.
+  silent_beside_a_phase(
+    DUPLICATE_ARGUMENT,
+    "type Query {\n  ok: Int\n}\ntype T {\n  f(a: Int, a: Int): Int\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ntype T {\n  f(a: Int, a: Int): Int\n}\ntype U {\n  x: Missing\n}\n",
   );
   // The later member's contribution silences it; the first's does not.
   silent_beside_a_phase(

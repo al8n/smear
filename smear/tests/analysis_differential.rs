@@ -533,8 +533,9 @@ fn every_graphql_document_gets_smear_schemas_verdict() {
 }
 
 /// The comparison reports a difference no row excuses, an error of GraphQLx's own on a document
-/// GraphQL accepts, and a row that excuses nothing; and a row that excuses a difference is no
-/// failure. Without this, a comparison that never fails would pass every test here.
+/// GraphQL accepts, any error on such a document though a row excuses its code, and a row that
+/// excuses nothing; and a row that excuses a difference is no failure. Without this, a comparison
+/// that never fails would pass every test here.
 #[test]
 fn the_comparison_can_answer_no() {
   let empty = SCHEMA_FIXTURES
@@ -605,6 +606,29 @@ fn the_comparison_can_answer_no() {
   assert_eq!(run.failures.len(), 1, "{:#?}", run.failures);
   assert!(
     run.failures[0].contains("smear::graphqlx::generic-enum"),
+    "{:#?}",
+    run.failures
+  );
+
+  // GraphQL builds a schema of a text, and the analyzer refuses a text with GraphQL's own code, a
+  // difference the row excuses and uses: the verdict fails all the same, whatever rows were used.
+  let mut run = Run::new(&rows);
+  let compared = run
+    .compare(
+      "the control",
+      QUERY_ONLY,
+      "type Query {\n  ok: Int\n}\ntype Empty\n",
+    )
+    .expect("the control parses");
+  assert!(
+    compared
+      .excused
+      .contains("smear::schema::empty-fields-definition")
+  );
+  run.finish();
+  assert_eq!(run.failures.len(), 1, "{:#?}", run.failures);
+  assert!(
+    run.failures[0].contains("smear-schema builds it, and the analyzer refuses it"),
     "{:#?}",
     run.failures
   );

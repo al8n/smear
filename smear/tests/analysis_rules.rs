@@ -271,6 +271,12 @@ fn clean(analysis: &Analysis) -> bool {
   diagnostics.len() == waived && diagnostics.error_count() == waived
 }
 
+/// The analysis's error count, but for the missing query root.
+fn errors(analysis: &Analysis) -> usize {
+  let diagnostics = analysis.diagnostics();
+  diagnostics.error_count() - (diagnostics.len() - reported(analysis).len())
+}
+
 /// Each diagnostic's code, primary location, and first label's location, in the list's order, but
 /// for the missing query root.
 fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
@@ -1439,7 +1445,8 @@ fn the_root_extending_a_dependencys_type_is_an_orphan() {
     "{:#?}",
     analysis.diagnostics()
   );
-  assert!(!analysis.is_ok());
+  // Each is an error: the analysis is not ok by them, whatever the missing root adds.
+  assert_eq!(errors(&analysis), 2);
   assert_eq!(
     messages(&analysis),
     [
