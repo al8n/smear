@@ -49,8 +49,10 @@
 //! collection repeats either: the table keeps the place apart from the key or element, and passes
 //! it on to nothing.
 //!
-//! The rule reads the public model, and one crate-private accessor, `Application::ty`: an
-//! application's complete type, its directive's instantiation.
+//! The rule reads the public model, the public `Application::ty` among it: an application's
+//! complete type, its directive's instantiation. Through `positions::Derived` it reads one
+//! crate-private accessor, `Model::type_exprs`: every type occurrence of the model, whose types
+//! are what the program writes.
 
 use std::{collections::BTreeMap, format};
 

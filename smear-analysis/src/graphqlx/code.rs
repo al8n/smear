@@ -135,9 +135,15 @@ pub enum DiagnosticKind {
   /// first of the definition's bounds that fails, with a label at the bound and one at the type
   /// argument, written or filled from a default. The occurrence keeps its type.
   ///
+  /// A directive application is an instantiation of its directive too. Once its type arguments are
+  /// complete, the ones it writes and then those its directive's defaults fill, its type is judged
+  /// against its directive's bounds, once for each distinct type. Each application whose type
+  /// fails is reported at its path, naming the directive with its `@`, for the first of the
+  /// directive's bounds that fails, with a label at the bound and one at the type argument where
+  /// the application writes it, or else at the directive's default that filled it.
+  ///
   /// A bound of `MapKey` that a `NonZero` fails is passed over: that `NonZero` holds what is no
-  /// integer primitive, and is [`NonZeroArgument`](Self::NonZeroArgument) where it is written. A
-  /// directive application's type arguments are not judged against its directive's bounds.
+  /// integer primitive, and is [`NonZeroArgument`](Self::NonZeroArgument) where it is written.
   UnsatisfiedBound,
 
   // -- Values ------------------------------------------------------------------------------------
@@ -258,13 +264,25 @@ pub enum DiagnosticKind {
 
   // -- The rule a backend composes ---------------------------------------------------------------
   /// A generic definition that reaches itself with a type argument that grows, so that a backend
-  /// that makes one copy per instantiation would need an endless family of them. Reported at each
-  /// written type occurrence, in a member's type, an `implements` entry, a union member or a
-  /// directive application's type argument, whose type is an instantiation that grows, with a label
-  /// at the type argument that grows where the occurrence writes it, or at the default that fills
-  /// it; at each such occurrence whose type holds one only in what defaults filled, with a label at
-  /// the default that filled the first argument that holds one; and at the path of each directive
-  /// application whose type argument grows, with a label at that type argument.
+  /// that makes one copy per instantiation would need an endless family of them. Reported at one
+  /// of three places:
+  ///
+  /// - a written type occurrence, in a member's type, an `implements` entry, a union member or a
+  ///   directive application's type argument, whose type is an instantiation that grows, with a
+  ///   label at the type argument that grows where the occurrence writes it, or at the default
+  ///   that fills it;
+  /// - such an occurrence whose type holds one only in what defaults filled, with a label at the
+  ///   default that filled the first argument that holds one;
+  /// - the path of a directive application whose type, its directive's instantiation with every
+  ///   type argument ([`Application::ty`](crate::graphqlx::Application::ty)), is one that grows,
+  ///   with a label at the type argument that grows where the application writes it, or at the
+  ///   default that fills it; or whose type holds one only in what its directive's defaults
+  ///   filled, with a label at the default that filled the first argument that holds one.
+  ///
+  /// Where the type itself grows, the help asks for the type parameter itself, or a type that
+  /// names none, in place of the argument that grows. Where the growth is held in what a default
+  /// filled, at an occurrence or at an application, the help asks for the type argument the
+  /// default fills to be written, or for the default to change.
   ///
   /// [`analyze`](crate::graphqlx::analyze) never reports it: only
   /// [`UnboundedInstantiation`](crate::graphqlx::UnboundedInstantiation), the rule a backend

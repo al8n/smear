@@ -180,7 +180,9 @@ All notable changes to Smear are documented in this file.
   that names it drops it from its feature list.
 - `smear-semantics` and `smear-analysis`: two new crates. `smear-semantics` holds the
   algorithms smear's two semantic layers share: the byte-spelling interner, duplicate-name
-  detection and the graph-cycle kernel. `smear` does not re-export it. `smear-analysis` is
+  detection and the graph-cycle kernel, whose `scc::components` answers, for each node of a
+  directed graph, the least node of its strongly connected component, over the same compressed
+  rows and iterative walk as `scc::on_cycle`. `smear` does not re-export it. `smear-analysis` is
   the GraphQLx schema analyzer, reached as `smear::analysis` behind the new `analysis`
   capability feature, which implies `parser` and `graphqlx` and no tier; the analyzer itself
   needs `std` or `alloc`. Its source features `bytes_1`, `bstr_1`, `hipstr_0_8` and
@@ -188,482 +190,78 @@ All notable changes to Smear are documented in this file.
   `smear-parser`'s and imply no tier, and `smear`'s features of the same names forward to them.
   `smear-schema`'s builder now takes those three kernels from `smear-semantics`, behind
   `build`, with no change in behaviour.
-- `smear-analysis`: `graphqlx::UnboundedInstantiation`, a rule `analyze` never runs and a
-  backend composes into its own walk, refuses a generic definition that reaches itself with a
-  type argument that grows, as `smear::graphqlx::unbounded-instantiation`, a new
-  `DiagnosticKind`. `SourceMap::written_by`, the package that wrote a location, and
-  `TypeExpr::written_args`, the arguments written on an occurrence of any shape, are public.
-  `graphqlx::schema` holds the `smear::schema` codes the analyzer shares with GraphQL's own
-  validator as public constants, and `schema::ALL` lists them.
-- `smear-semantics`: `scc::components` answers, for each node of a directed graph, the least
-  node of its strongly connected component, over the same compressed rows and iterative walk as
-  `scc::on_cycle`, which is unchanged.
-- `smear-analysis`: the analyzer's entrance, its exits and its rules. `graphqlx::analyze`
-  takes a root `Package` and its dependencies, each file's text any `SourceText` (`&str`,
-  `&[u8]`, or a source feature's type), within `Limits`, and answers an `Analysis` with no
-  type parameter: a `Model` of the packages, the `Diagnostics` and a `SourceMap`.
-  `graphqlx::analyze_with` is the same entrance with the parser layer the caller passes, and it
-  answers beside the `Analysis` a `Trees`: what that layer kept for each supplied file it read,
-  by source id, found by `get` and `node` and walked by `TreesIter` and `TreesIntoIter`.
-  `Analysis` and `Model` implement `PartialEq`, and `SourceMap` `PartialEq` and `Eq`: two
-  analyses are equal when their models, every row and every id, their diagnostics, their source
-  maps and the diagnostic ceilings they were made under are, and for a package set no layer
-  reports a syntax error for, every parser layer answers an equal analysis. Packages
-  and sources are numbered deterministically, whatever order they are passed in. The package
-  set's file paths, package names, dependencies and total size are checked, under the new
-  `smear::graphqlx` codes `DiagnosticKind` lists; a message quotes a name or a path whole when
-  it is at most 128 bytes, and otherwise as its first and last 64 bytes around `…`, each cut
-  moved back to the start of a character, unless that would leave nothing out, so no message
-  grows with what it quotes. Every file is parsed with the GraphQLx syntactic parser, or,
-  through `analyze_with`, with the parser layer the caller passes, its syntax errors reported at
-  that file. A parser that keeps a bounded number of records, as the lossless layer does under
-  its own limits, lends no more than it kept; the errors it found beyond them are counted, and
-  the list is truncated. `Diagnostic::builder` is public, so a consumer's
-  findings join smear's in one ordered list, and `SourceMap::bind` pairs an analysis with the
-  texts it was made from, finding each file again by its package and its path alone: it
-  answers no text for a file whose path another file of its package has, for the files of a
-  dependency whose name another dependency has, or for the root's files when the root is
-  given under another name. The `Model` is dense tables read through `Copy` views, each
-  numbered by its own id: packages, modules, definitions and their contributions, members,
-  type occurrences and interned types, values, directive applications, the schema and the
-  built-ins, with `canonical_name`, `lookup` and `module_by_path`; `lookup` keeps a type's and
-  a directive's names apart, the second names a module gives included. Rules are visitors: a
-  `Visitor` implements the hooks it needs, each with an empty default body, from `begin`
-  through entering and leaving packages, modules, definitions and members and reaching type
-  occurrences, values, directive applications and the schema, to `end`; `visit` walks an
-  analysis's model for one over the packages `Packages` selects, hands each hook a `Cx` that
-  says where the walk is (its `Site` says where an occurrence sits) and takes what the visitor
-  reports, and answers those diagnostics under the analysis's ceiling. A consumer's walk marks
-  nothing and holds memory bounded by that ceiling. Visitors compose at compile time: a tuple
-  of up to twelve, an `Option` of one, a `&mut V`, a `Box<V>` and `()` are each a visitor.
-  `analyze` runs smear's own rules through the same walk over the supplied packages,
-  and an error that a phase or a rule reports marks the contributions, members and
-  definitions that hold where it points, as their `has_errors()` says, whether the
-  ceiling keeps the diagnostic or not; a syntax error marks nothing. Every analysis parses the
-  built-in library too:
-  `core`, `alloc` and `std`, one GraphQLx file each, embedded in smear. So far `analyze` fills
-  in the packages and their modules: a module for every directory of a `Directory` package
-  that holds a file or a directory that does, every file of a `Flat` package in its root
-  module, and a module for every inline `mod`. A directory that is not a name is
-  `invalid-directory-name`, a second declaration of one module is `module-defined-twice`, and
-  a module nested past `Limits::max_module_depth` is `resource-limit`; the files under a refused
-  directory, and a file whose path the package set refused, are parsed but place nothing in any
-  module. Every type and directive definition that parses is a definition of the model, with its
-  kind, name, module, location, origin and description, numbered by package, module path, source
-  and position, and so is every intrinsic primitive (`bool`, `f32`, `f64`, `iN`, `uN`) a program
-  writes where its package may have it: `core`'s own widths 8 to 128, or a width its
-  `IntegerProvider` gives. `Int`, `Float`, `Boolean`, `String` and `ID` are second names of
-  `i32`, `f64`, `bool`, `string` and `id`; a root package's own scalar of one of those names, or
-  directive named as one of GraphQL's five, in its root module, replaces the built-in, which keeps
-  its id. `Builtins`' accessors answer a `DefId`. Two definitions of one name in one namespace of a
-  module (`smear::schema::duplicate-type-name`, `duplicate-directive-definition`), a supplied name
-  that begins with `__` (`reserved-type-name`, `reserved-directive-name`), and a type named as a
-  child module (`module-type-collision`) are reported; a type of the root package's root module
-  named as one of GraphQL's eight introspection types redefines it, as GraphQL says, and is
-  `redefined-built-in-type` and no reserved name. A file that holds only white space,
-  commas, byte order marks and comments is accepted and declares nothing, before any parser
-  layer reads it, so it has no entry in `Trees`; the lossless layer, handed such a text, answers a
-  tree with one syntax error. `Limits::max_definitions` bounds every
-  definition the model would hold, the built-in library's and the primitives included: the first
-  one a supplied package would add past it is `resource-limit`, and nothing after it is
-  collected. A new `Limits::max_modules`, 2^16 by default, bounds every module the model would
-  hold, every package's root module included, which is always held: the first module a supplied
-  package's directory or `mod` would add past it is `resource-limit`, and no module is added
-  after it. A file holding an item of a kind the analyzer does not know, which only a newer
-  parser can make, is `unknown-item`, once per file. Every module has a scope: its own
-  declarations and child modules, then the prelude, the root modules of `core`, `alloc` and `std`
-  whatever the package's tier, and last, where a module is wanted, the names of the packages it
-  may reach, which are `core`, `alloc`, `std` and its declared dependencies; types and modules
-  share one namespace and directives have their own. A type that a supplied package names as a
-  primitive of the prelude (`bool`, `f32`, `f64`, `iN`, `uN`, `string`, `bytes`, `NonZeroIN`,
-  `NonZeroUN`) shadows it in its module and is the warning `shadowed-primitive`; a path that does
-  not resolve is `unresolved-path`, or `unknown-package` for a package it may not reach, and a
-  name of one segment in a place GraphQL has keeps GraphQL's own code. Every `use` item is
-  resolved, each module's to a fixpoint, with a module's explicit `use` bindings before its
-  globs, which give the declarations and child modules of the modules they name; `use` cycles are
-  legal. A new `Limits::max_globs`, 64 by default, bounds the modules the globs of one module may
-  name, and so what one lookup searches: the first glob past it is `resource-limit`, once for its
-  module. A name two globs give two items is `ambiguous-glob` where a path meets it; a string
-  source names its directory's module, relative to the file it is written in, and is
-  `file-path-use` when it names a file and `url-unsupported` when it is a URL. A `use` item that
-  names one thing while its module's items resolve and another once all have is
-  `use-resolution-changed`, a `use` of a name its module declares is
-  `use-declaration-collision`, and two that give one name two items are `use-name-collision`. A
-  name that does not resolve gets a "did you mean" in its help: the nearest name visible where
-  it is written, of the namespace wanted, within `Limits::max_near_miss_comparisons` names
-  looked at over the whole analysis. Lowering then writes what each definition holds beyond its
-  identity. Each extension's target is resolved where the extension is written; one that names a
-  definition of another kind than its keyword is `smear::schema::extension-kind-mismatch`, one
-  that is an alias such as `NonZeroU32`, which spells an instantiation of `NonZero` and is no
-  definition of its own, is `smear::schema::undefined-extension-target`, and these and one that
-  names nothing contribute nothing. An extension's parameter list names its target's type
-  parameters by position, one name each, and a list of another length is the new
-  `smear::graphqlx::generic-arity`, though the extension still contributes what it writes; an
-  extension that writes no list names none of them, and is legal whatever their count. A
-  definition holds its contributions, its own,
-  named where its name is written, then each extension's, by source and position, named where
-  its target path is written; its type parameters; a directive definition's locations and whether
-  it is `repeatable`; and its members, the direct members of each contribution in turn as written
-  and then each field's arguments, field by field, each with its description. A GraphQL
-  built-in the root package replaces holds what the root package's definition
-  writes, and the root package may add directives to a built-in by an extension; it declares no
-  type parameter, since the built-in keeps its identity, and a list it writes is `generic-arity`.
-  `Contribution::is_extension()` says whether a contribution is a definition or one of its
-  extensions. `Contribution::extent()`, `Member::extent()` and `Module::extent()` answer where
-  each contribution, member and inline module is written, in its own file, from its description,
-  or its first token, to its last token; the own contribution of a primitive `core` materialises,
-  when no definition of the root package's replaces it, answers the whole of `core`'s package
-  source, which has no span; and through `analyze_with` with a layer that keeps a tree,
-  `Trees::node` answers the node an extent in a file the layer read was written as. Every written
-  type is a type occurrence, numbered in the order the
-  model's walk reaches it, each before the types it nests: a type parameter's default, a bound,
-  an `implements` entry, a union member, a member's type. It keeps its path as written, `Int`
-  staying `Int`, and its written arguments, however many its definition has parameters, and its
-  path is resolved where it is written, with the generic parameters of its definition, or of its
-  extension by position, in scope; one that names nothing is reported with the code of its place
-  and stays unresolved. A `where` predicate bounds one of its definition's own type parameters;
-  any other left side, and any `where` clause on an extension, is the new
-  `smear::graphqlx::invalid-bound`, and so is a right side that names no interface, which is kept
-  as written. Every directive application, on a definition, an extension, a
-  member or an argument, is numbered in the walk's order too, with its directive's path as
-  written and resolved where it is written; one whose directive names nothing keeps no type
-  argument and no argument. The others keep their type arguments, each an occurrence, and the
-  arguments their directive declares, in the directive's order, an argument written twice
-  twice; one the directive does not declare is `smear::schema::undefined-directive-argument`,
-  with the nearest name it does declare in its help. The schema has a contribution for every
-  schema item any package writes, its definitions first and then its extensions, each by source
-  and position
-  and named at its `schema` or its `extend`. The root package's first schema definition gives it
-  its description, its roots and its applications, the root package's schema extensions give it
-  their roots and their applications, and every other schema item is a contribution alone. The
-  first root written for an operation is the schema's, a type occurrence, and a second one is
-  `smear::schema::duplicate-root-operation-type`; with no schema definition of the root
-  package's, an object type the root package's root module declares named `Query`, `Mutation` or
-  `Subscription` is presumed that operation's root. Names and texts past what the model's `u32`
-  offsets address are `resource-limit`. Then each definition gets its built-in meaning, read off
-  what its applications resolved to and never off how they are spelled, and only off those the
-  package that wrote the definition writes: an interface that applies `core`'s `@marker` is a
-  marker, as `Def::is_marker()` says, and a scalar that applies `core`'s `@set` or `@map` stands for
-  that collection, as `Def::collection()` says. Each definition's type parameter defaults are
-  checked where they are written: they are trailing, a parameter with no default after one with a
-  default being the new `smear::graphqlx::generic-default`; a default
-  may name any parameter of its definition, written before it or after it; and each group of a
-  definition's defaults that need each other, a default that names its own parameter included, is
-  `generic-default` once, at the default of the group's lowest parameter, which a use that leaves
-  that parameter out can never fill. Then every type occurrence gets its type, `TypeExpr::ty()`,
-  each type interned once, so that `==` on `TyId` is type equality, and where the model's walk
-  first needs it, its arguments before it: a list's, a type parameter's, of its own definition,
-  and a definition's with every argument, those written and then each one left out filled from its
-  default, substituted, a default that names a parameter written after it filled first; a
-  collection's key or element is non-null in it however it is written, and an alias such as
-  `NonZeroU32` is the `NonZero<u32>` it spells. More type arguments than a definition has type
-  parameters, fewer than it takes, type arguments on a type parameter or an alias, and an argument
-  left to a default that cannot fill it, are `generic-arity`, each where it is written; an
-  occurrence inside a default whose filling leads back to a default being filled is
-  `generic-default`; and an application's count of type arguments is checked against its
-  directive's. An occurrence that cannot be typed, or holds one that cannot, has the unresolved
-  type. `Model::instantiations` lists the closed types a generic definition's written occurrences
-  resolve to. `Model::satisfies` answers whether a type satisfies an interface or a marker, and the
-  new `Model::satisfies_ty` whether it satisfies one interface type exactly, the `!` of its
-  arguments included, both read off what the model holds and nothing stored: by declaration,
-  through the `implements` entries of a named type's definition under its arguments and the bounds
-  of a type parameter, with `core`'s `MapKey` satisfied intrinsically by every integer primitive,
-  `bool`, `string`, `id`, every enum and `NonZero` of an integer primitive. A new
-  `Limits::max_substitutions`, 2^20 by default, bounds the steps of substitution
-  filling defaults takes, and `Limits::max_generic_depth`, a list counting a level, and
-  `Limits::max_instantiations`, every distinct instantiation counting once whatever its nullness,
-  are enforced: each occurrence past one is `resource-limit` where it is written, and the built-in
-  library is typed whatever the three are. Last, every written occurrence of a definition with a
-  bound is judged by its complete type, a slot a default filled included: the argument for each
-  bounded parameter, without its own `!`, satisfies the bound's interface type with the type's
-  arguments in place of the definition's parameters, each with its `!`, or the occurrence is the
-  new `smear::graphqlx::unsatisfied-bound`, for the first bound that fails, and keeps its type; an
-  occurrence that names a parameter of the definition it is written in is judged through that
-  parameter's bounds. A new `Limits::max_bound_steps`, 2^20 by default, bounds the steps judging
-  takes, each type judged once whatever its nullness; past it, and past the depth or the
-  instantiations the types it derives may reach, each occurrence is `resource-limit` and keeps its
-  type. Then every value is made, in the model's walk, each by the type expected where it stands,
-  with its `!`, as `Value::ty()` answers, each value nested in it a value of its own at its own
-  location: `null` where the type is nullable; a list's elements each against its element, and any
-  other value where a list is expected the one-element list that holds it, a list for each level;
-  a boolean; an integer of any length, range-checked against its width by smear itself, in every
-  radix; a float, or an integer, rounded once to `f32` or `f64` and finite there, an `f32` never
-  read off its `f64`, and a decimal one's exponent read at any size; a string, cooked; for `id` a
-  string, or an integer in `i32`'s range; for `bytes` a string's UTF-8 encoding or a list of
-  integers from 0 to
-  255, either one `ValueKind::Bytes`, a new kind; for `NonZero` an integer that is not zero; and for
-  an enum one of its values, as `ValueKind::Enum`, a bare name looked up under the enum expected
-  alone, and a qualified one whose prefix names that enum where the value is written, through any
-  path or alias, a name that is none of its values having the nearest in its help. For an input
-  object, an object literal is a `ValueKind::Object` of the fields it sets, each found by name, in
-  the input object's order, one written twice twice, each value against its field's type: a field
-  the input object does not declare is GraphQL's `smear::schema::undefined-input-object-field`,
-  with the nearest field in its help, and is not kept; a required field given `null`, or left out,
-  is `smear::schema::missing-required-input-object-field`; an input object its own package applies
-  `@oneOf` to takes exactly one field, and not `null`; and a field left out that has a default
-  takes a copy of it, as an argument does, but a OneOf input object's, and is otherwise absent. A
-  copy is counted before it is made, each default's count kept by its tree and its type, and a
-  default whose copy would hold a copy of itself is not copied, its argument or field absent, and
-  the first time a count meets itself the cycle is `smear::schema::input-object-default-value-cycle`,
-  at the input field of least id whose default is on it, once for each field, "under the type
-  arguments a use gives it" for `input A { b: Box<A> = {} }` with `input Box<T> { v: T = {} }`;
-  a program with such a cycle among closed types gets at least one, and a cycle in a generic
-  definition no closed instantiation reaches is not met, nor one of `input G<T> { g: G<[T]> = {} }`,
-  which grows and is `resource-limit`. A set
-  takes a `set!{…}` and a map a `map!{…}`, as `ValueKind::Set` and `ValueKind::Map`, each element,
-  key and value coerced against the collection's types, a key or an element never `null`; any
-  other literal where a collection is expected, an extern one among them, and a collection
-  literal where no collection of its shape is, is the new `smear::graphqlx::collection-literal`;
-  and so is a set literal that holds one element twice, or a map literal one key twice, two being
-  one when their coerced values are, `1` and `0x1` one integer and `"4"` and `4` one `id`, at the
-  later occurrence, the literal keeping everything it holds. A `TypeRef` value is a path resolved
-  as a type where it is written, `ValueKind::Type` of the definition it names, of any kind; a type
-  parameter or an alias such as `NonZeroU32` does not fit, and a path that names nothing is the
-  resolver's, `smear::schema::undefined-type` for one segment. A custom scalar's value but `null`
-  is its `Literal`, a collection literal among them, and so is a value whose type names a type
-  parameter or can take no value. A value that does not fit is unresolved and reported where it
-  is written, with GraphQL's
-  `smear::schema::invalid-default-value` or `invalid-directive-argument-value`, but for a number out
-  of the range of any width but the 32-bit signed one, or of `f32`, the new
-  `smear::graphqlx::width-overflow`, and a zero where `NonZero` is expected, the new
-  `smear::graphqlx::nonzero-zero`; a required argument given `null` is
-  `smear::schema::missing-required-directive-argument`, at its name. A row made of a written path
-  keeps its path. An application has its arguments in its directive's order: each one written,
-  and each one left out whose definition has a default, which a copy of the default fills, each
-  of its values not `written()` and located at the default, the copy silent and the default's own
-  diagnostic saying once what does not fit; a required argument left out is
-  `missing-required-directive-argument`, at the application's path, with a label at the argument.
-  A new `Limits::max_value_steps`, 2^20 by default, bounds what no literal writes: the lists a
-  value written alone stands for, each value of a copy, charged before the copy's first, each read
-  of one default's count while another's is counted, each read of a count made already for a later
-  copy of its default, each default left out that needs itself, and each required argument, and
-  each required field of an object literal, found left out; and the one
-  reading more than linear, the conversion of a decimal integer of more than 38 significant
-  digits, charged before it as `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, past
-  which the integer is `resource-limit`; a hexadecimal, octal or binary integer costs nothing. Past
-  it a value is `resource-limit` where it is written, an application once, at its path, its
-  written arguments kept and a copy made whole or not at all, and an object literal once, at the
-  literal; the built-in library's own values cost nothing, and a copy made for an application it
-  writes neither. A directive application whose count its directive takes has its complete type
-  arguments, filled from the directive's defaults as an occurrence's are, on the same limits, a
-  default that cannot fill one `smear::graphqlx::generic-arity` at its path; its directive's bounds
-  are judged at it, `smear::graphqlx::unsatisfied-bound` at its path. A generic directive's
-  arguments are coerced under its application's type arguments, "required" read there, and so are
-  a generic input object's fields under its type's arguments; a copy of a default made under them
-  is counted a step a node and judged as a written value is, the first that does not fit
-  `invalid-default-value` once, at the application, or at the literal, but where a type occurrence
-  the program writes has the literal's type, whose instantiation's check reports it there.
-  A value of a generic type definition whose type names its type parameters stays a `Literal`,
-  and is checked at each closed instantiation of it the program writes: the first that does not
-  fit is reported once at each occurrence, with its site's code, labelled at the value. An
-  argument an application on it leaves out, whose type there is its bare nullable type parameter,
-  is checked there too: `missing-required-directive-argument` at an occurrence whose type
-  arguments make it non-null, labelled at the application. The values of the applications on a
-  generic directive and on its arguments are checked likewise at each closed application of the
-  directive, reported at its path; its own arguments' defaults only where one leaves them out.
-  The steps this takes are `Limits::max_value_steps`'s, and so are each field a count reads of an
-  object literal against an input object it had not read it against, and each 64 bytes of the
-  identities of a set's elements or a map's keys a count under type arguments renders to search
-  them for one held twice, a search made once for each literal and the type they are read against.
-  Then each
-  scalar a supplied package defines is bound to its host types: `Def::externs()` answers each
-  `core` `@extern` its own package writes on it, in its definition or an extension of its own,
-  in application order, a `lang` written twice twice, with its `lang` and `type`, the strings
-  coerced, and its effective tier, the `tier` it writes or, absent or `null`, its package's. An
-  `@extern` whose values did not coerce, one another package writes and one on a built-in bind
-  nothing. Then each definition is checked against what it says it is, reading of it, and of every
-  interface the check reads, what its own package writes: an `implements` entry, or a union's
-  member, of the type an earlier one has is `smear::schema::duplicate-implements-interface` or
-  `smear::schema::duplicate-union-member`, at the later, labelled at the first; each interface the
-  interfaces a definition implements implement, read under its entries' type arguments, is one of
-  its entries too, compared as a type, or it is `smear::schema::missing-transitive-interface`, so a
-  type that omits one is refused on every kind that may write `implements`, markers included,
-  `type Lazy implements Ord<Lazy>` having to write the `Comparable<Lazy>` that `Ord<X>`'s
-  `Comparable<X>` asks; and an object or an interface declares each field of an interface it
-  implements, its type a subtype of the interface's under the entry's type arguments, covariant
-  through lists, non-null, declared interfaces, union members and every type argument, a type
-  parameter a subtype of itself and of its bounds alone, deprecated only where the interface's is,
-  taking each of its arguments with exactly its type and requiring no other, or it is
-  `smear::schema::missing-interface-field`, `invalid-interface-field-type`,
-  `interface-field-not-deprecated`, `missing-interface-field-argument`,
-  `invalid-interface-field-argument-type` or `unexpected-required-argument`, where `smear-schema`
-  reports each; and each instantiation the program writes that gives a non-null type to the type
-  parameter typing such an argument, written bare and nullable with no default, makes it required,
-  and is `unexpected-required-argument` at the occurrence: `Page<Int!>` of
-  `type Page<T> implements Paged { items(after: T): [Int] }`. Last, each instantiation the program
-  writes of a definition whose entries or
-  members name its type parameters, an open one included, has no two of them that are one type
-  under its arguments, `Either<User, User>` of `union Either<A, B> = A | B` being
-  `duplicate-union-member` at the occurrence. A new `Limits::max_implementation_steps`, 2^20 by
-  default, bounds the check, which costs the square of a definition's entries on programs it
-  accepts: each entry, field, argument and union member looked at, each pair of types compared and
-  each node of a type rebuilt under type arguments is a step, and past it a definition's check is
-  `resource-limit` once, at the entry it was checking, and an instantiation's at each occurrence of
-  it. Then every definition and
-  every type is given the tier it requires, which
-  `Def::tier()` and `Ty::tier()` answer: a built-in keeps its package's tag; a scalar a supplied
-  package defines requires its externs' greatest tier, `core` with none; an enum and a directive
-  `core`; an object or an interface the greatest of its fields' types' and their arguments', an
-  input object its input fields' types', and a union its members' types', a position that applies
-  `core`'s `@heap` `alloc` at least; a named type its definition's and its arguments', a list
-  `alloc` at least and its element's, and a type parameter `core`; and what holds itself shares
-  the greatest tier any of it reaches. Then smear's rules walk the model, each a visitor on
-  the public trait. A program
-  defines its schema at most once: each schema definition the root
-  package writes after its first is `smear::schema::duplicate-schema-definition`, GraphQL's own
-  code, with a label at the first. And the schema is the root package's: each schema definition
-  and each schema extension a dependency writes is the new
-  `smear::graphqlx::schema-outside-root`, and no duplicate of the root package's. And a package
-  extends its own definitions alone: an extension of a type or directive another supplied
-  package defines is the new `smear::graphqlx::orphan-extension`, at its target path, with a
-  label at the definition's name; and so is an extension of a definition of `core`, `alloc` or
-  `std`, a GraphQL built-in the root package replaces among them, unless the root package writes it
-  and it adds directives and nothing else, though the root package's that adds more to one of
-  GraphQL's introspection types keeps GraphQL's own code,
-  `smear::schema::introspection-type-extension`; in the root package's extension of a built-in it
-  did not write, each application of `core`'s `@marker`, `@set` or `@map` is `orphan-extension` too,
-  at its path, since what a built-in is is the language's to say, and so is each of `core`'s
-  `@extern` there, a built-in's host type being given by `@repr(for: …)` on the schema alone. And an
-  enum takes no type parameter: an
-  enum that declares one is the new `smear::graphqlx::generic-enum`, at its first type parameter's
-  name, and each use of it is still typed. And a marker is used as a marker: one that declares a
-  field, once, at the first its own package wrote; one named anywhere but as the outermost type of
-  an `implements` entry or of a bound, a type argument and a list's element included; and an
-  `implements` entry of a scalar, an enum, an input object or a union that names what is no marker,
-  a type parameter among them, are each the new `smear::graphqlx::marker-misuse`. And a set has one
-  type parameter and a map two: the first `@set` of a scalar its own package writes that has not
-  exactly one, or `@map` not exactly two, is the new `smear::graphqlx::collection-arity`, at the
-  application, and a scalar that applies both is so once, at the later. And `TypeRef` stands only as
-  the type of a directive definition's argument or of an input field, under lists alone: anywhere
-  else, a type argument of any generic definition included, it is the new
-  `smear::graphqlx::typeref-misuse`; and so is a field's argument whose value can hold an input
-  field of type `TypeRef`, through lists, collections' arguments and input objects, over every
-  package's input objects together, at the argument's type, labelled at that field: the root
-  package's `f(b: ^::geo::Binding)` is refused when `geo`'s `Binding` holds a `TypeRef`, though
-  only `geo`'s directives take it; a value of an input object holds what its input fields hold,
-  and nothing a directive applied to it names. It is also each instantiation that gives such a
-  type to a type parameter an operation's argument reaches, where it is written, or whose defaults
-  derive one that does: `Q<Binding>` of `type Q<T> { f(a: T): Int }`, and `D<Binding>` of
-  `type D<T> { q: Q<Wrapped<T>> }`. And `NonZero`'s type argument is an integer primitive at least
-  one bit wide, written without `!`: `NonZero` of a float, `string`, an object, a list, `u0`, a type
-  parameter or an integer written with `!` is the new `smear::graphqlx::nonzero-argument`, where it
-  is written, which is then all a map or a set keyed by it is refused with. And a definition's type
-  parameters have distinct names, and so do the names an extension's own list gives them: a type
-  parameter with the name of an earlier one is the new `smear::graphqlx::duplicate-type-parameter`,
-  at its name, with a label at the first of that name. And `@extern` binds a scalar its own package
-  defines, once for each language: an extern whose `lang` an earlier extern of its scalar has, the
-  cooked strings compared, and an `@extern` the root package writes on a GraphQL built-in its own
-  definition replaces, are each the new `smear::graphqlx::extern-misuse`, at the `@extern`'s path.
-  And `@repr` writes `for` on the schema alone, where it names a type, and chooses once for each
-  language at a position and for each type and language on the schema: an `@repr` on the schema
-  whose `for` is absent or `null`, one at a position that writes `for`, and one whose `lang`, or on
-  the schema whose `for` and `lang`, an earlier one there has, are each the new
-  `smear::graphqlx::repr-misuse`. The model keeps `@repr` as its applications, with their typed
-  arguments, read through `Builtins::repr`. And a package uses nothing above the tier it declares:
-  below `std`, a list in a `core` package, an occurrence of another package's definition that needs
-  more, counting the defaults it leaves out and capped at that package's tier, `core`'s `@heap` on a
-  field, an argument or an input field of a `core` package, and an extern's `tier` above its
-  package's are each the new `smear::graphqlx::tier`, where it is written; a use of the package's
-  own definition is not, what raises it being reported where it is written. Compile-time metadata
-  counts nowhere and is not judged: what a directive definition writes, its arguments' types and its
-  type parameters' defaults and bounds, and the type arguments of an application of any directive,
-  written or filled from its directive's defaults, with every type nested in them; an input object a
-  directive's argument names is a definition like any other, and its fields are judged where they
-  are written. And what a definition a supplied package wrote holds keeps GraphQL's own rules, with
-  GraphQL's codes, a GraphQL built-in the root package replaces among those definitions: a member
-  whose name begins with `__` is `smear::schema::reserved-field-name`, `reserved-argument-name`,
-  `reserved-enum-value-name`, `reserved-input-field-name` or `reserved-directive-argument-name`, by
-  what it is; and a member whose name an earlier member of its list has, a definition's own members
-  and its extensions' being one list and a field's arguments another, is `duplicate-field-name`,
-  `duplicate-argument-name`, `duplicate-enum-value`, `duplicate-input-field-name` or
-  `duplicate-directive-argument-name`, with a label at the first; and an object, or an interface
-  that is no marker, with no field, a union with no member, an enum with no value and an input
-  object with no field, its extensions' members counted, is `empty-fields-definition`,
-  `empty-union-members`, `empty-enum-values` or `empty-input-fields`; and a field whose type's
-  base, under its lists, is an input object, and an argument, an input field or a directive's
-  argument whose base is an object, an interface or a union, are `field-type-not-output-type`,
-  `argument-type-not-input-type`, `input-field-type-not-input-type` or
-  `directive-argument-type-not-input-type`, at the base, and so is a base that is a collection
-  holding such a type, its complete type's arguments read through the collections and lists they
-  hold, at the deepest occurrence that writes the way to it, with a label at the default that
-  fills a slot left out: `f(a: HashMap<string, User>)` is `argument-type-not-input-type` at
-  `User`; and at each instantiation the same codes judge what it gives each type parameter where
-  the parameter stands, every written type occurrence and every directive application by its
-  complete type arguments, a parameter standing where its definition's members, union members,
-  `implements` entries and applications put it, through lists, collections and the definitions it
-  is passed to, a scalar and an interface among them:
-  `Page<Input>` of `type Page<T> { items: [T] }` is `field-type-not-output-type` at `Input`, with a
-  label at `[T]`; and what the slots an occurrence leaves to their defaults derive, which no
-  occurrence writes, is judged at the occurrence: `Conn<Input>` of `type Conn<N, E = Edge<N>>` is
-  refused when `Edge`'s `N` stands in a field, and a default refused where it is written is
-  refused there alone, at no use that leaves its slot out; and an `implements` entry of an object or
-  an interface that names what is no interface, a type parameter among them, is
-  `implements-non-interface`; and an interface on a cycle of `implements` entries, of any length,
-  is `self-implementing-interface`; and a union member that names what is no object type is
-  `union-member-not-object`; and an argument or an input field written non-null, with no default,
-  that applies `core`'s `@deprecated`, told by its definition and not its spelling, is
-  `deprecated-required-argument` or `deprecated-required-input-field`, and so is an instantiation
-  that makes one required, where it is written: `I<Int!>` of `input I<T> { a: T @deprecated }`;
-  and so is, once, where it does so, a collection's own definition that gives its element or key,
-  non-null in every instantiation however it is written, such a member's type, which no use of the
-  collection repeats: `scalar S<T> @set @d<T>` of `directive @d<X>(v: X @deprecated)`; and an
-  input object is OneOf
-  when the package that wrote it applies `core`'s `@oneOf` to it, in its definition or in an
-  extension of its own, and a field of one written non-null is `one-of-field-not-nullable`, and so
-  is an instantiation that gives a non-null type to a type parameter that is such a field's type,
-  where it is written: `Choice<Int!>` of `input Choice<T> @oneOf { x: T }`, but not `L<Int!>` of
-  `input L<T> @oneOf { x: [T] }`, and so, once, is a collection's own definition that gives its
-  element or key such a field's type; and one that declares a default `one-of-field-has-default`;
-  and each `@oneOf` an extension of an input
-  object applies is `one-of-on-input-object-extension`; and an input object that requires a value
-  of itself is `circular-non-null-input-field` when every field on the way is non-null and no
-  list, and `circular-one-of-input-field` when the way passes a OneOf none of whose fields can be
-  given a finite value, at the field that closes the cycle, once for its input object, by the
-  draft's unbreakable-cycle algorithm over every package's input objects, a generic input object
-  requiring what its type arguments must hold: `input Wrap<T> { v: T! }` makes
-  `input A { w: Wrap<A>! }` a cycle, and `input Wrap<T> { v: T }` makes `Wrap<A!>!` one. Where
-  only a substitution would say what an alternative of a OneOf requires, and past a cap on the
-  choices an input object keeps, the rule requires less: it never refuses an input object a finite
-  value satisfies, and may miss a cycle only in a program with type parameters. And every
-  application a supplied package writes keeps GraphQL's own rules on directives, with GraphQL's
-  codes: one at a location its
-  directive's definition does not list, a built-in's own directive or a program's, is
-  `smear::schema::unsupported-directive-location`, at its path, with a label at the directive's
-  definition; and one of a directive that is not repeatable, applied again where it is applied, a
-  definition and its extensions being one location, `core`'s own definition among them, is
-  `duplicate-directive-use`, at its path, with a label at the first; and an argument an
-  application writes again, its directive declaring it, is `duplicate-directive-argument-use`, at
-  its name, with a label at the first; and a directive that refers to itself is
-  `self-referential-directive`, at its name, over one graph of the definitions, in which a
-  definition reaches the directives applied to it and, for a directive, to its arguments, or for
-  another definition to its input fields and enum values, and every definition a type in a
-  directive's arguments, an input field, those applications' type arguments or its own type
-  parameters' defaults names, a scalar that is no collection hiding its type arguments; a
-  directive of `core` that a program puts on such a cycle, as `scalar String @specifiedBy(…)` puts
-  `@specifiedBy`, is reported at its own name, in `core`'s source; and `core`'s `@specifiedBy`
-  on a scalar of the built-in library, by its definition or by an extension, is
-  `specified-by-on-built-in-scalar`, at its path: GraphQL's five, which the root package's own
-  `scalar Int` replaces and keeps, and every other scalar of the library, `u64`, `bytes` and
-  `HashMap` among them, which the language specifies itself. And the schema keeps GraphQL's own
-  rules on its roots, with GraphQL's codes: a written root operation type whose type names a
-  definition that is no object type, of any of the three operations, an alias such as
-  `NonZeroU32` among them, is `smear::schema::root-operation-type-not-object`, at the type; an
-  instantiation of a generic object type is one; and of the roots that are object types, presumed
-  or written, one that is one type with an earlier one, `Root<Int>` twice among them and
-  `Root<Int>` beside `Root<String>` not, is `smear::schema::shared-root-operation-type`, at a
-  written root's type, with a label at the other; and when the root package writes no schema
-  definition and no object type `Query` of its root module is presumed its query root, each schema
-  extension it writes is `smear::schema::schema-extension-without-schema`, at its `extend`; and a
-  schema with no query root, neither written nor presumed, is
-  `smear::schema::missing-query-root-operation-type`, so a root package with no query root is not
-  ok, as in GraphQL, and a consumer that analyzes a library as the root package filters that code.
-  A rule says nothing about a contribution a phase already refused something in, and a rule on the
-  roots, which no contribution holds, nothing while any of the schema's contributions does. On
-  every GraphQL document of smear's corpora the analyzer is held to `smear-schema`'s verdict, code
-  for code, by a differential test that lists each divergence it allows. A new `test-support`
-  feature, which `smear/test-support`
-  forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models
-  it builds, for `smear`'s own tests; it is not API.
+- `smear-analysis`: the GraphQLx schema analyzer, at its first release.
+  - **The entrance.** `graphqlx::analyze` takes a root `Package` and its dependencies, each a
+    name, a `Layout`, a `Tier`, its `SourceFile`s and optionally an `IntegerProvider`, each file's
+    text any `SourceText` (`&str`, `&[u8]` or a source feature's type), within `Limits`, and
+    answers an `Analysis`, which has no type parameter: a `Model`, its `Diagnostics` and a
+    `SourceMap`. It is Sans-I/O: the caller supplies every package. `graphqlx::analyze_with` is
+    the same analysis read by a parser layer the caller passes, such as the lossless one, which
+    recovers, and answers beside it the `Trees` that layer kept, one for each file it read.
+  - **The model.** Dense tables read through `Copy` views, each numbered by a dense `u32` id in a
+    fixed order that permuting the dependencies or a package's files does not change: packages,
+    modules, definitions and their contributions, members, type occurrences and interned types,
+    values, directive applications, the schema and the built-ins, with `canonical_name`, a
+    definition's name across analyses, `lookup` and `module_by_path`. `Model::instantiations`
+    lists the closed instantiations the program writes, and `satisfies` and `satisfies_ty` answer
+    what a type satisfies. `Application::ty` and `Application::ty_args` answer an application's
+    type and complete type arguments, defaults filled; `Def::externs` a scalar's host types and
+    `Extern::application` the `@extern` each is bound from; `Def::tier` and `Ty::tier` the tier
+    each requires; and the `extent()` of a contribution, a member and an inline module, where it
+    is written. `Analysis` and `Model` are `PartialEq` and `SourceMap` is `Eq`, and
+    `SourceMap::bind` pairs an analysis with the caller's texts again for a renderer.
+  - **The phases.** The package set is checked; every file is parsed; each package's module tree
+    and declarations are collected, duplicate and reserved names refused; every scope, `use` item
+    and path is resolved, with a "did you mean" help; each definition is lowered; every
+    occurrence is typed, defaults filled, its count of type arguments and the bounds of every
+    instantiation the program writes judged; every value is coerced to the type expected where
+    it stands, defaults copied and a cycle of them refused, a generic definition's values at each
+    closed instantiation a supplied package writes; each scalar is bound to its host types; each
+    definition is checked against the interfaces it implements, transitively and under type
+    arguments, its entries and members told apart as types; and every definition and type gets its
+    tier.
+  - **The rules.** 33 rules, each a visitor on the public trait, judge what the supplied packages
+    wrote once the phases have written the model: smear's own rules on GraphQLx, under eleven
+    `smear::graphqlx` codes, and the type-system rules GraphQLx shares with GraphQL in this
+    release, under 39 of GraphQL's codes. Those on the kinds a type parameter takes, on `TypeRef`,
+    on a OneOf's fields and on deprecated members judge each instantiation too. One rule ships
+    for a backend to compose, and `analyze` never runs it: `UnboundedInstantiation` refuses a
+    generic definition that reaches itself with a type argument that grows, as
+    `smear::graphqlx::unbounded-instantiation`, following each directive application through its
+    complete type arguments.
+  - **The verdict.** `Analysis::is_ok` is whether no error was reported, kept by the diagnostic
+    ceiling or not, and no syntax error was counted that a parser did not lend. On every GraphQL
+    document of smear's corpora, each given as the one file of a `Flat` package, it is the verdict
+    `smear-schema` gives, but for three capacity ceilings of `smear-schema`'s representation that
+    GraphQLx does not have; a differential test holds that, counting each of GraphQL's codes on
+    both sides, and beside the three ceilings lists by document each count it lets differ, every
+    one on a document both refuse. A root package with no query root is not ok.
+  - **Codes.** `DiagnosticKind` lists the 39 codes of the analyzer's own family, `smear::graphqlx`,
+    in `DiagnosticKind::ALL`, all errors but the warning `shadowed-primitive`; `graphqlx::schema`
+    holds the 68 `smear::schema` codes it shares with GraphQL's own validator as public constants,
+    in `schema::ALL`; and a file that does not parse keeps the parser's `smear::syntax` code.
+    `Diagnostic::builder` is public, so a consumer's findings join smear's in one ordered list,
+    which counts every error; an analysis's list and a walk's keep the least under a ceiling. An
+    error a phase or a rule reports, a syntax error aside, marks what holds where it points, as each
+    `has_errors()` says.
+  - **A consumer's rules.** `Visitor` has a hook for each entity, each with an empty default body,
+    and `visit` walks an analysis's model for one over the packages `Packages` selects, handing
+    each hook a `Cx` that says where the walk is, an occurrence's `Site` included. Visitors compose
+    at compile time: a tuple of up to twelve, an `Option` of one, a `&mut` or a `Box` of one, and
+    `()`. `SourceMap::written_by` answers the package that wrote a location, and
+    `TypeExpr::written_args` the arguments written on an occurrence of any shape.
+  - **Limits.** Sixteen bounds, each a `u32` count with its getter and its `with_*` setter, and
+    one passed is `smear::graphqlx::resource-limit`, never a panic: definitions 2^20, modules
+    2^16, module depth 64, path segments 64, `use` depth 32, glob iterations 2^10, globs 64,
+    generic depth 64, instantiations 2^16, substitutions 2^20, bound steps 2^20, value steps 2^20,
+    implementation steps 2^20, source bytes 2^26, diagnostics 16 384, and near-miss comparisons
+    2^20, the last two limiting what the analysis says and not what it accepts.
+  - **Stability.** The crate makes no semver promise yet: a release may change any path, signature
+    or answer of it, and which programs it accepts.
+  - **Tests.** A `test-support` feature, which `smear/test-support` forwards, compiles a hidden
+    door to the crate-private model builder for smear's own tests; it is not API, and its
+    `type_arguments` is gone, `Application::ty_args` answering what it answered.
+  - The crate's documentation is the reference for every phase, rule, code and limit.
 - `smear`!, `smear-lexer`! and `smear-parser`!: the five features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`

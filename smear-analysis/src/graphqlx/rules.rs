@@ -44,8 +44,10 @@
 //! parameters an operation's argument reaches, `OneOfFieldNotNullable` a third, for the
 //! parameters that are a OneOf's field's whole type, which `positions::Positions::of` tells from
 //! who wrote each `@oneOf`, as `one_of` does, and `DeprecatedRequired` a fourth, for the
-//! parameters that are a deprecated member's whole type; each reads one crate-private accessor,
-//! `Application::ty`, an application's complete type, its directive's instantiation.
+//! parameters that are a deprecated member's whole type; each reads the public `Application::ty`,
+//! an application's complete type, its directive's instantiation, and, through
+//! `positions::Derived`, one crate-private accessor, `Model::type_exprs`: every type occurrence of
+//! the model, whose types are what the program writes, which a fill passes over.
 //! `TypeRefMisuse` reads the graph of what a value can reach too, `reach::Reach`, found once for
 //! the walk over every package's input objects, so that an argument the root package writes is
 //! judged by what a dependency's input object holds; what a value of an input object holds is its
@@ -56,10 +58,9 @@
 //! arguments of an occurrence that names a type parameter, or nothing, which the kind does not
 //! answer. `DuplicateTypeParameter` reads one crate-private accessor, `Def::extension_params`:
 //! the names an extension's own list writes, which no public view holds. `DuplicateMember` reads
-//! another, `IdRange::start`, to name the member at a position of a list. `ExternMisuse` reads a
-//! third, `Extern::application`, the application an extern is bound from, which the public model
-//! does not answer yet: a candidate public accessor for the model's review; and `TierViolation`
-//! reads it too.
+//! another, `IdRange::start`, to name the member at a position of a list. `ExternMisuse` and
+//! `TierViolation` read the public `Extern::application`, the application an extern is bound from.
+//! `supplied` and `one_of` are this module's own, and read the public model alone.
 //!
 //! One rule is in no set: `UnboundedInstantiation`, which is public, which `analyze` never runs,
 //! and which a backend composes into its own walk. It reads the public model alone.
@@ -423,12 +424,13 @@ rule_set! {
   /// a definition that holds members holds one at least, a marker holding none; a member's type is
   /// of the kind its position takes, and so are a collection's arguments there, and at each
   /// instantiation what it gives a type parameter where the parameter stands; an object or an
-  /// interface implements interfaces; no interface implements itself; a union's members are object
-  /// types; a required argument or input field is not deprecated, nor one an instantiation makes
-  /// required; a OneOf input object's fields are
+  /// interface implements interfaces; no interface implements itself; a union's members that name
+  /// a definition are object types; a required argument or input field is not deprecated, nor one
+  /// an instantiation makes required; a OneOf input object's fields are
   /// nullable, at each instantiation too, and have no default; an input object takes `@oneOf` in
   /// its definition alone; and no
-  /// input object requires a value of itself, through its fields and the type arguments they give.
+  /// input object requires a value of itself, through its fields and the type arguments they give,
+  /// but for a cycle it may miss in a program with type parameters.
   /// And of the directives and every application a
   /// supplied package writes, GraphQL's own rules: a directive stands where its definition lists; a
   /// directive that is not repeatable is applied once to a location, a definition and its

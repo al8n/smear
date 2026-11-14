@@ -37,6 +37,15 @@ fn analyze_one(text: &'static str) -> Analysis {
   analyze(&root, &[], &Limits::new())
 }
 
+/// An analysis of the root package `app`'s one file `text`, which `analyze` accepts: a program it
+/// refuses fails here and not at what a test expects of the rule, so that the rule is never pinned
+/// on a program `analyze` turns away.
+fn accepted(text: &'static str) -> Analysis {
+  let analysis = analyze_one(text);
+  assert!(analysis.is_ok(), "{text}\n{:#?}", analysis.diagnostics());
+  analysis
+}
+
 /// The id of the file at `path` in the package `package`.
 fn file(analysis: &Analysis, package: u32, path: &str) -> SourceId {
   let sources = analysis.sources();
@@ -327,6 +336,70 @@ fn each_followed_position_is_followed() {
   }
 }
 
+/// The `implements` entry of the test above, in a program `analyze` accepts: an object implements
+/// the interface and the interface's field names the object, so no interface implements itself
+/// through another. The entry `I<[U]>` and `G`'s own field `G<[U]>` each write a growth, and each
+/// is reported where it is written, labelled at its list.
+#[test]
+fn an_implements_entry_that_grows_is_refused_in_an_accepted_program() {
+  let text = "interface I<T> { f: G<T> }\ntype G<U> implements I<[U]> { f: G<[U]> }\n\
+              type Query { x: Int }\n";
+  let analysis = accepted(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [
+      (
+        at(schema, text, "I<[U]>", 0),
+        Some(at(schema, text, "[U]", 0))
+      ),
+      (
+        at(schema, text, "G<[U]>", 0),
+        Some(at(schema, text, "[U]", 1))
+      ),
+    ]
+  );
+}
+
+/// The field's argument of the test above, in a program `analyze` accepts: the argument's type is
+/// an input object, where an object is `argument-type-not-input-type`, and the input object's field
+/// applies `@e<G<U>>`, which names `G` again. Reported at the argument's type, labelled at its
+/// list.
+#[test]
+fn a_fields_argument_that_grows_is_refused_in_an_accepted_program() {
+  let text = "directive @e<W> on INPUT_FIELD_DEFINITION\ninput X<U> { v: U @e<G<U>> }\n\
+              type G<T> { f(a: X<[T]>): Int }\ntype Query { x: Int }\n";
+  let analysis = accepted(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      at(schema, text, "X<[T]>", 0),
+      Some(at(schema, text, "[T]", 0))
+    )]
+  );
+}
+
+/// The directive definition's argument of the test above, in a program `analyze` accepts: `d`'s
+/// argument is an input object whose field applies `@e<G<V>>`, and `G`'s field applies `@d<T>`. An
+/// object's field is no part of the graph `self-referential-directive` reads, so `d` is on no cycle
+/// there. Reported at the argument's type, labelled at its list.
+#[test]
+fn a_directive_definitions_argument_that_grows_is_refused_in_an_accepted_program() {
+  let text = "directive @e<W> on INPUT_FIELD_DEFINITION\n\
+              directive @d<U>(x: X<[U]>) on FIELD_DEFINITION\n\
+              input X<V> { v: V @e<G<V>> }\ntype G<T> { f: Int @d<T> }\ntype Query { x: Int }\n";
+  let analysis = accepted(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      at(schema, text, "X<[U]>", 0),
+      Some(at(schema, text, "[U]", 0))
+    )]
+  );
+}
+
 /// A bound's interface and a type parameter's default as it is written write the same growing type
 /// as a field beside them, and only the field's is reported: a hook that reads no site fails here.
 #[test]
@@ -354,6 +427,19 @@ fn a_bound_and_a_written_default_are_not_followed() {
       "{text}"
     );
   }
+}
+
+/// An interface's instantiation is not followed into the types that implement it. `G<i32>` needs
+/// `I<i32>`, `H<i32>` and `I<[i32]>`, and the rule is silent. A backend that also emits the
+/// implementors of `I<[i32]>` needs `G<[i32]>`, then `H<[i32]>`, then `I<[[i32]]>`, without end,
+/// and checks that itself: an implementor followed from its interface's instantiation fails here.
+#[test]
+fn an_interfaces_instantiation_is_not_followed_into_its_implementors() {
+  let analysis = accepted(
+    "interface I<T> { a: Int }\ntype G<U> implements I<U> { a: Int  h: H<U> }\n\
+     type H<V> { i: I<[V]> }\ntype Query { g: G<i32> }\n",
+  );
+  silent(&analysis, Packages::All);
 }
 
 /// `E<B>` is `E<B, [B]>`: the growth is the default `[A]`, filled for `B`, and the label is at the
@@ -401,6 +487,46 @@ fn growth_inside_a_filled_default_is_reported_at_the_use() {
   }
 }
 
+/// `P<X>` is `P<X, Q<[X]>>`. `P` needs nothing, its two fields being bare parameters, and the
+/// growth is `Q`'s, which the default fills in. The report is at the occurrence that leaves the
+/// argument out, labelled at the default, and its help says what the author can do: write the type
+/// argument the default fills, or change the default. The marked case's help, to pass the type
+/// parameter itself, is no advice here, since the occurrence passes it already: a held case that
+/// keeps it fails here.
+#[test]
+fn a_held_growth_is_helped_by_writing_the_argument_or_changing_the_default() {
+  let text = "type P<T, U = Q<[T]>> { v: T  w: U }\ntype Q<X> { p: P<X> }\n\
+              type Query { x: Int }\n";
+  let analysis = accepted(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      at(schema, text, "P<X>", 0),
+      Some(at(schema, text, "Q<[T]>", 0))
+    )]
+  );
+
+  let diagnostics = visit(&analysis, Packages::All, &mut UnboundedInstantiation::new());
+  let diagnostic = diagnostics.iter().next().expect("one diagnostic");
+  assert_eq!(
+    diagnostic.to_string(),
+    "an instantiation of `P` whose default grows without end"
+  );
+  assert_eq!(
+    diagnostic.label(0).map(|label: Label<'_>| label.text()),
+    Some("this default holds a type argument that wraps a type parameter it reaches again")
+  );
+  assert_eq!(
+    diagnostic.help(),
+    Some(
+      "this occurrence leaves out a type argument of `P` whose default holds an instantiation \
+       that grows without end, so a backend that makes one copy per instantiation cannot finish; \
+       write the type argument the default fills, or change the default"
+    )
+  );
+}
+
 /// With two parameters left out, the label is at the default that filled the first argument that
 /// holds the growth, `V`'s, and not at `U`'s, the first left out: a label at the first parameter
 /// left out fails here.
@@ -434,6 +560,127 @@ fn an_application_that_grows_a_cycle_is_refused_at_the_application() {
       within(schema, text, "@d<[T]>", "d"),
       Some(at(schema, text, "[T]", 0))
     )]
+  );
+}
+
+/// The growth of the test above, in a program `analyze` accepts: `G`'s field applies `@d<[T]>`, and
+/// an object's field is no part of the graph `self-referential-directive` reads, so `d`, whose
+/// argument names `G<U>` through `@e`, is on no cycle there. Reported as above, at the
+/// application's path, labelled at the type argument.
+#[test]
+fn an_application_that_grows_a_cycle_is_refused_in_an_accepted_program() {
+  let text = "directive @e<W> on ARGUMENT_DEFINITION\n\
+              directive @d<U>(x: Int @e<G<U>>) on FIELD_DEFINITION\n\
+              type G<T> { f: Int @d<[T]> }\ntype Query { x: Int }\n";
+  let analysis = accepted(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      within(schema, text, "@d<[T]>", "d"),
+      Some(at(schema, text, "[T]", 0))
+    )]
+  );
+}
+
+/// `@d<T>` is `@d<T, [T]>`: the growth is the default `[A]`, filled for `B`, which the application
+/// leaves out, so the report is at the application's path, labelled at the default where it is
+/// declared. A rule that reads the written type arguments alone sees nothing and fails here.
+#[test]
+fn an_application_that_grows_through_a_filled_default_is_refused_at_the_application() {
+  let text = "directive @d<A, B = [A]>(x: G<B>) on INPUT_OBJECT\ninput G<T> @d<T> { v: T }\n\
+              type Query { x: Int }\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      within(schema, text, "@d<T>", "d"),
+      Some(at(schema, text, "[A]", 0))
+    )]
+  );
+
+  let diagnostics = visit(&analysis, Packages::All, &mut UnboundedInstantiation::new());
+  let diagnostic = diagnostics.iter().next().expect("one diagnostic");
+  assert_eq!(
+    diagnostic.to_string(),
+    "an application of `@d` that grows without end"
+  );
+  assert_eq!(
+    diagnostic.label(0).map(|label: Label<'_>| label.text()),
+    Some("this default fills a type argument that wraps a type parameter it reaches again")
+  );
+}
+
+/// The growth of the test above, in a program `analyze` accepts: `G`'s field applies `@d<T>`, which
+/// is `@d<T, [T]>`, and `d`'s argument names `G<B>` through `@e`, so `d` is on no cycle of
+/// `self-referential-directive`'s graph, which leaves out an object's field. Reported as above, at
+/// the application's path, labelled at the default.
+#[test]
+fn an_application_that_grows_through_a_filled_default_is_refused_in_an_accepted_program() {
+  let text = "directive @e<W> on ARGUMENT_DEFINITION\n\
+              directive @d<A, B = [A]>(x: Int @e<G<B>>) on FIELD_DEFINITION\n\
+              type G<T> { f: Int @d<T> }\ntype Query { x: Int }\n";
+  let analysis = accepted(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      within(schema, text, "@d<T>", "d"),
+      Some(at(schema, text, "[A]", 0))
+    )]
+  );
+
+  let diagnostics = visit(&analysis, Packages::All, &mut UnboundedInstantiation::new());
+  let diagnostic = diagnostics.iter().next().expect("one diagnostic");
+  assert_eq!(
+    diagnostic.to_string(),
+    "an application of `@d` that grows without end"
+  );
+  assert_eq!(
+    diagnostic.label(0).map(|label: Label<'_>| label.text()),
+    Some("this default fills a type argument that wraps a type parameter it reaches again")
+  );
+}
+
+/// `@d<T>` is `@d<T, H<[T]>>`, which does not grow and holds `H<[T]>`, which does: `G<Int>` needs
+/// `@d<Int>`, which holds `H<[Int]>`, whose field is `G<[Int]>`, and so on without end. No
+/// occurrence is written with the type `H<[T]>`, so the report is at the application's path,
+/// labelled at the default that holds it, and nothing is reported at `G<U>`. A rule that reports
+/// only an application whose type is itself marked fails here. The application passes the type
+/// parameter itself already, so its help is not the marked case's advice to pass it: it says to
+/// write the type argument the default fills, or to change the default.
+#[test]
+fn an_application_whose_filled_default_holds_a_growth_is_refused_at_the_application() {
+  let text = "directive @d<A, B = H<[A]>> on OBJECT\ntype H<U> { g: G<U> }\n\
+              type G<T> @d<T> { v: T }\ntype Query { x: Int }\n";
+  let analysis = accepted(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      within(schema, text, "@d<T>", "d"),
+      Some(at(schema, text, "H<[A]>", 0))
+    )]
+  );
+
+  let diagnostics = visit(&analysis, Packages::All, &mut UnboundedInstantiation::new());
+  let diagnostic = diagnostics.iter().next().expect("one diagnostic");
+  assert_eq!(
+    diagnostic.to_string(),
+    "an application of `@d` whose default grows without end"
+  );
+  assert_eq!(
+    diagnostic.label(0).map(|label: Label<'_>| label.text()),
+    Some("this default holds a type argument that wraps a type parameter it reaches again")
+  );
+  assert_eq!(
+    diagnostic.help(),
+    Some(
+      "this application leaves out a type argument of `@d` whose default holds an \
+       instantiation that grows without end, so a backend that makes one copy per instantiation \
+       cannot finish; write the type argument the default fills, or change the default"
+    )
   );
 }
 

@@ -33,8 +33,9 @@ use super::{
 /// What one analysis found: the model, the diagnostics, and the source map.
 ///
 /// It has no type parameter and no lifetime: it is the same type whatever text type the packages
-/// were supplied in, and it borrows nothing from them. The model and the diagnostics are complete
-/// whatever was refused; [`is_ok`](Self::is_ok) is the verdict.
+/// were supplied in, and it borrows nothing from them. Whatever was refused, the model holds every
+/// definition collection admitted, and a shape in it is no proof of acceptance: the diagnostics say
+/// what was refused, as far as their ceiling keeps them, and [`is_ok`](Self::is_ok) is the verdict.
 ///
 /// Two analyses are equal when their models, their diagnostics (the list, the error count and
 /// whether the list is truncated), their source maps and the diagnostic ceilings they were made
@@ -269,11 +270,13 @@ impl Analysis {
 ///   takes any literal, kept as written, and so does a type that still names a type parameter or
 ///   can take no value, with nothing said. A prefix, or a type value's path, that names nothing is the
 ///   resolver's to report. A value
-///   that does not fit is unresolved and reported where it is written, with GraphQL's
+///   that does not fit is reported where it is written, with GraphQL's
 ///   `invalid-default-value` or `invalid-directive-argument-value`, but for a number out of the
 ///   range of any width but the 32-bit signed one, or of `f32`, which is `width-overflow`, and
-///   zero for `NonZero`, which is `nonzero-zero`; a required argument given `null` is
-///   `missing-required-directive-argument`, at its name. An application's arguments are in its
+///   zero for `NonZero`, which is `nonzero-zero`, and is unresolved, or kept with the structure it
+///   was written with though refused, as a OneOf literal that gives two fields is; a required
+///   argument given `null` is `missing-required-directive-argument`, at its name. An application's
+///   arguments are in its
 ///   directive's order: each one written, and each one left out whose definition has a default, a
 ///   copy of the default filling it, each row of the copy not written and located at the default,
 ///   and silent, the default's own diagnostic saying once what does not fit; a required argument
@@ -473,7 +476,8 @@ impl Analysis {
 ///   An `implements` entry of an object or an interface that names what is no interface, a type
 ///   parameter among them, is `implements-non-interface`, at the entry. An interface on a cycle
 ///   of `implements` entries, of any length, is `self-implementing-interface`, at its name. A
-///   union member that names what is no object type is `union-member-not-object`, at the member.
+///   union member that names a definition that is no object type is `union-member-not-object`, at
+///   the member; one that is a type parameter is not judged, nor is what an instantiation gives it.
 ///   An argument or an input field written non-null, with no default, that applies `core`'s
 ///   `@deprecated` is `deprecated-required-argument` or `deprecated-required-input-field`, at its
 ///   name, with a label at the `@deprecated`; and so is an instantiation that gives a non-null type

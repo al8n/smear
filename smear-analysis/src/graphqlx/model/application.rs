@@ -75,19 +75,6 @@ impl Model {
     );
     Application { model: self, id }
   }
-
-  /// The complete type arguments of the application `id`: the arguments of its directive's
-  /// instantiation, which its row holds, and none when it holds none, or the unresolved type.
-  #[cfg(feature = "test-support")]
-  pub(crate) fn type_arguments(&self, id: ApplicationId) -> &[TyId] {
-    let Some(row) = self.applications.get(id.get() as usize) else {
-      return &[];
-    };
-    match self.tys.get(row.ty.get() as usize) {
-      Some(ty) if ty.shape == KIND_NAMED => ty.args.of(&self.ty_args),
-      _ => &[],
-    }
-  }
 }
 
 /// One directive application of the model: one `@directive(…)` as written.
@@ -96,6 +83,49 @@ impl Model {
 /// with no type argument and no argument.
 ///
 /// `Copy`: it holds the model and an id, and everything it answers is borrowed from the model.
+///
+/// `@repr` has no accessor of its own: a backend reads its `lang`, `type` and `for` off its
+/// applications, as below.
+///
+/// # Examples
+///
+/// ```
+/// use smear_analysis::graphqlx::{
+///   Layout, Limits, Package, Resolution, SourceFile, Tier, ValueKind, analyze,
+/// };
+///
+/// let text = "schema @repr(for: bytes, lang: \"rust\", type: \"bytes::Bytes\") { query: Query } \
+///             type Query { x: Int }";
+/// let root = Package::new("app", Layout::Flat, Tier::Std)
+///   .with_files([SourceFile::new("schema.graphqlx", text)]);
+/// let analysis = analyze(&root, &[], &Limits::new());
+/// assert!(analysis.is_ok());
+///
+/// let model = analysis.model();
+/// let repr = model.builtins().repr();
+/// let mut read = 0;
+/// for &id in model.schema().applications() {
+///   let application = model.application(id);
+///   if application.directive() != Resolution::Resolved(repr) {
+///     continue;
+///   }
+///   let (mut lang, mut host, mut target) = (None, None, None);
+///   for argument in application.arguments() {
+///     let name = model.member(argument.argument()).name();
+///     match (name, model.value(argument.value()).kind()) {
+///       ("lang", ValueKind::String(text)) => lang = Some(text),
+///       ("type", ValueKind::String(text)) => host = Some(text),
+///       ("for", ValueKind::Type { def, .. }) => target = Some(def),
+///       _ => {}
+///     }
+///   }
+///   assert_eq!(lang, Some("rust"));
+///   assert_eq!(host, Some("bytes::Bytes"));
+///   assert_eq!(target, Some(model.builtins().bytes()));
+///   read += 1;
+/// }
+/// assert_eq!(read, 1);
+/// ```
 #[derive(Clone, Copy)]
 pub struct Application<'a> {
   model: &'a Model,
@@ -122,21 +152,35 @@ impl<'a> Application<'a> {
     self.row().type_args.of(&model.application_type_args)
   }
 
-  /// Its type: its directive's instantiation, a named type of the directive with every type
-  /// argument, the written ones and those its defaults fill; `None` for a directive of no type
-  /// parameter, one that did not resolve, and a count of type arguments that was refused, and when
-  /// the arguments could not be completed.
-  //
-  // Crate-private: what an application is as a type is no part of the public model yet. The rules
-  // on what an instantiation's arguments take read it. A candidate public accessor for the model's
-  // review.
+  /// Its type: its directive's instantiation, a named type of the directive whose arguments are
+  /// every type argument, those the application writes and then each one the directive's defaults
+  /// fill. `None` for an application of a directive that takes no type parameter, of one that did
+  /// not resolve, and for one whose count of type arguments was refused or whose type arguments
+  /// could not be completed.
+  ///
+  /// No position has this type: it is what a backend that makes one copy of a generic directive for
+  /// each instantiation keys on.
   #[inline]
-  pub(crate) fn ty(&self) -> Option<TyId> {
-    let model: &'a Model = self.model;
+  pub fn ty(&self) -> Option<TyId> {
     let ty = self.row().ty;
-    match model.tys.get(ty.get() as usize) {
+    match self.model.tys.get(ty.get() as usize) {
       Some(row) if row.shape == KIND_NAMED => Some(ty),
       _ => None,
+    }
+  }
+
+  /// Its complete type arguments, in its directive's order: the arguments of [`ty`](Self::ty), the
+  /// written ones first, then those the directive's defaults fill, substituted. Empty when it has
+  /// no type.
+  ///
+  /// Applications of one directive that complete alike answer one type: a walk that reads every
+  /// application's arguments keys on [`ty`](Self::ty).
+  #[inline]
+  pub fn ty_args(&self) -> &'a [TyId] {
+    let model: &'a Model = self.model;
+    match model.tys.get(self.row().ty.get() as usize) {
+      Some(row) if row.shape == KIND_NAMED => row.args.of(&model.ty_args),
+      _ => &[],
     }
   }
 

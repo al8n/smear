@@ -751,4 +751,117 @@ mod lossless {
       );
     }
   }
+
+  /// E11: a definition the lossless layer keeps despite a missing token is the image of its text
+  /// with the token restored, the missing-token class of Y §8.2, so what a phase or a rule finds
+  /// inside it is true of that text, and is reported, not silenced. For each row, the broken text
+  /// holds a syntax error and its repair none; the broken analysis's other diagnostics are the
+  /// repair's, in order; and among them is the code expected inside the item. Each row writes a
+  /// query root first, and leaves its token out after everything a diagnostic of the repair spans,
+  /// so that no span moves.
+  ///
+  /// The rows are the class's nine that stand in type-system text and keep their definition:
+  /// `FieldsDefinition`, `InputFieldsDefinition`, `EnumValuesDefinition`,
+  /// `RootOperationTypesDefinition` and `ModDefinition` without their `}`, `DirectiveDefinition`
+  /// without its `on`, `DefinitionTypeGenerics` and `TypeGenerics` without their `>`, and
+  /// `ListType` without its `]`. The class's executable rows are no analysis's.
+  /// `ExtensionTypeGenerics` and `ArgumentsDefinition` lose their definition either way, so nothing
+  /// of it is judged. A `use` item holds no definition for a rule to judge. `ListValue`,
+  /// `ObjectValue`, `SetValue`, `MapValue` and `Arguments` stand in type-system text only inside a
+  /// default or an application, and are left to a test that writes one there.
+  ///
+  /// It fails the day recovery builds an image with a hole, which is when such a finding would
+  /// become false, or a syntax error starts to mark what holds it.
+  #[test]
+  fn a_rule_inside_a_recovered_item_speaks_as_of_its_repair() {
+    const QUERY: &str = "type Query {\n  x: Int\n}\n";
+    for (row, broken, repaired, expected) in [
+      (
+        "FieldsDefinition",
+        "interface M @marker {\n  f: Int\n",
+        "interface M @marker {\n  f: Int\n}\n",
+        "smear::graphqlx::marker-misuse",
+      ),
+      (
+        "InputFieldsDefinition",
+        "input I {\n  a: Int\n  a: Int\n",
+        "input I {\n  a: Int\n  a: Int\n}\n",
+        "smear::schema::duplicate-input-field-name",
+      ),
+      (
+        "EnumValuesDefinition",
+        "enum E<T> {\n  A\n",
+        "enum E<T> {\n  A\n}\n",
+        "smear::graphqlx::generic-enum",
+      ),
+      (
+        "RootOperationTypesDefinition",
+        "input In {\n  a: Int\n}\nschema {\n  query: In\n",
+        "input In {\n  a: Int\n}\nschema {\n  query: In\n}\n",
+        "smear::schema::root-operation-type-not-object",
+      ),
+      (
+        "DirectiveDefinition",
+        "directive @d(__a: Int) FIELD_DEFINITION\n",
+        "directive @d(__a: Int) on FIELD_DEFINITION\n",
+        "smear::schema::reserved-directive-argument-name",
+      ),
+      (
+        "DefinitionTypeGenerics",
+        "type T<A, A",
+        "type T<A, A>\n",
+        "smear::graphqlx::duplicate-type-parameter",
+      ),
+      (
+        "TypeGenerics",
+        "interface M @marker\ntype Page<X> {\n  x: X\n}\ntype T {\n  p: Page<M }\n",
+        "interface M @marker\ntype Page<X> {\n  x: X\n}\ntype T {\n  p: Page<M> }\n",
+        "smear::graphqlx::marker-misuse",
+      ),
+      (
+        "ListType",
+        "type Obj {\n  y: Int\n}\ntype T {\n  s: [HashSet<Obj> }\n",
+        "type Obj {\n  y: Int\n}\ntype T {\n  s: [HashSet<Obj>] }\n",
+        "smear::graphqlx::unsatisfied-bound",
+      ),
+      (
+        "ModDefinition",
+        "mod m {\n  enum E<T> {\n    A\n  }\n",
+        "mod m {\n  enum E<T> {\n    A\n  }\n}\n",
+        "smear::graphqlx::generic-enum",
+      ),
+    ] {
+      let broken = format!("{QUERY}{broken}");
+      let repaired = format!("{QUERY}{repaired}");
+      let root = one_file(broken.as_str());
+      let (recovered, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+      let whole = analyze(&one_file(repaired.as_str()), &[], &Limits::new());
+      assert!(
+        syntax_diagnostics(&recovered) > 0,
+        "{row}: the broken text holds no syntax error: {:#?}",
+        recovered.diagnostics()
+      );
+      assert_eq!(
+        syntax_diagnostics(&whole),
+        0,
+        "{row}: the repair holds a syntax error: {:#?}",
+        whole.diagnostics()
+      );
+      let kept: Vec<&Diagnostic> = recovered
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic: &&Diagnostic| {
+          !diagnostic.code().as_str().starts_with("smear::syntax::")
+        })
+        .collect();
+      let reported: Vec<&Diagnostic> = whole.diagnostics().iter().collect();
+      assert_eq!(kept, reported, "{row}");
+      assert!(
+        reported
+          .iter()
+          .any(|diagnostic: &&Diagnostic| diagnostic.code().as_str() == expected),
+        "{row}: `{expected}` is not reported: {reported:#?}"
+      );
+    }
+  }
 }

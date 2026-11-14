@@ -1,12 +1,14 @@
-//! The two accessors smear's own rules read and a consumer's rule may: who wrote what is written at
-//! a location, `SourceMap::written_by`, and the arguments written on a type occurrence of any
-//! shape, `TypeExpr::written_args`.
+//! The accessors smear's own rules read and a consumer's rule may: who wrote what is written at a
+//! location, `SourceMap::written_by`; the arguments written on a type occurrence of any shape,
+//! `TypeExpr::written_args`; an application's type and its complete type arguments,
+//! `Application::ty` and `Application::ty_args`; and the application an extern is bound from,
+//! `Extern::application`.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Layout, Limits, MemberId, Namespace, Package, PackageId, SourceFile, SourceId, Tier,
-    TypeExprId, TypeExprKind, analyze,
+    Analysis, ApplicationId, Extern, Layout, Limits, MemberId, Namespace, Package, PackageId,
+    SourceFile, SourceId, Tier, TyKind, TypeExprId, TypeExprKind, analyze,
   },
   diagnostic::Location,
   lexer::tokora::SimpleSpan,
@@ -34,6 +36,18 @@ fn field_type(analysis: &Analysis, owner: &str, field: &str) -> TypeExprId {
     .find(|id: &MemberId| model.member(*id).name() == field)
     .unwrap_or_else(|| panic!("no field `{field}`"));
   model.member(member).ty().expect("a field has a type")
+}
+
+/// The one application written on the type `owner`, a canonical name.
+fn only_application(analysis: &Analysis, owner: &str) -> ApplicationId {
+  let model = analysis.model();
+  let owner = model
+    .lookup(Namespace::Type, owner)
+    .unwrap_or_else(|| panic!("no type `{owner}`"));
+  match model.def(owner).applications() {
+    [only] => *only,
+    other => panic!("{} applications: {other:?}", other.len()),
+  }
 }
 
 /// The package of a source answers for every location in it, a dependency's and the root's, and a
@@ -129,4 +143,84 @@ fn written_args_answers_the_arguments_of_every_shape() {
     "{:?}",
     model.type_expr(element).kind()
   );
+}
+
+/// An application's type is its directive's instantiation, and its complete type arguments are
+/// that type's: the written `Int`, then the default `[A]` filled with it. A directive of no type
+/// parameter, a count the directive does not take and a directive that does not resolve give no
+/// type and no type argument. Refuses the written type arguments alone, and a type built for a
+/// refused count.
+#[test]
+fn an_applications_type_and_type_arguments_are_its_instantiation() {
+  let text = "directive @tag<A, B = [A]> on OBJECT\ndirective @plain on OBJECT\n\
+              type Query @tag<Int> { x: Int }\ntype Other @plain { y: Int }\n\
+              type Third @tag<Int, Int, Int> { z: Int }\ntype Fourth @nope { w: Int }\n";
+  let root = package("app", &[("schema.graphqlx", text)]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  let model = analysis.model();
+  let tag = model
+    .lookup(Namespace::Directive, "@^::app::tag")
+    .expect("the directive `@tag`");
+
+  let tagged = model.application(only_application(&analysis, "^::app::Query"));
+  let args = tagged.ty_args();
+  assert_eq!(args.len(), 2, "{args:?}");
+  let written = model.type_expr(tagged.type_args()[0]).ty();
+  assert_eq!(args[0], written);
+  let TyKind::List { element, .. } = model.ty(args[1]).kind() else {
+    panic!(
+      "the default `[A]` fills a list: {:?}",
+      model.ty(args[1]).kind()
+    );
+  };
+  assert_eq!(element, written);
+  let ty = tagged.ty().expect("`@tag<Int>` has a type");
+  let TyKind::Named { def, args: of, .. } = model.ty(ty).kind() else {
+    panic!("its type is a named type: {:?}", model.ty(ty).kind());
+  };
+  assert_eq!(def, tag);
+  assert_eq!(of, args);
+
+  for owner in ["^::app::Other", "^::app::Third", "^::app::Fourth"] {
+    let applied = model.application(only_application(&analysis, owner));
+    assert_eq!(applied.ty(), None, "{owner}");
+    assert!(
+      applied.ty_args().is_empty(),
+      "{owner}: {:?}",
+      applied.ty_args()
+    );
+  }
+}
+
+/// Each extern answers the `@extern` it is bound from, the definition's and then the extension's:
+/// one application answered for every extern of a scalar fails here.
+#[test]
+fn an_extern_answers_the_application_it_is_bound_from() {
+  let text = "scalar Money @extern(lang: \"rust\", type: \"rust_decimal::Decimal\")\n\
+              extend scalar Money @extern(lang: \"typescript\", type: \"string\")\n\
+              type Query { m: Money }\n";
+  let root = package("app", &[("schema.graphqlx", text)]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  let money = model.def(
+    model
+      .lookup(Namespace::Type, "^::app::Money")
+      .expect("the scalar `Money`"),
+  );
+  let applications: Vec<Option<ApplicationId>> = money
+    .applications()
+    .iter()
+    .map(|id: &ApplicationId| Some(*id))
+    .collect();
+  assert_eq!(applications.len(), 2, "{applications:?}");
+  let bound: Vec<Option<ApplicationId>> = money
+    .externs()
+    .map(|binding: Extern<'_>| binding.application())
+    .collect();
+  assert_eq!(bound, applications);
 }

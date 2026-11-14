@@ -853,12 +853,9 @@ pub struct Extern<'a> {
 }
 
 impl<'a> Extern<'a> {
-  /// The `@extern` it is bound from: `None` only for one a hand-built model holds.
-  //
-  // Crate-private: the public model answers no extern's application, and the rules on `@extern`'s
-  // use and on tiers point at it. A candidate public accessor for the model's review.
+  /// The `@extern` it is bound from: `Some` for every extern an analysis binds.
   #[inline]
-  pub(crate) const fn application(&self) -> Option<ApplicationId> {
+  pub const fn application(&self) -> Option<ApplicationId> {
     self.application
   }
 

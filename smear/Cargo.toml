@@ -6,7 +6,7 @@ rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 license.workspace = true
-description = "The I/O-free core of a GraphQL implementation: zero-copy parsing to an AST or a lossless CST, and draft-specification validation, for GraphQL and GraphQLx."
+description = "The I/O-free core of a GraphQL implementation: zero-copy parsing to an AST or a lossless CST, draft-specification validation and execution for GraphQL, and schema analysis for GraphQLx."
 keywords = ["graphql", "parser", "validator", "zero-copy", "no-std"]
 categories = ["parsing", "parser-implementations", "web-programming", "no-std"]
 
@@ -69,10 +69,10 @@ std = ["smear-lexer/std", "smear-parser?/std", "smear-schema/std", "smear-semant
 
 graphql = ["smear-lexer/graphql", "smear-parser?/graphql"]
 # Tracks a moving dialect spec: the GraphQLx surface is semver-exempt until the dialect
-# stabilises. This comment is the successor to the deleted `unstable` marker feature, which gated
-# no code anywhere in the workspace and was auto-enabled by this one — cargo features are
-# additive, so an implication cannot ask for consent, and no consumer ever typed `unstable` to get
-# GraphQLx.
+# stabilises, and so is `smear::analysis`, the analyzer of its schemas. This comment is the
+# successor to the deleted `unstable` marker feature, which gated no code anywhere in the workspace
+# and was auto-enabled by this one — cargo features are additive, so an implication cannot ask for
+# consent, and no consumer ever typed `unstable` to get GraphQLx.
 graphqlx = ["smear-lexer/graphqlx", "smear-parser?/graphqlx"]
 
 # The parser tower (`smear::parser`). Off, `smear-parser` is not in the graph at all and this crate
@@ -92,8 +92,8 @@ parser = ["dep:smear-parser"]
 #
 # Off by default until the API stabilises; it flips into `default` alongside a minor bump. It
 # implies `parser` because the builder consumes a parsed `TypeSystemDocument`, and `graphql`
-# because the specification it implements is standard GraphQL's — GraphQLx deliberately has no
-# validator.
+# because the specification it implements is standard GraphQL's: GraphQLx's schemas are analyzed
+# by `analysis`, and the dialect has no executable-document validator.
 #
 # It adds no THIRD-PARTY dependency — it adds `smear-compiler` and turns on `smear-schema/build`,
 # which is where the §3 pass lives, and the edge to `smear-semantics`, the kernels that pass runs
@@ -482,7 +482,7 @@ apollo-compiler = "=1.32.0"
 [lib]
 bench = false
 
-# Both examples read files from argv and print to stdout, and they drive the
+# The first two read files from argv and print to stdout, and they drive the
 # GraphQL lossless lexer, so they need `std` and `graphql`.
 [[example]]
 name = "trivia_spans"
@@ -493,6 +493,15 @@ required-features = ["std", "graphql"]
 name = "token_mix"
 path = "examples/token_mix.rs"
 required-features = ["std", "graphql"]
+
+# What a lowering reads, as running code: two packages built in memory, analyzed and read through
+# the model, with a rule of the consumer's own. It needs `analysis`, and `std` because it prints.
+# `cargo test` builds it and runs nothing, so `ci.yml`'s `test` job runs it by name, which also
+# makes an unmet `required-features` loud.
+[[example]]
+name = "analysis_model"
+path = "examples/analysis_model.rs"
+required-features = ["analysis", "std"]
 
 # ── THE BENCHMARKS ──────────────────────────────────────────────────────────────────────────
 #

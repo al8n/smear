@@ -1,7 +1,10 @@
-//! The `smear::schema` codes the GraphQLx analyzer shares with GraphQL's own validator: each public
-//! constant of `graphqlx::schema` is `smear-schema`'s code of the kind it names, `schema::ALL`
-//! lists each once in declaration order, and every shared code an analysis of the schema corpus
-//! reports has its constant.
+//! The `smear::schema` codes the GraphQLx analyzer shares with GraphQL's own validator, the
+//! registry `graphqlx::schema`: each public constant is `smear-schema`'s code of the kind it names,
+//! and `schema::ALL` lists each once, in declaration order, as a kebab-case code of the family;
+//! every shared code an analysis of the schema corpus reports, and every one a rule of smear's
+//! lists, has its constant; and every constant is reported on a fixture of that corpus or listed by
+//! a rule. Together, every shared code the analysis reports is public and in `ALL`, and nothing
+//! else is.
 //!
 //! The registry golden holds no row for a constant: each constant IS a `SchemaErrorKind`'s code,
 //! whose row the golden has, and two rows with one code are what `diagnostic_codes.rs` refuses.
@@ -12,7 +15,9 @@
 ))]
 
 use smear::{
-  analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze, schema},
+  analysis::graphqlx::{
+    Analysis, Layout, Limits, Package, SourceFile, Tier, analyze, schema, test_support::RULES,
+  },
   diagnostic::{Code, Diagnose},
   validator::SchemaErrorKind,
 };
@@ -25,6 +30,14 @@ use smear::{
 mod corpus;
 
 use corpus::SCHEMA_FIXTURES;
+
+/// The analysis of the SDL `sdl`, a fixture of the draft §3 corpus, as the one file of a `Flat`
+/// root package.
+fn analyzed(sdl: &str) -> Analysis {
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("schema.graphqlx", sdl)]);
+  analyze(&root, &[], &Limits::new())
+}
 
 /// Each shared code, with the kind of `smear-schema`'s it is, in the module's declaration order.
 const SHARED: &[(Code, SchemaErrorKind)] = &[
@@ -357,9 +370,7 @@ fn each_shared_code_is_listed_once_and_well_formed() {
 fn every_shared_code_an_analysis_reports_has_its_constant() {
   let mut shared = 0usize;
   for (kind, sdl, _) in SCHEMA_FIXTURES {
-    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
-      .with_files([SourceFile::new("schema.graphqlx", *sdl)]);
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyzed(sdl);
     for diagnostic in analysis.diagnostics() {
       let code = diagnostic.code();
       if !code.as_str().starts_with("smear::schema::") {
@@ -376,4 +387,47 @@ fn every_shared_code_an_analysis_reports_has_its_constant() {
     shared > 0,
     "no fixture of the corpus made the analysis report a shared code"
   );
+}
+
+/// Each `smear::schema` code a rule of smear's lists is in `schema::ALL`: a rule's constant left out
+/// of the registry fails here, whatever the fixtures fire.
+#[test]
+fn every_shared_code_a_rule_lists_is_registered() {
+  let mut shared = 0usize;
+  for (rule, codes) in RULES {
+    for code in *codes {
+      if !code.as_str().starts_with("smear::schema::") {
+        continue;
+      }
+      shared += 1;
+      assert!(
+        schema::ALL.contains(code),
+        "`{rule}` lists `{code}`, which `schema::ALL` does not hold"
+      );
+    }
+  }
+  assert!(shared > 0, "no rule of smear's lists a shared code");
+}
+
+/// Each code of `schema::ALL` is reported by the analysis of a fixture of the draft §3 corpus, or
+/// listed by a rule of smear's: a constant that names a code nothing reports fails here. Each
+/// constant's kind has its fixture there, so each is reported on its own, and a rule's list is the
+/// fallback.
+#[test]
+fn every_registered_code_is_reported_or_listed() {
+  let mut seen: Vec<Code> = Vec::new();
+  for (_, codes) in RULES {
+    seen.extend_from_slice(codes);
+  }
+  for (_, sdl, _) in SCHEMA_FIXTURES {
+    for diagnostic in analyzed(sdl).diagnostics() {
+      seen.push(diagnostic.code());
+    }
+  }
+  for code in schema::ALL {
+    assert!(
+      seen.contains(code),
+      "`schema::ALL` holds `{code}`, which no fixture's analysis reports and no rule lists"
+    );
+  }
 }
