@@ -555,6 +555,64 @@ fn a_slot_filled_from_a_default_is_counted_at_the_use() {
   );
 }
 
+/// An application of another package's generic directive that leaves a type argument to a default
+/// needs what the default needs, as an occurrence does: a `core` root's bare `@^::dep::d`, whose
+/// `T` the default `string` fills, is refused once, at its path, labelled at that default, and the
+/// same application written `@^::dep::d<string>` once, at its `string`, both with one code. A
+/// root at `alloc` says nothing of either. Refuses an application judged by the type arguments it
+/// writes alone, which says nothing of the bare one.
+#[test]
+fn an_application_that_leaves_a_type_argument_to_a_default_needs_what_it_needs() {
+  let theirs = "directive @d<T = string>(value: T = \"x\") on SCALAR\n";
+  let omitted = "type Query {\n  x: Int\n}\nscalar S @^::dep::d\n";
+  let written = "type Query {\n  x: Int\n}\nscalar S @^::dep::d<string>\n";
+  let dep = || package("dep", Tier::Alloc, &[("dep.graphqlx", theirs)]);
+
+  let root = package("app", Tier::Core, &[("schema.graphqlx", omitted)]).with_dependencies(["dep"]);
+  let analysis = analyze(&root, &[dep()], &Limits::new());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  let dep_file = file(&analysis, 4, "dep.graphqlx");
+  assert_eq!(
+    analysis.diagnostics().len(),
+    1,
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    found(&analysis, TIER),
+    [(
+      at(schema, omitted, "^::dep::d", 0),
+      Some(at(dep_file, theirs, "string", 0))
+    )]
+  );
+  assert_eq!(
+    messages(&analysis, TIER),
+    [
+      "`@d`, with the type arguments this application leaves to its defaults, needs `alloc`, \
+       and package `app` is declared at tier `core`"
+    ]
+  );
+
+  let root = package("app", Tier::Core, &[("schema.graphqlx", written)]).with_dependencies(["dep"]);
+  let analysis = analyze(&root, &[dep()], &Limits::new());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    analysis.diagnostics().len(),
+    1,
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    found(&analysis, TIER),
+    [(at(schema, written, "string", 0), None)]
+  );
+
+  for text in [omitted, written] {
+    let root = package("app", Tier::Alloc, &[("schema.graphqlx", text)]).with_dependencies(["dep"]);
+    quiet(&analyze(&root, &[dep()], &Limits::new()));
+  }
+}
+
 /// A slot filled from a default needs what the default needs of its own, a parameter it names
 /// counting as `core`, and never the argument the slot ends up holding: `^::dep::P2<string>` is
 /// refused once, at its written `string`, and `^::dep::P3` once, labelled at `T`'s default.
