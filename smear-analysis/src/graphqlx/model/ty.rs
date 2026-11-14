@@ -181,10 +181,41 @@ impl Model {
   /// Substitution is not followed: a written `Page<User>` is listed, and a `Cursor<User>` that
   /// `Page`'s fields would need is listed only where the program writes one. A code generator that
   /// monomorphises computes that closure from these.
+  /// [`UnboundedInstantiation`](crate::graphqlx::UnboundedInstantiation) says whether that closure
+  /// is finite. A directive has none here: an application is no type occurrence, and its
+  /// instantiation is [`Application::ty`](crate::graphqlx::Application::ty).
   ///
   /// # Panics
   ///
   /// If `def` is not one of [`defs`](Self::defs).
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use smear_analysis::graphqlx::{
+  ///   Layout, Limits, Namespace, Package, SourceFile, Tier, TyKind, analyze,
+  /// };
+  ///
+  /// let root = Package::new("app", Layout::Flat, Tier::Std).with_files([SourceFile::new(
+  ///   "schema.graphqlx",
+  ///   "type Page<T> { items: [T!]! } type Query { a: Page<String> b: Page<Int> c: Page<String> }",
+  /// )]);
+  /// let analysis = analyze(&root, &[], &Limits::new());
+  /// assert!(analysis.is_ok());
+  ///
+  /// let model = analysis.model();
+  /// let page = model.lookup(Namespace::Type, "^::app::Page").expect("the root declares `Page`");
+  /// // `Page<String>`, written twice, is one type: two instantiations, each with its argument.
+  /// let instantiations = model.instantiations(page);
+  /// assert_eq!(instantiations.len(), 2);
+  /// for &ty in instantiations {
+  ///   let TyKind::Named { def, args, .. } = model.ty(ty).kind() else {
+  ///     panic!("an instantiation is a named type");
+  ///   };
+  ///   assert_eq!(def, page);
+  ///   assert_eq!(args.len(), 1);
+  /// }
+  /// ```
   //
   // The instantiation phase records each written occurrence's own type, both nullnesses when both
   // are written; the builder sorts them and keeps each once.

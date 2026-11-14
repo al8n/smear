@@ -83,6 +83,49 @@ impl Model {
 /// with no type argument and no argument.
 ///
 /// `Copy`: it holds the model and an id, and everything it answers is borrowed from the model.
+///
+/// `@repr` has no accessor of its own: a backend reads its `lang`, `type` and `for` off its
+/// applications, as below.
+///
+/// # Examples
+///
+/// ```
+/// use smear_analysis::graphqlx::{
+///   Layout, Limits, Package, Resolution, SourceFile, Tier, ValueKind, analyze,
+/// };
+///
+/// let text = "schema @repr(for: bytes, lang: \"rust\", type: \"bytes::Bytes\") { query: Query } \
+///             type Query { x: Int }";
+/// let root = Package::new("app", Layout::Flat, Tier::Std)
+///   .with_files([SourceFile::new("schema.graphqlx", text)]);
+/// let analysis = analyze(&root, &[], &Limits::new());
+/// assert!(analysis.is_ok());
+///
+/// let model = analysis.model();
+/// let repr = model.builtins().repr();
+/// let mut read = 0;
+/// for &id in model.schema().applications() {
+///   let application = model.application(id);
+///   if application.directive() != Resolution::Resolved(repr) {
+///     continue;
+///   }
+///   let (mut lang, mut host, mut target) = (None, None, None);
+///   for argument in application.arguments() {
+///     let name = model.member(argument.argument()).name();
+///     match (name, model.value(argument.value()).kind()) {
+///       ("lang", ValueKind::String(text)) => lang = Some(text),
+///       ("type", ValueKind::String(text)) => host = Some(text),
+///       ("for", ValueKind::Type { def, .. }) => target = Some(def),
+///       _ => {}
+///     }
+///   }
+///   assert_eq!(lang, Some("rust"));
+///   assert_eq!(host, Some("bytes::Bytes"));
+///   assert_eq!(target, Some(model.builtins().bytes()));
+///   read += 1;
+/// }
+/// assert_eq!(read, 1);
+/// ```
 #[derive(Clone, Copy)]
 pub struct Application<'a> {
   model: &'a Model,

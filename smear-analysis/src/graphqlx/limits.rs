@@ -56,6 +56,13 @@ const _: () = assert!(
 /// as a panic. Two bounds are not refusals: the diagnostic ceiling and the near-miss budget limit
 /// what the analysis says, not what it accepts.
 ///
+/// The parser's own ceilings are not among these bounds: how deep brackets nest, how many tokens a
+/// parse lexes, and how many diagnostics it keeps. They belong to the parser value:
+/// [`analyze`](crate::graphqlx::analyze) reads every file with the syntactic layer's defaults, and
+/// [`analyze_with`](crate::graphqlx::analyze_with) takes a layer that holds its own limits,
+/// `smear-lexer`'s `SyntacticLimits` or `LosslessLimits`, whose ceilings are `usize`, the lexer's
+/// width, where these bounds are `u32`.
+///
 /// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
 /// is always declared whole and every package has its root module, and that the built-in library's
 /// types are built whatever the generic depth, instantiation and substitution bounds are, its
@@ -177,6 +184,10 @@ impl Limits {
   /// How deep a module may sit below its package's root module, each directory and each inline
   /// `mod` counting one level: the files of `media/vision/` are a module two deep, and a `mod`
   /// written in one of them declares a module three deep.
+  ///
+  /// An inline `mod` opens a brace, so at the parser's default bracket ceiling, 24, the parser
+  /// refuses inline modules nested deeper than that before this bound can: it decides for directory
+  /// modules, and for a parser value given a deeper ceiling.
   ///
   /// A directory deeper than this is reported once, at its package's package source, and the
   /// files under it are parsed but place nothing in any module; a `mod` deeper than this is
