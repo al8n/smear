@@ -716,9 +716,11 @@ fn a_members_type_is_of_the_kind_its_position_takes() {
 }
 
 #[test]
-fn what_this_part_leaves_to_instantiations_is_accepted() {
-  // A scalar's arguments, a collection's, and a type parameter are not judged here; a generic
-  // input object as a field's type and a generic object as an argument's are.
+fn a_scalars_arguments_are_opaque_and_a_collections_are_not() {
+  // A scalar that is no collection hides its arguments, and a type parameter is a type of every
+  // position; a collection holds values of its arguments, so an object in a map's value is no
+  // input type, at the object; a generic input object as a field's type and a generic object as
+  // an argument's are judged by their kind, at the whole occurrence.
   let text = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\nscalar Ref<R>\n\
               input Filter<F> {\n  eq: F\n}\ntype Page<P> {\n  items: [P]\n  at(cursor: P): Int\n}\n\
               type Uses {\n  r(a: Ref<Obj>): Int\n  m(a: HashMap<string, Obj>): Int\n  \
@@ -728,11 +730,103 @@ fn what_this_part_leaves_to_instantiations_is_accepted() {
   assert_eq!(
     found(&analysis),
     [
+      (
+        ARGUMENT_TYPE,
+        named(schema, text, "HashMap<string, ", "Obj", 0),
+        None
+      ),
       (FIELD_TYPE, at(schema, text, "Filter<Int>", 0), None),
       (ARGUMENT_TYPE, at(schema, text, "Page<Int>", 0), None),
     ],
     "{:#?}",
     analysis.diagnostics()
+  );
+}
+
+/// An object, an input object, a user's set and a user's map whose value a default fills, and a
+/// scalar that is no collection; then collections of them in every position, nested, under lists,
+/// and with a parameter, the refused ones first in each definition.
+const COLLECTIONS: &str = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\ninput In {\n  i: Int\n}\n\
+                           scalar Bag<T> @set\nscalar Pair<A, B = Obj> @map\nscalar Ref<R>\n\
+                           type Uses {\n  f1(m: HashMap<string, Obj>): Int\n  \
+                           f2(s: [Bag<Obj>!]): Int\n  f3(n: HashMap<string, Bag<Obj>>): Int\n  \
+                           g: HashMap<string, In>\n  f4(p: Pair<string>): Int\n  \
+                           f5(k: HashMap<string, In>): Int\n  h: HashMap<string, Obj>\n  \
+                           f6(r: Ref<Obj>): Int\n}\n\
+                           input Inputs {\n  b: Bag<Obj>\n  c: Bag<In>\n}\n\
+                           directive @d(dm: HashMap<string, Obj>) on FIELD\n\
+                           type G<T> {\n  f7(a: HashMap<string, T>): Int\n}\n";
+
+#[test]
+fn a_collections_arguments_take_the_kind_of_its_place() {
+  let analysis = analyze_one(COLLECTIONS);
+  let schema = schema_file(&analysis);
+  let leaf =
+    |code: &'static str, before: &str, name: &str| -> (&'static str, Location, Option<Location>) {
+      (code, named(schema, COLLECTIONS, before, name, 0), None)
+    };
+  assert_eq!(
+    found(&analysis),
+    [
+      leaf(ARGUMENT_TYPE, "m: HashMap<string, ", "Obj"),
+      // Under the list and the `!`, at the set's element.
+      leaf(ARGUMENT_TYPE, "s: [Bag<", "Obj"),
+      // Through two collections, at the deepest.
+      leaf(ARGUMENT_TYPE, "n: HashMap<string, Bag<", "Obj"),
+      leaf(FIELD_TYPE, "g: HashMap<string, ", "In"),
+      // The value is the default's: at the occurrence, labelled at the default.
+      (
+        ARGUMENT_TYPE,
+        at(schema, COLLECTIONS, "Pair<string>", 0),
+        Some(named(schema, COLLECTIONS, "B = ", "Obj", 0))
+      ),
+      leaf(INPUT_FIELD_TYPE, "b: Bag<", "Obj"),
+      leaf(DIRECTIVE_ARGUMENT_TYPE, "dm: HashMap<string, ", "Obj"),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  // Each names the member, its owner, the collection and what does not fit, and prints no type.
+  let messages = messages(&analysis);
+  assert_eq!(
+    messages[0],
+    "the argument `m` of the field `f1` of `Uses` is typed by the collection `HashMap`, whose \
+     argument is the object type `Obj`, and an argument's type is an input type"
+  );
+  assert_eq!(
+    messages[2],
+    "the argument `n` of the field `f3` of `Uses` is typed by the collection `HashMap`, whose \
+     argument is the object type `Obj`, and an argument's type is an input type"
+  );
+  assert_eq!(
+    messages[3],
+    "the field `g` of `Uses` is typed by the collection `HashMap`, whose argument is the input \
+     object `In`, and a field's type is an output type"
+  );
+  assert_eq!(
+    messages[4],
+    "the argument `p` of the field `f4` of `Uses` is typed by the collection `Pair`, whose \
+     argument is the object type `Obj`, and an argument's type is an input type"
+  );
+  assert_eq!(
+    messages[6],
+    "the argument `dm` of the directive `@d` is typed by the collection `HashMap`, whose \
+     argument is the object type `Obj`, and a directive's argument's type is an input type"
+  );
+  // GraphQL's phrases and helps, as the base check gives them, and the default's label.
+  let diagnostics = analysis.diagnostics();
+  let first = diagnostics.iter().next().expect("a diagnostic");
+  assert_eq!(
+    (first.primary_label(), first.help()),
+    (
+      Some("argument type is not an input type"),
+      Some("an argument's type must be a scalar, enum or input object.")
+    )
+  );
+  let filled = diagnostics.iter().nth(4).expect("five diagnostics");
+  assert_eq!(
+    filled.label(0).map(|label| label.text()),
+    Some("filled from this default")
   );
 }
 

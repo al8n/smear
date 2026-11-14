@@ -438,6 +438,10 @@ impl Analysis {
 ///   object is `field-type-not-output-type`, and an argument, an input field or a directive's
 ///   argument whose base is an object, an interface or a union is `argument-type-not-input-type`,
 ///   `input-field-type-not-input-type` or `directive-argument-type-not-input-type`, at the base.
+///   A base that is a collection is judged by its complete type's arguments, through the
+///   collections and lists they hold, and the same code is at the deepest occurrence that writes
+///   the way to the one of the wrong kind, with a label at the default that fills a slot the
+///   occurrence leaves out.
 ///   An `implements` entry of an object or an interface that names what is no interface, a type
 ///   parameter among them, is `implements-non-interface`, at the entry. An interface on a cycle
 ///   of `implements` entries, of any length, is `self-implementing-interface`, at its name. A

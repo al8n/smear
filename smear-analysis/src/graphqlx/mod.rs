@@ -156,7 +156,9 @@
 //! code of its list; and a definition that holds members and holds none, its extensions' counted,
 //! is `smear::schema::empty-fields-definition`, or the code of its kind, a marker holding none; and
 //! a member typed by a definition of a kind its position does not take is
-//! `smear::schema::field-type-not-output-type`, or the code of its position; and an `implements`
+//! `smear::schema::field-type-not-output-type`, or the code of its position, and so is one typed by
+//! a collection that holds one, a set or a map being of the kinds of its arguments; and an
+//! `implements`
 //! entry of an object or an interface that names what is no interface is
 //! `smear::schema::implements-non-interface`; and an interface on a cycle of `implements` entries
 //! is `smear::schema::self-implementing-interface`; and a union member that is no object type is
@@ -207,6 +209,7 @@ mod lower;
 mod model;
 mod package;
 mod parse;
+mod positions;
 mod raw;
 mod resolve;
 mod rules;

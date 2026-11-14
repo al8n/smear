@@ -378,7 +378,7 @@ rule_set! {
   /// of the definitions a supplied package wrote, GraphQL's own rules: a member's name does not
   /// begin with `__`; a definition's members have distinct names, and so have a field's arguments;
   /// a definition that holds members holds one at least, a marker holding none; a member's type is
-  /// of the kind its position takes; an object or an interface implements interfaces; no interface
+  /// of the kind its position takes, and so are a collection's arguments there; an object or an interface implements interfaces; no interface
   /// implements itself; a union's members are object types; a required argument or input field is
   /// not deprecated; a OneOf input object's fields are nullable and have no default; and an input
   /// object takes `@oneOf` in its definition alone. And of the directives and every application a

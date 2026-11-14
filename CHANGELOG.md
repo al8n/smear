@@ -558,7 +558,11 @@ All notable changes to Smear are documented in this file.
   base, under its lists, is an input object, and an argument, an input field or a directive's
   argument whose base is an object, an interface or a union, are `field-type-not-output-type`,
   `argument-type-not-input-type`, `input-field-type-not-input-type` or
-  `directive-argument-type-not-input-type`, at the base; and an `implements` entry of an object or
+  `directive-argument-type-not-input-type`, at the base, and so is a base that is a collection
+  holding such a type, its complete type's arguments read through the collections and lists they
+  hold, at the deepest occurrence that writes the way to it, with a label at the default that
+  fills a slot left out: `f(a: HashMap<string, User>)` is `argument-type-not-input-type` at
+  `User`; and an `implements` entry of an object or
   an interface that names what is no interface, a type parameter among them, is
   `implements-non-interface`; and an interface on a cycle of `implements` entries, of any length,
   is `self-implementing-interface`; and a union member that names what is no object type is
