@@ -229,11 +229,7 @@ impl Sweep {
     }
     let wanted = nine_counts(schema_codes.iter().copied());
     let found = nine_counts(analysis_codes.iter().copied());
-    let reports = |code: &str| {
-      analysis_codes
-        .iter()
-        .any(|written: &&'static str| *written == code)
-    };
+    let reports = |code: &'static str| analysis_codes.contains(&code);
     let mut equal = true;
     for (at, code) in NINE.iter().enumerate() {
       let (Some(&theirs), Some(&ours)) = (wanted.get(at), found.get(at)) else {
