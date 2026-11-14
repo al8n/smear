@@ -135,9 +135,15 @@ pub enum DiagnosticKind {
   /// first of the definition's bounds that fails, with a label at the bound and one at the type
   /// argument, written or filled from a default. The occurrence keeps its type.
   ///
+  /// A directive application is an instantiation of its directive too. Once its type arguments are
+  /// complete, the ones it writes and then those its directive's defaults fill, its type is judged
+  /// against its directive's bounds, once for each distinct type. Each application whose type
+  /// fails is reported at its path, naming the directive with its `@`, for the first of the
+  /// directive's bounds that fails, with a label at the bound and one at the type argument where
+  /// the application writes it, or else at the directive's default that filled it.
+  ///
   /// A bound of `MapKey` that a `NonZero` fails is passed over: that `NonZero` holds what is no
-  /// integer primitive, and is [`NonZeroArgument`](Self::NonZeroArgument) where it is written. A
-  /// directive application's type arguments are not judged against its directive's bounds.
+  /// integer primitive, and is [`NonZeroArgument`](Self::NonZeroArgument) where it is written.
   UnsatisfiedBound,
 
   // -- Values ------------------------------------------------------------------------------------
