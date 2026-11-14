@@ -46,15 +46,21 @@ const _: () = assert!(
 
 /// The bounds one analysis runs under.
 ///
-/// A package set is untrusted input, and the analysis bounds every resource such input could
-/// otherwise grow without limit: the number of definitions and of modules, how deep modules, `use`
-/// trees and types nest, how long a path is, how many rounds the glob fixpoint runs, how many
-/// modules one module's globs name, how many instantiations of generic definitions it interns, how
-/// many steps of substitution it takes, how many steps judging bounds takes, how many steps
-/// completing values takes, how many steps checking implementations takes, and how many bytes of
-/// source it reads. A bound that is passed is reported as `smear::graphqlx::resource-limit`, never
-/// as a panic. Two bounds are not refusals: the diagnostic ceiling and the near-miss budget limit
-/// what the analysis says, not what it accepts.
+/// A package set is untrusted input, and these bounds hold what the analysis builds from the
+/// packages' texts, and from their files' directories, and what it spends on them: the number of
+/// definitions and of modules, how deep modules, `use` trees and types nest, how many segments a
+/// path a scope resolves has, how many rounds the glob fixpoint runs, how many modules one module's
+/// globs name, how many instantiations of generic definitions it interns, how many steps of
+/// substitution it takes, how many steps judging bounds takes, how many steps completing values
+/// takes, how many steps checking implementations takes, and how many bytes the supplied texts
+/// hold. A bound that is passed stops that work, is reported as `smear::graphqlx::resource-limit`,
+/// and the analysis goes on. Two bounds are not refusals: the diagnostic ceiling and the near-miss
+/// budget limit what the analysis says, not what it accepts.
+///
+/// What a caller supplies beside the texts is the caller's to bound: how many packages and files,
+/// how many dependencies each names, and how long their names and paths are. The analysis reads
+/// each of those, sorts each package's files by path and the packages and their dependencies by
+/// name, and keeps a copy of every package's name and every file's path.
 ///
 /// The parser's own ceilings are not among these bounds: how deep brackets nest, how many tokens a
 /// parse lexes, and how many diagnostics it keeps. They belong to the parser value:
@@ -145,16 +151,16 @@ impl Limits {
   /// hold counts, the built-in library's own included: each type and directive a file declares, and
   /// each primitive `core` makes for a width a package writes. A root package's definition that
   /// replaces one of GraphQL's built-ins takes that built-in's definition and adds none, unless the
-  /// built-in is a primitive that no package writes, which it makes.
+  /// built-in is a primitive no package has written yet, which it makes.
   ///
   /// The built-in library is always declared whole, so a limit below its own count admits no
-  /// supplied definition at all. The first definition a supplied package would add past the limit,
-  /// a type, a directive or a primitive it writes, is reported once, where it is named, and nothing
-  /// after it is collected: no item of the rest of its file, nor of any file after it.
+  /// supplied definition beyond one that replaces a GraphQL built-in the model already holds, which
+  /// adds none. The first definition a supplied package would add past the limit, a type, a
+  /// directive or a primitive it writes, is reported once, where it is named, and nothing after it
+  /// is collected: no item of the rest of its file, nor of any file after it.
   ///
   /// The default is 2^20. A hand-written schema declares thousands of definitions, not a million,
-  /// and the bound is what stops a generated or hostile package set from growing the model's
-  /// tables without limit before any rule has run.
+  /// and the bound caps a generated or hostile package set at that many before any rule has run.
   #[inline]
   pub const fn max_definitions(&self) -> u32 {
     self.max_definitions
@@ -201,7 +207,10 @@ impl Limits {
     self.max_module_depth
   }
 
-  /// How many segments one written path may have: `^::geo::shapes::Point` has three.
+  /// How many segments one path may have where a scope resolves it: a type's, a directive's, a
+  /// `use` item's, an extension's target, a root and a type value, `^::geo::shapes::Point` having
+  /// three. An enum value's segments but its last are resolved, so `Color::RED` has one, and a bare
+  /// enum value, looked up in its enum, none. The built-in library's paths count as any other's.
   ///
   /// The default is 64. A path names a package, a few modules and an item; resolution walks each
   /// path segment by segment, so the bound limits that walk for a path no author writes.
@@ -348,8 +357,9 @@ impl Limits {
   ///
   /// Past it, each occurrence of an instantiation whose bounds could not be judged within it is
   /// reported where it is written, and keeps its type, and each such application is reported at
-  /// its path. Every bound takes a step, so `0` reports every instantiation of a definition with a
-  /// bound, a `HashMap` among them.
+  /// its path. Every bound takes a step, so `0` reports each written instantiation of a definition
+  /// with a bound, and each application of a directive with one whose type arguments complete, a
+  /// `HashMap` among them.
   ///
   /// The default is 2^20: sixteen steps for each of the instantiations
   /// [`max_instantiations`](Self::max_instantiations) admits at its default. `Sorted<User>`, of
@@ -415,9 +425,9 @@ impl Limits {
   /// whose next required field, or next default, left out cannot be paid for is starved likewise:
   /// `resource-limit` at the literal, once; what it writes is still made, what was filled stays,
   /// and none of the rest of its required fields and defaults is read. Its required fields are
-  /// asked for before its defaults. At `0`, no default fills an argument or a field, no written
-  /// value stands for a list, and no decimal integer of more than 38 significant digits is read: a
-  /// decimal `u128::MAX` is `resource-limit`.
+  /// asked for before its defaults. At `0`, no default fills what a supplied package leaves out, no
+  /// value it writes stands for a list, and no decimal integer of more than 38 significant digits
+  /// is read: a decimal `u128::MAX` is `resource-limit`.
   ///
   /// The default is 2^20: a read and one copied value for each of half a million applications, so
   /// a program of a hundred thousand applications that each leave four defaults of one value out
@@ -432,10 +442,11 @@ impl Limits {
   }
 
   /// How many steps the analysis may take to check implementations, over the whole analysis:
-  /// that each definition implements every interface it declares, under the type arguments its
-  /// `implements` entry writes, and every interface those interfaces implement; and that no two of
-  /// a definition's entries, or of a union's members, are one type, as written or under the type
-  /// arguments of an instantiation the program writes.
+  /// that each definition implements the interfaces its own package's `implements` entries name,
+  /// markers alone where it is no object and no interface, under the type arguments each entry
+  /// writes, and what those interfaces implement in turn; and that no two of a definition's
+  /// entries, or of a union's members, are one type, as written or under the type arguments of an
+  /// instantiation the program writes.
   ///
   /// A step is one of: an item looked at of a list of another definition's, an interface's
   /// `implements` entries and fields, a field's arguments, a type's entries, a type parameter's
@@ -448,10 +459,9 @@ impl Limits {
   ///
   /// Past it, a definition's check stops: `resource-limit` once, at the `implements` entry it was
   /// checking, and nothing more is said of the definition. An instantiation whose entries or
-  /// members could not be compared is `resource-limit` at each occurrence of it. At `0` every
-  /// definition that implements an interface or a marker with an entry or a field to look at is
-  /// reported, and so is every occurrence of a definition whose own entries or members name its
-  /// type parameters. What a rebuild derives counts toward
+  /// members could not be compared is `resource-limit` at each occurrence of it. At `0` each check
+  /// that would take a step stops and is reported, a definition's once, at the entry it was
+  /// checking. What a rebuild derives counts toward
   /// [`max_instantiations`](Self::max_instantiations) and
   /// [`max_generic_depth`](Self::max_generic_depth); nothing here draws on
   /// [`max_substitutions`](Self::max_substitutions) or [`max_bound_steps`](Self::max_bound_steps).
@@ -468,14 +478,15 @@ impl Limits {
     self.max_implementation_steps
   }
 
-  /// How many bytes of source text the supplied packages may hold together. The built-in
-  /// packages' own text is smear's and does not count.
+  /// How many bytes of text the supplied files may hold together. Their paths and their packages'
+  /// names do not count, nor does the built-in packages' own text, which is smear's.
   ///
   /// Past it, the package set is refused at the root package and no supplied file is parsed.
   ///
   /// The default is 2^26, 64 MiB: far more than any package set written by hand, and the bound on
-  /// everything the analysis reads. Because the bound is a `u32`, every byte offset into an
-  /// accepted package set fits one.
+  /// the texts the analysis reads. What a caller supplies beside them, how many files and packages
+  /// and how long their paths and names are, is the caller's to bound. Because the bound is a
+  /// `u32`, every byte offset into an accepted package set's texts fits one.
   #[inline]
   pub const fn max_source_bytes(&self) -> u32 {
     self.max_source_bytes
@@ -499,12 +510,13 @@ impl Limits {
     self.max_diagnostics
   }
 
-  /// How many name comparisons the analysis may spend, over the whole analysis, looking for a "did
-  /// you mean" suggestion for names that do not resolve.
+  /// How many names the analysis may look at, over the whole analysis, looking for a "did you mean"
+  /// suggestion for names that do not resolve, each module a glob names that a search reads
+  /// costing one more.
   ///
-  /// Past it, a name that does not resolve is still reported, without a suggestion. The search
-  /// compares each unresolved name with every name visible where it was written, which is
-  /// quadratic over the program; this bound makes it linear in the worst case.
+  /// Past it, a name that does not resolve is still reported, without a suggestion. A search looks
+  /// at the names visible where an unresolved name was written, which is quadratic over the
+  /// program; this bound makes it linear in the worst case.
   ///
   /// The default is 2^20: a program with a thousand unresolved names among a thousand visible
   /// ones still gets every suggestion, and an honest program has a handful of unresolved names.

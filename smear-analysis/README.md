@@ -63,10 +63,13 @@ argument that grows, for a backend that makes one copy per instantiation.
 
 ## Limits
 
-Every resource that untrusted input could grow is bounded by
-[`graphqlx::Limits`](https://docs.rs/smear-analysis/latest/smear_analysis/graphqlx/struct.Limits.html),
-and a bound passed is `smear::graphqlx::resource-limit`, never a panic, but for the diagnostic
-ceiling and the near-miss budget, which limit what the analysis says and not what it accepts.
+What the analysis builds from the supplied texts, and from their files' directories, and what it
+spends on them, is bounded by
+[`graphqlx::Limits`](https://docs.rs/smear-analysis/latest/smear_analysis/graphqlx/struct.Limits.html):
+a bound passed stops that work, is reported as `smear::graphqlx::resource-limit`, and the analysis
+goes on, but for the diagnostic ceiling and the near-miss budget, which limit what the analysis says
+and not what it accepts. What a caller supplies beside the texts is the caller's to bound: how many
+packages and files, how many dependencies each names, and how long their names and paths are.
 
 ## Feature flags
 

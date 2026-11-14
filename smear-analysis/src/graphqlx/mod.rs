@@ -258,20 +258,26 @@
 //!
 //! # Limits
 //!
-//! [`Limits`] bounds every resource untrusted input could grow, and a bound passed is
-//! `smear::graphqlx::resource-limit`, never a panic, but for the diagnostic ceiling and the
-//! near-miss budget, which limit what the analysis says and not what it accepts. Each is a `u32`
-//! count, and `0` admits none of what it counts, but that every package has its root module and
-//! the built-in library is always declared whole, its types built whatever the generic depth,
-//! instantiation and substitution bounds, and its bounds, its own values and its implementations
-//! costing nothing to judge, complete or check.
+//! [`Limits`] bounds what the analysis builds from the supplied texts, and from their files'
+//! directories, and what it spends on them: a bound passed stops that work, is reported as
+//! `smear::graphqlx::resource-limit`, and the analysis goes on, but for the diagnostic ceiling and
+//! the near-miss budget, which limit what the analysis says and not what it accepts. What a
+//! caller supplies beside the texts is the caller's to bound: how many packages and files, how
+//! many dependencies each names, and how long their names and paths are. The analysis reads each
+//! of those, sorts each package's files by path and the packages and their dependencies by name,
+//! and keeps a copy of every package's name and every file's path.
+//!
+//! Each bound is a `u32` count, and `0` admits none of what it counts, but that every package has
+//! its root module and the built-in library is always declared whole, its types built whatever the
+//! generic depth, instantiation and substitution bounds, and its bounds, its own values and its
+//! implementations costing nothing to judge, complete or check.
 //!
 //! | Bound | Default | What it counts | At `0` |
 //! |---|---|---|---|
-//! | [`max_definitions`](Limits::max_definitions) | 2^20 | The definitions the model holds, over every package, the built-in library's included | No supplied definition |
+//! | [`max_definitions`](Limits::max_definitions) | 2^20 | The definitions the model holds, over every package, the built-in library's included | No supplied definition beyond one that replaces a GraphQL built-in |
 //! | [`max_modules`](Limits::max_modules) | 2^16 | The modules the model holds, over every package | No module but the built-in packages' and the root modules |
 //! | [`max_module_depth`](Limits::max_module_depth) | 64 | How deep a module sits below its package's root module | No directory module and no `mod` |
-//! | [`max_path_segments`](Limits::max_path_segments) | 64 | The segments of one written path | No path |
+//! | [`max_path_segments`](Limits::max_path_segments) | 64 | The segments of one path a scope resolves, an enum value's but its last | No path a scope resolves, the built-in library's included; a bare enum value is still read |
 //! | [`max_use_depth`](Limits::max_use_depth) | 32 | How deeply one `use` tree nests its braces | No braced group in a `use` item |
 //! | [`max_glob_iterations`](Limits::max_glob_iterations) | 2^10 | The rounds the glob fixpoint of one module's `use` items runs | No round |
 //! | [`max_globs`](Limits::max_globs) | 64 | The modules the glob `use` items of one module name | No glob |
@@ -279,11 +285,11 @@
 //! | [`max_instantiations`](Limits::max_instantiations) | 2^16 | The distinct instantiations of generic definitions the analysis interns | No instantiation a supplied package needs |
 //! | [`max_substitutions`](Limits::max_substitutions) | 2^20 | The steps of substitution, filling the type arguments a use leaves out | No type argument a supplied package leaves out is filled |
 //! | [`max_bound_steps`](Limits::max_bound_steps) | 2^20 | The steps judging bounds takes | Every written instantiation of a definition with a bound is reported, a `HashMap` among them |
-//! | [`max_value_steps`](Limits::max_value_steps) | 2^20 | The steps completing values beyond what is written takes | No default fills an argument or a field, no written value stands for a list, and no decimal integer of more than 38 significant digits is read |
-//! | [`max_implementation_steps`](Limits::max_implementation_steps) | 2^20 | The steps checking implementations takes | Every definition that implements an interface or a marker with an entry or a field to look at is reported |
-//! | [`max_source_bytes`](Limits::max_source_bytes) | 2^26, 64 MiB | The bytes of source the supplied packages hold together | No supplied byte of source |
+//! | [`max_value_steps`](Limits::max_value_steps) | 2^20 | The steps completing values beyond what is written takes | No default fills what a supplied package leaves out, no value it writes stands for a list, and no decimal integer of more than 38 significant digits is read |
+//! | [`max_implementation_steps`](Limits::max_implementation_steps) | 2^20 | The steps checking implementations takes | Each check that would take a step stops and is reported, a definition's at the entry it was checking |
+//! | [`max_source_bytes`](Limits::max_source_bytes) | 2^26, 64 MiB | The bytes of the supplied files' texts, together; not their paths | No byte of a supplied text |
 //! | [`max_diagnostics`](Limits::max_diagnostics) | 16 384 | The diagnostics one analysis keeps, the least of them | None is kept, and every error is still counted |
-//! | [`max_near_miss_comparisons`](Limits::max_near_miss_comparisons) | 2^20 | The name comparisons spent looking for a "did you mean" suggestion | No suggestion |
+//! | [`max_near_miss_comparisons`](Limits::max_near_miss_comparisons) | 2^20 | The names looked at, and the globbed modules read, looking for a "did you mean" suggestion | No suggestion |
 //!
 //! The parser's own ceilings are not among these: they belong to the parser value, as [`Limits`]
 //! says.
