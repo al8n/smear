@@ -783,6 +783,44 @@ fn an_arguments_type_that_cannot_be_built_is_a_limit() {
   assert_eq!(argument_shown(model, "Query", 1, "a"), "absent");
 }
 
+/// A value whose type cannot be built keeps the path it is written as, though its row is
+/// unresolved, as every row of a written path does: under a depth of two, `RED` for `@w<[Int]>`'s
+/// three-deep `a`, and for `c` of the literal `{ c: RED }` of `In<[Int]>`, two deep, whose `[[U]]`
+/// is three deep there, each with `resource-limit` at it. Refuses the path of an unbuilt row
+/// dropped.
+#[test]
+fn an_unbuilt_value_keeps_the_path_it_is_written_as() {
+  let text = "type Query @w<[Int]>(a: RED, b: { c: RED }) {\n  x: Int\n}\n\
+              directive @w<T>(a: [[T]], b: In<T>) on OBJECT\ninput In<U> {\n  c: [[U]]\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_generic_depth(2));
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (LIMIT, after(schema, text, "(a: ", "RED")),
+      (LIMIT, after(schema, text, "{ c: ", "RED")),
+    ]
+  );
+  let model = analysis.model();
+  let application = application_on(model, "Query", 0);
+  let a = argument(model, application, "a").expect("`a`'s value");
+  let b = argument(model, application, "b").expect("`b`'s value");
+  let ValueKind::Object([c]) = model.value(b).kind() else {
+    panic!("`b` is no object of one field");
+  };
+  for id in [a, c.value()] {
+    let value = model.value(id);
+    assert!(
+      matches!(value.kind(), ValueKind::Unresolved),
+      "value {}",
+      id.get()
+    );
+    let path = value.path().expect("the path it is written as");
+    assert_eq!(path.segments().len(), 1);
+    assert_eq!(model.name(path.segments()[0]), "RED");
+  }
+}
+
 /// An application inside a generic definition whose type arguments name its parameters keeps its
 /// arguments' literals, written and copied, each typed with that parameter, and says nothing.
 /// Refuses a value under an open type coerced.
