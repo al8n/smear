@@ -72,11 +72,51 @@ fn analyzed(path: &Path, text: &[u8]) -> Analysis {
   analyze(&root, &[], &Limits::new())
 }
 
+/// GraphQL's code for a schema with no query root. Most files of the corpora are parts of a schema
+/// and write none, so the sweeps over ok files read a file whose only errors are this code as ok.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// Whether `analysis` is ok but for its program having no query root: every error it holds, if
+/// any, is that code.
+fn ok_but_for_the_root(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() == NO_QUERY_ROOT)
+    .count();
+  diagnostics.error_count() == waived
+}
+
+/// Files of the schema fixtures that each sweep over ok files must read as ok: whole schemas, each
+/// with its query root, that both dialects accept, and that write defaults of every shape. A sweep
+/// that reads none of them, or no file at all, checks nothing, and fails.
+const KNOWN_OK: [&str; 3] = [
+  "countries.graphql",
+  "introspection_agreement.graphql",
+  "introspection_defaults.graphql",
+];
+
+/// Asserts that a sweep over ok files read each of [`KNOWN_OK`] among `checked`, the files it
+/// read as ok, and prints how many it read.
+fn checked_the_known_ok(checked: &[PathBuf]) {
+  println!("{} corpus files read as ok", checked.len());
+  for name in KNOWN_OK {
+    assert!(
+      checked
+        .iter()
+        .any(|path: &PathBuf| path.file_name() == Some(std::ffi::OsStr::new(name))),
+      "`{name}` is not read as ok: {} files are",
+      checked.len()
+    );
+  }
+}
+
 #[test]
 fn an_ok_corpus_file_has_no_unresolved_value() {
+  let mut checked: Vec<PathBuf> = Vec::new();
   for (path, text) in corpus() {
     let analysis = analyzed(&path, &text);
-    if !analysis.is_ok() {
+    if !ok_but_for_the_root(&analysis) {
       continue;
     }
     let model = analysis.model();
@@ -91,7 +131,9 @@ fn an_ok_corpus_file_has_no_unresolved_value() {
         path.display()
       );
     }
+    checked.push(path);
   }
+  checked_the_known_ok(&checked);
 }
 
 /// Over every corpus file whose analysis is ok, a value kept as written is a custom scalar's that
@@ -100,9 +142,10 @@ fn an_ok_corpus_file_has_no_unresolved_value() {
 /// other value is coerced.
 #[test]
 fn an_ok_corpus_file_keeps_a_literal_only_where_nothing_is_coerced() {
+  let mut checked: Vec<PathBuf> = Vec::new();
   for (path, text) in corpus() {
     let analysis = analyzed(&path, &text);
-    if !analysis.is_ok() {
+    if !ok_but_for_the_root(&analysis) {
       continue;
     }
     let model = analysis.model();
@@ -130,7 +173,9 @@ fn an_ok_corpus_file_keeps_a_literal_only_where_nothing_is_coerced() {
         path.display()
       );
     }
+    checked.push(path);
   }
+  checked_the_known_ok(&checked);
 }
 
 /// The value `id`, written out: a scalar as its kind and its text, `Int 1`, a list as
