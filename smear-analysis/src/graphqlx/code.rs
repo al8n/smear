@@ -154,7 +154,9 @@ pub enum DiagnosticKind {
   /// A collection literal out of its place. A `set!{…}` is a value of a set alone, and a
   /// `map!{…}` of a map alone: one where a type that is no collection of its shape is expected,
   /// but a custom scalar that is no collection, which keeps any literal, is reported at the
-  /// literal. And a set or a map, an extern one among them, takes its own literal and `null`
+  /// literal; one whose expected type takes no value, or still names a type parameter, is kept as
+  /// written, and nothing is said. And a set or a map, an extern one among them, takes its own
+  /// literal and `null`
   /// alone: any other literal is reported at the literal, with the collection's form in the help.
   /// Either is unresolved, and nothing it holds is a value of its own. Or a set literal that holds
   /// one element twice, or a map literal that holds one key twice, two being one when their

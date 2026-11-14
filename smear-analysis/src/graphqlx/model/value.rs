@@ -123,8 +123,10 @@ pub enum ValueKind<'a> {
   Map(&'a [(ValueId, ValueId)]),
   /// An input object, of its fields, in the input object's order: each one its literal writes and
   /// the input object declares, one written twice twice, in written order, and each one it leaves
-  /// out that has a default, a copy of the default; no absent one. A OneOf input object's fields
-  /// left out are never filled.
+  /// out that has a default, a copy of the default; no absent one. A field left out is absent when
+  /// its default's copy would hold a copy of itself, or when
+  /// [`Limits::max_value_steps`](crate::graphqlx::Limits::max_value_steps) could not pay for the
+  /// copy. A OneOf input object's fields left out are never filled.
   Object(&'a [ObjectEntry]),
   /// A value kept as written: of a custom scalar that is no collection, but `null`; of a type that
   /// still names a type parameter; or of a type that can take no value.

@@ -52,8 +52,10 @@ the input object does not declare is `smear::schema::undefined-input-object-fiel
 given `null` or left out is `smear::schema::missing-required-input-object-field`, and an input
 object its own package makes OneOf takes exactly one field, not `null`. A set takes a `set!{…}` and
 a map a `map!{…}`, and nothing else does but a custom scalar: any other literal where a collection
-is expected, and a collection literal anywhere else, is `smear::graphqlx::collection-literal`, and
-so is an element of a set, or a key of a map, written twice, told by its coerced value. An
+is expected, and a collection literal where a value of another type is, is
+`smear::graphqlx::collection-literal`, and so is an element of a set, or a key of a map, written
+twice, told by its coerced value; where the type takes no value, or still names a type parameter, a
+collection literal is kept as written, and nothing is said. An
 application's argument left out takes a copy of its default, and so does an object literal's field,
 but a OneOf input object's; a required argument left out is
 `smear::schema::missing-required-directive-argument`. A

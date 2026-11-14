@@ -58,7 +58,8 @@
 //! `smear::schema::unexpected-required-argument`. A value that does not fit its type is
 //! refused where it is written, a generic directive's arguments and a generic input object's
 //! fields read under their type arguments, and a default fills each argument and each input field
-//! a value leaves out; a value of a generic definition whose type names its type parameters is
+//! a value leaves out, but where its copy would hold a copy of itself or the value budget cannot
+//! pay for it; a value of a generic definition whose type names its type parameters is
 //! checked at each closed instantiation of it, a type's the program writes or a directive's an
 //! application makes, and refused there, and so is an argument an application in it leaves out
 //! that the instantiation's type arguments make required. And every definition and every type
