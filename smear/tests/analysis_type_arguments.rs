@@ -1767,6 +1767,24 @@ fn a_count_pays_for_what_it_schedules_before_a_type_stops_it() {
   );
 }
 
+/// `null` for an argument that is required under an application's open type arguments is refused
+/// once, at the argument, for every instantiation: `@d<T>`'s `a` takes `T!` on `G`, required
+/// whatever `T` is, and `G<Int>` and `G<String>` report nothing more. Refuses the value recorded
+/// and refused again at each instantiation, `1 + k` diagnostics for one mistake.
+#[test]
+fn null_for_an_argument_required_under_open_arguments_is_refused_once() {
+  let text = "type Query {\n  g: G<Int>\n  h: G<String>\n}\ndirective @d<X>(a: X!) on OBJECT\n\
+              type G<T> @d<T>(a: null) {\n  f: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let argument = after(schema, text, "@d<T>(", "a");
+  assert_eq!(found(&analysis), [(MISSING, argument)]);
+  assert_eq!(
+    the(&analysis, MISSING, argument).to_string(),
+    "the argument `a` of `@d` is required, and `null` is given"
+  );
+}
+
 /// An argument an application on a generic definition leaves out, whose type there is the
 /// definition's bare nullable type parameter, is required wherever an instantiation makes that
 /// parameter non-null. `@need<T>` on `Box` leaves out `v`, whose type there is `Box`'s `T`:
