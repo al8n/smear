@@ -51,6 +51,19 @@ pub(crate) use read::{Occurrence, Shape, Stored, Written};
 #[derive(Clone, Copy)]
 pub(crate) struct Text(Run);
 
+impl Text {
+  /// The run of this text `len` bytes long from its byte `start`, which any number of rows may
+  /// share with it: within this text, however far `start` and `len` reach.
+  pub(crate) fn within(self, start: u32, len: u32) -> Self {
+    let run = self.0;
+    let start = start.min(run.len);
+    Self(Run {
+      start: run.start.saturating_add(start),
+      len: len.min(run.len.saturating_sub(start)),
+    })
+  }
+}
+
 /// A run of the path pool: a path's segments kept once, which any number of paths may share.
 #[derive(Clone, Copy)]
 pub(crate) struct Segments(Run);

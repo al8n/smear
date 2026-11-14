@@ -111,12 +111,18 @@
 //! path, whatever it becomes.
 //!
 //! What is read of a literal is read once and kept outside the tree, in a row the node's one slot
-//! indexes: its text, kept in the model's text arena; a string's cooked text; an integer's count
-//! of significant digits, its magnitude once its digits could fit the width asked, and its row; a
-//! float's verdict and its row for each of `f64` and `f32`, whose values differ; a literal's row;
-//! a path's segments, what its prefix names, and what the whole of it names as a type. A byte
-//! string, which only a `bytes` value reads, is kept in a table of its own, by node. An object
-//! literal's fields are kept by the literal and the input object.
+//! indexes: its text; a string's cooked text; an integer's count of significant digits, its
+//! magnitude once its digits could fit the width asked, and its row; a float's verdict and its row
+//! for each of `f64` and `f32`, whose values differ; a literal's row; a path's segments, what its
+//! prefix names, and what the whole of it names as a type. A byte string, which only a `bytes`
+//! value reads, is kept in a table of its own, by node. An object literal's fields are kept by the
+//! literal and the input object.
+//!
+//! A node's text is a run of its tree's spelling, the text of the tree's root, which the model's
+//! text arena keeps once, the first time a text of any node of the tree is kept, each sequence of
+//! it that is not UTF-8 replaced by one U+FFFD: a node is written inside its root, so however
+//! many nodes of a tree are kept as written, under whatever types, applications and
+//! instantiations, the texts the model keeps are bounded by the source written.
 //!
 //! # An application's arguments
 //!
@@ -322,6 +328,7 @@ use super::{
 };
 
 mod number;
+mod spelling;
 
 use number::{Float, Scanned};
 
@@ -415,6 +422,8 @@ pub(crate) fn coerce(
     rebuilds: BTreeMap::new(),
     nullables: BTreeMap::new(),
     kept: Vec::new(),
+    spellings: BTreeMap::new(),
+    growths: Vec::new(),
     magnitudes: Vec::new(),
     limbs: Vec::new(),
     scratch: String::new(),
@@ -913,7 +922,7 @@ struct Converted {
 /// that no literal is read twice and no text kept twice.
 #[derive(Clone, Copy, Default)]
 struct Kept {
-  /// Its text as written, in the model's text arena.
+  /// Its text as written: a run of its tree's spelling, which the model's text arena keeps once.
   text: Option<Text>,
   /// A string's cooked text, in the model's text arena; `None` inside for a spelling the decoder
   /// refuses.
@@ -939,6 +948,15 @@ struct Kept {
 // times the node's 32, since a node read for any kind has room for what every kind reads. What only
 // a rare kind reads lives in a table of its own: a `bytes` value's bytes.
 const _: () = assert!(core::mem::size_of::<Kept>() <= 128);
+
+/// A tree's spelling, kept once: the copy of its root's span in the model's text arena, where that
+/// span starts in its source, and its run of the phase's growths, where the copy grew.
+#[derive(Clone, Copy)]
+struct Spelling {
+  text: Text,
+  start: u32,
+  growths: (u32, u32),
+}
 
 /// A node to make: the node, the type it is made against, the tree it is of, and how; and whether
 /// a rebuild under type arguments made its type, or the type of a value it is held in, which says
@@ -1046,11 +1064,18 @@ struct Coercion<'c, 'p, 'x> {
   nullables: BTreeMap<TyId, TyId>,
   /// What has been read of each node read so far: the rows a node's `kept` slot indexes.
   kept: Vec<Kept>,
+  /// Each tree a text of a node of which is kept, by its root node: the one copy of its spelling,
+  /// which every text kept of its nodes is a run of.
+  spellings: BTreeMap<u32, Spelling>,
+  /// Where each spelling kept grew, each sequence of it that is not UTF-8 one U+FFFD: the offset in
+  /// its root's span just past the sequence, and how much longer the copy is up to there; one run
+  /// for each spelling, in offset order.
+  growths: Vec<(u32, u32)>,
   /// Every integer's magnitude converted so far.
   magnitudes: Vec<u8>,
   /// The limbs of the decimal integer being converted.
   limbs: Vec<u32>,
-  /// The text being cooked.
+  /// The text being cooked, or a spelling that is not UTF-8 being copied as UTF-8.
   scratch: String,
   /// The bytes of the list being read as a `bytes` value.
   octets: Vec<u8>,
@@ -2830,7 +2855,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     match self.classify(raw.kind, ty) {
       Class::NoValue => {
-        self.literal(id, node, source);
+        self.literal(id, node, tree);
         self.path(id, raw.kind);
       }
       Class::Null => self.builder.set_null(id),
@@ -3668,7 +3693,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     match (base, kind) {
       (Base::Kept, _) => {
         if let Some(id) = id {
-          self.literal(id, node, source);
+          self.literal(id, node, tree);
         }
         Ok(None)
       }
@@ -3688,7 +3713,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         Ok(Some(Ident::Text(text)))
       }
       (Base::Int(range), RawKind::Int(radix)) => {
-        let (negative, converted) = self.int(id, node, source, radix, range)?;
+        let (negative, converted) = self.int(id, node, tree, radix, range)?;
         Ok(Some(Ident::Int {
           negative: negative && converted.len != 0,
           start: converted.start,
@@ -3696,7 +3721,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         }))
       }
       (Base::Id, RawKind::Int(radix)) => {
-        let (negative, converted) = self.int(id, node, source, radix, ID_RANGE)?;
+        let (negative, converted) = self.int(id, node, tree, radix, ID_RANGE)?;
         Ok(Some(Ident::Decimal {
           negative: negative && converted.len != 0,
           start: converted.start,
@@ -3704,7 +3729,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         }))
       }
       (Base::Float { single }, RawKind::Float { .. } | RawKind::Int(_)) => {
-        let bits = self.float(id, node, source, single)?;
+        let bits = self.float(id, node, tree, single)?;
         Ok(Some(Ident::Float(bits)))
       }
       (Base::Bytes, RawKind::String | RawKind::List) => {
@@ -3731,17 +3756,18 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
   }
 
-  /// Makes `id` the integer `node` is, of `radix`, when it is in `range`, and no row with no `id`.
-  /// Its digits are counted first, and a count past what the width holds refuses it unconverted.
-  /// Answers whether it is written below zero, and its magnitude.
+  /// Makes `id` the integer `node`, one of `tree`'s, is, of `radix`, when it is in `range`, and no
+  /// row with no `id`. Its digits are counted first, and a count past what the width holds refuses
+  /// it unconverted. Answers whether it is written below zero, and its magnitude.
   fn int(
     &mut self,
     id: Option<ValueId>,
     node: u32,
-    source: u32,
+    tree: RawTree,
     radix: Radix,
     range: Range,
   ) -> Result<(bool, Converted), Refused> {
+    let source = tree.source;
     let refused = move |why: Why| Refused { node, why };
     let scanned = self
       .scanned(node, source, radix)
@@ -3769,37 +3795,40 @@ impl<'p> Coercion<'_, 'p, '_> {
       return Err(refused(out));
     }
     if let Some(id) = id {
-      let row = self.int_row(node, source, scanned.negative, converted);
+      let row = self.int_row(node, tree, scanned.negative, converted);
       self.builder.give_int(id, row);
     }
     Ok((scanned.negative, converted))
   }
 
-  /// Makes `id` the float `node`, a float or an integer, reads as in `f32` when `single` and in
-  /// `f64` otherwise, when it is finite there, and no row with no `id`: an `f32` is the literal
-  /// rounded once to `f32`, never its `f64` rounded again, and is kept widened to an `f64`, which
-  /// is exact. Answers its identity: the bits of its value in its type, `-0.0` made `0.0`.
+  /// Makes `id` the float `node`, one of `tree`'s, a float or an integer, reads as in `f32` when
+  /// `single` and in `f64` otherwise, when it is finite there, and no row with no `id`: an `f32` is
+  /// the literal rounded once to `f32`, never its `f64` rounded again, and is kept widened to an
+  /// `f64`, which is exact. Answers its identity: the bits of its value in its type, `-0.0` made
+  /// `0.0`.
   fn float(
     &mut self,
     id: Option<ValueId>,
     node: u32,
-    source: u32,
+    tree: RawTree,
     single: bool,
   ) -> Result<u64, Refused> {
     let refused = move |why: Why| Refused { node, why };
-    let read = self.float_read(node, source).ok_or(refused(Why::Kind))?;
+    let read = self
+      .float_read(node, tree.source)
+      .ok_or(refused(Why::Kind))?;
     // Adding `0.0` makes `-0.0` `0.0`, and leaves every other value as it is.
     if single {
       let narrow = read.single.ok_or(refused(Why::Single))?;
       if let Some(id) = id {
-        let row = self.float_row(node, source, f64::from(narrow), true);
+        let row = self.float_row(node, tree, f64::from(narrow), true);
         self.builder.give_float(id, row);
       }
       return Ok(u64::from((narrow + 0.0).to_bits()));
     }
     let value = read.value.ok_or(refused(Why::Infinite))?;
     if let Some(id) = id {
-      let row = self.float_row(node, source, value, false);
+      let row = self.float_row(node, tree, value, false);
       self.builder.give_float(id, row);
     }
     Ok((value + 0.0).to_bits())
@@ -4073,20 +4102,78 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
   }
 
-  /// `node`'s text as written, kept in the model's text arena.
-  fn text(&mut self, node: u32, source: u32) -> Text {
+  /// `node`'s text as written, `node` being one of `tree`'s: a run of the one copy of `tree`'s
+  /// spelling, which the first text kept of any of its nodes makes.
+  ///
+  /// A node of a tree is its root or a value the root holds at some depth, and the parser spans a
+  /// value over the text of every value it holds, so each node is written inside its root's span,
+  /// and its run lies inside the copy. One copy serves every node of the tree, under every type,
+  /// application and instantiation that reads one, so the text kept is bounded by the source
+  /// written: the source map keeps no text, and the model keeps that one copy.
+  fn text(&mut self, node: u32, tree: RawTree) -> Text {
     let slot = self.slot(node);
     if let Some(text) = self.read(slot).text {
       return text;
     }
-    let written = self.written(node, source);
-    let text = self.builder.keep_text(&String::from_utf8_lossy(written));
+    let spelled = self.spelling(tree);
+    let (start, end) = self
+      .raw
+      .nodes
+      .get(node as usize)
+      .map_or((0, 0), |raw: &RawNode| (raw.span.start(), raw.span.end()));
+    let from = self.spelled_at(spelled, start);
+    let to = self.spelled_at(spelled, end);
+    let text = spelled.text.within(from, to.saturating_sub(from));
     self.update(slot, |kept: &mut Kept| kept.text = Some(text));
     text
   }
 
-  /// Makes `id` the literal `node` is, its syntactic kind and its text as written.
-  fn literal(&mut self, id: ValueId, node: u32, source: u32) {
+  /// The one copy of `tree`'s spelling, the text of its root's span, made in the model's text arena
+  /// the first time a text of one of its nodes is kept, and kept by its root: as written when it
+  /// is UTF-8, and otherwise each sequence of it that is not replaced by one U+FFFD, the copy's
+  /// growth there recorded.
+  fn spelling(&mut self, tree: RawTree) -> Spelling {
+    if let Some(&kept) = self.spellings.get(&tree.root) {
+      return kept;
+    }
+    let span = self
+      .raw
+      .nodes
+      .get(tree.root as usize)
+      .map_or(SimpleSpan::new(0, 0), |raw: &RawNode| raw.span);
+    let written: &'p [u8] = self.raw.text(tree.source, span);
+    let first = dense(self.growths.len());
+    let text = match core::str::from_utf8(written) {
+      Ok(text) => self.builder.keep_text(text),
+      Err(_) => {
+        self.scratch.clear();
+        spelling::copy(written, &mut self.scratch, &mut self.growths);
+        self.builder.keep_text(&self.scratch)
+      }
+    };
+    let kept = Spelling {
+      text,
+      start: dense(span.start()),
+      growths: (first, dense(self.growths.len())),
+    };
+    self.spellings.insert(tree.root, kept);
+    kept
+  }
+
+  /// Where the byte `at` of its source, inside the root span of the spelling `kept`, is in its
+  /// copy.
+  fn spelled_at(&self, kept: Spelling, at: usize) -> u32 {
+    let (first, end) = kept.growths;
+    let growths: &[(u32, u32)] = self
+      .growths
+      .get(first as usize..end as usize)
+      .unwrap_or_default();
+    spelling::offset(growths, dense(at).saturating_sub(kept.start))
+  }
+
+  /// Makes `id` the literal `node`, one of `tree`'s, is: its syntactic kind and its text as
+  /// written.
+  fn literal(&mut self, id: ValueId, node: u32, tree: RawTree) {
     let slot = self.slot(node);
     let row = match self.read(slot).literal {
       Some(row) => row,
@@ -4103,7 +4190,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           RawKind::Map => LiteralKind::Map,
           RawKind::Object(_) => LiteralKind::Object,
         };
-        let text = self.text(node, source);
+        let text = self.text(node, tree);
         let row = self.builder.push_literal(kind, text);
         self.update(slot, |kept: &mut Kept| kept.literal = Some(row));
         row
@@ -4224,14 +4311,14 @@ impl<'p> Coercion<'_, 'p, '_> {
       .unwrap_or_default()
   }
 
-  /// `node`'s row of the model's integer table, negative when `negative`, of the magnitude
-  /// `converted`: made the first time a type it fits asks, and kept.
-  fn int_row(&mut self, node: u32, source: u32, negative: bool, converted: Converted) -> u32 {
+  /// `node`'s row of the model's integer table, `node` being one of `tree`'s, negative when
+  /// `negative`, of the magnitude `converted`: made the first time a type it fits asks, and kept.
+  fn int_row(&mut self, node: u32, tree: RawTree, negative: bool, converted: Converted) -> u32 {
     let slot = self.slot(node);
     if let Some(row) = self.read(slot).int {
       return row;
     }
-    let text = self.text(node, source);
+    let text = self.text(node, tree);
     let start = converted.start as usize;
     let magnitude = self
       .magnitudes
@@ -4275,10 +4362,10 @@ impl<'p> Coercion<'_, 'p, '_> {
     read
   }
 
-  /// `node`'s row of the model's float table, of `value`, its value in `f32` when `single` and in
-  /// `f64` otherwise: made the first time a type of that width it fits asks, and kept, one row for
-  /// each width.
-  fn float_row(&mut self, node: u32, source: u32, value: f64, single: bool) -> u32 {
+  /// `node`'s row of the model's float table, `node` being one of `tree`'s, of `value`, its value
+  /// in `f32` when `single` and in `f64` otherwise: made the first time a type of that width it
+  /// fits asks, and kept, one row for each width.
+  fn float_row(&mut self, node: u32, tree: RawTree, value: f64, single: bool) -> u32 {
     let slot = self.slot(node);
     let kept = self.read(slot);
     let made = if single {
@@ -4289,7 +4376,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     if let Some(row) = made {
       return row;
     }
-    let text = self.text(node, source);
+    let text = self.text(node, tree);
     let row = self.builder.push_float(value, text);
     self.update(slot, |kept: &mut Kept| {
       if single {
