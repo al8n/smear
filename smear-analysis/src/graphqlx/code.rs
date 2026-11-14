@@ -356,72 +356,93 @@ impl DiagnosticKind {
   }
 }
 
-/// The codes of GraphQL's own rules that the analysis reports under `smear-schema`'s codes, since
-/// the rule is the same rule in both dialects (K17).
-pub(crate) mod schema {
+/// The `smear::schema` codes the analysis shares with GraphQL's own validator.
+///
+/// Each is a rule of GraphQL's own, which the analysis reports under `smear-schema`'s code because
+/// the rule is the same rule in both dialects: a consumer sees one vocabulary across the two. A
+/// consumer waives one by filtering its code out, by name, and each constant here is that name;
+/// [`ALL`](crate::graphqlx::schema::ALL) lists them. The list grows as the analysis does.
+/// [`DiagnosticKind`](crate::graphqlx::DiagnosticKind) lists the analyzer's own family,
+/// `smear::graphqlx`.
+pub mod schema {
   use tokora::diagnostic::Code;
 
+  /// Every shared code the analysis reports, in declaration order.
+  pub const ALL: &[Code] = &[
+    DUPLICATE_TYPE_NAME,
+    DUPLICATE_DIRECTIVE_DEFINITION,
+    RESERVED_TYPE_NAME,
+    RESERVED_DIRECTIVE_NAME,
+    UNDEFINED_TYPE,
+    UNDEFINED_DIRECTIVE,
+    UNDEFINED_EXTENSION_TARGET,
+    UNDEFINED_IMPLEMENTS_INTERFACE,
+    UNDEFINED_UNION_MEMBER,
+    UNDEFINED_ROOT_OPERATION_TYPE,
+    EXTENSION_KIND_MISMATCH,
+    UNDEFINED_DIRECTIVE_ARGUMENT,
+    DUPLICATE_ROOT_OPERATION_TYPE,
+    DUPLICATE_SCHEMA_DEFINITION,
+  ];
+
   /// Two definitions in one module give a type one name: `smear-schema`'s `DuplicateTypeName`.
-  pub(crate) const DUPLICATE_TYPE_NAME: Code = Code::new("smear::schema::duplicate-type-name");
+  pub const DUPLICATE_TYPE_NAME: Code = Code::new("smear::schema::duplicate-type-name");
 
   /// Two definitions in one module give a directive one name: `smear-schema`'s
   /// `DuplicateDirectiveDefinition`.
-  pub(crate) const DUPLICATE_DIRECTIVE_DEFINITION: Code =
+  pub const DUPLICATE_DIRECTIVE_DEFINITION: Code =
     Code::new("smear::schema::duplicate-directive-definition");
 
   /// A supplied package's type name begins with `__`: `smear-schema`'s `ReservedTypeName`.
-  pub(crate) const RESERVED_TYPE_NAME: Code = Code::new("smear::schema::reserved-type-name");
+  pub const RESERVED_TYPE_NAME: Code = Code::new("smear::schema::reserved-type-name");
 
   /// A supplied package's directive name begins with `__`: `smear-schema`'s
   /// `ReservedDirectiveName`.
-  pub(crate) const RESERVED_DIRECTIVE_NAME: Code =
-    Code::new("smear::schema::reserved-directive-name");
+  pub const RESERVED_DIRECTIVE_NAME: Code = Code::new("smear::schema::reserved-directive-name");
 
   /// A type position names, with one segment and no root, no type: `smear-schema`'s
   /// `UndefinedType`.
-  pub(crate) const UNDEFINED_TYPE: Code = Code::new("smear::schema::undefined-type");
+  pub const UNDEFINED_TYPE: Code = Code::new("smear::schema::undefined-type");
 
   /// A directive application names, with one segment and no root, no directive: `smear-schema`'s
   /// `UndefinedDirective`.
-  pub(crate) const UNDEFINED_DIRECTIVE: Code = Code::new("smear::schema::undefined-directive");
+  pub const UNDEFINED_DIRECTIVE: Code = Code::new("smear::schema::undefined-directive");
 
   /// An extension's target names, with one segment and no root, nothing to extend:
   /// `smear-schema`'s `UndefinedExtensionTarget`.
-  pub(crate) const UNDEFINED_EXTENSION_TARGET: Code =
+  pub const UNDEFINED_EXTENSION_TARGET: Code =
     Code::new("smear::schema::undefined-extension-target");
 
   /// An `implements` entry names, with one segment and no root, no interface: `smear-schema`'s
   /// `UndefinedImplementsInterface`.
-  pub(crate) const UNDEFINED_IMPLEMENTS_INTERFACE: Code =
+  pub const UNDEFINED_IMPLEMENTS_INTERFACE: Code =
     Code::new("smear::schema::undefined-implements-interface");
 
   /// A union member names, with one segment and no root, no type: `smear-schema`'s
   /// `UndefinedUnionMember`.
-  pub(crate) const UNDEFINED_UNION_MEMBER: Code =
-    Code::new("smear::schema::undefined-union-member");
+  pub const UNDEFINED_UNION_MEMBER: Code = Code::new("smear::schema::undefined-union-member");
 
   /// A root operation names, with one segment and no root, no type: `smear-schema`'s
   /// `UndefinedRootOperationType`.
-  pub(crate) const UNDEFINED_ROOT_OPERATION_TYPE: Code =
+  pub const UNDEFINED_ROOT_OPERATION_TYPE: Code =
     Code::new("smear::schema::undefined-root-operation-type");
 
   /// An extension's keyword is not the kind of the definition its target names: `smear-schema`'s
   /// `ExtensionKindMismatch`.
-  pub(crate) const EXTENSION_KIND_MISMATCH: Code =
-    Code::new("smear::schema::extension-kind-mismatch");
+  pub const EXTENSION_KIND_MISMATCH: Code = Code::new("smear::schema::extension-kind-mismatch");
 
   /// An application names an argument its directive does not declare: `smear-schema`'s
   /// `UndefinedDirectiveArgument`.
-  pub(crate) const UNDEFINED_DIRECTIVE_ARGUMENT: Code =
+  pub const UNDEFINED_DIRECTIVE_ARGUMENT: Code =
     Code::new("smear::schema::undefined-directive-argument");
 
   /// The schema is given a second root for one operation: `smear-schema`'s
   /// `DuplicateRootOperationType`.
-  pub(crate) const DUPLICATE_ROOT_OPERATION_TYPE: Code =
+  pub const DUPLICATE_ROOT_OPERATION_TYPE: Code =
     Code::new("smear::schema::duplicate-root-operation-type");
 
   /// The root package writes a second schema definition: `smear-schema`'s
   /// `DuplicateSchemaDefinition`.
-  pub(crate) const DUPLICATE_SCHEMA_DEFINITION: Code =
+  pub const DUPLICATE_SCHEMA_DEFINITION: Code =
     Code::new("smear::schema::duplicate-schema-definition");
 }

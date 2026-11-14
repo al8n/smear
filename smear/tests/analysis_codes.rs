@@ -1,0 +1,166 @@
+//! The `smear::schema` codes the GraphQLx analyzer shares with GraphQL's own validator: each public
+//! constant of `graphqlx::schema` is `smear-schema`'s code of the kind it names, `schema::ALL`
+//! lists each once in declaration order, and every shared code an analysis of the schema corpus
+//! reports has its constant.
+//!
+//! The registry golden holds no row for a constant: each constant IS a `SchemaErrorKind`'s code,
+//! whose row the golden has, and two rows with one code are what `diagnostic_codes.rs` refuses.
+#![cfg(all(
+  any(feature = "std", feature = "alloc"),
+  feature = "analysis",
+  feature = "validator"
+))]
+
+use smear::{
+  analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze, schema},
+  diagnostic::{Code, Diagnose},
+  validator::SchemaErrorKind,
+};
+
+// The draft §3 corpus: an SDL for each kind of `smear-schema`'s that a parsed document reaches.
+// The module also carries what this file does not read, which would be a `dead_code` denial under
+// CI's `-Dwarnings`; allowed at the include, as its other readers do.
+#[allow(dead_code)]
+#[path = "support/validator_corpus.rs"]
+mod corpus;
+
+use corpus::SCHEMA_FIXTURES;
+
+/// Each shared code, with the kind of `smear-schema`'s it is, in the module's declaration order.
+const SHARED: &[(Code, SchemaErrorKind)] = &[
+  (
+    schema::DUPLICATE_TYPE_NAME,
+    SchemaErrorKind::DuplicateTypeName,
+  ),
+  (
+    schema::DUPLICATE_DIRECTIVE_DEFINITION,
+    SchemaErrorKind::DuplicateDirectiveDefinition,
+  ),
+  (
+    schema::RESERVED_TYPE_NAME,
+    SchemaErrorKind::ReservedTypeName,
+  ),
+  (
+    schema::RESERVED_DIRECTIVE_NAME,
+    SchemaErrorKind::ReservedDirectiveName,
+  ),
+  (schema::UNDEFINED_TYPE, SchemaErrorKind::UndefinedType),
+  (
+    schema::UNDEFINED_DIRECTIVE,
+    SchemaErrorKind::UndefinedDirective,
+  ),
+  (
+    schema::UNDEFINED_EXTENSION_TARGET,
+    SchemaErrorKind::UndefinedExtensionTarget,
+  ),
+  (
+    schema::UNDEFINED_IMPLEMENTS_INTERFACE,
+    SchemaErrorKind::UndefinedImplementsInterface,
+  ),
+  (
+    schema::UNDEFINED_UNION_MEMBER,
+    SchemaErrorKind::UndefinedUnionMember,
+  ),
+  (
+    schema::UNDEFINED_ROOT_OPERATION_TYPE,
+    SchemaErrorKind::UndefinedRootOperationType,
+  ),
+  (
+    schema::EXTENSION_KIND_MISMATCH,
+    SchemaErrorKind::ExtensionKindMismatch,
+  ),
+  (
+    schema::UNDEFINED_DIRECTIVE_ARGUMENT,
+    SchemaErrorKind::UndefinedDirectiveArgument,
+  ),
+  (
+    schema::DUPLICATE_ROOT_OPERATION_TYPE,
+    SchemaErrorKind::DuplicateRootOperationType,
+  ),
+  (
+    schema::DUPLICATE_SCHEMA_DEFINITION,
+    SchemaErrorKind::DuplicateSchemaDefinition,
+  ),
+];
+
+/// Each constant is the code `smear-schema` reports for the kind it names, and `schema::ALL` holds
+/// them all, in the module's order: a constant whose string drifted, and an `ALL` that leaves one
+/// out or reorders them, each fail here.
+#[test]
+fn each_shared_code_is_smear_schemas() {
+  assert_eq!(
+    schema::ALL.len(),
+    SHARED.len(),
+    "`schema::ALL` holds {} codes, and the module {}",
+    schema::ALL.len(),
+    SHARED.len()
+  );
+  for ((constant, kind), listed) in SHARED.iter().zip(schema::ALL) {
+    assert_eq!(
+      listed, constant,
+      "`schema::ALL` lists `{listed}` where the module declares `{constant}`"
+    );
+    assert_eq!(
+      *constant,
+      kind.code(),
+      "the constant for `{kind:?}` is not `smear-schema`'s code"
+    );
+  }
+}
+
+/// No shared code is listed twice, and each is `smear::schema::` and a kebab-case rule.
+#[test]
+fn each_shared_code_is_listed_once_and_well_formed() {
+  let mut codes: Vec<&str> = schema::ALL
+    .iter()
+    .map(|code: &Code| code.as_str())
+    .collect();
+  for code in &codes {
+    let rule = code
+      .strip_prefix("smear::schema::")
+      .unwrap_or_else(|| panic!("{code} is not in the `smear::schema` family"));
+    assert!(
+      !rule.is_empty()
+        && !rule.starts_with('-')
+        && !rule.ends_with('-')
+        && !rule.contains("--")
+        && rule
+          .bytes()
+          .all(|byte: u8| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'),
+      "{code} is not kebab-case"
+    );
+  }
+  let count = codes.len();
+  codes.sort_unstable();
+  codes.dedup();
+  assert_eq!(codes.len(), count, "`schema::ALL` lists a code twice");
+}
+
+/// Each SDL of the draft §3 corpus, analysed as the one file of a `Flat` root package: every
+/// `smear::schema` code the analysis reports is in `schema::ALL`, so a shared code reported under a
+/// string no constant names fails here. At least one row reports one, so that the test is not
+/// empty.
+#[test]
+fn every_shared_code_an_analysis_reports_has_its_constant() {
+  let mut shared = 0usize;
+  for (kind, sdl, _) in SCHEMA_FIXTURES {
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("schema.graphqlx", *sdl)]);
+    let analysis = analyze(&root, &[], &Limits::new());
+    for diagnostic in analysis.diagnostics() {
+      let code = diagnostic.code();
+      if !code.as_str().starts_with("smear::schema::") {
+        continue;
+      }
+      shared += 1;
+      assert!(
+        schema::ALL.contains(&code),
+        "the fixture of `{kind:?}` reports `{code}`, which no constant of `graphqlx::schema` names"
+      );
+    }
+  }
+  assert!(
+    shared > 0,
+    "no fixture of the corpus made the analysis report a shared code"
+  );
+}

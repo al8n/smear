@@ -144,7 +144,7 @@ mod widths;
 pub mod test_support;
 
 pub use analysis::{Analysis, Trees, TreesIntoIter, TreesIter, analyze, analyze_with};
-pub use code::DiagnosticKind;
+pub use code::{DiagnosticKind, schema};
 pub use diagnostic::{Diagnostic, DiagnosticBuilder, Diagnostics};
 pub use id::{
   ApplicationId, DefId, IdIter, IdRange, MemberId, ModuleId, PackageId, SourceId, Sym, TyId,
