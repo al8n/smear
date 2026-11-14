@@ -29,6 +29,27 @@ const ZERO: &str = "smear::graphqlx::nonzero-zero";
 /// A bound of the limits passed.
 const LIMIT: &str = "smear::graphqlx::resource-limit";
 
+/// GraphQL's code for a schema with no query root. Most programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// Whether `analysis` reports nothing but that its program has no query root.
+fn clean(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics.len() - reported(analysis).len();
+  diagnostics.len() == waived && diagnostics.error_count() == waived
+}
+
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_text(text: &str, limits: &Limits) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
@@ -81,11 +102,11 @@ fn after(source: SourceId, text: &str, before: &str, literal: &str) -> Location 
   Location::new(source.get(), SimpleSpan::new(start, start + literal.len()))
 }
 
-/// Each diagnostic's code and primary location, in the list's order.
+/// Each diagnostic's code and primary location, in the list's order, but for the missing query
+/// root.
 fn found(analysis: &Analysis) -> Vec<(&'static str, Location)> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
     .collect()
 }
@@ -208,7 +229,7 @@ const KINDS: &str = "directive @all(b: Boolean, i: Int, f: Float, s: String, d: 
 #[test]
 fn each_kind_of_literal_coerces_to_its_type() {
   let analysis = analyze_text(KINDS, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = schema_file(&analysis);
   let arguments = arguments_of(model, "T");
@@ -259,7 +280,7 @@ fn each_kind_of_literal_coerces_to_its_type() {
 fn a_values_type_is_the_type_it_was_coerced_against() {
   let text = "input I {\n  l: [Int!]! = [1]\n}\n";
   let analysis = analyze_text(text, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let list = default(model, "I", "l");
   let ty = member_ty(model, input_field(model, "I", "l"));
@@ -351,7 +372,7 @@ fn a_lone_value_stands_for_a_list_of_itself() {
   let text = "input I {\n  a: [Int] = 1\n  b: [[Int]] = 2\n  c: [[Int]] = [3]\n  \
               d: [Int] = null\n}\n";
   let analysis = analyze_text(text, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = schema_file(&analysis);
   assert_eq!(shown_default(model, "I", "a"), "List [Int 1]");
@@ -428,7 +449,7 @@ fn what_takes_no_value_keeps_its_literal_and_says_nothing() {
   let text = "directive @d<T>(v: T) on OBJECT\ntype Q<T> @d<T>(v: \"x\") {\n  f: Int\n}\n\
               input I<T> {\n  x: T = 1\n  l: [T] = [1]\n}\n";
   let analysis = analyze_text(text, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let argument = arguments_of(model, "Q")[0];
   assert_eq!(shown(model, argument.value()), "Literal(String) \"x\"");
@@ -464,13 +485,17 @@ fn what_takes_no_value_keeps_its_literal_and_says_nothing() {
     "Literal(Null) null"
   );
 
-  // An output type: nothing at all from this phase.
+  // An output type: nothing from this phase. An argument typed by an object is GraphQL's own
+  // rule's to refuse, at the type.
   let text = "type Obj {\n  f: Int\n}\ntype Q {\n  f(a: Obj = 1): Int\n}\n";
   let analysis = analyze_text(text, &Limits::new());
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::schema::argument-type-not-input-type",
+      after(schema, text, "a: ", "Obj")
+    )]
   );
 }
 
@@ -680,11 +705,7 @@ fn a_literal_too_long_for_its_width_is_refused_by_its_length() {
     found(&analysis),
     [(WIDTH, after(schema, &text, "a: i8 = ", &digits))]
   );
-  let diagnostic = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic");
+  let diagnostic = reported(&analysis)[0];
   assert!(diagnostic.to_string().len() < 1024);
   let model = analysis.model();
   let ValueKind::Literal(literal) = model.value(default(model, "L", "b")).kind() else {
@@ -940,7 +961,7 @@ fn strings_are_cooked() {
   let text = "input S {\n  a: String = \"a\\tb\\u00e9\"\n  \
               b: String = \"\"\"\n      indented\n        more\n      text\n  \"\"\"\n}\n";
   let analysis = analyze_text(text, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let cooked = |name: &str| model.value(default(model, "S", name)).kind();
   assert_eq!(cooked("a"), ValueKind::String("a\tbé"));
@@ -963,7 +984,7 @@ fn a_bare_enum_value_resolves_against_the_expected_enum() {
   let text = "enum Color {\n  RED\n}\nenum Paint {\n  BLUE\n  RED\n}\n\
               input I<RED> {\n  c: Color = RED\n  p: Paint = RED\n}\n";
   let analysis = analyze_text(text, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   // Each is its own enum's `RED`, though a type parameter named `RED` is in scope.
   assert_eq!(
@@ -989,7 +1010,7 @@ fn a_qualified_enum_value_names_the_expected_enum() {
               input I {\n  a: Color = Color::RED\n  b: m::Color = m::Color::RED\n  \
               c: m::Color = Hue::RED\n  d: m::Color = ~::m::Color::RED\n}\n";
   let analysis = analyze_text(text, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   for (name, path) in [
     ("a", "Color::RED"),
@@ -1032,9 +1053,8 @@ fn an_enum_value_that_is_none_names_the_nearest() {
   let text = "enum Color {\n  RED\n  GREEN\n}\ninput I {\n  a: Color = REDD\n  \
               b: Color = Color::REDD\n}\n";
   let helps = |limits: &Limits| -> Vec<Option<String>> {
-    analyze_text(text, limits)
-      .diagnostics()
-      .iter()
+    reported(&analyze_text(text, limits))
+      .into_iter()
       .map(|diagnostic: &Diagnostic| diagnostic.help().map(String::from))
       .collect()
   };
@@ -1085,7 +1105,7 @@ fn a_literal_that_is_no_path_is_no_enum_value() {
 fn a_lone_enum_value_keeps_its_path_and_its_list_has_none() {
   let text = "enum Color {\n  RED\n}\ninput I {\n  cs: [Color] = RED\n}\n";
   let analysis = analyze_text(text, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let list = default(model, "I", "cs");
   let ValueKind::List(&[red]) = model.value(list).kind() else {
@@ -1116,11 +1136,7 @@ fn a_required_argument_is_reported_once() {
       (MISSING, after(schema, text, "type W @", "need")),
     ]
   );
-  let left_out = analysis
-    .diagnostics()
-    .iter()
-    .last()
-    .expect("three diagnostics");
+  let left_out = reported(&analysis)[2];
   assert_eq!(
     left_out.label(0).map(|label| label.location()),
     Some(after(schema, text, "@need(", "a"))
@@ -1173,7 +1189,7 @@ const TAG: &str = "directive @tag(name: String = \"none\", level: Int = 1, note:
 fn a_default_fills_an_argument_left_out() {
   let text = format!("{TAG}type T @tag(level: 2) {{\n  f: Int\n}}\n");
   let analysis = analyze_text(&text, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = schema_file(&analysis);
   let arguments = arguments_of(model, "T");
@@ -1196,7 +1212,7 @@ fn a_default_fills_an_argument_left_out() {
 fn each_application_has_its_own_copy() {
   let text = format!("{TAG}type A @tag {{\n  f: Int\n}}\ntype B @tag {{\n  f: Int\n}}\n");
   let analysis = analyze_text(&text, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let tag = model
     .lookup(Namespace::Directive, "@^::app::tag")
@@ -1226,7 +1242,7 @@ fn each_application_has_its_own_copy() {
 fn a_copy_is_whole() {
   let text = "directive @d(m: [[Int]] = [1, [2, 3]]) on OBJECT\ntype T @d {\n  f: Int\n}\n";
   let analysis = analyze_text(text, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = schema_file(&analysis);
   let copy = arguments_of(model, "T")[0].value();
@@ -1257,7 +1273,7 @@ fn a_copy_is_whole() {
 fn a_copy_is_made_before_its_default_is_reached() {
   let text = "type T @d {\n  f: Int\n}\ndirective @d(n: Int = 1) on OBJECT\n";
   let analysis = analyze_text(text, &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let copy = arguments_of(model, "T")[0].value();
   let d = model
@@ -1285,7 +1301,7 @@ fn a_dependencys_default_fills_the_roots_application() {
       "directive @tag(name: String = \"dep\") on OBJECT\n",
     )]);
   let analysis = analyze(&root, &[dep], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let copy = arguments_of(model, "T")[0].value();
   let source = analysis
@@ -1370,11 +1386,7 @@ fn a_copy_spends_no_near_miss() {
   let analysis = analyze_text(text, &Limits::new().with_max_near_miss_comparisons(2));
   let schema = schema_file(&analysis);
   assert_eq!(found(&analysis), [(DEFAULT, at(schema, text, "REDD", 0))]);
-  let diagnostic = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic");
+  let diagnostic = reported(&analysis)[0];
   assert_eq!(diagnostic.help(), Some("did you mean `RED`?"));
 }
 
@@ -1389,18 +1401,14 @@ fn a_copy_costs_a_step_a_row() {
      type T {applied}{{\n  f: Int\n}}\n"
   );
   let analysis = analyze_text(&text, &Limits::new().with_max_value_steps(399));
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   let analysis = analyze_text(&text, &Limits::new().with_max_value_steps(398));
   let schema = schema_file(&analysis);
   // The last application the walk reaches, alone, is starved, whole: its read is paid and its
   // copy is not, and it has no `names`.
   assert_eq!(found(&analysis), [(LIMIT, at(schema, &text, "tag", 100))]);
-  let diagnostic = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic");
+  let diagnostic = reported(&analysis)[0];
   assert!(diagnostic.to_string().contains("Limits::max_value_steps"));
   let model = analysis.model();
   let applications = model.def(type_def(model, "T")).applications();
@@ -1572,7 +1580,7 @@ fn reversing_files_and_dependencies_changes_no_value_and_no_diagnostic() {
         diagnostic.primary()
       ));
     }
-    assert_eq!(analysis.diagnostics().len(), 3, "{text}");
+    assert_eq!(reported(&analysis).len(), 3, "{text}");
     rendered.push(text);
   }
   assert_eq!(rendered[0], rendered[1]);
@@ -1582,7 +1590,7 @@ fn reversing_files_and_dependencies_changes_no_value_and_no_diagnostic() {
 fn a_lone_value_costs_a_step_a_level() {
   let text = "input I {\n  a: [[Int]] = 1\n}\n";
   let analysis = analyze_text(text, &Limits::new().with_max_value_steps(2));
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(
     shown_default(analysis.model(), "I", "a"),
     "List [List [Int 1]]"
@@ -1592,11 +1600,7 @@ fn a_lone_value_costs_a_step_a_level() {
   let schema = schema_file(&analysis);
   assert_eq!(found(&analysis), [(LIMIT, at(schema, text, "1", 0))]);
   assert_eq!(shown_default(analysis.model(), "I", "a"), "List [?]");
-  let diagnostic = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic");
+  let diagnostic = reported(&analysis)[0];
   assert!(
     diagnostic
       .help()
@@ -1616,11 +1620,7 @@ fn written_values_cost_no_step() {
     items.join(", ")
   );
   let analysis = analyze_text(&text, &Limits::new().with_max_value_steps(0));
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 }
 
 #[test]
@@ -1649,7 +1649,7 @@ fn the_built_in_library_is_completed_whatever_the_limit() {
 
 #[test]
 fn an_ok_analysis_has_no_unresolved_value() {
-  let text = "scalar Date\nenum Color {\n  RED\n}\n\
+  let text = "type Query {\n  x: Int\n}\nscalar Date\nenum Color {\n  RED\n}\n\
               directive @all(b: Boolean, l: [[Int]], s: [String!], d: Date) repeatable on OBJECT\n\
               input I<T> {\n  a: Int = 1\n  b: [Int] = 2\n  c: f32 = 0x1p3\n  d: bytes = [1, 2]\n  \
               e: ID = 3\n  f: NonZeroI8 = -1\n  g: T = 1\n  h: Date = { x: [RED] }\n  \
@@ -1676,8 +1676,8 @@ fn long_spellings_are_quoted_as_excerpts() {
   let long = "x".repeat(4096);
   let text = format!("input I {{\n  a: Int = \"{long}\"\n}}\n");
   let analysis = analyze_text(&text, &Limits::new());
-  assert_eq!(analysis.diagnostics().len(), 1);
-  for diagnostic in analysis.diagnostics() {
+  assert_eq!(reported(&analysis).len(), 1);
+  for diagnostic in reported(&analysis) {
     assert!(diagnostic.to_string().len() < 1024);
   }
 
@@ -1687,8 +1687,8 @@ fn long_spellings_are_quoted_as_excerpts() {
     long.to_uppercase()
   );
   let analysis = analyze_text(&text, &Limits::new());
-  assert_eq!(analysis.diagnostics().len(), 1);
-  for diagnostic in analysis.diagnostics() {
+  assert_eq!(reported(&analysis).len(), 1);
+  for diagnostic in reported(&analysis) {
     assert!(diagnostic.to_string().len() < 1024);
   }
 
@@ -1705,7 +1705,7 @@ fn long_spellings_are_quoted_as_excerpts() {
     .map(|&(code, _): &(&str, Location)| code)
     .collect();
   assert_eq!(codes, [MISSING]);
-  for diagnostic in analysis.diagnostics() {
+  for diagnostic in reported(&analysis) {
     assert!(diagnostic.to_string().len() < 1024);
   }
 
@@ -1714,8 +1714,8 @@ fn long_spellings_are_quoted_as_excerpts() {
     "directive @{directive}({argument}: Int!) on OBJECT\ntype T @{directive} {{\n  f: Int\n}}\n"
   );
   let analysis = analyze_text(&text, &Limits::new());
-  assert_eq!(analysis.diagnostics().len(), 1);
-  for diagnostic in analysis.diagnostics() {
+  assert_eq!(reported(&analysis).len(), 1);
+  for diagnostic in reported(&analysis) {
     assert!(diagnostic.to_string().len() < 1024);
   }
 }
