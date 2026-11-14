@@ -36,8 +36,8 @@
 //! ceilings `smear-schema`'s representation has and GraphQLx has not; each other row names the work
 //! that removes it.
 //!
-//! It holds sixteen rows. Four are for every document: the three of the capacity ceilings, which
-//! stay, and the one of the default-value cycles, which L4's last part deletes. Coercion and the
+//! It holds fifteen rows. Three are for every document: those of the capacity ceilings, which
+//! stay. Coercion and the
 //! implementation phase have none: each of their codes has `smear-schema`'s count on every
 //! document, or a row for that document. Twelve are each for one document both dialects refuse: one
 //! where `smear-schema` drops a second definition of a name unread, and eleven where the mistake
@@ -114,15 +114,11 @@ const BESIDE_A_PHASE: &str = "[Z31]: the contribution that holds the mistake als
 const CEILING: &str =
   "[Z6]: a capacity ceiling of smear-schema's representation, which GraphQLx does not have";
 
-/// Why a row of the input-object cycles exists.
-const CYCLES: &str = "the cycle rules report it: L4's last part";
-
 /// Every divergence the test allows.
 const ALLOWED: &[Allowed] = &[
   every("smear::schema::type-reference-too-deep", CEILING),
   every("smear::schema::too-many-field-arguments", CEILING),
   every("smear::schema::too-many-directive-arguments", CEILING),
-  every("smear::schema::input-object-default-value-cycle", CYCLES),
   Allowed {
     code: "smear::schema::undefined-implements-interface",
     document: Some("implements.graphql"),

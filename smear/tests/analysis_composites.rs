@@ -29,9 +29,14 @@ const LIMIT: &str = "smear::graphqlx::resource-limit";
 /// A collection literal out of its place.
 const COLLECTION: &str = "smear::graphqlx::collection-literal";
 
-/// The codes this phase reports values with. A program the other rules refuse, a cycle of
-/// defaults or a OneOf field with a default among them, is asserted on these alone.
+/// The codes this phase reports values with. A program refused besides, a cycle of defaults, which
+/// this phase reports under `CYCLE`, or a OneOf field with a default, which a rule refuses, among
+/// them, is asserted on these alone.
 const PHASE: [&str; 6] = [DEFAULT, ARGUMENT, UNDEFINED, REQUIRED, LIMIT, COLLECTION];
+
+/// GraphQL's code for a default that needs a copy of itself, which this phase reports where the
+/// count of a copy meets itself.
+const CYCLE: &str = "smear::schema::input-object-default-value-cycle";
 
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_text(text: &str, limits: &Limits) -> Analysis {
@@ -839,10 +844,10 @@ fn the_stop_is_by_field() {
   );
 }
 
-/// A default whose copy would hold a copy of itself is not copied, and this phase says nothing:
-/// the cycle is the other rules' to report. So is one that only reads such a default. Refuses
-/// filling until a limit, a diagnostic of this phase, and a poison that does not reach what reads
-/// it.
+/// A default whose copy would hold a copy of itself is not copied, and this phase says nothing of
+/// its values: it reports the cycle under `CYCLE`, which the next test reads. So is one that only
+/// reads such a default. Refuses filling until a limit, a diagnostic of this phase's values, and a
+/// poison that does not reach what reads it.
 #[test]
 fn a_default_that_needs_itself_is_not_filled() {
   let text = "type Query {\n  x: Int\n}\ninput A {\n  b: B = {}\n}\ninput B {\n  a: A = {}\n}\n\
@@ -860,6 +865,165 @@ fn a_default_that_needs_itself_is_not_filled() {
   assert!(arguments_of(model, "T").is_empty());
   assert_eq!(shown_default(model, "C2", "c"), "Object {n: Int 1}");
   assert_eq!(shown_default(model, "A2", "b"), "Object {}");
+}
+
+/// A default that needs a copy of itself is a cycle, reported where the count of a copy meets
+/// itself, once, at the field of least id among the defaults on it: `In.a`; `A.b`, of the two of
+/// `A` and `B`; `C2.c`; and `B2.b`, which `A2.b` only reads, so that `A2.b` is not reported.
+/// Refuses a report for every field of a cycle, a report at each reader of a poisoned count, and
+/// none.
+#[test]
+fn a_default_that_needs_itself_is_a_cycle() {
+  let text = "type Query {\n  x: Int\n}\ninput In {\n  a: In = {}\n}\n\
+              input A {\n  b: B = {}\n}\ninput B {\n  a: A = {}\n}\n\
+              input C2 {\n  c: C2 = { n: 1 }\n  n: Int\n}\n\
+              input A2 {\n  b: B2 = {}\n}\ninput B2 {\n  b: B2 = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (CYCLE, after(schema, text, "input In {\n  ", "a")),
+      (CYCLE, after(schema, text, "input A {\n  ", "b")),
+      (CYCLE, after(schema, text, "input C2 {\n  ", "c")),
+      (CYCLE, after(schema, text, "input B2 {\n  ", "b")),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let report = analysis.diagnostics().iter().next().expect("a diagnostic");
+  assert_eq!(
+    report.to_string(),
+    "the default of the input field `a` of `In` needs a copy of itself: a field its object \
+     literals leave out leads back to it"
+  );
+  assert_eq!(
+    (report.primary_label(), report.help(), report.labels()),
+    (
+      Some("input object default values form a cycle"),
+      Some("drop one of the defaults, or give it a value that does not refer back."),
+      0
+    )
+  );
+}
+
+/// A cycle that closes only under type arguments is met where an instantiation's count meets
+/// itself, and reported once, as needing a copy of itself under the type arguments a use gives
+/// it, however many instantiations meet it: `Box<A>` fills `v` with a copy of `A.b`'s default,
+/// and `P<Int>` and `P<String>` each read `Q<T>.g` back into `P<T>.f`. Refuses a cycle seen
+/// through closed types alone (`[U8]`), and a report for each instantiation.
+#[test]
+fn a_cycle_of_defaults_under_type_arguments_is_reported_once() {
+  let text = "type Query {\n  x: Int\n}\ninput A {\n  b: Box<A> = {}\n}\n\
+              input Box<T> {\n  v: T = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(CYCLE, after(schema, text, "input A {\n  ", "b"))],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    analysis
+      .diagnostics()
+      .iter()
+      .next()
+      .expect("a diagnostic")
+      .to_string(),
+    "the default of the input field `b` of `A` needs a copy of itself: a field its object \
+     literals leave out leads back to it, under the type arguments a use gives it"
+  );
+
+  for text in [
+    "type Query {\n  x(a: P<Int>): Int\n}\ninput P<T> {\n  f: Q<T> = {}\n}\n\
+     input Q<T> {\n  g: P<T> = {}\n}\n",
+    "type Query {\n  x(a: P<Int>): Int\n  y(b: P<String>): Int\n}\ninput P<T> {\n  f: Q<T> = {}\n}\n\
+     input Q<T> {\n  g: P<T> = {}\n}\n",
+  ] {
+    let analysis = analyze_text(text, &Limits::new());
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(CYCLE, after(schema, text, "input P<T> {\n  ", "f"))],
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
+
+/// A count read again under other type arguments, which fills finitely, is no cycle, and nor is
+/// one whose type arguments grow: the second is `resource-limit` alone. Refuses a stop by field
+/// (`[U3]`), and growth taken for a cycle.
+#[test]
+fn a_finite_fill_and_a_growing_one_are_no_cycle() {
+  let text = "type Query {\n  x(y: P<Q> = {}): Int\n}\ninput P<T> {\n  f: T = {}\n}\n\
+              input Q {\n  p: P<R> = {}\n}\ninput R {\n  z: Int = 1\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let text = "type Query {\n  f(x: G<Int> = {}): Int\n}\ninput G<T> {\n  g: G<[T]> = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(
+    found_of(&analysis, &[CYCLE]).is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert!(
+    !found_of(&analysis, &[LIMIT]).is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// A cycle in a generic definition that no closed instantiation reaches is never counted, and not
+/// reported (`[G12]`): what each closed instantiation the program writes holds is what is checked.
+#[test]
+fn a_cycle_no_instantiation_reaches_is_not_counted() {
+  let text = "type Query {\n  x: Int\n}\ninput P<T> {\n  f: Q<T> = {}\n}\n\
+              input Q<T> {\n  g: P<T> = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// A judged count goes on past its poison, and may meet a count being made again for each read it
+/// has left: `Chain0<Int>`'s check counts down to `Fan<Int>`, each of whose three fields reads
+/// `Chain0.next` back while it is being counted. The first meeting alone reports: one cycle, at
+/// `Chain0.next`, under the type arguments. A test cannot see the frames a meeting scans, which
+/// the one report a count makes bounds by construction; it pins the one report.
+#[test]
+fn a_judged_count_reports_its_cycle_once() {
+  let text = "type Query {\n  f(a: Chain0<Int>): Int\n}\n\
+              input Chain0<T> {\n  next: Chain1<T> = {}\n}\n\
+              input Chain1<T> {\n  next: Chain2<T> = {}\n}\n\
+              input Chain2<T> {\n  next: Fan<T> = {}\n}\n\
+              input Fan<T> {\n  b1: Chain0<T> = {}\n  b2: Chain0<T> = {}\n  b3: Chain0<T> = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(CYCLE, after(schema, text, "input Chain0<T> {\n  ", "next"))],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert!(
+    analysis
+      .diagnostics()
+      .iter()
+      .next()
+      .is_some_and(|report: &Diagnostic| report
+        .to_string()
+        .ends_with(", under the type arguments a use gives it")),
+    "{:#?}",
+    analysis.diagnostics()
+  );
 }
 
 /// A OneOf input object's fields left out are never filled. The codes are read by name: the other

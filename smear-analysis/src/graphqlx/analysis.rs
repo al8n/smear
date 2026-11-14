@@ -302,7 +302,12 @@ impl Analysis {
 ///   arguments' defaults are judged only where an application leaves them out. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
 ///   copy of itself is not copied: the argument, or the field, is absent, and under type arguments
-///   what its count reached is judged as a copy is. Each row of a copy, each
+///   what its count reached is judged as a copy is. The first time a count meets itself, that
+///   cycle of defaults is `input-object-default-value-cycle`, at the name of the input field of
+///   least id whose default is on it, once for each field, "under the type arguments a use gives
+///   it" when a default on it is counted under a type it is not written against: a program that
+///   holds such a cycle among closed types gets at least one, not one for each. Each row of a
+///   copy, each
 ///   read of another default's count while counting, each read of a count made already for a
 ///   later copy, each default left out that needs itself, each required argument found left out,
 ///   each field a count reads of an object literal against an input object it had not read it

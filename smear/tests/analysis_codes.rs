@@ -290,6 +290,10 @@ const SHARED: &[(Code, SchemaErrorKind)] = &[
     schema::CIRCULAR_ONE_OF_INPUT_FIELD,
     SchemaErrorKind::CircularOneOfInputField,
   ),
+  (
+    schema::INPUT_OBJECT_DEFAULT_VALUE_CYCLE,
+    SchemaErrorKind::InputObjectDefaultValueCycle,
+  ),
 ];
 
 /// Each constant is the code `smear-schema` reports for the kind it names, and `schema::ALL` holds

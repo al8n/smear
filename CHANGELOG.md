@@ -403,7 +403,13 @@ All notable changes to Smear are documented in this file.
   `@oneOf` to takes exactly one field, and not `null`; and a field left out that has a default
   takes a copy of it, as an argument does, but a OneOf input object's, and is otherwise absent. A
   copy is counted before it is made, each default's count kept by its tree and its type, and a
-  default whose copy would hold a copy of itself is not copied, its argument or field absent. A set
+  default whose copy would hold a copy of itself is not copied, its argument or field absent, and
+  the first time a count meets itself the cycle is `smear::schema::input-object-default-value-cycle`,
+  at the input field of least id whose default is on it, once for each field, "under the type
+  arguments a use gives it" for `input A { b: Box<A> = {} }` with `input Box<T> { v: T = {} }`;
+  a program with such a cycle among closed types gets at least one, and a cycle in a generic
+  definition no closed instantiation reaches is not met, nor one of `input G<T> { g: G<[T]> = {} }`,
+  which grows and is `resource-limit`. A set
   takes a `set!{…}` and a map a `map!{…}`, as `ValueKind::Set` and `ValueKind::Map`, each element,
   key and value coerced against the collection's types, a key or an element never `null`; any
   other literal where a collection is expected, an extern one among them, and a collection

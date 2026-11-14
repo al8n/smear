@@ -540,6 +540,7 @@ pub mod schema {
     DUPLICATE_UNION_MEMBER,
     CIRCULAR_NON_NULL_INPUT_FIELD,
     CIRCULAR_ONE_OF_INPUT_FIELD,
+    INPUT_OBJECT_DEFAULT_VALUE_CYCLE,
   ];
 
   /// Two definitions in one module give a type one name: `smear-schema`'s `DuplicateTypeName`.
@@ -839,4 +840,9 @@ pub mod schema {
   /// fields can be given a finite value: `smear-schema`'s `CircularOneOfInputField`.
   pub const CIRCULAR_ONE_OF_INPUT_FIELD: Code =
     Code::new("smear::schema::circular-one-of-input-field");
+
+  /// An input field's default needs a copy of itself, through the fields its object literals leave
+  /// out: `smear-schema`'s `InputObjectDefaultValueCycle`.
+  pub const INPUT_OBJECT_DEFAULT_VALUE_CYCLE: Code =
+    Code::new("smear::schema::input-object-default-value-cycle");
 }
