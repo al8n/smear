@@ -17,21 +17,24 @@
 //! A parameter stands where its definition puts it: in the complete type of each of its members,
 //! a field's arguments among them, every contribution's, a slot a default fills included; through
 //! a list's element and a collection's arguments, which a value holds; and, given as an argument to
-//! another definition, which an object, an interface, a union, an input object and a directive
-//! are, wherever that definition's parameter stands. A scalar that is no collection and an enum
-//! hide their arguments. A union member and an application's type, the directive's instantiation,
-//! pass a parameter on and put it nowhere themselves. An `implements` entry, a bound and a
-//! parameter's default put it nowhere: the implementing type declares each field itself, a bound's
-//! argument is judged where it is written, and what a default gives is judged where an occurrence
-//! leaves its slot out.
+//! another definition, which an object, an interface, a union, an input object, a directive and a
+//! collection are, wherever that definition's parameter stands. So a collection's argument stands
+//! where the collection stands, and where the collection's own parameter does, which its
+//! applications can put in a directive's argument: with `scalar M<K, V> @map @d<V>`, the `T` of
+//! `type Box<T> { v: M<Int, T> }` stands as a field's type, and wherever `@d`'s parameter stands. A
+//! scalar that is no collection and an enum hide their arguments. A union member and an
+//! application's type, the directive's instantiation, pass a parameter on and put it nowhere
+//! themselves. An `implements` entry, a bound and a parameter's default put it nowhere: the
+//! implementing type declares each field itself, a bound's argument is judged where it is written,
+//! and what a default gives is judged where an occurrence leaves its slot out.
 //!
 //! The table is a graph whose nodes are the slots, one for each type parameter of each definition,
 //! and the open types the roots reach, each interned type once: a type entered before is passed
 //! over, whatever reached it. A type parameter's type leads to its slot; a list to its element and a
-//! collection to each argument; and a slot of another definition to each argument given to it, the
-//! edge carrying where that is written. Each root gives its type its place, and the places spread
-//! along the edges, each node gaining each place once, a slot keeping the witness it gained it
-//! with: across an edge out of a slot the witness becomes the edge's.
+//! collection to each argument; and a slot of another definition, a collection's among them, to
+//! each argument given to it, the edge carrying where that is written. Each root gives its type its
+//! place, and the places spread along the edges, each node gaining each place once, a slot keeping
+//! the witness it gained it with: across an edge out of a slot the witness becomes the edge's.
 //!
 //! What an operation's argument reaches is found last: each field argument's type is given it,
 //! and it spreads along the same edges, and from a named type of an input object to each argument
@@ -626,19 +629,20 @@ impl Graph<'_> {
         }
         TyKind::Named { def, args } => {
           let definition = model.def(def);
-          if definition.collection().is_some() {
-            for arg in args {
-              if let Some(to) = self.open(model, *arg, at) {
+          let collection = definition.collection().is_some();
+          // A scalar that is no collection and an enum hide their arguments.
+          if collection || !matches!(definition.kind(), DefKind::Scalar | DefKind::Enum) {
+            let input = definition.kind() == DefKind::InputObject;
+            for (index, arg) in args.iter().enumerate() {
+              let Some(to) = self.open(model, *arg, at) else {
+                continue;
+              };
+              // A value of a collection holds its arguments, which stand where it stands.
+              if collection {
                 self.edges.push((from, to, at, true));
               }
-            }
-          } else if !matches!(definition.kind(), DefKind::Scalar | DefKind::Enum) {
-            let input = definition.kind() == DefKind::InputObject;
-            // What an argument takes is the definition's slot's to say.
-            for (index, arg) in args.iter().enumerate() {
-              if let Some(to) = self.open(model, *arg, at)
-                && let Some(given) = slot(self.base, def, dense(index))
-              {
+              // What an argument takes is the definition's slot's to say, a collection's too.
+              if let Some(given) = slot(self.base, def, dense(index)) {
                 self.edges.push((given, to, at, false));
                 if input {
                   self.holds.push((from, to, given));

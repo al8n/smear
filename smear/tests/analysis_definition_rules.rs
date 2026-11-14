@@ -1150,6 +1150,76 @@ fn an_application_is_an_instantiation_of_its_directive() {
 }
 
 #[test]
+fn a_collections_own_parameters_stand_in_what_it_is_given() {
+  // `@d<V>` puts the map `M`'s value parameter in a directive's argument, so `M<Int, Obj>` is
+  // refused at `Obj`, labelled at that `V`. `Box`'s `T` is given to that parameter in `v`, so it
+  // stands there too, beside the field's type `v` makes it through the map's value: `Box<Obj>` is
+  // refused under the same code, labelled at `M<Int, T>`. A collection that only held its
+  // arguments, and passed none of its own parameters' places to them, accepted `Box<Obj>`.
+  let text = "type Query {\n  b: Box<Obj>\n  m: M<Int, Obj>\n}\ntype Obj {\n  x: Int\n}\n\
+              directive @d<X>(v: [X]) on SCALAR\nscalar M<K, V> @map @d<V>\n\
+              type Box<T> {\n  v: M<Int, T>\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "Box<", "Obj", 0),
+        Some(at(schema, text, "M<Int, T>", 0))
+      ),
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "m: M<Int, ", "Obj", 0),
+        Some(named(schema, text, "@d<", "V", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Box` takes the object type `Obj` for its type parameter `T`, which stands as a directive \
+       argument's type, and a directive's argument's type is an input type",
+      "`M` takes the object type `Obj` for its type parameter `V`, which stands as a directive \
+       argument's type, and a directive's argument's type is an input type",
+    ]
+  );
+  let labels: Vec<Vec<(Location, &str)>> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| {
+      (0..diagnostic.labels())
+        .filter_map(|index: usize| diagnostic.label(index))
+        .map(|label| (label.location(), label.text()))
+        .collect()
+    })
+    .collect();
+  assert_eq!(
+    labels,
+    [
+      vec![(at(schema, text, "M<Int, T>", 0), "`T` stands here")],
+      vec![(named(schema, text, "@d<", "V", 0), "`V` stands here")],
+    ]
+  );
+
+  // The twin, an input object where the object was: `Box` is an input object and both are taken
+  // as field arguments, so every place each parameter stands in takes an input type, and the
+  // input object passes both ways.
+  let text = "type Query {\n  b(a: Box<In>): Int\n  m(a: M<Int, In>): Int\n}\n\
+              input In {\n  x: Int\n}\ndirective @d<X>(v: [X]) on SCALAR\n\
+              scalar M<K, V> @map @d<V>\ninput Box<T> {\n  v: M<Int, T>\n}\n";
+  let analysis = analyze_text(text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
 fn a_type_given_to_many_parameters_is_one_node() {
   // `D.d`'s complete type is `H<Tup<T>, G1<Tup<T>>, G2<Tup<T>>>`: `Tup<T>` is given to three
   // slots, and is one node of the table with an edge from each, walked once. A test cannot see
