@@ -76,7 +76,7 @@ rule_set! {
 #[test]
 fn the_set_smear_ships_lists_each_rule_with_its_codes() {
   let table: &[(&str, &[Code])] = Rules::TABLE;
-  assert_eq!(table.len(), 29);
+  assert_eq!(table.len(), 32);
   assert_eq!(table[0].0, "DuplicateSchemaDefinition");
   assert_eq!(
     table[0].1,
@@ -243,6 +243,12 @@ fn the_set_smear_ships_lists_each_rule_with_its_codes() {
       "smear::schema::missing-query-root-operation-type"
     )]
   );
+  assert_eq!(table[29].0, "ExternMisuse");
+  assert_eq!(table[29].1, &[Code::new("smear::graphqlx::extern-misuse")]);
+  assert_eq!(table[30].0, "ReprMisuse");
+  assert_eq!(table[30].1, &[Code::new("smear::graphqlx::repr-misuse")]);
+  assert_eq!(table[31].0, "TierViolation");
+  assert_eq!(table[31].1, &[Code::new("smear::graphqlx::tier")]);
 }
 
 /// A set's table lists each rule by its type's name, in field order, with the codes it lists.

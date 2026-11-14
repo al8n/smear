@@ -40,6 +40,8 @@
 //! accepts any literal: only the service knows how to read one, so a validator that guessed would
 //! reject valid documents.
 
+use smear_parser::lexer::{DecimalFloat, NORMALIZED_FLOAT_LEN, normalize_decimal_float};
+
 /// The eight shapes a GraphQL input literal takes, with the variable arm left out.
 ///
 /// A variable is not a shape a coercion table can rule on — whether it fits is draft 5.8.5's
@@ -48,7 +50,7 @@
 /// # The two numeric arms carry a verdict, not a spelling
 ///
 /// [`BuiltInScalar::accepts`] took the literal's retained source bytes beside the shape, and read
-/// them for exactly two questions — [`fits_i32`] and [`is_finite`] — asked of exactly two arms.
+/// them for exactly two questions — [`fits_i32`] and [`is_finite`] — asked of the two numeric arms.
 /// Keeping the bytes to ask those questions later is what made a constant literal's spelling
 /// something the builder had to *store*, one copy per distinct spelling, and a parse is not
 /// injective into the bytes it reads: `B` parses of the `B` suffixes of one buffer through the
@@ -65,10 +67,13 @@ pub(crate) enum LiteralShape {
   Null,
   /// `true` or `false`.
   Boolean,
-  /// An integer literal, with whether its spelling fit GraphQL's 32-bit signed range.
+  /// An integer literal, with whether its spelling fit GraphQL's 32-bit signed range and whether
+  /// it named a finite double.
   Int {
     /// [`fits_i32`], decided where the literal was read.
     fits_i32: bool,
+    /// [`is_finite`], decided where the literal was read: whether it may stand for a `Float`.
+    is_finite: bool,
   },
   /// A floating-point literal, with whether its spelling named a finite double.
   Float {
@@ -121,11 +126,11 @@ impl BuiltInScalar {
   pub(crate) fn accepts(self, shape: LiteralShape) -> bool {
     match self {
       // The specification's `Int` input coercion takes integer literals only, in 32-bit range.
-      Self::Int => matches!(shape, LiteralShape::Int { fits_i32: true }),
-      // The coercion rules let an `Int` literal stand for a `Float`.
+      Self::Int => matches!(shape, LiteralShape::Int { fits_i32: true, .. }),
+      // The coercion rules let an `Int` literal stand for a `Float`, and `Float`'s input coercion
+      // refuses a value no finite double represents, written as an integer or not (§3.5.2).
       Self::Float => match shape {
-        LiteralShape::Float { is_finite } => is_finite,
-        LiteralShape::Int { .. } => true,
+        LiteralShape::Float { is_finite } | LiteralShape::Int { is_finite, .. } => is_finite,
         _ => false,
       },
       Self::String => shape == LiteralShape::String,
@@ -135,7 +140,7 @@ impl BuiltInScalar {
       // reads the same verdict rather than a `fits_id` of its own.
       Self::ID => match shape {
         LiteralShape::String => true,
-        LiteralShape::Int { fits_i32 } => fits_i32,
+        LiteralShape::Int { fits_i32, .. } => fits_i32,
         _ => false,
       },
     }
@@ -154,19 +159,30 @@ pub(crate) fn fits_i32(spelling: &[u8]) -> bool {
   core::str::from_utf8(spelling).is_ok_and(|text| text.parse::<i32>().is_ok())
 }
 
-/// Whether a `Float` literal's spelling names a finite double.
+/// Whether a numeric literal's spelling, a `Float`'s or an `Int`'s, names a finite double: a zero,
+/// or the spelling `normalize_decimal_float` writes of it, read by `str::parse`. Not the literal as
+/// written, whose exponent past 655 359 `str::parse` misreads when the literal's digits offset it.
 pub(crate) fn is_finite(spelling: &[u8]) -> bool {
-  core::str::from_utf8(spelling).is_ok_and(|text| text.parse::<f64>().is_ok_and(f64::is_finite))
+  let mut buffer = [0; NORMALIZED_FLOAT_LEN];
+  match normalize_decimal_float(spelling, &mut buffer) {
+    Some(DecimalFloat::Zero { .. }) => true,
+    Some(DecimalFloat::Spelled(spelled)) => spelled.parse::<f64>().is_ok_and(f64::is_finite),
+    // Past every double, no decimal float, or a reading of a later lexer's.
+    _ => false,
+  }
 }
 
 #[cfg(test)]
 mod tests {
+  use std::string::String;
+
   use super::{BuiltInScalar, LiteralShape, fits_i32, is_finite};
 
-  /// An `Int` literal's shape, with the range verdict the reduction decides.
+  /// An `Int` literal's shape, with the two verdicts the reduction decides.
   fn int(spelling: &[u8]) -> LiteralShape {
     LiteralShape::Int {
       fits_i32: fits_i32(spelling),
+      is_finite: is_finite(spelling),
     }
   }
 
@@ -251,5 +267,79 @@ mod tests {
     assert!(is_finite(b"-1.5e3"));
     assert!(!is_finite(b"1e400"));
     assert!(!BuiltInScalar::Float.accepts(float(b"1e400")));
+  }
+
+  #[test]
+  fn a_float_literals_exponent_is_read_whatever_its_digits_offset() {
+    // Enough zeros that an exponent past 655 359, the most `str::parse` reads exactly, is offset
+    // back into range; fewer under Miri, where each verdict is the same.
+    let zeros = "0".repeat(if cfg!(miri) { 997 } else { 99_998 });
+    // `0.`, the zeros, `1e999999`: 10^900000 when unshrunk, past every double, which `str::parse`
+    // alone reads as 1.0.
+    let mut codex = String::from("0.");
+    codex.push_str(&zeros);
+    codex.push_str("1e999999");
+    assert!(!is_finite(codex.as_bytes()));
+    assert!(!BuiltInScalar::Float.accepts(float(codex.as_bytes())));
+    // `1`, the zeros and one more, `e-999999`: as far below, and so zero, which it reads as 1.0.
+    let mut reverse = String::from("1");
+    reverse.push_str(&zeros);
+    reverse.push_str("0e-999999");
+    assert!(is_finite(reverse.as_bytes()));
+    // A first significant digit at each edge of a double's range, and a zero past any exponent.
+    assert!(is_finite(b"1e308"));
+    assert!(!is_finite(b"1e309"));
+    assert!(is_finite(b"1.7976931348623157e308"));
+    assert!(!is_finite(b"1.7976931348623159e308"));
+    assert!(is_finite(b"1e-999999"));
+    assert!(is_finite(b"-0.0e999999"));
+  }
+
+  /// The first 308 digits of `2^1024 - 2^970`, the least integer that rounds to infinity as a
+  /// double: with a final `2` it is that integer, and with a final `1` it is the greatest that
+  /// rounds to `f64::MAX`.
+  const EDGE_HEAD: &str = concat!(
+    "17976931348623158079372897140530341507993413271003782693617377898044496829276",
+    "47509466490179775872070963302864166928879109465555478519404026306574886715058",
+    "20681908902000708383676273854845817711531764475730270069855571366959622842914",
+    "81986083493647529271907416844436551070434271155969950809304288017790417449779",
+  );
+
+  #[test]
+  fn an_integer_stands_for_a_float_only_within_a_doubles_range() {
+    let mut below = String::from(EDGE_HEAD);
+    below.push('1');
+    let mut edge = String::from(EDGE_HEAD);
+    edge.push('2');
+    let mut ten_308 = String::from("1");
+    ten_308.push_str(&"0".repeat(308));
+    let mut ten_309 = ten_308.clone();
+    ten_309.push('0');
+    for (spelling, finite) in [
+      (below.as_str(), true),
+      (edge.as_str(), false),
+      (ten_308.as_str(), true),
+      (ten_309.as_str(), false),
+    ] {
+      let mut negative = String::from("-");
+      negative.push_str(spelling);
+      for written in [spelling, negative.as_str()] {
+        assert_eq!(is_finite(written.as_bytes()), finite, "{written}");
+        assert_eq!(
+          BuiltInScalar::Float.accepts(int(written.as_bytes())),
+          finite,
+          "{written}"
+        );
+        // Far out of `Int`'s range, and so of `ID`'s integer arm, finite or not.
+        assert!(
+          !BuiltInScalar::Int.accepts(int(written.as_bytes())),
+          "{written}"
+        );
+        assert!(
+          !BuiltInScalar::ID.accepts(int(written.as_bytes())),
+          "{written}"
+        );
+      }
+    }
   }
 }

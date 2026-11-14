@@ -1750,7 +1750,9 @@ fn the_built_in_library_is_built_whatever_the_limits() {
     .with_max_generic_depth(0)
     .with_max_instantiations(0)
     .with_max_substitutions(0)
-    .with_max_bound_steps(0);
+    .with_max_bound_steps(0)
+    .with_max_value_steps(0)
+    .with_max_implementation_steps(0);
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
   let analysis = analyze(&root, &[], &limits);
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());

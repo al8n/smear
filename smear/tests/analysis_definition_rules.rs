@@ -57,6 +57,10 @@ const IMPLEMENTS: &str = "smear::schema::implements-non-interface";
 /// GraphQL's code for an interface that implements itself.
 const SELF_IMPLEMENTING: &str = "smear::schema::self-implementing-interface";
 
+/// GraphQL's code for an interface a definition's interfaces implement and it does not, the
+/// implementation phase's.
+const TRANSITIVE: &str = "smear::schema::missing-transitive-interface";
+
 /// GraphQL's code for a union member that is no object type.
 const UNION_MEMBER: &str = "smear::schema::union-member-not-object";
 
@@ -312,6 +316,33 @@ fn a_replaced_built_in_is_judged_and_a_built_ins_extension_is_not() {
         INTROSPECTION,
         at(schema, text, "__Type", 0),
         Some(definition(&analysis, "^::core::__Type"))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A built-in's extension is judged by none of these rules, whatever it adds: a field `__Type`
+  // already has, a field typed by an input object, a required argument that is deprecated, an
+  // argument typed by an object, and an entry that names an object. Each extension is GraphQL's
+  // one refusal of it, and nothing more.
+  let text = "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Obj {\n  o: Int\n}\n\
+              extend type __Type {\n  name: String\n  bad: In\n  \
+              f(a: Int! @deprecated, o: Obj): Int\n}\nextend type __Schema implements Obj\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        INTROSPECTION,
+        at(schema, text, "__Type", 0),
+        Some(definition(&analysis, "^::core::__Type"))
+      ),
+      (
+        INTROSPECTION,
+        at(schema, text, "__Schema", 0),
+        Some(definition(&analysis, "^::core::__Schema"))
       ),
     ],
     "{:#?}",
@@ -784,6 +815,11 @@ const RINGS: &str = "type Query {\n  ok: Int\n}\ninterface Selfish implements Se
                      extend interface E2 implements E1\n\
                      interface Down implements Leaf {\n  id: ID\n}\ninterface Leaf {\n  id: ID\n}\n";
 
+/// Each interface on a ring is refused at its name, but on the ring of three. There each interface
+/// misses the interface its own interface implements, which the implementation phase reports at
+/// its entry, labelled at the entry that implements it; that error, in the interface's own
+/// contribution, silences this rule there. On every other ring the interface missed is the
+/// definition itself, which the phase passes by.
 #[test]
 fn no_interface_implements_itself() {
   let analysis = analyze_one(RINGS);
@@ -795,15 +831,18 @@ fn no_interface_implements_itself() {
       None,
     )
   };
+  let entry = |of: &str, names: &str| -> Location {
+    named(schema, RINGS, &format!("{of} implements "), names, 0)
+  };
   assert_eq!(
     found(&analysis),
     [
       ring("Selfish"),
       ring("P1"),
       ring("P2"),
-      ring("R1"),
-      ring("R2"),
-      ring("R3"),
+      (TRANSITIVE, entry("R1", "R2"), Some(entry("R2", "R3"))),
+      (TRANSITIVE, entry("R2", "R3"), Some(entry("R3", "R1"))),
+      (TRANSITIVE, entry("R3", "R1"), Some(entry("R1", "R2"))),
       ring("G"),
       ring("E1"),
       ring("E2"),
@@ -1130,6 +1169,12 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ntype T {\n  __f: Int\n  x: Missing\n}\n",
     "type Query {\n  ok: Int\n}\ntype T {\n  __f: Int\n}\ntype U {\n  x: Missing\n}\n",
   );
+  // A field's arguments are judged as the walk enters the field, by its contribution.
+  silent_beside_a_phase(
+    DUPLICATE_ARGUMENT,
+    "type Query {\n  ok: Int\n}\ntype T {\n  f(a: Int, a: Int): Int\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ntype T {\n  f(a: Int, a: Int): Int\n}\ntype U {\n  x: Missing\n}\n",
+  );
   // The later member's contribution silences it; the first's does not.
   silent_beside_a_phase(
     DUPLICATE_FIELD,
@@ -1184,9 +1229,11 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
      input U {\n  x: Missing\n}\n",
   );
   // An error in an interface's own contribution silences it, and not the other interface of its
-  // ring.
+  // ring. `B` writes `A`'s field `x` too, so that the implementation phase finds nothing missing in
+  // `B`'s own contribution: a type that names nothing is a subtype of any type, and has every type
+  // as a subtype.
   let text = "type Query {\n  ok: Int\n}\ninterface A implements B {\n  id: ID\n  x: Missing\n}\n\
-              interface B implements A {\n  id: ID\n}\n";
+              interface B implements A {\n  id: ID\n  x: Int\n}\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
   assert_eq!(

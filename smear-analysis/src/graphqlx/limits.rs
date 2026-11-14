@@ -22,6 +22,10 @@ const DEFAULT_INSTANTIATIONS: u32 = 1 << 16;
 const DEFAULT_SUBSTITUTIONS: u32 = 1 << 20;
 /// See [`Limits::max_bound_steps`].
 const DEFAULT_BOUND_STEPS: u32 = 1 << 20;
+/// See [`Limits::max_value_steps`].
+const DEFAULT_VALUE_STEPS: u32 = 1 << 20;
+/// See [`Limits::max_implementation_steps`].
+const DEFAULT_IMPLEMENTATION_STEPS: u32 = 1 << 20;
 /// See [`Limits::max_source_bytes`].
 const DEFAULT_SOURCE_BYTES: u32 = 1 << 26;
 /// See [`Limits::max_diagnostics`].
@@ -46,18 +50,22 @@ const _: () = assert!(
 /// otherwise grow without limit: the number of definitions and of modules, how deep modules, `use`
 /// trees and types nest, how long a path is, how many rounds the glob fixpoint runs, how many
 /// modules one module's globs name, how many instantiations of generic definitions it interns, how
-/// many steps of substitution it takes, how many steps judging bounds takes, and how many bytes of
+/// many steps of substitution it takes, how many steps judging bounds takes, how many steps
+/// completing values takes, how many steps checking implementations takes, and how many bytes of
 /// source it reads. A bound that is passed is reported as `smear::graphqlx::resource-limit`, never
 /// as a panic. Two bounds are not refusals: the diagnostic ceiling and the near-miss budget limit
 /// what the analysis says, not what it accepts.
 ///
 /// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
 /// is always declared whole and every package has its root module, and that the built-in library's
-/// types are built whatever the generic depth, instantiation and substitution bounds are, and its
-/// bounds cost nothing to judge, since it writes no instantiation of a definition with a bound:
-/// see [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_generic_depth`],
-/// [`Limits::max_instantiations`], [`Limits::max_substitutions`] and
-/// [`Limits::max_bound_steps`].
+/// types are built whatever the generic depth, instantiation and substitution bounds are, its
+/// bounds cost nothing to judge, since it writes no instantiation of a definition with a bound,
+/// its own values cost nothing to complete, where it writes them and in a copy made for an
+/// application it writes, and its implementations cost nothing to check, since it writes no
+/// `implements` entry and no union: see
+/// [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_generic_depth`],
+/// [`Limits::max_instantiations`], [`Limits::max_substitutions`], [`Limits::max_bound_steps`],
+/// [`Limits::max_value_steps`] and [`Limits::max_implementation_steps`].
 ///
 /// # Building one
 ///
@@ -86,6 +94,8 @@ pub struct Limits {
   max_instantiations: u32,
   max_substitutions: u32,
   max_bound_steps: u32,
+  max_value_steps: u32,
+  max_implementation_steps: u32,
   max_source_bytes: u32,
   max_diagnostics: u32,
   max_near_miss_comparisons: u32,
@@ -116,6 +126,8 @@ impl Limits {
       max_instantiations: DEFAULT_INSTANTIATIONS,
       max_substitutions: DEFAULT_SUBSTITUTIONS,
       max_bound_steps: DEFAULT_BOUND_STEPS,
+      max_value_steps: DEFAULT_VALUE_STEPS,
+      max_implementation_steps: DEFAULT_IMPLEMENTATION_STEPS,
       max_source_bytes: DEFAULT_SOURCE_BYTES,
       max_diagnostics: DEFAULT_DIAGNOSTICS,
       max_near_miss_comparisons: DEFAULT_NEAR_MISS_COMPARISONS,
@@ -236,11 +248,16 @@ impl Limits {
   /// two.
   ///
   /// A type deeper than this is reported at each occurrence that would have it, which is then the
-  /// unresolved type; but for a bound put under an instantiation's arguments, which would nest
-  /// deeper than this: each occurrence of the instantiation is reported where it is written, and
-  /// keeps its type. The built-in library's types are built whatever the bound, so `0`, which
-  /// refuses every list and every type with an argument a supplied package writes, reports nothing
-  /// inside it.
+  /// unresolved type, and at each directive application whose type would, at its path: an
+  /// application is typed as an occurrence of its directive, a level above its type arguments, so
+  /// `@d<[Int]>` is two deep. But a bound put under an instantiation's arguments that would nest
+  /// deeper than this is reported at each occurrence of the instantiation, where it is written, and
+  /// the occurrence keeps its type; and a type that checking an implementation reads under an
+  /// `implements` entry's type arguments that would nest deeper stops the check of its definition,
+  /// reported once, at the entry it was checking, and the comparing of an instantiation's entries
+  /// and members, reported at each occurrence of it. The built-in library's types are built
+  /// whatever the bound, so `0`, which refuses every list and every type with an argument a
+  /// supplied package writes, reports nothing inside it.
   ///
   /// The default is 64. A written type is already bounded by the parser's bracket ceiling (24 at
   /// its default); substitution is what can go deeper, since a default that wraps a parameter once
@@ -253,14 +270,24 @@ impl Limits {
 
   /// How many distinct instantiations of generic definitions the analysis may intern: each
   /// definition of at least one type parameter with each list of arguments, those the program
-  /// writes, those filling its defaults derives and those a bound derives when it is put under an
-  /// instantiation's arguments together, a type that names a type parameter included. An
-  /// instantiation written nullable and non-null counts once.
+  /// writes, those filling its defaults derives, those a bound derives when it is put under an
+  /// instantiation's arguments, each directive application's type, its directive with its
+  /// complete type arguments, those a member's type rebuilt under type arguments derives, and
+  /// those checking an implementation derives, reading a type under an `implements` entry's type
+  /// arguments, together, a type that names a type parameter included. An instantiation written
+  /// nullable and non-null counts once.
   ///
   /// Past it, each occurrence that would need one more is reported where it is written, and is the
-  /// unresolved type; one already interned is still built. An occurrence whose bounds, put under
-  /// its arguments, would need one more is reported where it is written too, and keeps its type.
-  /// The built-in library's are not counted.
+  /// unresolved type; one already interned is still built. An application that would need one
+  /// more is reported at its path, and its type arguments are not completed. A value whose type
+  /// under type arguments would need one more is reported as
+  /// [`max_value_steps`](Self::max_value_steps) says of a type that cannot be built. An occurrence
+  /// whose bounds, put under its arguments, would need one more is reported where it is written
+  /// too, and keeps its type; a definition whose implementation's check would need one more is
+  /// reported once, at the `implements` entry it was checking; and an instantiation whose entries
+  /// and members, compared under its arguments, would need one more is reported at each
+  /// occurrence of it. The built-in library's are not
+  /// counted.
   ///
   /// The default is 2^16. A program writes hundreds of instantiations; derived ones can double per
   /// level of a chain of defaults, or of an `implements` chain, and this bound is what keeps that
@@ -273,15 +300,20 @@ impl Limits {
   /// How many steps of substitution the analysis may take, over the whole analysis.
   ///
   /// Substitution puts types in place of a generic definition's type parameters. Filling the type
-  /// arguments a use leaves out is substitution: a set of written arguments filled for the first
-  /// time takes one step for each argument left out, and one for each type occurrence of a default
-  /// that the filling walks, whether the type that occurrence yields is new or not. A set of
-  /// arguments filled once is not filled again, whichever use asks for it. Judging a bound puts an
-  /// instantiation's arguments in place of the parameters the bound names too, and draws on
-  /// [`max_bound_steps`](Self::max_bound_steps), never on this bound.
+  /// arguments a use leaves out is substitution, a directive application's left-out type
+  /// arguments included: a set of written arguments filled for the first time takes one step for
+  /// each argument left out, and one for each type occurrence of a default that the filling walks,
+  /// whether the type that occurrence yields is new or not. A set of arguments filled once is not
+  /// filled again, whichever use asks for it. Judging a bound puts an instantiation's arguments in
+  /// place of the parameters the bound names too, and draws on
+  /// [`max_bound_steps`](Self::max_bound_steps), never on this bound; and checking an
+  /// implementation puts an `implements` entry's type arguments in place of an interface's
+  /// parameters, and draws on [`max_implementation_steps`](Self::max_implementation_steps), never
+  /// on this bound.
   ///
   /// Past it, each type occurrence whose type would take one more step is reported where it is
-  /// written, and its type is the unresolved one.
+  /// written, and its type is the unresolved one; an application is reported at its path, and its
+  /// type arguments are not completed.
   ///
   /// The default is 2^20: sixteen steps for each of the instantiations
   /// [`max_instantiations`](Self::max_instantiations) admits at its default, which no program
@@ -296,15 +328,17 @@ impl Limits {
   /// How many steps the analysis may take to judge bounds, over the whole analysis.
   ///
   /// The bounds of each instantiation the program writes of a definition with a bound are judged
-  /// once, whatever nullness the instantiation is written with. A step is one of: a bound taken
+  /// once, whatever nullness the instantiation is written with, and so are a directive's bounds
+  /// once for each distinct type its applications have. A step is one of: a bound taken
   /// under the instantiation's arguments; a node of a bound's interface rebuilt with those
   /// arguments in place of the definition's type parameters; an `implements` entry, or a type
   /// parameter's bound, looked at; and a pair of types, or an argument, compared. What a type
   /// argument takes against one interface type is taken once, whichever instantiation asks it.
   ///
   /// Past it, each occurrence of an instantiation whose bounds could not be judged within it is
-  /// reported where it is written, and keeps its type. Every bound takes a step, so `0` reports
-  /// every instantiation of a definition with a bound, a `HashMap` among them.
+  /// reported where it is written, and keeps its type, and each such application is reported at
+  /// its path. Every bound takes a step, so `0` reports every instantiation of a definition with a
+  /// bound, a `HashMap` among them.
   ///
   /// The default is 2^20: sixteen steps for each of the instantiations
   /// [`max_instantiations`](Self::max_instantiations) admits at its default. `Sorted<User>`, of
@@ -314,6 +348,113 @@ impl Limits {
   #[inline]
   pub const fn max_bound_steps(&self) -> u32 {
     self.max_bound_steps
+  }
+
+  /// How many steps the analysis may take to complete values beyond what is written, over the
+  /// whole analysis.
+  ///
+  /// A written value takes none, but for the conversion of a long decimal integer below:
+  /// [`max_source_bytes`](Self::max_source_bytes) bounds the rest of what is written. A step is
+  /// one of: a value of a copy of a default, which fills an argument an application leaves out or
+  /// a field an object literal leaves out, each value nested in the default counting one, the
+  /// copies of the defaults its own object literals leave out among them; a read, while a copy is
+  /// counted, of the count of each default one of its object literals leaves out, and a read of a
+  /// count made already, when a later copy of its default is asked for, each spent whether or not
+  /// the copy it was read for is made; a default left out whose copy would hold a copy of itself,
+  /// which is not made; a list that a written value stands for where a list is expected, one for
+  /// each level of list between the value and its type, as `tags: [[Int]] = 1` stands for a list
+  /// of a list of `1`; a required argument an application leaves out, and a required field an
+  /// object literal leaves out, each found left out, reported where it is written and not in a
+  /// count; a node a rebuild of a member's type
+  /// under type arguments looks at, its root included, once for each written type and
+  /// instantiation; a node of a count made under a type its default is not written against, and an
+  /// identity of a set's element or of a map's key that such a count renders to search them for
+  /// one held twice, a step for each 64 bytes of it or part, once for each literal and the type its
+  /// identities are read against; a field an object literal of a default writes, one its input
+  /// object does not declare included, the first time the default's count reads the literal
+  /// against that input object; an argument that may be required, a bare nullable type parameter
+  /// of its directive, that an application with complete type arguments leaves out, and a field
+  /// that may be required that a written object literal of a generic input object leaves out; a
+  /// pair of a closed instantiation, of a type the program writes or of a generic directive an
+  /// application of it makes, and what its definition records, checked under the instantiation's
+  /// arguments: a value whose type names its type parameters, or an argument an application in it
+  /// leaves out whose type is one of them; and converting a decimal integer of more
+  /// than 38 significant digits, the most `u128` arithmetic reads whatever they spell, to its
+  /// value, charged before the conversion as an upper bound of its work:
+  /// `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine digits times
+  /// the 32-bit limbs of its value. A hexadecimal, octal or binary integer converts in one pass and
+  /// takes none. The built-in library's own values take none: its defaults where it writes them,
+  /// and a copy made for an application it writes. A copy of one of its defaults made for an
+  /// application a supplied package writes, a bare `@deprecated` among them, is charged.
+  ///
+  /// A type that cannot be built under type arguments, past this bound, past
+  /// [`max_generic_depth`](Self::max_generic_depth) or past
+  /// [`max_instantiations`](Self::max_instantiations), makes a written value one unresolved row,
+  /// `resource-limit` at it, and starves an application that leaves out an argument of that type,
+  /// the report naming the limit.
+  ///
+  /// Past it, a written value whose lists cannot all be paid for is `resource-limit` where it is
+  /// written, and the level of list that could not be paid for is its one unresolved row, under
+  /// the levels that were: with one step left, `a: [[Int]] = 1` is a list of one unresolved value.
+  /// An integer whose conversion cannot be paid for is `resource-limit` where it is written, and
+  /// unresolved. An application whose next argument left out cannot be paid for is
+  /// `resource-limit` at its path, once, and is filled no further: what it writes is still
+  /// coerced, an argument the budget kept from being filled is absent, a required one it kept from
+  /// being reported is not reported, and a copy is made whole or not at all. An object literal
+  /// whose next required field, or next default, left out cannot be paid for is starved likewise:
+  /// `resource-limit` at the literal, once; what it writes is still made, what was filled stays,
+  /// and none of the rest of its required fields and defaults is read. Its required fields are
+  /// asked for before its defaults. At `0`, no default fills an argument or a field, no written
+  /// value stands for a list, and no decimal integer of more than 38 significant digits is read: a
+  /// decimal `u128::MAX` is `resource-limit`.
+  ///
+  /// The default is 2^20: a read and one copied value for each of half a million applications, so
+  /// a program of a hundred thousand applications that each leave four defaults of one value out
+  /// stays inside it. The longest decimal integer it converts, with nothing else spent, has 9 526
+  /// digits, charged 1 048 410 steps; a longer one is written in hexadecimal, or read under a
+  /// higher limit. Defaults that fill defaults multiply: input objects that each default two fields
+  /// to `{}` of the next fill twice as many values at each level, and nineteen of them, a valid
+  /// GraphQL document, pass the default where their own defaults are written.
+  #[inline]
+  pub const fn max_value_steps(&self) -> u32 {
+    self.max_value_steps
+  }
+
+  /// How many steps the analysis may take to check implementations, over the whole analysis:
+  /// that each definition implements every interface it declares, under the type arguments its
+  /// `implements` entry writes, and every interface those interfaces implement; and that no two of
+  /// a definition's entries, or of a union's members, are one type, as written or under the type
+  /// arguments of an instantiation the program writes.
+  ///
+  /// A step is one of: an item looked at of a list of another definition's, an interface's
+  /// `implements` entries and fields, a field's arguments, a type's entries, a type parameter's
+  /// bounds and a bound's interface's entries, a union's members, and a written instantiation's
+  /// definition's entries and members, each one another package wrote, which is passed by,
+  /// included; a node a type is rebuilt at, its root and each of its arguments and elements, with
+  /// an entry's type arguments in place of a definition's type parameters, once for each type and
+  /// arguments, a rebuild remembered costing nothing; and a pair of types compared, a pair compared
+  /// already included. A definition's own entries and members, read once for it, cost nothing.
+  ///
+  /// Past it, a definition's check stops: `resource-limit` once, at the `implements` entry it was
+  /// checking, and nothing more is said of the definition. An instantiation whose entries or
+  /// members could not be compared is `resource-limit` at each occurrence of it. At `0` every
+  /// definition that implements an interface or a marker with an entry or a field to look at is
+  /// reported, and so is every occurrence of a definition whose own entries or members name its
+  /// type parameters. What a rebuild derives counts toward
+  /// [`max_instantiations`](Self::max_instantiations) and
+  /// [`max_generic_depth`](Self::max_generic_depth); nothing here draws on
+  /// [`max_substitutions`](Self::max_substitutions) or [`max_bound_steps`](Self::max_bound_steps).
+  /// The built-in library writes no `implements` entry and no union, and costs nothing here.
+  ///
+  /// The default is 2^20. GitLab's schema, the largest of smear's fixtures, with 2,041 types and 188
+  /// `implements` entries, takes about 6,500 steps, and every fixture takes fewer than 2^15. A valid
+  /// GraphQL document can meet it: checking that `implements` is transitively closed costs up to
+  /// the square of a type's entries, as it does in `smear-schema`, so 468 object types that each
+  /// implement a complete chain of 64 interfaces of one field each, about 200 KB of SDL, take
+  /// 1,049,088 steps, and 467 take 1,046,944.
+  #[inline]
+  pub const fn max_implementation_steps(&self) -> u32 {
+    self.max_implementation_steps
   }
 
   /// How many bytes of source text the supplied packages may hold together. The built-in
@@ -446,6 +587,23 @@ impl Limits {
   #[must_use]
   pub const fn with_max_bound_steps(mut self, max: u32) -> Self {
     self.max_bound_steps = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_value_steps`](Self::max_value_steps) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_value_steps(mut self, max: u32) -> Self {
+    self.max_value_steps = max;
+    self
+  }
+
+  /// The same limits with `max` as their
+  /// [`max_implementation_steps`](Self::max_implementation_steps) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_implementation_steps(mut self, max: u32) -> Self {
+    self.max_implementation_steps = max;
     self
   }
 

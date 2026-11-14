@@ -21,8 +21,9 @@
 //!    allow-list, or it is a failure, said with the document, the code and both counts, and with
 //!    each place `smear-schema` reports it and whether a phase's error lies in an extent that holds
 //!    that place.
-//! 7. When `Schema::build` answers a schema, an error of the analysis whose code is not GraphQL's
-//!    is a failure, whatever rows were used: GraphQLx alone would refuse a valid GraphQL document.
+//! 7. When `Schema::build` answers a schema, any error of the analysis is a failure, whatever its
+//!    code and whatever rows were used: GraphQLx would refuse a valid GraphQL document, and no row
+//!    can mask that.
 //!
 //! Every failure of the whole corpus is collected and said at once, so that one run shows every
 //! divergence.
@@ -35,12 +36,12 @@
 //! ceilings `smear-schema`'s representation has and GraphQLx has not; each other row names the work
 //! that removes it.
 //!
-//! It holds thirty-two rows. Twenty are for every document: the three of the capacity ceilings,
-//! which stay; the five of coercion and the nine of the implementation phase, which pull request 1
-//! deletes; and the three of the input-object cycles, which the last part of this pull request
-//! deletes. Twelve are each for one document both dialects refuse: one where `smear-schema` drops a
-//! second definition of a name unread, and eleven where the mistake lies in a contribution that also
-//! holds a phase's error, beside which the rule is silent.
+//! It holds eighteen rows. Six are for every document: the three of the capacity ceilings, which
+//! stay, and the three of the input-object cycles, which L4's last part deletes. Coercion and the
+//! implementation phase have none: each of their codes has `smear-schema`'s count on every
+//! document, or a row for that document. Twelve are each for one document both dialects refuse: one
+//! where `smear-schema` drops a second definition of a name unread, and eleven where the mistake
+//! lies in a contribution that also holds a phase's error, beside which the rule is silent.
 #![cfg(all(feature = "std", feature = "analysis", feature = "validator"))]
 
 use std::{
@@ -113,62 +114,14 @@ const BESIDE_A_PHASE: &str = "[Z31]: the contribution that holds the mistake als
 const CEILING: &str =
   "[Z6]: a capacity ceiling of smear-schema's representation, which GraphQLx does not have";
 
-/// Why a row of coercion exists.
-const COERCION: &str = "the coercion phase reports it: pull request 1, parts 1.1 and 1.2";
-
-/// Why a row of the implementation phase exists.
-const IMPLEMENTATION: &str = "the implementation phase reports it: pull request 1, part 1.6 (the \
-                              two duplicate kinds by the rulings' round 2, item 3)";
-
 /// Why a row of the input-object cycles exists.
-const CYCLES: &str = "the cycle rules report it: the last part of this pull request";
+const CYCLES: &str = "the cycle rules report it: L4's last part";
 
 /// Every divergence the test allows.
 const ALLOWED: &[Allowed] = &[
   every("smear::schema::type-reference-too-deep", CEILING),
   every("smear::schema::too-many-field-arguments", CEILING),
   every("smear::schema::too-many-directive-arguments", CEILING),
-  every("smear::schema::invalid-default-value", COERCION),
-  every(
-    "smear::schema::missing-required-directive-argument",
-    COERCION,
-  ),
-  every("smear::schema::invalid-directive-argument-value", COERCION),
-  every("smear::schema::undefined-input-object-field", COERCION),
-  every(
-    "smear::schema::missing-required-input-object-field",
-    COERCION,
-  ),
-  every(
-    "smear::schema::missing-transitive-interface",
-    IMPLEMENTATION,
-  ),
-  every("smear::schema::missing-interface-field", IMPLEMENTATION),
-  every(
-    "smear::schema::invalid-interface-field-type",
-    IMPLEMENTATION,
-  ),
-  every(
-    "smear::schema::missing-interface-field-argument",
-    IMPLEMENTATION,
-  ),
-  every(
-    "smear::schema::invalid-interface-field-argument-type",
-    IMPLEMENTATION,
-  ),
-  every(
-    "smear::schema::unexpected-required-argument",
-    IMPLEMENTATION,
-  ),
-  every(
-    "smear::schema::interface-field-not-deprecated",
-    IMPLEMENTATION,
-  ),
-  every(
-    "smear::schema::duplicate-implements-interface",
-    IMPLEMENTATION,
-  ),
-  every("smear::schema::duplicate-union-member", IMPLEMENTATION),
   every("smear::schema::circular-non-null-input-field", CYCLES),
   every("smear::schema::circular-one-of-input-field", CYCLES),
   every("smear::schema::input-object-default-value-cycle", CYCLES),
@@ -465,11 +418,7 @@ impl<'r> Run<'r> {
       (false, false) => self.refused_by_both += 1,
       _ => {}
     }
-    if built.is_ok()
-      && every_error
-        .iter()
-        .any(|code: &&str| !code.starts_with(GRAPHQL))
-    {
+    if built.is_ok() && !every_error.is_empty() {
       self.failures.push(format!(
         "{name}: smear-schema builds it, and the analyzer refuses it with {every_error:?}"
       ));
@@ -584,8 +533,9 @@ fn every_graphql_document_gets_smear_schemas_verdict() {
 }
 
 /// The comparison reports a difference no row excuses, an error of GraphQLx's own on a document
-/// GraphQL accepts, and a row that excuses nothing; and a row that excuses a difference is no
-/// failure. Without this, a comparison that never fails would pass every test here.
+/// GraphQL accepts, any error on such a document though a row excuses its code, and a row that
+/// excuses nothing; and a row that excuses a difference is no failure. Without this, a comparison
+/// that never fails would pass every test here.
 #[test]
 fn the_comparison_can_answer_no() {
   let empty = SCHEMA_FIXTURES
@@ -656,6 +606,29 @@ fn the_comparison_can_answer_no() {
   assert_eq!(run.failures.len(), 1, "{:#?}", run.failures);
   assert!(
     run.failures[0].contains("smear::graphqlx::generic-enum"),
+    "{:#?}",
+    run.failures
+  );
+
+  // GraphQL builds a schema of a text, and the analyzer refuses a text with GraphQL's own code, a
+  // difference the row excuses and uses: the verdict fails all the same, whatever rows were used.
+  let mut run = Run::new(&rows);
+  let compared = run
+    .compare(
+      "the control",
+      QUERY_ONLY,
+      "type Query {\n  ok: Int\n}\ntype Empty\n",
+    )
+    .expect("the control parses");
+  assert!(
+    compared
+      .excused
+      .contains("smear::schema::empty-fields-definition")
+  );
+  run.finish();
+  assert_eq!(run.failures.len(), 1, "{:#?}", run.failures);
+  assert!(
+    run.failures[0].contains("smear-schema builds it, and the analyzer refuses it"),
     "{:#?}",
     run.failures
   );

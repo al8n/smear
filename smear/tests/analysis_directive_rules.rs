@@ -21,6 +21,9 @@ const UNDEFINED: &str = "smear::schema::undefined-type";
 /// The code of a directive's name that names nothing, a phase's.
 const UNDEFINED_DIRECTIVE: &str = "smear::schema::undefined-directive";
 
+/// The code of a root operation that names nothing, a phase's.
+const UNDEFINED_ROOT: &str = "smear::schema::undefined-root-operation-type";
+
 /// The code of an extension its package may not write, the orphan rule's.
 const ORPHAN: &str = "smear::graphqlx::orphan-extension";
 
@@ -859,6 +862,24 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
      extend type T @d {\n  u: Missing\n}\n",
     "type Query {\n  ok: Int\n}\ndirective @d on OBJECT\ntype T @d {\n  t: Int\n  u: Missing\n}\n\
      extend type T @d\n",
+  );
+  // A member's applications are silent by the member's contribution, and the schema's by the
+  // contribution that writes the later one.
+  silent_beside(
+    UNDEFINED,
+    DUPLICATE,
+    "type Query {\n  ok: Int\n}\ndirective @d on FIELD_DEFINITION\n\
+     type T {\n  f: Int @d @d\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ndirective @d on FIELD_DEFINITION\ntype T {\n  f: Int @d @d\n}\n\
+     type U {\n  x: Missing\n}\n",
+  );
+  silent_beside(
+    UNDEFINED_ROOT,
+    DUPLICATE,
+    "type Query {\n  ok: Int\n}\ndirective @d on SCHEMA\n\
+     schema @d @d {\n  query: Query\n  mutation: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ndirective @d on SCHEMA\nschema @d @d {\n  query: Query\n}\n\
+     extend schema {\n  mutation: Missing\n}\n",
   );
   silent_beside(
     UNDEFINED,

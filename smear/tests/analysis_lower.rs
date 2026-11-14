@@ -4,9 +4,10 @@
 //! its description; extensions that name nothing or a definition of another kind; every written
 //! type an occurrence, numbered outer first, with its path and arguments as written and what it
 //! resolves to where it is written; bounds; directive applications, their type arguments and their
-//! arguments in the definition's order; values kept as written; what the built-in library holds;
-//! the schema's contributions, its description, its roots, written or presumed, and its
-//! applications; and none of it moved by the order files and dependencies are passed in.
+//! arguments in the definition's order; a custom scalar's values kept as written; what the
+//! built-in library holds; the schema's contributions, its description, its roots, written or
+//! presumed, and its applications; and none of it moved by the order files and dependencies are
+//! passed in.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -265,10 +266,29 @@ fn applications(model: &Model, ids: &[ApplicationId]) -> Vec<String> {
     .collect()
 }
 
-/// The value `id`, written out: a literal as its kind and its text.
+/// The value `id`, written out: a coerced value as its kind's name and its text, `Int 1`,
+/// `Float -1.5e3`, `Boolean true`, `Null null`, `String "q"` with its cooked text quoted,
+/// `Enum Color::RED` with its path as written and `List [Int 1, Int 2]`; a literal kept as
+/// written as `Literal(Int) 1`; and an unresolved value as `?`. A value that coerces prints as its
+/// literal does.
 fn valued(model: &Model, id: ValueId) -> String {
-  match model.value(id).kind() {
-    ValueKind::Literal(literal) => format!("{:?} {}", literal.kind(), literal.text()),
+  let value = model.value(id);
+  match value.kind() {
+    ValueKind::Null => String::from("Null null"),
+    ValueKind::Bool(flag) => format!("Boolean {flag}"),
+    ValueKind::Int(int) => format!("Int {}", int.text()),
+    ValueKind::Float(float) => format!("Float {}", float.text()),
+    ValueKind::String(text) => format!("String {text:?}"),
+    ValueKind::Enum { .. } => format!("Enum {}", spelled(model, value.path())),
+    ValueKind::List(items) => {
+      let items: Vec<String> = items
+        .iter()
+        .map(|item: &ValueId| valued(model, *item))
+        .collect();
+      format!("List [{}]", items.join(", "))
+    }
+    ValueKind::Literal(literal) => format!("Literal({:?}) {}", literal.kind(), literal.text()),
+    ValueKind::Unresolved => String::from("?"),
     other => format!("{other:?}"),
   }
 }
@@ -815,14 +835,16 @@ fn a_replaced_directive_has_the_roots_arguments() {
   );
 }
 
-/// A definition of every kind that has extensions, each extended once below it.
+/// A definition of every kind that has extensions, each extended once below it, and `Other`, the
+/// member the union's extension adds.
 const EXTENDED: &str = "type Query {\n  a: Int\n}\nextend type Query {\n  b(x: Int): Int\n}\n\
                         interface Node {\n  id: ID\n}\nextend interface Node {\n  name: String\n}\n\
                         input Filter {\n  f: Int\n}\nextend input Filter {\n  g: Int\n}\n\
                         enum Color {\n  RED\n}\nextend enum Color {\n  GREEN\n}\n\
                         scalar Date\nextend scalar Date @specifiedBy(url: \"https://example.com\")\n\
-                        union Either = Query\nextend union Either = Query\n\
-                        directive @d on FIELD\nextend directive @d @deprecated\n";
+                        union Either = Query\nextend union Either = Other\n\
+                        directive @d on FIELD\nextend directive @d @deprecated\n\
+                        type Other {\n  a: Int\n}\n";
 
 #[test]
 fn an_extension_is_a_contribution_of_its_target() {
@@ -2098,10 +2120,11 @@ fn an_unresolved_directive_stays_with_no_argument() {
   assert_eq!(reached.types, f.into_iter().collect::<Vec<TypeExprId>>());
 }
 
-/// An application of every kind of literal, each argument in the definition's order.
-const LITERALS: &str = "enum Color {\n  RED\n}\n\
-                        directive @all(b: Boolean, s: String, f: Float, i: Int, e: Color, n: Int, \
-                        l: [Int], st: Int, m: Int, o: Int) on OBJECT\n\
+/// An application of every kind of literal, each argument, in the definition's order, of a
+/// custom scalar, which takes any literal.
+const LITERALS: &str = "enum Color {\n  RED\n}\nscalar Any\n\
+                        directive @all(b: Any, s: Any, f: Any, i: Any, e: Any, n: Any, \
+                        l: Any, st: Any, m: Any, o: Any) on OBJECT\n\
                         type T @all(b: true, s: \"two\\nlines\", f: -1.5e3, i: -42, e: Color::RED, \
                         n: null, l: [1, [2]], st: set!{ 1 2 }, m: map!{ one => 1 }, \
                         o: { x: 1, y: [2] }) {\n  f: Int\n}\n";
@@ -2119,19 +2142,21 @@ fn each_kind_of_literal_is_kept_as_written() {
     .iter()
     .map(|argument: &ApplicationArgument| valued(model, argument.value()))
     .collect();
+  // Each is kept as written, its syntactic kind and its text, but `null`, which a nullable type
+  // takes as `null`.
   assert_eq!(
     values,
     [
-      "Boolean true",
-      "String \"two\\nlines\"",
-      "Float -1.5e3",
-      "Int -42",
-      "Enum Color::RED",
+      "Literal(Boolean) true",
+      "Literal(String) \"two\\nlines\"",
+      "Literal(Float) -1.5e3",
+      "Literal(Int) -42",
+      "Literal(Enum) Color::RED",
       "Null null",
-      "List [1, [2]]",
-      "Set set!{ 1 2 }",
-      "Map map!{ one => 1 }",
-      "Object { x: 1, y: [2] }",
+      "Literal(List) [1, [2]]",
+      "Literal(Set) set!{ 1 2 }",
+      "Literal(Map) map!{ one => 1 }",
+      "Literal(Object) { x: 1, y: [2] }",
     ]
   );
   // A path keeps its path; each is where it is written; nothing nested is a value of its own.
@@ -2161,9 +2186,10 @@ fn type_arguments_of_an_application_are_occurrences() {
   assert_eq!(member_types(model, model.def(typed).arguments()), ["T=#0"]);
   let boxed = def(model, Namespace::Type, "^::app::Box");
   let application = model.application(model.def(boxed).applications()[0]);
+  // Its argument takes its type under the type argument, `[Int!]`: a lone value there.
   assert_eq!(
     applied(model, application.id()),
-    "@typed=typed<[Int=i32!]>(value: Int 1)"
+    "@typed=typed<[Int=i32!]>(value: List [Int 1])"
   );
   // The application's type argument, and what it nests, come before the next member's type.
   let argument = application.type_args()[0];

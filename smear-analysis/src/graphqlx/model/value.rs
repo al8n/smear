@@ -7,8 +7,9 @@ use crate::graphqlx::id::{DefId, MemberId, TyId, ValueId};
 use super::{
   Model,
   table::{
-    VALUE_BOOL, VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST, VALUE_LITERAL, VALUE_MAP,
-    VALUE_NULL, VALUE_OBJECT, VALUE_SET, VALUE_STRING, VALUE_TYPE, VALUE_UNRESOLVED, ValueRow,
+    VALUE_BOOL, VALUE_BYTES, VALUE_ENUM, VALUE_FLOAT, VALUE_INT, VALUE_LIST, VALUE_LITERAL,
+    VALUE_MAP, VALUE_NULL, VALUE_OBJECT, VALUE_SET, VALUE_STRING, VALUE_TYPE, VALUE_UNRESOLVED,
+    ValueRow,
   },
   ty::Path,
 };
@@ -68,10 +69,17 @@ impl ObjectEntry {
   }
 }
 
-/// What one value is.
+/// What one value is: the shape it was coerced to, by the type expected where it stands.
 ///
-/// A value of a custom scalar, an extern one included, is kept as written: a [`Literal`], with
-/// nothing coerced beyond syntax.
+/// Three kinds of value are kept as written, as a [`Literal`] with nothing coerced beyond syntax: a
+/// value of a custom scalar that is no collection, an extern one included, but `null`, which is
+/// `null` where the scalar is nullable; a value whose expected type still names a type parameter,
+/// inside a generic definition or under a directive application with no complete type arguments,
+/// which only an instantiation can check; and a value whose expected type can take none, an output
+/// type or a path that names nothing among them, which is another rule's or phase's to refuse. A
+/// value under a generic directive's application with complete type arguments is coerced against
+/// its type under them, and so is a field's value of an instantiation of a generic input object,
+/// under its type's arguments.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum ValueKind<'a> {
@@ -85,6 +93,9 @@ pub enum ValueKind<'a> {
   Float(FloatValue<'a>),
   /// A string, cooked: escapes decoded, and a block string's indentation removed.
   String(&'a str),
+  /// A `bytes` value: its bytes, whichever literal spelled them, the UTF-8 encoding of a string or
+  /// a list of integers from 0 to 255, so that two spellings of one sequence are one value.
+  Bytes(&'a [u8]),
   /// A value of an enum.
   #[non_exhaustive]
   Enum {
@@ -93,7 +104,8 @@ pub enum ValueKind<'a> {
     /// The value.
     value: MemberId,
   },
-  /// A `TypeRef` value: a definition, never an instantiation.
+  /// A `TypeRef` value: a definition, never an instantiation, of any kind, named by a path resolved
+  /// as a type where the value is written; a generic definition is named bare.
   #[non_exhaustive]
   Type {
     /// The definition it names.
@@ -101,16 +113,28 @@ pub enum ValueKind<'a> {
   },
   /// A list, of its elements.
   List(&'a [ValueId]),
-  /// A set, of its elements.
+  /// A set, of its elements, in written order: a set literal where a set is expected, an extern
+  /// set among them, each element coerced against the set's element type. An element written
+  /// twice is held twice, and reported where it is written.
   Set(&'a [ValueId]),
-  /// A map, of its entries, each a key and a value.
+  /// A map, of its entries, each a key and a value, in written order: a map literal where a map is
+  /// expected, each key coerced against the map's key type and each value against its value type.
+  /// A key written twice is held twice, and reported where it is written.
   Map(&'a [(ValueId, ValueId)]),
-  /// An input object, of its fields: each one written or defaulted, and no absent one.
+  /// An input object, of its fields, in the input object's order: each one its literal writes and
+  /// the input object declares, one written twice twice, in written order, and each one it leaves
+  /// out that has a default, a copy of the default; no absent one. A field left out is absent when
+  /// its default's copy would hold a copy of itself, or when
+  /// [`Limits::max_value_steps`](crate::graphqlx::Limits::max_value_steps) could not pay for the
+  /// copy. A OneOf input object's fields left out are never filled.
   Object(&'a [ObjectEntry]),
-  /// A value kept as written.
+  /// A value kept as written: of a custom scalar that is no collection, but `null`; of a type that
+  /// still names a type parameter; or of a type that can take no value.
   Literal(Literal<'a>),
-  /// A value that did not coerce or resolve. Only an analysis that is not ok has one, within the
-  /// extent of the error that says why.
+  /// A value that did not coerce or resolve. Only an analysis that is not ok has one. It lies
+  /// within the extent of the error that says why, but for a copy of a default: its error is where
+  /// the default is written, or at the application, the literal or the instantiation's occurrence
+  /// whose type arguments it does not fit, which may stand in another definition.
   Unresolved,
 }
 
@@ -173,7 +197,8 @@ fn small(magnitude: &[u8]) -> Option<u128> {
   Some(value)
 }
 
-/// A float value: the nearest `f64`, and the literal as written.
+/// A float value: the literal rounded once to the type it was coerced against, and the literal as
+/// written.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FloatValue<'a> {
   value: f64,
@@ -181,7 +206,10 @@ pub struct FloatValue<'a> {
 }
 
 impl<'a> FloatValue<'a> {
-  /// The nearest `f64` to the literal.
+  /// Its value as an `f64`: the nearest `f64` to the literal; or, for a value of `f32`, the nearest
+  /// `f32` to the literal, widened, which is exact. An `f32` is never the nearest `f64` rounded
+  /// again: `1.0000000596046448` is `1 + 2^-23` as an `f32`, though its nearest `f64`,
+  /// `1 + 2^-24`, rounds to `1.0`.
   #[inline]
   pub const fn to_f64(self) -> f64 {
     self.value
@@ -258,9 +286,7 @@ impl<'a> Value<'a> {
 
   /// What it is.
   //
-  // Coercion gives a value its coerced shape. Until coercion lands, every written value is the one
-  // `Literal` lowering makes of it, its syntactic kind and its text as written, whatever it holds:
-  // nothing nested in it is a value of its own.
+  // Coercion gives a value its shape, each of the kind's.
   pub fn kind(&self) -> ValueKind<'a> {
     let model: &'a Model = self.model;
     let row = self.row();
@@ -283,6 +309,7 @@ impl<'a> Value<'a> {
         })
       }
       VALUE_STRING => ValueKind::String(row.run.text(&model.text)),
+      VALUE_BYTES => ValueKind::Bytes(row.run.of(&model.magnitudes)),
       VALUE_ENUM => ValueKind::Enum {
         def: row.def,
         value: row.member,
@@ -313,10 +340,9 @@ impl<'a> Value<'a> {
 
   /// The type it was coerced against.
   //
-  // Coercion gives it; no phase before it gives a value a type. Until then every value answers
-  // the one unresolved type, in an analysis that is ok too, which therefore holds an unresolved
-  // type wherever it holds a value: the interim this accessor accepts, since the design names no
-  // neutral type for a value nothing has coerced.
+  // Coercion gives it the type expected where it stands, with its `!`, the list a lone value
+  // stands for included. A value whose expected type is unknown, which only a type that could not
+  // be written has, answers the one unresolved type.
   #[inline]
   pub fn ty(&self) -> TyId {
     self.row().ty
@@ -329,7 +355,9 @@ impl<'a> Value<'a> {
     self.row().written
   }
 
-  /// The path an enum or a type value writes, and `None` for every other value.
+  /// The path a value written as a path writes, whatever it was coerced to: an enum value's, a type
+  /// value's, and a literal's that is one. `None` for every other value, among them the lists a
+  /// value written alone where a list is expected stands for.
   #[inline]
   pub fn path(&self) -> Option<Path<'a>> {
     let row = self.row().path?;

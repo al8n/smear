@@ -28,7 +28,7 @@
 //! GraphQL's own rules over the schema judge the root package's, the one schema a program has. So
 //! a root package with no query root is not ok, as in GraphQL: a library analyzed as the root
 //! package has none, and a consumer that analyzes one waives that code by filtering it, since the
-//! analysis keeps GraphQL's verdict and exposes no waiver.
+//! analysis keeps GraphQL's rule on the query root and exposes no waiver.
 //!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk
@@ -36,6 +36,9 @@
 //! the public kind does not answer them. `DuplicateTypeParameter` reads another,
 //! `Def::extension_params`: the names an extension's own list writes, which no public view holds.
 //! `DuplicateMember` reads `IdRange::start`, to name the member at a position of a list.
+//! `ExternMisuse` reads `Extern::application`, the application an extern is bound from, which the
+//! public model does not answer yet: a candidate public accessor for the model's review; and
+//! `TierViolation` reads it too.
 
 mod collection_arity;
 mod deprecated_required;
@@ -45,6 +48,7 @@ mod duplicate_member;
 mod duplicate_schema_definition;
 mod duplicate_type_parameter;
 mod empty_definition;
+mod extern_misuse;
 mod generic_enum;
 mod implements_non_interface;
 mod marker_misuse;
@@ -55,6 +59,7 @@ mod one_of_field_has_default;
 mod one_of_field_not_nullable;
 mod one_of_on_input_object_extension;
 mod orphan_extension;
+mod repr_misuse;
 mod reserved_name;
 mod root_operation_type_not_object;
 mod schema_extension_without_schema;
@@ -63,6 +68,7 @@ mod self_implementing_interface;
 mod self_referential_directive;
 mod shared_root_operation_type;
 mod specified_by_on_built_in_scalar;
+mod tier_violation;
 mod type_ref_misuse;
 mod union_member_not_object;
 mod unsupported_directive_location;
@@ -73,19 +79,21 @@ use self::{
   duplicate_directive_use::DuplicateDirectiveUse, duplicate_member::DuplicateMember,
   duplicate_schema_definition::DuplicateSchemaDefinition,
   duplicate_type_parameter::DuplicateTypeParameter, empty_definition::EmptyDefinition,
-  generic_enum::GenericEnum, implements_non_interface::ImplementsNonInterface,
-  marker_misuse::MarkerMisuse, member_type_kind::MemberTypeKind,
+  extern_misuse::ExternMisuse, generic_enum::GenericEnum,
+  implements_non_interface::ImplementsNonInterface, marker_misuse::MarkerMisuse,
+  member_type_kind::MemberTypeKind,
   missing_query_root_operation_type::MissingQueryRootOperationType,
   non_zero_argument::NonZeroArgument, one_of_field_has_default::OneOfFieldHasDefault,
   one_of_field_not_nullable::OneOfFieldNotNullable,
   one_of_on_input_object_extension::OneOfOnInputObjectExtension, orphan_extension::OrphanExtension,
-  reserved_name::ReservedName, root_operation_type_not_object::RootOperationTypeNotObject,
+  repr_misuse::ReprMisuse, reserved_name::ReservedName,
+  root_operation_type_not_object::RootOperationTypeNotObject,
   schema_extension_without_schema::SchemaExtensionWithoutSchema,
   schema_outside_root::SchemaOutsideRoot, self_implementing_interface::SelfImplementingInterface,
   self_referential_directive::SelfReferentialDirective,
   shared_root_operation_type::SharedRootOperationType,
-  specified_by_on_built_in_scalar::SpecifiedByOnBuiltInScalar, type_ref_misuse::TypeRefMisuse,
-  union_member_not_object::UnionMemberNotObject,
+  specified_by_on_built_in_scalar::SpecifiedByOnBuiltInScalar, tier_violation::TierViolation,
+  type_ref_misuse::TypeRefMisuse, union_member_not_object::UnionMemberNotObject,
   unsupported_directive_location::UnsupportedDirectiveLocation,
 };
 use super::{
@@ -358,27 +366,30 @@ rule_set! {
   /// smear's own rules, which `analyze` runs over every supplied package once its phases have
   /// written the model: a program defines its schema at most once; only the root package defines
   /// or extends the schema; a package extends its own definitions alone, but for the directives
-  /// the root package adds to a built-in, none of which may give it a built-in meaning; an enum
-  /// takes no type parameter; a marker has no field and is named only in `implements` and in
-  /// bounds, and a scalar, an enum, an input object or a union implements markers alone; a set has
-  /// one type parameter and a map two; `TypeRef` stands only in a directive's arguments;
+  /// the root package adds to a built-in, none of which may give it a built-in meaning or a host
+  /// type; an enum takes no type parameter; a marker has no field and is named only in `implements`
+  /// and in bounds, and a scalar, an enum, an input object or a union implements markers alone; a
+  /// set has one type parameter and a map two; `TypeRef` stands only in a directive's arguments;
   /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; a
   /// definition's type parameters have distinct names, and so do the names an extension's own list
-  /// gives them; and of the definitions a supplied package wrote, GraphQL's own rules: a member's
-  /// name does not begin with `__`; a definition's members have distinct names, and so have a
-  /// field's arguments; a definition that holds members holds one at least, a marker holding
-  /// none; a member's type is of the kind its position takes; an object or an interface implements
-  /// interfaces; no interface implements itself; a union's members are object types; a required
-  /// argument or input field is not deprecated; a OneOf input object's fields are nullable and have
-  /// no default; and an input object takes `@oneOf` in its definition alone. And of the
-  /// directives and every application a supplied package writes, GraphQL's own rules: a directive
-  /// stands where its definition lists; a directive that is not repeatable is applied once to a
-  /// location, a definition and its extensions being one; an application passes each argument
-  /// once; no directive refers to itself, through the directives and types it names, a scalar that
-  /// is no collection hiding its type arguments; and a scalar of the built-in library takes no
-  /// `@specifiedBy`. And of the schema, GraphQL's own rules: a root operation type is an object
-  /// type; the root operations have distinct types; a schema extension extends a schema that is
-  /// defined; and a schema has a query root operation type, written or presumed.
+  /// gives them; `@extern` binds a scalar its own package defines, once for each language; `@repr`
+  /// writes `for` on the schema alone, and chooses once for each language at a position and for
+  /// each type and language on the schema; a package uses nothing above the tier it declares; and
+  /// of the definitions a supplied package wrote, GraphQL's own rules: a member's name does not
+  /// begin with `__`; a definition's members have distinct names, and so have a field's arguments;
+  /// a definition that holds members holds one at least, a marker holding none; a member's type is
+  /// of the kind its position takes; an object or an interface implements interfaces; no interface
+  /// implements itself; a union's members are object types; a required argument or input field is
+  /// not deprecated; a OneOf input object's fields are nullable and have no default; and an input
+  /// object takes `@oneOf` in its definition alone. And of the directives and every application a
+  /// supplied package writes, GraphQL's own rules: a directive stands where its definition lists; a
+  /// directive that is not repeatable is applied once to a location, a definition and its
+  /// extensions being one; an application passes each argument once; no directive refers to itself,
+  /// through the directives and types it names, a scalar that is no collection hiding its type
+  /// arguments; and a scalar of the built-in library takes no `@specifiedBy`. And of the schema,
+  /// GraphQL's own rules: a root operation type is an object type; the root operations have
+  /// distinct types; a schema extension extends a schema that is defined; and a schema has a query
+  /// root operation type, written or presumed.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
@@ -454,6 +465,9 @@ rule_set! {
       => [super::code::schema::SCHEMA_EXTENSION_WITHOUT_SCHEMA],
     missing_query_root_operation_type: MissingQueryRootOperationType
       => [super::code::schema::MISSING_QUERY_ROOT_OPERATION_TYPE],
+    extern_misuse: ExternMisuse => [super::DiagnosticKind::ExternMisuse.code()],
+    repr_misuse: ReprMisuse => [super::DiagnosticKind::ReprMisuse.code()],
+    tier_violation: TierViolation => [super::DiagnosticKind::Tier.code()],
   }
 }
 

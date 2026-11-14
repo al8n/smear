@@ -21,13 +21,17 @@ primitive the program writes, with its identity, its contributions, its own and 
 extension's, its type parameters with their defaults and its bounds, its `implements` entries and
 union members, its directive applications, a directive definition's locations, whether it is a
 marker or a collection, read off `core`'s `@marker`, `@set` and `@map` where the package that wrote
-it applies them, the closed instantiations its written occurrences resolve to, and its members with
+it applies them, a scalar's host types, each `@extern` its own package writes on it, with its
+effective tier, the closed instantiations its written occurrences resolve to, and its members with
 their descriptions, types, defaults and applications; every written type an occurrence with its path
 and arguments as written, what it resolves to, and its type: the complete instantiation, with each
 argument left out filled from its default and an alias such as `NonZeroU32` expanded, each type
 interned once, so that `==` on two type ids is type equality; every application with its type
-arguments and its arguments, and every value as written; and the schema, with its contributions, one
-for each schema item, its description, its roots, written or presumed, and its applications.
+arguments and its arguments; every value, coerced to the type expected where it stands, each value
+nested in it one of its own, an input object's fields found by name and kept in its order, a set's
+elements and a map's entries, a `TypeRef` value the definition its path names, and a custom
+scalar's but `null` kept as written; and the schema, with its contributions, one for each schema
+item, its description, its roots, written or presumed, and its applications.
 `Model::satisfies` answers whether a type satisfies an interface or a marker, and
 `Model::satisfies_ty` whether it satisfies one interface type exactly, its arguments' `!` included:
 by declaration, read off the `implements` entries and the bounds the model holds, with `core`'s
@@ -38,15 +42,69 @@ by `Limits::max_substitutions`, and the types it derives by `Limits::max_generic
 `Limits::max_instantiations`. Every instantiation the program writes has its bounds judged, exactly:
 a type argument that does not satisfy a bound's interface type, with the instantiation's arguments
 in its parameters' place, is `smear::graphqlx::unsatisfied-bound` where the instantiation is
-written, and judging is bounded by `Limits::max_bound_steps`. It resolves every module's `use` items
-too, globs and string sources included, against scopes that end with the prelude and the packages
-each package may reach. The built-in packages, `core`, `alloc` and `std`, are one embedded GraphQLx
-file each, parsed on every analysis. `graphqlx::analyze_with` is the same analysis with the parser
-layer the caller passes, such as `smear-parser`'s lossless layer, which recovers, so the well-formed
-rest of a broken file is analyzed, and it answers `Trees` beside the `Analysis`: what that layer
-kept for each file it read. Each contribution, member and inline module answers its extent, where
-it is written in its file, and `Trees::node` answers the node of a kept tree that an extent was
-written as.
+written, and judging is bounded by `Limits::max_bound_steps`. A value that does not fit the type
+expected of it is refused where it is written, with GraphQL's `smear::schema::invalid-default-value`
+or `invalid-directive-argument-value`, an integer read at any length, a decimal one past 38
+significant digits within `Limits::max_value_steps`, and range-checked against its width,
+`smear::graphqlx::width-overflow` past any width but the 32-bit signed one or past `f32`, and
+`smear::graphqlx::nonzero-zero` for a zero where `NonZero` is expected. An object literal's field
+the input object does not declare is `smear::schema::undefined-input-object-field`, a required field
+given `null` or left out is `smear::schema::missing-required-input-object-field`, and an input
+object its own package makes OneOf takes exactly one field, not `null`. A set takes a `set!{…}` and
+a map a `map!{…}`, and nothing else does but a custom scalar: any other literal where a collection
+is expected, and a collection literal where a value of another type is, is
+`smear::graphqlx::collection-literal`, and so is an element of a set, or a key of a map, written
+twice, told by its coerced value; where the type takes no value, or still names a type parameter, a
+collection literal is kept as written, and nothing is said. An
+application's argument left out takes a copy of its default, and so does an object literal's field,
+but a OneOf input object's; a required argument left out is
+`smear::schema::missing-required-directive-argument`. A
+copy is counted before it is made, and a default whose copy would hold a copy of itself is not
+copied; the copies, the reads of a default's count, by another's and by each later copy of it, the
+required arguments and fields left out, the lists a value written alone stands for where a list is
+expected, the conversion of a decimal integer of more than 38 significant digits, each field a
+count reads of an object literal against an input object it had not read it against, and the
+identities of a set's elements or a map's keys a count under type arguments renders to search them
+for one held twice, a step for each 64 bytes, once for each literal and the type they are read
+against, are bounded by `Limits::max_value_steps`. A directive application has its complete type
+arguments, filled from
+its directive's defaults as an occurrence's are, and its directive's bounds are judged at it; its
+arguments are read under them, a generic input object's fields under its type's arguments, and a
+copy of a default made there is judged as a written value is, the first that does not fit
+reported once, at the application or at the literal whose type the arguments made. A value of a
+generic type definition whose type names its type parameters stays a literal, and is checked at
+each closed instantiation of the definition the program writes, reported once at each occurrence
+of one under which it does not fit; so is an argument an application on it leaves out whose type
+is its bare type parameter, reported where an instantiation makes it required. The values of the
+applications on a generic directive and on its arguments are checked likewise at each closed
+application of the directive. Each definition is checked against what it says it is, reading
+of it what its own package writes: no two of its `implements` entries, nor of a union's members,
+are one type, as written or under the type arguments of an instantiation the program writes; it
+implements every interface the interfaces it implements implement, compared as types under its
+entries' type arguments, on every kind that may write `implements`, so a type that omits one is
+refused; and an object or an interface declares each field of the interfaces it implements, with a
+type that is a subtype of the interface's under those arguments, covariant through lists, non-null,
+declared interfaces, union members and type arguments, a type parameter a subtype of itself and of
+its bounds alone, deprecated only where the interface's is, and taking each of its arguments with
+exactly its type and requiring no other. The refusals are `smear-schema`'s nine codes,
+`smear::schema::duplicate-implements-interface`, `duplicate-union-member`,
+`missing-transitive-interface`, `missing-interface-field`, `invalid-interface-field-type`,
+`interface-field-not-deprecated`, `missing-interface-field-argument`,
+`invalid-interface-field-argument-type` and `unexpected-required-argument`, and the steps the check
+takes are bounded by `Limits::max_implementation_steps`, a budget of its own, which a valid GraphQL
+document can meet. Every definition and every type has the tier it requires, the
+least of `core`, `alloc` and `std` that holds what it uses: a built-in its package's tag, a scalar
+its externs' greatest tier, an object, an interface, an input object or a union the greatest of its
+positions' and members' types', a position `@heap` marks `alloc` at least, and a type its
+definition's and its arguments', a list `alloc` at least. It
+resolves every module's `use` items too, globs and string sources included, against scopes that
+end with the prelude and the packages each package may reach. The built-in packages, `core`, `alloc`
+and `std`, are one embedded GraphQLx file each, parsed on every analysis. `graphqlx::analyze_with`
+is the same analysis with the parser layer the caller passes, such as `smear-parser`'s lossless
+layer, which recovers, so the well-formed rest of a broken file is analyzed, and it answers `Trees`
+beside the `Analysis`: what that layer kept for each file it read. Each contribution, member and
+inline module answers its extent, where it is written in its file, and `Trees::node` answers the
+node of a kept tree that an extent was written as.
 
 Rules are visitors. A `graphqlx::Visitor` implements the hooks it needs, one for each entity a walk
 enters, leaves or reaches, and `graphqlx::visit` walks an analysis's model for it over the packages
@@ -58,7 +116,8 @@ its schema at most once, each later schema definition of the root package being
 dependency's schema item being `smear::graphqlx::schema-outside-root`; and a package extends its own
 definitions alone, an extension of another package's being `smear::graphqlx::orphan-extension`, but
 for the directives the root package adds to a definition of `core`, `alloc` or `std`, none of which
-may be `@marker`, `@set` or `@map` unless the root package wrote that definition; an enum takes no
+may be `@marker`, `@set` or `@map` unless the root package wrote that definition, nor `@extern`; an
+enum takes no
 type parameter, an enum that declares one being `smear::graphqlx::generic-enum`; and a marker
 declares no field, is named only as the outermost type of an `implements` entry or of a bound, and
 is all a scalar, an enum, an input object or a union implements, each other use being
@@ -70,8 +129,18 @@ definition's argument or of an input field, under lists alone, anywhere else bei
 one bit wide, written without `!`, `NonZero` of anything else being
 `smear::graphqlx::nonzero-argument`; and a definition's type parameters have distinct names, and so
 do the names an extension's own list gives them, a type parameter with the name of an earlier one
-being `smear::graphqlx::duplicate-type-parameter`. And what a definition a supplied package
-wrote holds keeps GraphQL's own rules, with GraphQL's codes: a member whose name begins with `__` is
+being `smear::graphqlx::duplicate-type-parameter`; and `@extern` binds a scalar its own package
+defines, once for each language, an extern whose `lang` an earlier one of its scalar has, and an
+`@extern` the root package writes on a GraphQL built-in its own definition replaces, being
+`smear::graphqlx::extern-misuse`; and `@repr` writes `for` on the schema alone, where it names a
+type, and chooses once for each language at a position and for each type and language on the schema,
+anything else being `smear::graphqlx::repr-misuse`; and a package uses nothing above the tier it
+declares, a list in a `core` package, another package's definition that needs more, `@heap` in a
+`core` package and an extern's `tier` above its package's each being `smear::graphqlx::tier`, where
+it is written, but for compile-time metadata, which counts nowhere: a directive definition's types
+and an application's type arguments are not judged, though an input object a directive's argument
+names is, where it is written. And what a definition a supplied package wrote holds keeps GraphQL's
+own rules, with GraphQL's codes: a member whose name begins with `__` is
 `smear::schema::reserved-field-name`, or the code of what else it is, and a member whose name an
 earlier member of its list has is `smear::schema::duplicate-field-name`, or the code of its list,
 and a definition that holds members and holds none, its extensions' counted, is

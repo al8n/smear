@@ -33,6 +33,12 @@ fn clean(analysis: &Analysis) -> bool {
   diagnostics.len() == waived && diagnostics.error_count() == waived
 }
 
+/// The analysis's error count, but for the missing query root.
+fn errors(analysis: &Analysis) -> usize {
+  let diagnostics = analysis.diagnostics();
+  diagnostics.error_count() - (diagnostics.len() - reported(analysis).len())
+}
+
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
 fn package(
   name: &str,
@@ -683,7 +689,8 @@ fn the_first_definition_past_the_limit_is_reported_and_nothing_after_it_is_decla
     "{:#?}",
     analysis.diagnostics()
   );
-  assert!(!analysis.is_ok());
+  // The limit is an error: the analysis is not ok by it, whatever the missing root adds.
+  assert_eq!(errors(&analysis), 1);
   let message = reported(&analysis)[0].to_string();
   assert!(message.contains("the type `B`"), "{message}");
   assert!(message.contains(&format!("limit of {max}")), "{message}");

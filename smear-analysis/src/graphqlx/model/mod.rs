@@ -22,7 +22,7 @@ use std::{string::String, vec::Vec};
 
 pub use application::{Application, ApplicationArgument, Resolution};
 pub use build::ModelBuilder;
-pub(crate) use build::{Occurrence, Shape, Written};
+pub(crate) use build::{Bytes, Occurrence, Segments, Shape, Stored, Text, Written};
 pub use def::{
   Collection, Contribution, Contributions, Def, DefKind, DirectiveLocation, Extern, Externs,
   Origin, Primitive, TypeBound, TypeParam, TypeParams,
@@ -63,8 +63,8 @@ use table::{
 /// the same spellings: when every id names the same thing in both. That is finer than every
 /// accessor answering alike: a model built by another route, with the same content interned in
 /// another order, is not equal. It is `PartialEq` and not `Eq` because a float value is compared
-/// as an `f64` is. A float the model holds comes from a float literal, and no literal spells a
-/// NaN, so a model is equal to itself.
+/// as an `f64` is. A float the model holds is read from a number literal, a float or an integer
+/// where a float is expected, and none reads as a NaN, so a model is equal to itself.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
   packages: Vec<PackageRow>,
@@ -112,7 +112,7 @@ pub struct Model {
   ints: Vec<IntRow>,
   floats: Vec<FloatRow>,
   literals: Vec<LiteralRow>,
-  /// Every integer's magnitude, little-endian.
+  /// Every integer's magnitude, little-endian, and every byte string's bytes: the byte pool.
   magnitudes: Vec<u8>,
 
   applications: Vec<ApplicationRow>,
@@ -235,6 +235,12 @@ impl Model {
       dense(self.values.len()),
       dense(self.applications.len()),
     )
+  }
+
+  /// How many bytes its text arena holds: every spelling it keeps but names and paths.
+  #[cfg(feature = "test-support")]
+  pub(crate) fn text_len(&self) -> usize {
+    self.text.len()
   }
 }
 

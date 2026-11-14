@@ -138,6 +138,33 @@ pub enum DiagnosticKind {
   /// directive application's type arguments are not judged against its directive's bounds.
   UnsatisfiedBound,
 
+  // -- Values ------------------------------------------------------------------------------------
+  /// A number out of the range of the type expected where it is written. An integer out of the
+  /// range of an integer primitive of any width but the 32-bit signed one, or of the primitive a
+  /// `NonZero` holds when that is not `i32`; a float, or an integer where a float is expected, out
+  /// of `f32`'s range; and an element of a `bytes` list out of a byte's range, 0 to 255. `i32`,
+  /// `Int`, `id`'s integers, `NonZero<i32>`, `f64` and `Float` keep GraphQL's own code, the one of
+  /// the place the value is written in. Reported at the literal, whose value is unresolved, or for
+  /// a `bytes` element at the element, the list being the one unresolved value; the help gives
+  /// the type's range as a formula.
+  WidthOverflow,
+  /// A zero where `core`'s `NonZero` is expected, of any width, in any radix and with either sign,
+  /// in a default or in a directive's argument. Reported at the literal, whose value is unresolved.
+  NonZeroZero,
+  /// A collection literal out of its place. A `set!{…}` is a value of a set alone, and a
+  /// `map!{…}` of a map alone: one where a type that is no collection of its shape is expected,
+  /// but a custom scalar that is no collection, which keeps any literal, is reported at the
+  /// literal; one whose expected type takes no value, or still names a type parameter, is kept as
+  /// written, and nothing is said. And a set or a map, an extern one among them, takes its own
+  /// literal and `null`
+  /// alone: any other literal is reported at the literal, with the collection's form in the help.
+  /// Either is unresolved, and nothing it holds is a value of its own. Or a set literal that holds
+  /// one element twice, or a map literal that holds one key twice, two being one when their
+  /// coerced values are, `1` and `0x1` one integer and `"4"` and `4` one `id`: reported at the
+  /// later occurrence, with a label at the first, where the literal is written; the literal keeps
+  /// everything it holds.
+  CollectionLiteral,
+
   // -- smear's rules -----------------------------------------------------------------------------
   /// A package other than the root package writes a `schema` definition or a schema extension. A
   /// dependency is a library, and the schema is the root package's, which alone defines and
@@ -157,7 +184,9 @@ pub enum DiagnosticKind {
   /// Nor may those directives say what the built-in is: in the root package's extension of a
   /// built-in it did not write, each application of `core`'s `@marker`, `@set` or `@map` is
   /// reported too, at the application's path, with the same label. A built-in the root package
-  /// replaces is the root package's own, and its extension may.
+  /// replaces is the root package's own, and its extension may. Nor may they bind it to a host
+  /// type: each application of `core`'s `@extern` there is reported likewise, a built-in's host
+  /// type being given by `@repr(for: …)` on the schema alone.
   OrphanExtension,
   /// An enum that declares a type parameter. An enum's values are names that hold no type, so an
   /// enum takes no type parameter. Reported once, at the enum's first type parameter's name; each
@@ -199,6 +228,31 @@ pub enum DiagnosticKind {
   /// a parameter by its name, which would name the first of the two alone. Reported at the later
   /// name, with a label at the first of that name.
   DuplicateTypeParameter,
+  /// `core`'s `@extern` misused. A language binds a scalar once: an `@extern` whose `lang` an
+  /// earlier one its package binds the scalar with has, told by the cooked strings, is reported at
+  /// its path, with a label at the earlier. And `@extern` binds a scalar its own package defines:
+  /// one the root package writes on a GraphQL built-in its own definition replaces, in that
+  /// definition or its extension, is reported at its path, a built-in's host type being given by
+  /// `@repr(for: …)` on the schema alone.
+  ExternMisuse,
+  /// `core`'s `@repr` misused. `for` names the type the schema chooses a default host type for: an
+  /// `@repr` on the schema whose `for` is absent or `null` is reported at its path, and one on a
+  /// field, an argument or an input field that writes `for` at `for`'s name. A position chooses
+  /// its host type once in each language, and the schema once for each type and language: an
+  /// `@repr` whose `lang`, or whose `for` and `lang`, an earlier one there has is reported at its
+  /// path, with a label at the earlier.
+  ReprMisuse,
+  /// A use above the tier the package that writes it declares, the least of `core`, `alloc` and
+  /// `std` its definitions may need. Below `std`: a list in a `core` package, reported where it is
+  /// written; an occurrence of another package's definition that needs more, counting the
+  /// defaults it leaves out and capped at that package's own tier, reported where it is written,
+  /// with a label at a default that raised it; `core`'s `@heap` on a field, an argument or an input
+  /// field in a `core` package, at its path; and an extern whose `tier` is above the tier of the
+  /// package that declares its scalar, at that `tier`. A use of a definition of the package's own
+  /// is not reported: what raises that definition is, where the package wrote it. What a directive
+  /// definition writes and an application's type arguments are compile-time metadata, and are not
+  /// judged, an input object a directive's argument names being judged where it is written.
+  Tier,
 
   // -- Resources ---------------------------------------------------------------------------------
   /// A bound of the analysis's limits was passed.
@@ -231,6 +285,9 @@ impl DiagnosticKind {
     Self::GenericArity,
     Self::GenericDefault,
     Self::UnsatisfiedBound,
+    Self::WidthOverflow,
+    Self::NonZeroZero,
+    Self::CollectionLiteral,
     Self::SchemaOutsideRoot,
     Self::OrphanExtension,
     Self::GenericEnum,
@@ -239,6 +296,9 @@ impl DiagnosticKind {
     Self::TypeRefMisuse,
     Self::NonZeroArgument,
     Self::DuplicateTypeParameter,
+    Self::ExternMisuse,
+    Self::ReprMisuse,
+    Self::Tier,
     Self::ResourceLimit,
   ];
 
@@ -269,6 +329,9 @@ impl DiagnosticKind {
       Self::GenericArity => Code::new("smear::graphqlx::generic-arity"),
       Self::GenericDefault => Code::new("smear::graphqlx::generic-default"),
       Self::UnsatisfiedBound => Code::new("smear::graphqlx::unsatisfied-bound"),
+      Self::WidthOverflow => Code::new("smear::graphqlx::width-overflow"),
+      Self::NonZeroZero => Code::new("smear::graphqlx::nonzero-zero"),
+      Self::CollectionLiteral => Code::new("smear::graphqlx::collection-literal"),
       Self::SchemaOutsideRoot => Code::new("smear::graphqlx::schema-outside-root"),
       Self::OrphanExtension => Code::new("smear::graphqlx::orphan-extension"),
       Self::GenericEnum => Code::new("smear::graphqlx::generic-enum"),
@@ -277,6 +340,9 @@ impl DiagnosticKind {
       Self::TypeRefMisuse => Code::new("smear::graphqlx::typeref-misuse"),
       Self::NonZeroArgument => Code::new("smear::graphqlx::nonzero-argument"),
       Self::DuplicateTypeParameter => Code::new("smear::graphqlx::duplicate-type-parameter"),
+      Self::ExternMisuse => Code::new("smear::graphqlx::extern-misuse"),
+      Self::ReprMisuse => Code::new("smear::graphqlx::repr-misuse"),
+      Self::Tier => Code::new("smear::graphqlx::tier"),
       Self::ResourceLimit => Code::new("smear::graphqlx::resource-limit"),
     }
   }
@@ -307,6 +373,9 @@ impl DiagnosticKind {
       Self::GenericArity => "wrong number of type arguments",
       Self::GenericDefault => "type parameter default that can never fill",
       Self::UnsatisfiedBound => "unsatisfied bound",
+      Self::WidthOverflow => "out of the type's range",
+      Self::NonZeroZero => "zero where `NonZero` is expected",
+      Self::CollectionLiteral => "collection literal out of place",
       Self::SchemaOutsideRoot => "schema outside the root package",
       Self::OrphanExtension => "orphan extension",
       Self::GenericEnum => "generic enum",
@@ -315,6 +384,9 @@ impl DiagnosticKind {
       Self::TypeRefMisuse => "`TypeRef` where it may not stand",
       Self::NonZeroArgument => "invalid `NonZero` argument",
       Self::DuplicateTypeParameter => "duplicate type parameter",
+      Self::ExternMisuse => "`@extern` misused",
+      Self::ReprMisuse => "`@repr` misused",
+      Self::Tier => "above the package's tier",
       Self::ResourceLimit => "resource limit exceeded",
     }
   }
@@ -345,6 +417,9 @@ impl DiagnosticKind {
       | Self::GenericArity
       | Self::GenericDefault
       | Self::UnsatisfiedBound
+      | Self::WidthOverflow
+      | Self::NonZeroZero
+      | Self::CollectionLiteral
       | Self::SchemaOutsideRoot
       | Self::OrphanExtension
       | Self::GenericEnum
@@ -353,6 +428,9 @@ impl DiagnosticKind {
       | Self::TypeRefMisuse
       | Self::NonZeroArgument
       | Self::DuplicateTypeParameter
+      | Self::ExternMisuse
+      | Self::ReprMisuse
+      | Self::Tier
       | Self::ResourceLimit => Severity::Error,
       Self::ShadowedPrimitive => Severity::Warning,
     }
@@ -595,4 +673,76 @@ pub(crate) mod schema {
   /// `MissingQueryRootOperationType`.
   pub(crate) const MISSING_QUERY_ROOT_OPERATION_TYPE: Code =
     Code::new("smear::schema::missing-query-root-operation-type");
+
+  /// A member's default does not fit the type the member is declared with: `smear-schema`'s
+  /// `InvalidDefaultValue`.
+  pub(crate) const INVALID_DEFAULT_VALUE: Code = Code::new("smear::schema::invalid-default-value");
+
+  /// An application's argument does not fit the type its directive declares for it:
+  /// `smear-schema`'s `InvalidDirectiveArgumentValue`.
+  pub(crate) const INVALID_DIRECTIVE_ARGUMENT_VALUE: Code =
+    Code::new("smear::schema::invalid-directive-argument-value");
+
+  /// An application leaves out an argument its directive requires, or passes it `null`:
+  /// `smear-schema`'s `MissingRequiredDirectiveArgument`.
+  pub(crate) const MISSING_REQUIRED_DIRECTIVE_ARGUMENT: Code =
+    Code::new("smear::schema::missing-required-directive-argument");
+
+  /// An object literal names a field its input object does not declare: `smear-schema`'s
+  /// `UndefinedInputObjectField`.
+  pub(crate) const UNDEFINED_INPUT_OBJECT_FIELD: Code =
+    Code::new("smear::schema::undefined-input-object-field");
+
+  /// An object literal leaves out a field its input object requires, or passes it `null`:
+  /// `smear-schema`'s `MissingRequiredInputObjectField`.
+  pub(crate) const MISSING_REQUIRED_INPUT_OBJECT_FIELD: Code =
+    Code::new("smear::schema::missing-required-input-object-field");
+
+  /// A definition's `implements` entry is the type an earlier entry of its is, as written or under
+  /// the type arguments of an instantiation the program writes: `smear-schema`'s
+  /// `DuplicateImplementsInterface`.
+  pub(crate) const DUPLICATE_IMPLEMENTS_INTERFACE: Code =
+    Code::new("smear::schema::duplicate-implements-interface");
+
+  /// A definition implements an interface whose interfaces it does not all implement, each
+  /// compared as a type under the type arguments that reach it: `smear-schema`'s
+  /// `MissingTransitiveInterface`.
+  pub(crate) const MISSING_TRANSITIVE_INTERFACE: Code =
+    Code::new("smear::schema::missing-transitive-interface");
+
+  /// A definition declares no field named as a field of an interface it implements:
+  /// `smear-schema`'s `MissingInterfaceField`.
+  pub(crate) const MISSING_INTERFACE_FIELD: Code =
+    Code::new("smear::schema::missing-interface-field");
+
+  /// A field's type is no subtype of the type an interface it implements declares for its field,
+  /// under the type arguments of the definition's entry: `smear-schema`'s
+  /// `InvalidInterfaceFieldType`.
+  pub(crate) const INVALID_INTERFACE_FIELD_TYPE: Code =
+    Code::new("smear::schema::invalid-interface-field-type");
+
+  /// A field does not take an argument of the interface's field it implements: `smear-schema`'s
+  /// `MissingInterfaceFieldArgument`.
+  pub(crate) const MISSING_INTERFACE_FIELD_ARGUMENT: Code =
+    Code::new("smear::schema::missing-interface-field-argument");
+
+  /// A field's argument is not of exactly the type the interface's field gives it, under the type
+  /// arguments of the definition's entry: `smear-schema`'s `InvalidInterfaceFieldArgumentType`.
+  pub(crate) const INVALID_INTERFACE_FIELD_ARGUMENT_TYPE: Code =
+    Code::new("smear::schema::invalid-interface-field-argument-type");
+
+  /// A field requires an argument the interface's field it implements does not declare:
+  /// `smear-schema`'s `UnexpectedRequiredArgument`.
+  pub(crate) const UNEXPECTED_REQUIRED_ARGUMENT: Code =
+    Code::new("smear::schema::unexpected-required-argument");
+
+  /// A deprecated field implements an interface's field that is not: `smear-schema`'s
+  /// `InterfaceFieldNotDeprecated`.
+  pub(crate) const INTERFACE_FIELD_NOT_DEPRECATED: Code =
+    Code::new("smear::schema::interface-field-not-deprecated");
+
+  /// A union's member is the type an earlier member of its is, as written or under the type
+  /// arguments of an instantiation the program writes: `smear-schema`'s `DuplicateUnionMember`.
+  pub(crate) const DUPLICATE_UNION_MEMBER: Code =
+    Code::new("smear::schema::duplicate-union-member");
 }
