@@ -33,13 +33,16 @@
 //! writes being judged where it is written.
 //!
 //! A set's element and a map's key are non-null in every instantiation, however they are written.
-//! So a collection's own definition that gives its key or element such a member's whole type makes
-//! the member required in every instantiation: `scalar S<T> @set @d<T>` with
-//! `directive @d<X>(v: X @deprecated)`. That is the definition's mistake, reported once, under the
-//! member's code, where the definition gives the place: at the type argument or the `implements`
-//! entry, or at an application's path for an argument a default fills; with a label at the
-//! member's `@deprecated`, which the table keeps. No use of the collection repeats it: the table
-//! keeps the place apart from the key or element, and passes it on to nothing.
+//! So a collection's own definition that gives its key or element, nullable, such a member's whole
+//! type makes the member required in every instantiation: `scalar S<T> @set @d<T>` with
+//! `directive @d<X>(v: X @deprecated)`. That is the definition's mistake, which nothing written
+//! makes, reported once, under the member's code, where the definition gives the place: at the
+//! type argument or the `implements` entry, or at an application's path for an argument a default
+//! fills; with a label at the member's `@deprecated`, which the table keeps. Each mistake has one
+//! owner: given non-null, `@d<T!>`, or by a default written non-null, it is the instantiation's
+//! mistake, reported once, as any instantiation's is, where the `!` makes it. No use of the
+//! collection repeats either: the table keeps the place apart from the key or element, and passes
+//! it on to nothing.
 //!
 //! The rule reads the public model, and one crate-private accessor, `Application::ty`: an
 //! application's complete type, its directive's instantiation.
@@ -85,7 +88,7 @@ const PLACES: [Place; 2] = [Place::DeprecatedArgument, Place::DeprecatedInputFie
 /// non-null, has no default, and applies `core`'s `@deprecated`; each occurrence and application
 /// whose type gives a type parameter that stands as such a member's whole type, written nullable,
 /// or whose fill gives one, a non-null type; and each place where a collection's own definition
-/// gives its key or element such a member's whole type.
+/// gives its key or element, nullable, such a member's whole type.
 ///
 /// It finds where each type parameter stands in the `begin` hook, reads who wrote each definition
 /// in the `enter_def` hook, each argument's and input field's default, type and applications in
@@ -361,11 +364,11 @@ impl DeprecatedRequired {
 
   /// The diagnostic of the mistake of `def`'s definition, of `model`, at `at`, where the walk has
   /// reached a type argument, an application or an `implements` entry of the definition: the key
-  /// or element of `def`, a collection, which every instantiation makes non-null, given there a
-  /// type parameter that stands as a deprecated member's whole type, which it makes required in
-  /// every instantiation. `None` anywhere else: a definition's mistake is reported once, where it
-  /// gives the key or element that place. A lookup for each place, and the label is the
-  /// `@deprecated` the table kept with the mistake, so no member's applications are read.
+  /// or element of `def`, a collection, which every instantiation makes non-null, given there,
+  /// nullable, to a type parameter that stands as a deprecated member's whole type, which it makes
+  /// required in every instantiation. `None` anywhere else: a definition's mistake is reported
+  /// once, where it gives the key or element that place. A lookup for each place, and the label
+  /// is the `@deprecated` the table kept with the mistake, so no member's applications are read.
   fn forced(&self, model: &Model, def: Option<DefId>, at: Location) -> Option<Diagnostic> {
     let def = def?;
     let collection = model.def(def).collection()?;

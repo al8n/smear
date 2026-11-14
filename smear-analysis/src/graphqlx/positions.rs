@@ -14,9 +14,14 @@
 //! the place came from. A place that is a member's whole type does not pass from a list to its
 //! element, or from a collection to its arguments: the list or the collection stands there. Nor
 //! does it stand at a collection's key or element, which every instantiation makes non-null
-//! however it is written: one that reaches it there is the mistake of the collection's definition,
-//! which [`Positions::forced`] keeps, and is passed on to nothing, so that no use of the collection
-//! repeats it.
+//! however it is written, and nothing passes it on from there, so that no use of the collection
+//! repeats it. Each mistake has one owner: a place that reaches the key or element through the
+//! type parameter's type nullable, `T`, is the mistake of the collection's definition, which
+//! nothing written makes, and [`Positions::forced`] keeps it, with where the member applies
+//! `@deprecated` for a deprecated member's place; one that would reach it through the type
+//! non-null, `T!`, is the mistake of that `!`, written in the type argument or in the default that
+//! fills it, which the instantiation that gives it is refused for where it is written, as every
+//! instantiation is, and it stops short of the key or element.
 //!
 //! A parameter stands where its definition puts it: in the complete type of each of its members,
 //! a field's arguments among them, every contribution's, a slot a default fills included; through
@@ -45,7 +50,10 @@
 //! collection to each argument; and a slot of another definition, any scalar's among them, to each
 //! argument given to it, the edge carrying where that is written. Each root gives its type its
 //! place, and the places spread along the edges, each node gaining each place once, a slot keeping
-//! the witness it gained it with: across an edge out of a slot the witness becomes the edge's.
+//! the witness it gained it with: across an edge out of a slot the witness becomes the edge's. A
+//! place that is a member's whole type does not cross a flagged edge: a list's to its element, a
+//! collection's to each argument, and a non-null type parameter's type's to a collection's key or
+//! element.
 //!
 //! What an operation's argument reaches is found last: each field argument's type is given it,
 //! and it spreads along the same edges, and from a named type of an input object to each argument
@@ -201,7 +209,8 @@ impl Place {
 /// Where each type parameter of a model stands: for each, the places it stands in, and where, in
 /// its own definition, it stands there or is passed to a parameter that does; for each type
 /// parameter of an input object, whether a value of the input object holds a value of it; and
-/// where a collection's own definition gives its key or element a place that takes a nullable type.
+/// where a collection's own definition gives its key or element, nullable, a place that takes a
+/// nullable type.
 #[derive(Default)]
 pub(crate) struct Positions {
   /// The first slot of each definition, in id order, and the count of slots last: definition `d`'s
@@ -215,18 +224,18 @@ pub(crate) struct Positions {
   /// For each slot, whether a value of its definition, an input object, holds a value of its
   /// argument.
   held: Vec<bool>,
-  /// Each place that takes a nullable type that reached a collection's key or element, which
-  /// stands in none of them.
+  /// Each place that takes a nullable type that reached a collection's key or element, nullable,
+  /// which stands in none of them.
   forced: Forced,
 }
 
-/// Each place that takes a nullable type that reached a collection's key or element, by the slot
-/// and the place's index.
+/// Each place that takes a nullable type that reached a collection's key or element, nullable, by
+/// the slot and the place's index.
 type Forced = BTreeMap<(u32, usize), Mistake>;
 
-/// A place that takes a nullable type that reached a collection's key or element: the mistake of
-/// the collection's definition, as [`Positions::forced`] answers it, with everything its report
-/// reads.
+/// A place that takes a nullable type that reached a collection's key or element through the type
+/// parameter's type nullable: the mistake of the collection's definition, as
+/// [`Positions::forced`] answers it, with everything its report reads.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Mistake {
   /// Where the definition gives the key or element the place: the witness it reached it with.
@@ -248,6 +257,7 @@ impl Positions {
     let keys = key_slots(model, &base);
     let mut graph = Graph {
       base: &base,
+      keys: &keys,
       slots,
       types: BTreeMap::new(),
       edges: Vec::new(),
@@ -261,7 +271,7 @@ impl Positions {
     for def in model.defs() {
       graph.def(model, sources, def);
     }
-    let (witnesses, origins, forced) = graph.spread(&held, &keys);
+    let (witnesses, origins, forced) = graph.spread(&held);
     Self {
       base,
       witnesses,
@@ -300,11 +310,13 @@ impl Positions {
       .unwrap_or(false)
   }
 
-  /// Where the definition of `def`, a collection, gives its key or element `place`, a place that
-  /// takes a nullable type, with the member the place came from and where a deprecated one applies
-  /// `@deprecated`: the definition's mistake, since every instantiation makes the key or element
-  /// non-null. The place stands at no key or element, so no use of `def` repeats the mistake.
-  /// `None` when the definition gives it none, or `def` is no collection. One lookup.
+  /// Where the definition of `def`, a collection, gives its key or element, nullable, `place`, a
+  /// place that takes a nullable type, with the member the place came from and where a deprecated
+  /// one applies `@deprecated`: the definition's mistake, since every instantiation makes the key
+  /// or element non-null. The place stands at no key or element, so no use of `def` repeats the
+  /// mistake. `None` when `def` is no collection, or its definition gives the place to no key or
+  /// element nullable: one it gives non-null, `T!`, is the mistake of the instantiation that gives
+  /// it, refused where it is written. One lookup.
   pub(crate) fn forced(&self, def: DefId, place: Place) -> Option<Mistake> {
     let slot = slot(&self.base, def, 0)?;
     self.forced.get(&(slot, place.index())).copied()
@@ -508,8 +520,10 @@ pub(crate) fn slot(base: &[u32], def: DefId, index: u32) -> Option<u32> {
   (slot < end).then_some(slot)
 }
 
-/// An edge of the graph: from a node, to a node, where it is written, and whether it leads from a
-/// list to its element or from a collection to an argument.
+/// An edge of the graph: from a node, to a node, where it is written, and whether it is flagged,
+/// so that a place that is a member's whole type does not cross it: one from a list to its element
+/// or from a collection to an argument, and one from a non-null type parameter's type to a
+/// collection's key or element.
 type Edge = (u32, u32, Location, bool);
 
 /// A node given a place, with the witness it gains it with and the member whose type the place
@@ -520,13 +534,15 @@ type Seed = (u32, Place, Location, Option<MemberId>);
 struct Graph<'b> {
   /// The first slot of each definition.
   base: &'b [u32],
+  /// For each slot, whether it is a collection's key or element.
+  keys: &'b [bool],
   /// How many slots there are: they are the first nodes.
   slots: u32,
   /// The node of each open type entered, numbered after the slots.
   types: BTreeMap<TyId, u32>,
   /// Each edge, from a node to a node, with where it is written, the witness it gives when it
-  /// leaves a slot, and whether it leads from a list to its element or from a collection to an
-  /// argument.
+  /// leaves a slot, and whether it is flagged: one a place that is a member's whole type does not
+  /// cross.
   edges: Vec<Edge>,
   /// Each open argument of a named type of an input object: from the type's node to the
   /// argument's, with the slot it is given to, which a value of the type holds a value of when
@@ -706,7 +722,12 @@ impl Graph<'_> {
       match model.ty(ty).kind() {
         TyKind::Param { def, index } => {
           if let Some(to) = slot(self.base, def, index) {
-            self.edges.push((from, to, at, false));
+            // A collection's key or element given non-null, `T!`: the instantiation that gives it
+            // to a member's whole type is refused where it is written, for its `!`, as any is, so
+            // the member's place stops here, and is no mistake of the collection's definition.
+            let flagged =
+              model.ty(ty).non_null() && self.keys.get(to as usize).copied().unwrap_or(false);
+            self.edges.push((from, to, at, flagged));
           }
         }
         TyKind::List { element } => {
@@ -764,13 +785,8 @@ impl Graph<'_> {
   /// Spreads each root's place along the edges, root by root, then what an operation's argument
   /// reaches, which passes from an input object's type to the arguments a value of it holds by
   /// `held`, and answers each slot's witnesses and the members its places came from, and each
-  /// place that takes a nullable type that reached a collection's key or element, which `keys`
-  /// tells.
-  fn spread(
-    mut self,
-    held: &[bool],
-    keys: &[bool],
-  ) -> (Vec<Option<Location>>, Vec<Option<MemberId>>, Forced) {
+  /// place that takes a nullable type that reached a collection's key or element, nullable.
+  fn spread(mut self, held: &[bool]) -> (Vec<Option<Location>>, Vec<Option<MemberId>>, Forced) {
     let nodes = (self.slots as usize).saturating_add(self.types.len());
     let size = (self.slots as usize).saturating_mul(PLACES);
     // The edges by their source, so that a node's are one run.
@@ -781,7 +797,7 @@ impl Graph<'_> {
       edges: &self.edges,
       holds: &self.holds,
       held,
-      keys,
+      keys: self.keys,
       deprecated: &self.deprecated,
       gained: vec![0; nodes],
       witnesses: vec![None; size],
@@ -825,7 +841,7 @@ struct Spread<'e> {
   witnesses: Vec<Option<Location>>,
   /// For each slot, and each place in turn, the member the place came from, when one did.
   origins: Vec<Option<MemberId>>,
-  /// Each place that takes a nullable type that reached a collection's key or element.
+  /// Each place that takes a nullable type that reached a collection's key or element, nullable.
   forced: Forced,
   /// The nodes that gained a place and have not passed it on, with the witness they gained it
   /// with and the member it came from.
@@ -835,8 +851,9 @@ struct Spread<'e> {
 impl Spread<'_> {
   /// A node gains a place, with a witness and an origin, unless it has it. A collection's key or
   /// element, which every instantiation makes non-null, stands in no place that takes a nullable
-  /// type: one that reaches it is kept apart, its definition's mistake, with where a deprecated
-  /// member applies `@deprecated`, one lookup, and passed on to nothing.
+  /// type: one that reaches it, which only the type parameter's type nullable leads to, is kept
+  /// apart, its definition's mistake, with where a deprecated member applies `@deprecated`, one
+  /// lookup, and passed on to nothing.
   fn gain(&mut self, (node, place, at, origin): Seed) {
     let Some(gained) = self.gained.get_mut(node as usize) else {
       return;
@@ -873,9 +890,10 @@ impl Spread<'_> {
   }
 
   /// Passes every queued place along each edge out of its node, until none is left: but a place
-  /// that stands only as a member's whole type not from a list to its element or from a
-  /// collection to an argument; and what an operation's argument reaches, from a named type of an
-  /// input object to each of its arguments a value of it holds.
+  /// that stands only as a member's whole type not along a flagged edge, from a list to its
+  /// element, from a collection to an argument, or from a non-null type parameter's type to a
+  /// collection's key or element; and what an operation's argument reaches, from a named type of
+  /// an input object to each of its arguments a value of it holds.
   fn drain(&mut self) {
     let edges = self.edges;
     let holds = self.holds;

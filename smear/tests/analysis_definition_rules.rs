@@ -2484,6 +2484,131 @@ fn a_member_many_collections_make_required_is_read_once() {
   }
 }
 
+#[test]
+fn a_key_written_non_null_a_deprecated_member_takes_is_refused_once() {
+  // `@d<T!>` makes `v` required as written: the application's own mistake, refused once, at `T!`,
+  // as any instantiation is, labelled where `@d`'s `X` stands. That the `T!` is the set's element
+  // as well adds nothing: what the forced path reports is what the complete type alone makes
+  // non-null. The twin, `@d<T>`, is refused once, through the forced path, at its `T`, labelled at
+  // the `@deprecated`. `S<Int>` adds nothing to either.
+  let program = |element: &str| -> String {
+    format!(
+      "type Query {{\n  s: S<Int>\n}}\ndirective @d<X>(v: X @deprecated) on SCALAR\n\
+       scalar S<T> @set @d<{element}>\n"
+    )
+  };
+  let text = program("T!");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      at(schema, &text, "T!", 0),
+      Some(named(schema, &text, "v: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@d` takes a non-null type for its type parameter `X`, which makes a deprecated argument \
+       required"
+    ]
+  );
+  let text = program("T");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      named(schema, &text, "@d<", "T", 0),
+      Some(at(schema, &text, "deprecated", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`T`, the element of the set `S`, is non-null in every instantiation, and here it makes the \
+       deprecated argument `v` of the directive `@d` required"
+    ]
+  );
+
+  // Two directives give the element the same place, one through `T!`: each is refused once, by
+  // its own owner, whichever reaches the element first, since what `@e<T!>` gives stops short of
+  // the element and takes no room from what `@d<T>` gives.
+  let text = "type Query {\n  s: S<Int>\n}\ndirective @e<X>(w: X @deprecated) on SCALAR\n\
+              directive @d<X>(v: X @deprecated) on SCALAR\nscalar S<T> @set @e<T!> @d<T>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DEPRECATED_ARGUMENT,
+        at(schema, text, "T!", 0),
+        Some(named(schema, text, "w: ", "X", 0))
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "@d<", "T", 0),
+        Some(at(schema, text, "deprecated", 1))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@e` takes a non-null type for its type parameter `X`, which makes a deprecated argument \
+       required",
+      "`T`, the element of the set `S`, is non-null in every instantiation, and here it makes the \
+       deprecated argument `v` of the directive `@d` required",
+    ]
+  );
+
+  // A default written non-null, `Y = X!`, fills the slot `@d<T>` leaves out with `T!`: the
+  // application's mistake, refused once, at its path, as any fill that gives a non-null type is,
+  // labelled where `Y` stands and at the default.
+  let text = "type Query {\n  s: S<Int>\n}\ndirective @d<X, Y = X!>(v: Y @deprecated) on SCALAR\n\
+              scalar S<T> @set @d<T>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      named(schema, text, "@", "d", 1),
+      Some(named(schema, text, "v: ", "Y", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@d` takes, from the default of `Y`, a non-null type for its type parameter `Y`, which \
+       makes a deprecated argument required"
+    ]
+  );
+  let filled = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    filled
+      .label(1)
+      .map(|label| (label.location(), label.text())),
+    Some((at(schema, text, "X!", 0), "filled from this default"))
+  );
+}
+
 /// A OneOf input object with a field of each shape, and a generic one whose field is a type
 /// parameter.
 const ONE_OF: &str = "type Query {\n  ok: Int\n}\n\
@@ -2661,6 +2786,61 @@ fn a_collections_key_a_one_of_field_takes_is_refused_once() {
          of a `@oneOf` input object has to be nullable: do not pass the key or element to one."
       )
     )
+  );
+}
+
+#[test]
+fn a_key_written_non_null_a_one_of_field_takes_is_refused_once() {
+  // `@d<T!>` gives `Choice`'s field `value` a non-null type as written: the application's own
+  // mistake, refused once, at `T!`, as any instantiation is, labelled where `@d`'s `X` stands, at
+  // `Choice<X>`. That the `T!` is the set's element as well adds nothing: what the forced path
+  // reports is what the complete type alone makes non-null. The twin, `@d<T>`, is refused once,
+  // through the forced path, at its `T`, labelled at the field. `S<Int>` adds nothing to either.
+  let program = |element: &str| -> String {
+    format!(
+      "type Query {{\n  s: S<Int>\n}}\ninput Choice<X> @oneOf {{\n  value: X\n}}\n\
+       directive @d<X>(value: Choice<X>) on SCALAR\nscalar S<T> @set @d<{element}>\n"
+    )
+  };
+  let text = program("T!");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, &text, "T!", 0),
+      Some(at(schema, &text, "Choice<X>", 1))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@d` takes a non-null type for its type parameter `X`, which is the type of the field \
+       `value` of the OneOf input object `Choice`"
+    ]
+  );
+  let text = program("T");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      named(schema, &text, "@d<", "T", 0),
+      Some(named(schema, &text, "  ", "value", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`T`, the element of the set `S`, is non-null in every instantiation, and here it is the \
+       type of the field `value` of the OneOf input object `Choice`"
+    ]
   );
 }
 

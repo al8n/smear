@@ -23,13 +23,15 @@
 //! being judged where it is written.
 //!
 //! A set's element and a map's key are non-null in every instantiation, however they are written.
-//! So a collection's own definition that gives its key or element such a field's whole type makes
-//! the field non-null in every instantiation: `scalar S<T> @set @d<T>` with
-//! `directive @d<X>(v: Choice<X>)`. That is the definition's mistake, reported once, where the
-//! definition gives the place: at the type argument or the `implements` entry, or at an
-//! application's path for an argument a default fills; with a label at the field. No use of the
-//! collection repeats it: the table keeps the place apart from the key or element, and passes it
-//! on to nothing.
+//! So a collection's own definition that gives its key or element, nullable, such a field's whole
+//! type makes the field non-null in every instantiation: `scalar S<T> @set @d<T>` with
+//! `directive @d<X>(v: Choice<X>)`. That is the definition's mistake, which nothing written makes,
+//! reported once, where the definition gives the place: at the type argument or the `implements`
+//! entry, or at an application's path for an argument a default fills; with a label at the field.
+//! Each mistake has one owner: given non-null, `@d<T!>`, or by a default written non-null, it is
+//! the instantiation's mistake, reported once, as any instantiation's is, where the `!` makes it.
+//! No use of the collection repeats either: the table keeps the place apart from the key or
+//! element, and passes it on to nothing.
 //!
 //! An input object is a OneOf input object when the package that wrote it applies `core`'s
 //! `@oneOf` to it, in its definition or in an extension of its own, as `one_of` answers. So a
@@ -69,7 +71,7 @@ const LABEL: &str = "field of a @oneOf input object is non-null";
 /// Reports each field of a OneOf input object that is written non-null; each occurrence and
 /// application whose type gives a type parameter that stands as such a field's whole type, or
 /// whose fill gives one, a non-null type; and each place where a collection's own definition gives
-/// its key or element such a field's whole type.
+/// its key or element, nullable, such a field's whole type.
 ///
 /// It finds where each type parameter stands in the `begin` hook, reads whether an input object is
 /// OneOf in the `enter_def` hook, each input field's type in the `enter_member` hook, each
@@ -280,10 +282,10 @@ impl OneOfFieldNotNullable {
 
   /// The diagnostic of the mistake of `def`'s definition, of `model`, at `at`, where the walk has
   /// reached a type argument, an application or an `implements` entry of the definition: the key
-  /// or element of `def`, a collection, which every instantiation makes non-null, given there a
-  /// type parameter that stands as a OneOf's field's whole type, which it makes non-null in every
-  /// instantiation. `None` anywhere else: a definition's mistake is reported once, where it gives
-  /// the key or element that place. One lookup.
+  /// or element of `def`, a collection, which every instantiation makes non-null, given there,
+  /// nullable, to a type parameter that stands as a OneOf's field's whole type, which it makes
+  /// non-null in every instantiation. `None` anywhere else: a definition's mistake is reported
+  /// once, where it gives the key or element that place. One lookup.
   fn forced(&self, model: &Model, def: Option<DefId>, at: Location) -> Option<Diagnostic> {
     let def = def?;
     let collection = model.def(def).collection()?;
