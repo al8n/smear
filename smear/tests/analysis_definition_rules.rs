@@ -1221,6 +1221,167 @@ fn a_collections_own_parameters_stand_in_what_it_is_given() {
 }
 
 #[test]
+fn a_scalars_own_parameters_stand_in_what_it_is_given() {
+  // `@d<T>` puts the scalar `Ref`'s parameter in a directive's argument, so `Ref<Obj>` is refused
+  // at `Obj`, labelled at that `T`. `Box`'s `T` is given to that parameter in `v`, so it stands
+  // there too, and `Box<Obj>`, which holds a `Ref<Obj>`, is refused under the same code, labelled
+  // at `Ref<T>`; and so is `Y<Obj>`, whose default derives a `Ref<Obj>`. A scalar that hid its
+  // arguments accepted `Box<Obj>`.
+  let text = "type Query {\n  r: Ref<Obj>\n  b: Box<Obj>\n}\ntype Obj {\n  x: Int\n}\n\
+              directive @d<X>(v: [X]) on SCALAR\nscalar Ref<T> @d<T>\n\
+              type Box<T> {\n  v: Ref<T>\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "Ref<", "Obj", 0),
+        Some(named(schema, text, "@d<", "T", 0))
+      ),
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "Box<", "Obj", 0),
+        Some(named(schema, text, "v: ", "Ref<T>", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Ref` takes the object type `Obj` for its type parameter `T`, which stands as a directive \
+       argument's type, and a directive's argument's type is an input type",
+      "`Box` takes the object type `Obj` for its type parameter `T`, which stands as a directive \
+       argument's type, and a directive's argument's type is an input type",
+    ]
+  );
+
+  // Derived from a default, alone: a `Ref<Obj>` the program writes would be judged where it is.
+  let text = "type Query {\n  y: Y<Obj>\n}\ntype Obj {\n  x: Int\n}\n\
+              directive @d<X>(v: [X]) on SCALAR\nscalar Ref<T> @d<T>\n\
+              type Y<A, R = Ref<A>> {\n  r: R\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DIRECTIVE_ARGUMENT_TYPE,
+      at(schema, text, "Y<Obj>", 0),
+      Some(named(schema, text, "@d<", "T", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the default of `R` of `Y` makes `Ref` take the object type `Obj` for its type parameter \
+       `T`, which stands as a directive argument's type, and a directive's argument's type is an \
+       input type"
+    ]
+  );
+
+  // The twin, an input object where the object was, passes every form: a value of a scalar that
+  // is no collection holds nothing, so `Box`'s `T` stands in no field's type.
+  let text = "type Query {\n  r: Ref<In>\n  b: Box<In>\n  y: Y<In>\n}\ninput In {\n  i: Int\n}\n\
+              directive @d<X>(v: [X]) on SCALAR\nscalar Ref<T> @d<T>\n\
+              type Box<T> {\n  v: Ref<T>\n}\ntype Y<A, R = Ref<A>> {\n  r: R\n}\n";
+  let analysis = analyze_text(text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn what_a_scalars_argument_holds_passes_its_parameters_on() {
+  // `Page`'s `T` stands as a field's type, so `Page<In>` is refused in each of its forms, each
+  // alone: written under `Ref`'s argument, at `In`; substituted, as the `Ref<Page<In>>` of
+  // `Box<In>`, at `In`, labelled at `Ref<Page<T>>`, which puts `Box`'s `T` where `Page`'s stands;
+  // and derived from `X`'s default, at `X<In>`. A scalar that hid its arguments accepted
+  // `Box<In>`, and refused the other two.
+  let definitions = "input In {\n  i: Int\n}\ntype Obj {\n  x: Int\n}\nscalar Ref<T>\n\
+                     type Page<T> {\n  items: [T]\n}\ntype Box<T> {\n  v: Ref<Page<T>>\n}\n\
+                     type X<A, R = Ref<Page<A>>> {\n  r: R\n}\n";
+  let text = format!("type Query {{\n  a: Ref<Page<In>>\n}}\n{definitions}");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      FIELD_TYPE,
+      named(schema, &text, "Page<", "In", 0),
+      Some(at(schema, &text, "[T]", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Page` takes the input object `In` for its type parameter `T`, which stands as a field's \
+       type, and a field's type is an output type"
+    ]
+  );
+
+  let text = format!("type Query {{\n  b: Box<In>\n}}\n{definitions}");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      FIELD_TYPE,
+      named(schema, &text, "Box<", "In", 0),
+      Some(named(schema, &text, "v: ", "Ref<Page<T>>", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Box` takes the input object `In` for its type parameter `T`, which stands as a field's \
+       type, and a field's type is an output type"
+    ]
+  );
+
+  let text = format!("type Query {{\n  c: X<In>\n}}\n{definitions}");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      FIELD_TYPE,
+      at(schema, &text, "X<In>", 0),
+      Some(at(schema, &text, "[T]", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the default of `R` of `X` makes `Page` take the input object `In` for its type parameter \
+       `T`, which stands as a field's type, and a field's type is an output type"
+    ]
+  );
+
+  // The twin, an object where the input object was, passes every form.
+  let text =
+    format!("type Query {{\n  a: Ref<Page<Obj>>\n  b: Box<Obj>\n  c: X<Obj>\n}}\n{definitions}");
+  let analysis = analyze_text(&text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
 fn a_type_given_to_many_parameters_is_one_node() {
   // `D.d`'s complete type is `H<Tup<T>, G1<Tup<T>>, G2<Tup<T>>>`: `Tup<T>` is given to three
   // slots, and is one node of the table with an edge from each, walked once. A test cannot see
