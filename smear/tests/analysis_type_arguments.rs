@@ -1130,7 +1130,10 @@ fn every_pair_of_an_instantiation_and_a_value_is_a_step() {
   for j in 1..=50 {
     text.push_str(&format!("input X{j} {{\n  v: Int\n}}\n"));
   }
-  quiet(&analyze_text(&text, &Limits::new().with_max_value_steps(2600)));
+  quiet(&analyze_text(
+    &text,
+    &Limits::new().with_max_value_steps(2600),
+  ));
   let short = analyze_text(&text, &Limits::new().with_max_value_steps(2599));
   let schema = schema_file(&short);
   assert_eq!(
