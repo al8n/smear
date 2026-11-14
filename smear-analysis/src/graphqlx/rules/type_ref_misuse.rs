@@ -14,7 +14,7 @@
 //! the definition an occurrence resolved to, never by a spelling. Each is
 //! `smear::graphqlx::typeref-misuse`.
 //!
-//! The rule reads the public model, and one crate-private accessor through `Nesting`:
+//! The rule reads the public model and nothing else: through `Nesting`, the public
 //! `TypeExpr::written_args`, to tell which occurrences of a tree are above another.
 
 use crate::graphqlx::{

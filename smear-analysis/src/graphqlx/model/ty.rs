@@ -329,9 +329,9 @@ impl<'a> TypeExpr<'a> {
   /// The arguments as written, in order, whatever the occurrence resolved to: one that did not
   /// resolve, or that names a type parameter, keeps those it was written with. They are the same
   /// as [`kind`](Self::kind)'s `args` for a named occurrence, and the walk reaches them for every
-  /// shape.
+  /// shape. A list has none: its element is the one [`kind`](Self::kind) answers.
   #[inline]
-  pub(crate) fn written_args(&self) -> &'a [TypeExprId] {
+  pub fn written_args(&self) -> &'a [TypeExprId] {
     let model: &'a Model = self.model;
     self.row().args.of(&model.type_expr_args)
   }

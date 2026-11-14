@@ -20,9 +20,9 @@
 //! which is not this rule's to say; and one whose values did not coerce binds nothing, coercion
 //! having reported it within the contribution, where this rule says nothing.
 //!
-//! The rule reads the public model, and two crate-private accessors: `Extern::application`, the
-//! application an extern is bound from, and `SourceMap::written_by`, the package that wrote a
-//! contribution.
+//! The rule reads the public model, the public `SourceMap::written_by` among it, the package that
+//! wrote a contribution, and one crate-private accessor, `Extern::application`: the application
+//! an extern is bound from.
 
 use std::{format, vec::Vec};
 

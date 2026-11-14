@@ -56,7 +56,10 @@ impl Packages {
 ///
 /// [`Cx::site`] answers it for the occurrence the walk is reaching and for every occurrence nested
 /// in it: an argument of `Page<User>` sits where `Page<User>` sits. A rule that needs more reads the
-/// outermost occurrence, which the walk reaches first, and its children from it.
+/// outermost occurrence, which the walk reaches first, and its children from it. For a type
+/// occurrence of any shape, [`TypeExpr::written_args`](crate::graphqlx::TypeExpr::written_args)
+/// answers the arguments written on it, and
+/// [`TypeExprKind::List`](crate::graphqlx::TypeExprKind::List) a list's element.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Site {
@@ -64,7 +67,7 @@ pub enum Site {
   MemberType,
   /// A member's default value: an argument's or an input field's.
   Default,
-  /// An entry of an object's or an interface's `implements`.
+  /// An entry of a definition's `implements`.
   Implements,
   /// A member of a union.
   UnionMember,
