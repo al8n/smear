@@ -4,9 +4,10 @@
 //! bounds, judged at it by those arguments; its arguments, each read under them, written or a
 //! copy of its default, the copy's count judging whether it fits and paying for each node; and a
 //! generic input object's fields, read under its type's arguments, a copy that does not fit them
-//! reported by the written literal whose type a rebuild made; and a value of a generic type
-//! definition whose type names its type parameters, checked at each closed instantiation of it the
-//! program writes.
+//! reported by the written literal whose type a rebuild made; and what a generic definition holds
+//! whose type names its type parameters, a value, or an argument an application in it leaves out,
+//! checked at each closed instantiation of it, a type's the program writes or a directive's an
+//! application makes.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -1701,5 +1702,126 @@ fn a_count_pays_for_what_it_schedules_before_a_type_stops_it() {
   assert!(
     last.contains(&format!("`Limits::max_value_steps`, {}", total - 1)),
     "{last}"
+  );
+}
+
+/// An argument an application on a generic definition leaves out, whose type there is the
+/// definition's bare nullable type parameter, is required wherever an instantiation makes that
+/// parameter non-null. `@need<T>` on `Box` leaves out `v`, whose type there is `Box`'s `T`:
+/// `Box<Int>` gives it `Int`, and holds; `Box<Int!>` gives it `Int!`, and is
+/// `missing-required-directive-argument` at the occurrence, labelled at the application and at
+/// `v`. With a default, `v` is required under neither, and its copy fits both. Refuses an omission
+/// accepted under the open type and never asked again.
+#[test]
+fn an_argument_left_out_is_required_where_an_instantiation_makes_it_non_null() {
+  let text = "type Query {\n  a: Box<Int>\n  b: Box<Int!>\n}\n\
+              directive @need<T>(v: T) on OBJECT\ntype Box<T> @need<T> {\n  value: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Box<Int!>", 0);
+  assert_eq!(found(&analysis), [(MISSING, occurrence)]);
+  let report = the(&analysis, MISSING, occurrence);
+  assert_eq!(
+    report.to_string(),
+    "`Box` is instantiated here with type arguments under which `@need` requires its argument \
+     `v`, and an application it holds leaves it out"
+  );
+  assert_eq!(
+    labels(report),
+    [
+      (
+        named(schema, text, "@", "need", 1),
+        "this application leaves it out"
+      ),
+      (named(schema, text, "(", "v", 0), "required here"),
+    ]
+  );
+
+  let defaulted = "type Query {\n  a: Box<Int>\n  b: Box<Int!>\n}\n\
+                   directive @need<T>(v: T = 1) on OBJECT\n\
+                   type Box<T> @need<T> {\n  value: Int\n}\n";
+  quiet(&analyze_text(defaulted, &Limits::new()));
+}
+
+/// A field an object literal of a generic definition leaves out, whose type there is its input
+/// object's bare nullable type parameter, is judged by the same rule: the literal is a value its
+/// definition records, and its count at each instantiation reads the field under that
+/// instantiation's arguments. `Box`'s `{}` leaves out `In`'s `v`: `Box<Int>` gives it `Int`, and
+/// holds; `Box<Int!>` gives it `Int!`, which the literal must set, and is refused at the
+/// occurrence with the default's code, labelled at the literal. With a default, `v` is required
+/// under neither. Refuses a field left out read off the `!` it is written with.
+#[test]
+fn a_field_left_out_is_required_where_an_instantiation_makes_it_non_null() {
+  let text = "type Query {\n  a(x: Box<Int>): Int\n  b(y: Box<Int!>): Int\n}\n\
+              input In<U> {\n  v: U\n}\ninput Box<T> {\n  f: In<T> = {}\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Box<Int!>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [(after(schema, text, "In<T> = ", "{}"), "this value")]
+  );
+
+  let defaulted = "type Query {\n  a(x: Box<Int>): Int\n  b(y: Box<Int!>): Int\n}\n\
+                   input In<U> {\n  v: U = 1\n}\ninput Box<T> {\n  f: In<T> = {}\n}\n";
+  quiet(&analyze_text(defaulted, &Limits::new()));
+}
+
+/// Each pair of a distinct instantiation and an argument left out that its definition records is
+/// a step, as each pair of one and a value is. `@need<T>` on `Box` leaves out `v` and `w`: a step
+/// each, and one to rebuild `T`, which `w` finds made, three. `Box<Int>` pays a step for each pair
+/// and one to rebuild `Box`'s `T`, which the second pair finds made, three; `Box<String>` three
+/// more: nine in all. At eight, `Box<String>`'s second pair cannot be paid for, and it alone is
+/// `resource-limit`. Refuses the arguments left out checked for nothing, which passes at eight
+/// with five, and their check never made, with three.
+#[test]
+fn every_pair_of_an_instantiation_and_an_argument_left_out_is_a_step() {
+  let text = "type Query {\n  a: Box<Int>\n  b: Box<String>\n}\n\
+              directive @need<T>(v: T, w: T) on OBJECT\n\
+              type Box<T> @need<T> {\n  value: Int\n}\n";
+  quiet(&analyze_text(text, &Limits::new().with_max_value_steps(9)));
+  let short = analyze_text(text, &Limits::new().with_max_value_steps(8));
+  let schema = schema_file(&short);
+  let string = at(schema, text, "Box<String>", 0);
+  assert_eq!(found(&short), [(LIMIT, string)]);
+  assert_eq!(
+    the(&short, LIMIT, string).to_string(),
+    "the values `Box` holds could not be checked under the type arguments it is instantiated with \
+     here within `Limits::max_value_steps`, 8, the steps the analysis may take to complete values"
+  );
+}
+
+/// An `implements` entry is an occurrence like any other, and what its interface records is
+/// checked under its type arguments there: `I<String>` refuses `I`'s `1`, with the default's code,
+/// and `J<Int!>` makes the `v` that `@need<X>` on `J` leaves out required. Each is reported at its
+/// entry. Refuses an entry the check passes over, which only the implementation phase reads.
+#[test]
+fn what_an_implements_entry_instantiates_is_checked_there() {
+  let text = "type Query {\n  a: A\n  b: B\n}\ninterface I<X> {\n  f(a: X = 1): Int\n}\n\
+              type A implements I<String> {\n  f(a: String): Int\n}\n\
+              directive @need<T>(v: T) on INTERFACE\ninterface J<X> @need<X> {\n  g: Int\n}\n\
+              type B implements J<Int!> {\n  g: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let value = at(schema, text, "I<String>", 0);
+  let omitted = at(schema, text, "J<Int!>", 0);
+  assert_eq!(
+    sorted(found_of(&analysis, &PHASE)),
+    sorted(vec![(DEFAULT, value), (MISSING, omitted)])
+  );
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, value)),
+    [(after(schema, text, "X = ", "1"), "this value")]
+  );
+  assert_eq!(
+    labels(the(&analysis, MISSING, omitted)),
+    [
+      (
+        named(schema, text, "@", "need", 1),
+        "this application leaves it out"
+      ),
+      (named(schema, text, "(", "v", 0), "required here"),
+    ]
   );
 }
