@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationId, Contribution, Cx, DefId, DefKind, Diagnostic, Layout, Limits,
-    MemberId, Model, ModuleId, Namespace, ObjectEntry, Package, PackageId, PackageKind, Packages,
-    SourceFile, SourceId, Tier, TyKind, TypeExprId, ValueId, ValueKind, Visitor, analyze,
+    MemberId, Model, ModuleId, Namespace, ObjectEntry, Origin, Package, PackageId, PackageKind,
+    Packages, SourceFile, SourceId, Tier, TyKind, TypeExprId, ValueId, ValueKind, Visitor, analyze,
     test_support::{self, RULES},
     visit,
   },
@@ -136,10 +136,10 @@ fn an_ok_corpus_file_has_no_unresolved_value() {
   checked_the_known_ok(&checked);
 }
 
-/// Over every corpus file whose analysis is ok, a value kept as written is a custom scalar's that
-/// is no collection, or one whose type names a type parameter, or, since the rule that refuses an
-/// output type in an input position is still to come, one whose type is an output type: every
-/// other value is coerced.
+/// Over every corpus file whose analysis is ok, a value kept as written is a custom scalar's, one a
+/// supplied package defines that is no collection, or one whose type names a type parameter: every
+/// other value is coerced, a built-in scalar's among them. An output type in an input position is
+/// GraphQL's own rules' to refuse, so no ok file holds a value of one.
 #[test]
 fn an_ok_corpus_file_keeps_a_literal_only_where_nothing_is_coerced() {
   let mut checked: Vec<PathBuf> = Vec::new();
@@ -159,11 +159,9 @@ fn an_ok_corpus_file_keeps_a_literal_only_where_nothing_is_coerced() {
       let custom = match ty.kind() {
         TyKind::Named { def, .. } => {
           let def = model.def(def);
-          match def.kind() {
-            DefKind::Scalar => def.collection().is_none(),
-            DefKind::Object | DefKind::Interface | DefKind::Union => true,
-            _ => false,
-          }
+          def.kind() == DefKind::Scalar
+            && def.collection().is_none()
+            && def.origin() == Origin::User
         }
         _ => false,
       };
