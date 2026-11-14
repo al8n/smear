@@ -290,7 +290,13 @@ impl Analysis {
 ///   on it, stays a literal, and is checked at each closed instantiation of the definition a
 ///   supplied package writes, one verdict for each instantiation, each pair of one and a value a
 ///   step: the first value that does not fit under its arguments is reported once at each
-///   occurrence of it, with the value's site code, labelled at the value. A copy is
+///   occurrence of it, with the value's site code, labelled at the value. So is an argument such
+///   an application leaves out, its type there the definition's bare nullable type parameter:
+///   where the instantiation's arguments make it non-null, it is
+///   `missing-required-directive-argument` at the occurrence, labelled at the application. The
+///   values of the applications on a generic directive and on its arguments are checked likewise
+///   at each closed application of the directive, reported at its path; the directive's own
+///   arguments' defaults are judged only where an application leaves them out. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
 ///   copy of itself is not copied: the argument, or the field, is absent, and under type arguments
 ///   what its count reached is judged as a copy is. Each row of a copy, each

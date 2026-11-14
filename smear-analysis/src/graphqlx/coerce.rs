@@ -187,23 +187,31 @@
 //!
 //! # At each instantiation
 //!
-//! A value of a generic type definition whose expected type names its type parameters stays a
-//! `Literal`, and is recorded under the definition, in the walk's order: a default of one of its
-//! members, an input field's or a field argument's; and an argument of an application on it or on
-//! one of its members whose type, under the application's open type arguments, names them,
-//! written or copied from its directive's default. A generic directive's own values are judged at
-//! its applications, and recorded nowhere. When the walk has ended, each type occurrence a supplied
-//! package writes, in id order, whose type is a closed named type of a definition with recorded
-//! values, asks that instantiation's verdict, made once for its nullable form and kept: each
-//! recorded value in turn, a step paid before it is asked, its type read under the instantiation's
-//! arguments and its count judged there, until one does not fit. Each occurrence of an
-//! instantiation whose verdict fails is reported once, with the recorded value's site code,
-//! `invalid-default-value` or `invalid-directive-argument-value`, labelled at the value; each one
-//! a limit stopped is `resource-limit`. The value stays its definition's `Literal`, and the check
-//! makes no row. A count that meets itself is judged by what it reached, as an exact one is: the
-//! cycle is another rule's to report, and a value that does not fit is reported all the same. An
-//! instantiation only a derivation reaches is not checked: a value written under such a type is
-//! judged where it is written.
+//! A value of a generic definition whose expected type names its type parameters stays a
+//! `Literal`, and is recorded under the definition, in the walk's order: of a type, a default of
+//! one of its members, an input field's or a field argument's; and an argument of an application
+//! on the definition or on one of its members, a directive's arguments among them, whose type,
+//! under the application's open type arguments, names them, written or copied from its
+//! directive's default. So is an argument such an application leaves out with no default, whose
+//! type there is a bare nullable type parameter of the definition: whether it is required is each
+//! instantiation's to say. A generic directive's own arguments' defaults are judged where its
+//! applications leave them out, and recorded nowhere. When the walk has ended, each type
+//! occurrence a supplied package writes, in id order, whose type is a closed named type of a
+//! definition with recorded rows, and then each application a supplied package writes, in id
+//! order, whose type is a closed instantiation of its directive, asks that instantiation's
+//! verdict, made once for its nullable form and kept: each recorded row in turn, a step paid
+//! before it is asked, its type read under the instantiation's arguments, until one does not
+//! hold: a value whose count, judged there, does not fit, or an argument left out whose type
+//! there is non-null. Each occurrence, or application, of an instantiation whose verdict fails is
+//! reported once: a value with its site code, `invalid-default-value` or
+//! `invalid-directive-argument-value`, labelled at the value; an argument left out
+//! `missing-required-directive-argument`, labelled at the application that leaves it out and at
+//! the argument. Each one a limit stopped is `resource-limit`. A value stays its definition's
+//! `Literal`, and the check makes no row. A count that meets itself is judged by what it reached,
+//! as an exact one is: the cycle is another rule's to report, and a value that does not fit is
+//! reported all the same. An instantiation only a derivation reaches is not checked, nor an
+//! application only an instantiation reaches: a value written under such a type is judged where
+//! it is written.
 //!
 //! # The count of a copy
 //!
@@ -257,8 +265,8 @@
 //! its identities are read against; each node a rebuild of a member's type under type
 //! arguments looks at, its root included, once for each type and instantiation; each argument or
 //! field that may be required left out where the type arguments are complete; and each pair of a
-//! written instantiation checked and a value recorded under its definition. So is the one
-//! reading that is more than linear: a decimal integer of more than 38
+//! closed instantiation checked, written or applied, and a row recorded under its definition. So
+//! is the one reading that is more than linear: a decimal integer of more than 38
 //! significant digits, the most `u128` arithmetic reads whatever they spell, is converted nine
 //! digits at a time over a vector of limbs, and that is charged first, an upper bound of its limb
 //! updates; one the budget cannot pay for is `resource-limit` where it is written, and
@@ -441,11 +449,10 @@ pub(crate) fn coerce(
   coercion.list_fields();
   for index in 0..coercion.builder.def_count() {
     let def = DefId::new(index);
-    // A generic type definition's values that name its type parameters are recorded under it; a
-    // generic directive's are judged at its applications.
-    coercion.owner = (coercion.builder.type_param_count(def) > 0
-      && coercion.builder.def_kind(def) != Some(DefKind::Directive))
-    .then_some(def);
+    // A generic definition's values that name its type parameters are recorded under it: a
+    // type's, and those of the applications on a directive and on its arguments. A directive's
+    // own arguments' defaults are judged where its applications leave them out.
+    coercion.owner = (coercion.builder.type_param_count(def) > 0).then_some(def);
     let count = coercion.builder.def_applications(def).len();
     for at in 0..count {
       if let Some(&application) = coercion.builder.def_applications(def).get(at) {
@@ -586,22 +593,38 @@ struct Input {
   required: (u32, u32),
 }
 
-/// A value of a generic type definition whose type names its type parameters: its definition, its
-/// tree, its type, and the site its value is written at, which says the code it is refused with.
+/// What a generic definition holds that each closed instantiation of it checks, a type's written
+/// or a directive's applied: its definition, its type, which names the definition's type
+/// parameters, and what the instantiation's type arguments are asked of it.
 #[derive(Clone, Copy)]
 struct Recorded {
   def: DefId,
-  tree: u32,
   ty: TyId,
-  site: Site,
+  owed: Owed,
 }
 
-/// What a definition's recorded values come to under one instantiation's arguments.
+/// What a recorded row asks of an instantiation's type arguments.
+#[derive(Clone, Copy)]
+enum Owed {
+  /// That the value of the tree `tree`, written at `site`, which says the code it is refused
+  /// with, fit the type they give it.
+  Value { tree: u32, site: Site },
+  /// That the argument `argument`, which the application `application` leaves out with no
+  /// default, its type a bare nullable type parameter of the definition, take no non-null type
+  /// from them, which would make it required.
+  Omitted {
+    application: ApplicationId,
+    argument: MemberId,
+  },
+}
+
+/// What a definition's recorded rows come to under one instantiation's arguments.
 #[derive(Clone, Copy)]
 enum Checked {
-  /// Each fits.
+  /// Each holds.
   Fits,
-  /// The recorded value at this row, the first in the walk's order, does not fit.
+  /// The recorded row at this index, the first in the walk's order, does not hold: a value that
+  /// does not fit, or an argument left out that the arguments make required.
   Unfit(u32),
   /// A limit stopped the check before it was known.
   Stopped(Stop),
@@ -1076,12 +1099,15 @@ struct Coercion<'c, 'p, 'x> {
   /// Each set or map literal a judged count searched for an element or a key held twice, by its
   /// node and the type its identities were read against: whether it holds each once.
   searched: BTreeMap<(u32, TyId), bool>,
-  /// The generic type definition whose values the walk is making, when it is in one.
+  /// The generic definition whose values the walk is making, when it is in one: a type, or a
+  /// directive.
   owner: Option<DefId>,
-  /// Each value of a generic type definition whose type names its type parameters, in the walk's
-  /// order, and so by its definition: what each written instantiation of it checks.
+  /// Each value of a generic definition whose type names its type parameters, and each argument
+  /// an application in it leaves out whose type is a bare nullable type parameter of it, in the
+  /// walk's order, and so by its definition: what each closed instantiation of it checks, a
+  /// type's written or a directive's applied.
   recorded: Vec<Recorded>,
-  /// What the values recorded under each closed instantiation's definition come to under its
+  /// What the rows recorded under each closed instantiation's definition come to under its
   /// arguments, by the instantiation's nullable form.
   checked: BTreeMap<TyId, Checked>,
   /// The rows of every count a copy was made of, charged or not.
@@ -1104,7 +1130,14 @@ impl<'p> Coercion<'_, 'p, '_> {
       if let Some(value) = self.value(tree, ty, Mode::Written(Site::Default), false) {
         self.builder.set_member_default(member, value);
       }
-      self.record(tree, ty, Site::Default);
+      // A generic directive's argument's default is judged where an application leaves the
+      // argument out, under that application's type arguments, and is recorded nowhere.
+      let argument = self
+        .owner
+        .is_some_and(|owner: DefId| self.builder.def_kind(owner) == Some(DefKind::Directive));
+      if !argument {
+        self.record(tree, ty, Site::Default);
+      }
     }
     let count = self.builder.member_applications(member).len();
     for at in 0..count {
@@ -1220,8 +1253,8 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Records the value of the tree `tree`, of the type `ty`, written at `site` in the definition
-  /// the walk is in, when that is a generic type definition and `ty` names its type parameters:
-  /// each closed instantiation the program writes of it checks the value.
+  /// the walk is in, when that is a generic definition and `ty` names its type parameters: each
+  /// closed instantiation of it checks the value, a type's written or a directive's applied.
   fn record(&mut self, tree: u32, ty: Option<TyId>, site: Site) {
     let (Some(def), Some(ty)) = (self.owner, ty) else {
       return;
@@ -1229,17 +1262,41 @@ impl<'p> Coercion<'_, 'p, '_> {
     if !self.builder.ty_closed(ty) {
       self.recorded.push(Recorded {
         def,
-        tree,
         ty,
-        site,
+        owed: Owed::Value { tree, site },
       });
     }
   }
 
-  /// Checks the values recorded under each generic type definition at each closed instantiation of
-  /// it a supplied package writes, every type occurrence in id order: one verdict for each
-  /// instantiation, both nullnesses sharing it, made the first time it is asked and kept, and one
-  /// report for each occurrence of an instantiation whose verdict fails or that a limit stopped.
+  /// Records `argument`, which the application `application` leaves out with no default, its
+  /// type there `ty`, when the walk is in a generic definition and `ty` is a bare nullable type
+  /// parameter of it: whether the argument is required is each instantiation's to say, and each
+  /// closed instantiation of the definition checks it, a type's written or a directive's applied.
+  fn owe(&mut self, application: ApplicationId, argument: MemberId, ty: Option<TyId>) {
+    let (Some(def), Some(ty)) = (self.owner, ty) else {
+      return;
+    };
+    let param = matches!(
+      self.builder.ty_shape(ty),
+      Some(Shape::Param { def: named, .. }) if named == def
+    );
+    if param && !self.builder.ty_non_null(ty) {
+      self.recorded.push(Recorded {
+        def,
+        ty,
+        owed: Owed::Omitted {
+          application,
+          argument,
+        },
+      });
+    }
+  }
+
+  /// Checks the rows recorded under each generic definition at each closed instantiation of it a
+  /// supplied package writes: every type occurrence of a type in id order, then every application
+  /// of a directive in id order. One verdict for each instantiation, both nullnesses sharing it,
+  /// is made the first time it is asked and kept, and each occurrence, or application, of one
+  /// whose verdict fails or that a limit stopped is reported once.
   fn instantiations(&mut self) {
     if self.recorded.is_empty() {
       return;
@@ -1252,41 +1309,59 @@ impl<'p> Coercion<'_, 'p, '_> {
         continue;
       };
       let at = occurrence.location;
-      if at.source() < self.supplied || !self.builder.ty_closed(ty) || !self.is_named(ty, def) {
+      self.instantiation(at, def, ty);
+    }
+    for index in 0..self.builder.application_count() {
+      let application = ApplicationId::new(index);
+      let (Some((Resolution::Resolved(def), _, at)), Some(ty)) = (
+        self.builder.applied(application),
+        self.builder.application_ty(application),
+      ) else {
         continue;
-      }
-      let start = self
-        .recorded
-        .partition_point(|row: &Recorded| row.def < def);
-      let end = self
-        .recorded
-        .partition_point(|row: &Recorded| row.def <= def);
-      if start >= end {
-        continue;
-      }
-      let nullable = self.nullable(ty, def);
-      let verdict = match self.checked.get(&nullable).copied() {
-        Some(verdict) => verdict,
-        None => {
-          let verdict = self.check(def, nullable, start, end);
-          self.checked.insert(nullable, verdict);
-          verdict
-        }
       };
-      match verdict {
-        Checked::Fits => {}
-        Checked::Unfit(row) => self.report_unfit(at, def, row),
-        Checked::Stopped(stop) => self.report_unchecked(at, def, stop),
-      }
+      self.instantiation(at, def, ty);
     }
   }
 
-  /// What the values recorded at the rows `start..end`, all `def`'s, come to under `ty`, a closed
+  /// Checks what `def` records under `ty`, written at `at`, when a supplied package writes it, `ty`
+  /// is a closed named type of `def`, and `def` records anything: the verdict of `ty`'s nullable
+  /// form, made the first time it is asked and kept, and its one report at `at`.
+  fn instantiation(&mut self, at: Location, def: DefId, ty: TyId) {
+    if at.source() < self.supplied || !self.builder.ty_closed(ty) || !self.is_named(ty, def) {
+      return;
+    }
+    let start = self
+      .recorded
+      .partition_point(|row: &Recorded| row.def < def);
+    let end = self
+      .recorded
+      .partition_point(|row: &Recorded| row.def <= def);
+    if start >= end {
+      return;
+    }
+    let nullable = self.nullable(ty, def);
+    let verdict = match self.checked.get(&nullable).copied() {
+      Some(verdict) => verdict,
+      None => {
+        let verdict = self.check(def, nullable, start, end);
+        self.checked.insert(nullable, verdict);
+        verdict
+      }
+    };
+    match verdict {
+      Checked::Fits => {}
+      Checked::Unfit(row) => self.report_unfit(at, def, row),
+      Checked::Stopped(stop) => self.report_unchecked(at, def, stop),
+    }
+  }
+
+  /// What the rows recorded at `start..end`, all `def`'s, come to under `ty`, a closed
   /// instantiation of `def`: each in turn, a step paid before it is asked, its type read under
-  /// `ty`'s arguments and its count judged under that type, until one does not fit. A count that
-  /// meets itself is judged as an exact one is, by what it reached: the cycle is another rule's to
-  /// report, and no value that does not fit is passed for it. A step that cannot be paid, a count
-  /// past the budget and a type that cannot be built stop the check.
+  /// `ty`'s arguments, until one does not hold. A value's count is judged under that type, and an
+  /// argument left out holds where that type is nullable. A count that meets itself is judged as
+  /// an exact one is, by what it reached: the cycle is another rule's to report, and no value that
+  /// does not fit is passed for it. A step that cannot be paid, a count past the budget and a type
+  /// that cannot be built stop the check.
   fn check(&mut self, def: DefId, ty: TyId, start: usize, end: usize) -> Checked {
     for row in start..end {
       let Some(recorded) = self.recorded.get(row).copied() else {
@@ -1300,9 +1375,19 @@ impl<'p> Coercion<'_, 'p, '_> {
         Ok(None) => continue,
         Err(stop) => return Checked::Stopped(stop),
       };
-      match self.count(recorded.tree, Some(under), true, true) {
+      let tree = match recorded.owed {
+        Owed::Value { tree, .. } => tree,
+        // Required where the arguments make its type non-null.
+        Owed::Omitted { .. } => {
+          if self.builder.ty_non_null(under) {
+            return Checked::Unfit(dense(row));
+          }
+          continue;
+        }
+      };
+      match self.count(tree, Some(under), true, true) {
         Count::Rows(_) | Count::Poisoned | Count::Counting => {
-          if self.unfit.contains(&(recorded.tree, Some(under))) {
+          if self.unfit.contains(&(tree, Some(under))) {
             return Checked::Unfit(dense(row));
           }
         }
@@ -1313,27 +1398,52 @@ impl<'p> Coercion<'_, 'p, '_> {
     Checked::Fits
   }
 
-  /// Reports, at the occurrence `at` of an instantiation of `def`, the value recorded at `row` that
-  /// does not fit the type the instantiation's arguments give it: with the code of the site it is
-  /// written at, labelled at the value.
+  /// How a report at a use of an instantiation of `def` begins: a type instantiated there, or a
+  /// directive applied there.
+  fn used(&self, def: DefId) -> String {
+    let name = Excerpt(self.builder.def_name(def));
+    if self.builder.def_kind(def) == Some(DefKind::Directive) {
+      format!("`@{name}` is applied here")
+    } else {
+      format!("`{name}` is instantiated here")
+    }
+  }
+
+  /// Reports, at `at`, a use of an instantiation of `def`, the row recorded at `row` that the
+  /// instantiation's type arguments refuse: a value that does not fit the type they give it, with
+  /// the code of the site it is written at, labelled at the value; or an argument an application
+  /// leaves out that they make required, labelled at the application and at the argument's
+  /// declaration.
   fn report_unfit(&mut self, at: Location, def: DefId, row: u32) {
     let Some(recorded) = self.recorded.get(row as usize).copied() else {
       return;
     };
-    let Some(RawTree { root, source, .. }) = self.raw.trees.get(recorded.tree as usize).copied()
-    else {
+    let used = self.used(def);
+    match recorded.owed {
+      Owed::Value { tree, site } => self.report_value(at, &used, tree, site),
+      Owed::Omitted {
+        application,
+        argument,
+      } => self.report_omitted(at, &used, application, argument),
+    }
+  }
+
+  /// Reports, at `at`, a use `used` says begins the report with, that the value of the tree
+  /// `tree`, written at `site`, does not fit the type the use's type arguments give it: with the
+  /// site's code, labelled at the value.
+  fn report_value(&mut self, at: Location, used: &str, tree: u32, site: Site) {
+    let Some(RawTree { root, source, .. }) = self.raw.trees.get(tree as usize).copied() else {
       return;
     };
     let Some(node) = self.raw.nodes.get(root as usize).copied() else {
       return;
     };
     let message = format!(
-      "`{}` is instantiated here with type arguments under which `{}`, a value it holds, does not \
-       fit the type it takes",
-      Excerpt(self.builder.def_name(def)),
+      "{used} with type arguments under which `{}`, a value it holds, does not fit the type it \
+       takes",
       Excerpt(self.raw.text(source, node.span))
     );
-    let (code, label) = recorded.site.refusal();
+    let (code, label) = site.refusal();
     self.reporter.report(
       Diagnostic::builder(code, at)
         .message(message)
@@ -1343,21 +1453,66 @@ impl<'p> Coercion<'_, 'p, '_> {
     );
   }
 
-  /// Reports, at the occurrence `at` of an instantiation of `def`, that `stop` kept its values from
+  /// Reports, at `at`, a use `used` says begins the report with, that `argument`, which the
+  /// application `application` leaves out, is required under the use's type arguments:
+  /// `missing-required-directive-argument`, as the application would be under them, labelled at
+  /// the application and at the argument's declaration.
+  fn report_omitted(
+    &mut self,
+    at: Location,
+    used: &str,
+    application: ApplicationId,
+    argument: MemberId,
+  ) {
+    let Some((resolution, _, path)) = self.builder.applied(application) else {
+      return;
+    };
+    let directive: &[u8] = match resolution {
+      Resolution::Resolved(def) => self.builder.def_name(def),
+      _ => b"",
+    };
+    let name: &[u8] = match self.builder.member_name(argument) {
+      Some(sym) => self.builder.spelling(sym),
+      None => b"",
+    };
+    let message = format!(
+      "{used} with type arguments under which `@{}` requires its argument `{}`, and an \
+       application it holds leaves it out",
+      Excerpt(directive),
+      Excerpt(name)
+    );
+    let mut report = Diagnostic::builder(schema::MISSING_REQUIRED_DIRECTIVE_ARGUMENT, at)
+      .message(message)
+      .primary_label("missing required directive argument")
+      .label(path, "this application leaves it out");
+    if let Some(declared) = self.builder.member_location(argument)
+      && !declared.is_entire()
+    {
+      report = report.label(declared, "required here");
+    }
+    self.reporter.report(report.build());
+  }
+
+  /// Reports, at `at`, a use of an instantiation of `def`, that `stop` kept what `def` holds from
   /// being checked under its arguments.
   fn report_unchecked(&mut self, at: Location, def: DefId, stop: Stop) {
+    let (sigil, verb) = if self.builder.def_kind(def) == Some(DefKind::Directive) {
+      ("@", "applied")
+    } else {
+      ("", "instantiated")
+    };
     let name = Excerpt(self.builder.def_name(def));
     let (message, help) = match stop {
       Stop::Steps => (
         format!(
-          "the values `{name}` holds could not be checked under the type arguments it is \
-           instantiated with here within `Limits::max_value_steps`, {}, the steps the analysis may \
-           take to complete values",
+          "the values `{sigil}{name}` holds could not be checked under the type arguments it is \
+           {verb} with here within `Limits::max_value_steps`, {}, the steps the analysis may take \
+           to complete values",
           self.values.max()
         ),
         "raise the limit with `Limits::with_max_value_steps`, or instantiate fewer types",
       ),
-      Stop::Built(_) => self.stopped(stop, &format!("a value `{name}` holds takes")),
+      Stop::Built(_) => self.stopped(stop, &format!("a value `{sigil}{name}` holds takes")),
     };
     self.limit(at, message, help);
   }
@@ -1466,13 +1621,15 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Does what `left`, an argument the application `applying` says leaves out, asks, its type read
   /// under the application's type arguments: a copy of its default, as [`ask`](Self::ask) says;
   /// required, a report that it is left out; and one that may be required, a step, then that
-  /// report when its type under the arguments is non-null, passed over with no step when the
-  /// application has no complete type arguments. Each is charged first, but on an application the
-  /// built-in library writes. A copy under the arguments that does not fit them is reported at the
-  /// application, the first of its arguments' copies alone, as `reported` keeps, and so is a
-  /// default left absent, its copy holding a copy of itself, whose count reached a node that does
-  /// not fit them. Answers `false`, and reports the application once, when the budget cannot pay,
-  /// or when a type the argument takes cannot be built under the arguments.
+  /// report when its type under the arguments is non-null, recorded for each instantiation to
+  /// check when that type is a nullable type parameter of the generic definition the walk is in,
+  /// and passed over with no step when the application has no complete type arguments. Each is
+  /// charged first, but on an application the built-in library writes. A copy under the arguments
+  /// that does not fit them is reported at the application, the first of its arguments' copies
+  /// alone, as `reported` keeps, and so is a default left absent, its copy holding a copy of
+  /// itself, whose count reached a node that does not fit them. Answers `false`, and reports the
+  /// application once, when the budget cannot pay, or when a type the argument takes cannot be
+  /// built under the arguments.
   fn left_out(&mut self, applying: Applying, left: Listed, reported: &mut bool) -> bool {
     let Applying {
       application,
@@ -1502,6 +1659,10 @@ impl<'p> Coercion<'_, 'p, '_> {
           Ok(expected) => {
             if expected.non_null {
               self.missing(application, left.argument, at);
+            } else {
+              // Nullable under type arguments that still name the walk's definition's parameter:
+              // required at each instantiation that makes it non-null.
+              self.owe(application, left.argument, expected.ty);
             }
             true
           }

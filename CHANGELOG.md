@@ -439,11 +439,17 @@ All notable changes to Smear are documented in this file.
   `invalid-default-value` once, at the application, or at the literal whose type a rebuild made.
   A value of a generic type definition whose type names its type parameters stays a `Literal`,
   and is checked at each closed instantiation of it the program writes: the first that does not
-  fit is reported once at each occurrence, with its site's code, labelled at the value. The steps
-  this takes are `Limits::max_value_steps`'s, and so are each field a count reads of an object
-  literal against an input object it had not read it against, and each 64 bytes of the identities
-  of a set's elements or a map's keys a count under type arguments renders to search them for one
-  held twice, a search made once for each literal and the type they are read against. Then each
+  fit is reported once at each occurrence, with its site's code, labelled at the value. An
+  argument an application on it leaves out, whose type there is its bare nullable type parameter,
+  is checked there too: `missing-required-directive-argument` at an occurrence whose type
+  arguments make it non-null, labelled at the application. The values of the applications on a
+  generic directive and on its arguments are checked likewise at each closed application of the
+  directive, reported at its path; its own arguments' defaults only where one leaves them out.
+  The steps this takes are `Limits::max_value_steps`'s, and so are each field a count reads of an
+  object literal against an input object it had not read it against, and each 64 bytes of the
+  identities of a set's elements or a map's keys a count under type arguments renders to search
+  them for one held twice, a search made once for each literal and the type they are read against.
+  Then each
   scalar a supplied package defines is bound to its host types: `Def::externs()` answers each
   `core` `@extern` its own package writes on it, in its definition or an extension of its own,
   in application order, a `lang` written twice twice, with its `lang` and `type`, the strings

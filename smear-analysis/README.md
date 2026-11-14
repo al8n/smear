@@ -72,7 +72,10 @@ copy of a default made there is judged as a written value is, the first that doe
 reported once, at the application or at the literal whose type the arguments made. A value of a
 generic type definition whose type names its type parameters stays a literal, and is checked at
 each closed instantiation of the definition the program writes, reported once at each occurrence
-of one under which it does not fit. Each definition is checked against what it says it is, reading
+of one under which it does not fit; so is an argument an application on it leaves out whose type
+is its bare type parameter, reported where an instantiation makes it required. The values of the
+applications on a generic directive and on its arguments are checked likewise at each closed
+application of the directive. Each definition is checked against what it says it is, reading
 of it what its own package writes: no two of its `implements` entries, nor of a union's members,
 are one type, as written or under the type arguments of an instantiation the program writes; it
 implements every interface the interfaces it implements implement, compared as types under its

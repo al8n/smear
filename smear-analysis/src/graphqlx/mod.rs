@@ -52,11 +52,12 @@
 //! `smear::schema::missing-interface-field-argument`,
 //! `smear::schema::invalid-interface-field-argument-type` or
 //! `smear::schema::unexpected-required-argument`. A value that does not fit its type is
-//! refused where it is written, a
-//! generic directive's arguments and a generic input object's fields read under their type
-//! arguments, and a default fills each argument and each input field a value leaves out; a value
-//! of a generic type definition whose type names its type parameters is checked at each closed
-//! instantiation of it the program writes, and refused there. And every definition and every type
+//! refused where it is written, a generic directive's arguments and a generic input object's
+//! fields read under their type arguments, and a default fills each argument and each input field
+//! a value leaves out; a value of a generic definition whose type names its type parameters is
+//! checked at each closed instantiation of it, a type's the program writes or a directive's an
+//! application makes, and refused there, and so is an argument an application in it leaves out
+//! that the instantiation's type arguments make required. And every definition and every type
 //! has the tier it requires, the least of `core`, `alloc` and `std` that holds everything it uses:
 //! a built-in its package's tag, and anything else what it holds, a list `alloc` at least.
 //!

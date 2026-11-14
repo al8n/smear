@@ -374,9 +374,10 @@ impl Limits {
   /// against that input object; an argument that may be required, a bare nullable type parameter
   /// of its directive, that an application with complete type arguments leaves out, and a field
   /// that may be required that a written object literal of a generic input object leaves out; a
-  /// pair of a closed instantiation the program writes and a value of its definition whose type
-  /// names its type parameters, checked under the instantiation's arguments; and converting a
-  /// decimal integer of more
+  /// pair of a closed instantiation, of a type the program writes or of a generic directive an
+  /// application of it makes, and what its definition records, checked under the instantiation's
+  /// arguments: a value whose type names its type parameters, or an argument an application in it
+  /// leaves out whose type is one of them; and converting a decimal integer of more
   /// than 38 significant digits, the most `u128` arithmetic reads whatever they spell, to its
   /// value, charged before the conversion as an upper bound of its work:
   /// `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine digits times
