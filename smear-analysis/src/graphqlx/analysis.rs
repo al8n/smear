@@ -467,7 +467,11 @@ impl Analysis {
 ///   union member that names what is no object type is `union-member-not-object`, at the member.
 ///   An argument or an input field written non-null, with no default, that applies `core`'s
 ///   `@deprecated` is `deprecated-required-argument` or `deprecated-required-input-field`, at its
-///   name, with a label at the `@deprecated`. An input object is OneOf when the package that
+///   name, with a label at the `@deprecated`; and so is an instantiation that gives a non-null
+///   type to a type parameter that is such a member's whole type, written nullable, through the
+///   definitions it is passed to but no list or collection, or whose defaults derive one that
+///   does, at the argument, labelled where the parameter stands. An input object is OneOf when the
+///   package that
 ///   wrote it applies `core`'s `@oneOf` to it, in its definition or in an extension of its own,
 ///   and a field of one that is written non-null is `one-of-field-not-nullable`, and one that
 ///   declares a default `one-of-field-has-default`, at its name. An instantiation, written or a

@@ -39,9 +39,10 @@
 //! rule judges every written occurrence and every application, each type once, and what the slots
 //! an occurrence leaves to their defaults derive, at the occurrence, through `positions::Derived`.
 //! `MemberTypeKind` is one, for the kinds its places take, `TypeRefMisuse` another, for the
-//! parameters an operation's argument reaches, and `OneOfFieldNotNullable` a third, for the
+//! parameters an operation's argument reaches, `OneOfFieldNotNullable` a third, for the
 //! parameters that are a OneOf's field's whole type, which `positions::Positions::of` tells from
-//! who wrote each `@oneOf`, as `one_of` does; each reads one crate-private accessor,
+//! who wrote each `@oneOf`, as `one_of` does, and `DeprecatedRequired` a fourth, for the
+//! parameters that are a deprecated member's whole type; each reads one crate-private accessor,
 //! `Application::ty`, an application's complete type, its directive's instantiation.
 //! `TypeRefMisuse` reads the graph of what a value can reach too, `reach::Reach`, found once for
 //! the walk over every package's input objects, so that an argument the root package writes is
@@ -421,7 +422,8 @@ rule_set! {
   /// of the kind its position takes, and so are a collection's arguments there, and at each
   /// instantiation what it gives a type parameter where the parameter stands; an object or an
   /// interface implements interfaces; no interface implements itself; a union's members are object
-  /// types; a required argument or input field is not deprecated; a OneOf input object's fields are
+  /// types; a required argument or input field is not deprecated, nor one an instantiation makes
+  /// required; a OneOf input object's fields are
   /// nullable, at each instantiation too, and have no default; an input object takes `@oneOf` in
   /// its definition alone; and no
   /// input object requires a value of itself, through its fields and the type arguments they give.

@@ -1615,6 +1615,81 @@ fn a_required_argument_or_input_field_is_not_deprecated() {
   );
 }
 
+/// Deprecated members with no default typed by their definition's type parameter, written
+/// nullable: an input field, a field's argument and a directive's argument; one with a default;
+/// and instantiations that give each a non-null type, or a nullable one.
+const DEPRECATED_INSTANTIATIONS: &str = "type Query {\n  ok: Int\n}\n\
+                                         input I<T> {\n  a: T @deprecated\n  b: T = 1 @deprecated\n}\n\
+                                         type O<T> {\n  f(a: T @deprecated): Int\n}\n\
+                                         directive @d<T>(a: T @deprecated) on OBJECT\n\
+                                         type Uses @d<Int!>(a: 1) {\n  g(i: I<Int!>): Int\n  \
+                                         h(j: I<Int>): Int\n  o: O<Int!>\n}\n";
+
+#[test]
+fn what_an_instantiation_makes_required_is_not_deprecated() {
+  let analysis = analyze_one(DEPRECATED_INSTANTIATIONS);
+  let schema = schema_file(&analysis);
+  let text = DEPRECATED_INSTANTIATIONS;
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "@d<", "Int!", 0),
+        Some(named(schema, text, "(a: ", "T", 1))
+      ),
+      // `b` has a default: the input field `a` is the one `I<Int!>` makes required.
+      (
+        DEPRECATED_INPUT_FIELD,
+        named(schema, text, "I<", "Int!", 0),
+        Some(named(schema, text, "  a: ", "T", 0))
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "O<", "Int!", 0),
+        Some(named(schema, text, "(a: ", "T", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@d` takes a non-null type for its type parameter `T`, which makes a deprecated argument \
+       required",
+      "`I` takes a non-null type for its type parameter `T`, which makes a deprecated input field \
+       required",
+      "`O` takes a non-null type for its type parameter `T`, which makes a deprecated argument \
+       required",
+    ]
+  );
+  let words: Vec<(Option<&str>, Option<&str>)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| (diagnostic.primary_label(), diagnostic.help()))
+    .collect();
+  assert_eq!(
+    words[..2],
+    [
+      (
+        Some("required argument is deprecated"),
+        Some(
+          "to deprecate a required argument, first make it optional — give it a default, or drop \
+           the `!`."
+        )
+      ),
+      (
+        Some("required input field is deprecated"),
+        Some(
+          "to deprecate a required input field, first make it optional — give it a default, or \
+           drop the `!`."
+        )
+      ),
+    ]
+  );
+}
+
 /// A OneOf input object with a field of each shape, and a generic one whose field is a type
 /// parameter.
 const ONE_OF: &str = "type Query {\n  ok: Int\n}\n\
@@ -1922,6 +1997,13 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     ONE_OF_NON_NULL,
     "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int!\n  x: Missing\n}\n",
     "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int!\n}\ninput U {\n  x: Missing\n}\n",
+  );
+  silent_beside_a_phase(
+    DEPRECATED_INPUT_FIELD,
+    "type Query {\n  ok: Int\n}\ninput I<T> {\n  a: T @deprecated\n}\n\
+     type T {\n  f(i: I<Int!>): Int\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ninput I<T> {\n  a: T @deprecated\n}\n\
+     type T {\n  f(i: I<Int!>): Int\n}\ntype U {\n  x: Missing\n}\n",
   );
   silent_beside_a_phase(
     ONE_OF_NON_NULL,

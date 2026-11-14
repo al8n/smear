@@ -6,8 +6,9 @@
 //! A place is a kind of position a type parameter can stand in: a field's type, which takes an
 //! output type; a field argument's, an input field's and a directive argument's, which take an
 //! input type; what a value an operation's field argument takes can hold, which holds no
-//! `TypeRef`; and the whole type of a field of a OneOf input object, written nullable, which takes
-//! a nullable type. [`Positions`] finds, once for a walk, the places each type parameter of every
+//! `TypeRef`; and the whole type, written nullable, of a field of a OneOf input object, and of a
+//! deprecated argument or input field with no default, each of which takes a nullable type.
+//! [`Positions`] finds, once for a walk, the places each type parameter of every
 //! package's definitions stands in, and for each, where in its own definition it stands there or
 //! is passed to a parameter that does, the witness a diagnostic labels, and the member whose type
 //! the place came from. A place that is a member's whole type does not pass from a list to its
@@ -99,8 +100,8 @@ use std::{
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  ApplicationId, DefId, DefKind, MemberId, MemberKind, Model, SourceMap, TyId, TyKind, TypeExprId,
-  TypeExprKind, diagnostic::Excerpt, id::dense, rules::one_of_in,
+  ApplicationId, DefId, DefKind, MemberId, MemberKind, Model, Resolution, SourceMap, TyId, TyKind,
+  TypeExprId, TypeExprKind, diagnostic::Excerpt, id::dense, rules::one_of_in,
 };
 
 /// A class of type a position takes.
@@ -130,10 +131,16 @@ pub(crate) enum Place {
   /// The whole type of a field of a OneOf input object, which takes a nullable type: the field's
   /// type is the parameter itself, written nullable, and no list or collection stands between.
   OneOfField,
+  /// The whole type, written nullable, of a deprecated argument with no default, a field's or a
+  /// directive's, which takes a nullable type.
+  DeprecatedArgument,
+  /// The whole type, written nullable, of a deprecated input field with no default, which takes a
+  /// nullable type.
+  DeprecatedInputField,
 }
 
 /// How many places there are: the witnesses a slot keeps.
-const PLACES: usize = 6;
+const PLACES: usize = 8;
 
 impl Place {
   /// Its index among the places.
@@ -145,13 +152,18 @@ impl Place {
       Self::DirectiveArgument => 3,
       Self::Operation => 4,
       Self::OneOfField => 5,
+      Self::DeprecatedArgument => 6,
+      Self::DeprecatedInputField => 7,
     }
   }
 
   /// Whether it stands only where the parameter is a member's whole type, so that it does not
   /// pass from a list to its element or from a collection to its arguments.
   const fn whole(self) -> bool {
-    matches!(self, Self::OneOfField)
+    matches!(
+      self,
+      Self::OneOfField | Self::DeprecatedArgument | Self::DeprecatedInputField
+    )
   }
 
   /// Its bit in a set of places.
@@ -513,14 +525,32 @@ impl Graph<'_> {
       self.operations.push((node, at));
     }
     let complete = model.ty(occurrence.ty());
-    if let TyKind::Param { def, .. } = complete.kind()
-      && def == written.owner()
-      && !complete.non_null()
-      && one_of
-      && place == Place::InputField
-    {
+    let TyKind::Param { def, .. } = complete.kind() else {
+      return;
+    };
+    if def != written.owner() || complete.non_null() {
+      return;
+    }
+    if one_of && place == Place::InputField {
       self.seeds.push((node, Place::OneOfField, at, Some(member)));
     }
+    // A deprecated member a caller may leave out, which a non-null argument would make required.
+    let deprecated = model.builtins().deprecated();
+    let applies = written.applications().iter().any(|id: &ApplicationId| {
+      matches!(
+        model.application(*id).directive(),
+        Resolution::Resolved(directive) if directive == deprecated
+      )
+    });
+    if !applies || written.default().is_some() {
+      return;
+    }
+    let required = match place {
+      Place::Argument | Place::DirectiveArgument => Place::DeprecatedArgument,
+      Place::InputField => Place::DeprecatedInputField,
+      _ => return,
+    };
+    self.seeds.push((node, required, at, Some(member)));
   }
 
   /// Enters the arguments of `application`'s type, each from its directive's slot, with where it

@@ -174,7 +174,9 @@
 //! is `smear::schema::self-implementing-interface`; and a union member that is no object type is
 //! `smear::schema::union-member-not-object`; and a required argument or input field that applies
 //! `core`'s `@deprecated` is `smear::schema::deprecated-required-argument`, or the code of an input
-//! field; and a field written non-null of an input object its own package makes OneOf is
+//! field, and so is an instantiation that gives a non-null type to a type parameter that is such a
+//! member's type, written nullable; and a field written non-null of an input object its own package
+//! makes OneOf is
 //! `smear::schema::one-of-field-not-nullable`, and so is an instantiation that gives a non-null
 //! type to a type parameter that is such a field's type, and one with a default
 //! `smear::schema::one-of-field-has-default`; and `@oneOf` in an extension of an input object is

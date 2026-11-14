@@ -596,7 +596,9 @@ All notable changes to Smear are documented in this file.
   is `self-implementing-interface`; and a union member that names what is no object type is
   `union-member-not-object`; and an argument or an input field written non-null, with no default,
   that applies `core`'s `@deprecated`, told by its definition and not its spelling, is
-  `deprecated-required-argument` or `deprecated-required-input-field`; and an input object is OneOf
+  `deprecated-required-argument` or `deprecated-required-input-field`, and so is an instantiation
+  that makes one required, where it is written: `I<Int!>` of `input I<T> { a: T @deprecated }`;
+  and an input object is OneOf
   when the package that wrote it applies `core`'s `@oneOf` to it, in its definition or in an
   extension of its own, and a field of one written non-null is `one-of-field-not-nullable`, and so
   is an instantiation that gives a non-null type to a type parameter that is such a field's type,
