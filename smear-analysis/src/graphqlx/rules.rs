@@ -15,10 +15,10 @@
 //! contributions for the whole walk.
 //!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
-//! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk
-//! descends the written arguments of an occurrence that names a type parameter, or nothing, and
-//! the public kind does not answer them. `DuplicateTypeParameter` reads another,
-//! `Def::extension_params`: the names an extension's own list writes, which no public view holds.
+//! by `Nesting`, which reads the public `TypeExpr::written_args`: the walk descends the written
+//! arguments of an occurrence that names a type parameter, or nothing, which the kind does not
+//! answer. `DuplicateTypeParameter` reads one crate-private accessor, `Def::extension_params`:
+//! the names an extension's own list writes, which no public view holds.
 
 mod collection_arity;
 mod duplicate_schema_definition;

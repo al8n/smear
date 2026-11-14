@@ -210,16 +210,19 @@ impl SourceMap {
 
   /// The package that wrote what is written at `at`: the package of the source `at` is in.
   ///
-  /// It is the one answer the analysis gives to who wrote something. For a definition's own
+  /// It is the one answer the analysis gives to who wrote something, and the question
+  /// [`Packages`](crate::graphqlx::Packages) and
+  /// [`Cx::contribution`](crate::graphqlx::Cx::contribution) are stated in. For a definition's own
   /// contribution, which is written where its declaration is, it is the package that wrote the
   /// definition: the root package for a GraphQL built-in it replaces, though the definition stays
   /// the built-in's, and `core` for a primitive `core` materialises, whose contribution is the
   /// whole of `core`'s package source. For an extension or a directive application it is the
   /// package that wrote that, which need not be its definition's.
   ///
-  /// `None` when `at`'s source is none of this map's, as a location of a model built by hand may
-  /// be.
-  pub(crate) fn written_by(&self, at: Location) -> Option<PackageId> {
+  /// It never panics. `None` when `at`'s source is none of this map's: a source id at or past
+  /// [`len`](Self::len), which is a consumer's own, or a location of a model built by hand.
+  #[inline]
+  pub fn written_by(&self, at: Location) -> Option<PackageId> {
     self
       .sources
       .get(at.source() as usize)
