@@ -1,13 +1,13 @@
-//! A union's members are object types.
+//! A union's members are object types, where they name a definition.
 //!
 //! GraphQL refuses a union member that is no object type: a union of interfaces, of scalars, of
 //! enums, of input objects or of unions has no concrete member set. So each such member is
 //! reported where it is written, under the code the same rule has in GraphQL: `smear-schema`'s
 //! `union-member-not-object`, with its label and its help. An object is a member, with or without
 //! arguments; a member that names an alias such as `NonZeroU32` names the scalar it spells. A
-//! member that is a type parameter of a generic union is not judged here: each instantiation that
-//! fills it is where it is written. A member that names nothing was refused by name resolution,
-//! and is passed by.
+//! member that is a type parameter of a generic union is not judged, and no rule judges the type an
+//! instantiation gives it: `Either<User, Int>` of `union Either<A, B> = A | B` is accepted. A
+//! member that names nothing was refused by name resolution, and is passed by.
 //!
 //! A union is judged when a supplied package wrote it, a GraphQL built-in the root package
 //! replaces among them, and each member whoever wrote it.

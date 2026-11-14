@@ -53,11 +53,14 @@ use table::{
 ///
 /// The model owns every spelling it answers with, so a consumer that reads only the model never
 /// holds the sources. It has no type parameter and no lifetime: it is the same type whatever text
-/// type the packages were supplied in. It is read through views, such as [`PackageInfo`], each a
-/// `Copy` pair of the model and an id.
+/// type the packages were supplied in. It is read through `Copy` views, most of them, as
+/// [`PackageInfo`] is, a pair of the model and an id.
 ///
-/// The model is always complete: what could not be resolved is still in it, and the diagnostics
-/// say why.
+/// The model holds every definition collection admits. What a refusal touches may be absent,
+/// unresolved, or kept with the structure it was written with though refused, so a shape in the
+/// model is no proof that it was accepted: the diagnostics say what was refused, as far as their
+/// ceiling keeps them, and [`Analysis::is_ok`](crate::graphqlx::Analysis::is_ok) whether anything
+/// was.
 ///
 /// Two models are equal when every table holds equal rows in the same order and both arenas hold
 /// the same spellings: when every id names the same thing in both. That is finer than every

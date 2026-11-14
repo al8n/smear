@@ -21,8 +21,8 @@
 //! having reported it within the contribution, where this rule says nothing.
 //!
 //! The rule reads the public model, the public `SourceMap::written_by` among it, the package that
-//! wrote a contribution, and one crate-private accessor, `Extern::application`: the application
-//! an extern is bound from.
+//! wrote a contribution, and the public `Extern::application`, the application an extern is bound
+//! from.
 
 use std::{format, vec::Vec};
 

@@ -486,11 +486,11 @@ type Duplicates = semantics::duplicates::Duplicates<Sym>;
 /// # Why this is not [`Duplicates`], which is the neighbouring question
 ///
 /// [`Duplicates`] is addressed by **position**: `first(position, name)` answers "did an earlier
-/// position of *this* list write this name", and its [`Duplicates::Index`] payload is one entry
-/// per position with the names already discarded. Draft §3.6.1's conformance pass asks the other
-/// question — "which position of the *implementor's* list wrote the name this *interface* field
-/// carries" — and the sorted pairs that built that payload are gone by the time it could be
-/// asked. So the type is not reusable here, and neither is its `Vec<u32>`.
+/// position of *this* list write this name", and its sorted index is one entry per position with
+/// the names already discarded. Draft §3.6.1's conformance pass asks the other question — "which
+/// position of the *implementor's* list wrote the name this *interface* field carries" — and the
+/// sorted pairs that built that index are gone by the time it could be asked. So the type is not
+/// reusable here, and neither is its `Vec<u32>`.
 ///
 /// # What it replaces
 ///
@@ -598,12 +598,12 @@ impl Drop for Positions<'_, '_> {
 ///
 /// # Why this is neither [`Duplicates`] nor [`Positions`], which are the two neighbours
 ///
-/// [`Duplicates`] is addressed by **position** and its [`Duplicates::Index`] payload has discarded
-/// the names, so it cannot answer "which position of *this* list holds the name that *other* list
-/// carries" at all. [`Positions`] answers exactly that question, and its payload is one slot per
-/// [`Sym`] over the whole symbol space — the shape [`Duplicates`]'s header rules out because it
-/// "does not survive the nesting", and which [`Positions`] takes only because draft §3.6.1's
-/// conformance pass holds one implementor's list at a time and nests no second index inside it.
+/// [`Duplicates`] is addressed by **position** and its sorted index has discarded the names, so it
+/// cannot answer "which position of *this* list holds the name that *other* list carries" at all.
+/// [`Positions`] answers exactly that question, and its payload is one slot per [`Sym`] over the
+/// whole symbol space — the shape [`Duplicates`]'s header rules out because it "does not survive
+/// the nesting", and which [`Positions`] takes only because draft §3.6.1's conformance pass holds
+/// one implementor's list at a time and nests no second index inside it.
 ///
 /// A value per list rather than a table, because what these index is a **literal**: its entries
 /// belong to the one node that wrote them, so there is nothing for a table to be keyed by. The

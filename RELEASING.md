@@ -80,12 +80,56 @@ the dependent package.
 
 ## Bootstrap and trusted publishing
 
-`0.0.1` has one manual bootstrap exception: the seven sibling crates, published
-by `al8n`. The existing `smear` name needs no bootstrap. **Never manually publish
-`smear 0.0.1`: the controller requires GitHub OIDC provenance for the facade.**
-A missing crate name cannot be created through trusted publishing.
+Trusted publishing cannot create a crate name, so every crate of the set must
+exist on crates.io, in Trusted-Publishing-only mode and with its trusted
+publisher configured, before a release runs. `python3 ci/release.py verify`
+checks that each name exists in that mode before anything is packaged or
+uploaded, and refuses the release otherwise. It reads crates.io and changes
+nothing. It cannot see whether a trusted publisher is configured: a name in that
+mode with no publisher for `release.yml` still stops the publish job at that
+crate.
 
-Use one release run for both the manual bootstrap and OIDC publication:
+`verify` also reads `CHANGELOG.md`: the release commit must hold a non-empty
+`## [VERSION]` section of at most 125,000 characters, the most GitHub accepts in
+a release body. The last job publishes that section after every crate is public,
+and the tag it creates is never moved, so a section that cannot be published is
+refused here.
+
+**A crate that joins the set** gets its name before the release that first
+includes it. Publish the crate itself by hand once, as `al8n`, from the
+workspace (`cargo publish -p NAME`), with a credential handled as the 0.0.1 run
+below handles its own; crates.io's usage policy forbids reserving a name with an
+empty crate. Then configure its trusted publisher (owner `al8n`, repository
+`smear`, workflow `release.yml`, environment `crates-io`) and enable
+Trusted-Publishing-only mode. Publish a version that no release will use: the
+controller accepts a version it did not publish through OIDC only at the 0.0.1
+bootstrap below, so a release that finds its own version published by hand stops
+at that crate. `smear-semantics` and `smear-analysis` joined the set after 0.0.1
+and were created by hand on 2026-11-14, each at `0.0.1` (`smear-analysis`'s is
+yanked). The next release is above 0.0.1.
+
+**A release after 0.0.1** has no manual step:
+
+1. Merge the reviewed release changes. Wait for the CI, Windows, macOS and Miri
+   push runs to succeed on that exact main SHA. It must still be main's tip when
+   you dispatch, since a dispatch on main runs at its tip and the workflow
+   refuses any other commit: merge nothing in between.
+2. Dispatch `release.yml` from main with that full SHA and the version.
+3. Let `verify` finish, then approve the waiting `crates-io` publish job.
+
+**0.0.1's bootstrap, kept as the record.** 0.0.1 released six crates. The five
+siblings of `smear`, `smear-lexer`, `smear-parser`, `smear-schema`,
+`smear-compiler` and `graphql-proto`, were published by hand as `al8n` from the
+release's own evidence; the existing `smear` name needed no bootstrap.
+**`smear 0.0.1` was never to be published by hand: the controller requires
+GitHub OIDC provenance for the facade.** `BOOTSTRAP_0_0_1` in `ci/release.py`
+also names `smear-semantics` and `smear-analysis`, which were added after the
+release and took no part in it, and the table acts only at version `0.0.1`. The
+steps below, and the paragraphs after them, are that procedure as the controller
+holds it; none of them runs for a later version, and `verify`'s check of the
+crate names skips 0.0.1, whose run created them.
+
+The 0.0.1 run:
 
 1. Merge the reviewed release changes and wait for CI, Windows, macOS, and Miri
    push runs to succeed on that exact main SHA. Dispatch `release.yml` from main with that

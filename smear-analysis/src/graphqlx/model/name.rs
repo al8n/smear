@@ -55,7 +55,7 @@ impl Model {
   /// The canonical name of `def`: `^::package::module::path::Name` for a type, and
   /// `@^::package::module::path::name` for a directive. Its `Display` writes it.
   ///
-  /// It is the definition's identity across analyses and versions, spelled as a dependency path:
+  /// It is the definition's identity across analyses, spelled as a dependency path:
   /// a valid path in every package that may reach the definition's package, and in none of that
   /// package's own modules, which say `~::`. A definition in a package's root module has no
   /// module segment: `^::core::i32`.

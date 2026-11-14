@@ -44,8 +44,8 @@
 //! says nothing.
 //!
 //! The rule reads the public model, the public `SourceMap::written_by` among it, the package that
-//! wrote what is judged, and one crate-private accessor, `Extern::application`: the application
-//! an extern is bound from.
+//! wrote what is judged, and the public `Extern::application`, the application an extern is bound
+//! from.
 
 use std::{collections::BTreeMap, format, vec, vec::Vec};
 

@@ -29,10 +29,8 @@
 //! may hold `input Binding { type: TypeRef! }` and take it in a directive's argument alone, which
 //! is metadata, and the root package write `f(b: ^::geo::Binding)`, which an operation sets. A
 //! pass over one package at a time would judge the dependency alone and find nothing; this graph
-//! holds every input object of every package. The next pull request can reuse the numbering of
-//! types and definitions, and the walk; its edges and its roots are its own design's to settle,
-//! since this graph follows what a value can hold, and a tier counts a type argument a value
-//! cannot hold.
+//! holds every input object of every package. The tier phase's graph is another: this one follows
+//! what a value can hold, and a tier counts a type argument a value cannot hold.
 //!
 //! # What it costs
 //!

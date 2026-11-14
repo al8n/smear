@@ -3,7 +3,7 @@
 //!
 //! # Ids
 //!
-//! Modules take their [`ModuleId`]s from the tree. Every definition that parsed then takes a
+//! Modules take their [`ModuleId`]s from the tree. Every definition collection kept then takes a
 //! [`DefId`], in the order W gives: by package, then module path, which is the `ModuleId` order,
 //! then source id, then position. `core`'s root module is the first module of all, and the
 //! primitives the program writes come first in it, at `core`'s package source, in the order

@@ -16,8 +16,8 @@ pub const NARROW_LIST: usize = 64;
 ///
 /// # Sorted pairs, and why `first` is still the first
 ///
-/// [`Duplicates::Index`] pairs every position with the name written there and sorts once. Sorting
-/// the *pair* orders equal names by ascending position, so the head of each run is the first
+/// The wide path pairs every position with the name written there and sorts once. Sorting the
+/// *pair* orders equal names by ascending position, so the head of each run is the first
 /// occurrence rather than merely one of them, and the answer read back at position `p` is the
 /// same position the trail would have been holding when the walk reached `p`.
 ///
@@ -37,7 +37,12 @@ pub const NARROW_LIST: usize = 64;
 /// name; this is eight bytes per position while the index is built and four while it is read. A
 /// position is a `u32` because everything `smear-schema` addresses is — `Sym` itself, `Range32`,
 /// the flat tables `flatten` builds — so the width is the representation's and not a new one.
-pub enum Duplicates<S> {
+pub struct Duplicates<S> {
+  repr: Repr<S>,
+}
+
+/// How one list finds its duplicates: the narrow path's trail, or the wide path's index.
+enum Repr<S> {
   /// The names written so far and the position that wrote each, scanned in order.
   Trail(Vec<(S, u32)>),
   /// One entry per position: the position that first wrote that position's name, which is the
@@ -52,7 +57,9 @@ impl<S: Copy + Ord> Duplicates<S> {
   /// never calls it.
   pub fn over(len: usize, name: impl Fn(usize) -> S) -> Self {
     if len <= NARROW_LIST {
-      return Self::Trail(Vec::with_capacity(len));
+      return Self {
+        repr: Repr::Trail(Vec::with_capacity(len)),
+      };
     }
 
     let mut order: Vec<(S, u32)> = (0..len).map(|at| (name(at), at as u32)).collect();
@@ -67,7 +74,9 @@ impl<S: Copy + Ord> Duplicates<S> {
       }
       first[entry.1 as usize] = head.1;
     }
-    Self::Index(first)
+    Self {
+      repr: Repr::Index(first),
+    }
   }
 
   /// Answers the earlier position that wrote `name`, or records this one as its first.
@@ -75,15 +84,15 @@ impl<S: Copy + Ord> Duplicates<S> {
   /// Call it once per position, in source order, and only where the rule actually applies — a
   /// repeatable directive is not recorded, exactly as the trail did not record one.
   pub fn first(&mut self, position: usize, name: S) -> Option<usize> {
-    match self {
-      Self::Trail(trail) => match trail.iter().find(|(written, _)| *written == name) {
+    match &mut self.repr {
+      Repr::Trail(trail) => match trail.iter().find(|(written, _)| *written == name) {
         Some(&(_, at)) => Some(at as usize),
         None => {
           trail.push((name, position as u32));
           None
         }
       },
-      Self::Index(first) => {
+      Repr::Index(first) => {
         let at = first[position] as usize;
         (at != position).then_some(at)
       }

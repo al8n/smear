@@ -184,14 +184,14 @@ pub use smear_parser::ast_node;
 /// Standard GraphQL only —
 #[cfg_attr(
   all(any(feature = "std", feature = "alloc"), feature = "graphqlx"),
-  doc = "[`graphqlx`](parser::graphqlx) has no validator, deliberately: its generics, \
-         `where` constraints, set and map literals and namespaced paths have no specification \
-         semantics, so validating them would be language design rather than conformance."
+  doc = "[`graphqlx`](parser::graphqlx) is not the draft specification's language: its \
+         schemas are analyzed by `analysis`, and it has no executable-document validator and \
+         no executor."
 )]
 #[cfg_attr(
   not(all(any(feature = "std", feature = "alloc"), feature = "graphqlx")),
-  doc = "the GraphQLx dialect has no validator, deliberately: its extensions have no \
-         specification semantics to validate against."
+  doc = "the GraphQLx dialect is not the draft specification's language: its schemas are \
+         analyzed by `analysis`, and it has no executable-document validator and no executor."
 )]
 ///
 /// The layer is the `smear-compiler` crate; `validator` is the name it has always had inside
@@ -247,15 +247,21 @@ pub use graphql_proto as proto;
 #[cfg_attr(
   any(feature = "std", feature = "alloc"),
   doc = "[`graphqlx`](analysis::graphqlx) is the analyzer: GraphQLx packages in, a resolved model \
-         and its diagnostics out."
+         and its diagnostics out, checked against smear's own rules and the rules GraphQLx shares \
+         with GraphQL, with a consumer's rules walking the same model."
 )]
 #[cfg_attr(
   not(any(feature = "std", feature = "alloc")),
   doc = "`graphqlx` is the analyzer: GraphQLx packages in, a resolved model and its diagnostics \
-         out. It needs `std` or `alloc`."
+         out, checked against smear's own rules and the rules GraphQLx shares with GraphQL, with a \
+         consumer's rules walking the same model. It needs `std` or `alloc`."
 )]
 ///
-/// GraphQLx only: standard GraphQL is validated against the draft specification by `validator`.
+/// GraphQLx only: standard GraphQL is validated against the draft specification by
+/// `validator`, and GraphQLx has no executable-document validator and no executor.
+///
+/// Its API makes no semver promise yet: a release may change any of its paths, signatures or
+/// answers, and the CHANGELOG says each change.
 ///
 /// The layer is the `smear-analysis` crate.
 #[cfg(feature = "analysis")]

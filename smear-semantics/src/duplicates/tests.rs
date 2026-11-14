@@ -43,10 +43,7 @@ fn either_path_answers_what_a_plain_scan_answers() {
       "a list of {width} names has no repeat to find"
     );
     assert_eq!(
-      matches!(
-        Duplicates::over(width, |at| names[at]),
-        Duplicates::Index(_)
-      ),
+      matches!(Duplicates::over(width, |at| names[at]).repr, Repr::Index(_)),
       width > NARROW_LIST,
       "a list of {width} names took the other path"
     );
@@ -84,7 +81,7 @@ fn the_accessor_is_read_once_per_position_and_only_on_the_wide_path() {
     reads.set(reads.get() + 1);
     at as u32
   });
-  assert!(matches!(narrow, Duplicates::Trail(_)));
+  assert!(matches!(narrow.repr, Repr::Trail(_)));
   assert_eq!(reads.get(), 0, "the narrow path read a name");
 
   let width = NARROW_LIST + 1;
@@ -93,7 +90,7 @@ fn the_accessor_is_read_once_per_position_and_only_on_the_wide_path() {
     per_position[at].set(per_position[at].get() + 1);
     at as u32
   });
-  assert!(matches!(wide, Duplicates::Index(_)));
+  assert!(matches!(wide.repr, Repr::Index(_)));
   assert!(
     per_position.iter().all(|count| count.get() == 1),
     "a position's name was read other than once"
@@ -116,7 +113,7 @@ fn a_name_skipped_at_every_occurrence_is_never_recorded() {
     .collect();
   assert_eq!(answers, [(0, None), (2, None), (5, Some(0))]);
 
-  let Duplicates::Trail(trail) = seen else {
+  let Repr::Trail(trail) = seen.repr else {
     panic!("six names is the narrow path");
   };
   assert_eq!(
