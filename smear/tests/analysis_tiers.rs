@@ -555,61 +555,22 @@ fn a_slot_filled_from_a_default_is_counted_at_the_use() {
   );
 }
 
-/// An application of another package's generic directive that leaves a type argument to a default
-/// needs what the default needs, as an occurrence does: a `core` root's bare `@^::dep::d`, whose
-/// `T` the default `string` fills, is refused once, at its path, labelled at that default, and the
-/// same application written `@^::dep::d<string>` once, at its `string`, both with one code. A
-/// root at `alloc` says nothing of either. Refuses an application judged by the type arguments it
-/// writes alone, which says nothing of the bare one.
+/// An application's type arguments count nowhere, the written ones and those its directive's
+/// default fills: another package's `@^::dep::d<string>` and its bare `@^::dep::d`, whose `T` the
+/// default `string` fills, say nothing in a root at `core`, as they say nothing in one at `alloc`.
+/// Refuses an application's type arguments judged, whether written or left to a default.
 #[test]
-fn an_application_that_leaves_a_type_argument_to_a_default_needs_what_it_needs() {
+fn an_applications_type_arguments_are_not_judged_written_or_filled() {
   let theirs = "directive @d<T = string>(value: T = \"x\") on SCALAR\n";
   let omitted = "type Query {\n  x: Int\n}\nscalar S @^::dep::d\n";
   let written = "type Query {\n  x: Int\n}\nscalar S @^::dep::d<string>\n";
   let dep = || package("dep", Tier::Alloc, &[("dep.graphqlx", theirs)]);
 
-  let root = package("app", Tier::Core, &[("schema.graphqlx", omitted)]).with_dependencies(["dep"]);
-  let analysis = analyze(&root, &[dep()], &Limits::new());
-  let schema = file(&analysis, 3, "schema.graphqlx");
-  let dep_file = file(&analysis, 4, "dep.graphqlx");
-  assert_eq!(
-    analysis.diagnostics().len(),
-    1,
-    "{:#?}",
-    analysis.diagnostics()
-  );
-  assert_eq!(
-    found(&analysis, TIER),
-    [(
-      at(schema, omitted, "^::dep::d", 0),
-      Some(at(dep_file, theirs, "string", 0))
-    )]
-  );
-  assert_eq!(
-    messages(&analysis, TIER),
-    [
-      "`@d`, with the type arguments this application leaves to its defaults, needs `alloc`, \
-       and package `app` is declared at tier `core`"
-    ]
-  );
-
-  let root = package("app", Tier::Core, &[("schema.graphqlx", written)]).with_dependencies(["dep"]);
-  let analysis = analyze(&root, &[dep()], &Limits::new());
-  let schema = file(&analysis, 3, "schema.graphqlx");
-  assert_eq!(
-    analysis.diagnostics().len(),
-    1,
-    "{:#?}",
-    analysis.diagnostics()
-  );
-  assert_eq!(
-    found(&analysis, TIER),
-    [(at(schema, written, "string", 0), None)]
-  );
-
-  for text in [omitted, written] {
-    let root = package("app", Tier::Alloc, &[("schema.graphqlx", text)]).with_dependencies(["dep"]);
-    quiet(&analyze(&root, &[dep()], &Limits::new()));
+  for tier in [Tier::Core, Tier::Alloc] {
+    for text in [omitted, written] {
+      let root = package("app", tier, &[("schema.graphqlx", text)]).with_dependencies(["dep"]);
+      quiet(&analyze(&root, &[dep()], &Limits::new()));
+    }
   }
 }
 
@@ -691,28 +652,66 @@ fn an_extern_tier_above_its_package_is_refused_at_its_tier() {
   );
 }
 
-/// A directive definition writes its types as any definition does, until the owner rules on the
-/// exemption: at `core`, its arguments' `string!`, its list and the list's `string!`, its type
-/// parameter's default and an application's type argument are each refused; applying a directive
-/// is not, nor `@heap` on a directive's argument. Refuses an occurrence passed over for where it
-/// stands.
+/// What counts nowhere is not judged. At `core`, a directive definition writes `string!`, a list
+/// and the list's `string!`, a type parameter's default, and a bound that names a dependency's
+/// interface needing `alloc`; two applications write a type argument, one of them a list; and
+/// `@heap` stands on a directive's argument: nothing is said. Refuses compile-time metadata judged.
 #[test]
-fn a_directive_writes_its_types_as_any_definition_does() {
-  let text = "type Query {\n  x: Int\n}\n\
+fn what_counts_nowhere_is_not_judged() {
+  let theirs = "interface Named {\n  s: string\n}\n";
+  let ours = "type Query {\n  x: Int\n}\n\
               directive @doc(text: string!, tags: [string!]) on FIELD_DEFINITION\n\
               directive @g<T = string> on OBJECT\n\
               type Q @g<String> {\n  y: Int @doc(text: \"x\")\n}\n\
-              directive @h(n: i64 @heap) on OBJECT\n";
+              type R @g<[string]> {\n  z: Int\n}\n\
+              directive @h(n: i64 @heap) on OBJECT\n\
+              directive @b<T> on OBJECT where T: ^::dep::Named\n";
+  let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let dep = package("dep", Tier::Alloc, &[("dep.graphqlx", theirs)]);
+  quiet(&analyze(&root, &[dep], &Limits::new()));
+}
+
+/// The exemption is shallow: an input object a directive's argument names is a definition like any
+/// other, and its fields are judged where they are written. At `core`, `Binding`'s `string!` is
+/// refused once, and the directive's argument that names `Binding` is not. Refuses an input object
+/// exempt because a directive's argument names it.
+#[test]
+fn an_input_object_a_directive_names_is_judged_where_it_is_written() {
+  let text = "type Query {\n  x: Int\n}\ninput Binding {\n  lang: string!\n}\n\
+              directive @bind(b: Binding) on SCALAR\n\
+              scalar S @bind(b: { lang: \"rust\" })\n";
   let analysis = analyze_at(text, Tier::Core);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    analysis.diagnostics().len(),
+    1,
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    found(&analysis, TIER),
+    [(at(schema, text, "string!", 0), None)]
+  );
+}
+
+/// What a generic type writes is judged, as what a generic directive writes is not: at `core`, a
+/// type parameter's default `string`, and a bound that names a dependency's interface needing
+/// `alloc`, are each refused where they are written. Refuses the exemption read off any generic
+/// definition.
+#[test]
+fn a_generic_types_defaults_and_bounds_are_judged() {
+  let theirs = "interface Named {\n  s: string\n}\n";
+  let ours = "type Query {\n  x: Int\n}\ntype P<T = string> {\n  v: T\n}\n\
+              type B<T> where T: ^::dep::Named {\n  v: T\n}\n";
+  let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let dep = package("dep", Tier::Alloc, &[("dep.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   assert_eq!(
     found(&analysis, TIER),
     [
-      (at(schema, text, "string!", 0), None),
-      (at(schema, text, "[string!]", 0), None),
-      (at(schema, text, "string!", 1), None),
-      (at(schema, text, "string", 2), None),
-      (at(schema, text, "String", 0), None),
+      (at(schema, ours, "string", 0), None),
+      (at(schema, ours, "^::dep::Named", 0), None),
     ]
   );
 }

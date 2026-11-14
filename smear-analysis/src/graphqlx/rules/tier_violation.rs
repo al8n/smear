@@ -5,9 +5,7 @@
 //! written, as `smear::graphqlx::tier`, by the package that wrote it, `P`. Nothing is judged in a
 //! package declared at `std`. Below it:
 //!
-//! - a type occurrence `P` writes, wherever it stands, a directive definition's argument types, its
-//!   type parameters' defaults and bounds and an application's type arguments included, which is
-//!   the letter of the language's decisions until its owner rules otherwise:
+//! - a type occurrence `P` writes, but for compile-time metadata, which counts nowhere:
 //!   - a list needs `alloc`;
 //!   - an occurrence of a definition of `P`'s own needs nothing: such a definition rises above
 //!     `P`'s tier only through a cause `P` wrote inside it, which is judged where it is written;
@@ -16,17 +14,20 @@
 //!     a default that names a parameter counting that parameter as `core`, capped at `H`'s
 //!     declared tier: what `E` needs past `H`'s tier is `H`'s mistake, reported in `H`, and not
 //!     again at each use. When a default is what raises the need, the report has a label at it;
-//! - an application `P` writes of another package's generic directive, which needs what the
-//!   defaults of the type parameters it leaves out need of their own, read off its written count
-//!   and capped at that package's tier, as an occurrence's: a directive needs `core` itself, and
-//!   its written type arguments are occurrences, judged where they are written. It is reported
-//!   once, at its path, with a label at the default that raises it;
 //! - an application of `core`'s `@heap` on a field, a field's argument or an input field, in a
 //!   package declared at `core`: `@heap` needs `alloc`. On a directive definition's argument it
 //!   raises no tier, and is not judged;
 //! - an extern whose tier is above the tier of the package that declares its scalar, which wrote
 //!   the binding: the tier is reported at the value of the `@extern`'s first `tier`, which is
 //!   written, since an extern that writes none takes its package's tier.
+//!
+//! Compile-time metadata counts nowhere, and none of it is judged: every type occurrence under a
+//! directive definition, its arguments' types and its type parameters' defaults and bounds, and
+//! every type argument of an application of any directive, the written ones and those its
+//! directive's defaults fill, each with every type nested in it. So a `core` package may declare a
+//! directive with a `string` argument, and apply another package's directive with a `string` type
+//! argument. The exemption is shallow: an input object a directive's argument names is a
+//! definition like any other, and its fields are judged where they are written.
 //!
 //! So one cause is one report: a `string` field in a `core` package is reported at `string`, and
 //! not at the uses of the type that holds it; a dependency's type that needs more than the root
@@ -50,7 +51,7 @@ use std::{collections::BTreeMap, format, vec, vec::Vec};
 
 use crate::graphqlx::{
   ApplicationArgument, ApplicationId, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, MemberId,
-  MemberKind, Model, Origin, Resolution, Tier, TypeExprId, TypeExprKind, TypeParam, Visitor,
+  MemberKind, Model, Origin, Resolution, Site, Tier, TypeExprId, TypeExprKind, TypeParam, Visitor,
   diagnostic::Excerpt,
 };
 
@@ -61,16 +62,16 @@ use super::Silence;
 ///
 /// It reads an occurrence and its type in the `type_expr` hook; an application in the
 /// `application` hook; and a scalar's externs, each with its application and its tier, in the
-/// `enter_def` hook. It says nothing about what a phase refused something in the contribution of,
-/// or for a root, the schema's, nor in a package declared at `std`; it reports only what a
-/// supplied package wrote, which is all the walk reaches.
+/// `enter_def` hook. It says nothing at an occurrence under a directive definition, nor at an
+/// application's type argument: compile-time metadata counts nowhere. It says nothing about what a
+/// phase refused something in the contribution of, or for a root, the schema's, nor in a package
+/// declared at `std`; it reports only what a supplied package wrote, which is all the walk reaches.
 ///
 /// It costs one look at each occurrence, application and extern the walk reaches, and below `std`
 /// one look at the package that wrote each and at the type of an occurrence of another package's
 /// definition; a binary search of the scalar's externs, sorted when the walk enters it, for each
-/// application of `@extern`; and once for each definition whose defaults an occurrence or an
-/// application may fill, one look at each of its type parameters, kept, which every later use
-/// reads in a lookup. It keeps the scalar's externs, one at a time,
+/// application of `@extern`; and once for each definition whose defaults an occurrence may fill,
+/// one look at each of its type parameters, kept. It keeps the scalar's externs, one at a time,
 /// and those defaults' tiers, each definition's once, until the next walk. Its messages quote a
 /// definition's own name and a package's name as excerpts, so each is bounded whatever their
 /// lengths.
@@ -134,10 +135,18 @@ impl Visitor for TierViolation {
   }
 
   fn type_expr(&mut self, cx: &mut Cx<'_>, ty: TypeExprId) {
+    let model = cx.model();
+    // Compile-time metadata is not judged: an occurrence under a directive definition, and an
+    // application's type argument, whose site every type nested in it shares.
+    let under_directive = cx
+      .def()
+      .is_some_and(|def: DefId| model.def(def).kind() == DefKind::Directive);
+    if under_directive || cx.site() == Some(Site::ApplicationTypeArgument) {
+      return;
+    }
     if self.silence.silenced(cx) {
       return;
     }
-    let model = cx.model();
     let occurrence = model.type_expr(ty);
     let Some(writer) = cx.sources().written_by(occurrence.location()) else {
       return;
@@ -213,6 +222,9 @@ impl Visitor for TierViolation {
   }
 
   fn application(&mut self, cx: &mut Cx<'_>, application: ApplicationId) {
+    let Some(keys) = self.keys else {
+      return;
+    };
     if self.silence.silenced(cx) {
       return;
     }
@@ -227,125 +239,75 @@ impl Visitor for TierViolation {
     let declared = model.package(writer).tier();
     let kind = DiagnosticKind::Tier;
     let package = Excerpt(model.package(writer).name().as_bytes());
-    let keys = self.keys;
-    match keys {
-      Some(keys) if directive == keys.heap => {
-        // A field's, a field's argument's or an input field's: not a directive definition's
-        // argument, which counts nowhere, nor an enum value's.
-        let position = cx
-          .member()
-          .is_some_and(|member: MemberId| model.member(member).kind() != MemberKind::EnumValue)
-          && cx
-            .def()
-            .is_some_and(|def: DefId| model.def(def).kind() != DefKind::Directive);
-        if !position || declared >= Tier::Alloc {
-          return;
-        }
-        cx.report(
-          Diagnostic::builder(kind.code(), applied.path_location())
-            .severity(kind.severity())
-            .message(format!(
-              "`@heap` keeps this value on the heap, which needs `alloc`, and package \
-               `{package}` is declared at tier `core`"
-            ))
-            .primary_label(kind.title())
-            .help(format!(
-              "remove `@heap`, or declare package `{package}` at tier `alloc` or above"
-            ))
-            .build(),
-        );
+    if directive == keys.heap {
+      // A field's, a field's argument's or an input field's: not a directive definition's
+      // argument, which counts nowhere, nor an enum value's.
+      let position = cx
+        .member()
+        .is_some_and(|member: MemberId| model.member(member).kind() != MemberKind::EnumValue)
+        && cx
+          .def()
+          .is_some_and(|def: DefId| model.def(def).kind() != DefKind::Directive);
+      if !position || declared >= Tier::Alloc {
+        return;
       }
-      Some(keys) if directive == keys.host => {
-        let Ok(at) = self
-          .externs
-          .binary_search_by_key(&application, |&(bound, _): &(ApplicationId, Tier)| bound)
-        else {
-          return;
-        };
-        let Some(&(_, tier)) = self.externs.get(at) else {
-          return;
-        };
-        if tier <= declared {
-          return;
-        }
-        let Some(written) = applied
-          .arguments()
-          .iter()
-          .find(|argument: &&ApplicationArgument| argument.argument() == keys.tier)
-        else {
-          return;
-        };
-        cx.report(
-          Diagnostic::builder(kind.code(), model.value(written.value()).location())
-            .severity(kind.severity())
-            .message(format!(
-              "this `@extern` says its host type needs `{}`, and package `{package}`, which \
-               declares the scalar, is declared at tier `{}`",
-              spelled(tier),
-              spelled(declared)
-            ))
-            .primary_label(kind.title())
-            .help(format!(
-              "lower this `tier`, or declare package `{package}` at tier `{}` or above",
-              spelled(tier)
-            ))
-            .build(),
-        );
-      }
-      // Any other directive another package defines: the type arguments the application leaves to
-      // its directive's defaults need what those defaults need of their own, read off its written
-      // count as an occurrence's are, the directive itself needing `core`. One whose type
-      // arguments could not be completed was refused at its path, and its contribution is silent.
-      _ => {
-        let home = model.module(model.def(directive).module()).package();
-        if home == writer {
-          return;
-        }
-        let ceiling = model.package(home).tier();
-        if ceiling <= declared {
-          return;
-        }
-        let own = model.def(directive).tier();
-        let (filled, default) = self.filled(model, directive, applied.type_args().len());
-        let need = own.max(filled).min(ceiling);
-        if need <= declared {
-          return;
-        }
-        let name = Excerpt(model.def(directive).name().as_bytes());
-        let mut report = Diagnostic::builder(kind.code(), applied.path_location())
+      cx.report(
+        Diagnostic::builder(kind.code(), applied.path_location())
           .severity(kind.severity())
           .message(format!(
-            "`@{name}`, with the type arguments this application leaves to its defaults, needs \
-             `{}`, and package `{package}` is declared at tier `{}`",
-            spelled(need),
+            "`@heap` keeps this value on the heap, which needs `alloc`, and package `{package}` \
+             is declared at tier `core`"
+          ))
+          .primary_label(kind.title())
+          .help(format!(
+            "remove `@heap`, or declare package `{package}` at tier `alloc` or above"
+          ))
+          .build(),
+      );
+    } else if directive == keys.host {
+      let Ok(at) = self
+        .externs
+        .binary_search_by_key(&application, |&(bound, _): &(ApplicationId, Tier)| bound)
+      else {
+        return;
+      };
+      let Some(&(_, tier)) = self.externs.get(at) else {
+        return;
+      };
+      if tier <= declared {
+        return;
+      }
+      let Some(written) = applied
+        .arguments()
+        .iter()
+        .find(|argument: &&ApplicationArgument| argument.argument() == keys.tier)
+      else {
+        return;
+      };
+      cx.report(
+        Diagnostic::builder(kind.code(), model.value(written.value()).location())
+          .severity(kind.severity())
+          .message(format!(
+            "this `@extern` says its host type needs `{}`, and package `{package}`, which declares \
+             the scalar, is declared at tier `{}`",
+            spelled(tier),
             spelled(declared)
           ))
           .primary_label(kind.title())
           .help(format!(
-            "declare package `{package}` at tier `{}` or above, or write the type arguments with \
-             what tier `{}` holds",
-            spelled(need),
-            spelled(declared)
-          ));
-        if filled > own
-          && let Some(default) = default
-        {
-          report = report.label(
-            model.type_expr(default).location(),
-            "filled from this default",
-          );
-        }
-        cx.report(report.build());
-      }
+            "lower this `tier`, or declare package `{package}` at tier `{}` or above",
+            spelled(tier)
+          ))
+          .build(),
+      );
     }
   }
 }
 
 impl TierViolation {
   /// The greatest tier the defaults of `def`'s type parameters from the one at `written` on need
-  /// of their own, and the first default that needs it: what an occurrence, or an application of a
-  /// directive, that writes `written` type arguments fills. Read once for each definition, from its
-  /// last parameter back, and kept.
+  /// of their own, and the first default that needs it: what an occurrence that writes `written`
+  /// type arguments fills. Read once for each definition, from its last parameter back, and kept.
   fn filled(&mut self, model: &Model, def: DefId, written: usize) -> (Tier, Option<TypeExprId>) {
     let defaults = self.defaults.entry(def).or_insert_with(|| {
       let params: Vec<Option<TypeExprId>> = model
