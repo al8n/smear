@@ -224,7 +224,8 @@
 //! `missing-required-directive-argument`, labelled at the application that leaves it out and at
 //! the argument. Each one a limit stopped is `resource-limit`. A value stays its definition's
 //! `Literal`, and the check makes no row. A count that meets itself is judged by what it reached,
-//! as an exact one is: the cycle is another rule's to report, and a value that does not fit is
+//! as an exact one is: the cycle is reported where the count meets itself, below, and a value
+//! that does not fit is
 //! reported all the same. An instantiation only a derivation reaches is not checked, nor an
 //! application only an instantiation reaches: a value written under such a type is judged where
 //! it is written.
@@ -253,7 +254,8 @@
 //! adds nothing, and nothing more is added up for a poisoned count. One that is not judged has
 //! nothing to judge, and stops; a judged one goes on judging what it reaches besides, each node a
 //! step as before, so whether what it reached fits is known and kept as an exact count's is: the
-//! cycle is another rule's to report, and never clears a value that does not fit. A count whose
+//! cycle is reported where the count meets itself, and never clears a value that does not fit. A
+//! count whose
 //! rows pass `Limits::max_value_steps`, or one of whose reads cannot be paid for, is past it, with
 //! every count on the way, and is never added up further. An exact count's rows are added with
 //! overflow checked, so it is exact whatever the limit; a default whose count is exact reaches no
@@ -263,9 +265,29 @@
 //! Who asks for a count does what it says, once it has paid for reading a count made already:
 //! exact, the count is charged, all of it or none, and the copy is made; past the budget, the
 //! asker is starved; poisoned, one step is charged, and nothing is made: the argument, or the
-//! field, is absent, and the cycle is another rule's to report, while what its count reached is
+//! field, is absent, and the cycle was reported where its count met itself, while what its count
+//! reached is
 //! judged as a copy is. A read the budget cannot pay for starves the asker too. A copy is whole or
 //! absent, and the rows a copy makes are its count's, which the phase asserts when it ends.
+//!
+//! # A cycle of defaults
+//!
+//! A count that reads a count still being made has met a cycle: that default's frame and every
+//! frame above it, each an input field's default that an object literal of the one below leaves
+//! out. The first meeting of a count reports it, `smear::schema::input-object-default-value-cycle`,
+//! with GraphQL's label and help, at the name of the field of least id among those defaults, a
+//! root package's before a dependency's, once for each field, and as needing a copy of itself
+//! under the type arguments a use gives it when one of those frames is judged. A later meeting of
+//! the same count, which a judged count going on past its poison may make once for each read it
+//! has left, poisons as before and reports nothing; and a read of a poisoned count is no meeting.
+//! So a program that holds a cycle among closed types gets at least one report, and not one for
+//! each cycle: once a count meets one, every count on its stack ends poisoned, and a second cycle
+//! that only reads one of them is never met. No cycle is met through a OneOf's defaulted field,
+//! which is never filled and which `one-of-field-has-default` refuses; in the defaults of an
+//! instantiation only a fill or a substitution derives, which is not checked; or in a generic
+//! definition no closed instantiation reaches. A cycle met only past the budget is
+//! `resource-limit`, and nothing more. The report reads the frames above the one met, once for
+//! each count, each opened by a read the count paid for, and it charges nothing.
 //!
 //! # What bounds it
 //!
@@ -454,6 +476,9 @@ pub(crate) fn coerce(
     unfit: BTreeSet::new(),
     counting: Vec::new(),
     frames: Vec::new(),
+    met: false,
+    cycled: BTreeMap::new(),
+    cycles: BTreeSet::new(),
     held: Vec::new(),
     searched: BTreeMap::new(),
     owner: None,
@@ -467,6 +492,7 @@ pub(crate) fn coerce(
   };
   coercion.list_arguments();
   coercion.list_fields();
+  coercion.list_cycled();
   coercion.list_written();
   for index in 0..coercion.builder.def_count() {
     let def = DefId::new(index);
@@ -1127,6 +1153,13 @@ struct Coercion<'c, 'p, 'x> {
   /// The defaults the count being made is counting: the one asked for first, and each later one
   /// read by the one before it.
   frames: Vec<Frame>,
+  /// Whether the count being made has met itself already: its first meeting alone reports.
+  met: bool,
+  /// Each input field's default listed, by its tree, with the field and its input object: what a
+  /// cycle of defaults is reported at.
+  cycled: BTreeMap<u32, (MemberId, DefId)>,
+  /// The fields a cycle of defaults has been reported at, each once.
+  cycles: BTreeSet<MemberId>,
   /// The identities of the elements or the keys of the sets and the maps a judged count is
   /// searching, by slot.
   held: Vec<Option<Ident>>,
@@ -1438,8 +1471,8 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// instantiation of `def`: each in turn, a step paid before it is asked, its type read under
   /// `ty`'s arguments, until one does not hold. A value's count is judged under that type, and an
   /// argument left out holds where that type is nullable. A count that meets itself is judged as
-  /// an exact one is, by what it reached: the cycle is another rule's to report, and no value that
-  /// does not fit is passed for it. A step that cannot be paid, a count past the budget and a type
+  /// an exact one is, by what it reached: the cycle is reported where the count meets itself, and
+  /// no value that does not fit is passed for it. A step that cannot be paid, a count past the budget and a type
   /// that cannot be built stop the check.
   fn check(&mut self, def: DefId, ty: TyId, start: usize, end: usize) -> Checked {
     for row in start..end {
@@ -1894,6 +1927,22 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
   }
 
+  /// Lists each input field's default listed, by its tree, with the field and its input object:
+  /// what a cycle of defaults met while counting is reported at, every frame a read opens being
+  /// one of them.
+  fn list_cycled(&mut self) {
+    for input in &self.inputs {
+      let (start, end) = input.defaults;
+      let run: &[(MemberId, u32)] = self
+        .defaulted
+        .get(start as usize..end as usize)
+        .unwrap_or(&[]);
+      for &(field, tree) in run {
+        self.cycled.insert(tree, (field, input.def));
+      }
+    }
+  }
+
   /// The runs of `def`, an input object, when it has any.
   fn input(&self, def: DefId) -> Option<Input> {
     let at = self
@@ -1978,6 +2027,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.counting.clear();
     self.frames.clear();
     self.held.clear();
+    self.met = false;
     self.open(tree, ty, judged);
     loop {
       let Some(frame) = self.frames.last().copied() else {
@@ -2031,8 +2081,13 @@ impl<'p> Coercion<'_, 'p, '_> {
             }
             self.add_rows(rows, charged)
           }
-          // The read is cut: the copy would hold a copy of itself.
+          // The read is cut: the copy would hold a copy of itself. The count's first meeting
+          // reports the cycle.
           Some(Count::Counting) => {
+            if !self.met {
+              self.met = true;
+              self.cycle(tree, ty);
+            }
             self.poison();
             Ok(())
           }
@@ -2134,6 +2189,63 @@ impl<'p> Coercion<'_, 'p, '_> {
       let base = frame.base;
       self.counting.truncate(base);
     }
+  }
+
+  /// Reports the cycle of defaults a read of the default whose tree is `tree`, against `ty`,
+  /// closes: that count is still being made, so its frame and each one above it are the cycle,
+  /// each an input field's default an object literal of the one below leaves out. It is reported
+  /// at the field of least id among them, once for each field, as needing a copy of itself under
+  /// the type arguments a use gives it when one of those frames is judged. It reads the frames
+  /// above the one met, each opened by a read the count paid for, and charges nothing.
+  fn cycle(&mut self, tree: u32, ty: Option<TyId>) {
+    let Some(start) = self
+      .frames
+      .iter()
+      .rposition(|frame: &Frame| frame.tree == tree && frame.ty == ty)
+    else {
+      return;
+    };
+    let mut least: Option<(MemberId, DefId)> = None;
+    let mut judged = false;
+    for frame in self.frames.get(start..).unwrap_or(&[]) {
+      judged |= frame.judged;
+      if let Some(&(field, def)) = self.cycled.get(&frame.tree)
+        && least.is_none_or(|(first, _): (MemberId, DefId)| field < first)
+      {
+        least = Some((field, def));
+      }
+    }
+    let Some((field, def)) = least else {
+      return;
+    };
+    if !self.cycles.insert(field) {
+      return;
+    }
+    let Some(at) = self.builder.member_location(field) else {
+      return;
+    };
+    let name: &[u8] = match self.builder.member_name(field) {
+      Some(sym) => self.builder.spelling(sym),
+      None => b"",
+    };
+    let under = if judged {
+      ", under the type arguments a use gives it"
+    } else {
+      ""
+    };
+    let message = format!(
+      "the default of the input field `{}` of `{}` needs a copy of itself: a field its object \
+       literals leave out leads back to it{under}",
+      Excerpt(name),
+      Excerpt(self.builder.def_name(def))
+    );
+    self.reporter.report(
+      Diagnostic::builder(schema::INPUT_OBJECT_DEFAULT_VALUE_CYCLE, at)
+        .message(message)
+        .primary_label("input object default values form a cycle")
+        .help("drop one of the defaults, or give it a value that does not refer back.")
+        .build(),
+    );
   }
 
   /// Whether the copy of the default counted on top would hold a copy of itself.

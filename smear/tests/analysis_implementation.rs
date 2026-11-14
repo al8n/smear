@@ -1137,8 +1137,8 @@ fn argument_types_are_exact_after_substitution() {
 }
 
 /// An extra argument is required when it is written non-null with no default, as GraphQL reads
-/// it: `a: Int!` is refused; `a: Int! = 1`, `a: Int` and a bare `a: T` are not, whatever `T`
-/// stands for; and `a: Missing!` is, beside the resolver's report of `Missing`.
+/// it: `a: Int!` is refused; `a: Int! = 1`, `a: Int` and a bare `a: T` are not, the last judged at
+/// each instantiation instead; and `a: Missing!` is, beside the resolver's report of `Missing`.
 #[test]
 fn an_extra_argument_is_required_by_its_written_bang() {
   let text = "type Query {\n  x: Int\n}\ninterface I {\n  f: Int\n}\n\
@@ -1155,6 +1155,49 @@ fn an_extra_argument_is_required_by_its_written_bang() {
       (UNEXPECTED, named(schema, text, "f(", "a", 0)),
       (UNEXPECTED, named(schema, text, "f(", "a", 4)),
       (UNDEFINED_TYPE, at(schema, text, "Missing", 0)),
+    ]
+  );
+}
+
+/// An extra argument typed by a bare type parameter, written nullable with no default, is required
+/// in an instantiation that gives the parameter a non-null type: `Page<Int!>` is refused at the
+/// occurrence, and so is `Filled`, whose default gives it one, while `Page<Int>` is not. What only
+/// a substitution derives is not judged: `Outer<Int!>` makes a `Page<Int!>` no occurrence writes,
+/// the gap recorded for derived instantiations. Refuses the written `!` read alone.
+#[test]
+fn an_instantiation_that_makes_an_extra_argument_required_is_refused() {
+  let text = "type Query {\n  ok: Int\n  a: Page<Int!>\n  b: Page<Int>\n  c: Filled\n  \
+              o: Outer<Int!>\n}\ninterface Paged {\n  items: [Int]\n}\n\
+              type Page<T> implements Paged {\n  items(after: T): [Int]\n}\n\
+              type Filled<T = Int!> implements Paged {\n  items(after: T): [Int]\n}\n\
+              type Outer<U> {\n  p: Page<U>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let page = at(schema, text, "Page<Int!>", 0);
+  assert_eq!(
+    found(&analysis),
+    [
+      (UNEXPECTED, page),
+      (UNEXPECTED, named(schema, text, "c: ", "Filled", 0)),
+    ]
+  );
+  let refused = the(&analysis, UNEXPECTED, page);
+  assert_eq!(
+    refused.to_string(),
+    "under the type arguments given here, `Page`'s field `items` requires the argument `after`, \
+     which `Paged`'s field `items` does not declare"
+  );
+  assert_eq!(
+    labels(refused),
+    [
+      (
+        named(schema, text, "items(", "after", 0),
+        "required under these type arguments"
+      ),
+      (
+        named(schema, text, "  ", "items", 0),
+        "the interface's field"
+      ),
     ]
   );
 }

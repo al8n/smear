@@ -1,7 +1,9 @@
 //! The GraphQLx analyzer's rules on what a definition holds, each GraphQL's own with GraphQL's
 //! code: a member's name does not begin with two underscores; a definition's members have distinct
 //! names, and so have a field's arguments; a definition that holds members holds one at least; a
-//! member's type is of the kind its position takes; an object or an interface implements
+//! member's type is of the kind its position takes, and so are a collection's arguments there and
+//! what each instantiation gives a type parameter where it stands; an object or an interface
+//! implements
 //! interfaces; no interface implements itself; a union's members are object types; a required
 //! argument or input field is not deprecated; a OneOf input object's fields are nullable and have
 //! no default; and an input object takes `@oneOf` in its definition alone. Each rule judges what a
@@ -13,10 +15,11 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, Diagnostic, Layout, Limits, Namespace, Package, PackageId, SourceFile, SourceId,
-    Tier, analyze,
+    Tier, analyze, analyze_with,
   },
   diagnostic::{Diagnose, Location},
-  lexer::tokora::SimpleSpan,
+  lexer::{limits::SyntacticLimits, tokora::SimpleSpan},
+  parser::graphqlx::Syntactic,
 };
 
 /// The code of a type name that names nothing, a phase's.
@@ -70,6 +73,10 @@ const UNDEFINED_MEMBER: &str = "smear::schema::undefined-union-member";
 /// GraphQL's codes for a required argument and a required input field that are deprecated.
 const DEPRECATED_ARGUMENT: &str = "smear::schema::deprecated-required-argument";
 const DEPRECATED_INPUT_FIELD: &str = "smear::schema::deprecated-required-input-field";
+
+/// GraphQL's code for a required directive argument an application leaves out, the coercion
+/// phase's.
+const MISSING_ARGUMENT: &str = "smear::schema::missing-required-directive-argument";
 
 /// GraphQL's codes for the three mistakes of a OneOf input object.
 const ONE_OF_NON_NULL: &str = "smear::schema::one-of-field-not-nullable";
@@ -716,9 +723,11 @@ fn a_members_type_is_of_the_kind_its_position_takes() {
 }
 
 #[test]
-fn what_this_part_leaves_to_instantiations_is_accepted() {
-  // A scalar's arguments, a collection's, and a type parameter are not judged here; a generic
-  // input object as a field's type and a generic object as an argument's are.
+fn a_scalars_arguments_are_opaque_and_a_collections_are_not() {
+  // A scalar that is no collection hides its arguments, and a type parameter is a type of every
+  // position; a collection holds values of its arguments, so an object in a map's value is no
+  // input type, at the object; a generic input object as a field's type and a generic object as
+  // an argument's are judged by their kind, at the whole occurrence.
   let text = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\nscalar Ref<R>\n\
               input Filter<F> {\n  eq: F\n}\ntype Page<P> {\n  items: [P]\n  at(cursor: P): Int\n}\n\
               type Uses {\n  r(a: Ref<Obj>): Int\n  m(a: HashMap<string, Obj>): Int\n  \
@@ -728,8 +737,1192 @@ fn what_this_part_leaves_to_instantiations_is_accepted() {
   assert_eq!(
     found(&analysis),
     [
+      (
+        ARGUMENT_TYPE,
+        named(schema, text, "HashMap<string, ", "Obj", 0),
+        None
+      ),
       (FIELD_TYPE, at(schema, text, "Filter<Int>", 0), None),
       (ARGUMENT_TYPE, at(schema, text, "Page<Int>", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// An object, an input object, a user's set and a user's map whose value a default fills, and a
+/// scalar that is no collection; then collections of them in every position, nested, under lists,
+/// and with a parameter, the refused ones first in each definition.
+const COLLECTIONS: &str = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\ninput In {\n  i: Int\n}\n\
+                           scalar Bag<T> @set\nscalar Pair<A, B = Obj> @map\nscalar Ref<R>\n\
+                           type Uses {\n  f1(m: HashMap<string, Obj>): Int\n  \
+                           f2(s: [Bag<Obj>!]): Int\n  f3(n: HashMap<string, Bag<Obj>>): Int\n  \
+                           g: HashMap<string, In>\n  f4(p: Pair<string>): Int\n  \
+                           f5(k: HashMap<string, In>): Int\n  h: HashMap<string, Obj>\n  \
+                           f6(r: Ref<Obj>): Int\n}\n\
+                           input Inputs {\n  b: Bag<Obj>\n  c: Bag<In>\n}\n\
+                           directive @d(dm: HashMap<string, Obj>) on FIELD\n\
+                           type G<T> {\n  f7(a: HashMap<string, T>): Int\n}\n";
+
+#[test]
+fn a_collections_arguments_take_the_kind_of_its_place() {
+  let analysis = analyze_one(COLLECTIONS);
+  let schema = schema_file(&analysis);
+  let leaf =
+    |code: &'static str, before: &str, name: &str| -> (&'static str, Location, Option<Location>) {
+      (code, named(schema, COLLECTIONS, before, name, 0), None)
+    };
+  assert_eq!(
+    found(&analysis),
+    [
+      leaf(ARGUMENT_TYPE, "m: HashMap<string, ", "Obj"),
+      // Under the list and the `!`, at the set's element.
+      leaf(ARGUMENT_TYPE, "s: [Bag<", "Obj"),
+      // Through two collections, at the deepest.
+      leaf(ARGUMENT_TYPE, "n: HashMap<string, Bag<", "Obj"),
+      leaf(FIELD_TYPE, "g: HashMap<string, ", "In"),
+      // The value is the default's: at the occurrence, labelled at the default.
+      (
+        ARGUMENT_TYPE,
+        at(schema, COLLECTIONS, "Pair<string>", 0),
+        Some(named(schema, COLLECTIONS, "B = ", "Obj", 0))
+      ),
+      leaf(INPUT_FIELD_TYPE, "b: Bag<", "Obj"),
+      leaf(DIRECTIVE_ARGUMENT_TYPE, "dm: HashMap<string, ", "Obj"),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  // Each names the member, its owner, the collection and what does not fit, and prints no type.
+  let messages = messages(&analysis);
+  assert_eq!(
+    messages[0],
+    "the argument `m` of the field `f1` of `Uses` is typed by the collection `HashMap`, whose \
+     argument is the object type `Obj`, and an argument's type is an input type"
+  );
+  assert_eq!(
+    messages[2],
+    "the argument `n` of the field `f3` of `Uses` is typed by the collection `HashMap`, whose \
+     argument is the object type `Obj`, and an argument's type is an input type"
+  );
+  assert_eq!(
+    messages[3],
+    "the field `g` of `Uses` is typed by the collection `HashMap`, whose argument is the input \
+     object `In`, and a field's type is an output type"
+  );
+  assert_eq!(
+    messages[4],
+    "the argument `p` of the field `f4` of `Uses` is typed by the collection `Pair`, whose \
+     argument is the object type `Obj`, and an argument's type is an input type"
+  );
+  assert_eq!(
+    messages[6],
+    "the argument `dm` of the directive `@d` is typed by the collection `HashMap`, whose \
+     argument is the object type `Obj`, and a directive's argument's type is an input type"
+  );
+  // GraphQL's phrases and helps, as the base check gives them, and the default's label.
+  let diagnostics = analysis.diagnostics();
+  let first = diagnostics.iter().next().expect("a diagnostic");
+  assert_eq!(
+    (first.primary_label(), first.help()),
+    (
+      Some("argument type is not an input type"),
+      Some("an argument's type must be a scalar, enum or input object.")
+    )
+  );
+  let filled = diagnostics.iter().nth(4).expect("five diagnostics");
+  assert_eq!(
+    filled.label(0).map(|label| label.text()),
+    Some("filled from this default")
+  );
+}
+
+/// Generic definitions whose type parameters stand in each place: directly, through a list,
+/// through another definition, in an extension's field, from a default, and in a directive's
+/// argument; then instantiations of each that give a parameter what its place does not take.
+const INSTANTIATIONS: &str = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\ninput In {\n  i: Int\n}\n\
+                              input Filter<T> {\n  eq: T\n  any: [T!]\n}\n\
+                              type Page<T> {\n  items: [T]\n  at(cursor: T): Int\n}\n\
+                              type Outer<U> {\n  p: Page<U>\n}\ntype Def<T = In> {\n  d: T\n}\n\
+                              directive @tagged<V>(value: V) on OBJECT\n\
+                              interface Node<X> {\n  id: X\n}\n\
+                              type Holds implements Node<In> {\n  id: In\n}\n\
+                              scalar Pair<A, B = Obj> @map\ninput Box<T> {\n  v: T\n}\n\
+                              type Uses @tagged<Obj> {\n  f(where: Filter<Obj>): Int\n  \
+                              p: Page<In>\n  q: Page<Obj>\n  o: Outer<In>\n  x: Def\n  \
+                              g(b: Box<Pair<string>>): Int\n}\n";
+
+/// Instantiations of the same definitions that give each parameter what its places take, or that
+/// leave a parameter that stands nowhere to its default; and a parameter given to another
+/// definition, inside a generic definition nothing instantiates.
+const FITTING: &str = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\ninput In {\n  i: Int\n}\n\
+                       input Filter<T> {\n  eq: T\n}\ntype Page<T> {\n  items: [T]\n  at(cursor: T): Int\n}\n\
+                       type Edge<N> {\n  node: N\n}\ntype Conn<N, E = Edge<N>> {\n  edges: [E]\n}\n\
+                       type G<T> {\n  f(w: Filter<T>): Int\n}\nscalar Ref<R>\n\
+                       directive @tagged<V>(value: V) on OBJECT\ntype R<T = In> {\n  r: Int\n}\n\
+                       type Uses @tagged<Int> {\n  a(f: Filter<Int>): Int\n  b(f: Filter<In>): Int\n  \
+                       c: Page<Int>\n  d: Conn<In, Obj>\n  e(r: Ref<Obj>): Int\n  r: Ref<In>\n  s: R\n}\n";
+
+#[test]
+fn an_instantiations_arguments_fit_where_its_parameters_stand() {
+  let analysis = analyze_one(INSTANTIATIONS);
+  let schema = schema_file(&analysis);
+  let text = INSTANTIATIONS;
+  assert_eq!(
+    found(&analysis),
+    [
+      // An `implements` entry is an instantiation; the field that implements it is the base
+      // check's, each true.
+      (
+        FIELD_TYPE,
+        named(schema, text, "implements Node<", "In", 0),
+        Some(named(schema, text, "id: ", "X", 0))
+      ),
+      (FIELD_TYPE, named(schema, text, "id: ", "In", 0), None),
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "@tagged<", "Obj", 0),
+        Some(named(schema, text, "value: ", "V", 0))
+      ),
+      // Labelled where the parameter first stands, the field `eq`.
+      (
+        INPUT_FIELD_TYPE,
+        named(schema, text, "Filter<", "Obj", 0),
+        Some(named(schema, text, "eq: ", "T", 0))
+      ),
+      // A field's type comes before a field argument's.
+      (
+        FIELD_TYPE,
+        named(schema, text, "p: Page<", "In", 0),
+        Some(at(schema, text, "[T]", 0))
+      ),
+      (
+        ARGUMENT_TYPE,
+        named(schema, text, "q: Page<", "Obj", 0),
+        Some(named(schema, text, "cursor: ", "T", 0))
+      ),
+      // `Outer`'s parameter stands where `Page`'s does, passed on at `Page<U>`.
+      (
+        FIELD_TYPE,
+        named(schema, text, "o: Outer<", "In", 0),
+        Some(at(schema, text, "Page<U>", 0))
+      ),
+      // A default fills it: at the occurrence.
+      (
+        FIELD_TYPE,
+        named(schema, text, "x: ", "Def", 0),
+        Some(named(schema, text, "d: ", "T", 0))
+      ),
+      // A collection a default completes: at the deepest written occurrence.
+      (
+        INPUT_FIELD_TYPE,
+        at(schema, text, "Pair<string>", 0),
+        Some(named(schema, text, "v: ", "T", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let messages = messages(&analysis);
+  assert_eq!(
+    messages[2],
+    "`@tagged` takes the object type `Obj` for its type parameter `V`, which stands as a \
+     directive argument's type, and a directive's argument's type is an input type"
+  );
+  assert_eq!(
+    messages[3],
+    "`Filter` takes the object type `Obj` for its type parameter `T`, which stands as an input \
+     field's type, and an input field's type is an input type"
+  );
+  assert_eq!(
+    messages[6],
+    "`Outer` takes the input object `In` for its type parameter `U`, which stands as a field's \
+     type, and a field's type is an output type"
+  );
+  assert_eq!(
+    messages[7],
+    "`Def` takes, from the default of `T`, the input object `In` for its type parameter `T`, \
+     which stands as a field's type, and a field's type is an output type"
+  );
+  assert_eq!(
+    messages[8],
+    "`Box` takes, for its type parameter `T`, which stands as an input field's type, a \
+     collection whose argument is the object type `Obj`, and an input field's type is an input \
+     type"
+  );
+  // The labels after the first: where the parameter stands, then the default that fills it.
+  let labels: Vec<Vec<(Location, &str)>> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| {
+      (0..diagnostic.labels())
+        .filter_map(|index: usize| diagnostic.label(index))
+        .map(|label| (label.location(), label.text()))
+        .collect()
+    })
+    .collect();
+  assert_eq!(
+    labels[7],
+    [
+      (named(schema, text, "d: ", "T", 0), "`T` stands here"),
+      (
+        named(schema, text, "T = ", "In", 0),
+        "filled from this default"
+      ),
+    ]
+  );
+  assert_eq!(
+    labels[8],
+    [
+      (named(schema, text, "v: ", "T", 0), "`T` stands here"),
+      (
+        named(schema, text, "B = ", "Obj", 0),
+        "filled from this default"
+      ),
+    ]
+  );
+  // GraphQL's phrase and help, as the base check gives them for the place's code.
+  let outer = analysis
+    .diagnostics()
+    .iter()
+    .nth(6)
+    .expect("seven diagnostics");
+  assert_eq!(
+    (outer.primary_label(), outer.help()),
+    (
+      Some("field type is not an output type"),
+      Some(
+        "a field's type must be a scalar, object, interface, union or enum; an input object \
+         appears only in argument and input-field positions."
+      )
+    )
+  );
+
+  let analysis = analyze_one(FITTING);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn what_a_default_derives_is_judged_where_it_is_derived() {
+  // `Conn<In>` is `Conn<In, Edge<In>>`, whose `Edge<In>` no occurrence writes: it is judged at
+  // each occurrence that derives it, a type's fill judged by the type and its count of written
+  // arguments alone, so `Other<In>`, which derives the same type, is refused too.
+  let text = "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+              type Conn<N, E = Edge<N>> {\n  edges: [E]\n}\ntype Other<N, F = Edge<N>> {\n  f: F\n}\n\
+              type Uses {\n  a: Conn<In>\n  b: Conn<In>\n  c: Other<In>\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  let node = Some(named(schema, text, "node: ", "N", 0));
+  assert_eq!(
+    found(&analysis),
+    [
+      (FIELD_TYPE, at(schema, text, "Conn<In>", 0), node),
+      (FIELD_TYPE, at(schema, text, "Conn<In>", 1), node),
+      (FIELD_TYPE, at(schema, text, "Other<In>", 0), node),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let messages = messages(&analysis);
+  assert_eq!(
+    messages[0],
+    "the default of `E` of `Conn` makes `Edge` take the input object `In` for its type parameter \
+     `N`, which stands as a field's type, and a field's type is an output type"
+  );
+  assert_eq!(
+    messages[2],
+    "the default of `F` of `Other` makes `Edge` take the input object `In` for its type \
+     parameter `N`, which stands as a field's type, and a field's type is an output type"
+  );
+  let defaults: Vec<Option<Location>> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.label(1).map(|label| label.location()))
+    .collect();
+  assert_eq!(
+    defaults,
+    [
+      Some(named(schema, text, "E = ", "Edge<N>", 0)),
+      Some(named(schema, text, "E = ", "Edge<N>", 0)),
+      Some(named(schema, text, "F = ", "Edge<N>", 0)),
+    ]
+  );
+
+  // A default that is written closed is an occurrence: judged where it is written, once, and not
+  // at each use, whichever of the use and the default the walk reaches first.
+  for text in [
+    "type Query {\n  u: Uses\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+     type Uses {\n  a: Conn2<Int>\n  b: Conn2<Int>\n}\ntype Conn2<N, E = Edge<In>> {\n  e: [E]\n  \
+     n: N\n}\n",
+    "type Query {\n  u: Uses\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+     type Conn2<N, E = Edge<In>> {\n  e: [E]\n  n: N\n}\ntype Uses {\n  a: Conn2<Int>\n  \
+     b: Conn2<Int>\n}\n",
+  ] {
+    let analysis = analyze_text(text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(
+        FIELD_TYPE,
+        named(schema, text, "Edge<", "In", 0),
+        Some(named(schema, text, "node: ", "N", 0))
+      )],
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  }
+
+  // A slot the occurrence writes is judged where it is written, and the default never derives
+  // what the occurrence writes; nor is a type a field writes judged again where a fill derives it.
+  for (text, at_in) in [
+    (
+      "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+       type Conn<N, E = Edge<N>> {\n  edges: [E]\n}\ntype Uses {\n  a: Conn<In, Edge<In>>\n}\n",
+      "a: Conn<In, Edge<",
+    ),
+    (
+      "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+       type Conn<N, E = Edge<N>> {\n  edges: [E]\n}\ntype Uses {\n  a: Conn<In>\n  e: Edge<In>\n}\n",
+      "e: Edge<",
+    ),
+  ] {
+    let analysis = analyze_text(text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(
+        FIELD_TYPE,
+        named(schema, text, at_in, "In", 0),
+        Some(named(schema, text, "node: ", "N", 0))
+      )],
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
+
+#[test]
+fn an_application_is_an_instantiation_of_its_directive() {
+  let text = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
+              directive @tagged<V>(value: V) on OBJECT\ndirective @plain<V> on OBJECT\n\
+              directive @dd<V = Obj>(value: V) on OBJECT\n\
+              type A @tagged<Obj> {\n  a: Int\n}\ntype B @tagged<Int> @plain<Obj> {\n  b: Int\n}\n\
+              type C @dd {\n  c: Int\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "@tagged<", "Obj", 0),
+        Some(named(schema, text, "value: ", "V", 0))
+      ),
+      // A default fills it: at the application's path.
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "C @", "dd", 0),
+        Some(named(schema, text, "value: ", "V", 1))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis)[1],
+    "`@dd` takes, from the default of `V`, the object type `Obj` for its type parameter `V`, \
+     which stands as a directive argument's type, and a directive's argument's type is an input \
+     type"
+  );
+  let filled = analysis
+    .diagnostics()
+    .iter()
+    .nth(1)
+    .expect("two diagnostics");
+  assert_eq!(
+    filled
+      .label(1)
+      .map(|label| (label.location(), label.text())),
+    Some((
+      named(schema, text, "V = ", "Obj", 0),
+      "filled from this default"
+    ))
+  );
+}
+
+#[test]
+fn a_collections_own_parameters_stand_in_what_it_is_given() {
+  // `@d<V>` puts the map `M`'s value parameter in a directive's argument, so `M<Int, Obj>` is
+  // refused at `Obj`, labelled at that `V`. `Box`'s `T` is given to that parameter in `v`, so it
+  // stands there too, beside the field's type `v` makes it through the map's value: `Box<Obj>` is
+  // refused under the same code, labelled at `M<Int, T>`. A collection that only held its
+  // arguments, and passed none of its own parameters' places to them, accepted `Box<Obj>`.
+  let text = "type Query {\n  b: Box<Obj>\n  m: M<Int, Obj>\n}\ntype Obj {\n  x: Int\n}\n\
+              directive @d<X>(v: [X]) on SCALAR\nscalar M<K, V> @map @d<V>\n\
+              type Box<T> {\n  v: M<Int, T>\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "Box<", "Obj", 0),
+        Some(at(schema, text, "M<Int, T>", 0))
+      ),
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "m: M<Int, ", "Obj", 0),
+        Some(named(schema, text, "@d<", "V", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Box` takes the object type `Obj` for its type parameter `T`, which stands as a directive \
+       argument's type, and a directive's argument's type is an input type",
+      "`M` takes the object type `Obj` for its type parameter `V`, which stands as a directive \
+       argument's type, and a directive's argument's type is an input type",
+    ]
+  );
+  let labels: Vec<Vec<(Location, &str)>> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| {
+      (0..diagnostic.labels())
+        .filter_map(|index: usize| diagnostic.label(index))
+        .map(|label| (label.location(), label.text()))
+        .collect()
+    })
+    .collect();
+  assert_eq!(
+    labels,
+    [
+      vec![(at(schema, text, "M<Int, T>", 0), "`T` stands here")],
+      vec![(named(schema, text, "@d<", "V", 0), "`V` stands here")],
+    ]
+  );
+
+  // The twin, an input object where the object was: `Box` is an input object and both are taken
+  // as field arguments, so every place each parameter stands in takes an input type, and the
+  // input object passes both ways.
+  let text = "type Query {\n  b(a: Box<In>): Int\n  m(a: M<Int, In>): Int\n}\n\
+              input In {\n  x: Int\n}\ndirective @d<X>(v: [X]) on SCALAR\n\
+              scalar M<K, V> @map @d<V>\ninput Box<T> {\n  v: M<Int, T>\n}\n";
+  let analysis = analyze_text(text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn a_scalars_own_parameters_stand_in_what_it_is_given() {
+  // `@d<T>` puts the scalar `Ref`'s parameter in a directive's argument, so `Ref<Obj>` is refused
+  // at `Obj`, labelled at that `T`. `Box`'s `T` is given to that parameter in `v`, so it stands
+  // there too, and `Box<Obj>`, which holds a `Ref<Obj>`, is refused under the same code, labelled
+  // at `Ref<T>`; and so is `Y<Obj>`, whose default derives a `Ref<Obj>`. A scalar that hid its
+  // arguments accepted `Box<Obj>`.
+  let text = "type Query {\n  r: Ref<Obj>\n  b: Box<Obj>\n}\ntype Obj {\n  x: Int\n}\n\
+              directive @d<X>(v: [X]) on SCALAR\nscalar Ref<T> @d<T>\n\
+              type Box<T> {\n  v: Ref<T>\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "Ref<", "Obj", 0),
+        Some(named(schema, text, "@d<", "T", 0))
+      ),
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "Box<", "Obj", 0),
+        Some(named(schema, text, "v: ", "Ref<T>", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Ref` takes the object type `Obj` for its type parameter `T`, which stands as a directive \
+       argument's type, and a directive's argument's type is an input type",
+      "`Box` takes the object type `Obj` for its type parameter `T`, which stands as a directive \
+       argument's type, and a directive's argument's type is an input type",
+    ]
+  );
+
+  // Derived from a default, alone: a `Ref<Obj>` the program writes would be judged where it is.
+  let text = "type Query {\n  y: Y<Obj>\n}\ntype Obj {\n  x: Int\n}\n\
+              directive @d<X>(v: [X]) on SCALAR\nscalar Ref<T> @d<T>\n\
+              type Y<A, R = Ref<A>> {\n  r: R\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DIRECTIVE_ARGUMENT_TYPE,
+      at(schema, text, "Y<Obj>", 0),
+      Some(named(schema, text, "@d<", "T", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the default of `R` of `Y` makes `Ref` take the object type `Obj` for its type parameter \
+       `T`, which stands as a directive argument's type, and a directive's argument's type is an \
+       input type"
+    ]
+  );
+
+  // The twin, an input object where the object was, passes every form: a value of a scalar that
+  // is no collection holds nothing, so `Box`'s `T` stands in no field's type.
+  let text = "type Query {\n  r: Ref<In>\n  b: Box<In>\n  y: Y<In>\n}\ninput In {\n  i: Int\n}\n\
+              directive @d<X>(v: [X]) on SCALAR\nscalar Ref<T> @d<T>\n\
+              type Box<T> {\n  v: Ref<T>\n}\ntype Y<A, R = Ref<A>> {\n  r: R\n}\n";
+  let analysis = analyze_text(text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn what_a_scalars_argument_holds_passes_its_parameters_on() {
+  // `Page`'s `T` stands as a field's type, so `Page<In>` is refused in each of its forms, each
+  // alone: written under `Ref`'s argument, at `In`; substituted, as the `Ref<Page<In>>` of
+  // `Box<In>`, at `In`, labelled at `Ref<Page<T>>`, which puts `Box`'s `T` where `Page`'s stands;
+  // and derived from `X`'s default, at `X<In>`. A scalar that hid its arguments accepted
+  // `Box<In>`, and refused the other two.
+  let definitions = "input In {\n  i: Int\n}\ntype Obj {\n  x: Int\n}\nscalar Ref<T>\n\
+                     type Page<T> {\n  items: [T]\n}\ntype Box<T> {\n  v: Ref<Page<T>>\n}\n\
+                     type X<A, R = Ref<Page<A>>> {\n  r: R\n}\n";
+  let text = format!("type Query {{\n  a: Ref<Page<In>>\n}}\n{definitions}");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      FIELD_TYPE,
+      named(schema, &text, "Page<", "In", 0),
+      Some(at(schema, &text, "[T]", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Page` takes the input object `In` for its type parameter `T`, which stands as a field's \
+       type, and a field's type is an output type"
+    ]
+  );
+
+  let text = format!("type Query {{\n  b: Box<In>\n}}\n{definitions}");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      FIELD_TYPE,
+      named(schema, &text, "Box<", "In", 0),
+      Some(named(schema, &text, "v: ", "Ref<Page<T>>", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Box` takes the input object `In` for its type parameter `T`, which stands as a field's \
+       type, and a field's type is an output type"
+    ]
+  );
+
+  let text = format!("type Query {{\n  c: X<In>\n}}\n{definitions}");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      FIELD_TYPE,
+      at(schema, &text, "X<In>", 0),
+      Some(at(schema, &text, "[T]", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the default of `R` of `X` makes `Page` take the input object `In` for its type parameter \
+       `T`, which stands as a field's type, and a field's type is an output type"
+    ]
+  );
+
+  // The twin, an object where the input object was, passes every form.
+  let text =
+    format!("type Query {{\n  a: Ref<Page<Obj>>\n  b: Box<Obj>\n  c: X<Obj>\n}}\n{definitions}");
+  let analysis = analyze_text(&text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn an_implements_entry_passes_its_interfaces_parameters_on() {
+  // `@d<X>` puts `Tagged`'s parameter in a directive's argument, so `Direct`'s entry `Tagged<Obj>`
+  // is refused at `Obj`, labelled at that `X`. `Holds`'s `T` is given to it in `Holds`'s entry, so
+  // `Holds<Obj>`, which implements `Tagged<Obj>`, is refused under the same code, labelled at the
+  // entry. An implementing type declares each field itself, but not its interface's applications:
+  // an entry that passed nothing on accepted `Holds<Obj>`.
+  let text = "type Query {\n  h: Holds<Obj>\n  d: Direct\n}\ntype Obj {\n  x: Int\n}\n\
+              directive @d<V>(v: V) on INTERFACE\ninterface Tagged<X> @d<X> {\n  a: Int\n}\n\
+              type Holds<T> implements Tagged<T> {\n  a: Int\n}\n\
+              type Direct implements Tagged<Obj> {\n  a: Int\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "Holds<", "Obj", 0),
+        Some(at(schema, text, "Tagged<T>", 0))
+      ),
+      (
+        DIRECTIVE_ARGUMENT_TYPE,
+        named(schema, text, "Tagged<", "Obj", 0),
+        Some(named(schema, text, "@d<", "X", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Holds` takes the object type `Obj` for its type parameter `T`, which stands as a directive \
+       argument's type, and a directive's argument's type is an input type",
+      "`Tagged` takes the object type `Obj` for its type parameter `X`, which stands as a \
+       directive argument's type, and a directive's argument's type is an input type",
+    ]
+  );
+
+  // Nor the `@deprecated` of its fields' arguments: `I<Int!>` makes `a` required, written in
+  // `H2`'s entry and substituted in `H<Int!>`, whose own `f` deprecates nothing.
+  let text = "type Query {\n  h: H<Int!>\n  h2: H2\n}\n\
+              interface I<X> {\n  f(a: X @deprecated): Int\n}\n\
+              type H<T> implements I<T> {\n  f(a: T): Int\n}\n\
+              type H2 implements I<Int!> {\n  f(a: Int!): Int\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "H<", "Int!", 0),
+        Some(at(schema, text, "I<T>", 0))
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "I<", "Int!", 0),
+        Some(named(schema, text, "(a: ", "X", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`H` takes a non-null type for its type parameter `T`, which makes a deprecated argument \
+       required",
+      "`I` takes a non-null type for its type parameter `X`, which makes a deprecated argument \
+       required",
+    ]
+  );
+
+  // The twins pass both forms: an input object where the object was, and a nullable `Int`.
+  for text in [
+    "type Query {\n  h: Holds<In>\n  d: Direct\n}\ninput In {\n  i: Int\n}\n\
+     directive @d<V>(v: V) on INTERFACE\ninterface Tagged<X> @d<X> {\n  a: Int\n}\n\
+     type Holds<T> implements Tagged<T> {\n  a: Int\n}\n\
+     type Direct implements Tagged<In> {\n  a: Int\n}\n",
+    "type Query {\n  h: H<Int>\n  h2: H2\n}\ninterface I<X> {\n  f(a: X @deprecated): Int\n}\n\
+     type H<T> implements I<T> {\n  f(a: T): Int\n}\n\
+     type H2 implements I<Int> {\n  f(a: Int): Int\n}\n",
+  ] {
+    let analysis = analyze_text(text);
+    assert!(
+      analysis.diagnostics().is_empty(),
+      "{text}\n{:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
+
+#[test]
+fn a_type_given_to_many_parameters_is_one_node() {
+  // `D.d`'s complete type is `H<Tup<T>, G1<Tup<T>>, G2<Tup<T>>>`: `Tup<T>` is given to three
+  // slots, and is one node of the table with an edge from each, walked once. A test cannot see
+  // the work, which the table bounds by construction; it pins what the table answers through it.
+  let text = "type Query {\n  d: D<In>\n}\ninput In {\n  i: Int\n}\ntype Tup<A> {\n  a: A\n}\n\
+              type G1<X> {\n  g: X\n}\ntype G2<X> {\n  g: X\n}\n\
+              type H<A, B1 = G1<A>, B2 = G2<A>> {\n  h: Int\n}\ntype D<T> {\n  d: H<Tup<T>>\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      FIELD_TYPE,
+      named(schema, text, "D<", "In", 0),
+      Some(at(schema, text, "H<Tup<T>>", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn an_application_its_defaults_complete_is_entered_once() {
+  // `@d` has many parameters its defaults fill, each from the first, and is applied as `@d<T>` to
+  // each of many fields of `G`: every application's type is the one type `d<T, T, …, T>`, whose
+  // filled arguments the table enters once, at the first application, which the last parameter's
+  // place reaches `G`'s `T` through. `@e`, applied bare to each field too, has a closed type, which
+  // gives no edge and is passed over at once. A test sees the diagnostics, not the work, which the
+  // table bounds by construction: each written type argument once, and the filled ones once for
+  // each type and count of written arguments, which the fill that typed them paid for. Read once
+  // for each application, this program's 4,000 applications would each read 2,000 slots.
+  const PARAMS: usize = 2_000;
+  const FIELDS: usize = 2_000;
+  let mut text =
+    String::from("type Query {\n  g: G<Obj>\n}\ntype Obj {\n  o: Int\n}\ndirective @d<A");
+  for index in 1..PARAMS {
+    text.push_str(&format!(", B{index} = A"));
+  }
+  text.push_str(&format!(
+    ">(b: B{}) on FIELD_DEFINITION\ndirective @e<C0 = Int",
+    PARAMS - 1
+  ));
+  for index in 1..PARAMS {
+    text.push_str(&format!(", C{index} = Int"));
+  }
+  text.push_str("> on FIELD_DEFINITION\ntype G<T> {\n");
+  for index in 0..FIELDS {
+    text.push_str(&format!("  f{index}: Int @d<T> @e\n"));
+  }
+  text.push_str("}\n");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DIRECTIVE_ARGUMENT_TYPE,
+      named(schema, &text, "G<", "Obj", 0),
+      Some(named(schema, &text, "f0: Int @", "d", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn a_parameter_far_down_a_long_list_is_named_in_one_step() {
+  // `Wide`'s parameters are all defaulted, the last to an input object that its field takes, and
+  // each of many fields leaves them all out: each is refused, naming the last parameter and
+  // labelling its default. A parameter is named by reading its row, skipping none, so each report
+  // costs the same however far down the list its parameter is: a test sees the diagnostics, not
+  // the work, which holds by construction, `TypeParams::nth` reading the row it is asked for. Read
+  // from the first parameter on, each of this program's 3,000 reports would read 3,000 rows twice.
+  const PARAMS: usize = 3_000;
+  const FIELDS: usize = 3_000;
+  let mut text = String::from("type Query {\n  u: Uses\n}\ninput In {\n  i: Int\n}\ntype Wide<");
+  for index in 0..PARAMS {
+    text.push_str(&format!("T{index} = Int, "));
+  }
+  let default = text.len() + format!("T{PARAMS} = ").len();
+  text.push_str(&format!("T{PARAMS} = In> {{\n  f: "));
+  let stands = text.len();
+  text.push_str(&format!("T{PARAMS}\n}}\ntype Uses {{\n"));
+  let mut uses: Vec<usize> = Vec::with_capacity(FIELDS);
+  for index in 0..FIELDS {
+    let field = format!("  u{index}: ");
+    uses.push(text.len() + field.len());
+    text.push_str(&field);
+    text.push_str("Wide\n");
+  }
+  text.push_str("}\n");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  let span = |start: usize, len: usize| -> Location {
+    Location::new(schema.get(), SimpleSpan::new(start, start + len))
+  };
+  let last = format!("T{PARAMS}");
+  let expected: Vec<(&'static str, Location, Option<Location>)> = uses
+    .iter()
+    .map(|start: &usize| {
+      (
+        FIELD_TYPE,
+        span(*start, "Wide".len()),
+        Some(span(stands, last.len())),
+      )
+    })
+    .collect();
+  assert_eq!(found(&analysis), expected);
+  let first = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("a diagnostic for each field");
+  assert_eq!(
+    first.to_string(),
+    format!(
+      "`Wide` takes, from the default of `{last}`, the input object `In` for its type parameter \
+       `{last}`, which stands as a field's type, and a field's type is an output type"
+    )
+  );
+  assert_eq!(
+    first.label(1).map(|label| (label.location(), label.text())),
+    Some((span(default, "In".len()), "filled from this default"))
+  );
+}
+
+#[test]
+fn a_type_many_fills_derive_is_walked_once() {
+  // Each `Outer<Si>` leaves `T`, `R`, `X` and `B` to their defaults. `R` derives `Maker<Int>`,
+  // whose own default derives `Wide<Int, …, Int>`, and `B` derives `Page<In>`, which no occurrence
+  // writes and which takes an input object where its parameter stands as a field's type: each use
+  // is refused, labelled at `item: T` and at `B`'s default. Every use's fill derives the one
+  // `Maker<Int>`, which the instantiation phase typed once, and the walk below a derived type is
+  // made once, whichever use asks: each use reads one kept answer for each slot it leaves out. The
+  // depth is constant; the width of `Wide` and the count of uses vary. A test sees the
+  // diagnostics, not the work, which holds by construction: a derived type's answer is kept by its
+  // id, the same whichever fill derives it, and each type is expanded once, its arguments read at
+  // most twice. Walked again for each use, the largest program here would read `Wide`'s 3,000
+  // arguments for each of its 3,000 uses, in each of the four rules that judge what a fill
+  // derives: 36 million steps, where each rule now makes a few for each use and for each of
+  // `Wide`'s arguments.
+  const WIDTH: usize = 3_000;
+  const USES: usize = 3_000;
+  for (width, uses) in [(1, 1), (WIDTH, 1), (1, USES), (WIDTH, USES)] {
+    let mut text = String::from(
+      "type Query {\n  u: Uses\n}\ninput In {\n  i: Int\n}\ntype Page<T> {\n  item: T\n}\n\
+       scalar Wide<P0",
+    );
+    for index in 1..width {
+      text.push_str(&format!(", P{index}"));
+    }
+    text.push_str(">\nscalar Maker<T, R = Wide<T");
+    for _ in 1..width {
+      text.push_str(", T");
+    }
+    text.push_str(">>\nscalar Outer<U, T = Int, R = Maker<T>, X = In, B = ");
+    let default = text.len();
+    text.push_str("Page<X>>\n");
+    for index in 0..uses {
+      text.push_str(&format!("scalar S{index}\n"));
+    }
+    text.push_str("type Uses {\n");
+    let mut written: Vec<(usize, usize)> = Vec::with_capacity(uses);
+    for index in 0..uses {
+      let field = format!("  u{index}: ");
+      let ty = format!("Outer<S{index}>");
+      written.push((text.len() + field.len(), ty.len()));
+      text.push_str(&field);
+      text.push_str(&ty);
+      text.push('\n');
+    }
+    text.push_str("}\n");
+    let analysis = analyze_text(&text);
+    let schema = schema_file(&analysis);
+    let span = |start: usize, len: usize| -> Location {
+      Location::new(schema.get(), SimpleSpan::new(start, start + len))
+    };
+    let item = Some(named(schema, &text, "item: ", "T", 0));
+    let expected: Vec<(&'static str, Location, Option<Location>)> = written
+      .iter()
+      .map(|&(start, len): &(usize, usize)| (FIELD_TYPE, span(start, len), item))
+      .collect();
+    assert_eq!(found(&analysis), expected, "width {width}, uses {uses}");
+    let first = analysis
+      .diagnostics()
+      .iter()
+      .next()
+      .expect("a diagnostic for each use");
+    assert_eq!(
+      first.to_string(),
+      "the default of `B` of `Outer` makes `Page` take the input object `In` for its type \
+       parameter `T`, which stands as a field's type, and a field's type is an output type"
+    );
+    assert_eq!(
+      first.label(1).map(|label| (label.location(), label.text())),
+      Some((span(default, "Page<X>".len()), "filled from this default"))
+    );
+  }
+}
+
+#[test]
+fn a_report_never_walks_a_path_defaults_fill() {
+  // Each field of `Query` is typed by the last set of a chain, each set's element its default, the
+  // set before it, down to `scalar C0<T = Bad> @set`: the field's complete type holds the input
+  // object `Bad` at the chain's end, so each field is refused, at its occurrence, labelled at the
+  // default of the last set's `T`. The occurrence writes no type argument, so the way down to `Bad`
+  // leaves what it writes at once, and the rest of the way is what defaults fill: its end is kept
+  // for each set when the chain is judged, once for the walk, and each report reads it in one
+  // lookup. The depth and the count of fields vary, and each program runs again under a diagnostic
+  // ceiling of zero, which keeps no report and still builds and counts each. A test sees the
+  // diagnostics, not the work, which holds by construction: a report follows the levels its
+  // occurrence writes alone, and reads the end kept for the type where the occurrence stops
+  // writing the way. Walked again for each report, the largest program here would follow its 3,000
+  // sets for each of its 3,000 fields, 9 million steps, where the rule now takes a few for each set
+  // and for each field.
+  const DEPTH: usize = 3_000;
+  const FIELDS: usize = 3_000;
+  // The last set is as deep as the chain, past the default bound.
+  let limits = Limits::new()
+    .with_max_generic_depth(u32::try_from(DEPTH + 1).expect("the chain's depth is a u32"));
+  for (depth, fields) in [(1, 1), (DEPTH, 1), (1, FIELDS), (DEPTH, FIELDS)] {
+    let last = format!("C{}", depth - 1);
+    let mut text = String::from("type Query {\n");
+    let mut written: Vec<usize> = Vec::with_capacity(fields);
+    for index in 0..fields {
+      let field = format!("  f{index}: ");
+      written.push(text.len() + field.len());
+      text.push_str(&field);
+      text.push_str(&last);
+      text.push('\n');
+    }
+    text.push_str("}\ninput Bad {\n  x: Int\n}\n");
+    // Where the last set's default is written, and its length.
+    let mut default = (0, 0);
+    for index in 0..depth {
+      let element = match index {
+        0 => String::from("Bad"),
+        _ => format!("C{}", index - 1),
+      };
+      let head = format!("scalar C{index}<T = ");
+      default = (text.len() + head.len(), element.len());
+      text.push_str(&head);
+      text.push_str(&element);
+      text.push_str("> @set\n");
+    }
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+    let analysis = analyze(&root, &[], &limits);
+    let schema = schema_file(&analysis);
+    let span = |start: usize, len: usize| -> Location {
+      Location::new(schema.get(), SimpleSpan::new(start, start + len))
+    };
+    let filled = Some(span(default.0, default.1));
+    let expected: Vec<(&'static str, Location, Option<Location>)> = written
+      .iter()
+      .map(|start: &usize| (FIELD_TYPE, span(*start, last.len()), filled))
+      .collect();
+    assert_eq!(found(&analysis), expected, "depth {depth}, fields {fields}");
+    let first = analysis
+      .diagnostics()
+      .iter()
+      .next()
+      .expect("a diagnostic for each field");
+    assert_eq!(
+      first.to_string(),
+      format!(
+        "the field `f0` of `Query` is typed by the collection `{last}`, whose argument is the \
+         input object `Bad`, and a field's type is an output type"
+      )
+    );
+    assert_eq!(
+      (
+        first.primary_label(),
+        first.labels(),
+        first.label(0).map(|label| label.text()),
+        first.help()
+      ),
+      (
+        Some("field type is not an output type"),
+        1,
+        Some("filled from this default"),
+        Some(
+          "a field's type must be a scalar, object, interface, union or enum; an input object \
+           appears only in argument and input-field positions."
+        )
+      )
+    );
+    // Under a ceiling of zero, each report is built and counted, and none is kept.
+    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0));
+    let diagnostics = silent.diagnostics();
+    assert!(diagnostics.is_empty(), "depth {depth}, fields {fields}");
+    assert!(diagnostics.truncated());
+    assert_eq!(diagnostics.error_count(), fields);
+  }
+}
+
+/// The stack [`on_a_deep_stack`] runs on: 512 MiB, past four times what the parser's recursion
+/// takes in a debug build for a type nested 3,000 deep, at about 40 KiB for each level.
+const DEEP_STACK: usize = 512 << 20;
+
+/// Runs `body` on a thread with room for the parser's own recursion, which descends a level for
+/// each bracket a text opens and drops its tree the same way: neither is what these tests are
+/// about.
+fn on_a_deep_stack(body: impl FnOnce() + Send + 'static) {
+  std::thread::Builder::new()
+    .stack_size(DEEP_STACK)
+    .spawn(body)
+    .expect("the thread spawns")
+    .join()
+    .expect("the body does not panic");
+}
+
+#[test]
+fn a_written_tree_many_reports_nest_in_is_read_once() {
+  // `@d<V>` puts the map `M`'s value parameter in a directive's argument, and `Query.f` is typed
+  // by `M<Int, …>` nested `depth` deep around the object `Obj`: each occurrence of `M` gives `V`
+  // `Obj`, or a map that holds it, so each is refused, at `Obj`, the deepest occurrence that
+  // writes the way to it, labelled where `V` stands. The depth varies, and each program runs again
+  // under a diagnostic ceiling of zero, which keeps no report and still builds and counts each. A
+  // test sees the diagnostics, not the work, which holds by construction: each written occurrence
+  // is answered once for the walk, in one step from the answer of the child it writes on the way,
+  // and each report reads the one answer kept for its argument. Walked again for each report, the
+  // deepest program here would follow what each occurrence writes below it for each of its 3,000
+  // reports, 4.5 million steps, where the rule now takes a few for each occurrence. The parser
+  // descends its own recursion a level for each `<`, so the text is read under a raised nesting
+  // ceiling, on a thread with room for that.
+  const DEPTH: usize = 3_000;
+  on_a_deep_stack(|| {
+    // The outermost map is as deep as the nesting, past the default bound.
+    let limits = Limits::new()
+      .with_max_generic_depth(u32::try_from(DEPTH + 1).expect("the nesting's depth is a u32"));
+    // `type Query {` opens a bracket, and so does each `<`.
+    let syntactic = Syntactic::with_limits(SyntacticLimits::with_max_nesting_depth(DEPTH + 2));
+    let flat = "`M` takes the object type `Obj` for its type parameter `V`, which stands as a \
+                directive argument's type, and a directive's argument's type is an input type";
+    let held = "`M` takes, for its type parameter `V`, which stands as a directive argument's \
+                type, a collection whose argument is the object type `Obj`, and a directive's \
+                argument's type is an input type";
+    for depth in [1, 2, DEPTH] {
+      let text = format!(
+        "type Query {{\n  f: {}Obj{}\n}}\ntype Obj {{\n  x: Int\n}}\n\
+         directive @d<X>(v: [X]) on SCALAR\nscalar M<K, V> @map @d<V>\n",
+        "M<Int, ".repeat(depth),
+        ">".repeat(depth)
+      );
+      let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+        .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+      let (analysis, _) = analyze_with(&syntactic, &root, &[], &limits);
+      let schema = schema_file(&analysis);
+      let leaf = named(schema, &text, "M<Int, ", "Obj", 0);
+      let stands = named(schema, &text, "@d<", "V", 0);
+      assert_eq!(
+        found(&analysis),
+        vec![(DIRECTIVE_ARGUMENT_TYPE, leaf, Some(stands)); depth],
+        "depth {depth}"
+      );
+      // The innermost map takes `Obj` itself, and each other one a map that holds it; equal but
+      // for their messages, they are in the order of those.
+      let mut expected = vec![String::from(flat)];
+      expected.resize(depth, String::from(held));
+      assert_eq!(messages(&analysis), expected, "depth {depth}");
+      let first = analysis
+        .diagnostics()
+        .iter()
+        .next()
+        .expect("a diagnostic for each map");
+      assert_eq!(
+        (
+          first.primary_label(),
+          first.label(0).map(|label| label.text()),
+          first.help()
+        ),
+        (
+          Some("directive argument type is not an input type"),
+          Some("`V` stands here"),
+          Some("a directive argument's type must be a scalar, enum or input object.")
+        )
+      );
+      assert!(
+        analysis
+          .diagnostics()
+          .iter()
+          .all(|diagnostic: &Diagnostic| diagnostic.labels() == 1),
+        "depth {depth}"
+      );
+      // Under a ceiling of zero, each report is built and counted, and none is kept.
+      let (silent, _) = analyze_with(&syntactic, &root, &[], &limits.with_max_diagnostics(0));
+      let diagnostics = silent.diagnostics();
+      assert!(diagnostics.is_empty(), "depth {depth}");
+      assert!(diagnostics.truncated());
+      assert_eq!(diagnostics.error_count(), depth);
+    }
+  });
+}
+
+#[test]
+fn instantiations_are_judged_across_files_modules_and_packages() {
+  // An extension in another file uses a generic type of a module; an extension in a third file
+  // adds a field argument to it; a dependency's generic input object is used by the root package.
+  const B: &str = "extend type Uses {\n  p: ~::m::Page<In>\n}\n";
+  const MORE: &str = "extend type Page<U> {\n  at(cursor: U): Int\n}\n";
+  const PAGE: &str = "type Page<T> {\n  items: [T]\n}\n";
+  const SCHEMA: &str = "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\ninput In {\n  i: Int\n}\n\
+                        type Uses {\n  q: ~::m::Page<Obj>\n  f(w: ^::geo::Filter<Obj>): Int\n}\n";
+  const GEO: &str = "input Filter<T> {\n  eq: T\n}\n";
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[
+      ("b.graphqlx", B),
+      ("m/more.graphqlx", MORE),
+      ("m/page.graphqlx", PAGE),
+      ("schema.graphqlx", SCHEMA),
+    ],
+  )
+  .with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("geo.graphqlx", GEO)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let b = file(&analysis, 3, "b.graphqlx");
+  let more = file(&analysis, 3, "m/more.graphqlx");
+  let page = file(&analysis, 3, "m/page.graphqlx");
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  let geo = file(&analysis, 4, "geo.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      // In the extension's file; where `Page`'s parameter stands, in its own file.
+      (
+        FIELD_TYPE,
+        named(b, B, "Page<", "In", 0),
+        Some(at(page, PAGE, "[T]", 0))
+      ),
+      // The argument another file's extension adds.
+      (
+        ARGUMENT_TYPE,
+        named(schema, SCHEMA, "m::Page<", "Obj", 0),
+        Some(named(more, MORE, "cursor: ", "U", 0))
+      ),
+      // In the root package's source, labelled in the dependency's.
+      (
+        INPUT_FIELD_TYPE,
+        named(schema, SCHEMA, "Filter<", "Obj", 0),
+        Some(named(geo, GEO, "eq: ", "T", 0))
+      ),
     ],
     "{:#?}",
     analysis.diagnostics()
@@ -1021,6 +2214,548 @@ fn a_required_argument_or_input_field_is_not_deprecated() {
   );
 }
 
+/// Deprecated members with no default typed by their definition's type parameter, written
+/// nullable: an input field, a field's argument and a directive's argument; one with a default;
+/// and instantiations that give each a non-null type, or a nullable one.
+const DEPRECATED_INSTANTIATIONS: &str = "type Query {\n  ok: Int\n}\n\
+                                         input I<T> {\n  a: T @deprecated\n  b: T = 1 @deprecated\n}\n\
+                                         type O<T> {\n  f(a: T @deprecated): Int\n}\n\
+                                         directive @d<T>(a: T @deprecated) on OBJECT\n\
+                                         type Uses @d<Int!>(a: 1) {\n  g(i: I<Int!>): Int\n  \
+                                         h(j: I<Int>): Int\n  o: O<Int!>\n}\n";
+
+#[test]
+fn what_an_instantiation_makes_required_is_not_deprecated() {
+  let analysis = analyze_one(DEPRECATED_INSTANTIATIONS);
+  let schema = schema_file(&analysis);
+  let text = DEPRECATED_INSTANTIATIONS;
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "@d<", "Int!", 0),
+        Some(named(schema, text, "(a: ", "T", 1))
+      ),
+      // `b` has a default: the input field `a` is the one `I<Int!>` makes required.
+      (
+        DEPRECATED_INPUT_FIELD,
+        named(schema, text, "I<", "Int!", 0),
+        Some(named(schema, text, "  a: ", "T", 0))
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "O<", "Int!", 0),
+        Some(named(schema, text, "(a: ", "T", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@d` takes a non-null type for its type parameter `T`, which makes a deprecated argument \
+       required",
+      "`I` takes a non-null type for its type parameter `T`, which makes a deprecated input field \
+       required",
+      "`O` takes a non-null type for its type parameter `T`, which makes a deprecated argument \
+       required",
+    ]
+  );
+  let words: Vec<(Option<&str>, Option<&str>)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| (diagnostic.primary_label(), diagnostic.help()))
+    .collect();
+  assert_eq!(
+    words[..2],
+    [
+      (
+        Some("required argument is deprecated"),
+        Some(
+          "to deprecate a required argument, first make it optional — give it a default, or drop \
+           the `!`."
+        )
+      ),
+      (
+        Some("required input field is deprecated"),
+        Some(
+          "to deprecate a required input field, first make it optional — give it a default, or \
+           drop the `!`."
+        )
+      ),
+    ]
+  );
+}
+
+/// A set whose element, and a map whose key, `@d` makes a deprecated argument's whole type,
+/// beside a map whose value it does; and uses of each, one through a type parameter. Each
+/// application leaves `v` out.
+const FORCED: &str = "type Query {\n  s: S<Int>\n  t: S<Int!>\n  u: Box<Int!>\n  \
+                      m: M<Int, Int>\n  n: N<Int, Int>\n  o: N<Int, Int!>\n}\n\
+                      directive @d<X>(v: X @deprecated) on SCALAR\nscalar S<T> @set @d<T>\n\
+                      scalar M<K, V> @map @d<K>\nscalar N<K, V> @map @d<V>\n\
+                      type Box<T> {\n  v: S<T>\n}\n";
+
+/// [`FORCED`], each application writing `v`, a value each instantiation judges, so that no use
+/// leaves out what its type arguments make required.
+const FORCED_WRITTEN: &str = "type Query {\n  s: S<Int>\n  t: S<Int!>\n  u: Box<Int!>\n  \
+                              m: M<Int, Int>\n  n: N<Int, Int>\n  o: N<Int, Int!>\n}\n\
+                              directive @d<X>(v: X @deprecated) on SCALAR\n\
+                              scalar S<T> @set @d<T>(v: 1)\nscalar M<K, V> @map @d<K>(v: 1)\n\
+                              scalar N<K, V> @map @d<V>(v: 1)\ntype Box<T> {\n  v: S<T>\n}\n";
+
+#[test]
+fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
+  // A set's element and a map's key are non-null in every instantiation, however they are
+  // written, so `S`'s `@d<T>` and `M`'s `@d<K>` make `v` required whatever `S` and `M` are given:
+  // each definition's mistake, reported once, where it gives the place, labelled at the
+  // `@deprecated`. No use repeats it, `S<Int>`, `S<Int!>`, `Box<Int!>`, which gives `S` its `T`,
+  // and `M<Int, Int>` among them; `N`'s value is no key, and `N<Int, Int!>` alone is refused.
+  // Each application writes `v`, `1`, which each use's type for it takes.
+  let text = FORCED_WRITTEN;
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let deprecated = Some(at(schema, text, "deprecated", 0));
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "N<Int, ", "Int!", 0),
+        Some(named(schema, text, "@d<", "V", 0))
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "@d<", "T", 0),
+        deprecated
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "@d<", "K", 0),
+        deprecated
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let forced_message = |part: &str, kind: &str, collection: &str, parameter: &str| -> String {
+    format!(
+      "`{parameter}`, the {part} of the {kind} `{collection}`, is non-null in every \
+       instantiation, and here it makes the deprecated argument `v` of the directive `@d` required"
+    )
+  };
+  assert_eq!(
+    messages(&analysis),
+    [
+      String::from(
+        "`N` takes a non-null type for its type parameter `V`, which makes a deprecated argument \
+         required"
+      ),
+      forced_message("element", "set", "S", "T"),
+      forced_message("key", "map", "M", "K"),
+    ]
+  );
+  let forced = analysis
+    .diagnostics()
+    .iter()
+    .nth(1)
+    .expect("three diagnostics");
+  let forced_words = (
+    Some("required argument is deprecated"),
+    1,
+    Some(
+      "a set's element and a map's key are non-null however they are written: give the \
+       deprecated member a default, or do not pass the key or element to it.",
+    ),
+  );
+  assert_eq!(
+    (forced.primary_label(), forced.labels(), forced.help()),
+    forced_words
+  );
+
+  // Where each application leaves `v` out, a use whose instantiation makes it required, `@d<Int!>`
+  // under it, is the coercion phase's `missing-required-directive-argument`, at the use, labelled
+  // at the application that leaves `v` out and at `v`: another rule, on another mistake. A use only
+  // a derivation reaches, the `S<Int!>` of `Box<Int!>`, is not checked. The phase's error marks
+  // `Query`, where the rule then says nothing, at `N<Int, Int!>` either; the definitions' mistakes
+  // are reported as before.
+  let text = FORCED;
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let deprecated = Some(at(schema, text, "deprecated", 0));
+  let path = |nth: usize| -> Option<Location> { Some(named(schema, text, "@", "d", nth)) };
+  assert_eq!(
+    found(&analysis),
+    [
+      (MISSING_ARGUMENT, at(schema, text, "S<Int>", 0), path(1)),
+      (MISSING_ARGUMENT, at(schema, text, "S<Int!>", 0), path(1)),
+      (
+        MISSING_ARGUMENT,
+        at(schema, text, "M<Int, Int>", 0),
+        path(2)
+      ),
+      (
+        MISSING_ARGUMENT,
+        at(schema, text, "N<Int, Int!>", 0),
+        path(3)
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "@d<", "T", 0),
+        deprecated
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "@d<", "K", 0),
+        deprecated
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let missing = |collection: &str| -> String {
+    format!(
+      "`{collection}` is instantiated here with type arguments under which `@d` requires its \
+       argument `v`, and an application it holds leaves it out"
+    )
+  };
+  assert_eq!(
+    messages(&analysis),
+    [
+      missing("S"),
+      missing("S"),
+      missing("M"),
+      missing("N"),
+      forced_message("element", "set", "S", "T"),
+      forced_message("key", "map", "M", "K"),
+    ]
+  );
+  let first = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("six diagnostics");
+  assert_eq!(
+    (
+      first.primary_label(),
+      first.labels(),
+      first.label(0).map(|label| label.text()),
+      first.label(1).map(|label| (label.location(), label.text())),
+      first.help()
+    ),
+    (
+      Some("missing required directive argument"),
+      2,
+      Some("this application leaves it out"),
+      Some((named(schema, text, "(", "v", 0), "required here")),
+      None
+    )
+  );
+  let forced = analysis
+    .diagnostics()
+    .iter()
+    .nth(4)
+    .expect("six diagnostics");
+  assert_eq!(
+    (forced.primary_label(), forced.labels(), forced.help()),
+    forced_words
+  );
+
+  // An input field, through the input object `W` the directive's argument names: the element is
+  // reported where `@e<T>` gives it, under the input field's code.
+  let text = "type Query {\n  s: S<Int>\n}\ninput W<Y> {\n  w: Y @deprecated\n}\n\
+              directive @e<X>(v: W<X>) on SCALAR\nscalar S<T> @set @e<T>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_INPUT_FIELD,
+      named(schema, text, "@e<", "T", 0),
+      Some(at(schema, text, "deprecated", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`T`, the element of the set `S`, is non-null in every instantiation, and here it makes the \
+       deprecated input field `w` of `W` required"
+    ]
+  );
+
+  // Where a default fills the slot, at the application's path; and where an `implements` entry
+  // passes the element on, at the entry. Each once, and `S<Int>` adds nothing of this rule's. The
+  // application with the default leaves `v` out, so `S<Int>` is the phase's
+  // `missing-required-directive-argument`, as in `FORCED`; the one on `Mk` is reached at `S<Int>`
+  // only through a derivation, which the phase does not check.
+  let deprecated_message = "`T`, the element of the set `S`, is non-null in every instantiation, \
+                            and here it makes the deprecated argument `v` of the directive `@d` \
+                            required";
+  let text = "type Query {\n  s: S<Int>\n}\n\
+              directive @d<X, Y = X>(v: Y @deprecated) on SCALAR\nscalar S<T> @set @d<T>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        MISSING_ARGUMENT,
+        at(schema, text, "S<Int>", 0),
+        Some(named(schema, text, "@", "d", 1))
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "@", "d", 1),
+        Some(at(schema, text, "deprecated", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [missing("S"), String::from(deprecated_message)]
+  );
+  let text = "type Query {\n  s: S<Int>\n}\ndirective @d<X>(v: X @deprecated) on INTERFACE\n\
+              interface Mk<X> @marker @d<X>\nscalar S<T> implements Mk<T> @set\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      at(schema, text, "Mk<T>", 0),
+      Some(at(schema, text, "deprecated", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [deprecated_message]);
+}
+
+#[test]
+fn a_member_many_collections_make_required_is_read_once() {
+  // `@d`'s argument `v` applies `@tag` `tags` times and then `@deprecated`, and each of `sets`
+  // sets gives `v` its element through `@d<T>`: each is its definition's mistake, refused once, at
+  // the `T` of its `@d<T>`, labelled at the one `@deprecated`. The counts vary, and each program
+  // runs again under a diagnostic ceiling of zero, which keeps no report and still builds and
+  // counts each. A test sees the diagnostics, not the work, which holds by construction: where `v`
+  // applies `@deprecated` is found in the one look the table of where each type parameter stands
+  // takes at `v`'s applications, and kept with each set's mistake, so each report reads it in one
+  // lookup. Read from `v`'s applications again for each report, the largest program here would
+  // pass its 3,000 `@tag`s for each of its 3,000 sets, 9 million steps, where the rule now takes a
+  // few for each set.
+  const SETS: usize = 3_000;
+  const TAGS: usize = 3_000;
+  let limits = Limits::new();
+  for (sets, tags) in [(1, 1), (SETS, 1), (1, TAGS), (SETS, TAGS)] {
+    let mut text = format!(
+      "type Query {{\n  ok: Int\n}}\ndirective @tag repeatable on ARGUMENT_DEFINITION\n\
+       directive @d<X>(v: X{} @deprecated) on SCALAR\n",
+      " @tag".repeat(tags)
+    );
+    // Where each set's `T` in `@d<T>` is written.
+    let mut written: Vec<usize> = Vec::with_capacity(sets);
+    for index in 0..sets {
+      let head = format!("scalar S{index}<T> @set @d<");
+      written.push(text.len() + head.len());
+      text.push_str(&head);
+      text.push_str("T>\n");
+    }
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+    let analysis = analyze(&root, &[], &limits);
+    let schema = schema_file(&analysis);
+    let deprecated = Some(at(schema, &text, "deprecated", 0));
+    let expected: Vec<(&'static str, Location, Option<Location>)> = written
+      .iter()
+      .map(|start: &usize| {
+        (
+          DEPRECATED_ARGUMENT,
+          Location::new(schema.get(), SimpleSpan::new(*start, *start + 1)),
+          deprecated,
+        )
+      })
+      .collect();
+    assert_eq!(found(&analysis), expected, "sets {sets}, tags {tags}");
+    let expected: Vec<String> = (0..sets)
+      .map(|index: usize| {
+        format!(
+          "`T`, the element of the set `S{index}`, is non-null in every instantiation, and here \
+           it makes the deprecated argument `v` of the directive `@d` required"
+        )
+      })
+      .collect();
+    assert_eq!(messages(&analysis), expected, "sets {sets}, tags {tags}");
+    assert!(
+      analysis
+        .diagnostics()
+        .iter()
+        .all(|diagnostic: &Diagnostic| diagnostic.labels() == 1),
+      "sets {sets}, tags {tags}"
+    );
+    // Under a ceiling of zero, each report is built and counted, and none is kept.
+    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0));
+    let diagnostics = silent.diagnostics();
+    assert!(diagnostics.is_empty(), "sets {sets}, tags {tags}");
+    assert!(diagnostics.truncated());
+    assert_eq!(diagnostics.error_count(), sets);
+  }
+}
+
+#[test]
+fn a_key_written_non_null_a_deprecated_member_takes_is_refused_once() {
+  // `@d<T!>` makes `v` required as written: the application's own mistake, refused once, at `T!`,
+  // as any instantiation is, labelled where `@d`'s `X` stands. That the `T!` is the set's element
+  // as well adds nothing: what the forced path reports is what the complete type alone makes
+  // non-null. The twin, `@d<T>`, is refused once, through the forced path, at its `T`, labelled at
+  // the `@deprecated`. `S<Int>` adds nothing to either. Each application writes `v`, `1`, which
+  // `S<Int>`'s type for it takes: one that leaves out what its type arguments make required is
+  // the coercion phase's `missing-required-directive-argument`, as the last case shows.
+  let program = |application: &str| -> String {
+    format!(
+      "type Query {{\n  s: S<Int>\n}}\ndirective @d<X>(v: X @deprecated) on SCALAR\n\
+       scalar S<T> @set {application}\n"
+    )
+  };
+  let text = program("@d<T!>(v: 1)");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      at(schema, &text, "T!", 0),
+      Some(named(schema, &text, "v: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@d` takes a non-null type for its type parameter `X`, which makes a deprecated argument \
+       required"
+    ]
+  );
+  let text = program("@d<T>(v: 1)");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      named(schema, &text, "@d<", "T", 0),
+      Some(at(schema, &text, "deprecated", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`T`, the element of the set `S`, is non-null in every instantiation, and here it makes the \
+       deprecated argument `v` of the directive `@d` required"
+    ]
+  );
+
+  // Two directives give the element the same place, one through `T!`: each is refused once, by
+  // its own owner, whichever reaches the element first, since what `@e<T!>` gives stops short of
+  // the element and takes no room from what `@d<T>` gives.
+  let text = "type Query {\n  s: S<Int>\n}\ndirective @e<X>(w: X @deprecated) on SCALAR\n\
+              directive @d<X>(v: X @deprecated) on SCALAR\n\
+              scalar S<T> @set @e<T!>(w: 1) @d<T>(v: 1)\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DEPRECATED_ARGUMENT,
+        at(schema, text, "T!", 0),
+        Some(named(schema, text, "w: ", "X", 0))
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "@d<", "T", 0),
+        Some(at(schema, text, "deprecated", 1))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@e` takes a non-null type for its type parameter `X`, which makes a deprecated argument \
+       required",
+      "`T`, the element of the set `S`, is non-null in every instantiation, and here it makes the \
+       deprecated argument `v` of the directive `@d` required",
+    ]
+  );
+
+  // A default written non-null, `Y = X!`, fills the slot `@d<T>` leaves out with `T!`: the
+  // application's mistake, refused once, at its path, as any fill that gives a non-null type is,
+  // labelled where `Y` stands and at the default.
+  let text = "type Query {\n  s: S<Int>\n}\ndirective @d<X, Y = X!>(v: Y @deprecated) on SCALAR\n\
+              scalar S<T> @set @d<T>(v: 1)\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      named(schema, text, "@", "d", 1),
+      Some(named(schema, text, "v: ", "Y", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@d` takes, from the default of `Y`, a non-null type for its type parameter `Y`, which \
+       makes a deprecated argument required"
+    ]
+  );
+  let filled = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    filled
+      .label(1)
+      .map(|label| (label.location(), label.text())),
+    Some((at(schema, text, "X!", 0), "filled from this default"))
+  );
+
+  // Left out where `T!` makes it required, `v` is the coercion phase's: one
+  // `missing-required-directive-argument`, at the application's path, labelled at `v`. Its error
+  // marks `S`, where the rule says nothing by either path: one owner still.
+  let text = program("@d<T!>");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      MISSING_ARGUMENT,
+      named(schema, &text, "@", "d", 1),
+      Some(named(schema, &text, "(", "v", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    ["`@d` requires its argument `v`, and this application leaves it out"]
+  );
+}
+
 /// A OneOf input object with a field of each shape, and a generic one whose field is a type
 /// parameter.
 const ONE_OF: &str = "type Query {\n  ok: Int\n}\n\
@@ -1071,6 +2806,634 @@ fn a_one_of_input_objects_fields_are_nullable_and_have_no_default() {
       ),
     ]
   );
+}
+
+/// OneOf input objects whose field is a type parameter, written nullable, and one whose field is a
+/// list of one; an input object that holds one; and one whose default fills it non-null.
+const ONE_OF_INSTANTIATIONS: &str = "type Query {\n  ok: Int\n}\n\
+                                     input Choice<T> @oneOf {\n  x: T\n}\n\
+                                     input L<T> @oneOf {\n  x: [T]\n}\n\
+                                     input Holds<U> {\n  c: Choice<U>\n}\n\
+                                     input Filled<T = Int!> @oneOf {\n  y: T\n}\n\
+                                     type Uses {\n  a(c: Choice<Int!>): Int\n  \
+                                     b(c: Choice<Int>): Int\n  d(l: L<Int!>): Int\n  \
+                                     e(h: Holds<Int!>): Int\n  f(c: Filled): Int\n}\n";
+
+#[test]
+fn a_one_of_field_a_parameter_types_stays_nullable() {
+  let analysis = analyze_one(ONE_OF_INSTANTIATIONS);
+  let schema = schema_file(&analysis);
+  let text = ONE_OF_INSTANTIATIONS;
+  let choice = Some(named(schema, text, "x: ", "T", 0));
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        ONE_OF_NON_NULL,
+        named(schema, text, "a(c: Choice<", "Int!", 0),
+        choice
+      ),
+      // `Holds`'s `U` is `Choice`'s `T`, passed on at `Choice<U>`.
+      (
+        ONE_OF_NON_NULL,
+        named(schema, text, "Holds<", "Int!", 0),
+        Some(at(schema, text, "Choice<U>", 0))
+      ),
+      // A default fills it: at the occurrence.
+      (
+        ONE_OF_NON_NULL,
+        named(schema, text, "f(c: ", "Filled", 0),
+        Some(named(schema, text, "y: ", "T", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let messages = messages(&analysis);
+  assert_eq!(
+    messages,
+    [
+      "`Choice` takes a non-null type for its type parameter `T`, which is the type of the field \
+       `x` of the OneOf input object `Choice`",
+      "`Holds` takes a non-null type for its type parameter `U`, which is the type of the field \
+       `x` of the OneOf input object `Choice`",
+      "`Filled` takes, from the default of `T`, a non-null type for its type parameter `T`, which \
+       is the type of the field `y` of the OneOf input object `Filled`",
+    ]
+  );
+  let filled = analysis
+    .diagnostics()
+    .iter()
+    .nth(2)
+    .expect("three diagnostics");
+  assert_eq!(
+    (
+      filled.primary_label(),
+      filled
+        .label(1)
+        .map(|label| (label.location(), label.text())),
+      filled.help()
+    ),
+    (
+      Some("field of a @oneOf input object is non-null"),
+      Some((
+        named(schema, text, "T = ", "Int!", 0),
+        "filled from this default"
+      )),
+      Some(
+        "every field of a `@oneOf` input object is one of the alternatives, so each one has to be \
+         nullable."
+      )
+    )
+  );
+}
+
+#[test]
+fn a_collections_key_a_one_of_field_takes_is_refused_once() {
+  // `@d<T>` makes the element of the set `S`, non-null in every instantiation, the type of
+  // `Choice`'s field `x`: the definition's mistake, reported once, where it gives the place,
+  // labelled at the field. `S<Int>` and `S<Int!>` add nothing.
+  let text = "type Query {\n  s: S<Int>\n  t: S<Int!>\n}\ninput Choice<C> @oneOf {\n  x: C\n}\n\
+              directive @d<X>(v: Choice<X>) on SCALAR\nscalar S<T> @set @d<T>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      named(schema, text, "@d<", "T", 0),
+      Some(named(schema, text, "  ", "x", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`T`, the element of the set `S`, is non-null in every instantiation, and here it is the \
+       type of the field `x` of the OneOf input object `Choice`"
+    ]
+  );
+  let forced = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    (
+      forced.primary_label(),
+      forced.label(0).map(|label| label.text()),
+      forced.help()
+    ),
+    (
+      Some("field of a @oneOf input object is non-null"),
+      Some("the field it is the type of"),
+      Some(
+        "a set's element and a map's key are non-null however they are written, and every field \
+         of a `@oneOf` input object has to be nullable: do not pass the key or element to one."
+      )
+    )
+  );
+}
+
+#[test]
+fn a_key_written_non_null_a_one_of_field_takes_is_refused_once() {
+  // `@d<T!>` gives `Choice`'s field `value` a non-null type as written: the application's own
+  // mistake, refused once, at `T!`, as any instantiation is, labelled where `@d`'s `X` stands, at
+  // `Choice<X>`. That the `T!` is the set's element as well adds nothing: what the forced path
+  // reports is what the complete type alone makes non-null. The twin, `@d<T>`, is refused once,
+  // through the forced path, at its `T`, labelled at the field. `S<Int>` adds nothing to either.
+  let program = |element: &str| -> String {
+    format!(
+      "type Query {{\n  s: S<Int>\n}}\ninput Choice<X> @oneOf {{\n  value: X\n}}\n\
+       directive @d<X>(value: Choice<X>) on SCALAR\nscalar S<T> @set @d<{element}>\n"
+    )
+  };
+  let text = program("T!");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, &text, "T!", 0),
+      Some(at(schema, &text, "Choice<X>", 1))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@d` takes a non-null type for its type parameter `X`, which is the type of the field \
+       `value` of the OneOf input object `Choice`"
+    ]
+  );
+  let text = program("T");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      named(schema, &text, "@d<", "T", 0),
+      Some(named(schema, &text, "  ", "value", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`T`, the element of the set `S`, is non-null in every instantiation, and here it is the \
+       type of the field `value` of the OneOf input object `Choice`"
+    ]
+  );
+}
+
+#[test]
+fn a_parameter_given_non_null_passes_no_nullable_place_on() {
+  // `E`'s `@d<U!>` makes `v` required whatever `E` is given: its own mistake, refused once, at
+  // `U!`, labelled where `@d`'s `X` stands. The place stops at `U!`, so neither `E<Int!>`, whose
+  // argument changes nothing, nor the set `S`, whose element `@e<E<T>>` gives `E`, is refused for
+  // it: each mistake has one owner. `@d<U!>` writes `v`, which `E<Int!>`'s type for it takes.
+  let text = "type Query {\n  s: S<Int>\n  e: E<Int!>\n}\n\
+              directive @d<X>(v: X @deprecated) on SCALAR\ndirective @e<Y>(w: Y) on SCALAR\n\
+              scalar E<U> @d<U!>(v: 1)\nscalar S<T> @set @e<E<T>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      at(schema, text, "U!", 0),
+      Some(named(schema, text, "v: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@d` takes a non-null type for its type parameter `X`, which makes a deprecated argument \
+       required"
+    ]
+  );
+
+  // The same for a OneOf's field: refused once, at `U!`, labelled at `Choice<X>`, where `@d`'s
+  // `X` stands.
+  let text = "type Query {\n  s: S<Int>\n  e: E<Int!>\n}\ninput Choice<X> @oneOf {\n  value: X\n}\n\
+              directive @d<X>(value: Choice<X>) on SCALAR\ndirective @e<Y>(w: Y) on SCALAR\n\
+              scalar E<U> @d<U!>\nscalar S<T> @set @e<E<T>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "U!", 0),
+      Some(at(schema, text, "Choice<X>", 1))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@d` takes a non-null type for its type parameter `X`, which is the type of the field \
+       `value` of the OneOf input object `Choice`"
+    ]
+  );
+}
+
+#[test]
+fn a_parameter_a_default_gives_non_null_passes_no_nullable_place_on() {
+  // `E`'s default `V = U!` gives `V`, which `@d<V>` makes a deprecated argument's whole type, a
+  // non-null type whatever `E` is given: the mistake of each occurrence that leaves `V` out,
+  // refused where it is written, as any instantiation is, here `E<T>`, labelled where `V` stands
+  // and at the default. The `T!` that `E<T>`'s fill gives stops the place short of the set's
+  // element, as a `T!` written does: `S` is not refused for it, and `S<Int>` adds nothing.
+  let text = "type Query {\n  s: S<Int>\n}\ndirective @d<X>(v: X @deprecated) on SCALAR\n\
+              directive @e<Y>(w: Y) on SCALAR\nscalar E<U, V = U!> @d<V>(v: 1)\n\
+              scalar S<T> @set @e<E<T>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      at(schema, text, "E<T>", 0),
+      Some(named(schema, text, "@d<", "V", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`E` takes, from the default of `V`, a non-null type for its type parameter `V`, which makes \
+       a deprecated argument required"
+    ]
+  );
+  let filled = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    filled
+      .label(1)
+      .map(|label| (label.location(), label.text())),
+    Some((at(schema, text, "U!", 0), "filled from this default"))
+  );
+
+  // The same for a OneOf's field: refused once, at `E<T>`, labelled where `V` stands.
+  let text = "type Query {\n  s: S<Int>\n}\ninput Choice<X> @oneOf {\n  value: X\n}\n\
+              directive @d<X>(value: Choice<X>) on SCALAR\ndirective @e<Y>(w: Y) on SCALAR\n\
+              scalar E<U, V = U!> @d<V>\nscalar S<T> @set @e<E<T>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "E<T>", 0),
+      Some(named(schema, text, "@d<", "V", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`E` takes, from the default of `V`, a non-null type for its type parameter `V`, which is \
+       the type of the field `value` of the OneOf input object `Choice`"
+    ]
+  );
+}
+
+/// The report of a non-null type given to the `X` of `input Choice<X> @oneOf { value: X }` by an
+/// instantiation of `Choice` that is written.
+const CHOICE_TAKES: &str = "`Choice` takes a non-null type for its type parameter `X`, which is \
+                            the type of the field `value` of the OneOf input object `Choice`";
+
+/// The report of a non-null type given to that `X` by what the default of `B` of `Ref` fills.
+const CHOICE_FILLED: &str = "the default of `B` of `Ref` makes `Choice` take a non-null type for \
+                             its type parameter `X`, which is the type of the field `value` of \
+                             the OneOf input object `Choice`";
+
+#[test]
+fn a_default_the_rule_refuses_is_refused_where_it_is_written() {
+  // `Ref`'s default `Choice<A!>` gives `Choice`'s field `value` a non-null type as written: its
+  // own mistake, refused once, at `A!`, labelled where `X` stands. `Ref<Int>` leaves `B` to that
+  // default, and its fill derives `Choice<Int!>`, which no occurrence writes and which would
+  // repeat the default's mistake: a fill that leaves a slot to a default the rule refuses derives
+  // nothing to judge, and neither use adds a report. Each use derives a `Choice` of its own, so a
+  // second use, `Ref<Boolean>`, is no type the first judged.
+  let text = "type Query {\n  x: Ref<Int>\n  y: Ref<Boolean>\n}\n\
+              input Choice<X> @oneOf {\n  value: X\n}\nscalar Ref<A, B = Choice<A!>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "A!", 0),
+      Some(named(schema, text, "value: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [CHOICE_TAKES]);
+
+  // The same for a deprecated input field.
+  let text = "type Query {\n  x: Ref<Int>\n  y: Ref<Boolean>\n}\n\
+              input Choice<X> {\n  value: X @deprecated\n}\nscalar Ref<A, B = Choice<A!>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_INPUT_FIELD,
+      at(schema, text, "A!", 0),
+      Some(named(schema, text, "value: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Choice` takes a non-null type for its type parameter `X`, which makes a deprecated input \
+       field required"
+    ]
+  );
+}
+
+#[test]
+fn a_default_only_a_use_makes_refused_is_the_uses_mistake() {
+  // `Choice<A>` gives `Choice` what `A` is given, and is no mistake as written: `Ref<Int!>`'s fill
+  // derives `Choice<Int!>`, which substitution alone makes refused, so it is refused at the use,
+  // from the default of `B`, labelled where `X` stands and at the default. `Ref<Int>` adds nothing.
+  let text = "type Query {\n  x: Ref<Int!>\n  y: Ref<Int>\n}\n\
+              input Choice<X> @oneOf {\n  value: X\n}\nscalar Ref<A, B = Choice<A>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "Ref<Int!>", 0),
+      Some(named(schema, text, "value: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [CHOICE_FILLED]);
+  let filled = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    filled
+      .label(1)
+      .map(|label| (label.location(), label.text())),
+    Some((
+      named(schema, text, "B = ", "Choice<A>", 0),
+      "filled from this default"
+    ))
+  );
+
+  // A default may name a parameter written after it, which is filled first: `C`'s `A!` fills the
+  // `C` of `B`'s `Choice<C>`. Neither default is refused as written, so what `Ref<Int>`'s fill
+  // derives is the use's own mistake, refused at the use.
+  let text = "type Query {\n  x: Ref<Int>\n}\ninput Choice<X> @oneOf {\n  value: X\n}\n\
+              scalar Ref<A, B = Choice<C>, C = A!>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "Ref<Int>", 0),
+      Some(named(schema, text, "value: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [CHOICE_FILLED]);
+}
+
+#[test]
+fn a_nested_default_owns_what_its_fill_derives() {
+  // `Wrap`'s default `Choice<W!>` is refused at `W!`. `Ref`'s default `Wrap<A>` leaves `V` to it,
+  // and its complete type, `Wrap<A, Choice<A!>>`, holds what `Wrap`'s default makes of `A`: a
+  // mistake `W!` owns. So `Wrap<A>`, `Ref<Int>` and `Wrap<Int>`, each of whose fills derives a
+  // `Choice` that no occurrence writes, add nothing, with `Wrap<Int>` written or not.
+  for uses in ["  x: Ref<Int>\n  y: Wrap<Int>\n", "  x: Ref<Int>\n"] {
+    let text = format!(
+      "type Query {{\n{uses}}}\ninput Choice<X> @oneOf {{\n  value: X\n}}\n\
+       scalar Wrap<W, V = Choice<W!>>\nscalar Ref<A, B = Wrap<A>>\n"
+    );
+    let analysis = analyze_text(&text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(
+        ONE_OF_NON_NULL,
+        at(schema, &text, "W!", 0),
+        Some(named(schema, &text, "value: ", "X", 0))
+      )],
+      "{uses}{:#?}",
+      analysis.diagnostics()
+    );
+    assert_eq!(messages(&analysis), [CHOICE_TAKES], "{uses}");
+  }
+}
+
+#[test]
+fn a_refused_default_hides_what_substitution_adds_to_its_fill() {
+  // The recorded remainder. `B`'s default is refused at `A!`, and `Ref<Int!>` leaves `B` and `C`
+  // out, so its fill derives nothing to judge, the whole fill and not `B`'s slot alone: what
+  // substitution alone makes of `C`'s default, `Choice<Int!>`, is not reported until `B`'s default
+  // is fixed. The analysis is not ok meanwhile.
+  let text = "type Query {\n  x: Ref<Int!>\n}\ninput Choice<X> @oneOf {\n  value: X\n}\n\
+              scalar Ref<A, B = Choice<A!>, C = Choice<A>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "A!", 0),
+      Some(named(schema, text, "value: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [CHOICE_TAKES]);
+  assert!(!analysis.is_ok());
+
+  // Fixed, `B`'s default derives a `Choice<Int!>` too, the first slot that fails: at the use, from
+  // the default of `B`.
+  let text = "type Query {\n  x: Ref<Int!>\n}\ninput Choice<X> @oneOf {\n  value: X\n}\n\
+              scalar Ref<A, B = Choice<A>, C = Choice<A>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "Ref<Int!>", 0),
+      Some(named(schema, text, "value: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [CHOICE_FILLED]);
+}
+
+#[test]
+fn a_default_of_the_wrong_kind_is_refused_where_it_is_written() {
+  // `Pair`'s `Q` stands as an input field's type, so `Ref`'s default `Pair<A, Obj>` is refused at
+  // `Obj`, where it is written, labelled where `Q` stands. Each use derives a `Pair` of its own,
+  // `Pair<Int, Obj>` and `Pair<Boolean, Obj>`, which no occurrence writes, and adds nothing.
+  let text = "type Query {\n  x: Ref<Int>\n  y: Ref<Boolean>\n}\ntype Obj {\n  o: Int\n}\n\
+              input Pair<P, Q> {\n  p: P\n  q: Q\n}\nscalar Ref<A, B = Pair<A, Obj>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      INPUT_FIELD_TYPE,
+      named(schema, text, "Pair<A, ", "Obj", 0),
+      Some(named(schema, text, "q: ", "Q", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Pair` takes the object type `Obj` for its type parameter `Q`, which stands as an input \
+       field's type, and an input field's type is an input type"
+    ]
+  );
+
+  // The twin, a default that fits as written: `Ref<Obj>`'s fill derives `Pair<Obj, Int>`, refused
+  // at the use, from the default of `B`, labelled where `P` stands and at the default.
+  let text = "type Query {\n  x: Ref<Obj>\n  y: Ref<Int>\n}\ntype Obj {\n  o: Int\n}\n\
+              input Pair<P, Q> {\n  p: P\n  q: Q\n}\nscalar Ref<A, B = Pair<A, Int>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      INPUT_FIELD_TYPE,
+      at(schema, text, "Ref<Obj>", 0),
+      Some(named(schema, text, "p: ", "P", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the default of `B` of `Ref` makes `Pair` take the object type `Obj` for its type parameter \
+       `P`, which stands as an input field's type, and an input field's type is an input type"
+    ]
+  );
+  let filled = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    filled
+      .label(1)
+      .map(|label| (label.location(), label.text())),
+    Some((
+      named(schema, text, "B = ", "Pair<A, Int>", 0),
+      "filled from this default"
+    ))
+  );
+}
+
+#[test]
+fn each_refused_default_is_refused_once_however_many_uses() {
+  // Each of `definitions` scalars `R{i}` has the default `Choice<A!>`, refused at its `A!`, and is
+  // used `uses` times, `R{i}<S{j}>`: each use is a type of its own, whose fill derives a
+  // `Choice<S{j}!>` that no occurrence writes. Each default is refused once, at its `A!`, and no
+  // use is. The counts vary, and each program runs again under a diagnostic ceiling of zero, which
+  // keeps no report and still builds and counts each. A test sees the diagnostics, not the work,
+  // which holds by construction: whether a definition's defaults are refused is found at the first
+  // of its fills judged, each type of its defaults' trees looked under once for the walk, and kept
+  // by the definition, so each later use reads one kept answer. Judged at each use, each use was
+  // refused again for its definition's mistake: 3,000 reports more in each of the largest
+  // programs, and 10,000 in the square.
+  const DEFINITIONS: usize = 3_000;
+  const USES: usize = 3_000;
+  // Both counts at once write their product of uses, each an instantiation of its own: a square
+  // of 10,000.
+  const SQUARE: usize = 100;
+  let limits = Limits::new();
+  for (definitions, uses) in [(1, 1), (DEFINITIONS, 1), (1, USES), (SQUARE, SQUARE)] {
+    let mut text = String::from("type Query {\n");
+    for definition in 0..definitions {
+      for index in 0..uses {
+        text.push_str(&format!(
+          "  f{definition}_{index}: R{definition}<S{index}>\n"
+        ));
+      }
+    }
+    text.push_str("}\ninput Choice<X> @oneOf {\n  value: X\n}\n");
+    for index in 0..uses {
+      text.push_str(&format!("scalar S{index}\n"));
+    }
+    // Where each definition's `A!` is written.
+    let mut written: Vec<usize> = Vec::with_capacity(definitions);
+    for definition in 0..definitions {
+      let head = format!("scalar R{definition}<A, B = Choice<");
+      written.push(text.len() + head.len());
+      text.push_str(&head);
+      text.push_str("A!>>\n");
+    }
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+    let analysis = analyze(&root, &[], &limits);
+    let schema = schema_file(&analysis);
+    let stands = Some(named(schema, &text, "value: ", "X", 0));
+    let expected: Vec<(&'static str, Location, Option<Location>)> = written
+      .iter()
+      .map(|start: &usize| {
+        (
+          ONE_OF_NON_NULL,
+          Location::new(schema.get(), SimpleSpan::new(*start, *start + 2)),
+          stands,
+        )
+      })
+      .collect();
+    assert_eq!(
+      found(&analysis),
+      expected,
+      "definitions {definitions}, uses {uses}"
+    );
+    assert_eq!(
+      messages(&analysis),
+      vec![CHOICE_TAKES; definitions],
+      "definitions {definitions}, uses {uses}"
+    );
+    // Under a ceiling of zero, each report is built and counted, and none is kept.
+    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0));
+    let diagnostics = silent.diagnostics();
+    assert!(
+      diagnostics.is_empty(),
+      "definitions {definitions}, uses {uses}"
+    );
+    assert!(diagnostics.truncated());
+    assert_eq!(diagnostics.error_count(), definitions);
+  }
 }
 
 #[test]
@@ -1194,6 +3557,38 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype T {\n  f: In\n}\n\
      type U {\n  x: Missing\n}\n",
   );
+  // A collection's argument, an instantiation's in a member's type, an application's, and what a
+  // fill derives.
+  silent_beside_a_phase(
+    ARGUMENT_TYPE,
+    "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
+     type T {\n  f(m: HashMap<string, Obj>): Int\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
+     type T {\n  f(m: HashMap<string, Obj>): Int\n}\ntype U {\n  x: Missing\n}\n",
+  );
+  silent_beside_a_phase(
+    FIELD_TYPE,
+    "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Page<P> {\n  items: [P]\n}\n\
+     type T {\n  p: Page<In>\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Page<P> {\n  items: [P]\n}\n\
+     type T {\n  p: Page<In>\n}\ntype U {\n  x: Missing\n}\n",
+  );
+  silent_beside_a_phase(
+    DIRECTIVE_ARGUMENT_TYPE,
+    "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
+     directive @tagged<V>(value: V) on OBJECT\ntype T @tagged<Obj> {\n  t: Int\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
+     directive @tagged<V>(value: V) on OBJECT\ntype T @tagged<Obj> {\n  t: Int\n}\n\
+     type U {\n  x: Missing\n}\n",
+  );
+  silent_beside_a_phase(
+    FIELD_TYPE,
+    "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+     type Conn<N, E = Edge<N>> {\n  edges: [E]\n}\ntype T {\n  c: Conn<In>\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ninput In {\n  i: Int\n}\ntype Edge<N> {\n  node: N\n}\n\
+     type Conn<N, E = Edge<N>> {\n  edges: [E]\n}\ntype T {\n  c: Conn<In>\n}\n\
+     type U {\n  x: Missing\n}\n",
+  );
   silent_beside_a_phase(
     IMPLEMENTS,
     "type Query {\n  ok: Int\n}\ntype Obj {\n  o: Int\n}\n\
@@ -1216,6 +3611,20 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     ONE_OF_NON_NULL,
     "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int!\n  x: Missing\n}\n",
     "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int!\n}\ninput U {\n  x: Missing\n}\n",
+  );
+  silent_beside_a_phase(
+    DEPRECATED_INPUT_FIELD,
+    "type Query {\n  ok: Int\n}\ninput I<T> {\n  a: T @deprecated\n}\n\
+     type T {\n  f(i: I<Int!>): Int\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ninput I<T> {\n  a: T @deprecated\n}\n\
+     type T {\n  f(i: I<Int!>): Int\n}\ntype U {\n  x: Missing\n}\n",
+  );
+  silent_beside_a_phase(
+    ONE_OF_NON_NULL,
+    "type Query {\n  ok: Int\n}\ninput Choice<T> @oneOf {\n  x: T\n}\n\
+     type T {\n  f(c: Choice<Int!>): Int\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ninput Choice<T> @oneOf {\n  x: T\n}\n\
+     type T {\n  f(c: Choice<Int!>): Int\n}\ntype U {\n  x: Missing\n}\n",
   );
   silent_beside_a_phase(
     ONE_OF_DEFAULT,
@@ -1256,7 +3665,15 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
   let owner = "T".repeat(4096);
   let member = format!("__{}", "f".repeat(4096));
   let plain = "m".repeat(4096);
+  let param = "P".repeat(4096);
   let texts = [
+    format!(
+      "type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  f({plain}: HashMap<string, {owner}>): Int\n}}\n"
+    ),
+    format!(
+      "type Query {{\n  ok: Int\n}}\ninput In {{\n  i: Int\n}}\n\
+       type {owner}<{param}> {{\n  {plain}: {param}\n}}\ntype U {{\n  u: {owner}<In>\n}}\n"
+    ),
     format!("type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  {member}: Int\n}}\n"),
     format!("type Query {{\n  ok: Int\n}}\ntype {owner} {{\n  {plain}: Int\n  {plain}: Int\n}}\n"),
     format!("type Query {{\n  ok: Int\n}}\ntype {owner}\n"),

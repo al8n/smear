@@ -691,6 +691,23 @@ fn a_type_argument_a_default_and_an_applications_type_argument_are_edges() {
 }
 
 #[test]
+fn a_generic_directive_given_the_input_object_it_stands_in_is_accepted() {
+  // The owner's ruling of 2026-11-14 on the gate's Q2: a generic directive whose type parameter
+  // types its argument, applied with the input object it stands in as its type argument, does not
+  // refer to itself in v1, whatever the same program written without generics is. Recorded, not
+  // refused: the graph reads a type parameter as naming nothing, and the instantiation is of the
+  // right kind.
+  let text = "type Query {\n  ok: Int\n}\ndirective @d<T>(a: T) on INPUT_FIELD_DEFINITION\n\
+              input In {\n  x: Int @d<In>\n}\n";
+  let analysis = analyze_one(text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
 fn a_built_in_directive_on_a_cycle_is_reported_at_its_own_name() {
   // The root package's `scalar String` replaces `alloc`'s `string`, which `core`'s `@specifiedBy`
   // takes as its `url`, and applies `@specifiedBy`: the cycle is reported at `@specifiedBy`'s own

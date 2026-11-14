@@ -60,7 +60,8 @@ application's argument left out takes a copy of its default, and so does an obje
 but a OneOf input object's; a required argument left out is
 `smear::schema::missing-required-directive-argument`. A
 copy is counted before it is made, and a default whose copy would hold a copy of itself is not
-copied; the copies, the reads of a default's count, by another's and by each later copy of it, the
+copied, the cycle being `smear::schema::input-object-default-value-cycle` where the count meets
+itself, at one field of it, under type arguments too; the copies, the reads of a default's count, by another's and by each later copy of it, the
 required arguments and fields left out, the lists a value written alone stands for where a list is
 expected, the conversion of a decimal integer of more than 38 significant digits, each field a
 count reads of an object literal against an input object it had not read it against, and the
@@ -90,7 +91,9 @@ exactly its type and requiring no other. The refusals are `smear-schema`'s nine 
 `smear::schema::duplicate-implements-interface`, `duplicate-union-member`,
 `missing-transitive-interface`, `missing-interface-field`, `invalid-interface-field-type`,
 `interface-field-not-deprecated`, `missing-interface-field-argument`,
-`invalid-interface-field-argument-type` and `unexpected-required-argument`, and the steps the check
+`invalid-interface-field-argument-type` and `unexpected-required-argument`, the last also at each
+instantiation the program writes that makes an argument typed by a bare type parameter non-null,
+and the steps the check
 takes are bounded by `Limits::max_implementation_steps`, a budget of its own, which a valid GraphQL
 document can meet. Every definition and every type has the tier it requires, the
 least of `core`, `alloc` and `std` that holds what it uses: a built-in its package's tag, a scalar
@@ -125,7 +128,10 @@ is all a scalar, an enum, an input object or a union implements, each other use 
 package makes a collection with another count, or makes both, being
 `smear::graphqlx::collection-arity`; and `TypeRef` stands only as the type of a directive
 definition's argument or of an input field, under lists alone, anywhere else being
-`smear::graphqlx::typeref-misuse`; and `NonZero`'s type argument is an integer primitive at least
+`smear::graphqlx::typeref-misuse`, and so is a field's argument whose value can hold an input field
+of type `TypeRef`, through lists, collections and the input objects of every package, and each
+instantiation that gives such a type to a type parameter an operation's argument reaches; and
+`NonZero`'s type argument is an integer primitive at least
 one bit wide, written without `!`, `NonZero` of anything else being
 `smear::graphqlx::nonzero-argument`; and a definition's type parameters have distinct names, and so
 do the names an extension's own list gives them, a type parameter with the name of an earlier one
@@ -138,24 +144,38 @@ anything else being `smear::graphqlx::repr-misuse`; and a package uses nothing a
 declares, a list in a `core` package, another package's definition that needs more, `@heap` in a
 `core` package and an extern's `tier` above its package's each being `smear::graphqlx::tier`, where
 it is written, but for compile-time metadata, which counts nowhere: a directive definition's types
-and an application's type arguments are not judged, though an input object a directive's argument
-names is, where it is written. And what a definition a supplied package wrote holds keeps GraphQL's
+and an application's type arguments are not judged for their tiers, though an input object a
+directive's argument names is, where it is written. And what a definition a supplied package wrote holds keeps GraphQL's
 own rules, with GraphQL's codes: a member whose name begins with `__` is
 `smear::schema::reserved-field-name`, or the code of what else it is, and a member whose name an
 earlier member of its list has is `smear::schema::duplicate-field-name`, or the code of its list,
 and a definition that holds members and holds none, its extensions' counted, is
 `smear::schema::empty-fields-definition`, or the code of its kind, a marker holding none, and a
 member typed by a definition of a kind its position does not take is
-`smear::schema::field-type-not-output-type`, or the code of its position, and an `implements` entry
-of an object or an interface that names what is no interface is
+`smear::schema::field-type-not-output-type`, or the code of its position, and so is one typed by a
+collection that holds one, a set or a map being of the kinds of its arguments, and so is an
+instantiation, or a directive application, that gives a type parameter a type of a kind where the
+parameter stands does not take, a parameter standing where its definition and each definition it is
+passed to put it, what a default fills judged at the occurrence that leaves the slot out unless the
+default is refused where it is written, and an
+`implements` entry of an object or an interface that names what is no interface is
 `smear::schema::implements-non-interface`, and an interface on a cycle of `implements` entries is
 `smear::schema::self-implementing-interface`, and a union member that is no object type is
 `smear::schema::union-member-not-object`, and a required argument or input field that applies
 `core`'s `@deprecated` is `smear::schema::deprecated-required-argument`, or the code of an input
-field, and a field written non-null of an input object its own package makes OneOf is
-`smear::schema::one-of-field-not-nullable`, and one with a default
+field, and so is an instantiation that gives a non-null type to a type parameter that is such a
+member's type, written nullable, and, once, a collection's own definition that gives its element
+or key, non-null in every instantiation, such a type, and a field written non-null of an input
+object its own package makes OneOf is
+`smear::schema::one-of-field-not-nullable`, and so is an instantiation that gives a non-null type
+to a type parameter that is such a field's type, and, once, a collection's own definition that
+gives its element or key such a type, and one with a default
 `smear::schema::one-of-field-has-default`, and `@oneOf` in an extension of an input object is
-`smear::schema::one-of-on-input-object-extension`. And every application a supplied package
+`smear::schema::one-of-on-input-object-extension`, and an input object that requires a value of
+itself, through fields each non-null and no list, is `smear::schema::circular-non-null-input-field`,
+and one that does by way of a OneOf none of whose fields can be given a finite value
+`smear::schema::circular-one-of-input-field`, at the field that closes the cycle, a generic input
+object requiring what its type arguments must hold. And every application a supplied package
 writes keeps GraphQL's own rules on directives, with GraphQL's codes: one at a location its
 directive's definition does not list is `smear::schema::unsupported-directive-location`, and one
 of a directive that is not repeatable, applied again where it is applied, a definition and its

@@ -142,6 +142,12 @@ const REPR_MISUSE: &str = "smear::graphqlx::repr-misuse";
 /// The code for a use above the tier its package declares.
 const TIER: &str = "smear::graphqlx::tier";
 
+/// GraphQL's code for an input object that requires a value of itself through non-null fields.
+const CIRCULAR_NON_NULL: &str = "smear::schema::circular-non-null-input-field";
+
+/// GraphQL's code for an input object that requires a value of itself by way of a OneOf.
+const CIRCULAR_ONE_OF: &str = "smear::schema::circular-one-of-input-field";
+
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
                            the same in every program that holds it: define a type or a directive \
@@ -2697,6 +2703,14 @@ const FIXTURES: &[(Code, Fixture)] = &[
   (Code::new(EXTERN_MISUSE), one_language_bound_twice),
   (Code::new(REPR_MISUSE), a_for_on_a_field),
   (Code::new(TIER), a_string_in_a_core_package),
+  (
+    Code::new(CIRCULAR_NON_NULL),
+    two_input_objects_that_require_each_other,
+  ),
+  (
+    Code::new(CIRCULAR_ONE_OF),
+    a_one_of_whose_one_field_leads_back,
+  ),
 ];
 
 /// A root package that defines its schema twice.
@@ -2980,6 +2994,19 @@ fn a_string_in_a_core_package() -> Analysis {
     "type Query {\n  x: String\n}\n",
   )]);
   analyze(&root, &[], &Limits::new())
+}
+
+/// Two input objects that require each other through non-null fields: the census row.
+fn two_input_objects_that_require_each_other() -> Analysis {
+  analyze_one("type Query { ok: Int } input A { b: B! } input B { a: A! }")
+}
+
+/// A OneOf whose one field leads back to it through a non-null field: the census row, the draft's
+/// Counter Example 86.
+fn a_one_of_whose_one_field_leads_back() -> Analysis {
+  analyze_one(
+    "type Query { ok: Int } input First @oneOf { second: Second } input Second { first: First! }",
+  )
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

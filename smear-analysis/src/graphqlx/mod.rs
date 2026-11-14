@@ -55,11 +55,15 @@
 //! `smear::schema::interface-field-not-deprecated`,
 //! `smear::schema::missing-interface-field-argument`,
 //! `smear::schema::invalid-interface-field-argument-type` or
-//! `smear::schema::unexpected-required-argument`. A value that does not fit its type is
+//! `smear::schema::unexpected-required-argument`, the last also at each instantiation the program
+//! writes that makes such an argument, typed by a bare type parameter, non-null. A value that does
+//! not fit its type is
 //! refused where it is written, a generic directive's arguments and a generic input object's
 //! fields read under their type arguments, and a default fills each argument and each input field
 //! a value leaves out, but where its copy would hold a copy of itself or the value budget cannot
-//! pay for it; a value of a generic definition whose type names its type parameters is
+//! pay for it, a default that needs a copy of itself being
+//! `smear::schema::input-object-default-value-cycle`, where the count of a copy meets itself,
+//! under type arguments too; a value of a generic definition whose type names its type parameters is
 //! checked at each closed instantiation of it, a type's the program writes or a directive's an
 //! application makes, and refused there, and so is an argument an application in it leaves out
 //! that the instantiation's type arguments make required. And every definition and every type
@@ -135,7 +139,11 @@
 //! own package makes a collection with another count, or makes both, is
 //! `smear::graphqlx::collection-arity`. And `TypeRef` stands only as the type of a directive
 //! definition's argument or of an input field, under lists alone: anywhere else it is
-//! `smear::graphqlx::typeref-misuse`. And `NonZero` makes an integer never zero: `NonZero` of what
+//! `smear::graphqlx::typeref-misuse`, and so is a field's argument whose value can hold an input
+//! field of type `TypeRef`, through lists, collections and the input objects of every package, at
+//! the argument's type, and each instantiation that gives such a type to a type parameter an
+//! operation's argument reaches, at the argument. And `NonZero` makes an integer never zero:
+//! `NonZero` of what
 //! is no integer primitive at least one bit wide, written without `!`, is
 //! `smear::graphqlx::nonzero-argument`. And a definition's type parameters have distinct names, and
 //! so do the names an extension's own list gives them: a type parameter with the name of an
@@ -149,24 +157,39 @@
 //! `@heap` in a `core` package and an extern's `tier` above its package's are each
 //! `smear::graphqlx::tier`, where they are written, so that in an analysis that is ok every
 //! definition requires at most its package's tier. What a directive definition writes and an
-//! application's type arguments are compile-time metadata, and are not judged, an input object a
-//! directive's argument names being judged where it is written. And what a definition a supplied
+//! application's type arguments are compile-time metadata, and are not judged for their tiers, an
+//! input object a directive's argument names being judged where it is written. And what a definition a supplied
 //! package wrote holds keeps GraphQL's own rules, with GraphQL's codes: a member whose name begins
 //! with `__` is `smear::schema::reserved-field-name`, or the code of what else it is; and a member
 //! whose name an earlier member of its list has is `smear::schema::duplicate-field-name`, or the
 //! code of its list; and a definition that holds members and holds none, its extensions' counted,
 //! is `smear::schema::empty-fields-definition`, or the code of its kind, a marker holding none; and
 //! a member typed by a definition of a kind its position does not take is
-//! `smear::schema::field-type-not-output-type`, or the code of its position; and an `implements`
+//! `smear::schema::field-type-not-output-type`, or the code of its position, and so is one typed by
+//! a collection that holds one, a set or a map being of the kinds of its arguments, and so is an
+//! instantiation, or a directive application, that gives a type parameter a type of a kind where
+//! the parameter stands does not take, a parameter standing where its definition and each
+//! definition it is passed to put it, what a default fills judged at the occurrence that leaves
+//! the slot out unless the default is refused where it is written; and an `implements`
 //! entry of an object or an interface that names what is no interface is
 //! `smear::schema::implements-non-interface`; and an interface on a cycle of `implements` entries
 //! is `smear::schema::self-implementing-interface`; and a union member that is no object type is
 //! `smear::schema::union-member-not-object`; and a required argument or input field that applies
 //! `core`'s `@deprecated` is `smear::schema::deprecated-required-argument`, or the code of an input
-//! field; and a field written non-null of an input object its own package makes OneOf is
-//! `smear::schema::one-of-field-not-nullable`, and one with a default
+//! field, and so is an instantiation that gives a non-null type to a type parameter that is such a
+//! member's type, written nullable, and, once, a collection's own definition that gives its element
+//! or key, non-null in every instantiation, such a type; and a field written non-null of an input
+//! object its own package makes OneOf is
+//! `smear::schema::one-of-field-not-nullable`, and so is an instantiation that gives a non-null
+//! type to a type parameter that is such a field's type, and, once, a collection's own definition
+//! that gives its element or key such a type, and one with a default
 //! `smear::schema::one-of-field-has-default`; and `@oneOf` in an extension of an input object is
-//! `smear::schema::one-of-on-input-object-extension`. And every application a supplied package
+//! `smear::schema::one-of-on-input-object-extension`; and an input object that requires a value of
+//! itself, through fields each non-null and no list, is
+//! `smear::schema::circular-non-null-input-field`, and one that does by way of a OneOf none of
+//! whose fields can be given a finite value `smear::schema::circular-one-of-input-field`, at the
+//! field that closes the cycle, once for its input object, a generic input object requiring what
+//! its type arguments must hold. And every application a supplied package
 //! writes keeps GraphQL's own rules on directives, with GraphQL's codes: one at a location its
 //! directive's definition does not list is `smear::schema::unsupported-directive-location`; and one
 //! of a directive that is not repeatable, applied again where it is applied, a definition and its
@@ -215,7 +238,9 @@ mod lower;
 mod model;
 mod package;
 mod parse;
+mod positions;
 mod raw;
+mod reach;
 mod resolve;
 mod rules;
 mod set;
