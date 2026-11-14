@@ -24,6 +24,8 @@ const DEFAULT_SUBSTITUTIONS: u32 = 1 << 20;
 const DEFAULT_BOUND_STEPS: u32 = 1 << 20;
 /// See [`Limits::max_value_steps`].
 const DEFAULT_VALUE_STEPS: u32 = 1 << 20;
+/// See [`Limits::max_implementation_steps`].
+const DEFAULT_IMPLEMENTATION_STEPS: u32 = 1 << 20;
 /// See [`Limits::max_source_bytes`].
 const DEFAULT_SOURCE_BYTES: u32 = 1 << 26;
 /// See [`Limits::max_diagnostics`].
@@ -92,6 +94,7 @@ pub struct Limits {
   max_substitutions: u32,
   max_bound_steps: u32,
   max_value_steps: u32,
+  max_implementation_steps: u32,
   max_source_bytes: u32,
   max_diagnostics: u32,
   max_near_miss_comparisons: u32,
@@ -123,6 +126,7 @@ impl Limits {
       max_substitutions: DEFAULT_SUBSTITUTIONS,
       max_bound_steps: DEFAULT_BOUND_STEPS,
       max_value_steps: DEFAULT_VALUE_STEPS,
+      max_implementation_steps: DEFAULT_IMPLEMENTATION_STEPS,
       max_source_bytes: DEFAULT_SOURCE_BYTES,
       max_diagnostics: DEFAULT_DIAGNOSTICS,
       max_near_miss_comparisons: DEFAULT_NEAR_MISS_COMPARISONS,
@@ -403,6 +407,43 @@ impl Limits {
     self.max_value_steps
   }
 
+  /// How many steps the analysis may take to check implementations, over the whole analysis:
+  /// that each definition implements every interface it declares, under the type arguments its
+  /// `implements` entry writes, and every interface those interfaces implement; and that no two of
+  /// a definition's entries, or of a union's members, are one type, as written or under the type
+  /// arguments of an instantiation the program writes.
+  ///
+  /// A step is one of: an item looked at of a list of another definition's, an interface's
+  /// `implements` entries and fields, a field's arguments, a type's entries, a type parameter's
+  /// bounds and a bound's interface's entries, a union's members, and a written instantiation's
+  /// definition's entries and members, each one another package wrote, which is passed by,
+  /// included; a node a type is rebuilt at, its root and each of its arguments and elements, with
+  /// an entry's type arguments in place of a definition's type parameters, once for each type and
+  /// arguments, a rebuild remembered costing nothing; and a pair of types compared, a pair compared
+  /// already included. A definition's own entries and members, read once for it, cost nothing.
+  ///
+  /// Past it, a definition's check stops: `resource-limit` once, at the `implements` entry it was
+  /// checking, and nothing more is said of the definition. An instantiation whose entries or
+  /// members could not be compared is `resource-limit` at each occurrence of it. At `0` every
+  /// definition that implements an interface or a marker with an entry or a field to look at is
+  /// reported, and so is every occurrence of a definition whose own entries or members name its
+  /// type parameters. What a rebuild derives counts toward
+  /// [`max_instantiations`](Self::max_instantiations) and
+  /// [`max_generic_depth`](Self::max_generic_depth); nothing here draws on
+  /// [`max_substitutions`](Self::max_substitutions) or [`max_bound_steps`](Self::max_bound_steps).
+  /// The built-in library writes no `implements` entry and no union, and costs nothing here.
+  ///
+  /// The default is 2^20. GitLab's schema, the largest of smear's fixtures, with 2,041 types and 188
+  /// `implements` entries, takes about 6,500 steps, and every fixture takes fewer than 2^15. A valid
+  /// GraphQL document can meet it: checking that `implements` is transitively closed costs up to
+  /// the square of a type's entries, as it does in `smear-schema`, so 468 object types that each
+  /// implement a complete chain of 64 interfaces of one field each, about 200 KB of SDL, take
+  /// 1,049,088 steps, and 467 take 1,046,944.
+  #[inline]
+  pub const fn max_implementation_steps(&self) -> u32 {
+    self.max_implementation_steps
+  }
+
   /// How many bytes of source text the supplied packages may hold together. The built-in
   /// packages' own text is smear's and does not count.
   ///
@@ -541,6 +582,15 @@ impl Limits {
   #[must_use]
   pub const fn with_max_value_steps(mut self, max: u32) -> Self {
     self.max_value_steps = max;
+    self
+  }
+
+  /// The same limits with `max` as their
+  /// [`max_implementation_steps`](Self::max_implementation_steps) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_implementation_steps(mut self, max: u32) -> Self {
+    self.max_implementation_steps = max;
     self
   }
 
