@@ -628,11 +628,13 @@ enum Count {
 enum Counted {
   /// A node of the tree being counted, against the type it is made against; in a judged count, an
   /// element or a key of a set or a map whose identity goes in the slot `slot` of the elements
-  /// being searched.
+  /// being searched. `paid` when its step was charged where it was scheduled, as a child of a
+  /// list, a set, a map or an object literal is.
   Node {
     node: u32,
     ty: Option<TyId>,
     slot: Option<u32>,
+    paid: bool,
   },
   /// A read: the count of the default whose tree is `tree`, against `ty`, judged when `ty` is not
   /// the type the default is written against.
@@ -1723,10 +1725,12 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// passed over, and ends poisoned, what does not fit kept beside it as an exact count's is.
   ///
   /// A count `judged`, against a type its default is not written against, the asker's `ty` a
-  /// rebuild made, pays a step for each node before it is counted, and judges whether the copy
-  /// fits: whether each of its nodes takes its type as a written one would, and each judged count
-  /// it reads fits. A count that is not judged fits: its default was judged where it is written.
-  /// What does not fit is kept beside the count.
+  /// rebuild made, pays a step for each node before it is scheduled, a frame's root as it is
+  /// counted and every other node where its parent pushes it, the fields an object literal sets
+  /// all at once before any is looked at; so a verdict that ends the count discards no work it did
+  /// not pay for. It judges whether the copy fits: whether each of its nodes takes its type as a
+  /// written one would, and each judged count it reads fits. A count that is not judged fits: its
+  /// default was judged where it is written. What does not fit is kept beside the count.
   fn count(&mut self, tree: u32, ty: Option<TyId>, charged: bool, judged: bool) -> Count {
     if let Some(&kept) = self.counts.get(&(tree, ty)) {
       return kept;
@@ -1771,7 +1775,12 @@ impl<'p> Coercion<'_, 'p, '_> {
         return self.verdict(Count::Past);
       };
       let counted = match entry {
-        Counted::Node { node, ty, slot } => self.count_node(node, ty, slot, charged),
+        Counted::Node {
+          node,
+          ty,
+          slot,
+          paid,
+        } => self.count_node(node, ty, slot, charged, paid),
         // A poisoned frame makes no copy, and a default its type is written against holds nothing
         // it judges: the read is passed over.
         Counted::Fill { judged: false, .. } if self.poisoned() => Ok(()),
@@ -1848,6 +1857,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         node: root,
         ty,
         slot: None,
+        paid: false,
       });
     }
   }
@@ -1916,21 +1926,27 @@ impl<'p> Coercion<'_, 'p, '_> {
 
   /// Counts `node` against `ty` into the default being counted on top, as [`count`](Self::count)
   /// says, or fails with the count's verdict; in a judged count, an element or a key of a set or a
-  /// map being searched whose identity goes in `slot`.
+  /// map being searched whose identity goes in `slot`. `paid` when its step was charged where it
+  /// was scheduled.
   fn count_node(
     &mut self,
     node: u32,
     ty: Option<TyId>,
     slot: Option<u32>,
     charged: bool,
+    paid: bool,
   ) -> Result<(), Count> {
     let Some(raw) = self.raw.nodes.get(node as usize).copied() else {
       return Ok(());
     };
     let judged = self.frames.last().is_some_and(|frame: &Frame| frame.judged);
     // Under a type its default is not written against, a node is a step, paid before it is
-    // counted: its source paid for it under that type alone.
-    if judged && charged && !self.charge(1) {
+    // scheduled, and so before it is counted: its source paid for it under that type alone. A
+    // frame's root, and a lone value counted again under its lists, are paid here, as they are
+    // counted; a child where its parent schedules it, so that no work is queued that a verdict
+    // could discard unpaid.
+    let pay = judged && charged;
+    if pay && !paid && !self.charge(1) {
       return Err(Count::Past);
     }
     self.add_rows(1, charged)?;
@@ -1943,16 +1959,16 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
       }
       Class::List(element) => {
-        self.count_items(node, raw, (element, element), None);
+        self.count_items(node, raw, (element, element), None, pay)?;
       }
       Class::Set(element) => {
         let searched = judged.then_some((Held::Set, element));
-        self.count_items(node, raw, (element, element), searched);
+        self.count_items(node, raw, (element, element), searched, pay)?;
       }
       Class::Map(key, value) => {
-        // A last key with no value is dropped, as the copy drops it.
+        // A last key with no value is dropped, as the copy drops it: looked at, it is paid for.
         let searched = judged.then_some((Held::Map, key));
-        if self.count_items(node, raw, (key, value), searched) % 2 == 1 {
+        if self.count_items(node, raw, (key, value), searched, pay)? % 2 == 1 {
           let _ = self.counting.pop();
         }
       }
@@ -1964,10 +1980,12 @@ impl<'p> Coercion<'_, 'p, '_> {
           // the value is one row more, and nothing is under it.
           self.add_rows(1, charged)?;
         } else {
+          // Counted next, before anything else is scheduled: it pays its step as it is counted.
           self.counting.push(Counted::Node {
             node,
             ty: Some(under),
             slot: None,
+            paid: false,
           });
         }
       }
@@ -1976,6 +1994,13 @@ impl<'p> Coercion<'_, 'p, '_> {
         let fields = self
           .fields_of(node, def, first, charged)
           .ok_or(Count::Past)?;
+        // Each field the literal sets is a node this count schedules below: in a judged count its
+        // step is paid here, all of them at once and before any is looked at, so that neither the
+        // search for the required fields nor a field whose type cannot be built leaves work done
+        // that no step paid for.
+        if pay && !self.charge(fields.len) {
+          return Err(Count::Past);
+        }
         // Each field's type is read under the object's type arguments, as the copy reads it.
         let env = ty.map(|ty: TyId| (ty, def));
         if judged && !self.object_fits(def, fields, charged, env)? {
@@ -1992,6 +2017,7 @@ impl<'p> Coercion<'_, 'p, '_> {
                 node: set.node,
                 ty: expected.ty,
                 slot: None,
+                paid: true,
               });
             }
             Next::Default(field, tree) => {
@@ -2181,15 +2207,17 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// `types.0`, and those at odd places against `types.1`. When `searched` says the node is a set
   /// or a map a judged count searches, and the type its identities are read against, each child
   /// has a slot for its identity, under the entry that searches them; unless a search of the node
-  /// against that type was made already, whose verdict is read instead. Answers how many it
-  /// pushed.
+  /// against that type was made already, whose verdict is read instead. When `pay`, each child is
+  /// a step, charged before it is looked at, and pushed paid: a budget that cannot pay is past it,
+  /// and nothing more is pushed. Answers how many it pushed.
   fn count_items(
     &mut self,
     node: u32,
     raw: RawNode,
     types: (TyId, TyId),
     searched: Option<(Held, TyId)>,
-  ) -> u32 {
+    pay: bool,
+  ) -> Result<u32, Count> {
     let mut slots = false;
     if let Some((held, of)) = searched {
       match self.searched.get(&(node, of)).copied() {
@@ -2210,6 +2238,9 @@ impl<'p> Coercion<'_, 'p, '_> {
     let mut pushed: u32 = 0;
     let mut child = node.saturating_add(1);
     while child < raw.after {
+      if pay && !self.charge(1) {
+        return Err(Count::Past);
+      }
       let ty = if pushed % 2 == 1 { types.1 } else { types.0 };
       let slot = slots.then(|| {
         let slot = dense(self.held.len());
@@ -2220,6 +2251,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         node: child,
         ty: Some(ty),
         slot,
+        paid: true,
       });
       pushed = pushed.saturating_add(1);
       let next = self
@@ -2232,7 +2264,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       child = next;
     }
-    pushed
+    Ok(pushed)
   }
 
   /// The merge of `fields`, what an object literal sets, with the defaults of the input object
