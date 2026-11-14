@@ -437,6 +437,66 @@ fn an_application_that_grows_a_cycle_is_refused_at_the_application() {
   );
 }
 
+/// `@d<T>` is `@d<T, [T]>`: the growth is the default `[A]`, filled for `B`, which the application
+/// leaves out, so the report is at the application's path, labelled at the default where it is
+/// declared. A rule that reads the written type arguments alone sees nothing and fails here.
+#[test]
+fn an_application_that_grows_through_a_filled_default_is_refused_at_the_application() {
+  let text = "directive @d<A, B = [A]>(x: G<B>) on INPUT_OBJECT\ninput G<T> @d<T> { v: T }\n\
+              type Query { x: Int }\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      within(schema, text, "@d<T>", "d"),
+      Some(at(schema, text, "[A]", 0))
+    )]
+  );
+
+  let diagnostics = visit(&analysis, Packages::All, &mut UnboundedInstantiation::new());
+  let diagnostic = diagnostics.iter().next().expect("one diagnostic");
+  assert_eq!(
+    diagnostic.to_string(),
+    "an application of `@d` that grows without end"
+  );
+  assert_eq!(
+    diagnostic.label(0).map(|label: Label<'_>| label.text()),
+    Some("this default fills a type argument that wraps a type parameter it reaches again")
+  );
+}
+
+/// `@d<T>` is `@d<T, H<[T]>>`, which does not grow and holds `H<[T]>`, which does: `G<Int>` needs
+/// `@d<Int>`, which holds `H<[Int]>`, whose field is `G<[Int]>`, and so on without end. No
+/// occurrence is written with the type `H<[T]>`, so the report is at the application's path,
+/// labelled at the default that holds it, and nothing is reported at `G<U>`. A rule that reports
+/// only an application whose type is itself marked fails here.
+#[test]
+fn an_application_whose_filled_default_holds_a_growth_is_refused_at_the_application() {
+  let text = "directive @d<A, B = H<[A]>> on OBJECT\ntype H<U> { g: G<U> }\n\
+              type G<T> @d<T> { v: T }\ntype Query { x: Int }\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      within(schema, text, "@d<T>", "d"),
+      Some(at(schema, text, "H<[A]>", 0))
+    )]
+  );
+
+  let diagnostics = visit(&analysis, Packages::All, &mut UnboundedInstantiation::new());
+  let diagnostic = diagnostics.iter().next().expect("one diagnostic");
+  assert_eq!(
+    diagnostic.to_string(),
+    "an application of `@d` whose default grows without end"
+  );
+  assert_eq!(
+    diagnostic.label(0).map(|label: Label<'_>| label.text()),
+    Some("this default holds a type argument that wraps a type parameter it reaches again")
+  );
+}
+
 /// The rule judges every definition, and reports only what the walk covers: a dependency's growth
 /// is not reported under `Packages::Root`, though the root instantiates it, and is reported in the
 /// dependency's file under `Packages::Supplied` and `Packages::All`. A report made outside the

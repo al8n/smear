@@ -35,10 +35,9 @@
 //! arguments of an occurrence that names a type parameter, or nothing, which the kind does not
 //! answer. `DuplicateTypeParameter` reads one crate-private accessor, `Def::extension_params`:
 //! the names an extension's own list writes, which no public view holds. `DuplicateMember` reads
-//! another, `IdRange::start`, to name the member at a position of a list. `ExternMisuse` reads a
-//! third, `Extern::application`, the application an extern is bound from, which the public model
-//! does not answer yet: a candidate public accessor for the model's review; and `TierViolation`
-//! reads it too.
+//! another, `IdRange::start`, to name the member at a position of a list. `ExternMisuse` and
+//! `TierViolation` read the public `Extern::application`, the application an extern is bound from.
+//! `supplied` and `one_of` are this module's own, and read the public model alone.
 //!
 //! One rule is in no set: `UnboundedInstantiation`, which is public, which `analyze` never runs,
 //! and which a backend composes into its own walk. It reads the public model alone.

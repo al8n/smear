@@ -2,13 +2,13 @@
 
 use tokora::diagnostic::Location;
 
-#[cfg(feature = "test-support")]
-use crate::graphqlx::id::TyId;
-use crate::graphqlx::id::{ApplicationId, DefId, MemberId, TypeExprId, ValueId};
+use crate::graphqlx::id::{ApplicationId, DefId, MemberId, TyId, TypeExprId, ValueId};
 
-#[cfg(feature = "test-support")]
-use super::table::KIND_NAMED;
-use super::{Model, table::ApplicationRow, ty::Path};
+use super::{
+  Model,
+  table::{ApplicationRow, KIND_NAMED},
+  ty::Path,
+};
 
 /// What a written name resolved to, or that it did not resolve.
 ///
@@ -75,19 +75,6 @@ impl Model {
     );
     Application { model: self, id }
   }
-
-  /// The complete type arguments of the application `id`: the arguments of its directive's
-  /// instantiation, which its row holds, and none when it holds none, or the unresolved type.
-  #[cfg(feature = "test-support")]
-  pub(crate) fn type_arguments(&self, id: ApplicationId) -> &[TyId] {
-    let Some(row) = self.applications.get(id.get() as usize) else {
-      return &[];
-    };
-    match self.tys.get(row.ty.get() as usize) {
-      Some(ty) if ty.shape == KIND_NAMED => ty.args.of(&self.ty_args),
-      _ => &[],
-    }
-  }
 }
 
 /// One directive application of the model: one `@directive(…)` as written.
@@ -120,6 +107,38 @@ impl<'a> Application<'a> {
   pub fn type_args(&self) -> &'a [TypeExprId] {
     let model: &'a Model = self.model;
     self.row().type_args.of(&model.application_type_args)
+  }
+
+  /// Its type: its directive's instantiation, a named type of the directive whose arguments are
+  /// every type argument, those the application writes and then each one the directive's defaults
+  /// fill. `None` for an application of a directive that takes no type parameter, of one that did
+  /// not resolve, and for one whose count of type arguments was refused or whose type arguments
+  /// could not be completed.
+  ///
+  /// No position has this type: it is what a backend that makes one copy of a generic directive for
+  /// each instantiation keys on.
+  #[inline]
+  pub fn ty(&self) -> Option<TyId> {
+    let ty = self.row().ty;
+    match self.model.tys.get(ty.get() as usize) {
+      Some(row) if row.shape == KIND_NAMED => Some(ty),
+      _ => None,
+    }
+  }
+
+  /// Its complete type arguments, in its directive's order: the arguments of [`ty`](Self::ty), the
+  /// written ones first, then those the directive's defaults fill, substituted. Empty when it has
+  /// no type.
+  ///
+  /// Applications of one directive that complete alike answer one type: a walk that reads every
+  /// application's arguments keys on [`ty`](Self::ty).
+  #[inline]
+  pub fn ty_args(&self) -> &'a [TyId] {
+    let model: &'a Model = self.model;
+    match model.tys.get(self.row().ty.get() as usize) {
+      Some(row) if row.shape == KIND_NAMED => row.args.of(&model.ty_args),
+      _ => &[],
+    }
   }
 
   /// Where the whole application is written, from its `@` to its last token.

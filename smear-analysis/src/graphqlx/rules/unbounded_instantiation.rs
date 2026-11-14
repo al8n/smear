@@ -3,27 +3,27 @@
 //!
 //! `begin` builds a graph over the whole model. Its nodes are every type parameter of every
 //! definition, numbered by definition, and every open type, other than a bare parameter, that a
-//! followed position writes, or that such a type holds: each written occurrence's own type is
-//! entered, since a collection's key or element is non-null in its holder's type and so is not the
-//! type of the occurrence that writes it. Its edges:
+//! followed position writes, that an application written there has, or that such a type holds:
+//! each written occurrence's own type is entered, since a collection's key or element is non-null
+//! in its holder's type and so is not the type of the occurrence that writes it. Its edges:
 //!
 //! - for a named type and each of its open arguments, an edge from the argument into the named
 //!   definition's parameter at that position, which grows unless the argument is a bare parameter;
 //! - for each open argument or element of an open type, an edge from it into the type, which does
 //!   not grow;
-//! - for a directive application whose directive resolved and takes at least as many type
-//!   parameters as it writes, the first kind of edge from each written type argument into the
-//!   directive's parameter at its position. A count instantiation refused keeps its type arguments,
-//!   and one past the directive's parameters names none of them.
+//! - for a directive application, the edges of its type, its directive's instantiation with every
+//!   type argument, written or filled, which is entered as a named type is. A count of type
+//!   arguments that was refused gives the application no type, and no edge.
 //!
 //! A growing edge whose two ends share a strongly connected component is the refusal: it marks the
-//! type, or the application, that holds it, which keeps the least index of such an argument. One
-//! ascending pass over the types then says which hold a marked one, since a type's arguments are
-//! interned before it, and each keeps the default that fills the argument it is reported for.
+//! type that holds it, which keeps the least index of such an argument. One ascending pass over the
+//! types then says which hold a marked one, since a type's arguments are interned before it, and
+//! each keeps the default that fills the argument it is reported for.
 //!
 //! The hooks report at a written occurrence in a followed position whose own type is marked, or
-//! holds a marked type that none of its written children's own types holds, and at a marked
-//! application's path.
+//! holds a marked type that none of its written children's own types holds, and at the path of an
+//! application whose type is marked, or holds a marked type that none of its written type
+//! arguments' own types holds.
 //!
 //! The rule reads the public model and nothing else: the walk's context and the model's views. Its
 //! crate-private names are smear's wording alone, the excerpt a message quotes a name through and
@@ -89,27 +89,26 @@ const HELD: &str = "this default holds a type argument that wraps a type paramet
 ///   it, or at the default that fills it;
 /// - a written occurrence whose type holds such an instantiation only in what defaults filled,
 ///   labelled at the default that filled the first argument that holds one;
-/// - a directive application whose type argument grows, at its directive's path, labelled at that
-///   type argument.
+/// - a directive application whose type is such an instantiation, labelled at the type argument
+///   that grows where the application writes it, and otherwise at the default that fills it; or
+///   whose type holds one only in what its directive's defaults filled, labelled at the default
+///   that filled the first argument that holds one. Both at its directive's path.
 ///
 /// One written occurrence or application gives one diagnostic at most. A message names the
 /// definition or the directive, never a type, through a bounded excerpt of its name.
 ///
 /// It follows what a copy of an instantiation needs: the types of a definition's fields, of their
 /// arguments, of its input fields and of a directive definition's arguments; its `implements`
-/// entries; its union members; and the type arguments of the directive applications written on it
-/// and on its members. It does not follow a bound, a type parameter's default as it is written, a
-/// root or a value. A default is followed where it fills, since an occurrence's type holds what it
-/// filled.
-///
-/// It reads the type arguments an application writes, so a growth through a type argument that a
-/// generic directive's default fills is not seen.
+/// entries; its union members; and the directive applications written on it and on its members,
+/// each followed by its type arguments as written and by its complete type arguments, defaults
+/// filled ([`Application::ty`](crate::graphqlx::Application::ty)). It does not follow a bound, a
+/// type parameter's default as it is written, a root or a value. A default is followed where it
+/// fills, since an occurrence's type, and an application's, holds what it filled.
 ///
 /// It costs time linear in the model's definitions, members, applications and types. Until the
 /// next walk begins it keeps a fixed number of words for each of the model's types up to the last
-/// it entered, and for each application up to the last it marked. It has no limit of its own. When
-/// its graph has more nodes than a `u32` numbers, which only a model of tens of gigabytes reaches,
-/// it says nothing in that walk.
+/// it entered. It has no limit of its own. When its graph has more nodes than a `u32` numbers,
+/// which only a model of tens of gigabytes reaches, it says nothing in that walk.
 ///
 /// # Examples
 ///
@@ -136,8 +135,6 @@ const HELD: &str = "this default holds a type argument that wraps a type paramet
 pub struct UnboundedInstantiation {
   /// What the last `begin` found of each type, by id.
   types: Vec<Found>,
-  /// The index of the type argument each marked application is reported at, by id.
-  applications: Vec<Option<u32>>,
 }
 
 impl UnboundedInstantiation {
@@ -145,10 +142,7 @@ impl UnboundedInstantiation {
   /// many walks.
   #[inline]
   pub const fn new() -> Self {
-    Self {
-      types: Vec::new(),
-      applications: Vec::new(),
-    }
+    Self { types: Vec::new() }
   }
 }
 
@@ -169,12 +163,10 @@ impl core::fmt::Debug for UnboundedInstantiation {
 impl Visitor for UnboundedInstantiation {
   fn begin(&mut self, cx: &mut Cx<'_>) {
     self.types = Vec::new();
-    self.applications = Vec::new();
     // Only a model of tens of gigabytes has more nodes than a `u32` numbers: the rule then keeps
     // nothing, and says nothing in this walk.
     if let Ok(build) = Build::run(cx.model()) {
       self.types = build.found;
-      self.applications = build.applications;
     }
   }
 
@@ -235,26 +227,50 @@ impl Visitor for UnboundedInstantiation {
   }
 
   fn application(&mut self, cx: &mut Cx<'_>, application: ApplicationId) {
-    let Some(&Some(index)) = self.applications.get(application.get() as usize) else {
-      return;
-    };
     let model = cx.model();
     let applied = model.application(application);
-    // A marked application resolved: its edges are read only then.
+    let Some(own) = applied.ty() else {
+      return;
+    };
+    let Some(&found) = self.types.get(own.get() as usize) else {
+      return;
+    };
+    if !found.holds {
+      return;
+    }
     let Resolution::Resolved(directive) = applied.directive() else {
       return;
     };
-    let label = applied
-      .type_args()
-      .get(index as usize)
-      .map(|argument: &TypeExprId| (model.type_expr(*argument).location(), WRITTEN));
+    let written = applied.type_args();
     let name = Excerpt(model.def(directive).name().as_bytes());
-    let message = format!("an application of `@{name}` that grows without end");
     let help = format!(
       "every instantiation of the definition this application stands on needs `@{name}` with a \
        larger type argument, so a backend that makes one copy per instantiation cannot finish; \
        pass the type parameter itself, or a type that names none"
     );
+    if found.marked {
+      let label = match written.get(found.index as usize) {
+        Some(&argument) => Some((model.type_expr(argument).location(), WRITTEN)),
+        None => found
+          .default
+          .map(|default: TypeExprId| (model.type_expr(default).location(), FILLED)),
+      };
+      let message = format!("an application of `@{name}` that grows without end");
+      report(cx, applied.path_location(), message, help, label);
+      return;
+    }
+    // The report is a written type argument's, or one below it, when a written type argument's own
+    // type holds.
+    if written
+      .iter()
+      .any(|argument: &TypeExprId| holds(&self.types, model.type_expr(*argument).ty()))
+    {
+      return;
+    }
+    let label = found
+      .default
+      .map(|default: TypeExprId| (model.type_expr(default).location(), HELD));
+    let message = format!("an application of `@{name}` whose default grows without end");
     report(cx, applied.path_location(), message, help, label);
   }
 }
@@ -323,7 +339,7 @@ struct Found {
   /// one that holds and is not marked, the least index of an argument that holds.
   index: u32,
   /// The default of its definition's type parameter at `index`, which fills that argument for an
-  /// occurrence that leaves it out.
+  /// occurrence or an application that leaves it out.
   default: Option<TypeExprId>,
 }
 
@@ -337,15 +353,6 @@ struct Entry {
   node: Option<u32>,
 }
 
-/// Who holds a growing edge: whom it marks when it lies on a cycle.
-#[derive(Clone, Copy)]
-enum Holder {
-  /// The named type one of whose arguments the edge leaves.
-  Type(TyId),
-  /// The application one of whose type arguments the edge leaves.
-  Application(ApplicationId),
-}
-
 /// An edge from an open type that is no bare parameter into a type parameter.
 #[derive(Clone, Copy)]
 struct Growing {
@@ -353,8 +360,8 @@ struct Growing {
   from: u32,
   /// The type parameter's node.
   to: u32,
-  /// Who holds it.
-  holder: Holder,
+  /// The named type one of whose arguments it leaves: the type it marks when it lies on a cycle.
+  holder: TyId,
   /// The position of the argument it leaves.
   index: u32,
 }
@@ -384,8 +391,6 @@ struct Build<'a> {
   entries: Vec<Entry>,
   /// What the build found of each type, by id.
   found: Vec<Found>,
-  /// The index of the type argument each marked application is reported at, by id.
-  applications: Vec<Option<u32>>,
   /// The edges that do not grow, each from its first node into its second.
   plain: Vec<(u32, u32)>,
   /// The edges that grow.
@@ -405,7 +410,7 @@ impl<'a> Build<'a> {
       return Ok(build);
     }
     let component = build.components()?;
-    build.mark(&component)?;
+    build.mark(&component);
     build.spread();
     Ok(build)
   }
@@ -432,7 +437,6 @@ impl<'a> Build<'a> {
       next,
       entries: Vec::new(),
       found: Vec::new(),
-      applications: Vec::new(),
       plain: Vec::new(),
       growing: Vec::new(),
       occurrences: Vec::new(),
@@ -505,7 +509,7 @@ impl<'a> Build<'a> {
 
   /// The edge from what `tail` leaves into the type parameter whose node is `to`, held by `holder`
   /// at `index`. It grows when `tail` is an open type that is no bare parameter.
-  fn pass(&mut self, tail: Tail, to: u32, holder: Holder, index: u32) {
+  fn pass(&mut self, tail: Tail, to: u32, holder: TyId, index: u32) {
     match tail {
       Tail::Param(from) => self.plain.push((from, to)),
       Tail::Type(from) => self.growing.push(Growing {
@@ -553,7 +557,7 @@ impl<'a> Build<'a> {
             };
             self.contain(tail, holder);
             if let Some(to) = self.param(def, index) {
-              self.pass(tail, to, Holder::Type(ty), index);
+              self.pass(tail, to, ty, index);
             }
             self.pending.push(argument);
           }
@@ -584,8 +588,8 @@ impl<'a> Build<'a> {
 
   /// The followed positions of every definition that has a type parameter: each field's type and
   /// its arguments' types, each input field's and each directive argument's type, each
-  /// `implements` entry and union member, and the type arguments of the applications written on
-  /// the definition and on each of its members, an enum's values among them.
+  /// `implements` entry and union member, and the type arguments and the type of each application
+  /// written on the definition and on each of its members, an enum's values among them.
   fn roots(&mut self) -> Result<(), Overflow> {
     let model: &'a Model = self.model;
     for id in model.defs() {
@@ -617,7 +621,7 @@ impl<'a> Build<'a> {
     Ok(())
   }
 
-  /// A member's type, and the type arguments of its applications.
+  /// A member's type, and the type arguments and the type of each of its applications.
   fn member(&mut self, id: MemberId) -> Result<(), Overflow> {
     let model: &'a Model = self.model;
     let member = model.member(id);
@@ -630,32 +634,17 @@ impl<'a> Build<'a> {
     Ok(())
   }
 
-  /// An application's type arguments, each walked whatever their count; and, when its directive
-  /// resolved and takes at least as many type parameters as it writes, the edge from each into
-  /// the directive's parameter at its position.
+  /// An application's type arguments as written, each walked whatever their count; then its type,
+  /// its directive's instantiation with every type argument, written or filled, entered as a named
+  /// type is. An application whose count of type arguments was refused has no type.
   fn applied(&mut self, id: ApplicationId) -> Result<(), Overflow> {
     let model: &'a Model = self.model;
     let application = model.application(id);
-    let written = application.type_args();
-    for argument in written {
+    for argument in application.type_args() {
       self.walk(*argument)?;
     }
-    let Resolution::Resolved(directive) = application.directive() else {
-      return Ok(());
-    };
-    // A count instantiation refused keeps its type arguments: one past the directive's parameters
-    // names none of them.
-    if written.len() > model.def(directive).type_params().len() {
-      return Ok(());
-    }
-    for (position, argument) in written.iter().enumerate() {
-      let index = number(position)?;
-      let Some(tail) = self.tail(model.type_expr(*argument).ty())? else {
-        continue;
-      };
-      if let Some(to) = self.param(directive, index) {
-        self.pass(tail, to, Holder::Application(id), index);
-      }
+    if let Some(instantiation) = application.ty() {
+      self.enter(instantiation)?;
     }
     Ok(())
   }
@@ -700,9 +689,9 @@ impl<'a> Build<'a> {
     ))
   }
 
-  /// Marks the holder of each growing edge whose two ends share a component: a type or an
-  /// application, each keeping the least index of such an argument.
-  fn mark(&mut self, component: &[u32]) -> Result<(), Overflow> {
+  /// Marks the holder of each growing edge whose two ends share a component, each type keeping the
+  /// least index of such an argument.
+  fn mark(&mut self, component: &[u32]) {
     for edge in &self.growing {
       let (Some(from), Some(to)) = (
         component.get(edge.from as usize),
@@ -713,30 +702,15 @@ impl<'a> Build<'a> {
       if from != to {
         continue;
       }
-      match edge.holder {
-        Holder::Type(ty) => {
-          if let Some(found) = self.found.get_mut(ty.get() as usize) {
-            found.index = if found.marked {
-              found.index.min(edge.index)
-            } else {
-              edge.index
-            };
-            found.marked = true;
-          }
-        }
-        Holder::Application(application) => {
-          let at = application.get() as usize;
-          if at >= self.applications.len() {
-            let len = at.checked_add(1).ok_or(Overflow)?;
-            self.applications.resize(len, None);
-          }
-          if let Some(kept) = self.applications.get_mut(at) {
-            *kept = Some(kept.map_or(edge.index, |index: u32| index.min(edge.index)));
-          }
-        }
+      if let Some(found) = self.found.get_mut(edge.holder.get() as usize) {
+        found.index = if found.marked {
+          found.index.min(edge.index)
+        } else {
+          edge.index
+        };
+        found.marked = true;
       }
     }
-    Ok(())
   }
 
   /// Says which types hold a marked one, in one ascending pass over the types by id: a type's

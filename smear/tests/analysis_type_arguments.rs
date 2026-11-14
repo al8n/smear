@@ -189,9 +189,11 @@ fn shown(model: &Model, id: TyId) -> String {
   text
 }
 
-/// The complete type arguments of `application`, each written out, through the hidden door.
+/// The complete type arguments of `application`, each written out.
 fn arguments(model: &Model, application: ApplicationId) -> Vec<String> {
-  test_support::type_arguments(model, application)
+  model
+    .application(application)
+    .ty_args()
     .iter()
     .map(|ty: &TyId| shown(model, *ty))
     .collect()
@@ -251,9 +253,14 @@ fn an_application_with_no_complete_type_arguments_has_none() {
   for index in 0..applications {
     let application = ApplicationId::new(index);
     assert!(
-      test_support::type_arguments(model, application).is_empty(),
+      model.application(application).ty_args().is_empty(),
       "application {index} has complete type arguments: {:?}",
       arguments(model, application)
+    );
+    assert_eq!(
+      model.application(application).ty(),
+      None,
+      "application {index}"
     );
   }
 }
