@@ -274,17 +274,14 @@ struct Group {
 }
 
 /// What each type parameter of an input object carries, by slot: whether a value of the input
-/// object must hold a value of its argument, and whether a nullable field of a OneOf is on the
-/// way; the choices a OneOf on the way leaves its instantiations; and the alternatives of each
-/// OneOf.
+/// object must hold a value of its argument; the choices a OneOf on the way leaves its
+/// instantiations; and the alternatives of each OneOf.
 struct Carried {
   /// The first slot of each definition, in id order, and the count of slots last.
   base: Vec<u32>,
   /// For each slot: 0 when nothing carries it, 1 when it is carried when non-null, 2 when it is
   /// carried.
   levels: Vec<u8>,
-  /// For each slot: whether a nullable field of a OneOf carries it, or is on the way.
-  nullable: Vec<bool>,
   /// Every group.
   groups: Vec<Group>,
   /// Each group by the input object whose instantiations it constrains, sorted: none of an input
@@ -309,10 +306,8 @@ impl Carried {
       base,
       alternatives,
       levels: vec![0; count],
-      nullable: vec![false; count],
       types: Vec::new(),
       held: Vec::new(),
-      bits: Vec::new(),
       entries: Vec::new(),
       rules: Vec::new(),
       nodes: BTreeMap::new(),
@@ -326,7 +321,7 @@ impl Carried {
       fresh: Vec::new(),
       added: Vec::new(),
     };
-    let mut seeds: Vec<(u32, u8, bool)> = Vec::new();
+    let mut seeds: Vec<(u32, u8)> = Vec::new();
     // The types whose arguments are still to read.
     let mut stack: Vec<TyId> = Vec::new();
     for &input in inputs {
@@ -346,13 +341,13 @@ impl Carried {
           TyKind::Param { def, index } if def == input => {
             if let Some(slot) = slot(&work.base, input, index) {
               let level = if non_null { 2 } else { 1 };
-              seeds.push((slot, level, false));
+              seeds.push((slot, level));
             }
           }
           TyKind::Named { def, .. } if is_input(model, def) && non_null => {
             if let Some(to) = work.node(&mut stack, ty) {
               work.entries.push(Entry {
-                from: Origin::Root(false),
+                from: Origin::Root,
                 to,
                 slot: None,
               });
@@ -403,15 +398,12 @@ impl Carried {
         }
       }
     }
-    let count = work.types.len();
-    work.held = vec![false; count];
-    work.bits = vec![false; count];
+    work.held = vec![false; work.types.len()];
     work.run(&seeds);
     let Work {
       base,
       alternatives,
       levels,
-      nullable,
       groups,
       owned,
       saturated,
@@ -429,7 +421,6 @@ impl Carried {
     Self {
       base,
       levels,
-      nullable,
       groups,
       owners,
       alternatives,
@@ -468,22 +459,14 @@ impl Carried {
       .and_then(|slot: u32| self.levels.get(slot as usize).copied())
       .unwrap_or(0)
   }
-
-  /// Whether a nullable field of a OneOf carries the type parameter `index` of `def`, or is on
-  /// the way.
-  fn nullable(&self, def: DefId, index: u32) -> bool {
-    slot(&self.base, def, index)
-      .and_then(|slot: u32| self.nullable.get(slot as usize).copied())
-      .unwrap_or(false)
-  }
 }
 
-/// What a way into an open type hangs from: a link field, with whether it is a nullable field of
-/// a OneOf, or the open type that holds it as an argument.
+/// What a way into an open type hangs from: a link field, or the open type that holds it as an
+/// argument.
 #[derive(Clone, Copy)]
 enum Origin {
   /// The link field.
-  Root(bool),
+  Root,
   /// The node of the open type that holds it.
   Node(u32),
 }
@@ -536,14 +519,10 @@ struct Work<'m> {
   alternatives: BTreeMap<DefId, Alternatives>,
   /// For each slot, what it carries.
   levels: Vec<u8>,
-  /// For each slot, whether a nullable field of a OneOf is on the way.
-  nullable: Vec<bool>,
   /// The type of each node, an open input object type a link field's complete type holds.
   types: Vec<TyId>,
   /// For each open type, whether a value of the input object that holds it must hold one of it.
   held: Vec<bool>,
-  /// For each open type, whether a nullable field of a OneOf is on the way to it.
-  bits: Vec<bool>,
   /// Every entry.
   entries: Vec<Entry>,
   /// Every rule.
@@ -561,9 +540,9 @@ struct Work<'m> {
   saturated: BTreeSet<DefId>,
   /// Each group made, by its input object and alternatives, so that none is made twice.
   seen: BTreeSet<(DefId, Vec<u32>, Vec<Other>)>,
-  /// The slots that gained a level or a bit and whose waiters have not seen it.
+  /// The slots that gained a level and whose waiters have not seen it.
   slots: Vec<u32>,
-  /// The open types that were held or gained a bit and whose waiters have not seen it.
+  /// The open types that were held and whose waiters have not seen it.
   opened: Vec<u32>,
   /// The open types held for the first time, whose groups are still to make.
   fresh: Vec<u32>,
@@ -589,9 +568,9 @@ impl Work<'_> {
   }
 
   /// Gives the slots `seeds`' levels, and spreads them along the entries and rules until nothing
-  /// changes. Each slot changes at most three times and each open type twice, so each waiter is
-  /// woken a bounded number of times.
-  fn run(&mut self, seeds: &[(u32, u8, bool)]) {
+  /// changes. Each slot changes at most twice and each open type once, so each waiter is woken a
+  /// bounded number of times.
+  fn run(&mut self, seeds: &[(u32, u8)]) {
     // Who waits on each slot, and on each open type, each as one run of a sorted list.
     let mut waiting: Vec<(u32, Waiter)> = Vec::new();
     let mut children: Vec<(u32, Waiter)> = Vec::new();
@@ -609,15 +588,15 @@ impl Work<'_> {
     }
     waiting.sort_by_key(|entry: &(u32, Waiter)| entry.0);
     children.sort_by_key(|entry: &(u32, Waiter)| entry.0);
-    for &(slot, level, bit) in seeds {
-      self.raise(slot, level, bit);
+    for &(slot, level) in seeds {
+      self.raise(slot, level);
     }
     // What hangs from a link field is looked at once; the rest when what it waits on changes.
     for index in 0..self.entries.len() {
       if self
         .entries
         .get(index)
-        .is_some_and(|entry: &Entry| matches!(entry.from, Origin::Root(_)))
+        .is_some_and(|entry: &Entry| matches!(entry.from, Origin::Root))
       {
         self.wake(Waiter::Entry(dense(index)));
       }
@@ -652,57 +631,40 @@ impl Work<'_> {
     }
   }
 
-  /// Whether what `from` names is held, and if so whether a nullable field of a OneOf is on the
-  /// way to it.
-  fn source(&self, from: Origin) -> Option<bool> {
+  /// Whether what `from` names is held: a link field always is.
+  fn source(&self, from: Origin) -> bool {
     match from {
-      Origin::Root(bit) => Some(bit),
-      Origin::Node(node) => {
-        if !self.held.get(node as usize).copied().unwrap_or(false) {
-          return None;
-        }
-        Some(self.bits.get(node as usize).copied().unwrap_or(false))
-      }
+      Origin::Root => true,
+      Origin::Node(node) => self.held.get(node as usize).copied().unwrap_or(false),
     }
   }
 
-  /// Holds the open type the entry `index` leads to, or gives it a bit, when it can now.
+  /// Holds the open type the entry `index` leads to, when it can now.
   fn entry(&mut self, index: u32) {
     let Some(&Entry { from, to, slot }) = self.entries.get(index as usize) else {
       return;
     };
-    let Some(above) = self.source(from) else {
+    if !self.source(from) {
       return;
-    };
-    let bit = match slot {
-      None => above,
-      Some((slot, threshold)) => {
-        if self.level(slot) < threshold {
-          return;
-        }
-        above || self.bit(slot)
-      }
-    };
-    self.hold(to, bit);
+    }
+    if let Some((slot, threshold)) = slot
+      && self.level(slot) < threshold
+    {
+      return;
+    }
+    self.hold(to);
   }
 
-  /// Holds the open type `node`, or gives it `bit`, queueing it when either changes, and as fresh
-  /// the first time it is held.
-  fn hold(&mut self, node: u32, bit: bool) {
-    let held = self.held.get(node as usize).copied().unwrap_or(true);
-    let had = self.bits.get(node as usize).copied().unwrap_or(true);
-    if held && (had || !bit) {
+  /// Holds the open type `node`, queueing it, and as fresh, the first time it is held.
+  fn hold(&mut self, node: u32) {
+    let Some(held) = self.held.get_mut(node as usize) else {
+      return;
+    };
+    if *held {
       return;
     }
-    if !held {
-      self.fresh.push(node);
-    }
-    if let Some(held) = self.held.get_mut(node as usize) {
-      *held = true;
-    }
-    if let Some(had) = self.bits.get_mut(node as usize) {
-      *had = *had || bit;
-    }
+    *held = true;
+    self.fresh.push(node);
     self.opened.push(node);
   }
 
@@ -895,16 +857,15 @@ impl Work<'_> {
     else {
       return;
     };
-    let Some(above) = self.source(Origin::Node(from)) else {
+    if !self.source(Origin::Node(from)) {
       return;
-    };
+    }
     let level = match self.level(slot) {
       0 => return,
       1 if !bang => 1,
       _ => 2,
     };
-    let bit = above || self.bit(slot);
-    self.raise(target, level, bit);
+    self.raise(target, level);
   }
 
   /// What `slot` carries.
@@ -912,28 +873,12 @@ impl Work<'_> {
     self.levels.get(slot as usize).copied().unwrap_or(0)
   }
 
-  /// Whether a nullable field of a OneOf is on the way to `slot`.
-  fn bit(&self, slot: u32) -> bool {
-    self.nullable.get(slot as usize).copied().unwrap_or(false)
-  }
-
-  /// Raises `slot` to `level`, and gives it `bit`, queueing it when either changes.
-  fn raise(&mut self, slot: u32, level: u8, bit: bool) {
-    let mut changed = false;
+  /// Raises `slot` to `level`, queueing it when it changes.
+  fn raise(&mut self, slot: u32, level: u8) {
     if let Some(current) = self.levels.get_mut(slot as usize)
       && level > *current
     {
       *current = level;
-      changed = true;
-    }
-    if bit
-      && let Some(current) = self.nullable.get_mut(slot as usize)
-      && !*current
-    {
-      *current = true;
-      changed = true;
-    }
-    if changed {
       self.slots.push(slot);
     }
   }
@@ -1146,13 +1091,12 @@ impl Requirements<'_> {
       if !required {
         continue;
       }
+      // A slot an ordinary input object carries passes no field of a OneOf: a OneOf carries none.
       if let TyKind::Named { def: inner, .. } = self.model.ty(argument).kind()
         && is_input(self.model, inner)
         && let Some(target) = self.requirement(argument)
       {
-        self
-          .edges
-          .push((node, target, self.carried.nullable(def, index), None));
+        self.edges.push((node, target, false, None));
       }
     }
     let groups: Vec<u32> = carried.groups_of(def).collect();
