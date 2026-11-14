@@ -58,12 +58,13 @@ use crate::graphqlx::{
 
 use super::{Silence, supplied};
 
-/// The places this rule judges an instantiation's arguments at, in the order it reads them.
-const PLACES: [Place; 4] = [
-  Place::Field,
-  Place::Argument,
-  Place::InputField,
-  Place::DirectiveArgument,
+/// The positions whose places this rule judges an instantiation's arguments at, in the order it
+/// reads them.
+const POSITIONS: [Position; 4] = [
+  Position::Field,
+  Position::Argument,
+  Position::InputField,
+  Position::DirectiveArgument,
 ];
 
 /// Reports each member of a definition a supplied package wrote whose type's base, under its
@@ -107,13 +108,13 @@ pub(super) struct MemberTypeKind {
 }
 
 /// A type's own failure: the first of its arguments, in order, that does not fit a place its slot
-/// stands in, with that place.
+/// stands in, with that place's position.
 #[derive(Clone, Copy)]
 struct Own {
   /// The slot of the argument.
   slot: u32,
-  /// The place it does not fit.
-  place: Place,
+  /// The position whose place it does not fit.
+  position: Position,
 }
 
 /// What an occurrence or an application is refused for.
@@ -314,11 +315,10 @@ impl MemberTypeKind {
       ""
     };
     match found {
-      Found::Own(Own { slot, place }) => {
-        let position = Position::at(place);
+      Found::Own(Own { slot, position }) => {
         let given = written.get(slot as usize).copied();
         let argument = *args.get(slot as usize)?;
-        let misfit = self.fits.misfit(model, argument, place.class(), given)?;
+        let misfit = self.fits.misfit(model, argument, position.class(), given)?;
         let name = Excerpt(parameter(model, def, slot).as_bytes());
         let lead = match given {
           Some(_) => format!("`{sign}{definition}` takes"),
@@ -340,7 +340,7 @@ impl MemberTypeKind {
         let mut report = Diagnostic::builder(position.code(), at)
           .message(message)
           .primary_label(position.label());
-        if let Some(witness) = self.positions.witness(def, slot, place) {
+        if let Some(witness) = self.positions.witness(def, slot, position.place()) {
           report = report.label(witness, format!("`{name}` stands here"));
         }
         if given.is_none()
@@ -359,9 +359,8 @@ impl MemberTypeKind {
       Found::Derived(Fill {
         slot: filled,
         ty: derived,
-        verdict: Own { slot, place },
+        verdict: Own { slot, position },
       }) => {
-        let position = Position::at(place);
         let TyKind::Named {
           def: derived_def,
           args: derived_args,
@@ -370,7 +369,7 @@ impl MemberTypeKind {
           return None;
         };
         let argument = *derived_args.get(slot as usize)?;
-        let misfit = self.fits.misfit(model, argument, place.class(), None)?;
+        let misfit = self.fits.misfit(model, argument, position.class(), None)?;
         let name = Excerpt(parameter(model, derived_def, slot).as_bytes());
         let lead = format!(
           "the default of `{}` of `{sign}{definition}` makes `{}` take",
@@ -389,7 +388,7 @@ impl MemberTypeKind {
         let mut report = Diagnostic::builder(position.code(), whole)
           .message(message)
           .primary_label(position.label());
-        if let Some(witness) = self.positions.witness(derived_def, slot, place) {
+        if let Some(witness) = self.positions.witness(derived_def, slot, position.place()) {
           report = report.label(witness, format!("`{name}` stands here"));
         }
         if let Some(default) = default_of(model, def, filled) {
@@ -402,8 +401,8 @@ impl MemberTypeKind {
 }
 
 /// The first argument of `ty`, of `model`, in order, that does not fit a place its slot stands in
-/// by `positions`, places read in [`PLACES`]' order, `fits` judging each type once and `verdicts`
-/// keeping each type's answer.
+/// by `positions`, places read in [`POSITIONS`]' order, `fits` judging each type once and
+/// `verdicts` keeping each type's answer.
 fn verdict(
   model: &Model,
   positions: &Positions,
@@ -418,11 +417,11 @@ fn verdict(
   if let TyKind::Named { def, args } = model.ty(ty).kind() {
     'arguments: for (slot, argument) in args.iter().enumerate() {
       let slot = dense(slot);
-      for place in PLACES {
-        if positions.witness(def, slot, place).is_some()
-          && !fits.fits(model, *argument, place.class())
+      for position in POSITIONS {
+        if positions.witness(def, slot, position.place()).is_some()
+          && !fits.fits(model, *argument, position.class())
         {
-          found = Some(Own { slot, place });
+          found = Some(Own { slot, position });
           break 'arguments;
         }
       }
@@ -489,13 +488,13 @@ impl Position {
     }
   }
 
-  /// The position a type parameter stands in at `place`.
-  fn at(place: Place) -> Self {
-    match place {
-      Place::Field => Self::Field,
-      Place::Argument => Self::Argument,
-      Place::InputField => Self::InputField,
-      Place::DirectiveArgument => Self::DirectiveArgument,
+  /// The place a type parameter stands in when it stands in this position.
+  const fn place(self) -> Place {
+    match self {
+      Self::Field => Place::Field,
+      Self::Argument => Place::Argument,
+      Self::DirectiveArgument => Place::DirectiveArgument,
+      Self::InputField => Place::InputField,
     }
   }
 

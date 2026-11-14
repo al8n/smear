@@ -536,7 +536,11 @@ All notable changes to Smear are documented in this file.
   field of type `TypeRef`, through lists, collections' arguments and input objects, over every
   package's input objects together, at the argument's type, labelled at that field: the root
   package's `f(b: ^::geo::Binding)` is refused when `geo`'s `Binding` holds a `TypeRef`, though
-  only `geo`'s directives take it. And `NonZero`'s type argument is an integer primitive at least
+  only `geo`'s directives take it; a value of an input object holds what its input fields hold,
+  and nothing a directive applied to it names. It is also each instantiation that gives such a
+  type to a type parameter an operation's argument reaches, where it is written, or whose defaults
+  derive one that does: `Q<Binding>` of `type Q<T> { f(a: T): Int }`, and `D<Binding>` of
+  `type D<T> { q: Q<Wrapped<T>> }`. And `NonZero`'s type argument is an integer primitive at least
   one bit wide, written without `!`: `NonZero` of a float, `string`, an object, a list, `u0`, a type
   parameter or an integer written with `!` is the new `smear::graphqlx::nonzero-argument`, where it
   is written, which is then all a map or a set keyed by it is refused with. And a definition's type

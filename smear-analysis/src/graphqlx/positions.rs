@@ -3,11 +3,12 @@
 //!
 //! # Places
 //!
-//! A place is a kind of position a type parameter can stand in, and takes one class of type: a
-//! field's type an output type, and a field argument's, an input field's and a directive
-//! argument's an input type. [`Positions`] finds, once for a walk, the places each type parameter
-//! of every package's definitions stands in, and for each, where in its own definition it stands
-//! there or is passed to a parameter that does: the witness a diagnostic labels.
+//! A place is a kind of position a type parameter can stand in: a field's type, which takes an
+//! output type; a field argument's, an input field's and a directive argument's, which take an
+//! input type; and what a value an operation's field argument takes can hold, which holds no
+//! `TypeRef`. [`Positions`] finds, once for a walk, the places each type parameter of every
+//! package's definitions stands in, and for each, where in its own definition it stands there or
+//! is passed to a parameter that does: the witness a diagnostic labels.
 //!
 //! A parameter stands where its definition puts it: in the complete type of each of its members,
 //! a field's arguments among them, every contribution's, a slot a default fills included; through
@@ -27,6 +28,23 @@
 //! edge carrying where that is written. Each root gives its type its place, and the places spread
 //! along the edges, each node gaining each place once, a slot keeping the witness it gained it
 //! with: across an edge out of a slot the witness becomes the edge's.
+//!
+//! What an operation's argument reaches is found last: each field argument's type is given it,
+//! and it spreads along the same edges, and from a named type of an input object to each argument
+//! a value of the input object holds. So with `type Q<A> { f(a: A): Int }` and
+//! `input Wrapped<W> { v: W }`, the `T` of `type D<T> { q: Q<Wrapped<T>> }` is reached from an
+//! operation's argument: `Q`'s field argument takes a `Wrapped<T>`, whose value holds a `T`.
+//!
+//! # What a value holds
+//!
+//! Which arguments of an input object a value of it holds is no place: a value holds what its
+//! input fields' complete types hold, under lists, collections' arguments and the arguments of
+//! other input objects that their values hold, and nothing a directive applied to it, or that
+//! directive's arguments, name, which are metadata. A parameter can stand in an input field's
+//! place through a directive's argument, which the kind its arguments take must answer to, while
+//! no value holds it: `input Empty<T> @tag<T> { n: Int }` holds no `T`, whatever `@tag`'s
+//! arguments are. [`Positions::holds`] answers it, for what an operation's argument reaches and
+//! for the `reach` module.
 //!
 //! # Classes
 //!
@@ -51,11 +69,15 @@
 //!
 //! # What it costs
 //!
-//! [`Positions::of`] looks once at each member, union member and application, enters each open
-//! type the roots reach once, reading its arguments once, and spreads each place to each node once,
-//! reading each edge once for each place its source gains: linear in the slots, the open types the
-//! roots reach and their arguments, with a logarithm for each lookup of an ordered map. A type
-//! given to many slots is one node with an edge from each, never a walk of what it holds for each.
+//! [`Positions::of`] looks once at each member and union member, and at each application, whose
+//! closed type it passes over at once and whose arguments its defaults fill it enters once for
+//! each type and count of written arguments; enters each open type the roots reach once, reading
+//! its arguments once; and spreads each place to each node once, reading each edge once for each
+//! place its source gains, and each argument of a named type of an input object once more, for
+//! what an operation's argument reaches: linear in the slots, the written type arguments, the open
+//! types the roots reach and their arguments, with a logarithm for each lookup of an ordered map.
+//! A type given to many slots is one node with an edge from each, never a walk of what it holds
+//! for each. What a value holds is one more worklist over the input fields, as linear.
 //! [`Fits`] judges each pair of a type and a class asked about once, with an explicit stack, a
 //! type's children before it; reading where a misfit lies follows one path down the type, beside
 //! the written occurrence that holds it. [`Derived`] walks, for each type and count of written
@@ -85,7 +107,7 @@ pub(crate) enum Class {
   Input,
 }
 
-/// A kind of position a type parameter can stand in, each taking one class of type.
+/// A kind of position a type parameter can stand in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Place {
   /// A field's type.
@@ -96,20 +118,16 @@ pub(crate) enum Place {
   InputField,
   /// A directive definition's argument's type.
   DirectiveArgument,
+  /// What a value an operation's field argument takes can hold: the argument's type, through
+  /// lists, collections' arguments, the definitions it is passed to, and the arguments a value of
+  /// an input object holds.
+  Operation,
 }
 
 /// How many places there are: the witnesses a slot keeps.
-const PLACES: usize = 4;
+const PLACES: usize = 5;
 
 impl Place {
-  /// The class of type it takes.
-  pub(crate) const fn class(self) -> Class {
-    match self {
-      Self::Field => Class::Output,
-      Self::Argument | Self::InputField | Self::DirectiveArgument => Class::Input,
-    }
-  }
-
   /// Its index among the places.
   const fn index(self) -> usize {
     match self {
@@ -117,6 +135,7 @@ impl Place {
       Self::Argument => 1,
       Self::InputField => 2,
       Self::DirectiveArgument => 3,
+      Self::Operation => 4,
     }
   }
 
@@ -127,7 +146,8 @@ impl Place {
 }
 
 /// Where each type parameter of a model stands: for each, the places it stands in, and where, in
-/// its own definition, it stands there or is passed to a parameter that does.
+/// its own definition, it stands there or is passed to a parameter that does; and, for each type
+/// parameter of an input object, whether a value of the input object holds a value of it.
 #[derive(Default)]
 pub(crate) struct Positions {
   /// The first slot of each definition, in id order, and the count of slots last: definition `d`'s
@@ -135,6 +155,9 @@ pub(crate) struct Positions {
   base: Vec<u32>,
   /// For each slot, and each place in turn, where the slot stands there, when it does.
   witnesses: Vec<Option<Location>>,
+  /// For each slot, whether a value of its definition, an input object, holds a value of its
+  /// argument.
+  held: Vec<bool>,
 }
 
 impl Positions {
@@ -142,19 +165,27 @@ impl Positions {
   pub(crate) fn of(model: &Model) -> Self {
     let base = bases(model);
     let slots = base.last().copied().unwrap_or(0);
+    let held = containment(model, &base);
     let mut graph = Graph {
       base: &base,
       slots,
       types: BTreeMap::new(),
       edges: Vec::new(),
+      holds: Vec::new(),
       seeds: Vec::new(),
+      operations: Vec::new(),
+      filled: BTreeSet::new(),
       stack: Vec::new(),
     };
     for def in model.defs() {
       graph.def(model, def);
     }
-    let witnesses = graph.spread();
-    Self { base, witnesses }
+    let witnesses = graph.spread(&held);
+    Self {
+      base,
+      witnesses,
+      held,
+    }
   }
 
   /// Where the type parameter `index` of `def` stands in `place`, in its own definition, or is
@@ -166,6 +197,172 @@ impl Positions {
       .checked_add(place.index())?;
     self.witnesses.get(at).copied().flatten()
   }
+
+  /// Whether a value of `def`, an input object, holds a value of its type parameter `index`'s
+  /// argument: what [`containment`] answers, which no place is. False for any other definition.
+  pub(crate) fn holds(&self, def: DefId, index: u32) -> bool {
+    slot(&self.base, def, index)
+      .and_then(|slot: u32| self.held.get(slot as usize).copied())
+      .unwrap_or(false)
+  }
+}
+
+/// A step [`containment`] takes from a type it reached.
+#[derive(Clone, Copy)]
+enum Step {
+  /// To a type a value of it always holds: a list's element, a collection's argument.
+  Always(u32),
+  /// To an argument of an input object, held when the input object's slot, the first, is.
+  If(u32, u32),
+  /// To the slot of the type parameter it is.
+  Param(u32),
+}
+
+/// For each slot under `base`, whether a value of its definition, an input object of `model`,
+/// holds a value of its argument: whether the complete type of one of the definition's input
+/// fields, every contribution's, holds its type parameter, under lists, collections' arguments and
+/// the arguments of input objects at the slots that hold theirs, found the same way.
+///
+/// A value holds what its input fields hold, and nothing else: a directive applied to the input
+/// object, and the arguments of that directive, are metadata, and give no value of the input object
+/// a value of anything. So it is no place, which says where a type parameter stands for the kind
+/// its arguments take: `input Empty<T> @tag<T> { n: Int }` holds no `T`, whatever `@tag`'s
+/// arguments do with its own.
+///
+/// A worklist: the open types the input fields' complete types reach, each `TyId` once, each with
+/// the steps it leads by; a type is reached once, a slot held once, and a step to an argument of
+/// an input object is read once when its type is reached and once when its slot is held. Linear in
+/// the input fields and the open types they reach, with a logarithm for each lookup.
+fn containment(model: &Model, base: &[u32]) -> Vec<bool> {
+  let slots = base.last().copied().unwrap_or(0) as usize;
+  let mut held = vec![false; slots];
+  let mut types: BTreeMap<TyId, u32> = BTreeMap::new();
+  let mut steps: Vec<(u32, Step)> = Vec::new();
+  let mut stack: Vec<TyId> = Vec::new();
+  let mut roots: Vec<u32> = Vec::new();
+  let node_of = |types: &mut BTreeMap<TyId, u32>, stack: &mut Vec<TyId>, ty: TyId| -> Option<u32> {
+    // A closed type names no parameter, and holds none.
+    if model.ty(ty).is_closed() {
+      return None;
+    }
+    if let Some(node) = types.get(&ty) {
+      return Some(*node);
+    }
+    let node = dense(types.len());
+    types.insert(ty, node);
+    stack.push(ty);
+    Some(node)
+  };
+  for def in model.defs() {
+    let definition = model.def(def);
+    if definition.kind() != DefKind::InputObject {
+      continue;
+    }
+    for field in definition.input_fields() {
+      let Some(written) = model.member(field).ty() else {
+        continue;
+      };
+      if let Some(node) = node_of(&mut types, &mut stack, model.type_expr(written).ty()) {
+        roots.push(node);
+      }
+    }
+  }
+  // Each open type's steps, once: the stack holds each type when it is first numbered.
+  while let Some(ty) = stack.pop() {
+    let Some(&from) = types.get(&ty) else {
+      continue;
+    };
+    match model.ty(ty).kind() {
+      TyKind::Param { def, index } => {
+        if let Some(slot) = slot(base, def, index) {
+          steps.push((from, Step::Param(slot)));
+        }
+      }
+      TyKind::List { element } => {
+        if let Some(to) = node_of(&mut types, &mut stack, element) {
+          steps.push((from, Step::Always(to)));
+        }
+      }
+      TyKind::Named { def, args } => {
+        let definition = model.def(def);
+        let input = definition.kind() == DefKind::InputObject;
+        if definition.collection().is_some() || input {
+          for (index, arg) in args.iter().enumerate() {
+            let Some(to) = node_of(&mut types, &mut stack, *arg) else {
+              continue;
+            };
+            if !input {
+              steps.push((from, Step::Always(to)));
+            } else if let Some(slot) = slot(base, def, dense(index)) {
+              steps.push((from, Step::If(slot, to)));
+            }
+          }
+        }
+      }
+      TyKind::Unresolved => {}
+    }
+  }
+  steps.sort_by_key(|step: &(u32, Step)| step.0);
+  // The steps to an argument of an input object, by the slot that holds it.
+  let mut waits: Vec<(u32, u32, u32)> = steps
+    .iter()
+    .filter_map(|&(from, step): &(u32, Step)| match step {
+      Step::If(slot, to) => Some((slot, from, to)),
+      Step::Always(_) | Step::Param(_) => None,
+    })
+    .collect();
+  waits.sort_unstable();
+  let mut reached = vec![false; types.len()];
+  // What is reached or held and not followed yet.
+  let mut queue: Vec<Event> = roots.into_iter().map(Event::Reached).collect();
+  while let Some(event) = queue.pop() {
+    match event {
+      Event::Reached(node) => {
+        let Some(seen) = reached.get_mut(node as usize) else {
+          continue;
+        };
+        if *seen {
+          continue;
+        }
+        *seen = true;
+        for &(_, step) in run(&steps, node, |step: &(u32, Step)| step.0) {
+          match step {
+            Step::Always(to) => queue.push(Event::Reached(to)),
+            Step::If(slot, to) => {
+              if held.get(slot as usize).copied().unwrap_or(false) {
+                queue.push(Event::Reached(to));
+              }
+            }
+            Step::Param(slot) => queue.push(Event::Held(slot)),
+          }
+        }
+      }
+      Event::Held(slot) => {
+        let Some(holds) = held.get_mut(slot as usize) else {
+          continue;
+        };
+        if *holds {
+          continue;
+        }
+        *holds = true;
+        for &(_, from, to) in run(&waits, slot, |wait: &(u32, u32, u32)| wait.0) {
+          if reached.get(from as usize).copied().unwrap_or(false) {
+            queue.push(Event::Reached(to));
+          }
+        }
+      }
+    }
+  }
+  held
+}
+
+/// What [`containment`]'s worklist follows next.
+#[derive(Clone, Copy)]
+enum Event {
+  /// A type's node, reached from an input field.
+  Reached(u32),
+  /// A slot, which a value of its input object holds.
+  Held(u32),
 }
 
 /// The first slot of each definition of `model`, in id order, and the count of slots last: one
@@ -202,9 +399,19 @@ struct Graph<'b> {
   /// Each edge, from a node to a node, with where it is written: the witness it gives when it
   /// leaves a slot.
   edges: Vec<(u32, u32, Location)>,
+  /// Each open argument of a named type of an input object: from the type's node to the
+  /// argument's, with the slot it is given to, which a value of the type holds a value of when
+  /// [`containment`] says so.
+  holds: Vec<(u32, u32, u32)>,
   /// The places the roots give, in the order of the roots: a node, its place, and the root's
   /// witness.
   seeds: Vec<(u32, Place, Location)>,
+  /// The field arguments' roots, in the order of the roots, each a node and the root's witness:
+  /// what an operation's argument reaches, given once the other places are found.
+  operations: Vec<(u32, Location)>,
+  /// Each open type of an application, with its count of written type arguments, whose arguments
+  /// its defaults fill were entered: once for each, whatever the applications.
+  filled: BTreeSet<(TyId, u32)>,
   /// The types still to enter, each with the witness of the root it is entered for.
   stack: Vec<(TyId, Location)>,
 }
@@ -255,31 +462,56 @@ impl Graph<'_> {
     let at = occurrence.location();
     if let Some(node) = self.enter(model, occurrence.ty(), at) {
       self.seeds.push((node, place, at));
+      // A field's argument is what an operation sets.
+      if place == Place::Argument {
+        self.operations.push((node, at));
+      }
     }
   }
 
   /// Enters the arguments of `application`'s type, each from its directive's slot, with where it
-  /// is written: its written type argument, or its path for one a default fills.
+  /// is written: each written type argument where it is written, which the source pays for; and
+  /// the arguments its defaults fill at its path, once for each type and count of written
+  /// arguments, which the fill that typed them paid for. A closed type gives no edge, and is
+  /// passed over at once.
   fn application(&mut self, model: &Model, id: ApplicationId) {
     let application = model.application(id);
     let Some(ty) = application.ty() else {
       return;
     };
-    let TyKind::Named { def, args } = model.ty(ty).kind() else {
+    let complete = model.ty(ty);
+    if complete.is_closed() {
+      return;
+    }
+    let TyKind::Named { def, args } = complete.kind() else {
       return;
     };
     let written = application.type_args();
-    for (index, arg) in args.iter().enumerate() {
-      let at = match written.get(index) {
-        Some(argument) => model.type_expr(*argument).location(),
-        None => application.path_location(),
-      };
-      let Some(to) = self.enter(model, *arg, at) else {
-        continue;
-      };
-      if let Some(from) = slot(self.base, def, dense(index)) {
-        self.edges.push((from, to, at));
+    for (index, (arg, argument)) in args.iter().zip(written).enumerate() {
+      self.argument(
+        model,
+        def,
+        index,
+        *arg,
+        model.type_expr(*argument).location(),
+      );
+    }
+    if written.len() < args.len() && self.filled.insert((ty, dense(written.len()))) {
+      let at = application.path_location();
+      for (index, arg) in args.iter().enumerate().skip(written.len()) {
+        self.argument(model, def, index, *arg, at);
       }
+    }
+  }
+
+  /// Enters `arg`, the argument at `index` of a type of `def`, for a root written at `at`, with an
+  /// edge to it from `def`'s slot.
+  fn argument(&mut self, model: &Model, def: DefId, index: usize, arg: TyId, at: Location) {
+    let Some(to) = self.enter(model, arg, at) else {
+      return;
+    };
+    if let Some(from) = slot(self.base, def, dense(index)) {
+      self.edges.push((from, to, at));
     }
   }
 
@@ -311,12 +543,16 @@ impl Graph<'_> {
               }
             }
           } else if !matches!(definition.kind(), DefKind::Scalar | DefKind::Enum) {
+            let input = definition.kind() == DefKind::InputObject;
             // What an argument takes is the definition's slot's to say.
             for (index, arg) in args.iter().enumerate() {
               if let Some(to) = self.open(model, *arg, at)
-                && let Some(from) = slot(self.base, def, dense(index))
+                && let Some(given) = slot(self.base, def, dense(index))
               {
-                self.edges.push((from, to, at));
+                self.edges.push((given, to, at));
+                if input {
+                  self.holds.push((from, to, given));
+                }
               }
             }
           }
@@ -342,20 +578,31 @@ impl Graph<'_> {
     Some(node)
   }
 
-  /// Spreads each root's place along the edges, root by root, and answers each slot's witnesses.
-  fn spread(mut self) -> Vec<Option<Location>> {
+  /// Spreads each root's place along the edges, root by root, then what an operation's argument
+  /// reaches, which passes from an input object's type to the arguments a value of it holds by
+  /// `held`, and answers each slot's witnesses.
+  fn spread(mut self, held: &[bool]) -> Vec<Option<Location>> {
     let nodes = (self.slots as usize).saturating_add(self.types.len());
     // The edges by their source, so that a node's are one run.
     self.edges.sort_by_key(|edge: &(u32, u32, Location)| edge.0);
+    self.holds.sort_by_key(|hold: &(u32, u32, u32)| hold.0);
     let mut spread = Spread {
       slots: self.slots,
       edges: &self.edges,
+      holds: &self.holds,
+      held,
       gained: vec![0; nodes],
       witnesses: vec![None; (self.slots as usize).saturating_mul(PLACES)],
       queue: Vec::new(),
     };
     for &(node, place, at) in &self.seeds {
       spread.gain(node, place, at);
+      spread.drain();
+    }
+    // Last, and root by root as well, so that a slot's witness is that of the first field
+    // argument, in the order of the roots, that reaches it.
+    for &(node, at) in &self.operations {
+      spread.gain(node, Place::Operation, at);
       spread.drain();
     }
     spread.witnesses
@@ -369,6 +616,10 @@ struct Spread<'e> {
   slots: u32,
   /// The edges, by their source.
   edges: &'e [(u32, u32, Location)],
+  /// The arguments of named types of input objects, by the type's node, each with its slot.
+  holds: &'e [(u32, u32, u32)],
+  /// For each slot, whether a value of its input object holds a value of its argument.
+  held: &'e [bool],
   /// For each node, the places it gained, a bit for each.
   gained: Vec<u8>,
   /// For each slot, and each place in turn, the witness it gained the place with.
@@ -399,23 +650,36 @@ impl Spread<'_> {
     self.queue.push((node, place, at));
   }
 
-  /// Passes every queued place along each edge out of its node, until none is left.
+  /// Passes every queued place along each edge out of its node, until none is left: and what an
+  /// operation's argument reaches, from a named type of an input object to each of its arguments
+  /// a value of it holds.
   fn drain(&mut self) {
+    let edges = self.edges;
+    let holds = self.holds;
+    let held = self.held;
     while let Some((node, place, at)) = self.queue.pop() {
-      let from = self
-        .edges
-        .partition_point(|edge: &(u32, u32, Location)| edge.0 < node);
-      let to = self
-        .edges
-        .partition_point(|edge: &(u32, u32, Location)| edge.0 <= node);
-      let out: &[(u32, u32, Location)] = self.edges.get(from..to).unwrap_or(&[]);
-      for &(_, next, written) in out {
+      for &(_, next, written) in run(edges, node, |edge: &(u32, u32, Location)| edge.0) {
         // Across an edge out of a slot, the witness is where the argument is given.
         let witness = if node < self.slots { written } else { at };
         self.gain(next, place, witness);
       }
+      if place != Place::Operation {
+        continue;
+      }
+      for &(_, next, given) in run(holds, node, |hold: &(u32, u32, u32)| hold.0) {
+        if held.get(given as usize).copied().unwrap_or(false) {
+          self.gain(next, place, at);
+        }
+      }
     }
   }
+}
+
+/// The run of `sorted`, sorted by `source`, whose source is `node`.
+fn run<T>(sorted: &[T], node: u32, source: fn(&T) -> u32) -> &[T] {
+  let from = sorted.partition_point(|item: &T| source(item) < node);
+  let to = sorted.partition_point(|item: &T| source(item) <= node);
+  sorted.get(from..to).unwrap_or(&[])
 }
 
 /// Where a type does not fit a class: nowhere, in itself, or under one of its children.
@@ -722,7 +986,8 @@ pub(crate) fn named(kind: DefKind) -> &'static str {
 }
 
 /// Where the default of the type parameter `index` of `def`, of `model`, is written, when it has
-/// one: what fills a slot an occurrence leaves out.
+/// one: what fills a slot an occurrence leaves out. A constant step: `TypeParams::nth` reads the
+/// row it is asked for.
 pub(crate) fn default_of(model: &Model, def: DefId, index: u32) -> Option<Location> {
   let default = model
     .def(def)
@@ -732,7 +997,8 @@ pub(crate) fn default_of(model: &Model, def: DefId, index: u32) -> Option<Locati
   Some(model.type_expr(default).location())
 }
 
-/// The name of the type parameter `index` of `def`, of `model`, or nothing when it has none.
+/// The name of the type parameter `index` of `def`, of `model`, or nothing when it has none. A
+/// constant step, as [`default_of`]'s.
 pub(crate) fn parameter(model: &Model, def: DefId, index: u32) -> &str {
   match model.def(def).type_params().nth(index as usize) {
     Some(param) => param.name(),

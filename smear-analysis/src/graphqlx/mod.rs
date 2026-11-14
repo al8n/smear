@@ -139,7 +139,9 @@
 //! definition's argument or of an input field, under lists alone: anywhere else it is
 //! `smear::graphqlx::typeref-misuse`, and so is a field's argument whose value can hold an input
 //! field of type `TypeRef`, through lists, collections and the input objects of every package, at
-//! the argument's type. And `NonZero` makes an integer never zero: `NonZero` of what
+//! the argument's type, and each instantiation that gives such a type to a type parameter an
+//! operation's argument reaches, at the argument. And `NonZero` makes an integer never zero:
+//! `NonZero` of what
 //! is no integer primitive at least one bit wide, written without `!`, is
 //! `smear::graphqlx::nonzero-argument`. And a definition's type parameters have distinct names, and
 //! so do the names an extension's own list gives them: a type parameter with the name of an

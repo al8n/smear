@@ -1172,6 +1172,110 @@ fn a_type_given_to_many_parameters_is_one_node() {
 }
 
 #[test]
+fn an_application_its_defaults_complete_is_entered_once() {
+  // `@d` has many parameters its defaults fill, each from the first, and is applied as `@d<T>` to
+  // each of many fields of `G`: every application's type is the one type `d<T, T, …, T>`, whose
+  // filled arguments the table enters once, at the first application, which the last parameter's
+  // place reaches `G`'s `T` through. `@e`, applied bare to each field too, has a closed type, which
+  // gives no edge and is passed over at once. A test sees the diagnostics, not the work, which the
+  // table bounds by construction: each written type argument once, and the filled ones once for
+  // each type and count of written arguments, which the fill that typed them paid for. Read once
+  // for each application, this program's 4,000 applications would each read 2,000 slots.
+  const PARAMS: usize = 2_000;
+  const FIELDS: usize = 2_000;
+  let mut text =
+    String::from("type Query {\n  g: G<Obj>\n}\ntype Obj {\n  o: Int\n}\ndirective @d<A");
+  for index in 1..PARAMS {
+    text.push_str(&format!(", B{index} = A"));
+  }
+  text.push_str(&format!(
+    ">(b: B{}) on FIELD_DEFINITION\ndirective @e<C0 = Int",
+    PARAMS - 1
+  ));
+  for index in 1..PARAMS {
+    text.push_str(&format!(", C{index} = Int"));
+  }
+  text.push_str("> on FIELD_DEFINITION\ntype G<T> {\n");
+  for index in 0..FIELDS {
+    text.push_str(&format!("  f{index}: Int @d<T> @e\n"));
+  }
+  text.push_str("}\n");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DIRECTIVE_ARGUMENT_TYPE,
+      named(schema, &text, "G<", "Obj", 0),
+      Some(named(schema, &text, "f0: Int @", "d", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn a_parameter_far_down_a_long_list_is_named_in_one_step() {
+  // `Wide`'s parameters are all defaulted, the last to an input object that its field takes, and
+  // each of many fields leaves them all out: each is refused, naming the last parameter and
+  // labelling its default. A parameter is named by reading its row, skipping none, so each report
+  // costs the same however far down the list its parameter is: a test sees the diagnostics, not
+  // the work, which holds by construction, `TypeParams::nth` reading the row it is asked for. Read
+  // from the first parameter on, each of this program's 3,000 reports would read 3,000 rows twice.
+  const PARAMS: usize = 3_000;
+  const FIELDS: usize = 3_000;
+  let mut text = String::from("type Query {\n  u: Uses\n}\ninput In {\n  i: Int\n}\ntype Wide<");
+  for index in 0..PARAMS {
+    text.push_str(&format!("T{index} = Int, "));
+  }
+  let default = text.len() + format!("T{PARAMS} = ").len();
+  text.push_str(&format!("T{PARAMS} = In> {{\n  f: "));
+  let stands = text.len();
+  text.push_str(&format!("T{PARAMS}\n}}\ntype Uses {{\n"));
+  let mut uses: Vec<usize> = Vec::with_capacity(FIELDS);
+  for index in 0..FIELDS {
+    let field = format!("  u{index}: ");
+    uses.push(text.len() + field.len());
+    text.push_str(&field);
+    text.push_str("Wide\n");
+  }
+  text.push_str("}\n");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  let span = |start: usize, len: usize| -> Location {
+    Location::new(schema.get(), SimpleSpan::new(start, start + len))
+  };
+  let last = format!("T{PARAMS}");
+  let expected: Vec<(&'static str, Location, Option<Location>)> = uses
+    .iter()
+    .map(|start: &usize| {
+      (
+        FIELD_TYPE,
+        span(*start, "Wide".len()),
+        Some(span(stands, last.len())),
+      )
+    })
+    .collect();
+  assert_eq!(found(&analysis), expected);
+  let first = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("a diagnostic for each field");
+  assert_eq!(
+    first.to_string(),
+    format!(
+      "`Wide` takes, from the default of `{last}`, the input object `In` for its type parameter \
+       `{last}`, which stands as a field's type, and a field's type is an output type"
+    )
+  );
+  assert_eq!(
+    first.label(1).map(|label| (label.location(), label.text())),
+    Some((span(default, "In".len()), "filled from this default"))
+  );
+}
+
+#[test]
 fn instantiations_are_judged_across_files_modules_and_packages() {
   // An extension in another file uses a generic type of a module; an extension in a third file
   // adds a field argument to it; a dependency's generic input object is used by the root package.

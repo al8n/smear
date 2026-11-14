@@ -5,22 +5,23 @@
 //! object one of whose fields is, under lists alone, a `TypeRef` may be reached from directives'
 //! arguments and from nothing an operation writes. [`Reach`] answers, for a type, the field of type
 //! `TypeRef` a value of it can hold, through lists, collections' arguments and input objects, each
-//! input object's arguments for its type parameters that stand in its input fields
-//! ([`Positions`]); a scalar that is no collection hides its arguments, which no value of it holds.
-//! A `TypeRef` itself, or a list of it, answers nothing: where it stands is judged where it is
-//! written.
+//! input object's arguments that a value of it holds ([`Positions::holds`]), which its input
+//! fields alone say: a directive applied to it, and that directive's arguments, are metadata,
+//! which no value holds. A scalar that is no collection hides its arguments, which no value of it
+//! holds. A `TypeRef` itself, or a list of it, answers nothing: where it stands is judged where it
+//! is written.
 //!
 //! # The graph
 //!
 //! Its nodes are every input object of the model, every package's, and each interned type the
 //! input objects' fields reach, each `TyId` once. An input object leads to the complete type of
 //! each of its fields, every contribution's, in member order; a list to its element; a collection
-//! to each argument; a named type of an input object to that input object, and to its argument at
-//! each slot whose parameter stands in an input field. Nothing leads out of any other type. The
-//! input objects one of whose fields is, under lists alone, `TypeRef` are the seeds, each with the
-//! first such field in member order; a breadth-first walk back along the edges from them taints
-//! every node that reaches one, with the field of the node it was reached from. What is kept is
-//! each input object tainted, with its field; the graph is dropped.
+//! to each argument; a named type of an input object to that input object, and to each argument a
+//! value of it holds. Nothing leads out of any other type. The input objects one of whose fields
+//! is, under lists alone, `TypeRef` are the seeds, each with the first such field in member order;
+//! a breadth-first walk back along the edges from them taints every node that reaches one, with
+//! the field of the node it was reached from. What is kept is each input object tainted, with its
+//! field; the graph is dropped.
 //!
 //! # Why the whole program
 //!
@@ -44,9 +45,7 @@
 use std::{collections::BTreeMap, vec::Vec};
 
 use crate::graphqlx::{
-  DefId, DefKind, MemberId, Model, TyId, TyKind,
-  id::dense,
-  positions::{Place, Positions},
+  DefId, DefKind, MemberId, Model, TyId, TyKind, id::dense, positions::Positions,
 };
 
 /// Which input objects can hold a `TypeRef`, each with the field it can reach first, and the
@@ -67,7 +66,7 @@ pub(crate) struct Reach {
 
 impl Reach {
   /// What can reach a `TypeRef` in `model`, every package's input objects together, `positions`
-  /// saying which arguments of an input object its input fields hold.
+  /// saying which arguments of an input object a value of it holds.
   pub(crate) fn of(model: &Model, positions: &Positions) -> Self {
     let type_ref = model.builtins().type_ref();
     let inputs: Vec<DefId> = model
@@ -130,10 +129,7 @@ impl Reach {
               edges.push((from, dense(index)));
             }
             for (index, arg) in args.iter().enumerate() {
-              if positions
-                .witness(def, dense(index), Place::InputField)
-                .is_some()
-              {
+              if positions.holds(def, dense(index)) {
                 let to = node_of(&mut types, &mut stack, *arg);
                 edges.push((from, to));
               }
@@ -190,9 +186,9 @@ impl Reach {
   }
 
   /// The input field of type `TypeRef` a value of `ty`, of `model`, can hold, through lists,
-  /// collections' arguments and input objects, each input object's arguments for its type
-  /// parameters that stand in its input fields by `positions`, the first one the walk found;
-  /// `None` when it can hold none. A `TypeRef` itself, and a list of it, answer `None`.
+  /// collections' arguments and input objects, each input object's arguments that a value of it
+  /// holds by `positions`, the first one the walk found; `None` when it can hold none. A `TypeRef`
+  /// itself, and a list of it, answer `None`.
   pub(crate) fn type_ref(
     &mut self,
     model: &Model,
@@ -224,13 +220,8 @@ impl Reach {
             Some(*field)
           } else if definition.collection().is_some() || input {
             // What a value of it holds: each argument of a collection, and each argument of an
-            // input object at a slot its input fields hold.
-            let held = |index: usize| -> bool {
-              !input
-                || positions
-                  .witness(def, dense(index), Place::InputField)
-                  .is_some()
-            };
+            // input object that a value of it holds.
+            let held = |index: usize| -> bool { !input || positions.holds(def, dense(index)) };
             if !pushed {
               self.stack.push((next, true));
               for (index, arg) in args.iter().enumerate().rev() {

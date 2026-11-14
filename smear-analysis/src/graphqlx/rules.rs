@@ -38,11 +38,13 @@
 //! collections, and where each definition it is passed to puts that definition's parameter. Such a
 //! rule judges every written occurrence and every application, each type once, and what the slots
 //! an occurrence leaves to their defaults derive, at the occurrence, through `positions::Derived`.
-//! `MemberTypeKind` is one, and reads one crate-private accessor, `Application::ty`, an
-//! application's complete type, its directive's instantiation. `TypeRefMisuse` reads the table
-//! too, and the graph of what a value can reach, `reach::Reach`, found once for the walk over
-//! every package's input objects, so that an argument the root package writes is judged by what
-//! a dependency's input object holds.
+//! `MemberTypeKind` is one, for the kinds its places take, and `TypeRefMisuse` another, for the
+//! parameters an operation's argument reaches; each reads one crate-private accessor,
+//! `Application::ty`, an application's complete type, its directive's instantiation.
+//! `TypeRefMisuse` reads the graph of what a value can reach too, `reach::Reach`, found once for
+//! the walk over every package's input objects, so that an argument the root package writes is
+//! judged by what a dependency's input object holds; what a value of an input object holds is its
+//! input fields' to say, and no directive's applied to it, as `Positions::holds` answers.
 //!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads the public `TypeExpr::written_args`: the walk descends the written
@@ -392,7 +394,8 @@ rule_set! {
   /// type; an enum takes no type parameter; a marker has no field and is named only in `implements`
   /// and in bounds, and a scalar, an enum, an input object or a union implements markers alone; a
   /// set has one type parameter and a map two; `TypeRef` stands only in a directive's arguments,
-  /// and no field's argument reaches an input object that holds one;
+  /// and no field's argument reaches an input object that holds one, nor, at each instantiation,
+  /// what it gives a type parameter an operation's argument reaches;
   /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; a
   /// definition's type parameters have distinct names, and so do the names an extension's own list
   /// gives them; `@extern` binds a scalar its own package defines, once for each language; `@repr`

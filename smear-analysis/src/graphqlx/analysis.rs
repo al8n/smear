@@ -406,9 +406,12 @@ impl Analysis {
 ///   directive definition's argument or of an input field, under lists alone, is `typeref-misuse`,
 ///   where it is named, a type argument of any generic definition included; and a field's
 ///   argument a value of whose type can hold an input field of type `TypeRef`, through lists,
-///   collections' arguments and input objects, each input object's arguments for its type
-///   parameters that stand in its input fields, over every package's input objects, is
-///   `typeref-misuse` too, at the argument's type, labelled at that field. `NonZero` whose type
+///   collections' arguments and input objects, each input object's arguments that its input
+///   fields hold, over every package's input objects, is `typeref-misuse` too, at the argument's
+///   type, labelled at that field; and so is each instantiation, written or a directive's
+///   application, that gives such a type to a type parameter an operation's argument reaches, or
+///   whose defaults derive one that does, at the argument, labelled where the parameter is
+///   reached and at that field. `NonZero` whose type
 ///   argument, in the occurrence's type, is no integer primitive at least one bit wide written
 ///   without `!` is `nonzero-argument`, where it is written, with a label at the argument. A type
 ///   parameter with the name of an earlier one of its definition, and a name an extension's own
