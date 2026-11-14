@@ -1,8 +1,8 @@
 //! smear's own rules: what `analyze` runs, after its phases, through the one driver.
 //!
 //! A rule is one type in one file, implementing the public `Visitor` and nothing else, and the set
-//! is a named struct of them that `rule_set!` declares. The rule types are private. The macro also
-//! emits the set's table of each rule and the codes it reports, which the liveness test reads:
+//! is a named struct of them that `rule_set!` declares. The set's rule types are private. The macro
+//! also emits the set's table of each rule and the codes it reports, which the liveness test reads:
 //! every code a rule lists must fire on at least one fixture.
 //!
 //! A rule reads the model the phases wrote, through its public views, and reports through the
@@ -31,14 +31,17 @@
 //! analysis keeps GraphQL's rule on the query root and exposes no waiver.
 //!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
-//! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk
-//! descends the written arguments of an occurrence that names a type parameter, or nothing, and
-//! the public kind does not answer them. `DuplicateTypeParameter` reads another,
-//! `Def::extension_params`: the names an extension's own list writes, which no public view holds.
-//! `DuplicateMember` reads `IdRange::start`, to name the member at a position of a list.
-//! `ExternMisuse` reads `Extern::application`, the application an extern is bound from, which the
-//! public model does not answer yet: a candidate public accessor for the model's review; and
-//! `TierViolation` reads it too.
+//! by `Nesting`, which reads the public `TypeExpr::written_args`: the walk descends the written
+//! arguments of an occurrence that names a type parameter, or nothing, which the kind does not
+//! answer. `DuplicateTypeParameter` reads one crate-private accessor, `Def::extension_params`:
+//! the names an extension's own list writes, which no public view holds. `DuplicateMember` reads
+//! another, `IdRange::start`, to name the member at a position of a list. `ExternMisuse` reads a
+//! third, `Extern::application`, the application an extern is bound from, which the public model
+//! does not answer yet: a candidate public accessor for the model's review; and `TierViolation`
+//! reads it too.
+//!
+//! One rule is in no set: `UnboundedInstantiation`, which is public, which `analyze` never runs,
+//! and which a backend composes into its own walk. It reads the public model alone.
 
 mod collection_arity;
 mod deprecated_required;
@@ -70,6 +73,7 @@ mod shared_root_operation_type;
 mod specified_by_on_built_in_scalar;
 mod tier_violation;
 mod type_ref_misuse;
+mod unbounded_instantiation;
 mod union_member_not_object;
 mod unsupported_directive_location;
 
@@ -100,6 +104,8 @@ use super::{
   ApplicationId, Contribution, Cx, DefId, DefKind, Model, PackageId, PackageKind, Resolution,
   TypeExprId, TypeExprKind, id::dense,
 };
+
+pub use self::unbounded_instantiation::UnboundedInstantiation;
 
 /// The definition `def`'s own contribution, its first, which is no extension, and the package that
 /// wrote it, read off where it is written: the package that wrote the definition, whose

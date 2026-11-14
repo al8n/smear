@@ -43,9 +43,9 @@
 //! judges, or, for a written root, in one of the schema's. A `use` item is no use: an unused one
 //! says nothing.
 //!
-//! The rule reads the public model, and two crate-private accessors: `Extern::application`, the
-//! application an extern is bound from, and `SourceMap::written_by`, the package that wrote what
-//! is judged.
+//! The rule reads the public model, the public `SourceMap::written_by` among it, the package that
+//! wrote what is judged, and one crate-private accessor, `Extern::application`: the application
+//! an extern is bound from.
 
 use std::{collections::BTreeMap, format, vec, vec::Vec};
 

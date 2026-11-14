@@ -19,8 +19,8 @@
 //!
 //! A marker that takes type parameters is a marker like any other.
 //!
-//! Each is `smear::graphqlx::marker-misuse`. The rule reads the public model, and one crate-private
-//! accessor through `Nesting`: `TypeExpr::written_args`, to tell an outermost occurrence.
+//! Each is `smear::graphqlx::marker-misuse`. The rule reads the public model and nothing else:
+//! through `Nesting`, the public `TypeExpr::written_args`, to tell an outermost occurrence.
 
 use std::format;
 
