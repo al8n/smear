@@ -17,13 +17,15 @@
 //!   holding all of them never needs to know which enum a code came from. The syntax family's
 //!   kinds are `smear-lexer`'s `SyntaxErrorKind`, whose lexer and parser errors implement the
 //!   contract straight from tokora.
-//! - **Every severity is [`Severity::Error`]** today. The other rungs exist for a deprecation-lint
-//!   class that does not exist yet, and nothing here invents a warning to justify them.
+//! - **Every family's diagnostics are [`Severity::Error`] but one:** the GraphQLx analyzer's
+//!   `smear::graphqlx::shadowed-primitive`, a type a package declares with the name of a primitive
+//!   of the prelude, which GraphQL schemas do freely, is a [`Severity::Warning`]. Nothing here
+//!   reports [`Severity::Advice`].
 //! - **[`Location::entire`] has two users**, each an input with no position worth pointing at: the
 //!   introspection door's `ResponseError`, whose input is a machine-generated response, and the
 //!   GraphQLx analyzer's diagnostics about a package as a whole, which point at that package's
 //!   package source, a source with no text. Every other family points at the bytes it refused.
-//! - **No path segments.** All four refuse an input before any request has produced a result,
+//! - **No path segments.** All five refuse an input before any request has produced a result,
 //!   so none has a field of one to point at.
 //!
 //! A schema refusal, a validation diagnostic and an introspection refusal erase to the same
