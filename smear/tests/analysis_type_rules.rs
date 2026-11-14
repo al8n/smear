@@ -794,6 +794,105 @@ fn an_instantiations_argument_reaches_no_type_ref_field() {
 }
 
 #[test]
+fn a_default_that_reaches_a_type_ref_is_refused_where_it_is_written() {
+  // `P`'s `T` is reached from an operation's argument, so `Ref`'s default `P<A, Binding>` is
+  // refused at `Binding`, where it is written, labelled where `T` is reached and at `Binding`'s
+  // `type`. Each use derives a `P` of its own, `P<Int, Binding>` and `P<Boolean, Binding>`, which
+  // no occurrence writes and which would repeat the default's mistake: a fill that leaves a slot to
+  // a default the rule refuses derives nothing to judge, and neither use adds a report.
+  let text = "type Query {\n  r: Ref<Int>\n  s: Ref<Boolean>\n}\n\
+              input Binding {\n  type: TypeRef!\n}\ntype P<S, T> {\n  f(a: T): Int\n}\n\
+              type Ref<A, B = P<A, Binding>> {\n  r: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let reached = named(schema, text, "f(a: ", "T", 0);
+  let field = (
+    named(schema, text, "  ", "type", 0),
+    "a value of `TypeRef` stands here",
+  );
+  assert_eq!(
+    found(&analysis),
+    [(
+      TYPEREF,
+      named(schema, text, "P<A, ", "Binding", 0),
+      Some(reached)
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`P` takes `Binding` for its type parameter `T`, which an operation's argument reaches, and \
+       a value of `Binding` can hold the input field `type` of `Binding`, whose type is `TypeRef`"
+    ]
+  );
+  let labels: Vec<Vec<(Location, &str)>> = reported(&analysis)
+    .into_iter()
+    .map(|diagnostic: &Diagnostic| {
+      (0..diagnostic.labels())
+        .filter_map(|index: usize| diagnostic.label(index))
+        .map(|label| (label.location(), label.text()))
+        .collect()
+    })
+    .collect();
+  assert_eq!(
+    labels,
+    [vec![
+      (reached, "`T` is reached from an operation's argument here"),
+      field,
+    ]]
+  );
+
+  // The twin, a default that holds no `TypeRef` as written: `Ref<Binding>`'s fill derives
+  // `P<Binding, Binding>`, refused at the use, from the default of `B`, labelled at the default
+  // too. `Ref<Int>` adds nothing.
+  let text = "type Query {\n  r: Ref<Binding>\n  s: Ref<Int>\n}\n\
+              input Binding {\n  type: TypeRef!\n}\ntype P<S, T> {\n  f(a: T): Int\n}\n\
+              type Ref<A, B = P<A, A>> {\n  r: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let reached = named(schema, text, "f(a: ", "T", 0);
+  assert_eq!(
+    found(&analysis),
+    [(TYPEREF, at(schema, text, "Ref<Binding>", 0), Some(reached))],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the default of `B` of `Ref` makes `P` take `Binding` for its type parameter `T`, which an \
+       operation's argument reaches, and a value of `Binding` can hold the input field `type` of \
+       `Binding`, whose type is `TypeRef`"
+    ]
+  );
+  let labels: Vec<Vec<(Location, &str)>> = reported(&analysis)
+    .into_iter()
+    .map(|diagnostic: &Diagnostic| {
+      (0..diagnostic.labels())
+        .filter_map(|index: usize| diagnostic.label(index))
+        .map(|label| (label.location(), label.text()))
+        .collect()
+    })
+    .collect();
+  assert_eq!(
+    labels,
+    [vec![
+      (reached, "`T` is reached from an operation's argument here"),
+      (
+        named(schema, text, "  ", "type", 0),
+        "a value of `TypeRef` stands here"
+      ),
+      (
+        named(schema, text, "B = ", "P<A, A>", 0),
+        "filled from this default"
+      ),
+    ]]
+  );
+}
+
+#[test]
 fn a_directive_applied_to_an_input_object_holds_no_value() {
   // `Empty`'s `T` stands in an input field through `@tag`'s argument, which the kind it takes
   // answers to; but a value of `Empty` holds what its input fields hold, and `@tag` is metadata:

@@ -417,7 +417,8 @@ impl Analysis {
 ///   type, labelled at that field; and so is each instantiation, written or a directive's
 ///   application, that gives such a type to a type parameter an operation's argument reaches, or
 ///   whose defaults derive one that does, at the argument, labelled where the parameter is
-///   reached and at that field. `NonZero` whose type
+///   reached and at that field, a default the rule refuses being reported where it is written, and
+///   at no use that leaves its slot out. `NonZero` whose type
 ///   argument, in the occurrence's type, is no integer primitive at least one bit wide written
 ///   without `!` is `nonzero-argument`, where it is written, with a label at the argument. A type
 ///   parameter with the name of an earlier one of its definition, and a name an extension's own
@@ -466,7 +467,9 @@ impl Analysis {
 ///   puts that definition's parameter, and the first argument that is not of the class each place
 ///   it stands in takes is refused at the argument, or at the occurrence for one a default fills,
 ///   with a label where the parameter stands; else what the slots the occurrence leaves to their
-///   defaults derive, and no occurrence writes, is judged so at the occurrence.
+///   defaults derive, and no occurrence writes, is judged so at the occurrence, and nothing when a
+///   slot it leaves out is filled from a default the rule refuses, which is reported where it is
+///   written.
 ///   An `implements` entry of an object or an interface that names what is no interface, a type
 ///   parameter among them, is `implements-non-interface`, at the entry. An interface on a cycle
 ///   of `implements` entries, of any length, is `self-implementing-interface`, at its name. A
@@ -476,11 +479,12 @@ impl Analysis {
 ///   name, with a label at the `@deprecated`; and so is an instantiation that gives a non-null type
 ///   to a type parameter that is such a member's whole type, written nullable, through the
 ///   definitions it is passed to, nullable, but no list or collection, or whose defaults derive one
-///   that does, at the argument, labelled where the parameter stands. A set's element and a map's
-///   key are non-null in every instantiation: a collection's own definition that gives one,
-///   nullable, such a member's whole type is refused once, under the member's code, where it gives
-///   it, with a label at the `@deprecated`; one it gives non-null, `T!`, is refused once as the
-///   instantiation it is; and no use of the collection repeats either. An input object is OneOf
+///   that does, at the argument, labelled where the parameter stands, a default the rule refuses
+///   being reported where it is written, and at no use that leaves its slot out. A set's element
+///   and a map's key are non-null in every instantiation: a collection's own definition that gives
+///   one, nullable, such a member's whole type is refused once, under the member's code, where it
+///   gives it, with a label at the `@deprecated`; one it gives non-null, `T!`, is refused once as
+///   the instantiation it is; and no use of the collection repeats either. An input object is OneOf
 ///   when the package that wrote it applies `core`'s `@oneOf` to it, in its definition or in an
 ///   extension of its own, and a field of one that is written non-null is
 ///   `one-of-field-not-nullable`, and one that declares a default `one-of-field-has-default`, at
@@ -488,10 +492,12 @@ impl Analysis {
 ///   to a type parameter that is a field of a OneOf's whole type, written nullable, through the
 ///   definitions it is passed to, nullable, but no list or collection, or whose defaults derive one
 ///   that does, is `one-of-field-not-nullable` too, at the argument, labelled where the parameter
-///   stands; and so is, once, where it gives it, a collection's own definition that gives its key
-///   or element, nullable, such a field's whole type, with a label at the field, one given non-null
-///   being refused once as the instantiation it is. Each application of `@oneOf` in an extension of
-///   an input object is `one-of-on-input-object-extension`, at its path. Over every input object of
+///   stands, a default the rule refuses being reported where it is written, and at no use that
+///   leaves its slot out; and so is, once, where it gives it, a collection's own definition that
+///   gives its key or element, nullable, such a field's whole type, with a label at the field, one
+///   given non-null being refused once as the instantiation it is. Each application of `@oneOf` in
+///   an extension of an input object is `one-of-on-input-object-extension`, at its path. Over every
+///   input object of
 ///   the model, the draft's unbreakable-cycle algorithm: an ordinary input object is finite when
 ///   what each field that is non-null and no list requires is, and a OneOf when one of its fields
 ///   can be given a finite value; the input objects that are not are walked in id order, each field

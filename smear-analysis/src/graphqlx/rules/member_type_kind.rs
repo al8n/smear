@@ -34,7 +34,11 @@
 //! Else, what the slots an occurrence leaves to their defaults derive is judged the same way, at
 //! the occurrence: `Conn<In>` of `type Conn<N, E = Edge<N>>`, whose `E` is `Edge<In>`, whose
 //! `node: N` is then an input object in a field. A type the occurrence writes, or that an
-//! occurrence of the program writes, is passed over there: it is judged where it is written.
+//! occurrence of the program writes, is passed over there: it is judged where it is written. And a
+//! fill that leaves a slot to a default the rule refuses derives nothing to judge: the default is
+//! refused where it is written, `Pair<N, Obj>` of `scalar Ref<N, E = Pair<N, Obj>>` at `Obj` when
+//! `Pair`'s second parameter stands in an input field, and no occurrence of `Ref` that leaves `E`
+//! out repeats it, though each derives a `Pair` of its own.
 //!
 //! A member is judged when a supplied package wrote its definition, a GraphQL built-in the root
 //! package replaces among them, and so is a member's type occurrence; every other occurrence and
@@ -85,15 +89,16 @@ const POSITIONS: [Position; 4] = [
 /// its type and one step for each list its type writes; for each occurrence and application, one
 /// look at its type and, once for each distinct type, a verdict that reads each argument against
 /// each place its slot stands in, each type and class judged once for the walk; and once for each
-/// distinct type and count of written arguments, the types its fill derives, each once. A report
-/// reads one answer kept for its written occurrence: where under it what does not fit lies, made
-/// once for the walk for each occurrence and class, from the answer of the child it writes on the
-/// way, or from its own type's where it stops writing the way. So a written tree is read once,
-/// however many reports nest in it, and a path a default fills is walked once, when its types are
-/// judged, and never for a report. Nothing recurses. It keeps, between two hooks, whether a
-/// supplied package wrote the definition the walk is in, and for the walk the table, the silence,
-/// its verdicts and those answers, each keyed by the model's ids. Its messages quote names as
-/// excerpts, so each is bounded whatever the names' lengths, and print no type.
+/// distinct type and count of written arguments, the types its fill derives, each once, and once
+/// for its definition, the types of its defaults. A report reads one answer kept for its written
+/// occurrence: where under it what does not fit lies, made once for the walk for each occurrence
+/// and class, from the answer of the child it writes on the way, or from its own type's where it
+/// stops writing the way. So a written tree is read once, however many reports nest in it, and a
+/// path a default fills is walked once, when its types are judged, and never for a report. Nothing
+/// recurses. It keeps, between two hooks, whether a supplied package wrote the definition the walk
+/// is in, and for the walk the table, the silence, its verdicts and those answers, each keyed by
+/// the model's ids. Its messages quote names as excerpts, so each is bounded whatever the names'
+/// lengths, and print no type.
 #[derive(Default)]
 pub(super) struct MemberTypeKind {
   /// Whether a supplied package wrote the definition the walk is in.

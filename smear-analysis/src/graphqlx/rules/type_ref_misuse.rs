@@ -37,10 +37,13 @@
 //! parameter is reached from an operation's argument, at the field of type `TypeRef`, and at the
 //! default that fills it. Each type is judged once, and reported at each occurrence of it. Else,
 //! what the slots an occurrence leaves to their defaults derive is judged the same way, at the
-//! occurrence, a type the occurrence or the program writes being judged where it is written. A
-//! directive's type parameter is reached from an operation's argument only through an object one
-//! of its arguments' types holds, which is no input type: an application is judged, in practice,
-//! for what its defaults derive.
+//! occurrence, a type the occurrence or the program writes being judged where it is written, and
+//! nothing when a slot it leaves out is filled from a default the rule refuses, which is reported
+//! where it is written: with `input Binding { type: TypeRef! }` and
+//! `type P<S, T> { f(a: T): Int }`, `P<A, Binding>` of `type Ref<A, B = P<A, Binding>>` is refused
+//! at `Binding`, and `Ref<Int>` adds nothing. A directive's type parameter is reached from an
+//! operation's argument only through an object one of its arguments' types holds, which is no
+//! input type: an application is judged, in practice, for what its defaults derive.
 //!
 //! The rule reads the public model, and one crate-private accessor, `Application::ty`: an
 //! application's complete type, its directive's instantiation. Through `Nesting` it reads the
@@ -79,14 +82,14 @@ use super::{Nesting, Silence};
 /// each field's argument, one answer of what its type can reach; and for each occurrence and
 /// application, one look at its type and, once for each distinct type, a verdict that reads what
 /// each argument at a slot an operation's argument reaches can reach, and once for each distinct
-/// type and count of written arguments, the types its fill derives, each once. Each type's reach
-/// is answered once for the walk, with the definition the type names under its lists. A report
-/// names the definition its argument names, which its verdict's reach kept for that argument: it
-/// reads one kept answer, so a chain of lists, a default's among them, is walked once for the walk,
-/// and never for a report. It keeps a count and two flags between two occurrences, and for the walk
-/// the table, what each type can reach and names, and its verdicts, keyed by the model's ids. Its
-/// messages quote names as excerpts, so each is bounded whatever the names' lengths, and print no
-/// type.
+/// type and count of written arguments, the types its fill derives, each once, and once for its
+/// definition, the types of its defaults. Each type's reach is answered once for the walk, with the
+/// definition the type names under its lists. A report names the definition its argument names,
+/// which its verdict's reach kept for that argument: it reads one kept answer, so a chain of lists,
+/// a default's among them, is walked once for the walk, and never for a report. It keeps a count
+/// and two flags between two occurrences, and for the walk the table, what each type can reach and
+/// names, and its verdicts, keyed by the model's ids. Its messages quote names as excerpts, so each
+/// is bounded whatever the names' lengths, and print no type.
 #[derive(Default)]
 pub(super) struct TypeRefMisuse {
   /// Where each occurrence stands in its tree.

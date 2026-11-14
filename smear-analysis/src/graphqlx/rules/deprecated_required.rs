@@ -32,7 +32,10 @@
 //! one a default fills; labelled where the parameter stands, and at the default that fills it. Each
 //! type is judged once, and reported at each occurrence of it. Else, what the slots an occurrence
 //! leaves to their defaults derive is judged the same way, at the occurrence, a type the occurrence
-//! or the program writes being judged where it is written.
+//! or the program writes being judged where it is written, and nothing when a slot it leaves out is
+//! filled from a default the rule refuses, which is reported where it is written: with
+//! `input I<T> { a: T @deprecated }` and `scalar Ref<A, B = I<A!>>`, `I<A!>` is refused at `A!`,
+//! and `Ref<Int>` adds nothing.
 //!
 //! A set's element and a map's key are non-null in every instantiation, however they are written.
 //! So a collection's own definition that gives its key or element, nullable, such a member's whole
@@ -106,13 +109,13 @@ const PLACES: [Place; 2] = [Place::DeprecatedArgument, Place::DeprecatedInputFie
 /// its type and one at each of its own applications; for each occurrence and application, one look
 /// at its type and, once for each distinct type, a verdict that reads each argument at a slot that
 /// stands as such a member's type, and once for each distinct type and count of written arguments,
-/// the types its fill derives, each once; and in a collection's definition, for each occurrence and
-/// application, a lookup of what its key or element was given there, which keeps where the member
-/// applies `@deprecated`, so that a report reads no member's applications, however many
-/// collections give one member's place. It keeps, between two hooks, whether a supplied package
-/// wrote the definition the walk is in, and for the walk the table, the silence and its verdicts,
-/// keyed by the model's ids. Its messages quote names as excerpts, so each is bounded whatever the
-/// names' lengths, and print no type.
+/// the types its fill derives, each once, and once for its definition, the types of its defaults;
+/// and in a collection's definition, for each occurrence and application, a lookup of what its key
+/// or element was given there, which keeps where the member applies `@deprecated`, so that a report
+/// reads no member's applications, however many collections give one member's place. It keeps,
+/// between two hooks, whether a supplied package wrote the definition the walk is in, and for the
+/// walk the table, the silence and its verdicts, keyed by the model's ids. Its messages quote names
+/// as excerpts, so each is bounded whatever the names' lengths, and print no type.
 #[derive(Default)]
 pub(super) struct DeprecatedRequired {
   /// Whether a supplied package wrote the definition the walk is in.

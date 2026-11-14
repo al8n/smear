@@ -3046,6 +3046,330 @@ fn a_parameter_given_non_null_passes_no_nullable_place_on() {
   );
 }
 
+/// The report of a non-null type given to the `X` of `input Choice<X> @oneOf { value: X }` by an
+/// instantiation of `Choice` that is written.
+const CHOICE_TAKES: &str = "`Choice` takes a non-null type for its type parameter `X`, which is \
+                            the type of the field `value` of the OneOf input object `Choice`";
+
+/// The report of a non-null type given to that `X` by what the default of `B` of `Ref` fills.
+const CHOICE_FILLED: &str = "the default of `B` of `Ref` makes `Choice` take a non-null type for \
+                             its type parameter `X`, which is the type of the field `value` of \
+                             the OneOf input object `Choice`";
+
+#[test]
+fn a_default_the_rule_refuses_is_refused_where_it_is_written() {
+  // `Ref`'s default `Choice<A!>` gives `Choice`'s field `value` a non-null type as written: its
+  // own mistake, refused once, at `A!`, labelled where `X` stands. `Ref<Int>` leaves `B` to that
+  // default, and its fill derives `Choice<Int!>`, which no occurrence writes and which would
+  // repeat the default's mistake: a fill that leaves a slot to a default the rule refuses derives
+  // nothing to judge, and neither use adds a report. Each use derives a `Choice` of its own, so a
+  // second use, `Ref<Boolean>`, is no type the first judged.
+  let text = "type Query {\n  x: Ref<Int>\n  y: Ref<Boolean>\n}\n\
+              input Choice<X> @oneOf {\n  value: X\n}\nscalar Ref<A, B = Choice<A!>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "A!", 0),
+      Some(named(schema, text, "value: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [CHOICE_TAKES]);
+
+  // The same for a deprecated input field.
+  let text = "type Query {\n  x: Ref<Int>\n  y: Ref<Boolean>\n}\n\
+              input Choice<X> {\n  value: X @deprecated\n}\nscalar Ref<A, B = Choice<A!>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_INPUT_FIELD,
+      at(schema, text, "A!", 0),
+      Some(named(schema, text, "value: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Choice` takes a non-null type for its type parameter `X`, which makes a deprecated input \
+       field required"
+    ]
+  );
+}
+
+#[test]
+fn a_default_only_a_use_makes_refused_is_the_uses_mistake() {
+  // `Choice<A>` gives `Choice` what `A` is given, and is no mistake as written: `Ref<Int!>`'s fill
+  // derives `Choice<Int!>`, which substitution alone makes refused, so it is refused at the use,
+  // from the default of `B`, labelled where `X` stands and at the default. `Ref<Int>` adds nothing.
+  let text = "type Query {\n  x: Ref<Int!>\n  y: Ref<Int>\n}\n\
+              input Choice<X> @oneOf {\n  value: X\n}\nscalar Ref<A, B = Choice<A>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "Ref<Int!>", 0),
+      Some(named(schema, text, "value: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [CHOICE_FILLED]);
+  let filled = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    filled
+      .label(1)
+      .map(|label| (label.location(), label.text())),
+    Some((
+      named(schema, text, "B = ", "Choice<A>", 0),
+      "filled from this default"
+    ))
+  );
+
+  // A default may name a parameter written after it, which is filled first: `C`'s `A!` fills the
+  // `C` of `B`'s `Choice<C>`. Neither default is refused as written, so what `Ref<Int>`'s fill
+  // derives is the use's own mistake, refused at the use.
+  let text = "type Query {\n  x: Ref<Int>\n}\ninput Choice<X> @oneOf {\n  value: X\n}\n\
+              scalar Ref<A, B = Choice<C>, C = A!>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "Ref<Int>", 0),
+      Some(named(schema, text, "value: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [CHOICE_FILLED]);
+}
+
+#[test]
+fn a_nested_default_owns_what_its_fill_derives() {
+  // `Wrap`'s default `Choice<W!>` is refused at `W!`. `Ref`'s default `Wrap<A>` leaves `V` to it,
+  // and its complete type, `Wrap<A, Choice<A!>>`, holds what `Wrap`'s default makes of `A`: a
+  // mistake `W!` owns. So `Wrap<A>`, `Ref<Int>` and `Wrap<Int>`, each of whose fills derives a
+  // `Choice` that no occurrence writes, add nothing, with `Wrap<Int>` written or not.
+  for uses in ["  x: Ref<Int>\n  y: Wrap<Int>\n", "  x: Ref<Int>\n"] {
+    let text = format!(
+      "type Query {{\n{uses}}}\ninput Choice<X> @oneOf {{\n  value: X\n}}\n\
+       scalar Wrap<W, V = Choice<W!>>\nscalar Ref<A, B = Wrap<A>>\n"
+    );
+    let analysis = analyze_text(&text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(
+        ONE_OF_NON_NULL,
+        at(schema, &text, "W!", 0),
+        Some(named(schema, &text, "value: ", "X", 0))
+      )],
+      "{uses}{:#?}",
+      analysis.diagnostics()
+    );
+    assert_eq!(messages(&analysis), [CHOICE_TAKES], "{uses}");
+  }
+}
+
+#[test]
+fn a_refused_default_hides_what_substitution_adds_to_its_fill() {
+  // The recorded remainder. `B`'s default is refused at `A!`, and `Ref<Int!>` leaves `B` and `C`
+  // out, so its fill derives nothing to judge, the whole fill and not `B`'s slot alone: what
+  // substitution alone makes of `C`'s default, `Choice<Int!>`, is not reported until `B`'s default
+  // is fixed. The analysis is not ok meanwhile.
+  let text = "type Query {\n  x: Ref<Int!>\n}\ninput Choice<X> @oneOf {\n  value: X\n}\n\
+              scalar Ref<A, B = Choice<A!>, C = Choice<A>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "A!", 0),
+      Some(named(schema, text, "value: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [CHOICE_TAKES]);
+  assert!(!analysis.is_ok());
+
+  // Fixed, `B`'s default derives a `Choice<Int!>` too, the first slot that fails: at the use, from
+  // the default of `B`.
+  let text = "type Query {\n  x: Ref<Int!>\n}\ninput Choice<X> @oneOf {\n  value: X\n}\n\
+              scalar Ref<A, B = Choice<A>, C = Choice<A>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "Ref<Int!>", 0),
+      Some(named(schema, text, "value: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(messages(&analysis), [CHOICE_FILLED]);
+}
+
+#[test]
+fn a_default_of_the_wrong_kind_is_refused_where_it_is_written() {
+  // `Pair`'s `Q` stands as an input field's type, so `Ref`'s default `Pair<A, Obj>` is refused at
+  // `Obj`, where it is written, labelled where `Q` stands. Each use derives a `Pair` of its own,
+  // `Pair<Int, Obj>` and `Pair<Boolean, Obj>`, which no occurrence writes, and adds nothing.
+  let text = "type Query {\n  x: Ref<Int>\n  y: Ref<Boolean>\n}\ntype Obj {\n  o: Int\n}\n\
+              input Pair<P, Q> {\n  p: P\n  q: Q\n}\nscalar Ref<A, B = Pair<A, Obj>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      INPUT_FIELD_TYPE,
+      named(schema, text, "Pair<A, ", "Obj", 0),
+      Some(named(schema, text, "q: ", "Q", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`Pair` takes the object type `Obj` for its type parameter `Q`, which stands as an input \
+       field's type, and an input field's type is an input type"
+    ]
+  );
+
+  // The twin, a default that fits as written: `Ref<Obj>`'s fill derives `Pair<Obj, Int>`, refused
+  // at the use, from the default of `B`, labelled where `P` stands and at the default.
+  let text = "type Query {\n  x: Ref<Obj>\n  y: Ref<Int>\n}\ntype Obj {\n  o: Int\n}\n\
+              input Pair<P, Q> {\n  p: P\n  q: Q\n}\nscalar Ref<A, B = Pair<A, Int>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      INPUT_FIELD_TYPE,
+      at(schema, text, "Ref<Obj>", 0),
+      Some(named(schema, text, "p: ", "P", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the default of `B` of `Ref` makes `Pair` take the object type `Obj` for its type parameter \
+       `P`, which stands as an input field's type, and an input field's type is an input type"
+    ]
+  );
+  let filled = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    filled
+      .label(1)
+      .map(|label| (label.location(), label.text())),
+    Some((
+      named(schema, text, "B = ", "Pair<A, Int>", 0),
+      "filled from this default"
+    ))
+  );
+}
+
+#[test]
+fn each_refused_default_is_refused_once_however_many_uses() {
+  // Each of `definitions` scalars `R{i}` has the default `Choice<A!>`, refused at its `A!`, and is
+  // used `uses` times, `R{i}<S{j}>`: each use is a type of its own, whose fill derives a
+  // `Choice<S{j}!>` that no occurrence writes. Each default is refused once, at its `A!`, and no
+  // use is. The counts vary, and each program runs again under a diagnostic ceiling of zero, which
+  // keeps no report and still builds and counts each. A test sees the diagnostics, not the work,
+  // which holds by construction: whether a definition's defaults are refused is found at the first
+  // of its fills judged, each type of its defaults' trees looked under once for the walk, and kept
+  // by the definition, so each later use reads one kept answer. Judged at each use, each use was
+  // refused again for its definition's mistake: 3,000 reports more in each of the largest
+  // programs, and 10,000 in the square.
+  const DEFINITIONS: usize = 3_000;
+  const USES: usize = 3_000;
+  // Both counts at once write their product of uses, each an instantiation of its own: a square
+  // of 10,000.
+  const SQUARE: usize = 100;
+  let limits = Limits::new();
+  for (definitions, uses) in [(1, 1), (DEFINITIONS, 1), (1, USES), (SQUARE, SQUARE)] {
+    let mut text = String::from("type Query {\n");
+    for definition in 0..definitions {
+      for index in 0..uses {
+        text.push_str(&format!(
+          "  f{definition}_{index}: R{definition}<S{index}>\n"
+        ));
+      }
+    }
+    text.push_str("}\ninput Choice<X> @oneOf {\n  value: X\n}\n");
+    for index in 0..uses {
+      text.push_str(&format!("scalar S{index}\n"));
+    }
+    // Where each definition's `A!` is written.
+    let mut written: Vec<usize> = Vec::with_capacity(definitions);
+    for definition in 0..definitions {
+      let head = format!("scalar R{definition}<A, B = Choice<");
+      written.push(text.len() + head.len());
+      text.push_str(&head);
+      text.push_str("A!>>\n");
+    }
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+    let analysis = analyze(&root, &[], &limits);
+    let schema = schema_file(&analysis);
+    let stands = Some(named(schema, &text, "value: ", "X", 0));
+    let expected: Vec<(&'static str, Location, Option<Location>)> = written
+      .iter()
+      .map(|start: &usize| {
+        (
+          ONE_OF_NON_NULL,
+          Location::new(schema.get(), SimpleSpan::new(*start, *start + 2)),
+          stands,
+        )
+      })
+      .collect();
+    assert_eq!(
+      found(&analysis),
+      expected,
+      "definitions {definitions}, uses {uses}"
+    );
+    assert_eq!(
+      messages(&analysis),
+      vec![CHOICE_TAKES; definitions],
+      "definitions {definitions}, uses {uses}"
+    );
+    // Under a ceiling of zero, each report is built and counted, and none is kept.
+    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0));
+    let diagnostics = silent.diagnostics();
+    assert!(
+      diagnostics.is_empty(),
+      "definitions {definitions}, uses {uses}"
+    );
+    assert!(diagnostics.truncated());
+    assert_eq!(diagnostics.error_count(), definitions);
+  }
+}
+
 #[test]
 fn no_extension_makes_an_input_object_one_of() {
   // An extension of the package's own input object that applies `@oneOf` is refused at it, and

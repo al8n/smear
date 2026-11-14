@@ -38,7 +38,8 @@
 //! through lists and collections, and where each definition it is passed to puts that definition's
 //! parameter, a scalar's and an interface's among them. Such a rule judges every written occurrence
 //! and every application, each type once, and what the slots an occurrence leaves to their
-//! defaults derive, at the occurrence, through `positions::Derived`.
+//! defaults derive, at the occurrence, through `positions::Derived`, but for a default the rule
+//! refuses, which is reported where it is written and at no use.
 //! `MemberTypeKind` is one, for the kinds its places take, `TypeRefMisuse` another, for the
 //! parameters an operation's argument reaches, `OneOfFieldNotNullable` a third, for the
 //! parameters that are a OneOf's field's whole type, which `positions::Positions::of` tells from

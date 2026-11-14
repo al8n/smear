@@ -22,7 +22,10 @@
 //! path, for one a default fills; labelled where the parameter stands, and at the default that
 //! fills it. Each type is judged once, and reported at each occurrence of it. Else, what the slots
 //! an occurrence leaves to their defaults derive is judged the same way, at the occurrence, a type
-//! the occurrence or the program writes being judged where it is written.
+//! the occurrence or the program writes being judged where it is written, and nothing when a slot
+//! it leaves out is filled from a default the rule refuses, which is reported where it is written:
+//! with `scalar Ref<A, B = Choice<A!>>`, `Choice<A!>` is refused at `A!`, and `Ref<Int>` adds
+//! nothing.
 //!
 //! A set's element and a map's key are non-null in every instantiation, however they are written.
 //! So a collection's own definition that gives its key or element, nullable, such a field's whole
@@ -88,12 +91,12 @@ const LABEL: &str = "field of a @oneOf input object is non-null";
 /// enters, one look at each of its applications, and for each input field one look at its type;
 /// for each occurrence and application, one look at its type and, once for each distinct type, a
 /// verdict that reads each argument at a slot that stands as a OneOf's field, and once for each
-/// distinct type and count of written arguments, the types its fill derives, each once; and in a
-/// collection's definition, for each occurrence and application, a lookup of what its key or
-/// element was given there. It keeps, between two hooks, whether the definition the walk is in is
-/// a OneOf input object, and for the walk the table, the silence and its verdicts, keyed by the
-/// model's ids. Its messages quote names as excerpts, so each is bounded whatever the names'
-/// lengths, and print no type.
+/// distinct type and count of written arguments, the types its fill derives, each once, and once
+/// for its definition, the types of its defaults; and in a collection's definition, for each
+/// occurrence and application, a lookup of what its key or element was given there. It keeps,
+/// between two hooks, whether the definition the walk is in is a OneOf input object, and for the
+/// walk the table, the silence and its verdicts, keyed by the model's ids. Its messages quote names
+/// as excerpts, so each is bounded whatever the names' lengths, and print no type.
 #[derive(Default)]
 pub(super) struct OneOfFieldNotNullable {
   /// Whether the definition the walk is in is a OneOf input object.

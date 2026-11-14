@@ -170,7 +170,7 @@
 //! instantiation, or a directive application, that gives a type parameter a type of a kind where
 //! the parameter stands does not take, a parameter standing where its definition and each
 //! definition it is passed to put it, what a default fills judged at the occurrence that leaves
-//! the slot out; and an `implements`
+//! the slot out unless the default is refused where it is written; and an `implements`
 //! entry of an object or an interface that names what is no interface is
 //! `smear::schema::implements-non-interface`; and an interface on a cycle of `implements` entries
 //! is `smear::schema::self-implementing-interface`; and a union member that is no object type is

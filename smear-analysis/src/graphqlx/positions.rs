@@ -91,7 +91,10 @@
 //! [`Derived`] judges what the slots an occurrence leaves to their defaults derive, by a rule's
 //! own verdict: every named type under those slots that no occurrence of the program writes, each
 //! once, a type the occurrence or the program writes, open or closed, being judged where it is
-//! written.
+//! written. A fill that leaves a slot to a default the rule refuses derives nothing to judge: the
+//! default's complete type, open in its definition's parameters, or a type it holds, is a named
+//! type the rule's verdict refuses, and that mistake is the default's, reported where it is
+//! written, or where the nested occurrence or default it comes from is, and no use repeats it.
 //!
 //! # What it costs
 //!
@@ -119,8 +122,11 @@
 //! fills derive it, reading each of its arguments at most twice, and reads, for each type and
 //! count of written arguments, one kept answer for each slot its fill typed, which
 //! `Limits::max_substitutions` paid for when the instantiation phase filled them; what the program
-//! writes is one pass over the type occurrences. Nothing recurses, and every table is keyed by the
-//! model's ids.
+//! writes is one pass over the type occurrences. Whether a definition's defaults are refused is
+//! found once for the walk, at the first of its fills judged, each type of the defaults' trees
+//! expanded once with nothing passed over, and kept as the greatest index of a refused default,
+//! which every later fill compares its count of written arguments with: linear in the distinct
+//! types of the defaults. Nothing recurses, and every table is keyed by the model's ids.
 
 use std::{
   collections::{BTreeMap, BTreeSet},
@@ -1212,27 +1218,60 @@ pub(crate) struct Fill<V> {
 /// under a type.
 type Failure<V> = (TyId, V);
 
+/// How [`Derived`] looks under a type, which keeps each answer by the type and the look.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Look {
+  /// Under what a fill derives: a type the program writes is passed over with what it holds, being
+  /// judged where it is written.
+  Fill,
+  /// Under a default's complete type: nothing is passed over, the default being written itself.
+  Default,
+}
+
 /// A rule's verdicts on what the slots an occurrence leaves to their defaults derive, each type and
 /// count of written arguments judged once.
 ///
 /// A rule keeps one for its walk and resets it in `begin`: what it holds is keyed by the model's
 /// ids, and what it answers for a type and a count is the same whatever the walk met before.
 ///
-/// Its work is linear in the distinct types the fills derive and the occurrences that ask. The
-/// first failure under a type, the type itself and then what it holds, in order, is the same
-/// whichever fill derives the type and whichever occurrence asks: a type the program writes is
-/// passed over wherever it is met, the arguments an occurrence writes among them, so no answer
-/// depends on the occurrence. So each type's answer is kept by its id for the walk, and each type
-/// is expanded once, each of its arguments read at most twice, however many fills share it: a
-/// shared subtree is never walked again for another outer fill. An occurrence then reads one kept
-/// answer for each slot it leaves out, slots its fill typed and `Limits::max_substitutions` paid
-/// for, and its own answer is kept by its type and count of written arguments. What the program
-/// writes is one pass over the type occurrences, sorted, at the first fill judged.
+/// A fill that leaves a slot to a default the rule refuses derives nothing to judge. A default is
+/// refused when its complete type, open in its definition's parameters, the fills of the
+/// occurrences nested in it included, or a type it holds, is a named type of a definition that has
+/// type parameters that the rule's verdict refuses. That mistake has its owner where it is
+/// written: the default's own occurrence, or, when a nested occurrence's fill derives it, that
+/// occurrence or the default that fills it, in turn, each reported once; a use that leaves the
+/// slot out would only repeat it. So the whole fill is passed over, and not that slot alone: a
+/// default may name a parameter written after it, which is filled first, so that another slot's
+/// type holds the refused one's. A refused default at a slot the occurrence writes is not used,
+/// and changes nothing. A failure that substitution alone would add to such a fill is not reported
+/// until the default is fixed: with `input Choice<X> @oneOf { value: X }`, `Ref<Int!>` of
+/// `scalar Ref<A, B = Choice<A!>, C = Choice<A>>` hides `C`'s. The analysis is not ok meanwhile,
+/// since the default is refused where it is written; and a dependency's refused default is the
+/// dependency's mistake, as every type a dependency writes is judged where it is written.
+///
+/// Its work is linear in the distinct types the fills derive, the distinct types of the defaults
+/// and the occurrences that ask. The first failure under a type, the type itself and then what it
+/// holds, in order, is the same whichever fill derives the type and whichever occurrence asks: a
+/// type the program writes is passed over wherever it is met, the arguments an occurrence writes
+/// among them, so no answer depends on the occurrence. So each type's answer is kept by its id for
+/// the walk, and each type is expanded once, each of its arguments read at most twice, however
+/// many fills share it: a shared subtree is never walked again for another outer fill. An
+/// occurrence then reads one kept answer for each slot it leaves out, slots its fill typed and
+/// `Limits::max_substitutions` paid for, and its own answer is kept by its type and count of
+/// written arguments. What the program writes is one pass over the type occurrences, sorted, at the
+/// first fill judged. Whether a definition's defaults are refused is found at the first of its
+/// fills judged, and kept by the definition as the greatest index of a refused default, which
+/// every later fill compares its count of written arguments with. Whether the rule refuses a type
+/// or a type it holds is the type's alone, so each type of the defaults' trees is looked under
+/// once for the walk, nothing passed over, its answer kept by its id, whichever default holds it.
 pub(crate) struct Derived<V> {
   /// Each type and count of written arguments judged, with the first failure found.
   judged: BTreeMap<(TyId, u32), Option<Fill<V>>>,
-  /// Each type looked under, with the first failure under it.
-  under: BTreeMap<TyId, Option<Failure<V>>>,
+  /// Each type looked under, and how, with the first failure under it.
+  under: BTreeMap<(TyId, Look), Option<Failure<V>>>,
+  /// Each definition a fill of which was judged, with the greatest index of its type parameters
+  /// whose default the rule refuses, or `None` when it refuses none.
+  refused: BTreeMap<DefId, Option<u32>>,
   /// Every named type of a definition that has type parameters that the program writes, sorted
   /// and each once, read at the first fill judged.
   written: Option<Vec<TyId>>,
@@ -1245,6 +1284,7 @@ impl<V> Default for Derived<V> {
     Self {
       judged: BTreeMap::new(),
       under: BTreeMap::new(),
+      refused: BTreeMap::new(),
       written: None,
       stack: Vec::new(),
     }
@@ -1257,7 +1297,9 @@ impl<V: Copy> Derived<V> {
   /// arguments leaves those slots to their defaults. For each slot in order, the first failure
   /// under its argument: a type an occurrence of the program writes, one the occurrence writes
   /// among them, is passed over with what it holds, and each other named type of a definition that
-  /// has type parameters is judged, then what it holds. `None` when none fails.
+  /// has type parameters is judged, then what it holds. `None` when none fails, and when one of
+  /// those slots is filled from a default `judge` refuses, whose mistake is reported where it is
+  /// written.
   pub(crate) fn verdict(
     &mut self,
     model: &Model,
@@ -1269,9 +1311,14 @@ impl<V: Copy> Derived<V> {
       return *kept;
     }
     let mut found: Option<Fill<V>> = None;
-    if let TyKind::Named { args, .. } = model.ty(ty).kind() {
+    if let TyKind::Named { def, args } = model.ty(ty).kind()
+      && args.len() > written as usize
+      && self
+        .refused(model, def, &mut judge)
+        .is_none_or(|last: u32| last < written)
+    {
       for (slot, arg) in args.iter().enumerate().skip(written as usize) {
-        if let Some((derived, verdict)) = self.under(model, *arg, &mut judge) {
+        if let Some((derived, verdict)) = self.under(model, *arg, Look::Fill, &mut judge) {
           found = Some(Fill {
             slot: dense(slot),
             ty: derived,
@@ -1285,22 +1332,58 @@ impl<V: Copy> Derived<V> {
     found
   }
 
-  /// The first failure, by `judge`, under `root`, of `model`: `root` itself when it is a named
-  /// type of a definition that has type parameters and `judge` refuses it, else the first under
-  /// each of its arguments, or under its element, in order. Each type's answer is kept for the
-  /// walk, whoever asks, and each type is expanded once, with an explicit stack, each of its
-  /// arguments read at most twice: once to find it unanswered, and once its answer is kept.
+  /// The greatest index of a type parameter of `def`, of `model`, whose default `judge` refuses,
+  /// kept for the walk; `None` when it refuses none. A default is refused when its complete type,
+  /// or a type it holds, is a named type of a definition that has type parameters that `judge`
+  /// refuses, nothing passed over. The parameters are read from the last, so the first default
+  /// found refused is the answer, and those before it are not looked under.
+  fn refused(
+    &mut self,
+    model: &Model,
+    def: DefId,
+    judge: &mut impl FnMut(TyId) -> Option<V>,
+  ) -> Option<u32> {
+    if let Some(kept) = self.refused.get(&def) {
+      return *kept;
+    }
+    let mut last: Option<u32> = None;
+    for param in model.def(def).type_params().rev() {
+      if let Some(default) = param.default()
+        && self
+          .under(
+            model,
+            model.type_expr(default).ty(),
+            Look::Default,
+            &mut *judge,
+          )
+          .is_some()
+      {
+        last = Some(param.index());
+        break;
+      }
+    }
+    self.refused.insert(def, last);
+    last
+  }
+
+  /// The first failure, by `judge`, under `root`, of `model`, looked under by `look`: `root` itself
+  /// when it is a named type of a definition that has type parameters and `judge` refuses it, else
+  /// the first under each of its arguments, or under its element, in order. Each type's answer is
+  /// kept for the walk by the type and the look, whoever asks, and each type is expanded once for
+  /// each look, with an explicit stack, each of its arguments read at most twice: once to find it
+  /// unanswered, and once its answer is kept.
   fn under(
     &mut self,
     model: &Model,
     root: TyId,
+    look: Look,
     judge: &mut impl FnMut(TyId) -> Option<V>,
   ) -> Option<Failure<V>> {
-    if let Some(kept) = self.under.get(&root) {
+    if let Some(kept) = self.under.get(&(root, look)) {
       return *kept;
     }
-    if let Some(answer) = self.settle(model, root, &mut *judge) {
-      self.under.insert(root, answer);
+    if let Some(answer) = self.settle(model, root, look, &mut *judge) {
+      self.under.insert((root, look), answer);
       return answer;
     }
     self.stack.clear();
@@ -1308,14 +1391,14 @@ impl<V: Copy> Derived<V> {
     while let Some(&(ty, next)) = self.stack.last() {
       let Some(child) = held_at(model, ty, next) else {
         // Nothing under it fails.
-        self.under.insert(ty, None);
+        self.under.insert((ty, look), None);
         self.stack.pop();
         continue;
       };
-      match self.under.get(&child).copied() {
+      match self.under.get(&(child, look)).copied() {
         // The first failure under it is the first under its first argument that has one.
         Some(Some(failure)) => {
-          self.under.insert(ty, Some(failure));
+          self.under.insert((ty, look), Some(failure));
           self.stack.pop();
         }
         Some(None) => {
@@ -1323,31 +1406,32 @@ impl<V: Copy> Derived<V> {
             top.1 = next.saturating_add(1);
           }
         }
-        None => match self.settle(model, child, &mut *judge) {
+        None => match self.settle(model, child, look, &mut *judge) {
           Some(answer) => {
-            self.under.insert(child, answer);
+            self.under.insert((child, look), answer);
           }
           None => self.stack.push((child, 0)),
         },
       }
     }
-    self.under.get(&root).copied().flatten()
+    self.under.get(&(root, look)).copied().flatten()
   }
 
-  /// What `ty`, of `model`, answers before what it holds is read, when it can: nothing for a type
-  /// the program writes, which is judged where it is written, for a type parameter, the unresolved
-  /// type and a named type with no argument; itself, with `judge`'s verdict, for a named type of a
-  /// definition that has type parameters that `judge` refuses. `None` when what it holds is to
-  /// read.
+  /// What `ty`, of `model`, answers before what it holds is read, when it can, looked under by
+  /// `look`: nothing for a type parameter, the unresolved type and a named type with no argument,
+  /// and, under a fill, for a type the program writes, which is judged where it is written; itself,
+  /// with `judge`'s verdict, for a named type of a definition that has type parameters that `judge`
+  /// refuses. `None` when what it holds is to read.
   fn settle(
     &mut self,
     model: &Model,
     ty: TyId,
+    look: Look,
     judge: &mut impl FnMut(TyId) -> Option<V>,
   ) -> Option<Option<Failure<V>>> {
     match model.ty(ty).kind() {
       TyKind::Named { def, args } => {
-        if self.writes(model, ty) {
+        if look == Look::Fill && self.writes(model, ty) {
           return Some(None);
         }
         if model.def(def).type_params().next().is_some()

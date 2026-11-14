@@ -595,7 +595,8 @@ All notable changes to Smear are documented in this file.
   `Page<Input>` of `type Page<T> { items: [T] }` is `field-type-not-output-type` at `Input`, with a
   label at `[T]`; and what the slots an occurrence leaves to their defaults derive, which no
   occurrence writes, is judged at the occurrence: `Conn<Input>` of `type Conn<N, E = Edge<N>>` is
-  refused when `Edge`'s `N` stands in a field; and an `implements` entry of an object or
+  refused when `Edge`'s `N` stands in a field, and a default refused where it is written is
+  refused there alone, at no use that leaves its slot out; and an `implements` entry of an object or
   an interface that names what is no interface, a type parameter among them, is
   `implements-non-interface`; and an interface on a cycle of `implements` entries, of any length,
   is `self-implementing-interface`; and a union member that names what is no object type is
