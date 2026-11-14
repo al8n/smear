@@ -1825,3 +1825,140 @@ fn what_an_implements_entry_instantiates_is_checked_there() {
     ]
   );
 }
+
+/// The values of the applications on a generic directive's definition, and on its arguments, whose
+/// types name its type parameters are checked at each closed application of the directive, as a
+/// generic type's are at each closed instantiation: `@outer<Int>` refuses the `"bad"` of the
+/// `@inner<T>` it holds, with the argument's code, at its path, labelled at the value, and
+/// `@outer<String>` holds. The value stays its definition's literal. Refuses an annotation on a
+/// generic directive that no application checks.
+#[test]
+fn a_generic_directives_annotations_are_checked_at_each_closed_application() {
+  let text = "directive @inner<T>(v: T) on DIRECTIVE_DEFINITION\n\
+              directive @outer<T> @inner<T>(v: \"bad\") repeatable on OBJECT\n\
+              type Query @outer<Int> @outer<String> {\n  value: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "outer", 1);
+  assert_eq!(found(&analysis), [(ARGUMENT, path)]);
+  let report = the(&analysis, ARGUMENT, path);
+  assert_eq!(
+    report.to_string(),
+    "`@outer` is applied here with type arguments under which `\"bad\"`, a value it holds, does \
+     not fit the type it takes"
+  );
+  assert_eq!(
+    labels(report),
+    [(at(schema, text, "\"bad\"", 0), "this value")]
+  );
+  let model = analysis.model();
+  let outer = model
+    .lookup(Namespace::Directive, "@^::app::outer")
+    .expect("`@outer`");
+  let inner = model.def(outer).applications()[0];
+  assert_eq!(
+    valued(model, argument(model, inner, "v").expect("`v`")),
+    "Literal(String) \"bad\""
+  );
+
+  let argued = "directive @inner<T>(v: T) on ARGUMENT_DEFINITION\n\
+                directive @outer<T>(a: Int @inner<T>(v: \"bad\")) repeatable on OBJECT\n\
+                type Query @outer<Int> @outer<String> {\n  value: Int\n}\n";
+  let analysis = analyze_text(argued, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, argued, "@", "outer", 1);
+  assert_eq!(found(&analysis), [(ARGUMENT, path)]);
+  assert_eq!(
+    labels(the(&analysis, ARGUMENT, path)),
+    [(at(schema, argued, "\"bad\"", 0), "this value")]
+  );
+}
+
+/// An argument an application on a generic directive leaves out, whose type there is the
+/// directive's bare nullable type parameter, is required wherever a closed application of the
+/// directive makes that parameter non-null: `@outer<Int!>` is
+/// `missing-required-directive-argument` at its path, labelled at the `@need<T>` it holds and at
+/// `v`, and `@outer<Int>` holds. Refuses an omission in an annotation that no application asks.
+#[test]
+fn an_argument_an_annotation_leaves_out_is_required_where_an_application_needs_it() {
+  let text = "directive @need<T>(v: T) on DIRECTIVE_DEFINITION\n\
+              directive @outer<T> @need<T> repeatable on OBJECT\n\
+              type Query @outer<Int> @outer<Int!> {\n  value: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "outer", 2);
+  assert_eq!(found(&analysis), [(MISSING, path)]);
+  let report = the(&analysis, MISSING, path);
+  assert_eq!(
+    report.to_string(),
+    "`@outer` is applied here with type arguments under which `@need` requires its argument `v`, \
+     and an application it holds leaves it out"
+  );
+  assert_eq!(
+    labels(report),
+    [
+      (
+        named(schema, text, "@", "need", 1),
+        "this application leaves it out"
+      ),
+      (named(schema, text, "(", "v", 0), "required here"),
+    ]
+  );
+}
+
+/// A default an application leaves out, copied under type arguments that still name the enclosing
+/// definition's parameters, is a value that definition records, checked at each closed
+/// instantiation of it as a written argument is: under `Box<Int>`, and under `@outer<Int>`,
+/// `@inner`'s `"bad"` is `invalid-default-value`, labelled at the default, and under `String` it
+/// fits. `@inner`'s own default is judged only where an application leaves it out. Refuses a copy
+/// under an open application that no instantiation checks.
+#[test]
+fn a_default_an_annotation_leaves_out_is_checked_as_its_value() {
+  let typed = "type Query {\n  a: Box<Int>\n  b: Box<String>\n}\n\
+               directive @inner<T>(v: T = \"bad\") on OBJECT\n\
+               type Box<T> @inner<T> {\n  value: Int\n}\n";
+  let analysis = analyze_text(typed, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, typed, "Box<Int>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [(after(schema, typed, "T = ", "\"bad\""), "this value")]
+  );
+
+  let applied = "directive @inner<T>(v: T = \"bad\") on DIRECTIVE_DEFINITION\n\
+                 directive @outer<T> @inner<T> repeatable on OBJECT\n\
+                 type Query @outer<Int> @outer<String> {\n  value: Int\n}\n";
+  let analysis = analyze_text(applied, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, applied, "@", "outer", 1);
+  assert_eq!(found(&analysis), [(DEFAULT, path)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, path)),
+    [(after(schema, applied, "T = ", "\"bad\""), "this value")]
+  );
+}
+
+/// Every closed application of one instantiation of a generic directive shares its verdict, and
+/// each pair of one and a value is a step: `@inner<T>`'s `1` costs a step to rebuild its `T` where
+/// it is written; the first `@outer<Int>` a step for its pair, one to rebuild `@outer`'s `T` under
+/// it and one for the count's one node, three; the second nothing; `@outer<Float>` three: seven in
+/// all. At six, `@outer<Float>`'s count cannot be paid for, and it alone is `resource-limit`, at
+/// its path. Refuses a verdict made for each application, which needs eight, and a pair paid for
+/// nothing, which passes at six with five.
+#[test]
+fn one_verdict_serves_every_closed_application_of_a_generic_directive() {
+  let text = "directive @inner<T>(v: T) on DIRECTIVE_DEFINITION\n\
+              directive @outer<T> @inner<T>(v: 1) repeatable on OBJECT\n\
+              type Query @outer<Int> @outer<Int> @outer<Float> {\n  value: Int\n}\n";
+  quiet(&analyze_text(text, &Limits::new().with_max_value_steps(7)));
+  let short = analyze_text(text, &Limits::new().with_max_value_steps(6));
+  let schema = schema_file(&short);
+  let float = named(schema, text, "@", "outer", 3);
+  assert_eq!(found(&short), [(LIMIT, float)]);
+  assert_eq!(
+    the(&short, LIMIT, float).to_string(),
+    "the values `@outer` holds could not be checked under the type arguments it is applied with \
+     here within `Limits::max_value_steps`, 6, the steps the analysis may take to complete values"
+  );
+}
