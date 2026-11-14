@@ -1666,13 +1666,14 @@ fn each_later_occurrence_is_reported_at_the_first() {
 }
 
 /// A set of two hundred elements is searched by the kernel's sort, and finds its one duplicate,
-/// the 150th, which the third holds already. Refuses a scan that stops at 64.
+/// the 150th, which the 100th holds already: both lie past the 64th, so a scan that compares each
+/// element with the first 64 alone finds nothing. Refuses a scan that stops at 64.
 #[test]
 fn a_wide_literal_finds_its_duplicates_too() {
-  // `0, 10, 20, …`, but the 150th is `20`, as the third is.
+  // `0, 10, 20, …`, but the 150th is `990`, as the 100th is.
   let items: Vec<String> = (0..200u32)
     .map(|item: u32| {
-      let value = if item == 149 { 20 } else { item * 10 };
+      let value = if item == 149 { 990 } else { item * 10 };
       value.to_string()
     })
     .collect();
@@ -1685,7 +1686,7 @@ fn a_wide_literal_finds_its_duplicates_too() {
   let before = format!("{{{}, ", items[..149].join(", "));
   assert_eq!(
     found(&analysis),
-    [(COLLECTION, after(schema, &text, &before, "20"))]
+    [(COLLECTION, after(schema, &text, &before, "990"))]
   );
 }
 
