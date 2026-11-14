@@ -500,7 +500,9 @@ All notable changes to Smear are documented in this file.
   new `smear::graphqlx::repr-misuse`. The model keeps `@repr` as its applications, with their
   typed arguments, read through `Builtins::repr`. And a package uses nothing above the tier it
   declares: below `std`, a list in a `core` package, an occurrence of another package's definition
-  that needs more, counting the defaults it leaves out and capped at that package's tier,
+  that needs more, counting the defaults it leaves out and capped at that package's tier, an
+  application of another package's generic directive whose type arguments left to its defaults
+  need more, counted and capped likewise and reported at its path,
   `core`'s `@heap` on a field, an argument or an input field of a `core` package, and an extern's
   `tier` above its package's are each the new `smear::graphqlx::tier`, where it is written; a use
   of the package's own definition is not, what raises it being reported where it is written. A

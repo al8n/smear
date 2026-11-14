@@ -361,7 +361,9 @@ impl Analysis {
 ///   `std`, a package uses nothing above the tier it declares, `tier` where it is written: a list
 ///   in a `core` package; an occurrence of another package's definition that needs more, counting
 ///   the defaults it leaves out and capped at that package's tier, a label at a default that
-///   raised it; `core`'s `@heap` on a field, an argument or an input field of a `core` package;
+///   raised it; an application of another package's generic directive whose type arguments left
+///   to its defaults need more, counted and capped likewise, at its path; `core`'s `@heap` on a
+///   field, an argument or an input field of a `core` package;
 ///   and an extern's `tier` above its package's, at that `tier`. A use of a definition of the
 ///   package's own is not reported, what raises it being reported where it is written; a
 ///   directive's argument types and an application's type arguments are judged as every other
