@@ -2414,6 +2414,76 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
   assert_eq!(messages(&analysis), [deprecated_message]);
 }
 
+#[test]
+fn a_member_many_collections_make_required_is_read_once() {
+  // `@d`'s argument `v` applies `@tag` `tags` times and then `@deprecated`, and each of `sets`
+  // sets gives `v` its element through `@d<T>`: each is its definition's mistake, refused once, at
+  // the `T` of its `@d<T>`, labelled at the one `@deprecated`. The counts vary, and each program
+  // runs again under a diagnostic ceiling of zero, which keeps no report and still builds and
+  // counts each. A test sees the diagnostics, not the work, which holds by construction: where `v`
+  // applies `@deprecated` is found in the one look the table of where each type parameter stands
+  // takes at `v`'s applications, and kept with each set's mistake, so each report reads it in one
+  // lookup. Read from `v`'s applications again for each report, the largest program here would
+  // pass its 3,000 `@tag`s for each of its 3,000 sets, 9 million steps, where the rule now takes a
+  // few for each set.
+  const SETS: usize = 3_000;
+  const TAGS: usize = 3_000;
+  let limits = Limits::new();
+  for (sets, tags) in [(1, 1), (SETS, 1), (1, TAGS), (SETS, TAGS)] {
+    let mut text = format!(
+      "type Query {{\n  ok: Int\n}}\ndirective @tag repeatable on ARGUMENT_DEFINITION\n\
+       directive @d<X>(v: X{} @deprecated) on SCALAR\n",
+      " @tag".repeat(tags)
+    );
+    // Where each set's `T` in `@d<T>` is written.
+    let mut written: Vec<usize> = Vec::with_capacity(sets);
+    for index in 0..sets {
+      let head = format!("scalar S{index}<T> @set @d<");
+      written.push(text.len() + head.len());
+      text.push_str(&head);
+      text.push_str("T>\n");
+    }
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+    let analysis = analyze(&root, &[], &limits);
+    let schema = schema_file(&analysis);
+    let deprecated = Some(at(schema, &text, "deprecated", 0));
+    let expected: Vec<(&'static str, Location, Option<Location>)> = written
+      .iter()
+      .map(|start: &usize| {
+        (
+          DEPRECATED_ARGUMENT,
+          Location::new(schema.get(), SimpleSpan::new(*start, *start + 1)),
+          deprecated,
+        )
+      })
+      .collect();
+    assert_eq!(found(&analysis), expected, "sets {sets}, tags {tags}");
+    let expected: Vec<String> = (0..sets)
+      .map(|index: usize| {
+        format!(
+          "`T`, the element of the set `S{index}`, is non-null in every instantiation, and here \
+           it makes the deprecated argument `v` of the directive `@d` required"
+        )
+      })
+      .collect();
+    assert_eq!(messages(&analysis), expected, "sets {sets}, tags {tags}");
+    assert!(
+      analysis
+        .diagnostics()
+        .iter()
+        .all(|diagnostic: &Diagnostic| diagnostic.labels() == 1),
+      "sets {sets}, tags {tags}"
+    );
+    // Under a ceiling of zero, each report is built and counted, and none is kept.
+    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0));
+    let diagnostics = silent.diagnostics();
+    assert!(diagnostics.is_empty(), "sets {sets}, tags {tags}");
+    assert!(diagnostics.truncated());
+    assert_eq!(diagnostics.error_count(), sets);
+  }
+}
+
 /// A OneOf input object with a field of each shape, and a generic one whose field is a type
 /// parameter.
 const ONE_OF: &str = "type Query {\n  ok: Int\n}\n\

@@ -49,7 +49,7 @@ use crate::graphqlx::{
   code::schema,
   diagnostic::Excerpt,
   id::dense,
-  positions::{Derived, Fill, Place, Positions, Taking, parameter, taking},
+  positions::{Derived, Fill, Mistake, Place, Positions, Taking, parameter, taking},
 };
 
 use super::{Silence, one_of};
@@ -283,11 +283,15 @@ impl OneOfFieldNotNullable {
   /// or element of `def`, a collection, which every instantiation makes non-null, given there a
   /// type parameter that stands as a OneOf's field's whole type, which it makes non-null in every
   /// instantiation. `None` anywhere else: a definition's mistake is reported once, where it gives
-  /// the key or element that place.
+  /// the key or element that place. One lookup.
   fn forced(&self, model: &Model, def: Option<DefId>, at: Location) -> Option<Diagnostic> {
     let def = def?;
     let collection = model.def(def).collection()?;
-    let (witness, member) = self.positions.forced(def, Place::OneOfField)?;
+    let Mistake {
+      at: witness,
+      member,
+      ..
+    } = self.positions.forced(def, Place::OneOfField)?;
     if witness != at {
       return None;
     }

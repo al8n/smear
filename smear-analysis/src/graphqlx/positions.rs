@@ -96,7 +96,11 @@
 //! more, for what an operation's argument reaches: linear in the slots, the written type arguments,
 //! the open types the roots reach and their arguments, with a logarithm for each lookup of an
 //! ordered map. A type given to many slots is one node with an edge from each, never a walk of what
-//! it holds for each. What a value holds is one more worklist over the input fields, as linear.
+//! it holds for each. What a value holds is one more worklist over the input fields, as linear. The
+//! look at a member reads its applications once, and keeps where a deprecated member with no
+//! default applies `@deprecated`, which a collection's mistake keeps in turn: a report of one reads
+//! one kept entry, and never a member's applications, however many collections give one member's
+//! place.
 //! [`Fits`] judges each pair of a type and a class asked about once, with an explicit stack, a
 //! type's children before it, and keeps with a type that does not fit the way down to what does
 //! not, made in one step from its child's; and answers each pair of a written occurrence and a
@@ -217,8 +221,22 @@ pub(crate) struct Positions {
 }
 
 /// Each place that takes a nullable type that reached a collection's key or element, by the slot
-/// and the place's index, with the witness it reached it with and the member it came from.
-type Forced = BTreeMap<(u32, usize), (Location, Option<MemberId>)>;
+/// and the place's index.
+type Forced = BTreeMap<(u32, usize), Mistake>;
+
+/// A place that takes a nullable type that reached a collection's key or element: the mistake of
+/// the collection's definition, as [`Positions::forced`] answers it, with everything its report
+/// reads.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Mistake {
+  /// Where the definition gives the key or element the place: the witness it reached it with.
+  pub(crate) at: Location,
+  /// The member whose type the place came from.
+  pub(crate) member: Option<MemberId>,
+  /// Where that member applies `@deprecated`, its first, when it is a deprecated member with no
+  /// default: kept when the member is looked at, so that no report reads its applications.
+  pub(crate) deprecated: Option<Location>,
+}
 
 impl Positions {
   /// The positions of `model`'s every type parameter, found once, `sources` saying who wrote each
@@ -235,6 +253,7 @@ impl Positions {
       edges: Vec::new(),
       holds: Vec::new(),
       seeds: Vec::new(),
+      deprecated: BTreeMap::new(),
       operations: Vec::new(),
       filled: BTreeSet::new(),
       stack: Vec::new(),
@@ -282,11 +301,11 @@ impl Positions {
   }
 
   /// Where the definition of `def`, a collection, gives its key or element `place`, a place that
-  /// takes a nullable type, with the member the place came from: the definition's mistake, since
-  /// every instantiation makes the key or element non-null. The place stands at no key or element,
-  /// so no use of `def` repeats the mistake. `None` when the definition gives it none, or `def` is
-  /// no collection.
-  pub(crate) fn forced(&self, def: DefId, place: Place) -> Option<(Location, Option<MemberId>)> {
+  /// takes a nullable type, with the member the place came from and where a deprecated one applies
+  /// `@deprecated`: the definition's mistake, since every instantiation makes the key or element
+  /// non-null. The place stands at no key or element, so no use of `def` repeats the mistake.
+  /// `None` when the definition gives it none, or `def` is no collection. One lookup.
+  pub(crate) fn forced(&self, def: DefId, place: Place) -> Option<Mistake> {
     let slot = slot(&self.base, def, 0)?;
     self.forced.get(&(slot, place.index())).copied()
   }
@@ -516,6 +535,9 @@ struct Graph<'b> {
   /// The places the roots give, in the order of the roots: a node, its place, the root's witness,
   /// and the member whose type the root is.
   seeds: Vec<Seed>,
+  /// Where each member that gives a deprecated member's place applies `@deprecated`, its first:
+  /// found in the one look at the member, for a collection's mistake to keep.
+  deprecated: BTreeMap<MemberId, Location>,
   /// The field arguments' roots, in the order of the roots, each a node and the root's witness:
   /// what an operation's argument reaches, given once the other places are found.
   operations: Vec<(u32, Location)>,
@@ -561,9 +583,11 @@ impl Graph<'_> {
     }
   }
 
-  /// Enters `member`'s applications, and its type, which it gives the place its kind is; and, the
-  /// field of a OneOf, when `one_of`, typed by its definition's type parameter written nullable,
-  /// the place of a OneOf's field too.
+  /// Enters `member`'s applications, and its type, which it gives the place its kind is; and, typed
+  /// by its definition's type parameter written nullable, the field of a OneOf, when `one_of`, the
+  /// place of a OneOf's field too, and an argument or an input field with no default that applies
+  /// `@deprecated` a deprecated member's place, keeping where it applies the first: one look at its
+  /// applications.
   fn member(&mut self, model: &Model, member: MemberId, one_of: bool) {
     let written = model.member(member);
     for application in written.applications() {
@@ -600,14 +624,7 @@ impl Graph<'_> {
       self.seeds.push((node, Place::OneOfField, at, Some(member)));
     }
     // A deprecated member a caller may leave out, which a non-null argument would make required.
-    let deprecated = model.builtins().deprecated();
-    let applies = written.applications().iter().any(|id: &ApplicationId| {
-      matches!(
-        model.application(*id).directive(),
-        Resolution::Resolved(directive) if directive == deprecated
-      )
-    });
-    if !applies || written.default().is_some() {
+    if written.default().is_some() {
       return;
     }
     let required = match place {
@@ -615,6 +632,20 @@ impl Graph<'_> {
       Place::InputField => Place::DeprecatedInputField,
       _ => return,
     };
+    let deprecated = model.builtins().deprecated();
+    let Some(application) = written.applications().iter().find(|id: &&ApplicationId| {
+      matches!(
+        model.application(**id).directive(),
+        Resolution::Resolved(directive) if directive == deprecated
+      )
+    }) else {
+      return;
+    };
+    // Where it applies `@deprecated`, found in this one look at it: what a report of a collection's
+    // mistake labels, which then reads no member's applications.
+    self
+      .deprecated
+      .insert(member, model.application(*application).path_location());
     self.seeds.push((node, required, at, Some(member)));
   }
 
@@ -751,6 +782,7 @@ impl Graph<'_> {
       holds: &self.holds,
       held,
       keys,
+      deprecated: &self.deprecated,
       gained: vec![0; nodes],
       witnesses: vec![None; size],
       origins: vec![None; size],
@@ -785,6 +817,8 @@ struct Spread<'e> {
   held: &'e [bool],
   /// For each slot, whether it is a collection's key or element.
   keys: &'e [bool],
+  /// Where each member that gives a deprecated member's place applies `@deprecated`.
+  deprecated: &'e BTreeMap<MemberId, Location>,
   /// For each node, the places it gained, a bit for each.
   gained: Vec<u8>,
   /// For each slot, and each place in turn, the witness it gained the place with.
@@ -801,7 +835,8 @@ struct Spread<'e> {
 impl Spread<'_> {
   /// A node gains a place, with a witness and an origin, unless it has it. A collection's key or
   /// element, which every instantiation makes non-null, stands in no place that takes a nullable
-  /// type: one that reaches it is kept apart, its definition's mistake, and passed on to nothing.
+  /// type: one that reaches it is kept apart, its definition's mistake, with where a deprecated
+  /// member applies `@deprecated`, one lookup, and passed on to nothing.
   fn gain(&mut self, (node, place, at, origin): Seed) {
     let Some(gained) = self.gained.get_mut(node as usize) else {
       return;
@@ -811,7 +846,15 @@ impl Spread<'_> {
     }
     *gained |= place.bit();
     if place.whole() && self.keys.get(node as usize).copied().unwrap_or(false) {
-      self.forced.insert((node, place.index()), (at, origin));
+      let deprecated = origin.and_then(|member: MemberId| self.deprecated.get(&member).copied());
+      self.forced.insert(
+        (node, place.index()),
+        Mistake {
+          at,
+          member: origin,
+          deprecated,
+        },
+      );
       return;
     }
     if node < self.slots

@@ -38,8 +38,8 @@
 //! `directive @d<X>(v: X @deprecated)`. That is the definition's mistake, reported once, under the
 //! member's code, where the definition gives the place: at the type argument or the `implements`
 //! entry, or at an application's path for an argument a default fills; with a label at the
-//! member's `@deprecated`. No use of the collection repeats it: the table keeps the place apart
-//! from the key or element, and passes it on to nothing.
+//! member's `@deprecated`, which the table keeps. No use of the collection repeats it: the table
+//! keeps the place apart from the key or element, and passes it on to nothing.
 //!
 //! The rule reads the public model, and one crate-private accessor, `Application::ty`: an
 //! application's complete type, its directive's instantiation.
@@ -54,7 +54,7 @@ use crate::graphqlx::{
   code::schema,
   diagnostic::Excerpt,
   id::dense,
-  positions::{Derived, Fill, Place, Positions, Taking, parameter, taking},
+  positions::{Derived, Fill, Mistake, Place, Positions, Taking, parameter, taking},
 };
 
 use super::{Silence, supplied};
@@ -102,11 +102,12 @@ const PLACES: [Place; 2] = [Place::DeprecatedArgument, Place::DeprecatedInputFie
 /// at its type and, once for each distinct type, a verdict that reads each argument at a slot that
 /// stands as such a member's type, and once for each distinct type and count of written arguments,
 /// the types its fill derives, each once; and in a collection's definition, for each occurrence and
-/// application, a lookup of what its key or element was given there, and for a report, one look at
-/// the member's applications. It keeps, between two hooks, whether a supplied package wrote the
-/// definition the walk is in, and for the walk the table, the silence and its verdicts, keyed by
-/// the model's ids. Its messages quote names as excerpts, so each is bounded whatever the names'
-/// lengths, and print no type.
+/// application, a lookup of what its key or element was given there, which keeps where the member
+/// applies `@deprecated`, so that a report reads no member's applications, however many
+/// collections give one member's place. It keeps, between two hooks, whether a supplied package
+/// wrote the definition the walk is in, and for the walk the table, the silence and its verdicts,
+/// keyed by the model's ids. Its messages quote names as excerpts, so each is bounded whatever the
+/// names' lengths, and print no type.
 #[derive(Default)]
 pub(super) struct DeprecatedRequired {
   /// Whether a supplied package wrote the definition the walk is in.
@@ -363,15 +364,20 @@ impl DeprecatedRequired {
   /// or element of `def`, a collection, which every instantiation makes non-null, given there a
   /// type parameter that stands as a deprecated member's whole type, which it makes required in
   /// every instantiation. `None` anywhere else: a definition's mistake is reported once, where it
-  /// gives the key or element that place.
+  /// gives the key or element that place. A lookup for each place, and the label is the
+  /// `@deprecated` the table kept with the mistake, so no member's applications are read.
   fn forced(&self, model: &Model, def: Option<DefId>, at: Location) -> Option<Diagnostic> {
     let def = def?;
     let collection = model.def(def).collection()?;
-    let (place, member) =
+    let (place, member, deprecated) =
       PLACES
         .into_iter()
         .find_map(|place: Place| match self.positions.forced(def, place) {
-          Some((witness, Some(member))) if witness == at => Some((place, member)),
+          Some(Mistake {
+            at: witness,
+            member: Some(member),
+            deprecated,
+          }) if witness == at => Some((place, member, deprecated)),
           _ => None,
         })?;
     let written = model.member(member);
@@ -409,17 +415,8 @@ impl DeprecatedRequired {
         Excerpt(model.def(def).name().as_bytes())
       ))
       .primary_label(label);
-    let deprecated = model.builtins().deprecated();
-    if let Some(application) = written.applications().iter().find(|id: &&ApplicationId| {
-      matches!(
-        model.application(**id).directive(),
-        Resolution::Resolved(directive) if directive == deprecated
-      )
-    }) {
-      report = report.label(
-        model.application(*application).path_location(),
-        "deprecated here",
-      );
+    if let Some(deprecated) = deprecated {
+      report = report.label(deprecated, "deprecated here");
     }
     Some(report.help(FORCED_HELP).build())
   }
