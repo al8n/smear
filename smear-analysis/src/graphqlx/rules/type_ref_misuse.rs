@@ -46,16 +46,16 @@
 //! application's complete type, its directive's instantiation. Through `Nesting` it reads the
 //! public `TypeExpr::written_args`, to tell which occurrences of a tree are above another.
 
-use std::{collections::BTreeMap, format, string::String};
+use std::{collections::BTreeMap, format};
 
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  ApplicationId, Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, MemberId,
-  MemberKind, Model, Site, TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
+  ApplicationId, Contribution, Cx, DefId, Diagnostic, DiagnosticKind, MemberId, MemberKind, Model,
+  Site, TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
   diagnostic::Excerpt,
   id::dense,
-  positions::{Derived, Fill, Place, Positions, default_of, parameter},
+  positions::{Derived, Fill, Place, Positions, Taking, parameter, taking},
   reach::Reach,
 };
 
@@ -125,7 +125,7 @@ impl Visitor for TypeRefMisuse {
     let model = cx.model();
     self.nesting = Nesting::default();
     self.silence = Silence::of(cx);
-    self.positions = Positions::of(model);
+    self.positions = Positions::of(model, cx.sources());
     self.reach = Reach::of(model, &self.positions);
     self.verdicts = BTreeMap::new();
     self.derived = Derived::default();
@@ -291,79 +291,22 @@ impl TypeRefMisuse {
     written: &[TypeExprId],
     whole: Location,
   ) -> Option<Diagnostic> {
-    let TyKind::Named { def, args } = model.ty(ty).kind() else {
-      return None;
-    };
-    let definition = Excerpt(model.def(def).name().as_bytes());
-    // A directive is named as it is applied.
-    let sign = if model.def(def).kind() == DefKind::Directive {
-      "@"
-    } else {
-      ""
-    };
-    let taking = match found {
-      Found::Own(Held { slot, field }) => {
-        let argument = *args.get(slot as usize)?;
-        match written.get(slot as usize) {
-          Some(given) => Taking {
-            def,
-            slot,
-            argument,
-            field,
-            lead: format!("`{sign}{definition}` takes"),
-            at: model.type_expr(*given).location(),
-            filled: None,
-          },
-          None => Taking {
-            def,
-            slot,
-            argument,
-            field,
-            lead: format!(
-              "`{sign}{definition}` takes, from the default of `{}`,",
-              Excerpt(parameter(model, def, slot).as_bytes())
-            ),
-            at: whole,
-            filled: default_of(model, def, slot),
-          },
-        }
-      }
+    let (slot, field, derived) = match found {
+      Found::Own(Held { slot, field }) => (slot, field, None),
       Found::Derived(Fill {
         slot: filled,
         ty: derived,
         verdict: Held { slot, field },
-      }) => {
-        let TyKind::Named {
-          def: derived_def,
-          args: derived_args,
-        } = model.ty(derived).kind()
-        else {
-          return None;
-        };
-        Taking {
-          def: derived_def,
-          slot,
-          argument: *derived_args.get(slot as usize)?,
-          field,
-          lead: format!(
-            "the default of `{}` of `{sign}{definition}` makes `{}` take",
-            Excerpt(parameter(model, def, filled).as_bytes()),
-            Excerpt(model.def(derived_def).name().as_bytes())
-          ),
-          at: whole,
-          filled: default_of(model, def, filled),
-        }
-      }
+      }) => (slot, field, Some((filled, derived))),
     };
     let Taking {
       def: taker,
       slot,
       argument,
-      field,
       lead,
       at,
       filled,
-    } = taking;
+    } = taking(model, ty, written, whole, slot, derived)?;
     let field = model.member(field);
     let name = Excerpt(parameter(model, taker, slot).as_bytes());
     let taken = Excerpt(
@@ -393,25 +336,6 @@ impl TypeRefMisuse {
     }
     Some(report.help(HELP).build())
   }
-}
-
-/// What a report of the instantiation half says: whose type parameter takes what, where, and from
-/// which default.
-struct Taking {
-  /// The definition whose type parameter takes it.
-  def: DefId,
-  /// The parameter's slot.
-  slot: u32,
-  /// The type it takes.
-  argument: TyId,
-  /// The input field of type `TypeRef` a value of that type can hold.
-  field: MemberId,
-  /// The message's lead, which names who takes it.
-  lead: String,
-  /// Where it is reported.
-  at: Location,
-  /// The default that fills the slot the occurrence leaves out, when it has one.
-  filled: Option<Location>,
 }
 
 /// The first argument of `ty`, of `model`, in order, at a slot an operation's argument reaches by

@@ -1667,6 +1667,86 @@ fn a_one_of_input_objects_fields_are_nullable_and_have_no_default() {
   );
 }
 
+/// OneOf input objects whose field is a type parameter, written nullable, and one whose field is a
+/// list of one; an input object that holds one; and one whose default fills it non-null.
+const ONE_OF_INSTANTIATIONS: &str = "type Query {\n  ok: Int\n}\n\
+                                     input Choice<T> @oneOf {\n  x: T\n}\n\
+                                     input L<T> @oneOf {\n  x: [T]\n}\n\
+                                     input Holds<U> {\n  c: Choice<U>\n}\n\
+                                     input Filled<T = Int!> @oneOf {\n  y: T\n}\n\
+                                     type Uses {\n  a(c: Choice<Int!>): Int\n  \
+                                     b(c: Choice<Int>): Int\n  d(l: L<Int!>): Int\n  \
+                                     e(h: Holds<Int!>): Int\n  f(c: Filled): Int\n}\n";
+
+#[test]
+fn a_one_of_field_a_parameter_types_stays_nullable() {
+  let analysis = analyze_one(ONE_OF_INSTANTIATIONS);
+  let schema = schema_file(&analysis);
+  let text = ONE_OF_INSTANTIATIONS;
+  let choice = Some(named(schema, text, "x: ", "T", 0));
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        ONE_OF_NON_NULL,
+        named(schema, text, "a(c: Choice<", "Int!", 0),
+        choice
+      ),
+      // `Holds`'s `U` is `Choice`'s `T`, passed on at `Choice<U>`.
+      (
+        ONE_OF_NON_NULL,
+        named(schema, text, "Holds<", "Int!", 0),
+        Some(at(schema, text, "Choice<U>", 0))
+      ),
+      // A default fills it: at the occurrence.
+      (
+        ONE_OF_NON_NULL,
+        named(schema, text, "f(c: ", "Filled", 0),
+        Some(named(schema, text, "y: ", "T", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let messages = messages(&analysis);
+  assert_eq!(
+    messages,
+    [
+      "`Choice` takes a non-null type for its type parameter `T`, which is the type of the field \
+       `x` of the OneOf input object `Choice`",
+      "`Holds` takes a non-null type for its type parameter `U`, which is the type of the field \
+       `x` of the OneOf input object `Choice`",
+      "`Filled` takes, from the default of `T`, a non-null type for its type parameter `T`, which \
+       is the type of the field `y` of the OneOf input object `Filled`",
+    ]
+  );
+  let filled = analysis
+    .diagnostics()
+    .iter()
+    .nth(2)
+    .expect("three diagnostics");
+  assert_eq!(
+    (
+      filled.primary_label(),
+      filled
+        .label(1)
+        .map(|label| (label.location(), label.text())),
+      filled.help()
+    ),
+    (
+      Some("field of a @oneOf input object is non-null"),
+      Some((
+        named(schema, text, "T = ", "Int!", 0),
+        "filled from this default"
+      )),
+      Some(
+        "every field of a `@oneOf` input object is one of the alternatives, so each one has to be \
+         nullable."
+      )
+    )
+  );
+}
+
 #[test]
 fn no_extension_makes_an_input_object_one_of() {
   // An extension of the package's own input object that applies `@oneOf` is refused at it, and
@@ -1842,6 +1922,13 @@ fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
     ONE_OF_NON_NULL,
     "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int!\n  x: Missing\n}\n",
     "type Query {\n  ok: Int\n}\ninput In @oneOf {\n  a: Int!\n}\ninput U {\n  x: Missing\n}\n",
+  );
+  silent_beside_a_phase(
+    ONE_OF_NON_NULL,
+    "type Query {\n  ok: Int\n}\ninput Choice<T> @oneOf {\n  x: T\n}\n\
+     type T {\n  f(c: Choice<Int!>): Int\n  x: Missing\n}\n",
+    "type Query {\n  ok: Int\n}\ninput Choice<T> @oneOf {\n  x: T\n}\n\
+     type T {\n  f(c: Choice<Int!>): Int\n}\ntype U {\n  x: Missing\n}\n",
   );
   silent_beside_a_phase(
     ONE_OF_DEFAULT,

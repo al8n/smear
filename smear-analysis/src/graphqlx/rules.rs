@@ -38,8 +38,10 @@
 //! collections, and where each definition it is passed to puts that definition's parameter. Such a
 //! rule judges every written occurrence and every application, each type once, and what the slots
 //! an occurrence leaves to their defaults derive, at the occurrence, through `positions::Derived`.
-//! `MemberTypeKind` is one, for the kinds its places take, and `TypeRefMisuse` another, for the
-//! parameters an operation's argument reaches; each reads one crate-private accessor,
+//! `MemberTypeKind` is one, for the kinds its places take, `TypeRefMisuse` another, for the
+//! parameters an operation's argument reaches, and `OneOfFieldNotNullable` a third, for the
+//! parameters that are a OneOf's field's whole type, which `positions::Positions::of` tells from
+//! who wrote each `@oneOf`, as `one_of` does; each reads one crate-private accessor,
 //! `Application::ty`, an application's complete type, its directive's instantiation.
 //! `TypeRefMisuse` reads the graph of what a value can reach too, `reach::Reach`, found once for
 //! the walk over every package's input objects, so that an argument the root package writes is
@@ -120,7 +122,7 @@ use self::{
 };
 use super::{
   ApplicationId, Contribution, Cx, DefId, DefKind, Model, PackageId, PackageKind, Resolution,
-  TypeExprId, TypeExprKind, id::dense,
+  SourceMap, TypeExprId, TypeExprKind, id::dense,
 };
 
 pub use self::unbounded_instantiation::UnboundedInstantiation;
@@ -132,13 +134,21 @@ pub use self::unbounded_instantiation::UnboundedInstantiation;
 /// built-in. `None` when the first contribution is an extension, so that the answer never rests
 /// on the order lowering appends contributions in.
 fn own_contribution<'a>(cx: &Cx<'a>, def: DefId) -> Option<(Contribution<'a>, PackageId)> {
-  let own = cx
-    .model()
+  own_in(cx.model(), cx.sources(), def)
+}
+
+/// [`own_contribution`]'s answer for `def` of `model`, whose files `sources` holds.
+fn own_in<'a>(
+  model: &'a Model,
+  sources: &SourceMap,
+  def: DefId,
+) -> Option<(Contribution<'a>, PackageId)> {
+  let own = model
     .def(def)
     .contributions()
     .next()
     .filter(|part: &Contribution<'a>| !part.is_extension())?;
-  let writer = cx.sources().written_by(own.location())?;
+  let writer = sources.written_by(own.location())?;
   Some((own, writer))
 }
 
@@ -153,16 +163,20 @@ fn supplied(cx: &Cx<'_>, def: DefId) -> bool {
 /// Whether the input object `def` is a OneOf input object: the package that wrote it applies
 /// `core`'s `@oneOf` to it, in its definition or in an extension of its own.
 fn one_of(cx: &Cx<'_>, def: DefId) -> bool {
-  let model = cx.model();
+  one_of_in(cx.model(), cx.sources(), def)
+}
+
+/// [`one_of`]'s answer for `def` of `model`, whose files `sources` holds: what the table of where
+/// each type parameter stands reads, which is found before any hook.
+pub(super) fn one_of_in(model: &Model, sources: &SourceMap, def: DefId) -> bool {
   let definition = model.def(def);
   if definition.kind() != DefKind::InputObject {
     return false;
   }
-  let Some((_, writer)) = own_contribution(cx, def) else {
+  let Some((_, writer)) = own_in(model, sources, def) else {
     return false;
   };
   let one_of = model.builtins().one_of();
-  let sources = cx.sources();
   definition.applications().iter().any(|id: &ApplicationId| {
     let application = model.application(*id);
     matches!(application.directive(), Resolution::Resolved(directive) if directive == one_of)
@@ -408,7 +422,8 @@ rule_set! {
   /// instantiation what it gives a type parameter where the parameter stands; an object or an
   /// interface implements interfaces; no interface implements itself; a union's members are object
   /// types; a required argument or input field is not deprecated; a OneOf input object's fields are
-  /// nullable and have no default; an input object takes `@oneOf` in its definition alone; and no
+  /// nullable, at each instantiation too, and have no default; an input object takes `@oneOf` in
+  /// its definition alone; and no
   /// input object requires a value of itself, through its fields and the type arguments they give.
   /// And of the directives and every application a
   /// supplied package writes, GraphQL's own rules: a directive stands where its definition lists; a

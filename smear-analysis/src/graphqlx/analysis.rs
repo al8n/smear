@@ -470,7 +470,11 @@ impl Analysis {
 ///   name, with a label at the `@deprecated`. An input object is OneOf when the package that
 ///   wrote it applies `core`'s `@oneOf` to it, in its definition or in an extension of its own,
 ///   and a field of one that is written non-null is `one-of-field-not-nullable`, and one that
-///   declares a default `one-of-field-has-default`, at its name. Each application of `@oneOf` in
+///   declares a default `one-of-field-has-default`, at its name. An instantiation, written or a
+///   directive's application, that gives a non-null type to a type parameter that is a field of a
+///   OneOf's whole type, written nullable, through the definitions it is passed to but no list or
+///   collection, or whose defaults derive one that does, is `one-of-field-not-nullable` too, at
+///   the argument, labelled where the parameter stands. Each application of `@oneOf` in
 ///   an extension of an input object is `one-of-on-input-object-extension`, at its path. Over
 ///   every input object of the model, the draft's unbreakable-cycle algorithm: an ordinary input
 ///   object is finite when what each field that is non-null and no list requires is, and a OneOf

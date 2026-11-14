@@ -130,7 +130,7 @@ impl Visitor for MemberTypeKind {
   fn begin(&mut self, cx: &mut Cx<'_>) {
     self.judged = false;
     self.silence = Silence::of(cx);
-    self.positions = Positions::of(cx.model());
+    self.positions = Positions::of(cx.model(), cx.sources());
     self.fits = Fits::default();
     self.verdicts = BTreeMap::new();
     self.derived = Derived::default();

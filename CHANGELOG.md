@@ -598,8 +598,11 @@ All notable changes to Smear are documented in this file.
   that applies `core`'s `@deprecated`, told by its definition and not its spelling, is
   `deprecated-required-argument` or `deprecated-required-input-field`; and an input object is OneOf
   when the package that wrote it applies `core`'s `@oneOf` to it, in its definition or in an
-  extension of its own, and a field of one written non-null is `one-of-field-not-nullable`, and one
-  that declares a default `one-of-field-has-default`; and each `@oneOf` an extension of an input
+  extension of its own, and a field of one written non-null is `one-of-field-not-nullable`, and so
+  is an instantiation that gives a non-null type to a type parameter that is such a field's type,
+  where it is written: `Choice<Int!>` of `input Choice<T> @oneOf { x: T }`, but not `L<Int!>` of
+  `input L<T> @oneOf { x: [T] }`; and one that declares a default `one-of-field-has-default`; and
+  each `@oneOf` an extension of an input
   object applies is `one-of-on-input-object-extension`; and an input object that requires a value
   of itself is `circular-non-null-input-field` when every field on the way is non-null and no
   list, and `circular-one-of-input-field` when the way passes a OneOf none of whose fields can be
