@@ -28,6 +28,9 @@ const UNSATISFIED: &str = "smear::graphqlx::unsatisfied-bound";
 /// The code of a bound of the analysis's limits that is passed.
 const LIMIT: &str = "smear::graphqlx::resource-limit";
 
+/// GraphQL's code for an interface a type's interfaces implement and it does not.
+const TRANSITIVE: &str = "smear::schema::missing-transitive-interface";
+
 /// The code of a count of type arguments that does not match.
 const ARITY: &str = "smear::graphqlx::generic-arity";
 
@@ -776,7 +779,8 @@ fn a_parameter_satisfies_through_its_bounds() {
 #[test]
 fn satisfaction_is_by_declaration() {
   // `Lazy` declares `Ord<Lazy>` and not `Comparable<Lazy>`, which `Ord` declares: what an interface
-  // declares is not followed. GraphQL's rule on transitive interfaces, L4's, refuses `Lazy` itself.
+  // declares is not followed. The implementation phase refuses `Lazy` itself, at its `Ord<Lazy>`,
+  // labelled at `Ord`'s `Comparable<X>`: GraphQL's rule on transitive interfaces.
   let text = program(
     "type Lazy implements Ord<Lazy> {\n  compare(other: Lazy): Int\n}\n\
      type Query {\n  s: Sorted<Lazy>\n}\n",
@@ -785,11 +789,18 @@ fn satisfaction_is_by_declaration() {
   let schema = schema_file(&analysis);
   assert_eq!(
     found(&analysis),
-    [(
-      UNSATISFIED,
-      at(schema, &text, "Sorted<Lazy>", 0),
-      Some(at(schema, &text, "Comparable<T>", 0))
-    )],
+    [
+      (
+        TRANSITIVE,
+        at(schema, &text, "Ord<Lazy>", 0),
+        Some(at(schema, &text, "Comparable<X>", 1))
+      ),
+      (
+        UNSATISFIED,
+        at(schema, &text, "Sorted<Lazy>", 0),
+        Some(at(schema, &text, "Comparable<T>", 0))
+      )
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
@@ -1362,13 +1373,15 @@ fn a_type_that_doubles_is_judged_in_its_distinct_nodes() {
 #[test]
 fn the_built_in_library_is_judged_whatever_the_limits() {
   // At 0, every limit leaves the library alone: it writes no instantiation of a definition with a
-  // bound, and its values cost nothing to complete. The root package holds its query root alone.
+  // bound, its values cost nothing to complete, and it writes no `implements` entry and no union.
+  // The root package holds its query root alone.
   let limits = Limits::new()
     .with_max_generic_depth(0)
     .with_max_instantiations(0)
     .with_max_substitutions(0)
     .with_max_bound_steps(0)
-    .with_max_value_steps(0);
+    .with_max_value_steps(0)
+    .with_max_implementation_steps(0);
   let root: Package<&str> =
     Package::new("app", Layout::Flat, Tier::Std).with_files([SourceFile::new(
       "schema.graphqlx",

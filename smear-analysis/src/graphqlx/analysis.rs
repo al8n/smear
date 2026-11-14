@@ -314,12 +314,26 @@ impl Analysis {
 ///   `@extern` whose `lang`, `type` or `tier` did not coerce binds nothing, and so does one another
 ///   package writes, and one on a built-in, a GraphQL built-in the root package replaces among
 ///   them. An extern holds the strings coercion kept, and binding writes no text.
-/// - Checks what each definition says it is, in id order, reading of it what its own package
-///   writes, its own extensions included: an `implements` entry of the type an earlier entry of
-///   the definition has is `smear::schema::duplicate-implements-interface`, and a union's member
-///   of the type an earlier member has `smear::schema::duplicate-union-member`, each at the later,
-///   with a label at the first, every later one reported. Two instantiations of one interface are
-///   two types, and an entry or a member that did not resolve is compared with nothing.
+/// - Checks what each definition says it is, in id order, reading of it, and of every interface
+///   the check reads, what its own package writes, its own extensions included: an `implements`
+///   entry of the type an earlier entry of the definition has is
+///   `smear::schema::duplicate-implements-interface`, and a union's member of the type an earlier
+///   member has `smear::schema::duplicate-union-member`, each at the later, with a label at the
+///   first, every later one reported. Two instantiations of one interface are two types, and an
+///   entry or a member that did not resolve is compared with nothing. Then each entry that names
+///   an interface other than the definition, a marker when the definition is no object and no
+///   interface, the first of its type, is checked: every interface that interface implements, its
+///   own entries read with the entry's type arguments in place of its type parameters, is one of
+///   the definition's entries too, compared as a type, or it is
+///   `smear::schema::missing-transitive-interface`, at the definition's entry, with a label at the
+///   entry that implements it, once for each interface type missing; and what a missing interface
+///   implements is owed too, each definition read once for the definition checked. What an entry
+///   names besides is another rule's to refuse. Each entry of an interface looked at, whoever wrote
+///   it, and each node of a type read under type arguments, once for each type and arguments, is a
+///   step of [`Limits::max_implementation_steps`]; such a type is depth-checked against
+///   [`Limits::max_generic_depth`] and counted toward [`Limits::max_instantiations`]. A check one
+///   of them stops is `resource-limit`, once, at the entry it was checking, naming the limit, and
+///   nothing more is said of the definition.
 /// - Gives every definition and every type the tier it requires, last, once every type is
 ///   interned: a built-in keeps its package's tag; a scalar a supplied package defines requires
 ///   its externs' greatest tier, `core` with none; an enum and a directive `core`; an object or an
@@ -566,7 +580,13 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut reporter,
   );
   bind::bind(&declarations, &sources, &mut builder);
-  implement::implement(&declarations, &sources, &mut builder, &mut reporter);
+  implement::implement(
+    &declarations,
+    &sources,
+    &mut types,
+    &mut builder,
+    &mut reporter,
+  );
   tiers::tiers(&declarations, &mut builder);
 
   conclude(builder.finish(), sources, reporter, &mut Rules::default())

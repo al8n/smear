@@ -528,6 +528,12 @@ pub(crate) mod schema {
   pub(crate) const DUPLICATE_IMPLEMENTS_INTERFACE: Code =
     Code::new("smear::schema::duplicate-implements-interface");
 
+  /// A definition implements an interface whose interfaces it does not all implement, each
+  /// compared as a type under the type arguments that reach it: `smear-schema`'s
+  /// `MissingTransitiveInterface`.
+  pub(crate) const MISSING_TRANSITIVE_INTERFACE: Code =
+    Code::new("smear::schema::missing-transitive-interface");
+
   /// A union's member is the type an earlier member of its is, as written: `smear-schema`'s
   /// `DuplicateUnionMember`.
   pub(crate) const DUPLICATE_UNION_MEMBER: Code =

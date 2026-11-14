@@ -40,8 +40,10 @@
 //! instantiation is written, and so is each directive application, by its complete type
 //! arguments, at its path. No definition implements one interface type twice, nor has a union one
 //! member type twice: each later one is `smear::schema::duplicate-implements-interface` or
-//! `smear::schema::duplicate-union-member`. A value that does not fit its type is refused where it
-//! is written, a
+//! `smear::schema::duplicate-union-member`. And a definition of any kind implements what the
+//! interfaces it implements implement, under the type arguments its entries give them: one it
+//! omits is `smear::schema::missing-transitive-interface`. A value that does not fit its type is
+//! refused where it is written, a
 //! generic directive's arguments and a generic input object's fields read under their type
 //! arguments, and a default fills each argument and each input field a value leaves out; a value
 //! of a generic type definition whose type names its type parameters is checked at each closed

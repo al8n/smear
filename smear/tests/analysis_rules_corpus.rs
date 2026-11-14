@@ -1063,4 +1063,26 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
     &analysis,
     "a use above the tier beside a type that names nothing",
   );
+
+  // A type that omits an interface its interface implements, and names a marker as a field's
+  // type: the implementation phase's diagnostic alone, which marks the type's contribution, where
+  // `marker-misuse` is then silent.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[(
+      "schema.graphqlx",
+      "type Query {\n  x: Int\n}\ninterface Marked @marker\ninterface A {\n  a: Int\n}\n\
+       interface B implements A {\n  a: Int\n}\ntype T implements B {\n  a: Int\n  m: Marked\n}\n",
+    )],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(
+    codes(&analysis),
+    ["smear::schema::missing-transitive-interface"]
+  );
+  tolerant(
+    &analysis,
+    "a missing interface beside a marker named as a field's type",
+  );
 }

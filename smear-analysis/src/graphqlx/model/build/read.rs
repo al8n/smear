@@ -301,6 +301,16 @@ impl ModelBuilder {
       .max()
   }
 
+  /// Whether `def` is a marker, once built-in meaning is given: `false` for an id the builder did
+  /// not issue.
+  pub(crate) fn def_marker(&self, def: DefId) -> bool {
+    self
+      .model
+      .defs
+      .get(def.get() as usize)
+      .is_some_and(|row: &DefRow| row.marker)
+  }
+
   /// The `implements` entries of `def`, every contribution's, in order: none for a definition that
   /// writes none, and for an id the builder did not issue.
   pub(crate) fn def_implements(&self, def: DefId) -> &[TypeExprId] {

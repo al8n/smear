@@ -51,20 +51,21 @@ const _: () = assert!(
 /// trees and types nest, how long a path is, how many rounds the glob fixpoint runs, how many
 /// modules one module's globs name, how many instantiations of generic definitions it interns, how
 /// many steps of substitution it takes, how many steps judging bounds takes, how many steps
-/// completing values takes, and how many bytes of source it reads. A bound that is passed is
-/// reported as `smear::graphqlx::resource-limit`, never as a panic. Two bounds are not refusals:
-/// the diagnostic ceiling and the near-miss budget limit what the analysis says, not what it
-/// accepts.
+/// completing values takes, how many steps checking implementations takes, and how many bytes of
+/// source it reads. A bound that is passed is reported as `smear::graphqlx::resource-limit`, never
+/// as a panic. Two bounds are not refusals: the diagnostic ceiling and the near-miss budget limit
+/// what the analysis says, not what it accepts.
 ///
 /// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
 /// is always declared whole and every package has its root module, and that the built-in library's
 /// types are built whatever the generic depth, instantiation and substitution bounds are, its
 /// bounds cost nothing to judge, since it writes no instantiation of a definition with a bound,
-/// and its own values cost nothing to complete, where it writes them and in a copy made for an
-/// application it writes: see
+/// its own values cost nothing to complete, where it writes them and in a copy made for an
+/// application it writes, and its implementations cost nothing to check, since it writes no
+/// `implements` entry and no union: see
 /// [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_generic_depth`],
-/// [`Limits::max_instantiations`], [`Limits::max_substitutions`], [`Limits::max_bound_steps`] and
-/// [`Limits::max_value_steps`].
+/// [`Limits::max_instantiations`], [`Limits::max_substitutions`], [`Limits::max_bound_steps`],
+/// [`Limits::max_value_steps`] and [`Limits::max_implementation_steps`].
 ///
 /// # Building one
 ///
@@ -251,7 +252,10 @@ impl Limits {
   /// application is typed as an occurrence of its directive, a level above its type arguments, so
   /// `@d<[Int]>` is two deep. But a bound put under an instantiation's arguments that would nest
   /// deeper than this is reported at each occurrence of the instantiation, where it is written, and
-  /// the occurrence keeps its type. The built-in library's types are built whatever the bound, so
+  /// the occurrence keeps its type; and a type that checking an implementation reads under an
+  /// `implements` entry's type arguments that would nest deeper stops the check of its definition,
+  /// reported once, at the entry it was checking. The built-in library's types are built whatever
+  /// the bound, so
   /// `0`, which
   /// refuses every list and every type with an argument a supplied package writes, reports nothing
   /// inside it.
@@ -269,9 +273,10 @@ impl Limits {
   /// definition of at least one type parameter with each list of arguments, those the program
   /// writes, those filling its defaults derives, those a bound derives when it is put under an
   /// instantiation's arguments, each directive application's type, its directive with its
-  /// complete type arguments, and those a member's type rebuilt under type arguments derives,
-  /// together, a type that names a type parameter included. An instantiation written nullable and
-  /// non-null counts once.
+  /// complete type arguments, those a member's type rebuilt under type arguments derives, and
+  /// those checking an implementation derives, reading a type under an `implements` entry's type
+  /// arguments, together, a type that names a type parameter included. An instantiation written
+  /// nullable and non-null counts once.
   ///
   /// Past it, each occurrence that would need one more is reported where it is written, and is the
   /// unresolved type; one already interned is still built. An application that would need one
@@ -279,7 +284,9 @@ impl Limits {
   /// under type arguments would need one more is reported as
   /// [`max_value_steps`](Self::max_value_steps) says of a type that cannot be built. An occurrence
   /// whose bounds, put under its arguments, would need one more is reported where it is written
-  /// too, and keeps its type. The built-in library's are not counted.
+  /// too, and keeps its type; and a definition whose implementation's check would need one more
+  /// is reported once, at the `implements` entry it was checking. The built-in library's are not
+  /// counted.
   ///
   /// The default is 2^16. A program writes hundreds of instantiations; derived ones can double per
   /// level of a chain of defaults, or of an `implements` chain, and this bound is what keeps that
@@ -298,7 +305,10 @@ impl Limits {
   /// whether the type that occurrence yields is new or not. A set of arguments filled once is not
   /// filled again, whichever use asks for it. Judging a bound puts an instantiation's arguments in
   /// place of the parameters the bound names too, and draws on
-  /// [`max_bound_steps`](Self::max_bound_steps), never on this bound.
+  /// [`max_bound_steps`](Self::max_bound_steps), never on this bound; and checking an
+  /// implementation puts an `implements` entry's type arguments in place of an interface's
+  /// parameters, and draws on [`max_implementation_steps`](Self::max_implementation_steps), never
+  /// on this bound.
   ///
   /// Past it, each type occurrence whose type would take one more step is reported where it is
   /// written, and its type is the unresolved one; an application is reported at its path, and its
