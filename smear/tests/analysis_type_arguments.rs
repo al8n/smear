@@ -1643,3 +1643,63 @@ fn a_count_pays_for_each_identity_it_renders_once_per_element_type() {
     [(LIMIT, named(schema, &text, "@", "d", 2))]
   );
 }
+
+/// A count under type arguments pays for each node before it schedules it, so a type that cannot
+/// be built, which ends the count, discards no work the count did not pay for.
+///
+/// `I<T>` has N = 128 nullable `Int` fields and then `tail: [[[T]]]`, and `@d`'s default, of type
+/// `I<T>`, sets every one. `@d` is applied under K = 48 distinct `[[[Si]]]`, under a depth of
+/// four. Each application rebuilds `I<T>` under its type argument, two steps, a type four deep;
+/// counts the literal's node, one; pays for the 129 fields it sets, 129, before it looks at any;
+/// and rebuilds `tail`'s `[[[T]]]`, a step for its root and one for each of its three elements,
+/// four, stopping where the type would nest five deep: 136. The first also reads the literal's 129
+/// fields against `I`, 129 more. So 48 × 136 + 129 = 6,657 pays for every count, and each
+/// application is `resource-limit` for the depth; at 6,656 the last application's last step of
+/// rebuilding cannot be paid for, and it alone is refused for the budget. The test pins the
+/// charge: the work of scheduling the fields is bounded by it by construction, each paid for
+/// before it is looked at. Refuses fields scheduled for nothing and dropped unpaid where `tail`
+/// cannot be built, with which 48 × 7 + 129 = 465 would pay for every count.
+#[test]
+fn a_count_pays_for_what_it_schedules_before_a_type_stops_it() {
+  const N: usize = 128;
+  const K: usize = 48;
+  let declared: String = (0..N).map(|k: usize| format!("  f{k}: Int\n")).collect();
+  let set: Vec<String> = (0..N).map(|k: usize| format!("f{k}: 1")).collect();
+  let applied: Vec<String> = (0..K).map(|i: usize| format!("@d<[[[S{i}]]]>")).collect();
+  let scalars: String = (0..K).map(|i: usize| format!("scalar S{i}\n")).collect();
+  let text = format!(
+    "type Query {} {{\n  x: Int\n}}\ninput I<T> {{\n{declared}  tail: [[[T]]]\n}}\n\
+     directive @d<T>(v: I<T> = {{ {}, tail: null }}) repeatable on OBJECT\n{scalars}",
+    applied.join(" "),
+    set.join(", ")
+  );
+  let total = u32::try_from(K * (N + 8) + N + 1).expect("a small budget");
+  let limits = Limits::new().with_max_generic_depth(4);
+  let depth = "nests deeper than `Limits::max_generic_depth`, 4, admits";
+
+  let paid = analyze_text(&text, &limits.with_max_value_steps(total));
+  let schema = schema_file(&paid);
+  let applications: Vec<(&str, Location)> = (0..K)
+    .map(|nth: usize| (LIMIT, named(schema, &text, "@", "d", nth)))
+    .collect();
+  assert_eq!(found(&paid), applications);
+  for diagnostic in paid.diagnostics() {
+    assert!(diagnostic.to_string().contains(depth), "{diagnostic}");
+  }
+
+  let short = analyze_text(&text, &limits.with_max_value_steps(total - 1));
+  assert_eq!(found(&short), applications);
+  let messages: Vec<String> = short
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.to_string())
+    .collect();
+  let (last, before) = messages.split_last().expect("a diagnostic");
+  for message in before {
+    assert!(message.contains(depth), "{message}");
+  }
+  assert!(
+    last.contains(&format!("`Limits::max_value_steps`, {}", total - 1)),
+    "{last}"
+  );
+}
