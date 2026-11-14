@@ -205,10 +205,12 @@ fn an_input_object_that_requires_itself_is_refused() {
 }
 
 /// Generic input objects whose type parameters each carry what their arguments require: directly,
-/// forwarded through another input object, through a OneOf, when non-null under a non-null
-/// argument, through a requirement on the walk's path, and through a slot a default fills; and
-/// those whose arguments are not required: a nullable field under a nullable argument, a OneOf
-/// with a field that is no link, and a OneOf of bare parameters given a finite alternative.
+/// forwarded through another input object, when non-null under a non-null argument, through a
+/// requirement on the walk's path, and through a slot a default fills; OneOfs whose every
+/// alternative leads back, directly and through an input object that holds one; and those whose
+/// arguments are not required: a nullable field under a nullable argument, a OneOf with a field
+/// that is no link, and a OneOf of bare parameters given a finite alternative, directly and
+/// through an input object that holds one.
 const GENERIC_CYCLES: &str = "type Query {\n  ok: Int\n}\n\
                               input Wrap<T> {\n  v: T!\n}\ninput A1 {\n  w: Wrap<A1>!\n}\n\
                               input Inner<U> {\n  u: U!\n}\ninput Outer<T> {\n  i: Inner<T>!\n}\n\
@@ -224,7 +226,8 @@ const GENERIC_CYCLES: &str = "type Query {\n  ok: Int\n}\n\
                               input Node2 {\n  next: Either<Node2, Int>!\n}\n\
                               input N2 {\n  e: Either<N2, N2>!\n}\n\
                               input Box3<T> {\n  e: Either<T, End>!\n}\ninput N3 {\n  b: Box3<N3>!\n}\n\
-                              input Fwd<X, Y = Inner<X>> {\n  y: Y!\n}\ninput A7 {\n  f: Fwd<A7>!\n}\n";
+                              input Fwd<X, Y = Inner<X>> {\n  y: Y!\n}\ninput A7 {\n  f: Fwd<A7>!\n}\n\
+                              input Box2<T> {\n  e: Either<T, T>!\n}\ninput N4 {\n  b: Box2<N4>!\n}\n";
 
 #[test]
 fn a_parameter_carries_what_its_input_object_requires() {
@@ -253,15 +256,64 @@ fn a_parameter_carries_what_its_input_object_requires() {
       field(NON_NULL, "D2", "b"),
       // An alternative whose every argument leads back.
       field(ONE_OF, "N2", "e"),
-      // Refused conservatively: `Box3` passes its own parameter to an alternative, which carries
-      // it.
-      field(ONE_OF, "N3", "b"),
       // A true cycle through a slot a default fills: `Fwd<A7>` is `{ y: Inner<A7>! }`.
       field(NON_NULL, "A7", "f"),
+      // Through `Box2`, which holds `Either<T, T>`: its group's one alternative leads back. `N3`,
+      // whose `Box3` gives the finite `End` as the other alternative, has a value,
+      // `{ b: { e: { right: { ok: true } } } }`.
+      field(ONE_OF, "N4", "b"),
     ],
     "{:#?}",
     analysis.diagnostics()
   );
+}
+
+#[test]
+fn a_one_of_is_finite_through_any_one_alternative() {
+  // A OneOf is given one field, any one: `Choice<A>` has a value through `stop` whatever `A` is,
+  // `{ choice: { stop: {} } }`; and through the input objects that hold it the choice stays one,
+  // `V<A>` holding `W<A>`, which holds `Choice<A>`: `{ v: { w: { c: { stop: {} } } } }`.
+  for text in [
+    "type Query {\n  ok: Int\n}\ninput Stop {\n  n: Int\n}\n\
+     input Choice<T> @oneOf {\n  again: T\n  stop: Stop\n}\ninput A {\n  choice: Choice<A>!\n}\n",
+    "type Query {\n  ok: Int\n}\ninput Stop {\n  n: Int\n}\n\
+     input Choice<T> @oneOf {\n  again: T\n  stop: Stop\n}\ninput W<T> {\n  c: Choice<T>!\n}\n\
+     input V<T> {\n  w: W<T>!\n}\ninput A {\n  v: V<A>!\n}\n",
+  ] {
+    let analysis = analyze_text(text);
+    assert!(
+      analysis.diagnostics().is_empty(),
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+  }
+  // With `Stop` requiring an `A`, every alternative is infinite: GraphQL's code, at the field
+  // that leaves `A` and at the one that leads back from `Stop`.
+  for (text, link) in [
+    (
+      "type Query {\n  ok: Int\n}\ninput A {\n  choice: Choice<A>!\n}\n\
+       input Choice<T> @oneOf {\n  again: T\n  stop: Stop\n}\ninput Stop {\n  back: A!\n}\n",
+      "choice",
+    ),
+    (
+      "type Query {\n  ok: Int\n}\ninput A {\n  v: V<A>!\n}\ninput V<T> {\n  w: W<T>!\n}\n\
+       input W<T> {\n  c: Choice<T>!\n}\n\
+       input Choice<T> @oneOf {\n  again: T\n  stop: Stop\n}\ninput Stop {\n  back: A!\n}\n",
+      "v",
+    ),
+  ] {
+    let analysis = analyze_text(text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [
+        (ONE_OF, named(schema, text, "input A {\n  ", link, 0)),
+        (ONE_OF, named(schema, text, "input Stop {\n  ", "back", 0)),
+      ],
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+  }
 }
 
 #[test]
