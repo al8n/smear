@@ -336,6 +336,70 @@ fn each_followed_position_is_followed() {
   }
 }
 
+/// The `implements` entry of the test above, in a program `analyze` accepts: an object implements
+/// the interface and the interface's field names the object, so no interface implements itself
+/// through another. The entry `I<[U]>` and `G`'s own field `G<[U]>` each write a growth, and each
+/// is reported where it is written, labelled at its list.
+#[test]
+fn an_implements_entry_that_grows_is_refused_in_an_accepted_program() {
+  let text = "interface I<T> { f: G<T> }\ntype G<U> implements I<[U]> { f: G<[U]> }\n\
+              type Query { x: Int }\n";
+  let analysis = accepted(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [
+      (
+        at(schema, text, "I<[U]>", 0),
+        Some(at(schema, text, "[U]", 0))
+      ),
+      (
+        at(schema, text, "G<[U]>", 0),
+        Some(at(schema, text, "[U]", 1))
+      ),
+    ]
+  );
+}
+
+/// The field's argument of the test above, in a program `analyze` accepts: the argument's type is
+/// an input object, where an object is `argument-type-not-input-type`, and the input object's field
+/// applies `@e<G<U>>`, which names `G` again. Reported at the argument's type, labelled at its
+/// list.
+#[test]
+fn a_fields_argument_that_grows_is_refused_in_an_accepted_program() {
+  let text = "directive @e<W> on INPUT_FIELD_DEFINITION\ninput X<U> { v: U @e<G<U>> }\n\
+              type G<T> { f(a: X<[T]>): Int }\ntype Query { x: Int }\n";
+  let analysis = accepted(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      at(schema, text, "X<[T]>", 0),
+      Some(at(schema, text, "[T]", 0))
+    )]
+  );
+}
+
+/// The directive definition's argument of the test above, in a program `analyze` accepts: `d`'s
+/// argument is an input object whose field applies `@e<G<V>>`, and `G`'s field applies `@d<T>`. An
+/// object's field is no part of the graph `self-referential-directive` reads, so `d` is on no cycle
+/// there. Reported at the argument's type, labelled at its list.
+#[test]
+fn a_directive_definitions_argument_that_grows_is_refused_in_an_accepted_program() {
+  let text = "directive @e<W> on INPUT_FIELD_DEFINITION\n\
+              directive @d<U>(x: X<[U]>) on FIELD_DEFINITION\n\
+              input X<V> { v: V @e<G<V>> }\ntype G<T> { f: Int @d<T> }\ntype Query { x: Int }\n";
+  let analysis = accepted(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      at(schema, text, "X<[U]>", 0),
+      Some(at(schema, text, "[U]", 0))
+    )]
+  );
+}
+
 /// A bound's interface and a type parameter's default as it is written write the same growing type
 /// as a field beside them, and only the field's is reported: a hook that reads no site fails here.
 #[test]
@@ -363,6 +427,19 @@ fn a_bound_and_a_written_default_are_not_followed() {
       "{text}"
     );
   }
+}
+
+/// An interface's instantiation is not followed into the types that implement it. `G<i32>` needs
+/// `I<i32>`, `H<i32>` and `I<[i32]>`, and the rule is silent. A backend that also emits the
+/// implementors of `I<[i32]>` needs `G<[i32]>`, then `H<[i32]>`, then `I<[[i32]]>`, without end,
+/// and checks that itself: an implementor followed from its interface's instantiation fails here.
+#[test]
+fn an_interfaces_instantiation_is_not_followed_into_its_implementors() {
+  let analysis = accepted(
+    "interface I<T> { a: Int }\ntype G<U> implements I<U> { a: Int  h: H<U> }\n\
+     type H<V> { i: I<[V]> }\ntype Query { g: G<i32> }\n",
+  );
+  silent(&analysis, Packages::All);
 }
 
 /// `E<B>` is `E<B, [B]>`: the growth is the default `[A]`, filled for `B`, and the label is at the
@@ -410,12 +487,12 @@ fn growth_inside_a_filled_default_is_reported_at_the_use() {
   }
 }
 
-/// `P<X>` is `P<X, Q<[X]>>`. `P` needs nothing, its two fields being bare parameters, and the growth
-/// is `Q`'s, which the default fills in. The report is at the occurrence that leaves the argument
-/// out, labelled at the default, and its help says what the author can do: write the type argument
-/// the default fills, or change the default. The marked case's help, to pass the type parameter
-/// itself, is no advice here, since the occurrence passes it already: a held case that keeps it
-/// fails here.
+/// `P<X>` is `P<X, Q<[X]>>`. `P` needs nothing, its two fields being bare parameters, and the
+/// growth is `Q`'s, which the default fills in. The report is at the occurrence that leaves the
+/// argument out, labelled at the default, and its help says what the author can do: write the type
+/// argument the default fills, or change the default. The marked case's help, to pass the type
+/// parameter itself, is no advice here, since the occurrence passes it already: a held case that
+/// keeps it fails here.
 #[test]
 fn a_held_growth_is_helped_by_writing_the_argument_or_changing_the_default() {
   let text = "type P<T, U = Q<[T]>> { v: T  w: U }\ntype Q<X> { p: P<X> }\n\
@@ -476,6 +553,26 @@ fn an_application_that_grows_a_cycle_is_refused_at_the_application() {
   let text = "directive @d<U>(x: G<U>) on INPUT_OBJECT\ninput G<T> @d<[T]> { v: T }\n\
               type Query { x: Int }\n";
   let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      within(schema, text, "@d<[T]>", "d"),
+      Some(at(schema, text, "[T]", 0))
+    )]
+  );
+}
+
+/// The growth of the test above, in a program `analyze` accepts: `G`'s field applies `@d<[T]>`, and
+/// an object's field is no part of the graph `self-referential-directive` reads, so `d`, whose
+/// argument names `G<U>` through `@e`, is on no cycle there. Reported as above, at the
+/// application's path, labelled at the type argument.
+#[test]
+fn an_application_that_grows_a_cycle_is_refused_in_an_accepted_program() {
+  let text = "directive @e<W> on ARGUMENT_DEFINITION\n\
+              directive @d<U>(x: Int @e<G<U>>) on FIELD_DEFINITION\n\
+              type G<T> { f: Int @d<[T]> }\ntype Query { x: Int }\n";
+  let analysis = accepted(text);
   let schema = schema_file(&analysis);
   assert_eq!(
     unbounded(&analysis, Packages::All),
