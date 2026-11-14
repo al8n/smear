@@ -85,11 +85,14 @@ const POSITIONS: [Position; 4] = [
 /// for each list its type writes; for each occurrence and application, one look at its type and,
 /// once for each distinct type, a verdict that reads each argument against each place its slot
 /// stands in, each type and class judged once for the walk; and once for each distinct type and
-/// count of written arguments, the types its fill derives, each once. A report follows one path
-/// down a type. Nothing recurses. It keeps, between two hooks, whether a supplied package wrote
-/// the definition the walk is in, and for the walk the table, the silence and its verdicts, each
-/// keyed by the model's ids. Its messages quote names as excerpts, so each is bounded whatever the
-/// names' lengths, and print no type.
+/// count of written arguments, the types its fill derives, each once. A report follows the way to
+/// what does not fit down what its occurrence writes alone, a step for each level written, and
+/// reads the end of the way kept for the type where the occurrence stops writing it: a path a
+/// default fills is walked once, when its types are judged, and never for a report. Nothing
+/// recurses. It keeps, between two hooks, whether a supplied package wrote the definition the walk
+/// is in, and for the walk the table, the silence and its verdicts, each keyed by the model's ids.
+/// Its messages quote names as excerpts, so each is bounded whatever the names' lengths, and print
+/// no type.
 #[derive(Default)]
 pub(super) struct MemberTypeKind {
   /// Whether a supplied package wrote the definition the walk is in.

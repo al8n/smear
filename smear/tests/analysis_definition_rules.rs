@@ -1350,6 +1350,102 @@ fn a_type_many_fills_derive_is_walked_once() {
 }
 
 #[test]
+fn a_report_never_walks_a_path_defaults_fill() {
+  // Each field of `Query` is typed by the last set of a chain, each set's element its default, the
+  // set before it, down to `scalar C0<T = Bad> @set`: the field's complete type holds the input
+  // object `Bad` at the chain's end, so each field is refused, at its occurrence, labelled at the
+  // default of the last set's `T`. The occurrence writes no type argument, so the way down to `Bad`
+  // leaves what it writes at once, and the rest of the way is what defaults fill: its end is kept
+  // for each set when the chain is judged, once for the walk, and each report reads it in one
+  // lookup. The depth and the count of fields vary, and each program runs again under a diagnostic
+  // ceiling of zero, which keeps no report and still builds and counts each. A test sees the
+  // diagnostics, not the work, which holds by construction: a report follows the levels its
+  // occurrence writes alone, and reads the end kept for the type where the occurrence stops
+  // writing the way. Walked again for each report, the largest program here would follow its 3,000
+  // sets for each of its 3,000 fields, 9 million steps, where the rule now takes a few for each set
+  // and for each field.
+  const DEPTH: usize = 3_000;
+  const FIELDS: usize = 3_000;
+  // The last set is as deep as the chain, past the default bound.
+  let limits = Limits::new()
+    .with_max_generic_depth(u32::try_from(DEPTH + 1).expect("the chain's depth is a u32"));
+  for (depth, fields) in [(1, 1), (DEPTH, 1), (1, FIELDS), (DEPTH, FIELDS)] {
+    let last = format!("C{}", depth - 1);
+    let mut text = String::from("type Query {\n");
+    let mut written: Vec<usize> = Vec::with_capacity(fields);
+    for index in 0..fields {
+      let field = format!("  f{index}: ");
+      written.push(text.len() + field.len());
+      text.push_str(&field);
+      text.push_str(&last);
+      text.push('\n');
+    }
+    text.push_str("}\ninput Bad {\n  x: Int\n}\n");
+    // Where the last set's default is written, and its length.
+    let mut default = (0, 0);
+    for index in 0..depth {
+      let element = match index {
+        0 => String::from("Bad"),
+        _ => format!("C{}", index - 1),
+      };
+      let head = format!("scalar C{index}<T = ");
+      default = (text.len() + head.len(), element.len());
+      text.push_str(&head);
+      text.push_str(&element);
+      text.push_str("> @set\n");
+    }
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+    let analysis = analyze(&root, &[], &limits);
+    let schema = schema_file(&analysis);
+    let span = |start: usize, len: usize| -> Location {
+      Location::new(schema.get(), SimpleSpan::new(start, start + len))
+    };
+    let filled = Some(span(default.0, default.1));
+    let expected: Vec<(&'static str, Location, Option<Location>)> = written
+      .iter()
+      .map(|start: &usize| (FIELD_TYPE, span(*start, last.len()), filled))
+      .collect();
+    assert_eq!(found(&analysis), expected, "depth {depth}, fields {fields}");
+    let first = analysis
+      .diagnostics()
+      .iter()
+      .next()
+      .expect("a diagnostic for each field");
+    assert_eq!(
+      first.to_string(),
+      format!(
+        "the field `f0` of `Query` is typed by the collection `{last}`, whose argument is the \
+         input object `Bad`, and a field's type is an output type"
+      )
+    );
+    assert_eq!(
+      (
+        first.primary_label(),
+        first.labels(),
+        first.label(0).map(|label| label.text()),
+        first.help()
+      ),
+      (
+        Some("field type is not an output type"),
+        1,
+        Some("filled from this default"),
+        Some(
+          "a field's type must be a scalar, object, interface, union or enum; an input object \
+           appears only in argument and input-field positions."
+        )
+      )
+    );
+    // Under a ceiling of zero, each report is built and counted, and none is kept.
+    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0));
+    let diagnostics = silent.diagnostics();
+    assert!(diagnostics.is_empty(), "depth {depth}, fields {fields}");
+    assert!(diagnostics.truncated());
+    assert_eq!(diagnostics.error_count(), fields);
+  }
+}
+
+#[test]
 fn instantiations_are_judged_across_files_modules_and_packages() {
   // An extension in another file uses a generic type of a module; an extension in a third file
   // adds a field argument to it; a dependency's generic input object is used by the root package.

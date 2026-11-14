@@ -84,13 +84,16 @@
 //! A type given to many slots is one node with an edge from each, never a walk of what it holds
 //! for each. What a value holds is one more worklist over the input fields, as linear.
 //! [`Fits`] judges each pair of a type and a class asked about once, with an explicit stack, a
-//! type's children before it; reading where a misfit lies follows one path down the type, beside
-//! the written occurrence that holds it. [`Derived`] expands each type the fills derive once for
-//! the walk, however many fills derive it, reading each of its arguments at most twice, and reads,
-//! for each type and count of written arguments, one kept answer for each slot its fill typed,
-//! which `Limits::max_substitutions` paid for when the instantiation phase filled them; what the
-//! program writes is one pass over the type occurrences. Nothing recurses, and every table is
-//! keyed by the model's ids.
+//! type's children before it, and keeps with a type that does not fit the way down to what does
+//! not, made in one step from its child's. Reading where a misfit lies follows that way down the
+//! written occurrence alone, a step for each level the occurrence writes, and reads the end kept
+//! for the type where the occurrence stops writing the way: a path a default fills is never walked
+//! for a report. [`Derived`] expands each type the fills derive once for the walk, however many
+//! fills derive it, reading each of its arguments at most twice, and reads, for each type and
+//! count of written arguments, one kept answer for each slot its fill typed, which
+//! `Limits::max_substitutions` paid for when the instantiation phase filled them; what the program
+//! writes is one pass over the type occurrences. Nothing recurses, and every table is keyed by the
+//! model's ids.
 
 use std::{
   collections::{BTreeMap, BTreeSet},
@@ -781,17 +784,30 @@ fn run<T>(sorted: &[T], node: u32, source: fn(&T) -> u32) -> &[T] {
   sorted.get(from..to).unwrap_or(&[])
 }
 
-/// Where a type does not fit a class: nowhere, in itself, or under one of its children.
+/// The first step of the way down from a type that does not fit a class to the type under it that
+/// does not: the type itself, or one of its children.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Under {
-  /// It fits.
-  Nowhere,
   /// It is of a kind the class does not take.
   Itself,
   /// A list's element does not fit.
   Element,
   /// A collection's argument at this index does not fit, the first of them that does not.
   Argument(u32),
+}
+
+/// Where a type does not fit a class, as [`Fits`] keeps it: the first step of the way down to the
+/// type under it that does not fit, and what lies at the way's end, which is the same whichever
+/// occurrence asks, made once from the first step's child's.
+#[derive(Debug, Clone, Copy)]
+struct Way {
+  /// The first step.
+  under: Under,
+  /// The definition of the type at the way's end, which does not fit: an object, an interface, a
+  /// union or an input object.
+  leaf: DefId,
+  /// Whether the way passes an argument of a collection.
+  nested: bool,
 }
 
 /// A type that does not fit a class, as [`Fits::misfit`] reads it.
@@ -814,10 +830,20 @@ pub(crate) struct Misfit {
 ///
 /// A rule keeps one for its walk and resets it in `begin`: what it holds is keyed by the model's
 /// ids.
+///
+/// Its work is linear in the distinct types it judges and in the written sizes of the occurrences
+/// whose misfits it reads. Each type and class is judged once, its children before it, and a type
+/// that does not fit keeps the way down to the type under it that does not: the way's first step,
+/// and what lies at its end, made in one step from the first step's child's. What lies down the way
+/// under a type is the same whichever occurrence asks, so a report follows the way down its
+/// occurrence's written tree alone, a step for each level the tree writes, and reads the end kept
+/// for the type where the tree stops writing the way: at a slot the occurrence leaves to its
+/// default, or a list it does not write. A path that defaults fill, however long, is walked once,
+/// when its types are judged, and never for a report, however many report it.
 #[derive(Default)]
 pub(crate) struct Fits {
-  /// Each type and class judged, with where the type does not fit.
-  judged: BTreeMap<(TyId, Class), Under>,
+  /// Each type and class judged, with the way down to what does not fit; `None` when it fits.
+  judged: BTreeMap<(TyId, Class), Option<Way>>,
   /// The types still to judge, each with whether its children were pushed above it.
   stack: Vec<(TyId, bool)>,
 }
@@ -825,12 +851,16 @@ pub(crate) struct Fits {
 impl Fits {
   /// Whether `ty`, of `model`, fits `class`.
   pub(crate) fn fits(&mut self, model: &Model, ty: TyId, class: Class) -> bool {
-    self.under(model, ty, class) == Under::Nowhere
+    self.way(model, ty, class).is_none()
   }
 
   /// Where `ty`, of `model`, does not fit `class`, `written` being the occurrence that writes it,
   /// if one does: the definition of the type under it that does not fit, and the deepest
   /// occurrence of `written`'s tree that writes the way to it. `None` when it fits.
+  ///
+  /// It follows the way down `written`'s tree alone, and reads what lies at the way's end from the
+  /// way kept for the type where the tree stops writing it: one step for each level the occurrence
+  /// writes, and one lookup.
   pub(crate) fn misfit(
     &mut self,
     model: &Model,
@@ -838,66 +868,61 @@ impl Fits {
     class: Class,
     written: Option<TypeExprId>,
   ) -> Option<Misfit> {
-    let mut under = self.under(model, ty, class);
+    let mut way = self.way(model, ty, class)?;
     let mut ty = ty;
     let mut at = written;
-    // Whether `at` still writes the type the way has reached.
-    let mut writes = written.is_some();
     let mut nested = false;
     let mut filled: Option<(DefId, u32)> = None;
-    // Each step goes one level down the type, so the loop ends.
-    loop {
-      match (under, model.ty(ty).kind()) {
-        (Under::Itself, TyKind::Named { def, .. }) => {
-          return Some(Misfit {
-            leaf: def,
-            nested,
-            at,
-            filled,
-          });
-        }
-        (Under::Element, TyKind::List { element }) => {
-          ty = element;
-          if writes && let Some(occurrence) = at {
-            match model.type_expr(occurrence).kind() {
-              TypeExprKind::List { element } => at = Some(element),
-              _ => writes = false,
-            }
-          }
-        }
+    // Down `written`'s tree while it writes the way: each step goes one level down the tree, so
+    // the loop ends within it.
+    while let Some(occurrence) = at {
+      let step = match (way.under, model.ty(ty).kind()) {
+        (Under::Element, TyKind::List { element }) => match model.type_expr(occurrence).kind() {
+          TypeExprKind::List { element: next } => Some((element, next)),
+          // The tree writes no list where the way goes down one.
+          _ => None,
+        },
         (Under::Argument(index), TyKind::Named { def, args }) => {
-          ty = *args.get(index as usize)?;
+          let child = *args.get(index as usize)?;
           nested = true;
-          if writes && let Some(occurrence) = at {
-            let next = match model.type_expr(occurrence).kind() {
-              TypeExprKind::Named { args: written, .. } => written.get(index as usize).copied(),
-              _ => None,
-            };
-            match next {
-              Some(next) => at = Some(next),
-              None => {
-                writes = false;
-                filled = Some((def, index));
-              }
+          let next = match model.type_expr(occurrence).kind() {
+            TypeExprKind::Named { args: given, .. } => given.get(index as usize).copied(),
+            _ => None,
+          };
+          match next {
+            Some(next) => Some((child, next)),
+            None => {
+              // A slot the occurrence leaves to its default: the way leaves the tree here.
+              filled = Some((def, index));
+              None
             }
           }
         }
-        _ => return None,
-      }
-      // Every type under a judged one is judged, so this reads a kept answer.
-      under = self
-        .judged
-        .get(&(ty, class))
-        .copied()
-        .unwrap_or(Under::Nowhere);
+        // The type itself does not fit.
+        _ => None,
+      };
+      let Some((child, next)) = step else {
+        break;
+      };
+      // Every type under a judged one is judged, so this reads a kept way.
+      way = self.kept(child, class)?;
+      ty = child;
+      at = Some(next);
     }
+    Some(Misfit {
+      leaf: way.leaf,
+      nested: nested || way.nested,
+      at,
+      filled,
+    })
   }
 
-  /// Where `ty`, of `model`, does not fit `class`, judging it and every type under it not judged
-  /// yet, children before their parent.
-  fn under(&mut self, model: &Model, ty: TyId, class: Class) -> Under {
-    if let Some(under) = self.judged.get(&(ty, class)) {
-      return *under;
+  /// The way down from `ty`, of `model`, to what does not fit `class`, `None` when it fits. It
+  /// judges `ty` and every type under it not judged yet, children before their parent, each way
+  /// made in one step from its first step's child's.
+  fn way(&mut self, model: &Model, ty: TyId, class: Class) -> Option<Way> {
+    if let Some(way) = self.judged.get(&(ty, class)) {
+      return *way;
     }
     self.stack.clear();
     self.stack.push((ty, false));
@@ -905,18 +930,17 @@ impl Fits {
       if self.judged.contains_key(&(next, class)) {
         continue;
       }
-      let under = match model.ty(next).kind() {
+      let way = match model.ty(next).kind() {
         TyKind::List { element } => {
           if !pushed {
             self.stack.push((next, true));
             self.stack.push((element, false));
             continue;
           }
-          if self.kept(element, class) {
-            Under::Nowhere
-          } else {
-            Under::Element
-          }
+          self.kept(element, class).map(|below: Way| Way {
+            under: Under::Element,
+            ..below
+          })
         }
         TyKind::Named { def, args } if model.def(def).collection().is_some() => {
           if !pushed {
@@ -926,43 +950,45 @@ impl Fits {
               .extend(args.iter().rev().map(|arg: &TyId| (*arg, false)));
             continue;
           }
-          match args.iter().position(|arg: &TyId| !self.kept(*arg, class)) {
-            Some(index) => Under::Argument(dense(index)),
-            None => Under::Nowhere,
-          }
+          // The first argument, in order, that does not fit.
+          args
+            .iter()
+            .enumerate()
+            .find_map(|(index, arg): (usize, &TyId)| {
+              self.kept(*arg, class).map(|below: Way| Way {
+                under: Under::Argument(dense(index)),
+                leaf: below.leaf,
+                nested: true,
+              })
+            })
         }
-        TyKind::Named { def, .. } => leaf(model.def(def).kind(), class),
-        TyKind::Param { .. } | TyKind::Unresolved => Under::Nowhere,
+        TyKind::Named { def, .. } => leaf(def, model.def(def).kind(), class),
+        TyKind::Param { .. } | TyKind::Unresolved => None,
       };
-      self.judged.insert((next, class), under);
+      self.judged.insert((next, class), way);
     }
-    self
-      .judged
-      .get(&(ty, class))
-      .copied()
-      .unwrap_or(Under::Nowhere)
+    self.kept(ty, class)
   }
 
-  /// Whether `ty`, judged for `class` already, fits it.
-  fn kept(&self, ty: TyId, class: Class) -> bool {
-    self
-      .judged
-      .get(&(ty, class))
-      .is_none_or(|under: &Under| *under == Under::Nowhere)
+  /// The way kept for `ty`, judged for `class` already, down to what does not fit it; `None` when
+  /// it fits.
+  fn kept(&self, ty: TyId, class: Class) -> Option<Way> {
+    self.judged.get(&(ty, class)).copied().flatten()
   }
 }
 
-/// Whether a type of a definition of `kind` that is no collection fits `class`.
-fn leaf(kind: DefKind, class: Class) -> Under {
+/// The way down from a type of `def`, a definition of `kind` that is no collection, to what does
+/// not fit `class`: the type itself, or `None` when it fits.
+fn leaf(def: DefId, kind: DefKind, class: Class) -> Option<Way> {
   let refused = match class {
     Class::Output => kind == DefKind::InputObject,
     Class::Input => matches!(kind, DefKind::Object | DefKind::Interface | DefKind::Union),
   };
-  if refused {
-    Under::Itself
-  } else {
-    Under::Nowhere
-  }
+  refused.then_some(Way {
+    under: Under::Itself,
+    leaf: def,
+    nested: false,
+  })
 }
 
 /// A type that a fill derives and a rule refuses: what [`Derived::verdict`] answers.
