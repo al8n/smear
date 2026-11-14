@@ -7,15 +7,35 @@
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{ApplicationId, DefId, ModuleId, Sym, TyId, TypeExprId, dense},
-  model::{
-    Collection, DefKind, Resolution, TypeBound,
-    satisfy::{Keys, Steps, Wanted},
-    table::{DefRow, KIND_LIST, KIND_NAMED, KIND_PARAM, TyRow, UNSET_TY},
+  id::{
+    ApplicationId, DefId, IdRange, MemberId, ModuleId, PackageId, Sym, TyId, TypeExprId, ValueId,
+    dense,
   },
+  model::{
+    ApplicationArgument, Collection, DefKind, Origin, Resolution, TypeBound,
+    satisfy::{Keys, Steps, Wanted},
+    table::{
+      DefRow, ExternRow, KIND_LIST, KIND_NAMED, KIND_PARAM, MemberRow, PackageRow, TyRow, UNSET_TY,
+      VALUE_ENUM, VALUE_NULL, VALUE_STRING,
+    },
+  },
+  package::Tier,
 };
 
-use super::{ModelBuilder, type_key};
+use super::{ModelBuilder, Text, type_key};
+
+/// What a value stores, as a phase after coercion reads it.
+#[derive(Clone, Copy)]
+pub(crate) enum Stored {
+  /// `null`.
+  Null,
+  /// A string: its cooked text, the run coercion kept.
+  String(Text),
+  /// A value of an enum: the value.
+  Enum(MemberId),
+  /// Anything else, an unresolved value among them.
+  Other,
+}
 
 /// What a type is, as a phase after instantiation reads it.
 #[derive(Clone, Copy)]
@@ -109,6 +129,83 @@ impl ModelBuilder {
     }
   }
 
+  /// The direct members of `def`, in id order: a directive's are its arguments.
+  pub(crate) fn def_members(&self, def: DefId) -> IdRange<MemberId> {
+    self
+      .model
+      .defs
+      .get(def.get() as usize)
+      .map_or(IdRange::new(0, 0), |row: &DefRow| row.members)
+  }
+
+  /// The arguments of `member`, a field: none for a member of any other kind.
+  pub(crate) fn member_arguments(&self, member: MemberId) -> IdRange<MemberId> {
+    self
+      .model
+      .members
+      .get(member.get() as usize)
+      .map_or(IdRange::new(0, 0), |row: &MemberRow| row.arguments)
+  }
+
+  /// The name of `member`.
+  pub(crate) fn member_name(&self, member: MemberId) -> Option<Sym> {
+    self
+      .model
+      .members
+      .get(member.get() as usize)
+      .map(|row: &MemberRow| row.name)
+  }
+
+  /// Where `member`'s name is written.
+  pub(crate) fn member_location(&self, member: MemberId) -> Option<Location> {
+    self
+      .model
+      .members
+      .get(member.get() as usize)
+      .map(|row: &MemberRow| row.location)
+  }
+
+  /// How many values the model holds.
+  pub(crate) fn value_count(&self) -> u32 {
+    dense(self.model.values.len())
+  }
+
+  /// The type occurrence `member`'s type is written as: none for an enum value.
+  pub(crate) fn member_ty(&self, member: MemberId) -> Option<TypeExprId> {
+    self
+      .model
+      .members
+      .get(member.get() as usize)
+      .and_then(|row: &MemberRow| row.ty)
+  }
+
+  /// The default `member` holds, once coercion made it, a refused one included: none for a member
+  /// that writes none, and for an id the builder did not issue.
+  pub(crate) fn member_default(&self, member: MemberId) -> Option<ValueId> {
+    self
+      .model
+      .members
+      .get(member.get() as usize)
+      .and_then(|row: &MemberRow| row.default)
+  }
+
+  /// The applications of `member`, in order.
+  pub(crate) fn member_applications(&self, member: MemberId) -> &[ApplicationId] {
+    match self.model.members.get(member.get() as usize) {
+      Some(row) => row.applications.of(&self.model.member_applications),
+      None => &[],
+    }
+  }
+
+  /// The schema's applications, every contribution's, in order.
+  pub(crate) fn schema_applications(&self) -> &[ApplicationId] {
+    self
+      .model
+      .schema
+      .applications
+      .of(&self.model.listed_applications)
+  }
+
   /// How many type parameters `def` has: 0 for an id the builder did not issue.
   pub(crate) fn type_param_count(&self, def: DefId) -> u32 {
     self
@@ -144,6 +241,111 @@ impl ModelBuilder {
   pub(crate) fn applied(&self, id: ApplicationId) -> Option<(Resolution<DefId>, u32, Location)> {
     let row = self.model.applications.get(id.get() as usize)?;
     Some((row.directive, row.type_args.len, row.path.location))
+  }
+
+  /// The type of the application `id`, once a phase gave it one: its directive's instantiation,
+  /// whose arguments are its complete type arguments, or the unresolved type.
+  pub(crate) fn application_ty(&self, id: ApplicationId) -> Option<TyId> {
+    let row = self.model.applications.get(id.get() as usize)?;
+    (row.ty != UNSET_TY).then_some(row.ty)
+  }
+
+  /// The type arguments the application `id` writes, in order: none for an id the builder did not
+  /// issue.
+  pub(crate) fn application_type_args(&self, id: ApplicationId) -> &[TypeExprId] {
+    match self.model.applications.get(id.get() as usize) {
+      Some(row) => row.type_args.of(&self.model.application_type_args),
+      None => &[],
+    }
+  }
+
+  /// The arguments of the application `id`, in its directive's order: none for an id the builder
+  /// did not issue.
+  pub(crate) fn application_arguments(&self, id: ApplicationId) -> &[ApplicationArgument] {
+    match self.model.applications.get(id.get() as usize) {
+      Some(row) => row.arguments.of(&self.model.arguments),
+      None => &[],
+    }
+  }
+
+  /// What the value `value` stores, once coercion made it: `Other` for an id the builder did not
+  /// issue.
+  pub(crate) fn value_stored(&self, value: ValueId) -> Stored {
+    match self.model.values.get(value.get() as usize) {
+      Some(row) => match row.shape {
+        VALUE_NULL => Stored::Null,
+        VALUE_STRING => Stored::String(Text(row.run)),
+        VALUE_ENUM => Stored::Enum(row.member),
+        _ => Stored::Other,
+      },
+      None => Stored::Other,
+    }
+  }
+
+  /// The tier `package` is declared at.
+  pub(crate) fn package_tier(&self, package: PackageId) -> Option<Tier> {
+    self
+      .model
+      .packages
+      .get(package.get() as usize)
+      .map(|row: &PackageRow| row.tier)
+  }
+
+  /// The tier `def` requires, as written so far: a built-in's tag, which no phase recomputes.
+  pub(crate) fn def_tier(&self, def: DefId) -> Option<Tier> {
+    self
+      .model
+      .defs
+      .get(def.get() as usize)
+      .map(|row: &DefRow| row.tier)
+  }
+
+  /// The greatest of the tiers of `def`'s externs: `None` when it has none.
+  pub(crate) fn def_extern_tier(&self, def: DefId) -> Option<Tier> {
+    let row = self.model.defs.get(def.get() as usize)?;
+    row
+      .externs
+      .of(&self.model.externs)
+      .iter()
+      .map(|bound: &ExternRow| bound.tier)
+      .max()
+  }
+
+  /// Whether `def` is a marker, once built-in meaning is given: `false` for an id the builder did
+  /// not issue.
+  pub(crate) fn def_marker(&self, def: DefId) -> bool {
+    self
+      .model
+      .defs
+      .get(def.get() as usize)
+      .is_some_and(|row: &DefRow| row.marker)
+  }
+
+  /// The `implements` entries of `def`, every contribution's, in order: none for a definition that
+  /// writes none, and for an id the builder did not issue.
+  pub(crate) fn def_implements(&self, def: DefId) -> &[TypeExprId] {
+    match self.model.defs.get(def.get() as usize) {
+      Some(row) => row.implements.of(&self.model.implements),
+      None => &[],
+    }
+  }
+
+  /// The union members of `def`, every contribution's, in order: none for a definition of any
+  /// other kind, and for an id the builder did not issue.
+  pub(crate) fn def_union_members(&self, def: DefId) -> &[TypeExprId] {
+    match self.model.defs.get(def.get() as usize) {
+      Some(row) => row.union_members.of(&self.model.union_members),
+      None => &[],
+    }
+  }
+
+  /// Where `def` comes from.
+  pub(crate) fn def_origin(&self, def: DefId) -> Option<Origin> {
+    self
+      .model
+      .defs
+      .get(def.get() as usize)
+      .map(|row: &DefRow| row.origin)
   }
 
   /// How many type occurrences the model holds.
@@ -183,6 +385,11 @@ impl ModelBuilder {
       .non_zero
       .get(at)
       .map(|&(_, primitive): &(TypeExprId, DefId)| primitive)
+  }
+
+  /// How many types the model holds.
+  pub(crate) fn ty_count(&self) -> u32 {
+    dense(self.model.tys.len())
   }
 
   /// How deeply `ty` nests: 0 for a type the builder did not issue.

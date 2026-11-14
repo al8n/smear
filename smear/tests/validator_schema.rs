@@ -440,6 +440,21 @@ const BRANCHES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     "type Query { ok: Int } directive @d on DIRECTIVE_DEFINITION extend directive @d @d",
     &[SchemaErrorKind::SelfReferentialDirective],
   ),
+  // -- §3.3, what an extension adds to an introspection type -----------------------------------
+  //
+  // The census row adds a field. These add an enum value and an `implements` entry, the other two
+  // members an introspection type's extension can write: none of the eight is a union or an input
+  // object, whose extensions are a kind mismatch first.
+  (
+    SchemaErrorKind::IntrospectionTypeExtension,
+    "type Query { ok: Int } extend enum __TypeKind { EXTRA }",
+    &[SchemaErrorKind::IntrospectionTypeExtension],
+  ),
+  (
+    SchemaErrorKind::IntrospectionTypeExtension,
+    "type Query { ok: Int } interface I { a: Int } extend type __Schema implements I",
+    &[SchemaErrorKind::IntrospectionTypeExtension],
+  ),
 ];
 
 /// Every branch row fires exactly what it says, and every one names a kind the census already
@@ -2107,6 +2122,35 @@ fn introspection_is_part_of_every_schema() {
   assert_eq!(schema.enum_values_of(kind_enum).len(), 8);
 }
 
+/// An extension may add directives to an introspection type and nothing else. One that adds a
+/// member is refused once, at the type it names, and contributes nothing, its directives included.
+#[test]
+fn an_introspection_type_takes_directives_by_extension_and_nothing_else() {
+  built("type Query { ok: Int } directive @x on OBJECT extend type __Type @x");
+
+  let sdl = "type Query { ok: Int } extend type __Type { extra: Int }";
+  let errors = refused(sdl);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::IntrospectionTypeExtension]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+  let error = &errors.errors()[0];
+  assert_eq!(error.subject(), "__Type");
+  assert_eq!(error.primary(), occurrence(&[sdl], 0, "__Type", 0));
+  assert_eq!(error.labels(), 0);
+  assert_eq!(error.related(), None);
+
+  // The extension contributes nothing, so the directive it applies, which nothing defines, is not
+  // read.
+  let errors = refused("type Query { ok: Int } extend type __Type @nope { extra: Int }");
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::IntrospectionTypeExtension]
+  );
+  assert_eq!(errors.len(), 1, "{errors}");
+}
+
 #[test]
 fn builtin_sdl_parses() {
   // The builder `expect()`s these; this is the standing guard on that expectation.
@@ -2489,14 +2533,23 @@ fn no_related_label_points_into_a_built_in() {
   assert_eq!(error.related(), None);
   assert_eq!(error.related_document(), None);
 
-  // A field that an extension of the injected `__Type` repeats.
+  // A field that an extension of the injected `__Type` would repeat. No extension adds a member to
+  // an injected type, so none repeats one, and the half above is the one place left where a
+  // related position would fall in a built-in: this extension is refused whole, at the type it
+  // names, with no label.
   let sdl = "type Query { ok: Int } extend type __Type { name: String }";
   let errors = refused(sdl);
-  assert_eq!(errors.kinds(), vec![SchemaErrorKind::DuplicateFieldName]);
+  assert_eq!(
+    errors.kinds(),
+    vec![SchemaErrorKind::IntrospectionTypeExtension]
+  );
   assert_eq!(errors.len(), 1, "{errors}");
   let error = &errors.errors()[0];
-  assert_eq!(error.to_string(), "duplicate field: `__Type.name`");
-  assert_eq!(error.primary(), occurrence(&[sdl], 0, "name", 0));
+  assert_eq!(
+    error.to_string(),
+    "introspection type extension adds more than directives: `__Type`"
+  );
+  assert_eq!(error.primary(), occurrence(&[sdl], 0, "__Type", 0));
   assert_eq!(error.labels(), 0);
   assert_eq!(error.label(0), None);
   assert_eq!(error.related(), None);
@@ -2949,6 +3002,54 @@ fn legal_default_values_are_accepted() {
     vec![SchemaErrorKind::InputObjectDefaultValueCycle],
     "a default that does not name the self-referential field falls back to itself"
   );
+}
+
+/// The first 308 digits of `2^1024 - 2^970`, the least integer that rounds to infinity as a double:
+/// with a final `2` it is that integer, and with a final `1` it is the greatest that rounds to
+/// `f64::MAX`.
+const EDGE_HEAD: &str = concat!(
+  "17976931348623158079372897140530341507993413271003782693617377898044496829276",
+  "47509466490179775872070963302864166928879109465555478519404026306574886715058",
+  "20681908902000708383676273854845817711531764475730270069855571366959622842914",
+  "81986083493647529271907416844436551070434271155969950809304288017790417449779",
+);
+
+/// An `Int` literal stands for a `Float` while a double holds it, and is refused past that as a
+/// `Float` literal is (§3.5.2): at an argument's default, an input field's default and a
+/// directive's argument, around the edge of a double's range.
+#[test]
+fn an_integer_for_a_float_is_refused_past_a_doubles_range() {
+  let zeros = "0".repeat(308);
+  for (integer, finite) in [
+    (format!("{EDGE_HEAD}1"), true),
+    (format!("{EDGE_HEAD}2"), false),
+    (format!("1{zeros}"), true),
+    (format!("1{zeros}0"), false),
+  ] {
+    for (sdl, kind) in [
+      (
+        format!("type Query {{ f(x: Float = {integer}): Int }}"),
+        SchemaErrorKind::InvalidDefaultValue,
+      ),
+      (
+        format!("type Query {{ ok: Int }} input In {{ x: Float = {integer} }}"),
+        SchemaErrorKind::InvalidDefaultValue,
+      ),
+      (
+        format!("directive @d(x: Float) on OBJECT type Query @d(x: {integer}) {{ ok: Int }}"),
+        SchemaErrorKind::InvalidDirectiveArgumentValue,
+      ),
+    ] {
+      if finite {
+        built(&sdl);
+      } else {
+        let errors = refused(&sdl);
+        assert_eq!(errors.kinds(), vec![kind], "---\n{sdl}");
+        let span = errors.errors()[0].span();
+        assert_eq!(&sdl[span.start()..span.end()], integer, "---\n{sdl}");
+      }
+    }
+  }
 }
 
 /// `@oneOf` on the definition stays legal; only an extension providing it is refused.

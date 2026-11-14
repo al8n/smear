@@ -24,11 +24,31 @@ fn package(name: &str, files: &[(&'static str, &'static str)]) -> Package<&'stat
   )
 }
 
-/// Each diagnostic's code and primary location, in the list's order.
-fn found(analysis: &Analysis) -> Vec<(&'static str, Location)> {
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
   analysis
     .diagnostics()
     .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// How many errors `analysis` found, but for the missing query root.
+fn errors(analysis: &Analysis) -> usize {
+  let diagnostics = analysis.diagnostics();
+  diagnostics.error_count() - (diagnostics.len() - reported(analysis).len())
+}
+
+/// Each diagnostic's code and primary location, in the list's order, but for the missing query
+/// root.
+fn found(analysis: &Analysis) -> Vec<(&'static str, Location)> {
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
     .collect()
 }
@@ -59,7 +79,7 @@ fn only(analysis: &Analysis, kind: DiagnosticKind, at: Location, count: usize) {
     "{:#?}",
     analysis.diagnostics()
   );
-  for diagnostic in analysis.diagnostics() {
+  for diagnostic in reported(analysis) {
     assert_eq!(diagnostic.severity(), kind.severity());
     assert_eq!(diagnostic.severity(), Severity::Error);
     assert!(diagnostic.primary_label().is_some());
@@ -68,7 +88,7 @@ fn only(analysis: &Analysis, kind: DiagnosticKind, at: Location, count: usize) {
     assert!(!diagnostic.to_string().is_empty());
   }
   assert!(!analysis.is_ok());
-  assert_eq!(analysis.diagnostics().error_count(), count);
+  assert_eq!(errors(analysis), count);
 }
 
 #[test]
@@ -396,18 +416,18 @@ fn quoted(message: &str) -> Vec<&str> {
   message.split('`').skip(1).step_by(2).collect()
 }
 
-/// The message of `analysis`'s first diagnostic.
+/// The message of `analysis`'s first diagnostic, but for the missing query root.
 fn first_message(analysis: &Analysis) -> String {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .next()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .unwrap_or_default()
 }
 
-/// A root package named `name` that holds three files at one path and one at an absolute path, and
-/// declares a dependency nobody supplies: four diagnostics, each quoting the name.
+/// A root package named `name` that holds three files at one path, one at an absolute path and one
+/// that is placed, and declares a dependency nobody supplies: four diagnostics, each quoting the
+/// name. The placed file gives the package its query root.
 fn quoting(name: &str, limits: &Limits) -> Analysis {
   let root = package(
     name,
@@ -416,6 +436,7 @@ fn quoting(name: &str, limits: &Limits) -> Analysis {
       ("a.graphqlx", OK),
       ("a.graphqlx", OK),
       ("/absolute.graphqlx", OK),
+      ("root.graphqlx", OK),
     ],
   )
   .with_dependencies(["geo"]);

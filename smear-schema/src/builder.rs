@@ -1284,8 +1284,9 @@ impl Drop for RawValue {
 ///
 /// `fits_i32` and `is_finite` are **all** a numeric spelling is ever read for — see
 /// [`LiteralShape`] — and both are answerable where the literal is read. So they are answered
-/// there, and what this enum carries is the `bool`. The growth is not bounded, it is *gone*: zero
-/// retained at every `B` above, and one range decision per literal instead of one per check.
+/// there, and what this enum carries is the `bool`s: both for an integer, which may stand for a
+/// `Float`, and `is_finite` for a float. The growth is not bounded, it is *gone*: zero retained at
+/// every `B` above, and one range decision per literal instead of one per check.
 ///
 /// The trade this reverses was made deliberately and is worth naming. Keeping the spelling let all
 /// three arms share one mechanism, at the price of a bound; the price was justified by
@@ -1320,8 +1321,12 @@ impl Drop for RawValue {
 enum RawShape {
   Null,
   Boolean,
-  /// An integer literal, reduced to [`fits_i32`](crate::literal::fits_i32).
-  Int(bool),
+  /// An integer literal, reduced to [`fits_i32`](crate::literal::fits_i32) and
+  /// [`is_finite`](crate::literal::is_finite).
+  Int {
+    fits_i32: bool,
+    is_finite: bool,
+  },
   /// A floating-point literal, reduced to [`is_finite`](crate::literal::is_finite).
   Float(bool),
   String,
@@ -1373,7 +1378,14 @@ impl core::fmt::Debug for RawShape {
     match self {
       Self::Null => f.write_str("Null"),
       Self::Boolean => f.write_str("Boolean"),
-      Self::Int(fits_i32) => f.debug_tuple("Int").field(fits_i32).finish(),
+      Self::Int {
+        fits_i32,
+        is_finite,
+      } => f
+        .debug_struct("Int")
+        .field("fits_i32", fits_i32)
+        .field("is_finite", is_finite)
+        .finish(),
       Self::Float(is_finite) => f.debug_tuple("Float").field(is_finite).finish(),
       Self::String => f.write_str("String"),
       Self::Enum(sym) => f.debug_tuple("Enum").field(sym).finish(),
@@ -1391,8 +1403,12 @@ impl RawShape {
     match self {
       Self::Null => Some(LiteralShape::Null),
       Self::Boolean => Some(LiteralShape::Boolean),
-      Self::Int(fits_i32) => Some(LiteralShape::Int {
+      Self::Int {
+        fits_i32,
+        is_finite,
+      } => Some(LiteralShape::Int {
         fits_i32: *fits_i32,
+        is_finite: *is_finite,
       }),
       Self::Float(is_finite) => Some(LiteralShape::Float {
         is_finite: *is_finite,
@@ -3209,7 +3225,13 @@ impl SchemaBuilder {
         // Reduced to the verdict where the spelling is in hand, so nothing is retained: see
         // [`RawShape`] for what retaining it cost and [`LiteralShape`] for why this is the same
         // answer read at a different time.
-        ConstInputValue::Int(int) => RawShape::Int(fits_i32(int.source().as_ref())),
+        ConstInputValue::Int(int) => {
+          let spelling: &[u8] = int.source().as_ref();
+          RawShape::Int {
+            fits_i32: fits_i32(spelling),
+            is_finite: is_finite(spelling),
+          }
+        }
         ConstInputValue::Float(float) => RawShape::Float(is_finite(float.source().as_ref())),
         // The one arm that cannot: an enum member's spelling is resolved against the declared
         // members, and a member declared later in this document — or in a later one — is not a
@@ -3649,6 +3671,28 @@ impl SchemaBuilder {
           None,
           target,
           related,
+        );
+        continue;
+      }
+      // Draft §3 reserves the `__`-prefixed names for "the introspection system as defined by this
+      // specification", and what an extension adds to one of its types beside directives changes
+      // that system. Such an extension contributes nothing, its directives included, as one of the
+      // wrong kind contributes nothing. A type a document defines under an introspection type's
+      // name is not injected, so this reads the injected types alone.
+      let directives_alone = extension.implements.is_empty()
+        && extension.fields.is_empty()
+        && extension.input_fields.is_empty()
+        && extension.members.is_empty()
+        && extension.enum_values.is_empty();
+      if !directives_alone
+        && self.types[index].built_in
+        && is_reserved(self.text(target.sym).as_bytes())
+      {
+        let subject = self.text(target.sym).to_owned();
+        self.push(
+          SchemaErrorKind::IntrospectionTypeExtension,
+          &subject,
+          target,
         );
         continue;
       }
@@ -7716,7 +7760,7 @@ fn map_nodes<'a>(value: &'a RawValue, out: &mut Vec<&'a [RawObjectField]>) {
       RawShape::Refused => {}
       RawShape::Null
       | RawShape::Boolean
-      | RawShape::Int(_)
+      | RawShape::Int { .. }
       | RawShape::Float(_)
       | RawShape::String
       | RawShape::Enum(_) => {}

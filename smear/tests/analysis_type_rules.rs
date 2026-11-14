@@ -42,6 +42,21 @@ const UNDEFINED: &str = "smear::schema::undefined-type";
 /// The code of a root operation type that names nothing.
 const UNDEFINED_ROOT: &str = "smear::schema::undefined-root-operation-type";
 
+/// GraphQL's code of a field's argument typed by what is no input type.
+const ARGUMENT_TYPE: &str = "smear::schema::argument-type-not-input-type";
+
+/// GraphQL's code of an input field typed by what is no input type.
+const INPUT_FIELD_TYPE: &str = "smear::schema::input-field-type-not-input-type";
+
+/// GraphQL's code of a union member that is no object type.
+const UNION_MEMBER: &str = "smear::schema::union-member-not-object";
+
+/// GraphQL's code of a directive applied where its definition does not list.
+const LOCATION: &str = "smear::schema::unsupported-directive-location";
+
+/// GraphQL's code of a root operation type that is no object type.
+const ROOT_TYPE: &str = "smear::schema::root-operation-type-not-object";
+
 /// What the rule on `NonZero`'s argument says, whatever the argument is.
 const NONZERO_MESSAGE: &str = "`NonZero` takes an integer primitive at least one bit wide, written \
                                without `!`, as its type argument, and this one is not";
@@ -118,11 +133,25 @@ fn named(source: SourceId, text: &str, before: &str, name: &str, nth: usize) -> 
   Location::new(source.get(), SimpleSpan::new(start, start + name.len()))
 }
 
-/// Each diagnostic's code, primary location, and first label's location, in the list's order.
-fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
   analysis
     .diagnostics()
     .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// Each diagnostic's code, primary location, and first label's location, in the list's order, but
+/// for the missing query root.
+fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| {
       (
         diagnostic.code().as_str(),
@@ -133,20 +162,18 @@ fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)>
     .collect()
 }
 
-/// Each diagnostic's code, in the list's order.
+/// Each diagnostic's code, in the list's order, but for the missing query root.
 fn codes(analysis: &Analysis) -> Vec<&'static str> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.code().as_str())
     .collect()
 }
 
-/// Each diagnostic's message, in the list's order.
+/// Each diagnostic's message, in the list's order, but for the missing query root.
 fn messages(analysis: &Analysis) -> Vec<String> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .collect()
 }
@@ -184,19 +211,26 @@ fn a_marker_stands_in_implements_and_where_and_nowhere_else() {
   let at_marker = |before: &str, nth: usize| -> (&'static str, Location, Option<Location>) {
     (MARKER, named(schema, SITES, before, "M", nth), None)
   };
+  // A marker is an interface, so as a field's argument and as an input field it is also no input
+  // type, as a union member no object type, and as a root no object type either, which GraphQL's
+  // own rules say at the same token.
   assert_eq!(
     found(&analysis),
     [
       at_marker("m: ", 0),
       at_marker("[", 0),
       at_marker("a: ", 0),
+      (ARGUMENT_TYPE, named(schema, SITES, "a: ", "M", 0), None),
       at_marker("m: ", 1),
+      (INPUT_FIELD_TYPE, named(schema, SITES, "m: ", "M", 1), None),
       at_marker("U = ", 0),
+      (UNION_MEMBER, named(schema, SITES, "U = ", "M", 0), None),
       at_marker("B<", 0),
       at_marker("I<", 0),
       at_marker("T = ", 0),
       at_marker("@d<", 0),
       at_marker("query: ", 0),
+      (ROOT_TYPE, named(schema, SITES, "query: ", "M", 0), None),
     ],
     "{:#?}",
     analysis.diagnostics()
@@ -276,7 +310,7 @@ fn only_a_marker_is_implemented_by_a_scalar_an_enum_an_input_or_a_union() {
 fn a_type_parameter_is_no_marker_to_implement() {
   // A scalar and an input object that implement their own type parameter are each refused at the
   // entry. An object that does is not this rule's: whether an object's entry names an interface is
-  // GraphQL's own rule.
+  // GraphQL's own rule, which refuses it with its own code.
   let text = "scalar S<T> implements T\ninput In<T> implements T {\n  x: Int\n}\n\
               type O<T> implements T {\n  id: ID\n}\n";
   let analysis = analyze_one(text);
@@ -294,6 +328,11 @@ fn a_type_parameter_is_no_marker_to_implement() {
         named(schema, text, "In<T> implements ", "T", 0),
         None
       ),
+      (
+        "smear::schema::implements-non-interface",
+        named(schema, text, "O<T> implements ", "T", 0),
+        None
+      ),
     ],
     "{:#?}",
     analysis.diagnostics()
@@ -305,6 +344,7 @@ fn a_type_parameter_is_no_marker_to_implement() {
        implements markers alone",
       "the input object `In` implements its type parameter `T`, which is no marker, and an input \
        object implements markers alone",
+      "the type `O` implements its type parameter `T`, and a type parameter is no interface",
     ]
   );
 }
@@ -329,8 +369,8 @@ fn a_generic_marker_is_a_marker() {
 fn a_set_has_one_type_parameter_and_a_map_two() {
   // A set of one and a map of two say nothing; a set of none and of two, and a map of one and of
   // three, are refused at the application; a scalar that applies both is refused once, at the
-  // later; an object is not this rule's; and the root package's `@set` on `alloc`'s `string` is the
-  // orphan rule's alone.
+  // later; an object is not this rule's, and `@set` on one is the rule on directive locations'; and
+  // the root package's `@set` on `alloc`'s `string` is the orphan rule's alone.
   let text = "scalar S1<T> @set\nscalar M2<K, V> @map\nscalar S0 @set\nscalar S2<A, B> @set\n\
               scalar M1<K> @map\nscalar M3<A, B, C> @map\nscalar Both<K, V> @set @map\n\
               type Obj @set {\n  x: Int\n}\nextend scalar String @set\n";
@@ -352,6 +392,11 @@ fn a_set_has_one_type_parameter_and_a_map_two() {
       refused("map", 1, "M1"),
       refused("map", 2, "M3"),
       refused("map", 3, "Both"),
+      (
+        LOCATION,
+        named(schema, text, "@", "set", 4),
+        Some(model.def(model.builtins().set()).location())
+      ),
       (
         ORPHAN,
         named(schema, text, "@", "set", 5),
@@ -461,6 +506,12 @@ fn type_ref_is_a_directive_arguments_type() {
       refused("a: "),
       refused("@t<"),
       refused("U = "),
+      // `TypeRef` is a scalar, so as a union member it is also no object type.
+      (
+        UNION_MEMBER,
+        named(schema, TYPE_REFS, "U = ", "TypeRef", 0),
+        None
+      ),
       refused("T = "),
       (
         TYPEREF,
@@ -540,9 +591,8 @@ fn non_zeros_argument_is_an_integer_primitive() {
                  `NonZero<u32>` and its second name `NonZeroU32` do";
   let nullable = "drop the `!` after the type argument: `NonZero<u32>` is never zero, and \
                   `NonZero<u32>!` is never null either";
-  let helps: Vec<Option<&str>> = analysis
-    .diagnostics()
-    .iter()
+  let helps: Vec<Option<&str>> = reported(&analysis)
+    .into_iter()
     .take(7)
     .map(|diagnostic: &Diagnostic| diagnostic.help())
     .collect();
@@ -558,9 +608,8 @@ fn non_zeros_argument_is_an_integer_primitive() {
       Some(integer),
     ]
   );
-  let labels: Vec<Option<&str>> = analysis
-    .diagnostics()
-    .iter()
+  let labels: Vec<Option<&str>> = reported(&analysis)
+    .into_iter()
     .take(7)
     .map(|diagnostic: &Diagnostic| diagnostic.label(0).map(|label| label.text()))
     .collect();
@@ -785,16 +834,16 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
       "type F<T, T> {\n  id: ID\n}\ntype G {\n  x: Missing\n}\n",
       DUPLICATE,
     ),
-    // A written root beside a phase's error in a definition, which is none of the schema's
-    // contributions.
-    (
-      "interface M @marker\nschema {\n  query: M\n}\ntype G {\n  x: Missing\n}\n",
-      MARKER,
-    ),
   ] {
     let analysis = analyze_one(text);
     assert_eq!(codes(&analysis), [rule, UNDEFINED], "{text}");
   }
+  // A written root beside a phase's error in a definition, which is none of the schema's
+  // contributions: the marker, and GraphQL's own refusal of a root that is no object type, at the
+  // same token.
+  let analysis =
+    analyze_one("interface M @marker\nschema {\n  query: M\n}\ntype G {\n  x: Missing\n}\n");
+  assert_eq!(codes(&analysis), [MARKER, ROOT_TYPE, UNDEFINED]);
 }
 
 #[test]

@@ -432,9 +432,10 @@ macro_rules! dialect {
       #[test]
       fn the_records_kept_at_the_default_stay_within_their_memory() {
         /// The most bytes a kept record may cost: four times the design's estimate of half a
-        /// kibibyte, so that a first run is not red on an estimate, and pinned from the first
-        /// run's print. The figure is of a lexer-error record that has one member, at a span of
-        /// its own.
+        /// kibibyte, so that a first run is not red on an estimate. CI's first run (run
+        /// 43467833700, at `370f50ff`) held it; the exact figure was not printed, as the harness
+        /// captures a passing test's output. The figure is of a lexer-error record that has one
+        /// member, at a span of its own.
         const RECORD_BOUND: usize = 2 * 1024;
 
         let default = LosslessLimits::new().max_diagnostics();

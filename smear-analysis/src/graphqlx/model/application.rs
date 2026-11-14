@@ -2,8 +2,12 @@
 
 use tokora::diagnostic::Location;
 
+#[cfg(feature = "test-support")]
+use crate::graphqlx::id::TyId;
 use crate::graphqlx::id::{ApplicationId, DefId, MemberId, TypeExprId, ValueId};
 
+#[cfg(feature = "test-support")]
+use super::table::KIND_NAMED;
 use super::{Model, table::ApplicationRow, ty::Path};
 
 /// What a written name resolved to, or that it did not resolve.
@@ -19,10 +23,8 @@ pub enum Resolution<T> {
   Unresolved,
 }
 
-/// One argument of a directive application: one the author wrote.
-//
-// Coercion, still to come, adds one for each argument the author left out whose definition has a
-// default, with no name written for it; `name_location` and `written` answer for it already.
+/// One argument of a directive application: one the author wrote, or one the author left out
+/// whose definition has a default, which a copy of the default fills.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ApplicationArgument {
   pub(super) argument: MemberId,
@@ -72,6 +74,19 @@ impl Model {
       self.applications.len()
     );
     Application { model: self, id }
+  }
+
+  /// The complete type arguments of the application `id`: the arguments of its directive's
+  /// instantiation, which its row holds, and none when it holds none, or the unresolved type.
+  #[cfg(feature = "test-support")]
+  pub(crate) fn type_arguments(&self, id: ApplicationId) -> &[TyId] {
+    let Some(row) = self.applications.get(id.get() as usize) else {
+      return &[];
+    };
+    match self.tys.get(row.ty.get() as usize) {
+      Some(ty) if ty.shape == KIND_NAMED => ty.args.of(&self.ty_args),
+      _ => &[],
+    }
   }
 }
 
@@ -125,11 +140,13 @@ impl<'a> Application<'a> {
     Path::of(self.model, self.row().path)
   }
 
-  /// Its arguments, each one the author wrote, in its definition's order: an argument written twice
-  /// is here twice, and one not written is absent.
-  //
-  // Coercion, still to come, fills each argument the author left out whose definition has a
-  // default; until it lands no default fills one.
+  /// Its arguments, in its definition's order: each one the author wrote, an argument written twice
+  /// here twice, and each one the author left out whose definition has a default, a copy of the
+  /// default filling it. One neither written nor defaulted is absent, and so is a defaulted one
+  /// that [`Limits::max_value_steps`](crate::graphqlx::Limits::max_value_steps) could not pay for,
+  /// or whose default's copy would hold a copy of itself.
+  /// An application of a generic directive with its complete type arguments has each value, a
+  /// copy included, coerced against its argument's type under them, and reads "required" there.
   #[inline]
   pub fn arguments(&self) -> &'a [ApplicationArgument] {
     let model: &'a Model = self.model;

@@ -18,6 +18,7 @@ use tokora::diagnostic::Code;
 use super::{
   Visitor,
   analysis::{Analysis, resolve_door},
+  id::{ApplicationId, TyId},
   limits::Limits,
   model::Model,
   package::Package,
@@ -54,6 +55,21 @@ pub const RULES: &[(&str, &[Code])] = Rules::TABLE;
 /// that check a walk reaches every row of each.
 pub fn counts(model: &Model) -> (u32, u32, u32, u32) {
   model.counts()
+}
+
+/// How many bytes `model`'s text arena holds: every spelling it keeps, literals' among them, but
+/// names and paths, which have pools of their own. For the tests that pin that what the model
+/// keeps of the values written is bounded by the source.
+pub fn text_len(model: &Model) -> usize {
+  model.text_len()
+}
+
+/// The complete type arguments of `application`: its written ones' types, then those its
+/// directive's defaults filled. None for an application of a directive with no type parameter, of
+/// one that did not resolve, or whose count of type arguments was refused, and none for one whose
+/// type arguments could not be completed.
+pub fn type_arguments(model: &Model, application: ApplicationId) -> &[TyId] {
+  model.type_arguments(application)
 }
 
 /// What `path` names, written in the module `module` of `root` beside `dependencies`, where

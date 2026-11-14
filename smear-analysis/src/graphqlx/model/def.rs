@@ -446,10 +446,20 @@ impl<'a> Def<'a> {
   }
 
   /// The tier it requires: the least of `core`, `alloc` and `std` that holds everything it uses.
-  /// A definition of `core`, `alloc` or `std` requires its package's tier, whatever it names.
-  //
-  // The tier phase computes it for every other definition. Until that phase lands, each of those
-  // answers `Core`: the least tier, and so a lower bound of the tier the phase will compute.
+  ///
+  /// A definition of `core`, `alloc` or `std` requires its package's tier, whatever it names: the
+  /// tier is a tag, a meta-type's and a GraphQL built-in's the root package replaces included. A
+  /// scalar a supplied package defines requires the greatest of its externs' tiers, and `core` with
+  /// none; an enum or a directive requires `core`, a directive's arguments counting nowhere. An
+  /// object or an interface requires the greatest of the tiers of its fields' types and of their
+  /// arguments' types, an input object of its input fields' types, and a union of its members'
+  /// types, each type's as [`Ty::tier`](crate::graphqlx::Ty::tier) answers; a field, an argument
+  /// or an input field that applies `core`'s `@heap` requires `alloc` at least. Definitions that
+  /// hold one another share the greatest tier any of them reaches.
+  ///
+  /// In an analysis that [`is_ok`](crate::graphqlx::Analysis::is_ok), it is at most its package's
+  /// [`tier`](crate::graphqlx::PackageInfo::tier), a meta-type aside: a use above a package's
+  /// tier is [`Tier`](crate::graphqlx::DiagnosticKind::Tier).
   #[inline]
   pub fn tier(&self) -> Tier {
     self.row().tier
@@ -485,7 +495,16 @@ impl<'a> Def<'a> {
     self.row().collection
   }
 
-  /// Its `@extern`s, in order, each with its effective tier.
+  /// Its host types: each `core` `@extern` its own package writes on it, in its definition or in an
+  /// extension of its own, in its applications' order, as (`lang`, `type`, `tier`), each with its
+  /// effective tier. Only a scalar a supplied package defines has any, and only an `@extern` whose
+  /// `lang` and `type` are strings and whose `tier` is absent, `null` or a value of `core`'s `Tier`
+  /// is one: what another package writes binds nothing, and a value that does not fit is refused
+  /// where it is written. A `lang` written twice is here twice, and the later is
+  /// [`ExternMisuse`](crate::graphqlx::DiagnosticKind::ExternMisuse).
+  ///
+  /// A built-in has none, a primitive and a GraphQL built-in the root package replaces among them:
+  /// a built-in's host type is given by `@repr(for: …)` on the schema alone.
   #[inline]
   pub fn externs(&self) -> Externs<'a> {
     Externs {
@@ -800,7 +819,12 @@ impl core::fmt::Debug for TypeParams<'_> {
   }
 }
 
-/// One `@extern` of a definition: the host type that stands for it in one language.
+/// One `@extern` of a scalar: the host type that stands for it in one language, which smear never
+/// reads. Its `lang` and its `type` are the strings written, cooked, and its tier is the one its
+/// `tier` names, or its scalar's package's when it names none.
+///
+/// Two externs are equal when they are one binding: when they answer alike and are bound from one
+/// application.
 ///
 /// `Copy`: everything it answers is borrowed from the model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -808,22 +832,33 @@ pub struct Extern<'a> {
   lang: &'a str,
   ty: &'a str,
   tier: Tier,
+  application: Option<ApplicationId>,
 }
 
 impl<'a> Extern<'a> {
-  /// Its `lang`: the host language.
+  /// The `@extern` it is bound from: `None` only for one a hand-built model holds.
+  //
+  // Crate-private: the public model answers no extern's application, and the rules on `@extern`'s
+  // use and on tiers point at it. A candidate public accessor for the model's review.
+  #[inline]
+  pub(crate) const fn application(&self) -> Option<ApplicationId> {
+    self.application
+  }
+
+  /// Its `lang`: the host language, as the string is cooked.
   #[inline]
   pub const fn lang(&self) -> &'a str {
     self.lang
   }
 
-  /// Its `type`: the host type, spelled as its language spells it.
+  /// Its `type`: the host type, spelled as its language spells it, as the string is cooked.
   #[inline]
   pub const fn r#type(&self) -> &'a str {
     self.ty
   }
 
-  /// Its effective tier: the `tier` it writes, or its declaring package's when it writes none.
+  /// Its effective tier: the `tier` it writes, or its declaring package's when it writes none or
+  /// `null`.
   #[inline]
   pub const fn tier(&self) -> Tier {
     self.tier
@@ -848,6 +883,7 @@ impl<'a> Externs<'a> {
       lang: row.lang.text(&model.text),
       ty: row.ty.text(&model.text),
       tier: row.tier,
+      application: row.application,
     }
   }
 }

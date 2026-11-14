@@ -14,34 +14,96 @@
 //! answers for a written root, which no contribution holds, from one look at the schema's
 //! contributions for the whole walk.
 //!
+//! GraphQL's own rules over what a definition holds judge the definitions a supplied package
+//! wrote, a GraphQL built-in the root package replaces among them, as `supplied` answers once for
+//! each definition: what a package adds to a definition of `core`, `alloc` or `std` is the orphan
+//! rule's alone, as GraphQL judges no member of a built-in type. An input object is a OneOf input
+//! object when the package that wrote it applies `core`'s `@oneOf` to it, as `one_of` answers once
+//! for each input object.
+//!
+//! GraphQL's own rules over directive applications judge every application a supplied package
+//! writes, on any definition, a built-in's included: the root package's `extend scalar String @x`
+//! is the root package's to answer for, whatever `String` is.
+//!
+//! GraphQL's own rules over the schema judge the root package's, the one schema a program has. So
+//! a root package with no query root is not ok, as in GraphQL: a library analyzed as the root
+//! package has none, and a consumer that analyzes one waives that code by filtering it, since the
+//! analysis keeps GraphQL's rule on the query root and exposes no waiver.
+//!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads the public `TypeExpr::written_args`: the walk descends the written
 //! arguments of an occurrence that names a type parameter, or nothing, which the kind does not
 //! answer. `DuplicateTypeParameter` reads one crate-private accessor, `Def::extension_params`:
-//! the names an extension's own list writes, which no public view holds.
+//! the names an extension's own list writes, which no public view holds. `DuplicateMember` reads
+//! another, `IdRange::start`, to name the member at a position of a list. `ExternMisuse` reads a
+//! third, `Extern::application`, the application an extern is bound from, which the public model
+//! does not answer yet: a candidate public accessor for the model's review; and `TierViolation`
+//! reads it too.
 //!
 //! One rule is in no set: `UnboundedInstantiation`, which is public, which `analyze` never runs,
 //! and which a backend composes into its own walk. It reads the public model alone.
 
 mod collection_arity;
+mod deprecated_required;
+mod duplicate_directive_argument_use;
+mod duplicate_directive_use;
+mod duplicate_member;
 mod duplicate_schema_definition;
 mod duplicate_type_parameter;
+mod empty_definition;
+mod extern_misuse;
 mod generic_enum;
+mod implements_non_interface;
 mod marker_misuse;
+mod member_type_kind;
+mod missing_query_root_operation_type;
 mod non_zero_argument;
+mod one_of_field_has_default;
+mod one_of_field_not_nullable;
+mod one_of_on_input_object_extension;
 mod orphan_extension;
+mod repr_misuse;
+mod reserved_name;
+mod root_operation_type_not_object;
+mod schema_extension_without_schema;
 mod schema_outside_root;
+mod self_implementing_interface;
+mod self_referential_directive;
+mod shared_root_operation_type;
+mod specified_by_on_built_in_scalar;
+mod tier_violation;
 mod type_ref_misuse;
 mod unbounded_instantiation;
+mod union_member_not_object;
+mod unsupported_directive_location;
 
 use self::{
-  collection_arity::CollectionArity, duplicate_schema_definition::DuplicateSchemaDefinition,
-  duplicate_type_parameter::DuplicateTypeParameter, generic_enum::GenericEnum,
-  marker_misuse::MarkerMisuse, non_zero_argument::NonZeroArgument,
-  orphan_extension::OrphanExtension, schema_outside_root::SchemaOutsideRoot,
-  type_ref_misuse::TypeRefMisuse,
+  collection_arity::CollectionArity, deprecated_required::DeprecatedRequired,
+  duplicate_directive_argument_use::DuplicateDirectiveArgumentUse,
+  duplicate_directive_use::DuplicateDirectiveUse, duplicate_member::DuplicateMember,
+  duplicate_schema_definition::DuplicateSchemaDefinition,
+  duplicate_type_parameter::DuplicateTypeParameter, empty_definition::EmptyDefinition,
+  extern_misuse::ExternMisuse, generic_enum::GenericEnum,
+  implements_non_interface::ImplementsNonInterface, marker_misuse::MarkerMisuse,
+  member_type_kind::MemberTypeKind,
+  missing_query_root_operation_type::MissingQueryRootOperationType,
+  non_zero_argument::NonZeroArgument, one_of_field_has_default::OneOfFieldHasDefault,
+  one_of_field_not_nullable::OneOfFieldNotNullable,
+  one_of_on_input_object_extension::OneOfOnInputObjectExtension, orphan_extension::OrphanExtension,
+  repr_misuse::ReprMisuse, reserved_name::ReservedName,
+  root_operation_type_not_object::RootOperationTypeNotObject,
+  schema_extension_without_schema::SchemaExtensionWithoutSchema,
+  schema_outside_root::SchemaOutsideRoot, self_implementing_interface::SelfImplementingInterface,
+  self_referential_directive::SelfReferentialDirective,
+  shared_root_operation_type::SharedRootOperationType,
+  specified_by_on_built_in_scalar::SpecifiedByOnBuiltInScalar, tier_violation::TierViolation,
+  type_ref_misuse::TypeRefMisuse, union_member_not_object::UnionMemberNotObject,
+  unsupported_directive_location::UnsupportedDirectiveLocation,
 };
-use super::{Contribution, Cx, DefId, Model, PackageId, TypeExprId, TypeExprKind, id::dense};
+use super::{
+  ApplicationId, Contribution, Cx, DefId, DefKind, Model, PackageId, PackageKind, Resolution,
+  TypeExprId, TypeExprKind, id::dense,
+};
 
 pub use self::unbounded_instantiation::UnboundedInstantiation;
 
@@ -60,6 +122,34 @@ fn own_contribution<'a>(cx: &Cx<'a>, def: DefId) -> Option<(Contribution<'a>, Pa
     .filter(|part: &Contribution<'a>| !part.is_extension())?;
   let writer = cx.sources().written_by(own.location())?;
   Some((own, writer))
+}
+
+/// Whether a supplied package wrote `def`: its own contribution, its first, is no built-in
+/// package's. A GraphQL built-in the root package replaces is the root package's.
+fn supplied(cx: &Cx<'_>, def: DefId) -> bool {
+  own_contribution(cx, def).is_some_and(|(_, writer): (Contribution<'_>, PackageId)| {
+    cx.model().package(writer).kind() != PackageKind::BuiltIn
+  })
+}
+
+/// Whether the input object `def` is a OneOf input object: the package that wrote it applies
+/// `core`'s `@oneOf` to it, in its definition or in an extension of its own.
+fn one_of(cx: &Cx<'_>, def: DefId) -> bool {
+  let model = cx.model();
+  let definition = model.def(def);
+  if definition.kind() != DefKind::InputObject {
+    return false;
+  }
+  let Some((_, writer)) = own_contribution(cx, def) else {
+    return false;
+  };
+  let one_of = model.builtins().one_of();
+  let sources = cx.sources();
+  definition.applications().iter().any(|id: &ApplicationId| {
+    let application = model.application(*id);
+    matches!(application.directive(), Resolution::Resolved(directive) if directive == one_of)
+      && sources.written_by(application.path_location()) == Some(writer)
+  })
 }
 
 /// Whether a rule says nothing at the occurrence the walk has reached in `type_expr`: a phase
@@ -282,18 +372,38 @@ rule_set! {
   /// smear's own rules, which `analyze` runs over every supplied package once its phases have
   /// written the model: a program defines its schema at most once; only the root package defines
   /// or extends the schema; a package extends its own definitions alone, but for the directives
-  /// the root package adds to a built-in, none of which may give it a built-in meaning; an enum
-  /// takes no type parameter; a marker has no field and is named only in `implements` and in
-  /// bounds, and a scalar, an enum, an input object or a union implements markers alone; a set has
-  /// one type parameter and a map two; `TypeRef` stands only in a directive's arguments;
-  /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; and
-  /// a definition's type parameters have distinct names, and so do the names an extension's own
-  /// list gives them.
+  /// the root package adds to a built-in, none of which may give it a built-in meaning or a host
+  /// type; an enum takes no type parameter; a marker has no field and is named only in `implements`
+  /// and in bounds, and a scalar, an enum, an input object or a union implements markers alone; a
+  /// set has one type parameter and a map two; `TypeRef` stands only in a directive's arguments;
+  /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; a
+  /// definition's type parameters have distinct names, and so do the names an extension's own list
+  /// gives them; `@extern` binds a scalar its own package defines, once for each language; `@repr`
+  /// writes `for` on the schema alone, and chooses once for each language at a position and for
+  /// each type and language on the schema; a package uses nothing above the tier it declares; and
+  /// of the definitions a supplied package wrote, GraphQL's own rules: a member's name does not
+  /// begin with `__`; a definition's members have distinct names, and so have a field's arguments;
+  /// a definition that holds members holds one at least, a marker holding none; a member's type is
+  /// of the kind its position takes; an object or an interface implements interfaces; no interface
+  /// implements itself; a union's members are object types; a required argument or input field is
+  /// not deprecated; a OneOf input object's fields are nullable and have no default; and an input
+  /// object takes `@oneOf` in its definition alone. And of the directives and every application a
+  /// supplied package writes, GraphQL's own rules: a directive stands where its definition lists; a
+  /// directive that is not repeatable is applied once to a location, a definition and its
+  /// extensions being one; an application passes each argument once; no directive refers to itself,
+  /// through the directives and types it names, a scalar that is no collection hiding its type
+  /// arguments; and a scalar of the built-in library takes no `@specifiedBy`. And of the schema,
+  /// GraphQL's own rules: a root operation type is an object type; the root operations have
+  /// distinct types; a schema extension extends a schema that is defined; and a schema has a query
+  /// root operation type, written or presumed.
   pub(crate) struct Rules {
     duplicate_schema_definition: DuplicateSchemaDefinition
       => [super::code::schema::DUPLICATE_SCHEMA_DEFINITION],
     schema_outside_root: SchemaOutsideRoot => [super::DiagnosticKind::SchemaOutsideRoot.code()],
-    orphan_extension: OrphanExtension => [super::DiagnosticKind::OrphanExtension.code()],
+    orphan_extension: OrphanExtension => [
+      super::DiagnosticKind::OrphanExtension.code(),
+      super::code::schema::INTROSPECTION_TYPE_EXTENSION,
+    ],
     generic_enum: GenericEnum => [super::DiagnosticKind::GenericEnum.code()],
     marker_misuse: MarkerMisuse => [super::DiagnosticKind::MarkerMisuse.code()],
     collection_arity: CollectionArity => [super::DiagnosticKind::CollectionArity.code()],
@@ -301,6 +411,69 @@ rule_set! {
     non_zero_argument: NonZeroArgument => [super::DiagnosticKind::NonZeroArgument.code()],
     duplicate_type_parameter: DuplicateTypeParameter
       => [super::DiagnosticKind::DuplicateTypeParameter.code()],
+    reserved_name: ReservedName => [
+      super::code::schema::RESERVED_FIELD_NAME,
+      super::code::schema::RESERVED_ARGUMENT_NAME,
+      super::code::schema::RESERVED_ENUM_VALUE_NAME,
+      super::code::schema::RESERVED_INPUT_FIELD_NAME,
+      super::code::schema::RESERVED_DIRECTIVE_ARGUMENT_NAME,
+    ],
+    duplicate_member: DuplicateMember => [
+      super::code::schema::DUPLICATE_FIELD_NAME,
+      super::code::schema::DUPLICATE_ARGUMENT_NAME,
+      super::code::schema::DUPLICATE_ENUM_VALUE,
+      super::code::schema::DUPLICATE_INPUT_FIELD_NAME,
+      super::code::schema::DUPLICATE_DIRECTIVE_ARGUMENT_NAME,
+    ],
+    empty_definition: EmptyDefinition => [
+      super::code::schema::EMPTY_FIELDS_DEFINITION,
+      super::code::schema::EMPTY_UNION_MEMBERS,
+      super::code::schema::EMPTY_ENUM_VALUES,
+      super::code::schema::EMPTY_INPUT_FIELDS,
+    ],
+    member_type_kind: MemberTypeKind => [
+      super::code::schema::FIELD_TYPE_NOT_OUTPUT_TYPE,
+      super::code::schema::ARGUMENT_TYPE_NOT_INPUT_TYPE,
+      super::code::schema::INPUT_FIELD_TYPE_NOT_INPUT_TYPE,
+      super::code::schema::DIRECTIVE_ARGUMENT_TYPE_NOT_INPUT_TYPE,
+    ],
+    implements_non_interface: ImplementsNonInterface
+      => [super::code::schema::IMPLEMENTS_NON_INTERFACE],
+    self_implementing_interface: SelfImplementingInterface
+      => [super::code::schema::SELF_IMPLEMENTING_INTERFACE],
+    union_member_not_object: UnionMemberNotObject
+      => [super::code::schema::UNION_MEMBER_NOT_OBJECT],
+    deprecated_required: DeprecatedRequired => [
+      super::code::schema::DEPRECATED_REQUIRED_ARGUMENT,
+      super::code::schema::DEPRECATED_REQUIRED_INPUT_FIELD,
+    ],
+    one_of_field_not_nullable: OneOfFieldNotNullable
+      => [super::code::schema::ONE_OF_FIELD_NOT_NULLABLE],
+    one_of_field_has_default: OneOfFieldHasDefault
+      => [super::code::schema::ONE_OF_FIELD_HAS_DEFAULT],
+    one_of_on_input_object_extension: OneOfOnInputObjectExtension
+      => [super::code::schema::ONE_OF_ON_INPUT_OBJECT_EXTENSION],
+    unsupported_directive_location: UnsupportedDirectiveLocation
+      => [super::code::schema::UNSUPPORTED_DIRECTIVE_LOCATION],
+    duplicate_directive_use: DuplicateDirectiveUse
+      => [super::code::schema::DUPLICATE_DIRECTIVE_USE],
+    duplicate_directive_argument_use: DuplicateDirectiveArgumentUse
+      => [super::code::schema::DUPLICATE_DIRECTIVE_ARGUMENT_USE],
+    self_referential_directive: SelfReferentialDirective
+      => [super::code::schema::SELF_REFERENTIAL_DIRECTIVE],
+    specified_by_on_built_in_scalar: SpecifiedByOnBuiltInScalar
+      => [super::code::schema::SPECIFIED_BY_ON_BUILT_IN_SCALAR],
+    root_operation_type_not_object: RootOperationTypeNotObject
+      => [super::code::schema::ROOT_OPERATION_TYPE_NOT_OBJECT],
+    shared_root_operation_type: SharedRootOperationType
+      => [super::code::schema::SHARED_ROOT_OPERATION_TYPE],
+    schema_extension_without_schema: SchemaExtensionWithoutSchema
+      => [super::code::schema::SCHEMA_EXTENSION_WITHOUT_SCHEMA],
+    missing_query_root_operation_type: MissingQueryRootOperationType
+      => [super::code::schema::MISSING_QUERY_ROOT_OPERATION_TYPE],
+    extern_misuse: ExternMisuse => [super::DiagnosticKind::ExternMisuse.code()],
+    repr_misuse: ReprMisuse => [super::DiagnosticKind::ReprMisuse.code()],
+    tier_violation: TierViolation => [super::DiagnosticKind::Tier.code()],
   }
 }
 

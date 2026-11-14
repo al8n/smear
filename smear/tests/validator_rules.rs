@@ -660,6 +660,50 @@ fn values_of_correct_type_reads_the_whole_coercion_table() {
   }
 }
 
+/// The first 308 digits of `2^1024 - 2^970`, the least integer that rounds to infinity as a double:
+/// with a final `2` it is that integer, and with a final `1` it is the greatest that rounds to
+/// `f64::MAX`.
+const EDGE_HEAD: &str = concat!(
+  "17976931348623158079372897140530341507993413271003782693617377898044496829276",
+  "47509466490179775872070963302864166928879109465555478519404026306574886715058",
+  "20681908902000708383676273854845817711531764475730270069855571366959622842914",
+  "81986083493647529271907416844436551070434271155969950809304288017790417449779",
+);
+
+/// The integer literals at the edge of a double's range, each with whether a double holds it: the
+/// greatest integer that rounds to `f64::MAX`, the least that rounds to infinity, `10^308` and
+/// `10^309`.
+fn edge_integers() -> [(String, bool); 4] {
+  let zeros = "0".repeat(308);
+  [
+    (format!("{EDGE_HEAD}1"), true),
+    (format!("{EDGE_HEAD}2"), false),
+    (format!("1{zeros}"), true),
+    (format!("1{zeros}0"), false),
+  ]
+}
+
+/// Draft 5.6.1 over an `Int` literal offered to a `Float`, at the edge of a double's range: it
+/// widens while a double holds it and is refused past that, as a `Float` literal is (§3.5.2), as an
+/// argument and as a variable's default.
+#[test]
+fn an_integer_for_a_float_widens_only_within_a_doubles_range() {
+  let schema = build(SCHEMA);
+  for (integer, finite) in edge_integers() {
+    let expected: &[Rule] = if finite {
+      &[]
+    } else {
+      &[Rule::ValuesOfCorrectType]
+    };
+    for source in [
+      format!("{{ arguments {{ floatArgField(floatArg: {integer}) }} }}"),
+      format!("query q($v: Float = {integer}) {{ arguments {{ floatArgField(floatArg: $v) }} }}"),
+    ] {
+      assert_eq!(fired(&schema, &source), sorted(expected), "---\n{source}");
+    }
+  }
+}
+
 /// The two coercion tables, held to the same answers.
 ///
 /// # There are two, and the module headers now say so
@@ -682,7 +726,8 @@ fn values_of_correct_type_reads_the_whole_coercion_table() {
 /// the verdicts required to be equal. A one-sided edit reds here naming the pair that moved.
 #[test]
 fn the_two_coercion_tables_agree() {
-  // Every spelling that decides an arm, including both ends of each numeric range.
+  // Every spelling that decides an arm, including both ends of each numeric range; the integers at
+  // the edge of a double's range are added below.
   const LITERALS: &[&str] = &[
     "1",
     "0",
@@ -706,6 +751,7 @@ fn the_two_coercion_tables_agree() {
     "{ a: 1 }",
   ];
   const SCALARS: &[&str] = &["Int", "Float", "String", "Boolean", "ID", "Custom"];
+  let edges = edge_integers();
 
   let mut disagreed = Vec::new();
   for scalar in SCALARS {
@@ -721,7 +767,12 @@ fn the_two_coercion_tables_agree() {
       "scalar Custom\ntype Query {{ ok: Int f(v: {scalar}): Int }}"
     ));
 
-    for literal in LITERALS {
+    let literals = LITERALS.iter().copied().chain(
+      edges
+        .iter()
+        .map(|(integer, _): &(String, bool)| integer.as_str()),
+    );
+    for literal in literals {
       let sdl = sdl_of(literal);
       let document = parse_type_system(&sdl);
       let build_rejects = Schema::build(&document).is_err();

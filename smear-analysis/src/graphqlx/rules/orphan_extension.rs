@@ -19,20 +19,26 @@
 //!
 //! Each refusal is `smear::graphqlx::orphan-extension`, at the extension's target path, with a
 //! label at the definition's name unless the definition has no position, as a primitive `core`
-//! materialises has none.
+//! materialises has none. One refusal is GraphQL's own: the root package's extension that adds
+//! more than directives to one of GraphQL's introspection types, the eight meta-types whose origin
+//! is `Compat`, keeps GraphQL's code, `smear::schema::introspection-type-extension`, with
+//! `smear-schema`'s label and help, at the same place and with the same label.
 //!
-//! Of the directives the root package may add to a built-in, three may not be among them: `core`'s
-//! `@marker`, `@set` and `@map`, which say what a definition is. A definition's built-in meaning is
-//! its own package's to say, and what a built-in is is the language's. Each application of one of
-//! the three in the root package's extension of a built-in is refused too, with the same code and
-//! label, at the application's path, whether or not the extension adds more than directives, which
-//! is another mistake. The directive is told by the definition its application resolved to, never
-//! by how it is spelled. The test is the one instantiation asks before it gives a definition its
-//! meaning: whether the package that wrote the directive wrote the definition. So a GraphQL
-//! built-in the root package replaces is the root package's own, and the root package's `@set` on
-//! it is no orphan. An extension the rule refuses whole, a dependency's of a built-in or any
-//! package's of another supplied package's definition, is refused once, and its applications are
-//! not reported again.
+//! Of the directives the root package may add to a built-in, four may not be among them: `core`'s
+//! `@marker`, `@set` and `@map`, which say what a definition is, and `@extern`, which binds a
+//! scalar to a host type. A definition's built-in meaning is its own package's to say, and what a
+//! built-in is is the language's; `@extern` binds a scalar its own package defines, and a
+//! built-in's host type is given by `@repr(for: …)` on the schema alone. Each application of one
+//! of the four in the root package's extension of a built-in is refused too, with the same code
+//! and label, at the application's path, whether or not the extension adds more than directives,
+//! which is another mistake; `@extern`'s with a message and a help of its own. The directive is
+//! told by the definition its application resolved to, never by how it is spelled. The test is
+//! the one instantiation and binding ask before they give a definition its meaning or its host
+//! type: whether the package that wrote the directive wrote the definition. So a GraphQL built-in
+//! the root package replaces is the root package's own, and the root package's `@set` on it is no
+//! orphan; its `@extern` there is the rule on `@extern`'s use's. An extension the rule refuses
+//! whole, a dependency's of a built-in or any package's of another supplied package's definition,
+//! is refused once, and its applications are not reported again.
 //!
 //! The rule judges a definition's extensions as the walk enters the definition. `analyze` walks
 //! what the supplied packages wrote, and that is exactly what this judges: the walk enters a
@@ -40,21 +46,23 @@
 //! supplied package's, since no built-in package writes one. A built-in definition no supplied
 //! package extends is not entered, and has no extension to judge.
 //!
-//! The rule reads the public model and nothing else.
+//! The rule reads the public model and nothing else: the public `SourceMap::written_by`, the
+//! package that wrote a contribution.
 
 use std::{format, string::String};
 
 use crate::graphqlx::{
-  Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, PackageId, PackageKind, Resolution,
-  Visitor, diagnostic::Excerpt,
+  Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, Origin, PackageId, PackageKind,
+  Resolution, Visitor, code::schema, diagnostic::Excerpt,
 };
 
 use super::own_contribution;
 
 /// Reports each extension of a definition that the package that wrote the extension may not
-/// extend, and each application of `core`'s `@marker`, `@set` or `@map` in the root package's
-/// extension of a built-in it did not write, whether or not the directive could give that kind of
-/// definition a meaning.
+/// extend, and each application of `core`'s `@marker`, `@set`, `@map` or `@extern` in the root
+/// package's extension of a built-in it did not write, whether or not the directive could give that
+/// kind of definition a meaning. The root package's extension of a meta-type that adds more than
+/// directives has GraphQL's code; every other refusal has the orphan rule's.
 ///
 /// It reads a definition's contributions in the `enter_def` hook, and tells an extension from the
 /// definition's own contribution by what the model says of each, never by its place among them.
@@ -111,7 +119,8 @@ impl Visitor for OrphanExtension {
         // is, unless it wrote the definition: a built-in it replaces is its own.
         if definer != Some(writer) {
           let builtins = model.builtins();
-          let meanings = [builtins.marker(), builtins.set(), builtins.map()];
+          let host = builtins.r#extern();
+          let meanings = [builtins.marker(), builtins.set(), builtins.map(), host];
           for application in part.applications() {
             let applied = model.application(*application);
             let Resolution::Resolved(directive) = applied.directive() else {
@@ -122,19 +131,33 @@ impl Visitor for OrphanExtension {
             }
             // Whether the directive could give this kind of definition a meaning or not: it is
             // refused on every built-in.
-            let spelled = Excerpt(model.def(directive).name().as_bytes());
+            let (message, help): (String, &'static str) = if directive == host {
+              (
+                format!(
+                  "package `{author}` applies `@extern` to the {noun} `{sigil}{name}` of the \
+                   built-in package `{owner}`, and a built-in's host type is given by \
+                   `@repr(for: …)` on the schema alone"
+                ),
+                "`@extern` binds a scalar its own package defines: give a built-in its host type \
+                 with `extend schema @repr(for: …, lang: …, type: …)`",
+              )
+            } else {
+              let spelled = Excerpt(model.def(directive).name().as_bytes());
+              (
+                format!(
+                  "package `{author}` applies `@{spelled}` to the {noun} `{sigil}{name}` of the \
+                   built-in package `{owner}`, and what a built-in is cannot be changed by an \
+                   extension"
+                ),
+                "`@marker`, `@set` and `@map` say what a definition is, and what a built-in is \
+                 is the language's to say: remove this directive",
+              )
+            };
             let mut report = Diagnostic::builder(kind.code(), applied.path_location())
               .severity(kind.severity())
-              .message(format!(
-                "package `{author}` applies `@{spelled}` to the {noun} `{sigil}{name}` of the \
-                 built-in package `{owner}`, and what a built-in is cannot be changed by an \
-                 extension"
-              ))
+              .message(message)
               .primary_label(kind.title())
-              .help(
-                "`@marker`, `@set` and `@map` say what a definition is, and what a built-in is is \
-                 the language's to say: remove this directive",
-              );
+              .help(help);
             // A primitive `core` materialises has no position of its own to point at.
             if !definition.location().is_entire() {
               report = report.label(definition.location(), "the definition it extends");
@@ -149,6 +172,9 @@ impl Visitor for OrphanExtension {
         }
       }
 
+      // GraphQL refuses itself what the root package adds to one of its introspection types beside
+      // directives, and that refusal keeps GraphQL's code, label and help.
+      let introspection = built_in && by_root && definition.origin() == Origin::Compat;
       let (message, help): (String, &'static str) = if !built_in {
         (
           format!(
@@ -175,6 +201,12 @@ impl Visitor for OrphanExtension {
              add directives: remove this extension"
           },
         )
+      } else if introspection {
+        (
+          format!("this extension adds more than directives to the introspection type `{name}`"),
+          "an extension may add directives to an introspection type and nothing else; the \
+           `__`-prefixed types are the introspection system the specification defines.",
+        )
       } else {
         // A GraphQL built-in the root package replaces has the root package's definition for its
         // own contribution, and that definition may write what this extension adds.
@@ -194,11 +226,15 @@ impl Visitor for OrphanExtension {
           },
         )
       };
-      let mut report = Diagnostic::builder(kind.code(), part.location())
-        .severity(kind.severity())
-        .message(message)
-        .primary_label(kind.title())
-        .help(help);
+      let builder = if introspection {
+        Diagnostic::builder(schema::INTROSPECTION_TYPE_EXTENSION, part.location())
+          .primary_label("introspection type extension adds more than directives")
+      } else {
+        Diagnostic::builder(kind.code(), part.location())
+          .severity(kind.severity())
+          .primary_label(kind.title())
+      };
+      let mut report = builder.message(message).help(help);
       // A primitive `core` materialises has no position of its own to point at.
       if !definition.location().is_entire() {
         report = report.label(definition.location(), "the definition it extends");

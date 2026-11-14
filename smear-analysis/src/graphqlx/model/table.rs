@@ -8,7 +8,10 @@
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{DefId, IdRange, MemberId, ModuleId, PackageId, SourceId, Sym, TyId, TypeExprId, ValueId},
+  id::{
+    ApplicationId, DefId, IdRange, MemberId, ModuleId, PackageId, SourceId, Sym, TyId, TypeExprId,
+    ValueId,
+  },
   package::{Layout, Tier},
 };
 
@@ -56,9 +59,9 @@ impl Run {
 }
 
 // A type-expression, type or value row says which variant of its public kind it is with one of
-// the numbers below, rather than with a private enum: lowering and instantiation write every type
-// shape, but until coercion lands only the test-support door writes most value shapes, and a
-// private variant that no shipped build constructs is dead code.
+// the numbers below, rather than with a private enum: a shape is written by the phase that makes
+// it, lowering and instantiation every type shape and coercion every value shape, each landing on
+// its own, and a private variant that no shipped build constructs would be dead code until it did.
 
 /// A named type, a definition and its arguments: `def` and `args` hold it.
 pub(super) const KIND_NAMED: u8 = 0;
@@ -95,6 +98,8 @@ pub(super) const VALUE_OBJECT: u8 = 10;
 pub(super) const VALUE_LITERAL: u8 = 11;
 /// `ValueKind::Unresolved`, and every row until a phase gives it its shape.
 pub(super) const VALUE_UNRESOLVED: u8 = 12;
+/// `ValueKind::Bytes`: `run` is the bytes, in the model's byte pool.
+pub(super) const VALUE_BYTES: u8 = 13;
 
 // Every row type below derives `PartialEq` and none derives `Eq`: a `Model` is compared whole,
 // by its derive, and it holds floats.
@@ -229,15 +234,17 @@ pub(super) struct TypeParamRow {
   pub(super) default: Option<TypeExprId>,
 }
 
-/// One `@extern` of a definition, resolved.
+/// One `@extern` of a definition, bound.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ExternRow {
-  /// Its `lang`, in the text arena.
+  /// Its `lang`, in the text arena: the run coercion kept for the string.
   pub(super) lang: Run,
-  /// Its `type`, in the text arena.
+  /// Its `type`, in the text arena: the run coercion kept for the string.
   pub(super) ty: Run,
   /// Its effective tier.
   pub(super) tier: Tier,
+  /// The application it is bound from: `None` only for one a hand-built model holds.
+  pub(super) application: Option<ApplicationId>,
 }
 
 /// A second name a module gives a definition: `Int` for `i32`.
@@ -332,15 +339,15 @@ pub(super) struct ValueRow {
   /// `VALUE_BOOL`: 1 or 0. `VALUE_INT`, `VALUE_FLOAT` and `VALUE_LITERAL`: the index of its row in
   /// the integer, float or literal table.
   pub(super) payload: u32,
-  /// `VALUE_STRING`: the text, in the text arena. `VALUE_LIST` and `VALUE_SET`: the elements, in
-  /// the value-item pool. `VALUE_MAP`: the entries, in the map-entry pool. `VALUE_OBJECT`: the
-  /// entries, in the object-entry pool.
+  /// `VALUE_STRING`: the text, in the text arena. `VALUE_BYTES`: the bytes, in the byte pool.
+  /// `VALUE_LIST` and `VALUE_SET`: the elements, in the value-item pool. `VALUE_MAP`: the entries,
+  /// in the map-entry pool. `VALUE_OBJECT`: the entries, in the object-entry pool.
   pub(super) run: Run,
   pub(super) location: Location,
   /// Its type: [`UNSET_TY`] until a phase sets it.
   pub(super) ty: TyId,
   pub(super) written: bool,
-  /// The path as written, for an enum or type value.
+  /// The path it is written as, for a value written as a path.
   pub(super) path: Option<PathRow>,
 }
 
@@ -355,7 +362,7 @@ pub(super) struct IntRow {
   pub(super) text: Run,
 }
 
-/// A float literal's value.
+/// A float value: what a float literal, or an integer literal where a float is expected, reads as.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct FloatRow {
   pub(super) value: f64,
@@ -382,6 +389,11 @@ pub(super) struct ApplicationRow {
   pub(super) path: PathRow,
   /// Its arguments, in the model's argument pool.
   pub(super) arguments: Run,
+  /// Its type: its directive's instantiation, a named type of the directive whose arguments are
+  /// its complete type arguments, or the unresolved type when they could not be completed.
+  /// [`UNSET_TY`] for a directive of no type parameter, one that did not resolve, and one whose
+  /// count of type arguments was refused.
+  pub(super) ty: TyId,
 }
 
 /// The schema: there is one per model, whether a schema definition is written or not.

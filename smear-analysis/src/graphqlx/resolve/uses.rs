@@ -181,12 +181,6 @@ struct Found {
   directive: Lookup,
 }
 
-/// The tree of a `use` item, of the parser that read its file.
-enum Tree<'x, 'a> {
-  Text(&'x UseTree<&'a str>),
-  Bytes(&'x UseTree<&'a [u8]>),
-}
-
 /// What a tree's path starts at, before its own segments are read.
 #[derive(Clone, Copy)]
 enum Start<'x> {
@@ -691,11 +685,9 @@ impl<'x> Run<'_, 'x> {
       seq: 0,
       deep: false,
     };
-    match tree_of(declarations, entry) {
-      Some(Tree::Text(tree)) => self.walk(&mut cursor, tree, found),
-      Some(Tree::Bytes(tree)) => self.walk(&mut cursor, tree, found),
-      // Every item is made from a `use` item's tree.
-      None => {}
+    // Every item is made from a `use` item's tree.
+    if let Some(tree) = tree_of(declarations, entry) {
+      self.walk(&mut cursor, tree, found);
     }
   }
 
@@ -1272,10 +1264,7 @@ impl<'x> Run<'_, 'x> {
 fn item_at<'x>(declarations: &'x Declarations<'_, '_>, index: usize) -> Option<Item<'x>> {
   let entry = declarations.uses.get(index)?;
   let source = entry.item.source;
-  let head = match tree_of(declarations, entry)? {
-    Tree::Text(tree) => head_of(tree, source),
-    Tree::Bytes(tree) => head_of(tree, source),
-  };
+  let head = head_of(tree_of(declarations, entry)?, source);
   Some(Item {
     entry: index,
     head,
@@ -1284,19 +1273,19 @@ fn item_at<'x>(declarations: &'x Declarations<'_, '_>, index: usize) -> Option<I
 }
 
 /// The tree of the `use` item `entry` addresses.
-fn tree_of<'x, 'a>(declarations: &'x Declarations<'_, 'a>, entry: &Entry) -> Option<Tree<'x, 'a>> {
+fn tree_of<'x, 'a>(
+  declarations: &'x Declarations<'_, 'a>,
+  entry: &Entry,
+) -> Option<&'x UseTree<&'a str>> {
   let index = entry.item.index as usize;
-  match declarations.items.get(entry.item.source.get() as usize)? {
-    Some(Items::Text(items)) => match items.get(index)? {
-      TypeSystemItem::Use(definition) => Some(Tree::Text(definition.tree())),
-      // Item collection addresses only `use` items among the declarations' `use` items.
-      _ => None,
-    },
-    Some(Items::Bytes(items)) => match items.get(index)? {
-      TypeSystemItem::Use(definition) => Some(Tree::Bytes(definition.tree())),
-      _ => None,
-    },
-    None => None,
+  let Items::Text(items) = declarations
+    .items
+    .get(entry.item.source.get() as usize)?
+    .as_ref()?;
+  match items.get(index)? {
+    TypeSystemItem::Use(definition) => Some(definition.tree()),
+    // Item collection addresses only `use` items among the declarations' `use` items.
+    _ => None,
   }
 }
 

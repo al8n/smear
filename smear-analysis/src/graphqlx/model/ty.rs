@@ -398,11 +398,10 @@ impl<'a> Ty<'a> {
     self.row().non_null
   }
 
-  /// The tier it requires, counting a type parameter as `core`'s: for a type that names a
-  /// parameter, a lower bound.
-  //
-  // The tier phase computes it. Until that phase lands, every type answers `Core`, the least tier
-  // and so a lower bound of the tier the phase will compute.
+  /// The tier it requires: for a named type, the greatest of its definition's
+  /// [`tier`](crate::graphqlx::Def::tier) and its arguments'; for a list, `alloc` at least, and its
+  /// element's; and `core` for a type parameter and the unresolved type. A type parameter counting
+  /// as `core`, it is a lower bound for a type that names one.
   #[inline]
   pub fn tier(&self) -> Tier {
     self.row().tier

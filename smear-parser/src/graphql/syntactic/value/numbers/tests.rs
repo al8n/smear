@@ -224,6 +224,14 @@ fn f64_is_correctly_rounded_at_any_length() {
   // denormal for the second one instead of zero.
   assert_eq!(parse_f64(b"4.9406564584124654e-324"), Some(5e-324));
   assert_eq!(parse_f64(b"2.4703282292062327e-324"), Some(0.0));
+
+  // 1 + 2^-53, the halfway point between 1.0 and the next double, which rounds to even; then 900
+  // zeros and a `1`, past the 800 significant digits the conversion's spelling keeps, which alone
+  // put the value above the halfway point: 1 + 2^-52.
+  let halfway = "1.00000000000000011102230246251565404236316680908203125";
+  assert_eq!(parse_f64(halfway.as_bytes()), Some(1.0));
+  let above = std::format!("{halfway}{}1", "0".repeat(900));
+  assert_eq!(parse_f64(above.as_bytes()), Some(1.0 + f64::EPSILON));
 }
 
 /// Draft §3.5.2 admits only finite values, and `f64::from_str` reports an overflow as an infinity
@@ -234,6 +242,40 @@ fn f64_refuses_the_non_finite() {
   assert_eq!(parse_f64(b"-1e400"), None);
   assert_eq!(parse_f64(b"1e-400"), Some(0.0));
   assert_eq!(parse_f64(b"nope"), None);
+}
+
+/// `core` stops reading an exponent's digits once it reaches 65 536, so a literal whose digits
+/// offset a written exponent past 655 359 is read through its normalized spelling, never as
+/// written.
+#[test]
+fn f64_reads_an_exponent_past_what_core_reads() {
+  // Enough zeros that an exponent past 655 359, the most `core` reads exactly, is offset back into
+  // range; fewer under Miri, where each verdict is the same.
+  let zeros = "0".repeat(if cfg!(miri) { 997 } else { 99_998 });
+  // `0.`, the zeros, `1e999999`: 10^900000 when unshrunk, past every double, which `core` alone
+  // reads as 1.0.
+  let codex = std::format!("0.{zeros}1e999999");
+  assert_eq!(parse_f64(codex.as_bytes()), None);
+  // `1`, the zeros and one more, `e-999999`: as far below, and so zero, which it reads as 1.0 too;
+  // its sign is the literal's own.
+  let reverse = std::format!("1{zeros}0e-999999");
+  assert_eq!(parse_f64(reverse.as_bytes()).map(f64::to_bits), Some(0));
+  let negative = std::format!("-{reverse}");
+  assert_eq!(
+    parse_f64(negative.as_bytes()).map(f64::to_bits),
+    Some((-0f64).to_bits())
+  );
+  // The same digits under exponents that offset them: 1.0, each way.
+  let count = zeros.len() + 1;
+  let up = std::format!("0.{zeros}1e{count}");
+  assert_eq!(parse_f64(up.as_bytes()), Some(1.0));
+  let down = std::format!("1{zeros}0e-{count}");
+  assert_eq!(parse_f64(down.as_bytes()), Some(1.0));
+  // A first significant digit at each edge of a double's range.
+  assert_eq!(parse_f64(b"1e308"), Some(1e308));
+  assert_eq!(parse_f64(b"1e309"), None);
+  assert_eq!(parse_f64(b"1.7976931348623157e308"), Some(f64::MAX));
+  assert_eq!(parse_f64(b"5e-324").map(f64::to_bits), Some(1));
 }
 
 /// The failure arm hands the slice back rather than dropping it, which is what lets the caller

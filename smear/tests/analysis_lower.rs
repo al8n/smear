@@ -4,9 +4,10 @@
 //! its description; extensions that name nothing or a definition of another kind; every written
 //! type an occurrence, numbered outer first, with its path and arguments as written and what it
 //! resolves to where it is written; bounds; directive applications, their type arguments and their
-//! arguments in the definition's order; values kept as written; what the built-in library holds;
-//! the schema's contributions, its description, its roots, written or presumed, and its
-//! applications; and none of it moved by the order files and dependencies are passed in.
+//! arguments in the definition's order; a custom scalar's values kept as written; what the
+//! built-in library holds; the schema's contributions, its description, its roots, written or
+//! presumed, and its applications; and none of it moved by the order files and dependencies are
+//! passed in.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -20,6 +21,27 @@ use smear::{
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
 };
+
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// Whether `analysis` reports nothing but that its program has no query root.
+fn clean(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics.len() - reported(analysis).len();
+  diagnostics.len() == waived && diagnostics.error_count() == waived
+}
 
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
 fn package(
@@ -117,11 +139,11 @@ fn member_names(model: &Model, range: IdRange<MemberId>) -> Vec<&str> {
     .collect()
 }
 
-/// Each diagnostic's code, primary location, and first label's location, in the list's order.
+/// Each diagnostic's code, primary location, and first label's location, in the list's order, but
+/// for the missing query root.
 fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| {
       (
         diagnostic.code().as_str(),
@@ -244,10 +266,29 @@ fn applications(model: &Model, ids: &[ApplicationId]) -> Vec<String> {
     .collect()
 }
 
-/// The value `id`, written out: a literal as its kind and its text.
+/// The value `id`, written out: a coerced value as its kind's name and its text, `Int 1`,
+/// `Float -1.5e3`, `Boolean true`, `Null null`, `String "q"` with its cooked text quoted,
+/// `Enum Color::RED` with its path as written and `List [Int 1, Int 2]`; a literal kept as
+/// written as `Literal(Int) 1`; and an unresolved value as `?`. A value that coerces prints as its
+/// literal does.
 fn valued(model: &Model, id: ValueId) -> String {
-  match model.value(id).kind() {
-    ValueKind::Literal(literal) => format!("{:?} {}", literal.kind(), literal.text()),
+  let value = model.value(id);
+  match value.kind() {
+    ValueKind::Null => String::from("Null null"),
+    ValueKind::Bool(flag) => format!("Boolean {flag}"),
+    ValueKind::Int(int) => format!("Int {}", int.text()),
+    ValueKind::Float(float) => format!("Float {}", float.text()),
+    ValueKind::String(text) => format!("String {text:?}"),
+    ValueKind::Enum { .. } => format!("Enum {}", spelled(model, value.path())),
+    ValueKind::List(items) => {
+      let items: Vec<String> = items
+        .iter()
+        .map(|item: &ValueId| valued(model, *item))
+        .collect();
+      format!("List [{}]", items.join(", "))
+    }
+    ValueKind::Literal(literal) => format!("Literal({:?}) {}", literal.kind(), literal.text()),
+    ValueKind::Unresolved => String::from("?"),
     other => format!("{other:?}"),
   }
 }
@@ -533,7 +574,7 @@ fn direct_members_come_before_every_argument() {
   let text = "type T {\n  first(a: Int, b: Int): Int\n  second: Int\n}\n\
               type U {\n  only(c: Int): Int\n}\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let t = def(model, Namespace::Type, "^::app::T");
   let u = def(model, Namespace::Type, "^::app::U");
@@ -574,7 +615,7 @@ const GENERIC: &str = "type Page<T, U = Int> {\n  items: [T]\n}\nscalar Wrapper<
 #[test]
 fn type_parameters_are_rows_of_their_definition_in_written_order() {
   let analysis = analyze_one(GENERIC);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = schema_file(&analysis);
   let expected = [
@@ -625,7 +666,7 @@ const LOCATIONS: &str = "directive @everywhere repeatable on QUERY | MUTATION | 
 #[test]
 fn a_directive_definition_keeps_its_locations_as_written_and_whether_it_is_repeatable() {
   let analysis = analyze_one(LOCATIONS);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
 
   let everywhere = model.def(def(model, Namespace::Directive, "@^::app::everywhere"));
@@ -672,9 +713,8 @@ fn a_definitions_own_contribution_is_named_where_its_name_is_and_holds_its_error
   let analysis = analyze_one(text);
   let model = analysis.model();
   let schema = schema_file(&analysis);
-  let found: Vec<(&str, Location)> = analysis
-    .diagnostics()
-    .iter()
+  let found: Vec<(&str, Location)> = reported(&analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
     .collect();
   assert_eq!(
@@ -726,11 +766,7 @@ fn a_replaced_directive_has_the_roots_arguments() {
   let text = "\"Ours.\"\ndirective @deprecated(\"Why.\" reason: String, since: String) \
               on FIELD_DEFINITION | ENUM_VALUE\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = schema_file(&analysis);
   let deprecated = model.builtins().deprecated();
@@ -799,14 +835,16 @@ fn a_replaced_directive_has_the_roots_arguments() {
   );
 }
 
-/// A definition of every kind that has extensions, each extended once below it.
+/// A definition of every kind that has extensions, each extended once below it, and `Other`, the
+/// member the union's extension adds.
 const EXTENDED: &str = "type Query {\n  a: Int\n}\nextend type Query {\n  b(x: Int): Int\n}\n\
                         interface Node {\n  id: ID\n}\nextend interface Node {\n  name: String\n}\n\
                         input Filter {\n  f: Int\n}\nextend input Filter {\n  g: Int\n}\n\
                         enum Color {\n  RED\n}\nextend enum Color {\n  GREEN\n}\n\
                         scalar Date\nextend scalar Date @specifiedBy(url: \"https://example.com\")\n\
-                        union Either = Query\nextend union Either = Query\n\
-                        directive @d on FIELD\nextend directive @d @deprecated\n";
+                        union Either = Query\nextend union Either = Other\n\
+                        directive @d on FIELD\nextend directive @d @deprecated\n\
+                        type Other {\n  a: Int\n}\n";
 
 #[test]
 fn an_extension_is_a_contribution_of_its_target() {
@@ -944,7 +982,7 @@ fn contributions_order_members_by_source_then_position() {
     ],
   );
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let (a_file, b_file, c_file, m_file) = (
     file(&analysis, 3, "a.graphqlx"),
@@ -991,11 +1029,7 @@ fn an_extension_of_another_kind_contributes_nothing() {
       Some(named(schema, text, "enum ", "E", 0)),
     )]
   );
-  let diagnostic = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic");
+  let diagnostic = reported(&analysis)[0];
   assert_eq!(
     diagnostic.to_string(),
     "`extend type` names `E`, which is an enum"
@@ -1028,9 +1062,8 @@ fn an_extension_of_nothing_reports_once() {
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
   // The target alone is reported: nothing inside the extension is lowered.
-  let codes: Vec<(&str, Location)> = analysis
-    .diagnostics()
-    .iter()
+  let codes: Vec<(&str, Location)> = reported(&analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
     .collect();
   assert_eq!(
@@ -1051,11 +1084,7 @@ fn a_built_in_is_extended_by_the_root() {
   // replaces `f64`, which keeps its id.
   let text = "directive @x on SCALAR\nextend scalar Int @x\nscalar Float\nextend scalar Float @x\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = schema_file(&analysis);
   let builtins = model.builtins();
@@ -1117,11 +1146,7 @@ fn an_alias_names_no_definition_to_extend() {
       None
     )]
   );
-  let diagnostic = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic");
+  let diagnostic = reported(&analysis)[0];
   assert_eq!(
     diagnostic.to_string(),
     "`extend scalar` names `NonZeroU32`, a spelling of `NonZero<u32>`, which is no definition of \
@@ -1160,9 +1185,8 @@ fn an_alias_names_no_definition_to_extend() {
   let text = "directive @x on SCALAR\nextend scalar ^::core::NonZeroU32 @x\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
-  let codes: Vec<(&str, Location)> = analysis
-    .diagnostics()
-    .iter()
+  let codes: Vec<(&str, Location)> = reported(&analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
     .collect();
   assert_eq!(
@@ -1181,7 +1205,7 @@ fn an_alias_names_no_definition_to_extend() {
 fn an_alias_occurrence_keeps_its_spelling_and_names_non_zero() {
   let text = "type T {\n  a: NonZeroU32!\n  b: [NonZeroI8]\n}\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = schema_file(&analysis);
   let t = def(model, Namespace::Type, "^::app::T");
@@ -1218,9 +1242,8 @@ fn a_mismatched_extension_of_a_long_name_quotes_an_excerpt() {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
   let analysis = analyze(&root, &[], &Limits::new());
-  let messages: Vec<String> = analysis
-    .diagnostics()
-    .iter()
+  let messages: Vec<String> = reported(&analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .collect();
   assert_eq!(messages.len(), 1);
@@ -1335,7 +1358,7 @@ fn type_occurrences_are_numbered_outer_first() {
   let text = "scalar A<X, Y>\nscalar B<Z>\nscalar C\nscalar D\n\
               type T {\n  f: A<B<C>, D>\n  g: Int\n}\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let t = def(model, Namespace::Type, "^::app::T");
   let fields = ids(model.def(t).fields());
@@ -1368,7 +1391,7 @@ fn a_parameter_shadows_a_type_of_its_module() {
   let text = "scalar T\ntype Box<T> {\n  value: T\n  wrapped: Box<T>\n}\n\
               type Plain {\n  value: T\n}\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let boxed = def(model, Namespace::Type, "^::app::Box");
   assert_eq!(
@@ -1471,9 +1494,8 @@ fn each_place_keeps_graphqls_code_for_a_name_that_names_nothing() {
               i: ^::geo::Thing\n}\nunion U = Absent\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
-  let codes: Vec<(&str, Location)> = analysis
-    .diagnostics()
-    .iter()
+  let codes: Vec<(&str, Location)> = reported(&analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
     .collect();
   assert_eq!(
@@ -1554,7 +1576,7 @@ fn a_where_clause_is_recorded_parameter_by_parameter() {
               scalar Table<K, V> where K: Ord & Hash V: Hash\n\
               type Pair<A, B> where B: Ord {\n  a: A\n}\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = schema_file(&analysis);
   // Predicate by predicate and bound by bound, each at its predicate.
@@ -1662,7 +1684,7 @@ fn extensions_order_by_source_and_position_whatever_their_modules() {
     &[("b.graphqlx", b), ("a/x.graphqlx", x)],
   );
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let shape = def(model, Namespace::Type, "^::app::Shape");
   assert_eq!(
@@ -1675,7 +1697,7 @@ fn extensions_order_by_source_and_position_whatever_their_modules() {
   let text = "type Shape {\n  own: Int\n}\nmod m {\n  extend type ..::Shape {\n    inMod: Int\n  }\n}\n\
               extend type Shape {\n  after: Int\n}\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let shape = def(model, Namespace::Type, "^::app::Shape");
   assert_eq!(
@@ -1697,7 +1719,7 @@ fn a_contributions_paths_resolve_where_it_is_written() {
     &[("b.graphqlx", b), ("m/x.graphqlx", x)],
   );
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let shape = def(model, Namespace::Type, "^::app::Shape");
   let from_m = model
@@ -1722,7 +1744,7 @@ fn a_contributions_paths_resolve_where_it_is_written() {
   // paths resolve there, though its module is `core`'s.
   let text = "scalar Local\ndirective @deprecated(reason: Local) on FIELD_DEFINITION\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let deprecated = model.builtins().deprecated();
   let reason = model
@@ -1762,7 +1784,7 @@ fn implements_entries_and_union_members_are_each_their_contributions() {
               type T implements A {\n  id: ID\n}\nextend type T implements B {\n  more: Int\n}\n\
               type V {\n  id: ID\n}\nunion U = T\nextend union U = V\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let none: Vec<String> = Vec::new();
   let t = def(model, Namespace::Type, "^::app::T");
@@ -1796,7 +1818,7 @@ fn implements_entries_and_union_members_are_each_their_contributions() {
 fn a_default_may_name_a_later_parameter_and_is_numbered_in_parameter_order() {
   let text = "type P<T = U, U = [Int]> {\n  a: T\n}\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let p = def(model, Namespace::Type, "^::app::P");
   let defaults: Vec<Option<TypeExprId>> = model
@@ -1862,9 +1884,8 @@ fn the_near_miss_budget_is_spent_in_walk_order_whatever_the_order_given() {
     let root = package("app", Layout::Flat, &files);
     let analysis = analyze(&root, &[], &limits);
     runs.push(
-      analysis
-        .diagnostics()
-        .iter()
+      reported(&analysis)
+        .into_iter()
         .map(|diagnostic: &Diagnostic| {
           (
             diagnostic.to_string(),
@@ -1983,7 +2004,7 @@ fn applications_are_kept_on_definitions_members_and_extensions() {
 fn arguments_take_the_definitions_order_and_so_do_their_values() {
   let text = "directive @d(a: Int, b: Int) on OBJECT\ntype T @d(b: 2, a: 1) {\n  f: Int\n}\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = schema_file(&analysis);
   let t = def(model, Namespace::Type, "^::app::T");
@@ -2024,11 +2045,7 @@ fn an_unknown_argument_is_reported_and_not_kept() {
       None
     )]
   );
-  let diagnostic = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic");
+  let diagnostic = reported(&analysis)[0];
   assert_eq!(
     diagnostic.to_string(),
     "the directive `@d` declares no argument named `limt`"
@@ -2050,7 +2067,16 @@ fn an_unknown_argument_is_reported_and_not_kept() {
 fn an_argument_written_twice_is_kept_twice() {
   let text = "directive @d(a: Int, b: Int) on OBJECT\ntype T @d(a: 1, b: 2, a: 3) {\n  f: Int\n}\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  // GraphQL's own rule refuses the second `a`, and the model keeps both all the same.
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      "smear::schema::duplicate-directive-argument-use",
+      named(schema, text, ", ", "a", 0),
+      Some(named(schema, text, "(", "a", 1))
+    )]
+  );
   let model = analysis.model();
   let t = def(model, Namespace::Type, "^::app::T");
   assert_eq!(
@@ -2064,9 +2090,8 @@ fn an_unresolved_directive_stays_with_no_argument() {
   let text = "type T @missing(a: 1, b: [2]) @gone<Int>(x: 3) {\n  f: Int\n}\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
-  let codes: Vec<(&str, Location)> = analysis
-    .diagnostics()
-    .iter()
+  let codes: Vec<(&str, Location)> = reported(&analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
     .collect();
   assert_eq!(
@@ -2095,10 +2120,11 @@ fn an_unresolved_directive_stays_with_no_argument() {
   assert_eq!(reached.types, f.into_iter().collect::<Vec<TypeExprId>>());
 }
 
-/// An application of every kind of literal, each argument in the definition's order.
-const LITERALS: &str = "enum Color {\n  RED\n}\n\
-                        directive @all(b: Boolean, s: String, f: Float, i: Int, e: Color, n: Int, \
-                        l: [Int], st: Int, m: Int, o: Int) on OBJECT\n\
+/// An application of every kind of literal, each argument, in the definition's order, of a
+/// custom scalar, which takes any literal.
+const LITERALS: &str = "enum Color {\n  RED\n}\nscalar Any\n\
+                        directive @all(b: Any, s: Any, f: Any, i: Any, e: Any, n: Any, \
+                        l: Any, st: Any, m: Any, o: Any) on OBJECT\n\
                         type T @all(b: true, s: \"two\\nlines\", f: -1.5e3, i: -42, e: Color::RED, \
                         n: null, l: [1, [2]], st: set!{ 1 2 }, m: map!{ one => 1 }, \
                         o: { x: 1, y: [2] }) {\n  f: Int\n}\n";
@@ -2106,7 +2132,7 @@ const LITERALS: &str = "enum Color {\n  RED\n}\n\
 #[test]
 fn each_kind_of_literal_is_kept_as_written() {
   let analysis = analyze_one(LITERALS);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = schema_file(&analysis);
   let t = def(model, Namespace::Type, "^::app::T");
@@ -2116,19 +2142,21 @@ fn each_kind_of_literal_is_kept_as_written() {
     .iter()
     .map(|argument: &ApplicationArgument| valued(model, argument.value()))
     .collect();
+  // Each is kept as written, its syntactic kind and its text, but `null`, which a nullable type
+  // takes as `null`.
   assert_eq!(
     values,
     [
-      "Boolean true",
-      "String \"two\\nlines\"",
-      "Float -1.5e3",
-      "Int -42",
-      "Enum Color::RED",
+      "Literal(Boolean) true",
+      "Literal(String) \"two\\nlines\"",
+      "Literal(Float) -1.5e3",
+      "Literal(Int) -42",
+      "Literal(Enum) Color::RED",
       "Null null",
-      "List [1, [2]]",
-      "Set set!{ 1 2 }",
-      "Map map!{ one => 1 }",
-      "Object { x: 1, y: [2] }",
+      "Literal(List) [1, [2]]",
+      "Literal(Set) set!{ 1 2 }",
+      "Literal(Map) map!{ one => 1 }",
+      "Literal(Object) { x: 1, y: [2] }",
     ]
   );
   // A path keeps its path; each is where it is written; nothing nested is a value of its own.
@@ -2152,15 +2180,16 @@ fn type_arguments_of_an_application_are_occurrences() {
   let text =
     "directive @typed<T>(value: T) on OBJECT\ntype Box @typed<[Int!]>(value: 1) {\n  f: Int\n}\n";
   let analysis = analyze_one(text);
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let typed = def(model, Namespace::Directive, "@^::app::typed");
   assert_eq!(member_types(model, model.def(typed).arguments()), ["T=#0"]);
   let boxed = def(model, Namespace::Type, "^::app::Box");
   let application = model.application(model.def(boxed).applications()[0]);
+  // Its argument takes its type under the type argument, `[Int!]`: a lone value there.
   assert_eq!(
     applied(model, application.id()),
-    "@typed=typed<[Int=i32!]>(value: Int 1)"
+    "@typed=typed<[Int=i32!]>(value: List [Int 1])"
   );
   // The application's type argument, and what it nests, come before the next member's type.
   let argument = application.type_args()[0];
@@ -2178,9 +2207,8 @@ fn an_unknown_argument_with_a_long_name_quotes_an_excerpt() {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
   let analysis = analyze(&root, &[], &Limits::new());
-  let messages: Vec<String> = analysis
-    .diagnostics()
-    .iter()
+  let messages: Vec<String> = reported(&analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .collect();
   assert_eq!(
@@ -2202,11 +2230,7 @@ const REASON: &str = "Explains why this element was deprecated, usually also inc
 fn the_built_in_library_lowers_with_no_diagnostic() {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let builtins = model.builtins();
 
@@ -2674,7 +2698,7 @@ fn default_roots_are_presumed_only_with_no_schema_definition() {
 
   // Not an interface named so.
   let analysis = analyze_one("interface Query {\n  ok: Int\n}\n");
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(roots(analysis.model()), [None::<String>, None, None]);
 
   // Not a type of a submodule, even one a `use` item names in the root module, nor a
@@ -2697,7 +2721,7 @@ fn default_roots_are_presumed_only_with_no_schema_definition() {
     &[("g.graphqlx", "type Mutation {\n  run: Int\n}\n")],
   );
   let analysis = analyze(&root, &[geo], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(roots(analysis.model()), [None::<String>, None, None]);
 
   // With a schema definition, nothing is presumed.
@@ -2940,7 +2964,7 @@ const APP: [(&str, &str); 3] = [
   (
     "z.graphqlx",
     "extend type Query @a::mark(level: 3) {\n  more(first: Int): Int @a::mark(level: 4)\n}\n\
-     scalar Late\nextend schema {\n  subscription: Query\n}\n",
+     scalar Late\nextend schema {\n  subscription: ^::geo::Point\n}\n",
   ),
 ];
 

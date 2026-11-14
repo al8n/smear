@@ -9,7 +9,10 @@ use core::{cmp::Ordering, ops::ControlFlow};
 
 use tokora::{SimpleSpan, span::AsSpan};
 
-use smear_parser::graphql::ast::VariableValue;
+use smear_parser::{
+  graphql::ast::VariableValue,
+  lexer::{DecimalFloat, NORMALIZED_FLOAT_LEN, normalize_decimal_float},
+};
 
 use super::{
   Diagnostic, Ledger, Meter, Rule, TypeId, Validator,
@@ -963,14 +966,18 @@ where
       };
     }
     if name == self.scalars.float {
-      // The coercion rules let an Int literal stand for a Float — and that arm reads **nothing**:
-      // being an Int is the whole of the answer. Only `is_finite` reads a spelling.
+      // The coercion rules let an Int literal stand for a Float, and Float's input coercion
+      // refuses a value no finite double represents, written as an integer or not (§3.5.2). So
+      // both arms read their digits with `is_finite`, and both pay for them.
       return match (value.as_float(), value.as_int()) {
         (Some(float), _) => match self.spelling(float.source().as_ref(), blame)? {
           Some(digits) => ControlFlow::Continue(is_finite(digits)),
           None => ControlFlow::Continue(false),
         },
-        (None, Some(_)) => ControlFlow::Continue(true),
+        (None, Some(int)) => match self.spelling(int.source().as_ref(), blame)? {
+          Some(digits) => ControlFlow::Continue(is_finite(digits)),
+          None => ControlFlow::Continue(false),
+        },
         (None, None) => ControlFlow::Continue(false),
       };
     }
@@ -1421,9 +1428,17 @@ fn fits_id(spelling: &str) -> bool {
   fits_i32(spelling)
 }
 
-/// Whether a `Float` literal's spelling names a finite double.
+/// Whether a numeric literal's spelling, a `Float`'s or an `Int`'s, names a finite double: a zero,
+/// or the spelling `normalize_decimal_float` writes of it, read by `str::parse`. Not the literal as
+/// written, whose exponent past 655 359 `str::parse` misreads when the literal's digits offset it.
 fn is_finite(spelling: &str) -> bool {
-  spelling.parse::<f64>().is_ok_and(f64::is_finite)
+  let mut buffer = [0; NORMALIZED_FLOAT_LEN];
+  match normalize_decimal_float(spelling.as_bytes(), &mut buffer) {
+    Some(DecimalFloat::Zero { .. }) => true,
+    Some(DecimalFloat::Spelled(spelled)) => spelled.parse::<f64>().is_ok_and(f64::is_finite),
+    // Past every double, no decimal float, or a reading of a later lexer's.
+    _ => false,
+  }
 }
 
 #[cfg(test)]
@@ -1473,5 +1488,52 @@ mod tests {
     assert!(is_finite("1.0"));
     assert!(is_finite("-1.5e3"));
     assert!(!is_finite("1e400"));
+  }
+
+  #[test]
+  fn a_float_literals_exponent_is_read_whatever_its_digits_offset() {
+    // Enough zeros that an exponent past 655 359, the most `str::parse` reads exactly, is offset
+    // back into range; fewer under Miri, where each verdict is the same.
+    let zeros = "0".repeat(if cfg!(miri) { 997 } else { 99_998 });
+    // `0.`, the zeros, `1e999999`: 10^900000 when unshrunk, past every double, which `str::parse`
+    // alone reads as 1.0.
+    assert!(!is_finite(&std::format!("0.{zeros}1e999999")));
+    // `1`, the zeros and one more, `e-999999`: as far below, and so zero, which it reads as 1.0.
+    assert!(is_finite(&std::format!("1{zeros}0e-999999")));
+    // A first significant digit at each edge of a double's range, and a zero past any exponent.
+    assert!(is_finite("1e308"));
+    assert!(!is_finite("1e309"));
+    assert!(is_finite("1.7976931348623157e308"));
+    assert!(!is_finite("1.7976931348623159e308"));
+    assert!(is_finite("1e-999999"));
+    assert!(is_finite("-0.0e999999"));
+  }
+
+  /// The first 308 digits of `2^1024 - 2^970`, the least integer that rounds to infinity as a
+  /// double: with a final `2` it is that integer, and with a final `1` it is the greatest that
+  /// rounds to `f64::MAX`.
+  const EDGE_HEAD: &str = concat!(
+    "17976931348623158079372897140530341507993413271003782693617377898044496829276",
+    "47509466490179775872070963302864166928879109465555478519404026306574886715058",
+    "20681908902000708383676273854845817711531764475730270069855571366959622842914",
+    "81986083493647529271907416844436551070434271155969950809304288017790417449779",
+  );
+
+  #[test]
+  fn an_integer_spelling_is_finite_only_within_a_doubles_range() {
+    let zeros = "0".repeat(308);
+    for (spelling, finite) in [
+      (std::format!("{EDGE_HEAD}1"), true),
+      (std::format!("{EDGE_HEAD}2"), false),
+      (std::format!("1{zeros}"), true),
+      (std::format!("1{zeros}0"), false),
+    ] {
+      assert_eq!(is_finite(&spelling), finite, "{spelling}");
+      assert_eq!(
+        is_finite(&std::format!("-{spelling}")),
+        finite,
+        "-{spelling}"
+      );
+    }
   }
 }

@@ -12,6 +12,27 @@ use smear::{
   lexer::tokora::SimpleSpan,
 };
 
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// Whether `analysis` reports nothing but that its program has no query root.
+fn clean(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics.len() - reported(analysis).len();
+  diagnostics.len() == waived && diagnostics.error_count() == waived
+}
+
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
 fn package(
   name: &str,
@@ -92,11 +113,11 @@ fn module(model: &Model, path: &str) -> ModuleId {
     .unwrap_or_else(|| panic!("no module `{path}`"))
 }
 
-/// Each diagnostic's code and primary location, in the list's order.
+/// Each diagnostic's code and primary location, in the list's order, but for the missing query
+/// root.
 fn found(analysis: &Analysis) -> Vec<(&'static str, Location)> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
     .collect()
 }
@@ -126,7 +147,7 @@ fn a_directory_package_has_a_module_per_directory_and_its_files_share_it() {
     ],
   );
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   let model = analysis.model();
   assert_eq!(
@@ -177,7 +198,7 @@ fn a_flat_package_has_every_file_in_its_root_module() {
     ],
   );
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(tree(analysis.model()), [(3, vec![], ModuleKind::Root)]);
 }
 
@@ -195,7 +216,7 @@ fn an_inline_mod_declares_a_child_of_the_module_it_is_written_in() {
       &[("a.graphqlx", NESTED), ("b.graphqlx", OTHER)],
     );
     let analysis = analyze(&root, &[], &Limits::new());
-    assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+    assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
     let model = analysis.model();
     assert_eq!(
@@ -281,7 +302,7 @@ fn two_mods_of_one_path_in_one_file_are_one_module_declared_twice() {
   let root = package("app", Layout::Directory, &[("a.graphqlx", text)]);
   let analysis = analyze(&root, &[], &Limits::new());
   let a = file(&analysis, 3, "a.graphqlx");
-  let diagnostics: Vec<&Diagnostic> = analysis.diagnostics().iter().collect();
+  let diagnostics = reported(&analysis);
   assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
   defined_twice(
     diagnostics[0],
@@ -318,7 +339,7 @@ fn a_mod_in_two_files_of_one_directory_is_one_module_declared_twice() {
   let analysis = analyze(&root, &[], &Limits::new());
   let a = file(&analysis, 3, "x/a.graphqlx");
   let b = file(&analysis, 3, "x/b.graphqlx");
-  let diagnostics: Vec<&Diagnostic> = analysis.diagnostics().iter().collect();
+  let diagnostics = reported(&analysis);
   assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
   defined_twice(
     diagnostics[0],
@@ -349,7 +370,7 @@ fn a_mod_of_a_directory_module_declares_that_module_twice() {
   );
   let analysis = analyze(&root, &[], &Limits::new());
   let written = file(&analysis, 3, "schema.graphqlx");
-  let diagnostics: Vec<&Diagnostic> = analysis.diagnostics().iter().collect();
+  let diagnostics = reported(&analysis);
   assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
   // The directory has no position of its own: the label is at the package source, and names it.
   defined_twice(
@@ -380,7 +401,7 @@ fn every_later_declaration_of_a_nested_mod_is_reported() {
   let root = package("app", Layout::Directory, &[("a.graphqlx", text)]);
   let analysis = analyze(&root, &[], &Limits::new());
   let a = file(&analysis, 3, "a.graphqlx");
-  let diagnostics: Vec<&Diagnostic> = analysis.diagnostics().iter().collect();
+  let diagnostics = reported(&analysis);
   assert_eq!(diagnostics.len(), 2, "{diagnostics:#?}");
   defined_twice(
     diagnostics[0],
@@ -491,7 +512,7 @@ fn a_module_deeper_than_the_limit_is_a_resource_limit() {
 
   // At the depth the program needs, nothing is refused.
   let analysis = analyze(&root, &[], &Limits::new().with_max_module_depth(3));
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   // With no depth, only the root module is.
   let analysis = analyze(&root, &[], &Limits::new().with_max_module_depth(0));
@@ -635,7 +656,7 @@ fn a_modules_descendants_come_before_its_next_sibling() {
     (mods, ModuleKind::Inline),
   ] {
     let analysis = analyze(&root, &[], &Limits::new());
-    assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+    assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
     assert_eq!(
       tree(analysis.model()),
       [
@@ -681,11 +702,7 @@ fn a_mod_past_the_module_limit_is_refused_and_no_module_after_it() {
     "{:#?}",
     analysis.diagnostics()
   );
-  let diagnostic = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic");
+  let diagnostic = reported(&analysis)[0];
   let message = diagnostic.to_string();
   assert_eq!(quoted(&message), ["mod b"], "{message}");
   assert!(
@@ -739,12 +756,7 @@ fn a_directory_past_the_module_limit_is_refused_and_no_module_after_it() {
     "{:#?}",
     analysis.diagnostics()
   );
-  let message = analysis
-    .diagnostics()
-    .iter()
-    .next()
-    .expect("one diagnostic")
-    .to_string();
+  let message = reported(&analysis)[0].to_string();
   assert_eq!(quoted(&message), ["app", "b"], "{message}");
   assert!(
     message.contains(&format!("limit of {max} modules")),
@@ -776,7 +788,7 @@ fn the_module_limit_met_exactly_is_no_error() {
   );
   // The four root modules, then `d`, `a`, `b` and `b::c`.
   let analysis = analyze(&root, &[], &Limits::new().with_max_modules(ROOTS + 4));
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(analysis.model().modules().len(), ROOTS + 4);
 
   let analysis = analyze(&root, &[], &Limits::new().with_max_modules(ROOTS + 3));
@@ -957,7 +969,7 @@ fn a_long_module_name_is_not_read_again_for_each_module_under_it() {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("lib.graphqlx", text.as_str())]);
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   let model = analysis.model();
   assert_eq!(model.modules().len(), ROOTS + 1 + CHILDREN);

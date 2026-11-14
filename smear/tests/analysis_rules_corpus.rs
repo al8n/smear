@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, ApplicationId, Contribution, Cx, DefId, Diagnostic, Layout, Limits, MemberId,
-    ModuleId, Package, PackageId, PackageKind, Packages, SourceFile, SourceId, Tier, TypeExprId,
-    ValueId, Visitor, analyze,
+    Analysis, ApplicationId, Contribution, Cx, DefId, DefKind, Diagnostic, Layout, Limits,
+    MemberId, Model, ModuleId, Namespace, ObjectEntry, Origin, Package, PackageId, PackageKind,
+    Packages, SourceFile, SourceId, Tier, TyKind, TypeExprId, ValueId, ValueKind, Visitor, analyze,
     test_support::{self, RULES},
     visit,
   },
@@ -70,6 +70,198 @@ fn analyzed(path: &Path, text: &[u8]) -> Analysis {
   let root: Package<&[u8]> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
   analyze(&root, &[], &Limits::new())
+}
+
+/// GraphQL's code for a schema with no query root. Most files of the corpora are parts of a schema
+/// and write none, so the sweeps over ok files read a file whose only errors are this code as ok.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// Whether `analysis` is ok but for its program having no query root: every error it holds, if
+/// any, is that code.
+fn ok_but_for_the_root(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() == NO_QUERY_ROOT)
+    .count();
+  diagnostics.error_count() == waived
+}
+
+/// Files of the schema fixtures that each sweep over ok files must read as ok: whole schemas, each
+/// with its query root, that both dialects accept, and that write defaults of every shape. A sweep
+/// that reads none of them, or no file at all, checks nothing, and fails.
+const KNOWN_OK: [&str; 3] = [
+  "countries.graphql",
+  "introspection_agreement.graphql",
+  "introspection_defaults.graphql",
+];
+
+/// Asserts that a sweep over ok files read each of [`KNOWN_OK`] among `checked`, the files it
+/// read as ok, and prints how many it read.
+fn checked_the_known_ok(checked: &[PathBuf]) {
+  println!("{} corpus files read as ok", checked.len());
+  for name in KNOWN_OK {
+    assert!(
+      checked
+        .iter()
+        .any(|path: &PathBuf| path.file_name() == Some(std::ffi::OsStr::new(name))),
+      "`{name}` is not read as ok: {} files are",
+      checked.len()
+    );
+  }
+}
+
+#[test]
+fn an_ok_corpus_file_has_no_unresolved_value() {
+  let mut checked: Vec<PathBuf> = Vec::new();
+  for (path, text) in corpus() {
+    let analysis = analyzed(&path, &text);
+    if !ok_but_for_the_root(&analysis) {
+      continue;
+    }
+    let model = analysis.model();
+    let (_, _, values, _) = test_support::counts(model);
+    for index in 0..values {
+      assert!(
+        !matches!(
+          model.value(ValueId::new(index)).kind(),
+          ValueKind::Unresolved
+        ),
+        "{}: value {index} is unresolved",
+        path.display()
+      );
+    }
+    checked.push(path);
+  }
+  checked_the_known_ok(&checked);
+}
+
+/// Over every corpus file whose analysis is ok, a value kept as written is a custom scalar's, one a
+/// supplied package defines that is no collection, or one whose type names a type parameter: every
+/// other value is coerced, a built-in scalar's among them. An output type in an input position is
+/// GraphQL's own rules' to refuse, so no ok file holds a value of one.
+#[test]
+fn an_ok_corpus_file_keeps_a_literal_only_where_nothing_is_coerced() {
+  let mut checked: Vec<PathBuf> = Vec::new();
+  for (path, text) in corpus() {
+    let analysis = analyzed(&path, &text);
+    if !ok_but_for_the_root(&analysis) {
+      continue;
+    }
+    let model = analysis.model();
+    let (_, _, values, _) = test_support::counts(model);
+    for index in 0..values {
+      let value = model.value(ValueId::new(index));
+      if !matches!(value.kind(), ValueKind::Literal(_)) {
+        continue;
+      }
+      let ty = model.ty(value.ty());
+      let custom = match ty.kind() {
+        TyKind::Named { def, .. } => {
+          let def = model.def(def);
+          def.kind() == DefKind::Scalar
+            && def.collection().is_none()
+            && def.origin() == Origin::User
+        }
+        _ => false,
+      };
+      assert!(
+        custom || !ty.is_closed(),
+        "{}: value {index} is kept as written",
+        path.display()
+      );
+    }
+    checked.push(path);
+  }
+  checked_the_known_ok(&checked);
+}
+
+/// The value `id`, written out: a scalar as its kind and its text, `Int 1`, a list as
+/// `List [Int 1]`, and an input object as `Object {key: String "value", answer= Int 42}`, each
+/// entry its field's name and its value, a field a default filled marked `=` for its `:`.
+fn shown(model: &Model, id: ValueId) -> String {
+  match model.value(id).kind() {
+    ValueKind::Null => String::from("Null null"),
+    ValueKind::Bool(flag) => format!("Boolean {flag}"),
+    ValueKind::Int(int) => format!("Int {}", int.text()),
+    ValueKind::Float(float) => format!("Float {}", float.text()),
+    ValueKind::String(text) => format!("String {text:?}"),
+    ValueKind::List(items) => {
+      let items: Vec<String> = items
+        .iter()
+        .map(|item: &ValueId| shown(model, *item))
+        .collect();
+      format!("List [{}]", items.join(", "))
+    }
+    ValueKind::Object(entries) => {
+      let entries: Vec<String> = entries
+        .iter()
+        .map(|entry: &ObjectEntry| {
+          let mark = if entry.name().is_some() { ":" } else { "=" };
+          format!(
+            "{}{mark} {}",
+            model.member(entry.field()).name(),
+            shown(model, entry.value())
+          )
+        })
+        .collect();
+      format!("Object {{{}}}", entries.join(", "))
+    }
+    other => format!("{other:?}"),
+  }
+}
+
+/// Each object literal the corpus writes as a default is an input object: the fields it writes,
+/// found by name, and the fields a default fills, each in its input object's order; a field with
+/// no default, a OneOf input object's among them, left out and absent. Each value is found by its
+/// owner: the argument of a field of a type of the file.
+#[test]
+fn the_corpus_input_objects_are_objects() {
+  let files = corpus();
+  let default = |name: &str, owner: &str, field: &str, argument: &str| -> String {
+    let (path, text) = files
+      .iter()
+      .find(|(path, _): &&(PathBuf, Vec<u8>)| path.file_name() == Some(std::ffi::OsStr::new(name)))
+      .unwrap_or_else(|| panic!("no corpus file `{name}`"));
+    let analysis = analyzed(path, text);
+    let model = analysis.model();
+    let def = model
+      .lookup(Namespace::Type, format!("^::app::{owner}"))
+      .unwrap_or_else(|| panic!("{name}: no type `{owner}`"));
+    let field = model
+      .def(def)
+      .fields()
+      .into_iter()
+      .find(|id: &MemberId| model.member(*id).name() == field)
+      .unwrap_or_else(|| panic!("{name}: no field `{owner}.{field}`"));
+    let argument = model
+      .member(field)
+      .arguments()
+      .into_iter()
+      .find(|id: &MemberId| model.member(*id).name() == argument)
+      .unwrap_or_else(|| panic!("{name}: no argument `{argument}`"));
+    let value = model
+      .member(argument)
+      .default()
+      .unwrap_or_else(|| panic!("{name}: no default"));
+    shown(model, value)
+  };
+  assert_eq!(
+    default("introspection_defaults.graphql", "Query", "range", "range"),
+    "Object {min: Int 1, max: Int 9, step= Int 1}"
+  );
+  assert_eq!(
+    default("introspection_agreement.graphql", "User", "posts", "filter"),
+    "Object {published: Boolean false, ranked: List [List [Int 1, Null null], List []]}"
+  );
+  assert_eq!(
+    default("schema_kitchen_sink.graphql", "Foo", "six", "argument"),
+    "Object {key: String \"value\", answer= Int 42, other= Float 1.23e4}"
+  );
+  assert_eq!(
+    default("countries.graphql", "Query", "continents", "filter"),
+    "Object {}"
+  );
 }
 
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
@@ -224,18 +416,19 @@ struct Reach {
 
 /// What a walk of `analysis` over `packages` must reach, read off the model.
 ///
-/// A member, a type occurrence, a value and an application are each reached exactly when the walk
-/// covers the package that wrote it, which is the package of the source its own location is in;
-/// a definition, when the walk covers one of its contributions; and a module and a package, when
-/// the walk covers the package or one of the definitions it holds is entered. The rows of the four
-/// tables the public model answers no range of are numbered from 0 to the counts the test-support
-/// door answers, so over every package this is each table whole.
+/// A member, a type occurrence and an application are each reached exactly when the walk covers
+/// the package that wrote it, which is the package of the source its own location is in; a value,
+/// when the walk covers the package that wrote its owner, the member whose default holds it or the
+/// application whose argument holds it; a definition, when the walk covers one of its
+/// contributions; and a module and a package, when the walk covers the package or one of the
+/// definitions it holds is entered. The rows of the four tables the public model answers no range
+/// of are numbered from 0 to the counts the test-support door answers, so over every package this
+/// is each table whole.
 ///
-/// It holds because nothing the analyzer writes yet is located outside the item that wrote it. A
-/// value a default fills is to be a copy located where the default is written, which may be
-/// another package's source than that of the application the copy fills: once coercion makes such
-/// copies, a value's own location stops saying who wrote it, and this must read the application
-/// that holds the copy instead.
+/// A value is read by its owner because a copy of a default that fills an application's argument
+/// is located where the default is written, which may be another package's source than the
+/// application's: its own location does not say who wrote it. Each value's owner is read off the
+/// model, and every value has exactly one.
 fn must_reach(analysis: &Analysis, packages: Packages) -> Reach {
   let model = analysis.model();
   let sources = analysis.sources();
@@ -295,9 +488,96 @@ fn must_reach(analysis: &Analysis, packages: Packages) -> Reach {
     applications: (0..applications)
       .filter(|index: &u32| wrote(model.application(ApplicationId::new(*index)).location()))
       .collect::<Vec<u32>>(),
-    values: (0..values)
-      .filter(|index: &u32| wrote(model.value(ValueId::new(*index)).location()))
+    values: owners(model, values)
+      .into_iter()
+      .enumerate()
+      .filter(|&(_, owner): &(usize, Location)| wrote(owner))
+      .map(|(index, _): (usize, Location)| u32::try_from(index).expect("a value id"))
       .collect::<Vec<u32>>(),
+  }
+}
+
+/// Where the owner of each of the `count` values of `model` is: the member whose default holds it,
+/// or the application whose argument holds it. Each definition's applications, then each of its
+/// direct members, right after each its arguments, a member's default and then its applications;
+/// then the schema's applications; and under each the values it holds.
+///
+/// # Panics
+///
+/// If a value has two owners, or none.
+fn owners(model: &Model, count: u32) -> Vec<Location> {
+  let mut owner: Vec<Option<Location>> = vec![None; count as usize];
+  for def in model.defs() {
+    let definition = model.def(def);
+    for &application in definition.applications() {
+      own_arguments(model, &mut owner, application);
+    }
+    let direct = [
+      definition.fields(),
+      definition.input_fields(),
+      definition.enum_values(),
+      definition.arguments(),
+    ];
+    for member in direct.into_iter().flatten() {
+      own_member(model, &mut owner, member);
+      for argument in model.member(member).arguments() {
+        own_member(model, &mut owner, argument);
+      }
+    }
+  }
+  for &application in model.schema().applications() {
+    own_arguments(model, &mut owner, application);
+  }
+  owner
+    .into_iter()
+    .enumerate()
+    .map(|(index, at): (usize, Option<Location>)| {
+      at.unwrap_or_else(|| panic!("value {index} has no owner"))
+    })
+    .collect()
+}
+
+/// Gives `member`'s default, and its applications' arguments, their owners.
+fn own_member(model: &Model, owner: &mut [Option<Location>], member: MemberId) {
+  let held = model.member(member);
+  if let Some(default) = held.default() {
+    own(model, owner, default, held.location());
+  }
+  for &application in held.applications() {
+    own_arguments(model, owner, application);
+  }
+}
+
+/// Gives `application`'s arguments their owner, `application`.
+fn own_arguments(model: &Model, owner: &mut [Option<Location>], application: ApplicationId) {
+  let applied = model.application(application);
+  for argument in applied.arguments() {
+    own(model, owner, argument.value(), applied.location());
+  }
+}
+
+/// Gives `root`, and every value it holds, the owner written at `at`.
+fn own(model: &Model, owner: &mut [Option<Location>], root: ValueId, at: Location) {
+  let mut stack: Vec<ValueId> = vec![root];
+  while let Some(id) = stack.pop() {
+    let slot = owner
+      .get_mut(id.get() as usize)
+      .unwrap_or_else(|| panic!("value {} is past the model's values", id.get()));
+    assert!(slot.is_none(), "value {} has two owners", id.get());
+    *slot = Some(at);
+    match model.value(id).kind() {
+      ValueKind::List(items) | ValueKind::Set(items) => stack.extend(items.iter().copied()),
+      ValueKind::Map(entries) => {
+        for &(key, item) in entries {
+          stack.push(key);
+          stack.push(item);
+        }
+      }
+      ValueKind::Object(entries) => {
+        stack.extend(entries.iter().map(|entry: &ObjectEntry| entry.value()));
+      }
+      _ => {}
+    }
   }
 }
 
@@ -508,9 +788,12 @@ fn each_walk_of_a_program_of_several_packages_reaches_what_the_model_says_once()
   assert_eq!(codes(&analysis), ["smear::graphqlx::orphan-extension"]);
   census(&analysis, "a dependency and an orphan extension");
 
+  // The `@specifiedBy` the root package's `Int` applies is GraphQL's own refusal: the replacement
+  // is the built-in `i32`, which takes none.
   let analysis = replaced_and_extended_built_ins();
-  assert!(
-    analysis.diagnostics().is_empty(),
+  assert_eq!(
+    codes(&analysis),
+    ["smear::schema::specified-by-on-built-in-scalar"],
     "{:#?}",
     analysis.diagnostics()
   );
@@ -520,10 +803,12 @@ fn each_walk_of_a_program_of_several_packages_reaches_what_the_model_says_once()
   assert_eq!(
     codes(&analysis),
     [
+      "smear::schema::self-referential-directive",
       "smear::graphqlx::unsatisfied-bound",
       "smear::schema::undefined-type",
       "smear::graphqlx::orphan-extension",
       "smear::graphqlx::orphan-extension",
+      "smear::schema::unsupported-directive-location",
       "smear::graphqlx::schema-outside-root",
     ]
   );
@@ -538,15 +823,19 @@ fn permuting_the_dependencies_changes_nothing_the_rules_report_or_mark() {
   let forward = analyze(&root, &[geo.clone(), astro.clone()], &Limits::new());
   let backward = analyze(&root, &[astro, geo], &Limits::new());
   // The case is not vacuous: the orphan rule reports a dependency's extension of the other's type
-  // and of a built-in, and the schema rule the dependency's schema extension, which its error
-  // marks.
+  // and of a built-in, the location rule the `@deprecated` that extension applies to a scalar,
+  // the self-reference rule `core`'s `@deprecated`, which that application puts on a cycle through
+  // `string`, in `core`'s source, and the schema rule the dependency's schema extension, which its
+  // error marks.
   assert_eq!(
     codes(&forward),
     [
+      "smear::schema::self-referential-directive",
       "smear::graphqlx::unsatisfied-bound",
       "smear::schema::undefined-type",
       "smear::graphqlx::orphan-extension",
       "smear::graphqlx::orphan-extension",
+      "smear::schema::unsupported-directive-location",
       "smear::graphqlx::schema-outside-root",
     ]
   );
@@ -642,13 +931,11 @@ fn a_rule_fired(analysis: &Analysis) -> bool {
 
 /// Tolerance, over every corpus file: no rule panics on one, and none repeats a phase.
 ///
-/// No corpus file makes a rule fire: each is the one file of a `Flat` root package, with no
-/// dependency beside it; none defines the schema twice, adds more than directives to a built-in or
-/// applies `@marker`, `@set` or `@map` anywhere; none declares an enum with a type parameter, or
-/// two type parameters of one name; none names a marker, `TypeRef` or `NonZero`, and every
-/// interface a scalar, an enum, an input object or a union of the corpus implements names nothing.
-/// So over the corpus this pins that no rule panics, and nothing more. It prints on how many files
-/// a rule fired, which shows the first file that makes one fire.
+/// Rules speak on corpus files: GraphQL's own rules over what a definition holds refuse what the
+/// GraphQL documents of the schema fixtures hold, such as an enum value declared twice, and those
+/// documents also hold what phases refuse. What this pins is that no rule's diagnostic lies within
+/// an extent that also holds a phase's error, over files on which rules do speak, and that no rule
+/// panics. It prints on how many files a rule fired.
 #[test]
 fn no_rule_repeats_a_phase_over_any_corpus_file() {
   let files = corpus();
@@ -776,5 +1063,76 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
   tolerant(
     &analysis,
     "a dependency's schema definition that holds a refusal",
+  );
+
+  // Two `rust` externs that bind, beside an `@extern` whose `lang` did not coerce, in the scalar's
+  // own contribution: coercion's diagnostic alone, the second `rust` being in a contribution a
+  // phase refused something in.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[(
+      "schema.graphqlx",
+      "type Query {\n  x: Int\n}\nscalar M @extern(lang: \"rust\", type: \"a\") \
+       @extern(lang: \"rust\", type: \"b\") @extern(lang: 1, type: \"c\")\n",
+    )],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(
+    codes(&analysis),
+    ["smear::schema::invalid-directive-argument-value"]
+  );
+  tolerant(&analysis, "a language bound twice beside a value refused");
+
+  // A field's `@repr` that writes `for`, whose `lang` did not coerce: coercion's diagnostic alone.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[(
+      "schema.graphqlx",
+      "type Query {\n  x: Int @repr(lang: 1, type: \"i64\", for: Int)\n}\n",
+    )],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(
+    codes(&analysis),
+    ["smear::schema::invalid-directive-argument-value"]
+  );
+  tolerant(&analysis, "a position's `for` beside a value refused");
+
+  // A `core` root package's `String` beside a type that names nothing, in one contribution: the
+  // resolver's diagnostic alone.
+  let root: Package<&str> =
+    Package::new("app", Layout::Flat, Tier::Core).with_files([SourceFile::new(
+      "schema.graphqlx",
+      "type Query {\n  x: Missing\n  s: String\n}\n",
+    )]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(codes(&analysis), ["smear::schema::undefined-type"]);
+  tolerant(
+    &analysis,
+    "a use above the tier beside a type that names nothing",
+  );
+
+  // A type that omits an interface its interface implements, and names a marker as a field's
+  // type: the implementation phase's diagnostic alone, which marks the type's contribution, where
+  // `marker-misuse` is then silent.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[(
+      "schema.graphqlx",
+      "type Query {\n  x: Int\n}\ninterface Marked @marker\ninterface A {\n  a: Int\n}\n\
+       interface B implements A {\n  a: Int\n}\ntype T implements B {\n  a: Int\n  m: Marked\n}\n",
+    )],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(
+    codes(&analysis),
+    ["smear::schema::missing-transitive-interface"]
+  );
+  tolerant(
+    &analysis,
+    "a missing interface beside a marker named as a field's type",
   );
 }

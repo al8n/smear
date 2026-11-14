@@ -17,23 +17,54 @@
 //!
 //! [`analyze`] answers an [`Analysis`]: the [`Model`], its [`Diagnostics`] and its [`SourceMap`].
 //! None of the three has a type parameter or a lifetime, whatever text type went in, and
-//! [`Analysis::is_ok`] is the verdict. So far the model holds the packages, their modules, from
+//! [`Analysis::is_ok`] is the verdict, which keeps GraphQL's rule on the query root: a root
+//! package with no query root is not ok. A library has none, so a consumer that analyzes one as
+//! the root package filters
+//! `smear::schema::missing-query-root-operation-type`, as it filters any code it waives; the
+//! analysis exposes no waiver. So far the model holds the packages, their modules, from
 //! their directories and their inline `mod`s, and every definition, the built-in library's and the
 //! primitives the program writes included, with canonical names and lookup: its kind, name, module,
 //! location, origin and description, its contributions, its own and then its extensions', its type
 //! parameters with their defaults and its bounds, its `implements` entries and union members, its
 //! directive applications, a directive definition's locations, whether its own package makes it a
-//! marker or a collection, the closed instantiations its written occurrences resolve to, and its
+//! marker or a collection, a scalar's host types, each `@extern` its own package writes on it,
+//! the closed instantiations its written occurrences resolve to, and its
 //! members with their descriptions, types, defaults and applications; every written type an
 //! occurrence with its path and arguments as written, what it resolves to, and its type, the
 //! complete instantiation with defaults filled and an alias expanded, each type interned once;
-//! every application with its type arguments and its arguments, and every value as written; and the
-//! schema, with its contributions, one for each schema item, its description, its roots, written or
-//! presumed, and its applications. [`Model::satisfies`] and [`Model::satisfies_ty`] answer what a
-//! type satisfies, read off what it declares, and every instantiation the program writes has its
-//! bounds judged so: a type argument that does not satisfy a bound of its definition is
-//! `smear::graphqlx::unsatisfied-bound`, where the instantiation is written. The phases that write
-//! the rest of it, values and tiers, are still to come.
+//! every application with its type arguments and its arguments; every value, coerced to the type
+//! expected where it stands, each nested value one of its own, an input object's fields found by
+//! name, a set's elements and a map's entries each coerced against its collection's types, a
+//! `TypeRef` value the definition its path names, and a custom scalar's but `null` kept as
+//! written; and the schema, with its contributions, one for each schema item, its description, its
+//! roots, written or presumed, and its applications. [`Model::satisfies`] and
+//! [`Model::satisfies_ty`] answer what a type satisfies, read off what it declares, and every
+//! instantiation the program writes has its bounds judged so: a type argument that does not
+//! satisfy a bound of its definition is `smear::graphqlx::unsatisfied-bound`, where the
+//! instantiation is written, and so is each directive application, by its complete type
+//! arguments, at its path. No definition implements one interface type twice, nor has a union one
+//! member type twice, as written or under the type arguments of an instantiation the program
+//! writes: each later one is `smear::schema::duplicate-implements-interface` or
+//! `smear::schema::duplicate-union-member`. And a definition of any kind implements what the
+//! interfaces it implements implement, under the type arguments its entries give them: one it
+//! omits is `smear::schema::missing-transitive-interface`. An object or an interface declares each
+//! field of the interfaces it implements, of a subtype of its type under those arguments,
+//! deprecated only where it is, taking each of its arguments with exactly its type and requiring
+//! no other: anything else is `smear::schema::missing-interface-field`,
+//! `smear::schema::invalid-interface-field-type`,
+//! `smear::schema::interface-field-not-deprecated`,
+//! `smear::schema::missing-interface-field-argument`,
+//! `smear::schema::invalid-interface-field-argument-type` or
+//! `smear::schema::unexpected-required-argument`. A value that does not fit its type is
+//! refused where it is written, a generic directive's arguments and a generic input object's
+//! fields read under their type arguments, and a default fills each argument and each input field
+//! a value leaves out, but where its copy would hold a copy of itself or the value budget cannot
+//! pay for it; a value of a generic definition whose type names its type parameters is
+//! checked at each closed instantiation of it, a type's the program writes or a directive's an
+//! application makes, and refused there, and so is an argument an application in it leaves out
+//! that the instantiation's type arguments make required. And every definition and every type
+//! has the tier it requires, the least of `core`, `alloc` and `std` that holds everything it uses:
+//! a built-in its package's tag, and anything else what it holds, a list `alloc` at least.
 //!
 //! [`analyze_with`] answers the same analysis with the parser the caller chose, a GraphQLx parser
 //! layer, and the [`Trees`] that layer kept beside it, one for each file it read. Each
@@ -92,7 +123,10 @@
 //! directive is `smear::graphqlx::orphan-extension`, and so is an extension of a definition of
 //! `core`, `alloc` or `std`, unless the root package writes it and it adds directives and nothing
 //! else, none of them `core`'s `@marker`, `@set` or `@map` unless it wrote the definition, a
-//! built-in it replaces. And an enum takes no type parameter: an enum that declares one is
+//! built-in it replaces, and none `core`'s `@extern`; the root package's extension that adds more
+//! to one of GraphQL's introspection types keeps GraphQL's code,
+//! `smear::schema::introspection-type-extension`. And an enum takes no type parameter: an enum that
+//! declares one is
 //! `smear::graphqlx::generic-enum`, at its first type parameter's name. And a marker is used as a
 //! marker: one that declares a field, one named anywhere but as the outermost type of an
 //! `implements` entry or of a bound, and an `implements` entry of a scalar, an enum, an input
@@ -105,8 +139,50 @@
 //! is no integer primitive at least one bit wide, written without `!`, is
 //! `smear::graphqlx::nonzero-argument`. And a definition's type parameters have distinct names, and
 //! so do the names an extension's own list gives them: a type parameter with the name of an
-//! earlier one is `smear::graphqlx::duplicate-type-parameter`. A rule says nothing about a
-//! contribution a phase already refused something in.
+//! earlier one is `smear::graphqlx::duplicate-type-parameter`. And `@extern` binds a scalar its own
+//! package defines, once for each language: an extern whose `lang` an earlier one of its scalar
+//! has, and an `@extern` the root package writes on a GraphQL built-in its own definition replaces,
+//! are each `smear::graphqlx::extern-misuse`. And `@repr` writes `for` on the schema alone, where
+//! it names a type, and chooses once for each language at a position and for each type and language
+//! on the schema: anything else is `smear::graphqlx::repr-misuse`. And a package uses nothing above
+//! the tier it declares: a list in a `core` package, another package's definition that needs more,
+//! `@heap` in a `core` package and an extern's `tier` above its package's are each
+//! `smear::graphqlx::tier`, where they are written, so that in an analysis that is ok every
+//! definition requires at most its package's tier. What a directive definition writes and an
+//! application's type arguments are compile-time metadata, and are not judged, an input object a
+//! directive's argument names being judged where it is written. And what a definition a supplied
+//! package wrote holds keeps GraphQL's own rules, with GraphQL's codes: a member whose name begins
+//! with `__` is `smear::schema::reserved-field-name`, or the code of what else it is; and a member
+//! whose name an earlier member of its list has is `smear::schema::duplicate-field-name`, or the
+//! code of its list; and a definition that holds members and holds none, its extensions' counted,
+//! is `smear::schema::empty-fields-definition`, or the code of its kind, a marker holding none; and
+//! a member typed by a definition of a kind its position does not take is
+//! `smear::schema::field-type-not-output-type`, or the code of its position; and an `implements`
+//! entry of an object or an interface that names what is no interface is
+//! `smear::schema::implements-non-interface`; and an interface on a cycle of `implements` entries
+//! is `smear::schema::self-implementing-interface`; and a union member that is no object type is
+//! `smear::schema::union-member-not-object`; and a required argument or input field that applies
+//! `core`'s `@deprecated` is `smear::schema::deprecated-required-argument`, or the code of an input
+//! field; and a field written non-null of an input object its own package makes OneOf is
+//! `smear::schema::one-of-field-not-nullable`, and one with a default
+//! `smear::schema::one-of-field-has-default`; and `@oneOf` in an extension of an input object is
+//! `smear::schema::one-of-on-input-object-extension`. And every application a supplied package
+//! writes keeps GraphQL's own rules on directives, with GraphQL's codes: one at a location its
+//! directive's definition does not list is `smear::schema::unsupported-directive-location`; and one
+//! of a directive that is not repeatable, applied again where it is applied, a definition and its
+//! extensions being one location, is `smear::schema::duplicate-directive-use`; and an argument an
+//! application writes again is `smear::schema::duplicate-directive-argument-use`; and a directive
+//! that refers to itself, through the directives applied where it reaches and the types it names,
+//! is `smear::schema::self-referential-directive`; and `core`'s `@specifiedBy` on a scalar of the
+//! built-in library is `smear::schema::specified-by-on-built-in-scalar`. And the schema keeps
+//! GraphQL's own rules on its roots, with GraphQL's codes: a root operation type that is no object
+//! type is `smear::schema::root-operation-type-not-object`, and two roots of one type are
+//! `smear::schema::shared-root-operation-type`; and a schema extension the root package writes when
+//! it defines no schema, by a definition or a presumed query root, is
+//! `smear::schema::schema-extension-without-schema`; and a schema with no query root, neither
+//! written nor presumed, is `smear::schema::missing-query-root-operation-type`, at the root
+//! package's first schema definition, or with none at the whole of the root package's package
+//! source. A rule says nothing about a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and
@@ -123,25 +199,31 @@
 //! its own [`visit`], and its verdict is the conjunction of the two.
 
 mod analysis;
+mod bind;
 mod builtin;
 mod check;
 mod code;
+mod coerce;
 mod collect;
 mod declare;
 mod diagnostic;
 mod id;
+mod implement;
 mod instantiate;
 mod limits;
 mod lower;
 mod model;
 mod package;
 mod parse;
+mod raw;
 mod resolve;
 mod rules;
 mod set;
 mod source;
 mod text;
+mod tiers;
 mod tree;
+mod types;
 mod visitor;
 mod widths;
 

@@ -19,11 +19,17 @@ fn directory(name: &str, files: &[(&'static str, &'static str)]) -> Package<&'st
   )
 }
 
-/// Each diagnostic's code and help, in the list's order.
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// Each diagnostic's code and help, in the list's order, but for the missing query root.
 fn helps(analysis: &Analysis) -> Vec<(&'static str, String)> {
   analysis
     .diagnostics()
     .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
     .map(|diagnostic: &Diagnostic| {
       (
         diagnostic.code().as_str(),
