@@ -1111,8 +1111,11 @@ fn both_nullnesses_share_one_verdict() {
 
 /// Each pair of a distinct instantiation and a value its definition records is a step: fifty
 /// values of `In<T, U>` under fifty `In<Int, Xj>` share every count after the first
-/// instantiation's, and still cost a step each pair, 2,600 in all. Refuses verdicts read off shared
-/// counts for nothing, which cost 100.
+/// instantiation's, and still cost a step each pair, 2,600 in all. The first instantiation pays
+/// fifty pairs, one rebuild of `T` and fifty counts of one node, 101; each of the other forty-nine
+/// fifty pairs and one rebuild, its counts kept, 51: 101 + 49 × 51 = 2,600. At 2,599 the last,
+/// `In<Int, X50>`, alone is `resource-limit`. Refuses verdicts read off shared counts for nothing,
+/// which cost 100.
 #[test]
 fn every_pair_of_an_instantiation_and_a_value_is_a_step() {
   let mut text = String::from("type Query {\n");
@@ -1127,12 +1130,12 @@ fn every_pair_of_an_instantiation_and_a_value_is_a_step() {
   for j in 1..=50 {
     text.push_str(&format!("input X{j} {{\n  v: Int\n}}\n"));
   }
-  quiet(&analyze_text(&text, &Limits::new()));
-  let short = analyze_text(&text, &Limits::new().with_max_value_steps(1000));
-  assert!(
-    found(&short)
-      .iter()
-      .any(|row: &(&str, Location)| row.0 == LIMIT)
+  quiet(&analyze_text(&text, &Limits::new().with_max_value_steps(2600)));
+  let short = analyze_text(&text, &Limits::new().with_max_value_steps(2599));
+  let schema = schema_file(&short);
+  assert_eq!(
+    found(&short),
+    [(LIMIT, at(schema, &text, "In<Int, X50>", 0))]
   );
 }
 
