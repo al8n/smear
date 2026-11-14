@@ -21,13 +21,13 @@
 //!
 //! - a field typed by the bare parameter carries it when written `T!` or in a OneOf, and carries it
 //!   when non-null when written `T` in an ordinary input object;
-//! - a link field that passes the parameter, written `T` or `T!`, as an argument of input objects
-//!   carries it as the slots it is passed through carry their arguments: each step asks that its
-//!   slot be carried, or carried when non-null where the argument written there is non-null, and
+//! - a link field whose complete type passes the parameter, `T` or `T!`, as an argument of input
+//!   objects carries it as the slots it is passed through carry their arguments: each step asks
+//!   that its slot be carried, or carried when non-null where the argument there is non-null, and
 //!   the last gives the parameter what its slot has, carried when non-null being carried where the
-//!   parameter is written `T!`;
-//! - a link field whose complete type holds the parameter only inside a slot a default filled,
-//!   under input objects' arguments, carries it: a conservative answer, which can be relaxed.
+//!   parameter is `T!`. An argument a default fills is read as a written one, with the nullness
+//!   the default gives it: the complete type holds both, so a slot whose parameter is carried
+//!   nowhere carries nothing, whatever fills it.
 //!
 //! A OneOf with a field that is no link carries none of its parameters: that field is a finite
 //! alternative whatever its arguments. A link whose base is an instantiation requires the input
@@ -53,8 +53,7 @@ use std::{
 };
 
 use crate::graphqlx::{
-  Contribution, Cx, DefId, DefKind, Diagnostic, MemberId, Model, TyId, TyKind, TypeExprId,
-  TypeExprKind, Visitor,
+  Contribution, Cx, DefId, DefKind, Diagnostic, MemberId, Model, TyId, TyKind, Visitor,
   code::schema,
   diagnostic::Excerpt,
   id::dense,
@@ -71,13 +70,13 @@ use super::one_of;
 /// contribution has its `has_errors()` set: a phase already refused something in it.
 ///
 /// It costs, once per walk: one look at each input object's applications, to tell a OneOf; one
-/// pass over each input object's fields and the written occurrences of its link fields, each
-/// once, and of the types its link fields' defaults fill, each once for the input object; one node
-/// for each input object and for each instantiation a link requires, each type once; and the
-/// fixed points and the coloured walk, each node and edge a bounded number of times, with explicit
-/// stacks and a logarithm for each lookup of an ordered map or a sorted list. For each member, one
-/// binary search. It keeps the fields to report, for the walk. Its messages quote names as
-/// excerpts, so each is bounded whatever the names' lengths.
+/// pass over each input object's fields; each open input object type their complete types hold
+/// read once, its arguments once, whichever fields hold it, and a closed one passed over at once;
+/// one node for each input object and for each instantiation a link requires, each type once; and
+/// the fixed points and the coloured walk, each node and edge a bounded number of times, with
+/// explicit stacks and a logarithm for each lookup of an ordered map or a sorted list. For each
+/// member, one binary search. It keeps the fields to report, for the walk. Its messages quote
+/// names as excerpts, so each is bounded whatever the names' lengths.
 #[derive(Default)]
 pub(super) struct CircularInputField {
   /// The fields that close a cycle, sorted by id, each with whether the cycle passes a nullable
@@ -217,6 +216,27 @@ fn alternative(model: &Model, input: DefId) -> Option<Vec<u32>> {
   Some(slots)
 }
 
+/// The node of `ty`, an input object's type of `model`, among `nodes`, numbered and pushed onto
+/// `stack` to have its arguments read when it is new; `None` for a closed type, which holds no type
+/// parameter.
+fn open_node(
+  model: &Model,
+  nodes: &mut BTreeMap<TyId, u32>,
+  stack: &mut Vec<TyId>,
+  ty: TyId,
+) -> Option<u32> {
+  if model.ty(ty).is_closed() {
+    return None;
+  }
+  if let Some(node) = nodes.get(&ty) {
+    return Some(*node);
+  }
+  let node = dense(nodes.len());
+  nodes.insert(ty, node);
+  stack.push(ty);
+  Some(node)
+}
+
 /// What each type parameter of an input object carries, by slot: whether a value of the input
 /// object must hold a value of its argument, and whether a nullable field of a OneOf is on the way.
 struct Carried {
@@ -238,32 +258,33 @@ impl Carried {
     let mut work = Work {
       levels: vec![0; count],
       nullable: vec![false; count],
-      gates: Vec::new(),
+      held: Vec::new(),
+      bits: Vec::new(),
+      entries: Vec::new(),
       rules: Vec::new(),
       slots: Vec::new(),
       opened: Vec::new(),
     };
     let mut seeds: Vec<(u32, u8, bool)> = Vec::new();
-    let mut written: Vec<(TypeExprId, Parent)> = Vec::new();
-    let mut complete: Vec<(TyId, Option<TypeExprId>)> = Vec::new();
-    let mut filled: Vec<TyId> = Vec::new();
-    // The types a default filled that the input object's link fields hold, each looked at once.
-    let mut seen: BTreeSet<TyId> = BTreeSet::new();
+    // Each open input object type the link fields' complete types hold, one node for each, and
+    // the types whose arguments are still to read.
+    let mut nodes: BTreeMap<TyId, u32> = BTreeMap::new();
+    let mut stack: Vec<TyId> = Vec::new();
     for &input in inputs {
       let is_one_of = one_ofs.contains(&input);
       if is_one_of && has_leaf(model, input) {
         continue;
       }
-      seen.clear();
       for field in model.def(input).input_fields() {
         let Some(occurrence) = model.member(field).ty() else {
           continue;
         };
         let ty = model.type_expr(occurrence).ty();
-        let non_null = model.ty(ty).non_null();
+        let complete = model.ty(ty);
+        let non_null = complete.non_null();
         // A nullable field of a OneOf.
         let through = is_one_of && !non_null;
-        match model.ty(ty).kind() {
+        match complete.kind() {
           TyKind::Param { def, index } if def == input => {
             if let Some(slot) = slot(&base, input, index) {
               let level = if is_one_of || non_null { 2 } else { 1 };
@@ -271,102 +292,61 @@ impl Carried {
             }
           }
           TyKind::Named { def, .. } if is_input(model, def) && (is_one_of || non_null) => {
-            // The chains its written type passes a parameter through.
-            written.push((occurrence, Parent::Root(through)));
-            while let Some((next, parent)) = written.pop() {
-              let TypeExprKind::Named {
-                def: holder,
-                args: arguments,
-              } = model.type_expr(next).kind()
-              else {
-                continue;
-              };
-              if !is_input(model, holder) {
-                continue;
-              }
-              for (position, argument) in arguments.iter().enumerate() {
-                let Some(step) = slot(&base, holder, dense(position)) else {
-                  continue;
-                };
-                let given = model.type_expr(*argument);
-                match given.kind() {
-                  TypeExprKind::Param { def, index } if def == input => {
-                    if let Some(target) = slot(&base, input, index) {
-                      work.rules.push(Rule {
-                        parent,
-                        slot: step,
-                        target,
-                        bang: given.non_null(),
-                      });
-                    }
-                  }
-                  TypeExprKind::Named { def, .. } if is_input(model, def) => {
-                    let gate = dense(work.gates.len());
-                    work.gates.push(Gate {
-                      parent,
-                      slot: step,
-                      threshold: if given.non_null() { 1 } else { 2 },
-                      open: false,
-                      bit: false,
-                    });
-                    written.push((*argument, Parent::Gate(gate)));
-                  }
-                  _ => {}
-                }
-              }
-            }
-            // What a default filled, under input objects' arguments: each type parameter it
-            // holds is taken as carried.
-            complete.push((ty, Some(occurrence)));
-            while let Some((next, at)) = complete.pop() {
-              let TyKind::Named {
-                def: holder,
-                args: arguments,
-              } = model.ty(next).kind()
-              else {
-                continue;
-              };
-              if !is_input(model, holder) {
-                continue;
-              }
-              let writes: &[TypeExprId] = match at.map(|at: TypeExprId| model.type_expr(at).kind())
-              {
-                Some(TypeExprKind::Named { args, .. }) => args,
-                _ => &[],
-              };
-              for (position, argument) in arguments.iter().enumerate() {
-                match writes.get(position) {
-                  Some(argument_at) => complete.push((*argument, Some(*argument_at))),
-                  None => {
-                    if seen.insert(*argument) {
-                      filled.push(*argument);
-                    }
-                  }
-                }
-              }
-            }
-            while let Some(next) = filled.pop() {
-              match model.ty(next).kind() {
-                TyKind::Param { def, index } if def == input => {
-                  if let Some(slot) = slot(&base, input, index) {
-                    seeds.push((slot, 2, through));
-                  }
-                }
-                TyKind::Named { def, args } if is_input(model, def) => {
-                  for argument in args {
-                    if seen.insert(*argument) {
-                      filled.push(*argument);
-                    }
-                  }
-                }
-                _ => {}
-              }
+            if let Some(to) = open_node(model, &mut nodes, &mut stack, ty) {
+              work.entries.push(Entry {
+                from: Origin::Root(through),
+                to,
+                slot: None,
+              });
             }
           }
           _ => {}
         }
       }
     }
+    // Each open type's arguments, once, whichever fields hold it: a type parameter is passed to
+    // the slot it is the argument of, and an open input object type is held when that slot
+    // carries what the argument's `!` asks. A filled argument is read as a written one: the
+    // complete type holds both.
+    while let Some(ty) = stack.pop() {
+      let Some(&from) = nodes.get(&ty) else {
+        continue;
+      };
+      let TyKind::Named { def: holder, args } = model.ty(ty).kind() else {
+        continue;
+      };
+      for (position, &argument) in args.iter().enumerate() {
+        let Some(step) = slot(&base, holder, dense(position)) else {
+          continue;
+        };
+        let given = model.ty(argument);
+        match given.kind() {
+          TyKind::Param { def, index } => {
+            if let Some(target) = slot(&base, def, index) {
+              work.rules.push(Rule {
+                from,
+                slot: step,
+                target,
+                bang: given.non_null(),
+              });
+            }
+          }
+          TyKind::Named { def, .. } if is_input(model, def) => {
+            if let Some(to) = open_node(model, &mut nodes, &mut stack, argument) {
+              let threshold = if given.non_null() { 1 } else { 2 };
+              work.entries.push(Entry {
+                from: Origin::Node(from),
+                to,
+                slot: Some((step, threshold)),
+              });
+            }
+          }
+          _ => {}
+        }
+      }
+    }
+    work.held = vec![false; nodes.len()];
+    work.bits = vec![false; nodes.len()];
     work.run(&seeds);
     Self {
       base,
@@ -391,88 +371,93 @@ impl Carried {
   }
 }
 
-/// What a step of a chain hangs from: the link field itself, with whether it is a nullable field
-/// of a OneOf, or the step above it.
+/// What a way into an open type hangs from: a link field, with whether it is a nullable field of
+/// a OneOf, or the open type that holds it as an argument.
 #[derive(Clone, Copy)]
-enum Parent {
+enum Origin {
   /// The link field.
   Root(bool),
-  /// The gate of the step above.
-  Gate(u32),
+  /// The node of the open type that holds it.
+  Node(u32),
 }
 
-/// A step of a chain that holds more below it: open when what it hangs from is, and its slot
-/// carries at least `threshold`.
-struct Gate {
+/// A way into an open type: it is held when what it hangs from is, and the slot it is the
+/// argument of, when it is one, carries at least the threshold: 1 for an argument that is
+/// non-null, 2 otherwise.
+#[derive(Clone, Copy)]
+struct Entry {
   /// What it hangs from.
-  parent: Parent,
-  /// The slot of the argument it is.
-  slot: u32,
-  /// What the slot must carry: 1 for an argument written non-null, 2 otherwise.
-  threshold: u8,
-  /// Whether it is open.
-  open: bool,
-  /// Whether a nullable field of a OneOf is on the way to it.
-  bit: bool,
+  from: Origin,
+  /// The open type's node.
+  to: u32,
+  /// The slot it is the argument of, and what the slot must carry.
+  slot: Option<(u32, u8)>,
 }
 
-/// The last step of a chain: when what it hangs from is open, what its slot carries the target
-/// slot carries, carried when non-null being carried where the parameter is written `T!`.
+/// A type parameter an open type holds as an argument: when the type is held, the parameter's
+/// own slot carries what the slot it is the argument of carries, carried when non-null being
+/// carried where the argument is non-null.
+#[derive(Clone, Copy)]
 struct Rule {
-  /// What it hangs from.
-  parent: Parent,
-  /// The slot the parameter is passed to.
+  /// The node of the open type that holds it.
+  from: u32,
+  /// The slot it is the argument of.
   slot: u32,
   /// The parameter's own slot.
   target: u32,
-  /// Whether the parameter is written `T!` there.
+  /// Whether the argument is non-null.
   bang: bool,
 }
 
-/// One gate or rule, waiting on a slot or on the gate above it.
+/// One entry or rule, waiting on a slot or on the open type it hangs from.
 #[derive(Clone, Copy)]
 enum Waiter {
-  /// A gate.
-  Gate(u32),
+  /// An entry.
+  Entry(u32),
   /// A rule.
   Rule(u32),
 }
 
-/// What the slots carry while it is found: the chains, and what is still to pass on.
+/// What the slots carry while it is found: the open types and how they are held, and what is
+/// still to pass on.
 struct Work {
   /// For each slot, what it carries.
   levels: Vec<u8>,
   /// For each slot, whether a nullable field of a OneOf is on the way.
   nullable: Vec<bool>,
-  /// Every gate.
-  gates: Vec<Gate>,
+  /// For each open type, whether a value of the input object that holds it must hold one of it.
+  held: Vec<bool>,
+  /// For each open type, whether a nullable field of a OneOf is on the way to it.
+  bits: Vec<bool>,
+  /// Every entry.
+  entries: Vec<Entry>,
   /// Every rule.
   rules: Vec<Rule>,
   /// The slots that gained a level or a bit and whose waiters have not seen it.
   slots: Vec<u32>,
-  /// The gates that opened or gained a bit and whose children have not seen it.
+  /// The open types that were held or gained a bit and whose waiters have not seen it.
   opened: Vec<u32>,
 }
 
 impl Work {
-  /// Gives the slots `seeds`' levels, and spreads them along the chains until nothing changes.
-  /// Each slot changes at most three times and each gate twice, so each waiter is woken a bounded
-  /// number of times.
+  /// Gives the slots `seeds`' levels, and spreads them along the entries and rules until nothing
+  /// changes. Each slot changes at most three times and each open type twice, so each waiter is
+  /// woken a bounded number of times.
   fn run(&mut self, seeds: &[(u32, u8, bool)]) {
-    // Who waits on each slot, and on each gate, each as one run of a sorted list.
+    // Who waits on each slot, and on each open type, each as one run of a sorted list.
     let mut waiting: Vec<(u32, Waiter)> = Vec::new();
     let mut children: Vec<(u32, Waiter)> = Vec::new();
-    for (index, gate) in self.gates.iter().enumerate() {
-      waiting.push((gate.slot, Waiter::Gate(dense(index))));
-      if let Parent::Gate(above) = gate.parent {
-        children.push((above, Waiter::Gate(dense(index))));
+    for (index, entry) in self.entries.iter().enumerate() {
+      if let Some((slot, _)) = entry.slot {
+        waiting.push((slot, Waiter::Entry(dense(index))));
+      }
+      if let Origin::Node(above) = entry.from {
+        children.push((above, Waiter::Entry(dense(index))));
       }
     }
     for (index, rule) in self.rules.iter().enumerate() {
       waiting.push((rule.slot, Waiter::Rule(dense(index))));
-      if let Parent::Gate(above) = rule.parent {
-        children.push((above, Waiter::Rule(dense(index))));
-      }
+      children.push((rule.from, Waiter::Rule(dense(index))));
     }
     waiting.sort_by_key(|entry: &(u32, Waiter)| entry.0);
     children.sort_by_key(|entry: &(u32, Waiter)| entry.0);
@@ -480,22 +465,13 @@ impl Work {
       self.raise(slot, level, bit);
     }
     // What hangs from a link field is looked at once; the rest when what it waits on changes.
-    for index in 0..self.gates.len() {
+    for index in 0..self.entries.len() {
       if self
-        .gates
+        .entries
         .get(index)
-        .is_some_and(|gate: &Gate| matches!(gate.parent, Parent::Root(_)))
+        .is_some_and(|entry: &Entry| matches!(entry.from, Origin::Root(_)))
       {
-        self.wake(Waiter::Gate(dense(index)));
-      }
-    }
-    for index in 0..self.rules.len() {
-      if self
-        .rules
-        .get(index)
-        .is_some_and(|rule: &Rule| matches!(rule.parent, Parent::Root(_)))
-      {
-        self.wake(Waiter::Rule(dense(index)));
+        self.wake(Waiter::Entry(dense(index)));
       }
     }
     loop {
@@ -517,57 +493,61 @@ impl Work {
   /// Looks at `waiter` again.
   fn wake(&mut self, waiter: Waiter) {
     match waiter {
-      Waiter::Gate(index) => self.gate(index),
+      Waiter::Entry(index) => self.entry(index),
       Waiter::Rule(index) => self.rule(index),
     }
   }
 
-  /// Whether what `parent` names is open, and if so whether a nullable field of a OneOf is on the
+  /// Whether what `from` names is held, and if so whether a nullable field of a OneOf is on the
   /// way to it.
-  fn open(&self, parent: Parent) -> Option<bool> {
-    match parent {
-      Parent::Root(bit) => Some(bit),
-      Parent::Gate(index) => self
-        .gates
-        .get(index as usize)
-        .filter(|gate: &&Gate| gate.open)
-        .map(|gate: &Gate| gate.bit),
+  fn source(&self, from: Origin) -> Option<bool> {
+    match from {
+      Origin::Root(bit) => Some(bit),
+      Origin::Node(node) => {
+        if !self.held.get(node as usize).copied().unwrap_or(false) {
+          return None;
+        }
+        Some(self.bits.get(node as usize).copied().unwrap_or(false))
+      }
     }
   }
 
-  /// Opens the gate `index`, or gives it a bit, when it can now.
-  fn gate(&mut self, index: u32) {
-    let Some(&Gate {
-      parent,
-      slot,
-      threshold,
-      open,
-      bit,
-    }) = self.gates.get(index as usize)
-    else {
+  /// Holds the open type the entry `index` leads to, or gives it a bit, when it can now.
+  fn entry(&mut self, index: u32) {
+    let Some(&Entry { from, to, slot }) = self.entries.get(index as usize) else {
       return;
     };
-    let Some(above) = self.open(parent) else {
+    let Some(above) = self.source(from) else {
       return;
     };
-    if self.level(slot) < threshold {
+    let bit = match slot {
+      None => above,
+      Some((slot, threshold)) => {
+        if self.level(slot) < threshold {
+          return;
+        }
+        above || self.bit(slot)
+      }
+    };
+    let held = self.held.get(to as usize).copied().unwrap_or(true);
+    let had = self.bits.get(to as usize).copied().unwrap_or(true);
+    if held && (had || !bit) {
       return;
     }
-    let gained = above || self.bit(slot);
-    if open && (bit || !gained) {
-      return;
+    if let Some(held) = self.held.get_mut(to as usize) {
+      *held = true;
     }
-    if let Some(gate) = self.gates.get_mut(index as usize) {
-      gate.open = true;
-      gate.bit = bit || gained;
+    if let Some(had) = self.bits.get_mut(to as usize) {
+      *had = *had || bit;
     }
-    self.opened.push(index);
+    self.opened.push(to);
   }
 
-  /// Gives the rule `index`'s target what its slot carries, when what it hangs from is open.
+  /// Gives the rule `index`'s target what its slot carries, when the open type it hangs from is
+  /// held.
   fn rule(&mut self, index: u32) {
     let Some(&Rule {
-      parent,
+      from,
       slot,
       target,
       bang,
@@ -575,7 +555,7 @@ impl Work {
     else {
       return;
     };
-    let Some(above) = self.open(parent) else {
+    let Some(above) = self.source(Origin::Node(from)) else {
       return;
     };
     let level = match self.level(slot) {

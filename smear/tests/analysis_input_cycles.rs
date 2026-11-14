@@ -265,18 +265,85 @@ fn a_parameter_carries_what_its_input_object_requires() {
 }
 
 #[test]
-fn a_parameter_a_default_forwards_is_taken_as_required() {
-  // `[G8]`'s conservative half, pinned so that relaxing it is a decision: `Use`'s `P` stands only
-  // inside the slot `Fwd`'s default fills, and is taken as required, though a value exists:
-  // `{ u: { f: { y: {} } } }`.
-  let text = "type Query {\n  ok: Int\n}\ninput Soft<U> {\n  u: U\n}\n\
-              input Fwd<X, Y = Soft<X>> {\n  y: Y!\n}\ninput Use<P> {\n  f: Fwd<P>!\n}\n\
-              input A9 {\n  u: Use<A9>!\n}\n";
-  let analysis = analyze_text(text);
+fn a_slot_a_default_fills_carries_as_a_written_one() {
+  // A filled argument is read as a written one, with the nullness its default gives it, and a slot
+  // whose parameter is carried nowhere carries nothing, whatever fills it. `Use`'s `P` stands only
+  // inside the slot `Fwd`'s default fills, as `Soft<P>`, whose `u` is nullable: `A9` has a value,
+  // `{ u: { f: { y: {} } } }`. `Wrap`'s `T` fills `Cell`'s `U`, whose `x` is nullable: `A` has a
+  // value, `{ w: { c: {} } }`.
+  for text in [
+    "type Query {\n  ok: Int\n}\ninput Soft<U> {\n  u: U\n}\n\
+     input Fwd<X, Y = Soft<X>> {\n  y: Y!\n}\ninput Use<P> {\n  f: Fwd<P>!\n}\n\
+     input A9 {\n  u: Use<A9>!\n}\n",
+    "type Query {\n  ok: Int\n}\ninput Cell<T, U = T> {\n  x: U\n}\n\
+     input Wrap<T> {\n  c: Cell<T>!\n}\ninput A {\n  w: Wrap<A>!\n}\n",
+  ] {
+    let analysis = analyze_text(text);
+    assert!(
+      analysis.diagnostics().is_empty(),
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+  }
+  // With each field non-null, what the default fills is required, and each is a cycle.
+  for (text, owner, link) in [
+    (
+      "type Query {\n  ok: Int\n}\ninput Soft<U> {\n  u: U!\n}\n\
+       input Fwd<X, Y = Soft<X>> {\n  y: Y!\n}\ninput Use<P> {\n  f: Fwd<P>!\n}\n\
+       input A9 {\n  u: Use<A9>!\n}\n",
+      "A9",
+      "u",
+    ),
+    (
+      "type Query {\n  ok: Int\n}\ninput Cell<T, U = T> {\n  x: U!\n}\n\
+       input Wrap<T> {\n  c: Cell<T>!\n}\ninput A {\n  w: Wrap<A>!\n}\n",
+      "A",
+      "w",
+    ),
+  ] {
+    let analysis = analyze_text(text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(
+        NON_NULL,
+        named(schema, text, &format!("input {owner} {{\n  "), link, 0)
+      )],
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
+
+#[test]
+fn a_type_many_link_fields_hold_is_read_once() {
+  // `Wide`'s many parameters are all defaulted, and each of many fields of `Holder` is typed by
+  // the closed `Wide!`, and of `Open` by the open `Wide<T>!`: what a complete type holds is read
+  // once for the type, whichever fields hold it, and a closed type, which holds no type
+  // parameter, is passed over at once. A test sees the diagnostics, not the work, which holds by
+  // construction: each open type is one node, its arguments read once. Read for each field, this
+  // program's 4,000 link fields would each read 2,000 arguments.
+  const PARAMS: usize = 2_000;
+  const FIELDS: usize = 2_000;
+  let mut text = String::from("type Query {\n  ok: Int\n}\ninput Wide<T0 = Int");
+  for index in 1..PARAMS {
+    text.push_str(&format!(", T{index} = Int"));
+  }
+  text.push_str("> {\n  x: Int\n}\ninput Holder {\n");
+  for index in 0..FIELDS {
+    text.push_str(&format!("  w{index}: Wide!\n"));
+  }
+  text.push_str("  back: Holder!\n}\ninput Open<T> {\n");
+  for index in 0..FIELDS {
+    text.push_str(&format!("  w{index}: Wide<T>!\n"));
+  }
+  text.push_str("}\ninput Uses {\n  o: Open<Uses>!\n}\n");
+  let analysis = analyze_text(&text);
   let schema = schema_file(&analysis);
+  // `Holder` requires itself through `back`; `Uses` does not, `Wide`'s `T0` standing nowhere.
   assert_eq!(
     found(&analysis),
-    [(NON_NULL, named(schema, text, "input A9 {\n  ", "u", 0))],
+    [(NON_NULL, named(schema, &text, "  ", "back", 0))],
     "{:#?}",
     analysis.diagnostics()
   );
