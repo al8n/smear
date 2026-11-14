@@ -17,8 +17,9 @@
 //!
 //! [`analyze`] answers an [`Analysis`]: the [`Model`], its [`Diagnostics`] and its [`SourceMap`].
 //! None of the three has a type parameter or a lifetime, whatever text type went in, and
-//! [`Analysis::is_ok`] is the verdict, which keeps GraphQL's: a root package with no query root is
-//! not ok. A library has none, so a consumer that analyzes one as the root package filters
+//! [`Analysis::is_ok`] is the verdict, which keeps GraphQL's rule on the query root: a root
+//! package with no query root is not ok. A library has none, so a consumer that analyzes one as
+//! the root package filters
 //! `smear::schema::missing-query-root-operation-type`, as it filters any code it waives; the
 //! analysis exposes no waiver. So far the model holds the packages, their modules, from
 //! their directories and their inline `mod`s, and every definition, the built-in library's and the

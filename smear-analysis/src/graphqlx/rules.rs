@@ -28,7 +28,7 @@
 //! GraphQL's own rules over the schema judge the root package's, the one schema a program has. So
 //! a root package with no query root is not ok, as in GraphQL: a library analyzed as the root
 //! package has none, and a consumer that analyzes one waives that code by filtering it, since the
-//! analysis keeps GraphQL's verdict and exposes no waiver.
+//! analysis keeps GraphQL's rule on the query root and exposes no waiver.
 //!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads one crate-private accessor, `TypeExpr::written_args`: the walk

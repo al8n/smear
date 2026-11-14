@@ -599,10 +599,11 @@ All notable changes to Smear are documented in this file.
   schema with no query root, neither written nor presumed, is
   `smear::schema::missing-query-root-operation-type`, so a root package with no query root is not
   ok, as in GraphQL, and a consumer that analyzes a library as the root package filters that code.
-  A rule says nothing about a contribution a phase already refused something in, and a rule on the roots, which no contribution holds, nothing
-  while any of the schema's contributions does. On every GraphQL document of smear's corpora the analyzer
-  is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
-  divergence it allows. A new `test-support` feature, which `smear/test-support`
+  A rule says nothing about a contribution a phase already refused something in, and a rule on the
+  roots, which no contribution holds, nothing while any of the schema's contributions does. On
+  every GraphQL document of smear's corpora the analyzer is held to `smear-schema`'s verdict, code
+  for code, by a differential test that lists each divergence it allows. A new `test-support`
+  feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models
   it builds, for `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`! and `smear-parser`!: the five features
@@ -630,8 +631,8 @@ All notable changes to Smear are documented in this file.
   are unchanged (#251).
 - `smear-schema`!: an extension of an introspection type adds directives and nothing else, which
   is a verdict change of a published crate. A document that extends one of the eight
-  `__`-prefixed introspection types with a member, an `implements` entry, a union member or an
-  enum value built in 0.0.1, and is refused now as the new
+  `__`-prefixed introspection types with a field, an `implements` entry or an enum value built in
+  0.0.1, and is refused now as the new
   `SchemaErrorKind::IntrospectionTypeExtension`, at the type the extension names, code
   `smear::schema::introspection-type-extension`. The refused extension contributes nothing, its
   directives included. An extension that adds directives alone still builds.

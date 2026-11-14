@@ -43,8 +43,8 @@ const INTERFACE_HELP: &str = "an object or interface type must define at least o
 /// something in it, and a second diagnostic within it would repeat the phase's.
 ///
 /// It costs one look at the length of what each definition the walk enters holds, and for an empty
-/// one an answer of who wrote it, and keeps nothing between two walks. Its messages quote the definition's name
-/// as an excerpt, so each is bounded whatever the name's length.
+/// one an answer of who wrote it, and keeps nothing between two walks. Its messages quote the
+/// definition's name as an excerpt, so each is bounded whatever the name's length.
 #[derive(Default)]
 pub(super) struct EmptyDefinition;
 
