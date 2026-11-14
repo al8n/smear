@@ -151,8 +151,9 @@
 //! judged for itself, neither its bounds, nor its entries and members, nor the arguments it makes
 //! required, nor its definition's values under it, each default being judged where it is written;
 //! the rules on the kinds a type parameter takes, on `TypeRef`, on a OneOf's fields and on
-//! deprecated members judge what it derives, at the occurrence that leaves the slot out; and a code
-//! generator that monomorphises judges the closure it computes.
+//! deprecated members judge what it derives, at the occurrence that leaves the slot out, but for a
+//! default such a rule refuses as written, which it reports where it is written and at no use; and
+//! a code generator that monomorphises judges the closure it computes.
 //!
 //! # When it is not ok
 //!
