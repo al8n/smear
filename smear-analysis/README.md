@@ -76,6 +76,12 @@ as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A 
 nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and
 holds memory bounded by it.
 
+One rule is a backend's to compose, and `analyze` never runs it: `graphqlx::UnboundedInstantiation`
+refuses a generic definition that reaches itself with a type argument that grows, as
+`smear::graphqlx::unbounded-instantiation`, for a backend that makes one copy per instantiation and
+so needs their set to be finite. The `smear::schema` codes the analyzer shares with GraphQL's own
+validator are public constants of `graphqlx::schema`, which `graphqlx::schema::ALL` lists.
+
 ## Feature flags
 
 | Feature | Description | Default |
