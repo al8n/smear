@@ -11,16 +11,18 @@
 //! written nullable, is non-null in an instantiation that gives the parameter a non-null type:
 //! `Choice<Int!>` of `input Choice<T> @oneOf { x: T }`. Such a parameter stands as the field's
 //! whole type where its definition puts it, and is passed on to the definitions it is given to,
-//! as the table of where each type parameter stands answers, but not through a list or a
+//! nullable, as the table of where each type parameter stands answers, but not through a list or a
 //! collection, which stand there instead: `input L<T> @oneOf { x: [T] }` holds a nullable `[Int!]`
-//! under `L<Int!>`. So each instantiation, every written type occurrence wherever it stands and
-//! every directive application, by its directive's complete instantiation, gives such a parameter
-//! a nullable type. The first argument, in order, that is non-null is reported, at the argument as
-//! written, or at the occurrence, an application at its path, for one a default fills; labelled
-//! where the parameter stands, and at the default that fills it. Each type is judged once, and
-//! reported at each occurrence of it. Else, what the slots an occurrence leaves to their defaults
-//! derive is judged the same way, at the occurrence, a type the occurrence or the program writes
-//! being judged where it is written.
+//! under `L<Int!>`. Given non-null, `Choice<T!>`, it makes the field non-null whatever the
+//! definition is given: that instantiation's own mistake, reported where it is written, and no
+//! instantiation of the definition is to blame. So each instantiation, every written type
+//! occurrence wherever it stands and every directive application, by its directive's complete
+//! instantiation, gives such a parameter a nullable type. The first argument, in order, that is
+//! non-null is reported, at the argument as written, or at the occurrence, an application at its
+//! path, for one a default fills; labelled where the parameter stands, and at the default that
+//! fills it. Each type is judged once, and reported at each occurrence of it. Else, what the slots
+//! an occurrence leaves to their defaults derive is judged the same way, at the occurrence, a type
+//! the occurrence or the program writes being judged where it is written.
 //!
 //! A set's element and a map's key are non-null in every instantiation, however they are written.
 //! So a collection's own definition that gives its key or element, nullable, such a field's whole

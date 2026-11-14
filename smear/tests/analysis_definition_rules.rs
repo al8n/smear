@@ -2992,6 +2992,61 @@ fn a_key_written_non_null_a_one_of_field_takes_is_refused_once() {
 }
 
 #[test]
+fn a_parameter_given_non_null_passes_no_nullable_place_on() {
+  // `E`'s `@d<U!>` makes `v` required whatever `E` is given: its own mistake, refused once, at
+  // `U!`, labelled where `@d`'s `X` stands. The place stops at `U!`, so neither `E<Int!>`, whose
+  // argument changes nothing, nor the set `S`, whose element `@e<E<T>>` gives `E`, is refused for
+  // it: each mistake has one owner. `@d<U!>` writes `v`, which `E<Int!>`'s type for it takes.
+  let text = "type Query {\n  s: S<Int>\n  e: E<Int!>\n}\n\
+              directive @d<X>(v: X @deprecated) on SCALAR\ndirective @e<Y>(w: Y) on SCALAR\n\
+              scalar E<U> @d<U!>(v: 1)\nscalar S<T> @set @e<E<T>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      at(schema, text, "U!", 0),
+      Some(named(schema, text, "v: ", "X", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@d` takes a non-null type for its type parameter `X`, which makes a deprecated argument \
+       required"
+    ]
+  );
+
+  // The same for a OneOf's field: refused once, at `U!`, labelled at `Choice<X>`, where `@d`'s
+  // `X` stands.
+  let text = "type Query {\n  s: S<Int>\n  e: E<Int!>\n}\ninput Choice<X> @oneOf {\n  value: X\n}\n\
+              directive @d<X>(value: Choice<X>) on SCALAR\ndirective @e<Y>(w: Y) on SCALAR\n\
+              scalar E<U> @d<U!>\nscalar S<T> @set @e<E<T>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "U!", 0),
+      Some(at(schema, text, "Choice<X>", 1))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`@d` takes a non-null type for its type parameter `X`, which is the type of the field \
+       `value` of the OneOf input object `Choice`"
+    ]
+  );
+}
+
+#[test]
 fn no_extension_makes_an_input_object_one_of() {
   // An extension of the package's own input object that applies `@oneOf` is refused at it, and
   // the input object is OneOf all the same: the definition's field is judged, and so is the

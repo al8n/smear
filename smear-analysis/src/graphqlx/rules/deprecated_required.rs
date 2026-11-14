@@ -21,16 +21,18 @@
 //! type is its definition's type parameter, written nullable, is required in an instantiation that
 //! gives the parameter a non-null type: `I<Int!>` of `input I<T> { a: T @deprecated }`. Such a
 //! parameter stands as the member's whole type where its definition puts it, and is passed on to
-//! the definitions it is given to, as the table of where each type parameter stands answers, but
-//! not through a list or a collection, which stand there instead. So each instantiation, every
-//! written type occurrence wherever it stands and every directive application, by its directive's
-//! complete instantiation, gives such a parameter a nullable type. The first argument, in order,
-//! that is non-null is reported, under the argument's code or the input field's, at the argument
-//! as written, or at the occurrence, an application at its path, for one a default fills;
-//! labelled where the parameter stands, and at the default that fills it. Each type is judged
-//! once, and reported at each occurrence of it. Else, what the slots an occurrence leaves to their
-//! defaults derive is judged the same way, at the occurrence, a type the occurrence or the program
-//! writes being judged where it is written.
+//! the definitions it is given to, nullable, as the table of where each type parameter stands
+//! answers, but not through a list or a collection, which stand there instead. Given non-null,
+//! `@d<T!>`, it makes the member required whatever the definition is given: that instantiation's
+//! own mistake, reported where it is written, and no instantiation of the definition is to blame.
+//! So each instantiation, every written type occurrence wherever it stands and every directive
+//! application, by its directive's complete instantiation, gives such a parameter a nullable type.
+//! The first argument, in order, that is non-null is reported, under the argument's code or the
+//! input field's, at the argument as written, or at the occurrence, an application at its path, for
+//! one a default fills; labelled where the parameter stands, and at the default that fills it. Each
+//! type is judged once, and reported at each occurrence of it. Else, what the slots an occurrence
+//! leaves to their defaults derive is judged the same way, at the occurrence, a type the occurrence
+//! or the program writes being judged where it is written.
 //!
 //! A set's element and a map's key are non-null in every instantiation, however they are written.
 //! So a collection's own definition that gives its key or element, nullable, such a member's whole

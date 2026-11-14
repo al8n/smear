@@ -12,16 +12,16 @@
 //! package's definitions stands in, and for each, where in its own definition it stands there or
 //! is passed to a parameter that does, the witness a diagnostic labels, and the member whose type
 //! the place came from. A place that is a member's whole type does not pass from a list to its
-//! element, or from a collection to its arguments: the list or the collection stands there. Nor
-//! does it stand at a collection's key or element, which every instantiation makes non-null
-//! however it is written, and nothing passes it on from there, so that no use of the collection
-//! repeats it. Each mistake has one owner: a place that reaches the key or element through the
-//! type parameter's type nullable, `T`, is the mistake of the collection's definition, which
-//! nothing written makes, and [`Positions::forced`] keeps it, with where the member applies
-//! `@deprecated` for a deprecated member's place; one that would reach it through the type
-//! non-null, `T!`, is the mistake of that `!`, written in the type argument or in the default that
-//! fills it, which the instantiation that gives it is refused for where it is written, as every
-//! instantiation is, and it stops short of the key or element.
+//! element, or from a collection to its arguments: the list or the collection stands there. Nor,
+//! since each mistake has one owner, does it pass from a type parameter's type written non-null,
+//! `T!`, to its slot: that `!`, written in the type argument or in the default that fills it, makes
+//! the member's type non-null whatever the slot is given, and the instantiation that gives it is
+//! refused for it where it is written, as every instantiation is; neither what the slot is given
+//! nor the slot is to blame. Nor does it stand at a collection's key or element, which every
+//! instantiation makes non-null however it is written, and nothing passes it on from there, so that
+//! no use of the collection repeats it: one that reaches the key or element, which nothing written
+//! makes, is the mistake of the collection's definition, and [`Positions::forced`] keeps it, with
+//! where the member applies `@deprecated` for a deprecated member's place.
 //!
 //! A parameter stands where its definition puts it: in the complete type of each of its members,
 //! a field's arguments among them, every contribution's, a slot a default fills included; through
@@ -52,8 +52,7 @@
 //! place, and the places spread along the edges, each node gaining each place once, a slot keeping
 //! the witness it gained it with: across an edge out of a slot the witness becomes the edge's. A
 //! place that is a member's whole type does not cross a flagged edge: a list's to its element, a
-//! collection's to each argument, and a non-null type parameter's type's to a collection's key or
-//! element.
+//! collection's to each argument, and a type parameter's type's, written non-null, to its slot.
 //!
 //! What an operation's argument reaches is found last: each field argument's type is given it,
 //! and it spreads along the same edges, and from a named type of an input object to each argument
@@ -314,9 +313,9 @@ impl Positions {
   /// place that takes a nullable type, with the member the place came from and where a deprecated
   /// one applies `@deprecated`: the definition's mistake, since every instantiation makes the key
   /// or element non-null. The place stands at no key or element, so no use of `def` repeats the
-  /// mistake. `None` when `def` is no collection, or its definition gives the place to no key or
-  /// element nullable: one it gives non-null, `T!`, is the mistake of the instantiation that gives
-  /// it, refused where it is written. One lookup.
+  /// mistake. `None` when `def` is no collection, or no such place reaches its key or element: none
+  /// passes a type parameter written non-null, `T!`, which is the mistake of the instantiation that
+  /// gives it, refused where it is written. One lookup.
   pub(crate) fn forced(&self, def: DefId, place: Place) -> Option<Mistake> {
     let slot = slot(&self.base, def, 0)?;
     self.forced.get(&(slot, place.index())).copied()
@@ -522,8 +521,8 @@ pub(crate) fn slot(base: &[u32], def: DefId, index: u32) -> Option<u32> {
 
 /// An edge of the graph: from a node, to a node, where it is written, and whether it is flagged,
 /// so that a place that is a member's whole type does not cross it: one from a list to its element
-/// or from a collection to an argument, and one from a non-null type parameter's type to a
-/// collection's key or element.
+/// or from a collection to an argument, and one from a type parameter's type written non-null to
+/// its slot.
 type Edge = (u32, u32, Location, bool);
 
 /// A node given a place, with the witness it gains it with and the member whose type the place
@@ -722,12 +721,11 @@ impl Graph<'_> {
       match model.ty(ty).kind() {
         TyKind::Param { def, index } => {
           if let Some(to) = slot(self.base, def, index) {
-            // A collection's key or element given non-null, `T!`: the instantiation that gives it
-            // to a member's whole type is refused where it is written, for its `!`, as any is, so
-            // the member's place stops here, and is no mistake of the collection's definition.
-            let flagged =
-              model.ty(ty).non_null() && self.keys.get(to as usize).copied().unwrap_or(false);
-            self.edges.push((from, to, at, flagged));
+            // A type parameter given non-null, `T!`: the instantiation that gives it to a member's
+            // whole type is refused where it is written, for its `!`, as any is, whatever the slot
+            // is given; so the member's place stops here, and is no mistake of what the slot is
+            // given, nor of a collection's definition whose key or element the slot is.
+            self.edges.push((from, to, at, model.ty(ty).non_null()));
           }
         }
         TyKind::List { element } => {
@@ -891,9 +889,9 @@ impl Spread<'_> {
 
   /// Passes every queued place along each edge out of its node, until none is left: but a place
   /// that stands only as a member's whole type not along a flagged edge, from a list to its
-  /// element, from a collection to an argument, or from a non-null type parameter's type to a
-  /// collection's key or element; and what an operation's argument reaches, from a named type of
-  /// an input object to each of its arguments a value of it holds.
+  /// element, from a collection to an argument, or from a type parameter's type written non-null
+  /// to its slot; and what an operation's argument reaches, from a named type of an input object
+  /// to each of its arguments a value of it holds.
   fn drain(&mut self) {
     let edges = self.edges;
     let holds = self.holds;
