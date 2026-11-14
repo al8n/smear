@@ -15,10 +15,11 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, Diagnostic, Layout, Limits, Namespace, Package, PackageId, SourceFile, SourceId,
-    Tier, analyze,
+    Tier, analyze, analyze_with,
   },
   diagnostic::{Diagnose, Location},
-  lexer::tokora::SimpleSpan,
+  lexer::{limits::SyntacticLimits, tokora::SimpleSpan},
+  parser::graphqlx::Syntactic,
 };
 
 /// The code of a type name that names nothing, a phase's.
@@ -1513,6 +1514,105 @@ fn a_report_never_walks_a_path_defaults_fill() {
     assert!(diagnostics.truncated());
     assert_eq!(diagnostics.error_count(), fields);
   }
+}
+
+/// The stack [`on_a_deep_stack`] runs on: 512 MiB, past four times what the parser's recursion
+/// takes in a debug build for a type nested 3,000 deep, at about 40 KiB for each level.
+const DEEP_STACK: usize = 512 << 20;
+
+/// Runs `body` on a thread with room for the parser's own recursion, which descends a level for
+/// each bracket a text opens and drops its tree the same way: neither is what these tests are
+/// about.
+fn on_a_deep_stack(body: impl FnOnce() + Send + 'static) {
+  std::thread::Builder::new()
+    .stack_size(DEEP_STACK)
+    .spawn(body)
+    .expect("the thread spawns")
+    .join()
+    .expect("the body does not panic");
+}
+
+#[test]
+fn a_written_tree_many_reports_nest_in_is_read_once() {
+  // `@d<V>` puts the map `M`'s value parameter in a directive's argument, and `Query.f` is typed
+  // by `M<Int, …>` nested `depth` deep around the object `Obj`: each occurrence of `M` gives `V`
+  // `Obj`, or a map that holds it, so each is refused, at `Obj`, the deepest occurrence that
+  // writes the way to it, labelled where `V` stands. The depth varies, and each program runs again
+  // under a diagnostic ceiling of zero, which keeps no report and still builds and counts each. A
+  // test sees the diagnostics, not the work, which holds by construction: each written occurrence
+  // is answered once for the walk, in one step from the answer of the child it writes on the way,
+  // and each report reads the one answer kept for its argument. Walked again for each report, the
+  // deepest program here would follow what each occurrence writes below it for each of its 3,000
+  // reports, 4.5 million steps, where the rule now takes a few for each occurrence. The parser
+  // descends its own recursion a level for each `<`, so the text is read under a raised nesting
+  // ceiling, on a thread with room for that.
+  const DEPTH: usize = 3_000;
+  on_a_deep_stack(|| {
+    // The outermost map is as deep as the nesting, past the default bound.
+    let limits = Limits::new()
+      .with_max_generic_depth(u32::try_from(DEPTH + 1).expect("the nesting's depth is a u32"));
+    // `type Query {` opens a bracket, and so does each `<`.
+    let syntactic = Syntactic::with_limits(SyntacticLimits::with_max_nesting_depth(DEPTH + 2));
+    let flat = "`M` takes the object type `Obj` for its type parameter `V`, which stands as a \
+                directive argument's type, and a directive's argument's type is an input type";
+    let held = "`M` takes, for its type parameter `V`, which stands as a directive argument's \
+                type, a collection whose argument is the object type `Obj`, and a directive's \
+                argument's type is an input type";
+    for depth in [1, 2, DEPTH] {
+      let text = format!(
+        "type Query {{\n  f: {}Obj{}\n}}\ntype Obj {{\n  x: Int\n}}\n\
+         directive @d<X>(v: [X]) on SCALAR\nscalar M<K, V> @map @d<V>\n",
+        "M<Int, ".repeat(depth),
+        ">".repeat(depth)
+      );
+      let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+        .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+      let (analysis, _) = analyze_with(&syntactic, &root, &[], &limits);
+      let schema = schema_file(&analysis);
+      let leaf = named(schema, &text, "M<Int, ", "Obj", 0);
+      let stands = named(schema, &text, "@d<", "V", 0);
+      assert_eq!(
+        found(&analysis),
+        vec![(DIRECTIVE_ARGUMENT_TYPE, leaf, Some(stands)); depth],
+        "depth {depth}"
+      );
+      // The innermost map takes `Obj` itself, and each other one a map that holds it; equal but
+      // for their messages, they are in the order of those.
+      let mut expected = vec![String::from(flat)];
+      expected.resize(depth, String::from(held));
+      assert_eq!(messages(&analysis), expected, "depth {depth}");
+      let first = analysis
+        .diagnostics()
+        .iter()
+        .next()
+        .expect("a diagnostic for each map");
+      assert_eq!(
+        (
+          first.primary_label(),
+          first.label(0).map(|label| label.text()),
+          first.help()
+        ),
+        (
+          Some("directive argument type is not an input type"),
+          Some("`V` stands here"),
+          Some("a directive argument's type must be a scalar, enum or input object.")
+        )
+      );
+      assert!(
+        analysis
+          .diagnostics()
+          .iter()
+          .all(|diagnostic: &Diagnostic| diagnostic.labels() == 1),
+        "depth {depth}"
+      );
+      // Under a ceiling of zero, each report is built and counted, and none is kept.
+      let (silent, _) = analyze_with(&syntactic, &root, &[], &limits.with_max_diagnostics(0));
+      let diagnostics = silent.diagnostics();
+      assert!(diagnostics.is_empty(), "depth {depth}");
+      assert!(diagnostics.truncated());
+      assert_eq!(diagnostics.error_count(), depth);
+    }
+  });
 }
 
 #[test]

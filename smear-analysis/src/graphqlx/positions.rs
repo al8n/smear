@@ -88,10 +88,12 @@
 //! for each. What a value holds is one more worklist over the input fields, as linear.
 //! [`Fits`] judges each pair of a type and a class asked about once, with an explicit stack, a
 //! type's children before it, and keeps with a type that does not fit the way down to what does
-//! not, made in one step from its child's. Reading where a misfit lies follows that way down the
-//! written occurrence alone, a step for each level the occurrence writes, and reads the end kept
-//! for the type where the occurrence stops writing the way: a path a default fills is never walked
-//! for a report. [`Derived`] expands each type the fills derive once for the walk, however many
+//! not, made in one step from its child's; and answers each pair of a written occurrence and a
+//! class asked about once, the child the occurrence writes on the way before it, keeping where
+//! under it what does not fit lies, made in one step from that child's answer, or from its own
+//! type's way where it stops writing the way. So a report reads one kept answer: a written tree is
+//! read once, however many reports nest in it, and a path a default fills is never walked for a
+//! report. [`Derived`] expands each type the fills derive once for the walk, however many
 //! fills derive it, reading each of its arguments at most twice, and reads, for each type and
 //! count of written arguments, one kept answer for each slot its fill typed, which
 //! `Limits::max_substitutions` paid for when the instantiation phase filled them; what the program
@@ -830,26 +832,45 @@ pub(crate) struct Misfit {
   pub(crate) filled: Option<(DefId, u32)>,
 }
 
-/// Whether types fit classes, each type and class judged once.
+/// What a written occurrence's own check answers, as [`Fits::check`] makes it.
+enum Check {
+  /// Its answer, `None` when it fits: made from its own type's way where the tree stops writing
+  /// the way there.
+  Answer(Option<Misfit>),
+  /// The child it writes on the way, and whether the step down to it passes an argument of a
+  /// collection: its answer is made from the child's.
+  Child(TypeExprId, bool),
+}
+
+/// Whether types fit classes, each type and class judged once, and where, under each written
+/// occurrence asked about, what does not fit lies, each occurrence and class answered once.
 ///
 /// A rule keeps one for its walk and resets it in `begin`: what it holds is keyed by the model's
 /// ids.
 ///
-/// Its work is linear in the distinct types it judges and in the written sizes of the occurrences
-/// whose misfits it reads. Each type and class is judged once, its children before it, and a type
-/// that does not fit keeps the way down to the type under it that does not: the way's first step,
-/// and what lies at its end, made in one step from the first step's child's. What lies down the way
-/// under a type is the same whichever occurrence asks, so a report follows the way down its
-/// occurrence's written tree alone, a step for each level the tree writes, and reads the end kept
-/// for the type where the tree stops writing the way: at a slot the occurrence leaves to its
-/// default, or a list it does not write. A path that defaults fill, however long, is walked once,
-/// when its types are judged, and never for a report, however many report it.
+/// Its work is linear in the distinct types it judges and in the written occurrences it answers
+/// for. Each type and class is judged once, its children before it, and a type that does not fit
+/// keeps the way down to the type under it that does not: the way's first step, and what lies at
+/// its end, made in one step from the first step's child's. Each written occurrence and class is
+/// answered once for the walk, the child it writes on the way before it, and keeps where under it
+/// what does not fit lies, made in one step: from that child's answer while the way goes down what
+/// the occurrence writes, and from its own type's way where it stops writing the way, at a slot it
+/// leaves to its default, a list it does not write, or what itself does not fit. So a report reads
+/// one kept answer, however many reports nest above one another in one written tree, and a path
+/// that defaults fill, however long, is walked once, when its types are judged, and never for a
+/// report.
 #[derive(Default)]
 pub(crate) struct Fits {
   /// Each type and class judged, with the way down to what does not fit; `None` when it fits.
   judged: BTreeMap<(TyId, Class), Option<Way>>,
+  /// Each written occurrence and class answered, with where under it what does not fit lies;
+  /// `None` when it fits.
+  answered: BTreeMap<(TypeExprId, Class), Option<Misfit>>,
   /// The types still to judge, each with whether its children were pushed above it.
   stack: Vec<(TyId, bool)>,
+  /// The occurrences whose answers wait for their child's, outermost first, each with whether the
+  /// step down from it passes an argument of a collection.
+  waiting: Vec<(TypeExprId, bool)>,
 }
 
 impl Fits {
@@ -859,12 +880,12 @@ impl Fits {
   }
 
   /// Where `ty`, of `model`, does not fit `class`, `written` being the occurrence that writes it,
-  /// if one does: the definition of the type under it that does not fit, and the deepest
-  /// occurrence of `written`'s tree that writes the way to it. `None` when it fits.
+  /// if one does, whose own type is `ty` up to a collection key's `!`, which no class reads: the
+  /// definition of the type under it that does not fit, and the deepest occurrence of `written`'s
+  /// tree that writes the way to it. `None` when it fits.
   ///
-  /// It follows the way down `written`'s tree alone, and reads what lies at the way's end from the
-  /// way kept for the type where the tree stops writing it: one step for each level the occurrence
-  /// writes, and one lookup.
+  /// It reads one kept answer: the way kept for `ty` when no occurrence writes it, and else the
+  /// answer kept for `written`, which [`answer`](Self::answer) makes once for the walk.
   pub(crate) fn misfit(
     &mut self,
     model: &Model,
@@ -872,53 +893,100 @@ impl Fits {
     class: Class,
     written: Option<TypeExprId>,
   ) -> Option<Misfit> {
-    let mut way = self.way(model, ty, class)?;
-    let mut ty = ty;
-    let mut at = written;
-    let mut nested = false;
-    let mut filled: Option<(DefId, u32)> = None;
-    // Down `written`'s tree while it writes the way: each step goes one level down the tree, so
-    // the loop ends within it.
-    while let Some(occurrence) = at {
-      let step = match (way.under, model.ty(ty).kind()) {
-        (Under::Element, TyKind::List { element }) => match model.type_expr(occurrence).kind() {
-          TypeExprKind::List { element: next } => Some((element, next)),
-          // The tree writes no list where the way goes down one.
-          _ => None,
-        },
-        (Under::Argument(index), TyKind::Named { def, args }) => {
-          let child = *args.get(index as usize)?;
-          nested = true;
-          let next = match model.type_expr(occurrence).kind() {
-            TypeExprKind::Named { args: given, .. } => given.get(index as usize).copied(),
-            _ => None,
-          };
-          match next {
-            Some(next) => Some((child, next)),
-            None => {
-              // A slot the occurrence leaves to its default: the way leaves the tree here.
-              filled = Some((def, index));
-              None
-            }
-          }
-        }
-        // The type itself does not fit.
-        _ => None,
-      };
-      let Some((child, next)) = step else {
-        break;
-      };
-      // Every type under a judged one is judged, so this reads a kept way.
-      way = self.kept(child, class)?;
-      ty = child;
-      at = Some(next);
+    let way = self.way(model, ty, class)?;
+    match written {
+      Some(occurrence) => self.answer(model, occurrence, class),
+      None => Some(Misfit {
+        leaf: way.leaf,
+        nested: way.nested,
+        at: None,
+        filled: None,
+      }),
     }
-    Some(Misfit {
+  }
+
+  /// Where, under `occurrence`, a written occurrence of `model`, what does not fit `class` lies,
+  /// `None` when it fits: each occurrence's answer made once for the walk, and kept.
+  ///
+  /// Asked about an occurrence it has not answered, it answers the occurrences down the way from
+  /// it that it has not answered either, children before their parents: down the tree while the
+  /// tree writes the way, to an occurrence answered before or to one whose own check answers it,
+  /// then each above it from its child's answer, in one step. So each written occurrence and class
+  /// is answered once for the walk, however many reports nest above it.
+  fn answer(&mut self, model: &Model, occurrence: TypeExprId, class: Class) -> Option<Misfit> {
+    if let Some(kept) = self.answered.get(&(occurrence, class)) {
+      return *kept;
+    }
+    self.waiting.clear();
+    let mut at = occurrence;
+    // Down the tree while it writes the way and nothing down there is answered: each step goes
+    // one level down the tree, so the loop ends within it.
+    let mut answer = loop {
+      if let Some(kept) = self.answered.get(&(at, class)) {
+        break *kept;
+      }
+      match self.check(model, at, class) {
+        Check::Answer(answer) => {
+          self.answered.insert((at, class), answer);
+          break answer;
+        }
+        Check::Child(child, argument) => {
+          self.waiting.push((at, argument));
+          at = child;
+        }
+      }
+    };
+    // Up again, the deepest first, each answer from its child's.
+    while let Some((parent, argument)) = self.waiting.pop() {
+      answer = answer.map(|below: Misfit| Misfit {
+        nested: below.nested || argument,
+        ..below
+      });
+      self.answered.insert((parent, class), answer);
+    }
+    answer
+  }
+
+  /// What `occurrence`, a written occurrence of `model`, answers for `class` by its own check: its
+  /// answer, from its own type's way, when it fits or the tree stops writing the way there, at a
+  /// slot it leaves to its default, a list it does not write, or what itself does not fit; else
+  /// the child it writes on the way.
+  fn check(&mut self, model: &Model, occurrence: TypeExprId, class: Class) -> Check {
+    let written = model.type_expr(occurrence);
+    let ty = written.ty();
+    let Some(way) = self.way(model, ty, class) else {
+      return Check::Answer(None);
+    };
+    let filled = match (way.under, model.ty(ty).kind()) {
+      (Under::Element, TyKind::List { .. }) => match written.kind() {
+        TypeExprKind::List { element } => return Check::Child(element, false),
+        // The tree writes no list where the way goes down one.
+        _ => None,
+      },
+      (Under::Argument(index), TyKind::Named { def, args }) => {
+        // The way down a collection goes to one of its arguments.
+        if args.get(index as usize).is_none() {
+          return Check::Answer(None);
+        }
+        let child = match written.kind() {
+          TypeExprKind::Named { args: given, .. } => given.get(index as usize).copied(),
+          _ => None,
+        };
+        if let Some(child) = child {
+          return Check::Child(child, true);
+        }
+        // A slot the occurrence leaves to its default: the way leaves the tree here.
+        Some((def, index))
+      }
+      // The type itself does not fit.
+      _ => None,
+    };
+    Check::Answer(Some(Misfit {
       leaf: way.leaf,
-      nested: nested || way.nested,
-      at,
+      nested: way.nested,
+      at: Some(occurrence),
       filled,
-    })
+    }))
   }
 
   /// The way down from `ty`, of `model`, to what does not fit `class`, `None` when it fits. It
