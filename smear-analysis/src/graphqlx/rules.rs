@@ -45,7 +45,9 @@
 //! parameters that are a OneOf's field's whole type, which `positions::Positions::of` tells from
 //! who wrote each `@oneOf`, as `one_of` does, and `DeprecatedRequired` a fourth, for the
 //! parameters that are a deprecated member's whole type; each reads the public `Application::ty`,
-//! an application's complete type, its directive's instantiation.
+//! an application's complete type, its directive's instantiation, and, through
+//! `positions::Derived`, one crate-private accessor, `Model::type_exprs`: every type occurrence of
+//! the model, whose types are what the program writes, which a fill passes over.
 //! `TypeRefMisuse` reads the graph of what a value can reach too, `reach::Reach`, found once for
 //! the walk over every package's input objects, so that an argument the root package writes is
 //! judged by what a dependency's input object holds; what a value of an input object holds is its

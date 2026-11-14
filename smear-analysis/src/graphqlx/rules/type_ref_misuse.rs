@@ -47,7 +47,9 @@
 //!
 //! The rule reads the public model, the public `Application::ty` among it: an application's
 //! complete type, its directive's instantiation. Through `Nesting` it reads the public
-//! `TypeExpr::written_args`, to tell which occurrences of a tree are above another.
+//! `TypeExpr::written_args`, to tell which occurrences of a tree are above another. Through
+//! `positions::Derived` it reads one crate-private accessor, `Model::type_exprs`: every type
+//! occurrence of the model, whose types are what the program writes.
 
 use std::{collections::BTreeMap, format};
 

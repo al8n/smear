@@ -44,7 +44,9 @@
 //! OneOf.
 //!
 //! The rule reads the public model, the public `Application::ty` among it: an application's
-//! complete type, its directive's instantiation.
+//! complete type, its directive's instantiation. Through `positions::Derived` it reads one
+//! crate-private accessor, `Model::type_exprs`: every type occurrence of the model, whose types
+//! are what the program writes.
 
 use std::{collections::BTreeMap, format};
 
