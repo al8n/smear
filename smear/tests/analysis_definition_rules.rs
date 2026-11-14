@@ -3046,6 +3046,72 @@ fn a_parameter_given_non_null_passes_no_nullable_place_on() {
   );
 }
 
+#[test]
+fn a_parameter_a_default_gives_non_null_passes_no_nullable_place_on() {
+  // `E`'s default `V = U!` gives `V`, which `@d<V>` makes a deprecated argument's whole type, a
+  // non-null type whatever `E` is given: the mistake of each occurrence that leaves `V` out,
+  // refused where it is written, as any instantiation is, here `E<T>`, labelled where `V` stands
+  // and at the default. The `T!` that `E<T>`'s fill gives stops the place short of the set's
+  // element, as a `T!` written does: `S` is not refused for it, and `S<Int>` adds nothing.
+  let text = "type Query {\n  s: S<Int>\n}\ndirective @d<X>(v: X @deprecated) on SCALAR\n\
+              directive @e<Y>(w: Y) on SCALAR\nscalar E<U, V = U!> @d<V>(v: 1)\n\
+              scalar S<T> @set @e<E<T>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_ARGUMENT,
+      at(schema, text, "E<T>", 0),
+      Some(named(schema, text, "@d<", "V", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`E` takes, from the default of `V`, a non-null type for its type parameter `V`, which makes \
+       a deprecated argument required"
+    ]
+  );
+  let filled = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    filled
+      .label(1)
+      .map(|label| (label.location(), label.text())),
+    Some((at(schema, text, "U!", 0), "filled from this default"))
+  );
+
+  // The same for a OneOf's field: refused once, at `E<T>`, labelled where `V` stands.
+  let text = "type Query {\n  s: S<Int>\n}\ninput Choice<X> @oneOf {\n  value: X\n}\n\
+              directive @d<X>(value: Choice<X>) on SCALAR\ndirective @e<Y>(w: Y) on SCALAR\n\
+              scalar E<U, V = U!> @d<V>\nscalar S<T> @set @e<E<T>>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      at(schema, text, "E<T>", 0),
+      Some(named(schema, text, "@d<", "V", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`E` takes, from the default of `V`, a non-null type for its type parameter `V`, which is \
+       the type of the field `value` of the OneOf input object `Choice`"
+    ]
+  );
+}
+
 /// The report of a non-null type given to the `X` of `input Choice<X> @oneOf { value: X }` by an
 /// instantiation of `Choice` that is written.
 const CHOICE_TAKES: &str = "`Choice` takes a non-null type for its type parameter `X`, which is \
