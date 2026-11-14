@@ -236,6 +236,12 @@ impl Model {
       dense(self.applications.len()),
     )
   }
+
+  /// How many bytes its text arena holds: every spelling it keeps but names and paths.
+  #[cfg(feature = "test-support")]
+  pub(crate) fn text_len(&self) -> usize {
+    self.text.len()
+  }
 }
 
 /// One package of the model.

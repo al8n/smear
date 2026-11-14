@@ -1962,3 +1962,59 @@ fn one_verdict_serves_every_closed_application_of_a_generic_directive() {
      here within `Limits::max_value_steps`, 6, the steps the analysis may take to complete values"
   );
 }
+
+/// A tree's spelling is kept once, however many of its nodes are kept as written and under however
+/// many types: each node's text is a run of that one copy. `@d`'s default nests a string in sixteen
+/// lists, and `@d` is applied under `S`, `[S]`, and so on to sixteen levels of list, `S` a custom
+/// scalar, so each application keeps as written the node at its depth, from the whole default down
+/// to the string: seventeen nodes, each holding the string. Lengthening the string by `GROWN`
+/// bytes lengthens the model's text arena by exactly `GROWN`, the one copy's growth, where a copy
+/// for each node kept would lengthen it by seventeen times as much. Each kept literal still reads
+/// back its spelling exactly. The test pins the arena's growth and the spellings; that the texts
+/// kept are bounded by the source holds by construction, each tree copied once and each of its
+/// nodes' texts a run of the copy.
+#[test]
+fn a_trees_spelling_is_kept_once_whatever_reads_its_nodes() {
+  const LEVELS: usize = 16;
+  const GROWN: usize = 4096;
+  let program = |long: &str| -> String {
+    let applied: Vec<String> = (0..=LEVELS)
+      .map(|k: usize| format!("@d<{}S{}>", "[".repeat(k), "]".repeat(k)))
+      .collect();
+    format!(
+      "type Query {} {{\n  x: Int\n}}\nscalar S\n\
+       directive @d<T>(v: T = {}\"{long}\"{}) repeatable on OBJECT\n",
+      applied.join(" "),
+      "[".repeat(LEVELS),
+      "]".repeat(LEVELS)
+    )
+  };
+  let short = analyze_text(&program("a"), &Limits::new());
+  quiet(&short);
+  let long = "a".repeat(GROWN + 1);
+  let analysis = analyze_text(&program(&long), &Limits::new());
+  quiet(&analysis);
+  assert_eq!(
+    test_support::text_len(analysis.model()),
+    test_support::text_len(short.model()) + GROWN
+  );
+  let model = analysis.model();
+  for k in 0..=LEVELS {
+    let mut value = argument(model, application_on(model, "Query", k), "v").expect("a copy");
+    for _ in 0..k {
+      let ValueKind::List(items) = model.value(value).kind() else {
+        panic!("no list at depth {k}");
+      };
+      value = items[0];
+    }
+    let ValueKind::Literal(literal) = model.value(value).kind() else {
+      panic!("no literal at depth {k}");
+    };
+    let lists = LEVELS - k;
+    assert_eq!(
+      literal.text(),
+      format!("{}\"{long}\"{}", "[".repeat(lists), "]".repeat(lists)),
+      "the node at depth {k}"
+    );
+  }
+}
