@@ -676,7 +676,7 @@ fn is_int_literal(bytes: &[u8]) -> bool {
 /// itself, and spells any other as its significant digits under an exponent of at most three
 /// digits, for `core` to read. That spelling keeps the first 800 significant digits and a final
 /// `1` for a later digit that is not zero, and no halfway point between two doubles has more than
-/// 767, so the conversion stays correctly rounded for a literal of any length, the buffer bounding
+/// 768, so the conversion stays correctly rounded for a literal of any length, the buffer bounding
 /// none. It allocates nothing: the buffer is on the stack, and so is the fixed-size big integer of
 /// `core::num::dec2flt`'s slow path. Rolling a mantissa-and-exponent conversion here instead would
 /// be double-rounded and therefore wrong on halfway cases.

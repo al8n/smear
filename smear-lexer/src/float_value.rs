@@ -1,7 +1,7 @@
 //! A decimal float literal's value, read for `core`'s float parser, as `string_value_pieces`
 //! reads a string literal's value from its spelling: [`normalize_decimal_float`].
 
-/// The significant digits a spelling keeps: more than the 767 any halfway point between two `f64`s
+/// The significant digits a spelling keeps: more than the 768 any halfway point between two `f64`s
 /// has.
 const KEPT: usize = 800;
 
@@ -96,7 +96,7 @@ impl Writer<'_> {
 ///
 /// The spelling keeps the literal's first 800 significant digits and, when a later digit is not
 /// zero, a final `1` after them. No halfway point between two `f64`s, nor between two `f32`s, has
-/// more than 767 significant digits, so the value and the spelling lie on the same side of each,
+/// more than 768 significant digits, so the value and the spelling lie on the same side of each,
 /// and round alike; `core`'s parser keeps 768 digits and a flag for a later digit that is not zero
 /// for the same reason. So the buffer bounds no literal's length, and changes no value the parser
 /// reads right.
