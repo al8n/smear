@@ -383,8 +383,10 @@ impl DiagnosticKind {
 /// the rule is the same rule in both dialects: a consumer sees one vocabulary across the two. A
 /// consumer waives one by filtering its code out, by name, and each constant here is that name;
 /// [`ALL`](crate::graphqlx::schema::ALL) lists them. The list grows as the analysis does.
-/// [`DiagnosticKind`](crate::graphqlx::DiagnosticKind) lists the analyzer's own family,
-/// `smear::graphqlx`.
+/// [`DiagnosticKind`] lists the analyzer's own family, `smear::graphqlx`.
+//
+// An outer doc comment of a module resolves its links in the parent module, this one: `ALL` names
+// nothing here, and `DiagnosticKind` is this module's own.
 pub mod schema {
   use tokora::diagnostic::Code;
 
