@@ -183,6 +183,10 @@ const MEANING: &str = "`@marker`, `@set` and `@map` say what a definition is, an
 const HOST: &str = "`@extern` binds a scalar its own package defines: give a built-in its host \
                     type with `extend schema @repr(for: …, lang: …, type: …)`";
 
+/// What GraphQL tells the author of a directive on a cycle: `smear-schema`'s help, word for word.
+const SELF_REFERENTIAL_HELP: &str = "a directive may not appear on its own definition or an \
+                                     extension of it, nor on any type or directive they name.";
+
 /// What GraphQL tells the author of a directive that is not repeatable applied twice to one
 /// location: `smear-schema`'s help, word for word.
 const DUPLICATE_DIRECTIVE_USE_HELP: &str = "declare the directive `repeatable`, or apply it once; \
@@ -2209,6 +2213,10 @@ fn host(what: &str, built_in: &str) -> String {
 /// `string`, on `i32`, a primitive `core` materialises with no position for a label, and on `std`'s
 /// `HashSet`, which an extension names with no parameter list. Each is refused where it is written,
 /// and none binds anything. Refuses the root's `@extern` on a built-in accepted, inert or bound.
+///
+/// `@extern` takes `string!` arguments, so its application to `string` also puts `core`'s
+/// `@extern` on a cycle, which the self-reference rule reports at its name, in `core`'s source,
+/// first: the orphan rule's refusal leaves the application in the model.
 #[test]
 fn the_root_giving_a_built_in_a_host_type_is_an_orphan() {
   let text = "type Query {\n  x: Int\n}\n\
@@ -2223,6 +2231,11 @@ fn the_root_giving_a_built_in_a_host_type_is_an_orphan() {
   assert_eq!(
     found(&analysis),
     [
+      (
+        SELF_REFERENTIAL_DIRECTIVE,
+        model.def(model.builtins().r#extern()).location(),
+        None
+      ),
       (
         ORPHAN,
         at(schema, text, "extern", 0),
@@ -2241,12 +2254,23 @@ fn the_root_giving_a_built_in_a_host_type_is_an_orphan() {
   assert_eq!(
     messages(&analysis),
     [
+      String::from(
+        "the directive `@extern` refers to itself, through the directives and types it names"
+      ),
       host("type `string`", "alloc"),
       host("type `i32`", "core"),
       host("type `HashSet`", "std"),
     ]
   );
-  assert_eq!(helps(&analysis), [Some(HOST), Some(HOST), Some(HOST)]);
+  assert_eq!(
+    helps(&analysis),
+    [
+      Some(SELF_REFERENTIAL_HELP),
+      Some(HOST),
+      Some(HOST),
+      Some(HOST)
+    ]
+  );
   let int = def(model, "^::core::i32");
   for built_in in [string, int, hash_set] {
     assert_eq!(model.def(built_in).externs().len(), 0);
@@ -2255,6 +2279,10 @@ fn the_root_giving_a_built_in_a_host_type_is_an_orphan() {
 
 /// A dependency's extension of a built-in that applies `@extern` is refused whole, once, by the
 /// orphan rule's second message, at its target. Refuses a second diagnostic at the `@extern`.
+///
+/// The application stays in the model all the same, so it puts `core`'s `@extern`, which takes
+/// `string!` arguments, on a cycle through `string`: the self-reference rule reports it at its
+/// name, in `core`'s source, first.
 #[test]
 fn a_dependencys_extern_on_a_built_in_is_one_orphan() {
   let ours = "type Query {\n  x: Int\n}\n";
@@ -2267,22 +2295,33 @@ fn a_dependencys_extern_on_a_built_in_is_one_orphan() {
   let string = model.builtins().string();
   assert_eq!(
     found(&analysis),
-    [(
-      ORPHAN,
-      at(geo_file, theirs, "string", 0),
-      Some(model.def(string).location())
-    )],
+    [
+      (
+        SELF_REFERENTIAL_DIRECTIVE,
+        model.def(model.builtins().r#extern()).location(),
+        None
+      ),
+      (
+        ORPHAN,
+        at(geo_file, theirs, "string", 0),
+        Some(model.def(string).location())
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
   assert_eq!(
     messages(&analysis),
     [
+      "the directive `@extern` refers to itself, through the directives and types it names",
       "package `geo` extends the type `string` of the built-in package `alloc`, which only the root \
        package extends"
     ]
   );
-  assert_eq!(helps(&analysis), [Some(NOT_THE_ROOT)]);
+  assert_eq!(
+    helps(&analysis),
+    [Some(SELF_REFERENTIAL_HELP), Some(NOT_THE_ROOT)]
+  );
   assert_eq!(model.def(string).externs().len(), 0);
 }
 
