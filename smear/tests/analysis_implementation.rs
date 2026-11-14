@@ -43,6 +43,10 @@ const UNEXPECTED: &str = "smear::schema::unexpected-required-argument";
 const UNDEFINED_TYPE: &str = "smear::schema::undefined-type";
 /// L3's code for a marker misused.
 const MARKER_MISUSE: &str = "smear::graphqlx::marker-misuse";
+/// GraphQL's code for an interface on a cycle of `implements` entries.
+const SELF_IMPLEMENTING: &str = "smear::schema::self-implementing-interface";
+/// GraphQL's code for an argument whose type is no input type.
+const NOT_INPUT: &str = "smear::schema::argument-type-not-input-type";
 
 /// The codes this phase reports. A program another rule refuses is asserted on these alone.
 const PHASE: [&str; 10] = [
@@ -515,8 +519,8 @@ fn a_ring_of_three_reports_what_each_omits() {
 /// A ring of definitions that grows its arguments ends at once: `T`'s `A<Int>` omits
 /// `B<Box<Int>>`, which `A` implements, and `A<Box<Box<Int>>>`, which `B` implements under it, two
 /// reports at `T`'s entry; `A`'s definition was read already, and is not read again. `A` and `B`
-/// each meet themselves, which is the self-implementing rule's. Refuses an expansion by type,
-/// which grows until the depth limit.
+/// each meet themselves, which this phase passes by: the self-implementing rule refuses each, at
+/// its name. Refuses an expansion by type, which grows until the depth limit.
 #[test]
 fn a_growing_ring_ends() {
   let text = "type Query {\n  x: Int\n}\nscalar Box<Z>\n\
@@ -526,7 +530,15 @@ fn a_growing_ring_ends() {
   let analysis = analyze_text(text, &Limits::new());
   let schema = schema_file(&analysis);
   let entry = at(schema, text, "A<Int>", 0);
-  assert_eq!(found(&analysis), [(TRANSITIVE, entry), (TRANSITIVE, entry)]);
+  assert_eq!(
+    found(&analysis),
+    [
+      (SELF_IMPLEMENTING, named(schema, text, "interface ", "A", 0)),
+      (SELF_IMPLEMENTING, named(schema, text, "interface ", "B", 0)),
+      (TRANSITIVE, entry),
+      (TRANSITIVE, entry),
+    ]
+  );
   let mut implemented: Vec<Location> = analysis
     .diagnostics()
     .iter()
@@ -1089,8 +1101,9 @@ fn graphqls_argument_fixtures_are_refused_once() {
 
 /// An argument's type is the interface's exactly, after substitution: `f(a: User)` for
 /// `f(a: Node)` is refused, though `User` implements `Node`; under `I<Int!>`, `f(a: X)` asks
-/// `Int!`, which `P` gives and `Q`'s `Int` does not. Refuses covariant arguments, and an argument
-/// read as written.
+/// `Int!`, which `P` gives and `Q`'s `Int` does not. An interface and an object are no input types:
+/// GraphQL's rule refuses `J`'s `Node`, at it, and says nothing of `S`'s `User`, in a contribution
+/// this phase refused something in. Refuses covariant arguments, and an argument read as written.
 #[test]
 fn argument_types_are_exact_after_substitution() {
   let text = "type Query {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
@@ -1105,6 +1118,7 @@ fn argument_types_are_exact_after_substitution() {
   assert_eq!(
     found(&analysis),
     [
+      (NOT_INPUT, named(schema, text, "f(a: ", "Node", 0)),
       (ARGUMENT_TYPE, named(schema, text, "f(", "a", 1)),
       (ARGUMENT_TYPE, q)
     ]

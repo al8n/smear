@@ -24,6 +24,8 @@ const EXTERN_MISUSE: &str = "smear::graphqlx::extern-misuse";
 const ORPHAN: &str = "smear::graphqlx::orphan-extension";
 /// The code for `@repr` misused.
 const REPR_MISUSE: &str = "smear::graphqlx::repr-misuse";
+/// GraphQL's code for a directive on a cycle of what definitions reach.
+const SELF_REFERENTIAL: &str = "smear::schema::self-referential-directive";
 
 /// A package named `name`, `Flat`, at `tier`, holding `files`, `(path, text)`.
 fn package<'a>(name: &'a str, tier: Tier, files: &[(&'a str, &'a str)]) -> Package<&'a str> {
@@ -452,35 +454,52 @@ fn sixty_five_externs_find_their_duplicate() {
 
 /// `@extern` on a GraphQL built-in the root package's own definition replaces is `extern-misuse`,
 /// at its path, in the definition and in the root package's own extension of it, and no orphan:
-/// `[Z5]`'s programs 3 and 4. Its help names `@repr(for: …)`. Refuses an `@extern` on a replaced
-/// built-in bound, or left to the orphan rule.
+/// `[Z5]`'s programs 3 and 4. Its help names `@repr(for: …)`. `String` is `alloc`'s `string`, which
+/// `core`'s `@extern` takes as its `lang` and its `type`, so an `@extern` on it closes a cycle
+/// through `@extern`: `self-referential-directive`, at `@extern`'s own name in `core`'s source,
+/// first in the list; `Int` closes none. Refuses an `@extern` on a replaced built-in bound, or left
+/// to the orphan rule.
 #[test]
 fn extern_on_a_replaced_built_in_is_refused() {
-  for (text, nth) in [
+  for (text, nth, cycle) in [
     (
       "type Query {\n  x: Int\n}\nscalar String @extern(lang: \"rust\", type: \"my::Str\")\n",
       0,
+      true,
     ),
     (
       "type Query {\n  x: Int\n}\nscalar Int @extern(lang: \"rust\", type: \"my::Int\")\n",
       0,
+      false,
     ),
     (
       "type Query {\n  x: Int\n}\nscalar String\n\
        extend scalar String @extern(lang: \"rust\", type: \"my::Str\")\n",
       0,
+      true,
     ),
   ] {
     let analysis = analyze_text(text);
     let schema = file(&analysis, 3, "schema.graphqlx");
+    let model = analysis.model();
+    let mut expected: Vec<(&str, Location, Option<Location>)> = Vec::new();
+    if cycle {
+      expected.push((
+        SELF_REFERENTIAL,
+        model.def(model.builtins().r#extern()).location(),
+        None,
+      ));
+    }
+    expected.push((EXTERN_MISUSE, at(schema, text, "extern", nth), None));
     assert_eq!(
-      labelled(&analysis, &[EXTERN_MISUSE, ORPHAN]),
-      [(EXTERN_MISUSE, at(schema, text, "extern", nth), None)],
+      labelled(&analysis, &[EXTERN_MISUSE, ORPHAN, SELF_REFERENTIAL]),
+      expected,
       "{text}"
     );
     let help = analysis
       .diagnostics()
       .iter()
+      .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() == EXTERN_MISUSE)
       .find_map(|diagnostic: &Diagnostic| diagnostic.help());
     assert!(
       help.is_some_and(|help: &str| help.contains("@repr(for: …")),

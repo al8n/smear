@@ -11,9 +11,11 @@
 //! counted by reason, when the analyzer's parser refuses it, when `smear-schema`'s list is not
 //! exhaustive, or when either side reports `duplicate-type-name` or `unresolved-path`, a second
 //! definition of one name that `smear-schema` drops unread, `implements-non-interface` or
-//! `self-implementing-interface`, rules the analyzer gives another phase, or one of the three
-//! ceilings of `smear-schema`'s representation. A difference is excused in one direction alone,
-//! and each excuse used is printed:
+//! `self-implementing-interface`, which the analyzer reports from rules of its own once its phases
+//! have run, or one of the three ceilings of `smear-schema`'s representation. Those two rules
+//! change none of the nine, and a phase's error, this one's among them, silences them in the
+//! contribution that holds it, where `smear-schema` may still report one: so either side's report
+//! is read. A difference is excused in one direction alone, and each excuse used is printed:
 //!
 //! - `smear-schema` gives more `invalid-interface-field-type` or
 //!   `invalid-interface-field-argument-type` on a document where the analyzer reports
@@ -72,8 +74,9 @@ const NINE_KINDS: [SchemaErrorKind; 9] = [
 ];
 
 /// Codes that put a document out of the sweep's scope, on either side: a second definition of one
-/// name, which `smear-schema` drops unread; a path that names nothing, the analyzer's alone; the
-/// rules on `implements` entries the analyzer gives another phase; and the three ceilings of
+/// name, which `smear-schema` drops unread; a path that names nothing, the analyzer's alone;
+/// GraphQL's rules on `implements` entries, which the analyzer runs as rules of its own after its
+/// phases, silent in a contribution a phase refused something in; and the three ceilings of
 /// `smear-schema`'s representation, which GraphQLx does not have.
 const OUT_OF_SCOPE: [&str; 7] = [
   "smear::schema::duplicate-type-name",
