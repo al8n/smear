@@ -835,6 +835,102 @@ fn a_directive_applied_to_an_input_object_holds_no_value() {
   );
 }
 
+#[test]
+fn a_report_reads_what_a_chain_of_lists_names_once() {
+  // `Q`'s parameters after the first are each a list of the one before, by default, and the first
+  // is `Binding`, which holds a `TypeRef`, by default; an operation's argument takes the last. So
+  // each field of `Query` that leaves `Q`'s parameters to their defaults is refused, at its
+  // occurrence, naming `Binding`, which the last argument names under its lists, and labelled where
+  // the last parameter is reached, at `Binding`'s `type` and at the last default. What a list
+  // names under its lists is kept for the walk once a report reads it, so each list is walked once
+  // for the walk, whichever report names it. The depth and the count of fields vary, and each
+  // program runs again under a diagnostic ceiling of zero, which keeps no report and still builds
+  // and counts each. A test sees the diagnostics, not the work, which holds by construction: a
+  // report walks only the lists no report read before. Walked again for each report, the largest
+  // program here would read its 3,000 lists for each of its 3,000 fields, 9 million steps.
+  const DEPTH: usize = 3_000;
+  const FIELDS: usize = 3_000;
+  // `Q` is a level deeper than its last argument, which is as deep as the lists, past the default
+  // bound.
+  let limits = Limits::new()
+    .with_max_generic_depth(u32::try_from(DEPTH + 1).expect("the lists' depth is a u32"));
+  for (depth, fields) in [(1, 1), (DEPTH, 1), (1, FIELDS), (DEPTH, FIELDS)] {
+    let mut text = String::from("type Query {\n");
+    let mut written: Vec<usize> = Vec::with_capacity(fields);
+    for index in 0..fields {
+      let field = format!("  q{index}: ");
+      written.push(text.len() + field.len());
+      text.push_str(&field);
+      text.push_str("Q\n");
+    }
+    text.push_str("}\ninput Binding {\n  type: TypeRef!\n}\ntype Q<A = Binding");
+    // The last parameter's name, and where its default is written, with its length.
+    let mut last = String::from("A");
+    let mut default = (0, 0);
+    for index in 1..=depth {
+      let head = format!(", B{index} = ");
+      let list = format!("[{last}]");
+      default = (text.len() + head.len(), list.len());
+      text.push_str(&head);
+      text.push_str(&list);
+      last = format!("B{index}");
+    }
+    text.push_str("> {\n  f(a: ");
+    let stands = text.len();
+    text.push_str(&last);
+    text.push_str("): Int\n}\n");
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+    let analysis = analyze(&root, &[], &limits);
+    let schema = schema_file(&analysis);
+    let span = |start: usize, len: usize| -> Location {
+      Location::new(schema.get(), SimpleSpan::new(start, start + len))
+    };
+    let reached = span(stands, last.len());
+    let expected: Vec<(&'static str, Location, Option<Location>)> = written
+      .iter()
+      .map(|start: &usize| (TYPEREF, span(*start, "Q".len()), Some(reached)))
+      .collect();
+    assert_eq!(found(&analysis), expected, "depth {depth}, fields {fields}");
+    let first = reported(&analysis)[0];
+    assert_eq!(
+      first.to_string(),
+      format!(
+        "`Q` takes, from the default of `{last}`, `Binding` for its type parameter `{last}`, which \
+         an operation's argument reaches, and a value of `Binding` can hold the input field `type` \
+         of `Binding`, whose type is `TypeRef`"
+      )
+    );
+    let labels: Vec<(Location, String)> = (0..first.labels())
+      .filter_map(|index: usize| first.label(index))
+      .map(|label| (label.location(), String::from(label.text())))
+      .collect();
+    assert_eq!(
+      labels,
+      [
+        (
+          reached,
+          format!("`{last}` is reached from an operation's argument here")
+        ),
+        (
+          named(schema, &text, "  ", "type", 0),
+          String::from("a value of `TypeRef` stands here")
+        ),
+        (
+          span(default.0, default.1),
+          String::from("filled from this default")
+        ),
+      ]
+    );
+    // Under a ceiling of zero, each report is built and counted, and none is kept.
+    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0));
+    let diagnostics = silent.diagnostics();
+    assert!(diagnostics.is_empty(), "depth {depth}, fields {fields}");
+    assert!(diagnostics.truncated());
+    assert_eq!(diagnostics.error_count(), fields);
+  }
+}
+
 /// `NonZero` of integer primitives, written and through an alias; then of a float, `string`, `u0`,
 /// a list, an object, an integer written with `!` and a type parameter; and with no argument.
 const NON_ZEROS: &str = "type User {\n  id: ID\n}\n\

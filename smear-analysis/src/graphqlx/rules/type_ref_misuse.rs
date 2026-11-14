@@ -80,10 +80,12 @@ use super::{Nesting, Silence};
 /// application, one look at its type and, once for each distinct type, a verdict that reads what
 /// each argument at a slot an operation's argument reaches can reach, and once for each distinct
 /// type and count of written arguments, the types its fill derives, each once. Each type's reach
-/// is answered once for the walk. It keeps a count and two flags between two occurrences, and for
-/// the walk the table, what each type can reach and its verdicts, keyed by the model's ids. Its
-/// messages quote names as excerpts, so each is bounded whatever the names' lengths, and print no
-/// type.
+/// is answered once for the walk. A report names the definition its argument names under its
+/// lists, kept for each list once a report reads it: a chain of lists a default fills is walked
+/// once for the walk, and never again for another report. It keeps a count and two flags between
+/// two occurrences, and for the walk the table, what each type can reach, what each list names and
+/// its verdicts, keyed by the model's ids. Its messages quote names as excerpts, so each is bounded
+/// whatever the names' lengths, and print no type.
 #[derive(Default)]
 pub(super) struct TypeRefMisuse {
   /// Where each occurrence stands in its tree.
@@ -94,6 +96,8 @@ pub(super) struct TypeRefMisuse {
   positions: Positions,
   /// What a value of each type can reach.
   reach: Reach,
+  /// The definition each list a report read names under its lists, when it names one.
+  named: BTreeMap<TyId, Option<DefId>>,
   /// Each type's own verdict, judged once: the first of its arguments, at a slot an operation's
   /// argument reaches, a value of which can hold a field of type `TypeRef`.
   verdicts: BTreeMap<TyId, Option<Held>>,
@@ -127,6 +131,7 @@ impl Visitor for TypeRefMisuse {
     self.silence = Silence::of(cx);
     self.positions = Positions::of(model, cx.sources());
     self.reach = Reach::of(model, &self.positions);
+    self.named = BTreeMap::new();
     self.verdicts = BTreeMap::new();
     self.derived = Derived::default();
   }
@@ -284,7 +289,7 @@ impl TypeRefMisuse {
   /// that writes the type arguments `written`, `whole` being where it is written: the occurrence,
   /// or an application's path.
   fn report(
-    &self,
+    &mut self,
     model: &Model,
     found: Found,
     ty: TyId,
@@ -311,7 +316,7 @@ impl TypeRefMisuse {
     let name = Excerpt(parameter(model, taker, slot).as_bytes());
     let taken = Excerpt(
       model
-        .def(named_under_lists(model, argument)?)
+        .def(named_under_lists(model, &mut self.named, argument)?)
         .name()
         .as_bytes(),
     );
@@ -367,15 +372,37 @@ fn verdict(
   found
 }
 
-/// The definition `ty`, of `model`, names under its lists, when it names one.
-fn named_under_lists(model: &Model, ty: TyId) -> Option<DefId> {
-  let mut ty = ty;
-  // Each step goes one level down the type, so the loop ends.
-  loop {
-    match model.ty(ty).kind() {
-      TyKind::List { element } => ty = element,
-      TyKind::Named { def, .. } => return Some(def),
-      TyKind::Param { .. } | TyKind::Unresolved => return None,
+/// The definition `ty`, of `model`, names under its lists, when it names one, each list's answer
+/// kept in `named` for the walk once it is read.
+///
+/// What a list names under its lists is the same whichever argument holds it and whichever report
+/// asks, so a report walks only the lists no report read before, down to a kept answer or a type
+/// that is no list, and keeps the answer for each of them: each list is walked at most twice for
+/// the walk, once to find the answer and once to keep it, however many reports name it.
+fn named_under_lists(
+  model: &Model,
+  named: &mut BTreeMap<TyId, Option<DefId>>,
+  ty: TyId,
+) -> Option<DefId> {
+  // Down the lists not read before: each step goes one level down the type, so the loop ends.
+  let mut at = ty;
+  let answer = loop {
+    if let Some(kept) = named.get(&at) {
+      break *kept;
     }
+    match model.ty(at).kind() {
+      TyKind::List { element } => at = element,
+      TyKind::Named { def, .. } => break Some(def),
+      TyKind::Param { .. } | TyKind::Unresolved => break None,
+    }
+  };
+  // The same lists again, each keeping the answer, up to the first list kept before.
+  let mut at = ty;
+  while let TyKind::List { element } = model.ty(at).kind() {
+    if named.insert(at, answer).is_some() {
+      break;
+    }
+    at = element;
   }
+  answer
 }
