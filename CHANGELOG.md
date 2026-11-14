@@ -615,7 +615,10 @@ All notable changes to Smear are documented in this file.
   given a finite value, at the field that closes the cycle, once for its input object, by the
   draft's unbreakable-cycle algorithm over every package's input objects, a generic input object
   requiring what its type arguments must hold: `input Wrap<T> { v: T! }` makes
-  `input A { w: Wrap<A>! }` a cycle, and `input Wrap<T> { v: T }` makes `Wrap<A!>!` one. And every
+  `input A { w: Wrap<A>! }` a cycle, and `input Wrap<T> { v: T }` makes `Wrap<A!>!` one. Where
+  only a substitution would say what an alternative of a OneOf requires, and past a cap on the
+  choices an input object keeps, the rule requires less: it never refuses an input object a finite
+  value satisfies, and may miss a cycle only in a program with type parameters. And every
   application a supplied package writes keeps GraphQL's own rules on directives, with GraphQL's
   codes: one at a location its
   directive's definition does not list, a built-in's own directive or a program's, is

@@ -316,6 +316,99 @@ fn a_one_of_is_finite_through_any_one_alternative() {
   }
 }
 
+/// `choices` OneOfs `C1<T>` to `Cn<T>`, each `{ recur: T, stop: <stop> }`, which `W<T>` holds, one
+/// in each field, and `input A { w: W<A>! }`: each OneOf gives `W` one group, "`A`, or `stop`".
+fn capped(choices: usize, stop: &str) -> String {
+  let mut text = String::from("type Query {\n  ok: Int\n}\ninput End {\n  n: Int\n}\n");
+  for index in 1..=choices {
+    text.push_str(&format!(
+      "input C{index}<T> @oneOf {{\n  recur: T\n  stop: {stop}\n}}\n"
+    ));
+  }
+  text.push_str("input W<T> {\n");
+  for index in 1..=choices {
+    text.push_str(&format!("  f{index}: C{index}<T>!\n"));
+  }
+  text.push_str("}\ninput A {\n  w: W<A>!\n}\n");
+  text
+}
+
+#[test]
+fn a_group_past_the_cap_requires_nothing() {
+  // `W`'s one type parameter allows it four groups, and each `Ci<T>` it holds gives it one. With
+  // `stop: End` each group has a value whatever `A` is, so `A` has one,
+  // `{ w: { f1: { stop: {} }, … } }`, below the cap and past it: past it, `W` is judged as if it
+  // had no group, and the cap never becomes a cycle.
+  for choices in [4, 5] {
+    let text = capped(choices, "End");
+    let analysis = analyze_text(&text);
+    assert!(
+      analysis.diagnostics().is_empty(),
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+  }
+  // With `stop: A`, every alternative of every group leads back to `A`, and `A` has no value.
+  // Below the cap the groups require `A`, and the cycle is reported at `A.w`.
+  let text = capped(4, "A");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(ONE_OF, named(schema, &text, "input A {\n  ", "w", 0))],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  // Past the cap the same cycle is not reported: the recorded gap. `W` is judged as if it had no
+  // group, which requires less than any group would, so the rule misses a cycle only a group past
+  // its cap would close, in a program with type parameters, and invents none.
+  let text = capped(5, "A");
+  let analysis = analyze_text(&text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{text}: {:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn an_alternative_only_a_substitution_would_judge_requires_nothing() {
+  // `Choice`'s one field is `Soft<T>`, whose finiteness under a use's argument only a substitution
+  // would say: it is judged with `T` taken as finite, and `Soft<T>` has a value whatever `T` is,
+  // `{}`. So neither `W<A>`, which holds `Choice<A>`, nor `Choice<B>` requires anything of its
+  // argument: `A` has a value, `{ w: { c: { a: {} } } }`, and `B` one, `{ c: { a: {} } }`. And
+  // `Pick<Soft<T>>`'s alternative `a` stands beside `b`, which leads back to `G` through `H<Int>`:
+  // `G` has a value through `a`, `{ h: { p: { a: {} } } }`. Each was refused before, an
+  // alternative only a substitution would judge being dropped beside another, and every argument
+  // of the type being required when none stood.
+  for text in [
+    "type Query {\n  ok: Int\n}\ninput Soft<T> {\n  s: T\n}\n\
+     input Choice<T> @oneOf {\n  a: Soft<T>\n}\ninput W<T> {\n  c: Choice<T>!\n}\n\
+     input A {\n  w: W<A>!\n}\ninput B {\n  c: Choice<B>!\n}\n",
+    "type Query {\n  ok: Int\n}\ninput Soft<T> {\n  s: T\n}\n\
+     input Pick<T> @oneOf {\n  a: T\n  b: G\n}\ninput H<T> {\n  p: Pick<Soft<T>>!\n}\n\
+     input G {\n  h: H<Int>!\n}\n",
+  ] {
+    let analysis = analyze_text(text);
+    assert!(
+      analysis.diagnostics().is_empty(),
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+  }
+  // With `Hard`, whose `h` is non-null, `Choice<B>` is `{ a: { h: B } }`, and `B` has no value;
+  // the rule, taking `T` as finite, does not report it. The recorded gap: what only a substitution
+  // would say is never required, so the rule misses this cycle, and invents none.
+  let text = "type Query {\n  ok: Int\n}\ninput Hard<T> {\n  h: T!\n}\n\
+              input Choice<T> @oneOf {\n  a: Hard<T>\n}\ninput B {\n  c: Choice<B>!\n}\n";
+  let analysis = analyze_text(text);
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 #[test]
 fn a_slot_a_default_fills_carries_as_a_written_one() {
   // A filled argument is read as a written one, with the nullness its default gives it, and a slot

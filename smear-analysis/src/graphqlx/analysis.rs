@@ -494,7 +494,10 @@ impl Analysis {
 ///   OneOf is on it, at its name, once for its input object. A generic input object requires what
 ///   its type arguments must hold: a type parameter a required field takes, or passes to another
 ///   input object's parameter it requires, is required of each instantiation, written `T` a
-///   nullable field being required where the argument is non-null.
+///   nullable field being required where the argument is non-null. Where only a substitution
+///   would say what an alternative of a OneOf requires, and past a cap on the choices an input
+///   object keeps, it requires less: it never refuses an input object a finite value satisfies,
+///   and may miss a cycle only in a program with type parameters.
 ///   GraphQL's own rules on directives judge every application a supplied package writes, with
 ///   GraphQL's codes: an application at a location its directive's definition does not list, the
 ///   schema, a kind of definition, a directive definition, a field, an argument, an input field or

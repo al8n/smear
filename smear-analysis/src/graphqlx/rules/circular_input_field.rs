@@ -32,19 +32,13 @@
 //! A OneOf carries none of its type parameters: it is given one field, any one, so no argument is
 //! one a value must hold. An instantiation of a OneOf is finite when one of its alternatives is: a
 //! field that is no link; a field typed by a type parameter, whose finiteness is its argument's; a
-//! field of a closed input object type. Through an input object that holds it the choice stays a
+//! field of an input object type. Through an input object that holds it the choice stays a
 //! choice: an instantiation of a OneOf some of whose alternatives are the arguments of the
 //! holder's own type parameters makes the holder a *group*, the requirement that one of those
-//! arguments, or one of the alternatives that need none, be finite; and an input object that holds
-//! an instantiation of a grouped one passes the group on through the arguments it gives. So
+//! arguments, or one of the other alternatives, be finite; and an input object that holds an
+//! instantiation of a grouped one passes the group on through the arguments it gives. So
 //! `input W<T> { c: Choice<T>! }` with `input Choice<T> @oneOf { again: T, stop: Stop }` requires
-//! nothing of `W<A>`'s `A` while `Stop` is finite. An input object keeps at most twice as many
-//! groups as it has type parameters, and two more, naming at most as many slots together, so that
-//! an instantiation costs a bounded number of steps for each argument: past that, a group's first
-//! slot is carried instead. An alternative whose
-//! finiteness only a substitution would say, an open input object type, is dropped while another
-//! stands, and when none does is required with every argument of the type beside it. Each is a
-//! stronger answer, the form that can be relaxed.
+//! nothing of `W<A>`'s `A` while `Stop` is finite.
 //!
 //! A link whose base is an instantiation requires the input object, what each argument at a slot
 //! it carries requires, a list breaking it, and one alternative of each of its groups. A link to a
@@ -60,6 +54,28 @@
 //! phase's error, whatever errors another input object of the cycle holds.
 //!
 //! The rule reads the public model and nothing else.
+//!
+//! # What it never invents, and what it may miss
+//!
+//! The rule never reports an input object that a finite value satisfies: where it cannot say
+//! exactly what an instantiation requires, it requires less. So it can miss a cycle, and only in
+//! a program with type parameters, in two places, each a recorded gap:
+//!
+//! - An alternative that is an open input object type, a field of the OneOf such as `a: Wrap<T>`
+//!   or an argument such as the `Wrap<U>` of `Choice<Wrap<U>>`, is finite under a use's arguments
+//!   as a substitution of them would say. It is judged with the type parameters it names taken as
+//!   finite instead, which requires no more than any substitution of them would. With
+//!   `input Hard<T> { h: T! }` and `input Choice<T> @oneOf { a: Hard<T> }`,
+//!   `input A { c: Choice<A>! }` is a cycle that is not reported.
+//! - An input object keeps at most twice as many groups as it has type parameters, and two more,
+//!   naming at most as many slots together, so that an instantiation costs a bounded number of
+//!   steps for each argument: the monotone condition its arguments must meet can need
+//!   exponentially many groups. Past that cap, the input object is judged as if it had no group,
+//!   its instantiations requiring none, so a cycle that only one of its groups would close is not
+//!   reported. The groups it passed on before stay with the input objects that hold it: each is
+//!   true of them.
+//!
+//! A GraphQL document, which has no type parameter, meets neither, and is judged exactly.
 
 use std::{
   collections::{BTreeMap, BTreeSet},
@@ -91,10 +107,10 @@ use super::one_of;
 /// of its input object, an input object keeping groups naming at most twice its type parameters
 /// and two more; one node for each input object and for each instantiation a link requires, each
 /// type once, with one for each of its groups, their edges a bounded number for each argument, and
-/// one for the alternatives that need no argument of each group and of each OneOf, once; and the
-/// fixed points and the coloured walk, each node and edge a bounded number of times, with
-/// explicit stacks and a logarithm for each lookup of an ordered map or a sorted list. For each
-/// member, one binary search. It keeps the fields to report, for the walk. Its messages quote
+/// one for the other alternatives of each group and for the input object fields of each OneOf,
+/// once; and the fixed points and the coloured walk, each node and edge a bounded number of times,
+/// with explicit stacks and a logarithm for each lookup of an ordered map or a sorted list. For
+/// each member, one binary search. It keeps the fields to report, for the walk. Its messages quote
 /// names as excerpts, so each is bounded whatever the names' lengths.
 #[derive(Default)]
 pub(super) struct CircularInputField {
@@ -208,11 +224,10 @@ struct Alternatives {
   /// The indices of its type parameters its fields are typed by, bare, in order and each once:
   /// each an alternative whose finiteness is its argument's.
   params: Vec<u32>,
-  /// Whether one of its fields is a closed input object type.
-  closed: bool,
-  /// Whether one of its fields is an open input object type, whose finiteness under a use's
-  /// arguments only a substitution would say.
-  open: bool,
+  /// Whether one of its fields is an input object type: a closed one an alternative as it is, an
+  /// open one, whose finiteness under a use's arguments only a substitution would say, with the
+  /// OneOf's type parameters taken as finite.
+  fields: bool,
 }
 
 /// The alternatives of the OneOf `input`, of `model`.
@@ -222,16 +237,9 @@ fn alternatives_of(model: &Model, input: DefId) -> Alternatives {
     let Some(occurrence) = model.member(field).ty() else {
       continue;
     };
-    let ty = model.ty(model.type_expr(occurrence).ty());
-    match ty.kind() {
+    match model.ty(model.type_expr(occurrence).ty()).kind() {
       TyKind::Param { def, index } if def == input => alternatives.params.push(index),
-      TyKind::Named { def, .. } if is_input(model, def) => {
-        if ty.is_closed() {
-          alternatives.closed = true;
-        } else {
-          alternatives.open = true;
-        }
-      }
+      TyKind::Named { def, .. } if is_input(model, def) => alternatives.fields = true,
       _ => alternatives.leaf = true,
     }
   }
@@ -240,27 +248,29 @@ fn alternatives_of(model: &Model, input: DefId) -> Alternatives {
   alternatives
 }
 
-/// An alternative of a group that needs no argument of the group's input object.
+/// An alternative of a group other than the arguments at its slots, judged without them.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Closed {
-  /// A closed input object type.
+enum Other {
+  /// An input object type: a closed one as it is, and an open one, which names the type
+  /// parameters of the input object that holds it, with them taken as finite, which requires less
+  /// than any substitution of them would.
   Ty(TyId),
-  /// The fields of a OneOf that are closed input object types.
+  /// The fields of a OneOf that are input object types.
   OneOf(DefId),
-  /// Another group's alternatives that need no argument.
+  /// Another group's other alternatives.
   Group(u32),
 }
 
 /// A requirement of an input object's instantiations that a OneOf on the way makes a choice: a
-/// value of the input object holds a finite value of one of the arguments at `slots`, or one of
-/// the alternatives that need none.
+/// value of the input object holds a finite value of one of the arguments at `slots`, or of one of
+/// the other alternatives.
 struct Group {
   /// The input object.
   owner: DefId,
   /// The slots, of the input object's type parameters, whose arguments are alternatives.
   slots: Vec<u32>,
-  /// The alternatives that need no argument.
-  closed: Vec<Closed>,
+  /// The other alternatives.
+  others: Vec<Other>,
 }
 
 /// What each type parameter of an input object carries, by slot: whether a value of the input
@@ -277,7 +287,8 @@ struct Carried {
   nullable: Vec<bool>,
   /// Every group.
   groups: Vec<Group>,
-  /// Each group by the input object whose instantiations it constrains, sorted.
+  /// Each group by the input object whose instantiations it constrains, sorted: none of an input
+  /// object past its cap.
   owners: Vec<(DefId, u32)>,
   /// The alternatives of each OneOf.
   alternatives: BTreeMap<DefId, Alternatives>,
@@ -308,6 +319,7 @@ impl Carried {
       by_def: BTreeMap::new(),
       groups: Vec::new(),
       owned: BTreeMap::new(),
+      saturated: BTreeSet::new(),
       seen: BTreeSet::new(),
       slots: Vec::new(),
       opened: Vec::new(),
@@ -402,11 +414,16 @@ impl Carried {
       nullable,
       groups,
       owned,
+      saturated,
       ..
     } = work;
-    // In the order of the owners' ids, each owner's groups in the order they were made.
+    // In the order of the owners' ids, each owner's groups in the order they were made. An owner
+    // past its cap is judged as if it had none: its instantiations require less.
     let mut owners: Vec<(DefId, u32)> = Vec::new();
     for (owner, (list, _)) in owned {
+      if saturated.contains(&owner) {
+        continue;
+      }
       owners.extend(list.into_iter().map(|group: u32| (owner, group)));
     }
     Self {
@@ -508,19 +525,6 @@ enum Waiter {
   Rule(u32),
 }
 
-/// What a held open type gives the input object that holds it, besides its rules.
-enum Outcome {
-  /// Nothing: an alternative needs no argument, or the requirements graph answers it at the
-  /// type's node.
-  Nothing,
-  /// A group of the input object: the slots of its type parameters any one of whose arguments
-  /// satisfies it, and the alternatives that need no argument.
-  Group(DefId, Vec<u32>, Vec<Closed>),
-  /// Every argument at these positions of the type is required: what stands where only an
-  /// alternative's own type parameters would say, a stronger answer.
-  Everything(Vec<usize>),
-}
-
 /// What the slots carry while it is found: the open types and how they are held, the groups, and
 /// what is still to pass on.
 struct Work<'m> {
@@ -552,8 +556,11 @@ struct Work<'m> {
   groups: Vec<Group>,
   /// The groups of each input object, with how many slots they name together.
   owned: BTreeMap<DefId, (Vec<u32>, usize)>,
+  /// The input objects past their cap, which make no more groups and are judged as if they had
+  /// none.
+  saturated: BTreeSet<DefId>,
   /// Each group made, by its input object and alternatives, so that none is made twice.
-  seen: BTreeSet<(DefId, Vec<u32>, Vec<Closed>)>,
+  seen: BTreeSet<(DefId, Vec<u32>, Vec<Other>)>,
   /// The slots that gained a level or a bit and whose waiters have not seen it.
   slots: Vec<u32>,
   /// The open types that were held or gained a bit and whose waiters have not seen it.
@@ -711,8 +718,9 @@ impl Work<'_> {
       return;
     };
     if self.alternatives.contains_key(&def) {
-      let outcome = self.choice(def, args);
-      self.apply(outcome, args);
+      if let Some((owner, slots, others)) = self.choice(def, args) {
+        self.add(owner, slots, others);
+      }
       return;
     }
     self.by_def.entry(def).or_default().push(node);
@@ -741,28 +749,27 @@ impl Work<'_> {
     }
   }
 
-  /// What the OneOf `def`'s instantiation with `args` gives the input object that holds it: a
-  /// group of the alternatives whose argument is a type parameter of that input object, with
-  /// those that need none; nothing when an alternative is finite whatever the arguments, or when
-  /// none is a type parameter, which the requirements graph answers at the type's node; and
-  /// every argument when each alternative stands where only a substitution would say.
-  fn choice(&self, def: DefId, args: &[TyId]) -> Outcome {
-    let Some(alternatives) = self.alternatives.get(&def) else {
-      return Outcome::Nothing;
-    };
+  /// What the OneOf `def`'s instantiation with `args` gives the input object that holds it: its
+  /// group of the alternatives whose argument is a type parameter of that input object, with the
+  /// others. Nothing when an alternative is finite whatever the arguments, or when none is a type
+  /// parameter of that input object: the requirements graph answers the type at its node, and no
+  /// argument is required of an instantiation. An open input object type, an argument or a field
+  /// of the OneOf, is an alternative with the type parameters it names taken as finite, which
+  /// requires less than a substitution would: what only a substitution would say is never
+  /// required.
+  fn choice(&self, def: DefId, args: &[TyId]) -> Option<(DefId, Vec<u32>, Vec<Other>)> {
+    let alternatives = self.alternatives.get(&def)?;
     if alternatives.leaf {
-      return Outcome::Nothing;
+      return None;
     }
     let mut owner: Option<DefId> = None;
     let mut slots: Vec<u32> = Vec::new();
-    let mut closed: Vec<Closed> = Vec::new();
-    let mut open = alternatives.open;
+    let mut others: Vec<Other> = Vec::new();
     for &index in &alternatives.params {
       let Some(&argument) = args.get(index as usize) else {
         continue;
       };
-      let given = self.model.ty(argument);
-      match given.kind() {
+      match self.model.ty(argument).kind() {
         TyKind::Param { def: holder, index } => {
           if let Some(slot) = slot(&self.base, holder, index) {
             owner = Some(holder);
@@ -770,30 +777,22 @@ impl Work<'_> {
           }
         }
         TyKind::Named { def: inner, .. } if is_input(self.model, inner) => {
-          if given.is_closed() {
-            closed.push(Closed::Ty(argument));
-          } else {
-            open = true;
-          }
+          others.push(Other::Ty(argument));
         }
         // A scalar, an enum, a list: an alternative a finite value always satisfies.
-        _ => return Outcome::Nothing,
+        _ => return None,
       }
     }
-    if alternatives.closed {
-      closed.push(Closed::OneOf(def));
+    if alternatives.fields {
+      others.push(Other::OneOf(def));
     }
-    match owner {
-      // An alternative that stands where only a substitution would say is dropped, another
-      // standing: a stronger answer.
-      Some(owner) => Outcome::Group(owner, slots, closed),
-      None if open && closed.is_empty() => Outcome::Everything((0..args.len()).collect()),
-      None => Outcome::Nothing,
-    }
+    let owner = owner?;
+    Some((owner, slots, others))
   }
 
   /// Passes the group `id` of an ordinary input object on through its held open type `node`, to
-  /// the input object that holds that type.
+  /// the input object that holds that type. An argument at one of its slots that is an open input
+  /// object type is an alternative as `choice` takes one.
   fn induce(&mut self, node: u32, id: u32) {
     let Some(&ty) = self.types.get(node as usize) else {
       return;
@@ -808,10 +807,9 @@ impl Work<'_> {
     let first = self.base.get(holder.get() as usize).copied().unwrap_or(0);
     let mut owner: Option<DefId> = None;
     let mut slots: Vec<u32> = Vec::new();
-    let mut closed: Vec<Closed> = Vec::new();
-    let mut positions: Vec<usize> = Vec::new();
-    if !group.closed.is_empty() {
-      closed.push(Closed::Group(id));
+    let mut others: Vec<Other> = Vec::new();
+    if !group.others.is_empty() {
+      others.push(Other::Group(id));
     }
     for &at in &group.slots {
       let Some(position) = at.checked_sub(first) else {
@@ -820,73 +818,37 @@ impl Work<'_> {
       let Some(&argument) = args.get(position as usize) else {
         continue;
       };
-      let given = model.ty(argument);
-      match given.kind() {
+      match model.ty(argument).kind() {
         TyKind::Param { def, index } => {
           if let Some(slot) = slot(&self.base, def, index) {
             owner = Some(def);
             slots.push(slot);
           }
         }
-        TyKind::Named { def, .. } if is_input(model, def) => {
-          if given.is_closed() {
-            closed.push(Closed::Ty(argument));
-          } else {
-            positions.push(position as usize);
-          }
-        }
+        TyKind::Named { def, .. } if is_input(model, def) => others.push(Other::Ty(argument)),
         _ => return,
       }
     }
-    let outcome = match owner {
-      Some(owner) => Outcome::Group(owner, slots, closed),
-      None if !positions.is_empty() && closed.is_empty() => Outcome::Everything(positions),
-      None => Outcome::Nothing,
-    };
-    self.apply(outcome, args);
-  }
-
-  /// Gives the input object that holds a type of arguments `args` what `outcome` says.
-  fn apply(&mut self, outcome: Outcome, args: &[TyId]) {
-    match outcome {
-      Outcome::Nothing => {}
-      Outcome::Group(owner, slots, closed) => self.add(owner, slots, closed),
-      Outcome::Everything(positions) => {
-        for position in positions {
-          let Some(&argument) = args.get(position) else {
-            continue;
-          };
-          match self.model.ty(argument).kind() {
-            TyKind::Param { def, index } => {
-              if let Some(slot) = slot(&self.base, def, index) {
-                self.raise(slot, 2, true);
-              }
-            }
-            TyKind::Named { .. } => {
-              if let Some(&node) = self.nodes.get(&argument) {
-                self.hold(node, true);
-              }
-            }
-            TyKind::List { .. } | TyKind::Unresolved => {}
-          }
-        }
-      }
+    if let Some(owner) = owner {
+      self.add(owner, slots, others);
     }
   }
 
-  /// Makes `owner` the group of `slots` and `closed`, once. An input object keeps at most twice as
+  /// Makes `owner` the group of `slots` and `others`, once. An input object keeps at most twice as
   /// many groups as it has type parameters, and two more, naming at most as many slots together:
   /// past that, each instantiation would pay more than a bounded number of steps for each of its
-  /// arguments, and the group's first slot is carried instead, a stronger answer.
-  fn add(&mut self, owner: DefId, mut slots: Vec<u32>, mut closed: Vec<Closed>) {
+  /// arguments. Then the input object is past its cap: it makes no more groups, and is judged as if
+  /// it had none, which requires less of its instantiations than any group would, so that a cap
+  /// never becomes a cycle.
+  fn add(&mut self, owner: DefId, mut slots: Vec<u32>, mut others: Vec<Other>) {
     slots.sort_unstable();
     slots.dedup();
-    closed.sort_unstable();
-    closed.dedup();
-    let Some(&first) = slots.first() else {
+    others.sort_unstable();
+    others.dedup();
+    if slots.is_empty() || self.saturated.contains(&owner) {
       return;
-    };
-    if !self.seen.insert((owner, slots.clone(), closed.clone())) {
+    }
+    if !self.seen.insert((owner, slots.clone(), others.clone())) {
       return;
     }
     let at = owner.get() as usize;
@@ -905,7 +867,7 @@ impl Work<'_> {
       });
     let bound = arity.saturating_mul(2).saturating_add(2);
     if count >= bound || named.saturating_add(slots.len()) > bound {
-      self.raise(first, 2, true);
+      self.saturated.insert(owner);
       return;
     }
     let id = dense(self.groups.len());
@@ -913,7 +875,7 @@ impl Work<'_> {
     self.groups.push(Group {
       owner,
       slots,
-      closed,
+      others,
     });
     let entry = self.owned.entry(owner).or_default();
     entry.0.push(id);
@@ -985,16 +947,16 @@ type Edge = (u32, u32, bool, Option<MemberId>);
 /// and the link field of the input object it was reached through.
 type Frame = (u32, u32, u32, Option<MemberId>);
 
-/// A node of the requirements that is no type's: what a group's alternatives that need no argument
-/// give, or what a OneOf's fields of a closed, or an open, input object type give.
+/// A node of the requirements that is no type's, finite when one of its targets is: what a group's
+/// other alternatives give, or what a OneOf's fields of an input object type give.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Part {
-  /// The alternatives of the group that need no argument.
+  /// The other alternatives of the group.
   Group(u32),
-  /// The OneOf's fields of a closed input object type.
-  Closed(DefId),
-  /// The OneOf's fields of an open input object type, each as the OneOf's own.
-  Open(DefId),
+  /// The OneOf's fields of an input object type: a closed one as it is, and an open one, with the
+  /// OneOf's type parameters taken as finite, which requires less than any substitution of them
+  /// would.
+  OneOf(DefId),
 }
 
 /// What each link requires, as a graph: a node for each input object, in id order, then one for
@@ -1093,9 +1055,9 @@ impl Requirements<'_> {
     node
   }
 
-  /// Makes the edges of `node`, the node of `part`: to each alternative that needs no argument of
-  /// a group, or to the requirement of each of a OneOf's fields of a closed, or an open, input
-  /// object type.
+  /// Makes the edges of `node`, the node of `part`: to each other alternative of a group, or to the
+  /// requirement of each of a OneOf's fields of an input object type, an open one's with the
+  /// OneOf's type parameters taken as finite.
   fn part_edges(&mut self, node: u32, part: Part) {
     let carried = self.carried;
     let model = self.model;
@@ -1104,28 +1066,25 @@ impl Requirements<'_> {
         let Some(group) = carried.group(id) else {
           return;
         };
-        for &closed in &group.closed {
-          let target = match closed {
-            Closed::Ty(ty) => self.requirement(ty),
-            Closed::OneOf(def) => Some(self.part(Part::Closed(def))),
-            Closed::Group(other) => Some(self.part(Part::Group(other))),
+        for &other in &group.others {
+          let target = match other {
+            Other::Ty(ty) => self.requirement(ty),
+            Other::OneOf(def) => Some(self.part(Part::OneOf(def))),
+            Other::Group(next) => Some(self.part(Part::Group(next))),
           };
           if let Some(target) = target {
             self.edges.push((node, target, true, None));
           }
         }
       }
-      Part::Closed(def) | Part::Open(def) => {
-        let closed = matches!(part, Part::Closed(_));
+      Part::OneOf(def) => {
         for field in model.def(def).input_fields() {
           let Some(occurrence) = model.member(field).ty() else {
             continue;
           };
           let ty = model.type_expr(occurrence).ty();
-          let complete = model.ty(ty);
-          if let TyKind::Named { def: inner, .. } = complete.kind()
+          if let TyKind::Named { def: inner, .. } = model.ty(ty).kind()
             && is_input(model, inner)
-            && complete.is_closed() == closed
             && let Some(target) = self.requirement(ty)
           {
             self.edges.push((node, target, true, None));
@@ -1174,7 +1133,7 @@ impl Requirements<'_> {
       return;
     };
     if let Some(alternatives) = carried.alternatives(def) {
-      self.choice(node, ty, def, args, alternatives);
+      self.choice(node, def, args, alternatives);
       return;
     }
     if let Some(target) = self.node_of(def) {
@@ -1202,22 +1161,14 @@ impl Requirements<'_> {
     }
   }
 
-  /// Makes `node`, the requirement of `ty`, an instantiation with `args` of the OneOf `def` of
-  /// `alternatives`, finite when one of its alternatives is: a field that is no link; one typed by
-  /// a type parameter, through its argument; one of a closed input object type. In an open type,
-  /// an argument that is a type parameter of the input object that holds it is taken as finite
-  /// here, its group answering for it; an alternative that stands where only a substitution would
-  /// say is dropped when another stands, and else is what it needs, every argument being required
-  /// besides. In a closed type, the OneOf's fields of an open input object type are one
-  /// alternative, as its own, every argument being required besides: a stronger answer.
-  fn choice(
-    &mut self,
-    node: u32,
-    ty: TyId,
-    def: DefId,
-    args: &[TyId],
-    alternatives: &Alternatives,
-  ) {
+  /// Makes `node`, an instantiation with `args` of the OneOf `def` of `alternatives`, finite when
+  /// one of its alternatives is: a field that is no link; one typed by a type parameter, through
+  /// its argument; one of an input object type. In an open type, an argument that is a type
+  /// parameter of the input object that holds it is taken as finite here, its group answering for
+  /// it. An open input object type, an argument or a field of the OneOf, is the requirement of
+  /// that open type, with the type parameters it names taken as finite, which requires less than a
+  /// substitution would: what only a substitution would say is never required.
+  fn choice(&mut self, node: u32, def: DefId, args: &[TyId], alternatives: &Alternatives) {
     let model = self.model;
     if let Some(any) = self.any.get_mut(node as usize) {
       *any = true;
@@ -1226,24 +1177,14 @@ impl Requirements<'_> {
       self.set_ready(node);
       return;
     }
-    let open = !model.ty(ty).is_closed();
-    // Whether an alternative stands that needs no argument of the input object holding the type.
-    let mut others = false;
-    let mut substituted: Vec<TyId> = Vec::new();
     for &index in &alternatives.params {
       let Some(&argument) = args.get(index as usize) else {
         continue;
       };
-      let given = model.ty(argument);
-      match given.kind() {
+      match model.ty(argument).kind() {
         TyKind::Named { def: inner, .. } if is_input(model, inner) => {
-          if given.is_closed() {
-            if let Some(target) = self.requirement(argument) {
-              self.edges.push((node, target, true, None));
-            }
-            others = true;
-          } else {
-            substituted.push(argument);
+          if let Some(target) = self.requirement(argument) {
+            self.edges.push((node, target, true, None));
           }
         }
         // A type parameter of the input object that holds the type, whose group answers for it;
@@ -1254,45 +1195,10 @@ impl Requirements<'_> {
         }
       }
     }
-    if alternatives.closed {
-      let target = self.part(Part::Closed(def));
+    if alternatives.fields {
+      let target = self.part(Part::OneOf(def));
       self.edges.push((node, target, true, None));
-      others = true;
     }
-    if !alternatives.open {
-      if open && !others {
-        for argument in substituted {
-          if let Some(target) = self.requirement(argument) {
-            self.edges.push((node, target, true, None));
-          }
-        }
-      }
-      return;
-    }
-    if open {
-      if !others {
-        for argument in substituted {
-          if let Some(target) = self.requirement(argument) {
-            self.edges.push((node, target, true, None));
-          }
-        }
-        let target = self.part(Part::Open(def));
-        self.edges.push((node, target, true, None));
-      }
-      return;
-    }
-    let all = self.fresh(false);
-    let target = self.part(Part::Open(def));
-    self.edges.push((all, target, false, None));
-    for &argument in args {
-      if let TyKind::Named { def: inner, .. } = model.ty(argument).kind()
-        && is_input(model, inner)
-        && let Some(target) = self.requirement(argument)
-      {
-        self.edges.push((all, target, false, None));
-      }
-    }
-    self.edges.push((node, all, true, None));
   }
 
   /// Gives `node`, the requirement of an instantiation with `args` of the ordinary input object
@@ -1307,8 +1213,6 @@ impl Requirements<'_> {
     let first = carried.base.get(def.get() as usize).copied().unwrap_or(0);
     let any = self.fresh(true);
     self.edges.push((node, any, true, None));
-    let mut others = false;
-    let mut substituted: Vec<TyId> = Vec::new();
     for &at in &group.slots {
       let Some(&argument) = at
         .checked_sub(first)
@@ -1316,16 +1220,10 @@ impl Requirements<'_> {
       else {
         continue;
       };
-      let given = model.ty(argument);
-      match given.kind() {
+      match model.ty(argument).kind() {
         TyKind::Named { def: inner, .. } if is_input(model, inner) => {
-          if given.is_closed() {
-            if let Some(target) = self.requirement(argument) {
-              self.edges.push((any, target, true, None));
-            }
-            others = true;
-          } else {
-            substituted.push(argument);
+          if let Some(target) = self.requirement(argument) {
+            self.edges.push((any, target, true, None));
           }
         }
         _ => {
@@ -1334,17 +1232,9 @@ impl Requirements<'_> {
         }
       }
     }
-    if !group.closed.is_empty() {
+    if !group.others.is_empty() {
       let target = self.part(Part::Group(id));
       self.edges.push((any, target, true, None));
-      others = true;
-    }
-    if !others {
-      for argument in substituted {
-        if let Some(target) = self.requirement(argument) {
-          self.edges.push((any, target, true, None));
-        }
-      }
     }
   }
 
