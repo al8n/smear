@@ -53,10 +53,19 @@
 //! - that field's type is a subtype of the interface's field's type under the root's arguments,
 //!   as the `subtype` module says, covariant through lists, non-null and type arguments, or it is
 //!   `smear::schema::invalid-interface-field-type`, at the field's name;
-//! - and a deprecated field implements a deprecated one, told by what its applications resolved
-//!   to, `core`'s `@deprecated` or the root package's own that replaces it, or it is
+//! - a deprecated field implements a deprecated one, told by what its applications resolved to,
+//!   `core`'s `@deprecated` or the root package's own that replaces it, or it is
 //!   `smear::schema::interface-field-not-deprecated`, at the field's name, labelled at the
-//!   interface's.
+//!   interface's;
+//! - each argument of the interface's field, in order, is taken by the first of the field's
+//!   arguments of its name, or it is `smear::schema::missing-interface-field-argument`, at the
+//!   field's name, labelled at the interface's argument; with exactly the interface's argument's
+//!   type under the root's arguments, its `!` included, or it is
+//!   `smear::schema::invalid-interface-field-argument-type`, at the argument's name;
+//! - and each argument of the field the interface's field does not declare is not required, or it
+//!   is `smear::schema::unexpected-required-argument`, at its name, labelled at the interface's
+//!   field. Required is written non-null with no default, as GraphQL reads it: an argument typed
+//!   by a bare type parameter is not, whatever an instantiation makes of it.
 //!
 //! Each is judged whatever the others found, in `smear-schema`'s order. A generic definition is
 //! judged once, where it is written: a type parameter is a subtype of itself and of its bounds
@@ -69,12 +78,14 @@
 //! other step is paid from `Limits::max_implementation_steps`, a budget of its own, since the
 //! check is needed on every accepted program and costs it the square of a definition's entries:
 //! each entry looked at of an interface the check reads, whoever wrote it; each field of an
-//! interface looked at; each pair of types the relation looks at, one answered before included,
+//! interface looked at, and each argument of it or of the field that implements it; each pair of
+//! types the relation looks at, one answered before included,
 //! and each entry, bound and member it looks at to answer one; and each node of a type rebuilt
 //! under an entry's arguments, a rebuild remembered by the type and the arguments' named type
 //! costing nothing more. On a program the check accepts, each root costs its interface's entries
 //! and its fields, and no more. The definition's own fields are indexed by name once, at its first
-//! root whose fields are compared, and whether a field is deprecated is read once. What a rebuild derives is checked against `Limits::max_generic_depth` and
+//! root whose fields are compared, each field's arguments once for the phase, and whether a field
+//! is deprecated is read once. What a rebuild derives is checked against `Limits::max_generic_depth` and
 //! counted toward `Limits::max_instantiations`; nothing draws on `Limits::max_substitutions` or
 //! `Limits::max_bound_steps`. A check a limit stops is `resource-limit` once, at the root it was
 //! checking, naming the limit, and nothing more is said of that definition.
@@ -98,7 +109,7 @@ use super::{
   code::{DiagnosticKind, schema},
   declare::Declarations,
   diagnostic::{Diagnostic, DiagnosticBuilder, Excerpt, Reporter},
-  id::{ApplicationId, DefId, MemberId, PackageId, Sym, TyId, TypeExprId},
+  id::{ApplicationId, DefId, MemberId, PackageId, Sym, TyId, TypeExprId, dense},
   instantiate::{binding, own_package},
   model::{DefKind, ModelBuilder, Occurrence, Resolution, Shape},
   source::SourceMap,
@@ -138,6 +149,8 @@ pub(crate) fn implement(
     steps,
     rebuilds: BTreeMap::new(),
     deprecations: BTreeMap::new(),
+    argument_runs: BTreeMap::new(),
+    argument_names: Vec::new(),
     pairs: BTreeMap::new(),
     frames: Vec::new(),
     alternatives: Vec::new(),
@@ -199,6 +212,11 @@ struct Implementing<'p> {
   rebuilds: BTreeMap<(TyId, TyId), Result<Option<TyId>, Stop>>,
   /// Whether each field compared applies `@deprecated`, by the field: read once.
   deprecations: BTreeMap<MemberId, bool>,
+  /// The arguments of each field compared, by the field: its run of `argument_names`, built once.
+  argument_runs: BTreeMap<MemberId, (u32, u32)>,
+  /// Each field's arguments, a run for each field, by name and then id, so that the first of a
+  /// name is the one found.
+  argument_names: Vec<(Sym, MemberId)>,
   /// Each pair of types the relation answered, by the pair, or marked open while its frame is on
   /// the stack.
   pairs: BTreeMap<(TyId, TyId), Answer>,
@@ -479,8 +497,103 @@ impl Implementing<'_> {
       if self.is_deprecated(implementing) && !self.is_deprecated(field) {
         self.report_not_deprecated(root, field, implementing);
       }
+      self.arguments(root, field, implementing)?;
     }
     Ok(())
+  }
+
+  /// Checks the arguments of `implementing`, the field of the definition `root` is a root of,
+  /// against those of `field`, the interface's field it implements: each of `field`'s, in order, is
+  /// taken, the first of `implementing`'s of its name, with exactly its type under the root's
+  /// arguments; and each of `implementing`'s that `field` does not declare is not required. Each
+  /// argument looked at is a step, on either side.
+  fn arguments(&mut self, root: Root, field: MemberId, implementing: MemberId) -> Result<(), Stop> {
+    let declared = self.argument_run(field);
+    let taken = self.argument_run(implementing);
+    for argument in self.builder.member_arguments(field) {
+      if !self.steps.charge(1) {
+        return Err(Stop::Steps);
+      }
+      let Some(name) = self.builder.member_name(argument) else {
+        continue;
+      };
+      let Some(written) = self.argument_named(taken, name) else {
+        self.report_missing_argument(root, argument, implementing);
+        continue;
+      };
+      let wanted = match self.member_type(argument) {
+        Some(open) => self.rebuilt(open, root.ty, root.interface)?,
+        None => None,
+      };
+      // Either type unresolved is the resolver's to report.
+      let (Some(wanted), Some(has)) = (wanted, self.member_type(written)) else {
+        continue;
+      };
+      if self.unresolved(wanted) || self.unresolved(has) {
+        continue;
+      }
+      if has != wanted {
+        self.report_argument_type(root, implementing, argument, written);
+      }
+    }
+    for argument in self.builder.member_arguments(implementing) {
+      if !self.steps.charge(1) {
+        return Err(Stop::Steps);
+      }
+      let Some(name) = self.builder.member_name(argument) else {
+        continue;
+      };
+      if self.argument_named(declared, name).is_none() && self.required(argument) {
+        self.report_unexpected(root, field, argument);
+      }
+    }
+    Ok(())
+  }
+
+  /// The run of `argument_names` that indexes the arguments of `field` by name: built the first
+  /// time it is asked for, and kept.
+  fn argument_run(&mut self, field: MemberId) -> (u32, u32) {
+    if let Some(&run) = self.argument_runs.get(&field) {
+      return run;
+    }
+    let start = self.argument_names.len();
+    for argument in self.builder.member_arguments(field) {
+      if let Some(name) = self.builder.member_name(argument) {
+        self.argument_names.push((name, argument));
+      }
+    }
+    if let Some(run) = self.argument_names.get_mut(start..) {
+      run.sort_unstable();
+    }
+    let run = (dense(start), dense(self.argument_names.len()));
+    self.argument_runs.insert(field, run);
+    run
+  }
+
+  /// The first argument named `name` of the run `run` of `argument_names`.
+  fn argument_named(&self, run: (u32, u32), name: Sym) -> Option<MemberId> {
+    let arguments = self.argument_names.get(run.0 as usize..run.1 as usize)?;
+    let at = arguments.partition_point(|&(written, _): &(Sym, MemberId)| written < name);
+    match arguments.get(at) {
+      Some(&(written, argument)) if written == name => Some(argument),
+      _ => None,
+    }
+  }
+
+  /// Whether `argument` is required: written non-null, its `!` as written, with no default, a
+  /// default refused included. A bare type parameter is not, whatever its argument is.
+  fn required(&self, argument: MemberId) -> bool {
+    let non_null = self
+      .builder
+      .member_ty(argument)
+      .and_then(|written: TypeExprId| self.builder.occurrence(written))
+      .is_some_and(|occurrence: Occurrence<'_>| occurrence.non_null);
+    non_null && self.builder.member_default(argument).is_none()
+  }
+
+  /// Whether `ty` is the unresolved type.
+  fn unresolved(&self, ty: TyId) -> bool {
+    matches!(self.builder.ty_shape(ty), Some(Shape::Unresolved) | None)
   }
 
   /// Indexes the fields of `def` its own package writes, by name and then id.
@@ -715,6 +828,97 @@ impl Implementing<'_> {
     self
       .reporter
       .report(labelled(report, declared, "the interface's field, not deprecated").build());
+  }
+
+  /// Reports that `implementing`, the field of the definition `root` is a root of, takes no
+  /// argument named as `argument`, an argument of the interface's field it implements: at the
+  /// field's name, labelled at the interface's argument.
+  fn report_missing_argument(&mut self, root: Root, argument: MemberId, implementing: MemberId) {
+    let (Some(at), Some(declared)) = (
+      self.builder.member_location(implementing),
+      self.builder.member_location(argument),
+    ) else {
+      return;
+    };
+    let owner = Excerpt(self.builder.def_name(root.def));
+    let interface = Excerpt(self.builder.def_name(root.interface));
+    let field = Excerpt(self.member_spelling(implementing));
+    let name = Excerpt(self.member_spelling(argument));
+    let report = Diagnostic::builder(schema::MISSING_INTERFACE_FIELD_ARGUMENT, at)
+      .message(format!(
+        "`{interface}`'s field `{field}` takes the argument `{name}`, and `{owner}`'s field \
+         `{field}` does not"
+      ))
+      .primary_label("missing interface field argument")
+      .help("add the argument to this field, with the type the interface's field gives it");
+    self
+      .reporter
+      .report(labelled(report, declared, "the interface's argument").build());
+  }
+
+  /// Reports that `written`, an argument of `implementing`, the field of the definition `root` is
+  /// a root of, is not of exactly the type `argument`, the interface's field's argument of its
+  /// name, has under the root's arguments: at its name, labelled at both types and, when the
+  /// root's entry writes type arguments, at the entry.
+  fn report_argument_type(
+    &mut self,
+    root: Root,
+    implementing: MemberId,
+    argument: MemberId,
+    written: MemberId,
+  ) {
+    let Some(at) = self.builder.member_location(written) else {
+      return;
+    };
+    let owner = Excerpt(self.builder.def_name(root.def));
+    let interface = Excerpt(self.builder.def_name(root.interface));
+    let field = Excerpt(self.member_spelling(implementing));
+    let name = Excerpt(self.member_spelling(written));
+    let mut report = Diagnostic::builder(schema::INVALID_INTERFACE_FIELD_ARGUMENT_TYPE, at)
+      .message(format!(
+        "the argument `{name}` of `{owner}`'s field `{field}` must have exactly the type \
+         `{interface}` declares for it"
+      ))
+      .primary_label("invalid interface field argument type")
+      .help("an argument's type is the interface's exactly, its `!` included");
+    if let Some(has) = self.type_location(written) {
+      report = labelled(report, has, "this type");
+    }
+    if let Some(declared) = self.type_location(argument) {
+      report = labelled(report, declared, "the type the interface declares");
+    }
+    if self.writes_arguments(root.entry) {
+      report = labelled(report, root.at, "under these type arguments");
+    }
+    self.reporter.report(report.build());
+  }
+
+  /// Reports that `argument`, an argument of the field of the definition `root` is a root of that
+  /// implements `field`, the interface's field, is required, and `field` declares none of its
+  /// name: at its name, labelled at the interface's field.
+  fn report_unexpected(&mut self, root: Root, field: MemberId, argument: MemberId) {
+    let (Some(at), Some(declared)) = (
+      self.builder.member_location(argument),
+      self.builder.member_location(field),
+    ) else {
+      return;
+    };
+    let owner = Excerpt(self.builder.def_name(root.def));
+    let interface = Excerpt(self.builder.def_name(root.interface));
+    let named = Excerpt(self.member_spelling(field));
+    let name = Excerpt(self.member_spelling(argument));
+    let report = Diagnostic::builder(schema::UNEXPECTED_REQUIRED_ARGUMENT, at)
+      .message(format!(
+        "`{owner}`'s field `{named}` requires the argument `{name}`, which `{interface}`'s field \
+         `{named}` does not declare"
+      ))
+      .primary_label("unexpected required argument")
+      .help(
+        "make the argument nullable, give it a default, or declare it on the interface's field",
+      );
+    self
+      .reporter
+      .report(labelled(report, declared, "the interface's field").build());
   }
 
   /// Whether the type occurrence `id` writes type arguments.

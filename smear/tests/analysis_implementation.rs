@@ -1,8 +1,9 @@
 //! The GraphQLx analyzer's implementation phase: what each definition says it is with its
 //! `implements` entries, and a union with its members, read of what its own package writes. No
-//! two entries of a definition, nor two members of a union, are one type; and a definition
-//! implements what the interfaces it implements implement, compared as types under the type
-//! arguments its entries give them, within a budget of its own.
+//! two entries of a definition, nor two members of a union, are one type; a definition implements
+//! what the interfaces it implements implement, compared as types under the type arguments its
+//! entries give them; and an object or an interface declares their fields, of subtypes of their
+//! types, with their arguments of exactly their types. All within a budget of its own.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -31,19 +32,28 @@ const MISSING_FIELD: &str = "smear::schema::missing-interface-field";
 const FIELD_TYPE: &str = "smear::schema::invalid-interface-field-type";
 /// GraphQL's code for a deprecated field implementing one that is not.
 const NOT_DEPRECATED: &str = "smear::schema::interface-field-not-deprecated";
+/// GraphQL's code for an interface field's argument a field does not take.
+const MISSING_ARGUMENT: &str = "smear::schema::missing-interface-field-argument";
+/// GraphQL's code for an argument not of exactly the interface's type.
+const ARGUMENT_TYPE: &str = "smear::schema::invalid-interface-field-argument-type";
+/// GraphQL's code for a required argument the interface's field does not declare.
+const UNEXPECTED: &str = "smear::schema::unexpected-required-argument";
 /// The resolver's code for a type name that names nothing.
 const UNDEFINED_TYPE: &str = "smear::schema::undefined-type";
 /// L3's code for a marker misused.
 const MARKER_MISUSE: &str = "smear::graphqlx::marker-misuse";
 
 /// The codes this phase reports. A program another rule refuses is asserted on these alone.
-const PHASE: [&str; 7] = [
+const PHASE: [&str; 10] = [
   DUPLICATE,
   MEMBER,
   TRANSITIVE,
   MISSING_FIELD,
   FIELD_TYPE,
   NOT_DEPRECATED,
+  MISSING_ARGUMENT,
+  ARGUMENT_TYPE,
+  UNEXPECTED,
   LIMIT,
 ];
 
@@ -1030,4 +1040,145 @@ fn a_pair_that_held_by_another_route_is_judged_again() {
     );
     quiet(&analyze_text(&text, &Limits::new()));
   }
+}
+
+/// GraphQL's own documents: an argument the field does not take, at the field, labelled at the
+/// interface's argument; an argument of another type, at the argument; and a required argument the
+/// interface's field does not declare, at the argument. One code each.
+#[test]
+fn graphqls_argument_fixtures_are_refused_once() {
+  let text = "type Query { ok: Int } interface I { a(x: Int): Int } type T implements I { a: Int }";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let field = named(schema, text, "{ ", "a", 1);
+  assert_eq!(found(&analysis), [(MISSING_ARGUMENT, field)]);
+  let report = the(&analysis, MISSING_ARGUMENT, field);
+  assert_eq!(
+    report.to_string(),
+    "`I`'s field `a` takes the argument `x`, and `T`'s field `a` does not"
+  );
+  assert_eq!(
+    labels(report),
+    [(named(schema, text, "(", "x", 0), "the interface's argument")]
+  );
+
+  let text = "type Query { ok: Int }
+     interface I { a(x: Int): Int }
+     type T implements I { a(x: String): Int }";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let argument = named(schema, text, "(", "x", 1);
+  assert_eq!(found(&analysis), [(ARGUMENT_TYPE, argument)]);
+  assert_eq!(
+    the(&analysis, ARGUMENT_TYPE, argument).to_string(),
+    "the argument `x` of `T`'s field `a` must have exactly the type `I` declares for it"
+  );
+
+  let text =
+    "type Query { ok: Int } interface I { a: Int } type T implements I { a(x: Int!): Int }";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let argument = named(schema, text, "(", "x", 0);
+  assert_eq!(found(&analysis), [(UNEXPECTED, argument)]);
+  assert_eq!(
+    labels(the(&analysis, UNEXPECTED, argument)),
+    [(named(schema, text, "{ ", "a", 0), "the interface's field")]
+  );
+}
+
+/// An argument's type is the interface's exactly, after substitution: `f(a: User)` for
+/// `f(a: Node)` is refused, though `User` implements `Node`; under `I<Int!>`, `f(a: X)` asks
+/// `Int!`, which `P` gives and `Q`'s `Int` does not. Refuses covariant arguments, and an argument
+/// read as written.
+#[test]
+fn argument_types_are_exact_after_substitution() {
+  let text = "type Query {\n  x: Int\n}\ninterface Node {\n  id: ID\n}\n\
+              type User implements Node {\n  id: ID\n}\n\
+              interface J {\n  f(a: Node): Int\n}\ntype S implements J {\n  f(a: User): Int\n}\n\
+              interface I<X> {\n  f(a: X): Int\n}\n\
+              type P implements I<Int!> {\n  f(a: Int!): Int\n}\n\
+              type Q implements I<Int!> {\n  f(a: Int): Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let q = named(schema, text, "f(", "a", 4);
+  assert_eq!(
+    found(&analysis),
+    [
+      (ARGUMENT_TYPE, named(schema, text, "f(", "a", 1)),
+      (ARGUMENT_TYPE, q)
+    ]
+  );
+  assert_eq!(
+    labels(the(&analysis, ARGUMENT_TYPE, q)),
+    [
+      (named(schema, text, "f(a: ", "Int", 1), "this type"),
+      (
+        named(schema, text, "f(a: ", "X", 0),
+        "the type the interface declares"
+      ),
+      (at(schema, text, "I<Int!>", 1), "under these type arguments"),
+    ]
+  );
+}
+
+/// An extra argument is required when it is written non-null with no default, as GraphQL reads
+/// it: `a: Int!` is refused; `a: Int! = 1`, `a: Int` and a bare `a: T` are not, whatever `T`
+/// stands for; and `a: Missing!` is, beside the resolver's report of `Missing`.
+#[test]
+fn an_extra_argument_is_required_by_its_written_bang() {
+  let text = "type Query {\n  x: Int\n}\ninterface I {\n  f: Int\n}\n\
+              type A implements I {\n  f(a: Int!): Int\n}\n\
+              type B implements I {\n  f(a: Int! = 1): Int\n}\n\
+              type C implements I {\n  f(a: Int): Int\n}\n\
+              type D<T> implements I {\n  f(a: T): Int\n}\n\
+              type E implements I {\n  f(a: Missing!): Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (UNEXPECTED, named(schema, text, "f(", "a", 0)),
+      (UNEXPECTED, named(schema, text, "f(", "a", 4)),
+      (UNDEFINED_TYPE, at(schema, text, "Missing", 0)),
+    ]
+  );
+}
+
+/// Arguments are found by their names, whatever the order; one written twice on the implementing
+/// field is found as the first of its name, which is the one compared: `U`'s fits and `V`'s does
+/// not. Refuses arguments paired by position, and the last of a name compared.
+#[test]
+fn arguments_are_found_by_their_names() {
+  let text = "type Query {\n  x: Int\n}\ninterface I {\n  f(a: Int, b: String): Int\n}\n\
+              type T implements I {\n  f(b: String, a: Int): Int\n}\n\
+              type U implements I {\n  f(a: Int, b: String, a: String): Int\n}\n\
+              type V implements I {\n  f(a: String, b: String, a: Int): Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found_of(&analysis, &PHASE),
+    [(
+      ARGUMENT_TYPE,
+      named(schema, text, "V implements I {\n  f(", "a", 0)
+    )]
+  );
+}
+
+/// Each argument looked at is a step, on either side: `T`'s check takes the field, one; the pair of
+/// `Int` and `Int`, one; the interface's two arguments, two; and `T`'s three, three: seven. At seven
+/// nothing is said, and at six the check stops at `T`'s `I`.
+#[test]
+fn each_argument_is_a_step() {
+  let text = "type Query {\n  x: Int\n}\ninterface I {\n  f(a: Int, b: Int): Int\n}\n\
+              type T implements I {\n  f(a: Int, b: Int, c: Int): Int\n}\n";
+  quiet(&analyze_text(
+    text,
+    &Limits::new().with_max_implementation_steps(7),
+  ));
+  let short = analyze_text(text, &Limits::new().with_max_implementation_steps(6));
+  let schema = schema_file(&short);
+  assert_eq!(
+    found(&short),
+    [(LIMIT, named(schema, text, "implements ", "I", 0))]
+  );
 }

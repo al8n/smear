@@ -179,6 +179,16 @@ impl ModelBuilder {
       .and_then(|row: &MemberRow| row.ty)
   }
 
+  /// The default `member` holds, once coercion made it, a refused one included: none for a member
+  /// that writes none, and for an id the builder did not issue.
+  pub(crate) fn member_default(&self, member: MemberId) -> Option<ValueId> {
+    self
+      .model
+      .members
+      .get(member.get() as usize)
+      .and_then(|row: &MemberRow| row.default)
+  }
+
   /// The applications of `member`, in order.
   pub(crate) fn member_applications(&self, member: MemberId) -> &[ApplicationId] {
     match self.model.members.get(member.get() as usize) {

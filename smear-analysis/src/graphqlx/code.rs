@@ -545,6 +545,21 @@ pub(crate) mod schema {
   pub(crate) const INVALID_INTERFACE_FIELD_TYPE: Code =
     Code::new("smear::schema::invalid-interface-field-type");
 
+  /// A field does not take an argument of the interface's field it implements: `smear-schema`'s
+  /// `MissingInterfaceFieldArgument`.
+  pub(crate) const MISSING_INTERFACE_FIELD_ARGUMENT: Code =
+    Code::new("smear::schema::missing-interface-field-argument");
+
+  /// A field's argument is not of exactly the type the interface's field gives it, under the type
+  /// arguments of the definition's entry: `smear-schema`'s `InvalidInterfaceFieldArgumentType`.
+  pub(crate) const INVALID_INTERFACE_FIELD_ARGUMENT_TYPE: Code =
+    Code::new("smear::schema::invalid-interface-field-argument-type");
+
+  /// A field requires an argument the interface's field it implements does not declare:
+  /// `smear-schema`'s `UnexpectedRequiredArgument`.
+  pub(crate) const UNEXPECTED_REQUIRED_ARGUMENT: Code =
+    Code::new("smear::schema::unexpected-required-argument");
+
   /// A deprecated field implements an interface's field that is not: `smear-schema`'s
   /// `InterfaceFieldNotDeprecated`.
   pub(crate) const INTERFACE_FIELD_NOT_DEPRECATED: Code =
