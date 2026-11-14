@@ -329,12 +329,11 @@ impl Limits {
   /// arguments included: a set of written arguments filled for the first time takes one step for
   /// each argument left out, and one for each type occurrence of a default that the filling walks,
   /// whether the type that occurrence yields is new or not. A set of arguments filled once is not
-  /// filled again, whichever use asks for it. Judging a bound puts an instantiation's arguments in
-  /// place of the parameters the bound names too, and draws on
-  /// [`max_bound_steps`](Self::max_bound_steps), never on this bound; and checking an
-  /// implementation puts an `implements` entry's type arguments in place of an interface's
-  /// parameters, and draws on [`max_implementation_steps`](Self::max_implementation_steps), never
-  /// on this bound.
+  /// filled again, whichever use asks for it. Nothing else draws on this bound, though other work
+  /// puts type arguments in place of type parameters too: judging a bound draws on
+  /// [`max_bound_steps`](Self::max_bound_steps), checking an implementation on
+  /// [`max_implementation_steps`](Self::max_implementation_steps), and reading a value's type
+  /// under type arguments on [`max_value_steps`](Self::max_value_steps).
   ///
   /// Past it, each type occurrence whose type would take one more step is reported where it is
   /// written, and its type is the unresolved one; an application is reported at its path, and its
@@ -354,11 +353,12 @@ impl Limits {
   ///
   /// The bounds of each instantiation the program writes of a definition with a bound are judged
   /// once, whatever nullness the instantiation is written with, and so are a directive's bounds
-  /// once for each distinct type its applications have. A step is one of: a bound taken
-  /// under the instantiation's arguments; a node of a bound's interface rebuilt with those
-  /// arguments in place of the definition's type parameters; an `implements` entry, or a type
-  /// parameter's bound, looked at; and a pair of types, or an argument, compared. What a type
-  /// argument takes against one interface type is taken once, whichever instantiation asks it.
+  /// once for each distinct type its applications have. A step is one of: a bound taken under the
+  /// instantiation's arguments; a node a rebuild of a bound's interface type looks at, with those
+  /// arguments in place of the definition's type parameters, its root and each argument or element
+  /// of a node it rebuilds; an `implements` entry, or a type parameter's bound, looked at; and a
+  /// pair of types, or an argument, compared. What a type argument takes against one interface type
+  /// is taken once, whichever instantiation asks it.
   ///
   /// Past it, each occurrence of an instantiation whose bounds could not be judged within it is
   /// reported where it is written, and keeps its type, and each such application is reported at
@@ -379,39 +379,42 @@ impl Limits {
   /// How many steps the analysis may take to complete values beyond what is written, over the
   /// whole analysis.
   ///
-  /// A written value takes none, but for the conversion of a long decimal integer below:
-  /// [`max_source_bytes`](Self::max_source_bytes) bounds the rest of what is written. A step is
-  /// one of: a value of a copy of a default, which fills an argument an application leaves out or
-  /// a field an object literal leaves out, each value nested in the default counting one, the
-  /// copies of the defaults its own object literals leave out among them; a read, while a copy is
-  /// counted, of the count of each default one of its object literals leaves out, and a read of a
-  /// count made already, when a later copy of its default is asked for, each spent whether or not
-  /// the copy it was read for is made; a default left out whose copy would hold a copy of itself,
-  /// which is not made; a list that a written value stands for where a list is expected, one for
-  /// each level of list between the value and its type, as `tags: [[Int]] = 1` stands for a list
-  /// of a list of `1`; a required argument an application leaves out, and a required field an
-  /// object literal leaves out, each found left out, reported where it is written and not in a
-  /// count; a node a rebuild of a member's type
-  /// under type arguments looks at, its root included, once for each written type and
-  /// instantiation; a node of a count made under a type its default is not written against, and an
-  /// identity of a set's element or of a map's key that such a count renders to search them for
-  /// one held twice, a step for each 64 bytes of it or part, once for each literal and the type its
-  /// identities are read against; a field an object literal of a default writes, one its input
-  /// object does not declare included, the first time the default's count reads the literal
-  /// against that input object; an argument that may be required, a bare nullable type parameter
-  /// of its directive, that an application with complete type arguments leaves out, and a field
-  /// that may be required that a written object literal of a generic input object leaves out; a
-  /// pair of a closed instantiation, of a type the program writes or of a generic directive an
-  /// application of it makes, and what its definition records, checked under the instantiation's
-  /// arguments: a value whose type names its type parameters, or an argument an application in it
-  /// leaves out whose type is one of them; and converting a decimal integer of more
-  /// than 38 significant digits, the most `u128` arithmetic reads whatever they spell, to its
-  /// value, charged before the conversion as an upper bound of its work:
-  /// `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine digits times
-  /// the 32-bit limbs of its value. A hexadecimal, octal or binary integer converts in one pass and
-  /// takes none. The built-in library's own values take none: its defaults where it writes them,
-  /// and a copy made for an application it writes. A copy of one of its defaults made for an
-  /// application a supplied package writes, a bare `@deprecated` among them, is charged.
+  /// A step is one of: a value of a copy of a default, which fills an argument an application
+  /// leaves out or a field an object literal leaves out, each value nested in the default counting
+  /// one, the copies of the defaults its own object literals leave out among them; a read, while a
+  /// count is made, of the count of each default one of its object literals leaves out, and a read
+  /// of a count made already, when a later copy of its default is asked for, each spent whether or
+  /// not a copy is made; a default left out whose copy would hold a copy of itself, which is not
+  /// made; a list that a written value stands for where a list is expected, one for each level of
+  /// list between the value and its type, as `tags: [[Int]] = 1` stands for a list of a list of
+  /// `1`; a required argument an application leaves out, and a required field an object literal
+  /// leaves out, each found left out, reported where it is written and not in a count; a node a
+  /// rebuild of a member's type under type arguments looks at, its root included, once for each
+  /// written type and instantiation; a node of a count made under a type its value is not written
+  /// against, each field that is or may be required that an object literal such a count reads
+  /// leaves out, up to the first found missing, and an identity of a set's element or of a map's
+  /// key that such a count renders to search them for one held twice, a step for each 64 bytes of
+  /// it or part, once for each literal and the type its identities are read against; a field an
+  /// object literal writes, one its input object does not declare included, when a count is the
+  /// first to read the literal against that input object; an argument that may be required, a bare
+  /// nullable type parameter of its directive, that an application with complete type arguments
+  /// leaves out, and a field that may be required that a written object literal of a generic input
+  /// object leaves out; a pair of a closed instantiation, of a type the program writes or of a
+  /// generic directive an application of it makes, and what its definition records, checked under
+  /// the instantiation's arguments: a value whose type names its type parameters, or an argument an
+  /// application in it leaves out whose type is one of them; and converting a decimal integer of
+  /// more than 38 significant digits, the most `u128` arithmetic reads whatever they spell, to an
+  /// integer where an integer type expects one, charged before the conversion as an upper bound of
+  /// its work: `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine
+  /// digits times the 32-bit limbs of its value.
+  ///
+  /// Nothing else takes a step, and [`max_source_bytes`](Self::max_source_bytes) bounds the rest of
+  /// the work on what is written: a hexadecimal, octal or binary integer converts in one pass, and
+  /// a decimal literal read as a float takes time linear in its length, the parser reading at most
+  /// its first 800 significant digits. The built-in library's own values take none: its defaults
+  /// where it writes them, and a copy made for an application it writes. A copy of one of its
+  /// defaults made for an application a supplied package writes, a bare `@deprecated` among them,
+  /// is charged.
   ///
   /// A type that cannot be built under type arguments, past this bound, past
   /// [`max_generic_depth`](Self::max_generic_depth) or past
@@ -430,14 +433,18 @@ impl Limits {
   /// whose next required field, or next default, left out cannot be paid for is starved likewise:
   /// `resource-limit` at the literal, once; what it writes is still made, what was filled stays,
   /// and none of the rest of its required fields and defaults is read. Its required fields are
-  /// asked for before its defaults. At `0`, no default fills what a supplied package leaves out, no
-  /// value it writes stands for a list, and no decimal integer of more than 38 significant digits
-  /// is read: a decimal `u128::MAX` is `resource-limit`.
+  /// asked for before its defaults. A closed instantiation whose definition's values cannot all be
+  /// checked within it is `resource-limit` at each use of it that a supplied package writes. At
+  /// `0`, nothing a supplied package leaves out is filled from a default or found missing, a bare
+  /// `@deprecated`'s reason among them; no list is made for a lone value it writes; no type is
+  /// rebuilt, and no generic definition checked at an instantiation, for its values; and no decimal
+  /// integer of more than 38 significant digits is converted to an integer: a decimal `u128::MAX`
+  /// is `resource-limit` where a `u128` is expected, and is still read where a float is.
   ///
   /// The default is 2^20: a read and one copied value for each of half a million applications, so
   /// a program of a hundred thousand applications that each leave four defaults of one value out
   /// stays inside it. The longest decimal integer it converts, with nothing else spent, has 9 526
-  /// digits, charged 1 048 410 steps; a longer one is written in hexadecimal, or read under a
+  /// digits, charged 1 048 410 steps; a longer one is written in hexadecimal, or converted under a
   /// higher limit. Defaults that fill defaults multiply: input objects that each default two fields
   /// to `{}` of the next fill twice as many values at each level, and nineteen of them, a valid
   /// GraphQL document, pass the default where their own defaults are written.
@@ -449,25 +456,30 @@ impl Limits {
   /// How many steps the analysis may take to check implementations, over the whole analysis:
   /// that each definition implements the interfaces its own package's `implements` entries name,
   /// markers alone where it is no object and no interface, under the type arguments each entry
-  /// writes, and what those interfaces implement in turn; and that no two of a definition's
-  /// entries, or of a union's members, are one type, as written or under the type arguments of an
-  /// instantiation the program writes.
+  /// writes, and what those interfaces implement in turn; that no two of a definition's entries,
+  /// or of a union's members, are one type, as written or under the type arguments of an
+  /// instantiation the program writes; and that no such instantiation makes required an argument
+  /// a field adds beside its interface's field's.
   ///
-  /// A step is one of: an item looked at of a list of another definition's, an interface's
-  /// `implements` entries and fields, a field's arguments, a type's entries, a type parameter's
-  /// bounds and a bound's interface's entries, a union's members, and a written instantiation's
-  /// definition's entries and members, each one another package wrote, which is passed by,
-  /// included; a node a type is rebuilt at, its root and each of its arguments and elements, with
-  /// an entry's type arguments in place of a definition's type parameters, once for each type and
-  /// arguments, a rebuild remembered costing nothing; and a pair of types compared, a pair compared
+  /// A step is one of: an item looked at of one of these lists, one another package wrote, which is
+  /// passed by, included: the `implements` entries of each interface the transitive check reaches;
+  /// the fields of an entry's interface; the arguments of an interface's field and of the field
+  /// that implements it; the `implements` entries, the bounds and the union members a subtype is
+  /// sought among, a bound's interface's entries included; the arguments a field adds beside its
+  /// interface's field's, each with no default and typed by a bare nullable type parameter, for
+  /// each type an occurrence of the field's definition has; and a definition's distinct entries and
+  /// members, for each written instantiation of it, when one of them names its type parameters. A
+  /// node a type is rebuilt at is a step too, its root and each of its arguments and elements, with
+  /// type arguments in place of a definition's type parameters, once for each type and arguments, a
+  /// rebuild remembered costing nothing; and so is a pair of types compared, a pair compared
   /// already included. A definition's own entries and members, read once for it, cost nothing.
   ///
   /// Past it, a definition's check stops: `resource-limit` once, at the `implements` entry it was
   /// checking, and nothing more is said of the definition. An instantiation whose entries or
-  /// members could not be compared is `resource-limit` at each occurrence of it. At `0` each check
-  /// that would take a step stops and is reported, a definition's once, at the entry it was
-  /// checking. What a rebuild derives counts toward
-  /// [`max_instantiations`](Self::max_instantiations) and
+  /// members could not be compared, or whose fields' added arguments could not all be read, is
+  /// `resource-limit` at each occurrence of it. At `0` each check that would take a step stops and
+  /// is reported, a definition's once, at the entry it was checking. What a rebuild derives counts
+  /// toward [`max_instantiations`](Self::max_instantiations) and
   /// [`max_generic_depth`](Self::max_generic_depth); nothing here draws on
   /// [`max_substitutions`](Self::max_substitutions) or [`max_bound_steps`](Self::max_bound_steps).
   /// The built-in library writes no `implements` entry and no union, and costs nothing here.
