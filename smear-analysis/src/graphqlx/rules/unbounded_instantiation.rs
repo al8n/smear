@@ -105,6 +105,10 @@ const HELD: &str = "this default holds a type argument that wraps a type paramet
 /// type parameter's default as it is written, a root or a value. A default is followed where it
 /// fills, since an occurrence's type, and an application's, holds what it filled.
 ///
+/// It does not follow an interface's instantiation into the types that implement it, so a backend
+/// that emits the implementors of each interface instantiation checks for growth through them
+/// itself.
+///
 /// It costs time linear in the model's definitions, members, applications and types. Until the
 /// next walk begins it keeps a fixed number of words for each of the model's types up to the last
 /// it entered. It has no limit of its own. When its graph has more nodes than a `u32` numbers,
