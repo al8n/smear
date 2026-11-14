@@ -325,6 +325,9 @@ jobs:
       run: python3 ci/tier_gates.py --selftest
     - name: tier_gates
       run: python3 ci/tier_gates.py
+    # Only release.yml ran this, so a defect in the controller first showed on release day.
+    - name: release controller selftest
+      run: python3 ci/release.py selftest
 
   # The one property no job above can see, because every one of them builds THIS workspace.
   #

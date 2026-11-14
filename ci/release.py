@@ -89,6 +89,8 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 MAX_GITHUB_OUTPUT_UTF16_BYTES = 900_000
+# GitHub's own validation message: "body is too long (maximum is 125000 characters)".
+MAX_RELEASE_BODY_CHARACTERS = 125_000
 
 
 class ReleaseError(RuntimeError):
@@ -987,6 +989,29 @@ def require_trustpub_only(crate: dict[str, object], name: str) -> None:
         fail(f"{name} does not enforce Trusted-Publishing-only mode")
 
 
+def verify_registry_names(version: str, registry: RegistryClient) -> None:
+    """Every crate of the set exists on crates.io in Trusted-Publishing-only mode. Read-only.
+
+    Trusted publishing cannot create a crate name, so a missing one would stop the publish job
+    after its dependencies were already published. The 0.0.1 bootstrap created its names by
+    hand, so that version is not asked about here.
+    """
+    if version == "0.0.1":
+        return
+    for name in PUBLISH_ORDER:
+        krate = registry.crate(name)
+        if krate is None:
+            fail(
+                f"{name} does not exist on crates.io; trusted publishing cannot create crate "
+                "names, so publish it by hand once, before the release, then configure its "
+                f"trusted publisher (repository {REPOSITORY}, workflow {WORKFLOW_FILENAME}, "
+                f"environment {TRUSTED_ENVIRONMENT}) and enable Trusted-Publishing-only mode "
+                "(RELEASING.md)"
+            )
+        require_trustpub_only(krate, name)
+        print(f"ok: {name} exists on crates.io in Trusted-Publishing-only mode")
+
+
 def decide_registry_action(
     name: str,
     version: str,
@@ -1489,6 +1514,11 @@ def changelog_section(version: str) -> str:
     section = "\n".join(lines[start:end]).strip() + "\n"
     if len(section.splitlines()) < 2:
         fail(f"CHANGELOG.md section for {version} is empty")
+    if len(section) > MAX_RELEASE_BODY_CHARACTERS:
+        fail(
+            f"CHANGELOG.md section for {version} has {len(section)} characters, but GitHub "
+            f"accepts at most {MAX_RELEASE_BODY_CHARACTERS} in a release body"
+        )
     return section
 
 
@@ -1537,8 +1567,14 @@ def build_release_files(
 
 
 def cmd_verify(args: argparse.Namespace) -> None:
+    """The read-only checks that run before anything is packaged or uploaded."""
     verify_event_context(args.version, args.commit)
     verify_git_commit(args.commit)
+    verify_registry_names(args.version, RegistryClient())
+    # The last job publishes this section as the release body, after every crate is public and
+    # the tag, which is never moved, is made. A section it cannot publish is refused here.
+    section = changelog_section(args.version)
+    print(f"ok: CHANGELOG.md has a {len(section)}-character section for {args.version}")
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if args.github_gates:
         if not token:
@@ -2198,6 +2234,109 @@ class ReleaseSelfTests(unittest.TestCase):
             ),
             "skip",
         )
+
+    def fake_crate_registry(
+        self, *, absent: tuple[str, ...] = (), open_mode: tuple[str, ...] = ()
+    ) -> mock.Mock:
+        crates = {
+            name: {"trustpub_only": name not in open_mode}
+            for name in PUBLISH_ORDER
+            if name not in absent
+        }
+        registry = mock.Mock()
+        registry.crate.side_effect = lambda name: crates.get(name)
+        return registry
+
+    def test_verify_refuses_a_missing_or_open_crate_name(self) -> None:
+        verify_registry_names("0.0.2", self.fake_crate_registry())
+        for name in ("smear-semantics", "smear-analysis"):
+            with self.subTest(absent=name), self.assertRaisesRegex(
+                ReleaseError,
+                f"{name} does not exist on crates.io.*publish it by hand once, before the release",
+            ):
+                verify_registry_names("0.0.2", self.fake_crate_registry(absent=(name,)))
+        with self.assertRaisesRegex(ReleaseError, "smear does not enforce Trusted-Publishing-only"):
+            verify_registry_names("0.0.2", self.fake_crate_registry(open_mode=("smear",)))
+        # 0.0.1 created its names by hand, so that version is not asked about.
+        registry = self.fake_crate_registry(absent=PUBLISH_ORDER)
+        verify_registry_names("0.0.1", registry)
+        registry.crate.assert_not_called()
+
+    def test_verify_runs_the_registry_preflight_whatever_its_flags(self) -> None:
+        def verify(registry: mock.Mock, *, github_gates: bool, no_workspace: bool) -> None:
+            args = argparse.Namespace(
+                version="0.0.2", commit=self.commit, target_dir="/fixture-target",
+                github_gates=github_gates, no_workspace=no_workspace,
+            )
+            with mock.patch.dict(os.environ, {"GH_TOKEN": "fixture-token"}, clear=True), \
+                    mock.patch.dict(globals(), {
+                        "RegistryClient": lambda: registry, "verify_git_commit": mock.Mock(),
+                        "changelog_section": mock.Mock(return_value="## [0.0.2]\n\n- a change\n"),
+                        "verify_github_gates": mock.Mock(),
+                        "cargo_metadata": mock.Mock(return_value={}),
+                        "verify_workspace": mock.Mock(),
+                    }):
+                cmd_verify(args)
+
+        for github_gates in (False, True):
+            for no_workspace in (False, True):
+                flags = {"github_gates": github_gates, "no_workspace": no_workspace}
+                with self.subTest(**flags):
+                    verify(self.fake_crate_registry(), **flags)
+                    with self.assertRaisesRegex(
+                        ReleaseError, "smear-analysis does not exist on crates.io"
+                    ):
+                        verify(self.fake_crate_registry(absent=("smear-analysis",)), **flags)
+                    with self.assertRaisesRegex(
+                        ReleaseError, "smear does not enforce Trusted-Publishing-only"
+                    ):
+                        verify(self.fake_crate_registry(open_mode=("smear",)), **flags)
+
+    def test_verify_refuses_a_changelog_section_that_cannot_be_published(self) -> None:
+        args = argparse.Namespace(
+            version="0.0.2", commit=self.commit, target_dir="/fixture-target",
+            github_gates=False, no_workspace=True,
+        )
+        heading = "## [0.0.2] - 2026-11-14"
+
+        def write_changelog(section_characters: int) -> None:
+            # The section is its heading, a blank line, one line of text and a final newline.
+            text = "x" * (section_characters - len(heading) - len("\n\n\n"))
+            Path("CHANGELOG.md").write_text(
+                f"## [Unreleased]\n\n- later\n\n{heading}\n\n{text}\n\n## [0.0.1] - 2026-10-30\n\n"
+                "- first\n",
+                encoding="utf-8",
+            )
+
+        previous = Path.cwd()
+        with tempfile.TemporaryDirectory() as temporary:
+            try:
+                os.chdir(temporary)
+                with mock.patch.dict(os.environ, {}, clear=True), mock.patch.dict(globals(), {
+                    "RegistryClient": lambda: self.fake_crate_registry(),
+                    "verify_git_commit": mock.Mock(),
+                }):
+                    for characters in (100, MAX_RELEASE_BODY_CHARACTERS):
+                        with self.subTest(characters=characters):
+                            write_changelog(characters)
+                            self.assertEqual(len(changelog_section("0.0.2")), characters)
+                            cmd_verify(args)
+                    write_changelog(MAX_RELEASE_BODY_CHARACTERS + 1)
+                    with self.assertRaisesRegex(ReleaseError, "release body"):
+                        cmd_verify(args)
+                    Path("CHANGELOG.md").write_text(
+                        "## [Unreleased]\n\n- later\n", encoding="utf-8"
+                    )
+                    with self.assertRaisesRegex(ReleaseError, r"no ## \[0\.0\.2\] section"):
+                        cmd_verify(args)
+                    Path("CHANGELOG.md").write_text(
+                        "## [0.0.2] - 2026-11-14\n\n## [0.0.1] - 2026-10-30\n\n- first\n",
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(ReleaseError, "is empty"):
+                        cmd_verify(args)
+            finally:
+                os.chdir(previous)
 
     def test_cargo_manifest_reader_contract_is_exact(self) -> None:
         validate_packaged_manifest(self.cargo_manifest("smear-parser"), "smear-parser", "0.0.1")
