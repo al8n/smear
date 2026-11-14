@@ -476,28 +476,32 @@ impl Analysis {
 ///   name, with a label at the `@deprecated`; and so is an instantiation that gives a non-null
 ///   type to a type parameter that is such a member's whole type, written nullable, through the
 ///   definitions it is passed to but no list or collection, or whose defaults derive one that
-///   does, at the argument, labelled where the parameter stands. An input object is OneOf when the
-///   package that
-///   wrote it applies `core`'s `@oneOf` to it, in its definition or in an extension of its own,
-///   and a field of one that is written non-null is `one-of-field-not-nullable`, and one that
-///   declares a default `one-of-field-has-default`, at its name. An instantiation, written or a
-///   directive's application, that gives a non-null type to a type parameter that is a field of a
-///   OneOf's whole type, written nullable, through the definitions it is passed to but no list or
-///   collection, or whose defaults derive one that does, is `one-of-field-not-nullable` too, at
-///   the argument, labelled where the parameter stands. Each application of `@oneOf` in
-///   an extension of an input object is `one-of-on-input-object-extension`, at its path. Over
-///   every input object of the model, the draft's unbreakable-cycle algorithm: an ordinary input
-///   object is finite when what each field that is non-null and no list requires is, and a OneOf
-///   when one of its fields can be given a finite value; the input objects that are not are
-///   walked in id order, each field in member order, and the field that closes a cycle is
-///   `circular-non-null-input-field`, or `circular-one-of-input-field` when a nullable field of a
-///   OneOf is on it, at its name, once for its input object. A generic input object requires what
-///   its type arguments must hold: a type parameter a required field takes, or passes to another
-///   input object's parameter it requires, is required of each instantiation, written `T` a
-///   nullable field being required where the argument is non-null. Where only a substitution
-///   would say what an alternative of a OneOf requires, and past a cap on the choices an input
-///   object keeps, it requires less: it never refuses an input object a finite value satisfies,
-///   and may miss a cycle only in a program with type parameters.
+///   does, at the argument, labelled where the parameter stands. A set's element and a map's key
+///   are non-null in every instantiation: a collection's own definition that gives one such a
+///   member's whole type is refused once, under the member's code, where it gives it, with a label
+///   at the `@deprecated`, and no use of the collection repeats it. An input object is OneOf when
+///   the package that wrote it applies `core`'s `@oneOf` to it, in its definition or in an
+///   extension of its own, and a field of one that is written non-null is
+///   `one-of-field-not-nullable`, and one that declares a default `one-of-field-has-default`, at
+///   its name. An instantiation, written or a directive's application, that gives a non-null type
+///   to a type parameter that is a field of a OneOf's whole type, written nullable, through the
+///   definitions it is passed to but no list or collection, or whose defaults derive one that
+///   does, is `one-of-field-not-nullable` too, at the argument, labelled where the parameter
+///   stands; and so is, once, where it gives it, a collection's own definition that gives its key
+///   or element such a field's whole type, with a label at the field. Each application of
+///   `@oneOf` in an extension of an input object is `one-of-on-input-object-extension`, at its
+///   path. Over every input object of the model, the draft's unbreakable-cycle algorithm: an
+///   ordinary input object is finite when what each field that is non-null and no list requires
+///   is, and a OneOf when one of its fields can be given a finite value; the input objects that
+///   are not are walked in id order, each field in member order, and the field that closes a
+///   cycle is `circular-non-null-input-field`, or `circular-one-of-input-field` when a nullable
+///   field of a OneOf is on it, at its name, once for its input object. A generic input object
+///   requires what its type arguments must hold: a type parameter a required field takes, or
+///   passes to another input object's parameter it requires, is required of each instantiation,
+///   written `T` a nullable field being required where the argument is non-null. Where only a
+///   substitution would say what an alternative of a OneOf requires, and past a cap on the choices
+///   an input object keeps, it requires less: it never refuses an input object a finite value
+///   satisfies, and may miss a cycle only in a program with type parameters.
 ///   GraphQL's own rules on directives judge every application a supplied package writes, with
 ///   GraphQL's codes: an application at a location its directive's definition does not list, the
 ///   schema, a kind of definition, a directive definition, a field, an argument, an input field or

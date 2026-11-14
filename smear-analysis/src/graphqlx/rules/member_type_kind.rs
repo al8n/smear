@@ -80,20 +80,20 @@ const POSITIONS: [Position; 4] = [
 /// in it, and a second diagnostic within it would repeat the phase's.
 ///
 /// It costs, once per walk, the table of where each type parameter stands, which is linear in the
-/// slots, the open types the members, union members and applications reach and their arguments,
-/// and one look at the schema's contributions. For each member, one look at its type and one step
-/// for each list its type writes; for each occurrence and application, one look at its type and,
-/// once for each distinct type, a verdict that reads each argument against each place its slot
-/// stands in, each type and class judged once for the walk; and once for each distinct type and
-/// count of written arguments, the types its fill derives, each once. A report reads one answer
-/// kept for its written occurrence: where under it what does not fit lies, made once for the walk
-/// for each occurrence and class, from the answer of the child it writes on the way, or from its
-/// own type's where it stops writing the way. So a written tree is read once, however many reports
-/// nest in it, and a path a default fills is walked once, when its types are judged, and never for
-/// a report. Nothing recurses. It keeps, between two hooks, whether a supplied package wrote the
-/// definition the walk is in, and for the walk the table, the silence, its verdicts and those
-/// answers, each keyed by the model's ids. Its messages quote names as excerpts, so each is bounded
-/// whatever the names' lengths, and print no type.
+/// slots, the open types the members, union members, `implements` entries and applications reach
+/// and their arguments, and one look at the schema's contributions. For each member, one look at
+/// its type and one step for each list its type writes; for each occurrence and application, one
+/// look at its type and, once for each distinct type, a verdict that reads each argument against
+/// each place its slot stands in, each type and class judged once for the walk; and once for each
+/// distinct type and count of written arguments, the types its fill derives, each once. A report
+/// reads one answer kept for its written occurrence: where under it what does not fit lies, made
+/// once for the walk for each occurrence and class, from the answer of the child it writes on the
+/// way, or from its own type's where it stops writing the way. So a written tree is read once,
+/// however many reports nest in it, and a path a default fills is walked once, when its types are
+/// judged, and never for a report. Nothing recurses. It keeps, between two hooks, whether a
+/// supplied package wrote the definition the walk is in, and for the walk the table, the silence,
+/// its verdicts and those answers, each keyed by the model's ids. Its messages quote names as
+/// excerpts, so each is bounded whatever the names' lengths, and print no type.
 #[derive(Default)]
 pub(super) struct MemberTypeKind {
   /// Whether a supplied package wrote the definition the walk is in.

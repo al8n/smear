@@ -12,7 +12,11 @@
 //! package's definitions stands in, and for each, where in its own definition it stands there or
 //! is passed to a parameter that does, the witness a diagnostic labels, and the member whose type
 //! the place came from. A place that is a member's whole type does not pass from a list to its
-//! element, or from a collection to its arguments: the list or the collection stands there.
+//! element, or from a collection to its arguments: the list or the collection stands there. Nor
+//! does it stand at a collection's key or element, which every instantiation makes non-null
+//! however it is written: one that reaches it there is the mistake of the collection's definition,
+//! which [`Positions::forced`] keeps, and is passed on to nothing, so that no use of the collection
+//! repeats it.
 //!
 //! A parameter stands where its definition puts it: in the complete type of each of its members,
 //! a field's arguments among them, every contribution's, a slot a default fills included; through
@@ -191,8 +195,9 @@ impl Place {
 }
 
 /// Where each type parameter of a model stands: for each, the places it stands in, and where, in
-/// its own definition, it stands there or is passed to a parameter that does; and, for each type
-/// parameter of an input object, whether a value of the input object holds a value of it.
+/// its own definition, it stands there or is passed to a parameter that does; for each type
+/// parameter of an input object, whether a value of the input object holds a value of it; and
+/// where a collection's own definition gives its key or element a place that takes a nullable type.
 #[derive(Default)]
 pub(crate) struct Positions {
   /// The first slot of each definition, in id order, and the count of slots last: definition `d`'s
@@ -206,7 +211,14 @@ pub(crate) struct Positions {
   /// For each slot, whether a value of its definition, an input object, holds a value of its
   /// argument.
   held: Vec<bool>,
+  /// Each place that takes a nullable type that reached a collection's key or element, which
+  /// stands in none of them.
+  forced: Forced,
 }
+
+/// Each place that takes a nullable type that reached a collection's key or element, by the slot
+/// and the place's index, with the witness it reached it with and the member it came from.
+type Forced = BTreeMap<(u32, usize), (Location, Option<MemberId>)>;
 
 impl Positions {
   /// The positions of `model`'s every type parameter, found once, `sources` saying who wrote each
@@ -215,6 +227,7 @@ impl Positions {
     let base = bases(model);
     let slots = base.last().copied().unwrap_or(0);
     let held = containment(model, &base);
+    let keys = key_slots(model, &base);
     let mut graph = Graph {
       base: &base,
       slots,
@@ -229,12 +242,13 @@ impl Positions {
     for def in model.defs() {
       graph.def(model, sources, def);
     }
-    let (witnesses, origins) = graph.spread(&held);
+    let (witnesses, origins, forced) = graph.spread(&held, &keys);
     Self {
       base,
       witnesses,
       origins,
       held,
+      forced,
     }
   }
 
@@ -266,6 +280,31 @@ impl Positions {
       .and_then(|slot: u32| self.held.get(slot as usize).copied())
       .unwrap_or(false)
   }
+
+  /// Where the definition of `def`, a collection, gives its key or element `place`, a place that
+  /// takes a nullable type, with the member the place came from: the definition's mistake, since
+  /// every instantiation makes the key or element non-null. The place stands at no key or element,
+  /// so no use of `def` repeats the mistake. `None` when the definition gives it none, or `def` is
+  /// no collection.
+  pub(crate) fn forced(&self, def: DefId, place: Place) -> Option<(Location, Option<MemberId>)> {
+    let slot = slot(&self.base, def, 0)?;
+    self.forced.get(&(slot, place.index())).copied()
+  }
+}
+
+/// For each slot under `base`, whether it is a collection's key or element: the first type
+/// parameter of a definition of `model` that stands for a collection, which every instantiation
+/// makes non-null, however it is written or filled.
+fn key_slots(model: &Model, base: &[u32]) -> Vec<bool> {
+  let mut keys = vec![false; base.last().copied().unwrap_or(0) as usize];
+  for def in model.defs() {
+    if model.def(def).collection().is_some()
+      && let Some(key) = slot(base, def, 0).and_then(|slot: u32| keys.get_mut(slot as usize))
+    {
+      *key = true;
+    }
+  }
+  keys
 }
 
 /// A step [`containment`] takes from a type it reached.
@@ -692,8 +731,14 @@ impl Graph<'_> {
 
   /// Spreads each root's place along the edges, root by root, then what an operation's argument
   /// reaches, which passes from an input object's type to the arguments a value of it holds by
-  /// `held`, and answers each slot's witnesses and the members its places came from.
-  fn spread(mut self, held: &[bool]) -> (Vec<Option<Location>>, Vec<Option<MemberId>>) {
+  /// `held`, and answers each slot's witnesses and the members its places came from, and each
+  /// place that takes a nullable type that reached a collection's key or element, which `keys`
+  /// tells.
+  fn spread(
+    mut self,
+    held: &[bool],
+    keys: &[bool],
+  ) -> (Vec<Option<Location>>, Vec<Option<MemberId>>, Forced) {
     let nodes = (self.slots as usize).saturating_add(self.types.len());
     let size = (self.slots as usize).saturating_mul(PLACES);
     // The edges by their source, so that a node's are one run.
@@ -704,9 +749,11 @@ impl Graph<'_> {
       edges: &self.edges,
       holds: &self.holds,
       held,
+      keys,
       gained: vec![0; nodes],
       witnesses: vec![None; size],
       origins: vec![None; size],
+      forced: BTreeMap::new(),
       queue: Vec::new(),
     };
     for &seed in &self.seeds {
@@ -719,12 +766,13 @@ impl Graph<'_> {
       spread.gain((node, Place::Operation, at, None));
       spread.drain();
     }
-    (spread.witnesses, spread.origins)
+    (spread.witnesses, spread.origins, spread.forced)
   }
 }
 
 /// The places spreading over a graph: what each node gained, each slot's witnesses and origins,
-/// and the nodes still to pass a place on.
+/// what reached a collection's key or element and stands there in no place, and the nodes still to
+/// pass a place on.
 struct Spread<'e> {
   /// How many slots there are: they are the first nodes.
   slots: u32,
@@ -734,19 +782,25 @@ struct Spread<'e> {
   holds: &'e [(u32, u32, u32)],
   /// For each slot, whether a value of its input object holds a value of its argument.
   held: &'e [bool],
+  /// For each slot, whether it is a collection's key or element.
+  keys: &'e [bool],
   /// For each node, the places it gained, a bit for each.
   gained: Vec<u8>,
   /// For each slot, and each place in turn, the witness it gained the place with.
   witnesses: Vec<Option<Location>>,
   /// For each slot, and each place in turn, the member the place came from, when one did.
   origins: Vec<Option<MemberId>>,
+  /// Each place that takes a nullable type that reached a collection's key or element.
+  forced: Forced,
   /// The nodes that gained a place and have not passed it on, with the witness they gained it
   /// with and the member it came from.
   queue: Vec<Seed>,
 }
 
 impl Spread<'_> {
-  /// A node gains a place, with a witness and an origin, unless it has it.
+  /// A node gains a place, with a witness and an origin, unless it has it. A collection's key or
+  /// element, which every instantiation makes non-null, stands in no place that takes a nullable
+  /// type: one that reaches it is kept apart, its definition's mistake, and passed on to nothing.
   fn gain(&mut self, (node, place, at, origin): Seed) {
     let Some(gained) = self.gained.get_mut(node as usize) else {
       return;
@@ -755,6 +809,10 @@ impl Spread<'_> {
       return;
     }
     *gained |= place.bit();
+    if place.whole() && self.keys.get(node as usize).copied().unwrap_or(false) {
+      self.forced.insert((node, place.index()), (at, origin));
+      return;
+    }
     if node < self.slots
       && let Some(index) = (node as usize)
         .checked_mul(PLACES)

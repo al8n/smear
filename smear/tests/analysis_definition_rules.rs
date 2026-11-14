@@ -2285,6 +2285,99 @@ fn what_an_instantiation_makes_required_is_not_deprecated() {
   );
 }
 
+/// A set whose element, and a map whose key, `@d` makes a deprecated argument's whole type,
+/// beside a map whose value it does; and uses of each, one through a type parameter.
+const FORCED: &str = "type Query {\n  s: S<Int>\n  t: S<Int!>\n  u: Box<Int!>\n  \
+                      m: M<Int, Int>\n  n: N<Int, Int>\n  o: N<Int, Int!>\n}\n\
+                      directive @d<X>(v: X @deprecated) on SCALAR\nscalar S<T> @set @d<T>\n\
+                      scalar M<K, V> @map @d<K>\nscalar N<K, V> @map @d<V>\n\
+                      type Box<T> {\n  v: S<T>\n}\n";
+
+#[test]
+fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
+  // A set's element and a map's key are non-null in every instantiation, however they are
+  // written, so `S`'s `@d<T>` and `M`'s `@d<K>` make `v` required whatever `S` and `M` are given:
+  // each definition's mistake, reported once, where it gives the place, labelled at the
+  // `@deprecated`. No use repeats it, `S<Int>`, `S<Int!>`, `Box<Int!>`, which gives `S` its `T`,
+  // and `M<Int, Int>` among them; `N`'s value is no key, and `N<Int, Int!>` alone is refused.
+  let analysis = analyze_one(FORCED);
+  let schema = schema_file(&analysis);
+  let deprecated = Some(at(schema, FORCED, "deprecated", 0));
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, FORCED, "N<Int, ", "Int!", 0),
+        Some(named(schema, FORCED, "@d<", "V", 0))
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, FORCED, "@d<", "T", 0),
+        deprecated
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, FORCED, "@d<", "K", 0),
+        deprecated
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`N` takes a non-null type for its type parameter `V`, which makes a deprecated argument \
+       required",
+      "`T`, the element of the set `S`, is non-null in every instantiation, and here it makes the \
+       deprecated argument `v` of the directive `@d` required",
+      "`K`, the key of the map `M`, is non-null in every instantiation, and here it makes the \
+       deprecated argument `v` of the directive `@d` required",
+    ]
+  );
+  let forced = analysis
+    .diagnostics()
+    .iter()
+    .nth(1)
+    .expect("three diagnostics");
+  assert_eq!(
+    (forced.primary_label(), forced.labels(), forced.help()),
+    (
+      Some("required argument is deprecated"),
+      1,
+      Some(
+        "a set's element and a map's key are non-null however they are written: give the \
+         deprecated member a default, or do not pass the key or element to it."
+      )
+    )
+  );
+
+  // An input field, through the input object `W` the directive's argument names: the element is
+  // reported where `@e<T>` gives it, under the input field's code.
+  let text = "type Query {\n  s: S<Int>\n}\ninput W<Y> {\n  w: Y @deprecated\n}\n\
+              directive @e<X>(v: W<X>) on SCALAR\nscalar S<T> @set @e<T>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      DEPRECATED_INPUT_FIELD,
+      named(schema, text, "@e<", "T", 0),
+      Some(at(schema, text, "deprecated", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`T`, the element of the set `S`, is non-null in every instantiation, and here it makes the \
+       deprecated input field `w` of `W` required"
+    ]
+  );
+}
+
 /// A OneOf input object with a field of each shape, and a generic one whose field is a type
 /// parameter.
 const ONE_OF: &str = "type Query {\n  ok: Int\n}\n\
@@ -2412,6 +2505,54 @@ fn a_one_of_field_a_parameter_types_stays_nullable() {
       Some(
         "every field of a `@oneOf` input object is one of the alternatives, so each one has to be \
          nullable."
+      )
+    )
+  );
+}
+
+#[test]
+fn a_collections_key_a_one_of_field_takes_is_refused_once() {
+  // `@d<T>` makes the element of the set `S`, non-null in every instantiation, the type of
+  // `Choice`'s field `x`: the definition's mistake, reported once, where it gives the place,
+  // labelled at the field. `S<Int>` and `S<Int!>` add nothing.
+  let text = "type Query {\n  s: S<Int>\n  t: S<Int!>\n}\ninput Choice<C> @oneOf {\n  x: C\n}\n\
+              directive @d<X>(v: Choice<X>) on SCALAR\nscalar S<T> @set @d<T>\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      ONE_OF_NON_NULL,
+      named(schema, text, "@d<", "T", 0),
+      Some(named(schema, text, "  ", "x", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`T`, the element of the set `S`, is non-null in every instantiation, and here it is the \
+       type of the field `x` of the OneOf input object `Choice`"
+    ]
+  );
+  let forced = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    (
+      forced.primary_label(),
+      forced.label(0).map(|label| label.text()),
+      forced.help()
+    ),
+    (
+      Some("field of a @oneOf input object is non-null"),
+      Some("the field it is the type of"),
+      Some(
+        "a set's element and a map's key are non-null however they are written, and every field \
+         of a `@oneOf` input object has to be nullable: do not pass the key or element to one."
       )
     )
   );

@@ -603,13 +603,17 @@ All notable changes to Smear are documented in this file.
   that applies `core`'s `@deprecated`, told by its definition and not its spelling, is
   `deprecated-required-argument` or `deprecated-required-input-field`, and so is an instantiation
   that makes one required, where it is written: `I<Int!>` of `input I<T> { a: T @deprecated }`;
-  and an input object is OneOf
+  and so is, once, where it does so, a collection's own definition that gives its element or key,
+  non-null in every instantiation however it is written, such a member's type, which no use of the
+  collection repeats: `scalar S<T> @set @d<T>` of `directive @d<X>(v: X @deprecated)`; and an
+  input object is OneOf
   when the package that wrote it applies `core`'s `@oneOf` to it, in its definition or in an
   extension of its own, and a field of one written non-null is `one-of-field-not-nullable`, and so
   is an instantiation that gives a non-null type to a type parameter that is such a field's type,
   where it is written: `Choice<Int!>` of `input Choice<T> @oneOf { x: T }`, but not `L<Int!>` of
-  `input L<T> @oneOf { x: [T] }`; and one that declares a default `one-of-field-has-default`; and
-  each `@oneOf` an extension of an input
+  `input L<T> @oneOf { x: [T] }`, and so, once, is a collection's own definition that gives its
+  element or key such a field's type; and one that declares a default `one-of-field-has-default`;
+  and each `@oneOf` an extension of an input
   object applies is `one-of-on-input-object-extension`; and an input object that requires a value
   of itself is `circular-non-null-input-field` when every field on the way is non-null and no
   list, and `circular-one-of-input-field` when the way passes a OneOf none of whose fields can be

@@ -22,6 +22,15 @@
 //! derive is judged the same way, at the occurrence, a type the occurrence or the program writes
 //! being judged where it is written.
 //!
+//! A set's element and a map's key are non-null in every instantiation, however they are written.
+//! So a collection's own definition that gives its key or element such a field's whole type makes
+//! the field non-null in every instantiation: `scalar S<T> @set @d<T>` with
+//! `directive @d<X>(v: Choice<X>)`. That is the definition's mistake, reported once, where the
+//! definition gives the place: at the type argument or the `implements` entry, or at an
+//! application's path for an argument a default fills; with a label at the field. No use of the
+//! collection repeats it: the table keeps the place apart from the key or element, and passes it
+//! on to nothing.
+//!
 //! An input object is a OneOf input object when the package that wrote it applies `core`'s
 //! `@oneOf` to it, in its definition or in an extension of its own, as `one_of` answers. So a
 //! field is judged whichever contribution writes it, and another package's `@oneOf` makes nothing
@@ -35,8 +44,8 @@ use std::{collections::BTreeMap, format};
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  ApplicationId, Contribution, Cx, DefId, Diagnostic, MemberId, MemberKind, Model, TyId, TyKind,
-  TypeExprId, TypeExprKind, Visitor,
+  ApplicationId, Collection, Contribution, Cx, DefId, Diagnostic, MemberId, MemberKind, Model,
+  TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
   code::schema,
   diagnostic::Excerpt,
   id::dense,
@@ -49,12 +58,18 @@ use super::{Silence, one_of};
 const HELP: &str = "every field of a `@oneOf` input object is one of the alternatives, so each one has to be \
    nullable.";
 
+/// What the rule tells the author of a collection whose key or element a OneOf's field takes.
+const FORCED_HELP: &str = "a set's element and a map's key are non-null however they are \
+                           written, and every field of a `@oneOf` input object has to be \
+                           nullable: do not pass the key or element to one.";
+
 /// GraphQL's label for a non-null field of a OneOf input object.
 const LABEL: &str = "field of a @oneOf input object is non-null";
 
-/// Reports each field of a OneOf input object that is written non-null, and each occurrence and
+/// Reports each field of a OneOf input object that is written non-null; each occurrence and
 /// application whose type gives a type parameter that stands as such a field's whole type, or
-/// whose fill gives one, a non-null type.
+/// whose fill gives one, a non-null type; and each place where a collection's own definition gives
+/// its key or element such a field's whole type.
 ///
 /// It finds where each type parameter stands in the `begin` hook, reads whether an input object is
 /// OneOf in the `enter_def` hook, each input field's type in the `enter_member` hook, each
@@ -64,15 +79,17 @@ const LABEL: &str = "field of a @oneOf input object is non-null";
 /// in it, and a second diagnostic within it would repeat the phase's.
 ///
 /// It costs, once per walk, the table of where each type parameter stands, which is linear in the
-/// slots, the open types the members, union members and applications reach and their arguments,
-/// and one look at the schema's contributions; for each input object the walk enters, one look at
-/// each of its applications, and for each input field one look at its type; for each occurrence
-/// and application, one look at its type and, once for each distinct type, a verdict that reads
-/// each argument at a slot that stands as a OneOf's field, and once for each distinct type and
-/// count of written arguments, the types its fill derives, each once. It keeps, between two hooks,
-/// whether the definition the walk is in is a OneOf input object, and for the walk the table, the
-/// silence and its verdicts, keyed by the model's ids. Its messages quote names as excerpts, so
-/// each is bounded whatever the names' lengths, and print no type.
+/// slots, the open types the members, union members, `implements` entries and applications reach
+/// and their arguments, and one look at the schema's contributions; for each input object the walk
+/// enters, one look at each of its applications, and for each input field one look at its type;
+/// for each occurrence and application, one look at its type and, once for each distinct type, a
+/// verdict that reads each argument at a slot that stands as a OneOf's field, and once for each
+/// distinct type and count of written arguments, the types its fill derives, each once; and in a
+/// collection's definition, for each occurrence and application, a lookup of what its key or
+/// element was given there. It keeps, between two hooks, whether the definition the walk is in is
+/// a OneOf input object, and for the walk the table, the silence and its verdicts, keyed by the
+/// model's ids. Its messages quote names as excerpts, so each is bounded whatever the names'
+/// lengths, and print no type.
 #[derive(Default)]
 pub(super) struct OneOfFieldNotNullable {
   /// Whether the definition the walk is in is a OneOf input object.
@@ -148,6 +165,9 @@ impl Visitor for OneOfFieldNotNullable {
     }
     let model = cx.model();
     let occurrence = model.type_expr(ty);
+    if let Some(report) = self.forced(model, cx.def(), occurrence.location()) {
+      cx.report(report);
+    }
     let TypeExprKind::Named { args: written, .. } = occurrence.kind() else {
       return;
     };
@@ -169,6 +189,9 @@ impl Visitor for OneOfFieldNotNullable {
     }
     let model = cx.model();
     let applied = model.application(application);
+    if let Some(report) = self.forced(model, cx.def(), applied.path_location()) {
+      cx.report(report);
+    }
     let Some(complete) = applied.ty() else {
       return;
     };
@@ -253,6 +276,41 @@ impl OneOfFieldNotNullable {
       report = report.label(default, "filled from this default");
     }
     Some(report.help(HELP).build())
+  }
+
+  /// The diagnostic of the mistake of `def`'s definition, of `model`, at `at`, where the walk has
+  /// reached a type argument, an application or an `implements` entry of the definition: the key
+  /// or element of `def`, a collection, which every instantiation makes non-null, given there a
+  /// type parameter that stands as a OneOf's field's whole type, which it makes non-null in every
+  /// instantiation. `None` anywhere else: a definition's mistake is reported once, where it gives
+  /// the key or element that place.
+  fn forced(&self, model: &Model, def: Option<DefId>, at: Location) -> Option<Diagnostic> {
+    let def = def?;
+    let collection = model.def(def).collection()?;
+    let (witness, member) = self.positions.forced(def, Place::OneOfField)?;
+    if witness != at {
+      return None;
+    }
+    let field = model.member(member?);
+    let (kind, part) = match collection {
+      Collection::Set => ("set", "element"),
+      Collection::Map => ("map", "key"),
+    };
+    Some(
+      Diagnostic::builder(schema::ONE_OF_FIELD_NOT_NULLABLE, at)
+        .message(format!(
+          "`{}`, the {part} of the {kind} `{}`, is non-null in every instantiation, and here it is \
+           the type of the field `{}` of the OneOf input object `{}`",
+          Excerpt(parameter(model, def, 0).as_bytes()),
+          Excerpt(model.def(def).name().as_bytes()),
+          Excerpt(field.name().as_bytes()),
+          Excerpt(model.def(field.owner()).name().as_bytes())
+        ))
+        .primary_label(LABEL)
+        .label(field.location(), "the field it is the type of")
+        .help(FORCED_HELP)
+        .build(),
+    )
   }
 }
 
