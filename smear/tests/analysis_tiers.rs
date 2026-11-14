@@ -530,6 +530,56 @@ fn a_dependencys_own_mistake_is_reported_once() {
   );
 }
 
+/// What a use of another package's definition needs is capped at that package's tier, and the
+/// message says the capped need: `X` holds a `HashMap`, which needs `std`, in a dependency declared
+/// at `alloc`, which reports its `HashMap`; the root package, at `core`, reports its use of `X` as
+/// needing `alloc`. Refuses the uncapped `std` in the root package's message.
+#[test]
+fn a_use_names_the_need_capped_at_the_definitions_package() {
+  let theirs = "type X {\n  h: HashMap<i32, i32>\n}\n";
+  let ours = "type Query {\n  x: Int\n  a: ^::dep::X\n}\n";
+  let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let dep = package("dep", Tier::Alloc, &[("dep.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  let dep_file = file(&analysis, 4, "dep.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [
+      (at(schema, ours, "^::dep::X", 0), None),
+      (at(dep_file, theirs, "HashMap<i32, i32>", 0), None),
+    ]
+  );
+  assert_eq!(
+    messages(&analysis, TIER),
+    [
+      "`X` needs `alloc`, and package `app` is declared at tier `core`",
+      "`HashMap` needs `std`, and package `dep` is declared at tier `alloc`",
+    ]
+  );
+}
+
+/// An `@extern` that writes `tier` twice is judged by the first, as binding reads it: at `core`,
+/// `tier: ALLOC, tier: CORE` is refused at `ALLOC`. Refuses the later `tier` read.
+#[test]
+fn an_externs_first_tier_is_the_one_judged() {
+  let text = "type Query {\n  x: Int\n}\n\
+              scalar S @extern(lang: \"rust\", type: \"a\", tier: ALLOC, tier: CORE)\n";
+  let analysis = analyze_at(text, Tier::Core);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [(at(schema, text, "ALLOC", 0), None)]
+  );
+  assert_eq!(
+    messages(&analysis, TIER),
+    [
+      "this `@extern` says its host type needs `alloc`, and package `app`, which declares the \
+       scalar, is declared at tier `core`"
+    ]
+  );
+}
+
 /// A use that leaves a type argument to a default needs what the default needs: `^::dep::P` is
 /// refused, with a label at its default `string`, and `^::dep::P<Int>` is not. Refuses the filled
 /// slots ignored, and a default reported as the root package's own writing.
