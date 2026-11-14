@@ -74,6 +74,10 @@ const UNDEFINED_MEMBER: &str = "smear::schema::undefined-union-member";
 const DEPRECATED_ARGUMENT: &str = "smear::schema::deprecated-required-argument";
 const DEPRECATED_INPUT_FIELD: &str = "smear::schema::deprecated-required-input-field";
 
+/// GraphQL's code for a required directive argument an application leaves out, the coercion
+/// phase's.
+const MISSING_ARGUMENT: &str = "smear::schema::missing-required-directive-argument";
+
 /// GraphQL's codes for the three mistakes of a OneOf input object.
 const ONE_OF_NON_NULL: &str = "smear::schema::one-of-field-not-nullable";
 const ONE_OF_DEFAULT: &str = "smear::schema::one-of-field-has-default";
@@ -2286,12 +2290,21 @@ fn what_an_instantiation_makes_required_is_not_deprecated() {
 }
 
 /// A set whose element, and a map whose key, `@d` makes a deprecated argument's whole type,
-/// beside a map whose value it does; and uses of each, one through a type parameter.
+/// beside a map whose value it does; and uses of each, one through a type parameter. Each
+/// application leaves `v` out.
 const FORCED: &str = "type Query {\n  s: S<Int>\n  t: S<Int!>\n  u: Box<Int!>\n  \
                       m: M<Int, Int>\n  n: N<Int, Int>\n  o: N<Int, Int!>\n}\n\
                       directive @d<X>(v: X @deprecated) on SCALAR\nscalar S<T> @set @d<T>\n\
                       scalar M<K, V> @map @d<K>\nscalar N<K, V> @map @d<V>\n\
                       type Box<T> {\n  v: S<T>\n}\n";
+
+/// [`FORCED`], each application writing `v`, a value each instantiation judges, so that no use
+/// leaves out what its type arguments make required.
+const FORCED_WRITTEN: &str = "type Query {\n  s: S<Int>\n  t: S<Int!>\n  u: Box<Int!>\n  \
+                              m: M<Int, Int>\n  n: N<Int, Int>\n  o: N<Int, Int!>\n}\n\
+                              directive @d<X>(v: X @deprecated) on SCALAR\n\
+                              scalar S<T> @set @d<T>(v: 1)\nscalar M<K, V> @map @d<K>(v: 1)\n\
+                              scalar N<K, V> @map @d<V>(v: 1)\ntype Box<T> {\n  v: S<T>\n}\n";
 
 #[test]
 fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
@@ -2300,40 +2313,48 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
   // each definition's mistake, reported once, where it gives the place, labelled at the
   // `@deprecated`. No use repeats it, `S<Int>`, `S<Int!>`, `Box<Int!>`, which gives `S` its `T`,
   // and `M<Int, Int>` among them; `N`'s value is no key, and `N<Int, Int!>` alone is refused.
-  let analysis = analyze_one(FORCED);
+  // Each application writes `v`, `1`, which each use's type for it takes.
+  let text = FORCED_WRITTEN;
+  let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
-  let deprecated = Some(at(schema, FORCED, "deprecated", 0));
+  let deprecated = Some(at(schema, text, "deprecated", 0));
   assert_eq!(
     found(&analysis),
     [
       (
         DEPRECATED_ARGUMENT,
-        named(schema, FORCED, "N<Int, ", "Int!", 0),
-        Some(named(schema, FORCED, "@d<", "V", 0))
+        named(schema, text, "N<Int, ", "Int!", 0),
+        Some(named(schema, text, "@d<", "V", 0))
       ),
       (
         DEPRECATED_ARGUMENT,
-        named(schema, FORCED, "@d<", "T", 0),
+        named(schema, text, "@d<", "T", 0),
         deprecated
       ),
       (
         DEPRECATED_ARGUMENT,
-        named(schema, FORCED, "@d<", "K", 0),
+        named(schema, text, "@d<", "K", 0),
         deprecated
       ),
     ],
     "{:#?}",
     analysis.diagnostics()
   );
+  let forced_message = |part: &str, kind: &str, collection: &str, parameter: &str| -> String {
+    format!(
+      "`{parameter}`, the {part} of the {kind} `{collection}`, is non-null in every \
+       instantiation, and here it makes the deprecated argument `v` of the directive `@d` required"
+    )
+  };
   assert_eq!(
     messages(&analysis),
     [
-      "`N` takes a non-null type for its type parameter `V`, which makes a deprecated argument \
-       required",
-      "`T`, the element of the set `S`, is non-null in every instantiation, and here it makes the \
-       deprecated argument `v` of the directive `@d` required",
-      "`K`, the key of the map `M`, is non-null in every instantiation, and here it makes the \
-       deprecated argument `v` of the directive `@d` required",
+      String::from(
+        "`N` takes a non-null type for its type parameter `V`, which makes a deprecated argument \
+         required"
+      ),
+      forced_message("element", "set", "S", "T"),
+      forced_message("key", "map", "M", "K"),
     ]
   );
   let forced = analysis
@@ -2341,16 +2362,105 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
     .iter()
     .nth(1)
     .expect("three diagnostics");
+  let forced_words = (
+    Some("required argument is deprecated"),
+    1,
+    Some(
+      "a set's element and a map's key are non-null however they are written: give the \
+       deprecated member a default, or do not pass the key or element to it.",
+    ),
+  );
   assert_eq!(
     (forced.primary_label(), forced.labels(), forced.help()),
-    (
-      Some("required argument is deprecated"),
-      1,
-      Some(
-        "a set's element and a map's key are non-null however they are written: give the \
-         deprecated member a default, or do not pass the key or element to it."
-      )
+    forced_words
+  );
+
+  // Where each application leaves `v` out, a use whose instantiation makes it required, `@d<Int!>`
+  // under it, is the coercion phase's `missing-required-directive-argument`, at the use, labelled
+  // at the application that leaves `v` out and at `v`: another rule, on another mistake. A use only
+  // a derivation reaches, the `S<Int!>` of `Box<Int!>`, is not checked. The phase's error marks
+  // `Query`, where the rule then says nothing, at `N<Int, Int!>` either; the definitions' mistakes
+  // are reported as before.
+  let text = FORCED;
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let deprecated = Some(at(schema, text, "deprecated", 0));
+  let path = |nth: usize| -> Option<Location> { Some(named(schema, text, "@", "d", nth)) };
+  assert_eq!(
+    found(&analysis),
+    [
+      (MISSING_ARGUMENT, at(schema, text, "S<Int>", 0), path(1)),
+      (MISSING_ARGUMENT, at(schema, text, "S<Int!>", 0), path(1)),
+      (
+        MISSING_ARGUMENT,
+        at(schema, text, "M<Int, Int>", 0),
+        path(2)
+      ),
+      (
+        MISSING_ARGUMENT,
+        at(schema, text, "N<Int, Int!>", 0),
+        path(3)
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "@d<", "T", 0),
+        deprecated
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "@d<", "K", 0),
+        deprecated
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let missing = |collection: &str| -> String {
+    format!(
+      "`{collection}` is instantiated here with type arguments under which `@d` requires its \
+       argument `v`, and an application it holds leaves it out"
     )
+  };
+  assert_eq!(
+    messages(&analysis),
+    [
+      missing("S"),
+      missing("S"),
+      missing("M"),
+      missing("N"),
+      forced_message("element", "set", "S", "T"),
+      forced_message("key", "map", "M", "K"),
+    ]
+  );
+  let first = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("six diagnostics");
+  assert_eq!(
+    (
+      first.primary_label(),
+      first.labels(),
+      first.label(0).map(|label| label.text()),
+      first.label(1).map(|label| (label.location(), label.text())),
+      first.help()
+    ),
+    (
+      Some("missing required directive argument"),
+      2,
+      Some("this application leaves it out"),
+      Some((named(schema, text, "(", "v", 0), "required here")),
+      None
+    )
+  );
+  let forced = analysis
+    .diagnostics()
+    .iter()
+    .nth(4)
+    .expect("six diagnostics");
+  assert_eq!(
+    (forced.primary_label(), forced.labels(), forced.help()),
+    forced_words
   );
 
   // An input field, through the input object `W` the directive's argument names: the element is
@@ -2378,7 +2488,10 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
   );
 
   // Where a default fills the slot, at the application's path; and where an `implements` entry
-  // passes the element on, at the entry. Each once, and `S<Int>` adds nothing.
+  // passes the element on, at the entry. Each once, and `S<Int>` adds nothing of this rule's. The
+  // application with the default leaves `v` out, so `S<Int>` is the phase's
+  // `missing-required-directive-argument`, as in `FORCED`; the one on `Mk` is reached at `S<Int>`
+  // only through a derivation, which the phase does not check.
   let deprecated_message = "`T`, the element of the set `S`, is non-null in every instantiation, \
                             and here it makes the deprecated argument `v` of the directive `@d` \
                             required";
@@ -2388,15 +2501,25 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
   let schema = schema_file(&analysis);
   assert_eq!(
     found(&analysis),
-    [(
-      DEPRECATED_ARGUMENT,
-      named(schema, text, "@", "d", 1),
-      Some(at(schema, text, "deprecated", 0))
-    )],
+    [
+      (
+        MISSING_ARGUMENT,
+        at(schema, text, "S<Int>", 0),
+        Some(named(schema, text, "@", "d", 1))
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        named(schema, text, "@", "d", 1),
+        Some(at(schema, text, "deprecated", 0))
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
-  assert_eq!(messages(&analysis), [deprecated_message]);
+  assert_eq!(
+    messages(&analysis),
+    [missing("S"), String::from(deprecated_message)]
+  );
   let text = "type Query {\n  s: S<Int>\n}\ndirective @d<X>(v: X @deprecated) on INTERFACE\n\
               interface Mk<X> @marker @d<X>\nscalar S<T> implements Mk<T> @set\n";
   let analysis = analyze_text(text);
@@ -2490,14 +2613,16 @@ fn a_key_written_non_null_a_deprecated_member_takes_is_refused_once() {
   // as any instantiation is, labelled where `@d`'s `X` stands. That the `T!` is the set's element
   // as well adds nothing: what the forced path reports is what the complete type alone makes
   // non-null. The twin, `@d<T>`, is refused once, through the forced path, at its `T`, labelled at
-  // the `@deprecated`. `S<Int>` adds nothing to either.
-  let program = |element: &str| -> String {
+  // the `@deprecated`. `S<Int>` adds nothing to either. Each application writes `v`, `1`, which
+  // `S<Int>`'s type for it takes: one that leaves out what its type arguments make required is
+  // the coercion phase's `missing-required-directive-argument`, as the last case shows.
+  let program = |application: &str| -> String {
     format!(
       "type Query {{\n  s: S<Int>\n}}\ndirective @d<X>(v: X @deprecated) on SCALAR\n\
-       scalar S<T> @set @d<{element}>\n"
+       scalar S<T> @set {application}\n"
     )
   };
-  let text = program("T!");
+  let text = program("@d<T!>(v: 1)");
   let analysis = analyze_text(&text);
   let schema = schema_file(&analysis);
   assert_eq!(
@@ -2517,7 +2642,7 @@ fn a_key_written_non_null_a_deprecated_member_takes_is_refused_once() {
        required"
     ]
   );
-  let text = program("T");
+  let text = program("@d<T>(v: 1)");
   let analysis = analyze_text(&text);
   let schema = schema_file(&analysis);
   assert_eq!(
@@ -2542,7 +2667,8 @@ fn a_key_written_non_null_a_deprecated_member_takes_is_refused_once() {
   // its own owner, whichever reaches the element first, since what `@e<T!>` gives stops short of
   // the element and takes no room from what `@d<T>` gives.
   let text = "type Query {\n  s: S<Int>\n}\ndirective @e<X>(w: X @deprecated) on SCALAR\n\
-              directive @d<X>(v: X @deprecated) on SCALAR\nscalar S<T> @set @e<T!> @d<T>\n";
+              directive @d<X>(v: X @deprecated) on SCALAR\n\
+              scalar S<T> @set @e<T!>(w: 1) @d<T>(v: 1)\n";
   let analysis = analyze_text(text);
   let schema = schema_file(&analysis);
   assert_eq!(
@@ -2576,7 +2702,7 @@ fn a_key_written_non_null_a_deprecated_member_takes_is_refused_once() {
   // application's mistake, refused once, at its path, as any fill that gives a non-null type is,
   // labelled where `Y` stands and at the default.
   let text = "type Query {\n  s: S<Int>\n}\ndirective @d<X, Y = X!>(v: Y @deprecated) on SCALAR\n\
-              scalar S<T> @set @d<T>\n";
+              scalar S<T> @set @d<T>(v: 1)\n";
   let analysis = analyze_text(text);
   let schema = schema_file(&analysis);
   assert_eq!(
@@ -2606,6 +2732,27 @@ fn a_key_written_non_null_a_deprecated_member_takes_is_refused_once() {
       .label(1)
       .map(|label| (label.location(), label.text())),
     Some((at(schema, text, "X!", 0), "filled from this default"))
+  );
+
+  // Left out where `T!` makes it required, `v` is the coercion phase's: one
+  // `missing-required-directive-argument`, at the application's path, labelled at `v`. Its error
+  // marks `S`, where the rule says nothing by either path: one owner still.
+  let text = program("@d<T!>");
+  let analysis = analyze_text(&text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      MISSING_ARGUMENT,
+      named(schema, &text, "@", "d", 1),
+      Some(named(schema, &text, "(", "v", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    ["`@d` requires its argument `v`, and this application leaves it out"]
   );
 }
 
