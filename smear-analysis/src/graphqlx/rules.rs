@@ -54,6 +54,7 @@
 //! One rule is in no set: `UnboundedInstantiation`, which is public, which `analyze` never runs,
 //! and which a backend composes into its own walk. It reads the public model alone.
 
+mod circular_input_field;
 mod collection_arity;
 mod deprecated_required;
 mod duplicate_directive_argument_use;
@@ -89,7 +90,8 @@ mod union_member_not_object;
 mod unsupported_directive_location;
 
 use self::{
-  collection_arity::CollectionArity, deprecated_required::DeprecatedRequired,
+  circular_input_field::CircularInputField, collection_arity::CollectionArity,
+  deprecated_required::DeprecatedRequired,
   duplicate_directive_argument_use::DuplicateDirectiveArgumentUse,
   duplicate_directive_use::DuplicateDirectiveUse, duplicate_member::DuplicateMember,
   duplicate_schema_definition::DuplicateSchemaDefinition,
@@ -396,10 +398,12 @@ rule_set! {
   /// begin with `__`; a definition's members have distinct names, and so have a field's arguments;
   /// a definition that holds members holds one at least, a marker holding none; a member's type is
   /// of the kind its position takes, and so are a collection's arguments there, and at each
-  /// instantiation what it gives a type parameter where the parameter stands; an object or an interface implements interfaces; no interface
-  /// implements itself; a union's members are object types; a required argument or input field is
-  /// not deprecated; a OneOf input object's fields are nullable and have no default; and an input
-  /// object takes `@oneOf` in its definition alone. And of the directives and every application a
+  /// instantiation what it gives a type parameter where the parameter stands; an object or an
+  /// interface implements interfaces; no interface implements itself; a union's members are object
+  /// types; a required argument or input field is not deprecated; a OneOf input object's fields are
+  /// nullable and have no default; an input object takes `@oneOf` in its definition alone; and no
+  /// input object requires a value of itself, through its fields and the type arguments they give.
+  /// And of the directives and every application a
   /// supplied package writes, GraphQL's own rules: a directive stands where its definition lists; a
   /// directive that is not repeatable is applied once to a location, a definition and its
   /// extensions being one; an application passes each argument once; no directive refers to itself,
@@ -486,6 +490,10 @@ rule_set! {
     extern_misuse: ExternMisuse => [super::DiagnosticKind::ExternMisuse.code()],
     repr_misuse: ReprMisuse => [super::DiagnosticKind::ReprMisuse.code()],
     tier_violation: TierViolation => [super::DiagnosticKind::Tier.code()],
+    circular_input_field: CircularInputField => [
+      super::code::schema::CIRCULAR_NON_NULL_INPUT_FIELD,
+      super::code::schema::CIRCULAR_ONE_OF_INPUT_FIELD,
+    ],
   }
 }
 

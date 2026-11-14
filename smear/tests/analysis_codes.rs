@@ -282,6 +282,14 @@ const SHARED: &[(Code, SchemaErrorKind)] = &[
     schema::DUPLICATE_UNION_MEMBER,
     SchemaErrorKind::DuplicateUnionMember,
   ),
+  (
+    schema::CIRCULAR_NON_NULL_INPUT_FIELD,
+    SchemaErrorKind::CircularNonNullInputField,
+  ),
+  (
+    schema::CIRCULAR_ONE_OF_INPUT_FIELD,
+    SchemaErrorKind::CircularOneOfInputField,
+  ),
 ];
 
 /// Each constant is the code `smear-schema` reports for the kind it names, and `schema::ALL` holds

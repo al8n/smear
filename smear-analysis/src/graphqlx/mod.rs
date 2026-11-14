@@ -171,7 +171,12 @@
 //! field; and a field written non-null of an input object its own package makes OneOf is
 //! `smear::schema::one-of-field-not-nullable`, and one with a default
 //! `smear::schema::one-of-field-has-default`; and `@oneOf` in an extension of an input object is
-//! `smear::schema::one-of-on-input-object-extension`. And every application a supplied package
+//! `smear::schema::one-of-on-input-object-extension`; and an input object that requires a value of
+//! itself, through fields each non-null and no list, is
+//! `smear::schema::circular-non-null-input-field`, and one that does by way of a OneOf none of
+//! whose fields can be given a finite value `smear::schema::circular-one-of-input-field`, at the
+//! field that closes the cycle, once for its input object, a generic input object requiring what
+//! its type arguments must hold. And every application a supplied package
 //! writes keeps GraphQL's own rules on directives, with GraphQL's codes: one at a location its
 //! directive's definition does not list is `smear::schema::unsupported-directive-location`; and one
 //! of a directive that is not repeatable, applied again where it is applied, a definition and its

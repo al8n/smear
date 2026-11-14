@@ -538,6 +538,8 @@ pub mod schema {
     UNEXPECTED_REQUIRED_ARGUMENT,
     INTERFACE_FIELD_NOT_DEPRECATED,
     DUPLICATE_UNION_MEMBER,
+    CIRCULAR_NON_NULL_INPUT_FIELD,
+    CIRCULAR_ONE_OF_INPUT_FIELD,
   ];
 
   /// Two definitions in one module give a type one name: `smear-schema`'s `DuplicateTypeName`.
@@ -827,4 +829,14 @@ pub mod schema {
   /// A union's member is the type an earlier member of its is, as written or under the type
   /// arguments of an instantiation the program writes: `smear-schema`'s `DuplicateUnionMember`.
   pub const DUPLICATE_UNION_MEMBER: Code = Code::new("smear::schema::duplicate-union-member");
+
+  /// An input object requires a value of itself through fields that are each non-null and no
+  /// list, so no finite value satisfies it: `smear-schema`'s `CircularNonNullInputField`.
+  pub const CIRCULAR_NON_NULL_INPUT_FIELD: Code =
+    Code::new("smear::schema::circular-non-null-input-field");
+
+  /// An input object requires a value of itself by way of a OneOf input object none of whose
+  /// fields can be given a finite value: `smear-schema`'s `CircularOneOfInputField`.
+  pub const CIRCULAR_ONE_OF_INPUT_FIELD: Code =
+    Code::new("smear::schema::circular-one-of-input-field");
 }

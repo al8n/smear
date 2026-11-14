@@ -36,8 +36,8 @@
 //! ceilings `smear-schema`'s representation has and GraphQLx has not; each other row names the work
 //! that removes it.
 //!
-//! It holds eighteen rows. Six are for every document: the three of the capacity ceilings, which
-//! stay, and the three of the input-object cycles, which L4's last part deletes. Coercion and the
+//! It holds sixteen rows. Four are for every document: the three of the capacity ceilings, which
+//! stay, and the one of the default-value cycles, which L4's last part deletes. Coercion and the
 //! implementation phase have none: each of their codes has `smear-schema`'s count on every
 //! document, or a row for that document. Twelve are each for one document both dialects refuse: one
 //! where `smear-schema` drops a second definition of a name unread, and eleven where the mistake
@@ -122,8 +122,6 @@ const ALLOWED: &[Allowed] = &[
   every("smear::schema::type-reference-too-deep", CEILING),
   every("smear::schema::too-many-field-arguments", CEILING),
   every("smear::schema::too-many-directive-arguments", CEILING),
-  every("smear::schema::circular-non-null-input-field", CYCLES),
-  every("smear::schema::circular-one-of-input-field", CYCLES),
   every("smear::schema::input-object-default-value-cycle", CYCLES),
   Allowed {
     code: "smear::schema::undefined-implements-interface",

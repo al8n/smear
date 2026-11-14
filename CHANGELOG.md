@@ -586,8 +586,15 @@ All notable changes to Smear are documented in this file.
   when the package that wrote it applies `core`'s `@oneOf` to it, in its definition or in an
   extension of its own, and a field of one written non-null is `one-of-field-not-nullable`, and one
   that declares a default `one-of-field-has-default`; and each `@oneOf` an extension of an input
-  object applies is `one-of-on-input-object-extension`. And every application a supplied package
-  writes keeps GraphQL's own rules on directives, with GraphQL's codes: one at a location its
+  object applies is `one-of-on-input-object-extension`; and an input object that requires a value
+  of itself is `circular-non-null-input-field` when every field on the way is non-null and no
+  list, and `circular-one-of-input-field` when the way passes a OneOf none of whose fields can be
+  given a finite value, at the field that closes the cycle, once for its input object, by the
+  draft's unbreakable-cycle algorithm over every package's input objects, a generic input object
+  requiring what its type arguments must hold: `input Wrap<T> { v: T! }` makes
+  `input A { w: Wrap<A>! }` a cycle, and `input Wrap<T> { v: T }` makes `Wrap<A!>!` one. And every
+  application a supplied package writes keeps GraphQL's own rules on directives, with GraphQL's
+  codes: one at a location its
   directive's definition does not list, a built-in's own directive or a program's, is
   `smear::schema::unsupported-directive-location`, at its path, with a label at the directive's
   definition; and one of a directive that is not repeatable, applied again where it is applied, a

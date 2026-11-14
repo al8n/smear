@@ -140,13 +140,8 @@ pub(crate) struct Positions {
 impl Positions {
   /// The positions of `model`'s every type parameter, found once.
   pub(crate) fn of(model: &Model) -> Self {
-    let mut base: Vec<u32> = Vec::with_capacity((model.defs().len() as usize).saturating_add(1));
-    let mut slots: u32 = 0;
-    for def in model.defs() {
-      base.push(slots);
-      slots = slots.saturating_add(dense(model.def(def).type_params().len()));
-    }
-    base.push(slots);
+    let base = bases(model);
+    let slots = base.last().copied().unwrap_or(0);
     let mut graph = Graph {
       base: &base,
       slots,
@@ -173,8 +168,22 @@ impl Positions {
   }
 }
 
-/// The slot of the type parameter `index` of `def`, under `base`, when `def` has it.
-fn slot(base: &[u32], def: DefId, index: u32) -> Option<u32> {
+/// The first slot of each definition of `model`, in id order, and the count of slots last: one
+/// slot for each type parameter of each definition, every package's.
+pub(crate) fn bases(model: &Model) -> Vec<u32> {
+  let mut base: Vec<u32> = Vec::with_capacity((model.defs().len() as usize).saturating_add(1));
+  let mut slots: u32 = 0;
+  for def in model.defs() {
+    base.push(slots);
+    slots = slots.saturating_add(dense(model.def(def).type_params().len()));
+  }
+  base.push(slots);
+  base
+}
+
+/// The slot of the type parameter `index` of `def`, under `base`, as [`bases`] numbers them,
+/// when `def` has it.
+pub(crate) fn slot(base: &[u32], def: DefId, index: u32) -> Option<u32> {
   let at = def.get() as usize;
   let first = *base.get(at)?;
   let end = *base.get(at.checked_add(1)?)?;

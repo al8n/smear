@@ -459,7 +459,16 @@ impl Analysis {
 ///   wrote it applies `core`'s `@oneOf` to it, in its definition or in an extension of its own,
 ///   and a field of one that is written non-null is `one-of-field-not-nullable`, and one that
 ///   declares a default `one-of-field-has-default`, at its name. Each application of `@oneOf` in
-///   an extension of an input object is `one-of-on-input-object-extension`, at its path.
+///   an extension of an input object is `one-of-on-input-object-extension`, at its path. Over
+///   every input object of the model, the draft's unbreakable-cycle algorithm: an ordinary input
+///   object is finite when what each field that is non-null and no list requires is, and a OneOf
+///   when one of its fields can be given a finite value; the input objects that are not are
+///   walked in id order, each field in member order, and the field that closes a cycle is
+///   `circular-non-null-input-field`, or `circular-one-of-input-field` when a nullable field of a
+///   OneOf is on it, at its name, once for its input object. A generic input object requires what
+///   its type arguments must hold: a type parameter a required field takes, or passes to another
+///   input object's parameter it requires, is required of each instantiation, written `T` a
+///   nullable field being required where the argument is non-null.
 ///   GraphQL's own rules on directives judge every application a supplied package writes, with
 ///   GraphQL's codes: an application at a location its directive's definition does not list, the
 ///   schema, a kind of definition, a directive definition, a field, an argument, an input field or
