@@ -163,23 +163,24 @@
 //!
 //! # When it is not ok
 //!
-//! The model still holds every definition collection kept, a refused one included, with its
-//! members and applications and the values written in them, but for what a refusal leaves out: an
-//! extension whose target names nothing, names a definition of another kind or is an alias
-//! contributes nothing; an application whose directive names nothing has no type argument and no
-//! argument; an argument, or an object literal's field, that its definition does not declare is
-//! not kept; and a value that does not fit, or the part of one that a limit stops, is one
-//! unresolved row that holds nothing. Collection keeps nothing of a file whose path the package
-//! set refused, an invalid path or one that two files share, nor of a file under a directory that
-//! is not a Name or that passes [`max_module_depth`](Limits::max_module_depth) or
-//! [`max_modules`](Limits::max_modules), nor of a `mod` whose module passes the same two limits,
-//! nor of what comes after the first definition that passes
-//! [`max_definitions`](Limits::max_definitions); and it keeps no item, nor what a part of one
-//! names, of a kind it does not know. A file that was not parsed holds nothing either, whether the
-//! parser refused it or the supplied sources passed [`max_source_bytes`](Limits::max_source_bytes).
-//! A phase reports an error whenever any of this happens, so such an analysis is not ok.
+//! The model still holds every definition collection kept, a refused one included. Collection
+//! keeps nothing of a file whose path the package set refused, an invalid path or one that two
+//! files share, nor of a file under a directory that is not a Name or that passes
+//! [`max_module_depth`](Limits::max_module_depth) or [`max_modules`](Limits::max_modules), nor of
+//! a `mod` whose module passes the same two limits, nor of what comes after the first definition
+//! that passes [`max_definitions`](Limits::max_definitions); and it keeps no item, nor what a part
+//! of one names, of a kind it does not know. A file that was not parsed holds nothing either,
+//! whether the parser refused it or the supplied sources passed
+//! [`max_source_bytes`](Limits::max_source_bytes). A phase reports an error whenever any of this
+//! happens, so such an analysis is not ok.
 //!
-//! What could not be built is one of four shapes: [`TypeExprKind::Unresolved`],
+//! Within what collection kept, what a refusal touches may be absent, unresolved, or kept with the
+//! structure it was written with though refused, as a OneOf literal that gives two fields is. A
+//! value's or an application's shape is no proof that it was accepted: [`Analysis::is_ok`] says
+//! whether anything was refused, and the diagnostics say what, on a list that is not
+//! [`truncated`](Diagnostics::truncated).
+//!
+//! Four shapes stand for what could not be built: [`TypeExprKind::Unresolved`],
 //! [`ValueKind::Unresolved`], [`Resolution::Unresolved`], and the unresolved type,
 //! [`TyKind::Unresolved`], which a resolved occurrence also has when it holds one that has it, or
 //! when its type could not be built, and a value has when the type expected where it stands is
