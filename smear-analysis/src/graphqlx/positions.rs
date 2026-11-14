@@ -299,7 +299,8 @@ fn key_slots(model: &Model, base: &[u32]) -> Vec<bool> {
   let mut keys = vec![false; base.last().copied().unwrap_or(0) as usize];
   for def in model.defs() {
     if model.def(def).collection().is_some()
-      && let Some(key) = slot(base, def, 0).and_then(|slot: u32| keys.get_mut(slot as usize))
+      && let Some(first) = slot(base, def, 0)
+      && let Some(key) = keys.get_mut(first as usize)
     {
       *key = true;
     }
