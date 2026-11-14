@@ -184,6 +184,12 @@ ceiling, and holds memory bounded by it.
 On every GraphQL document of smear's corpora the analyzer is held to `smear-schema`'s verdict, code
 for code, by a differential test that lists each divergence it allows and why.
 
+One rule is a backend's to compose, and `analyze` never runs it: `graphqlx::UnboundedInstantiation`
+refuses a generic definition that reaches itself with a type argument that grows, as
+`smear::graphqlx::unbounded-instantiation`, for a backend that makes one copy per instantiation and
+so needs their set to be finite. The `smear::schema` codes the analyzer shares with GraphQL's own
+validator are public constants of `graphqlx::schema`, which `graphqlx::schema::ALL` lists.
+
 ## Feature flags
 
 | Feature | Description | Default |

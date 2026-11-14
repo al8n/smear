@@ -46,7 +46,7 @@
 //! supplied package's, since no built-in package writes one. A built-in definition no supplied
 //! package extends is not entered, and has no extension to judge.
 //!
-//! The rule reads the public model, and one crate-private accessor, `SourceMap::written_by`: the
+//! The rule reads the public model and nothing else: the public `SourceMap::written_by`, the
 //! package that wrote a contribution.
 
 use std::{format, string::String};

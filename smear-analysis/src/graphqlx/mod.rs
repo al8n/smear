@@ -103,7 +103,8 @@
 //! ids of its own, and they render exactly as smear's do. [`Diagnostics`] keeps them in one total
 //! order, under a ceiling that keeps the least of them. [`DiagnosticKind`] lists the
 //! `smear::graphqlx` codes smear reports, and a message of smear's quotes a name or a path from the
-//! input only by a bounded excerpt of it.
+//! input only by a bounded excerpt of it. [`schema`] names the `smear::schema` codes the analysis
+//! shares with GraphQL's own validator.
 //!
 //! # Rules
 //!
@@ -194,6 +195,13 @@
 //! answers its own [`Diagnostics`] under the analysis's ceiling, which [`Diagnostics::merge`]
 //! joins with the analysis's, and holds memory bounded by that ceiling however much its visitor
 //! reports.
+//!
+//! # A rule a backend composes
+//!
+//! [`UnboundedInstantiation`] refuses a generic definition that reaches itself with a type argument
+//! that grows, which a backend that makes one copy per instantiation could never finish.
+//! [`analyze`] never runs it, so [`Analysis::is_ok`] means what it meant. A backend composes it into
+//! its own [`visit`], and its verdict is the conjunction of the two.
 
 mod analysis;
 mod bind;
@@ -232,7 +240,7 @@ mod widths;
 pub mod test_support;
 
 pub use analysis::{Analysis, Trees, TreesIntoIter, TreesIter, analyze, analyze_with};
-pub use code::DiagnosticKind;
+pub use code::{DiagnosticKind, schema};
 pub use diagnostic::{Diagnostic, DiagnosticBuilder, Diagnostics};
 pub use id::{
   ApplicationId, DefId, IdIter, IdRange, MemberId, ModuleId, PackageId, SourceId, Sym, TyId,
@@ -248,6 +256,7 @@ pub use model::{
   Value, ValueKind,
 };
 pub use package::{IntegerProvider, Layout, Package, SourceFile, Tier};
+pub use rules::UnboundedInstantiation;
 pub use source::{Bound, Source, SourceMap};
 pub use text::SourceText;
 pub use visitor::{Cx, Packages, Site, Visitor, visit};
