@@ -424,12 +424,13 @@ rule_set! {
   /// a definition that holds members holds one at least, a marker holding none; a member's type is
   /// of the kind its position takes, and so are a collection's arguments there, and at each
   /// instantiation what it gives a type parameter where the parameter stands; an object or an
-  /// interface implements interfaces; no interface implements itself; a union's members are object
-  /// types; a required argument or input field is not deprecated, nor one an instantiation makes
-  /// required; a OneOf input object's fields are
+  /// interface implements interfaces; no interface implements itself; a union's members that name
+  /// a definition are object types; a required argument or input field is not deprecated, nor one
+  /// an instantiation makes required; a OneOf input object's fields are
   /// nullable, at each instantiation too, and have no default; an input object takes `@oneOf` in
   /// its definition alone; and no
-  /// input object requires a value of itself, through its fields and the type arguments they give.
+  /// input object requires a value of itself, through its fields and the type arguments they give,
+  /// but for a cycle it may miss in a program with type parameters.
   /// And of the directives and every application a
   /// supplied package writes, GraphQL's own rules: a directive stands where its definition lists; a
   /// directive that is not repeatable is applied once to a location, a definition and its
